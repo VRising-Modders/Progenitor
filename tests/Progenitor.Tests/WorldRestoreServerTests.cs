@@ -68,6 +68,7 @@ public sealed class WorldRestoreServerTests : IDisposable
         ServerBackupsServer.ArgsProbe = () => new[] { "VRisingServer.exe", "-persistentDataPath", _data, "-saveName", "world1" };
         ServerBackupsServer.NowLocal = () => NowLocal;
         ServerBackupsServer.NowUtc = () => new DateTime(2026, 10, 7, 13, 30, 0, DateTimeKind.Utc);
+        ServerBackupsServer.Zone = () => WorldRestoreApplyTests.Zone;
         ServerBackupsRows.Reset();
     }
 

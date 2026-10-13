@@ -294,6 +294,16 @@ dotnet test tests/Progenitor.Tests --configuration Release --logger trx
 
 The trx log is uploaded as a workflow artifact. The same command is the local check; it does not need the game. The `test` job checks out full history (`fetch-depth: 0`) so the [build version](versioning.md) can find `origin/main`; `VersioningTests` needs `git` and the dotnet SDK on PATH.
 
+**Time zone and culture.** The runner is in UTC with an en-US culture; a developer machine usually is not. Tests must not depend on either: code that shows local times takes its zone from an injectable seam (`RestoreEnvironment.Zone`, `ServerBackupsServer.Zone`, `KeybindGameCache.Zone`), tests set a fixed zone, and text meant for logs or files formats with an explicit culture. To run the suite as if the machine were elsewhere (no system setting changes; `TestRunZone.cs` swaps the test process's local zone and culture):
+
+```
+$env:PROGENITOR_TEST_TIME_ZONE = 'Line Islands Standard Time'   # or UTC, Dateline Standard Time
+$env:PROGENITOR_TEST_CULTURE = 'de-DE'                          # a decimal comma
+dotnet test tests/Progenitor.Tests --configuration Release
+```
+
+The `test` job runs the suite once more this way after the normal run.
+
 **Optional external fixture.** `CastlesTests.Territory_buffer_strides_and_offsets_are_the_ones_the_decoders_walk` checks the decoder constants against the server metadata or the layout block in the internal research notes. It reports a reasoned skip when neither exists and a hard assertion when either is available. A skip does not verify the installed game's layout. `Directory.Build.props` accepts `VRISING_GAME_DIR` and `VRISING_INTEROP_DIR`. To check the game-free test build, point those at a nonexistent path:
 
 ```

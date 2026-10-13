@@ -133,7 +133,7 @@ internal static class ServerBackupsTestBridge
         List<WorldBackupEntry>? all = null;
         if (!string.IsNullOrEmpty(layout.SaveFolder))
         {
-            try { all = WorldBackupCatalog.List(ServerBackupsServer.Fs, layout); }
+            try { all = WorldBackupCatalog.List(ServerBackupsServer.Fs, layout, ServerBackupsServer.ZoneNow()); }
             catch { all = null; }
         }
 
@@ -182,8 +182,8 @@ internal static class ServerBackupsTestBridge
             ["ok"] = true, ["side"] = "server",
             ["policy"] = settings.Policy.Text(), ["keepCount"] = settings.Policy.KeepCount, ["keepDays"] = settings.Policy.KeepDays,
             ["now"] = Names(WorldBackupRetention.PruneList(all, settings.Policy, now, pending)),
-            ["afterManual"] = Names(WorldBackupRetention.NextDeletes(all, settings.Policy, now, WorldRestorePaths.KindManual, pending)),
-            ["afterScheduled"] = Names(WorldBackupRetention.NextDeletes(all, settings.Policy, now, WorldRestorePaths.KindScheduled, pending)),
+            ["afterManual"] = Names(WorldBackupRetention.NextDeletes(all, settings.Policy, now, WorldRestorePaths.KindManual, ServerBackupsServer.ZoneNow(), pending)),
+            ["afterScheduled"] = Names(WorldBackupRetention.NextDeletes(all, settings.Policy, now, WorldRestorePaths.KindScheduled, ServerBackupsServer.ZoneNow(), pending)),
             ["restoreKeep"] = state.Keep,
             ["afterRestore"] = restore,
             ["protectedPendingSource"] = pending,

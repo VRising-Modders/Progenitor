@@ -491,7 +491,7 @@ internal static class SampleFx
         end = new EffectVec3(metres, 0f, 0f);
         if (!TryLocalCharacterPose(out var pos, out var fwd))
         {
-            Log("beam pose missing; start=origin end=+X " + metres.ToString("0.##") + "m");
+            Log("beam pose missing; start=origin end=+X " + metres.ToString("0.##", CultureInfo.InvariantCulture) + "m");
             return;
         }
 
@@ -837,8 +837,8 @@ internal static class SampleFx
         handle.Tint = VignetteGold;
         handle.Intensity = VignetteIntensity;
         handle.Smoothness = VignetteSmoothness;
-        Log("vignette tint gold intensity=" + VignetteIntensity.ToString("0.##")
-            + " smoothness=" + VignetteSmoothness.ToString("0.##")
+        Log("vignette tint gold intensity=" + VignetteIntensity.ToString("0.##", CultureInfo.InvariantCulture)
+            + " smoothness=" + VignetteSmoothness.ToString("0.##", CultureInfo.InvariantCulture)
             + " (camera-wide; the game's own post effects can dominate)");
         Remember(handle);
         ScheduleDispose(handle, VignetteSeconds, "vignette");
@@ -875,7 +875,7 @@ internal static class SampleFx
 
     private static void ScheduleDispose(IDisposable handle, double seconds, string label)
     {
-        Log(label + " dispose in " + seconds.ToString("0.##") + "s");
+        Log(label + " dispose in " + seconds.ToString("0.##", CultureInfo.InvariantCulture) + "s");
         try
         {
             MainThread.PostDelayed(seconds, () =>

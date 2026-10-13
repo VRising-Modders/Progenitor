@@ -70,6 +70,7 @@ public sealed class WorldBackupServerTests : IDisposable
         ServerBackupsServer.ArgsProbe = () => _args;
         ServerBackupsServer.NowLocal = () => NowLocal;
         ServerBackupsServer.NowUtc = () => _utc;
+        ServerBackupsServer.Zone = () => WorldRestoreApplyTests.Zone;
         ServerBackupsServer.BackupSettingsProbe = () => _settings;
         ServerBackupsServer.BackupSettingWrite = (key, value) =>
         {
@@ -380,8 +381,8 @@ public sealed class WorldBackupServerTests : IDisposable
         string line = ServerBackups.AutosaveLine(s);
         Assert.StartsWith("2 files, ", line);
         Assert.EndsWith("; the game keeps 10, one every 2 minutes", line);
-        Assert.Equal(WorldBackupCatalog.FormatTime(new DateTime(2026, 10, 7, 13, 0, 0, DateTimeKind.Utc).ToLocalTime()) + " to "
-            + new DateTime(2026, 10, 7, 13, 2, 0, DateTimeKind.Utc).ToLocalTime().ToString("h:mm tt", WorldBackupCatalog.English), ServerBackups.AutosaveSpan(s));
+        // 13:00 and 13:02 UTC in the server's zone (the tests' UTC-4).
+        Assert.Equal("Wed, Oct 7, 2026 9:00 AM to 9:02 AM", ServerBackups.AutosaveSpan(s));
 
         var facts = ServerBackupsRows.HeaderFacts(s, s.Entries.Count).ToDictionary(f => f.Label, f => f.Value);
         Assert.Equal(line, facts[ServerBackupsRows.AutosavesLabel]);

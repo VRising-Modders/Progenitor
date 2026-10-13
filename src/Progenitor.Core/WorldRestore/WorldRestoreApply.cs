@@ -14,6 +14,12 @@ internal sealed class RestoreEnvironment
     public Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
     public Func<DateTime> LocalNow { get; set; } = () => DateTime.Now;
 
+    /// <summary>
+    /// The zone <see cref="LocalNow"/> runs in: the restore points' times and the worlds' days are read in it (default: the
+    /// machine's zone). Tests set it with <see cref="LocalNow"/> so their times read the same in every machine zone.
+    /// </summary>
+    public TimeZoneInfo Zone { get; set; } = TimeZoneInfo.Local;
+
     /// <summary>The process's command line, split (<c>-saveName</c>, <c>-persistentDataPath</c> must agree with the request).</summary>
     public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
 
@@ -478,7 +484,7 @@ internal static class WorldRestoreApply
     {
         try
         {
-            var entries = WorldBackupCatalog.List(fs, layout);
+            var entries = WorldBackupCatalog.List(fs, layout, env.Zone);
             foreach (var old in WorldBackupCatalog.PruneList(entries, keep, protect))
             {
                 try

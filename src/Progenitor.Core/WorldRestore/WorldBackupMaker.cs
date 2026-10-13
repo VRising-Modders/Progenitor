@@ -249,7 +249,8 @@ internal static class WorldBackupMaker
             outcome.Bytes = WorldManifest.TotalBytes(copied);
             var entry = new WorldBackupEntry
             {
-                Kind = WorldBackupEntry.KindBackup, BackupKind = job.Kind, CreatedLocal = sidecar.CreatedUtc.ToLocalTime(), Updates = sidecar.Updates,
+                Kind = WorldBackupEntry.KindBackup, BackupKind = job.Kind, CreatedLocal = WorldTime.ToLocal(sidecar.CreatedUtc, env.Zone),
+                CreatedUtc = sidecar.CreatedUtc, Updates = sidecar.Updates,
             };
             outcome.Name = entry.DisplayName;
             Say("made " + name + ": " + copied.Count + " files, " + WorldBackupCatalog.FormatBytes(outcome.Bytes)

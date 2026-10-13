@@ -32,7 +32,7 @@ public sealed class WorldRestoreRulesTests
     {
         var f = Fix();
         for (int i = 1; i <= 5; i++) AddBackup(f, "202609" + i.ToString("00") + "-120000-before-restore", new DateTime(2026, 9, i, 12, 0, 0, DateTimeKind.Utc));
-        var entries = WorldBackupCatalog.List(f.Fs, f.Layout);
+        var entries = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone);
         Assert.Equal(7, entries.Count);
         Assert.Single(entries, e => e.Kind == WorldBackupEntry.KindArchive);
         string made = entries.First(e => e.FolderName == "20260920-100000-before-restore").Path;
@@ -57,7 +57,7 @@ public sealed class WorldRestoreRulesTests
         AddBackup(g, "20260902-120000-before-restore", new DateTime(2026, 9, 2, 12, 0, 0, DateTimeKind.Utc), "B");
         AddBackup(g, "20260903-120000-before-restore", new DateTime(2026, 9, 3, 12, 0, 0, DateTimeKind.Utc), "B");
         AddBackup(g, "20260904-120000-before-restore", new DateTime(2026, 9, 4, 12, 0, 0, DateTimeKind.Utc), "B");
-        var all = WorldBackupCatalog.List(g.Fs, g.Layout);
+        var all = WorldBackupCatalog.List(g.Fs, g.Layout, WorldRestoreApplyTests.Zone);
         Assert.Equal(new[] { "20260903-120000-before-restore" }, WorldBackupCatalog.PruneList(all, 2).Select(e => e.FolderName));
     }
 
@@ -74,7 +74,7 @@ public sealed class WorldRestoreRulesTests
         Assert.True(r.Ok, r.Summary);
         // The new one, Sep 20 and Aug 6, 5, 4 stay (keep 5); Aug 3 and 2 go; Aug 1 is the chain's oldest.
         Assert.Equal(new[] { "20260803-120000-before-restore", "20260802-120000-before-restore" }, r.Pruned);
-        var left = WorldBackupCatalog.List(f.Fs, f.Layout);
+        var left = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone);
         Assert.Equal(6, left.Count(e => e.Kind == WorldBackupEntry.KindBackup));
         Assert.Contains(left, e => e.FolderName == "20260801-120000-before-restore");
         Assert.Single(left, e => e.Kind == WorldBackupEntry.KindArchive);
@@ -95,7 +95,7 @@ public sealed class WorldRestoreRulesTests
         f.Fs.Put(Path.Combine(f.BackupsRoot, "no-sidecar", "AutoSave_1.save.gz"), "x", DateTime.UtcNow);
         f.Fs.Put(Path.Combine(f.Persist, "Saves", "v4", "world1_notdigits", "AutoSave_1.save.gz"), "x", DateTime.UtcNow);
         f.Fs.Put(Path.Combine(f.Persist, "Saves", "v4", "world2_123", "AutoSave_1.save.gz"), "x", DateTime.UtcNow);
-        var entries = WorldBackupCatalog.List(f.Fs, f.Layout);
+        var entries = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone);
         Assert.Equal(new[] { WorldBackupEntry.KindArchive, WorldBackupEntry.KindBackup }, entries.Select(e => e.Kind));
         var archive = entries[0];
         Assert.Equal("archive:world1_" + f.ArchiveTicks, archive.Id);
@@ -108,6 +108,33 @@ public sealed class WorldRestoreRulesTests
         Assert.Equal("Before restore", entries[1].KindLabel);
         Assert.StartsWith("the backup from Sun, Sep 20, 2026 ", entries[1].BaseLabel);
         Assert.StartsWith("Before restore of the wipe archive from Sun, Sep 20, 2026 3:00 AM, Sun, Sep 20, 2026 ", entries[1].DisplayName);
+    }
+
+    [Fact]
+    public void The_catalog_reads_backup_times_and_world_ages_in_the_zone_it_is_given_not_the_machines()
+    {
+        // The backup's sidecar says 2026-09-20 14:00 UTC; the archive's newest save is 2026-09-30 12:00 UTC.
+        var f = Fix();
+        var east = TimeZoneInfo.CreateCustomTimeZone("Progenitor test UTC+14", TimeSpan.FromHours(14), "Progenitor test UTC+14", "Progenitor test UTC+14");
+        var west = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone);
+        var far = WorldBackupCatalog.List(f.Fs, f.Layout, east);
+        WorldBackupEntry Backup(List<WorldBackupEntry> l) => l.Single(e => e.Kind == WorldBackupEntry.KindBackup);
+        WorldBackupEntry Archive(List<WorldBackupEntry> l) => l.Single(e => e.Kind == WorldBackupEntry.KindArchive);
+
+        Assert.Equal("the backup from Sun, Sep 20, 2026 10:00 AM", Backup(west).BaseLabel);
+        Assert.Equal("the backup from Mon, Sep 21, 2026 4:00 AM", Backup(far).BaseLabel);
+        Assert.Equal(Backup(west).CreatedUtc, Backup(far).CreatedUtc);
+        Assert.Equal(new DateTime(2026, 9, 20, 14, 0, 0, DateTimeKind.Utc), Backup(far).CreatedUtc);
+        // The archive's name holds the wall clock of its wipe: the same label in any zone, a different UTC instant.
+        Assert.Equal(Archive(west).BaseLabel, Archive(far).BaseLabel);
+        Assert.Equal(new DateTime(2026, 9, 30, 8, 0, 0, DateTimeKind.Utc), Archive(west).CreatedUtc);
+        Assert.Equal(new DateTime(2026, 9, 29, 14, 0, 0, DateTimeKind.Utc), Archive(far).CreatedUtc);
+        // The world's age is its newest save's local day: Sep 30 at UTC-4, Oct 1 at UTC+14.
+        Assert.Equal(91, Archive(west).AgeDays);
+        Assert.Equal(92, Archive(far).AgeDays);
+
+        Assert.Equal(new DateTime(2026, 9, 30, 8, 0, 0), WorldTime.ToLocal(new DateTime(2026, 9, 30, 12, 0, 0, DateTimeKind.Utc), WorldRestoreApplyTests.Zone));
+        Assert.Equal(new DateTime(2026, 9, 30, 16, 0, 0, DateTimeKind.Utc), WorldTime.ToUtc(new DateTime(2026, 9, 30, 12, 0, 0), WorldRestoreApplyTests.Zone));
     }
 
     // ---- the wipe clock ------------------------------------------------------------------------------------
@@ -296,12 +323,12 @@ public sealed class WorldRestoreRulesTests
         Assert.Equal(result.BackupPath, done.BackupPath);
 
         // The same request again (a rename that did not happen) is not run twice: the result says what it did (M6).
-        var backups = WorldBackupCatalog.List(f.Fs, f.Layout).Count;
+        var backups = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Count;
         WorldRestoreMarker.Write(f.Fs, f.BepInEx, request);
         var again = WorldRestoreMarker.ApplyAtStart(f.Fs, f.BepInEx, f.Env())!;
         Assert.True(again.Ok);
         Assert.Equal(done.Summary, again.Summary);
-        Assert.Equal(backups, WorldBackupCatalog.List(f.Fs, f.Layout).Count);
+        Assert.Equal(backups, WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Count);
         Assert.False(f.Fs.Has(WorldRestoreMarker.RequestPath(f.BepInEx)));
     }
 

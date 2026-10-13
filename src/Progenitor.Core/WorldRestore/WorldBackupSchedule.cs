@@ -138,7 +138,7 @@ internal static class WorldBackupSchedule
         foreach (var e in entries)
         {
             if (e.Kind != WorldBackupEntry.KindBackup || e.BackupKind != WorldRestorePaths.KindScheduled || e.CreatedLocal == DateTime.MinValue) continue;
-            var utc = e.CreatedLocal.ToUniversalTime();
+            var utc = e.CreatedUtcOr(null);
             if (best == null || utc > best.Value) best = utc;
         }
 
