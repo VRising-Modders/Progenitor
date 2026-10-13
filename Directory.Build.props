@@ -1,0 +1,45 @@
+<Project>
+  <!-- Shared settings for every project in the Progenitor repo. -->
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Authors>Progenitor contributors</Authors>
+    <Company>Progenitor contributors</Company>
+    <Copyright>Copyright (c) 2026 Progenitor contributors</Copyright>
+    <PackageLicenseExpression>LGPL-2.1-only</PackageLicenseExpression>
+    <!-- Version, AssemblyVersion, FileVersion and InformationalVersion are computed from git at
+         build time by tools/version/ProgenitorVersion.targets (docs/versioning.md). Nobody bumps a
+         version by hand; pass /p:ProgenitorVersion=... only to override it for packaging/CI. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <!-- SourceLink writes the HEAD commit into every PDB, and the DLL carries the PDB's content id,
+         so every commit would change every DLL. Off, so an unchanged component builds byte-identical. -->
+    <EnableSourceLink>false</EnableSourceLink>
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+    <!-- Map the checkout folder out of the PDB and the DLL's debug directory, so a build carries no
+         machine path and builds the same bytes from any checkout location. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
+
+  <!--
+    Game reference assemblies. BepInEx generates the interop assemblies into
+    <game>\BepInEx\interop on first launch. Point VRisingInteropDir at that folder.
+    Override per machine in Directory.Build.local.props (git-ignored) or with the
+    VRISING_INTEROP_DIR environment variable.
+  -->
+  <PropertyGroup>
+    <VRisingGameDir Condition="'$(VRisingGameDir)' == '' and '$(VRISING_GAME_DIR)' != ''">$(VRISING_GAME_DIR)</VRisingGameDir>
+    <VRisingGameDir Condition="'$(VRisingGameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\VRising</VRisingGameDir>
+    <VRisingInteropDir Condition="'$(VRisingInteropDir)' == '' and '$(VRISING_INTEROP_DIR)' != ''">$(VRISING_INTEROP_DIR)</VRisingInteropDir>
+    <VRisingInteropDir Condition="'$(VRisingInteropDir)' == ''">$(VRisingGameDir)\BepInEx\interop</VRisingInteropDir>
+    <VRisingUnityLibsDir Condition="'$(VRisingUnityLibsDir)' == ''">$(VRisingGameDir)\BepInEx\unity-libs</VRisingUnityLibsDir>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)Directory.Build.local.props" Condition="Exists('$(MSBuildThisFileDirectory)Directory.Build.local.props')" />
+</Project>

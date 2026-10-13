@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.NecroArmyExample</AssemblyName>
+    <RootNamespace>Progenitor.NecroArmyExample</RootNamespace>
+    <Description>Demo: a necromancer raises a skeleton army and sends it at Dracula, with scripted camera shots.</Description>
+    <BepInExPluginGuid>progenitor.necroarmy</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Necro Army Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

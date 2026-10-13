@@ -1,0 +1,338 @@
+{
+  "name": "swap-client",
+  "summary": "Three client Sample swaps (copy into the client reload folder with a LastWrite bump; never remove/reinstall; never a Core swap). Each cycle establishes a tracked Charm borrow on the client, swaps the client Sample, waits for the client load line plus Sample handshake on the client side (no server reconcile wait), then checks unload/Effects: disposed, connection retained, exactly one FROSTSTYLE client enabled= line per toggle, and a subsequent borrow/dispose.",
+  "notes": [
+    "Run with --side client and --dll pointing at a Sample image (the live file is enough: the rig bumps LastWrite so Core still Swaps). Default --side server would copy into the server reload folder; that is the swap case, not this one.",
+    "Supported path only: copy Progenitor.Sample.dll into the CLIENT progenitor-reload folder. Do not rename/remove the DLL. Do not swap Core. Do not reinstall from a .rig-hold.",
+    "Intended final settings (restore in teardown / run finally): froststyle enabled=True, frostdash off, admin false, no test resources. This case never turns frost dash on; teardown still sends .frostdash off so the flag is off if a previous session left it on. Admin grant/restore is the rig's server-user path.",
+    "Baseline is the rig start-state: server users (connected user, character, handshake), Health, server protection and admin, client ping.images, owned carriers on both sides. Each swap step re-records playerIdentity (connected + users handshake), ping.images / sampleHashAfter from the CLIENT ping, handshake log, protection (server .debug status; a client check is not proof of server protection), and carrier leftover versus the pre-copy snapshot.",
+    "Per cycle a bounded tracked Sample effect is established on the client so teardown is exercised: .catalogex warm (server CATALOGEX warm; 8 s ServerBeamLink of Charm target sequence -541113174 at the player) then wait 6 s, then .catalogex borrow. Proof of the live borrow is the client CATALOGEX borrow enabled=True line plus .catalogex status (CATALOGEX status handle=… enabled=True). CHARMROOT snippet readback is not used: a Scratch load on the client during Sample swap qualification adds another Reload: event; CATALOGEX status is the Sample's own client line.",
+    "No units are spawned. Hostiles are absent; swap refuses if existsSweep is not empty. leftover remainingTestEntities at the end must be empty.",
+    "Client readiness after each swap: Reload: loaded Progenitor Sample … from Progenitor.Sample.dll (SAMPLE_SWAP_MATCHERS) plus Sample handshake: declared N row(s) on the client side… (SampleHandshake.AttachedLine via SampleLog, live cases-3 charm-client-handshake-logs.json seq 5198). No world-ready reconcile line is waited for: the debug buff is Core-owned, a Sample swap does not reconcile, and the Core Debug: world-ready reconcile line is server-side.",
+    "After the swap, observe the old generation unload (Reload: Progenitor.Sample.dll changed / unloaded Progenitor Sample) and Effects: disposed Particle for the tracked Charm borrow (Core EffectHandles; live cases-3 seq 5155 Effects: disposed Particle 'Part_Charm_Loop_01'). Then exactly one handler response per trigger: .froststyle off then .froststyle on. Client Receive logs FROSTSTYLE client enabled=<bool> only on a flag change; two such lines in the bounded wait is a duplicate handler and fails. Log steps carry count=1 for that check. After the bounded wait, log counts matching lines in the collected window: more than count fails with duplicate handler: <n> lines matching <regex>; fewer fails with expected <count> matching line(s), got <n>.",
+    "Then a subsequent effect can start and stop: .catalogex borrow then .catalogex dispose, each with its client CATALOGEX status/borrow/dispose line.",
+    "Carrier leftovers use the existing delta-id logic on both sides. A client NetworkedSequence leftover from .catalogex warm is a finding (client carrier outlived server disposal) and is destroyed at cleanup as today. That recovery is recorded separately; it is never proof that Sample teardown disposed the replica. Non-NetworkedSequence client deltas are listed remaining and not destroyed. Preserve any manual carrier recovery as a separate finding. An accepted command or scheduled reload is not a pass.",
+    "Sample [NetworkCompatibility(ServerMustHave, Exact)] may kick the client if the images diverge. The swap step fails if server users connected is not true or handshake is present and not ok. Client-side Removal in cases-3 kept the connection; this case must show the same for Swap.",
+    "Protection is server-side. The debug buff is Core-owned, so a client-side Sample swap is not expected to drop it; a dropped guard at the swap step still fails (fail-closed). Do not assume client and server Sample hashes are byte-identical; record the actual client ping.images hash after each swap."
+  ],
+  "steps": [
+    { "kind": "command", "text": ".catalogex warm", "expectLog": { "regex": "CATALOGEX warm" } },
+    { "kind": "wait", "ms": 6000 },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "log",
+      "name": "catalogex borrow 1",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX borrow enabled=True",
+      "timeoutMs": 5000,
+      "record": "catalogexBorrow1"
+    },
+    { "kind": "command", "text": ".catalogex status" },
+    {
+      "kind": "log",
+      "name": "catalogex status before swap 1",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX status handle=(?!null)\\S+ enabled=True",
+      "timeoutMs": 5000,
+      "record": "catalogexStatusBefore1"
+    },
+    { "kind": "swap", "name": "client swap 1", "dll": "<path>" },
+    {
+      "kind": "log",
+      "name": "unload 1",
+      "side": "client",
+      "filter": "Reload:",
+      "regex": "unloaded Progenitor Sample",
+      "sinceRecord": "catalogexBorrow1",
+      "timeoutMs": 5000,
+      "record": "sampleUnload1"
+    },
+    {
+      "kind": "log",
+      "name": "effects disposed 1",
+      "side": "client",
+      "filter": "Effects",
+      "regex": "Effects: disposed Particle",
+      "sinceRecord": "catalogexBorrow1",
+      "timeoutMs": 5000,
+      "record": "effectsDisposed1"
+    },
+    { "kind": "protectionCheck", "expect": true },
+    {
+      "kind": "command",
+      "name": "froststyle off 1",
+      "text": ".froststyle off",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=False" },
+      "record": "froststyleOff1"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client off 1",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=False",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOff1",
+      "record": "froststyleClientOff1"
+    },
+    {
+      "kind": "command",
+      "name": "froststyle on 1",
+      "text": ".froststyle on",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=True" },
+      "record": "froststyleOn1"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client on 1",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=True",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOn1",
+      "record": "froststyleClientOn1"
+    },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "log",
+      "name": "catalogex borrow after swap 1",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX borrow enabled=True",
+      "timeoutMs": 5000
+    },
+    { "kind": "command", "text": ".catalogex dispose" },
+    { "kind": "wait", "ms": 500 },
+    {
+      "kind": "log",
+      "name": "catalogex dispose after swap 1",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX dispose",
+      "timeoutMs": 5000
+    },
+
+    { "kind": "command", "text": ".catalogex warm", "expectLog": { "regex": "CATALOGEX warm" } },
+    { "kind": "wait", "ms": 6000 },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "log",
+      "name": "catalogex borrow 2",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX borrow enabled=True",
+      "timeoutMs": 5000,
+      "record": "catalogexBorrow2"
+    },
+    { "kind": "command", "text": ".catalogex status" },
+    {
+      "kind": "log",
+      "name": "catalogex status before swap 2",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX status handle=(?!null)\\S+ enabled=True",
+      "timeoutMs": 5000,
+      "record": "catalogexStatusBefore2"
+    },
+    { "kind": "swap", "name": "client swap 2", "dll": "<path>" },
+    {
+      "kind": "log",
+      "name": "unload 2",
+      "side": "client",
+      "filter": "Reload:",
+      "regex": "unloaded Progenitor Sample",
+      "sinceRecord": "catalogexBorrow2",
+      "timeoutMs": 5000,
+      "record": "sampleUnload2"
+    },
+    {
+      "kind": "log",
+      "name": "effects disposed 2",
+      "side": "client",
+      "filter": "Effects",
+      "regex": "Effects: disposed Particle",
+      "sinceRecord": "catalogexBorrow2",
+      "timeoutMs": 5000,
+      "record": "effectsDisposed2"
+    },
+    { "kind": "protectionCheck", "expect": true },
+    {
+      "kind": "command",
+      "name": "froststyle off 2",
+      "text": ".froststyle off",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=False" },
+      "record": "froststyleOff2"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client off 2",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=False",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOff2",
+      "record": "froststyleClientOff2"
+    },
+    {
+      "kind": "command",
+      "name": "froststyle on 2",
+      "text": ".froststyle on",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=True" },
+      "record": "froststyleOn2"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client on 2",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=True",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOn2",
+      "record": "froststyleClientOn2"
+    },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "log",
+      "name": "catalogex borrow after swap 2",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX borrow enabled=True",
+      "timeoutMs": 5000
+    },
+    { "kind": "command", "text": ".catalogex dispose" },
+    { "kind": "wait", "ms": 500 },
+    {
+      "kind": "log",
+      "name": "catalogex dispose after swap 2",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX dispose",
+      "timeoutMs": 5000
+    },
+
+    { "kind": "command", "text": ".catalogex warm", "expectLog": { "regex": "CATALOGEX warm" } },
+    { "kind": "wait", "ms": 6000 },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "log",
+      "name": "catalogex borrow 3",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX borrow enabled=True",
+      "timeoutMs": 5000,
+      "record": "catalogexBorrow3"
+    },
+    { "kind": "command", "text": ".catalogex status" },
+    {
+      "kind": "log",
+      "name": "catalogex status before swap 3",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX status handle=(?!null)\\S+ enabled=True",
+      "timeoutMs": 5000,
+      "record": "catalogexStatusBefore3"
+    },
+    { "kind": "swap", "name": "client swap 3", "dll": "<path>" },
+    {
+      "kind": "log",
+      "name": "unload 3",
+      "side": "client",
+      "filter": "Reload:",
+      "regex": "unloaded Progenitor Sample",
+      "sinceRecord": "catalogexBorrow3",
+      "timeoutMs": 5000,
+      "record": "sampleUnload3"
+    },
+    {
+      "kind": "log",
+      "name": "effects disposed 3",
+      "side": "client",
+      "filter": "Effects",
+      "regex": "Effects: disposed Particle",
+      "sinceRecord": "catalogexBorrow3",
+      "timeoutMs": 5000,
+      "record": "effectsDisposed3"
+    },
+    { "kind": "protectionCheck", "expect": true },
+    {
+      "kind": "command",
+      "name": "froststyle off 3",
+      "text": ".froststyle off",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=False" },
+      "record": "froststyleOff3"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client off 3",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=False",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOff3",
+      "record": "froststyleClientOff3"
+    },
+    {
+      "kind": "command",
+      "name": "froststyle on 3",
+      "text": ".froststyle on",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=True" },
+      "record": "froststyleOn3"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client on 3",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=True",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOn3",
+      "record": "froststyleClientOn3"
+    },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "log",
+      "name": "catalogex borrow after swap 3",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX borrow enabled=True",
+      "timeoutMs": 5000
+    },
+    { "kind": "command", "text": ".catalogex dispose" },
+    { "kind": "wait", "ms": 500 },
+    {
+      "kind": "log",
+      "name": "catalogex dispose after swap 3",
+      "side": "client",
+      "filter": "CATALOGEX",
+      "regex": "CATALOGEX dispose",
+      "timeoutMs": 5000
+    }
+  ],
+  "teardown": [
+    {
+      "kind": "command",
+      "text": ".froststyle on",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=True" }
+    },
+    { "kind": "command", "text": ".frostdash off" },
+    {
+      "kind": "command",
+      "text": ".catalogex dispose",
+      "expectLog": { "regex": "catalogex server dispose" }
+    }
+  ]
+}

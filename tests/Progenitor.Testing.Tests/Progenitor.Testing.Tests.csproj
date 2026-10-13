@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Mod compatibility C5: tests of Progenitor.Testing itself, and the samples' replay tests, set up exactly as a mod
+    author's test project is (docs/tutorial.md, "Make your mod work across versions"): a ProjectReference to
+    Progenitor.Testing, the mod's game-free message files linked as source, and the recorded fixtures copied to the
+    output. Game-free: no game, BepInEx or Core reference (Progenitor.Testing compiles Core's codec itself).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Progenitor.Testing.Tests</RootNamespace>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <ReferenceGame>false</ReferenceGame>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Testing\Progenitor.Testing.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- The samples' game-free message files, linked as source the way a mod author's test project links its own
+       (tests in Samples/<sample>/). CompatTest's file is linked as its 1.1.0 build (COMPATTEST_V2: hello v2); its
+       tests freeze the 1.0.0 shape themselves. -->
+  <PropertyGroup>
+    <DefineConstants>$(DefineConstants);COMPATTEST_V2</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\samples\Progenitor.SampleServerLed\ServerLedMessages.cs" Link="Samples\Progenitor.SampleServerLed\Linked\ServerLedMessages.cs" />
+    <Compile Include="..\..\samples\Progenitor.SampleClientLed\ClientLedMessages.cs" Link="Samples\Progenitor.SampleClientLed\Linked\ClientLedMessages.cs" />
+    <Compile Include="..\..\samples\Progenitor.CompatTest\CompatTestMessages.cs" Link="Samples\Progenitor.CompatTest\Linked\CompatTestMessages.cs" />
+  </ItemGroup>
+
+  <!-- The samples' recorded fixtures, beside their replay tests (Samples/<sample>/Fixtures/...). -->
+  <ItemGroup>
+    <None Include="Samples\**\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'BepInEx.Core'))"
+           Text="Progenitor.Testing.Tests must not reference BepInEx." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'ProjectM'))"
+           Text="Progenitor.Testing.Tests must not reference ProjectM." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'Il2CppInterop.Runtime'))"
+           Text="Progenitor.Testing.Tests must not reference Il2CppInterop." />
+  </Target>
+</Project>

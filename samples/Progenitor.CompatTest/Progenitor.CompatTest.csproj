@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.CompatTest</AssemblyName>
+    <RootNamespace>Progenitor.CompatTest</RootNamespace>
+    <Description>TEST PLUGIN for the mod compatibility C1/C2 live tests: feature negotiation and versioned messages. One build per version.</Description>
+    <BepInExPluginGuid>progenitor.compattest</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Compat Test</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <!-- -p:CompatTestV2=true builds the newer version: one more message field and one more feature. -->
+  <PropertyGroup Condition="'$(CompatTestV2)' == 'true'">
+    <DefineConstants>$(DefineConstants);COMPATTEST_V2</DefineConstants>
+  </PropertyGroup>
+  <!-- -p:CompatTestVariant=Other builds the second test plugin (its own id and file), run on one side only to show a
+       feature of another mod and a send refused because the peer lacks the mod. -->
+  <PropertyGroup Condition="'$(CompatTestVariant)' == 'Other'">
+    <AssemblyName>Progenitor.CompatTest.Other</AssemblyName>
+    <BepInExPluginGuid>progenitor.compattest.other</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Compat Test (other)</BepInExPluginName>
+    <DefineConstants>$(DefineConstants);COMPATTEST_OTHER</DefineConstants>
+  </PropertyGroup>
+  <!-- Mod compatibility C3: -p:CompatTestVariant=Range builds a ServerMustHave plugin that declares
+       Peers = ">=1.2.0 <2.0.0" and synced settings (-p:CompatTestNewKey=true adds one more synced key);
+       -p:CompatTestVariant=Default builds one that declares only its level (the same-minor default). -->
+  <PropertyGroup Condition="'$(CompatTestVariant)' == 'Range'">
+    <AssemblyName>Progenitor.CompatTest.Range</AssemblyName>
+    <BepInExPluginGuid>progenitor.compattest.range</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Compat Test (range)</BepInExPluginName>
+    <DefineConstants>$(DefineConstants);COMPATTEST_RANGE</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(CompatTestVariant)' == 'Default'">
+    <AssemblyName>Progenitor.CompatTest.Default</AssemblyName>
+    <BepInExPluginGuid>progenitor.compattest.default</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Compat Test (default)</BepInExPluginName>
+    <DefineConstants>$(DefineConstants);COMPATTEST_DEFAULT</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(CompatTestNewKey)' == 'true'">
+    <DefineConstants>$(DefineConstants);COMPATTEST_NEWKEY</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

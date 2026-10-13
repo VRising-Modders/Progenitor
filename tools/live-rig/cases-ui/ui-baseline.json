@@ -1,0 +1,23 @@
+{
+  "name": "ui-baseline",
+  "world": "main-menu",
+  "summary": "Client Mods workspace closed: status closed, three pings, then a 2-minute no-capture soak.",
+  "notes": [
+    "Acceptance procedure — not run. Focus-free Dev `mods_ui` + `ping` / socket `logs` / socket `bridge_status` only. Run with `--side client`.",
+    "Gate 1 closed baseline: Mods closed, serialize main-thread ops, sample `bridge_status` every 10 s, ping at most every 30 s, watch logs every 15 s, no PrintWindow. After a ping timeout, soak continues with `bridge_status` + `logs` only.",
+    "`mods_ui` actions return {ok, action, before, after, detail, elapsedMs}. Status fields: open, site, plugin, page, modsCapture, inputCapture, capture (global alias of inputCapture), panes, observers, width, height, mode. Closed after-state: open=false, curtain=false, modsCapture=false, panes equal the recorded baseline. Do not expect capture/inputCapture false: connected in-game inputCapture is Ui.IsCapturingInput and stays true with Mods closed."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "ping 1", "side": "client", "op": "ping", "expect": { "side": "client" } },
+    { "kind": "op", "name": "ping 2", "side": "client", "op": "ping", "expect": { "side": "client" } },
+    { "kind": "op", "name": "ping 3", "side": "client", "op": "ping", "expect": { "side": "client" } },
+    { "kind": "soak", "name": "soak closed 2min", "side": "client", "minutes": 2, "pingIntervalSeconds": 30, "logsIntervalSeconds": 15, "bridgeStatusIntervalSeconds": 10, "capture": null, "stopOnFirstFailure": true }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Drift-map generator for the compatibility rewriter (M4 item 2). It only READS metadata, with
+    System.Reflection.Metadata and no Mono.Cecil, so it runs on a machine that never launched
+    V Rising - the same discipline tools/resilience-report.ps1 follows. Keep ReferenceGame=false
+    and do not ProjectReference Core: the one Core file it needs is linked below.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>driftmap</AssemblyName>
+    <RootNamespace>Progenitor.DriftMapTool</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <ReferenceGame>false</ReferenceGame>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The drift-map model and its JSON, shared verbatim with the rewriter that consumes it.
+         Cecil-free on purpose so this tool can link it. -->
+    <Compile Include="..\..\src\Progenitor.Core\Compat\DriftMap.cs" Link="Linked\DriftMap.cs" />
+  </ItemGroup>
+
+  <!-- Same guard the tests carry: a game reference here would break the "runs anywhere" promise. -->
+  <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'ProjectM'))"
+           Text="tools/driftmap must not reference ProjectM. It reads metadata from files only." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'Mono.Cecil'))"
+           Text="tools/driftmap must not reference Mono.Cecil. The generator reads with System.Reflection.Metadata; only the load-time rewriter uses Cecil." />
+  </Target>
+</Project>

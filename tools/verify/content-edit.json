@@ -1,0 +1,37 @@
+{
+  "name": "content-edit",
+  "order": 60,
+  "title": "Content edit: the typed write, and the baseline restore proved by defining twice",
+  "evidence": ["213"],
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "Evidence 213 (FSAMP3 + FEDIT1). '.content define' writes DestroyData.DestroyReason Default(0) -> Consume(2) through TryRead<T>/Write<T> and reads it back; '.content drop' disposes the editor, which restores Core's captured baseline; the SECOND '.content define' must print 'Default(0) -> Consume(2)' AGAIN. Had the baseline not been restored, the before value would read Consume(2). That second read is the whole case." },
+
+    { "note": "Start from a known state: if the second item is not registered this replies that nothing was dropped." },
+    { "command": ".content drop" },
+    { "sleepMs": 2000 },
+
+    { "command": ".content define" },
+    { "sleepMs": 2500 },
+    { "expectLog": "Sample content: edit read-back: handle\\.Guid=-?\\d+ TryRead<PrefabGUID>=-?\\d+ \\(equal, so the editor was handed the clone and not the source prefab\\)" },
+    { "expectLog": "Sample content: edit write: ProjectM\\.DestroyData\\.DestroyReason Default\\(0\\) -> Consume\\(2\\) via TryRead<T> then Write<T>" },
+    { "expectLog": "Sample content: edit write read-back: Read<DestroyData>\\(\\)\\.DestroyReason=Consume\\(2\\) \\(equal to what Write<T> was given, so the write stuck\\)" },
+
+    { "command": ".content drop" },
+    { "sleepMs": 2500 },
+    { "expectLog": "Sample content: UnregisterAll dropped 1 definition\\(s\\)" },
+
+    { "note": "The restore proof: the same before value a second time." },
+    { "command": ".content define" },
+    { "sleepMs": 2500 },
+    { "expectLog": "Sample content: edit write: ProjectM\\.DestroyData\\.DestroyReason Default\\(0\\) -> Consume\\(2\\) via TryRead<T> then Write<T>", "count": 1 },
+    { "expectLog": "Sample content: edit write read-back: Read<DestroyData>\\(\\)\\.DestroyReason=Consume\\(2\\)", "count": 1 },
+
+    { "note": "Leave the world as the case found it." },
+    { "command": ".content drop" },
+    { "sleepMs": 2000 },
+    { "expectLog": "Sample content: UnregisterAll dropped 1 definition\\(s\\)" },
+
+    { "expectNoLog": "\\[Error\\] .*Sample content" }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "name": "ui-core-swap-open",
+  "world": "connected",
+  "summary": "Three compatible client Core swaps (`coreSwap`) with Mods open on the connected top-tab. After each swap: reopen, mods_ui status counts match the open baseline, close; server users stay connected with handshake ok. Each coreSwap records generationBefore/After, lastReload.outcome, previousAlive, refusalWindow, and imageHashes.",
+  "site": "top-tab",
+  "notes": [
+    "Acceptance procedure — not run. Connected fullscreen HUD. `--side client`. This is a Core swap via the documented `coreSwap` step, not a Sample file copy and not a removal. Do not hand-roll `core_reload` / `reload_status` op sequences: a Core swap unloads Dev, so the first `reload_status` may be ECONNREFUSED; `coreSwap` tolerates that refusal window.",
+    "coreSwap reads `reload_status` (generation before), sends `core_reload` (`scheduled=true` is not completion), then polls `reload_status` until `inFlight` is false and generation moved by `expectGenerationDelta` (1). Fails on `lastReload.outcome` not ok, generation not moved, or timeout (`maxWaitMs` 90000). previousAlive true is a pin: do not treat the swap as collected.",
+    "Each cycle records `generationBefore` / `generationAfter`, `alcName`, `lastReload.outcome`, `previousAlive`, `refusalWindow` (first/last refused-attempt timestamps), and loaded `imageHashes` from a ping afterwards.",
+    "After each completed swap: reopen, then mods_ui status: progenitor.sample listed once, observers/panes equal the open baseline, then close. Connection: server users `connected` true and `handshake` ok. Capture each cycle.",
+    "Config locks may be interrupted during a client Core swap; this case does not claim uninterrupted locking. Handshake refresh recovery is measured in ui-disconnect-reconnect, not here.",
+    "Intended finals: workspace closed, curtain/input released, panes 0, observers at the closed baseline."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": 0 } },
+    { "kind": "op", "name": "record users", "side": "server", "op": "users", "record": "usersStart", "expect": "\"connected\":true" },
+    { "kind": "op", "name": "open top-tab", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "open baseline counts", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "openBaseline", "expect": { "ok": true, "after.open": true } },
+
+    { "kind": "coreSwap", "name": "core swap 1", "side": "client", "expectGenerationDelta": 1, "maxWaitMs": 90000, "record": "coreSwap1" },
+    { "kind": "op", "name": "reopen after core 1", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "entry once after core 1", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": "progenitor\\.sample" },
+    { "kind": "op", "name": "counts after core 1", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": true, "after.observers": "@record:openBaseline.after.observers", "after.panes": "@record:openBaseline.after.panes" } },
+    { "kind": "op", "name": "close after core 1", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "connection after core 1", "side": "server", "op": "users", "expect": "\"connected\":true[\\s\\S]*\"handshake\":\"ok\"" },
+    { "kind": "capture", "name": "core cycle 1" },
+
+    { "kind": "op", "name": "open before core 2", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "coreSwap", "name": "core swap 2", "side": "client", "expectGenerationDelta": 1, "maxWaitMs": 90000, "record": "coreSwap2" },
+    { "kind": "op", "name": "reopen after core 2", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "entry once after core 2", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": "progenitor\\.sample" },
+    { "kind": "op", "name": "counts after core 2", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": true, "after.observers": "@record:openBaseline.after.observers", "after.panes": "@record:openBaseline.after.panes" } },
+    { "kind": "op", "name": "close after core 2", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "connection after core 2", "side": "server", "op": "users", "expect": "\"connected\":true[\\s\\S]*\"handshake\":\"ok\"" },
+    { "kind": "capture", "name": "core cycle 2" },
+
+    { "kind": "op", "name": "open before core 3", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "coreSwap", "name": "core swap 3", "side": "client", "expectGenerationDelta": 1, "maxWaitMs": 90000, "record": "coreSwap3" },
+    { "kind": "op", "name": "reopen after core 3", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "entry once after core 3", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": "progenitor\\.sample" },
+    { "kind": "op", "name": "counts after core 3", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": true, "after.observers": "@record:openBaseline.after.observers", "after.panes": "@record:openBaseline.after.panes" } },
+    { "kind": "op", "name": "close after core 3", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "connection after core 3", "side": "server", "op": "users", "expect": "\"connected\":true[\\s\\S]*\"handshake\":\"ok\"" },
+    { "kind": "capture", "name": "core cycle 3" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes", "after.observers": "@record:baselineResolution.after.observers" } }
+  ]
+}

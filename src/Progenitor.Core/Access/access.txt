@@ -1,0 +1,44 @@
+# Progenitor Core access declarations (roadmap M3 item 5).
+#
+# Grammar (docs/modules.md "Access"):
+#
+#   access v1                              required first directive
+#   assembly <SimpleAssemblyName>          sets the assembly for the lines that follow
+#   type   <Full.Type>                     existence only; no accessor members
+#   field  <Full.Type> <name> : <Type> [static]
+#   method <Full.Type> <name>[(<Param>, <Param>)]
+#
+# Nested types use the metadata spelling `Outer/Nested`. A method with no parameter list means
+# "the only overload"; two overloads with no list is a loud failure, not a guess. An overloaded
+# name declared with a list resolves through the interop's own NativeMethodInfoPtr_ naming, never
+# by position (R39 finding 2).
+#
+# `: <Type>` is required on a field line: il2cpp_field_get_value copies the field's own width into
+# whatever buffer it is handed, so the declared type is what makes the generated accessor's width
+# checkable at first resolution instead of a silent stack write (R39 finding 3).
+#
+# Regenerate src/Progenitor.Core/Access/Generated/Access.Generated.cs after any edit:
+#
+#   dotnet run --project tools/accessgen -- \
+#     --declarations src/Progenitor.Core/Access/access.txt \
+#     --out src/Progenitor.Core/Access/Generated --build <build id>
+#
+# Every line below also becomes a row in the resilience report's member scan, so a game update
+# that removes one of these is named before anything calls it.
+
+access v1
+
+# ---- ProjectM.Camera --------------------------------------------------------------------------
+assembly ProjectM.Camera
+
+# Ui/GameInputBlocker.cs: the native postfix site for chat's input mask. Detoured through its
+# compiled function pointer, so the accessor that matters here is the pointer one.
+# (It has a unique native address, unlike the shared empty stub other input systems share.)
+method ProjectM.RotateCameraBlocker GetConsumedInputs
+
+# ---- ProjectM.Shared --------------------------------------------------------------------------
+assembly ProjectM.Shared
+
+# GodMode/GodMode.cs: the raw kill writer. Needed twice — as a MethodBase for the Harmony prefix
+# and as a function pointer for the address-table-free fallback (buffs.md FDR §4 row 8).
+method ProjectM.DeathUtilities Kill

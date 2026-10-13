@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "items": [
+    {
+      "id": "sample.ash",
+      "cloneOf": "Item_Ingredient_Crystal",
+      "name": "Ash Shard",
+      "description": "Cold ash, left where an ember burned out.",
+      "stack": 50
+    }
+  ]
+}

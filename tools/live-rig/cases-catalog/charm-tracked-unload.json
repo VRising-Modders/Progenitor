@@ -1,0 +1,46 @@
+{
+  "name": "charm-tracked-unload",
+  "summary": "Tracked Charm loop particle borrow unloaded while active: warm the Charm target sequence, client Borrow via .catalogex, read back the Sample effects root, remove Sample, read back again, reinstall and confirm protection.",
+  "notes": [
+    "Acceptance procedure — not run. Outstanding check from the 2026-09-07 catalog live audit: charm-loop-particle-borrow explicitCleanup tracked Charm unload while active was not exercised.",
+    "This case must run with --side client. The borrow lives on the client; removal unloads Sample on --side.",
+    ".catalogex warm is server-side: ctx.Effects.ServerBeamLink(character, character, seconds: 8, sequenceGuid: -541113174). ServerBeam.Link accepts the same character as both endpoints (it only treats endIndex 0 as a one-entity mark), so warm does not spawn a marker rat. The Charm target sequence plays its particles at the player; playing it once makes Part_Charm_Loop_01 resident on the client. Expected log: CATALOGEX warm entity=<handle.Entity> enabled=True. The handle is ctx.Track'd by ServerBeamLink and disposes at its 8 s deadline.",
+    "Expected after .catalogex borrow: CATALOGEX borrow enabled=True root=progenitor-effects-progenitor.sample on the client log; charm-root-readback returns CHARMROOT children=1 with the child activeSelf=True and particle systems playing.",
+    "Expected after removal: Sample effects root absent or children=0 (tracked handle disposed at unload). Then reinstall; protectionCheck expect true.",
+    "IEffectHandle has no position API; ParticleHandle does. The client handler casts to ParticleHandle and sets Position to the local character Translation when that component exists; otherwise the clone stays at the world origin (catalog default).",
+    "Event id 0x536D4378 (ASCII SmCx). .catalogex borrow|dispose|status on the server sends Packet{Kind} to the calling user; the client plugin calls ctx.Effects.Borrow. The handle is kept in a static field and is also ctx.Track'd by Borrow, so Core sweep disposes it on Removal. Plugin.OnUnload is not given a Detach line (one-line Plugin.cs budget).",
+    "Run this case with --side client only when the test user is already admin on the server (the rig's admin grant then writes the client User view; .catalogex is still a server chat command). Default --side server unloads the server Sample and will not dispose the client clone — in that mode the live job must rename the client reload folder's Progenitor.Sample.dll the same way tools/live-rig/lib/reload.mjs does, then re-run the readback snippet.",
+    "Sample [NetworkCompatibility(ServerMustHave, Exact)] may kick the client if the client image is removed while the server image still requires it. Record whether the client stayed connected.",
+    "No units are spawned. Cleanup and final checks still run. Do not leave .fx handles live; they share the same Sample root."
+  ],
+  "steps": [
+    {
+      "kind": "snippetPrepare",
+      "name": "prepare charm root readback",
+      "file": "tools/live-rig/cases-catalog/charm-root-readback.Snippet.cs"
+    },
+    { "kind": "command", "text": ".catalogex warm", "expectLog": { "regex": "CATALOGEX warm" } },
+    { "kind": "wait", "ms": 6000 },
+    { "kind": "command", "text": ".catalogex borrow" },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "snippet",
+      "name": "charm root after borrow",
+      "side": "client",
+      "file": "tools/live-rig/cases-catalog/charm-root-readback.Snippet.cs",
+      "expect": "CHARMROOT children=[1-9]",
+      "timeoutMs": 20000
+    },
+    { "kind": "removal" },
+    {
+      "kind": "snippet",
+      "name": "charm root after sample removal",
+      "side": "client",
+      "file": "tools/live-rig/cases-catalog/charm-root-readback.Snippet.cs",
+      "expect": "CHARMROOT (absent|children=0)",
+      "timeoutMs": 20000
+    },
+    { "kind": "reinstall" },
+    { "kind": "protectionCheck", "expect": true }
+  ]
+}

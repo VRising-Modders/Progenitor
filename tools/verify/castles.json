@@ -1,0 +1,37 @@
+{
+  "name": "castles",
+  "order": 20,
+  "title": "Castle reader: all / territory / tiles / canplace / raw",
+  "evidence": ["208"],
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "Evidence 208 on save test1 read 'all count=1 owned=0' (plot 13, TestPlayer's) and 'raw plots=1 read=1'. The counts belong to the save, not to the code, so the expectations below assert the SHAPE of each line and the run's own numbers are printed in the matched line. A ghost owns no castle, so 'castle=none' is the expected answer everywhere a castle of the caller's own is wanted - that is what evidence 208 saw too." },
+
+    { "command": ".castle all" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample castle: all count=\\d+ owned=\\d+" },
+
+    { "command": ".castle territory 13" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample castle: territory 13" },
+
+    { "command": ".castle tiles" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample castle: tiles castle=(none|\\d+)" },
+
+    { "note": "A numeric PrefabGUID, so the reply does not depend on a spawnable-name lookup." },
+    { "command": ".castle canplace 12345" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample castle: canplace 12345 castle=(none|\\d+)" },
+
+    { "command": ".castle raw" },
+    { "sleepMs": 1500 },
+    { "expectLog": "Sample castle: raw plots=\\d+ read=\\d+" },
+
+    { "command": ".castle territory 99" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample castle: territory 99" },
+
+    { "expectNoLog": "\\[Error\\] .*[Cc]astle" }
+  ]
+}

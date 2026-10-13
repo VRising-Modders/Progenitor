@@ -1,0 +1,41 @@
+{
+  "generated": "2026-09-06T00:00:00.000Z",
+  "source": {"catalogSha256": "fixturecatalogsha256aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "objects": 7,
+  "names": 7,
+  "failed": 0,
+  "byClass": { "GameObject": 5, "Material": 2 },
+  "archives": [
+    {
+      "archiveId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "objectCount": 3,
+      "byClass": { "GameObject": 2, "Material": 1 },
+      "namesResolved": 3,
+      "named": [
+        { "pathID": "9142015999717103345", "type": "GameObject", "name": "Icon" },
+        { "pathID": "1805408021845029941", "type": "GameObject", "name": "Beam_Fixture_Channeling_01" },
+        { "pathID": "7627494972854781580", "type": "Material", "name": "mat_Fixture_Capture01" }
+      ]
+    },
+    {
+      "archiveId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "objectCount": 3,
+      "byClass": { "GameObject": 2, "Material": 1 },
+      "namesResolved": 3,
+      "named": [
+        { "pathID": "9223372036854775807", "type": "GameObject", "name": "Icon" },
+        { "pathID": "-9223372036854775808", "type": "GameObject", "name": "Part_Fixture_Loop_01" },
+        { "pathID": "42", "type": "Material", "name": "Icon" }
+      ]
+    },
+    {
+      "archiveId": "cccccccccccccccccccccccccccccccc",
+      "objectCount": 1,
+      "byClass": { "GameObject": 1 },
+      "namesResolved": 1,
+      "named": [
+        { "pathID": "9007199254740993", "type": "GameObject", "name": "Part_Fixture_Loop_01" }
+      ]
+    }
+  ]
+}

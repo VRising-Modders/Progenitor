@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.ControlsSample</AssemblyName>
+    <RootNamespace>Progenitor.ControlsSample</RootNamespace>
+    <Description>Test mod that uses every Progenitor UI control, each wired to a log line and a status label.</Description>
+    <BepInExPluginGuid>progenitor.controlssample</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Controls Sample</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

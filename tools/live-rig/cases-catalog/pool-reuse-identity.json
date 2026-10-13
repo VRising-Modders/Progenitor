@@ -1,0 +1,159 @@
+{
+  "name": "pool-reuse-identity",
+  "summary": "Same-instance crystal pool reuse for wendigo-frost-nova-appearance: structured POOLID identity and _BaseColor at baseline, tinted playback, rest (every T id present), then subsequent untinted reuse of T after .froststyle off. Verified live 2026-09-07 (reviews/2026-09-07-catalog-cases-10): T=10, R=T on attempt 1, capture unavailable (no capture step then). poolReuse requires nonempty R (ids in T present as rows, active again with no Sample override). Missing FROSTSTYLE handler line fails the off step. Capture is focus-free PrintWindow; readback success is separate from visual.verified.",
+  "notes": [
+    "Verified live 2026-09-07 (reviews/2026-09-07-catalog-cases-10, 20260907T215010Z-pool-reuse-identity): T=10, R=T on attempt 1, capture.available=false (that run had no capture step). Proves the same renderer/GameObject ids were present as rest rows and active again untinted after .froststyle off. Identity is Unity instance id plus renderer id observed present at rest between the two activations, not a general proof that Unity cannot recycle ids after Destroy. See tools/live-rig/cases-catalog/POOL-REUSE.md.",
+    "Pass is structured identity/colour assertions, not a census-string match and not whole-scene renderer-count equality. The historical 122-id comparison is recorded as informational output only.",
+    "Snippet: tools/live-rig/cases-catalog/pool-census.Snippet.cs (client). Crystal-shader family Shader Graphs/Shader_VFX_Ice_Crystal_Unlit_Final. Bounds: count cap 256, radius 60 from Camera.main; truncated/skippedRadius/skippedCap are reported on the summary line.",
+    "snippetPrepare builds the census DLL once (--no-incremental, mtime and hash checks) before any dash. Timed snippet steps only load that DLL (hash and source must still match; no rebuild) and record elapsedMs from step start to the scratch result line. CAT76 rebuilt on the tinted path (~3 s) and missed the ~1.5 s ring; Scratch reload itself was tens of milliseconds.",
+    "Sample commands used: .frostdash on (enable dash, which always tracks rings into SampleFrostNovaAppearance), .frostdash dash (request the equipped Veil), .froststyle off (disable appearance override while dash still spawns rings; server FROSTSTYLE enabled=False restored=<n>, client FROSTSTYLE client enabled=False), .froststyle on (re-enable; FROSTSTYLE enabled=True restored=0), .frostdash off (teardown; stops dash and destroys owned rings). Override colour is Sample _BaseColor 0.12,0.65,0.25,1.",
+    "T is the set of renderer/GameObject ids that are ACTIVE and carry Sample _BaseColor 0.12,0.65,0.25,1 at the tinted census. Fresh allocations are legitimate participants; how many of T were already in the baseline is informational only (tintedInBaseline / tintedFresh). At rest, every id in T must be a present row (inactive, no override or equal to its baseline). A T id missing from the rest census fails with tinted object missing at rest (a destroyed and recycled instance id cannot pass as restored). After rest, .froststyle off must see a FROSTSTYLE handler line within the bounded wait. No FROSTSTYLE line fails that step with no handler line for .froststyle off; the run must not pass silently. Then poolReuse retries .frostdash dash + 1500 ms load-only census up to 3 times (each retry after the previous rings rest). R is the nonempty subset of T that are present rows, active again with no override (no property block, or the per-id baseline state). Empty R after retries records reuse not observed and fails. Report qualifiedTinted (|T|), reusedUntinted (|R|), the ids, retriesUsed, and capture.available=true with saved PNG paths only when frames were written. visual.verified stays false until a person or the reviewing agent views the frames (verifiedBy/verifiedAt). The rig does not analyse pixels. A nonempty file is not visual verification.",
+    "capturePrepare runs one discarded PrintWindow warmup before any timed window so the first kept shot is fast. PrintWindow takes about 1 s and must not sit on the dash-to-census wait: each shot is a fire-and-forget child, started at its offset by a timer. The tinted comparison frame starts at +100 ms (content about +300 to +1100) while the census wait stays 1500 ms. poolReuse starts reuse frames at +100, +500, +900 ms (content about +300 to +1900) and still censuses at +1500 ms, then awaits the children. A dash-to-census delay above maxCensusDelayMs (default 2000) fails census late: <ms> ms. Capture is observe.ps1 shot -Window client -Method PrintWindow; it must not send input or take focus. A capture failure (non-zero exit, missing or zero-byte file, timeout) fails that step when requireFrames is true (default for the reuse burst). capture.available is true only when frames were saved. Readback success (nonempty R) is separate from visual success.",
+    "No entities are spawned by this case. Frost rings are Sample-owned and are not rig-tracked; they live ~1.5 s and should be gone before each 20 s rest census. Cleanup and final checks still run."
+  ],
+  "steps": [
+    {
+      "kind": "snippetPrepare",
+      "name": "prepare pool census",
+      "file": "tools/live-rig/cases-catalog/pool-census.Snippet.cs",
+      "record": "poolCensusPrepared"
+    },
+    {
+      "kind": "capturePrepare",
+      "name": "warmup PrintWindow",
+      "record": "capturePrepared"
+    },
+    {
+      "kind": "snippet",
+      "name": "pool census baseline",
+      "side": "client",
+      "file": "tools/live-rig/cases-catalog/pool-census.Snippet.cs",
+      "expect": "POOLID summary renderers=",
+      "timeoutMs": 20000,
+      "record": "poolBaseline",
+      "assert": { "phase": "baseline" }
+    },
+    { "kind": "command", "text": ".frostdash on" },
+    { "kind": "command", "text": ".frostdash dash" },
+    {
+      "kind": "capture",
+      "name": "tinted window",
+      "delayMs": 100,
+      "waitMs": 1500,
+      "maxCensusDelayMs": 2000,
+      "timeoutMs": 10000,
+      "maxWidth": 1920,
+      "window": "client",
+      "region": "window",
+      "method": "PrintWindow",
+      "record": "captureTinted"
+    },
+    {
+      "kind": "snippet",
+      "name": "pool census tinted",
+      "side": "client",
+      "file": "tools/live-rig/cases-catalog/pool-census.Snippet.cs",
+      "expect": "POOLID summary renderers=",
+      "timeoutMs": 20000,
+      "record": "poolTinted",
+      "assert": {
+        "phase": "tinted",
+        "baselineRecord": "poolBaseline",
+        "overrideColor": "0.12,0.65,0.25,1"
+      }
+    },
+    { "kind": "wait", "ms": 20000 },
+    {
+      "kind": "snippet",
+      "name": "pool census rest",
+      "side": "client",
+      "file": "tools/live-rig/cases-catalog/pool-census.Snippet.cs",
+      "expect": "POOLID summary renderers=",
+      "timeoutMs": 20000,
+      "record": "poolRest",
+      "assert": {
+        "phase": "rest",
+        "baselineRecord": "poolBaseline",
+        "tintedRecord": "poolTinted",
+        "overrideColor": "0.12,0.65,0.25,1"
+      }
+    },
+    {
+      "kind": "command",
+      "name": "froststyle off",
+      "text": ".froststyle off",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=False" },
+      "record": "froststyleOff"
+    },
+    {
+      "kind": "log",
+      "name": "froststyle client off",
+      "side": "client",
+      "filter": "FROSTSTYLE",
+      "regex": "FROSTSTYLE client enabled=False",
+      "timeoutMs": 5000,
+      "count": 1,
+      "sinceRecord": "froststyleOff",
+      "record": "froststyleClientOff"
+    },
+    {
+      "kind": "poolReuse",
+      "name": "untinted reuse",
+      "dash": ".frostdash dash",
+      "waitMs": 1500,
+      "maxCensusDelayMs": 2000,
+      "retries": 3,
+      "retryWaitMs": 20000,
+      "baselineRecord": "poolBaseline",
+      "tintedRecord": "poolTinted",
+      "overrideColor": "0.12,0.65,0.25,1",
+      "record": "poolReuse",
+      "capture": {
+        "delayMs": 100,
+        "burst": { "count": 3, "intervalMs": 400 },
+        "timeoutMs": 10000,
+        "requireFrames": true,
+        "maxInFlight": 4,
+        "maxWidth": 1920,
+        "window": "client",
+        "region": "window",
+        "method": "PrintWindow"
+      },
+      "snippet": {
+        "side": "client",
+        "file": "tools/live-rig/cases-catalog/pool-census.Snippet.cs",
+        "expect": "POOLID summary renderers="
+      }
+    },
+    {
+      "kind": "command",
+      "name": "froststyle on",
+      "text": ".froststyle on",
+      "expectLog": { "filter": "FROSTSTYLE", "regex": "FROSTSTYLE enabled=True" },
+      "record": "froststyleOn"
+    },
+    { "kind": "wait", "ms": 20000 },
+    {
+      "kind": "snippet",
+      "name": "pool census rest after reuse",
+      "side": "client",
+      "file": "tools/live-rig/cases-catalog/pool-census.Snippet.cs",
+      "expect": "POOLID summary renderers=",
+      "timeoutMs": 20000,
+      "record": "poolRestAfterReuse",
+      "assert": {
+        "phase": "rest",
+        "baselineRecord": "poolBaseline",
+        "tintedRecord": "poolTinted",
+        "overrideColor": "0.12,0.65,0.25,1"
+      }
+    }
+  ],
+  "teardown": [
+    {
+      "kind": "command",
+      "text": ".frostdash off",
+      "expectLog": { "filter": "FROSTDASH", "regex": "FROSTDASH cleanup alive=" }
+    }
+  ]
+}

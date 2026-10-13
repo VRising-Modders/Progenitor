@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Mod compatibility C5: the game-free compatibility test library mod authors reference from their own test projects
+    (docs/modules.md, "Testing your mod across versions"). No game, BepInEx or IL2CPP reference: it compiles Core's own
+    message codec, envelope, range and fixture sources, so a payload encodes and decodes here byte for byte as it does
+    in the game. A mod's message classes are linked into the author's test project as source (they use only
+    Progenitor.Networking's attributes), and bind to this library's copy of those attributes.
+  -->
+  <PropertyGroup>
+    <AssemblyName>Progenitor.Testing</AssemblyName>
+    <RootNamespace>Progenitor.Testing</RootNamespace>
+    <Description>Game-free compatibility tests for Progenitor mods: record, replay, unknown-field and range checks of versioned messages.</Description>
+    <ReferenceGame>false</ReferenceGame>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Progenitor.Core\Networking\ModMessageCodec.cs" Link="Core\ModMessageCodec.cs" />
+    <Compile Include="..\Progenitor.Core\Networking\ModMessageEnvelope.cs" Link="Core\ModMessageEnvelope.cs" />
+    <Compile Include="..\Progenitor.Core\Networking\ModMessageFixtures.cs" Link="Core\ModMessageFixtures.cs" />
+    <Compile Include="..\Progenitor.Core\Plugins\CompatRange.cs" Link="Core\CompatRange.cs" />
+    <Compile Include="..\Progenitor.Core\Plugins\NetworkCompatibility.cs" Link="Core\NetworkCompatibility.cs" />
+  </ItemGroup>
+</Project>

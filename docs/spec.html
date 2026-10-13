@@ -1,0 +1,778 @@
+<title>Progenitor Spec</title>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,400;9..144,600;9..144,700,50&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #f4f2f5;
+    --bg-2: #ebe8ee;
+    --ink: #1c1822;
+    --ink-2: #4a4452;
+    --ink-3: #7c7585;
+    --line: #d9d4de;
+    --accent: #8a1c2e;
+    --accent-ink: #ffffff;
+    --accent-soft: #f3dfe2;
+    --ok: #2f6b45;
+    --warn: #9a6410;
+    --crit: #8a1c2e;
+    --code-bg: #efecf1;
+    --card: #faf9fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17141b;
+      --bg-2: #1f1b24;
+      --ink: #ebe6ee;
+      --ink-2: #b8b0c0;
+      --ink-3: #847c8e;
+      --line: #35303c;
+      --accent: #d6465c;
+      --accent-ink: #17141b;
+      --accent-soft: #3a1e26;
+      --ok: #6fbf8a;
+      --warn: #d9a441;
+      --crit: #d6465c;
+      --code-bg: #221e28;
+      --card: #1d1922;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17141b;
+    --bg-2: #1f1b24;
+    --ink: #ebe6ee;
+    --ink-2: #b8b0c0;
+    --ink-3: #847c8e;
+    --line: #35303c;
+    --accent: #d6465c;
+    --accent-ink: #17141b;
+    --accent-soft: #3a1e26;
+    --ok: #6fbf8a;
+    --warn: #d9a441;
+    --crit: #d6465c;
+    --code-bg: #221e28;
+    --card: #1d1922;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .page {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 72ch);
+    gap: 56px;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+  @media (max-width: 860px) {
+    .page { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 32px 20px 64px; }
+    nav.toc { position: static; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    font-size: 13.5px;
+  }
+  nav.toc .brand {
+    font-family: "Fraunces", Georgia, serif;
+    font-variation-settings: "SOFT" 50;
+    font-weight: 700;
+    font-size: 22px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 4px;
+  }
+  nav.toc .sub { color: var(--ink-3); margin: 0 0 20px; font-size: 12.5px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  nav.toc a { color: var(--ink-2); text-decoration: none; display: block; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); }
+  nav.toc a:hover { color: var(--ink); border-left-color: var(--accent); }
+
+  main > header { margin-bottom: 40px; }
+  .eyebrow {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    font-weight: 600;
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-variation-settings: "SOFT" 50;
+    font-weight: 600;
+    font-size: 44px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  .lede { font-size: 18px; color: var(--ink-2); margin: 0 0 18px; max-width: 60ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .meta b { color: var(--ink-2); font-weight: 500; }
+
+  section { margin: 0 0 48px; scroll-margin-top: 24px; }
+  h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-variation-settings: "SOFT" 50;
+    font-weight: 600;
+    font-size: 28px;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+    margin: 0 0 14px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 26px 0 8px;
+    letter-spacing: -0.005em;
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { margin: 0 0 12px; padding-left: 22px; }
+  li { margin: 0 0 5px; }
+  li > ul { margin-top: 5px; }
+  strong { font-weight: 600; }
+
+  code {
+    font-family: "IBM Plex Mono", Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+    margin: 0 0 16px;
+  }
+  .tablewrap { overflow-x: auto; margin: 0 0 16px; }
+  .tablewrap table { margin: 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); font-weight: 600; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td code { white-space: nowrap; }
+
+  .callout {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 12px 16px;
+    border-radius: 0 6px 6px 0;
+    margin: 0 0 16px;
+  }
+  .callout p:last-child { margin: 0; }
+  .callout .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+
+  .pill {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--ink-2);
+    background: var(--card);
+    white-space: nowrap;
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+  .pill.crit { color: var(--crit); border-color: var(--crit); }
+
+  .stack { display: grid; gap: 10px; margin: 0 0 16px; }
+  .layer {
+    border: 1px solid var(--line);
+    background: var(--card);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .layer .t { font-weight: 600; margin: 0 0 4px; display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .layer .t small { font-weight: 400; color: var(--ink-3); font-size: 12.5px; }
+  .layer .d { color: var(--ink-2); font-size: 14px; margin: 0; }
+  .layer.ext { background: var(--bg-2); border-style: dashed; }
+
+  .milestones { display: grid; gap: 12px; margin: 0 0 16px; }
+  .ms {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 14px 16px;
+    background: var(--card);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 16px;
+  }
+  .ms .name { font-weight: 600; }
+  .ms .when { color: var(--ink-3); font-size: 13px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .ms .what { grid-column: 1 / -1; color: var(--ink-2); font-size: 14px; margin: 0; }
+
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; font-size: 14.5px; margin: 0 0 16px; }
+  .kv dt { color: var(--ink-3); }
+  .kv dd { margin: 0; }
+</style>
+
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <p class="brand">Progenitor</p>
+    <p class="sub">V Rising modding framework</p>
+    <ol>
+      <li><a href="#summary">Summary</a></li>
+      <li><a href="#goals">Goals and non-goals</a></li>
+      <li><a href="#constraints">Constraints</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#core">Core modules</a></li>
+      <li><a href="#content">Content modules</a></li>
+      <li><a href="#client">Client modules</a></li>
+      <li><a href="#hosted">Hosted games</a></li>
+      <li><a href="#devloop">Dev loop and MCP</a></li>
+      <li><a href="#spike">The gating spikes</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+      <li><a href="#risks">Risks</a></li>
+      <li><a href="#decisions">Open decisions</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <aside><strong>Planned API increment:</strong> <a href="basic-mod-authoring.md">Basic mod authoring improvements</a> defines owned creature spawning, complete timed-buff application and cleanup, player lookup, scheduling/config-watch gap review, opt-in world-data policy and beginner AI acceptance. These are proposed contracts, not implemented capability claims; all implementations must be original.</aside>
+    <header>
+      <p class="eyebrow">Design spec, M1</p>
+      <h1>Progenitor</h1>
+      <p class="lede">One library that sits between BepInEx and a V Rising mod, so the mod author writes gameplay and the library handles hooks, entities, networking, content registration, and the build-test loop.</p>
+      <div class="meta">
+        <span><b>Owner</b> ExampleTeam</span>
+        <span><b>Date</b> 2026-09-02</span>
+        <span><b>License</b> LGPL-2.1-only</span>
+        <span><b>Target</b> BepInEx 6 IL2CPP, pack 1.733.2</span>
+        <span><b>Status</b> M1 shipped; hosted live test and two-player command check open</span>
+      </div>
+    </header>
+
+    <section id="summary">
+      <h2>Summary</h2>
+      <p>V Rising mods today are built directly on BepInEx plus a handful of small, overlapping helper libraries. Nobody has shipped a framework layer for it: a way to register new content that server and client agree on, a networking channel between the two halves of a mod, a UI toolkit, and any kind of development loop that isn't "rebuild, restart, walk over, look."</p>
+      <p>Progenitor is that layer, with one deliberate emphasis. The build-test loop is a first-class module, not an afterthought. A running server or client exposes a local debug bridge, and an external MCP server turns that bridge into tools an AI coding session can drive. The intended day-to-day experience is: describe a change, and the session builds it, hot-reloads it into the live game, exercises it, reads the log, and reports back. Milestone 1 landed on 2026-09-02: Core's lifecycle, hooks, entity toolkit, events, commands, networking, prefab registry, persistence, config, localization, and hosted launcher are in the tree and were exercised in-game by <code>samples/Progenitor.Sample</code> (cloned item, chat commands, save-file JSON). Two M1 checks remain: a live private-game launch of the hosted loader, and a two-player check that handled commands are not broadcast.</p>
+      <div class="callout">
+        <div class="label">Dependency rule</div>
+        <p>A Progenitor mod depends on exactly two things: BepInEx and Progenitor. Progenitor itself depends only on BepInEx, and everything it provides is original code under the GNU Lesser General Public License, version 2.1.</p>
+      </div>
+    </section>
+
+    <section id="goals">
+      <h2>Goals and non-goals</h2>
+      <h3>Goals</h3>
+      <ul>
+        <li><strong>Single dependency.</strong> BepInEx is the only thing beneath Progenitor. It cannot be removed because it ships the interop assemblies that make the game's types callable from C#.</li>
+        <li><strong>One package, every supported way of playing.</strong> Compatible Progenitor mods support single player, client-hosted games and dedicated servers. Bundled-server setup is managed for the player; a dedicated server retains its own installation folder and state. Planned local mod management defaults to client only. Linking a validated same-machine server adds server-only and explicitly opt-in combined installation; neither registration nor package requirements automatically changes both installations. A client connected elsewhere can still be managed independently. Server controls appear only after configuration and validation. Remote server management is outside this increment. See the <a href="mod-package-capabilities.md">package and local-target contract</a>.</li>
+        <li><strong>Content that both sides agree on.</strong> A mod registers a new prefab once, and the server and every connected client with the mod know what it is.</li>
+        <li><strong>Own the outputs, not the systems.</strong> AI, combat, and other Burst-compiled systems are never rewritten. Progenitor gives mods a clean way to run their own ECS systems that take over the components those vanilla systems act on.</li>
+        <li><strong>Hot reload as the default workflow.</strong> Change a line, rebuild, and the running game picks it up in seconds.</li>
+        <li><strong>Machine-drivable.</strong> Everything a human does to test a mod can be done through the debug bridge, so an AI session can close the loop without a human in it.</li>
+        <li><strong>Survive game patches cheaply.</strong> Hooks resolve by shape where possible, and the framework reports what broke rather than failing silently.</li>
+      </ul>
+      <h3>Non-goals</h3>
+      <ul>
+        <li>Adding new map regions. Terrain, lighting, navigation, and world bounds are baked subscene data. Out of scope permanently.</li>
+        <li>Replacing Burst-compiled simulation. A native detour module is planned as an optional escape hatch, not a foundation.</li>
+        <li>Replacing other chat-command frameworks for mods that already use one. Both can coexist on one server. Progenitor's command module is for Progenitor mods.</li>
+        <li>Working with EasyAntiCheat enabled. Same constraint as every V Rising mod.</li>
+      </ul>
+    </section>
+
+    <section id="constraints">
+      <h2>Constraints</h2>
+      <dl class="kv">
+        <dt>Runtime</dt><dd>BepInEx 6 IL2CPP on CoreCLR (.NET 6). Il2CppInterop generates the proxy assemblies. Unmanaged ECS systems and Burst jobs are native code and cannot be patched with Harmony.</dd>
+        <dt>Topology</dt><dd>Server-authoritative. Gameplay runs in the server process. Clients render and send input. Most modules are server-first; UI and assets are client-only. There are three ways the server process comes to exist, and Progenitor treats them identically: a headless dedicated server, a private game where the client launches the bundled server as a child process, and single player, which is the same child process with one player.</dd>
+        <dt>Licensing</dt><dd>Progenitor is licensed under the GNU Lesser General Public License, version 2.1, and is entirely original code. Existing libraries, MIT or GPL, are read for their mechanisms and mistakes and never copied. This keeps the license clean by construction and avoids inheriting anyone's shortcuts.</dd>
+        <dt>Distribution</dt><dd>Thunderstore under ExampleTeam, plus NuGet for the build-time reference. Other mod sites optional.</dd>
+        <dt>Hot reload rules</dt><dd>A reloadable plugin keeps all state in its Progenitor-owned context, never in statics. It does not inject IL2CPP types (custom MonoBehaviours). It registers every hook, system, and subscription through Progenitor so unload can reverse them.</dd>
+      </dl>
+    </section>
+
+    <section id="architecture">
+      <h2>Architecture</h2>
+      <p>Progenitor ships as one plugin DLL with optional client-only and dev-only DLLs beside it. Mods reference the core assembly at build time and declare a BepInEx dependency on it.</p>
+      <div class="stack">
+        <div class="layer ext">
+          <p class="t">Progenitor.Dev.Mcp <small>separate process, dev machine only</small></p>
+          <p class="d">MCP server. Talks to the debug bridge over a local socket and exposes tools to Claude Code or any MCP client. Never installed on a public server.</p>
+        </div>
+        <div class="layer">
+          <p class="t">Progenitor.Dev <small>optional DLL, dev only</small></p>
+          <p class="d">Debug bridge: local socket, hot reload trigger, command and exec, entity inspection, structured log tail, status/save/store. Snapshot, restore, and screenshot are later.</p>
+        </div>
+        <div class="layer">
+          <p class="t">Progenitor.Client <small>optional DLL, client only, not yet shipped</small></p>
+          <p class="d">UI toolkit over the game's canvases, keybinds and settings panel, asset loading, custom map layers and map replacement, and icon injection. The hosted-game launcher lives in Core, not here: a private-game child process is still a server, and server-side code must not branch on how that process was started.</p>
+        </div>
+        <div class="layer">
+          <p class="t">Progenitor.Content <small>part of core</small></p>
+          <p class="d">Prefab registry with client sync (shipped), localization (shipped). Item / unit / ability / building / buff managers, drop tables, and world placement remain M2.</p>
+        </div>
+        <div class="layer">
+          <p class="t">Progenitor.Core <small>the required DLL</small></p>
+          <p class="d">Plugin lifecycle and hot reload, ECS hook layer, entity toolkit, event bus, commands, networking and handshake, prefab registry, config, persistence, localization, hosted-game launcher. Patch-resilience report is later.</p>
+        </div>
+        <div class="layer ext">
+          <p class="t">BepInEx 6 IL2CPP <small>BepInExPack_V_Rising</small></p>
+          <p class="d">Loader, HarmonyX, Il2CppInterop proxies. The one external dependency.</p>
+        </div>
+      </div>
+      <p>Everything above Core is optional. A server-only mod like Satisvampory would take Core and Content. A client-only mod such as a HUD tweak would take Core and Client. A mod declares which side it runs on, and Progenitor activates only that side in each process:</p>
+      <pre><code>[BepInPlugin("example.satisvampory", "Satisvampory", "1.1.0")]
+[BepInDependency("progenitor")]
+[ProgenitorSide(Side.Server)]           // Server, Client, or Both
+public class Plugin : ProgenitorPlugin&lt;SatisvamporyContext&gt; { ... }</code></pre>
+      <p>That attribute is what lets one DLL be installed once and be correct everywhere. In the client process a server-side plugin is loaded but dormant. In the server process, dedicated or bundled, it runs.</p>
+    </section>
+
+    <section id="core">
+      <h2>Core modules</h2>
+
+      <h3>Plugin lifecycle and hot reload <span class="pill ok">Shipped</span></h3>
+      <p>Mods derive from <code>ProgenitorPlugin&lt;TContext&gt;</code>. The context object owns all mutable state, config, and registrations. Reloadable plugins live in their own folder, outside the BepInEx chainloader. A reload is unload followed by load of the new file. Unload reverses, in order: scheduled tasks, event subscriptions, named system callbacks, ECS hooks, Harmony patches by plugin ID, network message handlers, command registrations, and finally the context is disposed.</p>
+      <p>Collectible <code>AssemblyLoadContext</code> per plugin is live and verified: a content plugin can be unloaded and reloaded with a player still connected. Compatible Core generations also swap in process through <code>Progenitor.Bootstrap</code>. Bootstrap is the process-lifetime component and requires restarting each affected process when changed. Collection, protocol and allowlist guards can refuse a swap; see the <a href="hot-reload.md">current reload procedure and verification scope</a>.</p>
+      <p><strong>As built.</strong> Collectible is what shipped: each reload DLL is read into a byte copy and loaded in its own collectible ALC; after every <code>Unload</code> (including when it throws) the reloader sweeps EventBus, commands, Harmony id, and owned <code>MainThread</code> work so leftover delegates cannot pin the context. Authors implement <code>OnLoad</code> and do not override <code>Load</code> / <code>Unload</code>. <code>PluginContext</code> is the only surface a plugin needs: facades <code>Events</code>, <code>Hooks</code>, <code>Commands</code>, <code>Content</code>, <code>Save</code>, <code>Net</code>, <code>Handshake</code>, <code>Config</code>, plus <code>Log</code>, <code>Patches</code>, <code>UnsafeHarmony</code> (reading this property opts out of hot swapping), <code>Side</code> / <code>IsServer</code> / <code>IsClient</code>, <code>World</code>, <code>Guid</code> / <code>Name</code> / <code>Version</code>, <code>Owner</code>, and <code>Track(IDisposable)</code> for anything the wrappers miss. <code>[ProgenitorSide]</code> is read from the concrete type; a mismatch logs dormant and creates nothing. <code>ProgenitorPlugin.WhenWorldReady</code> fires at most once. The framework ticks from an injected <code>FrameTicker</code> MonoBehaviour from launch, including the client main menu.</p>
+      <p>Reload is triggered by the debug bridge, by an admin chat command, or on the client by a keybind. Plugins loaded after the game has already bootstrapped get their world-ready callbacks replayed immediately so a reload behaves like a fresh load.</p>
+      <pre><code>[BepInPlugin("example.satisvampory", "Satisvampory", "1.1.0")]
+[BepInDependency("progenitor")]
+[ProgenitorSide(Side.Server)]
+public class Plugin : ProgenitorPlugin&lt;SatisvamporyContext&gt;
+{
+    protected override void OnLoad(SatisvamporyContext ctx)
+    {
+        ctx.Commands.Register(typeof(SatisCommands)); // static classes cannot be generic type args
+        ctx.Systems.Add("order-board", world =&gt; { /* After SimulationSystemGroup; M2 */ });
+        ctx.Events.On&lt;ChatMessage&gt;(e =&gt; ctx.Log.LogInfo(e.Text));
+        ctx.Handshake.DeclareSelf();
+    }
+    // OnUnload is generated: Progenitor reverses every registration above.
+}
+public sealed class SatisvamporyContext : PluginContext { }</code></pre>
+      <p>Two things cannot be undone and are documented as such: IL2CPP type injection, and static state. Core injects the few types it needs once (<code>FrameTicker</code>), with stable names, so mods never have to.</p>
+
+      <h3>Custom systems</h3>
+      <p><code>ctx.Systems.Add</code> is a named managed callback, not a real ECS system. Core runs it from a single <code>SystemHooks</code> Before or After on a game group type (<code>Unity.Entities.SimulationSystemGroup</code> by default). No new IL2CPP type, no TypeManager row, no <code>World.CreateSystemManaged</code>. Reload is dispose. Sitting next to a vanilla system is <code>AddAfter&lt;TAnchor&gt;</code>, or <code>ctx.Hooks</code> on that system; <code>WorldSystemFilterFlags.ServerSimulation</code> is a TypeManager creation filter, not an update group, and there is no <code>ProjectM.ServerSimulationSystemGroup</code>.</p>
+      <pre><code>// default: After SimulationSystemGroup, this plugin's side world only
+ctx.Systems.Add("order-board", world =&gt; { /* … */ });
+
+ctx.Systems.Add("order-board.init", world =&gt; { }, new SystemAddOptions
+{
+    GroupType = typeof(InitializationSystemGroup),
+    Phase = SystemPhase.AfterGroup,
+    Priority = 10,
+});
+
+// sit after a vanilla system (named, owner-tracked; same seam as Hooks.After)
+ctx.Systems.AddAfter&lt;ProjectM.DealDamageSystem&gt;("order-board.damage", world =&gt; { });</code></pre>
+      <p>Injected <code>SystemBase</code> subclasses cannot be the reloadable-plugin API: ClassInjector has no unregister, so a collectible unload leaves native vtable trampolines pointing at dead managed methods. An injected class is also missing from TypeManager until Core writes the tables, and <code>[UpdateInGroup]</code> on a C# wrapper does not populate those tables, so injection stays a later Core-only spike if a real <code>SystemState</code> is ever required. This API is the M2 shape; it is not on <code>PluginContext</code> yet.</p>
+
+      <h3>ECS hook layer <span class="pill ok">Shipped</span></h3>
+      <p>Prefix and postfix hooks on <code>OnUpdate</code> for managed and unmanaged systems, resolved by system type. The OnUpdate path is simpler than expected and needs no native detours: two Harmony patches, one on <code>SystemBase.Update</code> for managed systems and one on <code>WorldUnmanagedImpl.UnmanagedUpdate</code> for unmanaged ones. Both receive a <code>SystemState</code> pointer, which identifies the system, and both sit before the game's own "enabled and should run" check, so a prefix returning false skips the system entirely. That is what makes "own the outputs" possible: a mod can suppress a vanilla AI system for specific frames and run its own in the postfix.</p>
+      <p>Hook options: only fire when the system would actually run, and a throttle for hooks that don't need every frame. Also provides "run when these worlds exist" deferral for bootstrapping.</p>
+      <p><strong>As built.</strong> Public names are <code>SystemHooks.Before&lt;T&gt;</code> / <code>After&lt;T&gt;</code> (and non-generic overloads) taking <code>Action&lt;SystemHookContext&gt;</code>, plus <code>WhenWorldExists</code> (singular). <code>SystemHookContext</code> carries <code>World</code>, <code>SystemType</code>, <code>SystemName</code>, and <code>Skip</code> (Before only; nested group updates get a fresh context). <code>HookOptions</code>: <code>OnlyWhenSystemRuns</code> (default true), <code>EveryNFrames</code>. Verified live on <code>ServerBootstrapSystem</code> and Burst <code>MoveEntitySystem</code>. The type must have an IL2CPP class pointer; a missing wrapper throws at register. Do not put <code>ref SystemState</code> in a Harmony signature. <code>WorldReady</code> comes from a per-frame name check, not from <code>GameBootstrap.Start</code>.</p>
+      <pre><code>ctx.Hooks.Before&lt;BehaviourTreeSystem&gt;(ctx =&gt; { /* runs before vanilla AI ticks */ });
+ctx.Hooks.After&lt;DealDamageSystem&gt;(ctx =&gt; { /* damage events already applied */ });
+ctx.Hooks.WhenWorldExists("Server", world =&gt; { /* fires now if the world already exists */ });</code></pre>
+      <p>Harmony cannot marshal by-ref struct parameters. Those entry points use a native detour instead of a Harmony patch: resolve the method pointer from the interop's <code>NativeMethodInfoPtr_*</code> field and apply <code>INativeDetour.CreateAndApply</code>. That is how the client receives custom events on <code>ClientBootstrapSystem.OnReliableEventsReceived</code>; a Harmony prefix there sees a zeroed struct and stalls the client. Read position on entry is 8 bits.</p>
+
+      <h3>Entity toolkit <span class="pill ok">Shipped</span></h3>
+      <p>Typed helpers over <code>EntityManager</code>: <code>Read&lt;T&gt;</code>, <code>Write&lt;T&gt;</code>, <code>Has&lt;T&gt;</code>, <code>TryGet&lt;T&gt;</code>, buffer access, and a query builder that caches <code>EntityQuery</code> per plugin and disposes it on unload. Includes a "component monolith" that lists every known component type, used by the inspector and the patch-resilience report.</p>
+      <p><strong>As built.</strong> Public names are <code>ComponentIndex</code>, <code>EntityExtensions</code> (<code>Exists</code> / <code>Has</code> / <code>Read</code> / <code>TryRead</code> / <code>Write</code> / <code>Add</code> / <code>Remove</code> / <code>Describe</code>), <code>Query.Build</code> / <code>Entities</code> (includes disabled entities unless opted out; caller disposes a <code>Build</code> query), <code>Singletons.TryGetEntity</code> / <code>TryGetRawRW</code> (never <code>GetSingleton&lt;T&gt;</code>), and <code>PrefabLookup</code>. Buffer access and the component monolith are omitted on purpose. <code>Read</code>/<code>Write</code> require C# <code>unmanaged</code>; interop structs with bool fields such as <code>User</code> go through <code>GetComponentData&lt;User&gt;</code>. Zero-sized ECS tags use the parameterless <code>Add&lt;T&gt;</code> / <code>Remove&lt;T&gt;</code>.</p>
+
+      <h3>Event bus <span class="pill ok">Shipped</span></h3>
+      <p>Progenitor installs a fixed set of hooks once and republishes them as typed events. Mods subscribe instead of patching, so two mods reacting to the same moment never fight over one Harmony patch. The hook targets below are the moments mods most often need.</p>
+      <p><strong>As built.</strong> <code>EventBus.On&lt;T&gt;(handler, priority, owner)</code> returns <code>IDisposable</code>; <code>PluginEvents.On&lt;T&gt;</code> records the owner. Higher priority runs first. An exception in one handler is logged and does not stop the others. Shipped events are <code>WorldReady</code>, <code>PlayerConnected</code>, <code>PlayerDisconnected</code>, and <code>ChatMessage</code>; <code>Plugin.Frame</code> is the tick. The rest stay the M2 list. Chat Harmony priority is 300 (ahead of another chat-command framework, typically at 200). Commands subscribe at bus priority 500 and cancel what they handle.</p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>Event</th><th>Hook target</th><th>Cancelable</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><code>WorldReady</code></td><td>Per-frame name check for <code>"Server"</code> / <code>"Client_0"</code>; fires again after a client rejoin</td><td>No</td><td><span class="pill ok">Shipped</span></td></tr>
+          <tr><td><code>PlayerConnected</code> / <code>PlayerDisconnected</code></td><td><code>ServerBootstrapSystem.OnUserConnected</code> / prefix of <code>OnUserDisconnected</code></td><td>No</td><td><span class="pill ok">Shipped</span></td></tr>
+          <tr><td><code>ChatMessage</code></td><td><code>ChatMessageSystem.OnUpdate</code> prefix, draining the message query</td><td>Yes</td><td><span class="pill ok">Shipped</span></td></tr>
+          <tr><td><code>UnitDied</code></td><td><code>DeathEventListenerSystem.OnUpdate</code> postfix</td><td>No</td><td>M2</td></tr>
+          <tr><td><code>UnitDowned</code>, <code>VBloodConsumed</code></td><td>Sibling listeners in the same death pipeline</td><td>No</td><td>M2</td></tr>
+          <tr><td><code>StatsChanging</code> / <code>StatsChanged</code></td><td><code>StatChangeSystem.ApplyStatChanges</code> prefix and postfix</td><td>Yes (pre)</td><td>M2</td></tr>
+          <tr><td><code>DamageDealt</code></td><td>Damage event entities, read in a prefix of the consuming system</td><td>Yes</td><td>M2</td></tr>
+          <tr><td><code>BuffApplying</code></td><td><code>BuffSystem_Spawn_Server.OnUpdate</code> prefix</td><td>Yes</td><td>M2</td></tr>
+          <tr><td><code>UnitSpawned</code></td><td>Vanilla: <code>UnitSpawnerReactSystem.OnUpdate</code> and <code>MinionSpawnSystem.OnUpdate</code>. Also published by the Units module when a consumer spawns through <code>ctx.Units</code></td><td>No</td><td>M2</td></tr>
+          <tr><td><code>UnitArrived</code></td><td>Units module: the game's pathing reports the unit reached its tile</td><td>No</td><td>M2 candidate; gated on unit-behavior research</td></tr>
+          <tr><td><code>UnitUnreachable</code></td><td>Units module: the game's pathing reports the tile cannot be reached</td><td>No</td><td>M2 candidate; gated on unit-behavior research</td></tr>
+          <tr><td><code>UnitDespawned</code></td><td>Units module: a mod-owned unit despawned (explicit, plugin unload, or world teardown)</td><td>No</td><td>M2 candidate</td></tr>
+          <tr><td><code>ServerSaved</code>, <code>WorldLoaded</code></td><td>Save system and <code>LoadPersistenceSystem</code></td><td>No</td><td>M2</td></tr>
+          <tr><td><code>Tick</code>, <code>LateTick</code></td><td>A single injected MonoBehaviour owned by Progenitor, so plugins never inject their own</td><td>No</td><td><span class="pill ok">Shipped</span> as <code>Plugin.Frame</code> / <code>FrameTicker</code></td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>Commands <span class="pill ok">Shipped foundation</span></h3>
+      <p><strong>UI-first authoring direction.</strong> Encourage Progenitor's client UI as the primary entry point for everyday player actions and settings when the client runtime is installed. Keep commands supported for shortcuts, administration, automation and applicable server-only workflows with unmodified clients. UI and command entry points should call the same underlying operation with the same server-side authorization. Author examples should demonstrate this shared behavior. This guidance does not require client installation for server-only mods, a separate screen for every command, or treating hidden/disabled UI controls as permission enforcement.</p>
+      <p><strong>Command routing MVP — implemented offline; independently reviewed; coexistence with other chat-command frameworks unverified.</strong> Optional root-level shortcuts plus a qualified fallback under a configurable framework root (default <code>p</code>) and stable mod identifier. Administrators can disable, rename or assign shortcuts. Progenitor detects its own registration conflicts without silent replacement or load-order winners; unresolved shortcuts are disabled while valid qualified routes remain available. Both forms retain the same authorization and parsing behavior. Owned unload and swap must remove stale registrations without affecting other owners. Leave unowned commands available to other handlers; never fall through after a denied or invalid owned invocation. Keep server commands authoritative and client-local scope explicit. Live coexistence with another chat-command framework has not run. Not in a candidate.</p>
+      <p>Other chat-command frameworks remain optional, and mods built on one need not migrate. MVP coexistence still requires explicit alias configuration and a focused acceptance pass against another chat-command framework installed beside Progenitor. That pass includes overlapping commands, both help paths, exactly-once execution and reload cleanup. Patch priority alone is not proof of compatibility. Cross-framework conflict checks are <strong>unavailable</strong>, not passed. Future work also includes unified help views and autocomplete. See the <a href="roadmap.md">roadmap</a>.</p>
+      <p>Attribute-based chat commands with argument parsing, overloading, groups, remainder parameters, generated help, and a middleware pipeline for permissions and cooldowns. Written fresh, with the familiar attribute-based conventions. Planned beyond that: converters are registered per plugin and removed on unload, help output is localized, and command execution is async-safe so a command can await a network round trip without blocking the server tick.</p>
+      <p>Coexistence with a separately installed chat-command framework needs one deliberate choice. Such a framework may reply "command not found" and destroy the message for any dot-prefixed text it doesn't recognize, which would swallow Progenitor commands. Progenitor's chat hook therefore runs at a higher Harmony priority, handles its own commands, and lets everything else fall through untouched.</p>
+      <p>One resilience note: the chat patch reads the system's entity query through a compiler-generated field name that changes when the game is rebuilt. Progenitor resolves the query by component signature instead, so this seam stops breaking on patches.</p>
+      <p><strong>As built.</strong> <code>PluginCommands.Register&lt;T&gt;</code> / <code>Register(Type)</code> / <code>Register(object)</code> / <code>RegisterAssembly</code>. A C# <code>static</code> class cannot be a generic type argument, so those go through <code>Register(typeof(SampleCommands))</code>. Attributes shipped: <code>[Command]</code>, <code>[CommandGroup]</code>, <code>[Remainder]</code>. Prefix default <code>"."</code>. Argument types are a closed set (<code>string</code>, <code>int</code>, <code>long</code>, <code>float</code>, <code>double</code>, <code>bool</code>). Per-plugin converters, localized help, and async execution did not ship; built-ins are <code>.help</code> / <code>.h</code> and <code>.progenitor</code> / <code>.prog</code>. Open: two-player check that a handled command is canceled and not broadcast to others.</p>
+
+      <h3>Networking <span class="pill ok">Shipped</span></h3>
+      <p><strong>Planned: mod discovery and package capabilities (M4.4 / M3.11).</strong> The <a href="mod-package-capabilities.md">package contract</a> defines Mods, Install mods and Configuration workspace tabs, explicit per-side hot-load/replacement/removal declarations, and dependency/runtime checks that determine the final restart requirement. The player MCP shares catalog search, descriptions and the approved installation plan with the UI. Catalog access grants no server authority; missing metadata never enables hot loading. Not implemented or live-verified.</p>
+      <p><strong>Planned: coordinated mod deactivation (M4.4).</strong> An operator can request that an eligible server mod and its server-managed client functionality deactivate through Progenitor while player connections and the Dev bridge remain available. This is not implemented by ordinary catalog updates or hot reload. The <a href="mod-deactivation.md">authoritative design</a> requires capability/ownership checks, cooperative quiescence, per-client acknowledgments, dependency ordering, disabled-state enforcement and recovery. Unsupported or unsafe cases refuse before teardown; no automatic kick, restart or forced unload. Each supported mod/resource class requires the specified qualification tests; arbitrary native cleanup is not claimed crash-proof.</p>
+      <p>A custom message channel riding on the game's existing netcode, with a version handshake at connect. Handshake compares the server's Progenitor mod list against the client's and produces a specific rejection message ("Server requires Satisvampory 1.1.0, you have 1.0.83") instead of a silent desync. Also carries config sync, so a server-defined config reaches clients for mods that render it.</p>
+      <p><strong>Where client mods come from (decided 2026-10-05).</strong> Only from Thunderstore. A server never sends mod files to a client: it publishes a signed catalog naming the Thunderstore package for each mod it needs, and the player installs from the join screens or the Install tab after a per-server confirmation. The first verified catalog from an address pins its operator key (trust on first use); a later key change is flagged and never re-pinned. A refused join may be held open for a short install window when everything missing can be fixed on the client (a Thunderstore package the server confirmed serves the needed version, a kept or turned-off copy, or a pause). The earlier server-to-client transfer and consent panel were removed; what older builds installed from a server is deleted at client start. Source-checked and game-free tested; not live-verified. Rationale: <a href="client-mod-policy.md#security">client-mod-policy.md</a>; details: <a href="mod-manifest.md">mod-manifest.md</a>.</p>
+      <p>The idea: reserve one network event ID and route that ID to Progenitor's message registry, with messages as blittable structs or custom serializers, plus a message version byte, a size guard, and per-plugin registration that unloads cleanly. Spike 1 proved the server-to-client send on the current game build. The chat-channel fallback is unused.</p>
+      <p>The server builds an events packet itself and sends it with <code>ServerBootstrapSystem.SendPacketToUser</code>, passing <code>User.Index</code> and the connected-index flag off. The client receives with a native detour on <code>ClientBootstrapSystem.OnReliableEventsReceived</code>, because Harmony cannot marshal by-ref struct parameters. Read position on entry is 8 bits, so the event id sits byte-aligned after the packet type. One custom event per packet: when the id is ours, consuming means setting the read position to the bit length; otherwise the trampoline runs.</p>
+      <p><strong>As built.</strong> Public API is <code>CustomEvents.SendToUser</code> / <code>SendToAll</code> / <code>SendToServer</code>, <code>OnReceive</code> / <code>OnReceiveFromClient</code>, and <code>TryRead&lt;T&gt;</code> over an <code>unmanaged</code> struct (or a raw span). Max payload <code>CustomEvents.MaxPayloadBytes</code> (15 KiB). Typed <code>[NetMessage]</code> with strings did not ship; config sync is still later. Handshake: <code>Require</code> / <code>Provide</code> / <code>DeclareSelf</code>, at most <code>Handshake.MaxMods</code> (16) ASCII entries (guid 63 bytes, version 23). A mismatch is logged, sent as a result packet, then <code>PlayerControl.Disconnect</code> after 2 s so the result lands first. Comparison walks Required and ignores extra answer rows; a wire <code>Count</code> outside <code>[0, MaxMods]</code> is malformed. Unload drops the row by guid. Client-to-server receive is a native detour on <code>OnDataReceivedServer</code> (the whole packet unread); <code>DeserializeReliableEventsPacketServer</code> is never called on this build.</p>
+      <pre><code>[StructLayout(LayoutKind.Sequential, Pack = 1)]
+struct OrderBoardUpdate { public int BoardId; public int Flags; }
+
+const int EventId = 0x4F524244; // pick something unused
+
+if (ctx.IsServer)
+    ctx.Net.OnReceiveFromClient(EventId, (id, userEntity, user, payload, length) =&gt; { });
+else
+    ctx.Net.OnReceive(EventId, (id, payload, length) =&gt; { });</code></pre>
+
+      <h3>Config and persistence <span class="pill ok">Shipped</span></h3>
+      <p>Config is BepInEx <code>ConfigEntry</code> under the hood with a typed wrapper and file-watch hot reload. Persistence gives each mod a key-value store that is written alongside the world save and loaded when the world is ready, so mod data lives and dies with the save it belongs to.</p>
+      <p><strong>As built (config).</strong> <code>ConfigHelper.Bind</code> is <code>ConfigFile.Bind</code> plus a disk watch (BepInEx only reloads when asked). Watches are refcounted per path, debounced 1 s, and marshaled onto the main thread. <code>PluginContext.Config.Bind</code> is a thin bind over this plugin's <code>GUID.cfg</code> and does <em>not</em> start a watch; call <code>ConfigHelper.Watch(ctx.Config.File)</code> for live reloads.</p>
+      <p><strong>As built (persistence).</strong> <code>ModSave.Store</code> / <code>ctx.Save</code> is per-mod JSON beside the world's <code>AutoSave_N.save.gz</code> files, in a <code>progenitor</code> subfolder (<code>&lt;persistentDataPath&gt;\Saves\v4\&lt;saveName&gt;\progenitor\&lt;modGuid&gt;.json</code> on this build). Server only; the client is a silent no-op. Load on server <code>WorldReady</code>. Save is a Harmony postfix on <code>TriggerPersistenceSaveSystem.TriggerSave</code> (the one-shot entry; <code>OnUpdate</code> every frame is the wrong seam) plus a flush on <code>PlayerDisconnected</code>. Writes go to <code>.tmp</code> then move. A store created before the save folder is known is pending: in-memory dirty keys are merged over the disk JSON once the folder resolves (disk is the base; overlay keys win), so an <code>OnLoad</code> <code>Set</code> cannot skip the load and wipe the file.</p>
+
+      <h3>Castles</h3>
+      <p>Not in M1. A consumer mod that draws a castle, checks where something can go, or builds on a plot needs the same server-side reads of territories, tiles, and buildings. That is framework work, not mod work. Requirement hand-off: <a href="research/castle-module.md"><code>docs/research/castle-module.md</code></a>. Home is <code>Castles/</code> under Progenitor.Core; placement is a separate gated API, not mixed into the reader. Distinct from Content world placement (camps and arenas on the map).</p>
+      <p>Priority order. Later items must not delay the earlier ones.</p>
+      <ol>
+        <li><strong>Castle reader</strong> (server, pure reads). Plot: territory index to block set, bounds, heart entity, owner, clan, level, raided state. Tiles: floor present, floor type (treasury and others), room id, wall, door. Buildings on the plot: entity, prefab, tile footprint, rotation, interact tiles, kind (container, station, decor, heart). Deterministic ordering: buildings sorted by network id, tiles in row-major order. The client world already has the standing plot's outline; remote plots are the consumer's own protocol, so the client API is a thin subset of the standing plot.</li>
+        <li><strong>Occupancy query</strong> (server). Can footprint F at rotation R sit on tile T, by the same rules the game's build mode uses. Must be verified against real placements before a consumer trusts it: a finder that disagrees with vanilla will propose spots the game refuses.</li>
+        <li><strong>Placement and dismantle</strong> (server). Gated on <a href="#spike">spike 3</a>. Place a prefab at a tile and rotation on behalf of a player, paying vanilla cost from a given inventory set; dismantle with the vanilla refund. Until the spike passes, this API does not ship.</li>
+        <li><strong>Unit movement</strong> lives in the Units module, not here. A consumer that applies a layout in batch never needs it. Must not gate the reads.</li>
+      </ol>
+      <pre><code>foreach (var plot in ctx.Castles.Plots) { }
+var plot = ctx.Castles.PlotAt(entity);
+var tiles = ctx.Castles.Tiles(plot);            // row-major
+var buildings = ctx.Castles.Buildings(plot);    // by network id
+bool ok = ctx.Castles.CanPlace(prefab, tile, rotation);
+ctx.Castles.Place(...);                         // gated; spike 3
+ctx.Castles.Dismantle(...);                     // gated; spike 3</code></pre>
+
+      <h3>Units</h3>
+      <p>Not in M1. Split of responsibilities: <strong>Progenitor spawns units and exposes behavior; the calling mod defines the NPC</strong> (which prefab it clones, display name, appearance, what it does at each step). Progenitor does not ship any NPC design of its own. A consumer mod that needs a vendor, a guide, a builder, or any other live NPC uses this module. Requirement hand-off: the Units module section of <a href="research/castle-module.md"><code>docs/research/castle-module.md</code></a>. Home is <code>Units/</code> under Progenitor.Core. Distinct from the Content unit manager (stats, blood type, abilities on a prefab) and from Castles (plot and tile reads). This module must not gate the castle reads.</p>
+      <p>Server side. Spawn a unit from a prefab at a position (on a plot or anywhere), owned by a mod, with a display name; despawn. A servant-like prefab is the expected clone base. Reload-safe: units owned by a mod despawn on its unload.</p>
+      <ul>
+        <li><strong>Flags.</strong> Non-combatant, invulnerable, not interactable, not counted as a servant, saved or not as the mod chooses.</li>
+        <li><strong>Movement.</strong> Walk to a tile using the game's own pathing, with arrived and unreachable callbacks. Gated on the unit-behavior research and a spike.</li>
+        <li><strong>Behavior access.</strong> The game's unit behavior and AI state hooks (idle, move, play animation, face target, wait) as hookable steps a mod can sequence. If the game's behavior-tree or state-machine assets are addressable, expose read and selection of those scripts; otherwise the hook set is the minimum. Same research and spike gate as movement.</li>
+      </ul>
+      <p>Events on the bus: <code>UnitSpawned</code>, <code>UnitArrived</code>, <code>UnitUnreachable</code>, <code>UnitDespawned</code>.</p>
+      <pre><code>var unit = ctx.Units.Spawn(prefab, position, opts)
+    .Named("...")
+    .Flags(...);
+unit.MoveTo(tile, onArrived, onUnreachable);
+unit.Behaviour.Play(...);</code></pre>
+      <p>Roadmap: spawn, flags, and the four events are an M2 candidate. Movement and behavior access are gated on the unit-behavior research and a spike. This module subsumes the earlier smart-NPCs candidate (server-side bots that own the AI outputs of a unit through virtual systems — a feature, not a test double).</p>
+
+      <h3>Temporary player forms (experimental)</h3>
+      <p>The working tree adds <code>Progenitor.Players.Forms.PlayerForms</code>: selectable candidate descriptors, a bounded control request, and an inspectable recovery handle. Lord Styx is the first candidate. No profile is qualified; normal requests refuse before mutation. This is not a completed roadmap item or a verified transformation demo.</p>
+      <p>Bootstrap owns control leases across plugin/Core reloads. It preserves the canonical vampire, requests return before serialization, disconnect and Core unload, and retains failed recovery. Serialization is refused while recovery or known owned-body cleanup remains outstanding. A refusal does not queue a replacement save. A Bootstrap update requires a server restart; guard readiness and passing bookkeeping tests do not establish native save safety.</p>
+      <p>Before enabling any profile, verify client input and presentation, all ability phases and spawned descendants, destruction, disconnect, reload, save and crash/restart recovery on disposable data. Unknown destruction paths and dynamically created descendants remain open. The public API and qualification limits are in <a href="player-forms.md">player-forms.md</a>.</p>
+
+      <p><strong>Limited live evidence, 2026-09-06.</strong> The isolated test fixture loaded both assemblies, reported all five guard checks ready, refused an unqualified Styx request without a lease, and wrote an ordinary save with no form active. The original test-save hashes remained unchanged. There are 117 passing focused policy, facade and reload tests. No transformation or active-form recovery has been tested; the qualification set remains empty.</p>
+
+      <h3>Patch-resilience report</h3>
+      <p>Not in M1 (M4). On first run after a game update, Progenitor compares the interop assembly's type and member set against the one it was built for and writes a report listing every hook target, component, and prefab GUID the framework or any loaded mod references that no longer resolves. This does not fix anything. It turns "the mod stopped working" into a list of exact names, which is most of the work.</p>
+
+      <h3>Interop rules</h3>
+      <ul>
+        <li>Never pass a ValueType-derived interop wrapper as a generic argument (a struct with reference fields, e.g. <code>PrefabLookupKey</code>): the interop marshals an object pointer instead of unboxed bytes.</li>
+        <li>Never call generic interop methods over game value types unless the instantiation is known to exist (hard crash otherwise): <code>EntityQuery.GetSingleton&lt;T&gt;</code>, <code>NativeList&lt;T&gt;.Add</code>, <code>NativeHashMap&lt;K,V&gt;.Add</code>, <code>TypeManager.GetTypeIndex&lt;T&gt;</code>, <code>GetSystemTypeIndex&lt;T&gt;</code> over an <code>ISystem</code> struct. Use non-generic APIs and raw layouts.</li>
+        <li>Treat interop results on such calls as unverified until confirmed natively.</li>
+        <li>Harmony cannot patch IL2CPP methods that have by-ref struct parameters. Pointer parameters are fine. Use <code>Il2CppNative.MethodPointerByPrefix</code> plus <code>INativeDetour</code>.</li>
+        <li>Default entity queries skip disabled entities (offline players). Include them explicitly.</li>
+        <li><code>TypeManager.GetTypeInfo(typeIndex).TypeSize</code> often reads 0 through the interop; take sizes from the interop struct's own layout.</li>
+        <li>Interop structs with bool fields (e.g. <code>User</code>) are not C# <code>unmanaged</code>; use <code>GetComponentData&lt;User&gt;</code>, not <code>Read&lt;T&gt;</code> / <code>Write&lt;T&gt;</code>.</li>
+        <li>Compile against the game's own <code>BepInEx\core\*.dll</code>, not the BepInEx NuGet packages.</li>
+        <li>Do not call native functions with a guessed convention. Observe-only detours and raw reads are safe; direct native calls are last resort.</li>
+      </ul>
+
+      <h3>Hardening</h3>
+      <p>Adversarial reviews of M1 found classes of bugs that are now policy, not one-off patches:</p>
+      <ul>
+        <li><strong>Ownership checks on GUIDs.</strong> A prefab apply or unapply only mutates clones this process created. A wire <code>NewGuid</code> that disagrees with <code>PrefabGUID.CalculateGuidHash(id)</code> is refused. Spawnable names that already map to a vanilla GUID are refused. Client <code>PrfU</code> / <code>PrfK</code> ignore entries a local plugin owns.</li>
+        <li><strong>Bounded packet parsing.</strong> Handshake <code>Count</code> is clamped to <code>[0, MaxMods]</code>; a value outside that range is malformed. Comparison walks the server's Required list and ignores extra answer rows. Guid and version lengths are validated before they hit the wire.</li>
+        <li><strong>Item-key table never shrinks.</strong> Unregister leaves the <code>ItemKeyLookup</code> row. Compact-shifting a middle entry remaps every later inventory slot and breaks join-time count+hash. A GUID that was appended and then unregistered is kept as a tombstone and sent to later joiners as a <code>PrfK</code> placeholder.</li>
+        <li><strong>Staging fenced to the game root.</strong> Hosted staging writes only under a bundled-server folder that sits strictly inside the Steam install. It refuses the game root itself, the client's BepInEx tree, anything outside that root, and <code>C:\VRisingServer</code>. A real directory is recursive-deleted only if it already carries Core's staging marker.</li>
+        <li><strong>One in-flight bridge op.</strong> The debug bridge rejects a second main-thread request while one is running (the 20 s socket wait does not cancel Unity work). Line length and concurrent connections are capped.</li>
+        <li><strong>Reloader cleanup after Unload.</strong> After every plugin <code>Unload</code>, including when it throws, Core sweeps EventBus, commands, Harmony id, and owned <code>MainThread</code> work so leftover delegates cannot pin a collectible ALC or run after the assembly is gone.</li>
+      </ul>
+    </section>
+
+    <section id="content">
+      <h2>Content modules</h2>
+
+      <h3>Prefab registry <span class="pill ok">Shipped</span></h3>
+      <p>The foundation of everything else in this section. Spike 2 passed; see <a href="#spike">the gating spikes</a>. A mod defines a new prefab by cloning a vanilla prefab entity and overriding components. Progenitor assigns a stable <code>PrefabGUID</code> derived from the mod ID and a name, registers it on both sides, and pushes the definition to each connecting client so the client registers the same GUID with the same visual base.</p>
+      <p>Registration, in order, on both sides:</p>
+      <ol>
+        <li>Clone the prefab entity and patch components.</li>
+        <li>Insert into the prefab collection's three maps and the spawnable-name dictionary.</li>
+        <li>Add item data to <code>ItemHashLookupMap</code>.</li>
+        <li>Append to the <code>ItemKeyLookup</code> item key table by raw container access. It is a singleton on an unmanaged system, so the query needs <code>IncludeSystems</code>. Inventory slots travel as an index into this table, not as a GUID.</li>
+        <li>On the client, insert managed data (icon, name) through <code>il2cpp_runtime_invoke</code> with the unboxed key, because the interop mis-marshals ValueType-derived wrapper keys passed as generic arguments.</li>
+      </ol>
+      <p>On the server, run all of this in a prefix of <code>LoadPersistenceSystemV2.DeserializeLoadFile</code>. Send definitions to a connecting client in a postfix of <code>ServerBootstrapSystem.OnUserConnected</code> so they precede the join-time table validation.</p>
+      <p><strong>As built.</strong> Public surface is <code>PrefabRegistry.DefineItem(id)</code> and <code>ctx.Content.DefineItem(id)</code> (no owner on <code>Register</code>; this plugin is the owner). Ids and <code>Named()</code> strings are 1–63 ASCII bytes (64-byte wire slot with NUL). Packets: <code>PrfI</code> (join-time server key-table order, before <code>PrfD</code>/<code>PrfK</code>), <code>PrfD</code> (definition), <code>PrfU</code> (unregister), <code>PrfK</code> (key-table placeholder), <code>PrfE</code> (edit layer). Unhandled <code>PrfI</code> is a seeded Core protocol id and is dropped; dropping is not compatibility. The client rebuilds the tail in server order or <strong>fail-closes</strong> when no ledger is accepted (custom items stay unusable). A Core swap after a refused ledger must not append in local order — that gate is open (internal review R87 finding 1). Saves stay guid-based. Paired live agreement is not run; not in a candidate. Unregister is a <em>soft unapply</em>: the clone entity and GUID maps stay so held stacks still resolve; only localization undo and registry bookkeeping are cleared. <code>ItemKeyLookup</code> rows are never removed; a GUID appended then unregistered becomes a tombstone and is sent to later joiners as <code>PrfK</code> so they append the same row without registering a prefab. A later <code>Register</code> of the same id drops the tombstone and updates the surviving clone in place. Networked edit layers exist; a two-owner Crystal <code>MaxAmount</code> example compile-tests competing Default/Late writes, client-originated refusal, origin/allowlist refusal and owned typed-write restore. <strong>Structural <code>EntityManager</code> edits are not restored on unload.</strong> Isolated-pair two-process readback is not run; broad server-only vanilla-edit mode remains a separate gate. Fluent <code>Override&lt;T&gt;</code> remains planned. Item definitions support localized names/descriptions and <code>Icon("icons/item.png")</code>: a client-local PNG under the plugin assets folder written to the cloned <code>ManagedItemData.Icon</code>, with process-owned sprite caching across Core reloads. Missing or undecodable images retain the source icon. Item icons are compile-verified; inventory/equipment appearance and reload acceptance remain pending.</p>
+      <pre><code>ctx.Content.DefineItem("sample.ember")   // ASCII, 1–63 bytes; also the spawnable name
+   .CloneOf(new PrefabGUID(-257494203))    // or CloneOf("Item_Ingredient_Crystal")
+   .MaxAmount(50)
+   .Named("Ember Shard")                   // 63 ASCII bytes; client inventory name
+   .Register();                            // this plugin is the owner; dispose / unload undoes</code></pre>
+
+      <h3>Managers</h3>
+      <p>Not in M1. Thin, opinionated wrappers over the registry for the common cases. Each is "clone this, change these fields, register it," with sensible defaults and validation that fails at load time with a readable message.</p>
+      <p><strong>DefineRecipe — implemented offline; not live-verified.</strong> <code>ctx.Content.DefineRecipe</code> clones a vanilla workstation recipe, rewrites output/requirement buffers, and appends an owned station row. The primary Sample is vanilla-only <code>sample.bench.crystal-thread</code> at the existing simple crafting bench. Recipe visibility is partly inferred (<code>ProgressionUtility.AlwaysUnlocked</code> native body unread). Live gates: spikes S1–S3, S5, S6 (not run). Not in a candidate. Custom-output <code>sample.ember.craft</code> depends on item agreement and is not the primary path. Recipes sit beside the item registry; they do not use <code>PrfD</code>.</p>
+      <ul>
+        <li><strong>Items</strong> with recipes and where they can be crafted.</li>
+        <li><strong>Units</strong> with stats, blood type, level, and abilities on a prefab. Live spawn, flags, movement, and behavior of an NPC are the Core Units module, not this wrapper.</li>
+        <li><strong>Abilities</strong> assembled from vanilla projectile, hit, and effect pieces with new cooldowns and costs.</li>
+        <li><strong>Buildings</strong> as placeable structures with cost and category.</li>
+        <li><strong>Buffs</strong> with duration, stacking, and stat modifiers.</li>
+        <li><strong>Drop tables</strong> keyed by unit or resource, with weight and level scaling.</li>
+      </ul>
+
+      <h3>Localization <span class="pill ok">Shipped</span></h3>
+      <p>Register strings for new content under the game's hashed localization keys, per language, from code or from a JSON file next to the plugin.</p>
+      <p><strong>As built.</strong> <code>ProgenitorPlugin</code> auto-loads <code>en.json</code> / <code>de.json</code> / … before <code>OnLoad</code> via <code>Localization.LoadForPlugin</code>. The probe is <code>&lt;dir&gt;/&lt;AssemblyName&gt;/localization</code> then <code>&lt;dir&gt;/localization</code> (<code>dir</code> is <code>Assembly.Location</code>'s folder, or <code>PluginReloader.TryGetSourcePath</code> when the assembly was loaded from a byte stream). Neither folder is a warning. File stems map through <code>LocalizationParser.CanonicalLanguage</code> (<code>en</code> → <code>English</code>). English / <code>en</code> is the fallback when the player's language has no registration. <code>Register(key, text, language, owner)</code> returns <code>IDisposable</code>; identical text twice is not a conflict (a plugin's <code>en.json</code> plus <code>Named()</code> on the same id).</p>
+
+      <h3>World placement</h3>
+      <p>Not in M1. Spawn arrangements of prefabs at fixed world positions when the world loads, with persistence, so a mod can add a camp, a vendor, or an arena to the existing map. This is the realistic form of "adding to the map."</p>
+
+      <h3>Data files</h3>
+      <p>Every manager can also read its definitions from JSON in the plugin's folder, so a server admin can add an item or tune a drop table without a compiler. Planned after the managers have settled (M4), not before.</p>
+    </section>
+
+    <section id="client">
+      <h2>Client modules</h2>
+      <p>Not in M1. These stay M3. The hosted-game launcher is in Core, not this DLL.</p>
+
+      <h3>UI toolkit</h3>
+      <p><strong>Mods menu direction.</strong> One Mods tab beside the native top-level tabs opens a shared mod list and page host. Mods register grouped settings and custom pages through Progenitor; Core owns navigation, input capture, callbacks and cleanup during reload. Personal settings and explicitly authorized server edits are distinct. The current <a href="mods-menu.md">implemented host</a> is an owned main-menu button and an owned top-navigation button beside the native tabs, opening a two-pane workspace. Historical live verification (handler-invocation via <code>mods_ui</code>; os-injected via <code>observe.ps1</code> SendInput; physical human input untested; gamepad out of scope) and remaining defects are on that page, including set-eleven consent geometry / 3840 Close and a Decline leftover on live images (the consent panel was removed 2026-10-05). Consent close-on-empty was implemented offline at one checkpoint; pointer-dependent scrolling, tab selection and real input are still unrun. This batch is not in a candidate. This is not a complete mod manager and is not M3.1 done. Do not append fake game menu enum values or rely on an injected tab retaining native callbacks.</p>
+      <p>Panels, lists, buttons, dropdowns, and tooltips built inside the game's own Unity UI canvases, using the game's fonts and sprites, so mod UI looks native rather than overlaid. Input capture is handled so a panel being open blocks game input the same way vanilla panels do. M3 must cover what a consumer mod actually parents into those canvases: clone vanilla panel frames, buttons, toggles, sliders, dropdowns, scrollbars, tab strips, and tooltips, parent them into a vanilla canvas, and dispose them on unload; named seams that locate the vanilla panels a mod anchors next to (container, inventory, throne, heart, escape menu) so a game update breaks one entry, not the mod; item and building icon lookup for a prefab GUID (the game's item sprite and the build-menu icon, no shipped art); access to the vanilla notification stack (push a notice with kind and hover detail); and vanilla UI sounds played by the game's own sound event ids.</p>
+
+      <h3>Keybinds</h3>
+      <p>The game stores its input actions as a 64-bit flag field and uses all 64 bits, so a mod keybind cannot be added to the vanilla settings menu without serializing a fake flag into the game's input system. Progenitor does not fight this. Every key a plugin, sample or framework tool acts on is registered through <code>ctx.Keybinds</code>: it is stored in Progenitor's own config, listed in the Keybinds tab where the player can remap it, and takes part in the first-installed conflict rule. Plugins never poll Unity or game input directly. Mod keybinds do not appear in the vanilla keybind menu, and that is documented as a game limitation rather than a missing feature. Contract: <a href="modules.md#keybinds-fui5">Modules: keybinds</a>.</p>
+
+      <h3>Map</h3>
+      <p>Two levels. Layer injection adds new icon types and layers to the vanilla map from the same components vanilla uses. Full replacement patches the map-open call and renders a Progenitor-owned map instead, with custom art and per-mod layers. The vanilla map is a client-side view over server data, so neither level touches the server.</p>
+
+      <h3>Assets</h3>
+      <p><strong>Data-only item packs (under development; limited live qualification):</strong> Progenitor loads bounded server-side JSON packs with stable ownership and synchronizes native item definitions and validated main-stat bonuses to compatible clients. Packs cannot contain executable code or arbitrary files. The bone sword example adds 100 maximum health, physical power and spell power. Missing files do not authorize pack removal; explicit removal markers do. Packs register before save deserialization. Admission includes distinct definitions, retained keys, standalone synced edits and ledger byte limits; replacements reuse identity charges under separate receive-rate bounds. Isolated tests verified stat deltas, reversal, reconnect, save/restart and cross-player drop/pickup. Two clients synchronized 248 test definitions alongside eight existing definitions. An opt-in 1,024-identity profile adds bounded chunked key ledgers and advertises client capacity; one full client synchronized 960 test definitions. The native 2,048-row allocation remains an admission boundary in this implementation; automatic growth is not enabled. An internal 4,096-row reservation experiment synchronized 1,000 definitions, but fresh-join integration and castle shared-storage maintenance remain incomplete. The experimental identity and reservation bounds extend to 16,384 for controlled diagnostics; normal fresh joins at that profile remain incomplete. A manually reserved connected 10,000-definition test passed table/stat agreement and highest-index equipment, but loading and periodic hitches remain unoptimized. Ownership notifications are persisted in batches. Runtime activation and rollback are paced at most 50 slices per second with eight operations or a soft four milliseconds per slice; complete preflight and individual operations can still stall. Connected activation through 960 definitions passed; startup remains synchronous. Core owns paced join delivery with inventory, active-container and proximity priorities; movement refreshes priorities while delivered identities stay cached. Loading notices are debug-only and default off. A 128-item live test verified chest priority and complete stat delivery; 10,000-item fresh joins remain unqualified. Large distributed instance counts, sustained performance and custom asset downloads remain unqualified. See <a href="content-packs.md">data-only item packs</a>.</p>
+      <p><strong>Asset importing — under development and incomplete.</strong> The experimental GLB and model-package APIs provide scoped client visuals, not a complete third-party armor, character or creature pipeline. Example acceptance does not establish general compatibility or production readiness. Gameplay binding, native-rig retargeting, multiplayer package delivery and full item lifecycle recovery remain incomplete.</p>
+      <p><strong>Permanent mod removal:</strong> Progenitor records custom-item ownership and quarantines supported plain player-bag stacks after confirmed server mod removal; updates and temporary load failures preserve items. Admins explicitly restore, keep or discard saved records. Restoration is best effort and currently requires the same running world/Core incarnation. Unique equipment and container items remain intact until complete property and persistent-identity contracts are available. See <a href="item-removal.md">item removal</a>.</p>
+      <p><strong>Authored animation imports (under development and incomplete; scoped live verification):</strong> GLB imports may contain their own joint hierarchy, up to four skin influences per vertex, inverse bind matrices and named LINEAR/STEP translation, rotation and scale clips. The owned animation handle provides play, pause/resume, seek, looping, positive speed, pose crossfades and stop-to-rest; disposal removes its frame callback. A schema-2 <code>animated-model</code> package is explicit and requires at least one clip; schema-1 static packages still refuse skins and animations. Unsupported cubic interpolation and morph targets fail validation. This does not retarget native player rigs, register gameplay attacks, synchronize playback or import Animator controllers. See <a href="player-animation-import.md">animation workflow</a> and the original animated model example.</p>
+      <p><strong>Built-in Guide outfit:</strong> Progenitor Core contains the Guide Robes, Hood, Hands and Feet, including garment assets and icons. Existing robes.* item IDs are retained. The legacy RobeSet plugin must be retired on both sides when upgrading; the outfit has no separate mod listing.</p>
+      <p><strong>Wearable appearance:</strong> cosmetic overrides take precedence over stat equipment for chest, gloves, legs, footgear and cloak; vanilla overrides suppress custom stat overlays. Authored colors are fixed by default. The optional <code>paletteMode</code> policy can force authored colors even with palette mappings; <code>WithAuthoredColors()</code> is the recipe-level equivalent. It does not add a player-facing native swatch. Optional <code>surfacePalette</code> mappings select primary, accent, neutral or metal from the visible equipment slot. <code>WithPaletteSource(WearableSlot.Chest)</code> lets a Headgear recipe follow the effective chest slot, including its cosmetic override, while unmapped surfaces such as the black hood face remain fixed. The client reads <code>TransmogPaletteData</code> through <code>ManagedDataRegistry.TryGet</code> and bounds-checks <code>TransmogIndex - StartIndex</code>; missing or invalid data restores authored colors. A native default selection does not necessarily clear palette data. Updates affect only owned materials for that worn item without rebuilding its mesh. The schema, exporter and palette-source API are tested offline. Live selection of the top-right swatch changed robe chest cloth to red; the hood stayed blue in the current fixture because it read Headgear. The picker X hides equipment. Explicit selection of the desired authored blue and hood-following behavior remain unverified. The earlier crashing native utility wrapper is no longer used.</p>
+      <p><strong>Static asset packages (scoped live qualification):</strong> A schema-1 directory contains a stable asset ID, static-model kind, fixed model.glb entry and SHA256 content hash. An offline builder validates before publishing into a fresh directory. The client revalidates the same bytes before creating context-owned visuals. Blender is an offline exporter; this contract does not add gameplay identity, collision, network delivery, rigged GLB or animation. Those require separate typed contracts and acceptance. See <a href="../tools/asset-build/README.md">asset package workflow</a>.</p>
+      <p><strong>Native garment reuse (in qualification):</strong> A separate wearable recipe may borrow one exact skinned renderer already supplied by the worn native item. The runtime owns its new renderer and material clones, but never destroys or exports the game mesh. Missing or ambiguous donors defer attachment. Explicit color-property overrides may be fixed or follow an equipment palette; absent or incompatible shader properties fail validation. Native textures multiply palette tint, so matching palette inputs does not promise identical displayed colors across different materials. This is independent of the original-geometry Blender workflow.<br/><strong>Offline garment authoring:</strong> <code>ctx.Models.CaptureRigReference</code> exports selected readable body/rig references and one baked pose on the client main thread. The <a href="../tools/rig-reference/README.md">Blender workflow</a> builds a saved outfit manifest in one offline command: it can optionally fit selected regions, transfer weights to explicitly marked loose panels without moving them, check captured poses, export original garment JSON, write hashes and publish only a fresh complete output directory. Each build saves an editable <code>authoring.blend</code> and resumable <code>outfit.json</code> naming the built objects for a later build into another fresh directory. The package contains only original garment JSON; native body references remain in the local authoring scene. <code>WearableGraphics.FromAuthoredJson</code> retains authored geometry, normals, UVs and four skin influences, refusing incompatible bone paths or bind-rest matrices. Explicit <code>FromAuthoredJsonVariants</code> and <code>WithAuthoredOverlayVariants</code> alternatives select by the captured rig, preserving the selected surface metadata. Bind-only capture references can supplement a sparse body palette without exporting donor geometry. Per-garment <code>surfaceColors</code> stores authored RGBA colors independently of Core defaults; supported material categories remain <code>cloth</code>, <code>gold</code> and <code>void</code>, while arbitrary shaders are not exported. Blender is an offline authoring tool, not a runtime dependency. Separate head/face renderers may be absent from Body_GEO. <code>RigReference.CapturePoseSurface</code> captures selected baked surfaces as reference-only posed geometry, without claiming bind vertices or skin weights; a local Blender importer can approximately align a head snapshot using Head_JNT. This path captured the separate female face live; it is not a coverage approval. Live female Body_GEO/four-piece robe capture and import measured at most 0.44 mm; a baseline authored chest loaded live and reimported within 0.35 mm. Diagnostics across 55 poses include mixed experimental fitting and do not approve garment coverage. The current original hood has a compact opening, thin lip, lower external folds and a fixed black face recess. A mapped first load showed its blue palette in a screenshot; hood movement, user visual acceptance and male fit remain unverified. This path does not implement cloth simulation, automatic body fitting, arbitrary Blender shaders or skinned GLB import.</p>
+      <p>AssetBundle loading for sprites, icons, audio, and fonts. Meshes and materials through the game's Entities Graphics pipeline remain a research item; deferring them until after a core shipment does <strong>not</strong> satisfy broader readiness. Long-term readiness requires two tracks — existing-game asset reuse, and genuinely new content — with planned acceptance (not current capability) for new armor, a weapon, a spell and an NPC with custom behavior. One initially unloaded lantern acquisition wrapper is written and gated behind a two-part opt-in that is closed by default; no native <code>ContentNamespace</code> / <code>ArchiveFileInterface</code> / <code>ContentLoadInterface</code> call has been executed. No <code>AudioClip</code> was present in the content archives examined via this loader; that is not a claim about audio in general. The interim GameObject path is what current visual reuse uses; it is not new-content readiness. Worn armor and weapons have a separate procedural path: <code>DefineItem(...).Wearable</code> builds original geometry from compatible authored donor bind matrices (<a href="wearables.md">wearables</a>). <code>Bodice</code> measures close-fitting directional contours; <code>Sleeve</code> shares rings across the elbow; <code>Skirt</code>, <code>Glove</code> and <code>Shoe</code> complete the clothing set. <code>Cowl</code> forms a soft, elongated hood around a recessed black interior. Compatible native armor supplies reference positions and up to four transferred skin influences, with body references and two-influence procedural weights as fallbacks. Unreadable references require unit renderer scale and no blendshapes for inverse-skinned <code>BakeMesh</code> recovery. No source triangles are copied. <code>Models</code> is diagnostic only and refuses unverified model-field writes. An earlier four-piece procedural clothing build was deployed; attachments, clothing skin-weight transfer and standing female appearance were observed in the isolated client. Female coverage and shape were confirmed in the tested combat moves. That scoped acceptance does not qualify male fit, broader animations or equipping while animated. A spell and an NPC are also still open, so this does not meet the readiness gate.</p>
+    </section>
+
+    <section id="hosted">
+      <h2>Hosted games without a dedicated server <span class="pill warn">Unverified live</span></h2>
+      <p>Most players of a server-side mod never run a dedicated server. They press "Private Game" or "Single Player." When they do, the client starts the bundled <code>VRisingServer.exe</code> as a child process, and that process has no mod loader. The fix is to copy BepInEx into the server folder before each launch and share the plugin folder across. Done naively that has rough edges: NTFS only, a first launch that times out while the server builds its interop cache, and config files that get overwritten on every launch.</p>
+      <p>Progenitor builds this into Core (installed only in the client process) so there is nothing extra to install, and fixes the rough edges. Server-side plugin code still does not branch on dedicated vs hosted; the child is a server process.</p>
+      <p><strong>As built.</strong> <code>HostedServerLauncher.Install</code> Harmony-prefixes <code>StunProcess.Start</code> (and the PInvoke / MONO variants) for a file name ending in <code>VRisingServer.exe</code>, then <code>Staging.EnsureStaged(serverDir)</code>. The prefix is wired and the wait constants are stretched; a live private-game launch — child process loading the same plugins, interop cache generated, join succeeding — is not recorded as verified. Treat the first hosted session as a test; <code>Hosted.DryRun=true</code> logs what would be written without touching disk.</p>
+
+      <h3>Getting the loader into the bundled server</h3>
+      <ul>
+        <li><strong>Stage once, verify every launch.</strong> On first client start, Progenitor places the loader shim and a doorstop config in the bundled server folder, pointed at a <code>BepInEx_Server</code> state directory beside the client's BepInEx. Later launches only check that the staged files match the client's loader version and re-stage if not. Nothing is rewritten when nothing changed, so a player's server-side config edits survive.</li>
+        <li><strong>Shared plugins, separate state.</strong> The server reads plugins from the client's plugin folder, so one install is the truth for both. Its cache, logs, and interop assemblies live in <code>BepInEx_Server</code>. The link is an NTFS junction, which needs no elevated privileges, with a copy-and-watch fallback for filesystems that can't do junctions.</li>
+        <li><strong>No first-launch timeout.</strong> The server's interop cache is generated ahead of time, in the background, the first time the client starts with Progenitor installed. A small in-game notice shows progress. Hosting is only offered as ready once the cache exists. As a backstop, the client's connection timeout for the bundled server is extended while a cache build is known to be in progress.</li>
+        <li><strong>Launch hook, not folder polling.</strong> The client is patched at the point where it spawns the server process, so staging runs exactly then and can pass the server the paths it needs through environment variables the loader shim reads. A game update that moves the spawn point is caught by the resilience report.</li>
+        <li><strong>Safety fence.</strong> Staging writes only under a bundled-server folder that sits strictly inside the Steam game root. It refuses the game root itself, the client's BepInEx tree, anything outside that root, and the live dedicated server at <code>C:\VRisingServer</code>. A leftover real directory is never recursive-deleted unless it already carries Core's staging marker.</li>
+      </ul>
+      <p><strong>As built (staging).</strong> There is no sibling <code>BepInEx_Server</code> folder. Staging writes into the bundled server's own <code>BepInEx</code> under the game root. Copies the Doorstop shim (<code>winhttp.dll</code>) and rewrites <code>doorstop_config.ini</code> with absolute client paths. Junctions (else symlink, else copy) <code>core</code>, <code>patchers</code>, <code>unity-libs</code>, <code>plugins</code>, <code>progenitor-reload</code> from the client's BepInEx. <code>config</code>, <code>cache</code>, and <code>interop</code> stay local so the child generates its own interop. Idempotent stamp against the client's <code>BepInEx.Core.dll</code> write time. On first such spawn, stretches <code>ClientBootstrapSystem.TIME_TO_WAIT_FOR_LOCAL_SERVER_STARTUP</code> ×4 and <code>MAX_CONNECT_RETRIES</code> ×2 rather than pre-building the interop cache in the background. Config keys: <code>Hosted.Enabled</code> (default true), <code>Hosted.DryRun</code> (default false).</p>
+
+      <h3>What a mod author has to do</h3>
+      <p>Nothing. Server-side code targets the server world through the plugin context, and Progenitor resolves which world that is from the process role. A hosted game is the server role in a child process. The same DLL, code path, and config keys apply on a dedicated server. Mod authors never write "if hosted" branches.</p>
+
+      <h3>What a player has to do</h3>
+      <ol>
+        <li>Install the mod through a mod manager. Progenitor comes in as its one dependency.</li>
+        <li>Start a private game or single player.</li>
+      </ol>
+      <p>That is the whole list. Specifically handled so it stays that short:</p>
+      <ul>
+        <li><strong>Config in one place.</strong> Design: a hosted server's mod config lives under the client's config folder. As built, <code>config</code> stays local to the child so it can generate its own interop; unifying those folders is still open.</li>
+        <li><strong>Saves stay portable.</strong> Mod persistence is keyed to the save it belongs to, wherever that save lives. A hosted world moved to a dedicated server brings its mod data with it.</li>
+        <li><strong>Host is admin.</strong> Design: the hosting player is treated as admin for Progenitor commands by default. Not yet a separate hosted policy — <code>ICommandContext.IsAdmin</code> is the game's <code>User</code> admin flag.</li>
+        <li><strong>Friends joining.</strong> Someone joining a hosted game gets the same handshake as on a dedicated server: a clear message naming the mod and version they are missing, or a clean connection.</li>
+        <li><strong>Packaging.</strong> One Thunderstore package tagged both Client and Server, one manifest dependency. The mod manager handles the rest.</li>
+      </ul>
+
+      <h3>Why this also matters for development</h3>
+      <p>A hosted game is a full server plus client on one machine from one launch. With the debug bridge in both processes, it is the primary development setup: one click to start, both sides under test, no dedicated server to babysit.</p>
+    </section>
+
+    <section id="devloop">
+      <h2>Dev loop and MCP</h2>
+      <p><strong>Planned server location queries and permissions.</strong> Requests such as “Show me Lord Styx” will use a registered location provider through the connected player's authenticated server connection. The server will evaluate a location-query permission and discovery policy, returning only an allowed current position, known area/patrol region or a structured unavailable/refused result, with freshness and precision. This general permission model still needs to be built; existing settings checks do not implement it. Mods can register providers through the same capability system. Authorized results compose with map pins; saved pins are bookmarks, not a manually maintained source of current world truth. See the <a href="player-ai.md#server-authorized-location-queries">location-query contract and acceptance</a>.</p>
+      <p><strong>Planned runtime command discovery (M3.11.3).</strong> MCP exposes currently available game and mod commands, typed arguments, help and permission constraints so AI can adapt to the connected game and active mods without coding or a maintained coverage matrix. Refresh discovery after session, mod or permission changes; preserve server authority, transport restrictions and reliable completion handling. Verify discovery and execution through development tests. Developer chat injection does not establish native command parity. See the <a href="player-ai.md#native-and-mod-command-coverage">command discovery contract and acceptance</a>.</p>
+      <p><strong>Planned default player tools.</strong> The player companion will include permission-aware location lookup, map focus and personal pin creation/management, with distinct Progenitor pin styles that mods can extend. Map integration remains planned under M3.1. Query results should compose with pins so an AI can find an accessible item and mark its container without writing code. Markers have explicit ownership and temporary/saved lifetimes; sharing requires separate authorization. See the <a href="player-ai.md#default-player-capabilities-map-and-pins">map capability contract and live acceptance</a>.</p>
+      <p><strong>Separate planned player interface (M3.11).</strong> A local player MCP companion will let a player's chosen AI discover, explain and use explicitly registered mod capabilities without generating code or installing Progenitor.Dev. The Mods UI and AI share typed application handlers where applicable; personal settings run locally, while server queries/actions use the authenticated player's connection and current server permissions. Initial acceptance includes finding items in permitted containers and using a registered mod function. The player endpoint does not expose developer execution or grant administrator powers. See the <a href="player-ai.md">player AI design and acceptance gates</a>. This is planned, not implemented; the shipped MCP described below remains the development interface.</p>
+      <p>This is the module that sets Progenitor apart. It has two halves. Hot reload, the debug bridge, and the MCP server are built.</p>
+
+      <h3>Debug bridge (in-game) <span class="pill ok">Shipped</span></h3>
+      <p>A dev-only DLL that opens a localhost TCP socket speaking newline-delimited JSON. Off by default. Enabled by a config flag plus a token file, and refuses non-loopback connections. It runs on both server and client, and exposes the same operations to any client, whether that is the MCP server, a script, or a human with a terminal. In a hosted game the bundled server gets its own bridge on a second port, passed in at launch.</p>
+      <p><strong>As built.</strong> Built operations: <code>ping</code>, <code>logs</code>, <code>reload</code>, <code>users</code>, <code>worlds</code>, <code>command</code>, <code>chat_observe</code>, <code>query</code>, <code>get</code>, <code>set</code>, <code>components</code>, <code>spawn</code>, <code>players</code>, <code>status</code>, <code>save</code>, <code>store</code>, <code>connect</code>, <code>host</code>, <code>quit</code>, <code>ghost</code>. One in-flight main-thread op; bounded line reads; at most four concurrent connections. Ports: client 27341, server 27342. <code>exec</code> is not an in-process compile inside the game: MCP <code>progenitor_exec</code> builds a throwaway plugin, hot-loads it, returns its log, and unloads it.</p>
+      <p>The native-reading toolkit that worked where offline metadata tools could not locate the binary's registration tables: in-process reading of native instructions, observe-only native detours, and raw memory reads.</p>
+
+      <h3>Hands-off loop <span class="pill ok">Shipped</span></h3>
+      <p><strong>As built.</strong> A session launches the Steam client, waits for the loopback bridge, then drives the game with <code>connect</code> (Direct Connect to the test server), <code>host</code> (Private Game), and <code>quit</code> (<code>Application.Quit</code>, which promotes a staged Core). Extra clients are a separate launcher with per-instance bridge ports and token files. Multi-user tests that do not need a second process use a server <code>ghost</code> op (a User-only entity, no network peer). The two-player broadcast check is <code>chat_observe</code>: inject a chat line and watch <code>SendPacketToUser</code>. Verified live: the launch + connect + quit loop, and ghost users. Not yet verified live: the <code>host</code> op, and extra client instances.</p>
+
+      <h3>MCP server (external) <span class="pill ok">Shipped</span></h3>
+      <p>A small Node process (<code>tools/mcp/server.mjs</code>) that connects to one or more bridges and publishes them as MCP tools, each tool labeled by side so a session can say "reload on the server" or "screenshot the client." A Claude Code session adds it once in its MCP config and then has the game as a tool set. The MCP server is built.</p>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>Tool</th><th>What it does</th><th>Phase</th></tr></thead>
+        <tbody>
+          <tr><td><code>reload</code></td><td>Hot reload one plugin by ID. Returns load errors and the reversal log.</td><td>Shipped</td></tr>
+          <tr><td><code>command</code></td><td>Run a chat command as admin. Returns the command's output.</td><td>Shipped</td></tr>
+          <tr><td><code>exec</code></td><td>Compile a C# snippet into a throwaway plugin, hot-load it, return its log, unload it.</td><td>Shipped</td></tr>
+          <tr><td><code>logs</code></td><td>Tail the BepInEx log with level and text filters, structured.</td><td>Shipped</td></tr>
+          <tr><td><code>query</code> / <code>get</code> / <code>set</code> / <code>components</code> / <code>spawn</code> / <code>players</code></td><td>Entity inspection and admin shortcuts. Unconstrained queries are refused.</td><td>Shipped</td></tr>
+          <tr><td><code>status</code> / <code>save</code> / <code>store</code></td><td>Process status, flush mod saves, read a persistence store.</td><td>Shipped</td></tr>
+          <tr><td><code>connect</code> / <code>host</code> / <code>quit</code></td><td>Client: join a dedicated server or start a private game from the main menu; either side: <code>Application.Quit</code>.</td><td>Shipped</td></tr>
+          <tr><td><code>chat_observe</code></td><td>Server: inject a chat line and watch <code>SendPacketToUser</code> for the broadcast check.</td><td>Shipped</td></tr>
+          <tr><td><code>ghost</code></td><td>Server: create or destroy a User-only entity for multi-user tests without extra processes.</td><td>Shipped</td></tr>
+          <tr><td><code>teleport</code>, <code>give</code></td><td>Typed shortcuts still missing from the spawn/player set.</td><td>M3</td></tr>
+          <tr><td><code>snapshot</code> / <code>restore</code></td><td>Save the world to a named fixture, or reload one, so tests start from a known state.</td><td>M4</td></tr>
+          <tr><td><code>screenshot</code></td><td>Client only. Capture the game view to a file and return its path.</td><td>M3</td></tr>
+          <tr><td><code>inspect</code></td><td>Stream live component values for one entity, for the inspector page.</td><td>M3</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h3>A worked session</h3>
+      <p>The user asks for a boss that summons two adds at half health. The session writes the system, builds the DLL, and calls <code>reload</code>. It calls <code>spawn</code> for the boss near the admin, then <code>set</code> on its health component to 49 percent. It calls <code>query</code> for units with the add's prefab near that position and gets two. It calls <code>logs</code> filtered to errors and gets none. It reports success. The human looks at it once, at the end, if they want to.</p>
+
+      <h3>Inspector</h3>
+      <p>A local web page served by the MCP process, fed by <code>inspect</code>. Click an entity in a list, see its components update live. Cheap to build once the bridge exists, and it answers the "what does this thing actually have on it" question that eats most modding time.</p>
+    </section>
+
+    <section id="spike">
+      <h2>The gating spikes</h2>
+      <p>Spikes 1 and 2 have passed on the current game build. The spike logs are kept with the maintainers' internal records. The pass conditions below are what was required; the sentences after them are what the runs showed. Spike 3 (server-side castle placement) is not yet run; a fail is a valid result.</p>
+      <h3>Spike 1. Server-to-client transport</h3>
+      <p><strong>Can the server send an arbitrary custom message to one client through the game's netcode?</strong> Pass condition: a blittable struct sent from server code arrives in a client handler, on a build with the current game version, without touching chat. <strong>Pass.</strong> The send returned Sent on every tick with <code>User.Index</code> and the connected-index flag off. A Harmony prefix on the client receive saw a zeroed buffer and stalled the client; a native detour on <code>OnReliableEventsReceived</code> got the real packet, with read position 8 bits on entry. Payload fields arrived intact, matching the server send log line for line.</p>
+      <h3>Spike 2. Prefab with client sync</h3>
+      <p><strong>Can a client be taught about a prefab GUID it did not ship with, cleanly enough that it renders and interacts as a normal item?</strong> Pass condition: a cloned item registered under a new GUID on the server and, via a message over the spike 1 transport, on the client: it appears in the inventory with the right icon and name, it can be dropped and picked up, it survives a save and reload, and a client without the mod gets the handshake rejection rather than a crash. <strong>Pass.</strong> The item appeared with the cloned icon and name, in stacks of the overridden max, and dropped and picked up as a normal item. After a server restart with registration in a prefix of <code>LoadPersistenceSystemV2.DeserializeLoadFile</code>, the offline player's inventory still held the stacks. Unmodded-client rejection is a networking handshake feature and was not tested here.</p>
+      <div class="callout">
+        <div class="label">Outcome</div>
+        <p>Both passed: Progenitor is the framework described here. Transport is the reliable-events path, not the chat fallback. Prefab sync works, so Content stays the full registry-plus-managers design rather than shrinking to server-side clones of vanilla-visual prefabs.</p>
+      </div>
+      <h3>Spike 3. Server-side placement</h3>
+      <p><strong>Can the server place a building on a plot through the game's own build path so that it lands on the grid, pays the vanilla cost from a given inventory set, obeys territory and room rules, replicates to connected clients, and survives save and reload?</strong> Same for dismantle with the vanilla refund. Pass condition on the test server: place a Large Chest at a chosen tile and rotation for a given player; a connected client sees it; it is still there after a restart; the same call is refused where vanilla would refuse (occupied tile, off-territory, wrong floor); dismantle refunds. Candidate seams, in order: inject the build event a client sends, on behalf of the player; call the placement system directly. Both need the native analysis on the build-mode and placement systems and the debug bridge to try them. By-ref struct parameters and generic calls over game value types are the usual killers. <strong>Not run.</strong> Fail is a valid result: consumers ship survey mode (mark spots, the player places) and drop server-driven build.</p>
+    </section>
+
+    <section id="roadmap">
+      <h2>Roadmap</h2>
+      <p>Estimates assume one person part-time with an AI session doing most of the typing. The bottleneck is in-game verification and unknowns, not code volume. The dev loop is first because it makes every later week shorter.</p>
+      <div class="milestones">
+        <div class="ms">
+          <span class="name">M0. Spikes</span><span class="when">Done</span>
+          <p class="what">Transport proof, then prefab-with-client-sync proof. Both passed on the current build. They decided the shape of Core: full registry and the reliable-events send path.</p>
+        </div>
+        <div class="ms">
+          <span class="name">M1. Usable for us</span><span class="when">Done 2026-09-02, two checks open</span>
+          <p class="what">Shipped and verified in-game via <code>samples/Progenitor.Sample</code>: lifecycle and hot reload, ECS hooks, entity toolkit, event bus (WorldReady / connect / chat), commands, networking with handshake and kick, prefab registry with client sync, persistence, config file-watch, localization, plugin context facades, debug bridge inspection ops plus status/save/store. Hosted-game launcher is implemented in Core and fenced to the game root; a live private-game launch is not yet recorded. Also still open: two-player check that handled commands are not broadcast. The in-repo sample plugin is the consumer and acceptance test; porting external mods onto Progenitor is out of scope for this project.</p>
+        </div>
+        <div class="ms">
+          <span class="name">M2. Usable for others</span><span class="when">Next</span>
+          <p class="what"><strong>Committed: Core hot reload (Bootstrap / Core split).</strong> A thin <code>Progenitor.Bootstrap</code> stays restart-only: injected <code>FrameTicker</code>, <code>LogBuffer</code>, reloader/ALC host, <code>MainThread</code>, detour slots; <code>Progenitor.dll</code> becomes a collectible assembly under <code>BepInEx/progenitor-core</code> with a cascade unload plugins → <code>Core.Uninstall</code> → swap → <code>Core.Install</code> → reload plugins. About 10 engineering days, 15 with a second pass. Design: <a href="research/core-hot-reload.md"><code>docs/research/core-hot-reload.md</code></a>. Candidates: <code>ctx.Systems.Add</code> as the named virtual-system callback (not injected <code>SystemBase</code>); remaining event-bus seams (death, stats, buffs, spawn, save); item / unit / ability / building / buff managers; world placement; castle reader and occupancy query (placement gated on spike 3); Units spawn, flags, and events (this subsumes the smart-NPCs candidate: server-side bots that own the AI outputs of a unit through virtual systems — a feature, not a test double; movement and behavior access gated on the unit-behavior research and a spike); config sync on the handshake channel. Docs, project template, Thunderstore and NuGet publishing, CI. Close the two M1 checks. First public release.</p>
+        </div>
+        <div class="ms">
+          <span class="name">M3. Client</span><span class="when">After M2</span>
+          <p class="what">UI toolkit, keybinds and settings panel, map layers and replacement, sprite and audio assets. Dev: teleport/give shortcuts, screenshot, inspector page.</p>
+        </div>
+        <div class="ms">
+          <span class="name">M4. Reach</span><span class="when">After M3</span>
+          <p class="what">JSON content definitions, snapshot and restore fixtures, patch-resilience report, optional native detour module, mesh rendering research.</p>
+        </div>
+      </div>
+      <p>Ongoing cost after release: one to two days per game patch to re-verify hooks and prefab clones. The resilience report exists to keep that number from growing.</p>
+      <h3>Planned follow-up: in-game asset browser and MCP parity</h3>
+      <p>Planned as M5 after M4, deferred until the existing work is complete; current priorities and ongoing work are unchanged. The <a href="roadmap.md#m5-in-game-asset-browser-and-mcp-parity--planned-after-m4">canonical roadmap entry</a> defines an in-game catalog, asset management and native preview loop, with equivalent discovery, inspection, dependency loading, preview controls and cleanup through MCP. Reuse <code>Assets.Find</code>, <code>Assets.Borrow</code>, <code>Assets.Host</code> and their ownership model. Catalog discovery must be independent of loaded objects: a known unloaded fireball must still be discoverable, then loaded with its dependencies through the game's actual loading mechanisms and previewed through its own renderer and effect systems, including sequences, drivers and targets where needed.</p>
+      <p><strong>Planned, not proven:</strong> research shipped indexing metadata and the real dependency loading/release path before implementation; existing loaded-object scans and selected borrowing spikes do not establish arbitrary unloaded loading. Report catalog coverage, unsupported assets, missing context/dependencies and timeouts. Preview sessions own and clean up their clones, sequence entities, targets, hosts and acquired load references on stop, failure and unload, without releasing shared game ownership. Acceptance requires an initially unloaded known effect to be found, loaded, visibly previewed and cleaned up, with the same loop exposed through MCP. <strong>Not run 2026-09-07:</strong> no fireball-style discover-then-load test was done. The standalone/offline browser is deferred so the first version can use the game's rendering directly.</p>
+      <p><strong>Status 2026-09-06, offline recipe increment only:</strong> <code>tools/catalog/recipes/</code> and <code>tools/catalog/recipe.mjs</code> hold the first machine-readable usage recipes (Wendigo frost nova ring and appearance override, Charm caster/target sequences and borrowed loop particle) with typed identities, provenance-tagged relationships, per-operation evidence status and build stamps, searchable and inspectable offline with tests. It does not load, preview or browse anything, is not exposed through MCP or the game, and marks none of the loading/preview gates, the browser, full asset coverage or NPC work complete. Details are in an internal review record.</p>
+      <p><strong>Continuation 2026-09-07.</strong> MCP parity for the catalog <strong>landed</strong>: <code>progenitor_catalog_search</code> / <code>inspect</code> / <code>associations</code> / <code>list</code> in <code>tools/mcp/catalog-tools.mjs</code>, same library as the CLI, offline, never launches the game. Evidence kind <code>rig-run</code> ties recipes to saved live-rig reports with build stamps; a missing capture, an incomplete run or a different build cannot read as verified; there is no automatic promotion to verified; <code>currentVerification.claimable</code> stays <code>false</code> offline. Five seed recipes, live status 2026-09-07: <strong><code>wendigo-frost-nova-ring</code></strong> discovery/playback/appearance/controls/naturalCleanup <code>observed-success</code>; gameplayHits <code>observed-partial</code> (rig-run L8); explicitCleanup <code>observed-partial</code>; poolReuse <code>untested</code>. <strong><code>wendigo-frost-nova-appearance</code></strong> discovery/playback/appearance/controls/naturalCleanup/explicitCleanup/poolReuse <code>observed-success</code> (A6 poolReuse; A7/A8 explicitCleanup); gameplayHits <code>untested</code>. <strong><code>charm-caster-link-sequence</code></strong> discovery/playback <code>observed-success</code>; appearance/controls <code>observed-failure</code> (nothing drawn); naturalCleanup/explicitCleanup <code>observed-partial</code>; poolReuse <code>untested</code>; no <code>rig-run</code>. <strong><code>charm-target-channel-sequence</code></strong> discovery/playback <code>observed-success</code>; appearance/controls/naturalCleanup/explicitCleanup <code>observed-partial</code> (particles at the player, no beam between endpoints); poolReuse <code>untested</code>; no <code>rig-run</code>. <strong><code>charm-loop-particle-borrow</code></strong> discovery/playback/appearance/controls/explicitCleanup <code>observed-success</code> (B5); naturalCleanup/poolReuse <code>untested</code>. <strong>Still open:</strong> per-hit attribution; the ring recipe's own unload <code>rig-run</code> (unload-with-a-live-ring is appearance A7/A8, not a ring-recipe run); Charm beam between endpoints; client carrier outliving server disposal; <code>Restore()</code> at unload (catalog-cases-5 verified teardown order, not Restore()). Loading/preview gates G1-G8, the in-game browser, full asset coverage, NPC/Styx work, and the acceptance gate above remain not done. <strong>Continuation 2026-09-07, later the same day.</strong> Normal-swap protection diagnosed (R75: Sample keyed keep-grant off a scope that is null on the Bootstrap unload path) and fixed (keep-grant keyed off the OnUnload reason). Qualified live on three consecutive Sample swaps with the guard re-taken at each new generation's readiness line without manual rearm; guard-down interval 30/30/35 ms. Rig defects found on the way: identical-bytes copy does not Swap; CopyFile preserves LastWrite and the reloader compares LastWrite only; the rig bumps mtime and fails fast. Ping identity resolved through the active Core by ALC name, checked on a server generation swap 4→5 and a client swap 1→2; the identity string is identical across generations. Same-instance pool reuse demonstrated with subsequent untinted activation after <code>.froststyle off</code> (T=10, R=T; no visual capture step exists). Recipe evidence L9/A9/A10 added. R75 one finding fixed, R76 zero findings. Live-rig 149 tests. <strong>Still open</strong>: uninterrupted protection is not claimed — catalog-cases-8 restored <code>flags=7 guard=True</code> at each new generation's world-ready reconcile without <code>.nodrain on</code>, but the process-side guard was down 30/30/35 ms; identity is not distinguishable by value across generations — server 4→5 and client 1→2 both returned the same <code>gameIdentity</code> string because the game version facts did not change; a stale-generation answer would be indistinguishable by value; collection is only what <code>previousAlive</code> says; no visual capture of the untinted reuse — cases-10 <code>capture.available=false</code> / no visual capture step exists in the live-rig; identity and <code>_BaseColor</code> readbacks are the qualification; client-side Sample swap was not run — client Sample stayed <code>b089d451…</code> through Gates 1–3; Gate 1 qualified server Sample A <code>d698ee…</code> only; per-hit attribution remains unresolved (HitList not readable); L8 records Health before/after and a zero-damage control; catalog appearance <code>poolReuse</code> remains A6 until CAT82 (in progress) updates the recipe; product case notes may still say "Acceptance procedure — not run" while cases-10 is <code>complete</code>; Charm beam — caster appearance <code>observed-failure</code>; target <code>observed-partial</code> (particles, no beam); client <code>NetworkedSequence</code> outlives server disposal — recorded finding; rig destroys client deltas; engine behavior is not fixed; <code>Restore()</code> at unload still not separately observed (appearance explicitCleanup note); <code>currentVerification.claimable</code> false offline on every inspect; initially unloaded asset loading/preview remains a separate future assignment. Loading/preview gates G1-G8, the in-game browser, full asset coverage, NPC/Styx work, and the acceptance gate above remain not done. <strong>Continuation 2026-09-08.</strong> An independent review found that the combined server-first framework stamp hid client build changes. Fixed by per-side stamps in the rig (<code>frameworkSides</code>, <code>stampPhases</code> with transition detection, no hybrid; <code>tools/live-rig/README.md</code>) and side-aware comparison in the catalog (operation <code>sides</code>; a legacy-combined stamp is unknown and never a match; <code>tools/catalog/recipes/SCHEMA.md</code>); regressions through the library, CLI and MCP. A focus-free capture step landed in the rig (<code>tools/observe.ps1</code> PrintWindow), asynchronous so the census stays on schedule after a first attempt where synchronous shots pushed the census past ring life and reuse was not observed. Pool-reuse then ran with T=10, R=10 and four viewed frames (tinted green versus default ice-blue reuse); the report keeps <code>visual.verified=false</code>, the viewing verdict lives in the run README. Three consecutive client-side Sample swaps completed with the connection retained, one handler line per toggle, the tracked borrow disposed at unload and usable on the new generation; client <code>NetworkedSequence</code> leftovers were destroyed at cleanup as manual recovery. Two recording defects fixed (log step <code>since</code>, per-step findings). <strong>Still open:</strong> per-hit attribution; uninterrupted protection is not claimed; identity is not distinguishable by value across generations; client and server Sample images differ by build stamp (same source), recorded per side; the rig does not analyze pixels. Loading/preview gates G1-G8, the in-game browser, full asset coverage, NPC/Styx work, and the acceptance gate above remain not done.</p>
+    </section>
+
+    <section id="risks">
+      <h2>Risks</h2>
+      <div class="tablewrap">
+      <table>
+        <thead><tr><th>Risk</th><th>Severity</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr><td>No working server-to-client custom message path</td><td><span class="pill ok">Passed</span></td><td>Spike 1. Reliable-events path is Core <code>CustomEvents</code>. Chat-channel fallback unused.</td></tr>
+          <tr><td>Client cannot cleanly register new prefab GUIDs</td><td><span class="pill ok">Passed</span></td><td>Spike 2. Registry shipped with tombstones, <code>PrfU</code>/<code>PrfK</code>, and soft unapply.</td></tr>
+          <tr><td>Server-side placement bypasses vanilla validation</td><td><span class="pill warn">Medium</span></td><td>Same seams as build mode: inject the client's build event on behalf of the player, then call the placement system directly. Spike 3 pass condition is a Large Chest a connected client sees, that survives restart, and that is refused where vanilla refuses (occupied, off-territory, wrong floor), plus a dismantle refund. Fail ships no placement API.</td></tr>
+          <tr><td>Hook entry points or generated field names shift between game versions</td><td><span class="pill warn">Medium</span></td><td>Resolve queries by component signature, not generated names. Resilience report flags every unresolved target on first run.</td></tr>
+          <tr><td>Unit behavior internals shift per game patch</td><td><span class="pill warn">Medium</span></td><td>Hooks by system type, not generated names. Resilience report flags unresolved behavior targets. Spawn, flags, and events do not wait on the behavior spike.</td></tr>
+          <tr><td>Collectible unload fails or crashes with Il2CppInterop</td><td><span class="pill warn">Medium</span></td><td>Collectible is what shipped. After every Unload the reloader sweeps registrations and owned main-thread work. Leaky remains a fallback if a game patch makes collectible unsafe.</td></tr>
+          <tr><td>Core swap leaves a Harmony/detour installed from the old assembly</td><td><span class="pill crit">High</span></td><td>Bootstrap-owned detour slots; never dispose and re-apply the native JMP on a swap. Refuse the next swap while a generation-1 Core ALC is still alive and tell the user to restart.</td></tr>
+          <tr><td>Bundled server launch point or arguments change with a game update</td><td><span class="pill warn">Medium</span></td><td>Staging is verified per launch, fenced to the game root, and refuses <code>C:\VRisingServer</code>. Live private-game launch still unverified. Manual fallback documented: point the server folder at the client's BepInEx by hand.</td></tr>
+          <tr><td>Junctions unavailable (non-NTFS, some mod-manager profile paths)</td><td><span class="pill ok">Low</span></td><td>Copy-and-watch fallback keeps the server's plugin folder in sync with the client's.</td></tr>
+          <tr><td>Hot reload leaks state and produces confusing bugs</td><td><span class="pill warn">Medium</span></td><td>Strict context-ownership rule, reloader sweep after Unload, and a "cold restart" tool for when in doubt.</td></tr>
+          <tr><td>Another chat-command framework swallows Progenitor commands</td><td><span class="pill warn">Medium</span></td><td>Harmony priority 300, commands cancel on handle. Two-player check that handled commands are not broadcast is still open.</td></tr>
+          <tr><td>Debug bridge left enabled on a public server</td><td><span class="pill warn">Medium</span></td><td>Separate DLL, off by default, loopback only, token file required, loud log warning at startup.</td></tr>
+          <tr><td>Maintenance burden after release</td><td><span class="pill warn">Medium</span></td><td>Decide before M2 whether this is a community project or a personal one. Public release is optional.</td></tr>
+          <tr><td>Licensing contamination from references</td><td><span class="pill ok">Low</span></td><td>No code copied from any prior library. Design notes cite what was learned, not what was taken.</td></tr>
+          <tr><td>Stunlock changes stance on modding</td><td><span class="pill ok">Low</span></td><td>They declined official tools but bless BepInEx and Thunderstore. Same exposure as every existing mod.</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section id="decisions">
+      <h2>Open decisions</h2>
+      <ul>
+        <li><strong>MCP server language.</strong> Decided: Node (<code>tools/mcp/server.mjs</code>). The bridge stays C# in-process.</li>
+        <li><strong>Command compatibility.</strong> Decided: attribute-based commands (<code>[Command]</code>, <code>[CommandGroup]</code>, <code>[Remainder]</code>). Static command classes register via <code>Register(Type)</code>.</li>
+        <li><strong>Public from day one, or after M1.</strong> M1 is done privately. Still leaning public repo at M2.</li>
+        <li><strong>Where Progenitor lives.</strong> Decided: this repo, mods as submodule-free consumers.</li>
+        <li><strong>Exec sandboxing.</strong> Decided: not in-process compile inside the game. <code>progenitor_exec</code> builds a throwaway plugin, hot-loads it on one side, and unloads it. Dev DLL stays off public servers.</li>
+        <li><strong>Custom systems as injected <code>SystemBase</code>.</strong> Decided against for reloadable plugins. M2 ships named callbacks on <code>SystemHooks</code>; injection is a later Core-only spike if a real <code>SystemState</code> is required.</li>
+      </ul>
+    </section>
+
+    <section id="character-sheet-stats">
+      <h2>Character attribute presentation</h2>
+      <p><strong>Presentation, reload and section-spacing checks passed; performance qualification pending.</strong> Core supplies the native character sheet with bounded, own-player effective-stat snapshots while its Attributes page is visible. Content packs need no UI plugin. The server accepts no client-specified character or stat values and does not modify gameplay components for presentation.</p>
+      <p>Reuse native row art, layout, scrolling, localization, selection and hover tooltips. Add useful missing attributes to existing sections without duplicates. Preserve valid cap displays; hide inconsistent breakdowns rather than inventing cap contributions. Discard stale equipment/connection responses and restore native presentation on close, disconnect or missing fresh data. See <a href="character-sheet.md">current contract</a>. Ten native row-text equip/restoration cycles and full weapon removal passed on an isolated headless client. Same-candidate client/server reloads and reconnect also passed with released old generations and stable row counts. Structural row changes rebuild native section layout after row creation; removal retires pooled rows before restoring layout. Section spacing and representative native tooltips are live-verified. Exhaustive tooltip/localization coverage and performance acceptance remain required.</p>
+    </section>
+  </main>
+</div>

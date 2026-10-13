@@ -1,0 +1,43 @@
+# Sample plugin access declarations (job FSAMP).
+#
+# This file is the "a plugin does the same thing" half of docs/modules.md "Access": a mod ships
+# its own declaration file, runs tools/accessgen with its own output folder and namespace, and
+# checks the generated C# in. Nothing here is a build step — Access/Access.Generated.cs is a
+# normal source file in this project.
+#
+# Regenerate after any edit (deterministic; swap --interop's value for your install, or set
+# VRISING_INTEROP_DIR / VRISING_GAME_DIR and drop the flag; add --check for the CI form):
+#
+#   dotnet run --project tools/accessgen -- \
+#     --declarations samples/Progenitor.Sample/Access/access.txt \
+#     --out samples/Progenitor.Sample/Access \
+#     --namespace Progenitor.Sample.Access --build 248598344 \
+#     --interop "C:\Program Files (x86)\Steam\steamapps\common\VRising\BepInEx\interop"
+#
+# The interop folder is not optional here: the field line below carries a `ref` modifier, and the
+# generator checks every one of them against the interop metadata before writing anything. With no
+# folder it refuses (exit 1) rather than emitting an unverified file that --check would then call
+# stale on the next machine; --unverified is the explicit opt-out and stamps `verified: false`
+# into the generated header, where --check and the generated Access.Describe() both report it.
+# The checked-in Access.Generated.cs says `verified: true`, so it was produced with the folder.
+#
+# The member below is deliberately an ordinary interop-public instance field, not something
+# unreachable: `.access` exists to prove the pipeline resolves and reads through
+# il2cpp_field_get_value on the live build, and an interop-public member is the one case where
+# the answer can be checked against something else. ProjectM.GameDataSystem is the system the
+# Sample's `.ember` already fetches, and RandomLocalizationKeys is a reference-typed instance
+# field on it at 0x100 (server metadata; ProjectM.Shared.dll).
+# `.access` reports the offset the runtime hands back, which is checkable against that 0x100
+# without anything in Progenitor ever writing an offset down.
+
+access v1
+
+assembly ProjectM.Shared
+
+# `: <Type>` is required on a field line (FACC2 / R39 finding 3) — il2cpp_field_get_value copies
+# the FIELD's width into the buffer it is handed, so the declared type is what makes the accessor's
+# width checkable. This one is reference-typed (the interop declares the property as
+# `public RandomLocalizationKeys RandomLocalizationKeys`, ProjectM.Shared.dll), so it carries the
+# `ref` modifier: a field holding an object pointer gets the raw-pointer pair and the offset, and
+# no `T : unmanaged` accessor at all.
+field ProjectM.GameDataSystem RandomLocalizationKeys : ProjectM.RandomLocalizationKeys ref

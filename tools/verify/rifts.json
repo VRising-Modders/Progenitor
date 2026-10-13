@@ -1,0 +1,25 @@
+{
+  "name": "rifts",
+  "order": 70,
+  "title": "Rift schedule: the server read, the re-push, and the sixty-second heartbeat",
+  "evidence": ["203"],
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "Evidence 203 (FRIFT1). The '.rifts' STATUS reply is chat-only and a ghost has no chat slot, so the reply lines themselves still owe a real user - what is scriptable, and what evidence 203 actually measured on the server, is the broadcast line: the schedule read off WarEventSystem, sent on join/change and then exactly every sixty seconds. recipients=0 with nobody connected is the expected value, not a failure." },
+
+    { "command": ".rifts" },
+    { "sleepMs": 1500 },
+
+    { "note": "'.rifts send' is SendToUser, deliberately not a broadcast. A ghost has no connection, so sent=false and recipients=0; the line is written either way and carries the freshly read schedule." },
+    { "command": ".rifts send" },
+    { "sleepMs": 2000 },
+    { "expectLog": "Sample rifts: sent SmRf to user \\d+ recipients=\\d+ reason=change v\\d+ T1\\[.+\\] T2\\[.+\\] nextType=\\S+ utc=\\d+" },
+
+    { "note": "Sixty-five seconds: one heartbeat has to land inside it (evidence 203 measured the gap at exactly 60 s)." },
+    { "sleepMs": 65000 },
+    { "expectLog": "Sample rifts: sent SmRf to all recipients=\\d+ reason=heartbeat v\\d+ T1\\[.+\\] T2\\[.+\\] nextType=\\S+ utc=\\d+" },
+
+    { "expectNoLog": "Sample rifts: ignored an SmRf packet" },
+    { "expectNoLog": "\\[Error\\] .*Sample rifts" }
+  ]
+}

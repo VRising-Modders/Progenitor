@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ReferenceGame>false</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Progenitor.Core/Models/GltfScene.cs" Link="GltfScene.cs" />
+    <Compile Include="../../src/Progenitor.Core/Models/ModelPackage.cs" Link="ModelPackage.cs" />
+  </ItemGroup>
+</Project>

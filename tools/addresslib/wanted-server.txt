@@ -1,0 +1,53 @@
+# Address-library seed for the server GameAssembly.
+# One pattern per line; blank lines and # comments are ignored.
+# A ScriptMethod.Name is kept when it equals a pattern or contains it.
+# Metadata method names look like namespace.Type$$Method (generics and nested
+# types kept). StunProcess.Start is abstract; the live body is StunProcess_MONO.
+
+ClientBootstrapSystem$$OnReliableEventsReceived
+ServerBootstrapSystem$$OnDataReceivedServer
+ServerBootstrapSystem$$OnConnectionApproval
+ServerBootstrapSystem$$Authenticate
+ServerBootstrapSystem$$TryAuthenticate
+HailMessageStruct_Client$$FromConnectData
+LoadPersistenceSystemV2$$DeserializeLoadFile
+StunProcess$$Start
+StunProcess_MONO$$Start
+GameBootstrap$$Start
+ChatMessageSystem$$OnUpdate
+Dictionary<PrefabLookupKey, object>$$FindEntry
+
+# God mode's kill-path prefixes (src/Progenitor.Core/GodMode/GodMode.cs). PatchSites.Register
+# gives all three an address-library id, and neither StatChangeUtility overload has a prefix
+# fallback (MethodPointerByPrefix refuses an overloaded name, and KillEntity has three), so the
+# table is their only resolver. KillEntity emits three ids, disambiguated by TypeSignature:
+#   #viiiiidiiifii  11-arg
+#   #viiidiii        6-arg (12 callers;
+#                    reads Health into a stack local and writes it back — R33 finding 3)
+#   #viidii          4-arg, not patched
+#
+# There is deliberately no god-mode counterpart in wanted-client.txt (FHARM4, R34 finding 14).
+# ctx.GodMode refuses on a client before anything is patched (GodModePolicy.DecideGuard), because
+# the kill paths are server-authoritative: the StatChangeSystem damage pipeline, KillOrDestroyEntity
+# and the death writer all run server-side, so a client-side guard would keep nobody alive. Adding
+# the rows to the client table instead would have been the worse half of the trade — it makes the
+# patch land, and PatchSites' unknown-path degradation (shared-empty-stub guard OFF, with no prefix
+# fallback for either overloaded KillEntity) is exactly what the refusal now avoids reaching.
+#
+# Adding these lines does NOT update the table. Rebuild it (do not commit a stale one):
+#   node tools/addresslib/build.mjs --side server \
+#     --build 248598344-6a148fd0-ed22e34-3dcd792996235366
+# (the --build id is the one in the existing server-<build>.json filename).
+StatChangeUtility$$KillEntity
+# 2026-10-07: god mode no longer patches the 11-arg KillEntity (ref Health trips the
+# Il2CppInterop by-ref struct marshaling; see PatchSitePolicy.FindByRefValueTypeParameter) and
+# guards KillOrDestroyEntity instead. Like KillEntity it has no prefix fallback, so a loaded
+# table needs this row (rebuild it as above) for the shared-empty-stub check to run.
+StatChangeUtility$$KillOrDestroyEntity
+DeathUtilities$$Kill
+ItemKeyLookup$$
+BuildItemKeyLookupSystem$$
+
+# Core-owned patches that must resolve through the table (evidence 157/158)
+LoadPersistenceSystemV2$$CopyDataFromPrefabs
+ServerChatUtils$$SendSystemMessageToClient

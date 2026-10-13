@@ -1,0 +1,38 @@
+{
+  "name": "patch-kinds",
+  "order": 90,
+  "title": "ctx.Patches: prefix, postfix and finalizer on one live site, and RemoveAll removed=3",
+  "evidence": ["208"],
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "WARNING, and the reason this case runs LAST in -Case all: '.patchdemo on' pins the Sample plugin's ALC for the rest of the process (docs/bridge-ops.md, the .patchdemo row). The Sample can still be reloaded, but the old generation will not collect until the server restarts. Run this case when that is acceptable." },
+    { "note": "Evidence 208 (J14): '.patchdemo on' landed prefix, postfix and finalizer on ProjectM.ServerChatUtils::SendSystemMessageToClient; every chat reply fires all three in lockstep; '.patchdemo off' logged three unpatch lines and 'RemoveAll removed=3' (dev-loop.md had said 1, from the old single prefix)." },
+
+    { "note": "Known state first: an 'off' with nothing armed replies that there was nothing to remove." },
+    { "command": ".patchdemo off" },
+    { "sleepMs": 1500 },
+
+    { "command": ".patchdemo on" },
+    { "sleepMs": 2000 },
+    { "expectLog": "patches: prefix ProjectM\\.ServerChatUtils::SendSystemMessageToClient.*owner=progenitor\\.sample path=\\S+ offset=\\S+ priority=\\d+ id=\\d+" },
+    { "expectLog": "patches: postfix ProjectM\\.ServerChatUtils::SendSystemMessageToClient.*owner=progenitor\\.sample" },
+    { "expectLog": "patches: finalizer ProjectM\\.ServerChatUtils::SendSystemMessageToClient.*owner=progenitor\\.sample" },
+
+    { "note": "'.patchdemo ping' calls the patched helper once, so all three kinds must fire for it." },
+    { "command": ".patchdemo ping" },
+    { "sleepMs": 1500 },
+    { "expectLog": "Sample patchdemo: prefix fired on ProjectM\\.ServerChatUtils::SendSystemMessageToClient.* fires=\\d+" },
+    { "expectLog": "Sample patchdemo: postfix ran after ProjectM\\.ServerChatUtils::SendSystemMessageToClient.* postfix=\\d+" },
+    { "expectLog": "Sample patchdemo: finalizer ran after a clean return from ProjectM\\.ServerChatUtils::SendSystemMessageToClient.* finalizer=\\d+" },
+
+    { "command": ".patchdemo off" },
+    { "sleepMs": 1500 },
+    { "expectLog": "patches: unpatch (prefix|postfix|finalizer) ProjectM\\.ServerChatUtils::SendSystemMessageToClient owner=progenitor\\.sample", "minCount": 3 },
+    { "note": "Two RemoveAll lines, one from each side. The Sample prints what ctx.Patches.RemoveAll() returned; Core prints the registry's own line. 'removed=3' is what the code decides and is asserted exactly. 'left' is NOT: it is the whole registry's remaining count, every other owner included — evidence at logs 1519 read 'left=4' (Core's epoch postfix plus the three kill prefixes), and the count moves with whatever Core and other plugins have armed. The first version of this case asserted 'left=0', copied from docs/dev-loop.md rather than from a log, and failed on a clean server." },
+    { "expectLog": "Sample patchdemo: RemoveAll removed=3" },
+    { "expectLog": "patches: RemoveAll owner=progenitor\\.sample removed=3 left=\\d+" },
+
+    { "expectNoLog": "patches: (apply failed|apply sweep FAILED|unpatch FAILED|group rollback FAILED)" },
+    { "expectNoLog": "\\[Error\\] .*patchdemo" }
+  ]
+}

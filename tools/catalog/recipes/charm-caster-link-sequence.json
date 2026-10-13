@@ -1,0 +1,331 @@
+{
+  "schema": "progenitor.catalog.recipe/1",
+  "id": "charm-caster-link-sequence",
+  "revision": 7,
+  "title": "Charm caster sequence (Sequence)AB_Charm_Channeling: nothing drawn (not a beam)",
+  "family": {
+    "id": "charm-channeling",
+    "title": "Charm (channeling)"
+  },
+  "kind": "visual-sequence",
+  "aliases": [
+    "charm",
+    "charm caster",
+    "charm link",
+    "AB_Charm_Channeling",
+    "LinkSequenceCharmChanneling",
+    "charm beam default (nothing drawn)"
+  ],
+  "summary": "The sequence historically catalogued as 'the Charm beam' and still the ctx.Effects.ServerBeamLink default. Live inspection on 2026-09-06 found that the caster buff AB_Charm_Channeling (1002852223) has one BuffSequence row, -389499105, whose asset-reference list holds only mat_Transparent_Weapon01. Played alone through ServerBeamLink, nothing drawn: no beam and no particles. It is not the Charm spell. The Charm presentation belongs to the target debuff's sequence (charm-target-channel-sequence).",
+  "captured": "2026-09-07",
+  "identities": [
+    {
+      "ref": "caster-buff",
+      "role": "caster-side channeling buff",
+      "domain": "prefab-guid",
+      "value": "1002852223",
+      "name": "AB_Charm_Channeling",
+      "provenance": {
+        "source": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log lines 5568-5569 (candidate=AB_Charm_Channeling guid=1002852223; buff=1002852223 sequences=1)",
+        "method": "live-log"
+      }
+    },
+    {
+      "ref": "caster-sequence",
+      "role": "the caster buff's only BuffSequence row",
+      "domain": "sequence-guid",
+      "value": "-389499105",
+      "name": "(Sequence)AB_Charm_Channeling",
+      "provenance": {
+        "source": "continuation-client.log lines 5456-5458 (row=0 hash=-389499105 conditional=False; seq entity refs=1; ref[0]=mat_Transparent_Weapon01); name from docs/effects.md client prefab map read",
+        "method": "live-log"
+      }
+    }
+  ],
+  "assetReferences": [
+    {
+      "name": "mat_Transparent_Weapon01",
+      "unityType": "Material",
+      "role": "the sequence's only asset reference",
+      "provenance": {
+        "source": "continuation-client.log line 5458 (ref[0]=mat_Transparent_Weapon01 type=UnityEngine.Material)",
+        "method": "live-log"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "caster-buff",
+      "to": "caster-sequence",
+      "role": "buff-sequence-row-0 (conditional=False)",
+      "status": "known",
+      "provenance": {
+        "source": "continuation-client.log lines 5455-5457",
+        "method": "live-log"
+      }
+    },
+    {
+      "from": "caster-sequence",
+      "to": "asset:mat_Transparent_Weapon01",
+      "role": "references-asset",
+      "status": "known",
+      "provenance": {
+        "source": "continuation-client.log line 5458",
+        "method": "live-log"
+      }
+    },
+    {
+      "from": "caster-sequence",
+      "to": "external:Beam_Charm_Channeling_01/02 (the visible Charm beam bodies)",
+      "role": "does-not-reference",
+      "status": "unresolved",
+      "provenance": {
+        "source": "the live asset list of this sequence holds one material; the beam bodies are referenced by -541113174 (target side). Earlier docs (docs/effects.md, research evidence 139) attributed an accepted beam visual to this sequence; that attribution is not re-examined here",
+        "method": "live-log"
+      }
+    }
+  ],
+  "requirements": {
+    "side": "server",
+    "world": "server world spawns a NetworkedSequence carrier; every client resolves the hash in its client-only sequence prefab map",
+    "context": {
+      "carrier": "NetworkedSequence (651179295) + SpawnSequenceForEntity {SequenceGuid, Target, SecondaryTarget, PlayOnSelf} through ctx.Effects.ServerBeamLink(source, target, seconds: 20f, sequenceGuid: -389499105). The handle is tracked so plugin unload destroys it. Callers without a context use the static ServerBeam.Link(startIndex, startVersion, endIndex, endVersion, seconds, sequenceGuid, owner, pluginId).",
+      "endpoints": "source and target must be networked Unity.Entities.Entity values carrying NetworkId (a character or a spawned unit; a bare marker entity does not replicate). The sequence prefab carries Pull_Entity + Pull_BuffTarget per docs/effects.md.",
+      "lifetime": "Link seconds argument (20 s in the probe)"
+    },
+    "initialization": [
+      "ctx.Effects.ServerBeamLink(source, target, seconds: 20f, sequenceGuid: -389499105) on the server. source and target must be networked Unity.Entities.Entity values carrying NetworkId (a character or a spawned unit; a bare marker entity does not replicate). The handle is tracked so plugin unload destroys it. Callers without a context use the static ServerBeam.Link(startIndex, startVersion, endIndex, endVersion, seconds, sequenceGuid, owner, pluginId).",
+      "Nothing else: the client resolves and draws whatever the sequence graph does with its asset list."
+    ],
+    "cleanup": [
+      "Dispose the ServerBeam handle (observed: 'Effects: server beam disposed').",
+      "Client carriers may outlive server disposal: five NetworkedSequence carriers were still present on the client after disposal and were removed by explicit per-entity DestroyUtility calls (E4, E5)."
+    ]
+  },
+  "controls": [
+    {
+      "name": "endpoints",
+      "tested": [],
+      "limitations": "Two-entity endpoints are the Link API's contract (docs/effects.md); with this sequence no beam body is referenced, so endpoint tracking of a Charm beam cannot be observed through it.",
+      "implementation": "ctx.Effects.ServerBeamLink(source, target, seconds: 20f, sequenceGuid: -389499105); src/Progenitor.Core/Effects/BeamPresets.cs LinkSequenceCharmChanneling"
+    }
+  ],
+  "operations": {
+    "discovery": {
+      "status": "observed-success",
+      "sides": ["client"],
+      "evidence": [
+        "E1"
+      ],
+      "note": "Buff -> BuffSequence row -> sequence entity -> one asset reference, read live on the client. sides client: sequence/asset enumeration is a client readback."
+    },
+    "playback": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E2",
+        "C1",
+        "C3"
+      ],
+      "note": "Carrier spawned on the server and mirrored on the client with both endpoints set (2026-09-07 through the Sample's tracked ServerBeam.Link). sides server+client: server spawn plus client mirror."
+    },
+    "appearance": {
+      "status": "observed-failure",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E1",
+        "E6",
+        "C2"
+      ],
+      "note": "Reproduced 2026-09-07: no beam and no particles drawn with this sequence, before and after moving the player endpoint. Historical claims that this sequence is the Charm beam are superseded. sides server+client: client presentation of a server-spawned carrier (nothing drawn)."
+    },
+    "controls": {
+      "status": "observed-failure",
+      "sides": ["server", "client"],
+      "evidence": [
+        "C2",
+        "C3"
+      ],
+      "note": "The player endpoint was moved by a dash during playback; with nothing drawn there is no tracking to observe. The carrier's Target/SecondaryTarget fields stayed set. sides server+client: endpoint fields on the carrier plus client presentation."
+    },
+    "gameplayHits": {
+      "status": "not-applicable",
+      "sides": ["server"],
+      "evidence": [],
+      "note": "Visual sequence carrier; no gameplay effect is attached by Link. sides server: no gameplay hit is attached."
+    },
+    "naturalCleanup": {
+      "status": "observed-partial",
+      "sides": ["server", "client"],
+      "evidence": [
+        "C1",
+        "C3"
+      ],
+      "note": "The server disposed the carrier at the 20 s deadline; the client's carrier entity survived the server disposal until destroyed explicitly. sides server+client: server deadline disposal plus leftover client carrier."
+    },
+    "explicitCleanup": {
+      "status": "observed-partial",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E3",
+        "E4",
+        "E5",
+        "C3"
+      ],
+      "note": "Server handle disposal at the deadline is logged. The client carrier did not follow: it was removed by a manual client-side DestroyUtility (a recovery procedure, request logged), and the post-destroy zero-carrier query is agent-reported. Server disposal does not clean the client on its own. sides server+client: server handle disposal plus leftover client carrier."
+    },
+    "poolReuse": {
+      "status": "untested",
+      "sides": ["client"],
+      "evidence": [],
+      "note": "Not examined. sides client: pooling would be a client observation if tested."
+    }
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "SPELLPROBE buff=1002852223 sequences=1; row=0 hash=-389499105 conditional=False; seq=-389499105 entity=Entity(85704:1) refs=1; ref[0]=mat_Transparent_Weapon01 type=UnityEngine.Material (lines 5455-5458).",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "stampNote": "The handshake lines in the same log name plugin versions (sample 0.1.0, spellprobe 1.0.0) but not the Core build or the game identity.",
+      "observer": "Spell Probe exec plugin on the Steam client"
+    },
+    {
+      "id": "E2",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "Effects: server beam link spawned prefab=NetworkedSequence entity=411511:35 sequence=-389499105 (Sequence)AB_Charm_Channeling 330829:1 -> 559566:43 seconds=20; later 'Effects: server beam disposed'.",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/server-filtered.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Progenitor Core on the test server"
+    },
+    {
+      "id": "E3",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "SPELLPROBE stopped carrier=Entity(75669:158) sequence=Entity(116098:413) hash=-389499105 and two more carriers with the same hash (lines 5659-5661).",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Spell Probe exec plugin on the Steam client"
+    },
+    {
+      "id": "E4",
+      "kind": "readback-file",
+      "date": "2026-09-06",
+      "summary": "client-carriers-after-disposal.json: five NetworkedSequence carriers still present on the client after the server-side disposals.",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/client-carriers-after-disposal.json",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Dev bridge query"
+    },
+    {
+      "id": "E5",
+      "kind": "readback-file",
+      "date": "2026-09-06",
+      "summary": "final-client-carriers.json: total 0 nearby carriers after explicit cleanup.",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/final-client-carriers.json",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Dev bridge query"
+    },
+    {
+      "id": "E6",
+      "kind": "report",
+      "date": "2026-09-06",
+      "summary": "Coordinating agent's report as written up in <local-evidence>/charm-catalogue-correction.md: the caster sequence alone did not reproduce the intended effect.",
+      "path": "<local-evidence>/charm-catalogue-correction.md",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "research note (report, not a raw log)"
+    },
+    {
+      "id": "C1",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Sample .beam link 20: 'Effects: server beam link spawned prefab=NetworkedSequence entity=322366:85 sequence=-389499105 (Sequence)AB_Charm_Channeling 331182:1 -> 320100:39 seconds=20' (player -> a spawned rat with NetworkId), 'Effects: server beam disposed' 20.0 s later.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/server-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "C2",
+      "kind": "screenshot",
+      "date": "2026-09-07",
+      "summary": "charm-caster-1.png (+1.1 s), charm-caster-2.png (+2.1 s), charm-caster-3-moved.png (+4.7 s, after a player dash): nothing is drawn between or at the endpoints.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/charm-caster-1.png",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "C3",
+      "kind": "readback-file",
+      "date": "2026-09-07",
+      "summary": "Client capture report: a NetworkedSequence carrier with SequenceGuid -389499105, Target (player), SecondaryTarget (rat) and a SequenceInstance appeared at frame 47 and its fields never changed; carriers during playback client=1 server=1; after the deadline server=0, client=1 (71455:409) until an explicit DestroyUtility on the client (a manual recovery, logged as a request at client-filtered.log line 86); the subsequent 0-carrier query is an agent-reported bridge response (bridge-responses.md).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/capture-charm-caster.json",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    }
+  ],
+  "implementation": [
+    {
+      "path": "src/Progenitor.Core/Effects/BeamPresets.cs",
+      "symbol": "BeamPresets.LinkSequenceCharmChanneling (-389499105), the Link default",
+      "status": "source-checked; committed; the default was not changed by this increment"
+    },
+    {
+      "path": "docs/effects.md",
+      "symbol": "section 'Particle activation and Charm catalogue correction (2026-09-06)'",
+      "status": "source-checked; modified in the working tree"
+    },
+    {
+      "path": "samples/Progenitor.Sample/SampleCatalogRecipeExamples.cs",
+      "symbol": "CharmCasterDiagnosticLink",
+      "status": "compile-verified 2026-09-06 with dotnet build samples/Progenitor.Sample/Progenitor.Sample.csproj; acceptance procedure not run"
+    }
+  ],
+  "limitations": [
+    "API correction of 2026-09-06 (revision 2): the prescribed call is ctx.Effects.ServerBeamLink(source, target, seconds: 20f, sequenceGuid: -389499105), not the nonexistent ServerBeam.Link(world, source, target, sequence:, seconds) overload.",
+    "Searching 'charm' must not land here and treat this sequence as verified live: nothing is drawn (no beam); this sequence references one material and failed to reproduce the Charm effect.",
+    "Whether the earlier accepted beam visual (docs/effects.md evidence 139) was this sequence or something else was not re-examined.",
+    "Client carriers can survive server-side disposal; cleanup needs its own readback.",
+    "Revision 3 (2026-09-07): live evidence C1-C3 with full build stamps; the 2026-09-06 recordings remain unstamped.",
+    "Revision 4 (2026-09-07): audit correction; the client-side zero-carrier readback is agent-reported.",
+    "Revision 5 (2026-09-07): catalog discovery wording only; this sequence draws nothing (no beam) and is not the Charm spell.",
+    "Revision 6 (2026-09-07): catalog wording only; the prescribed call is ctx.Effects.ServerBeamLink, not a nonexistent ServerBeam.Link overload."
+  ]
+}

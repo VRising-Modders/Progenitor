@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.Scratch</AssemblyName>
+    <RootNamespace>Progenitor.Scratch</RootNamespace>
+    <Description>Throwaway snippet plugin compiled by the MCP exec tool.</Description>
+    <BepInExPluginGuid>progenitor.scratch</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Scratch</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Snippets are kept outside this repository; one is compiled only when copied over Snippet.cs.
+         A local spikes\ copy is never compiled. -->
+    <Compile Remove="spikes\**" />
+  </ItemGroup>
+</Project>

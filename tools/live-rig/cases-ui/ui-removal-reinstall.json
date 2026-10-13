@@ -1,0 +1,35 @@
+{
+  "name": "ui-removal-reinstall",
+  "world": "connected",
+  "summary": "Remove the client Sample while its Example page is open: the page closes and widget_click fails cleanly. Reinstall, then reopen works. This is not swap acceptance.",
+  "site": "top-tab",
+  "notes": [
+    "Acceptance procedure — not run. Connected. `--side client`. Removal + reinstall of Progenitor.Sample.dll (hold file), never a LastWrite Swap and never a Core swap. Do not treat a passing run as swap acceptance.",
+    "After removal the owned page / workspace is closed. widget_click Try an action must fail cleanly (envelope ok false, detail.error names the missing widget). Settings requests cannot update a destroyed owner panel.",
+    "Reinstall restores the Sample image (LastWrite bump on the hold-restore path) and waits for the load line. Then open + select Example + widget_read (and a click) must work on the new owner.",
+    "The run fail-safe will put Sample back if a hold file remains; teardown still closes the workspace. Intended finals: Sample loaded, workspace closed, curtain/input released, panes 0."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": 0 } },
+    { "kind": "op", "name": "open top-tab", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Example", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "custom", "group": "Example" }, "expect": { "ok": true, "after.page": "custom", "after.pageId": "Example" } },
+    { "kind": "op", "name": "widget_read Example", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "op", "name": "open baseline counts", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "openBaseline", "expect": { "ok": true, "after.open": true } },
+    { "kind": "removal", "name": "remove Sample with page open" },
+    { "kind": "op", "name": "page closed after removal", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "widget_click after removal fails", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Try an action" }, "expect": { "ok": false } },
+    { "kind": "reinstall", "name": "reinstall Sample" },
+    { "kind": "op", "name": "wait Sample listed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "pollMs": 500, "timeoutMs": 20000, "expect": "progenitor\\.sample" },
+    { "kind": "op", "name": "reopen after reinstall", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Example after reinstall", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "custom", "group": "Example" }, "expect": { "ok": true, "after.page": "custom", "after.pageId": "Example" } },
+    { "kind": "op", "name": "widget_read after reinstall", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "op", "name": "click Try an action after reinstall", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Try an action" }, "record": "clickAfterReinstall", "expect": { "ok": true, "action": "widget_click" } },
+    { "kind": "log", "name": "action handled after reinstall", "side": "client", "filter": "Sample menu", "regex": "Sample menu: action handled", "count": 1, "sinceRecord": "clickAfterReinstall", "timeoutMs": 5000 },
+    { "kind": "capture", "name": "after reinstall" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes", "after.observers": "@record:baselineResolution.after.observers" } }
+  ]
+}

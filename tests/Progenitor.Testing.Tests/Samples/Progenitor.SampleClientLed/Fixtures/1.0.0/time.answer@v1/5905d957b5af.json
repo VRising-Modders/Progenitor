@@ -1,0 +1,49 @@
+{
+  "format": 1,
+  "mod": "progenitor.sampleclientled",
+  "modVersion": "1.0.0",
+  "message": "time.answer",
+  "version": 1,
+  "minReader": 1,
+  "direction": "to-client",
+  "source": "test",
+  "recorded": "2026-10-11T01:26:16Z",
+  "sha256": "5905d957b5af2ca020902b8298290caa17e901e530adcd4814962f49ef52573a",
+  "schema": [
+    {
+      "n": 1,
+      "name": "Sequence",
+      "type": "int"
+    },
+    {
+      "n": 2,
+      "name": "Day",
+      "type": "long"
+    },
+    {
+      "n": 3,
+      "name": "Hour",
+      "type": "double"
+    },
+    {
+      "n": 4,
+      "name": "DayLengthSeconds",
+      "type": "double"
+    },
+    {
+      "n": 5,
+      "name": "SunriseHour",
+      "type": "double"
+    },
+    {
+      "n": 6,
+      "name": "SunsetHour",
+      "type": "double"
+    },
+    {
+      "n": 7,
+      "name": "UptimeMinutes",
+      "type": "int"
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+dist/
+*.dll.next
+*.bak
+TestResults/
+# local machine paths
+Directory.Build.local.props
+node_modules/
+__pycache__/
+
+# packaging output and local secrets (never ship Dev, tokens or the operator key)
+packaging/out/
+*.token
+progenitor-dev.enable
+progenitor-operator.key
+
+# Dev-loop artifacts that belong to a game tree, never to the repo or a release zip
+# (docs/dev-loop.md, "Deploy audit 2026-09-06"):
+#   *.delta / *.delta-state  tools/enc method-body deltas and the reloader's published sequence
+#   driftmap-*.json          the compat rewriter's per-build map (allowlist-vetted, hand-placed)
+#   build-*.json             the Resilience build fingerprint Core writes beside the address
+#                            tables (tools/addresslib/.gitignore already hides it there)
+#   progenitor-allow.txt     the operator's allowlist; nothing in this repo may create one
+*.delta
+*.delta-state
+driftmap-*.json
+build-*.json
+progenitor-allow.txt
+
+# local agent-runner config (machine paths)
+.codex/
+
+# live-rig run output (dated evidence stays outside the repository)
+tools/live-rig/runs/
+
+# Local agent notes, settings and permissions (machine-specific; never tracked)
+CLAUDE.local.md
+.claude/settings.json
+.claude/settings.local.json
+.claude/worktrees/

@@ -1,0 +1,15 @@
+{
+  "name": "cleanup-timeout",
+  "summary": "Spawn a rat and skip cleanup so the run must end incomplete listing the rat.",
+  "steps": [
+    {
+      "kind": "spawn",
+      "name": "rat",
+      "prefab": "CHAR_Critter_Rat",
+      "offset": { "x": 3, "y": 0, "z": 0 },
+      "hostile": false,
+      "track": true
+    },
+    { "kind": "skipCleanupFor", "name": "rat" }
+  ]
+}

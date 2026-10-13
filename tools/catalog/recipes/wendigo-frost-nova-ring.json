@@ -1,0 +1,533 @@
+{
+  "schema": "progenitor.catalog.recipe/1",
+  "id": "wendigo-frost-nova-ring",
+  "revision": 11,
+  "title": "Wendigo frost nova ring payload at both dash edges",
+  "family": {
+    "id": "wendigo-frost-nova",
+    "title": "Wendigo Frost Nova"
+  },
+  "kind": "gameplay-payload",
+  "aliases": [
+    "nova",
+    "frost nova",
+    "wendigo",
+    "wendigo nova",
+    "frost dash",
+    "frostdash",
+    "frost ring",
+    "AB_Wendigo_FrostNova_RingArea",
+    "green nova payload"
+  ],
+  "summary": "Spawn the native expanding frost ring AB_Wendigo_FrostNova_RingArea directly (no second ability cast, no replacement slot, no proxy NPC) at the departure and landing points of the player's Veil dash. This is a damaging gameplay payload with its authored hit filters, damage buffers, knockback and lifetime, not a harmless graphics-only effect. This is the payload the green nova appearance recipe restyles (wendigo-frost-nova-appearance). Observed live on 2026-09-07: about 9 HP per dash on a bandit inside the ring in agent-reported L4; 4.0 HP (121.57567 -> 117.57567) independently recorded by live-rig L8; 0 without rings in both. Per-hit attribution not read. gameplayHits is observed-partial.",
+  "captured": "2026-09-07",
+  "identities": [
+    {
+      "ref": "ring-prefab",
+      "role": "payload prefab that is instantiated",
+      "domain": "prefab-guid",
+      "value": "-1227952025",
+      "name": "AB_Wendigo_FrostNova_RingArea",
+      "provenance": {
+        "source": "samples/Progenitor.Sample/SampleFrostDash.cs (const FrostNovaRing) and <local-evidence>/frost-dash-payload.md",
+        "method": "source-inspection"
+      }
+    },
+    {
+      "ref": "ring-sequence",
+      "role": "ring sequence the prefab's RingAoE data names",
+      "domain": "sequence-guid",
+      "value": "-40367522",
+      "provenance": {
+        "source": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt line 1 (NOVAPROBE authored ... sequence=-40367522)",
+        "method": "live-log"
+      }
+    },
+    {
+      "ref": "nova-ability-group",
+      "role": "Wendigo frost nova ability group; NOT used by this recipe (the payload is spawned without a cast)",
+      "domain": "prefab-guid",
+      "value": "1238313774",
+      "provenance": {
+        "source": "samples/Progenitor.Sample/SampleFrostDash.cs (const FrostNovaGroup)",
+        "method": "source-inspection"
+      }
+    },
+    {
+      "ref": "observed-travel-group",
+      "role": "the equipped Veil ability group observed at every Start edge in the recordings; session equipment, not a recipe input (any AB_Vampire_Veil*_Group qualifies)",
+      "domain": "prefab-guid",
+      "value": "-433204738",
+      "provenance": {
+        "source": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt (FROSTDASH edge=Start ... group=-433204738)",
+        "method": "live-log"
+      }
+    }
+  ],
+  "assetReferences": [],
+  "relationships": [
+    {
+      "from": "ring-prefab",
+      "to": "ring-sequence",
+      "role": "plays-ring-sequence",
+      "status": "known",
+      "provenance": {
+        "source": "NOVAPROBE authored line read from the prefab's RingAoE data on the test server (evidence E1)",
+        "method": "live-log"
+      }
+    },
+    {
+      "from": "nova-ability-group",
+      "to": "ring-prefab",
+      "role": "ability-group-spawns-payload",
+      "status": "inferred",
+      "provenance": {
+        "source": "<local-evidence>/frost-dash-payload.md names the ring as the Wendigo nova's ring payload; the group->cast->payload chain was not read live",
+        "method": "report"
+      }
+    },
+    {
+      "from": "ring-sequence",
+      "to": "external:child particle entities that carry the crystal renderers",
+      "role": "renders-through-child-outputs",
+      "status": "unresolved",
+      "provenance": {
+        "source": "<local-evidence>/frost-dash-payload.md: the root ring sequence had no direct asset-reference list in the client inspection; renderers were reached through child particle outputs (see wendigo-frost-nova-appearance)",
+        "method": "live-readback"
+      }
+    },
+    {
+      "from": "ring-prefab",
+      "to": "external:content-archive objects for the ring's meshes/particles",
+      "role": "archive-association",
+      "status": "unresolved",
+      "provenance": {
+        "source": "no live readback ties this prefab to an archive object; the generated inventory recovers no name containing FrostNova (checked 2026-09-06 against catalog b8bd8fa6...)",
+        "method": "reasoning"
+      }
+    }
+  ],
+  "requirements": {
+    "side": "server",
+    "world": "server world (Progenitor.Worlds.Server); the ring replicates and the client renders it natively",
+    "context": {
+      "creator": "the player's character entity, passed as `creator` so EntityOwner, networked EntityCreator and TeamReference propagate (conditional on the prefab carrying them)",
+      "prefab": "PrefabLookup.TryGetEntity(world, new PrefabGUID(-1227952025)); throws when unavailable",
+      "position": "float3 captured before the tick that observed the Start edge (departure) or the current position (landing)",
+      "trigger": "a per-character FrostDashEdgeTracker turning cast-state observations of the equipped Veil group into one Start and one paired End edge; not a requirement of the payload itself",
+      "cast": "none; the cast-started counter is unchanged across both edges (castCounter=807 at Start and End in E2)"
+    },
+    "initialization": [
+      "Resolve the ring prefab entity through PrefabLookup.",
+      "Call ProjectM.Scripting.GameManager_Shared.InstantiateEntityImmediate(EntityManager, Entity creator, Entity prefab) with the player as creator (the Entity overload, not the GUID/PrefabLookup overload).",
+      "Retain the returned entity for cleanup before touching it.",
+      "Remove GetTranslationOnSpawn from THAT instance only (the authored ring otherwise takes its owner's position during spawn setup, after the dash has moved).",
+      "Write Translation.Value = the requested position.",
+      "Leave SpawnTag/Disabled alone: the normal spawn systems initialize and enable the ring next tick; an initially Disabled ring with zero health is not a failed spawn."
+    ],
+    "cleanup": [
+      "Natural: LifeTime reads Duration 6 s, EndAction Destroy, but the entity is gone about 1.5 s after spawn (observed 2026-09-07, L3; 2026-09-06 expiry E5).",
+      "Explicit: the Sample keeps every owned ring in a list, prunes entities that no longer exist each tick, and calls DestroyUtility.Destroy(em, ring, DestroyDebugReason.TryRemoveBuff) on `.frostdash off`, plugin unload and world replacement. `.frostdash off` was read back live (L5, agent-reported). Unload with a live ring is independently recorded by this recipe's L9 (live-rig 20260907T105917Z-active-ring-unload, same catalog-cases-5 directory as appearance A9): a ring entity alive at Sample teardown was destroyed by ClearRings, then absent. Measured: active ring at teardown, destroy call, later absence — not a completed-destruction latency.",
+      "A 128 active-ring bound refuses new Start rings."
+    ]
+  },
+  "controls": [
+    {
+      "name": "position",
+      "tested": [
+        {
+          "value": "departure point retained while the player travels; landing point at the End edge",
+          "evidence": [
+            "E2",
+            "E3"
+          ],
+          "readback": "FROSTDASH departure ring remains at=<start>; landing=<end>; distance=5.815 (E3)"
+        },
+        {
+          "value": "six bridge-driven dashes on 2026-09-07 (.frostdash dash), player standing still or against a wall",
+          "evidence": [
+            "L1",
+            "L5"
+          ],
+          "readback": "departure ring position retained; distance 0.00 to 5.59"
+        }
+      ],
+      "limitations": "Requires removing GetTranslationOnSpawn on the instance; this is not a general component-removal recipe (removing a networked component elsewhere broke a snapshot layout, see docs/asset-research-workflow.md step 6).",
+      "implementation": "SampleFrostDash.SpawnRing"
+    },
+    {
+      "name": "radius and colour",
+      "tested": [],
+      "limitations": "Not controls of this recipe; see wendigo-frost-nova-appearance (radius 18, green crystal property blocks).",
+      "implementation": "SampleFrostNovaAppearance"
+    }
+  ],
+  "operations": {
+    "discovery": {
+      "status": "observed-success",
+      "sides": ["server"],
+      "evidence": [
+        "E6",
+        "E7",
+        "L3"
+      ],
+      "note": "Prefab resolved through PrefabLookup and its component census read live (EntityOwner, EntityCreator, RingAoE_DataShared, GetTranslationOnSpawn, LifeTime, team/network components, damage/buff/knockback buffers). Live 2026-09-07: EntityOwner, Team and LifeTime read back on a live ring. sides server: the prefab census is a server readback."
+    },
+    "playback": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E2",
+        "E4",
+        "E8",
+        "L1",
+        "L2"
+      ],
+      "note": "One ring per edge, both visible, one cast counter per dash; reproduced in six bridge-driven dashes on 2026-09-07. sides server+client: server spawn plus client-visible rings."
+    },
+    "appearance": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E4",
+        "L2",
+        "L7"
+      ],
+      "note": "The native expanding frost ring at the authored look (start radius 1, end radius 12, 1 s expansion, thickness 1). Screenshots show two rings. 2026-09-07: burst, expansion and clearing captured at +1/+2/+3 s; a snippet-spawned untinted ring shows the authored look. sides server+client: client presentation of the authored look plus the server-driven spawn."
+    },
+    "controls": {
+      "status": "observed-success",
+      "sides": ["server"],
+      "evidence": [
+        "E3",
+        "L1"
+      ],
+      "note": "Position control only. Departure position retained at 0 to 5.8 units from the landing point across nine recorded dashes. sides server: dash/ring position is a server entity readback."
+    },
+    "gameplayHits": {
+      "status": "observed-partial",
+      "sides": ["server"],
+      "evidence": [
+        "L4",
+        "L8"
+      ],
+      "note": "The measurement is now independently recorded by the rig (readback class). Live-rig L8 report.records Health.Value: before 121.57567 -> after 117.57567 with frost dash on (4.0 HP) and controlBefore 121.57567 -> controlAfter 121.57567 with frost dash off (0 HP). Agent-reported L4 runs were about 9 HP per dash on a bandit inside the ring and 0 on a control dash without rings. This run 4.0 HP versus about 9 HP in the agent-reported runs. A neutral 1-HP rat was not hit. Per-hit attribution stays unresolved (HitList not readable). sides server: Health.Value is a server readback (L8); client images are not required."
+    },
+    "naturalCleanup": {
+      "status": "observed-success",
+      "sides": ["server"],
+      "evidence": [
+        "E5",
+        "E1",
+        "L3"
+      ],
+      "note": "Every ring read later reported exists=False (raw log, 2026-09-07 02:19:12; 2026-09-06 E5). The ~1.5 s entity life (alive at +0.2/+0.9 s, gone at +1.4-1.7 s) rests on inspect responses transcribed after the fact. sides server: existence is a server entity readback."
+    },
+    "explicitCleanup": {
+      "status": "observed-success",
+      "sides": ["server"],
+      "evidence": [
+        "L5",
+        "L6",
+        "L9"
+      ],
+      "note": ".frostdash off destroyed the active departure ring: the server log shows the Start edge, the off command and no End edge; the ring's absence at +216 ms is an inspect response transcribed after the fact (bridge-responses.md) (L5). Unload with a live ring is independently recorded by this recipe's L9 (live-rig 20260907T105917Z-active-ring-unload; same catalog-cases-5 directory as appearance A9). Ring Entity(567725:15) was alive at Sample teardown; ClearRings destroyed it (`FROSTDASH cleanup alive=1 destroyed=[567725:15]`); exists false afterwards. Measured: an active ring observed at teardown, a destroy call for that id, and later absence. Not a completed-destruction latency; Start-to-unload timing is not that measurement. Historical appearance A7/A8 (catalog-cases-4) recorded the same disposal with an admitted teardown-command gap; they are not this recipe's evidence. World replacement is untested. Per-hit attribution remains unresolved (gameplayHits). sides server: unload readiness is a server Sample teardown observation (L9)."
+    },
+    "poolReuse": {
+      "status": "untested",
+      "sides": ["client"],
+      "evidence": [],
+      "note": "Client presentation pooling is the appearance recipe's concern (see wendigo-frost-nova-appearance, observed-success: 122 identical rendererId/goId pairs across baseline/+1.5 s/rest; identity is per GameObject/renderer instance id). This recipe does not measure client pooling. sides client: pooling would be a client-renderer observation if tested."
+    }
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "NOVAPROBE authored start=1 end=12 duration=1 thickness=1 sequence=-40367522; lifetime=6 endAction=Destroy (read from the prefab on the test server).",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "stampNote": "The log lines carry no build stamp. Circumstantial only: the installed catalog (sha256 b8bd8fa6..., mtime 2026-08-25) predates the recording and had not changed when checked on 2026-09-06.",
+      "observer": "Nova Probe exec plugin, test server BepInEx LogOutput.log"
+    },
+    {
+      "id": "E2",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "FROSTDASH edge=Start frame=1444 ring=Entity(566313:130) position=(-2125.933, 5.0, -3161.541) castCounter=807 group=-433204738; edge=End frame=1478 ring=Entity(566454:57) position=(-2125.213, 5.0, -3155.771) castCounter=807 group=0. Entity ids are session evidence, not identities.",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Progenitor Sample on the test server"
+    },
+    {
+      "id": "E3",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "FROSTDASH departure ring remains at=(-2125.933, 5.0, -3161.541); landing=(-2125.213, 5.0, -3155.771); distance=5.815, repeated for later dashes (3.575 to 6.216).",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Progenitor Sample on the test server"
+    },
+    {
+      "id": "E4",
+      "kind": "screenshot",
+      "date": "2026-09-06",
+      "summary": "dual-ring.png and sample-dual.png show two visible rings (departure and landing). Local workspace files outside both repositories.",
+      "path": "<local-evidence>/NovaProbe/dual-ring.png",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "coordinating agent, PrintWindow capture of the client"
+    },
+    {
+      "id": "E5",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "NOVAPROBE ring=Entity(566443:60) exists=False and four more direct test rings reporting exists=False after their lifetime.",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Nova Probe exec plugin"
+    },
+    {
+      "id": "E6",
+      "kind": "source-inspection",
+      "date": "2026-09-06",
+      "summary": "SampleFrostDash.SpawnRing: PrefabLookup -> InstantiateEntityImmediate(em, player, prefab) -> Rings.Add -> RemoveComponent GetTranslationOnSpawn -> SetComponentData Translation -> SampleFrostNovaAppearance.Track. ClearRings uses DestroyUtility.Destroy.",
+      "path": "samples/Progenitor.Sample/SampleFrostDash.cs",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "this catalog increment (read of the uncommitted working tree, 2026-09-06)"
+    },
+    {
+      "id": "E7",
+      "kind": "readback-file",
+      "date": "2026-09-06",
+      "summary": "prefabs.txt: live component census of the ring prefab (EntityOwner, EntityCreator, RingAoE_DataShared, GetTranslationOnSpawn, LifeTime, Team/TeamReference, network components, damage/buff/knockback/gameplay-event buffers). TypeInfo sizes read 0 through the interop and are not strides.",
+      "path": "<local-evidence>/NovaProbe/prefabs.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Nova Probe exec plugin"
+    },
+    {
+      "id": "E8",
+      "kind": "native-analyze",
+      "date": "2026-09-06",
+      "summary": "ProjectM.Scripting.GameManager_Shared.InstantiateEntityImmediate(EntityManager, Entity creator, Entity prefab), server native code: instantiates, resolves the owner through GetOwnerOrSelf, fills EntityOwner and networked EntityCreator when present, propagates TeamReference when available. Component checks are conditional.",
+      "path": "<local-evidence>/NovaProbe/native/ProjectM.Scripting.GameManager_Shared.InstantiateEntityImmediate",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "stampNote": "Native from the server GameAssembly.dll of the installed build at the time; the export does not carry the game identity string.",
+      "observer": "native analysis export"
+    },
+    {
+      "id": "E9",
+      "kind": "report",
+      "date": "2026-09-06",
+      "summary": "Five FrostDashEdgeTracker unit tests passed (repeated observations/two dashes, enabling midway, resetting during a dash, resetting after a missed end, independent players). Edge policy only; nothing about rendering or damage.",
+      "path": "tests/Progenitor.Tests/FrostDashEdgeTrackerTests.cs",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "<local-evidence>/frost-dash-payload.md"
+    },
+    {
+      "id": "L1",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Six dashes requested through the bridge (.frostdash dash): every dash logged one FROSTDASH edge=Start and one edge=End with the same castCounter (895, 896, 897, 899, 900, 904), the End 34 frames after the Start, departure ring retained (distance 5.587, 5.109, 4.43, 2.99, 0.44, 0.00).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/server-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L2",
+      "kind": "screenshot",
+      "date": "2026-09-07",
+      "summary": "nova-02-a.png (+1.0 s: burst), nova-02-b.png (+2.0 s: expanded ring), nova-02-c.png (+3.1 s: cleared); focus-free PrintWindow captures of the client.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/nova-02-b.png",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L3",
+      "kind": "report",
+      "date": "2026-09-07",
+      "summary": "Agent-reported (bridge responses transcribed from the session trace; only the values named as raw-log lines are corroborated): Natural cleanup readback: the departure ring of cycle 4 (322807:99) answered inspect at +0.19 s and +0.95 s (EntityOwner=331182:1, Team Value 11 FactionIndex 21, LifeTime Duration 6 EndAction 2) and was gone at +1.7 s; cycle 5's ring (319839:189) answered at +0.12/+0.77 s and was gone at +1.4 s; every earlier ring reported exists=False when read later. The entity lives about 1.5 s, not the authored 6 s LifeTime. Raw-log corroboration: the 02:19:12 exists=False readback and the FROSTDASH lines; the +0.19/+0.95/+1.7 s samples are inspect responses only.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/bridge-responses.md",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L4",
+      "kind": "report",
+      "date": "2026-09-07",
+      "summary": "Agent-reported (bridge responses transcribed from the session trace; only the values named as raw-log lines are corroborated): Hits: a CHAR_Bandit_Thief spawned 3.9 units from the player lost 9.0, 9.28 and 9.28 HP on three dashes with frost dash on (121.58->112.59, 117.64->108.36, 121.58->112.30, read through the bridge before and 2-3 s after) and 0 HP on a control dash with frost dash off (121.31->121.31 over 4.5 s); the bandit regenerates between reads. A 1-HP CHAR_Critter_Rat 3.4 units from a ring was not hit. The ring's HitList buffer is not decodable through the bridge, so attribution rests on the control run plus the ring's EntityOwner=player readback. Raw-log corroboration: 121.57567 (line 993) and 118.58908 (line 1019) of server-LogOutput.log; the other values are get responses only.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/bridge-responses.md",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L5",
+      "kind": "report",
+      "date": "2026-09-07",
+      "summary": "Agent-reported (bridge responses transcribed from the session trace; only the values named as raw-log lines are corroborated): Explicit cleanup: cycle 6 dash at +0 ms, .frostdash off sent at +197 ms, the departure ring (322807:114) already did not exist at +216 ms and +813 ms, and no End edge was logged; untouched rings were still alive at +772 ms and +950 ms. Raw-log corroboration: the Start line and the off command; the +216 ms absence is an inspect response only.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/bridge-responses.md",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L6",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Consumer reload between cycles: the server Sample DLL was removed and restored (unload reason=Removal, 'unloaded Progenitor Sample: clean', image a274cbd4 reloaded); the next dash produced exactly one Start and one End (castCounter 904), no duplicate handler.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/server-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L7",
+      "kind": "screenshot",
+      "date": "2026-09-07",
+      "summary": "A plain bridge spawn of the ring prefab (Instantiate + Translation, no creator) rendered nothing (nova-04-untinted-a/b.png); the same prefab spawned from a snippet through InstantiateEntityImmediate(em, player, prefab) + GetTranslationOnSpawn removal + Translation rendered the default ring (nova-05-untinted-2.png).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/nova-05-untinted-2.png",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "L8",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig damage-timing (report status complete, logSignals.fatal all 0). report.records Health.Value through the bridge get, independent of the agent: before 121.57567, after (frost dash on) 117.57567, controlBefore 121.57567, controlAfter (frost dash off) 121.57567. Damage in this run 4.0 HP. Per-hit attribution unresolved (HitList not readable). The rig did not record build stamps in this run; the offline inventory of the same install on 2026-09-07 reported contentCatalogSha256 b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01 and gameIdentity vrising/1.1.13.0+r99712+b17/net25, which is stated here as context only and does not stamp this evidence. Side stamps recovered from report.json images.client/server.generation (5/4; sampleHash null) and trace.jsonl first ping result.images[] (client line 2, server line 4): no sha256 on those image rows, so core/dev/sample stay null. Combined framework generation:4 is legacy-combined (session.generation), never a match.",
+      "path": "<local-evidence>/reviews/2026-09-07-rig-qualification-5/20260907T083119Z-damage-timing",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": "generation:4",
+        "frameworkSides": {
+          "server": "generation:4; core:null; dev:null; sample:null",
+          "client": "generation:5; core:null; dev:null; sample:null"
+        }
+      },
+      "stampNote": "report.json/ping recorded sampleHash null, session.generation 4 (legacy-combined); per-side generation from report.json images[] and trace.jsonl ping result.images[] / reload.generation. Circumstantial launch note, not on ping and not used as a stamp: Core 42c9c081d87bae5f, Dev 2dff654e6624ea90; this catalog case ran after Sample swap2 a15cb7e129194a98 (not ab49982e84e72116). Commit 164a358 + uncommitted.",
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1); thief 567647:32"
+    },
+    {
+      "id": "L9",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig active-ring-unload (report status complete, logSignals.fatal all 0). Ring Entity(567725:15) was alive at Sample teardown (exists true before Removal); ClearRings destroyed it (`FROSTDASH cleanup alive=1 destroyed=[567725:15]`); exists false afterwards. Measured: an active ring observed at teardown, a destroy call for that id, and later absence. Not a completed-destruction latency; Start-to-unload log-clock 294 ms is the interval from spawn Start to the unload line, not how long destruction took. Same run directory as appearance evidence A9. Side stamps recovered from trace.jsonl first ping result.images[] (client line 2, server line 4: Core/Dev/Sample sha256 plus Core generation) and report.json images.client/server generation+sampleHash; combined report.framework is legacy-combined (server-first generation:4).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases-5/20260907T105917Z-active-ring-unload",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+        "frameworkSides": {
+          "server": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+          "client": "generation:5; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07"
+        }
+      },
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1)"
+    }
+  ],
+  "implementation": [
+    {
+      "path": "samples/Progenitor.Sample/SampleFrostDash.cs",
+      "symbol": "SampleFrostDash (SpawnRing, BeforeTick, OnTick, ClearRings; command .frostdash on|off|status|dash)",
+      "status": "observed live on 2026-09-07 as image a274cbd4 on both sides (agent-reported readback; see evidence L4)"
+    },
+    {
+      "path": "samples/Progenitor.Sample/FrostDashEdgeTracker.cs",
+      "symbol": "FrostDashEdgeTracker.Observe/Reset",
+      "status": "observed live on 2026-09-07 as image a274cbd4 on both sides (agent-reported readback; see evidence L4)"
+    },
+    {
+      "path": "samples/Progenitor.Sample/Plugin.cs",
+      "symbol": "SampleFrostDash.Attach/Detach wiring",
+      "status": "source-checked; modified in the working tree (2026-09-06)"
+    },
+    {
+      "path": "tests/Progenitor.Tests/FrostDashEdgeTrackerTests.cs",
+      "symbol": "edge-policy tests",
+      "status": "compile-verified; uncommitted working tree (untracked); unit tests, not part of the deployed image"
+    }
+  ],
+  "limitations": [
+    "Damaging payload: it carries the ring's authored damage, hit filters and knockback. It is not a graphics-only effect and must not be spawned to obtain graphics.",
+    "The InstantiateEntityImmediate initialization is verified for THIS prefab only; its EntityOwner/EntityCreator/TeamReference handling is conditional and does not promise complete initialization of arbitrary prefabs.",
+    "Removing GetTranslationOnSpawn is an instance edit chosen after inspecting this prefab; it is not a general component-removal technique.",
+    "The trigger (dash edges) depends on the character casting one ability at a time: a leading-edge cast trigger is discarded by the game, which is why the payload is spawned directly instead of cast.",
+    "No archive-object identity is known for the ring's presentation objects; the association stays unresolved.",
+    "Hits are measured (4.0 HP in live-rig L8; about 9 HP in agent-reported L4) but per-hit attribution was not read: the HitList buffer has no decodable interop struct through the bridge. A neutral critter (rat) was not hit.",
+    "Unload with a live ring is independently recorded by this recipe's L9 (live-rig 20260907T105917Z-active-ring-unload, catalog-cases-5; same directory as appearance A9): an active ring at Sample teardown, ClearRings destroy of that id, later absence. Not a completed-destruction latency. `.frostdash off` remains agent-reported L5. Historical appearance A7/A8 (catalog-cases-4) keep their admitted teardown-command gap.",
+    "A plain Instantiate of the prefab renders nothing; the InstantiateEntityImmediate path is required (observed 2026-09-07).",
+    "Revision 2 (2026-09-07): live evidence L1-L7 added with full build stamps; the 2026-09-06 recordings remain unstamped.",
+    "The 2026-09-07 lifetime and off-latency numbers remain agent-reported bridge responses (bridge-responses.md). Damage is independently recorded by live-rig L8 (4.0 HP) as well as agent-reported L4 (about 9 HP).",
+    "Session incident 2026-09-07: a Removal-based Sample reload dropped the test character's nodrain protection (buff removed, guard cleared, reconcile found no own grant) and the bandit used as the damage target killed the character four minutes later (Thief level 18, 22:34:27 local). Rearm protection after every consumer reload and remove hostile targets before reloading.",
+    "Revision 3 (2026-09-07): audit corrections; L3-L5 relabelled as agent-reported.",
+    "Revision 4 (2026-09-07): poolReuse note narrowed to the appearance recipe's observed-partial claim (restoration at rest and an untinted control ring; same-instance reuse unverified).",
+    "Revision 5 (2026-09-07): catalog discovery wording only; a green nova search hit names this gameplay payload, not a loadable or graphics-only effect.",
+    "Revision 6 (2026-09-07): catalog wording only; inspect status is observed live on 2026-09-07 (agent-reported readback; see evidence L4), not current verification.",
+    "Revision 7 (2026-09-07): gameplayHits independently recorded by live-rig run 20260907T083119Z-damage-timing (Health 121.57567 -> 117.57567 frost dash on, 121.57567 -> 121.57567 control; 4.0 HP this run versus about 9 HP in agent-reported L4). Per-hit attribution still unresolved. Status remains observed-partial.",
+    "Revision 8 (2026-09-07): L8 contentCatalogSha256 and gameIdentity set to null to match the run report (session recorded only serverStartedUtc, sampleHash null, generation 4); those two stamps had been copied from a launch note, not from the run.",
+    "Revision 9 (2026-09-07): unload with a live ring was exercised through the appearance recipe's A7/A8 (ClearRings at unload, log-clock Start-to-unload 295 ms); this recipe still has no rig-run of its own for that explicitCleanup scope. Dropped the claim that unload with a live ring was not exercised. Per-hit attribution remains unresolved.",
+    "This recipe's own rig-run L9 (20260907T105917Z-active-ring-unload) records unload with a live ring: active at teardown, ClearRings destroy, later absence. explicitCleanup observed-success for that scope. Not a completed-destruction latency. Per-hit attribution remains unresolved."
+  ]
+}

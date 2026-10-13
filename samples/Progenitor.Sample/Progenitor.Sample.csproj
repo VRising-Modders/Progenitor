@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.Sample</AssemblyName>
+    <RootNamespace>Progenitor.Sample</RootNamespace>
+    <Description>Reloadable sample plugin that exercises the M1 public API: custom item, chat commands, events, persistence, handshake.</Description>
+    <BepInExPluginGuid>progenitor.sample</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Sample</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="localization\**\*.json" />
+    <Content Include="localization\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>localization\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+    <None Remove="assets\**\*" />
+    <Content Include="assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+    <!-- Job FJSON1. Same shape as localization/ and assets/: deploy.ps1 copies the output-dir
+         folder to <reload>/Progenitor.Sample/content/, which is the first folder
+         ContentFiles / LocalizationParser.ResolvePluginFolder(..., "content") probes. -->
+    <None Remove="content\**\*.json" />
+    <Content Include="content\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>content\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+</Project>

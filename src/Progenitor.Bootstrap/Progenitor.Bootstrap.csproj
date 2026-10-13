@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.Bootstrap</AssemblyName>
+    <RootNamespace>Progenitor.Bootstrap</RootNamespace>
+    <Product>Progenitor Bootstrap</Product>
+    <Description>
+      Process-lifetime shell for Progenitor: injected FrameTicker, log buffer, main-thread queue,
+      plugin reloader, self-update, native receive detours, and collectible LoadFromStream
+      of Core from BepInEx/progenitor-core. Chainloader guid is progenitor so consumer
+      [BepInDependency] is unchanged. Not a mod-author reference. Must not compile-reference Core.
+    </Description>
+    <BepInExPluginGuid>progenitor</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Bootstrap</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Progenitor.Core\Players\Forms\ControlLeasePolicy.cs" Link="Forms\ControlLeasePolicy.cs" />
+    <Compile Include="..\Progenitor.Core\Plugins\LegacyIds.cs" Link="Shared\LegacyIds.cs" />
+    <!-- WORLDRESTORE1: the world restore's file-only library (Core writes the request, Bootstrap applies it at start). -->
+    <Compile Include="..\Progenitor.Core\WorldRestore\*.cs" Link="Shared\WorldRestore\%(Filename)%(Extension)" />
+    <!-- AUTOUPDATE5: Progenitor's own update files (Core keeps and stages a release, Bootstrap guards the start loop). -->
+    <Compile Include="..\Progenitor.Core\SelfUpdate\*.cs" Link="Shared\SelfUpdate\%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

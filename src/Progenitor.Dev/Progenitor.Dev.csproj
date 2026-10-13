@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.Dev</AssemblyName>
+    <RootNamespace>Progenitor.Dev</RootNamespace>
+    <Description>Progenitor debug bridge: loopback JSON socket for reload, logs, commands, and inspection. Dev machines only.</Description>
+    <BepInExPluginGuid>progenitor.dev</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Dev Bridge</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+    <!-- Never a NuGet package. The public Thunderstore zip omits this DLL unless tools/package.ps1 -IncludeDev. -->
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+  <!--
+    The extra-instance Steam skip compiles only into a local dev build: the server half
+    (Ops/ExtraInstanceServerAuth.cs) and, since R28 finding 28.18, the client half
+    (Ops/ExtraInstanceAuth.cs and its install site in Plugin.cs) — "compiled only in Debug" was
+    previously true of the server half only.
+
+    It hangs off ProgenitorExtraInstance, a property of its own, so the security boundary is a
+    named switch rather than a side effect of $(Configuration). It defaults to true in Debug
+    (tools/deploy.ps1 builds the default configuration, and the dev loop needs it) and false
+    everywhere else; tools/package.ps1 builds -c Release, so a packaged Dev DLL cannot contain it,
+    and package.ps1 asserts that. Build with -p:ProgenitorExtraInstance=false to prove a Debug
+    build without it. Never set it true for a build that is going to be published.
+  -->
+  <PropertyGroup>
+    <ProgenitorExtraInstance Condition="'$(ProgenitorExtraInstance)' == '' And '$(Configuration)' == 'Debug'">true</ProgenitorExtraInstance>
+    <ProgenitorExtraInstance Condition="'$(ProgenitorExtraInstance)' == ''">false</ProgenitorExtraInstance>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ProgenitorExtraInstance)' == 'true'">
+    <DefineConstants>$(DefineConstants);PROGENITOR_EXTRA_INSTANCE</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+  <!-- SERVERDESC1: the dev gate reads ServerHostSettings through the same game-free resolver as Core
+       (one source file, compiled into both; internal in each, so Dev's copy never clashes with Core's). -->
+  <ItemGroup>
+    <Compile Include="..\Progenitor.Core\Networking\ServerHostSettingsFiles.cs" Link="Shared\ServerHostSettingsFiles.cs" />
+  </ItemGroup>
+</Project>

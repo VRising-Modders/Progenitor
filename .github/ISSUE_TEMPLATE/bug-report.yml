@@ -1,0 +1,65 @@
+name: Bug report
+description: Something in Progenitor or a Progenitor mod does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go through private reporting instead (see SECURITY.md), not here.
+
+        **Collect logs first:** open **Mods** (title screen or Escape menu) → **Progenitor** → **Get help** → **Collect logs**. Progenitor saves a `vrising-mod-logs-client-<date>-<time>.zip` on your Desktop with private details replaced. Look through it, then drag it into the Logs field below. If the game crashed, start it again first; the crashed session's log is kept.
+  - type: input
+    id: version
+    attributes:
+      label: Progenitor version
+      description: Shown on Progenitor's page in the Mods menu, or the version in your mod manager.
+      placeholder: 2026.10.1
+    validations:
+      required: true
+  - type: dropdown
+    id: side
+    attributes:
+      label: Where does it happen?
+      options:
+        - Client (my game)
+        - Dedicated server
+        - Private game hosted from my client
+        - Both client and server
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Steps to reproduce, if you know them.
+      placeholder: |
+        1. Open the Mods menu
+        2. Click ...
+        3. Expected ..., but ...
+    validations:
+      required: true
+  - type: textarea
+    id: mods
+    attributes:
+      label: Installed mods
+      description: The mods and versions in your profile (the log bundle also lists them). Include the server's mods if it is a server problem.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Attach the zip from Collect logs. Paste only short excerpts as text.
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Game build (optional)
+      description: Steam > V Rising > Properties > Updates shows the build id.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else (optional)
+      description: Screenshots, whether it worked before, whether it happens without other mods.

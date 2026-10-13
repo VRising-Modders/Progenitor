@@ -1,0 +1,36 @@
+{
+  "name": "handshake-net-store",
+  "order": 50,
+  "title": "Handshake rows, reserved event ids, and the per-save store's directory and flush",
+  "evidence": ["212"],
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "Evidence 212 (J19). Two of these lines are written at plugin ATTACH, not by a command, so they are matched against the whole log ring rather than this run's window: if the Sample was loaded long enough ago for them to fall out of the 4000-line ring, they fail for that reason and not for a defect - reload the Sample and run the case again." },
+
+    { "expectLog": "Sample handshake: declared \\d+ row\\(s\\) on the server side costing \\d+ of \\d+ slot\\(s\\)", "scope": "ring", "filter": "Sample handshake" },
+    { "expectLog": "Sample net: own event ids 0x536D4E70 \\('SmNp'\\) and 0x536D4E72 \\('SmNr'\\) reserved=False/False", "scope": "ring", "filter": "own event ids" },
+
+    { "note": ".hs itself replies in chat only, and a ghost has no chat slot, so it is run for the code path and asserted through the attach line above (evidence 212 read the reply with a real user)." },
+    { "command": ".hs" },
+    { "sleepMs": 1000 },
+
+    { "command": ".net reserved 0x50726848" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample net: 0x50726848 is RESERVED: CustomEvents\\.IsReservedEventId says yes" },
+
+    { "command": ".net reserved 536D4E70" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample net: 0x536D4E70 is free: CustomEvents\\.IsReservedEventId says no" },
+
+    { "command": ".store dir" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample store: ModSave\\.CurrentSaveDirectory = .+ \\| this plugin's JSON: .+progenitor\\.sample\\.json" },
+
+    { "note": "The flush writes this plugin's JSON beside the world save - the one write this case makes, and the same one evidence 212 made by hand." },
+    { "command": ".store flush" },
+    { "sleepMs": 1500 },
+    { "expectLog": "Sample store: ModSave\\.SaveAll\\(\\) wrote .+progenitor\\.sample\\.json \\(\\d+ byte\\(s\\), \\d+ key\\(s\\) in memory\\)" },
+
+    { "expectNoLog": "\\[Error\\] .*Sample (store|net|handshake)" }
+  ]
+}

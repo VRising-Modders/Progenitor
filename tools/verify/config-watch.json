@@ -1,0 +1,61 @@
+{
+  "name": "config-watch",
+  "order": 10,
+  "title": "Config watch: one hand edit, one reload line, one ignored write-back",
+  "evidence": ["207", "209", "214", "222"],
+  "knownFailing": "FCFG11 (evidence 222): on a Core WITHOUT ec16f76 the config watch reloads a stale ConfigFile left behind by a previous plugin instance, so on any server where the Sample has been hot-reloaded since the Core generation started, the payload edit lands in a dead instance and the counted steps below cannot pass. Not a rig defect and not the authoring defects the notes further down are about - those were fixed by FRIG2. Cleared by a Core generation carrying ec16f76 (FCFG12: the watch reloads every live ConfigFile instance registered for a path): swap or restart onto a Core built from it. Under FCFG12 the live instance does move, and the case's assertions are written for that contract - see the note above the counted steps for why 'one edit, one reload' is asserted on Core's own line and not on the Sample's (R69 finding 4).",
+  "knownFailingSteps": [
+    "Sample config: reload #",
+    "ignoring the write-back",
+    "ConfigHelper: reloaded"
+  ],
+  "clearsWhen": {
+    "describe": "a Core generation built from ec16f76 or later (FCFG12: the watch reloads every live ConfigFile instance registered for a path) is the one this process is running",
+    "coreCommitAtLeast": "ec16f76"
+  },
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "Evidence 207 ran this by hand: .cfg status, .cfg watch on, edit the file, read the reload line. Evidence 209 (FCFG8) added the half that matters: ONE edit must produce exactly ONE reload, with BepInEx's own write-back ignored. Evidence 214 (FCFG9) is the re-save case and is not scripted here because it needs identical bytes written a second time." },
+
+    { "command": ".cfg status" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample config: file=progenitor\\.sample\\.cfg" },
+    { "expectLog": "Sample config: shared=progenitor\\.cfg" },
+    { "expectLog": "Sample config: Watch\\.Enabled=(True|False) \\(ConfigHelper\\.Bind<bool>\\)" },
+    { "expectLog": "Sample config: Watch\\.Verbosity=(Quiet|Normal|Loud) \\(ConfigHelper\\.BindEnum" },
+
+    { "note": "PRECONDITION, and the case establishes it itself. The first run of this case assumed the cfg started at Verbosity = Normal; the file had been left at Loud by a hand test, so the payload edit rewrote Loud over Loud and the reload line read 'Watch.Verbosity=Loud (unchanged)'. The reset below therefore matches whatever is on disk, and it runs AFTER '.cfg watch on', not before: the Sample's 'before' value comes from _lastVerbosity, which is refreshed by its own reload handler, so the reset has to travel through the armed handler to be believed." },
+
+    { "command": ".cfg watch on" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample config: (Watch armed\\.|Watch was already on;)" },
+
+    { "editFile": { "path": "<config>/progenitor.sample.cfg", "replace": "Verbosity = (Normal|Loud|Quiet)", "with": "Verbosity = Normal" } },
+    { "editFile": { "path": "<config>/progenitor.sample.cfg", "replace": "Enabled = (true|false)", "with": "Enabled = true" } },
+    { "note": "Long enough for the 1.0 s debounce, the reload, and the 3.0 s self-write window the reload's own write-back is measured against (ConfigHelper.SelfWriteWindowSeconds). A reset still in flight when the payload edit lands is what produced two reload lines in the first run." },
+    { "sleepMs": 7000 },
+    { "expectLog": "Sample config: reload #\\d+ .*Watch\\.Verbosity(=Normal \\(unchanged\\)|: (Loud|Quiet) -> Normal)", "scope": "case", "minCount": 1 },
+
+    { "note": "Everything above is setup. Discard it: the assertions below count lines, and a reload that belongs to the reset must not be one of them." },
+    { "resetWindow": true },
+
+    { "note": "The edit the example exists for." },
+    { "editFile": { "path": "<config>/progenitor.sample.cfg", "replace": "Verbosity = Normal", "with": "Verbosity = Loud" } },
+    { "sleepMs": 5000 },
+    { "expectLog": "Sample config: reload #\\d+ at [0-9:.]+Z of progenitor\\.sample\\.cfg: .*Watch\\.Verbosity: Normal -> Loud", "count": 1 },
+    { "expectLog": "ConfigHelper: ignoring the write-back of .*progenitor\\.sample\\.cfg", "count": 1 },
+    { "note": "FCFG8, evidence 209: exactly one reload for one edit. Evidence 207 saw two, 1.03 s apart. R69 finding 4: the line that counts this is Core's own, not the Sample's. Under FCFG12 (ec16f76) ConfigHelper dispatches Reloaded once per LIVE registered ConfigFile instance for the path, and the Sample's handler reads only file.ConfigFilePath, which two instances of one path share by construction - so on a hot-reloaded Sample one edit writes one 'Sample config: reload #N ... Normal -> Loud' followed by one '... Loud (unchanged)' per extra live instance. 'Sample config: reload #' is therefore an instance count, not an edit count. 'ConfigHelper: reloaded <path>' is written exactly once per reload whatever the instance count (singular form for one, '... into N registered ConfigFile instances' for more), so it is what FCFG8 is asserted on. The transition line above stays exactly-one because only the first dispatch sees a changed value." },
+    { "expectLog": "ConfigHelper: reloaded .*progenitor\\.sample\\.cfg", "count": 1 },
+    { "expectLog": "Sample config: reload #", "minCount": 1 },
+
+    { "command": ".cfg read" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample config: re-read progenitor\\.sample\\.cfg with ConfigFile\\.Reload\\(\\): Watch\\.Enabled=(True|False), Watch\\.Verbosity=Loud" },
+
+    { "command": ".cfg watch off" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample config: Watch off: the ConfigHelper\\.Reloaded handler is unsubscribed" },
+
+    { "expectNoLog": "\\[Error\\] .*Sample config" }
+  ]
+}

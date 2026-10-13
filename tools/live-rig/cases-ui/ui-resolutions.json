@@ -1,0 +1,34 @@
+{
+  "name": "ui-resolutions",
+  "world": "connected",
+  "summary": "Record the live baseline resolution from status; set 1280x720, 1920x1080, and the recorded baseline; at each size open at `@site`, widget_read, capture, close. Teardown restores the recorded baseline.",
+  "site": "@site",
+  "notes": [
+    "Acceptance procedure — not run. `--side client`. Open steps use `site` `@site` (`--site main-menu|top-tab|shortcut`; omitted, main-menu with no Client_0, top-tab when connected). Restore the captured baseline, never a presumed 1920x1080.",
+    "resolution requires width, height, and mode. Mode is taken from the recorded baseline status. after.width / after.height / after.mode are Screen readback, not after.resolution.",
+    "If ping is dead (main thread suspect), teardown restore fail-fasts and is not sent."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "resolution 1280x720", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": 1280, "height": 720, "mode": "@record:baselineResolution.after.mode" }, "expect": { "ok": true, "after.width": 1280, "after.height": 720 } },
+    { "kind": "op", "name": "open 720", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "op", "name": "widget_read 720", "side": "client", "op": "mods_ui", "args": { "action": "widget_read" }, "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "capture", "name": "720" },
+    { "kind": "op", "name": "close 720", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "resolution 1920x1080", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": 1920, "height": 1080, "mode": "@record:baselineResolution.after.mode" }, "expect": { "ok": true, "after.width": 1920, "after.height": 1080 } },
+    { "kind": "op", "name": "open 1080", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "op", "name": "widget_read 1080", "side": "client", "op": "mods_ui", "args": { "action": "widget_read" }, "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "capture", "name": "1080" },
+    { "kind": "op", "name": "close 1080", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "resolution baseline", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" }, "expect": { "ok": true, "after.width": "@record:baselineResolution.after.width", "after.height": "@record:baselineResolution.after.height", "after.mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "open baseline", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "op", "name": "widget_read baseline", "side": "client", "op": "mods_ui", "args": { "action": "widget_read" }, "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "capture", "name": "baseline" },
+    { "kind": "op", "name": "close baseline", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

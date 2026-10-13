@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.SampleClientLed</AssemblyName>
+    <RootNamespace>Progenitor.SampleClientLed</RootNamespace>
+    <Description>A mostly-client sample mod (a clock) with an optional server part and settings that need it (counterparts and settings scopes).</Description>
+    <BepInExPluginGuid>progenitor.sampleclientled</BepInExPluginGuid>
+    <BepInExPluginName>Client-led sample</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

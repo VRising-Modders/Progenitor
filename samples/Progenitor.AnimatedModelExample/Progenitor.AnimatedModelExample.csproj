@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.AnimatedModelExample</AssemblyName>
+    <RootNamespace>Progenitor.AnimatedModelExample</RootNamespace>
+    <Description>Client-only authored GLB skeletal animation example.</Description>
+    <BepInExPluginGuid>progenitor.animatedmodel.example</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Animated Model Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

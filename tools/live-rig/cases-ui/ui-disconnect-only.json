@@ -1,0 +1,28 @@
+{
+  "name": "ui-disconnect-only",
+  "world": "any",
+  "endWorld": "main-menu",
+  "summary": "Stock client disconnect to the main menu: poll `disconnect` `statusOnly` until a leftover leave latch is cleared, request the leave (`requested: true`), wait until ping has no Client_0, then wait for the inventory-cleared handshake. Does not reconnect.",
+  "site": "main-menu",
+  "notes": [
+    "Acceptance procedure — not run. `--side client`. Start connected (`world: any` records whichever world is detected). A previous connect/disconnect can leave `LeaveGamePolicy` latched: poll `disconnect` `statusOnly:true` first. `state: superseded` (replacement `Client_0`) or leftover `pending` without this leave having been requested is not a new request — observing `superseded` clears `_requested`; keep polling until `requested` is false and `state` is not `superseded`, then mutate. Envelope `ok` is not proof of leaving.",
+    "`disconnect` without `statusOnly` then requests the production ExitGame view. Assert `requested: true` and `state` not `superseded` (pending is not completion). Poll client ping until worlds has no Client_0.",
+    "Handshake wait: client Core line `Mods inventory: server context cleared reason=disconnect` (`inventoryCleared`, sinceRecord on the disconnect op), then mods_ui status closed (`after.open` false, `after.modsCapture` false) and `after.serverList.state` unavailable.",
+    "Does not `connect`. Rejoin is `ui-reconnect-only`. `endWorld: main-menu` so final checks match the menu, not the connected start.",
+    "Intended finals: no Client_0, workspace closed, curtain/input released."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "poll disconnect latch", "side": "client", "op": "disconnect", "args": { "statusOnly": true }, "pollMs": 1000, "timeoutMs": 120000, "expect": { "ok": true, "requested": false, "state": { "neq": "superseded" } } },
+    { "kind": "op", "name": "disconnect", "side": "client", "op": "disconnect", "record": "beforeLeave", "expect": { "ok": true, "requested": true, "state": { "neq": "superseded" } } },
+    { "kind": "op", "name": "wait main menu no Client_0", "side": "client", "op": "ping", "pollMs": 1000, "timeoutMs": 120000, "expect": "\"worlds\":\\[(?!.*Client_0)" },
+    { "kind": "log", "name": "inventory cleared after disconnect", "side": "client", "filter": "Mods inventory", "regex": "Mods inventory: server context cleared reason=disconnect", "sinceRecord": "beforeLeave", "timeoutMs": 30000, "record": "inventoryCleared" },
+    { "kind": "op", "name": "status workspace closed after disconnect", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "status server list unavailable", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.serverList.state": "unavailable" } }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

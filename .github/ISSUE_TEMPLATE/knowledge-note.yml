@@ -1,0 +1,92 @@
+name: Knowledge note
+description: Share an engine trap you hit and fixed while modding, so the next modder or agent avoids it.
+title: "[kb] "
+labels: ["knowledge-note"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Notes record traps that were **observed in the game**, not guesses or native analysis readings. A maintainer adds yours to [knowledge/](../blob/main/knowledge/README.md) as `reported` and marks it `verified-live` after reproducing it. Do not attach game files or native code.
+  - type: input
+    id: finding
+    attributes:
+      label: Finding in one line
+      placeholder: A LifeTime duration counts from spawn against Age, not from now
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Game build
+      description: Steam build id (Steam > V Rising > Properties > Updates), or the server build.
+      placeholder: Steam 23521359
+    validations:
+      required: true
+  - type: input
+    id: progenitor
+    attributes:
+      label: Progenitor version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: side
+    attributes:
+      label: Side
+      options: [client, server, both, offline]
+    validations:
+      required: true
+  - type: textarea
+    id: route
+    attributes:
+      label: Goal and route
+      description: What you were building and which API or native path you used.
+    validations:
+      required: true
+  - type: textarea
+    id: gotcha
+    attributes:
+      label: Symptom, cause and fix
+      description: "Three lines: Symptom (what you saw), Cause (why it happened), Fix (what fixed it)."
+      placeholder: |
+        - Symptom:
+        - Cause:
+        - Fix:
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: For example wearables, buffs, units, bots, ui, interop.
+    validations:
+      required: true
+  - type: input
+    id: date
+    attributes:
+      label: Date observed
+      placeholder: YYYY-MM-DD
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Screenshot, component read-back or log excerpt. No game files or native code.
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How you verified it
+      description: What you observed in the game and how (screenshot, component read, log). Say what you did not test.
+    validations:
+      required: true
+  - type: checkboxes
+    id: rules
+    attributes:
+      label: Rules
+      options:
+        - label: I observed this in the game; it is not a guess.
+          required: true
+        - label: No game files, native code, or cheats against other players.
+          required: true

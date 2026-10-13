@@ -1,0 +1,138 @@
+{
+  "name": "m2-4-crystal-maxamount",
+  "world": "connected",
+  "summary": "Paired M2.4 Crystal MaxAmount: baseline B after Sample unload, 40 on both sides after load with sent/applied PrfE, still 40 after a Sample swap, B after unload. A failed restore fails the step.",
+  "notes": [
+    "Acceptance procedure. Isolated pair. Sample must be loaded on both sides at start. --dll is the Sample image used for reinstall/swap.",
+    "Vanilla Item_Ingredient_Crystal (-257494203) ItemData.MaxAmount. Default editor writes 10, Late writes 40; effective 40; server ships PrfE. Unload restores the captured baseline B.",
+    "prefab op args are prefab (int guid hash) plus component ProjectM.ItemData; the dump returns fields.MaxAmount. ping has no ok field — stamps assert side.",
+    "Flow: ping stamps; ping before first removal; remove Sample; read MaxAmount as B on both sides; reinstall; server Sample editor line; client prefab MaxAmount 40 (Sample's editor summary is not re-emitted on the client after reinstall; PrfE apply / prefab 40 is the client proof); sent PrfE / applied PrfE; MaxAmount 40 both sides; Sample swap; MaxAmount 40 both sides; remove; MaxAmount equals recorded B on both sides. A mismatch is a failed restore and the run is aborted (never complete).",
+    "The run fail-safe puts Sample back if a .rig-hold remains, which is not the restore observation. Structural EntityManager edits are unrestorable (logged at handle.EntityManager); this case only touches ItemData.MaxAmount. No tracked spawns. Failed cleanup marks the run incomplete.",
+    "node tools/live-rig/rig.mjs run m2-4-crystal-maxamount --dll samples/Progenitor.Sample/bin/Debug/net6.0/Progenitor.Sample.dll"
+  ],
+  "steps": [
+    { "kind": "op", "name": "stamp server image", "side": "server", "op": "ping", "record": "serverPing", "expect": { "side": "server" } },
+    { "kind": "op", "name": "stamp client image", "side": "client", "op": "ping", "record": "clientPing", "expect": { "side": "client" } },
+    { "kind": "op", "name": "before first removal", "side": "server", "op": "ping", "record": "beforeRemoval1", "expect": { "side": "server" } },
+    { "kind": "removal" },
+    { "kind": "wait", "ms": 2000 },
+    {
+      "kind": "op",
+      "name": "server baseline MaxAmount",
+      "side": "server",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalBaselineServer",
+      "expect": { "guid": -257494203 }
+    },
+    {
+      "kind": "op",
+      "name": "client baseline MaxAmount",
+      "side": "client",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalBaselineClient",
+      "expect": { "guid": -257494203 }
+    },
+    { "kind": "op", "name": "before reinstall", "side": "server", "op": "ping", "record": "beforeReinstall", "expect": { "side": "server" } },
+    { "kind": "reinstall" },
+    {
+      "kind": "log",
+      "name": "server Sample Crystal editors 40",
+      "side": "server",
+      "sinceRecord": "beforeReinstall",
+      "filter": "Sample",
+      "regex": "vanilla Item_Ingredient_Crystal \\(-257494203\\) ItemData\\.MaxAmount Default 10 then Late 40; effective=40",
+      "timeoutMs": 20000,
+      "record": "serverEditors40"
+    },
+    {
+      "kind": "op",
+      "name": "client Sample Crystal editors 40",
+      "side": "client",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "clientEditors40",
+      "expect": { "guid": -257494203, "fields.MaxAmount": 40 },
+      "poll": { "intervalMs": 250, "timeoutMs": 20000 }
+    },
+    {
+      "kind": "log",
+      "name": "server sent PrfE",
+      "side": "server",
+      "sinceRecord": "beforeReinstall",
+      "filter": "PrefabRegistry",
+      "regex": "sent PrfE for -257494203",
+      "timeoutMs": 20000,
+      "record": "sentPrfE"
+    },
+    {
+      "kind": "log",
+      "name": "client applied PrfE",
+      "side": "client",
+      "sinceRecord": "beforeReinstall",
+      "filter": "PrefabRegistry",
+      "regex": "applied PrfE for -257494203:.*ItemData \\(server layer\\)",
+      "timeoutMs": 20000,
+      "record": "appliedPrfE"
+    },
+    {
+      "kind": "op",
+      "name": "server MaxAmount 40 after load",
+      "side": "server",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalLoadedServer",
+      "expect": { "guid": -257494203, "fields.MaxAmount": 40 }
+    },
+    {
+      "kind": "op",
+      "name": "client MaxAmount 40 after load",
+      "side": "client",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalLoadedClient",
+      "expect": { "guid": -257494203, "fields.MaxAmount": 40 }
+    },
+    { "kind": "op", "name": "before swap", "side": "server", "op": "ping", "record": "beforeSwap", "expect": { "side": "server" } },
+    { "kind": "swap", "dll": "<path>" },
+    {
+      "kind": "op",
+      "name": "server MaxAmount 40 after swap",
+      "side": "server",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalSwapServer",
+      "expect": { "guid": -257494203, "fields.MaxAmount": 40 }
+    },
+    {
+      "kind": "op",
+      "name": "client MaxAmount 40 after swap",
+      "side": "client",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalSwapClient",
+      "expect": { "guid": -257494203, "fields.MaxAmount": 40 }
+    },
+    { "kind": "removal" },
+    { "kind": "wait", "ms": 2000 },
+    {
+      "kind": "op",
+      "name": "server restore equals baseline",
+      "side": "server",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalRestoredServer",
+      "expect": { "guid": -257494203, "fields.MaxAmount": "@record:crystalBaselineServer.fields.MaxAmount" }
+    },
+    {
+      "kind": "op",
+      "name": "client restore equals baseline",
+      "side": "client",
+      "op": "prefab",
+      "args": { "prefab": -257494203, "component": "ProjectM.ItemData" },
+      "record": "crystalRestoredClient",
+      "expect": { "guid": -257494203, "fields.MaxAmount": "@record:crystalBaselineClient.fields.MaxAmount" }
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    # Runners have no V Rising install. Directory.Build.props honors VRISING_GAME_DIR;
+    # a missing path makes a stray ReferenceGame=true fail instead of silently using a default.
+    env:
+      VRISING_GAME_DIR: C:\missing-vrising
+      VRISING_INTEROP_DIR: C:\missing-vrising\interop
+    steps:
+      # Full history: the build version is computed from origin/main (docs/versioning.md);
+      # a shallow clone builds as 0.0.0.0 with a warning.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.x
+
+      - name: Test
+        run: dotnet test tests/Progenitor.Tests --configuration Release --logger trx
+
+      # Mod compatibility C5: Progenitor.Testing and the samples' replay tests (game-free, like the suite above).
+      - name: Test Progenitor.Testing
+        run: dotnet test tests/Progenitor.Testing.Tests --configuration Release --logger trx
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/*.trx'
+          if-no-files-found: warn
+
+  # Job FCI1 (R44 finding 10). The `test` job above builds only the tip of a push, so a commit
+  # in the middle of one that cannot build is never noticed: fb9d7fa added a <Compile Include>
+  # for SampleConsentDemo.cs, which did not land until cc84d95, and the pair's tip built fine.
+  # Whoever bisects through fb9d7fa gets a CS2001 that has nothing to do with their bug.
+  #
+  # ProjectFileManifestTests asserts this rule at the tip, where it also covers the projects the
+  # `test` job never compiles. This job asserts it at EVERY commit the push or PR adds, which is
+  # the half a test inside the assembly cannot do — when the Include is broken that assembly is
+  # exactly what fails to build. It reads blobs out of git, so it needs no toolchain and no
+  # checkout per commit; the whole job is a few seconds.
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Every Compile item resolves, at every commit in this push
+        env:
+          RANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          RANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 .github/workflows/compile-manifest-check.py
+
+  # Knowledge notes (knowledge/README.md): the format, status and no-dumps rules, plus the
+  # generated INDEX.md being current. Node only, no game install, a few seconds.
+  knowledge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check knowledge notes
+        run: node tools/kb/kb.mjs check
+
+      - name: Knowledge tool tests
+        run: node --test "tools/kb/test/*.test.mjs"
+
+      - name: MCP tool tests (knowledge, identity, bridge queue)
+        working-directory: tools/mcp
+        run: |
+          npm ci --no-audit --no-fund
+          node --test test/kb-tools.test.mjs test/identity.test.mjs test/bridge-who.test.mjs test/queue.test.mjs test/call-mail.test.mjs

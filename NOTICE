@@ -1,0 +1,129 @@
+Progenitor
+Copyright (c) 2026 Progenitor contributors
+
+This product is licensed under the GNU Lesser General Public License, version 2.1. See LICENSE for the full text.
+
+--------------------------------------------------------------------------------
+1. No third-party source code
+--------------------------------------------------------------------------------
+
+Every line under src/, samples/, tests/ and tools/ is original work.
+No source file was copied, translated or adapted from another modding framework
+or mod, and no file in this repository carries a third-party copyright header.
+
+The only ideas taken from other projects come from the dependencies below and
+the platform mods are installed from. They are listed so that a reader can
+follow the lineage of a design without mistaking it for provenance of code.
+Every entry is an idea or a public API convention, reimplemented in original
+code.
+
+--------------------------------------------------------------------------------
+2. Dependencies
+--------------------------------------------------------------------------------
+
+Runtime:
+
+  BepInEx / BepInEx.Unity.IL2CPP (BepInExPack_V_Rising 1.733.2)
+    https://github.com/BepInEx/BepInEx - LGPL-2.1
+    The only runtime dependency. Progenitor is a plugin on the BepInEx
+    chainloader; it is not a second loader.
+
+  HarmonyX (via BepInEx)
+    https://github.com/BepInEx/HarmonyX - MIT
+    Used as a library for patching. Progenitor's own hook and event ordering is
+    original code that reuses Harmony's *model* (see section 3).
+
+  Il2CppInterop (via BepInEx)
+    https://github.com/BepInEx/Il2CppInterop - LGPL-3.0
+    Generates the interop assemblies Progenitor compiles against.
+
+Bundled with BepInExPack_V_Rising and used through it (not redistributed here):
+
+  Mono.Cecil (via BepInEx core)
+    https://github.com/jbevain/cecil - MIT
+    Reads and rewrites plugin assemblies in Bootstrap, the preloader and the
+    compatibility rewriter.
+
+  SemanticVersioning (via BepInEx core)
+    https://github.com/adamreeve/semver.net - MIT
+    BepInEx's plugin version type, referenced by the preloader.
+
+Build only:
+
+  BepInEx.PluginInfoProps 2.1.0 (NuGet)
+    https://github.com/BepInEx/BepInEx.Templates - MIT
+    Emits MyPluginInfo. Compile-time only (PrivateAssets=all).
+
+  .NET SDK and runtime libraries (System.Text.Json and the rest of the BCL)
+    https://github.com/dotnet/runtime - MIT
+
+  V Rising game assemblies (Stunlock Studios). Referenced from the local install
+  as compile-time file references with Private="false". They are NOT
+  redistributed by this repository and are not NuGet dependencies. No game
+  asset, game binary, interop assembly or native code is committed here.
+
+Tests and development tools only (never shipped in a release package):
+
+  xunit 2.9.3 and xunit.runner.visualstudio 2.8.2
+    https://github.com/xunit/xunit - Apache-2.0
+
+  Microsoft.NET.Test.Sdk 17.12.0
+    https://github.com/microsoft/vstest - MIT
+
+  Microsoft.CodeAnalysis.CSharp (Roslyn) 4.8.0
+    https://github.com/dotnet/roslyn - MIT
+    Used by the test project and tools/enc (method-body deltas).
+
+  Mono.Cecil 0.11.4 (NuGet)
+    https://github.com/jbevain/cecil - MIT
+    The test project compiles the rewriter sources against the same version
+    BepInEx ships, because CI has no game install.
+
+  @modelcontextprotocol/sdk (^1.12.0) and zod (^3.23.8), with their
+  transitive npm dependencies as pinned in tools/mcp/package-lock.json
+    https://github.com/modelcontextprotocol/typescript-sdk - MIT
+    https://github.com/colinhacks/zod - MIT
+    The MCP server in tools/mcp that exposes the development bridge.
+
+  Node.js, Python and Blender are external tools some scripts under tools/
+  run on or inside; none of them is included in this repository.
+
+Interoperability data read from the game:
+
+  To work with the game, the source includes a small amount of factual data
+  read from the installed game: component and buffer layout constants (field
+  offsets, sizes and strides, e.g. src/Progenitor.Core/Layout/), prefab GUID
+  hashes and asset names, character rig bone names and reference data, and
+  game balance numbers that features match or document. It is included solely
+  for interoperability. It is not game code, art or audio, and Stunlock
+  Studios retains all rights in the game itself.
+
+--------------------------------------------------------------------------------
+3. Borrowed ideas, with attribution
+--------------------------------------------------------------------------------
+
+Harmony / HarmonyX - https://github.com/pardeike/Harmony
+  - The prefix/postfix, integer priority, and before/after-id ordering model,
+    reimplemented in original code for the event bus, system hooks and the
+    Content.Edit sorter (which inverts the priority direction).
+    (Progenitor.Core/Plugins/OrderSorter.cs)
+
+Thunderstore, r2modman and Gale - https://thunderstore.io/
+  - Packaging and install conventions for the V Rising community. The
+    observation that the public package API carries no checksum is why
+    Progenitor's operator-signed catalogue records SHA-256 of the offered
+    bytes.
+
+BepInEx ecosystems generally
+  - The posture that every plugin runs with full process authority, so the
+    mitigations that work are visibility and a small trusted core rather than
+    a sandbox.
+
+--------------------------------------------------------------------------------
+4. Trademarks
+--------------------------------------------------------------------------------
+
+V Rising is a trademark of Stunlock Studios. Progenitor is an unofficial,
+community-made modding framework and is not affiliated with, endorsed by, or
+sponsored by Stunlock Studios. All other names are the property of their
+respective owners and are used here for identification only.

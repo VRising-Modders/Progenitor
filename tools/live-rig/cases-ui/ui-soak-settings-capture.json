@@ -1,0 +1,24 @@
+{
+  "name": "ui-soak-settings-capture",
+  "world": "connected",
+  "summary": "Connected: open the top Mods tab, select Sample Server settings, soak 15 minutes with a PrintWindow capture every 60 s, then close.",
+  "site": "top-tab",
+  "notes": [
+    "Acceptance procedure — not run. Same as ui-soak-settings with host-side PrintWindow every 60 s. `--side client`. `open site=top-tab` brings up the fullscreen menu itself (`detail.menuOpenedBy`); do not prime with shortcut.",
+    "`bridge_status` every 10 s; ping at most every 30 s. After a ping timeout, soak continues with `bridge_status` + `logs` only.",
+    "Perf windows are at most 300 s with a 2 s gap; compare against the no-capture control. Run the no-capture control first."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "open top-tab", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "action": "open", "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Sample Server", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "action": "select", "after.open": true, "after.page": "settings", "after.pageId": "Server" } },
+    { "kind": "op", "name": "status settings open", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "soak", "name": "soak settings 15min capture", "side": "client", "minutes": 15, "pingIntervalSeconds": 30, "logsIntervalSeconds": 15, "bridgeStatusIntervalSeconds": 10, "capture": { "intervalSeconds": 60 }, "perf": { "windowSeconds": 300, "gapSeconds": 2 }, "stopOnFirstFailure": true },
+    { "kind": "op", "name": "close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

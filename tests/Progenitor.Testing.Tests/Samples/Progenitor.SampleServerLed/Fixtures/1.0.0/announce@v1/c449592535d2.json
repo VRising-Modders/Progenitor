@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "mod": "progenitor.sampleserverled",
+  "modVersion": "1.0.0",
+  "message": "announce",
+  "version": 1,
+  "minReader": 1,
+  "direction": "to-client",
+  "source": "test",
+  "recorded": "2026-10-11T01:26:16Z",
+  "sha256": "c449592535d293ba24a25c87aabdf21bc28d0b9591cd173db7b1980cd14b1ce7",
+  "schema": [
+    {
+      "n": 1,
+      "name": "Sequence",
+      "type": "int"
+    },
+    {
+      "n": 2,
+      "name": "Text",
+      "type": "string"
+    }
+  ]
+}

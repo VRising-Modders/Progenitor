@@ -1,0 +1,82 @@
+{
+  "name": "ecs",
+  "order": 40,
+  "title": "ECS toolkit: user census, singleton read, the tag-component refusal, Add/Write/Read/Remove",
+  "evidence": [
+    "208",
+    "211",
+    "213"
+  ],
+  "requires": {
+    "side": "server",
+    "ghostAdmin": true
+  },
+  "steps": [
+    {
+      "note": "Evidence 208 read '.ecs users withDisabled=2 default=2 connected=1 offline=1' and '.ecs singleton -> ServerRuntimeSettings found=True raw=True'; the UserMuteSingleton read threw an Il2CppException from the engine. Evidence 211 (FECS1) is the fix: Core refuses a zero-sized (tag) component before calling the engine and the reply reads found=True raw=False. Evidence 213 has the same line with tag=True and the .ecs tag walk. The user counts belong to the save, so only the shape is asserted."
+    },
+    {
+      "command": ".ecs users"
+    },
+    {
+      "sleepMs": 1200
+    },
+    {
+      "expectLog": "Sample ecs: users withDisabled=\\d+ default=\\d+ connected=\\d+ offline=\\d+"
+    },
+    {
+      "command": ".ecs singleton"
+    },
+    {
+      "sleepMs": 1200
+    },
+    {
+      "expectLog": "Sample ecs: singleton ServerRuntimeSettings found=True raw=True tag=False typeSize=0"
+    },
+    {
+      "note": "FECS1: the refusal, and no engine exception behind it."
+    },
+    {
+      "command": ".ecs singleton UserMuteSingleton"
+    },
+    {
+      "sleepMs": 1200
+    },
+    {
+      "expectLog": "Sample ecs: singleton UserMuteSingleton found=True raw=False tag=True typeSize=0"
+    },
+    {
+      "note": "The positive half of FECS1: Core's own refusal line, at Warning level, is what MUST be there — evidence 211. It is not the engine exception; the negative below is."
+    },
+    {
+      "expectLog": "\\[Warning\\] .*Singletons\\.TryGetRawRW\\(ProjectM\\.UserMuteSingleton \\[TypeIndex \\d+ \\(index \\d+\\)\\]\\): refused, zero-sized \\(tag\\) component"
+    },
+    {
+      "note": "The negative half: the engine must never be reached, so none of the three shapes evidence 208 saw may appear. 'zero sized component' on its own is NOT the test — that substring is inside Core's own refusal line above, which is why the first run of this case failed on itself. The engine's wording is 'zero sized component' preceded by 'This operation can not be called with'; Core's is 'zero-sized (tag) component'."
+    },
+    {
+      "expectNoLog": "Il2CppException",
+      "scope": "window"
+    },
+    {
+      "expectNoLog": "\\[Error\\] .*(AssertNotZeroSizedComponent|zero sized component)",
+      "scope": "window"
+    },
+    {
+      "expectNoLog": "\\[Error\\] .*(Singletons|UserMuteSingleton)",
+      "scope": "window"
+    },
+    {
+      "command": ".ecs tag"
+    },
+    {
+      "sleepMs": 1200
+    },
+    {
+      "expectLog": "Sample ecs: tag added=True wrote=\\(1\\.5, 2\\.5, 3\\.5\\) read=\\(1\\.5, 2\\.5, 3\\.5\\) removed=True destroyed=True"
+    },
+    {
+      "expectNoLog": "\\[Error\\] .*Sample \\.ecs"
+    }
+  ]
+}

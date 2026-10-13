@@ -1,0 +1,75 @@
+<Project>
+  <!--
+    Progenitor build version, computed from git at build time (docs/versioning.md).
+    Imported by Directory.Build.targets for every project; also buildable on its own:
+
+      dotnet msbuild tools/version/ProgenitorVersion.targets -t:ProgenitorComputeVersion -getProperty:ProgenitorVersion
+
+    Inputs (all optional):
+      ProgenitorVersion               explicit override (packaging/CI); skips git entirely
+      ProgenitorVersionProjectFile    project whose inputs scope the version; Directory.Build.targets
+                                      sets it to the project being built. Empty: whole repository.
+      ProgenitorVersionExtraInputs    more input paths (files or directories; ';'-separated)
+      ProgenitorRepoRoot              work tree to read (default: the repository this file is in)
+      ProgenitorGitExe                git executable (default: git on PATH)
+      ProgenitorMainRefs              main refs tried in order (default: origin/main;main)
+    Outputs:
+      ProgenitorVersion               year.month.release[.sub]   (string versions everywhere)
+      ProgenitorNumericVersion        year.month.release.sub     (AssemblyVersion / FileVersion)
+      ProgenitorThunderstoreVersion   year.month.release         (Thunderstore version_number)
+      ProgenitorSourceRevision        short sha of the component's last change, ".dirty" when an input is uncommitted
+      ProgenitorVersionInputs         the repo-relative inputs the version was scoped to
+  -->
+  <PropertyGroup>
+    <ProgenitorRepoRoot Condition="'$(ProgenitorRepoRoot)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..'))</ProgenitorRepoRoot>
+    <ProgenitorMainRefs Condition="'$(ProgenitorMainRefs)' == ''">origin/main;main</ProgenitorMainRefs>
+  </PropertyGroup>
+
+  <UsingTask TaskName="ProgenitorComputeVersionTask"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <Task>
+      <Code Type="Class" Language="cs" Source="$(MSBuildThisFileDirectory)ProgenitorVersionTask.cs" />
+    </Task>
+  </UsingTask>
+
+  <Target Name="ProgenitorComputeVersion">
+    <ProgenitorComputeVersionTask Condition="'$(ProgenitorVersion)' == ''"
+                                  RepoRoot="$(ProgenitorRepoRoot)"
+                                  GitExe="$(ProgenitorGitExe)"
+                                  MainRefs="$(ProgenitorMainRefs)"
+                                  ProjectFile="$(ProgenitorVersionProjectFile)"
+                                  ExtraInputs="$(ProgenitorVersionExtraInputs)">
+      <Output TaskParameter="Version" PropertyName="ProgenitorVersion" />
+      <Output TaskParameter="Revision" PropertyName="ProgenitorSourceRevision" />
+      <Output TaskParameter="Inputs" PropertyName="ProgenitorVersionInputs" />
+    </ProgenitorComputeVersionTask>
+
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(ProgenitorVersion)', '^\d+\.\d+\.\d+(\.\d+)?$'))"
+           Text="ProgenitorVersion '$(ProgenitorVersion)' must be year.month.release or year.month.release.sub (numbers only). See docs/versioning.md." />
+
+    <PropertyGroup>
+      <ProgenitorThunderstoreVersion>$([System.Text.RegularExpressions.Regex]::Match('$(ProgenitorVersion)', '^\d+\.\d+\.\d+').Value)</ProgenitorThunderstoreVersion>
+      <ProgenitorNumericVersion>$(ProgenitorVersion)</ProgenitorNumericVersion>
+      <ProgenitorNumericVersion Condition="'$(ProgenitorThunderstoreVersion)' == '$(ProgenitorVersion)'">$(ProgenitorVersion).0</ProgenitorNumericVersion>
+    </PropertyGroup>
+  </Target>
+
+  <!--
+    Applies the computed version to a project before anything reads it: PrepareForBuild runs
+    before GenerateAssemblyInfo and before BepInEx.PluginInfoProps' AddGeneratedFile
+    (BeforeCompile), which derives MyPluginInfo.PLUGIN_VERSION from $(Version) at execution time.
+  -->
+  <Target Name="ProgenitorApplyVersion"
+          BeforeTargets="PrepareForBuild;GetAssemblyVersion;GenerateNuspec"
+          DependsOnTargets="ProgenitorComputeVersion">
+    <PropertyGroup>
+      <Version>$(ProgenitorVersion)</Version>
+      <PackageVersion>$(ProgenitorVersion)</PackageVersion>
+      <AssemblyVersion>$(ProgenitorNumericVersion)</AssemblyVersion>
+      <FileVersion>$(ProgenitorNumericVersion)</FileVersion>
+      <InformationalVersion>$(ProgenitorVersion)</InformationalVersion>
+      <InformationalVersion Condition="'$(ProgenitorSourceRevision)' != ''">$(ProgenitorVersion)+$(ProgenitorSourceRevision)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+</Project>

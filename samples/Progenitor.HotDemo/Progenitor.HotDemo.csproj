@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.HotDemo</AssemblyName>
+    <RootNamespace>Progenitor.HotDemo</RootNamespace>
+    <Description>Client-capable dummy plugin for the Install tab's hot-load lane (job HOT2).</Description>
+    <BepInExPluginGuid>progenitor.hotdemo</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Hot Demo</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <!-- JOINFLOW4: -p:HotDemoRequired=true builds a required (ServerMustHave, Exact) copy at the build's version, the
+       hot-swappable mod of the "keep both versions" live recipe (docs/bridge-ops-join.md). Off by default. -->
+  <PropertyGroup Condition="'$(HotDemoRequired)' == 'true'">
+    <DefineConstants>$(DefineConstants);HOTDEMO_REQUIRED</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

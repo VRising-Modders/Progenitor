@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.ReloadExample</AssemblyName>
+    <RootNamespace>Progenitor.ReloadExample</RootNamespace>
+    <Description>Minimal server-only command and event lifecycle example.</Description>
+    <BepInExPluginGuid>progenitor.reloadexample</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Reload Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,593 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using Progenitor.Install;
+
+namespace Progenitor.Ui;
+
+// Settings scopes, step 2 (docs/settings-scopes.md, decided 2026-10-03): the game-free model.
+// Scope names and words, the owning half, the availability decision, "when" rules and the two-section
+// grouping of the mod page. Nothing here is drawn or sent yet: the page uses it from step 4, the wire
+// from step 5. Plain data and pure functions only — no game types, no plugin delegates held.
+
+/// <summary>Which half of a mod owns a setting's value.</summary>
+internal enum SettingOwner
+{
+    /// <summary>The client process registered it; its value is in the player's own cfg.</summary>
+    Client = 0,
+
+    /// <summary>The server owns it: a server-wide cfg value, or a per-player value the server keeps.</summary>
+    Server = 1,
+}
+
+/// <summary>Where this client stands with a server, as far as settings are concerned.</summary>
+internal enum SettingConnection
+{
+    /// <summary>Not in a game on any server.</summary>
+    NotConnected = 0,
+
+    /// <summary>Joined (or joining); the Progenitor handshake has not settled yet.</summary>
+    Waiting = 1,
+
+    /// <summary>Joined a server that did not answer the Progenitor handshake.</summary>
+    NotProgenitor = 2,
+
+    /// <summary>Joined a server whose Progenitor handshake was accepted.</summary>
+    Progenitor = 3,
+}
+
+/// <summary>Three-valued evidence: known yes, known no, or not known.</summary>
+internal enum SettingEvidence
+{
+    Unknown = 0,
+    Yes = 1,
+    No = 2,
+}
+
+/// <summary>What a row does when the half it needs is absent or unreachable (author's choice).</summary>
+internal enum AloneBehavior
+{
+    /// <summary>Grayed with the framework's reason (the default).</summary>
+    Gray = 0,
+
+    /// <summary>Not drawn at all: the setting makes no sense without the other half.</summary>
+    Hide = 1,
+}
+
+/// <summary>What the page does with one row.</summary>
+internal enum SettingRowState
+{
+    /// <summary>Drawn and editable.</summary>
+    Editable = 0,
+
+    /// <summary>Drawn with its value, read-only, with the <c>Admin only</c> note: a permission state, not grayed.</summary>
+    AdminOnly = 1,
+
+    /// <summary>Drawn grayed with a reason.</summary>
+    Grayed = 2,
+
+    /// <summary>Not drawn (author's <see cref="AloneBehavior.Hide"/>, or a false show-when rule).</summary>
+    Hidden = 3,
+}
+
+/// <summary>Scope words and helpers.</summary>
+internal static class SettingScopes
+{
+    /// <summary>The readback word for a scope: <c>personal</c> or <c>server-wide</c>.</summary>
+    public static string Word(SettingScope scope) => scope == SettingScope.ServerWide ? "server-wide" : "personal";
+
+    /// <summary>The readback word for an owner: <c>client</c> or <c>server</c>.</summary>
+    public static string Word(SettingOwner owner) => owner == SettingOwner.Server ? "server" : "client";
+
+    /// <summary>
+    /// The scope's name as readbacks wrote it before the aliases existed (<c>Local</c> / <c>Server</c>).
+    /// <see cref="SettingScope"/> now has two names per value, so <c>ToString()</c> no longer says which
+    /// one comes back; readbacks use this instead and stay byte-for-byte as they were.
+    /// </summary>
+    public static string LegacyName(SettingScope scope) => scope == SettingScope.ServerWide ? "Server" : "Local";
+
+    /// <summary>
+    /// The owning half a declaration implies. A Server-wide setting is always the server's, whichever
+    /// process declared it (a client half's synced bind only supplies its schema and default).
+    /// </summary>
+    public static SettingOwner OwnerOf(SettingScope scope, bool declaredByServer) =>
+        scope == SettingScope.ServerWide || declaredByServer ? SettingOwner.Server : SettingOwner.Client;
+}
+
+/// <summary>Everything one row's availability depends on. Plain values, so the matrix is testable.</summary>
+internal readonly struct SettingAvailabilityFacts
+{
+    public SettingScope Scope { get; init; }
+    public SettingOwner Owner { get; init; }
+    public SettingConnection Connection { get; init; }
+
+    /// <summary>The server said it can share settings (its settings manifest capability). Unknown before it said anything.</summary>
+    public SettingEvidence ServerSharesSettings { get; init; }
+
+    /// <summary>The server's settings manifest arrived for this join.</summary>
+    public bool ManifestArrived { get; init; }
+
+    /// <summary>The mod's server part runs on the joined server: Yes (named), No (proven absent, or paused for this server), Unknown.</summary>
+    public SettingEvidence ServerPart { get; init; }
+
+    /// <summary>The server's type and version for this setting match the client's (false: version mismatch).</summary>
+    public bool Compatible { get; init; }
+
+    /// <summary>The server authorized this player for server-wide edits (admin list or adminauth).</summary>
+    public bool CanEditServerWide { get; init; }
+
+    /// <summary>A client-owned row whose effect needs the mod's server part (<c>needsServerPart</c>).</summary>
+    public bool NeedsServerPart { get; init; }
+
+    /// <summary>The author's enabled-when rule holds (true when there is none).</summary>
+    public bool AuthorEnabled { get; init; }
+
+    /// <summary>The author's sentence for a false enabled-when rule; empty uses the default.</summary>
+    public string? AuthorReason { get; init; }
+
+    /// <summary>The author's visible-when rule holds (true when there is none).</summary>
+    public bool AuthorVisible { get; init; }
+
+    public AloneBehavior WhenAlone { get; init; }
+
+    /// <summary>Facts with nothing in the way: a joined Progenitor server whose manifest names the mod.</summary>
+    public static SettingAvailabilityFacts Ready(SettingScope scope, SettingOwner owner) => new()
+    {
+        Scope = scope,
+        Owner = owner,
+        Connection = SettingConnection.Progenitor,
+        ServerSharesSettings = SettingEvidence.Yes,
+        ManifestArrived = true,
+        ServerPart = SettingEvidence.Yes,
+        Compatible = true,
+        CanEditServerWide = false,
+        AuthorEnabled = true,
+        AuthorVisible = true,
+    };
+}
+
+/// <summary>One row's decided state, its reason code and the words the help line shows.</summary>
+internal readonly struct SettingAvailabilityResult
+{
+    public SettingAvailabilityResult(SettingRowState state, string code, string reason)
+    {
+        State = state;
+        Code = code ?? "";
+        Reason = reason ?? "";
+    }
+
+    public SettingRowState State { get; }
+
+    /// <summary>The readback code (<c>not-connected</c>, <c>admin-only</c>, …); empty when editable.</summary>
+    public string Code { get; }
+
+    /// <summary>The sentence for the help line; empty when editable.</summary>
+    public string Reason { get; }
+
+    public bool Editable => State == SettingRowState.Editable;
+}
+
+/// <summary>
+/// The framework's availability decision for one settings row (docs/settings-scopes.md,
+/// "Availability reasons"). Worst first: the first reason that applies wins.
+/// </summary>
+internal static class SettingAvailability
+{
+    public const string NotConnectedCode = "not-connected";
+    public const string WaitingCode = "waiting";
+    public const string NotProgenitorCode = "not-progenitor";
+    public const string ServerTooOldCode = "server-too-old";
+    public const string NeedsServerPartCode = "needs-server-part";
+    public const string VersionMismatchCode = "version-mismatch";
+    public const string AuthorCode = "author";
+    public const string AdminOnlyCode = "admin-only";
+    public const string HiddenCode = "hidden";
+
+    public const string NotConnectedReason = "Not connected to a server.";
+    public const string WaitingReason = "Waiting for the server…";
+    public const string NotProgenitorReason = "Server doesn't run Progenitor.";
+    public const string ServerTooOldReason = "Server's Progenitor can't share settings yet.";
+    public const string NeedsServerPartReason = "Needs the server part of this mod.";
+    public const string VersionMismatchReason = "Server runs a different version of this mod.";
+    public const string AuthorDefaultReason = "Not available right now.";
+    public const string AdminOnlyReason = "Only server admins can change this.";
+
+    /// <summary>The control-column note on an admin-only row: <c>Admin only · &lt;value&gt;</c>.</summary>
+    public const string AdminOnlyNote = "Admin only";
+
+    public static SettingAvailabilityResult Decide(in SettingAvailabilityFacts facts)
+    {
+        if (!facts.AuthorVisible) return new(SettingRowState.Hidden, HiddenCode, "");
+
+        bool serverOwned = facts.Owner == SettingOwner.Server || facts.Scope == SettingScope.ServerWide;
+        string code = serverOwned ? ServerOwnedBlock(facts) : facts.NeedsServerPart ? ServerPartBlock(facts) : "";
+
+        if (code.Length > 0)
+        {
+            if (facts.WhenAlone == AloneBehavior.Hide && MeansAlone(code)) return new(SettingRowState.Hidden, code, "");
+            return new(SettingRowState.Grayed, code, ReasonFor(code));
+        }
+
+        if (!facts.AuthorEnabled)
+        {
+            string sentence = string.IsNullOrWhiteSpace(facts.AuthorReason) ? AuthorDefaultReason : facts.AuthorReason!.Trim();
+            return new(SettingRowState.Grayed, AuthorCode, sentence);
+        }
+
+        if (facts.Scope == SettingScope.ServerWide && !facts.CanEditServerWide)
+            return new(SettingRowState.AdminOnly, AdminOnlyCode, AdminOnlyReason);
+
+        return new(SettingRowState.Editable, "", "");
+    }
+
+    /// <summary>The help-line sentence for a code (empty for an unknown or editable code).</summary>
+    public static string ReasonFor(string code) => code switch
+    {
+        NotConnectedCode => NotConnectedReason,
+        WaitingCode => WaitingReason,
+        NotProgenitorCode => NotProgenitorReason,
+        ServerTooOldCode => ServerTooOldReason,
+        NeedsServerPartCode => NeedsServerPartReason,
+        VersionMismatchCode => VersionMismatchReason,
+        AuthorCode => AuthorDefaultReason,
+        AdminOnlyCode => AdminOnlyReason,
+        _ => "",
+    };
+
+    /// <summary>
+    /// Codes that mean the other half is absent or unreachable, where an author's
+    /// <see cref="AloneBehavior.Hide"/> applies. A wait, a version mismatch and the author's own rule
+    /// are not "alone": the row stays drawn, grayed.
+    /// </summary>
+    public static bool MeansAlone(string code) =>
+        code is NotConnectedCode or NotProgenitorCode or ServerTooOldCode or NeedsServerPartCode;
+
+    private static string ServerOwnedBlock(in SettingAvailabilityFacts facts)
+    {
+        string connection = ConnectionBlock(facts.Connection);
+        if (connection.Length > 0) return connection;
+        if (facts.ServerSharesSettings == SettingEvidence.No) return ServerTooOldCode;
+        if (!facts.ManifestArrived) return WaitingCode;
+        if (facts.ServerPart == SettingEvidence.No) return NeedsServerPartCode;
+        // With the manifest in hand, a mod it does not name is absent: Unknown means the same here.
+        if (facts.ServerPart == SettingEvidence.Unknown) return NeedsServerPartCode;
+        if (!facts.Compatible) return VersionMismatchCode;
+        return "";
+    }
+
+    // A client-owned needsServerPart row: today's rule, unknown grays (only positive evidence enables it).
+    private static string ServerPartBlock(in SettingAvailabilityFacts facts)
+    {
+        string connection = ConnectionBlock(facts.Connection);
+        if (connection.Length > 0) return connection;
+        return facts.ServerPart == SettingEvidence.Yes ? "" : NeedsServerPartCode;
+    }
+
+    private static string ConnectionBlock(SettingConnection connection) => connection switch
+    {
+        SettingConnection.NotConnected => NotConnectedCode,
+        SettingConnection.Waiting => WaitingCode,
+        SettingConnection.NotProgenitor => NotProgenitorCode,
+        _ => "",
+    };
+}
+
+/// <summary>Comparison a <see cref="SettingCondition"/> leaf makes.</summary>
+internal enum SettingConditionOp
+{
+    On = 0,
+    Off = 1,
+    EqualTo = 2,
+    NotEqualTo = 3,
+    In = 4,
+    AtLeast = 5,
+    AtMost = 6,
+    All = 7,
+    Any = 8,
+    Not = 9,
+}
+
+/// <summary>
+/// A declarative enabled-when / visible-when rule over this mod's own settings. Plain data, so a
+/// server can send it to a client that evaluates it over the values it holds. Built with
+/// <see cref="When"/>. A rule over a value the client cannot read is false.
+/// </summary>
+internal sealed class SettingCondition
+{
+    /// <summary>The deepest a rule may nest (a leaf alone is depth 1).</summary>
+    public const int MaxDepth = 4;
+
+    /// <summary>The most leaves one rule may hold.</summary>
+    public const int MaxTerms = 16;
+
+    internal SettingCondition(SettingConditionOp op, string settingId, IReadOnlyList<string> operands, IReadOnlyList<SettingCondition> children)
+    {
+        Op = op;
+        SettingId = settingId;
+        Operands = operands;
+        Children = children;
+        Depth = 1;
+        Terms = children.Count == 0 ? 1 : 0;
+        foreach (var child in children)
+        {
+            Depth = Math.Max(Depth, child.Depth + 1);
+            Terms += child.Terms;
+        }
+        if (Depth > MaxDepth) throw new ArgumentException("A setting rule may nest at most " + MaxDepth + " deep.");
+        if (Terms > MaxTerms) throw new ArgumentException("A setting rule may hold at most " + MaxTerms + " terms.");
+    }
+
+    public SettingConditionOp Op { get; }
+
+    /// <summary><c>Section/Key</c> of the setting a leaf reads; empty on All / Any / Not.</summary>
+    public string SettingId { get; }
+
+    public IReadOnlyList<string> Operands { get; }
+    public IReadOnlyList<SettingCondition> Children { get; }
+    public int Depth { get; }
+    public int Terms { get; }
+
+    /// <summary>Every <c>Section/Key</c> this rule reads, once each, in first-use order.</summary>
+    public IReadOnlyList<string> Reads()
+    {
+        var ids = new List<string>();
+        Collect(this, ids);
+        return ids;
+    }
+
+    private static void Collect(SettingCondition rule, List<string> ids)
+    {
+        if (rule.SettingId.Length > 0 && !ids.Contains(rule.SettingId)) ids.Add(rule.SettingId);
+        foreach (var child in rule.Children) Collect(child, ids);
+    }
+
+    /// <summary>
+    /// Evaluate over <paramref name="read"/>, which answers a <c>Section/Key</c> with its current value
+    /// as the settings editors format it, or null when this client cannot read it. An unreadable value
+    /// makes its leaf false (so <c>Not</c> of it is true: write <c>Not</c> rules with that in mind).
+    /// Text compares ignoring case; numbers compare as invariant-culture doubles.
+    /// </summary>
+    public bool Evaluate(Func<string, string?> read)
+    {
+        if (read == null) throw new ArgumentNullException(nameof(read));
+        switch (Op)
+        {
+            case SettingConditionOp.All:
+                foreach (var child in Children) if (!child.Evaluate(read)) return false;
+                return true;
+            case SettingConditionOp.Any:
+                foreach (var child in Children) if (child.Evaluate(read)) return true;
+                return false;
+            case SettingConditionOp.Not:
+                return !Children[0].Evaluate(read);
+        }
+
+        string? value;
+        try { value = read(SettingId); }
+        catch { value = null; }
+        if (value == null) return false;
+        value = value.Trim();
+
+        switch (Op)
+        {
+            case SettingConditionOp.On: return TryBool(value, out bool on) && on;
+            case SettingConditionOp.Off: return TryBool(value, out bool off) && !off;
+            case SettingConditionOp.EqualTo: return Same(value, Operands[0]);
+            case SettingConditionOp.NotEqualTo: return !Same(value, Operands[0]);
+            case SettingConditionOp.In:
+                foreach (var operand in Operands) if (Same(value, operand)) return true;
+                return false;
+            case SettingConditionOp.AtLeast:
+                return TryNumber(value, out double a) && TryNumber(Operands[0], out double min) && a >= min;
+            case SettingConditionOp.AtMost:
+                return TryNumber(value, out double b) && TryNumber(Operands[0], out double max) && b <= max;
+            default: return false;
+        }
+    }
+
+    private static bool Same(string value, string operand)
+    {
+        if (TryNumber(value, out double x) && TryNumber(operand, out double y)) return x.Equals(y);
+        if (TryBool(value, out bool p) && TryBool(operand, out bool q)) return p == q;
+        return string.Equals(value, (operand ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryBool(string text, out bool value) => bool.TryParse((text ?? "").Trim(), out value);
+
+    private static bool TryNumber(string text, out double value) =>
+        double.TryParse((text ?? "").Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+        && !double.IsNaN(value);
+}
+
+/// <summary>Builders for <see cref="SettingCondition"/>. A setting is named <c>Section/Key</c> within the same mod.</summary>
+internal static class When
+{
+    public static SettingCondition On(string settingId) => Leaf(SettingConditionOp.On, settingId);
+    public static SettingCondition Off(string settingId) => Leaf(SettingConditionOp.Off, settingId);
+
+    public static SettingCondition EqualTo(string settingId, object value) =>
+        Leaf(SettingConditionOp.EqualTo, settingId, Text(value));
+
+    public static SettingCondition NotEqualTo(string settingId, object value) =>
+        Leaf(SettingConditionOp.NotEqualTo, settingId, Text(value));
+
+    public static SettingCondition In(string settingId, params object[] values)
+    {
+        if (values == null || values.Length == 0) throw new ArgumentException("In needs at least one value.", nameof(values));
+        return Leaf(SettingConditionOp.In, settingId, Array.ConvertAll(values, Text));
+    }
+
+    public static SettingCondition AtLeast(string settingId, double value) =>
+        Leaf(SettingConditionOp.AtLeast, settingId, Text(value));
+
+    public static SettingCondition AtMost(string settingId, double value) =>
+        Leaf(SettingConditionOp.AtMost, settingId, Text(value));
+
+    public static SettingCondition All(params SettingCondition[] rules) => Group(SettingConditionOp.All, rules);
+    public static SettingCondition Any(params SettingCondition[] rules) => Group(SettingConditionOp.Any, rules);
+
+    public static SettingCondition Not(SettingCondition rule)
+    {
+        if (rule == null) throw new ArgumentNullException(nameof(rule));
+        return new SettingCondition(SettingConditionOp.Not, "", Array.Empty<string>(), new[] { rule });
+    }
+
+    /// <summary>
+    /// <c>Section/Key</c>, trimmed. Exactly one slash, neither part empty: a rule names a setting of
+    /// its own mod, never <c>guid/Section/Key</c> of another.
+    /// </summary>
+    public static string CheckId(string settingId)
+    {
+        string id = (settingId ?? "").Trim();
+        int slash = id.IndexOf('/');
+        if (slash <= 0 || slash == id.Length - 1 || id.IndexOf('/', slash + 1) >= 0)
+            throw new ArgumentException("Name the setting as Section/Key of this mod: '" + id + "'.", nameof(settingId));
+        return id;
+    }
+
+    private static SettingCondition Leaf(SettingConditionOp op, string settingId, params string[] operands) =>
+        new(op, CheckId(settingId), operands, Array.Empty<SettingCondition>());
+
+    private static SettingCondition Group(SettingConditionOp op, SettingCondition[] rules)
+    {
+        if (rules == null || rules.Length == 0) throw new ArgumentException(op + " needs at least one rule.", nameof(rules));
+        foreach (var rule in rules) if (rule == null) throw new ArgumentNullException(nameof(rules));
+        return new SettingCondition(op, "", Array.Empty<string>(), (SettingCondition[])rules.Clone());
+    }
+
+    private static string Text(object value) => value switch
+    {
+        null => throw new ArgumentNullException(nameof(value)),
+        bool b => b ? "true" : "false",
+        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? "",
+    };
+}
+
+/// <summary>One settings row as the grouping sees it.</summary>
+internal readonly struct ScopedRow
+{
+    public ScopedRow(string id, SettingScope scope, string authorSection, SettingRowState state)
+    {
+        Id = id ?? "";
+        Scope = scope;
+        AuthorSection = (authorSection ?? "").Trim();
+        State = state;
+    }
+
+    public string Id { get; }
+    public SettingScope Scope { get; }
+
+    /// <summary>The author's section title (<c>ctx.Settings.Page(...).Section</c>, a <c>.Settings</c> group, General, Keys…); empty for none.</summary>
+    public string AuthorSection { get; }
+
+    public SettingRowState State { get; }
+}
+
+/// <summary>An author subheading inside a scope section, and its rows in declared order.</summary>
+internal sealed class ScopedSubsection
+{
+    public ScopedSubsection(string title) => Title = title ?? "";
+
+    /// <summary>The subheading; empty draws none (rows before any section, or a title the scope heading already says).</summary>
+    public string Title { get; }
+
+    public List<ScopedRow> Rows { get; } = new();
+}
+
+/// <summary>One of the page's two scope sections.</summary>
+internal sealed class ScopedSection
+{
+    public ScopedSection(SettingScope scope, string heading, string line)
+    {
+        Scope = scope;
+        Heading = heading;
+        Line = line;
+    }
+
+    public SettingScope Scope { get; }
+
+    /// <summary><c>Your settings</c> or <c>Server settings</c>.</summary>
+    public string Heading { get; }
+
+    /// <summary>The one line under the heading (Server settings: <c>Applies to everyone on …</c>); empty for none.</summary>
+    public string Line { get; }
+
+    public List<ScopedSubsection> Subsections { get; } = new();
+
+    public int RowCount
+    {
+        get
+        {
+            int n = 0;
+            foreach (var sub in Subsections) n += sub.Rows.Count;
+            return n;
+        }
+    }
+}
+
+/// <summary>
+/// The mod page's two sections (decided 2026-10-03): <b>Your settings</b> (Personal) then
+/// <b>Server settings</b> (Server-wide), one list, no tabs. The author's sections become subheadings
+/// inside the scope their rows belong to, in declared order; hidden rows are dropped; an empty
+/// subheading or section is omitted.
+/// </summary>
+internal static class SettingScopeSections
+{
+    public const string YourHeading = "Your settings";
+    public const string ServerHeading = "Server settings";
+    public const string AppliesPrefix = "Applies to everyone on ";
+    public const string AppliesNotConnected = "Applies to everyone on the server you join";
+
+    /// <summary>
+    /// Author section titles that only restate a scope heading. Under the new headings they would read
+    /// <c>Your settings › Personal</c>, so the subheading is dropped and the rows keep their order.
+    /// </summary>
+    internal static readonly string[] RedundantTitles =
+    {
+        "Personal", "Your settings", "Client", "Local", "Server", "Server settings", "Server-wide", "Server wide",
+    };
+
+    /// <summary>
+    /// <c>Applies to everyone on &lt;server&gt;</c>: the server's name when known, else its address, cut
+    /// in the middle like a confirmation title (<see cref="ServerIdentity.TitleName"/>); when not
+    /// connected, <see cref="AppliesNotConnected"/>.
+    /// </summary>
+    public static string ServerLine(bool connected, string? serverName, string? address)
+    {
+        if (!connected) return AppliesNotConnected;
+        return AppliesPrefix + ServerIdentity.Connected(serverName, address).TitleName;
+    }
+
+    public static IReadOnlyList<ScopedSection> Group(IEnumerable<ScopedRow> rows, string serverLine)
+    {
+        if (rows == null) throw new ArgumentNullException(nameof(rows));
+        var personal = new ScopedSection(SettingScope.Personal, YourHeading, "");
+        var server = new ScopedSection(SettingScope.ServerWide, ServerHeading, serverLine ?? "");
+        foreach (var row in rows)
+        {
+            if (row.State == SettingRowState.Hidden) continue;
+            var section = row.Scope == SettingScope.ServerWide ? server : personal;
+            string title = IsRedundant(row.AuthorSection) ? "" : row.AuthorSection;
+            ScopedSubsection? target = null;
+            foreach (var sub in section.Subsections)
+                if (string.Equals(sub.Title, title, StringComparison.OrdinalIgnoreCase)) { target = sub; break; }
+            if (target == null) section.Subsections.Add(target = new ScopedSubsection(title));
+            target.Rows.Add(row);
+        }
+
+        var result = new List<ScopedSection>(2);
+        if (personal.RowCount > 0) result.Add(personal);
+        if (server.RowCount > 0) result.Add(server);
+        return result;
+    }
+
+    public static bool IsRedundant(string? title)
+    {
+        string t = (title ?? "").Trim();
+        if (t.Length == 0) return true;
+        foreach (var word in RedundantTitles)
+            if (string.Equals(t, word, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+}

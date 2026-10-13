@@ -1,0 +1,30 @@
+{
+  "name": "input-shortcut-and-escape",
+  "world": "connected",
+  "summary": "OS-injected configured shortcut from gameplay opens Mods; Escape hides (documented close/back). Typing in search does not fire gameplay keybinds; capture is released after close.",
+  "site": "top-tab",
+  "shortcut": "F10",
+  "notes": [
+    "Acceptance procedure — not run. Connected gameplay. `--side client`. Evidence: os-injected. The shortcut is `mods_ui` status `after.shortcut` (configured chord, e.g. F10). If that field is absent, this case's `shortcut` field is used. This is not `mods_ui open site=shortcut` (handler-invocation).",
+    "Escape / Bootstrap Back hides every shown Progenitor panel and does not call ModsMenu.Close(); IsOpen then reads false and the curtain drops (docs/mods-menu.md Close and back). Assert after.open=false, after.curtain=false, after.modsCapture=false.",
+    "With the search input focused, type letters and assert no client keybind/ability lines in that window (`count` 0, sinceRecord on the type). After close, after.modsCapture=false (gameplay input returns). Prerequisite: unlocked workstation, game window can take foreground."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "input", "name": "shortcut from gameplay", "action": "key", "keys": "@record:baselineResolution.after.shortcut", "label": "os-injected", "record": "shortcutPress" },
+    { "kind": "op", "name": "status open after shortcut", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "after.modsCapture": true } },
+    { "kind": "input", "name": "press Escape", "action": "key", "keys": "Escape", "label": "os-injected" },
+    { "kind": "op", "name": "status hidden after Escape", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "reopen for search", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "input", "name": "click search", "action": "click", "target": { "rectOf": "search" }, "label": "os-injected" },
+    { "kind": "input", "name": "type in search", "action": "type", "text": "abc", "label": "os-injected", "record": "typedInSearch" },
+    { "kind": "log", "name": "no keybind or ability while typing", "side": "client", "filter": "", "regex": "Ui: keybind |ability", "count": 0, "sinceRecord": "typedInSearch", "timeoutMs": 2000 },
+    { "kind": "op", "name": "close after search type", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "status gameplay input returned", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

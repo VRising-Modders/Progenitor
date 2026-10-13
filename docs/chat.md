@@ -1,0 +1,210 @@
+# Chat box improvements
+
+Progenitor improves the game's own chat box on the client. It keeps the game's input line, sending, channel cycling, whispers, mute and profanity filter, and adds behavior around them. It is built into Core, with no plugin API. Server-side chat sending for plugins is a separate contract: `ctx.Chat` in [api.md](api.md#chat).
+
+Design decisions were made 2026-10-07. The game facts below come from the client's chat code.
+
+## The game's chat box (defaults Progenitor builds on)
+
+| Behavior | Game default |
+|---|---|
+| Fade | While open and not focused, the box starts fading **14 seconds** after the last message (a constant in the game's code, not a setting), fades over about a second, then closes. |
+| Lines shown | At most **50** lines, pooled across all channels. The full message list is kept separately. |
+| Channel filter | One channel at a time (`ChatMode` All, Global, Allies, Whispers, Local); no multi-channel filter. |
+| Player text | Wrapped in `<noparse>`, so players cannot add formatting; nothing in the game makes a clickable link. |
+| Hovering the box | Takes only the camera zoom axis. Mouse buttons reach gameplay: clicking the box attacks or turns the camera. |
+| Position | The game never sets the box's position; it only moves it between the HUD and the clan menu. |
+| Sender admin flag | Every client knows whether a sender is an admin (it colors admin names). |
+| System messages | Server notices, admin announcements and mod command replies all arrive as one type (System). |
+
+## Stage 1: as built
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatWindowLogicTests`, `ProgenitorPageTests`, `ThreeHomesTests`, `UiInputMaskTests`).
+
+**Live (2026-10-07, Steam client on the isolated test server, Core 2026.10.107.1 from commit 00f4e7a2):**
+- **Visibility verified live.** The click guard registered with the mask live on join. A server chat line was still fully shown 24 s after it arrived (the game alone fades at 14 s), and the box was closed 31 s after an earlier line, which matches the 30 s setting.
+- **Click guard verified live** (same day, with the Dev [`mouse`](bridge-ops-client.md#mouse) op and the server's cast counter for the player): three left clicks on the visible chat log started no attack (+0), three control clicks in the middle of the screen started three (+3), and with **Clicking chat doesn't attack** off three clicks on the chat log started three (+3). The guard also registered again on a second join.
+- **Keep chat on screen verified live:** a line was still fully shown 55 s after it arrived.
+- **Not yet live-verified:** right click (camera turn) on the box, a drag that starts outside and crosses it, hover keep-up and an in-world Core swap.
+
+Settings: `[Chat]` in `BepInEx/config/progenitor.ui.cfg`, also on Progenitor's page (**Mods → Progenitor → Your settings → Chat**). Each takes effect immediately.
+
+| Setting | Key | Default | What it does |
+|---|---|---|---|
+| Seconds chat stays on screen | `VisibleSeconds` | 30 | How long the box stays up after the last message before it fades. 14–600; 14 is the game's own. |
+| Keep chat on screen | `KeepVisible` | off | Never fade. Escape still closes the box. |
+| Keep chat up while the mouse is over it | `StayWhileHovered` | on | The countdown restarts while the pointer rests on the box. |
+| Clicking chat doesn't attack | `ClickSafe` | on | A click on the box doesn't attack, turn the camera or use another mouse action. |
+
+**How it works.** `Progenitor.Chat.ChatWindow` runs just before the game's `ClientChatSystem` update and moves the game's `_MessageTime` forward, never backward and never past now (`ChatVisibility`). The click guard is a third Progenitor input context at order 97 (`UiInputCapture.ChatClickGuardOrder`). It is registered once per client world, and it shares the input mask the mod panels use. It takes only gameplay actions bound to a mouse button: attack, camera turn, build place and pick up, plus any eligible action bound to the middle, back or forward button. Keyboard keys, push-to-talk, the map and menus are never taken. A press that starts on the box stays blocked until release; a press that starts elsewhere, such as a camera drag, is never cut off as it crosses the box. If the chat update stops, a frame watchdog drops the guard.
+
+**Where clicks are taken.** Over the message log (the same area the game's own hover test uses), over its scroll bar, which sits just outside the log's left edge, and over the input line while it shows, and only while the box is on screen: not after it fades, and not while the HUD is hidden. The area stays for as long as the box is shown, so a longer visibility time also keeps it longer. The guard is armed only when Core's UI module is installed, because that module's teardown releases the input mask it shares.
+
+**Limitations.**
+- The left and right buttons are taken by action, because the game reports their bindings only as display text. A player who moved attack to a keyboard key loses that key while the pointer rests on the chat box.
+- A mouse binding with a modifier (Shift+Mouse 4) is not taken.
+- Any new message restarts the countdown, including one the game's channel filter hides.
+
+### Live acceptance (steps 1, 3 left click and 5 passed; the rest not run)
+
+Steam client in a world on the isolated test server, with the client free for a short foreground test:
+
+1. Receive a message. The box stays up for about 30 s instead of 14, then fades. With **Keep chat on screen** on, it stays until Escape.
+2. Rest the pointer on the box past the timeout: it stays up, and fades `VisibleSeconds` after the pointer leaves.
+3. Left-click and right-click the box while it shows, both focused and unfocused: no attack and no camera turn. Scrolling still scrolls; typing and sending still work.
+4. Start a right-drag outside the box and cross it: the camera keeps turning. Hold attack and cross the box: the attack continues.
+5. Turn **Clicking chat doesn't attack** off: clicks reach the game again. Leave the world and rejoin: the guard registers again (one `Chat: click guard registered` line per world).
+6. Hot-swap Core while in a world: no stuck input, and the log shows the guard removed and registered again.
+
+## Chat commands: as built (CHAT2)
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatCommandLogicTests`, `KeybindTabTests` chat-scope cases, `ProgenitorPageTests`). **Verified live 2026-10-07** on the Steam client in the test server, with chat opened by the Dev `key` op and the line set in the field: `/r hello` became `/reply hello`; `/w` plus the start of the test character's name and Tab completed the name with the channel unchanged; `/w zz` plus Tab (no match) left the line and cycled the channel as the game does. Not live-verified: completing another player's name (only one player was online), and remapping the key off Tab.
+
+**What the game already has.** `/w name message` and `/whisper name message` (the name must match exactly, otherwise "No vampire with that name found"), `/reply message`, the channel switches `/local`, `/global`, `/allies`, `/a`, `/team`, `/clan` and `/system`, and the clan, kill, stats and pvp commands. It has no `/r` and no name completion.
+
+| Addition | How it behaves | Setting |
+|---|---|---|
+| `/r` | Typing `/r ` at the start of a chat line continues your latest whisper conversation, in either direction: it becomes `/w <partner> `, where the partner is the sender of the last whisper you received or the player you last whispered (yourself included). With no whisper yet it becomes the game's `/reply `, which says "There are no whispers to reply!". The game's own `/reply` answers only whispers received, and it keeps no record of whom you whispered (its whisper target is cleared after sending, and a sent whisper's entry names you), so Progenitor remembers the target you typed (`/w name`) or the whisper mode's target when your sent whisper appears. | **/r replies to the last whisper** (`ReplyShortcut`, on) |
+| Name completion | While the line is `/w ` or `/whisper ` followed by part of a name and nothing after it, **Tab** fills in the first online player whose name starts with it (ignoring case), then a space. Pressing Tab again on that line cycles through the other matches. Typing anything else starts over. While typing the name, up to three matching online players show above the line (your own name included, so a whisper to yourself completes too), the first marked with the key; with no match it says no player online has that name. For testing alone, `[Chat] TestNames` (cfg only, empty by default) adds names the suggestions offer as if online; they are not players. | **Tab completes names after /w** (`NameCompletion`, on) |
+
+**The completion key** is the Core keybind `ChatCompleteName` (default Tab), listed under Keys and in the Keybinds tab, where it can be remapped. It is a chat-scope bind: it works only while typing in chat and is the only kind of bind that runs then. The game also uses Tab in chat to cycle the channel, and it reads the Tab key itself rather than through a remappable action, so nothing can stop the cycle before it happens. While a Tab press completes a name, Progenitor puts the channel (and its placeholder) back right after the game's chat update, so one press does one thing. Elsewhere Tab cycles the channel as before; with the completion key moved off Tab, Tab only cycles.
+
+**Names** come from the client world's connected `User` entities. Your own name is not filtered out: finding the local user would need a new generic instantiation over a game type, and whispering yourself only shows the game's own answer. Whether the client holds `User` entities for players outside its view is not yet checked live.
+
+## Command hints (data)
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatCommandHintsTests`). **Not live-verified.** This is the data behind the hint line that lists the server's `.` commands while a player types one; drawing that line is separate (`ChatWindow`).
+
+**What a player gets.** The commands that player can run on the joined server, at most 200, sorted by text:
+
+| Field | Content |
+|---|---|
+| Command | The exact text to type, prefix included. The root shortcut when the routing table publishes one (`.help`, `.army summon`, a renamed shortcut under its new name); otherwise the qualified form (`.p <owner> [group] <name>`), as for a shortcut an administrator disabled or one two mods both claim ([command routing](roadmap.md)). |
+| Usage | The usage of every form this player may run, joined with ` \| `: the author's `usage` when set, else the command and its parameters (`<required>`, `[optional]`, `<rest...>`). At most 160 characters. |
+| Help | The command's description, on one line, at most 120 characters (a clipped line ends in `...`). |
+
+A command whose every form is `adminOnly` is not listed for a player who is not an admin, and an admin-only form of a mixed command adds neither its usage nor its help. The admin test is the one an `adminOnly` command applies (`User.IsAdmin`, or the player hosting the game).
+
+**Channel.** Core-reserved event id **`'PrCh'`** (`CustomEventPolicy.ChatCommandHintsEventId` = `0x50724368`), both directions, with a version byte and a kind byte (`Chat/ChatCommandHintsWire.cs`):
+
+1. The client declares `Handshake.Capability.CommandHints` (1024) in its handshake answer.
+2. After an ok handshake the server sends that client a **hello** carrying a stamp (the command registry's generation). Only a client that declared the bit gets it, and a client never sends on `'PrCh'` before a hello, so neither side sends the id to a peer without a handler. A server without Progenitor, or with an older Progenitor, never sends a hello: the client has no hints.
+3. The first time the chat line needs hints (`ChatCommandHints.RequestIfNeeded`), the client sends a **request** with a nonce. Requests are at least 5 s apart, time out after 10 s, and stop after 3 unanswered tries until the next hello.
+4. The server re-reads the sender's `User`, requires its handshake to be ok, answers at most one request per player every 2 s, and sends the catalog to that player only as **pages** of at most 12 KiB each (the transport limit is 15 KiB). The client keeps a catalog only when every page of its own request has arrived.
+5. When the server's command list changes (a plugin loads or unloads, routing settings are applied), the server waits until it has been stable for 1 s and sends a new hello to every capable client; the client's next `RequestIfNeeded` asks again and keeps the old catalog until the new one is complete. A server Core reload forgets which clients were sent a hello, so those clients learn of later changes on their next connection.
+
+The client forgets the catalog when the connection ends (`Handshake.ServerContextCleared`) and when Core unloads.
+
+**Client API** (internal, `Chat/ChatCommandHints.cs`): `RequestIfNeeded()`, cheap enough to call every frame while the line starts with the prefix; `Available`, true once a catalog is held; `Match(typed, max)`, which matches the typed line (leading spaces dropped, repeated spaces read as one) case-insensitively against each command's text. A command matches when its text starts with the line, or when the line is that command followed by a space and arguments. Commands the line already names come first (the longest first), then the rest, shortest first, then alphabetically.
+
+**Acceptance procedure — not run** (isolated test server, Steam client):
+1. Join as a player who is not an admin. Type `.` in chat: the client sends one `'PrCh'` request and holds a catalog with no admin-only commands. Typing more does not send another request.
+2. Join as an admin: admin-only commands such as `.stop-server` are in the catalog.
+3. Hot-load a sample with commands on the server: within a few seconds the client is sent a hello, and its next request lists the sample's commands. Remove the sample: they disappear the same way.
+4. Join a server without Progenitor: no `'PrCh'` packet is sent and there are no hints.
+
+## Settings on both sides
+
+Every chat feature ships with its settings in the same change (decided 2026-10-07). Each feature has a player setting, and a server setting where the server has a say.
+
+- **Player (client):** Progenitor's page, **Your settings → Chat**, stored in `[Chat]` of `progenitor.ui.cfg`. Personal look and behavior that affects only this player.
+- **Server:** a **Chat** group in the **Server** tab, server-wide and edited by admins through the existing admin edit path. It holds what the server decides for everyone: whether a feature is allowed, limits, and moderation. A server setting can turn a feature off for everyone; it never changes a player's personal look. When a server has no Progenitor, the player settings still apply to features that work client-only, and server-dependent features show why they are unavailable.
+
+| Feature | Player setting (Your settings → Chat) | Server setting (Server tab → Chat) | Stage |
+|---|---|---|---|
+| Visibility | Seconds on screen, keep on screen, keep up while hovered | none | 1 (built) |
+| Click-safe chat box | Clicking chat doesn't attack | none | 1 (built) |
+| `/r` and name completion | `/r` replies to the last whisper; Tab completes names after `/w` (the key is under Keys) | none | CHAT2 (built) |
+| Chat view (tabs, history, links, mentions) | Progenitor's chat lines (on); text size | none | CHAT5 (built) |
+| Tabs and window | Tabs (from the tab line), lock position, background opacity; position and size by dragging | none | CHAT6 (built) |
+| Web links | Confirm before opening (always) | **Allow clickable links** | CHAT5 (built) |
+| Mod links | Share / Copy link on mod rows and pages | **Allow mod links** | CHAT4 (built) |
+| Mentions | Highlight mentions, play a sound, watched words | **Allow @all from admins** | CHAT5 (built) |
+| History | Keep chat between sessions, lines kept per server | none | CHAT5 (built) |
+| Repeat counts, timestamps | One toggle each | none | CHAT5 (built) |
+| Recall, copy, mute | Up and Down bring back sent lines; muted players (right-click a line) | none | CHAT7 (built) |
+| Location and item links | none (`/loc`, `/item`) | none | CHAT8 (built) |
+| Long messages | Send long lines in parts | **Allow long messages**, **Longest long message** | CHAT9 (built) |
+| Command hints | Show command hints after "." | none | CHAT10 (built) |
+| Mod suggestions | Suggest mods after "[mod:" | **Allow mod links** | CHAT11 (built) |
+| Word filter, Discord relay | none | **Word filter**, **Filtered words**, **When a word matches**; **Discord relay**, **Discord webhook address**, one switch per relayed channel | built (server) |
+
+### Server settings (as built)
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatWordFilterTests`, `ChatRelayTests`, `ServerChatPolicyTests`, `ServerChatOptionsTests`, and the Server tab cases in `ThreeHomesTests` and `ServerSettingsStage5Tests`). **Not live-verified**: nothing below has run in the game yet.
+
+The **Chat** group of the **Server** tab follows **Server rules**: like the rules, it is what the server decides for every player, ahead of the two admin-only groups (Players without Progenitor, Operator). Its heading is **Chat on this server** and the left list names it **Chat**: Progenitor's page and the Server tab are split by group title, and **Chat** is already Your settings' group.
+
+| Row | Default | Stored in | Who sees it |
+|---|---|---|---|
+| Allow clickable links | on | `progenitor.serverchat.cfg` `[ServerChat] AllowLinks` | every player (synced) |
+| Allow mod links | on | `[ServerChat] AllowModLinks` | every player (synced) |
+| Allow @all from admins | on | `[ServerChat] AllowAtAll` | every player (synced) |
+| Allow long messages | on | `[ServerChat] AllowLongMessages` | every player (synced) |
+| Longest long message | 1000 characters (200 to 4000; a value outside is clamped) | `[ServerChat] MaxLongMessageChars` | every player (synced) |
+| Word filter | off | the server's `progenitor.cfg` `[ChatFilter] Enabled` | admins only |
+| Filtered words | empty | `[ChatFilter] Words` (comma separated, at most 2000 characters, 200 words of up to 64 characters) | admins only |
+| When a word matches | Replace with \*\*\* | `[ChatFilter] Action` (`replace` or `block`) | admins only |
+| Discord relay | off | `[ChatRelay] Enabled` | admins only |
+| Discord webhook address | empty | `[ChatRelay] WebhookUrl` | nobody: the row reads **Set** or **Not set** |
+| Relay Global chat, Relay System lines | on | `[ChatRelay] Global`, `System` | admins only |
+| Relay Local chat, Relay clan chat, Relay whispers | off | `[ChatRelay] Local`, `Clan`, `Whispers` | admins only |
+
+**How the policy reaches players.** The five synced rows are ConfigSync rows of Progenitor (`progenitor/ServerChat/<key>`), sent to every client that answered the handshake and edited by admins through the server-wide edit path (authorization, rate limit, audit, lock list). A client fills `ChatPolicy` from them twice a second while ConfigSync holds the server's values, and goes back to `ChatPolicy.Defaults` (everything allowed, 1000 characters) when it leaves the server, when the server has no Progenitor or an older one, and when Core unloads. The filter and relay rows travel only on the admin channel to admins of the joined server; the word list is never sent to other players, and the webhook address is never sent at all.
+
+**Word filter.** It runs on the server in Core's chat hook, after every `ChatMessage` subscriber (a plugin sees the line as typed, and a line a command cancelled is not filtered). Matching ignores case and takes whole words or phrases only: a match may not touch a letter, digit or `_` on either side, so `ass` does not match `class`.
+- **Replace with \*\*\*** writes the masked text into the game's own chat event before the game picks the recipients, so Global, Local (48 m), clan, whisper and the game's mute rules stay the game's own. For Global, Local, clan and whisper lines the game never sends a line back to its speaker, so the speaker's own chat still shows what they typed (an admin's System line does come back, masked). The write is the same typed component write the Dev bridge's `command` op makes; it is not yet verified live in the chat hook.
+- **Block the message** drops the line, and only its sender gets the System line `Your message was not sent: it contains a word this server filters.`
+- The game's own profanity filter on each player's client is separate and unchanged.
+
+**Discord relay.** With the relay on and a valid address, each line that goes out on a ticked channel is posted as `Name: message` (Global) or `[Local] Name: message`, `[Clan] …`, `[Whisper] …`, `[System] …`; a server-wide System notice from Progenitor or a mod (`Chat.Broadcast` without a speaker) is posted as `[System] message`. Lines starting with the command prefix, blocked lines and replies sent to one player are never posted. A filtered line is posted masked.
+- Every `@` gets a zero-width space after it and the body sets `allowed_mentions` to none, so nothing pings `@everyone`, `@here`, a user or a role. A line is cut to Discord's 2000 characters.
+- At most one request is in flight and at most one starts per second; waiting lines go out together, up to 2000 characters per post. The queue holds 50 lines and drops the oldest. A `429` answer puts its lines back and waits its retry time (at most 60 s); any other failure drops them.
+- Posting runs on a background task over `HttpClient` (10 s timeout, no redirects), never on the game thread. Turning the relay off, clearing the address or unloading Core cancels it and empties the queue.
+- The relay sees a line before the game's own checks, so a line the game then drops (a muted sender, Global chat turned off, a line over the game's 509-byte limit) is still posted.
+- Failures and dropped lines are logged at most once a minute each, without the address. The address must be `https` on `discord.com` or `discordapp.com` (or their `ptb.`/`canary.` hosts) under `/api/webhooks/`; the admin channel, its audit and every log carry only `set` or empty.
+
+**Locking.** The lock list (`[ServerSettings] LockedInGame`) takes the group word `chat` for the whole group, or a row's id as `settings_places` lists it.
+
+**Acceptance procedure — not run** (isolated test server, Steam client as an admin, a second player or a ghost user):
+1. Server tab → Chat: an admin sees all fifteen rows; a player who is not an admin sees the five synced rows as `Admin only · <value>` and none of the others.
+2. Turn **Allow clickable links** off: the client log shows `Chat: policy from the server … links off`. Leave the server: `Chat: policy defaults (left the server)`.
+3. Word filter on, words `darn`, Replace: a line `darn it` from one player reaches the other as `*** it`. Switch to Block: the line reaches nobody and its sender gets the notice.
+4. Relay on with a test webhook: Global lines arrive in Discord as `Name: message`, `@everyone` does not ping, a burst of 60 lines arrives in at most one post a second with the oldest dropped, and the server log never shows the address.
+
+## Chat view: as built (CHAT4 to CHAT9)
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatLogTests`, `ChatRecallTests`, `ChatTokenTests`, `ModLinkTests`, `ProgenitorPageTests`). Live results are listed per feature; anything not listed there is **not live-verified**.
+
+**How it works.** The game draws at most 50 pooled lines across all channels. Progenitor keeps its own log per server (`progenitor-cache/chat/<server>.jsonl`, `[Chat] HistoryLines`, default 500) and draws the active tab's newest 120 lines. It clones the game's content node (layout and all) under the chat log's scroll view, fills it with lines made from the game's own line prefab, so font, size and wrapping match, points the scroll view at it and hides the game's node; the game keeps writing its own lines, unchanged and unseen. Turning **Progenitor's chat lines** off, Core unloading or leaving the world puts the game's view back. The window's fade and placement stay the game's.
+
+| Feature | How it behaves | Live (2026-10-07) |
+|---|---|---|
+| Lines | Each line keeps the game's channel tag and colored name; the message is redrawn with every character escaped, so players still cannot add formatting. | Verified: lines match the game's look. |
+| Tabs | A line above the log: **All** (fixed), the player's tabs (default **Clan**), **+** and **≡**. Left-click a tab to show it (single-channel tabs also switch the send channel); right-click a tab or click **≡** for the quick menu. A tab with unread lines gets a dot. Six tabs at most. | Verified: clicking **Clan** and **All** switched the view. Unread dot not checked. |
+| Quick menu | Edit this tab (name, then "Show messages from": Global, Local, Clan, Whispers, System and mods, Mentions of me), Close this tab, New tab (presets Whispers, System and mods, Mentions, Clan, Local, or Custom), Colors (a panel directly above the chat box, design approved 2026-10-07: one row per channel, Global, Local, Clan, Whispers, System and mods, each with a sample line in its color now and swatches, the game's color then ten colors; a click recolors the sample, the chat and the line you type in that channel at once and is saved at once; the chosen swatch is outlined and the hovered one is named in the title; Use the game's colors resets all; Done or a click outside closes it; the chat stays shown while it is open. `[Chat] Colors`, e.g. `Global=#7AB8F5;Clan=#8ED86E`. Earlier builds used two dialogs, which never opened, then a line that cycled colors on click, which was rejected), Background opacity, Lock / Unlock position, Reset position and size, All chat settings (opens the Mods menu through the game's menu, waits for it, then Progenitor's page at Chat; opening it directly left the player on the game's spellbook page, user report 2026-10-07). | Not checked. |
+| Move and resize | Drag the tab line (not a tab name) to move the box, the ◥ corner (top right) to resize it, up to the top and right edges of the screen; a move keeps the whole box, from the tab line to the game's channel hint under the input, on screen; Lock stops both. Resizing changes the messages area (the game's fixed 512 x 212 `TextArea`) and grows the window by the same amounts, so the input line keeps its width. Stored in `[Chat] OffsetX`, `OffsetY`, and `Width`, `Height` (the messages area; 0 is the game's size). | First build resized only the window (user report 2026-10-07); fixed, not checked live. |
+| History | Each server's log comes back when you rejoin, dimmed, with `— Joined <server> · 13:23 —` and `— Left the server · 13:28 —` dividers. | Verified: 8 lines restored after a rejoin, both dividers drawn. |
+| Repeat counts | The same line again within a minute raises a `×3` count. | Verified. |
+| Timestamps | `[16:05]` before each line; skipped when the game's own timestamp option is on. | Verified with the game's option on (no double time). |
+| Web links | http(s), `www.` and `host.tld/path` become links (the join message's rules, `UiLinks.Find`). A click asks **Open this link?** (Open in browser, Copy link, Cancel); nothing opens without it. Off when the server turns clickable links off. | Verified: a click opened the dialog. |
+| Mod links | `[mod:Namespace-Name]` or `[mod:Namespace-Name@1.2.3]` becomes a link; a click opens the mod's installed page or its Install Mods listing and never installs anything. **Share** on Mods and Install Mods rows (on hover) and **Copy link** on the mod page and the Install drawer copy the token to the clipboard and say so in a notice; the Mods menu stays open (2026-10-07: closing it to fill the chat input left the player on the game's System menu). | Drawn as a link: verified. Click and copy: not checked. |
+| Mentions | A line with your name (learned from your own lines, or the only connected player), a watched word, or `@all` from an admin (the sender's replicated admin flag; when the server allows it) is highlighted, and a short chirp (the game's positive UI sound, `UI_Generic_Feedback_Positive`) plays once. Your own line that matches is highlighted and chirps too, so the sender sees and hears the mention work (requested 2026-10-07). | Own-line highlight: fixed after a user report (2026-10-07), not checked live. Sound: needs a second player. |
+| Copy, whisper, mute | Right-click a player's line: Copy line, Whisper them (puts `/w name ` in the input), Mute or Unmute them (their lines stay out of Progenitor's view; `[Chat] MutedPlayers`). Right-click a system line copies it. A copy shows "Copied the line" in the input line's placeholder for 2 s and adds nothing to the log (the first build added a log line per copy; user report 2026-10-07). | Not checked. |
+| Recall | While typing, Up brings back the lines you sent (commands too) and Down goes forward again (`ChatRecallPrevious` / `ChatRecallNext`, chat-scope keys). Kept in `progenitor-cache/chat/sent.txt`. A line counts as sent when the chat closes with its input emptied. | Not checked: the Dev `key` op cannot submit the game's input. |
+| Location links | `/loc ` at the start of a line becomes `[loc:x,z]` at your position; it draws as `[x, z]` and a click says how far and in which direction it is. | Not checked. |
+| Item links | `[item:id]` draws as the item's name; a click names it. `/item <prefab name> ` at the start of a line becomes the token (there is no completion over all items: listing them would need an unproven native enumeration). | Not checked. |
+| Long messages | A line too long for one chat line (480 bytes) goes out in parts on Enter (`ChatSendLong`, a chat-scope key beside the game's Enter): `… ` at the end of a part, `↪ ` at the start of the next. Progenitor clients join the parts into one line; other players read the parts. The input takes up to the server's limit (default 1000 characters). If the game handles Enter first, the line goes out cut as before; it is never sent twice. | Not checked. |
+| Channel color | The line you type takes its channel's color (the game's Global, Clan, Whisper, Local and System colors), so the channel shows while typing, not only in the empty line's placeholder (`[Chat] ChannelColor`). | Not checked. |
+| Command hints | While a line starts with `.`, up to three of the server's matching commands show above the input (command, usage, help), from the [command hints data](#command-hints-data); Tab completes the first and cycles on the next press, undoing the game's Tab channel cycle as for names. Only commands this player can run; none on a server without Progenitor (`[Chat] CommandHints`). | Not checked. |
+| Mod suggestions | Type `[mod:` and part of a mod's name (or its Thunderstore package): up to three matching mods show above the line, name and package, installed ones marked; names that start with the text first, then installed mods. **Tab** replaces the unfinished token with a finished link (`[mod:Namespace-Name] `) and cycles on the next press, undoing the game's Tab channel cycle as for names. Installed mods with a Thunderstore package always; Thunderstore listings once the Mods menu has loaded its list in this session (chat never fetches; with no match the panel says so and, when the list is not loaded, to open the Mods menu once). Off when the server turns mod links off (`[Chat] ModSuggestions`, page row **Suggest mods after "[mod:"**). | Not checked. |
+| Text size, opacity | `[Chat] FontSize` (0 keeps the game's) and `[Chat] BackgroundOpacity` (-1 keeps the game's). The game's line prefab resets a new line's size when it first shows, so a chosen size is re-applied each frame. | Size on new lines: fixed after a user report (2026-10-07), not checked live. |
+
+**Another chat mod.** Progenitor's chat view steps aside for a mod that replaces the game's chat window; visibility, the click guard and the chat commands still work on the window the game has. Progenitor names no chat mod itself. Two signals turn the view off, either is enough (`ChatReplacement` in `Chat/ChatWindowLogic.cs`, unit-tested):
+
+- **Configured.** `[Chat] ReplacedBy` (client, `progenitor.ui.cfg`, default empty) lists plugin GUIDs or names separated by commas or semicolons (at most 20). A loaded plugin whose GUID or name equals an entry, ignoring case, turns the view off; the setting is read again when it changes. Log: `Chat: <name> replaces the chat window ([Chat] ReplacedBy); Progenitor's chat view stays off.`
+- **Observed.** When the view is about to attach and the chat window's scroll area no longer shows the game's own line node (another mod has pointed it at its own content), the view stays off for the session. Log: `Chat: another mod drives the chat window's lines; Progenitor's chat view stays off.`
+
+Not checked live: neither signal has been exercised with a chat mod installed. A chat mod that draws its own window without touching the game's scroll area is not observed; list it in `[Chat] ReplacedBy`.
+
+**Clicks and focus.** The chat view reads the pointer whatever the window focus (`TrySamplePointerScreenAnyFocus`): a window in the background gets no presses anyway, and the Dev `mouse` op can then test it. The click guard covers the log, its scroll bar, the tab line and the grip.

@@ -1,0 +1,27 @@
+{
+  "name": "input-list-and-scroll",
+  "world": "connected",
+  "summary": "OS-injected click of a sidebar row (selection), the list scrollbar handle, and the content scrollbar. Scroll position is read back from status.",
+  "site": "top-tab",
+  "notes": [
+    "Acceptance procedure — not run. Connected. `--side client`. Evidence: os-injected (observe.ps1 SendInput). List selection and scrollbar hits are not handler-invocation `select` / `scroll`.",
+    "Setup open/select uses mods_ui only to reach the two-pane workspace; the clicks under test are os-injected. Prerequisite: unlocked workstation, game window can take foreground.",
+    "After clicking `scrollbar:list:handle` / `scrollbar:content:handle` (live ids `list-scrollbar-handle` / `content-scrollbar-handle`), status.after.scroll.list / .content must differ from the recorded baseline. A no-op click is a fail. Sidebar click is `sidebarRow:<plugin>` → live `id` `sidebar-row` with that `plugin`."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "open", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "input", "name": "click Sample sidebar row", "action": "click", "target": { "rectOf": "sidebarRow:progenitor.sample" }, "label": "os-injected" },
+    { "kind": "op", "name": "status selected Sample", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": true, "after.plugin": "progenitor.sample" } },
+    { "kind": "op", "name": "record scroll before", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "scrollBefore", "expect": { "ok": true, "after.open": true } },
+    { "kind": "input", "name": "click list scrollbar handle", "action": "click", "target": { "rectOf": "scrollbar:list:handle" }, "label": "os-injected" },
+    { "kind": "op", "name": "status list scroll changed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.scroll.list": { "neq": "@record:scrollBefore.after.scroll.list" } } },
+    { "kind": "input", "name": "click content scrollbar handle", "action": "click", "target": { "rectOf": "scrollbar:content:handle" }, "label": "os-injected" },
+    { "kind": "op", "name": "status content scroll changed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.scroll.content": { "neq": "@record:scrollBefore.after.scroll.content" } } }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

@@ -1,0 +1,590 @@
+{
+  "schema": "progenitor.catalog.recipe/1",
+  "id": "wendigo-frost-nova-appearance",
+  "revision": 11,
+  "title": "Wendigo frost nova: radius 18 and green crystals on owned rings only",
+  "family": {
+    "id": "wendigo-frost-nova",
+    "title": "Wendigo Frost Nova"
+  },
+  "kind": "visual-instance-override",
+  "aliases": [
+    "nova radius",
+    "green nova",
+    "green crystals",
+    "frost nova colour",
+    "frost nova color",
+    "nova appearance",
+    "wendigo green",
+    "frostnova radius 18"
+  ],
+  "summary": "Enlarge the ring's radius from the authored 12 to 18 on both sides and tint the crystal particles dark emerald through per-renderer, per-slot MaterialPropertyBlock overrides that apply only to particles owned by a Sample-spawned ring. Shared materials, the vanilla prefab and the sequence asset list are never written. This is a Sample-specific recolour, not a generic public recolor API.",
+  "captured": "2026-09-08",
+  "identities": [
+    {
+      "ref": "ring-prefab",
+      "role": "the ring whose instances are restyled (see wendigo-frost-nova-ring)",
+      "domain": "prefab-guid",
+      "value": "-1227952025",
+      "name": "AB_Wendigo_FrostNova_RingArea",
+      "provenance": {
+        "source": "samples/Progenitor.Sample/SampleFrostNovaAppearance.cs (SampleFrostDash.FrostNovaRing checked on every client ring)",
+        "method": "source-inspection"
+      }
+    },
+    {
+      "ref": "crystal-shader",
+      "role": "shader name that selects which renderer material slots receive the colour override",
+      "domain": "unity-name",
+      "value": "Shader Graphs/Shader_VFX_Ice_Crystal_Unlit_Final",
+      "provenance": {
+        "source": "samples/Progenitor.Sample/SampleFrostNovaAppearance.cs (const CrystalShader); FROSTSTYLE green ... crystalRenderers=5 confirms matching slots exist live",
+        "method": "source-inspection"
+      }
+    }
+  ],
+  "assetReferences": [
+    {
+      "name": "Shader Graphs/Shader_VFX_Ice_Crystal_Unlit_Final",
+      "unityType": "Shader",
+      "role": "crystal shader (looked up by Material.shader.name at runtime)",
+      "provenance": {
+        "source": "SampleFrostNovaAppearance.CrystalShader",
+        "method": "source-inspection"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "ring-prefab",
+      "to": "asset:Shader Graphs/Shader_VFX_Ice_Crystal_Unlit_Final",
+      "role": "child-particle-renderers-use-shader",
+      "status": "known",
+      "provenance": {
+        "source": "FROSTSTYLE green ring=... crystalRenderers=5 (E2): five renderer slots under the ring's child particles matched the shader name live",
+        "method": "live-log"
+      }
+    },
+    {
+      "from": "ring-prefab",
+      "to": "external:particle entities reached through UpdatePresentationPostGraphSystem ParticleData rows and Attach.Parent",
+      "role": "owns-child-particles",
+      "status": "inferred",
+      "provenance": {
+        "source": "UpdateParticles analyze (E5) plus the Sample's Attach.Parent walk that found the registered ring (E4, E2); the link was observed live but the particle entities have no catalog identity, so it cannot be 'known'",
+        "method": "native-analyze"
+      }
+    },
+    {
+      "from": "crystal-shader",
+      "to": "external:the mist particles of the ring",
+      "role": "not-covered",
+      "status": "unresolved",
+      "provenance": {
+        "source": "mist stayed pale blue/white in every capture; which material/shader draws it was not traced",
+        "method": "reasoning"
+      }
+    }
+  ],
+  "requirements": {
+    "side": "both",
+    "world": "server world writes the radius and sends ownership; client world writes the radius on the replicated ring and restyles particles Before/After PresentationSystemGroup",
+    "context": {
+      "ownership": "the server sends each owned ring's NetworkId (index, generation, type) in a Sample packet (event id 0x536D4E76, magic 0x4E4F5631, radius); the client accepts only the expected ring prefab GUID and radius and records ownership keyed by that NetworkId",
+      "radius write": "raw write of RingAoE_DataShared.EndRadius at byte offset +4 on both sides (offset from the installed dump; TypeInfo.ElementSize reads 0 on this interop and is not used)",
+      "particle identity": "ParticleData output rows (96-byte stride, SequenceEntity at +0) correlated with the Entities array, the row's sequence walked up Attach.Parent (depth <= 8) to a registered ring, then the particle entity's managed ParticleSettings.gameObject",
+      "retention": "a styled particle is kept by ECS entity (with version), SequencerParticle.TimeCreated and GameObject identity, with a 15 s bound, so the tint survives the end of sequence emission while the renderer is alive"
+    },
+    "initialization": [
+      "Server: after spawning the ring (wendigo-frost-nova-ring), write EndRadius=18 and register the ring for the ownership packet.",
+      "Client: on the packet, record the NetworkId; Before presentation, find the replicated ring with that NetworkId and the expected prefab GUID and write EndRadius=18 on it.",
+      "Client, Before presentation: restore every property block written last frame (Restore()).",
+      "Client, After presentation: for each ParticleData row whose sequence resolves to an owned ring, capture the slot's original MaterialPropertyBlock, seed the edited block from the renderer-wide block when the slot block is empty, set _BaseColor/_EmissiveColor/_GroundTint/_Fresnel_Color, SetPropertyBlock(edited, slot).",
+      "Keep restyling retained particles after sequence output ends while their identities still match."
+    ],
+    "cleanup": [
+      "Every frame: originals restored before presentation, then re-applied only to still-matching particles (source-inspected).",
+      "Unload/Detach: Restore() then clear all tracking (source-inspected; no readback).",
+      "Client world change: pending ownership and tracked particles cleared.",
+      "Bounds: 256 client rings, 256 styled particles, 1024 property blocks."
+    ]
+  },
+  "controls": [
+    {
+      "name": "radius",
+      "tested": [
+        {
+          "value": 18,
+          "authored": 12,
+          "evidence": [
+            "E1",
+            "E2"
+          ],
+          "readback": "FROSTSTYLE server ring=... radius=18 and FROSTSTYLE client ring=... radius=18 on every recorded ring"
+        },
+        {
+          "value": 18,
+          "authored": 12,
+          "evidence": [
+            "A1"
+          ],
+          "readback": "14 rings on 2026-09-07: server and client radius=18, particleRootScale=(1,1,1), crystalRenderers=5"
+        }
+      ],
+      "limitations": "Only 18 was tested. Radius is written into the ring's RingAoE data, not applied as geometry scale: particleRootScale stays (1,1,1) and no mesh or particle size is written. Whether the larger radius changes the damage area is untested.",
+      "implementation": "SampleFrostNovaAppearance.Radius (const) and SetRadius"
+    },
+    {
+      "name": "crystal colour",
+      "tested": [
+        {
+          "value": {
+            "_BaseColor": [
+              0.12,
+              0.65,
+              0.25,
+              1
+            ],
+            "_EmissiveColor": [
+              0.05,
+              1.4,
+              0.18,
+              1
+            ],
+            "_GroundTint": [
+              0.15,
+              0.75,
+              0.25,
+              0
+            ],
+            "_Fresnel_Color": [
+              0.2,
+              0.8,
+              0.3,
+              0
+            ]
+          },
+          "evidence": [
+            "E2",
+            "E6",
+            "E7",
+            "E8"
+          ],
+          "readback": "crystalRenderers=5 per ring; green crystals in the early burst and in the tail captures and through the fade in the clip"
+        },
+        {
+          "value": "same four colours",
+          "evidence": [
+            "A2",
+            "A3",
+            "A4"
+          ],
+          "readback": "green burst and tail captured; 0 green blocks at rest; untinted ring default"
+        }
+      ],
+      "limitations": "Sample-specific: only material slots whose shader name equals the crystal shader are touched, through per-slot MaterialPropertyBlocks with originals retained. Not a generic recolour operation for other effects. The pale mist was never claimed to turn green. Renderer.material is never instantiated and sharedMaterial never written.",
+      "implementation": "SampleFrostNovaAppearance.ColorParticle"
+    }
+  ],
+  "operations": {
+    "discovery": {
+      "status": "observed-success",
+      "sides": ["client"],
+      "evidence": [
+        "E2",
+        "E4",
+        "A1"
+      ],
+      "note": "Owned rings located on the client by NetworkId + prefab GUID; five crystal renderer slots found per ring by shader name. sides client: NetworkId lookup and shader slots are client presentation."
+    },
+    "playback": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E2",
+        "E6",
+        "A1",
+        "A2"
+      ],
+      "note": "Restyled particles emitted for every dash ring in the recording. sides server+client: server-driven dash rings plus client restyle."
+    },
+    "appearance": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E6",
+        "E7",
+        "E8",
+        "E9",
+        "A2"
+      ],
+      "note": "Green crystals during the burst and in the tail; both ring expansions visible in the 8.2 s clip. Mist remains pale blue/white (never claimed). Reproduced 2026-09-07 at +1/+2/+3 s. sides server+client: client crystal renderers plus the server-driven ring procedure."
+    },
+    "controls": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E1",
+        "E2",
+        "A1"
+      ],
+      "note": "Radius 18 read back on both sides on every ring; crystal root scale (1,1,1); colour applied. Each is one tested value, not a range. sides server+client: EndRadius was read on both process sides."
+    },
+    "gameplayHits": {
+      "status": "untested",
+      "sides": ["server"],
+      "evidence": [],
+      "note": "Whether radius 18 changes hits or damage area is untested, as are hits at all. sides server: hits would be a server Health/HitList observation if tested."
+    },
+    "naturalCleanup": {
+      "status": "observed-success",
+      "sides": ["client"],
+      "evidence": [
+        "A3",
+        "A4"
+      ],
+      "note": "At rest the per-slot overrides are gone: 0 of 120 crystal-shader slots carry a property block and none is green; an untinted ring on the same pool renders default colours. sides client: property-block presence is a client renderer observation."
+    },
+    "explicitCleanup": {
+      "status": "observed-success",
+      "sides": ["server"],
+      "evidence": [
+        "E4",
+        "A3",
+        "A7",
+        "A8",
+        "A9"
+      ],
+      "note": "Scopes: (a) Restore() before presentation is verified at rest (A3). (b) Unload with a live tinted ring: observed-success. Primary: A9 (live-rig 20260907T105917Z-active-ring-unload, catalog-cases-5; same directory as ring L9). The Sample's ClearRings destroyed the live ring: FROSTDASH edge=Start with the ring id, exists true before removal, server-side Sample Removal, `FROSTDASH cleanup alive=1 destroyed=[<ring id>]`, exists false afterwards. Measured: an active ring observed at teardown, a destroy call for that id, and later absence. Not a completed-destruction latency; Start-to-unload timing is not that measurement. Teardown restored Sample before `.frostdash off` (handler `alive=0 destroyed=[]`). Historical: A7 and A8 (catalog-cases-4, 20260907T104023Z-active-ring-unload and 20260907T104052Z-active-ring-unload) recorded the same disposal proof with an admitted teardown gap (`.frostdash off` not handled because the plugin was on hold; frost dash stayed enabled; not part of the disposal observation). The ring's appearance restore at unload (Restore()) logs nothing and was not separately observed. (c) Detach Restore() path: source-inspected only (E4). sides server: unload readiness (A7/A8/A9) is a server Sample teardown observation; Restore() at rest is not a rig-run stamp claim."
+    },
+    "poolReuse": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "A3",
+        "A4",
+        "A6",
+        "A10",
+        "A11"
+      ],
+      "note": "Same-instance reuse demonstrated: after `.froststyle off`, the 10 previously tinted crystal slots (T) were active again untinted (R=T, retriesUsed=1, hasBlock=False, baseColor=none). Both readback and viewed visual evidence exist for the same identified reused slots (10 qualified). Primary: A11 (live-rig 20260908T051452Z-pool-reuse-identity, pool-reuse-visual-2; report status complete; T=10, R=10 on attempt 1, censusDelayMs 1500). report.json keeps visual.verified=false (unverified by the rig; the rig does not analyse pixels); the visual verdict is the reviewer's viewing recorded in that README (tinted frame green; reuse frames default ice-blue, no green). Historical: A10 (20260907T215010Z-pool-reuse-identity, catalog-cases-10) recorded the same T=R=10 readback without visual capture. A6 (20260907T084907Z-pool-reuse-identity) recorded 122 identical rendererId/goId pairs across baseline/+1.5 s/rest; that whole-scene comparison is not the pass proof. Earlier A3/A4 still hold (0 of 120 crystal-shader slots with a block at rest; untinted control ring default). No vanilla Wendigo cast was compared. The appearance restore at unload (Restore()) is still unobserved. The rig does not analyse pixels. sides server+client: client renderer identities plus the server-driven `.froststyle off` procedure (A11)."
+    }
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "FROSTSTYLE server ring=Entity(566598:26) radius=18; authored crystal scale unchanged (and later rings).",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Progenitor Sample on the test server"
+    },
+    {
+      "id": "E2",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "FROSTSTYLE client ring=Entity(99488:1202) radius=18 network=11471:1; FROSTSTYLE green ring=Entity(99488:1202) crystalRenderers=5 particleRootScale=(1.00, 1.00, 1.00); particle sizes untouched (repeated per ring).",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Progenitor Sample on the Steam client"
+    },
+    {
+      "id": "E3",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "FROSTSTYLE tint retained for fading particle=Entity(99507:6809); sequence output ended while renderer remains alive (the regression fix path running).",
+      "path": "<local-evidence>/logs/2026-09-06-frost-dash-payload.txt",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Progenitor Sample on the Steam client"
+    },
+    {
+      "id": "E4",
+      "kind": "source-inspection",
+      "date": "2026-09-06",
+      "summary": "SampleFrostNovaAppearance: Send/Receive ownership packet, SetRadius raw write at +4, Before() Restore + radius, After() ColorOutputs over _ThisFrameParticles/_LastFrameParticles with FindOwner via Attach.Parent, StyledParticle retention, ColorParticle per-slot blocks, Detach() Restore.",
+      "path": "samples/Progenitor.Sample/SampleFrostNovaAppearance.cs",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "this catalog increment (read of the uncommitted working tree, 2026-09-06)"
+    },
+    {
+      "id": "E5",
+      "kind": "native-analyze",
+      "date": "2026-09-06",
+      "summary": "UpdatePresentationPostGraphSystem.UpdateParticles correlates ParticleData output rows with particle entity rows (one Entities row per Particles row). Script_RingAoE.Client.Update grounds the client sequence/radius behaviour.",
+      "path": "<local-evidence>/NovaProbe/native-client/ProjectM.Sequencer.UpdatePresentationPostGraphSystem$$UpdateParticles.c",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "native analysis export (client GameAssembly.dll)"
+    },
+    {
+      "id": "E6",
+      "kind": "screenshot",
+      "date": "2026-09-06",
+      "summary": "green-final-early-small.png: emitted crystals green during the prominent burst.",
+      "path": "<local-evidence>/NovaVisualProbe/green-final-early-small.png",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "coordinating agent, PrintWindow capture"
+    },
+    {
+      "id": "E7",
+      "kind": "screenshot",
+      "date": "2026-09-06",
+      "summary": "green-final-tail-small.png: surviving distant crystals still green during the tail.",
+      "path": "<local-evidence>/NovaVisualProbe/green-final-tail-small.png",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "coordinating agent, PrintWindow capture"
+    },
+    {
+      "id": "E8",
+      "kind": "clip",
+      "date": "2026-09-06",
+      "summary": "frost-dash-green-realtime.mp4: 8.2 s, 1920x540; captured at ~7 fps through PrintWindow on HWND 0x530942 and re-timed to a 30 fps encode from record-timing.json (not native 30 fps footage). Both burst expansions and green crystals through the fade; mist pale.",
+      "path": "<local-evidence>/NovaVisualProbe/frost-dash-green-realtime.mp4",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "coordinating agent; VIDEO.md in the same folder documents the capture"
+    },
+    {
+      "id": "E9",
+      "kind": "screenshot",
+      "date": "2026-09-06",
+      "summary": "video-final-contact.png: contact sheet of the clip viewed by the parent session. Server evidence for the clip's dashes: castCounter 841 at both edges, rings at radius 18, departure-to-landing 5.815.",
+      "path": "<local-evidence>/NovaVisualProbe/video-final-contact.png",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "parent session"
+    },
+    {
+      "id": "A1",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Every 2026-09-07 dash ring logged on the client: FROSTSTYLE client ring=... radius=18 network=..., FROSTSTYLE green ring=... crystalRenderers=5 particleRootScale=(1.00, 1.00, 1.00), then 'tint retained for fading particle' during the tail (14 rings).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "A2",
+      "kind": "screenshot",
+      "date": "2026-09-07",
+      "summary": "nova-02-a.png (+1.0 s): green crystals in the burst, pale blue-white mist; nova-02-b.png (+2.0 s): the expanded ring of green crystals; nova-02-c.png (+3.1 s): everything cleared.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/nova-02-a.png",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "A3",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Restoration readback at rest (02:24:06, 26 s after the last tinted ring): the client scene holds 120 renderer material slots on the crystal shader, 0 active, 0 with a MaterialPropertyBlock, 0 with the green _BaseColor (client exec, Resources.FindObjectsOfTypeAll over Renderer).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "A4",
+      "kind": "screenshot",
+      "date": "2026-09-07",
+      "summary": "Untinted control after five tinted cycles: a ring spawned by a snippet through the recipe path without the Sample's ownership packet rendered default pale-blue crystals at the authored radius (nova-05-untinted-2.png, +0.5 s; nova-05-untinted-3.png tail). The pooled crystal objects were not left green.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/nova-05-untinted-2.png",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "A5",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "After a Sample reload on the server (unload clean) the next ring logged one client ring line and one green line per edge: no duplicate styling.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "A6",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig pool-reuse-identity (report status complete, logSignals.fatal all 0). Report step lines: baseline POOLID summary renderers=122 active=0 withBlock=0 green=0; +1.5 s tinted renderers=122 active=5 withBlock=5 green=5; rest renderers=122 active=0 withBlock=0 green=0. POOLID comparison: 122 identical rendererId/goId pairs across those three passes; five active at +1.5 s with green _BaseColor 0.12,0.65,0.25,1; none active and no property block at rest. Identity is per GameObject/renderer instance id. The rig did not record build stamps in this run; the offline inventory of the same install on 2026-09-07 reported contentCatalogSha256 b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01 and gameIdentity vrising/1.1.13.0+r99712+b17/net25, which is stated here as context only and does not stamp this evidence. Side stamps recovered from report.json images.client/server.generation (5/4; sampleHash null) and trace.jsonl first ping result.images[] (client line 2, server line 4): no sha256 on those image rows, so core/dev/sample stay null. Combined framework generation:4 is legacy-combined, never a match.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases/20260907T084907Z-pool-reuse-identity",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": "generation:4",
+        "frameworkSides": {
+          "server": "generation:4; core:null; dev:null; sample:null",
+          "client": "generation:5; core:null; dev:null; sample:null"
+        }
+      },
+      "stampNote": "report.json/ping recorded sampleHash null, session.generation 4 (legacy-combined); per-side generation from report.json images[] and trace.jsonl ping result.images[] / reload.generation. Circumstantial launch note, not on ping and not used as a stamp: Core 42c9c081d87bae5f, Dev 2dff654e6624ea90, Sample ab49982e84e72116; commit 164a358 + uncommitted.",
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1)"
+    },
+    {
+      "id": "A7",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig active-ring-unload (report status complete, logSignals.fatal all 0). FROSTDASH edge=Start ring=Entity(568390:21); exists true before removal; server-side Sample Removal; `FROSTDASH cleanup alive=1 destroyed=[568390:21]` at unload; log-clock Start-to-unload 295 ms (under the ring's about 1.5 s life); exists false afterwards. Case sequencing gap: teardown `.frostdash off` was not handled because the plugin was on hold; frost dash stayed enabled; not part of the disposal observation. Side stamps recovered from trace.jsonl first ping result.images[] (client line 2, server line 4) and report.json images.client/server generation+sampleHash; combined report.framework is legacy-combined (server-first generation:4).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases-4/20260907T104023Z-active-ring-unload",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+        "frameworkSides": {
+          "server": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+          "client": "generation:5; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07"
+        }
+      },
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1)"
+    },
+    {
+      "id": "A8",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig active-ring-unload repeat (report status complete, logSignals.fatal all 0). FROSTDASH edge=Start ring=Entity(568230:30); exists true before removal; server-side Sample Removal; `FROSTDASH cleanup alive=1 destroyed=[568230:30]` at unload; log-clock Start-to-unload 295 ms (under the ring's about 1.5 s life); exists false afterwards. Case sequencing gap: teardown `.frostdash off` was not handled because the plugin was on hold; frost dash stayed enabled; not part of the disposal observation. Side stamps recovered from trace.jsonl first ping result.images[] (client line 2, server line 4) and report.json images.client/server generation+sampleHash; combined report.framework is legacy-combined (server-first generation:4).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases-4/20260907T104052Z-active-ring-unload",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+        "frameworkSides": {
+          "server": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+          "client": "generation:5; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07"
+        }
+      },
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1)"
+    },
+    {
+      "id": "A9",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig active-ring-unload (report status complete, logSignals.fatal all 0). Ring Entity(567725:15) existed at Sample Removal (exists true); Sample ClearRings logged `FROSTDASH cleanup alive=1 destroyed=[567725:15]`; exists false afterwards. Measured: an active ring observed at teardown, a destroy call for that id, and later absence. Not a completed-destruction latency; Start-to-unload log-clock 294 ms is the interval from spawn Start to the unload line, not how long destruction took. Teardown restored Sample then `.frostdash off` (handler `alive=0 destroyed=[]`). Appearance Restore() at unload was not separately observed. Same run directory as ring evidence L9. Side stamps recovered from trace.jsonl first ping result.images[] (client line 2, server line 4) and report.json images.client/server generation+sampleHash; combined report.framework is legacy-combined (server-first generation:4).",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases-5/20260907T105917Z-active-ring-unload",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+        "frameworkSides": {
+          "server": "generation:4; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07",
+          "client": "generation:5; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:9edb9edcfd908ce0d501c55d20dcf245bab21345e1c9d33e3d2db07535e59b1d; sample:6c81848ba12cba715c31614757a46939444dd22be6a42906a4c5b10146927f07"
+        }
+      },
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1)"
+    },
+    {
+      "id": "A10",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig pool-reuse-identity (report status complete, logSignals.fatal all 0). Prepare built once (buildElapsedMs=3169). Tinted census 1648 ms after the dash (Scratch reload 45 ms; load-only elapsedMs=298). T=10 crystal slots, all in the baseline (tintedInBaseline=10), all _BaseColor 0.12,0.65,0.25,1. Rest restored every id in T. `.froststyle off` on the server (`FROSTSTYLE enabled=False restored=0`) and the client (`FROSTSTYLE client enabled=False`). poolReuse: R=T (10) active with no override on attempt 1 (retriesUsed=1, hasBlock=False, baseColor=none). `.froststyle on` (`FROSTSTYLE enabled=True restored=0`). Final rest clean. Teardown `.frostdash off` handled. capture.available false (no visual capture step exists in the live-rig; no image of the untinted reuse was saved). Side stamps recovered from trace.jsonl first ping result.images[] (client line 2 Sample b089d451..., server line 4 Sample d698ee04...) and report.json images.client/server generation+sampleHash; combined report.framework is legacy-combined (server-first Sample d698ee04..., generation:1) and must not be used as a match for this client-renderer observation.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases-10/20260907T215010Z-pool-reuse-identity",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "generation:1; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:d698ee0499bf72ee7fdf6f6fd8b12cf3215ec74cce4a25bf05ed02b00ff00679",
+        "frameworkSides": {
+          "server": "generation:1; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:d698ee0499bf72ee7fdf6f6fd8b12cf3215ec74cce4a25bf05ed02b00ff00679",
+          "client": "generation:2; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:b089d45112510541e3dea1f50102570795a4d42212086919a3e72c5f425bc640"
+        }
+      },
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331460:1, character 332441:1)"
+    },
+    {
+      "id": "A11",
+      "kind": "rig-run",
+      "date": "2026-09-08",
+      "summary": "Live-rig pool-reuse-identity (report status complete, logSignals.fatal all 0). T=10, R=10 on attempt 1, censusDelayMs 1500. PrintWindow frames (report.json keeps visual.verified=false, unverified by the rig; the visual verdict is the reviewer's viewing recorded in reviews/2026-09-08-pool-reuse-visual-2/README.md): captures/tinted-window-2026-09-08T05-14-57.894Z-f0.png started 2026-09-08T05:14:57.895Z ended 2026-09-08T05:14:58.781Z tinted frame green; captures/untinted-reuse-2026-09-08T05-15-20.898Z-f0.png started 2026-09-08T05:15:20.899Z ended 2026-09-08T05:15:21.860Z default ice-blue, no green; captures/untinted-reuse-2026-09-08T05-15-21.304Z-f1.png started 2026-09-08T05:15:21.304Z ended 2026-09-08T05:15:22.259Z default ice-blue, no green; captures/untinted-reuse-2026-09-08T05-15-21.698Z-f2.png started 2026-09-08T05:15:21.699Z ended 2026-09-08T05:15:22.635Z default ice-blue, no green. Failed first attempt: reviews/2026-09-08-pool-reuse-visual (20260908T043913Z-pool-reuse-identity) aborted with reuse not observed (R=[]).",
+      "path": "<local-evidence>/reviews/2026-09-08-pool-reuse-visual-2/20260908T051452Z-pool-reuse-identity",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": null,
+        "frameworkSides": {
+          "server": "generation:1; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:d698ee0499bf72ee7fdf6f6fd8b12cf3215ec74cce4a25bf05ed02b00ff00679",
+          "client": "generation:1; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:b089d45112510541e3dea1f50102570795a4d42212086919a3e72c5f425bc640"
+        }
+      },
+      "stampNote": "frameworkSides copied from report.json frameworkSides (identical in stampPhases.start.frameworkSides and stampPhases.final.frameworkSides); report.framework is null; contentCatalogSha256 and gameIdentity from report.json top-level fields.",
+      "observer": "live-rig report.json (readback, agentReported=false); visual verdict from <local-evidence>/reviews/2026-09-08-pool-reuse-visual-2/README.md (report.json visual.verified=false, unverified by the rig); isolated test server <testserver> and Steam client; player TestPlayer (User 331460:1, character 332441:1)"
+    }
+  ],
+  "implementation": [
+    {
+      "path": "samples/Progenitor.Sample/SampleFrostNovaAppearance.cs",
+      "symbol": "SampleFrostNovaAppearance (Track, Send, Receive, SetRadius, Before, After, ColorOutputs, ColorParticle, Restore)",
+      "status": "observed live on 2026-09-07 as image a274cbd4 on both sides (agent-reported readback; see evidence A1)"
+    },
+    {
+      "path": "samples/Progenitor.Sample/SampleFrostDash.cs",
+      "symbol": "SampleFrostDash.SpawnRing calls SampleFrostNovaAppearance.Track",
+      "status": "observed live on 2026-09-07 as image a274cbd4 on both sides (agent-reported readback; see evidence A1)"
+    }
+  ],
+  "limitations": [
+    "Sample-specific recolour keyed on one shader name and one ring prefab; it does not establish a generic safe recolour operation for other game effects.",
+    "Only one radius value (18) and one colour set were tested.",
+    "The pale mist is not recoloured and its material was not traced.",
+    "The ownership packet and the raw +4 radius write are private Sample mechanisms, not framework API.",
+    "The ring's appearance restore at unload (Restore()) logs nothing and was not separately observed.",
+    "Revision 2 (2026-09-07): live evidence A1-A5 with full build stamps; the 2026-09-06 recordings remain unstamped.",
+    "No vanilla Wendigo cast was compared; pool-reuse identity is per GameObject/renderer instance id on Sample-owned rings only.",
+    "Revision 3 (2026-09-07): audit correction of the pool-reuse status.",
+    "Revision 4 (2026-09-07): catalog wording only; inspect status is observed live on 2026-09-07 as image a274cbd4, not current verification.",
+    "Revision 5 (2026-09-07): poolReuse observed-success from live-rig run 20260907T084907Z-pool-reuse-identity (122 identical rendererId/goId pairs; identity per GameObject/renderer instance id). No vanilla Wendigo cast was compared.",
+    "Revision 6 (2026-09-07): A6 contentCatalogSha256 and gameIdentity set to null to match the run report (session recorded only serverStartedUtc, sampleHash null, generation 4); those two stamps had been copied from a launch note, not from the run.",
+    "Revision 7 (2026-09-07): explicitCleanup unload-with-a-live-tinted-ring observed-success from live-rig 20260907T104023Z-active-ring-unload and 20260907T104052Z-active-ring-unload (ClearRings `FROSTDASH cleanup alive=1 destroyed=[<ring id>]`; log-clock Start-to-unload 295 ms; exists false afterwards). Proof is the Sample's cleanup log line plus the absence readback. Restore() at unload logs nothing and was not separately observed. Teardown `.frostdash off` was not handled (plugin on hold); frost dash stayed enabled; not part of the disposal observation.",
+    "A9 (live-rig 20260907T105917Z-active-ring-unload, catalog-cases-5; same directory as ring L9) is the clean unload-with-a-live-ring run: active ring at teardown, ClearRings destroy, later absence. Not a completed-destruction latency. A7/A8 remain historical with their admitted teardown gap. Restore() at unload was not separately observed.",
+    "Revision 9 (2026-09-07): subsequent untinted poolReuse from live-rig 20260907T215010Z-pool-reuse-identity (catalog-cases-10): 10 previously tinted slots qualified (R=T). A6 122-id comparison remains historical, not the pass proof. No vanilla Wendigo cast was compared. Untinted reuse visual not captured (readback and log only; capture.available false). Restore() at unload still unobserved.",
+    "Revision 11 (2026-09-08): A11 live-rig 20260908T051452Z-pool-reuse-identity (pool-reuse-visual-2) adds viewed visual evidence of subsequent untinted reuse (T=R=10, censusDelayMs 1500; report.json visual.verified=false, unverified by the rig). Failed first attempt: reviews/2026-09-08-pool-reuse-visual (20260908T043913Z-pool-reuse-identity) aborted with reuse not observed. No vanilla Wendigo comparison; Restore() at unload unobserved; the rig does not analyse pixels."
+  ]
+}

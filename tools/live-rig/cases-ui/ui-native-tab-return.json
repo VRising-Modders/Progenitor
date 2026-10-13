@@ -1,0 +1,44 @@
+{
+  "name": "ui-native-tab-return",
+  "world": "connected",
+  "summary": "Open Mods at `@site`, return via another native tab and the same native tab, three times. Each return asserts closed and curtain/input released, then captures so the native tab and any dual highlight are visible. One capture after the final close. This case keeps native_tab (it does not use back).",
+  "site": "@site",
+  "notes": [
+    "Acceptance procedure — not run. Connected fullscreen HUD. `--side client`. Open steps use `site` `@site` (`--site`; omitted, main-menu with no Client_0, top-tab when connected).",
+    "`native_tab` same=true for the current tab; `tab` (name or index) for another tab. Do not queue this after a ping timeout; the rig fail-fasts main-thread ops once a side is suspect. `open site=top-tab` brings up the fullscreen menu itself (`detail.menuOpenedBy`); do not prime with shortcut.",
+    "`back` is a separate Mods-workspace action (settings/custom → overview). Native-tab return stays `native_tab`. One PrintWindow capture after each native_tab (the native tab and any dual highlight) and one after the final close."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "open 1", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "native_tab other 1", "side": "client", "op": "mods_ui", "args": { "action": "native_tab", "tab": "Spellbook" }, "expect": { "ok": true, "action": "native_tab", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after other 1" },
+    { "kind": "op", "name": "status after other 1", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "open same 1", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "native_tab same 1", "side": "client", "op": "mods_ui", "args": { "action": "native_tab", "same": true }, "expect": { "ok": true, "action": "native_tab", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after same 1" },
+    { "kind": "op", "name": "status after same 1", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "open 2", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "native_tab other 2", "side": "client", "op": "mods_ui", "args": { "action": "native_tab", "tab": "Spellbook" }, "expect": { "ok": true, "action": "native_tab", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after other 2" },
+    { "kind": "op", "name": "status after other 2", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "open same 2", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "native_tab same 2", "side": "client", "op": "mods_ui", "args": { "action": "native_tab", "same": true }, "expect": { "ok": true, "action": "native_tab", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after same 2" },
+    { "kind": "op", "name": "status after same 2", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "open 3", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "native_tab other 3", "side": "client", "op": "mods_ui", "args": { "action": "native_tab", "tab": "Spellbook" }, "expect": { "ok": true, "action": "native_tab", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after other 3" },
+    { "kind": "op", "name": "status after other 3", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "open same 3", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "native_tab same 3", "side": "client", "op": "mods_ui", "args": { "action": "native_tab", "same": true }, "expect": { "ok": true, "action": "native_tab", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after same 3" },
+    { "kind": "op", "name": "status after same 3", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "capture", "name": "after final close" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

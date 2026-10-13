@@ -1,0 +1,23 @@
+# Address-library seed for the client GameAssembly.
+# One pattern per line; blank lines and # comments are ignored.
+# A ScriptMethod.Name is kept when it equals a pattern or contains it.
+# Metadata method names look like namespace.Type$$Method (generics and nested
+# types kept). StunProcess.Start is abstract; the live body is StunProcess_MONO.
+
+ClientBootstrapSystem$$OnReliableEventsReceived
+ServerBootstrapSystem$$OnDataReceivedServer
+ServerBootstrapSystem$$OnConnectionApproval
+ServerBootstrapSystem$$Authenticate
+ServerBootstrapSystem$$TryAuthenticate
+HailMessageStruct_Client$$FromConnectData
+LoadPersistenceSystemV2$$DeserializeLoadFile
+StunProcess$$Start
+StunProcess_MONO$$Start
+GameBootstrap$$Start
+ChatMessageSystem$$OnUpdate
+Dictionary<PrefabLookupKey, object>$$FindEntry
+ItemKeyLookup$$
+BuildItemKeyLookupSystem$$
+
+# Ui input capture (FUI2): the panel input mask postfix
+RotateCameraBlocker$$GetConsumedInputs

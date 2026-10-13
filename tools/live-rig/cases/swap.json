@@ -1,0 +1,22 @@
+{
+  "name": "swap",
+  "summary": "Spawn a hostile thief, read its Health, then swap the Sample image three times. Each copy into the reload folder bumps LastWrite so Core Swaps even when --dll is the same file (including the live image). The rig destroys the thief and existsSweep must pass before each swap. After each swap the rig waits for the Sample load line (no reconcile wait: the debug buff is Core-owned and a Sample swap does not reconcile; recorded as reconcile.skipped), then records protection (.debug status), player identity, ping.images hash, handshake/connection, and carriers leftover. A dropped guard after the swap fails it (now a Core defect); a later .debug on rearm does not make the run complete.",
+  "steps": [
+    {
+      "kind": "spawn",
+      "name": "bandit",
+      "prefab": "CHAR_Bandit_Thief",
+      "offset": { "x": 4, "y": 0, "z": 0 },
+      "hostile": true,
+      "track": true
+    },
+    { "kind": "wait", "ms": 2000 },
+    { "kind": "get", "entity": "@tracked:bandit", "component": "Health", "record": "banditHealth" },
+    { "kind": "swap", "dll": "<path>" },
+    { "kind": "protectionCheck", "expect": true },
+    { "kind": "swap", "dll": "<path>" },
+    { "kind": "protectionCheck", "expect": true },
+    { "kind": "swap", "dll": "<path>" },
+    { "kind": "protectionCheck", "expect": true }
+  ]
+}

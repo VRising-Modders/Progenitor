@@ -1,0 +1,1009 @@
+{
+ "_meta": {
+  "source": "Live-read 2026-09-24 from prefab entities on the isolated headless test server (127.0.0.1:27362) via read-only prefab/inspect; struct layouts from the server metadata. Units: seconds, metres; damage factors are multiples of PhysicalPower.",
+  "evidence": {
+   "castTime,postCast,cooldown,gcd,moveMultiplier,moveDuration,chainWindow/resetDelay,inputBuffer,comboLength,shape,angle,width,targets,damage,knockback.range,knockback.duration,projectile*": "live-read (raw bytes decoded with the server metadata layouts)",
+   "knockbackByResistanceIndex,unitKnockbackIndex": "live-read + dump (KnockbackPower layout, Buffable.KnockbackResistanceIndex)",
+   "reach (spear box end),cycleTime,dpsFactor,hitMoment,veil trigger semantics,conditional effects,lunge=0": "inferred"
+  },
+  "knockbackByResistanceIndex": {
+   "0": {
+    "stun": true,
+    "distanceFactor": 1,
+    "durationFactor": 1
+   },
+   "1": {
+    "stun": true,
+    "distanceFactor": 0.75,
+    "durationFactor": 0.75
+   },
+   "2": {
+    "stun": true,
+    "distanceFactor": 0,
+    "durationFactor": 1
+   },
+   "3": null,
+   "4": null,
+   "5": {
+    "stun": false,
+    "distanceFactor": 0,
+    "durationFactor": 1
+   },
+   "6+": null,
+   "_note": "null = no entry in KnockbackPower (all zero), inferred immune to primary knockback/stun. Identical table on every T01 melee hit; UseWeaponLevel=true on 0-2 (effect of weapon level not established)."
+  },
+  "unitKnockbackIndex": {
+   "CHAR_Undead_SkeletonSoldier_Base": 0,
+   "CHAR_Undead_SkeletonSoldier_Withered": 0,
+   "CHAR_Undead_SkeletonSoldier_Armored_Farbane": 0,
+   "CHAR_Undead_SkeletonCrossbow_Base": 0,
+   "CHAR_Undead_SkeletonApprentice": 3,
+   "CHAR_Undead_Ghoul_Armored_Farmlands": 3,
+   "CHAR_Undead_Ghoul_TombSummon": 3,
+   "CHAR_Undead_Priest": 3,
+   "CHAR_Forest_Wolf": 3,
+   "CHAR_Forest_Bear_Standard": 4,
+   "CHAR_Forest_Deer": 0,
+   "CHAR_Bandit_Thug": 0,
+   "CHAR_Bandit_Hunter": 0,
+   "CHAR_Bandit_Deadeye": 3,
+   "CHAR_Forest_Wolf_VBlood": 7
+  },
+  "weaponSkills": "none: every T01 bone EquipBuff_Weapon_*_Ability01 replaces only slot 0 (live-read); bar slots 1 and 4 empty (live bot_cast slots)",
+  "hitMoment": "inferred: the Hit prefab is spawned by AbilitySpawnPrefabOnCast when castTime ends; its collider is cast once on spawn",
+  "veilOfShadow": {
+   "buff": "AB_Vampire_VeilOfShadow_Buff",
+   "lifetime": 2.2,
+   "moveSpeed": 1.25,
+   "aggroFactor": 0.4,
+   "trigger": "first damage dealt by a primary attack (OnlyTriggerOnPrimaryAttack=true) applies AB_Vampire_VeilOfShadow_TriggerBonusEffects to the target",
+   "bonus": [
+    {
+     "type": "spell",
+     "factor": 0.25,
+     "plusHeal": true
+    },
+    {
+     "type": "physical",
+     "factor": 0.3,
+     "conditional": true
+    },
+    {
+     "type": "spell",
+     "factor": 0.4,
+     "conditional": true
+    }
+   ],
+   "weaponSpecific": "no for melee (one buff for all weapons); crossbow swaps in AB_Vampire_Crossbow_Primary_VeilOfShadow_Projectile which applies the same TriggerBonusEffects",
+   "dashCast": {
+    "castTime": 0.45,
+    "postCast": 0.1,
+    "cooldown": 8
+   },
+   "afterVeil": "conditional 4 s buffs when veil ends: +15% spell crit, +12% phys crit with 1.06 move, +10% primary attack speed (condition blobs unreadable)"
+  }
+ },
+ "Sword": {
+  "primaryGroup": "AB_Vampire_Sword_Primary_MeleeAttack_AbilityGroup",
+  "primaryGroupGuid": -2097352908,
+  "item": "Item_Weapon_Sword_T01_Bone",
+  "itemGuid": -2085919458,
+  "itemBonus": {
+   "DamageVsVegetation": 0.25
+  },
+  "comboLength": 3,
+  "chainWindow": 1.5,
+  "resetDelay": 1.5,
+  "inputBuffer": 0.3,
+  "ranged": false,
+  "groupMaxRange": 0,
+  "projectileRange": null,
+  "reload": null,
+  "cycleTime": 1.65,
+  "dpsFactor": 0.667,
+  "liveCalibratedPaceMs": 400,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Sword_Primary_MeleeAttack_Cast01",
+    "guid": -2110227527,
+    "hit": "AB_Vampire_Sword_Primary_MeleeAttack_Hit01",
+    "castTime": 0.2,
+    "postCast": 0.15,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.35,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Sword_Primary_MeleeAttack_Cast02",
+    "guid": 1894476748,
+    "hit": "AB_Vampire_Sword_Primary_MeleeAttack_Hit02",
+    "castTime": 0.2,
+    "postCast": 0.15,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.35,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Sword_Primary_MeleeAttack_Cast03",
+    "guid": -371304967,
+    "hit": "AB_Vampire_Sword_Primary_MeleeAttack_Hit03",
+    "castTime": 0.2,
+    "postCast": 0.15,
+    "cooldown": 0.6,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.4,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   }
+  ],
+  "notes": "Fast even 3-hit, 0.35 s/step; engage 1.5-2.5 m; 0.5 m knockback+stun on index-0 units (skeletons, bandit thugs)."
+ },
+ "Axe": {
+  "primaryGroup": "AB_Vampire_Axe_Primary_MeleeAttack_AbilityGroup",
+  "primaryGroupGuid": 1691491221,
+  "item": "Item_Weapon_Axe_T01_Bone",
+  "itemGuid": -1958888844,
+  "itemBonus": {
+   "DamageVsWood": 0.25
+  },
+  "comboLength": 3,
+  "chainWindow": 1.5,
+  "resetDelay": 1.5,
+  "inputBuffer": 0.3,
+  "ranged": false,
+  "groupMaxRange": 0,
+  "projectileRange": null,
+  "reload": null,
+  "cycleTime": 2.1,
+  "dpsFactor": 0.69,
+  "liveCalibratedPaceMs": 500,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Axe_Primary_MeleeAttack_Cast01",
+    "guid": 1215815401,
+    "hit": "AB_Vampire_Axe_Primary_MeleeAttack_Hit01",
+    "castTime": 0.25,
+    "postCast": 0.25,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.45,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Axe_Primary_MeleeAttack_Cast02",
+    "guid": 1039072868,
+    "hit": "AB_Vampire_Axe_Primary_MeleeAttack_Hit02",
+    "castTime": 0.25,
+    "postCast": 0.25,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.45,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Axe_Primary_MeleeAttack_Cast03",
+    "guid": 1822540594,
+    "hit": "AB_Vampire_Axe_Primary_MeleeAttack_Hit03",
+    "castTime": 0.25,
+    "postCast": 0.25,
+    "cooldown": 0.6,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.55,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   }
+  ],
+  "notes": "0.5 s/step; 0.45/0.45/0.55; same 3 m 120-degree cone; +25% vs wood only."
+ },
+ "Mace": {
+  "primaryGroup": "AB_Vampire_Mace_Primary_MeleeAttack_AbilityGroup",
+  "primaryGroupGuid": 722599012,
+  "item": "Item_Weapon_Mace_T01_Bone",
+  "itemGuid": 1588258447,
+  "itemBonus": {
+   "DamageVsMineral": 0.25
+  },
+  "comboLength": 3,
+  "chainWindow": 1.5,
+  "resetDelay": 1.5,
+  "inputBuffer": 0.3,
+  "ranged": false,
+  "groupMaxRange": 0,
+  "projectileRange": null,
+  "reload": null,
+  "cycleTime": 2.25,
+  "dpsFactor": 0.711,
+  "liveCalibratedPaceMs": 600,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Mace_Primary_MeleeAttack_Cast01",
+    "guid": 2094451872,
+    "hit": "AB_Vampire_Mace_Primary_MeleeAttack_Hit01",
+    "castTime": 0.35,
+    "postCast": 0.2,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.25,
+    "moveDuration": 0.55,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.5,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Mace_Primary_MeleeAttack_Cast02",
+    "guid": -492074341,
+    "hit": "AB_Vampire_Mace_Primary_MeleeAttack_Hit02",
+    "castTime": 0.35,
+    "postCast": 0.2,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.25,
+    "moveDuration": 0.55,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.5,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Mace_Primary_MeleeAttack_Cast03",
+    "guid": 1014770566,
+    "hit": "AB_Vampire_Mace_Primary_MeleeAttack_Hit03",
+    "castTime": 0.35,
+    "postCast": 0.2,
+    "cooldown": 0.6,
+    "gcd": 0,
+    "moveMultiplier": 0.25,
+    "moveDuration": 0.55,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.6,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   }
+  ],
+  "notes": "Slowest melee (0.55 s/step), strongest hits 0.5/0.5/0.6; 0.25x move mid-swing, so a retreating target leaves the cone - do not chase mid-combo."
+ },
+ "Spear": {
+  "primaryGroup": "AB_Vampire_Spear_Primary_Attack_Group",
+  "primaryGroupGuid": -208121356,
+  "item": "Item_Weapon_Spear_T01_Bone",
+  "itemGuid": 2038011836,
+  "itemBonus": {
+   "DamageVsBeasts": 0.25
+  },
+  "comboLength": 3,
+  "chainWindow": 1.5,
+  "resetDelay": 1.5,
+  "inputBuffer": 0.3,
+  "ranged": false,
+  "groupMaxRange": 0,
+  "projectileRange": null,
+  "reload": null,
+  "cycleTime": 1.75,
+  "dpsFactor": 0.743,
+  "liveCalibratedPaceMs": 400,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Spear_Primary_Attack_Cast01",
+    "guid": -765309196,
+    "hit": "AB_Vampire_Spear_Primary_MeleeAttack_Hit01",
+    "castTime": 0.1,
+    "postCast": 0.25,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0,
+    "moveDuration": 0.375,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Box",
+    "reach": 4.125,
+    "width": 1.5,
+    "angle": null,
+    "originOffsetZ": 2.5,
+    "boxLength": 3.25,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.4,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.1,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Spear_Primary_Attack_Cast02",
+    "guid": -69267758,
+    "hit": "AB_Vampire_Spear_Primary_MeleeAttack_Hit02",
+    "castTime": 0.1,
+    "postCast": 0.25,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0,
+    "moveDuration": 0.375,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Box",
+    "reach": 4.125,
+    "width": 1.5,
+    "angle": null,
+    "originOffsetZ": 2.5,
+    "boxLength": 3.25,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.4,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.1,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Spear_Primary_Attack_Cast03",
+    "guid": -1238015847,
+    "hit": "AB_Vampire_Spear_Primary_MeleeAttack_Hit03",
+    "castTime": 0.1,
+    "postCast": 0.25,
+    "cooldown": 0.7,
+    "gcd": 0,
+    "moveMultiplier": 0,
+    "moveDuration": 0.375,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Box",
+    "reach": 4.125,
+    "width": 1.5,
+    "angle": null,
+    "originOffsetZ": 2.5,
+    "boxLength": 3.25,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.5,
+     "secondary": 0.32,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.1,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   }
+  ],
+  "notes": "Rooted during each thrust (0 move for 0.375 s); box 1.5 m wide reaching about 4.1 m; knockback only 0.1 m so the target stays in reach; step 3 hits secondaries for 0.32; +25% vs beasts."
+ },
+ "Crossbow": {
+  "primaryGroup": "AB_Vampire_Crossbow_Primary_Group",
+  "primaryGroupGuid": 1070827786,
+  "item": "Item_Weapon_Crossbow_T01_Bone",
+  "itemGuid": -20041991,
+  "itemBonus": null,
+  "comboLength": 1,
+  "chainWindow": 2,
+  "resetDelay": 2,
+  "inputBuffer": 0.3,
+  "ranged": true,
+  "groupMaxRange": 12,
+  "projectileRange": 12,
+  "reload": {
+   "ammo": false,
+   "chargeTime": 1,
+   "rooted": true,
+   "cooldown": 0.55,
+   "gcd": 0.2,
+   "note": "no ammo/reload component; the 1.0 s cast is the draw, cooldown 0.55 after"
+  },
+  "cycleTime": 1.8,
+  "dpsFactor": 0.556,
+  "liveCalibratedPaceMs": null,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Crossbow_Primary_Cast",
+    "guid": 1081050588,
+    "hit": "AB_Vampire_Crossbow_Primary_Projectile",
+    "castTime": 1,
+    "postCast": 0.25,
+    "cooldown": 0.55,
+    "gcd": 0.2,
+    "moveMultiplier": 0,
+    "moveDuration": 1.3,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "projectile",
+    "projectileSpeed": 28,
+    "projectileRange": 12,
+    "projectileRadius": 0.5,
+    "reach": 12,
+    "width": 1,
+    "targets": {
+     "primary": 1,
+     "secondary": 0
+    },
+    "damage": {
+     "primary": 1,
+     "conditionalExtra": 0.25
+    },
+    "knockback": null,
+    "effects": [
+     "on hit (conditional): self AB_Vampire_Crossbow_Primary_AttackSpeed_Buff, +7% PrimaryAttackSpeed per stack, max 3, 10 s",
+     "AttackSpeed buff can apply AB_Vampire_Crossbow_Primary_Buff_CritMark (4 s, conditional); a conditional +0.25 hit removes a buff (inferred: consumes the mark)"
+    ]
+   }
+  ],
+  "notes": "Single-shot group, no combo; 1.0 s rooted draw + 0.25 post + 0.55 cd (about 1.8 s/shot); projectile 28 m/s, 12 m, radius 0.5, one target; kite at 7-11 m."
+ },
+ "Reaper": {
+  "primaryGroup": "AB_Vampire_Reaper_Primary_MeleeAttack_AbilityGroup",
+  "primaryGroupGuid": 784360484,
+  "item": "Item_Weapon_Reaper_T01_Bone",
+  "itemGuid": -152327780,
+  "itemBonus": {
+   "DamageVsUndeads": 0.25
+  },
+  "comboLength": 3,
+  "chainWindow": 2,
+  "resetDelay": 2,
+  "inputBuffer": 0.3,
+  "ranged": false,
+  "groupMaxRange": 0,
+  "projectileRange": null,
+  "reload": null,
+  "cycleTime": 2.45,
+  "dpsFactor": 0.633,
+  "liveCalibratedPaceMs": 500,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Reaper_Primary_MeleeAttack_Cast01",
+    "guid": 1176579852,
+    "hit": "AB_Vampire_Reaper_Primary_MeleeAttack_Hit01",
+    "castTime": 0.3,
+    "postCast": 0.2,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.5,
+    "moveDuration": 0.6,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.5,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Reaper_Primary_MeleeAttack_Cast02",
+    "guid": 363287836,
+    "hit": "AB_Vampire_Reaper_Primary_MeleeAttack_Hit02",
+    "castTime": 0.3,
+    "postCast": 0.2,
+    "cooldown": 0,
+    "gcd": 0,
+    "moveMultiplier": 0.5,
+    "moveDuration": 0.6,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.5,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Reaper_Primary_MeleeAttack_Cast03",
+    "guid": -131396040,
+    "hit": "AB_Vampire_Reaper_Primary_MeleeAttack_Hit03",
+    "castTime": 0.3,
+    "postCast": 0.5,
+    "cooldown": 0.65,
+    "gcd": 0,
+    "moveMultiplier": 0.5,
+    "moveDuration": 0.6,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.55,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.5,
+     "duration": 0.5,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   }
+  ],
+  "notes": "0.5 s steps, step 3 has 0.5 s post-cast + 0.65 cd (longest recovery); chain window 2.0 s; +25% vs undead."
+ },
+ "Slashers": {
+  "primaryGroup": "AB_Vampire_Slashers_Primary_MeleeAttack_AbilityGroup",
+  "primaryGroupGuid": 1470213751,
+  "item": "Item_Weapon_Slashers_T01_Bone",
+  "itemGuid": -588909332,
+  "itemBonus": {
+   "DamageVsVegetation": 0.25
+  },
+  "comboLength": 3,
+  "chainWindow": 1.5,
+  "resetDelay": 1.5,
+  "inputBuffer": 0.3,
+  "ranged": false,
+  "groupMaxRange": 0,
+  "projectileRange": null,
+  "reload": null,
+  "cycleTime": 1.65,
+  "dpsFactor": 0.545,
+  "liveCalibratedPaceMs": 400,
+  "combo": [
+   {
+    "ability": "AB_Vampire_Slashers_Primary_MeleeAttack_Cast01",
+    "guid": 2138997168,
+    "hit": "AB_Vampire_Slashers_Primary_MeleeAttack_Hit01",
+    "castTime": 0.15,
+    "postCast": 0.15,
+    "cooldown": 0.1,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.275,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.4,
+     "duration": 0.25,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Slashers_Primary_MeleeAttack_Cast02",
+    "guid": -538471976,
+    "hit": "AB_Vampire_Slashers_Primary_MeleeAttack_Hit02",
+    "castTime": 0.15,
+    "postCast": 0.15,
+    "cooldown": 0.1,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.275,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.4,
+     "duration": 0.25,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   },
+   {
+    "ability": "AB_Vampire_Slashers_Primary_MeleeAttack_Cast03",
+    "guid": -553275783,
+    "hit": "AB_Vampire_Slashers_Primary_MeleeAttack_Hit03",
+    "castTime": 0.15,
+    "postCast": 0.15,
+    "cooldown": 0.55,
+    "gcd": 0,
+    "moveMultiplier": 0.6,
+    "moveDuration": 0.5,
+    "lunge": 0,
+    "interrupt": {
+     "cooldownOnInterrupt": 0.5
+    },
+    "shape": "Cone",
+    "reach": 3,
+    "width": null,
+    "angle": 120,
+    "originOffsetZ": 0,
+    "targets": {
+     "primary": 1,
+     "secondary": 10
+    },
+    "damage": {
+     "primary": 0.35,
+     "secondary": 0.15,
+     "resourceHit": 1
+    },
+    "knockback": {
+     "range": 0.4,
+     "duration": 0.25,
+     "appliesTo": "primary target only",
+     "stun": "per knockbackByResistanceIndex"
+    },
+    "effects": [
+     "knockback+stun on primary target (resistance index 0-2 only)",
+     "secondary targets: damage only, IgnorePhysicalLeech",
+     "TriggerHitConsume SpellCategory 4 (primary-hit hook, inferred used by Veil bonus)"
+    ]
+   }
+  ],
+  "notes": "Fastest steps (0.15+0.15, cd 0.1), weakest hits 0.275/0.275/0.35; knockback 0.4 m / 0.25 s; group has AbilityChargeResetOnUse tag (purpose not established)."
+ }
+}

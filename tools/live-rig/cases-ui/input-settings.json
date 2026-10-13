@@ -1,0 +1,42 @@
+{
+  "name": "input-settings",
+  "world": "connected",
+  "summary": "OS-injected ExampleLimit edit: click the input, type 12, click Apply, poll Saved; restore 10 with polled Saved before dropping admin.",
+  "site": "top-tab",
+  "notes": [
+    "Acceptance procedure — not run. Connected. `--side client`. Evidence for the typed Apply path: os-injected. Open/select is handler-invocation setup so the ExampleLimit widgets exist. Admin is granted through the same server `set` User.IsAdmin path the rig uses.",
+    "Click `widget:ExampleLimit:input` (live `id` `widget` label ExampleLimit nested `controls` `input`), type `12`, click `widget:ExampleLimit:apply` (nested apply, or the sibling widget labelled `Apply ExampleLimit`). The Saved note is asynchronous; poll widget_read (intervalMs 500, timeoutMs 10000) until `Saved by the server.` Restore 10 the same way and keep admin until that Saved poll finishes, then set IsAdmin false.",
+    "Prerequisite: unlocked workstation, game window can take foreground. observe.ps1 type/click refuse a locked session (exit 3)."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "record users", "side": "server", "op": "users", "record": "usersStart", "expect": "\"connected\":true" },
+    { "kind": "op", "name": "grant admin", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": true } } },
+    { "kind": "op", "name": "open", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Server", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.page": "settings", "after.pageId": "Server" } },
+    { "kind": "input", "name": "click ExampleLimit input", "action": "click", "target": { "rectOf": "widget:ExampleLimit:input" }, "label": "os-injected" },
+    { "kind": "input", "name": "type 12", "action": "type", "text": "12", "label": "os-injected" },
+    { "kind": "input", "name": "click Apply ExampleLimit", "action": "click", "target": { "rectOf": "widget:ExampleLimit:apply" }, "label": "os-injected" },
+    { "kind": "op", "name": "read admin 12", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "adminSaved", "expect": "Saved by the server" },
+    { "kind": "input", "name": "click ExampleLimit input restore", "action": "click", "target": { "rectOf": "widget:ExampleLimit:input" }, "label": "os-injected" },
+    { "kind": "input", "name": "type 10", "action": "type", "text": "10", "label": "os-injected" },
+    { "kind": "input", "name": "Apply 10 restore", "action": "click", "target": { "rectOf": "widget:ExampleLimit:apply" }, "label": "os-injected" },
+    { "kind": "op", "name": "read restore 10 saved", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "restoreSaved", "expect": "Saved by the server" },
+    { "kind": "op", "name": "read restore 10 value", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "\"value\":\"10\"" },
+    { "kind": "op", "name": "restore admin false", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": false } } },
+    { "kind": "op", "name": "readback admin false", "side": "server", "op": "users", "expect": "\"admin\":false" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown grant admin for restore", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": true } } },
+    { "kind": "op", "name": "teardown open", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" } },
+    { "kind": "op", "name": "teardown select Server", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" } },
+    { "kind": "op", "name": "teardown type 10", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "10" } },
+    { "kind": "op", "name": "teardown Apply 10", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" } },
+    { "kind": "op", "name": "teardown read restore 10 saved", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "teardownRestoreSaved", "expect": "Saved by the server" },
+    { "kind": "op", "name": "teardown read restore 10 value", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "\"value\":\"10\"" },
+    { "kind": "op", "name": "teardown restore admin false", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": false } } },
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

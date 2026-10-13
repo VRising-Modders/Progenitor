@@ -1,0 +1,53 @@
+{
+  "name": "m2-12-incompatible-client",
+  "world": "connected",
+  "summary": "Old Progenitor client (no PrfI handler) joining a server with custom items: dropping PrfI is not compatibility. Custom items must stay unusable, never decode as a different item.",
+  "notes": [
+    "Wrong image (abort immediately): a current matched pair, both sides on a Core that registers OnClientKeyLedger. That client logs 'KeyAgreement: accepted server key-table order' and never logs the missing-ledger refusal. The first client logs op expects count 0 for that accepted line; a match fails the step with expect count: wanted 0, got N — that is the wrong-image abort, not a pass.",
+    "Required image: an older client Core that does not register CustomEvents.OnReceive(KeyLedgerPacket.EventId, OnClientKeyLedger). PrfI is seeded in Bootstrap so that client drops the packet and never passes it to the game. Server must be current Core with Sample loaded (custom items, including sample.ember). Vanilla clients with no Progenitor never run this path.",
+    "Chosen fix: prevent affected content from use (items do not resolve / are not appended), not a join kick. Observable on the required image: server sent PrfI; client log KeyAgreement: refused custom items this join: no PrfI key-table order was accepted before PrfD/PrfK; PrefabRegistry: ignoring 'sample.ember' ... the item stays unusable. An inventory index must not resolve as a different custom item.",
+    "Dropping PrfI is not compatibility. No tracked spawns. Failed cleanup of any tracked entity marks the run incomplete."
+  ],
+  "steps": [
+    { "kind": "op", "name": "stamp server image", "side": "server", "op": "ping", "record": "serverPing", "expect": { "side": "server" } },
+    { "kind": "op", "name": "stamp client image", "side": "client", "op": "ping", "record": "clientPing", "expect": { "side": "client" } },
+    {
+      "kind": "op",
+      "name": "wrong image: client Core accepted a key-table order (needs a client Core without OnClientKeyLedger)",
+      "side": "client",
+      "op": "logs",
+      "args": { "filter": "KeyAgreement: accepted server key-table order", "since": -1, "max": 50 },
+      "expect": { "count": 0 }
+    },
+    {
+      "kind": "log",
+      "name": "server sent PrfI",
+      "side": "server",
+      "since": -1,
+      "filter": "PrefabRegistry",
+      "regex": "PrefabRegistry: on-connect PrfI",
+      "timeoutMs": 5000,
+      "record": "serverPrfI"
+    },
+    {
+      "kind": "log",
+      "name": "client refused missing ledger",
+      "side": "client",
+      "since": -1,
+      "filter": "KeyAgreement",
+      "regex": "KeyAgreement: refused custom items this join: no PrfI key-table order was accepted before PrfD/PrfK",
+      "timeoutMs": 5000,
+      "record": "clientMissingLedger"
+    },
+    {
+      "kind": "log",
+      "name": "client ember unusable",
+      "side": "client",
+      "since": -1,
+      "filter": "PrefabRegistry",
+      "regex": "ignoring 'sample\\.ember'.*the item stays unusable",
+      "timeoutMs": 5000,
+      "record": "emberUnusable"
+    }
+  ]
+}

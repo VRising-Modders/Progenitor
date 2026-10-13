@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The layout-constant generator (roadmap M4.1, job FLAY1). Sibling of tools/accessgen and the
+    same discipline: it reads text and writes text. It never loads a game assembly, never reads
+    GameAssembly.dll and never launches the game; the game metadata it resolves against is a plain
+    text file it greps. Keep ReferenceGame=false.
+
+    Deliberately NOT in Progenitor.sln, like tools/accessgen and tools/enc: it is a build-time
+    tool, and its logic is covered by tests/Progenitor.Tests, which links the three files below.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>layoutgen</AssemblyName>
+    <RootNamespace>Progenitor.LayoutGen</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <ReferenceGame>false</ReferenceGame>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Same guard accessgen carries: a game reference here would break the "runs anywhere"
+       promise, and this tool's whole point is that the dump is the authority, not the interop. -->
+  <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'ProjectM'))"
+           Text="tools/layoutgen must not reference ProjectM. It reads the game metadata as text; the interop's sizeof is exactly the authority CLAUDE.md's EV17 rule forbids here." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'Il2CppInterop.Runtime'))"
+           Text="tools/layoutgen must not reference Il2CppInterop." />
+  </Target>
+</Project>

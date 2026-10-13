@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "mod": "progenitor.compattest",
+  "modVersion": "1.1.0",
+  "message": "hello",
+  "version": 2,
+  "minReader": 1,
+  "direction": "to-server",
+  "source": "test",
+  "recorded": "2026-10-11T01:26:16Z",
+  "sha256": "07ac06ce3e282127f2fea2e83f49703671335dd97631fa6134b4125509448404",
+  "schema": [
+    {
+      "n": 1,
+      "name": "Seq",
+      "type": "int"
+    },
+    {
+      "n": 2,
+      "name": "Text",
+      "type": "string"
+    },
+    {
+      "n": 3,
+      "name": "Note",
+      "type": "string"
+    }
+  ]
+}

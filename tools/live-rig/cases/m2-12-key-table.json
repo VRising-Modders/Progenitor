@@ -1,0 +1,156 @@
+{
+  "name": "m2-12-key-table",
+  "world": "connected",
+  "summary": "Paired M2.12 key-table agreement: PrfI before PrfD, matching ember indices on both sides, .ember inventory guid identical, then .content define must not move ember.",
+  "notes": [
+    "Acceptance procedure. Isolated pair only (<workspace>/_testserver, ports 9976/9977). Do not touch C:\\VRisingServer. Sample must be loaded on both sides.",
+    "Join-time PrfI/PrfD lines already happened; log steps use since -1 to read them. Ember guid hash is 480926629 (PrefabGUID.CalculateGuidHash('sample.ember')). The apply log is PrefabRegistry: applied 'sample.ember' (480926629) in <World>: itemKey=True index=N (ok); capture group 1 is index=N so a later logs op can require the other side's apply line to contain the same token. Do not hard-code the index (environment-dependent; live example was 1083).",
+    "After .content define, sample.cinder apply logs are captured the same way and compared across sides. Ember is not re-applied, so motion is judged from the report: cinderIndex must be emberIndex+1 on each side. The case language cannot assert integer arithmetic between two log captures (no rig-engine change); both ember indices and both cinder indices are still required to match across sides.",
+    ".ember 1 grants a stack. InventoryBuffer is not on the PlayerCharacter (inspect of the character with only:InventoryBuffer lists every row skipped: not requested; the character carries InventoryOwner + InventoryInstanceElement instead). Query live InventoryBuffer holders (exclude ItemPickup and TileModel so chests/drops drop out), then inspect that buffer (only + depth 256) and require the decoded ItemType 480926629 (ember guid hash). Inspect lists every component even with only, so the guid is matched as a parsed ItemType field rather than a path into components[N]. Client inspect polls until the replica shows the slot. The stack is not a tracked spawn and is left in the inventory. Teardown .content drop is SampleCommands Content / SampleContent.Drop (usage '.content [status] | .content define | .content drop'). Failed cleanup of any tracked entity marks the run incomplete."
+  ],
+  "steps": [
+    { "kind": "op", "name": "stamp server image", "side": "server", "op": "ping", "record": "serverPing", "expect": { "side": "server" } },
+    { "kind": "op", "name": "stamp client image", "side": "client", "op": "ping", "record": "clientPing", "expect": { "side": "client" } },
+    {
+      "kind": "log",
+      "name": "server PrfI before PrfD",
+      "side": "server",
+      "since": -1,
+      "filter": "PrefabRegistry",
+      "regex": "PrefabRegistry: on-connect PrfI",
+      "timeoutMs": 5000,
+      "record": "serverPrfI"
+    },
+    {
+      "kind": "log",
+      "name": "server on-connect ember after PrfI",
+      "side": "server",
+      "since": -1,
+      "filter": "PrefabRegistry",
+      "regex": "on-connect 'sample\\.ember'",
+      "timeoutMs": 5000,
+      "record": "serverPrfD"
+    },
+    {
+      "kind": "op",
+      "name": "PrfI appears before on-connect sample.ember",
+      "side": "server",
+      "op": "logs",
+      "args": { "filter": "PrefabRegistry: on-connect", "since": -1, "max": 200 },
+      "expect": "on-connect PrfI[\\s\\S]*on-connect 'sample\\.ember'"
+    },
+    {
+      "kind": "log",
+      "name": "client accepted key-table order",
+      "side": "client",
+      "since": -1,
+      "filter": "KeyAgreement",
+      "regex": "KeyAgreement: accepted server key-table order",
+      "timeoutMs": 5000,
+      "record": "clientAccepted"
+    },
+    {
+      "kind": "log",
+      "name": "server ember Describe index",
+      "side": "server",
+      "since": -1,
+      "filter": "PrefabRegistry",
+      "regex": "applied 'sample\\.ember'.*itemKey=True (index=\\d+)",
+      "timeoutMs": 5000,
+      "record": "emberIndexServer"
+    },
+    {
+      "kind": "log",
+      "name": "client ember Describe index",
+      "side": "client",
+      "since": -1,
+      "filter": "PrefabRegistry",
+      "regex": "applied 'sample\\.ember'.*itemKey=True (index=\\d+)",
+      "timeoutMs": 5000,
+      "record": "emberIndexClient"
+    },
+    {
+      "kind": "op",
+      "name": "client ember index equals server ember index",
+      "side": "client",
+      "op": "logs",
+      "args": { "filter": "applied 'sample.ember'", "since": -1, "max": 50 },
+      "expect": "@record:emberIndexServer.match.1"
+    },
+    { "kind": "op", "name": "server players", "side": "server", "op": "players", "record": "playersServer", "expect": { "count": { "neq": 0 } } },
+    { "kind": "op", "name": "client players", "side": "client", "op": "players", "record": "playersClient", "expect": { "count": { "neq": 0 } } },
+    { "kind": "command", "text": ".ember 1", "record": "emberGrant", "expectLog": { "filter": "Sample", "regex": "Gave 1 Ember Shard" } },
+    { "kind": "wait", "ms": 1500 },
+    {
+      "kind": "op",
+      "name": "server inventory holders",
+      "side": "server",
+      "op": "query",
+      "args": { "all": ["InventoryBuffer"], "none": ["ItemPickup", "TileModel"], "limit": 50, "total": true },
+      "record": "invHoldersServer",
+      "expect": { "count": { "neq": 0 } }
+    },
+    {
+      "kind": "op",
+      "name": "server inventory guid",
+      "side": "server",
+      "op": "inspect",
+      "args": { "entity": "@record:invHoldersServer.entities.0.entity", "only": ["InventoryBuffer"], "depth": 256 },
+      "record": "invServer",
+      "expect": "InventoryBuffer[\\s\\S]*\"ItemType\":480926629",
+      "poll": { "intervalMs": 250, "timeoutMs": 10000 }
+    },
+    {
+      "kind": "op",
+      "name": "client inventory holders",
+      "side": "client",
+      "op": "query",
+      "args": { "all": ["InventoryBuffer"], "none": ["ItemPickup", "TileModel"], "limit": 50, "total": true },
+      "record": "invHoldersClient",
+      "expect": { "count": { "neq": 0 } }
+    },
+    {
+      "kind": "op",
+      "name": "client inventory guid",
+      "side": "client",
+      "op": "inspect",
+      "args": { "entity": "@record:invHoldersClient.entities.0.entity", "only": ["InventoryBuffer"], "depth": 256 },
+      "record": "invClient",
+      "expect": "InventoryBuffer[\\s\\S]*\"ItemType\":480926629",
+      "poll": { "intervalMs": 250, "timeoutMs": 20000 }
+    },
+    { "kind": "op", "name": "before define ping", "side": "server", "op": "ping", "record": "beforeDefine", "expect": { "side": "server" } },
+    { "kind": "command", "text": ".content define", "record": "contentDefine" },
+    {
+      "kind": "log",
+      "name": "server cinder Describe index",
+      "side": "server",
+      "sinceRecord": "beforeDefine",
+      "filter": "PrefabRegistry",
+      "regex": "applied 'sample\\.cinder'.*itemKey=True (index=\\d+)",
+      "timeoutMs": 15000,
+      "record": "cinderIndexServer"
+    },
+    {
+      "kind": "log",
+      "name": "client cinder Describe index",
+      "side": "client",
+      "sinceRecord": "beforeDefine",
+      "filter": "PrefabRegistry",
+      "regex": "applied 'sample\\.cinder'.*itemKey=True (index=\\d+)",
+      "timeoutMs": 15000,
+      "record": "cinderIndexClient"
+    },
+    {
+      "kind": "op",
+      "name": "client cinder index equals server cinder index",
+      "side": "client",
+      "op": "logs",
+      "args": { "filter": "applied 'sample.cinder'", "since": -1, "max": 50 },
+      "expect": "@record:cinderIndexServer.match.1"
+    }
+  ],
+  "teardown": [
+    { "kind": "command", "text": ".content drop", "expectLog": { "filter": "Sample", "regex": "\\.content drop|UnregisterAll dropped|sample\\.cinder" } }
+  ]
+}

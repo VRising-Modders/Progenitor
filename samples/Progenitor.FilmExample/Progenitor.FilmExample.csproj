@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.FilmExample</AssemblyName>
+    <RootNamespace>Progenitor.FilmExample</RootNamespace>
+    <Description>Demo: an in-game short film set, with game models loaded on demand and posed as puppets.</Description>
+    <BepInExPluginGuid>progenitor.film</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Film Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

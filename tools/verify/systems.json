@@ -1,0 +1,36 @@
+{
+  "name": "systems",
+  "order": 30,
+  "title": "Virtual systems: three anchors tick, .sys status counts them, .sys off disposes three",
+  "evidence": ["208"],
+  "requires": { "side": "server", "ghostAdmin": true },
+  "steps": [
+    { "note": "Evidence 208: '.sys on' added three systems; after ~12 s '.sys status' read sample.sys.sim / sample.sys.after / sample.sys.before all at updates=626 (the sim group and ServerBootstrapSystem run once per frame on this server, so all three agree), Describe() printed groupFired=True, '.sys order' printed the Before/After lists, and '.sys off' disposed 3." },
+
+    { "note": "Start from a known state. If the demo is off this replies 'not on' and nothing is asserted." },
+    { "command": ".sys off" },
+    { "sleepMs": 1000 },
+
+    { "command": ".sys on" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample sys: Added 3 virtual systems: sample\\.sys\\.sim \\(VirtualSystemAnchor\\.AfterSimulation, order 0\\), sample\\.sys\\.after \\(AddAfter<ServerBootstrapSystem>, order 10\\), sample\\.sys\\.before \\(AddBefore<ServerBootstrapSystem>, order 10\\)" },
+
+    { "note": "Twelve seconds, the wait evidence 208 used, so every counter is well past zero." },
+    { "sleepMs": 12000 },
+
+    { "command": ".sys status" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample sys: Demo is on\\. sample\\.sys\\.sim \\(VirtualSystemAnchor\\.AfterSimulation\\) updates=[1-9]\\d*; sample\\.sys\\.after \\(AddAfter<ServerBootstrapSystem>\\) updates=[1-9]\\d*; sample\\.sys\\.before \\(AddBefore<ServerBootstrapSystem>\\) updates=[1-9]\\d*\\." },
+    { "expectLog": "Sample sys: ctx\\.Systems\\.Describe\\(\\):.*groupFired=True" },
+
+    { "command": ".sys order" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample sys: SystemHooks\\.DescribeOrder<ServerBootstrapSystem>\\(\\):" },
+
+    { "command": ".sys off" },
+    { "sleepMs": 1200 },
+    { "expectLog": "Sample sys: Disposed 3 virtual system handle\\(s\\)" },
+
+    { "expectNoLog": "\\[Error\\] .*Sample sys" }
+  ]
+}

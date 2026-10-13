@@ -1,0 +1,707 @@
+# Progenitor layout facts (roadmap M4.1).
+#
+# Every number here is a byte offset, a native array stride or an enum value read out of the
+# game's metadata, and every one of them is a wrong-memory write if it drifts on a game
+# update. Before this file they were sixteen-odd literals scattered through src/ with a
+# metadata citation in a comment and nothing checking them. Citations name the type and field;
+# the generator refuses a citation that points at a file line instead.
+#
+# Grammar (tools/layoutgen/LayoutDeclaration.cs, docs/modules.md "Layout constants"):
+#
+#   layout v1                                required first directive
+#   dump server | client                     which side's metadata the lines that follow resolve against
+#   offset <Name> = <value> : <Type>.<Field>    [# citation]
+#   size   <Name> = <value> : <Type>            [# citation]
+#   enum   <Name> = <value> : <Enum>.<Member>   [# citation]
+#   match  <Name> = <value> : /<regex>/ [in <Type>]  [# citation]
+#
+# <value> is the value the code was written and verified against, spelled the way the constant
+# it replaced spelled it (decimal or 0x). The metadata is what the game says today. `--check` exits 2
+# when the two disagree; it NEVER rewrites a value to match the metadata, because the declared number
+# is the one that was tested and a silently-updated offset ships an unverified write.
+#
+# `size` is derived, not stated: the metadata gives field offsets and no sizes, so a size is the
+# widest field extent rounded up to the widest field alignment (CLAUDE.md, "Native array element
+# strides": for a buffer or blob element the stride comes from the metadata, never from sizeof and
+# never from TypeManager). The generator refuses rather than guesses when any field width is
+# unavailable.
+#
+# Regenerate after any edit:
+#
+#   dotnet run --project tools/layoutgen -- \
+#     --declarations src/Progenitor.Core/Layout/layout.txt \
+#     --out src/Progenitor.Core/Layout/Generated \
+#     --dump-server <server metadata file> \
+#     --build <build id>
+#
+# The metadata file comes from PROGENITOR_METADATA_DIR (default <workspace>\_tools\interop-dump,
+# one folder per side); tools/deploy.ps1 finds it there. The server metadata is the authority for
+# every line below. Each of these types is a ProjectM / Stunlock / Unity component present in both
+# builds; where a value was first read from the client metadata the comment says so, and the
+# offsets were confirmed against the server metadata.
+
+layout v1
+dump server
+
+# ---- Castles: territory buffers (src/Progenitor.Core/Castles/CastleTerritoryBuffers.cs) --------
+size   CastleTerritoryBlocksStride                = 8    : CastleTerritoryBlocks              # one int2
+offset CastleTerritoryBlocksBlockCoordinateOffset = 0    : CastleTerritoryBlocks.BlockCoordinate
+size   CastleTerritoryTilesStride                 = 1    : CastleTerritoryTiles               # one bool
+offset CastleTerritoryTilesInsideBuildableOffset  = 0    : CastleTerritoryTiles.InsideBuildableTerritory
+
+# ---- Effects: sequence blackboard (src/Progenitor.Core/Effects/SequenceBlackboardLayout.cs) ----
+offset SequenceInputElementIndexOffset            = 0x40 : SequenceInputElement.Index
+offset SequenceInputElementTypeOffset             = 0x44 : SequenceInputElement.Type
+offset SequenceInputElementIsInputParameterOffset = 0x48 : SequenceInputElement.IsInputParameter
+# The stride the blob walk multiplies by, and the constant with the most expensive history in the
+# tree: EV17, R30 finding 22, and a live client regression where every beam went `path=none` after
+# `sizeof` (73, the unpadded extent) was made the authority for a native array element. Safe to
+# declare even though the source also derives it: the generator derives it from the same three
+# offsets above by the same rule, so the two cannot disagree without --check saying so.
+size   SequenceInputElementStride            = 76   : SequenceInputElement                  # EV17; docs/effects.md, "the metadata is the authority for a native array stride"
+enum   BlackboardRegisterTypeFloat3               = 3    : BlackboardRegisterType.Float3
+enum   BlackboardRegisterTypeQuaternion           = 9    : BlackboardRegisterType.Quaternion
+
+size   BlackboardElementStride                    = 1    : BlackboardElement                     # one byte
+offset BlackboardElementValueOffset               = 0x0  : BlackboardElement.Value
+
+size   LineRendererPositionElementStride          = 20   : LineRendererPositionElement           # int, int, float3
+offset LineRendererPositionIndexOffset            = 4    : LineRendererPositionElement.PositionIndex
+offset LineRendererPositionValueOffset            = 0x8  : LineRendererPositionElement.PositionValue
+
+offset BuffSequenceSequenceGuidOffset             = 0x0  : BuffSequence.SequenceGuid
+offset BuffSequenceConditionOffset                = 0x8  : BuffSequence.Condition
+
+# Unity's BlobAssetHeader sits immediately before the data BlobAssetReferenceData.m_Ptr points at,
+# so its Length is how the blob walk learns the real allocation extent.
+size   BlobAssetHeaderBytes                       = 32   : BlobAssetHeader
+offset BlobAssetHeaderLengthOffset                = 0x8  : BlobAssetHeader.Length
+match  FixedString64MaxUtf8Bytes                  = 61   : /utf8MaxLengthInBytes = (\d+);/ in FixedString64Bytes  # the longest blackboard input name
+
+# ---- Units: the exclusive Follow / GoTo field set (src/Progenitor.Core/Units/UnitSteering.cs) --
+offset FollowerFollowedOffset                     = 0    : Follower.Followed
+offset FollowerModeOffset                         = 24   : Follower.ModeModifiable
+offset FollowerStationaryOffset                   = 28   : Follower.Stationary
+enum   FollowModeUnit                             = 0    : FollowMode.Unit
+offset AiMoveTargetPositionOffset                 = 0    : AiMove_Server.TargetPosition
+offset AiMoveTargetEntityMovementOffset           = 24   : AiMove_Server.TargetEntity_Movement
+offset AiMoveTargettingModeOffset                 = 72   : AiMove_Server.TargettingMode
+enum   AiTargettingModeNone                       = 0    : AiTargettingMode.None
+enum   AiTargettingModePosition                   = 1    : AiTargettingMode.Position
+enum   AiTargettingModeEntity                     = 3    : AiTargettingMode.Entity
+enum   GenericEnemyStateIdle                      = 2    : GenericEnemyState.Idle                 # posted on GoTo so the Follow leaf stops rewriting AiMove
+enum   GenericEnemyStateFollow                    = 0x100 : GenericEnemyState.Follow              # posted on Follow (evidence 33)
+
+# ---- Castles: floor type (src/Progenitor.Core/Castles/CastleLogic.cs) --------------------------
+# The four Wall* bits next to it in that file are Progenitor's own encoding, not the game's:
+# CastleFloor.WallNorth/East/South/West are Entity fields, not flags.
+enum   CastleFloorTypesTreasury                   = 14   : CastleFloorTypes.Treasury
+
+# ---- Content: live buff refresh (src/Progenitor.Core/Content/PrefabLiveRefreshApply.cs) --------
+offset BuffTargetOffset                           = 8    : Buff.Target                           # was "inferred from interop stubs"; the metadata states it
+
+# ---- Dev ops: heal (src/Progenitor.Dev/Ops/HealLogic.cs) ---------------------------------------
+offset HealthMaxOffset                            = 0    : Health.MaxHealth                      # was "inferred from stubs"; the metadata states it
+offset HealthValueOffset                          = 16   : Health.Value
+offset HealthIsDeadOffset                         = 24   : Health.IsDead
+offset BloodMaxOffset                             = 0    : Blood.MaxBlood
+offset BloodValueOffset                           = 16   : Blood.Value
+
+# ---- Dev ops: world save (src/Progenitor.Dev/Ops/WorldSaveOps.cs) ------------------------------
+offset SavePersistentDataSaveFileNameOffset       = 4     : SavePersistentDataEvent.SaveFileName
+offset SavePersistentDataCompressSaveFilesOffset  = 0x204 : SavePersistentDataEvent.CompressSaveFiles
+size   FixedString512PayloadBytes                 = 512   : FixedString512Bytes                       # the SaveFileName payload the overlay must not memcpy
+# FixedString128Bytes states its own UTF-8 capacity as a const rather than a field offset, so it
+# is the one line here that needs the regex escape hatch.
+match  FixedString128MaxUtf8Bytes                 = 125   : /utf8MaxLengthInBytes = (\d+);/ in FixedString128Bytes
+
+# ---- Abilities: forced cast (src/Progenitor.Core/Abilities/AbilityCast.cs) ---------------------
+# ForceCastGroup is the game's own "cast this group now" inbox on the character's ability bar.
+# The server's cast pipeline reads it, starts one cast and writes the field back to 0; that
+# consume-and-clear is what makes a single int write a complete, non-repeating trigger, and it is
+# measured, not assumed (castStartedCounter and serverCastCounter each advanced by exactly 1 with
+# no input, and the field read back 0). A group that is not on the character's bar is consumed
+# without starting (live 2026-09-25); ServerGameManager.ForceCastAbilityGroup starts those.
+offset AbilityBarForceCastGroupOffset             = 0x34 : AbilityBar_Shared.ForceCastGroup
+offset AbilityBarCastStartedCounterOffset         = 0x28 : AbilityBar_Shared.CastStartedCounter  # the read-back that proves a forced cast started
+# The guid of the group currently being cast. AbilityCastStartedEvent entities live and die inside
+# the frame that creates them, so a virtual system at AfterSimulation never sees one (measured: 0
+# entities while the cast counter was advancing). Stable component state is the reliable seam.
+offset AbilityBarCastGroupPrefabGuidOffset        = 0x54 : AbilityBar_Shared.CastGroupPrefabGuid
+
+# ---- Units: blood (UnitBlood.SetBlood) ---------------------------------------------------------
+# ctx.Units.SetBlood raises the game's own admin "consume blood" event on the server, the entity a
+# client's admin console would send: NetworkEventType + ReceiveNetworkEventTag + FromCharacter +
+# ConsumeBloodAdminEvent. The server's VariousMigratedDebugEventsSystem.HandleConsumeBloodEvent
+# sets Blood.BloodType / Quality / Value from it (live 2026-09-25: Worker 4% ->
+# Draculin 100%, value 100, the event entity consumed the next frame). The payload is written raw:
+# the struct carries bools, so it is not C# unmanaged.
+match  ConsumeBloodAdminEventId                   = -112716025 : /EventId_ConsumeBloodAdminEvent = (-?\d+);/ in NetworkEvents
+offset ConsumeBloodAmountOffset                   = 0x0  : ConsumeBloodAdminEvent.Amount
+offset ConsumeBloodPrimaryQualityOffset           = 0x4  : ConsumeBloodAdminEvent.PrimaryQuality
+offset ConsumeBloodPrimaryTypeOffset              = 0xC  : ConsumeBloodAdminEvent.PrimaryType
+offset FromCharacterUserOffset                    = 0x0  : FromCharacter.User
+offset FromCharacterCharacterOffset               = 0x8  : FromCharacter.Character
+
+# ---- Abilities: bar slots (AbilitySlots) -------------------------------------------------------
+# One ReplaceAbilityOnSlotBuff element on a buff prefab makes the game's ReplaceAbilityOnSlotSystem
+# put NewGroupId on Slot while the buff is on the character. The stride was measured three ways
+# (metadata extents, managed SizeOf, a live element decoding at it). The element is appended with
+# the non-generic UnsafeEntityManagerUtility.AddBufferElement, which reads the size natively. A `size` line cannot
+# resolve (Condition is a BlobAssetReference<ConditionBlob>, a generic instantiation the metadata does
+# not lay out), so the last field is declared instead and AbilitySlots sizes its staging bytes from
+# it: CopyCooldown's byte at 0x24, rounded up to the blob reference's 8-byte alignment, is 0x28.
+offset ReplaceAbilityOnSlotCopyCooldownOffset     = 0x24 : ReplaceAbilityOnSlotBuff.CopyCooldown
+offset ReplaceAbilityOnSlotSlotOffset             = 0x4 : ReplaceAbilityOnSlotBuff.Slot
+offset ReplaceAbilityOnSlotNewGroupOffset         = 0xC : ReplaceAbilityOnSlotBuff.NewGroupId
+offset ReplaceAbilityOnSlotPriorityOffset         = 0x10 : ReplaceAbilityOnSlotBuff.Priority
+
+# ---- Abilities: cast time (AbilityCast.TrySetCastTime) ----------------------------------------
+# Both are ModifiableFloat, which is a bare float in memory. AB_Wendigo_FrostNova_Cast ships
+# MaxCastTime 2.0 and PostCastTime 0.4; zeroing them is what makes a boss ability usable as an
+# instant reaction rather than a two-second channel that loses a race with the player's own dash.
+offset AbilityCastTimeMaxOffset                   = 0x0  : AbilityCastTimeData.MaxCastTime
+offset AbilityCastTimePostOffset                  = 0x4  : AbilityCastTimeData.PostCastTime
+# One AbilityGroupSlotBuffer element: PrefabGUID(4) + bool ShowOnBar(1) + NetworkedEntity(12) at
+# alignment 4. AbilityGroupSlotBuffer.SLOTS_ON_BAR is 9; the buffer is longer because it also
+# covers mounted and shapeshifted contexts.
+size   AbilityGroupSlotStride                     = 20   : AbilityGroupSlotBuffer
+
+# ---- Abilities: no cooldowns (src/Progenitor.Core/Abilities/NoCooldownsRuntime.cs) -----------
+# Every ability entity a character has used (e.g. AB_Unholy_CorruptedSkull_Cast) carries
+# AbilityCooldownState and EntityOwner.Owner == the character (live, 2026-09-25: 50 on one
+# player). The game's own ResetAllCooldowns behaviour writes CooldownEndTime = serverTime and
+# CurrentCooldown = 0 on the entities in each group's AbilityStateBuffer (native server
+# ProjectM.Behaviours.ResetAllCooldowns$$Initialize); ctx.Abilities.NoCooldowns writes 0 / 0.
+offset EntityOwnerOwnerOffset                     = 0x0  : EntityOwner.Owner                      # an Entity (Index, Version)
+offset AbilityCooldownStateEndTimeOffset          = 0x0  : AbilityCooldownState.CooldownEndTime   # double
+offset AbilityCooldownStateCurrentOffset          = 0x8  : AbilityCooldownState.CurrentCooldown   # float
+# Charges live on the entity AbilityCooldownSystems iterates with AbilityChargesState (RW),
+# AbilityChargesData (RO) and EntityOwner (RO) together. ChargeTime @0x0 is
+# the recharge timer and is deliberately not declared: nothing writes it.
+offset AbilityChargesStateCurrentChargesOffset    = 0x4  : AbilityChargesState.CurrentCharges     # int, synced 0..255
+offset AbilityChargesDataMaxChargesOffset         = 0x8  : AbilityChargesData.MaxCharges          # int, read only
+
+# ---- Ecs: BuffBuffer sweep before unit DestroyTag (src/Progenitor.Core/Ecs/BuffSweep.cs) ------
+# DIAG2: DestroyTag on a unit that still holds BuffBuffer orphans Buff_General_Spawn_Unit;
+# Job 4 of Destroy_BuffModificationsSystem_Server then Burst-aborts on the missing target.
+# Walk is GetBufferRawRO, never GetBuffer<T>. Entity is two ints (Index @0x0, Version @0x4);
+# PrefabGUID sits at 0x8. Widest alignment 4, so the metadata-derived stride is 12, not sizeof.
+offset BuffBufferEntityOffset                     = 0    : BuffBuffer.Entity
+size   BuffBufferStride                           = 12   : BuffBuffer                             # Entity @0x0 (8) + PrefabGUID @0x8 (4)
+# Bootstrap SaveSafety mirrors these three as SaveSafetyPolicy.BuffRow* (no Core reference); a test pins them.
+offset BuffBufferPrefabGuidOffset                = 0x8  : BuffBuffer.PrefabGuid                  # read-only in SaveSafety's row log
+
+# ---- Content: recipe buffers (src/Progenitor.Core/Content/RecipeApply.cs) ----------------------
+# Dump-derived strides for the recipe clone and workstation list. RecipeData size is not
+# declared (the metadata states offsets, not size; U6 / S3). S3 answered live 2026-09-24: the typed
+# Write<RecipeData> (sizeof 24) is refused natively by SetComponentDataRaw's SizeInChunk check,
+# and SetComponentData<RecipeData> is absent. RecipeData is patched field by field in place
+# through GetComponentDataRawRW at these offsets, so no whole-struct length is ever passed.
+offset RecipeDataEntityOffset                     = 0    : RecipeData.Entity
+offset RecipeDataGuidOffset                       = 0x8  : RecipeData.Guid
+offset RecipeDataCraftDurationOffset              = 0xC  : RecipeData.CraftDuration
+offset RecipeDataHudSortingOrderOffset            = 0x10 : RecipeData.HudSortingOrder
+offset RecipeDataAlwaysUnlockedOffset             = 0x14 : RecipeData.AlwaysUnlocked
+offset RecipeDataHideInStationOffset              = 0x15 : RecipeData.HideInStation
+offset RecipeDataIgnoreServerSettingsOffset       = 0x16 : RecipeData.IgnoreServerSettings
+offset RecipeRequirementBufferGuidOffset          = 0    : RecipeRequirementBuffer.Guid
+offset RecipeRequirementBufferAmountOffset        = 4    : RecipeRequirementBuffer.Amount
+size   RecipeRequirementBufferStride              = 8    : RecipeRequirementBuffer                # PrefabGUID @0x0 + int Amount @0x4
+offset RecipeOutputBufferGuidOffset               = 0    : RecipeOutputBuffer.Guid
+offset RecipeOutputBufferAmountOffset             = 4    : RecipeOutputBuffer.Amount
+size   RecipeOutputBufferStride                   = 8    : RecipeOutputBuffer                     # PrefabGUID @0x0 + int Amount @0x4
+offset RecipeOutputUnitBufferGuidOffset           = 0    : RecipeOutputUnitBuffer.Guid
+offset RecipeOutputUnitBufferStacksOffset         = 4    : RecipeOutputUnitBuffer.Stacks
+size   RecipeOutputUnitBufferStride               = 8    : RecipeOutputUnitBuffer                 # PrefabGUID @0x0 + int Stacks @0x4
+offset RecipeLinkBufferGuidOffset                 = 0    : RecipeLinkBuffer.Guid
+size   RecipeLinkBufferStride                     = 4    : RecipeLinkBuffer                       # PrefabGUID @0x0
+offset WorkstationRecipesBufferRecipeGuidOffset   = 0    : WorkstationRecipesBuffer.RecipeGuid
+size   WorkstationRecipesBufferStride             = 4    : WorkstationRecipesBuffer               # PrefabGUID RecipeGuid @0x0
+
+# ---- Content: player unlock buffers (src/Progenitor.Core/Content/UnlockPrune.cs) --------------
+# The prune of stale Progenitor GUIDs reads ProgressionMapper on the user, then filters rows out of
+# the progression entity's unlock buffers by copying the kept rows byte for byte (no bool is ever
+# constructed). Strides come from here, never from a wrapper sizeof.
+offset ProgressionMapperEntityOffset              = 0    : ProgressionMapper.ProgressionEntity    # NetworkedEntity, _Entity first
+offset UnlockedProgressionElementGuidOffset       = 0    : UnlockedProgressionElement.UnlockedPrefab
+size   UnlockedProgressionElementStride           = 4    : UnlockedProgressionElement             # PrefabGUID @0x0
+offset UnlockedRecipeElementGuidOffset            = 0    : UnlockedRecipeElement.UnlockedRecipe
+size   UnlockedRecipeElementStride                = 8    : UnlockedRecipeElement                  # PrefabGUID @0x0 + bool UserHasRequiredContentFlags @0x4
+offset UnlockedBlueprintElementGuidOffset         = 0    : UnlockedBlueprintElement.UnlockedBlueprint
+size   UnlockedBlueprintElementStride             = 8    : UnlockedBlueprintElement               # PrefabGUID @0x0 + bool UserHasRequiredContentFlags @0x4
+
+# ---- Ai: boss behaviour trees (src/Progenitor.Core/Ai) -----------------------------------------
+# Verified live 2026-09-24 (internal research notes).
+# A unit's tree is BehaviourTreeInstance.TreeEntity; the job swaps to ExpectedTreeEntity itself,
+# aborting running nodes against the OLD blob first. That is the only swap Progenitor performs.
+offset BehaviourTreeInstanceTreeEntityOffset     = 0x0  : BehaviourTreeInstance.TreeEntity
+offset BehaviourTreeInstanceExpectedTreeOffset   = 0x8  : BehaviourTreeInstance.ExpectedTreeEntity
+offset BehaviourTreeBindingPrefabGuidOffset      = 0x0  : BehaviourTreeBinding.PrefabGUID
+offset BehaviourTreeBlobPointerOffset            = 0x0  : BehaviourTree.Blob
+offset BehaviourTreeBlackboardSizeValueOffset    = 0x0  : BehaviourTreeBlackboardSize.Value
+offset BehaviourTreeStateValueOffset             = 0x0  : BehaviourTreeState.Value
+offset BehaviourTreeBlobNodesOffset              = 0x0  : BehaviourTreeBlob.Nodes
+# The second BlobArray starts where the first ends, so this is also the width of one Unity
+# BlobArray {int m_OffsetPtr; int m_Length} (the metadata prints the open generic with both at 0x0).
+offset BehaviourTreeBlobDebugDataOffset          = 0x8  : BehaviourTreeBlob.NodeDebugData
+offset BehaviourTreeNodeParentOffset             = 0x0  : BehaviourTreeNode.ParentNode
+offset BehaviourTreeNodeIndexOffset              = 0x2  : BehaviourTreeNode.NodeIndex
+offset BehaviourTreeNodeTypeOffset               = 0x4  : BehaviourTreeNode.Type
+offset BehaviourTreeNodeBlackboardOffset         = 0x8  : BehaviourTreeNode.Blackboard
+offset BehaviourTreeNodeChildrenOffset           = 0x10 : BehaviourTreeNode.Children
+offset BlobAssetHeaderValidationPtrOffset        = 0x0  : BlobAssetHeader.ValidationPtr
+enum   BehaviourTreeNodeTypeAttackEntityCastOption = 85 : BehaviourTreeNodeType.AttackEntityCastOption
+enum   BehaviourTreeNodeTypeDelay                = 91   : BehaviourTreeNodeType.Delay
+enum   BehaviourTreeNodeTypeHealthChangePercentage = 118 : BehaviourTreeNodeType.HealthChangePercentage
+enum   BehaviourTreeNodeTypeIntSet               = 124  : BehaviourTreeNodeType.Int_Set
+enum   BehaviourTreeNodeTypeSetCombatAreaRelocationDistance = 159 : BehaviourTreeNodeType.SetCombatAreaRelocationDistance
+enum   BehaviourTreeNodeTypeSucceed              = 163  : BehaviourTreeNodeType.Succeed
+# Node blackboard bytes are the node's runtime struct (native/tree.md). Only literal parameters.
+offset DelayMinTimeOffset                        = 0x0  : ProjectM.Behaviours.Delay.MinTime
+offset DelayMaxTimeOffset                        = 0x4  : ProjectM.Behaviours.Delay.MaxTime
+offset HealthChangePercentageAmountOffset        = 0x0  : HealthChangePercentage.Amount
+offset IntSetValueOffset                         = 0x0  : Int_Set.Value
+offset SetCombatAreaRelocationDistanceValueOffset = 0x0 : SetCombatAreaRelocationDistance.Value
+enum   GenericEnemyStateCombat                   = 8    : GenericEnemyState.Combat
+
+# ---- Ai: cast options (src/Progenitor.Core/Ai) --------------------------------------------------
+# CastOptionsUser -> CO prefab -> CastOptionStateBuffer -> holder -> CastOptionGroupBuffer ->
+# option entity -> CastOptionBuffer rows. Rows are re-read every evaluation (live T3).
+offset CastOptionsUserPrefabOffset               = 0x0  : CastOptionsUser.CastOptionsPrefab
+offset CastOptionStateBufferStateOffset          = 0x0  : CastOptionStateBuffer.State
+offset CastOptionStateBufferEntityOffset         = 0x4  : CastOptionStateBuffer.Entity
+size   CastOptionStateBufferStride               = 12   : CastOptionStateBuffer
+offset CastOptionGroupBufferEntityOffset         = 0x0  : CastOptionGroupBuffer.CastOptionBufferEntity
+size   CastOptionGroupBufferStride               = 8    : CastOptionGroupBuffer
+offset CastOptionAbilityIndexOffset              = 0x0  : CastOptionBuffer.AbilityIndex
+offset CastOptionProbabilityOffset               = 0x4  : CastOptionBuffer.Probability
+offset CastOptionRangeOffset                     = 0x8  : CastOptionBuffer.Range
+offset CastOptionCooldownOffset                  = 0x10 : CastOptionBuffer.Cooldown
+offset CastOptionAggroFilterOffset               = 0x18 : CastOptionBuffer.AggroFilter
+offset CastOptionAngleOffset                     = 0x1C : CastOptionBuffer.AngleRequirement
+offset CastOptionIgnoreCooldownOffset            = 0x20 : CastOptionBuffer.IgnoreCooldown
+offset CastOptionInterruptOnTargetDeathOffset    = 0x24 : CastOptionBuffer.InterruptOnTargetDeath
+offset CastOptionLineOfSightOffset               = 0x28 : CastOptionBuffer.LineOfSightRequirement
+offset CastOptionConditionOffset                 = 0x30 : CastOptionBuffer.Condition
+offset CastOptionGroupConditionOffset            = 0x38 : CastOptionBuffer.GroupCondition
+offset CastOptionSuccessDelayOffset              = 0x40 : CastOptionBuffer.SuccessDelay
+offset CastOptionTieBreakerOffset                = 0x48 : CastOptionBuffer.TieBreaker
+offset CastOptionComboOffset                     = 0x70 : CastOptionBuffer.Combo
+# The row stride is Combo + sizeof(CastOptionCombo) = 0x78, 8-aligned by the blob pointers at 0x30/0x38;
+# the metadata cannot size the row itself (BlobAssetReference<T> is an uninstantiated generic).
+size   CastOptionComboSize                       = 8    : CastOptionCombo
+offset CastOptionRangeMinOffset                  = 0x0  : CastOptionRange.Min
+offset CastOptionRangeMaxOffset                  = 0x4  : CastOptionRange.Max
+# The runtime cooldown struct. Min < 0 means exactly Max seconds (native/cast-options.md).
+offset CastOptionCooldownMinOffset               = 0x0  : CastOptionCooldown.Min
+offset CastOptionCooldownMaxOffset               = 0x4  : CastOptionCooldown.Max
+offset CastOptionComboIndexOffset                = 0x0  : CastOptionCombo.Index
+offset CastOptionComboResetTimeOffset            = 0x4  : CastOptionCombo.ResetTime
+offset CastOptionTieBreakerSourceOffset          = 0x0  : CastOptionTieBreaker.Source
+offset CastOptionTieBreakerPickOffset            = 0x4  : CastOptionTieBreaker.Pick
+enum   CastOptionAggroFilterNone                 = 2    : CastOptionAggroFilter.None
+enum   CastOptionLineOfSightNone                 = 2    : CastOptionLineOfSightRequirement.None
+enum   CastOptionAngleCounterClockSide180        = 12   : CastOptionAngleRequirement.CounterClockSide180 # the last member
+offset AbilityGroupSlotGroupOffset               = 0x0  : AbilityGroupSlotBuffer.BaseAbilityGroupOnSlot
+
+# ---- Ai: condition graphs (src/Progenitor.Core/Ai) ----------------------------------------------
+# Element stride 0x28 is how CheckConditionGroup indexes the array (native/conditions.md).
+offset ConditionBlobConditionalsOffset           = 0x0  : ProjectM.Shared.ConditionBlob.Conditionals
+offset ConditionElementSourceOffset              = 0x0  : ConditionElement.Source
+offset ConditionElementFailureOffset             = 0x8  : ConditionElement.FailureIndex
+offset ConditionElementUnionOffset               = 0x10 : ConditionElement.Union
+# ConditionUnion is 8-aligned (Union sits at 0x10, not 0xC) and its widest member ends at
+# AbilityTargetPrefabTimeCondition.Prefab + sizeof(PrefabIdentifier) = 0x14, so the stride is
+# 0x10 + RoundUp(0x14, 8) = 0x28, the value CheckConditionGroup indexes by.
+offset AbilityTargetPrefabTimePrefabOffset       = 0x10 : AbilityTargetPrefabTimeCondition.Prefab
+size   PrefabIdentifierSize                      = 4    : PrefabIdentifier
+enum   ConditionSourceHealthFactor               = 1    : ConditionSource.HealthFactor
+offset TargetFloatConditionTargetOffset          = 0x0  : TargetFloatCondition.Target
+offset TargetFloatConditionCompareOffset         = 0x4  : TargetFloatCondition.CompareValue
+# Comparison<T> is { ConditionTypes Type; T ValueRHS }; the metadata prints the open generic at 0x0,
+# so ValueRHS = CompareValue + the enum's width.
+size   ConditionTypesSize                        = 4    : ConditionTypes
+enum   ConditionTargetOwner                      = 0    : ConditionTarget.Owner
+enum   ConditionTargetSelf                       = 2    : ConditionTarget.Self
+
+# ---- Ai: ally-safe damaging hits (src/Progenitor.Core/Ai/AllySafety*.cs) -------------------------
+# A damaging hit prefab carries CreateGameplayEventsOnHit rows whose Condition gates the whole hit
+# event. The row stride is ColliderCastIndex + 4 rounded up to 8 (the blob pointer at 0x10 makes the
+# row 8-aligned) = 0x20; the metadata cannot size the row itself (BlobAssetReference<T> is generic).
+offset CreateGameplayEventsOnHitConditionOffset  = 0x10 : ProjectM.CreateGameplayEventsOnHit.Condition
+offset CreateGameplayEventsOnHitColliderCastIndexOffset = 0x18 : ProjectM.CreateGameplayEventsOnHit.ColliderCastIndex
+offset ConditionElementSuccessOffset             = 0x4  : ConditionElement.SuccessIndex
+offset ConditionBlobInfoOffset                   = 0x8  : ProjectM.Shared.ConditionBlob.Info
+# ConditionInfo { BlobString Prefab @0; BlobString Component @8; bool @0x10; bool @0x11 }: a fresh
+# condition blob's header ends at Info + RoundUp(0x12, 8).
+offset ConditionInfoUsingMinionMasterChecksOffset = 0x11 : ConditionInfo.UsingMinionMasterChecks
+offset TargetBoolConditionTargetOffset           = 0x0  : TargetBoolCondition.Target
+offset TargetBoolConditionInvertOffset           = 0x4  : TargetBoolCondition.Invert
+enum   ConditionSourceIsAlly                     = 8    : ConditionSource.IsAlly
+enum   ConditionSourceIsEnemy                    = 41   : ConditionSource.IsEnemy
+enum   ConditionSourceIsInUnitTeam               = 66   : ConditionSource.IsInUnitTeam
+enum   ConditionSourceIsInNeutralTeam            = 89   : ConditionSource.IsInNeutralTeam
+enum   ConditionTargetTarget                     = 1    : ConditionTarget.Target
+enum   ConditionTargetMinionMaster               = 5    : ConditionTarget.MinionMaster
+# The caster check of the scoped guard: HasBuff(Owner / MinionMaster, API-spawn marker). HasBuff's
+# union member is TargetPrefabCondition { Target @0; bool Invert @4; PrefabIdentifier Prefab @8 }
+# (Fields 67 = Target|Invert|Prefab; Frostmaw's melee HasBuff elements read that way live).
+enum   ConditionSourceHasBuff                    = 7    : ConditionSource.HasBuff
+offset TargetPrefabConditionTargetOffset         = 0x0  : TargetPrefabCondition.Target
+offset TargetPrefabConditionInvertOffset         = 0x4  : TargetPrefabCondition.Invert
+offset TargetPrefabConditionPrefabOffset         = 0x8  : TargetPrefabCondition.Prefab
+offset BlobAssetHeaderAllocatorOffset            = 0xC  : BlobAssetHeader.Allocator
+offset BlobAssetHeaderHashOffset                 = 0x10 : BlobAssetHeader.Hash
+# A hit slot is damaging only when a GameplayEventListeners row on the same prefab listens for its
+# EventId (both GameplayEventId fields) with GameplayEventType DealDamage. The listener row stride is
+# GameplayEventId + sizeof(GameplayEventId) rounded up to 8 (the blob pointer at 0x8) = 0x20.
+offset CreateGameplayEventsOnHitEventIdOffset    = 0x0  : ProjectM.CreateGameplayEventsOnHit.EventId
+offset GameplayEventIdTypeOffset                 = 0x0  : ProjectM.GameplayEventId.GameplayEventType
+offset GameplayEventIdEventIdOffset              = 0x4  : ProjectM.GameplayEventId.EventId
+size   GameplayEventIdSize                       = 8    : ProjectM.GameplayEventId
+offset GameplayEventListenersEventTypeOffset     = 0x10 : ProjectM.GameplayEventListeners.GameplayEventType
+offset GameplayEventListenersEventIdOffset       = 0x14 : ProjectM.GameplayEventListeners.GameplayEventId
+enum   GameplayEventTypeEnumDealDamage           = 23   : GameplayEventTypeEnum.DealDamage
+
+# ---- Ai: phase script, team, faction, history (src/Progenitor.Core/Ai) -------------------------
+offset PhaseScriptHealthFactorOffset             = 0x0  : Script_ApplyBuffUnderHealthThreshold_DataServer.HealthFactor
+offset PhaseScriptNewBuffOffset                  = 0x4  : Script_ApplyBuffUnderHealthThreshold_DataServer.NewBuffEntity
+offset PhaseScriptThresholdMetOffset             = 0x14 : Script_ApplyBuffUnderHealthThreshold_DataServer.ThresholdMet
+offset TeamValueOffset                           = 0x0  : Team.Value
+offset TeamFactionIndexOffset                    = 0x4  : Team.FactionIndex
+offset FactionDataOffset                         = 0x0  : Faction.Data
+offset FactionReferenceGuidOffset                = 0x0  : FactionReference.FactionGuid
+offset FactionBlobMembershipOffset               = 0x10 : FactionBlobAsset.Membership
+offset FactionBlobFriendlyOffset                 = 0x14 : FactionBlobAsset.Friendly
+offset FactionBlobNeutralOffset                  = 0x18 : FactionBlobAsset.Neutral
+offset FactionBlobHostileOffset                  = 0x1C : FactionBlobAsset.Hostile
+offset FactionBlobIndexOffset                    = 0x20 : FactionBlobAsset.Index
+offset CastHistoryGuidOffset                     = 0x0  : CastHistoryBufferElement.AbilityPrefabGuid
+offset CastHistoryTimeOffset                     = 0x8  : CastHistoryBufferElement.CastTime
+offset CastHistoryResultOffset                   = 0x10 : CastHistoryBufferElement.CastResult
+size   CastHistoryStride                         = 0x18 : CastHistoryBufferElement
+offset AggroConsumerAggroTargetOffset            = 0x30 : AggroConsumer.AggroTarget
+# A CO prefab root carries a LinkedEntityGroup (live 2026-09-24); Instantiate clones the group and
+# remaps references inside it. The clone's group is read to tag every copy Prefab.
+offset LinkedEntityGroupValueOffset              = 0x0  : LinkedEntityGroup.Value
+size   LinkedEntityGroupStride                   = 8    : LinkedEntityGroup
+# Per-unit running-node list the tree job re-expands; a tree repair checks its indices fit the tree.
+offset BehaviourTreeNodeInstanceIndexOffset      = 0x0  : BehaviourTreeNodeInstance.NodeIndex
+size   BehaviourTreeNodeInstanceElementStride    = 4    : BehaviourTreeNodeInstanceElement
+
+# ---- Units: hitbox scale (src/Progenitor.Core/Units/UnitHitboxCodec.cs, UnitBody.cs) ----------
+# Verified live 2026-09-25. A unit's hitbox is its PhysicsCollider blob: a compound collider whose
+# child on the Hittable layer (CollisionFilter.BelongsTo has CollisionFilterFlags.Hittable) is what hits test.
+# The BVH node stride is NOT declared here: the metadata derives 0x74 from Flags @0x70, but the native
+# node is 0x80 (the 928-byte Frostmaw compound only adds up with 0x80 nodes, and the live leaf
+# walk read at 0x80). UnitHitboxCodec.BvhNodeStride states it next to that derivation.
+offset PhysicsColliderValueOffset                = 0x0  : PhysicsCollider.Value
+enum   ColliderTypeSphere                        = 1    : Unity.Physics.ColliderType.Sphere
+enum   ColliderTypeCapsule                       = 2    : Unity.Physics.ColliderType.Capsule
+enum   ColliderTypeCompound                      = 8    : Unity.Physics.ColliderType.Compound
+offset ColliderHeaderTypeOffset                  = 0x0  : ColliderHeader.Type
+offset ConvexColliderHeaderFilterOffset          = 0x8  : ConvexColliderHeader.Filter
+offset CollisionFilterBelongsToOffset            = 0x0  : CollisionFilter.BelongsTo             # the live 2179080 is this field
+enum   CollisionFilterFlagsHittable              = 8    : CollisionFilterFlags.Hittable
+offset PhysicsBlobArrayOffsetOffset              = 0x0  : Unity.Physics.BlobArray.Offset        # self-relative
+offset PhysicsBlobArrayLengthOffset              = 0x4  : Unity.Physics.BlobArray.Length
+offset CompoundColliderBoundingRadiusOffset      = 0x14 : CompoundCollider.m_BoundingRadius
+offset CompoundColliderChildrenOffset            = 0x18 : CompoundCollider.m_ChildrenBlob
+offset CompoundColliderBvhNodesOffset            = 0x20 : CompoundCollider.m_BvhNodesBlob
+offset CompoundChildTransformOffset              = 0x0  : CompoundCollider.Child.CompoundFromChild
+offset CompoundChildColliderOffset               = 0x1C : CompoundCollider.Child.m_ColliderOffset # relative to this field
+size   CompoundChildStride                       = 0x28 : CompoundCollider.Child
+offset RigidTransformRotOffset                   = 0x0  : RigidTransform.rot
+offset RigidTransformPosOffset                   = 0x10 : RigidTransform.pos
+offset CapsuleColliderHullOffset                 = 0x20 : Unity.Physics.CapsuleCollider.ConvexHull
+offset CapsuleColliderVertex0Offset              = 0x54 : Unity.Physics.CapsuleCollider.m_Vertex0
+offset CapsuleColliderVertex1Offset              = 0x60 : Unity.Physics.CapsuleCollider.m_Vertex1
+offset SphereColliderHullOffset                  = 0x20 : Unity.Physics.SphereCollider.ConvexHull
+offset SphereColliderVertexOffset                = 0x54 : Unity.Physics.SphereCollider.m_Vertex
+offset ConvexHullConvexRadiusOffset              = 0x0  : ConvexHull.ConvexRadius
+offset ConvexHullVerticesOffset                  = 0x4  : ConvexHull.VerticesBlob               # live: a capsule's hull vertices alias m_Vertex0/1
+offset BvhNodeBoundsOffset                       = 0x0  : BoundingVolumeHierarchy.Node.Bounds
+offset BvhNodeDataOffset                         = 0x60 : BoundingVolumeHierarchy.Node.Data
+offset BvhNodeFlagsOffset                        = 0x70 : BoundingVolumeHierarchy.Node.Flags
+offset FourTransposedAabbsLxOffset               = 0x0  : FourTransposedAabbs.Lx
+offset FourTransposedAabbsHxOffset               = 0x10 : FourTransposedAabbs.Hx
+offset FourTransposedAabbsLyOffset               = 0x20 : FourTransposedAabbs.Ly
+offset FourTransposedAabbsHyOffset               = 0x30 : FourTransposedAabbs.Hy
+offset FourTransposedAabbsLzOffset               = 0x40 : FourTransposedAabbs.Lz
+offset FourTransposedAabbsHzOffset               = 0x50 : FourTransposedAabbs.Hz
+
+# ---- Units: move speed (src/Progenitor.Core/Units/UnitMoveSpeedMath.cs, UnitBody.cs) -----------
+# Chase speed follows Movement.Speed (live: set 3..12, measured 3.1..12.1 m/s). AiMoveSpeeds alone
+# did not change chase speed; it is scaled by the same factor for the AI's other modes. Neither
+# carries a PersistenceV2 exclusion, so both are written into the world save.
+offset MovementSpeedOffset                       = 0x5C : ProjectM.Movement.Speed
+offset ModifiableFloatValueOffset                = 0x0  : ModifiableFloat._Value
+offset AiMoveSpeedsWalkOffset                    = 0x0  : AiMoveSpeeds.Walk
+offset AiMoveSpeedsRunOffset                     = 0x4  : AiMoveSpeeds.Run
+offset AiMoveSpeedsCircleOffset                  = 0x8  : AiMoveSpeeds.Circle
+offset AiMoveSpeedsReturnOffset                  = 0xC  : AiMoveSpeeds.Return
+
+# ---- Units: stats (src/Progenitor.Core/Units/UnitStatMath.cs, UnitStatsBody.cs) ---------------
+# Absolute level, max health and power for a spawned unit. The spawn computation fills Health and
+# the powers from the unit's UnitSpawnData settings after Instantiate (a prefab reads MaxHealth 0),
+# so the write waits for it. Health, UnitStats and UnitLevel carry no PersistenceV2 exclusion
+# (no ExcludeComponent attribute, not in PersistenceV2Utility..cctor), so all three are saved.
+offset UnitStatsPhysicalPowerOffset              = 0x0  : UnitStats.PhysicalPower
+offset UnitStatsSpellPowerOffset                 = 0x4  : UnitStats.SpellPower
+offset UnitLevelLevelOffset                      = 0x0  : UnitLevel.Level
+offset ModifiableIntValueOffset                  = 0x0  : ModifiableInt._Value
+offset HealthMaxRecoveryOffset                   = 0x14 : Health.MaxRecoveryHealth
+
+# ---- Units: aggro, pet stances and hold (src/Progenitor.Core/Units/UnityUnitRuntime*.cs) -------
+# AggroTarget (AggroConsumerAggroTargetOffset) and Combat are declared above. Engage writes AggroTarget and sets Active; Hold clears both targets and writes Active 0 (the field
+# DisableAggroBuff's TargetDontAttackOthers clears), then writes back the value it read. Active is a
+# ModifiableBool whose value byte is _Value @0x0. NetworkedEntity is Entity @0x0 + _WaitingForSync @0x8.
+offset AggroConsumerAlertTargetOffset            = 0x3C : AggroConsumer.AlertTarget
+offset AggroConsumerActiveOffset                 = 0x50 : AggroConsumer.Active
+offset ModifiableBoolValueOffset                 = 0x0  : ModifiableBool._Value
+offset NetworkedEntityWaitingForSyncOffset       = 0x8  : NetworkedEntity._WaitingForSync
+enum   GenericEnemyStateAlert                    = 4    : GenericEnemyState.Alert
+enum   GenericEnemyStateReturn                   = 64   : GenericEnemyState.Return
+enum   GenericEnemyStateRelocateCombatArea       = 1048576 : GenericEnemyState.Relocate_CombatArea
+# Hold release skips the write-back while a buff whose DisableAggroBuff has TargetDontAttackOthers is
+# on the unit: that buff, not Core, owns Active then (internal research notes).
+offset DisableAggroBuffModeOffset                = 0x0  : DisableAggroBuff.Mode
+enum   DisableAggroBuffModeTargetDontAttackOthers = 2   : DisableAggroBuffMode.TargetDontAttackOthers
+
+# ---- Units: spawn options Permanent (src/Progenitor.Core/Units/UnityUnitRuntime.Stance.cs) ------
+# CHAR_Unholy_DeathKnight ships LifeTime {6, Kill}; {-1, None} right after spawn kept it alive (live,
+# 2026-09-25, checked at 12 s). LifeTime is networked; Core's marker clones already use {-1, None}.
+offset LifeTimeDurationOffset                    = 0x0  : LifeTime.Duration
+offset LifeTimeEndActionOffset                   = 0x4  : LifeTime.EndAction
+enum   LifeTimeEndActionNone                     = 0    : LifeTimeEndAction.None
+# Units: lifetime (src/Progenitor.Core/Units/UnityUnitMutation.cs, UnityUnitExpiry.cs). LifeTimeSystem.Handle
+# (the server's native code) ends an entity when EndAction != None and Duration <= Age.Value; its query
+# is WithAllRW<Age> + LifeTime, so a unit without Age never expires. Read only, plus Age added at 0.
+enum   LifeTimeEndActionDestroy                  = 2    : LifeTimeEndAction.Destroy
+offset AgeValueOffset                            = 0x0  : Age.Value
+
+# ---- Units: look (src/Progenitor.Core/Units/UnitLooks.cs) ----------------------------------------
+# Client only. A unit's visual model is a hybrid GameObject: the client unit entity carries
+# HybridModelUser, whose HybridEntity carries the model's managed UnityEngine.Transform
+# (live 2026-09-25, creature-customization review). Read-only.
+dump client
+offset HybridModelUserHybridEntityOffset         = 0x0  : HybridModelUser.HybridEntity
+
+# ---- Cameras: scripted shots (src/Progenitor.Core/Cameras/UnityCameraRuntime.cs) --------------
+# Client only. The camera components live on the instance LocalUserSystem._CameraEntity names
+# (a fresh instance of the mode's prefab on every mode switch; never the prefab itself) and are
+# poked through a GetComponentDataRawRW overlay each frame. Angles are degrees: the native
+# FreeCameraSystem / OrbitCameraSystem jobs multiply Yaw and Pitch by 0.017453292 before
+# quaternion.Euler (the native FreeCameraSystem.CameraUpdateJob.UpdateCamera and
+# OrbitCameraSystem.CameraUpdateJob.SetCameraPositionRotation).
+enum   CameraTypeTopDown                          = 1    : ProjectM.CameraType.TopDownCamera
+enum   CameraTypeOrbit                            = 2    : ProjectM.CameraType.OrbitCamera
+enum   CameraTypeFree                             = 3    : ProjectM.CameraType.FreeCamera
+enum   CameraTypeStatic                           = 4    : ProjectM.CameraType.StaticCamera
+offset FreeCameraStateStaticCameraOffset          = 0x0  : FreeCameraState.StaticCamera          # true skips UpdateInputs
+offset FreeCameraStateLastTargetOffset            = 0x4  : FreeCameraState.LastTarget
+offset FreeCameraStateTargetOffset                = 0x18 : FreeCameraState.Target
+offset FreeCameraStateCurrentOffset               = 0x2C : FreeCameraState.Current
+offset FreeCameraLerpYawOffset                    = 0x0  : FreeCameraState.LerpVariables.Yaw
+offset FreeCameraLerpPitchOffset                  = 0x4  : FreeCameraState.LerpVariables.Pitch
+offset FreeCameraLerpPositionOffset               = 0x8  : FreeCameraState.LerpVariables.Position
+size   FreeCameraLerpStride                       = 20   : FreeCameraState.LerpVariables         # float, float, float3
+offset OrbitCameraMinPitchOffset                  = 0x4  : OrbitCamera.MinPitch
+offset OrbitCameraMaxPitchOffset                  = 0x8  : OrbitCamera.MaxPitch
+offset OrbitCameraMinZoomOffset                   = 0xC  : OrbitCamera.MinZoom
+offset OrbitCameraMaxZoomOffset                   = 0x10 : OrbitCamera.MaxZoom
+offset OrbitCameraZoomSpeedOffset                 = 0x14 : OrbitCamera.ZoomSpeed
+offset OrbitCameraOverTheShoulderSensitivityOffset = 0x18 : OrbitCamera.OverTheShoulderSensitivity
+offset OrbitCameraAnchorHeightSensitivityOffset   = 0x1C : OrbitCamera.AnchorHeightSensitivity
+offset OrbitCameraAutoRotationSensitivityOffset   = 0x20 : OrbitCamera.AutoRotationSensitivity
+offset OrbitCameraMouseRotationSensitivityOffset  = 0x24 : OrbitCamera.MouseRotationSensitivity
+offset OrbitCameraStateAutomaticRotationSpeedOffset = 0x4 : OrbitCameraState.AutomaticRotationSpeed
+offset OrbitCameraStateUseCustomLookAtTargetOffset = 0x8 : OrbitCameraState.UseCustomLookAtTarget
+offset OrbitCameraStateCustomLookAtTargetOffset   = 0xC  : OrbitCameraState.CustomLookAtTarget
+offset OrbitCameraStateFollowTargetRotationOffset = 0x14 : OrbitCameraState.FollowTargetObjectRotation
+offset OrbitCameraStateLastTargetOffset           = 0x24 : OrbitCameraState.LastTarget
+offset OrbitCameraStateTargetOffset               = 0x4C : OrbitCameraState.Target
+offset OrbitCameraStateCurrentOffset              = 0x74 : OrbitCameraState.Current
+offset OrbitCameraLerpDistanceOffset              = 0x0  : OrbitCameraState.LerpVariables.OrbitDistance
+offset OrbitCameraLerpYawOffset                   = 0x4  : OrbitCameraState.LerpVariables.OrbitYaw
+offset OrbitCameraLerpPitchOffset                 = 0x8  : OrbitCameraState.LerpVariables.OrbitPitch
+offset OrbitCameraLerpAnchorPositionOffset        = 0xC  : OrbitCameraState.LerpVariables.AnchorPosition
+offset OrbitCameraLerpAnchorRotationOffset        = 0x18 : OrbitCameraState.LerpVariables.AnchorRotation
+size   OrbitCameraLerpStride                      = 40   : OrbitCameraState.LerpVariables        # 3 floats, float3, quaternion
+# Lighting focus (docs/modules.md, "Lighting under free shots"). HybridCameraSystem anchors the
+# HDRP volume and sets _g_CameraZoom from CameraTarget.Target's Translation. The free camera's
+# RayCastTarget_Job and LocalUserSystem.UpdateCamera's point orbit both point CameraTarget at the
+# camera's own BonusCustomTargetEntity helper (tagged CustomCameraTarget) and move its Translation;
+# the focus hook does the same with the shot's focus (the client's native code, read 2026-09-25).
+offset CameraTargetTargetOffset                   = 0x0  : CameraTarget.Target
+offset FreeCameraBonusCustomTargetEntityOffset    = 0x14 : ProjectM.FreeCamera.BonusCustomTargetEntity
+offset OrbitCameraBonusCustomTargetEntityOffset   = 0x28 : OrbitCamera.BonusCustomTargetEntity
+
+# ---- Units: hide health bar (src/Progenitor.Core/Units/UnitHealthBars.cs, Ai/InertClones.cs) ----
+# The client's GetCharacterHUDSystem.GetHideTargetHUDBuffs_Job collects every buff with Buff +
+# HideTargetHUD and skips its target's HUD. Core's hide-HUD clone carries the component on both
+# sides; Type is written -1 (every flag, the value vanilla carriers use). Identical in the client
+# metadata. Typed Write<HideTargetHUD>, checked against this size.
+dump server
+size   HideTargetHUDSize                         = 4    : HideTargetHUD
+offset HideTargetHUDTypeOffset                   = 0x0  : HideTargetHUD.Type
+enum   HideTargetHUDTypeCharacterHUD             = 1    : HideTargetHUDType.CharacterHUD
+enum   HideTargetHUDTypeTargetInfo               = 2    : HideTargetHUDType.TargetInfo
+
+# ---- Units: join a character's team (src/Progenitor.Core/Units/UnitTeams.cs) --------------------
+# API units sit on Team.Value 2 (Team.UNIT_TEAM) with TeamReference = the unit-team entity; a player
+# reads their own team value and team entity (live 2026-09-25). JoinTeam copies both from the
+# character through GetComponentDataRawRW field pokes; Team.Value/FactionIndex are declared above.
+# TeamReference.Value is a ModifiableEntity whose Entity is _Value @0x0 (8 bytes: Index, Version).
+offset TeamReferenceValueOffset                  = 0x0  : TeamReference.Value
+offset ModifiableEntityValueOffset               = 0x0  : ModifiableEntity._Value
+
+# ---- Clock: time of day (src/Progenitor.Core/Clock/TimeOfDayRuntime.cs) --------------------------
+# DayNightCycle is the server singleton the day/night systems read. DayNightCycleSystem.OnUpdate
+# (the server's native code, read 2026-09-25) writes, each frame,
+# Time = DayNightCycleStartTime + ServerTime.Time unless SyncedServerDebugSettings.DayNightCycleDisabled;
+# when disabled the server copies Time into the [SyncDouble] ServerTime field and a client copies
+# that field back into its own Time. ctx.Time sets the flag and writes Time + ServerTime. The same
+# offsets are in the client metadata (DayNightCycle, SyncedServerDebugSettings).
+offset DayNightCycleTimeOffset                   = 0x0  : DayNightCycle.Time
+offset DayNightCycleServerTimeOffset             = 0x8  : DayNightCycle.ServerTime               # [SyncDouble]
+offset DayNightCycleStartTimeOffset              = 0x10 : DayNightCycle.DayNightCycleStartTime   # not synced
+offset DayNightCycleDayDurationOffset            = 0x14 : DayNightCycle.DayDurationInSeconds     # whole cycle
+offset DayNightCycleDayTimeStartOffset           = 0x40 : DayNightCycle.DayTimeStartInSeconds    # sunrise past midnight
+offset DayNightCycleDayTimeDurationOffset        = 0x44 : DayNightCycle.DayTimeDurationInSeconds
+offset DayNightCycleNextBloodMoonDayOffset       = 0x5C : DayNightCycle.NextBloodMoonDay         # [SyncInt], read only;
+offset ServerTimeTimeOffset                      = 0x0  : ServerTime.Time                        # the game clock
+offset SyncedServerDebugSettingsDayNightCycleDisabledOffset = 0xA : SyncedServerDebugSettings.DayNightCycleDisabled # [SyncBool]
+
+# ---- Debug: build mode (src/Progenitor.Core/Debugging/DebugBuildRuntime.cs, .debug build on|off) ----
+# The game's own server debug settings that `.debug build on` sets. Each is a one-byte [SyncBool] on the
+# [NetworkedComponent] singleton SyncedServerDebugSettings; SetupSyncedServerDebugSettingsForWorld_Base
+# copies the singleton into the shared static every frame, so writing the component is enough (the
+# server's native code, read 2026-09-25). Same offsets in the client metadata.
+offset SyncedServerDebugSettingsBuildCostsDisabledOffset                    = 0x5  : SyncedServerDebugSettings.BuildCostsDisabled
+offset SyncedServerDebugSettingsAllProgressionUnlockedOffset                = 0x7  : SyncedServerDebugSettings.AllProgressionUnlocked
+offset SyncedServerDebugSettingsBuildingPlacementRestrictionsDisabledOffset = 0xD  : SyncedServerDebugSettings.BuildingPlacementRestrictionsDisabled
+offset SyncedServerDebugSettingsFreeBuildingPlacementEnabledOffset          = 0xE  : SyncedServerDebugSettings.FreeBuildingPlacementEnabled
+offset SyncedServerDebugSettingsFloorPlacementRestrictionsDisabledOffset    = 0x10 : SyncedServerDebugSettings.FloorPlacementRestrictionsDisabled
+offset SyncedServerDebugSettingsCastleLimitsDisabledOffset                  = 0x1B : SyncedServerDebugSettings.CastleLimitsDisabled
+offset SyncedServerDebugSettingsCastleDragBuildingEnabledOffset             = 0x1C : SyncedServerDebugSettings.CastleDragBuildingEnabled
+offset SyncedServerDebugSettingsBuildingProximityRequirementDisabledOffset  = 0x27 : SyncedServerDebugSettings.BuildingProximityRequirementDisabled
+
+# ---- Debug: detached pieces (src/Progenitor.Core/Debugging/DetachedPiecesRuntime.cs, .debug build detached) ----
+# A piece whose CastleAreaRequirement is AttachToOwnedArea always joins a castle heart when placed normally;
+# with BuildingPlacementRestrictionsDisabled on, GetPlacementResult.CheckCastleTerritoryZone skips the
+# territory check that picks the heart, so CastleHeartConnection stays empty. Read-only raw reads.
+offset CastleHeartConnectionEntityOffset           = 0x0  : CastleHeartConnection.CastleHeartEntity   # NetworkedEntity, _Entity {Index, Version} first
+offset UserOwnerOwnerOffset                        = 0x0  : UserOwner.Owner                           # NetworkedEntity, _Entity first
+offset CastleAreaRequirementRequirementTypeOffset  = 0x0  : CastleAreaRequirement.RequirementType     # CastleAreaRequirementType, byte
+enum   CastleAreaRequirementTypeAttachToOwnedArea  = 1    : CastleAreaRequirementType.AttachToOwnedArea
+
+# ---- Clock: world speed (src/Progenitor.Core/Clock/TimeScaleRuntime.cs) ---------------------------
+# TimeScale is the game's own networked world-speed singleton (the debug menu's time control).
+# TimeScaleSystem (LateUpdateGroup, server and client worlds) calls UnityEngine.Time.set_timeScale
+# with Value every frame, so the server's World.Time.DeltaTime, ServerTime and every connected
+# client follow it (the game's native code, read 2026-09-27). ctx.Time.Freeze / SlowMotion write
+# Value and never IsPaused.
+# Same offsets in the client metadata.
+offset TimeScaleValueOffset                      = 0x0  : ProjectM.TimeScale.Value               # [SyncRangedFloat(0, 100, 3, 1)]
+offset TimeScaleIsPausedOffset                   = 0x4  : ProjectM.TimeScale.IsPaused            # [SyncBool], read only
+
+# ---- Inputs: local player input (src/Progenitor.Core/Inputs/UnityInputRuntime.cs) -----------------
+# Client only. GameplayInputSystem fills the input controller entity's EntityInput (the one entity
+# with InputCommandBufferElement + Controller, not the character) from the mouse and keys;
+# CreateInputCommandsSystem copies it into InputCommandBufferElement.RawInput, the command the
+# server reads (live 2026-09-25, internal research notes). ctx.Input writes
+# EntityInput on the controller and the character through GetComponentDataRawRW, then reads back
+# and patches the new commands in the buffer. The server metadata has the same EntityInput offsets.
+dump client
+offset EntityInputMovementOffset                 = 0x0  : EntityInput.Movement                   # float2
+offset EntityInputAimPositionOffset              = 0x8  : EntityInput.AimPosition                # float3
+offset EntityInputAimPositionPlaneOffset         = 0x14 : EntityInput.AimPositionPlane           # float3
+offset EntityInputAimDirectionOffset             = 0x20 : EntityInput.AimDirection               # float3, flat and normalized
+offset EntityInputAimLengthOffset                = 0x2C : EntityInput.AimLength                  # float
+offset EntityInputHoveredEntityOffset            = 0x30 : EntityInput.HoveredEntity              # Entity (this client's id)
+offset EntityInputHoveredNetworkIdOffset         = 0x38 : EntityInput.HoveredEntityNetworkId     # NetworkId, 12 bytes up to ProjectileAimType
+offset EntityInputProjectileAimTypeOffset        = 0x44 : EntityInput.ProjectileAimType          # bounds the hovered NetworkId copy; never written
+offset EntityInputStateOffset                    = 0x48 : EntityInput.State                      # SyncedInputState
+offset SyncedInputStateInputsUpOffset            = 0x0  : SyncedInputState.InputsUp              # ushort SyncedButtonInputAction
+offset SyncedInputStateInputsDownOffset          = 0x2  : SyncedInputState.InputsDown
+offset SyncedInputStateInputsPressedOffset       = 0x4  : SyncedInputState.InputsPressed
+offset InputCommandMovementInputOffset           = 0x0  : InputCommandBufferElement.MovementInput   # CommandMovementInput.MoveDirection float2 @0x0
+offset InputCommandRotationInputOffset           = 0x8  : InputCommandBufferElement.RotationInput   # CommandRotationInput.TargetDirection float3 @0x0
+offset InputCommandRawInputOffset                = 0x14 : InputCommandBufferElement.RawInput        # an EntityInput
+offset InputCommandClientFrameOffset             = 0x74 : InputCommandBufferElement.ClientFrame     # int
+# The element size cannot be derived here (RawInput holds a fixed buffer the metadata lays out no
+# instance for), so the stride is computed from these two in UnityInputRuntime: DeltaTime's end
+# (0x94) rounded up to EndTime's 8-byte alignment = 0x98, cross-checked against the ECS ElementSize.
+offset InputCommandEndTimeOffset                 = 0x88 : InputCommandBufferElement.EndTime         # double, the widest alignment
+offset InputCommandDeltaTimeOffset               = 0x90 : InputCommandBufferElement.DeltaTime       # float, the last field
+
+# ---- Units: instance feed flag (MVP StripVBlood) ----
+# Prefer clearing CanBeConsumed over removing BloodConsumeSource (networked snapshot risk).
+offset BloodConsumeSourceCanBeConsumedOffset     = 0x20 : BloodConsumeSource.CanBeConsumed      # server metadata
+
+# ---- Dye all (Core): transmog color event and palette keys (src/Progenitor.Core/Dye) ------------
+# ChangeTransmogColorEvent is the event TransmogContainer.HandleInput sends for a swatch click
+# (TransmogEventUtilities.SendChangeColorEvent builds the same struct). Written field by field into the event entity, never as a sized blob.
+offset ChangeTransmogColorEventItemNetworkIdOffset      = 0x0  : ChangeTransmogColorEvent.ItemNetworkId       # NetworkId, 12 bytes
+offset ChangeTransmogColorEventEquipmentNetworkIdOffset = 0xC  : ChangeTransmogColorEvent.EquipmentNetworkId  # the character NetworkId
+offset ChangeTransmogColorEventEquipmentTypeOffset      = 0x18 : ChangeTransmogColorEvent.EquipmentType       # int enum
+offset ChangeTransmogColorEventNewIndexOffset           = 0x1C : ChangeTransmogColorEvent.NewIndex            # byte
+match  ChangeTransmogColorEventId                       = -695231661 : /EventId_ChangeTransmogColorEvent = (-?\d+);/ in NetworkEvents
+# One TransmogAssetKey: a palette (TransmogPaletteData prefab) and where its colors start in the
+# item color option list (TransmogInfoUtilities.TryGetClientTransmogOptionsForSlot).
+size   TransmogAssetKeyStride                     = 8    : TransmogAssetKey                       # PrefabGUID @0x0, byte @0x4, byte @0x5
+offset TransmogAssetKeyAssetGuidOffset            = 0x0  : TransmogAssetKey.AssetGuid
+offset TransmogAssetKeyStartIndexOffset           = 0x4  : TransmogAssetKey.StartIndex
+offset TransmogAssetKeyNumColorsOffset            = 0x5  : TransmogAssetKey.NumColors
+offset TransmogAssetKeyBlobGuidsOffset            = 0x0  : TransmogAssetKeyBlob.Guids              # BlobArray {int offset; int length}
+offset TransmogAssetKeyBlobDataBlobOffset         = 0x0  : TransmogAssetKeyBlobData.Blob           # BlobAssetReference: the data pointer first
+
+# ---- Build menu search: the composition blob (src/Progenitor.Core/Ui/BuildMenuIndex.cs) ---------
+# Client only, read-only. BuildMenuComposition.Blob points at the build menu's baked layout:
+# categories > tags > structures (a group, or one blueprint) > blueprints. The strides are the ones
+# BuildMenuMapper's native code multiplies by (`* 0xc` for a structure and `* 0x24` for a blueprint,
+# read 2026-10-04).
+dump client
+offset BuildMenuCompositionBlobOffset             = 0x0  : BuildMenuComposition.Blob               # BlobAssetReference, the data pointer first
+offset BuildMenuCompositionCategoriesOffset       = 0x0  : BuildMenuCompositionBlob.Categories     # BlobArray
+offset BuildMenuCategoryTagsOffset                = 0x0  : BuildMenuCategoryBlob.Tags              # BlobArray
+offset BuildMenuTagStructuresOffset               = 0x0  : BuildMenuTagBlob.Structures             # BlobArray
+offset BuildMenuStructureGroupGuidOffset          = 0x0  : BuildMenuStructureBlob.GroupPrefabGuid
+offset BuildMenuStructureBlueprintsOffset         = 0x4  : BuildMenuStructureBlob.Blueprints       # BlobArray
+# BuildMenuStructureBlob's stride (0xC) is BuildMenuStructureBlueprintsOffset + one BlobArray (the metadata
+# lays out no BlobArray<T> instance, so it is not a size here); BuildMenuIndex derives and checks it.
+offset BuildMenuBlueprintGuidOffset               = 0x0  : BuildMenuBlueprintBlob.PrefabGUID
+size   BuildMenuBlueprintStride                   = 36   : BuildMenuBlueprintBlob                 # PrefabGUID, LocalizationKey (16), AssetGuid (16)
+
+# ---- Build menu open/close (src/Progenitor.Core/Ui/BuildMenuOpener.cs; Dev build_search open/close) --
+# Client only. What the B key does (MenuInputSystem.HandleInput, ButtonInputAction 0x15 -> the native
+# helper ToggleMenu<CharacterMenu.InitData>): with no HUD menu open, an entity carrying
+# OpenMenuEvent {Menu = CharacterInfo, InitDataEntity} plus an init entity carrying CharacterMenu.InitData
+# {DefaultTab = Building}; with one open, HUDMenuManager.CloseMenu(world).
+dump client
+offset OpenMenuEventMenuOffset                     = 0x0  : OpenMenuEvent.Menu                     # HUDMenuType, int
+offset OpenMenuEventInitDataEntityOffset           = 0x4  : OpenMenuEvent.InitDataEntity           # Entity {Index, Version}
+offset CharacterMenuInitDataDefaultTabOffset       = 0x0  : CharacterMenu.InitData.DefaultTab      # CharacterMenuTab, int
+enum   HUDMenuTypeCharacterInfo                    = 1    : HUDMenuType.CharacterInfo
+enum   CharacterMenuTabBuilding                    = 2    : CharacterMenuTab.Building
+
+# ---- Authored item stat bonuses (native equip transfer uses stride 0x24) ----------------------
+dump server
+size   ItemStatRowStride = 36 : ModifyUnitStatBuff_DOTS
+offset ItemStatCapOffset = 0 : ModifyUnitStatBuff_DOTS.AttributeCapType
+offset ItemStatTypeOffset = 4 : ModifyUnitStatBuff_DOTS.StatType
+offset ItemStatOperationOffset = 5 : ModifyUnitStatBuff_DOTS.ModificationType
+offset ItemStatValueOffset = 8 : ModifyUnitStatBuff_DOTS.Value
+offset ItemStatSoftCapOffset = 12 : ModifyUnitStatBuff_DOTS.SoftCapValue
+offset ItemStatModifierOffset = 16 : ModifyUnitStatBuff_DOTS.Modifier
+offset ItemStatStacksOffset = 20 : ModifyUnitStatBuff_DOTS.IncreaseByStacks
+offset ItemStatStackValueOffset = 24 : ModifyUnitStatBuff_DOTS.ValueByStacks
+offset ItemStatPriorityOffset = 28 : ModifyUnitStatBuff_DOTS.Priority
+offset ItemStatIdOffset = 32 : ModifyUnitStatBuff_DOTS.Id
+enum ItemStatUncapped = -1 : AttributeCapType.Uncapped
+enum ItemStatAdd = 3 : ModificationType.Add
+enum ItemStatMaxHealth = 4 : UnitStatType.MaxHealth
+enum ItemStatPhysicalPower = 0 : UnitStatType.PhysicalPower
+enum ItemStatSpellPower = 25 : UnitStatType.SpellPower

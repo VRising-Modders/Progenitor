@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The generated access layer (roadmap M3 item 5, job FACC). It reads a text declaration file and
+    writes C#; it never loads a game assembly, never reads GameAssembly.dll and never launches the
+    game, so it runs on a machine that has never installed V Rising - the same discipline
+    tools/driftmap and tools/resilience-report.ps1 follow. Keep ReferenceGame=false.
+
+    Deliberately NOT in Progenitor.sln, like tools/enc: it is a build-time tool, and its logic is
+    covered by tests/Progenitor.Tests, which links AccessGenerator.cs and the declaration parser.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>accessgen</AssemblyName>
+    <RootNamespace>Progenitor.AccessGen</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <ReferenceGame>false</ReferenceGame>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The declaration model and parser, shared verbatim with the runtime that consumes the
+         generated code. Game-free on purpose so this tool can link it. -->
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessDeclaration.cs" Link="Linked\AccessDeclaration.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessMemberAttribute.cs" Link="Linked\AccessMemberAttribute.cs" />
+  </ItemGroup>
+
+  <!-- Same guard the tests and driftmap carry: a game reference here would break the
+       "runs anywhere" promise. -->
+  <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'ProjectM'))"
+           Text="tools/accessgen must not reference ProjectM. It emits text that names game types; it never loads one." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'Il2CppInterop.Runtime'))"
+           Text="tools/accessgen must not reference Il2CppInterop. Resolution happens at runtime in Progenitor.Core/Access/AccessResolver.cs." />
+  </Target>
+</Project>

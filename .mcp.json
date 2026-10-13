@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "progenitor": {
+      "command": "node",
+      "args": ["tools/mcp/server.mjs"],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "cleanup-ok",
+  "summary": "Spawn a rat 3 units from the player, wait 1 s, destroy it, confirm absent.",
+  "steps": [
+    {
+      "kind": "spawn",
+      "name": "rat",
+      "prefab": "CHAR_Critter_Rat",
+      "offset": { "x": 3, "y": 0, "z": 0 },
+      "hostile": false,
+      "track": true
+    },
+    { "kind": "wait", "ms": 1000 },
+    { "kind": "destroyTracked", "name": "rat" },
+    { "kind": "exists", "entity": "@tracked:rat", "expect": false }
+  ]
+}

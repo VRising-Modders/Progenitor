@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.AssetPackageExample</AssemblyName>
+    <RootNamespace>Progenitor.AssetPackageExample</RootNamespace>
+    <Description>Client-only static model package import example.</Description>
+    <BepInExPluginGuid>progenitor.assetpackage.example</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Asset Package Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

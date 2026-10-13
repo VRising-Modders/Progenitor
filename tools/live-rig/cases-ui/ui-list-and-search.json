@@ -1,0 +1,30 @@
+{
+  "name": "ui-list-and-search",
+  "world": "connected",
+  "summary": "Open Mods, widget_read the list pane, select Sample, search zzz then clear, scroll content top/bottom, open the custom Example page, back to overview, close, reopen.",
+  "site": "@site",
+  "notes": [
+    "Acceptance procedure — not run. `--side client`. Open steps use `site` `@site` (`--site main-menu|top-tab|shortcut`; omitted, main-menu with no Client_0, top-tab when connected).",
+    "widget_read records the list pane. This case selects the Sample plugin (progenitor.sample), the buildable author example. Empty search `zzz` expects after.search zzz. `back` from the custom Example page returns to overview with the workspace still open. `close` is the full owned close."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "open", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "op", "name": "widget_read list", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "list" }, "record": "sidebar", "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "op", "name": "select Sample", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "overview" }, "expect": { "ok": true, "action": "select", "after.plugin": "progenitor.sample", "after.page": "overview" } },
+    { "kind": "op", "name": "search zzz", "side": "client", "op": "mods_ui", "args": { "action": "search", "text": "zzz" }, "expect": { "ok": true, "action": "search", "after.search": "zzz" } },
+    { "kind": "op", "name": "search clear", "side": "client", "op": "mods_ui", "args": { "action": "search", "text": "" }, "expect": { "ok": true, "after.search": "" } },
+    { "kind": "op", "name": "select Sample Server", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.page": "settings", "after.pageId": "Server" } },
+    { "kind": "op", "name": "scroll top", "side": "client", "op": "mods_ui", "args": { "action": "scroll", "pane": "content", "to": "top" }, "expect": { "ok": true, "action": "scroll" } },
+    { "kind": "op", "name": "scroll bottom", "side": "client", "op": "mods_ui", "args": { "action": "scroll", "pane": "content", "to": "bottom" }, "expect": { "ok": true, "action": "scroll" } },
+    { "kind": "op", "name": "custom page Example", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "custom", "group": "Example" }, "expect": { "ok": true, "after.page": "custom", "after.pageId": "Example" } },
+    { "kind": "op", "name": "back from Example", "side": "client", "op": "mods_ui", "args": { "action": "back" }, "expect": { "ok": true, "action": "back", "after.open": true, "after.page": "overview" } },
+    { "kind": "op", "name": "close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "reopen", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

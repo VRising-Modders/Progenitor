@@ -1,0 +1,38 @@
+{
+  "name": "input-resolutions",
+  "world": "connected",
+  "summary": "Windowed 1280x720 and 1920x1080: assertWindow on the real client area, open, capture both panes (native pixels), rects for list and content; restore the recorded baseline mode and size.",
+  "site": "@site",
+  "notes": [
+    "Acceptance procedure — not run. `--side client`. `resolution` mode `windowed` (not FullScreenWindow). assertWindow reads `mods_ui window` (actual client-area width/height/position, Screen size, fullScreenMode, display size) and fails if clientWidth/clientHeight/mode mismatch.",
+    "Capture is PrintWindow (`-Region window`). observe.ps1 shot JSON reports sourceWidth/sourceHeight for the captured rectangle and width/height for the saved file; this case records the capture step (path/bytes/command) and the window client size. maxWidth 0 keeps native pixels. A previous FullScreenWindow run reported 1280x720 on Screen while PrintWindow stayed ultrawide — windowed mode is required so the client area matches.",
+    "Open the workspace at `@site` *before* capturing at each size so the PNG shows both Mods panes, then `mods_ui rects` for list and content. assertWindow baseline uses the live nested window shape (`detail.client.width` / `.height`, `detail.mode`). Teardown restores the recorded baseline width/height/mode and assertWindow on that baseline."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "record baseline window", "side": "client", "op": "mods_ui", "args": { "action": "window" }, "record": "baselineWindow", "expect": { "ok": true, "action": "window" } },
+    { "kind": "op", "name": "resolution windowed 1280x720", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": 1280, "height": 720, "mode": "windowed" }, "expect": { "ok": true } },
+    { "kind": "assertWindow", "name": "assertWindow 1280x720", "expect": { "clientWidth": 1280, "clientHeight": 720, "mode": "windowed" }, "record": "window720" },
+    { "kind": "op", "name": "open 720", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "capture", "name": "720-list", "maxWidth": 0, "record": "capture720list" },
+    { "kind": "capture", "name": "720-content", "maxWidth": 0, "record": "capture720content" },
+    { "kind": "op", "name": "rects list 720", "side": "client", "op": "mods_ui", "args": { "action": "rects", "pane": "list" }, "record": "rectsList720", "expect": { "ok": true, "action": "rects" } },
+    { "kind": "op", "name": "rects content 720", "side": "client", "op": "mods_ui", "args": { "action": "rects", "pane": "content" }, "record": "rectsContent720", "expect": { "ok": true, "action": "rects" } },
+    { "kind": "op", "name": "close 720", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "resolution windowed 1920x1080", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": 1920, "height": 1080, "mode": "windowed" }, "expect": { "ok": true } },
+    { "kind": "assertWindow", "name": "assertWindow 1920x1080", "expect": { "clientWidth": 1920, "clientHeight": 1080, "mode": "windowed" }, "record": "window1080" },
+    { "kind": "op", "name": "open 1080", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "after.curtain": true } },
+    { "kind": "capture", "name": "1080-list", "maxWidth": 0, "record": "capture1080list" },
+    { "kind": "capture", "name": "1080-content", "maxWidth": 0, "record": "capture1080content" },
+    { "kind": "op", "name": "rects list 1080", "side": "client", "op": "mods_ui", "args": { "action": "rects", "pane": "list" }, "record": "rectsList1080", "expect": { "ok": true, "action": "rects" } },
+    { "kind": "op", "name": "rects content 1080", "side": "client", "op": "mods_ui", "args": { "action": "rects", "pane": "content" }, "record": "rectsContent1080", "expect": { "ok": true, "action": "rects" } },
+    { "kind": "op", "name": "close 1080", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "restore baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" }, "expect": { "ok": true } },
+    { "kind": "assertWindow", "name": "assertWindow baseline", "expect": { "clientWidth": "@record:baselineWindow.detail.client.width", "clientHeight": "@record:baselineWindow.detail.client.height", "mode": "@record:baselineWindow.detail.mode" }, "record": "windowBaseline" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "removal-reinstall",
+  "summary": "Spawn a hostile thief, remove the Sample, then reinstall it. The debug buff is Core-owned, so protection must pass after the removal and after the reinstall; the rig rearms with .debug on only when a readback is not ok.",
+  "steps": [
+    {
+      "kind": "spawn",
+      "name": "bandit",
+      "prefab": "CHAR_Bandit_Thief",
+      "offset": { "x": 4, "y": 0, "z": 0 },
+      "hostile": true,
+      "track": true
+    },
+    { "kind": "wait", "ms": 2000 },
+    { "kind": "get", "entity": "@tracked:bandit", "component": "Health", "record": "banditHealth" },
+    { "kind": "removal" },
+    { "kind": "protectionCheck", "expect": true },
+    { "kind": "reinstall" },
+    { "kind": "protectionCheck", "expect": true }
+  ]
+}

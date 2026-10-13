@@ -1,0 +1,58 @@
+{
+  "name": "active-ring-unload",
+  "summary": "Unload Sample while a frost dash ring is still inside its log-time lifetime. A FROSTDASH cleanup line with alive>=1 and the tracked ring in destroyed is the disposal proof; an exists readback after removal alone cannot distinguish disposal from expiry.",
+  "notes": [
+    "Acceptance procedure. With a Sample image that logs exactly one line `FROSTDASH cleanup alive=<n> destroyed=[<index:version>,...]` at unload and at `.frostdash off` (alive=0 destroyed=[] when nothing was alive), this case completes as a disposal proof: unload destroyed a ring that was alive. Without that line (older Sample image) the log step fails and the case stays aborted.",
+    "The ring lives ~1.5 s. Removal waits for the reloader's full unload (~3.3 s live). existsAt after that wait therefore cannot tell disposal from expiry on its own: live catalog-cases-3 saw Start 09:32:23.674, unload 09:32:23.969 (log delta 295 ms), wall ageMs 3318, exists false.",
+    "What this case can show: (a) the cleanup line names a live ring (alive>=1 and the tracked id as a whole token in destroyed=[...], not a substring of another id), recorded as ringUnloadCleanup; (b) logAgeMs from the FROSTDASH Start line to the Progenitor.Sample.dll removed line is under 1500 (existsAt after that line, ageClock log, maxAgeMs 1500); (c) existsAt of the ring is then false.",
+    "Flow: .frostdash on, .frostdash dash, logEntity(ring) from edge=Start, existsAt ring expect true, removal, log FROSTDASH cleanup alive= since ringLog (regex with @tracked:ring, alive>=1) recorded as ringUnloadCleanup, existsAt after the unload line with ageClock log / maxAgeMs 1500 / expect any, existsAt ring expect false. .frostdash off is teardown so it still runs after abort. Before that command, a leftover .rig-hold is restored (report.teardown.restore) so Sample is loaded to handle off; expectLog requires the Sample line `FROSTDASH cleanup alive=` from ClearRings. A missing handler line fails teardown and the run is incomplete.",
+    "The ring is adopted from the log, not spawned by the rig. It is not hostile and is not destroyed on cleanup unless track is true. A leftover .rig-hold after removal is put back before teardown (and again by the run fail-safe if it remains) so final protection can be checked. That restore is not the observation."
+  ],
+  "steps": [
+    { "kind": "command", "text": ".frostdash on" },
+    { "kind": "command", "text": ".frostdash dash", "record": "dashSince" },
+    {
+      "kind": "logEntity",
+      "name": "ring",
+      "side": "server",
+      "sinceRecord": "dashSince",
+      "filter": "FROSTDASH",
+      "regex": "edge=Start.*ring=Entity\\((\\d+:\\d+)\\)",
+      "record": "ringLog"
+    },
+    { "kind": "existsAt", "entity": "@tracked:ring", "expect": true, "record": "ringBeforeRemoval" },
+    { "kind": "removal" },
+    {
+      "kind": "log",
+      "name": "ringUnloadCleanup",
+      "side": "server",
+      "sinceRecord": "ringLog",
+      "filter": "FROSTDASH",
+      "regex": "FROSTDASH cleanup alive=([1-9]\\d*) destroyed=\\[[^\\]]*@tracked:ring",
+      "timeoutMs": 5000,
+      "record": "ringUnloadCleanup"
+    },
+    {
+      "kind": "existsAt",
+      "entity": "@tracked:ring",
+      "expect": "any",
+      "after": {
+        "side": "server",
+        "filter": "Reload:",
+        "regex": "Progenitor\\.Sample\\.dll removed",
+        "sinceRecord": "ringLog"
+      },
+      "maxAgeMs": 1500,
+      "ageClock": "log",
+      "record": "ringAfterUnload"
+    },
+    { "kind": "existsAt", "entity": "@tracked:ring", "expect": false, "record": "ringGoneAfterUnload" }
+  ],
+  "teardown": [
+    {
+      "kind": "command",
+      "text": ".frostdash off",
+      "expectLog": { "filter": "FROSTDASH", "regex": "FROSTDASH cleanup alive=" }
+    }
+  ]
+}

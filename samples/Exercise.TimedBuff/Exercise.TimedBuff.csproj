@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Exercise.TimedBuff</AssemblyName>
+    <RootNamespace>Exercise.TimedBuff</RootNamespace>
+    <Description>Standalone exercise plugin: a timed, named buff that mutes blood drain to a trickle while it is on.</Description>
+    <BepInExPluginGuid>exercise.timedbuff</BepInExPluginGuid>
+    <BepInExPluginName>Exercise Timed Buff</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

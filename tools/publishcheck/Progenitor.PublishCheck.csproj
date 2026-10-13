@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Pre-publish checker for mod packages built on Progenitor (docs/publishing.md). It reads a
+    package zip or folder and the plugin DLL's metadata with System.Reflection.Metadata only: it
+    never loads an assembly and needs no game install. Keep ReferenceGame=false and do not
+    ProjectReference Core: the few Core files it needs are linked below, and
+    tests/Progenitor.Tests links this tool's sources (all but Program.cs) the same way.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>publishcheck</AssemblyName>
+    <RootNamespace>Progenitor.PublishCheck</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <ReferenceGame>false</ReferenceGame>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <!-- DirectKeyReadCheck.cs keeps its BepInEx logging half behind !PROGENITOR_TESTS; this tool
+         uses only the game-free metadata half, exactly as the test project does. -->
+    <DefineConstants>$(DefineConstants);PROGENITOR_TESTS</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\DirectKeyReadCheck.cs" Link="Linked\DirectKeyReadCheck.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\CompatRange.cs" Link="Linked\CompatRange.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\NetworkCompatibility.cs" Link="Linked\NetworkCompatibility.cs" />
+    <!-- The Install tab's own image preflight and hotLoadable rule, and its plugin-id rule, so the checker agrees with it exactly. -->
+    <Compile Include="..\..\src\Progenitor.Core\Install\PackageSide.cs" Link="Linked\PackageSide.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Install\Admission\AdmissionReasons.cs" Link="Linked\AdmissionReasons.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Install\Admission\ArtifactPreflight.cs" Link="Linked\ArtifactPreflight.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Install\Admission\HotImageCheck.cs" Link="Linked\HotImageCheck.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestIds.cs" Link="Linked\ModManifestIds.cs" />
+  </ItemGroup>
+
+  <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'ProjectM'))"
+           Text="tools/publishcheck must not reference ProjectM. It reads metadata from files only." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'BepInEx.Core'))"
+           Text="tools/publishcheck must not reference BepInEx. It reads metadata from files only." />
+  </Target>
+</Project>

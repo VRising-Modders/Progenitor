@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "mod": "progenitor.sampleserverled",
+  "modVersion": "1.0.0",
+  "message": "prefs",
+  "version": 1,
+  "minReader": 1,
+  "direction": "to-server",
+  "source": "test",
+  "recorded": "2026-10-11T01:26:16Z",
+  "sha256": "9be0f0c66821230acf3c85fd878c29729007fae7d3cc59aab4ee4c7fd89d2a87",
+  "schema": [
+    {
+      "n": 1,
+      "name": "Kind",
+      "type": "int"
+    },
+    {
+      "n": 2,
+      "name": "Receive",
+      "type": "bool"
+    },
+    {
+      "n": 3,
+      "name": "Delivery",
+      "type": "int"
+    }
+  ]
+}

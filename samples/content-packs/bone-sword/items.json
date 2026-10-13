@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "items": [
+    {
+      "id": "example.bone-sword.plus100",
+      "cloneOf": "Item_Weapon_Sword_T01_Bone",
+      "name": "Empowered Bone Sword",
+      "description": "Adds 100 health, physical power and spell power.",
+      "statBonuses": {
+        "maxHealth": 100,
+        "physicalPower": 100,
+        "spellPower": 100
+      }
+    }
+  ]
+}

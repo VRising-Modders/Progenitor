@@ -1,0 +1,26 @@
+{
+  "name": "ui-reconnect-only",
+  "world": "main-menu",
+  "endWorld": "connected",
+  "summary": "Stock client reconnect from the main menu: `connect` 127.0.0.1:9976, wait for Client_0 and the handshake-ok inventory restore. Does not open Mods.",
+  "site": "main-menu",
+  "notes": [
+    "Acceptance procedure — not run. `--side client`. Start at the main menu (no Client_0). `connect` to 127.0.0.1:9976 (default SteamIPv4). If this test server is LanMode-only, pass protocol Lidgren on that step (`args.protocol`). Join is async: poll ping until Client_0, then server users until connected=true and handshake=ok.",
+    "Handshake wait: `Mods inventory: server context restored reason=handshake-ok` (`inventoryRestored`, sinceRecord on the connect op), then mods_ui status `after.serverList.state` available.",
+    "Does not open or select. Pair with `ui-disconnect-only` around the main-menu cases. `endWorld: connected` so final checks match the joined world, not the main-menu start.",
+    "Intended finals: connected, workspace closed, curtain/input released."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "connect test server", "side": "client", "op": "connect", "args": { "address": "127.0.0.1", "port": 9976 }, "record": "beforeConnect", "expect": { "ok": true } },
+    { "kind": "op", "name": "wait Client_0", "side": "client", "op": "ping", "pollMs": 1000, "timeoutMs": 120000, "expect": "Client_0" },
+    { "kind": "log", "name": "inventory restored handshake-ok", "side": "client", "filter": "Mods inventory", "regex": "Mods inventory: server context restored reason=handshake-ok", "sinceRecord": "beforeConnect", "timeoutMs": 120000, "record": "inventoryRestored" },
+    { "kind": "op", "name": "status server list available", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.serverList.state": "available" } },
+    { "kind": "op", "name": "wait users connected handshake ok", "side": "server", "op": "users", "pollMs": 1000, "timeoutMs": 120000, "expect": "\"connected\":true[\\s\\S]*\"handshake\":\"ok\"" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } }
+  ]
+}

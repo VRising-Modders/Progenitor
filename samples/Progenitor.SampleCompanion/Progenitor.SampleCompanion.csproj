@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.SampleCompanion</AssemblyName>
+    <RootNamespace>Progenitor.SampleCompanion</RootNamespace>
+    <Description>The Sample's companion plugin: a counterpart declaration and a deliberate keybind conflict for the Mods page (SETTINGS1 stage 3).</Description>
+    <BepInExPluginGuid>progenitor.samplecompanion</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Sample Companion</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

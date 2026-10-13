@@ -1,0 +1,85 @@
+{
+  "name": "ui-settings",
+  "world": "connected",
+  "summary": "Connected settings acceptance: personal ShowHints persist, a synced-readonly row refuses writes, opted-in ExampleLimit non-admin/admin/bounds/pending, restore 10 and admin false, inventory kinds without Installed/Enabled.",
+  "site": "top-tab",
+  "notes": [
+    "Acceptance procedure — not run. Connected. `--side client`. Prerequisite: the test user is not admin at rest (the rig may grant admin at start for protection, then restore). This case sets User.IsAdmin through the existing server `set` op (same component/fields as the rig grant/restore) on `usersStart.users.0.entity`.",
+    "Personal ShowHints (Sample Menu/ShowHints, default true): widget_click the toggle, close, reopen, read persisted, restore true.",
+    "Synced read-only: a synced row that is not the opted-in admin editor. widget_read shows source synced-readonly (label suffix `(set by the server)` or `(awaiting server synchronization)`). widget_click on that label cannot write: ModsUiOps returns ok true with detail.invoked 0 (labels have no write path). That is the refusal; the envelope is not ok false.",
+    "Opted-in ExampleLimit (range 1–20, default 10, row progenitor.sample/Menu/ExampleLimit). The admin editor is Input + Apply ExampleLimit. The input widget's Text is the displayed value, so this case writes it by content index 3 on the Server group (Back to mod, group header, description label, input, note, Apply). Apply is matched by label.",
+    "Non-admin: Apply 12 is refused; the note/readback carries `Only server administrators can change this setting.` (ServerSettings.Apply; that refusal is not a ServerSettings log line). Then grant admin, Apply 12 accepted (`Saved by the server.` / value 12), Apply 999 refused (`Outside the values this setting accepts.`), Apply 11 accepted (`Saved by the server.`). Those notes arrive asynchronously after `Waiting for the server…`; poll `widget_read` (`poll.intervalMs` 500, `poll.timeoutMs` 10000) until the note is that text and record `elapsedMs`. Never a single immediate read. Every admin-required Apply (12, 999, 11, restore 10) is followed by that polled note before any step that sets `IsAdmin` false.",
+    "Stale expected-value conflict is not exercisable through the UI: the editor captures `displayedValue` when the page is built and sends that as expected; widget_click value writes the input, not the expected token. Skipped.",
+    "Pending: After the 11 Saved note, Apply again then close immediately. Closing disposes the request handle and forgets the callback (`if (input.IsDisposed || note.IsDisposed) return`). Assert no `ServerSettings callback:` / dead-widget log line (count 0, sinceRecord on the Apply). A timed-out request can still have applied server-side; reopen and read before restoring 10.",
+    "Inventory (ModMenuInventory): Core `Running`, Sample `Loaded on this client`, handshake requirement `Required by server` when present. Declaration-only is `Reported on this client`; advertised-server-only is `Listed by server`; unavailable-server is the overview line `Server mod list unavailable. Known requirements are shown where available.` A healthy connected pair may only show the observed kinds. There is no Installed or Enabled status.",
+    "Restore ExampleLimit 10 with admin true: poll `Saved by the server.` then read back `\"value\":\"10\"` before `IsAdmin` false. Teardown repeats that restore; the Saved poll must finish before the run-level admin restore. The final `.debug status` check re-grants if the case already dropped admin; `adminState` is false last."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": 0 } },
+    { "kind": "op", "name": "record users", "side": "server", "op": "users", "record": "usersStart", "expect": "\"connected\":true" },
+    { "kind": "op", "name": "force non-admin", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": false } } },
+
+    { "kind": "op", "name": "open for personal", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Personal", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Personal" }, "expect": { "ok": true, "after.page": "settings", "after.pageId": "Personal" } },
+    { "kind": "op", "name": "read ShowHints before", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "record": "showHintsBefore", "expect": { "ok": true, "action": "widget_read" } },
+    { "kind": "op", "name": "toggle ShowHints false", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "ShowHints", "value": "false" }, "expect": { "ok": true, "action": "widget_click" } },
+    { "kind": "op", "name": "close after toggle", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "reopen personal", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Personal again", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Personal" }, "expect": { "ok": true, "after.page": "settings" } },
+    { "kind": "op", "name": "read ShowHints persisted", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "\"value\":\"false\"" },
+    { "kind": "op", "name": "restore ShowHints true", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "ShowHints", "value": "true" }, "expect": { "ok": true } },
+
+    { "kind": "op", "name": "select all Sample settings", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings" }, "expect": { "ok": true, "after.page": "settings" } },
+    { "kind": "op", "name": "read synced-readonly", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "record": "syncedReadonly", "expect": "synced-readonly" },
+    { "kind": "op", "name": "click synced-readonly refused", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "(set by the server)", "value": "true" }, "expect": { "ok": true, "detail.invoked": 0 } },
+
+    { "kind": "op", "name": "select Server as non-admin", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.page": "settings", "after.pageId": "Server" } },
+    { "kind": "op", "name": "type ExampleLimit 12 non-admin", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "12" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "Apply 12 non-admin", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "read non-admin refusal", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "nonAdminRefusal", "expect": "Only server administrators can change this setting" },
+
+    { "kind": "op", "name": "grant admin", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": true } } },
+    { "kind": "op", "name": "select Server as admin", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.pageId": "Server" } },
+    { "kind": "op", "name": "type ExampleLimit 12 admin", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "12" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "Apply 12 admin", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "read admin 12", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "adminSaved", "expect": "Saved by the server" },
+    { "kind": "op", "name": "type ExampleLimit 999", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "999" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "Apply 999 bounds", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "read bounds refusal", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "boundsRefusal", "expect": "Outside the values this setting accepts" },
+
+    { "kind": "op", "name": "type ExampleLimit 11", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "11" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "Apply 11 admin", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "read admin 11", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "adminSaved11", "expect": "Saved by the server" },
+    { "kind": "op", "name": "Apply 11 pending", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" }, "record": "pendingClick", "expect": { "ok": true } },
+    { "kind": "op", "name": "close while pending", "side": "client", "op": "mods_ui", "args": { "action": "close" } },
+    { "kind": "log", "name": "no dead-widget callback", "side": "client", "filter": "ServerSettings", "regex": "ServerSettings callback:|dead widget", "count": 0, "sinceRecord": "pendingClick", "timeoutMs": 9000 },
+
+    { "kind": "op", "name": "reopen to restore limit", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Server restore", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.pageId": "Server" } },
+    { "kind": "op", "name": "read current ExampleLimit", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "limitBeforeRestore", "expect": "\"value\":\"11\"" },
+    { "kind": "op", "name": "type ExampleLimit 10", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "10" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "Apply 10 restore", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "read restore 10 saved", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "restoreSaved", "expect": "Saved by the server" },
+    { "kind": "op", "name": "read restore 10 value", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "\"value\":\"10\"" },
+    { "kind": "op", "name": "restore admin false", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": false } } },
+    { "kind": "op", "name": "readback admin false", "side": "server", "op": "users", "expect": "\"admin\":false" },
+
+    { "kind": "op", "name": "select overview inventory", "side": "client", "op": "mods_ui", "args": { "action": "select", "page": "overview" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "inventory status kinds", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": "\"status\":\"Running\"[\\s\\S]*\"status\":\"Loaded on this client\"|\"status\":\"Loaded on this client\"[\\s\\S]*\"status\":\"Running\"" },
+    { "kind": "op", "name": "inventory overview labels", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "mods found on this client" },
+    { "kind": "capture", "name": "settings" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown grant admin for restore", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": true } } },
+    { "kind": "op", "name": "teardown open", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "top-tab" } },
+    { "kind": "op", "name": "teardown select Server", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" } },
+    { "kind": "op", "name": "teardown type 10", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "index": 3, "value": "10" } },
+    { "kind": "op", "name": "teardown Apply 10", "side": "client", "op": "mods_ui", "args": { "action": "widget_click", "pane": "content", "label": "Apply ExampleLimit" } },
+    { "kind": "op", "name": "teardown read restore 10 saved", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "poll": { "intervalMs": 500, "timeoutMs": 10000 }, "record": "teardownRestoreSaved", "expect": "Saved by the server" },
+    { "kind": "op", "name": "teardown read restore 10 value", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "\"value\":\"10\"" },
+    { "kind": "op", "name": "teardown restore admin false", "side": "server", "op": "set", "args": { "entity": "@record:usersStart.users.0.entity", "component": "User", "fields": { "IsAdmin": false } } },
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes", "after.observers": "@record:baselineResolution.after.observers" } }
+  ]
+}

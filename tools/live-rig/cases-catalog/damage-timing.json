@@ -1,0 +1,33 @@
+{
+  "name": "damage-timing",
+  "summary": "Independently recorded Health before/after a frost dash against a tracked hostile thief, plus a frost-dash-off control. Bridge get responses in trace.jsonl are the record.",
+  "notes": [
+    "Acceptance procedure — not run. Outstanding check from the 2026-09-07 catalog live audit: ring recipe gameplayHits numbers were agent-reported; raw bridge responses/timestamps were not saved.",
+    "Every get is a bridge call the rig writes to trace.jsonl. Records: before, after, controlBefore, controlAfter (Health of @tracked:bandit).",
+    "Expected shape, not a claimed magnitude: after a tinted dash the thief Health.Value is lower than before. After the control dash with frost dash off, controlAfter is not a nova-sized drop relative to controlBefore. Per-hit attribution unresolved — this does not prove the ring (versus dash, DoT, or another unit) dealt the damage.",
+    "The thief is tracked and left for the rig's cleanup and remainingTestEntities check. Do not skipCleanupFor.",
+    "No exists step on frost rings; they are not spawned by this case."
+  ],
+  "steps": [
+    {
+      "kind": "spawn",
+      "name": "bandit",
+      "prefab": "CHAR_Bandit_Thief",
+      "offset": { "x": 4, "y": 0, "z": 0 },
+      "hostile": true,
+      "track": true
+    },
+    { "kind": "wait", "ms": 2000 },
+    { "kind": "get", "entity": "@tracked:bandit", "component": "Health", "record": "before" },
+    { "kind": "command", "text": ".frostdash on" },
+    { "kind": "command", "text": ".frostdash dash" },
+    { "kind": "wait", "ms": 3000 },
+    { "kind": "get", "entity": "@tracked:bandit", "component": "Health", "record": "after" },
+    { "kind": "command", "text": ".frostdash off" },
+    { "kind": "wait", "ms": 5000 },
+    { "kind": "get", "entity": "@tracked:bandit", "component": "Health", "record": "controlBefore" },
+    { "kind": "command", "text": ".frostdash dash" },
+    { "kind": "wait", "ms": 3000 },
+    { "kind": "get", "entity": "@tracked:bandit", "component": "Health", "record": "controlAfter" }
+  ]
+}

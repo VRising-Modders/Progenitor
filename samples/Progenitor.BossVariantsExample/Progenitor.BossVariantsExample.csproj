@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.BossVariantsExample</AssemblyName>
+    <RootNamespace>Progenitor.BossVariantsExample</RootNamespace>
+    <Description>Server-only example of ctx.Ai: Frostmaw variants with different behaviour on one self-friendly faction.</Description>
+    <BepInExPluginGuid>progenitor.bossvariants</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Boss Variants Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

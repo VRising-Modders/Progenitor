@@ -1,0 +1,41 @@
+{
+  "name": "ui-disconnect-reconnect",
+  "world": "connected",
+  "summary": "Open Mods connected at `@site`, disconnect to the main menu (no Client_0), assert the workspace closed and modsCapture released, wait for the Core inventory-cleared line and status showing the server list unavailable, reconnect to 127.0.0.1:9976, wait for the inventory-restored handshake-ok line, then measure settings-lock recovery from that line to the first authoritative readback. Do not prime with shortcut.",
+  "site": "@site",
+  "notes": [
+    "Acceptance procedure — not run. Start connected to the isolated test server (ports 9976/9977). `--side client`. Open steps use `site` `@site` (`--site`; omitted, main-menu with no Client_0, top-tab when connected). `disconnect` requests the production ExitGame view (pending is not completion). Poll client ping until worlds has no Client_0. Do not close-to-prime, do not open site=shortcut.",
+    "After leave: wait (bounded) for the client Core line `Mods inventory: server context cleared reason=disconnect` (`inventoryCleared`, sinceRecord on the disconnect op). Then mods_ui status must show the workspace closed (`after.open` false, `after.modsCapture` false) — the product requirement under test. `after.serverList.state` is `unavailable` after that clear. `after.entries` are sidebar rows (`id` / `name` / `status` / `location` / `version` / `requirement`; `status` is Running / Loaded on this client / Reported on this client / Listed by server). The overview sentence `Server mod list unavailable` is `ModMenuInventory.Snapshot().ServerSummary`, not copied onto status.",
+    "`connect` to 127.0.0.1:9976 (default SteamIPv4). If this test server is LanMode-only, pass protocol Lidgren on that step. Join is async: poll ping until Client_0, then server users until connected=true and handshake=ok.",
+    "After reconnect: wait for `Mods inventory: server context restored reason=handshake-ok` (`inventoryRestored`, sinceRecord on the connect op). Then mods_ui status must show `after.serverList.state` `available`. Reopen with the same `@site` (not shortcut). Poll Server settings widget_read until source admin (`firstAuthoritative`). Recovery ms is firstAuthoritative.seenAt minus inventoryRestored.seenAt. Uninterrupted locking is not claimed; do not inflate the interval with shortcut or attach priming.",
+    "Synced rows readable and the ExampleLimit admin editor source=admin after recovery. Intended finals: connected, workspace closed, curtain/input released, panes 0."
+  ],
+  "steps": [
+    { "kind": "op", "name": "record baseline resolution", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "record": "baselineResolution", "expect": { "ok": true, "action": "status", "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": 0 } },
+    { "kind": "op", "name": "record users", "side": "server", "op": "users", "record": "usersStart", "expect": "\"connected\":true" },
+    { "kind": "op", "name": "open connected", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Server connected", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.page": "settings" } },
+    { "kind": "op", "name": "read settings connected", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "record": "settingsConnected", "expect": { "ok": true } },
+    { "kind": "op", "name": "disconnect", "side": "client", "op": "disconnect", "record": "beforeLeave", "expect": { "ok": true } },
+    { "kind": "op", "name": "wait main menu no Client_0", "side": "client", "op": "ping", "pollMs": 1000, "timeoutMs": 120000, "expect": "\"worlds\":\\[(?!.*Client_0)" },
+    { "kind": "log", "name": "inventory cleared after disconnect", "side": "client", "filter": "Mods inventory", "regex": "Mods inventory: server context cleared reason=disconnect", "sinceRecord": "beforeLeave", "timeoutMs": 30000, "record": "inventoryCleared" },
+    { "kind": "op", "name": "status workspace closed after disconnect", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false } },
+    { "kind": "op", "name": "status server list unavailable", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.serverList.state": "unavailable" } },
+    { "kind": "op", "name": "connect test server", "side": "client", "op": "connect", "args": { "address": "127.0.0.1", "port": 9976 }, "record": "beforeConnect", "expect": { "ok": true } },
+    { "kind": "op", "name": "wait Client_0", "side": "client", "op": "ping", "pollMs": 1000, "timeoutMs": 120000, "expect": "Client_0" },
+    { "kind": "log", "name": "inventory restored handshake-ok", "side": "client", "filter": "Mods inventory", "regex": "Mods inventory: server context restored reason=handshake-ok", "sinceRecord": "beforeConnect", "timeoutMs": 120000, "record": "inventoryRestored" },
+    { "kind": "op", "name": "status server list available", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.serverList.state": "available" } },
+    { "kind": "op", "name": "wait users connected handshake ok", "side": "server", "op": "users", "pollMs": 1000, "timeoutMs": 120000, "expect": "\"connected\":true[\\s\\S]*\"handshake\":\"ok\"" },
+    { "kind": "op", "name": "open after reconnect", "side": "client", "op": "mods_ui", "args": { "action": "open", "site": "@site" }, "expect": { "ok": true, "after.open": true, "detail.menuOpenedBy": { "neq": null } } },
+    { "kind": "op", "name": "select Server after reconnect", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings", "group": "Server" }, "expect": { "ok": true, "after.page": "settings" } },
+    { "kind": "op", "name": "first authoritative readback", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "pollMs": 500, "timeoutMs": 20000, "record": "firstAuthoritative", "expect": "\"source\":\"admin\"" },
+    { "kind": "op", "name": "synced rows readable", "side": "client", "op": "mods_ui", "args": { "action": "select", "plugin": "progenitor.sample", "page": "settings" }, "expect": { "ok": true } },
+    { "kind": "op", "name": "read synced after recovery", "side": "client", "op": "mods_ui", "args": { "action": "widget_read", "pane": "content" }, "expect": "synced-readonly|\"source\":\"admin\"" },
+    { "kind": "capture", "name": "after reconnect" }
+  ],
+  "teardown": [
+    { "kind": "op", "name": "teardown close", "side": "client", "op": "mods_ui", "args": { "action": "close" }, "expect": { "ok": true, "after.open": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes" } },
+    { "kind": "op", "name": "teardown restore resolution", "side": "client", "op": "mods_ui", "args": { "action": "resolution", "width": "@record:baselineResolution.after.width", "height": "@record:baselineResolution.after.height", "mode": "@record:baselineResolution.after.mode" } },
+    { "kind": "op", "name": "teardown status closed", "side": "client", "op": "mods_ui", "args": { "action": "status" }, "expect": { "ok": true, "after.open": false, "after.curtain": false, "after.modsCapture": false, "after.panes": "@record:baselineResolution.after.panes", "after.observers": "@record:baselineResolution.after.observers" } }
+  ]
+}

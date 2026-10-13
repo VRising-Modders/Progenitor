@@ -1,0 +1,391 @@
+{
+  "schema": "progenitor.catalog.recipe/1",
+  "id": "charm-loop-particle-borrow",
+  "revision": 10,
+  "title": "Charm loop particle Part_Charm_Loop_01 borrowed as an owned copy (framework-activated since Core a66a6379)",
+  "family": {
+    "id": "charm-channeling",
+    "title": "Charm (channeling)"
+  },
+  "kind": "isolated-particle",
+  "aliases": [
+    "charm particle",
+    "charm loop",
+    "Part_Charm_Loop_01",
+    "charm borrow",
+    "red particle cloud"
+  ],
+  "summary": "Borrow the resident Part_Charm_Loop_01 body as a plugin-owned copy through ctx.Effects.Borrow. With the deployed framework fix (2026-09-07, Core a66a6379) the clone comes back active with all seven particle systems playing; on 2026-09-06 the same borrow returned an inactive clone (root activeSelf=False, zero particles) that the probe had to activate by hand. This is an isolated particle duplication at the world origin until positioned, not the Charm spell and not a beam. The body only becomes borrowable after the target sequence has played (warmed process); nothing here demonstrates loading from an unloaded state.",
+  "captured": "2026-09-08",
+  "identities": [
+    {
+      "ref": "loop-particle-body",
+      "role": "particle prefab body borrowed by name",
+      "domain": "unity-name",
+      "value": "Part_Charm_Loop_01",
+      "provenance": {
+        "source": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log line 5678 (Effects: borrowed Particle 'Part_Charm_Loop_01(Clone)' ...)",
+        "method": "live-log"
+      }
+    },
+    {
+      "ref": "target-sequence",
+      "role": "the sequence that references this body (ref[2]) and whose playback made it resident",
+      "domain": "sequence-guid",
+      "value": "-541113174",
+      "name": "(Sequence)SEQ_Charm_Channel",
+      "provenance": {
+        "source": "continuation-client.log lines 5519-5523",
+        "method": "live-log"
+      }
+    }
+  ],
+  "assetReferences": [
+    {
+      "name": "Part_Charm_Loop_01",
+      "unityType": "GameObject",
+      "role": "borrowed body",
+      "provenance": {
+        "source": "continuation-client.log line 5523 (sequence asset list) and 5678 (borrow)",
+        "method": "live-log"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "target-sequence",
+      "to": "asset:Part_Charm_Loop_01",
+      "role": "references-asset ref[2]",
+      "status": "known",
+      "provenance": {
+        "source": "continuation-client.log line 5523",
+        "method": "live-log"
+      }
+    },
+    {
+      "from": "loop-particle-body",
+      "to": "asset:Part_Charm_Loop_01",
+      "role": "borrowed-copy-of",
+      "status": "known",
+      "provenance": {
+        "source": "continuation-client.log line 5678; the clone's name is the body name plus '(Clone)'",
+        "method": "live-log"
+      }
+    },
+    {
+      "from": "loop-particle-body",
+      "to": "external:the pooled instance the game selected as the borrow source",
+      "role": "copied-from-pooled-instance",
+      "status": "inferred",
+      "provenance": {
+        "source": "<local-evidence>/charm-catalogue-correction.md: 'the runtime bug occurs when an inactive pooled instance is selected'",
+        "method": "report"
+      }
+    }
+  ],
+  "requirements": {
+    "side": "client",
+    "world": "client world; Effects ownership root progenitor-effects-<plugin guid>",
+    "context": {
+      "residency": "the body must already be loaded: Assets.Find listed zero Charm objects before the target sequence played and two clone roots after (E1)",
+      "activation": "With the deployed Core (a66a6379, 2026-09-07) the framework activates the owned clone itself (clone.SetActive(true) before Play in UnityEffectRuntime.BorrowParticle): Borrow returned an active clone with all seven systems playing. Historical: on 2026-09-06 the fix was not deployed and the probe activated its own clone by hand (E2, E3).",
+      "position": "the framework places the clone at the world origin; the caller positions it (the 2026-09-06 probe placed it at (-1719.7, 11.3, -1455.2))."
+    },
+    "initialization": [
+      "Play the target sequence (or otherwise have the body resident); confirm with Assets.Find.",
+      "ctx.Effects.Borrow(AssetKind.Particle, \"Part_Charm_Loop_01\") -> tracked owned clone under the plugin's effects root, active and playing (B1). The static Assets.Borrow without owner/pluginId files the clone under EffectOwnership.UnownedId, and with owner null it is not swept at plugin unload even when a pluginId is given (B2).",
+      "Position the clone; then read back activeHierarchy/playing/particle counts if the result matters (B1: 7/7)."
+    ],
+    "cleanup": [
+      "Dispose the effect handle: 'Effects: disposed Particle Part_Charm_Loop_01(Clone)' (E4).",
+      "Dispose also runs on plugin unload through the ownership root when the handle came from ctx.Effects.Borrow (tracked). The static Assets.Borrow without owner/pluginId is not swept with the plugin (source-checked, Assets.cs InferPluginId)."
+    ]
+  },
+  "controls": [
+    {
+      "name": "activation",
+      "tested": [
+        {
+          "value": "SetActive(true) on the owned clone root, then Play",
+          "evidence": [
+            "E2",
+            "E3"
+          ],
+          "readback": "before: root activeSelf=False, all systems activeHierarchy=False playing=False count=0; after: seven systems activeHierarchy=True playing=True counts 1,1,1,1,18,1,1"
+        },
+        {
+          "value": "framework activation (Core with clone.SetActive(true) in BorrowParticle)",
+          "evidence": [
+            "B1",
+            "B2"
+          ],
+          "readback": "activeSelf=True, 7/7 systems activeInHierarchy and playing immediately after Borrow"
+        }
+      ],
+      "limitations": "Activation is provided by the deployed framework build (B1, B2); the 2026-09-06 manual SetActive workaround is historical. IEffectHandle.Enabled does not measure emission; read the particle systems.",
+      "implementation": "src/Progenitor.Core/Effects/UnityEffectRuntime.cs BorrowParticle (uncommitted working-tree change, deployed 2026-09-07 as Core a66a6379)"
+    },
+    {
+      "name": "colour, scale, lifetime",
+      "tested": [],
+      "limitations": "Untested for this body. The generic particle tint helper instantiates Renderer.material and is warned against for pooled sequence clones (frost-dash-payload.md pitfalls).",
+      "implementation": "none"
+    }
+  ],
+  "operations": {
+    "discovery": {
+      "status": "observed-success",
+      "sides": ["client"],
+      "evidence": [
+        "E1",
+        "B1"
+      ],
+      "note": "Loaded-object scan found the body only after the target sequence played (count 0 -> 2). A loaded scan is a diagnostic, not the catalog; an empty scan is not absence. sides client: the loaded-object scan is a client presentation observation."
+    },
+    "playback": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E2",
+        "E3",
+        "B1",
+        "B2"
+      ],
+      "note": "With the framework activation fix deployed, Borrow alone yields an active clone with all seven systems playing (2026-09-07); the 2026-09-06 run needed the probe's manual SetActive. sides server+client: client Borrow of the particle plus the server-driven warm of the target sequence."
+    },
+    "appearance": {
+      "status": "observed-success",
+      "sides": ["server", "client"],
+      "evidence": [
+        "E5"
+      ],
+      "note": "A visible red particle cloud at the clone position (charm-borrow-activated-small.png). This is the isolated particle, not the Charm spell. sides server+client: client particle presentation plus the server-driven warm that made the body borrowable."
+    },
+    "controls": {
+      "status": "observed-success",
+      "sides": ["client"],
+      "evidence": [
+        "B1"
+      ],
+      "note": "Activation is now the framework's (clone.SetActive(true) before Play); no caller workaround needed. Colour/scale/lifetime still untested for this body. sides client: Borrow activation is a client Effects observation."
+    },
+    "gameplayHits": {
+      "status": "not-applicable",
+      "sides": ["server"],
+      "evidence": [],
+      "note": "Presentation-only owned copy. sides server: no gameplay hit is attached."
+    },
+    "naturalCleanup": {
+      "status": "untested",
+      "sides": ["client"],
+      "evidence": [],
+      "note": "The particle systems' own lifetime was not read back; the handle was disposed explicitly. sides client: lifetime would be a client particle observation if tested."
+    },
+    "explicitCleanup": {
+      "status": "observed-success",
+      "sides": ["client"],
+      "evidence": [
+        "E4",
+        "B1",
+        "B3",
+        "B5",
+        "B6"
+      ],
+      "note": "Scopes: (a) direct Charm Dispose: the clone was detached from the root in the same frame (B1); complete Unity destruction after deferred cleanup was not read back (this run did not re-exercise Dispose). (b) Tracked plugin unload of Flame/Embers: observed (B3); this run did not re-exercise those bodies. (c) Tracked Charm borrow unloaded while active: observed-success on both Removal and Swap. Removal: B5 (live-rig 20260907T093055Z-charm-tracked-unload). `.catalogex warm` played sequence -541113174 at the player (carrier 567415:12); `.catalogex borrow` on the client through the Sample context; CHARMROOT children=1 while active; client-side Removal of Sample; Effects disposed Particle 'Part_Charm_Loop_01' 6 ms after Progenitor.Sample.dll removed; CHARMROOT children=0 afterwards; client stayed connected; run complete; logSignals fatal 0. The client replica of the warm carrier (99414:354) outlived server disposal and was destroyed by the rig at cleanup. Swap: B6 (live-rig 20260908T045301Z-swap-client). Three client Sample swaps with a tracked borrow active; disposed at unload (reason=Swap); new-generation borrow/dispose usable; one `FROSTSTYLE client enabled=` line per toggle; connection retained. Client NetworkedSequence leftovers were destroyed at cleanup as manual recovery, not automatic cleanup. (d) Null-owner static borrow: not swept at unload (B2). The 2026-09-06 disposal log line (E4) proves the call, not removal. sides client: B5 Removal and B6 Swap are client Sample unloads of the owned particle."
+    },
+    "poolReuse": {
+      "status": "untested",
+      "sides": ["client"],
+      "evidence": [],
+      "note": "The game's pooled source objects were not compared before/after; Assets.Find still listed the original Part_Charm_Loop_01(Clone) after the owned copies were gone, which says nothing about their state. sides client: pooling would be a client observation if tested."
+    }
+  },
+  "evidence": [
+    {
+      "id": "E1",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "SPELLPROBE catalogue Charm count=0 (lines 6, 14, 24) then catalogue Charm count=2; particle Part_Charm_Loop_01(Clone); particle Part_Charm_Loop_SlaveCrown_01(Clone) (lines 5633-5635).",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Spell Probe exec plugin on the Steam client"
+    },
+    {
+      "id": "E2",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "Effects: borrowed Particle 'Part_Charm_Loop_01(Clone)' under progenitor-effects-progenitor.spellprobe (line 5678); owned particle readback before activation: six child systems activeSelf=True activeHierarchy=False count=0 playing=False and the root particle-Part_Charm_Loop_01(Clone) activeSelf=False (lines 5681-5687, repeated 5689-5695).",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Spell Probe exec plugin on the Steam client"
+    },
+    {
+      "id": "E3",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "After activation: Mesh, Glow (1), distortion, Light, sparks noise, Glow and the root all activeSelf=True activeHierarchy=True playing=True with counts 1,1,1,1,18,1,1 at pos (-1719.70, 11.30, -1455.20) (lines 5697-5703).",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Spell Probe exec plugin on the Steam client"
+    },
+    {
+      "id": "E4",
+      "kind": "log",
+      "date": "2026-09-06",
+      "summary": "SPELLPROBE action=cleanup; Effects: disposed Particle 'Part_Charm_Loop_01(Clone)'; SPELLPROBE cleanup complete (lines 5704-5706).",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/continuation-client.log",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "Spell Probe exec plugin on the Steam client"
+    },
+    {
+      "id": "E5",
+      "kind": "screenshot",
+      "date": "2026-09-06",
+      "summary": "charm-borrow-activated-small.png: the red particle cloud of the activated owned clone.",
+      "path": "<local-evidence>/logs/2026-09-06-spell-probe/charm-borrow-activated-small.png",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": null
+      },
+      "observer": "coordinating agent, game-window capture"
+    },
+    {
+      "id": "B1",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Client exec with the activation fix deployed (Core a66a6379): Assets.Find(Particle,'Charm') = 2 clones resident after the target sequence; Assets.Borrow(Particle,'Part_Charm_Loop_01', null, 'catalog-borrow-test') returned enabled=true, clone particle-Part_Charm_Loop_01 activeSelf=True, 7 systems activeInHierarchy=7 playing=7 with no manual SetActive; handle.Dispose() -> IsDisposed=true and the root had 0 children in the same frame.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "B2",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Static borrow with owner null and pluginId 'progenitor.scratch' from a manually loaded scratch plugin: 7/7 systems playing; after that plugin unloaded (Reload: unloaded Progenitor Scratch: clean) the root progenitor-effects-progenitor.scratch still existed with 1 child and Assets.Find listed particle-Part_Charm_Loop_01. The null-owner static form is not swept at unload (review finding 2 reproduced live); the root was destroyed by hand afterwards.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "B3",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "Owned path through the Sample (.fx particle -> ctx.Effects.Borrow of Flame and Embers, 5 s timer): the client Sample DLL was removed 0.94 s after the borrow; at unload the framework logged 'Effects: disposed Particle Flame' and 'Embers' before the timer, and after the reload the Sample root had 0 children.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "B4",
+      "kind": "log",
+      "date": "2026-09-07",
+      "summary": "'.fx particle Part_Charm_Loop_01' failed: the Sample's name packing delivered 'ruruccmm0101' and the borrow came back disabled. A Sample bug outside this recipe; the owned path was measured with the Sample's default bodies instead.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-live/client-filtered.log",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": "Progenitor 0.1.0 from commit 164a358 plus the uncommitted working tree; Bootstrap sha256 40642b63a6045a62, Core a66a637930d30f49 (generation 1 on both sides), Sample a274cbd4478a943d, Dev 0057b756f17dd777"
+      },
+      "observer": "main agent; isolated session 2026-09-07 02:13-02:34 UTC: test server <testserver> (save forms-save-data-20260906/test1), Steam client joined 127.0.0.1:9976, player TestPlayer (User 331181:1, character 331182:1, granted IsAdmin for the session)"
+    },
+    {
+      "id": "B5",
+      "kind": "rig-run",
+      "date": "2026-09-07",
+      "summary": "Live-rig charm-tracked-unload --side client (report status complete, logSignals.fatal all 0). `.catalogex warm` played sequence -541113174 at the player (carrier 567415:12); `.catalogex borrow` on the client through the Sample context; CHARMROOT children=1 playingChildren=1 while active; client-side Removal of Sample; Effects: disposed Particle 'Part_Charm_Loop_01' 6 ms after Progenitor.Sample.dll removed (seq 5146 09:31:07.385 → seq 5155 09:31:07.391); CHARMROOT children=0 afterwards; client stayed connected. Finding: client replica of the warm carrier (99414:354) outlived server disposal and was destroyed by the rig at cleanup (cleanup.clientCarriers.destroyed). Side stamps recovered from report.json images.client/server.generation (5/4; sampleHash null) and trace.jsonl first ping result.images[] (client line 2, server line 4): no sha256 on those image rows, so core/dev/sample stay null. Combined framework generation:4 is legacy-combined, never a match.",
+      "path": "<local-evidence>/reviews/2026-09-07-catalog-cases-3/20260907T093055Z-charm-tracked-unload",
+      "build": {
+        "contentCatalogSha256": null,
+        "gameIdentity": null,
+        "framework": "generation:4",
+        "frameworkSides": {
+          "server": "generation:4; core:null; dev:null; sample:null",
+          "client": "generation:5; core:null; dev:null; sample:null"
+        }
+      },
+      "stampNote": "report.json/ping recorded sampleHash null, session.generation 4 (legacy-combined); per-side generation from report.json images[] (client 5, server 4) and trace.jsonl ping result.images[] / reload.generation. Circumstantial from this run's reinstall log, not on ping and not used as a stamp: Sample sha256=8f506ea17405766e size=382464 (full 8f506ea17405766e3f57a5dde182570e5312c15767c762332bdf00325d502c64).",
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331674:1, character 331675:1)"
+    },
+    {
+      "id": "B6",
+      "kind": "rig-run",
+      "date": "2026-09-08",
+      "summary": "Live-rig swap-client --side client (report status complete, logSignals.fatal all 0). Three consecutive client Sample swaps with a tracked Charm borrow active each cycle: Effects disposed Particle 'Part_Charm_Loop_01' at unload (reason=Swap); new-generation `.catalogex borrow` then dispose usable after each load; exactly one `FROSTSTYLE client enabled=` line per toggle (count: 1); connection retained (connected true, handshake ok, Client_0 present) across all three cycles. Client NetworkedSequence leftovers from `.catalogex warm` (99501:36, 99503:37, 99471:87) were destroyed at cleanup as manual recovery, not automatic Sample teardown.",
+      "path": "<local-evidence>/reviews/2026-09-08-client-sample-swaps/20260908T045301Z-swap-client",
+      "build": {
+        "contentCatalogSha256": "b8bd8fa6cb1619330bad310ff082b77872e02ec27e4d1cd88a846125a25c1a01",
+        "gameIdentity": "vrising/1.1.13.0+r99712+b17/net25",
+        "framework": null,
+        "frameworkSides": {
+          "server": "generation:1; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:d698ee0499bf72ee7fdf6f6fd8b12cf3215ec74cce4a25bf05ed02b00ff00679",
+          "client": "generation:1; core:42c9c081d87bae5f79d1deecdfa40711b23bef05142cedfecd72f4b202e3c402; dev:85cd21a21623e5da7da5349523997b7ff76656e45816807a42a8700a6fa7337c; sample:b089d45112510541e3dea1f50102570795a4d42212086919a3e72c5f425bc640"
+        }
+      },
+      "stampNote": "frameworkSides copied from report.json frameworkSides (identical in stampPhases.start.frameworkSides and stampPhases.final.frameworkSides); report.framework is null; contentCatalogSha256 and gameIdentity from report.json top-level fields.",
+      "observer": "live-rig report.json (readback, agentReported=false); isolated test server <testserver> and Steam client; player TestPlayer (User 331460:1, character 332441:1)"
+    }
+  ],
+  "implementation": [
+    {
+      "path": "src/Progenitor.Core/Effects/UnityEffectRuntime.cs",
+      "symbol": "BorrowParticle: clone.SetActive(true) before ps.Play(true)",
+      "status": "observed live on 2026-09-07 as Core a66a637930d30f49 (agent-reported readback; see evidence B1/B2)"
+    },
+    {
+      "path": "docs/effects.md",
+      "symbol": "section 'Particle activation and Charm catalogue correction (2026-09-06)'",
+      "status": "source-checked; modified in the working tree"
+    },
+    {
+      "path": "samples/Progenitor.Sample/SampleCatalogRecipeExamples.cs",
+      "symbol": "CharmLoopParticleBorrow; SampleCatalogExCommands.CatalogEx (.catalogex borrow|dispose|status)",
+      "status": "compile-verified 2026-09-07 (dotnet build samples/Progenitor.Sample/Progenitor.Sample.csproj); admin-only `.catalogex borrow|dispose|status` exists; tracked Charm borrow unloaded while active observed live on 2026-09-07 as live-rig 20260907T093055Z-charm-tracked-unload (see evidence B5) and on 2026-09-08 as live-rig 20260908T045301Z-swap-client (see evidence B6)"
+    }
+  ],
+  "limitations": [
+    "API correction of 2026-09-06 (revision 2): the prescribed call is ctx.Effects.Borrow(AssetKind.Particle, \"Part_Charm_Loop_01\"); the static Assets.Borrow without owner/pluginId files the clone under EffectOwnership.UnownedId, outside the plugin's unload sweep.",
+    "Not the Charm spell: one particle body, isolated, no beam, no gameplay.",
+    "Discovery relied on a warmed process; loading the body from an unloaded state was not demonstrated (M5 gate G6 remains open).",
+    "Pooled-source integrity after the borrow was not read back.",
+    "The static Assets.Borrow with owner null is not swept at plugin unload (observed live); use ctx.Effects.Borrow or pass the owner.",
+    "Revision 3 (2026-09-07): live evidence B1-B4 with full build stamps; the 2026-09-06 recordings remain unstamped.",
+    "The framework borrow places the clone at the world origin; a caller must position it. No new visual was captured on 2026-09-07 for that reason.",
+    "The client replica of a server-disposed warm NetworkedSequence carrier outlives server disposal and needs an explicit client-side destroy (B5 finding 99414:354; B6 cleanup destroyed 99501:36, 99503:37, 99471:87 as manual recovery).",
+    "Revision 4 (2026-09-07): audit corrections; instructions updated for the deployed activation fix; cleanup scopes split.",
+    "Revision 5 (2026-09-07): title and summary updated for the deployed activation fix (documentation-only).",
+    "Revision 6 (2026-09-07): `.catalogex borrow|dispose|status` exists and is compile-verified; tracked Charm borrow unloaded while active remains UNTESTED live (pending tools/live-rig/cases-catalog/charm-tracked-unload.json).",
+    "Revision 7 (2026-09-07): catalog wording only; inspect status is observed live on 2026-09-07 (agent-reported readback; see evidence B1/B2), not current verification.",
+    "Revision 8 (2026-09-07): tracked Charm unload while active observed-success from live-rig 20260907T093055Z-charm-tracked-unload (CHARMROOT children=1 then 0; Effects disposed Part_Charm_Loop_01 6 ms after Sample.dll removed; client replica 99414:354 outlived server disposal and was destroyed at cleanup). Direct Dispose deferred destruction unread; null-owner static borrow still not swept.",
+    "Revision 10 (2026-09-08): client Sample Swap with a tracked borrow active observed-success from live-rig 20260908T045301Z-swap-client (B6: three cycles, disposed at unload, new-generation borrow/dispose usable, one handler line per toggle, connection retained). Client NetworkedSequence leftovers destroyed at cleanup remain manual recovery, not automatic cleanup."
+  ]
+}

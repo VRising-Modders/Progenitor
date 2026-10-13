@@ -1,0 +1,1146 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Pure-logic tests. Core and Dev reference game assemblies, so this project does not
+    ProjectReference them; it compiles the game-free source files directly. CI has no V Rising
+    install (see docs/dev-loop.md). Keep ReferenceGame=false. Do not add a game or BepInEx
+    reference here.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Progenitor.Tests</RootNamespace>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <ReferenceGame>false</ReferenceGame>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <!-- PROGENITOR_EXTRA_INSTANCE keeps ExtraInstanceServerAuth's policy half (band, TryAllowEnable,
+         argv parsing) compiled here; the Dev csproj sets it for Debug only, so a Release/packaged
+         Dev DLL has none of it. Its tests would silently vanish without this. -->
+    <DefineConstants>$(DefineConstants);PROGENITOR_TESTS;PROGENITOR_EXTRA_INSTANCE</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Progenitor.Core\Ui\CharacterStatPresentation.cs" Link="Linked\CharacterStatPresentation.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\CharacterSheetSnapshot.cs" Link="Linked\CharacterSheetSnapshot.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\DefinitionPriorityQueue.cs" Link="Linked\DefinitionPriorityQueue.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\DataPackRegistrationRules.cs" Link="Linked\DataPackRegistrationRules.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\DataPackActivation.cs" Link="Linked\DataPackActivation.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemKeyCapacityPlan.cs" Link="Linked\ItemKeyCapacityPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ItemManagementPolicy.cs" Link="Linked\ItemManagementPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemQuarantineJournal.cs" Link="Linked\ItemQuarantineJournal.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemStatBonuses.cs" Link="Linked\ItemStatBonuses.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemStatRows.cs" Link="Linked\ItemStatRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemStatPacket.cs" Link="Linked\ItemStatPacket.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemStatSyncBudget.cs" Link="Linked\ItemStatSyncBudget.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\DataPackManifest.cs" Link="Linked\DataPackManifest.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemOwnerLedger.cs" Link="Linked\ItemOwnerLedger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\RigReferenceSnapshot.cs" Link="Linked\RigReferenceSnapshot.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\MenuPanelLayout.cs" Link="Linked\MenuPanelLayout.cs" />
+    <!-- Job KEY2: the menu-hotkey guard is game-free by construction (dump-read ints and one
+         focus flag), so its action set and its release rules are tested without a client. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\MenuHotkeyGuard.cs" Link="Linked\MenuHotkeyGuard.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\BuildSearchMatch.cs" Link="Linked\BuildSearchMatch.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\BuildMenuBlob.cs" Link="Linked\BuildMenuBlob.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\NativeModsEntry.cs" Link="Linked\NativeModsEntry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\NativeTabSelection.cs" Link="Linked\NativeTabSelection.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\NativeOuterTabRegistration.cs" Link="Linked\NativeOuterTabRegistration.cs" />
+    <!-- Job NATIVE1: the Action-field trampoline's lease table and null-safety compile game-free;
+         the converted Il2CppSystem.Action itself is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\UiActionSlot.cs" Link="Linked\UiActionSlot.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\LeaveGamePolicy.cs" Link="Linked\LeaveGamePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\Forms\PlayerForms.cs" Link="Linked\PlayerForms.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerRespawnPolicy.cs" Link="Linked\PlayerRespawnPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Items\ItemGrantPolicy.cs" Link="Linked\ItemGrantPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Abilities\AbilityCooldownPolicy.cs" Link="Linked\AbilityCooldownPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Abilities\AbilitySlotPolicy.cs" Link="Linked\AbilitySlotPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitBloodPolicy.cs" Link="Linked\UnitBloodPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitBreakablesPolicy.cs" Link="Linked\UnitBreakablesPolicy.cs" />
+    <!-- ctx.Triggers: the enter/leave book is game-free. The player scan is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Core\Triggers\AreaTriggerLogic.cs" Link="Linked\AreaTriggerLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Clock\TimeOfDayMath.cs" Link="Linked\TimeOfDayMath.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Clock\TimeOfDayPolicy.cs" Link="Linked\TimeOfDayPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Clock\TimeScalePolicy.cs" Link="Linked\TimeScalePolicy.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleSpeed.cs" Link="Linked\SampleSpeed.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleTime.cs" Link="Linked\SampleTime.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleTriggers.cs" Link="Linked\SampleTriggers.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleItems.cs" Link="Linked\SampleItems.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleDebugProtect.cs" Link="Linked\SampleDebugProtect.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SamplePlayerDirectory.cs" Link="Linked\SamplePlayerDirectory.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleForms.cs" Link="Linked\SampleForms.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleCamera.cs" Link="Linked\SampleCamera.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleCompat.cs" Link="Linked\SampleCompat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerAccountId.cs" Link="Linked\PlayerAccountId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerSessionRef.cs" Link="Linked\PlayerSessionRef.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerInfo.cs" Link="Linked\PlayerInfo.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerDirectoryLogic.cs" Link="Linked\PlayerDirectoryLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerDirectoryCache.cs" Link="Linked\PlayerDirectoryCache.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Combat\CombatEventPolicy.cs" Link="Linked\CombatEventPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Combat\CombatMusicRepair.cs" Link="Linked\CombatMusicRepair.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Combat\CombatEvents.cs" Link="Linked\CombatEvents.cs" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+
+    <Compile Include="..\..\src\Progenitor.Core\Players\Forms\ControlLeasePolicy.cs" Link="Linked\ControlLeasePolicy.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\FrostDashEdgeTracker.cs" Link="Linked\FrostDashEdgeTracker.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleLogic.cs" Link="Linked\CastleLogic.cs" />
+    <!-- Castles handle API. Every file here is game-free by construction; UnityCastleRuntime.cs
+         is the module's only Unity/ProjectM file and is deliberately not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleId.cs" Link="Linked\CastleId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleVec3.cs" Link="Linked\CastleVec3.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleGeometry.cs" Link="Linked\CastleGeometry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleTerritoryBuffers.cs" Link="Linked\CastleTerritoryBuffers.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleInfo.cs" Link="Linked\CastleInfo.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastlePlacement.cs" Link="Linked\CastlePlacement.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\ICastleHandle.cs" Link="Linked\ICastleHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\ICastleRuntime.cs" Link="Linked\ICastleRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleHandle.cs" Link="Linked\CastleHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleWatch.cs" Link="Linked\CastleWatch.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleEvents.cs" Link="Linked\CastleEvents.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\Castles.cs" Link="Linked\Castles.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleCastle.cs" Link="Linked\SampleCastle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLogic.cs" Link="Linked\ChatLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatWindowLogic.cs" Link="Linked\ChatWindowLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandLogic.cs" Link="Linked\ChatCommandLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandHints.cs" Link="Linked\ChatCommandHints.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandHintsWire.cs" Link="Linked\ChatCommandHintsWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatPolicy.cs" Link="Linked\ChatPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLog.cs" Link="Linked\ChatLog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatFormat.cs" Link="Linked\ChatFormat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ModLinkToken.cs" Link="Linked\ModLinkToken.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ServerChatLogic.cs" Link="Linked\ServerChatLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerChatRows.cs" Link="Linked\ServerChatRows.cs" />
+    <!-- AUTOUPDATE3: the Server tab's Updates group rows. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerUpdatesRows.cs" Link="Linked\ServerUpdatesRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabKind.cs" Link="Linked\PrefabKind.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemKeepRules.cs" Link="Linked\ItemKeepRules.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableGraphics.cs" Link="Linked\WearableGraphics.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableAttachRetry.cs" Link="Linked\WearableAttachRetry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableSlotSelection.cs" Link="Linked\WearableSlotSelection.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableModelVisibility.cs" Link="Linked\WearableModelVisibility.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableAuthoredMesh.cs" Link="Linked\WearableAuthoredMesh.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshBuild.cs" Link="Linked\WearableMeshBuild.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshHood.cs" Link="Linked\WearableMeshHood.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshSkirt.cs" Link="Linked\WearableMeshSkirt.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshGlove.cs" Link="Linked\WearableMeshGlove.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshBodice.cs" Link="Linked\WearableMeshBodice.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshWaist.cs" Link="Linked\WearableMeshWaist.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshSleeve.cs" Link="Linked\WearableMeshSleeve.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableMeshTassels.cs" Link="Linked\WearableMeshTassels.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableSkinTransfer.cs" Link="Linked\WearableSkinTransfer.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\WearableHandSkin.cs" Link="Linked\WearableHandSkin.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\RecipeDefinition.cs" Link="Linked\RecipeDefinition.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\RecipeApply.cs" Link="Linked\RecipeApply.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\UnlockPrunePlan.cs" Link="Linked\UnlockPrunePlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\RecipeBufferLayout.cs" Link="Linked\RecipeBufferLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\RecipeApplySession.cs" Link="Linked\RecipeApplySession.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleRecipe.cs" Link="Linked\SampleRecipe.cs" />
+    <!-- Job IA1 (M2.12): game-free key-table agreement. The live table is ItemKeyTable (game-typed);
+         every decision about order, mismatch and refusal lives here. -->
+    <Compile Include="..\..\src\Progenitor.Core\Content\KeyLedger.cs" Link="Linked\KeyLedger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\KeyIndexPlan.cs" Link="Linked\KeyIndexPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\KeyAgreement.cs" Link="Linked\KeyAgreement.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\KeyJoinSession.cs" Link="Linked\KeyJoinSession.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\KeyLedgerPacket.cs" Link="Linked\KeyLedgerPacket.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\KeyLedgerChunks.cs" Link="Linked\KeyLedgerChunks.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabLiveRefresh.cs" Link="Linked\PrefabLiveRefresh.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Reload\PluginStaticApiSweep.cs" Link="Linked\PluginStaticApiSweep.cs" />
+    <!-- Job FREL1 (R61 finding 1): the plugin-identity resolution order. Game-free by
+         construction - PluginReloader passes the BepInEx metadata read and its own attribute
+         read in as delegates precisely so this half can be tested here. -->
+    <Compile Include="..\..\src\Progenitor.Core\Reload\PluginIdentity.cs" Link="Linked\PluginIdentity.Core.cs" />
+    <!-- Job FREL2: the Bootstrap mirror of that file, byte-identical apart from its namespace
+         (Bootstrap may not reference Core, the same reason ReloaderHost mirrors PluginReloader
+         and ReloadAllowPolicy exists twice). Both copies are compiled here and
+         ReloadHardeningTests compares them line for line. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginIdentity.cs" Link="Linked\PluginIdentity.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabWire.cs" Link="Linked\PrefabWire.cs" />
+    <!-- Job FRLD: the reload-folder / Core-generation allowlist policy. It exists twice
+         because Bootstrap and Core cannot reference each other (ReloaderHost mirrors
+         PluginReloader for the same reason); both copies are compiled here and
+         ReloadHardeningTests compares them line for line. Both are game-free. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\ReloadAllowPolicy.cs" Link="Linked\ReloadAllowPolicy.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Reload\ReloadAllowPolicy.cs" Link="Linked\ReloadAllowPolicy.Core.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabIconPath.cs" Link="Linked\PrefabIconPath.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\BuffBarText.cs" Link="Linked\BuffBarText.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ContentIconOwnership.cs" Link="Linked\ContentIconOwnership.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabApplyGate.cs" Link="Linked\PrefabApplyGate.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditLog.cs" Link="Linked\PrefabEditLog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditPriority.cs" Link="Linked\PrefabEditPriority.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditOrder.cs" Link="Linked\PrefabEditOrder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditTable.cs" Link="Linked\PrefabEditTable.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditBaselines.cs" Link="Linked\PrefabEditBaselines.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabCloneLedger.cs" Link="Linked\PrefabCloneLedger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabServerFill.cs" Link="Linked\PrefabServerFill.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditPass.cs" Link="Linked\PrefabEditPass.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditApply.cs" Link="Linked\PrefabEditApply.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditCompatibility.cs" Link="Linked\PrefabEditCompatibility.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditWrite.cs" Link="Linked\PrefabEditWrite.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditWire.cs" Link="Linked\PrefabEditWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditWireLayer.cs" Link="Linked\PrefabEditWireLayer.cs" />
+    <!-- The PrfE security boundary (job FEDW3, R51 findings 1 and 6; job FEDW4, R52 finding 1):
+         the vouched-type list, the shape rule, the reflection that feeds it, and the apply ladder.
+         All four are game-free on purpose so the suite drives the real decisions instead of a hand
+         copy of them. -->
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditWireTypes.cs" Link="Linked\PrefabEditWireTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditShape.cs" Link="Linked\PrefabEditShape.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditShapeReflect.cs" Link="Linked\PrefabEditShapeReflect.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditApplyDecision.cs" Link="Linked\PrefabEditApplyDecision.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\PrefabEditEffective.cs" Link="Linked\PrefabEditEffective.cs" />
+    <!-- Job FJSON1. JSON content definition files (roadmap M4.6). The model, the parse, every
+         refusal message and the mapping to builder calls are game-free; the only file the suite
+         cannot take is ContentFiles.cs, which opens the folder and binds Stunlock.Core. -->
+    <Compile Include="..\..\src\Progenitor.Core\Content\Json\ContentFileModel.cs" Link="Linked\ContentFileModel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\Json\IContentFileSink.cs" Link="Linked\IContentFileSink.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\Json\ContentFileParser.cs" Link="Linked\ContentFileParser.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\Json\ContentFileLoad.cs" Link="Linked\ContentFileLoad.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\Attributes.cs" Link="Linked\Attributes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandParser.cs" Link="Linked\CommandParser.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandRegistry.cs" Link="Linked\CommandRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandRoutingSettings.cs" Link="Linked\CommandRoutingSettings.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandRouteTable.cs" Link="Linked\CommandRouteTable.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandHintCatalog.cs" Link="Linked\CommandHintCatalog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandResult.cs" Link="Linked\CommandResult.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\CommandDispatcher.cs" Link="Linked\CommandDispatcher.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\ReplyText.cs" Link="Linked\ReplyText.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\ConfigHelper.cs" Link="Linked\ConfigHelper.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\DeferredBinds.cs" Link="Linked\DeferredBinds.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\LeaseTable.cs" Link="Linked\LeaseTable.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\SyncedBounds.cs" Link="Linked\SyncedBounds.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dev\MainThread.cs" Link="Linked\MainThread.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dev\DrainHeartbeat.cs" Link="Linked\DrainHeartbeat.cs" />
+    <!-- The `perf` timing seam. Linked because EventBus.cs (also linked) dispatches through it. -->
+    <Compile Include="..\..\src\Progenitor.Core\Dev\PerfProbe.cs" Link="Linked\PerfProbe.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ticks\TickOwnership.cs" Link="Linked\TickOwnership.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ecs\RawWriteGuard.cs" Link="Linked\RawWriteGuard.cs" />
+    <!-- The tag-component gate in Singletons.TryGetRawRW. Game-free by construction: it reads
+         only the TypeIndex integer, never TypeManager (evidence 208 / FECS1). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ecs\SingletonsZeroSize.cs" Link="Linked\SingletonsZeroSize.cs" />
+    <!-- Cached-query release decision: dispose only while the owning world lives (core-swap crash 2026-10-02). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ecs\WorldQueryPolicy.cs" Link="Linked\WorldQueryPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\AssetKind.cs" Link="Linked\AssetKind.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\HostKind.cs" Link="Linked\HostKind.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\EffectColor.cs" Link="Linked\EffectColor.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\IEffectHandle.cs" Link="Linked\IEffectHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\EffectOwnership.cs" Link="Linked\EffectOwnership.cs" />
+    <!-- Job AA2: owned catalog-asset acquisition. Game-free policy, ledger, opt-in and op
+         shapes; UnityContentArchiveLoader.cs is the live adapter and is not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Assets\AssetAcquisitionReasons.cs" Link="Linked\AssetAcquisitionReasons.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\AssetAcquisitionStatus.cs" Link="Linked\AssetAcquisitionStatus.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\AssetAcquisitionOptIn.cs" Link="Linked\AssetAcquisitionOptIn.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\CatalogAssetIdentity.cs" Link="Linked\CatalogAssetIdentity.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\AssetAcquisitionLedger.cs" Link="Linked\AssetAcquisitionLedger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\IAssetAcquisitionHandle.cs" Link="Linked\IAssetAcquisitionHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\IContentArchiveLoader.cs" Link="Linked\IContentArchiveLoader.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\AssetAcquisitionRequest.cs" Link="Linked\AssetAcquisitionRequest.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Assets\AssetAcquisition.cs" Link="Linked\AssetAcquisition.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\CatalogAssetOps.cs" Link="Linked\CatalogAssetOps.cs" />
+    <!-- HOT1: the install_local op is reflection plus JSON, so its argument shapes compile game-free. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\InstallOps.cs" Link="Linked\InstallOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\IEffectRuntime.cs" Link="Linked\IEffectRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\EffectHandles.cs" Link="Linked\EffectHandles.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\Assets.cs" Link="Linked\Assets.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\TransformWritePath.cs" Link="Linked\TransformWritePath.cs" />
+    <!-- ctx.Models: section ids, the name table, the load/hold state machine and the inert list are
+         game-free; UnityModelStreamingRuntime.cs and PluginModels.cs are the game half and stay out. -->
+    <Compile Include="..\..\src\Progenitor.Core\Models\ModelSection.cs" Link="Linked\ModelSection.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\ModelCatalog.cs" Link="Linked\ModelCatalog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\ModelLoader.cs" Link="Linked\ModelLoader.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\ModelInertPolicy.cs" Link="Linked\ModelInertPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\PuppetBinding.cs" Link="Linked\PuppetBinding.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\GltfScene.cs" Link="Linked\GltfScene.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\GltfAnimationSampler.cs" Link="Linked\GltfAnimationSampler.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Models\ModelPackage.cs" Link="Linked\ModelPackage.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Film\TakeFile.cs" Link="Linked\TakeFile.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Film\CapturePlan.cs" Link="Linked\CapturePlan.cs" />
+    <!-- ctx.Camera: validation, shot math and the owner/shot state machine are game-free;
+         UnityCameraRuntime.cs and PluginCamera.cs are the game half and stay out. -->
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\CameraMode.cs" Link="Linked\CameraMode.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\CameraMath.cs" Link="Linked\CameraMath.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\CameraShots.cs" Link="Linked\CameraShots.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\PhotoFlight.cs" Link="Linked\PhotoFlight.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\PhotoPause.cs" Link="Linked\PhotoPause.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\PhotoLock.cs" Link="Linked\PhotoLock.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Cameras\CameraDirector.cs" Link="Linked\CameraDirector.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitVec3.cs" Link="Linked\UnitVec3.cs" />
+    <!-- ctx.Input: ownership, the user yield, what to write each frame and the command patch are
+         game-free; UnityInputRuntime.cs and PluginInput.cs are the game half and stay out. -->
+    <Compile Include="..\..\src\Progenitor.Core\Inputs\InputTypes.cs" Link="Linked\InputTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inputs\IInputRuntime.cs" Link="Linked\IInputRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inputs\InputLease.cs" Link="Linked\InputLease.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inputs\InputDirector.cs" Link="Linked\InputDirector.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitId.cs" Link="Linked\UnitId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitHandleState.cs" Link="Linked\UnitHandleState.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\IUnitHandle.cs" Link="Linked\IUnitHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\IUnitRuntime.cs" Link="Linked\IUnitRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitEvents.cs" Link="Linked\UnitEvents.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitSteering.cs" Link="Linked\UnitSteering.cs" />
+    <!-- Job FUNIT1: behavior steps. Everything that decides ordering, completion, failure and
+         Stop lives in UnitSequencer.cs above the IUnitStepDriver seam, so it compiles here and
+         UnitBehaviourTests drives it with a fake driver and a fake clock. The live writes
+         (Rotation, BehaviourTreeBinding) are in UnityUnitBehaviour.cs, which is not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitStep.cs" Link="Linked\UnitStep.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\IUnitBehaviour.cs" Link="Linked\IUnitBehaviour.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\IUnitBehaviourRuntime.cs" Link="Linked\IUnitBehaviourRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\IUnitStepDriver.cs" Link="Linked\IUnitStepDriver.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitBehaviourEvents.cs" Link="Linked\UnitBehaviourEvents.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitSequencer.cs" Link="Linked\UnitSequencer.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitHandle.cs" Link="Linked\UnitHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\Units.cs" Link="Linked\Units.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\DespawnHandoffPolicy.cs" Link="Linked\DespawnHandoffPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitEngageResult.cs" Link="Linked\UnitEngageResult.cs" />
+    <!-- ctx.Units.ClearArea: public options / result types and the pure target and pass policy.
+         UnityClearArea.cs is the live half and is deliberately not linked. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\ClearArea.cs" Link="Linked\ClearArea.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitStatOverrides.cs" Link="Linked\UnitStatOverrides.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitStatMath.cs" Link="Linked\UnitStatMath.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitSpawnOptions.cs" Link="Linked\UnitSpawnOptions.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitInstanceMutation.cs" Link="Linked\UnitInstanceMutation.cs" />
+    <!-- Unit lifetime across reload and restart: the policy and the stateless sweep. The live half is UnityUnitExpiry.cs. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitExpiry.cs" Link="Linked\UnitExpiry.cs" />
+    <!-- Timed buffs (ctx.Buffs): everything that decides refusal, confirmation, refresh, expiry,
+         cancellation, ownership and unload lives above the IBuffRuntime seam, so BuffLifecycleTests
+         drives the production state machine with a fake runtime. The live writes are in
+         UnityBuffRuntime.cs, the stat writer in BuffStats.cs and the context facade in
+         PluginContextBuffs.cs; none of those is on this list, so ForbidGameReferences holds.
+         BuffDrainWrite is the ModifyBloodDrainBuff field-write decision, extracted from the raw
+         pointer path so its layout and scope rule are testable. -->
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffEntityId.cs" Link="Linked\BuffEntityId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffApplicationState.cs" Link="Linked\BuffApplicationState.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffRefusal.cs" Link="Linked\BuffRefusal.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffRequest.cs" Link="Linked\BuffRequest.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffStat.cs" Link="Linked\BuffStat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffDrainWrite.cs" Link="Linked\BuffDrainWrite.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\IBuffApplication.cs" Link="Linked\IBuffApplication.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\IBuffRuntime.cs" Link="Linked\IBuffRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffApplicationPolicy.cs" Link="Linked\BuffApplicationPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\BuffApplication.cs" Link="Linked\BuffApplication.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\Buffs.cs" Link="Linked\Buffs.cs" />
+    <!-- Both timed-buff samples keep their stat policy game-free so the declared stats are pinned. -->
+    <Compile Include="..\..\samples\Progenitor.TimedBuffExample\TimedBuffPolicy.cs" Link="Linked\TimedBuffPolicy.cs" />
+    <Compile Include="..\..\samples\Exercise.TimedBuff\AdrenalinePolicy.cs" Link="Linked\AdrenalinePolicy.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleUnits.cs" Link="Linked\SampleUnits.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleMods.cs" Link="Linked\SampleMods.cs" />
+    <!-- INSTALLFAIL1: the real Progenitor-HotDemo 0.1.0 package (our own sample), byte for byte. -->
+    <None Include="Fixtures\Progenitor-HotDemo-0.1.0.zip" Link="Fixtures\Progenitor-HotDemo-0.1.0.zip" CopyToOutputDirectory="PreserveNewest" />
+    <!-- INSTPLUG1: a generated plain BepInEx plugin package (tools/make-dummy-package.ps1 -Kind Plain
+         -Owner QATeam -Package QStacks -PluginName QStack -Version 1.0.1 -Paperwork): a plugin at
+         BepInEx/plugins/QStack/QStack.dll with Source/ and SOURCE_REVIEW.md beside it. -->
+    <None Include="Fixtures\QATeam-QStacks-1.0.1.zip" Link="Fixtures\QATeam-QStacks-1.0.1.zip" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The publish checker (docs/publishing.md): generated with tools/make-dummy-package.ps1 -Sample HotDemo
+         -Configuration Release -Owner ExampleTeam -Publishable, and the same with -PublishFlaws -Package HotDemoFlawed. -->
+    <None Include="Fixtures\ExampleTeam-HotDemo-0.1.0.zip" Link="Fixtures\ExampleTeam-HotDemo-0.1.0.zip" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\ExampleTeam-HotDemoFlawed-0.1.0.zip" Link="Fixtures\ExampleTeam-HotDemoFlawed-0.1.0.zip" CopyToOutputDirectory="PreserveNewest" />
+    <!-- tools/publishcheck: every source but its Program.cs (DirectKeyReadCheck, CompatRange and NetworkCompatibility are linked above). -->
+    <Compile Include="..\..\tools\publishcheck\ImageFacts.cs" Link="Linked\PublishCheck\ImageFacts.cs" />
+    <Compile Include="..\..\tools\publishcheck\PublishChecker.cs" Link="Linked\PublishCheck\PublishChecker.cs" />
+    <Compile Include="..\..\tools\publishcheck\ProgenitorJsonWriter.cs" Link="Linked\PublishCheck\ProgenitorJsonWriter.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\SequenceLateDriver.cs" Link="Linked\SequenceLateDriver.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\SequenceBlackboardLayout.cs" Link="Linked\SequenceBlackboardLayout.cs" />
+    <!-- R31 finding 26 / R30 open question 7: the Effects gate WIRING, not just the pure layout
+         helpers. Research Â§A35.1 diagnosed all three of EV15/EV16/EV17 as "the tested code was
+         right and the untested predicate turned it off" — the predicates lived inside
+         #if !PROGENITOR_TESTS in SequenceDriverLookup.cs. They now live here and a fake runtime
+         drives them. Game-free: the runtime readings arrive as Func<int> and the log as
+         IEffectGateLog. -->
+    <Compile Include="..\..\src\Progenitor.Core\Effects\SequenceWalkGate.cs" Link="Linked\SequenceWalkGate.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitSpawnWrite.cs" Link="Linked\UnitSpawnWrite.cs" />
+    <!-- R27 finding 15: FV (9dc6edc) replaced this line with CaptureReport.cs instead of adding
+         alongside it, so R26 #14's fix was pinned only by a source-grep against a file the test
+         assembly did not compile. Keep both. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitSpawnPlacement.cs" Link="Linked\UnitSpawnPlacement.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\ServerBeam.cs" Link="Linked\ServerBeam.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\ServerBeamHandle.cs" Link="Linked\ServerBeamHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\ServerBeamRuntime.cs" Link="Linked\ServerBeamRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\BeamPresets.cs" Link="Linked\BeamPresets.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleBeam.cs" Link="Linked\SampleBeam.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Effects\BeamStyle.cs" Link="Linked\BeamStyle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiOwnership.cs" Link="Linked\UiOwnership.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\IUiHandle.cs" Link="Linked\IUiHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\IUiRuntime.cs" Link="Linked\IUiRuntime.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiSlotTable.cs" Link="Linked\UiSlotTable.cs" />
+    <!-- Job FUI2: the input-capture refcount and its deferral rule. Game-free on purpose —
+         the game's ordered context list is behind IUiInputBlocker (GameInputBlocker.cs is the
+         module's only ProjectM file here and is deliberately not on this list). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\IUiInputBlocker.cs" Link="Linked\IUiInputBlocker.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiInputCapture.cs" Link="Linked\UiInputCapture.cs" />
+    <!-- Job FUI20 (defect 1): what the mask blocks in each scope, and why the panel-close key is in every one of them. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiInputMask.cs" Link="Linked\UiInputMask.cs" />
+    <!-- Job FUI19: route the input block by where the pointer is. The mode enum and the router
+         that decides from it are game-free for the same reason the refcount above is - the
+         hit test, the overlapping-panel rule and the edge-crossing debounce are the arithmetic,
+         and the game only ever answers "where is this panel" and "where is the mouse". -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiCaptureMode.cs" Link="Linked\UiCaptureMode.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\HoverCapture.cs" Link="Linked\HoverCapture.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiShownInput.cs" Link="Linked\UiShownInput.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiHandles.cs" Link="Linked\UiHandles.cs" />
+    <!-- DIALOGS1: the shared dialog layout, the dialog queue and the mod-facing dialogs (not the
+         ctx.Dialogs facade, which needs PluginContext). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\DialogLayout.cs" Link="Linked\DialogLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiDialog.cs" Link="Linked\UiDialog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\DialogFact.cs" Link="Linked\DialogFact.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextEdit.cs" Link="Linked\UiTextEdit.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiFieldInsert.cs" Link="Linked\UiFieldInsert.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiKeyRepeat.cs" Link="Linked\UiKeyRepeat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextUndo.cs" Link="Linked\UiTextUndo.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingPersistence.cs" Link="Linked\SettingPersistence.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiTypedKeys.cs" Link="Linked\UiTypedKeys.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiCaretLayout.cs" Link="Linked\UiCaretLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiCharFilter.cs" Link="Linked\UiCharFilter.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextTestInput.cs" Link="Linked\UiTextTestInput.cs" />
+    <!-- TEXTEXPAND1: the expanded editor's layout and the text-scroll arithmetic. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextExpand.cs" Link="Linked\UiTextExpand.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\TextInputRing.cs" Link="Linked\TextInputRing.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiChoice.cs" Link="Linked\UiChoice.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiNumeric.cs" Link="Linked\UiNumeric.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiSliderEntry.cs" Link="Linked\UiSliderEntry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiColor.cs" Link="Linked\UiColor.cs" />
+    <!-- LIST1: the Install list view palette (game-free floats) behind CellRow / CellHeader. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\MenuPalette.cs" Link="Linked\MenuPalette.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiKeybindPicker.cs" Link="Linked\UiKeybindPicker.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiControlDraw.cs" Link="Linked\UiControlDraw.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiControlHandles.cs" Link="Linked\UiControlHandles.cs" />
+    <!-- Job FUI29: the panel field that derives "am I open" from the handle instead of shadowing
+         it. Game-free by construction - it reads IUiHandle.State and nothing else. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\OwnedPanel.cs" Link="Linked\OwnedPanel.cs" />
+    <!-- Job FUI36: hosting mod rows beside a vanilla widget. The site catalog, the per-frame
+         decision, the per-owner registry and the handle are game-free on purpose; the Unity half
+         (MapWarEventSiteResolver.cs) is the only file here that knows what a MapMenuMapper is and
+         is deliberately not on this list. Close/reopen, "the site went away", "the game destroyed
+         our container" and the layout branch are the four things this capability can get wrong,
+         and all four are decidable from an instance id and three booleans. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaUiSite.cs" Link="Linked\VanillaUiSite.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachPlan.cs" Link="Linked\VanillaAttachPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\IVanillaAttachHandle.cs" Link="Linked\IVanillaAttachHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachHandle.cs" Link="Linked\VanillaAttachHandle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachRegistry.cs" Link="Linked\VanillaAttachRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\Ui.cs" Link="Linked\Ui.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\FrameworkVersions.cs" Link="Linked\FrameworkVersions.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleFx.cs" Link="Linked\SampleFx.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleUi.cs" Link="Linked\SampleUi.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleMenu.cs" Link="Linked\SampleMenu.cs" />
+    <!-- Core debug tools (moved from the Sample 2026-10-06): the debug buff's ledger, verdicts and
+         parse, the .debug command (its game half is #if-ed out) and the map powers' policy. -->
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugBuff.cs" Link="Linked\DebugBuff.cs" />
+    <!-- ctx.Debug ownership: which buffs DebugProtection may add or remove, and its deferred readback.
+         Game-free; DebugProtection.cs itself (the ECS half) is not linked. -->
+    <Compile Include="..\..\src\Progenitor.Core\Buffs\DebugProtectionPolicy.cs" Link="Linked\DebugProtectionPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugCommandParse.cs" Link="Linked\DebugCommandParse.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugBuildMode.cs" Link="Linked\DebugBuildMode.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugBuildController.cs" Link="Linked\DebugBuildController.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DetachedPieces.cs" Link="Linked\DetachedPieces.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugCommands.cs" Link="Linked\DebugCommands.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Events\EventBus.cs" Link="Linked\EventBus.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Events\EventOrder.cs" Link="Linked\EventOrder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hooks\HookedIndexSet.cs" Link="Linked\HookedIndexSet.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hooks\HookOrder.cs" Link="Linked\HookOrder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hooks\SystemTypeIndexLookup.cs" Link="Linked\SystemTypeIndexLookup.cs" />
+    <!-- Job FLATCH1 (R44 finding 8): the prefix/postfix call stack SystemHooks pushes into.
+         SystemHooks itself is unsafe and takes game types; the unwind rules are not. -->
+    <Compile Include="..\..\src\Progenitor.Core\Hooks\HookCallStack.cs" Link="Linked\HookCallStack.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\OrderSorter.cs" Link="Linked\OrderSorter.cs" />
+    <!-- Job FBUFF2: the unload reason, its scope and the inference policy. Game-free on purpose
+         (ProgenitorPlugin itself references BepInEx), so DebugBuff's keep-vs-sweep rule and the
+         reason inference are both covered here. -->
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\PluginUnloadReason.cs" Link="Linked\PluginUnloadReason.cs" />
+    <!-- Job FHARM: the patch registry's tagging / sweep / refusal rules and the god-mode guard
+         set. Game-free on purpose — HarmonyLib lives behind IPatchApplier
+         (Patches\HarmonyPatchApplier.cs) and the Entity-typed face behind GodMode.cs, neither of
+         which is on this list, so the ForbidGameReferences target below still holds. -->
+    <Compile Include="..\..\src\Progenitor.Core\Patches\PatchKind.cs" Link="Linked\PatchKind.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\PatchSitePolicy.cs" Link="Linked\PatchSitePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\IPatchApplier.cs" Link="Linked\IPatchApplier.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\PatchRegistry.cs" Link="Linked\PatchRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\GodMode\GodModeGuard.cs" Link="Linked\GodModeGuard.cs" />
+    <!-- Job FEPOCH: the world-load epoch (game-free half; WorldLoadHook.cs, the Harmony half, is not linked). -->
+    <Compile Include="..\..\src\Progenitor.Core\World\WorldEpoch.cs" Link="Linked\WorldEpoch.cs" />
+    <!-- Job FEVT1 (R44 finding 3): the WorldReady ledger, keyed on World.SequenceNumber like the
+         epoch above. Game-free so the destroy-and-recreate case has a behavioral test. -->
+    <Compile Include="..\..\src\Progenitor.Core\Events\WorldReadyLedger.cs" Link="Linked\WorldReadyLedger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\World\PluginWorldState.cs" Link="Linked\PluginWorldState.cs" />
+    <!-- Job FHARM2: the god-mode policy (throttle and log shapes), game-free. -->
+    <Compile Include="..\..\src\Progenitor.Core\GodMode\GodModePolicy.cs" Link="Linked\GodModePolicy.cs" />
+    <!-- Job FCOMPAT2. The load-time rewriter is Mono.Cecil, which in production is BepInEx's own
+         copy (BepInEx/core/Mono.Cecil.dll, on Core's and Bootstrap's compile-time reference set
+         via Directory.Build.targets). CI has no V Rising install, so the tests take the same
+         version from NuGet. This is a TEST-ONLY reference: it is not a runtime dependency of the
+         framework and nothing ships it (CLAUDE.md's one-runtime-dependency rule is unaffected).
+         Pin the version BepInEx 6 be.733 carries; ForbidGameReferences below still bars the game. -->
+    <PackageReference Include="Mono.Cecil" Version="0.11.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" /> <!-- Job FENC: test-and-tool-only, like Mono.Cecil; nothing in src/ references Roslyn -->
+    <!-- Job FCOMPAT2: M4 item 2, the compatibility rewriter. Same mirror rule as ReloadAllowPolicy
+         above - ReloaderHost is the reloader that runs in production and cannot reference Core,
+         so the drift-map model and the Cecil rewriter exist twice; both copies are compiled here
+         and CompatRewriterTests compares them line for line and drives the Core copy end to end.
+         Game-free by construction: Cecil is a plain managed library, nothing here names ProjectM,
+         Unity or Il2CppInterop, and the S1/S2/S3 fixtures are synthetic assemblies built at test
+         time. The generator's two files are linked from tools/driftmap for the same reason. -->
+    <Compile Include="..\..\src\Progenitor.Core\Compat\DriftMap.cs" Link="Linked\DriftMap.Core.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Compat\PluginRewriter.cs" Link="Linked\PluginRewriter.Core.cs" />
+    <Compile Include="..\..\tools\driftmap\AssemblySurface.cs" Link="Linked\AssemblySurface.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Compat\CompatRewriteHost.cs" Link="Linked\CompatRewriteHost.Core.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\DriftMap.cs" Link="Linked\DriftMap.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CompatRewriteHost.cs" Link="Linked\CompatRewriteHost.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginRewriter.cs" Link="Linked\PluginRewriter.Bootstrap.cs" />
+    <Compile Include="..\..\tools\driftmap\DriftDiff.cs" Link="Linked\DriftDiff.cs" />
+    <!-- Job FEPOCH: the world-load epoch. Game-free (WorldLoadHook.cs, the Harmony half, is not
+         linked); CastleHandle.cs and GodModeGuard.cs both compile against it. -->
+    <!-- FHARM2 (R32 findings 5, 9): the prefix-side policy — how many prefixes a guard needs to
+         mean anything, and the non-positive-health restore and its log window. Game-free for the
+         same reason as the guard set; the Entity-typed write lives in GodMode.cs. -->
+    <!-- Job FRLD4 / R32 finding 4: the promote sequence itself, behind IPromoteFileSystem. It is
+         here so ReloadHardeningTests drives the PRODUCTION read -> gate -> stage -> rotate ->
+         re-read -> verify, with a fake file system that swaps the staged file's contents between
+         the gate and the rotate. The old tests re-implemented that sequence and could not fail
+         for any change to SelfUpdate.cs. Game-free by construction (System.IO only). -->
+    <Compile Include="..\..\src\Progenitor.Core\Localization\LocalizationParser.cs" Link="Linked\LocalizationParser.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Native\AddressId.cs" Link="Linked\AddressId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Native\AddressTable.cs" Link="Linked\AddressTable.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Native\AddressLibrary.cs" Link="Linked\AddressLibrary.cs" />
+    <!-- Job FBUFF4: the production hand-off. Bootstrap's slot and Core's reflective probes are
+         both game-free, so PluginUnloadReasonTests drives the real Bootstrap -> Core path
+         (fake host pushes the slot, the resolve reads it back) instead of grepping source. -->
+    <Compile Include="..\..\src\Progenitor.Core\Native\DetourSite.cs" Link="Linked\DetourSite.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\BootstrapUnloadSlotProbe.cs" Link="Linked\BootstrapUnloadSlotProbe.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\CoreSwapProbe.cs" Link="Linked\CoreSwapProbe.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginUnloadSlot.cs" Link="Linked\PluginUnloadSlot.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Native\KeyTableProbe.cs" Link="Linked\KeyTableProbe.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hosted\HostedPathRules.cs" Link="Linked\HostedPathRules.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hosted\HostedServerLauncher.cs" Link="Linked\HostedServerLauncher.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hosted\Staging.cs" Link="Linked\Staging.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\Handshake.cs" Link="Linked\Handshake.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ConfigSync.cs" Link="Linked\ConfigSync.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ConfigSyncToml.cs" Link="Linked\ConfigSyncToml.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ConfigSyncWire.cs" Link="Linked\ConfigSyncWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifest.cs" Link="Linked\ModManifest.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestJson.cs" Link="Linked\ModManifestJson.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModCatalogForms.cs" Link="Linked\ModCatalogForms.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestCrypto.cs" Link="Linked\ModManifestCrypto.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestCompare.cs" Link="Linked\ModManifestCompare.cs" />
+    <!-- Job FUPD: M4.1 update resilience. Every Resilience file is game-free on purpose (the
+         BepInEx log source arrives through Resilience.LogSink), so the fingerprint, the
+         metadata scan, the diff and the report are all covered without a V Rising install. -->
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\BuildFingerprint.cs" Link="Linked\BuildFingerprint.cs" />
+    <!-- Job FUPD4: the per-build interop archive that gives tools/driftmap the previous
+         build's interop set to diff against. -->
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\InteropArchive.cs" Link="Linked\InteropArchive.cs" />
+    <!-- Job FUPD6: the archive's completeness manifest (R53 finding 5) and the default-off
+         policy that keeps a stranger's Steam install out of it (R53 finding 9). -->
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\InteropArchiveManifest.cs" Link="Linked\InteropArchiveManifest.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\InteropArchivePolicy.cs" Link="Linked\InteropArchivePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\MemberBinding.cs" Link="Linked\MemberBinding.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\MetadataScan.cs" Link="Linked\MetadataScan.cs" />
+    <!-- Load-time direct key read guidance: the metadata matcher is game-free; Run is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\DirectKeyReadCheck.cs" Link="Linked\DirectKeyReadCheck.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\ResilienceDiff.cs" Link="Linked\ResilienceDiff.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\ResilienceReport.cs" Link="Linked\ResilienceReport.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\ResilienceCheck.cs" Link="Linked\ResilienceCheck.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Resilience\Resilience.cs" Link="Linked\Resilience.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestWire.cs" Link="Linked\ModManifestWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestIds.cs" Link="Linked\ModManifestIds.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\LegacyServerMods.cs" Link="Linked\LegacyServerMods.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\InstallWindowFixes.cs" Link="Linked\InstallWindowFixes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerPackageAvailability.cs" Link="Linked\ServerPackageAvailability.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeptVersions.cs" Link="Linked\KeptVersions.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModFolders.cs" Link="Linked\ModFolders.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestTrust.cs" Link="Linked\ModManifestTrust.cs" />
+    <!-- JOINFLOW1: the join screens' game-free half (the signed join section, the reset countdown and
+         tokens, the page model and its session, the seen store and the download queue) and the
+         date-time picker's model. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinSection.cs" Link="Linked\JoinSection.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ResetCountdown.cs" Link="Linked\ResetCountdown.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\GameWipeSchedule.cs" Link="Linked\GameWipeSchedule.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\TextTokens.cs" Link="Linked\TextTokens.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminText.cs" Link="Linked\JoinAdminText.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinCoreRefusal.cs" Link="Linked\JoinCoreRefusal.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowModel.cs" Link="Linked\JoinFlowModel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowSession.cs" Link="Linked\JoinFlowSession.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinShowPolicy.cs" Link="Linked\JoinShowPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.cs" Link="Linked\JoinFlowClient.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowPanel.cs" Link="Linked\JoinFlowPanel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinServerSettings.cs" Link="Linked\JoinServerSettings.cs" />
+    <!-- SERVERDESC1: the server-list description (composition, tokens, Steam keys, the file rewrite, the
+         publisher and the apply loop over a fake game) and the shared ServerHostSettings resolver. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerHostSettingsFiles.cs" Link="Linked\ServerHostSettingsFiles.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerListDescription.cs" Link="Linked\ServerListDescription.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRules.cs" Link="Linked\ServerRules.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRulesWire.cs" Link="Linked\ServerRulesWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRulesServer.cs" Link="Linked\ServerRulesServer.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRulesServer.Write.cs" Link="Linked\ServerRulesServer.Write.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRulesRows.cs" Link="Linked\ServerRulesRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRulesTestBridge.cs" Link="Linked\ServerRulesTestBridge.cs" />
+    <!-- WORLDRESTORE1: the world restore's file-only library (also linked into Bootstrap), the Backups wire state, the
+         server's request path, the client rows and dialogs, and the bridge half. -->
+    <Compile Include="..\..\src\Progenitor.Core\WorldRestore\*.cs" Link="Linked\WorldRestore\%(Filename)%(Extension)" />
+    <!-- AUTOUPDATE5: Progenitor's own update files (also linked into Bootstrap: the start-loop guard). -->
+    <Compile Include="..\..\src\Progenitor.Core\SelfUpdate\*.cs" Link="Linked\SelfUpdate\%(Filename)%(Extension)" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerBackups.cs" Link="Linked\ServerBackups.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerRulesServer.Backups.cs" Link="Linked\ServerRulesServer.Backups.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerBackupsRows.cs" Link="Linked\ServerBackupsRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerBackupsTestBridge.cs" Link="Linked\ServerBackupsTestBridge.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerBackupsJob.cs" Link="Linked\ServerBackupsJob.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerListApply.cs" Link="Linked\ServerListApply.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerBrowserMarker.cs" Link="Linked\ServerBrowserMarker.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinDescriptionChat.cs" Link="Linked\JoinDescriptionChat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowTestBridge.cs" Link="Linked\JoinFlowTestBridge.cs" />
+    <!-- JOINLINKS1: links in the server message (detection, markup, the confirmation's model). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiLinks.cs" Link="Linked\UiLinks.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinMessageLinks.cs" Link="Linked\JoinMessageLinks.cs" />
+    <!-- JOINADMIN1 (join flow stage 3): the admin store, policy, wire, refused-join record and the server half. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminModel.cs" Link="Linked\JoinAdminModel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminDraft.cs" Link="Linked\JoinAdminDraft.cs" />
+    <!-- Mod compatibility C1/C2: feature tables, the tagged message codec, the 'PrMs' envelope, router and send gate
+         (game-free; ModCompatNet.cs and Plugins/PluginCompat.cs are the live halves). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModFeatures.cs" Link="Linked\ModFeatures.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageCodec.cs" Link="Linked\ModMessageCodec.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageEnvelope.cs" Link="Linked\ModMessageEnvelope.cs" />
+    <!-- Mod compatibility C5: the message fixture format and the bounded recorder behind messages_record (game-free). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageFixtures.cs" Link="Linked\ModMessageFixtures.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\MessagesRecordArgs.cs" Link="Linked\MessagesRecordArgs.cs" />
+    <!-- Mod compatibility C3: compatibility ranges, declarations, version matching and the join's table hold (game-free). -->
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\CompatRange.cs" Link="Linked\CompatRange.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\CompatDeclaration.cs" Link="Linked\CompatDeclaration.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\VersionMatching.cs" Link="Linked\VersionMatching.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ProgenitorExact.cs" Link="Linked\ProgenitorExact.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\VersionMatchSetting.cs" Link="Linked\VersionMatchSetting.cs" />
+    <!-- CLIENTPOLICY1: the client mod policy's model, judgment, report wire and client report (game-free halves). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientModPolicy.cs" Link="Linked\ClientModPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientModReport.cs" Link="Linked\ClientModReport.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientModReportClient.cs" Link="Linked\ClientModReportClient.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientPolicyPanelModel.cs" Link="Linked\ClientPolicyPanelModel.cs" />
+    <!-- NOPROGNOTICE: the no-answer countdown's schedule and the notice's words. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\NoAnswerNotice.cs" Link="Linked\NoAnswerNotice.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\RefusedJoins.cs" Link="Linked\RefusedJoins.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminServer.cs" Link="Linked\JoinAdminServer.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminOptions.cs" Link="Linked\JoinAdminOptions.cs" />
+    <!-- JOINFLOW2: Thunderstore installs, Join now, restart and rejoin (JoinFlowLive.cs is the game half, not compiled here). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.Stage2.cs" Link="Linked\JoinFlowClient.Stage2.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinInstall.cs" Link="Linked\JoinInstall.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinRejoin.cs" Link="Linked\JoinRejoin.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinLocalRoute.cs" Link="Linked\JoinLocalRoute.cs" />
+    <!-- INSTALLRESTART1: the Mods window's pending-restart bar, Restart and rejoin / resume. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientRestart.cs" Link="Linked\ClientRestart.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.InstallRestart.cs" Link="Linked\JoinFlowClient.InstallRestart.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\LastServer.cs" Link="Linked\LastServer.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.LastServer.cs" Link="Linked\JoinFlowClient.LastServer.cs" />
+    <!-- JOINFLOW4: keeping both versions (ModVersionLive.cs is the game half, not compiled here). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.Stage4.cs" Link="Linked\JoinFlowClient.Stage4.cs" />
+    <!-- JOINTURNON: Turn on for installed-but-off mods (the live probes are set by JoinFlowLive.cs, not compiled here). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.TurnOn.cs" Link="Linked\JoinFlowClient.TurnOn.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.LocalTest.cs" Link="Linked\JoinFlowClient.LocalTest.cs" />
+    <!-- CLIENTPOLICY2: the join screens' policy rows, the automatic pause plan and the remembered policy (game-free). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.Policy.cs" Link="Linked\JoinFlowClient.Policy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientPolicyClient.cs" Link="Linked\ClientPolicyClient.cs" />
+    <!-- CLIENTPOLICY3: mid-session re-checks (the decisions, the server's notice wire and words, the client's handling). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ClientPolicyRecheck.cs" Link="Linked\ClientPolicyRecheck.cs" />
+    <!-- The join flow's notices on the dialog kit (requested 2026-10-05), and the guard that keeps them there. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinNoticeDialog.cs" Link="Linked\JoinNoticeDialog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerModPauseNotice.cs" Link="Linked\ServerModPauseNotice.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinChangeNoticePanel.cs" Link="Linked\JoinChangeNoticePanel.cs" />
+    <!-- JOINNOTICE: the mid-session server-change notice (its panel, JoinChangeNoticePanel.cs, is the game half). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinFlowClient.ChangeNotice.cs" Link="Linked\JoinFlowClient.ChangeNotice.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModVersionJoin.cs" Link="Linked\ModVersionJoin.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\DateTimePickerModel.cs" Link="Linked\DateTimePickerModel.cs" />
+    <!-- JOINFLOW1 (date-time control): the date-time field, its picker popup and the dev bridge's
+         datetime_* handlers. Game-free: composed from cell rows and the dialog layout. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiDateTimeField.cs" Link="Linked\UiDateTimeField.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeAnswerWatch.cs" Link="Linked\HandshakeAnswerWatch.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\NoProgenitorKeepOut.cs" Link="Linked\NoProgenitorKeepOut.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\WipePlan.cs" Link="Linked\WipePlan.cs" />
+    <!-- Catalog/install pipeline (CAT1). One glob: the folder is game-free by contract. -->
+    <Compile Include="..\..\src\Progenitor.Core\Install\*.cs" Link="Linked\Install\%(Filename)%(Extension)" />
+    <!-- Job TAG1: the V Rising game-build -> update-tag table behind CatalogUpdateTags.Adapter (game-free). -->
+    <Compile Include="..\..\src\Progenitor.Core\Install\VRising\VRisingUpdateTagMap.cs" Link="Linked\Install\VRising\VRisingUpdateTagMap.cs" />
+    <!-- ADMIT1: the non-executing artifact scanner and the admission model. Game-free by design. -->
+    <Compile Include="..\..\src\Progenitor.Core\Install\Admission\*.cs" Link="Linked\Install\Admission\%(Filename)%(Extension)" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeInstallGrace.cs" Link="Linked\HandshakeInstallGrace.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModInstallWindow.cs" Link="Linked\ModInstallWindow.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ReceiveSlotHandoff.cs" Link="Linked\ReceiveSlotHandoff.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ReceiveGate.cs" Link="Linked\ReceiveGate.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\CustomEventPolicy.cs" Link="Linked\CustomEventPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\ReceiveSlotPolicy.cs" Link="Linked\ReceiveSlotPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\HarmonySlotPolicy.cs" Link="Linked\HarmonySlotPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\SaveSafetyPolicy.cs" Link="Linked\SaveSafetyPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\DetourCachePolicy.cs" Link="Linked\DetourCachePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\HarmonySlotHandoff.cs" Link="Linked\HarmonySlotHandoff.cs" />
+    <!-- Join-hang mitigation: the gate, the collect order and the LaunchGame plugin chain the
+         handoff routes to. GcBeforeLaunchLive.cs is the game half and is not linked. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\GcBeforeLaunch.cs" Link="Linked\GcBeforeLaunch.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreLayout.cs" Link="Linked\CoreLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreLoadContext.cs" Link="Linked\CoreLoadContext.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadCollect.cs" Link="Linked\CoreReloadCollect.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadStatus.cs" Link="Linked\CoreReloadStatus.cs" />
+    <!-- Job FINJ1: process-lifetime plugins (IL2CPP type injection); CoreReloadStatus, PluginSuspend and the orchestrator use it. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\Il2CppInjectionPolicy.cs" Link="Linked\Il2CppInjectionPolicy.cs" />
+    <!-- Job FORD1: dependency-aware load order for the reload folder. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginLoadOrder.cs" Link="Linked\PluginLoadOrder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ProcessLifetimeSource.cs" Link="Linked\ProcessLifetimeSource.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreWatchPolicy.cs" Link="Linked\CoreWatchPolicy.cs" />
+    <!-- Job HOSTPROBE: the hosted-child liveness state machine. HostedChildProbe.cs (P/Invoke) is not linked. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\HostedChildTracker.cs" Link="Linked\HostedChildTracker.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreImagePolicy.cs" Link="Linked\CoreImagePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginAssemblyResolver.cs" Link="Linked\PluginAssemblyResolver.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreAssemblyResolver.cs" Link="Linked\CoreAssemblyResolver.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadPolicy.cs" Link="Linked\CoreReloadPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadOrchestrator.cs" Link="Linked\CoreReloadOrchestrator.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadFrameDriver.cs" Link="Linked\CoreReloadFrameDriver.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadStackCheck.cs" Link="Linked\CoreReloadStackCheck.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadHolderScan.cs" Link="Linked\CoreReloadHolderScan.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\ContentMemory.cs" Link="Linked\ContentMemory.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\DespawnHandoffBook.cs" Link="Linked\DespawnHandoffBook.cs" />
+    <!-- Job FRLD4 / R32 finding 4: the promote sequence itself, behind IPromoteFileSystem. It is
+         here so ReloadHardeningTests drives the PRODUCTION read -> gate -> stage -> rotate ->
+         re-read -> verify, with a fake file system that swaps the staged file's contents between
+         the gate and the rotate. The old tests re-implemented that sequence and could not fail
+         for any change to SelfUpdate.cs. Game-free by construction (System.IO only). -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PromoteSequence.cs" Link="Linked\PromoteSequence.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\IconCachePolicy.cs" Link="Linked\IconCachePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\NativePinRegistry.cs" Link="Linked\NativePinRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\WorkQueue.cs" Link="Linked\WorkQueue.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginUnloadOrder.cs" Link="Linked\PluginUnloadOrder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\NetworkCompatibility.cs" Link="Linked\NetworkCompatibility.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\IModStore.cs" Link="Linked\IModStore.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\ModStore.cs" Link="Linked\ModStore.cs" />
+    <!-- JsonCacheSweep: game-free; drops System.Text.Json per-type caches for collectible types. -->
+    <Compile Include="..\..\src\Progenitor.Core\Reload\JsonCacheSweep.cs" Link="Linked\JsonCacheSweep.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\SavePaths.cs" Link="Linked\SavePaths.cs" />
+    <!-- ServerSave's game-free half: the folder layout and the store set (ServerSave.cs reads the game's persistent data path). -->
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\ServerSavePaths.cs" Link="Linked\ServerSavePaths.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\ServerStoreSet.cs" Link="Linked\ServerStoreSet.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\StoreMerge.cs" Link="Linked\StoreMerge.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Persistence\WorldSaveTrigger.cs" Link="Linked\WorldSaveTrigger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Systems\DefaultAnchorWatch.cs" Link="Linked\DefaultAnchorWatch.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Systems\DispatchAmbient.cs" Link="Linked\DispatchAmbient.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Systems\VirtualSystemDispatcher.cs" Link="Linked\VirtualSystemDispatcher.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\BoundedLineReader.cs" Link="Linked\BoundedLineReader.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\BridgeUsers.cs" Link="Linked\BridgeUsers.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\DevGate.cs" Link="Linked\DevGate.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\DeferredResult.cs" Link="Linked\DeferredResult.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ConnectAddressParser.cs" Link="Linked\ConnectAddressParser.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ConnectOps.cs" Link="Linked\ConnectOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ExtraInstanceServerAuth.cs" Link="Linked\ExtraInstanceServerAuth.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\HeadlessClientPolicy.cs" Link="Linked\HeadlessClientPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\LoopbackTransport.cs" Link="Linked\LoopbackTransport.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\WorldSaveOps.cs" Link="Linked\WorldSaveOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\QueryArgs.cs" Link="Linked\QueryArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\HealLogic.cs" Link="Linked\HealLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PrefabInspectArgs.cs" Link="Linked\PrefabInspectArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\SpawnArgs.cs" Link="Linked\SpawnArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\EntityLifecycleOps.cs" Link="Linked\EntityLifecycleOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ecs\BuffSweep.cs" Link="Linked\BuffSweep.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\CaptureReport.cs" Link="Linked\CaptureReport.cs" />
+    <!-- FDV2 Dev ops: teleport / give / inspect / snapshot+restore. Each op keeps its
+         argument parse, budget and refusal policy in a game-free file so the rules that
+         decide whether a write happens are covered without a V Rising install. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\TeleportArgs.cs" Link="Linked\TeleportArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\GiveArgs.cs" Link="Linked\GiveArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\UnlockArgs.cs" Link="Linked\UnlockArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\InspectArgs.cs" Link="Linked\InspectArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\SnapshotArgs.cs" Link="Linked\SnapshotArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\TimeArgs.cs" Link="Linked\TimeArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PhotoArgs.cs" Link="Linked\PhotoArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfReport.cs" Link="Linked\PerfReport.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfFrameDetail.cs" Link="Linked\PerfFrameDetail.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfProgress.cs" Link="Linked\PerfProgress.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfFinalize.cs" Link="Linked\PerfFinalize.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\PingIdentity.cs" Link="Linked\PingIdentity.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ModsUiOps.cs" Link="Linked\ModsUiOps.cs" />
+    <!-- keybind_press: argument parsing is game-free; the dispatch is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\KeybindPressOps.cs" Link="Linked\KeybindPressOps.cs" />
+    <!-- map and key: parsing, decisions, the held-key ledger and event bytes are game-free; the game calls are behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\MapOps.cs" Link="Linked\MapOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\KeyInjectPlan.cs" Link="Linked\KeyInjectPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\KeyInjectOps.cs" Link="Linked\KeyInjectOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\NavOps.cs" Link="Linked\NavOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\MouseInjectPlan.cs" Link="Linked\MouseInjectPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\MouseInjectOps.cs" Link="Linked\MouseInjectOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\BridgeStatus.cs" Link="Linked\BridgeStatus.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeDump.cs" Link="Linked\FreezeDump.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeWindowState.cs" Link="Linked\FreezeWindowState.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeHoldOps.cs" Link="Linked\FreezeHoldOps.cs" />
+    <!-- Job FUI5 -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeyChord.cs" Link="Linked\KeyChord.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\IKeyInputSource.cs" Link="Linked\IKeyInputSource.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\Keybinds.cs" Link="Linked\Keybinds.cs" />
+    <!-- KEYS1: the winner rule, the game's key catalog, cfg key settings, and the Keybinds tab. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindArbiter.cs" Link="Linked\KeybindArbiter.cs" />
+    <!-- KEYS2: chords Windows or Steam reserve, and the no-conflicting-remap guard. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ReservedChords.cs" Link="Linked\ReservedChords.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindRemapGuard.cs" Link="Linked\KeybindRemapGuard.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindConflictPrompt.cs" Link="Linked\KeybindConflictPrompt.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\WorkspaceNavHistory.cs" Link="Linked\WorkspaceNavHistory.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameMenuHistory.cs" Link="Linked\GameMenuHistory.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Navigation.cs" Link="Linked\ModsMenu.Navigation.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameKeybindCatalog.cs" Link="Linked\GameKeybindCatalog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameKeyRemap.cs" Link="Linked\GameKeyRemap.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsCatalog.Keys.cs" Link="Linked\SettingsCatalog.Keys.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindGroups.cs" Link="Linked\KeybindGroups.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindsTabLayout.cs" Link="Linked\KeybindsTabLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameArt\GameArtLadder.cs" Link="Linked\GameArtLadder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameArt\GameSettingsLook.cs" Link="Linked\GameSettingsLook.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameArt\SettingsArtLadder.cs" Link="Linked\SettingsArtLadder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameArt\GameArtKept.cs" Link="Linked\GameArtKept.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsDescription.cs" Link="Linked\ModSettingsDescription.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindArtLadder.cs" Link="Linked\KeybindArtLadder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindsPane.cs" Link="Linked\KeybindsPane.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Keybinds.cs" Link="Linked\ModsMenu.Keybinds.cs" />
+    <!-- Job FUI12 (research evidence 161): the press detector. Game-free on purpose, because the
+         edge arithmetic is what the "press the key twice" bug was. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\KeyEdgeTracker.cs" Link="Linked\KeyEdgeTracker.cs" />
+    <!-- Job FUI16 (R43 finding 1): the same rule for Bootstrap's Escape, which cannot reference
+         Core. Bootstrap-local and game-free, so the tests cover both sides of the same bug. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\KeyPressEdge.cs" Link="Linked\KeyPressEdge.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\AfterCallStack.cs" Link="Linked\AfterCallStack.Bootstrap.cs" /> <!-- Job FHOOK1: the After hand-off stacks HarmonyPatches cannot compile here -->
+    <!-- Job FUI13 (research evidence 163): row placement and panel sizing, for the same reason -
+         the panel drew 26 of its 32 rows over the world and the arithmetic is the fix. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\PanelLayout.cs" Link="Linked\PanelLayout.cs" />
+    <!-- Job FUI20 (defect 2): where the nth simultaneously shown panel goes, so two are not one.
+         Job FUI21 renamed the file: the panels are tiled into columns and only cascade when they
+         cannot all fit, so "cascade" was no longer the model it implements. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\PanelFlow.cs" Link="Linked\PanelFlow.cs" />
+    <!-- Job FUI26 (R45 findings 2 and 22): the clone-then-build recovery for a settings editor
+         control, and the sentence a panel prints when it reads back what ScrollRect actually did
+         with its scrollbar. Both are game-free precisely so the branch that decides whether a
+         settings panel can be operated at all has tests that do not need Unity. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ControlBuildPlan.cs" Link="Linked\ControlBuildPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ScrollbarVerdict.cs" Link="Linked\ScrollbarVerdict.cs" />
+    <!-- Job FUI30: "is uGUI interaction alive on this screen", split so that every Unity read is in
+         UnityUiRuntime and every judgment about what the reads mean is here, testable. The reads
+         themselves have no coverage and cannot: nothing in this suite produces an EventSystem. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiInteractionReport.cs" Link="Linked\UiInteractionReport.cs" />
+    <!-- Job FDOC5 (R43 finding 5 / R45 finding 38): which ruler a panel was measured against.
+         The chain is game-free on purpose, so the rung that answers is decidable in a test rather
+         than only observable in a running client. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\PanelRuler.cs" Link="Linked\PanelRuler.cs" />
+    <!-- Job FUI33 (R48 finding 2): the owed list behind the deferred re-measure, extracted out of
+         UnityUiRuntime.cs so the four transitions a waiting panel has are tested rather than
+         pinned over the text of a file this project does not compile. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiSettleGate.cs" Link="Linked\UiSettleGate.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiFontLookup.cs" Link="Linked\UiFontLookup.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsEditors.cs" Link="Linked\SettingsEditors.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingDescriptor.cs" Link="Linked\SettingDescriptor.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingScopes.cs" Link="Linked\SettingScopes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsScopes.cs" Link="Linked\ModSettingsScopes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingBinding.cs" Link="Linked\SettingBinding.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsRow.cs" Link="Linked\SettingsRow.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsCatalog.cs" Link="Linked\SettingsCatalog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsCatalog.Bindings.cs" Link="Linked\SettingsCatalog.Bindings.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsPanel.cs" Link="Linked\SettingsPanel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.cs" Link="Linked\ModsMenu.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsLanding.cs" Link="Linked\ModsLanding.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\TitleLogsTile.cs" Link="Linked\TitleLogsTile.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SupportOfferDialog.cs" Link="Linked\SupportOfferDialog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\CellTiles.cs" Link="Linked\CellTiles.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ZipGlyph.cs" Link="Linked\ZipGlyph.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\LoopGlyph.cs" Link="Linked\LoopGlyph.cs" />
+    <!-- Settings organization: the places table and the links between the Configuration tab and Progenitor's page. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingPlaces.cs" Link="Linked\SettingPlaces.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Settings.cs" Link="Linked\ModsMenu.Settings.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\CoreUiSettings.cs" Link="Linked\CoreUiSettings.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsLinks.cs" Link="Linked\SettingsLinks.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallFilterMemory.cs" Link="Linked\InstallFilterMemory.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ProgenitorPage.cs" Link="Linked\ProgenitorPage.cs" />
+    <!-- Three homes: the Server tab, the left lists and the drawers. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ServerTabPane.cs" Link="Linked\ServerTabPane.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SectionNav.cs" Link="Linked\SectionNav.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsDrawers.cs" Link="Linked\SettingsDrawers.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.SectionNav.cs" Link="Linked\ModsMenu.SectionNav.cs" />
+    <!-- MODSPAGE1: the Mods-tab mod page, its copy, its Like store and the uninstall seam. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModPageCopy.cs" Link="Linked\ModPageCopy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModPageModel.cs" Link="Linked\ModPageModel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModPagePane.cs" Link="Linked\ModPagePane.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModPagePane.Layout.cs" Link="Linked\ModPagePane.Layout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModPageHeader.cs" Link="Linked\ModPageHeader.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModHeaderPanel.cs" Link="Linked\ModHeaderPanel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsLayout.cs" Link="Linked\ModSettingsLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.cs" Link="Linked\ModSettingsView.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.Admin.cs" Link="Linked\ModSettingsView.Admin.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\AdminSettingRow.cs" Link="Linked\AdminSettingRow.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\JoinAdminRows.cs" Link="Linked\JoinAdminRows.cs" />
+    <!-- SETTINGS1 stage 2: the settings page builder and registry, and the stage 2 controls. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsPage.cs" Link="Linked\ModSettingsPage.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiSettingsControls.cs" Link="Linked\UiSettingsControls.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiRadioList.cs" Link="Linked\UiRadioList.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModUninstallSeam.cs" Link="Linked\ModUninstallSeam.cs" />
+    <!-- TABS2: three-tab Mods workspace. Explicit links because this project compiles Core by hand. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsTabs.cs" Link="Linked\ModsTabs.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsTabStrip.cs" Link="Linked\ModsTabStrip.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsShortcutRoute.cs" Link="Linked\ModsShortcutRoute.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\NativeTabCaption.cs" Link="Linked\NativeTabCaption.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\WorkspaceTabLadder.cs" Link="Linked\WorkspaceTabLadder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\WorkspaceArtworkLadder.cs" Link="Linked\WorkspaceArtworkLadder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\WorkspaceHostLayout.cs" Link="Linked\WorkspaceHostLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\WorkspaceInputPolicy.cs" Link="Linked\WorkspaceInputPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\WorkspaceOpenTiming.cs" Link="Linked\WorkspaceOpenTiming.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.cs" Link="Linked\InstallModsPane.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.Simple.cs" Link="Linked\InstallModsPane.Simple.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.Restart.cs" Link="Linked\InstallModsPane.Restart.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallSimpleView.cs" Link="Linked\InstallSimpleView.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallColumns.cs" Link="Linked\InstallColumns.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallDrawerLayout.cs" Link="Linked\InstallDrawerLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ConfigurationPane.cs" Link="Linked\ConfigurationPane.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\LocalServerFolder.cs" Link="Linked\LocalServerFolder.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\SteamLibraryScan.cs" Link="Linked\SteamLibraryScan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModMenuInventory.cs" Link="Linked\ModMenuInventory.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ReloadFolderPlugins.cs" Link="Linked\ReloadFolderPlugins.cs" />
+    <!-- SETTINGS1 stage 3: the on/off switch, mod problems, counterparts, the Mods list redesign and
+         the preloader's next-start plugin actions. All game-free. -->
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\Counterpart.cs" Link="Linked\Counterpart.cs" />
+    <!-- COUNTERPART-SAMPLES: the two counterpart samples' game-free halves (declaration constants,
+         messages and validation, the settings pages). Their Plugin.cs files are game-bound. -->
+    <Compile Include="..\..\samples\Progenitor.SampleServerLed\ServerLedMessages.cs" Link="Linked\ServerLedMessages.cs" />
+    <Compile Include="..\..\samples\Progenitor.SampleServerLed\ServerLedPolicy.cs" Link="Linked\ServerLedPolicy.cs" />
+    <Compile Include="..\..\samples\Progenitor.SampleServerLed\ServerLedSettings.cs" Link="Linked\ServerLedSettings.cs" />
+    <Compile Include="..\..\samples\Progenitor.SampleClientLed\ClientLedMessages.cs" Link="Linked\ClientLedMessages.cs" />
+    <Compile Include="..\..\samples\Progenitor.SampleClientLed\ClientLedPolicy.cs" Link="Linked\ClientLedPolicy.cs" />
+    <Compile Include="..\..\samples\Progenitor.SampleClientLed\ClientLedSettings.cs" Link="Linked\ClientLedSettings.cs" />
+    <!-- DYEALL (in Core since 2026-10-08): Dye all's game-free halves (hold machine, slot planner, ring math, hint
+         rules, settings, the former mod's cfg import and stand-down rule) and Core's pointer-watch registry its
+         swatch watches are swept through. DyeAllFeature.cs, DyeAllClient.cs, DyeSender.cs, ChargeRing.cs and
+         HintLabel.cs are game-bound. -->
+    <!-- HOLD1: Core's shared press-and-hold machine and ring math (Dye all and the debug buff's map teleport).
+         HoldRing.cs is the game-bound Image half. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\HoldMachine.cs" Link="Linked\HoldMachine.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\HoldRingMath.cs" Link="Linked\HoldRingMath.cs" />
+    <!-- MAPTP1: the world map's coordinate math and reveal leases. WorldMap.cs, GroundProbe.cs and
+         PlayerTeleport.cs are the game-bound halves. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\MapTransformMath.cs" Link="Linked\MapTransformMath.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\MapRevealLeases.cs" Link="Linked\MapRevealLeases.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugMapPolicy.cs" Link="Linked\DebugMapPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dye\DyeHold.cs" Link="Linked\DyeHold.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dye\DyeSlots.cs" Link="Linked\DyeSlots.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dye\DyeRing.cs" Link="Linked\DyeRing.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dye\DyeHint.cs" Link="Linked\DyeHint.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Dye\DyeAllSettings.cs" Link="Linked\DyeAllSettings.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiPointerWatchRegistry.cs" Link="Linked\UiPointerWatchRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\ModRegistry.cs" Link="Linked\ModRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\ModEnableState.cs" Link="Linked\ModEnableState.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\LegacyIds.cs" Link="Linked\LegacyIds.cs" />
+    <Compile Include="..\..\src\Progenitor.Preloader\PluginFileActions.cs" Link="Linked\PluginFileActions.cs" />
+    <!-- SUPPORT1: Get help's log bundle (redaction, tail cuts, retention, zip contents), its page rows' actions and the
+         preloader's per-session log rotation. All game-free; SupportLive.cs is the game-bound half. -->
+    <Compile Include="..\..\src\Progenitor.Preloader\SessionLogFiles.cs" Link="Linked\SessionLogFiles.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Support\SupportRedactor.cs" Link="Linked\Support\SupportRedactor.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Support\SupportBundle.cs" Link="Linked\Support\SupportBundle.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Support\SupportActions.cs" Link="Linked\Support\SupportActions.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Support\ServerLogsTransfer.cs" Link="Linked\Support\ServerLogsTransfer.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Support\SupportDiagnosis.cs" Link="Linked\Support\SupportDiagnosis.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModProblems.cs" Link="Linked\ModProblems.cs" />    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSwitch.cs" Link="Linked\ModSwitch.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsListLayout.cs" Link="Linked\ModsListLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ModList.cs" Link="Linked\ModsMenu.ModList.cs" />
+    <!-- C5: the Works across versions marker and the mod page's developer details (game-free words and decisions; the
+         live network calls in ModsMenu.Compat.cs are behind !PROGENITOR_TESTS). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModCompatDetails.cs" Link="Linked\ModCompatDetails.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Compat.cs" Link="Linked\ModsMenu.Compat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.JoinTurnOn.cs" Link="Linked\ModsMenu.JoinTurnOn.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.InstallRestart.cs" Link="Linked\ModsMenu.InstallRestart.cs" />
+    <!-- AUTOUPDATE1: the update list partials (the live wiring inside is behind !PROGENITOR_TESTS). -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Updates.cs" Link="Linked\ModsMenu.Updates.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\InstallModsPane.Updates.cs" Link="Linked\InstallModsPane.Updates.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ModLinks.cs" Link="Linked\ModsMenu.ModLinks.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Nav.cs" Link="Linked\ModsMenu.Nav.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiNav.cs" Link="Linked\UiNav.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiNavHost.cs" Link="Linked\UiNavHost.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiNavTestBridge.cs" Link="Linked\UiNavTestBridge.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ServerUninstall.cs" Link="Linked\ModsMenu.ServerUninstall.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModUninstallPlan.cs" Link="Linked\ModUninstallPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModLinks.cs" Link="Linked\ModLinks.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerSettings.cs" Link="Linked\ServerSettings.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerSettingsLock.cs" Link="Linked\ServerSettingsLock.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerSettingsWire.cs" Link="Linked\ServerSettingsWire.cs" />
+    <!-- TEXTLIMIT1: the server-wide text limits (characters, packet bytes, ConfigSync's escaped bytes). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerSettingsLimits.cs" Link="Linked\ServerSettingsLimits.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeRefresh.cs" Link="Linked\HandshakeRefresh.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeReask.cs" Link="Linked\HandshakeReask.cs" />
+    <!-- Per-server mod pause: the planner, the coordinator (fake backend), the no-Progenitor watch,
+         the profile file and Bootstrap's suspend table are all game-free. The notice panel is not. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerModPause.cs" Link="Linked\ServerModPause.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ServerProfiles.cs" Link="Linked\ServerProfiles.cs" />
+    <!-- HOSTKEY1: the stable host key and the move of rows written under relay strings. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ConnectHostKey.cs" Link="Linked\ConnectHostKey.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PluginSuspend.cs" Link="Linked\PluginSuspend.Bootstrap.cs" />
+    <!-- Job FMAN17: the deny-time descriptor and the disconnect-screen report. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestDeny.cs" Link="Linked\ModManifestDeny.cs" />
+    <!-- Job FUI29. The deny panel names no Unity or ProjectM type; it builds through Progenitor.Ui and the
+         test project fakes IUiRuntime, so its open state is a behavioral test. -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestDenyPanel.cs" Link="Linked\ModManifestDenyPanel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Reload\ReloadAllowStore.cs" Link="Linked\ReloadAllowStore.Core.cs" />
+    <!-- Job FCOMPAT4 -->
+    <Compile Include="..\..\src\Progenitor.Core\Compat\PluginOwnedAssemblies.cs" Link="Linked\PluginOwnedAssemblies.cs" />
+    <!-- Job FMAN4 -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ModManifestPending.cs" Link="Linked\ModManifestPending.cs" />
+    <!-- Job FENC -->
+    <Compile Include="..\..\tools\enc\EncProbe.cs" Link="Linked\EncProbe.cs" />
+    <!-- Job FMAN5 -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PendingInstalls.cs" Link="Linked\PendingInstalls.Bootstrap.cs" />
+    <!-- Job MODS2: Bootstrap's start-time uninstall path. Game-free by construction (a JSON
+         marker, path checks and one MoveFileEx seam), so its honour/refuse rules are tested on a
+         temp folder without a client. Core's mirror is Install/ClientUninstall.cs. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\UninstallAtStart.cs" Link="Linked\UninstallAtStart.Bootstrap.cs" />
+    <!-- Job FENC2 -->
+    <Compile Include="..\..\tools\enc\EncClassifier.cs" Link="Linked\EncClassifier.cs" />
+    <Compile Include="..\..\tools\enc\EncDeltaFile.cs" Link="Linked\EncDeltaFile.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\DeltaApply.cs" Link="Linked\DeltaApply.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Reload\DeltaApply.cs" Link="Linked\DeltaApply.Core.cs" />
+    <!-- Job FACC -->
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessDeclaration.cs" Link="Linked\AccessDeclaration.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessMemberAttribute.cs" Link="Linked\AccessMemberAttribute.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessMessages.cs" Link="Linked\AccessMessages.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessNaming.cs" Link="Linked\AccessNaming.cs" />
+    <Compile Include="..\..\tools\accessgen\AccessGenerator.cs" Link="Linked\AccessGenerator.cs" />
+    <!-- Job FLAY1: the layout-constant generator, and the generated constants every migrated
+         site now references. The generated file is linked (not the whole Layout folder) so the
+         suite compiles the exact artifact that is checked in. -->
+    <Compile Include="..\..\src\Progenitor.Core\Layout\Generated\LayoutConstants.cs" Link="Linked\LayoutConstants.cs" />
+    <!-- ctx.Ai: the game-free codecs, models and variant bookkeeping. The live half (AiRuntime,
+         PluginAi, AiVariants) is behind !PROGENITOR_TESTS. Fixture: Fixtures/wendigo-ai.json. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ai\AiModels.cs" Link="Linked\AiModels.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\AiNames.cs" Link="Linked\AiNames.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\AiCodecs.cs" Link="Linked\AiCodecs.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\TreeVariant.cs" Link="Linked\TreeVariant.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\VariantBook.cs" Link="Linked\VariantBook.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\AiLimits.cs" Link="Linked\AiLimits.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\TreeRepairPolicy.cs" Link="Linked\TreeRepairPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\AllySafetyCodec.cs" Link="Linked\AllySafetyCodec.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ai\InertCloneRules.cs" Link="Linked\InertCloneRules.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitTeamRules.cs" Link="Linked\UnitTeamRules.cs" />
+    <!-- ctx.Units hitbox scale and move speed: the game-free blob surgery and speed bookkeeping.
+         The live half (UnitBody.cs) is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitHitboxCodec.cs" Link="Linked\UnitHitboxCodec.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitMoveSpeedMath.cs" Link="Linked\UnitMoveSpeedMath.cs" />
+    <!-- ctx.Units look: the public UnitLook, range rules, color composition, wire message and the
+         client/server bookkeeping. The live half (UnitLooks.cs) is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitLook.cs" Link="Linked\UnitLook.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitLookWire.cs" Link="Linked\UnitLookWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitLookState.cs" Link="Linked\UnitLookState.cs" />
+    <!-- ctx.Units aura: the public UnitAura and the aura table. The live half (UnitAuras.cs) is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitAura.cs" Link="Linked\UnitAura.cs" />
+    <!-- ctx.Units pet stances, hold and spawn entrance: the public enums, the entrance table and the
+         game-free stance book. The live half (UnityUnitRuntime.Stance.cs) is behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Core\Units\PetStance.cs" Link="Linked\PetStance.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\PetStanceBook.cs" Link="Linked\PetStanceBook.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Units\UnitEntrance.cs" Link="Linked\UnitEntrance.cs" />
+    <Compile Include="..\..\tools\layoutgen\LayoutDeclaration.cs" Link="Linked\LayoutDeclaration.cs" />
+    <Compile Include="..\..\tools\layoutgen\LayoutEmitter.cs" Link="Linked\LayoutEmitter.cs" />
+    <Compile Include="..\..\tools\layoutgen\DumpIndex.cs" Link="Linked\DumpIndex.cs" />
+    <!-- Job FLAY2 (R53 finding 1): the exit-code and summary-wording decision, lifted out of
+         Main so the suite can assert that an unresolved declaration fails. -->
+    <Compile Include="..\..\tools\layoutgen\LayoutCheckTally.cs" Link="Linked\LayoutCheckTally.cs" />
+    <!-- Job FENC3 -->
+    <Compile Include="..\..\tools\enc\EncDeltaState.cs" Link="Linked\EncDeltaState.cs" />
+    <!-- Job FSAMP -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleLog.cs" Link="Linked\SampleLog.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleEpoch.cs" Link="Linked\SampleEpoch.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SamplePatchDemo.cs" Link="Linked\SamplePatchDemo.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleAccessDemo.cs" Link="Linked\SampleAccessDemo.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleGodModeDemo.cs" Link="Linked\SampleGodModeDemo.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleLogPanel.cs" Link="Linked\SampleLogPanel.cs" />
+    <!-- Job FEX1 (RD6 J1/J2/J3): the ctx.Hooks, ctx.Chat and client->server networking examples.
+         Each file keeps its parsing, counter arithmetic, validation and log lines game-free, so
+         what ships in the Sample is the same code these tests pin. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleHooks.cs" Link="Linked\SampleHooks.cs" />
+    <Compile Include="..\..\samples\Progenitor.ControlsSample\ControlsDemo.cs" Link="Linked\ControlsDemo.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleChat.cs" Link="Linked\SampleChat.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleNet.cs" Link="Linked\SampleNet.cs" />
+    <!-- The map-scope keybind example: the ruler, the coordinate check and the lines are game-free;
+         the RegisterInMap / RegisterHoldInMap calls and the WorldMap reads are behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleMap.cs" Link="Linked\SampleMap.cs" />
+    <!-- Job FCFGEX (RD6 J11): the ConfigHelper Bind/BindEnum/ReadEnum/Watch/Reloaded example.
+         Parsing, the reload counters, the file-path comparison and every reply and log line are
+         game-free; the binds, the watch lease and the command are behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleConfig.cs" Link="Linked\SampleConfig.cs" />
+    <!-- Job FRIFT1: the rift-schedule example. The packet struct, the snapshot builder, the clock
+         skew, the countdown formatter, the change/heartbeat decision and every line are game-free;
+         the WarEventSystem reads, the sends and the receive are behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleRifts.cs" Link="Linked\SampleRifts.cs" />
+    <!-- Job FEX3 (RD6 J4/J9/J10): the IModStore Remove/Keys + pending-merge example, the four
+         unit-event subscribers, and the programmatic-localization example. SampleStore.cs runs
+         against the real ModStore (linked above) over a temp folder; SampleUnitEvents.cs drives
+         the real sequencer through the Units fake runtime; SampleLocalization.cs keeps its
+         reply text game-free and the Localization calls behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleStore.cs" Link="Linked\SampleStore.cs" />
+    <!-- Job J19 (RD6): the handshake declaration ledger. The ctx.Handshake calls are behind
+         !PROGENITOR_TESTS; the plan, the slot arithmetic and every reply line are game-free. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleHandshake.cs" Link="Linked\SampleHandshake.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleUnitEvents.cs" Link="Linked\SampleUnitEvents.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleLocalization.cs" Link="Linked\SampleLocalization.cs" />
+    <!-- Job FEX5 (RD6 J5/J12/J13): the remaining event subscribers, the [CommandGroup] instance
+         example, and the PrefabRegistry Describe/Definitions/UnregisterAll example. Each keeps
+         its parsing, counters, cancel decision and reply lines outside the !PROGENITOR_TESTS
+         fence, so what ships in the Sample is the code these tests pin. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleEvents.cs" Link="Linked\SampleEvents.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleGroup.cs" Link="Linked\SampleGroup.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleContent.cs" Link="Linked\SampleContent.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleEditLayers.cs" Link="Linked\SampleEditLayers.cs" />
+    <!-- Job J14 (RD6): the Ecs toolkit and Players examples. Both keep their parsing, the
+         allowlist and every reply line outside the !PROGENITOR_TESTS fence, so what ships in the
+         Sample is the code these tests pin. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleEcs.cs" Link="Linked\SampleEcs.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SamplePlayers.cs" Link="Linked\SamplePlayers.cs" />
+    <!-- Job J18 (RD6): the virtual-system anchors and the instance command registration. Both
+         keep their parsing, counters and reply lines outside the !PROGENITOR_TESTS fence. -->
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleSystems.cs" Link="Linked\SampleSystems.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleInstanceCommands.cs" Link="Linked\SampleInstanceCommands.cs" />
+    <!-- Job FHARM5 -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\PatchSlots.cs" Link="Linked\PatchSlots.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\PatchSlotLink.cs" Link="Linked\PatchSlotLink.cs" />
+    <!-- Job FACC3 -->
+    <Compile Include="..\..\tools\accessgen\InteropFieldShapes.cs" Link="Linked\InteropFieldShapes.cs" />
+    <!-- Job R41 -->
+    <Compile Include="..\..\src\Progenitor.Core\Patches\CorePatchFallbackPolicy.cs" Link="Linked\CorePatchFallbackPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\UnsafeHarmonyUse.cs" Link="Linked\UnsafeHarmonyUse.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\SlotArgs.cs" Link="Linked\SlotArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Access\AccessFieldShape.cs" Link="Linked\AccessFieldShape.cs" />
+    <!-- Job R42 -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\UnsafeHarmonySlot.cs" Link="Linked\UnsafeHarmonySlot.Bootstrap.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\UnsafeHarmonySlotLink.cs" Link="Linked\UnsafeHarmonySlotLink.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Patches\CorePatchBudget.cs" Link="Linked\CorePatchBudget.cs" />
+    <!-- Job FENC8 -->
+    <Compile Include="..\..\tools\enc\EncReferences.cs" Link="Linked\EncReferences.cs" />
+    <Compile Include="..\..\tools\enc\EncFailure.cs" Link="Linked\EncFailure.cs" />
+    <!-- Job FHARM6 -->
+    <Compile Remove="GodModeGuardTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="SampleLogPanelTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="UiKeybindTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="UiSettingsTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <!-- Other jobs' in-progress Effects sources can break a filtered `dotnet test`; pass -p:SkipForeignTestFiles=true. -->
+    <Compile Remove="EffectsTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="SampleFxTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="UiTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="SampleUiTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <!-- These reference the Effects / Ui sources removed below, so they must go with them.
+         The filtered build had gone stale: EV11-EV14 and FS added SampleBeam.cs and the beam
+         test suites without extending this list, so `-p:SkipForeignTestFiles=true` no longer
+         compiled at all. -->
+    <Compile Remove="ServerBeamTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="SampleBeamTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="PluginReloaderTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="UiOwnershipTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="UiInputCaptureTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="..\..\samples\Progenitor.Sample\SampleBeam.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="..\..\src\Progenitor.Core\Reload\PluginStaticApiSweep.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="..\..\src\Progenitor.Core\Effects\*.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="..\..\src\Progenitor.Core\Ui\*.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="..\..\samples\Progenitor.Sample\SampleFx.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="..\..\samples\Progenitor.Sample\SampleUi.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+  </ItemGroup>
+
+  <!-- Fail the build if a game or BepInEx assembly lands on the reference list (a ProjectReference
+       to Core, or ReferenceGame flipping to true, would do that and break CI). -->
+  <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'BepInEx.Core'))"
+           Text="Progenitor.Tests must not reference BepInEx. Keep ReferenceGame=false and do not ProjectReference Core." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'ProjectM'))"
+           Text="Progenitor.Tests must not reference ProjectM. Keep ReferenceGame=false and do not ProjectReference Core." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'Il2CppInterop.Runtime'))"
+           Text="Progenitor.Tests must not reference Il2CppInterop. Keep ReferenceGame=false and do not ProjectReference Core." />
+    <Error Condition="@(ReferencePath->AnyHaveMetadataValue('Filename', 'HarmonyLib'))"
+           Text="Progenitor.Tests must not reference Harmony. Keep ReferenceGame=false and do not ProjectReference Core." />
+  </Target>
+</Project>

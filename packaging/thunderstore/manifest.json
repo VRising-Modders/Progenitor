@@ -1,0 +1,10 @@
+{
+  "name": "Progenitor",
+  "author": "Progenitor",
+  "version_number": "0.1.0",
+  "website_url": "",
+  "description": "V Rising modding framework. One dependency (BepInEx). Original LGPL-2.1-only code. Hot reload, debug bridge, prefab registry with client sync, commands, events, persistence, and a hosted-game launcher.",
+  "dependencies": [
+    "BepInEx-BepInExPack_V_Rising-1.733.2"
+  ]
+}

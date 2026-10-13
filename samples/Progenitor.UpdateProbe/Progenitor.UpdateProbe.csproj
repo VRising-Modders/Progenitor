@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.UpdateProbe</AssemblyName>
+    <RootNamespace>Progenitor.UpdateProbe</RootNamespace>
+    <Description>Client-side test plugin for the auto-update live tests (AUTOUPDATE2): one build per version.</Description>
+    <BepInExPluginGuid>progenitor.updateprobe</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Update Probe</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <!-- -p:UpdateProbeFailLoad=true builds a copy whose OnLoad throws (the automatic rollback test). -->
+  <PropertyGroup Condition="'$(UpdateProbeFailLoad)' == 'true'">
+    <DefineConstants>$(DefineConstants);UPDATEPROBE_FAIL</DefineConstants>
+  </PropertyGroup>
+  <!-- AUTOUPDATE3: -p:UpdateProbeVariant=Server is a server-only plugin (its own id and file), the server's
+       "server-only hot update" case. -->
+  <PropertyGroup Condition="'$(UpdateProbeVariant)' == 'Server'">
+    <AssemblyName>Progenitor.UpdateProbe.Server</AssemblyName>
+    <BepInExPluginGuid>progenitor.updateprobe.server</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Update Probe (server)</BepInExPluginName>
+    <DefineConstants>$(DefineConstants);UPDATEPROBE_SERVER</DefineConstants>
+  </PropertyGroup>
+  <!-- AUTOUPDATE3: -p:UpdateProbeVariant=Both is a plugin both sides run that the server's handshake requires
+       (ServerMustHave, Exact): the "clients need it" case. -->
+  <PropertyGroup Condition="'$(UpdateProbeVariant)' == 'Both'">
+    <AssemblyName>Progenitor.UpdateProbe.Both</AssemblyName>
+    <BepInExPluginGuid>progenitor.updateprobe.both</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Update Probe (both sides)</BepInExPluginName>
+    <DefineConstants>$(DefineConstants);UPDATEPROBE_BOTH</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

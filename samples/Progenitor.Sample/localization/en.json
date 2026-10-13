@@ -1,0 +1,8 @@
+{
+  "sample.ember": "Ember Shard",
+  "sample.ember.desc": "A shard that still holds a little heat.",
+  "sample.rifts.next": "{tier}{level} next in {time}",
+  "sample.rifts.remaining": "{tier}{level} remaining {time}",
+  "sample.rifts.notScheduled": "{tier}{level} - not scheduled",
+  "sample.rifts.waiting": "{tier} - waiting for the server"
+}

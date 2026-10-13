@@ -1,0 +1,443 @@
+# Bridge operations: Mods workspace UI
+
+Operation reference for the [development bridge](bridge.md), part 3 of 5: the Mods workspace (`mods_ui`), the game menu, text fields and the date-time picker, and `setting`. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
+
+## `mods_ui`
+
+Client, main thread. Focus-free Mods workspace (`status` / `open` / `close` / `back` / `select` / `search` / `scroll` / `widget_read` / `widget_click` / `native_tab` / `resolution` / `rects` / `window` / `dialog_choose`). With a dialog open, `widget_click label=…` clicks that dialog's button first; `dialog_choose {choice: yes|no|cancel|<caption>|<index>}` answers the open dialog even with the workspace closed ([ui.md](ui.md#the-games-popup-look-dialogs2)). `open` takes `args.site` = `main-menu` / `top-tab` / `shortcut` / `standalone`; in a world `shortcut` opens through the FullscreenMenu a few frames after the call returns (`detail.routedThroughMenu`), and `standalone` opens the window without that route. Refuses on the server. Contract: [`mods_ui` in api.md](api.md#dev-bridge-ops). Player and author workflow: [mods-menu.md](mods-menu.md). No MCP wrapper; use `call.mjs`.
+
+**Bridge cost: light reads versus heavy ones.** Every `mods_ui` op used to wrap its result in the full workspace status before and after (`before` / `after`: entries, facts and the rest, about 90 ms on the main thread, the `readback-status` span). Polled once a second while a player was in game, that was a visible stutter every second (live 2026-09-30). The read-only ops that change nothing now skip it and report `before` / `after` as `{skipped: true, reason, open}`: `menu_tab_state`, `nav_state`, `rects`, `window`, `scene`, `tabs`, `perf`, `settings_places`, `restart` with `op` `read` (INSTALLRESTART1), and `keys` with `op` `read`, `conflict` or `conflict-read`. Pass `"withStatus": true` to get the full status with one of them. Every op that changes something (open, close, select, clicks, `keys` edits, `nav_back` / `nav_forward`, `native_tab`, …) keeps the readback, and `status` is the status itself. So: a light read is safe to poll while a player is in game; do not poll `status` or a changing op. `ModsMenu.StatusBuilds` counts full status builds (tests pin that the polled reads never build it).
+
+### The game's full-screen menu (`menu` op)
+
+**Live (2026-10-04, Steam client in game on the isolated test server, Core + Dev from branch feat/bridge-game-menu f60a7470, client generation 32):** `status` from gameplay read `menuOpen:false`; `close` with no menu answered `NoOp` (`no-menu`); `open tab:map` → `RaiseThenSelect`, menu on Map after 15 frames, repeated → `NoOp` (`already`); `close` → `Dismiss`, back to gameplay in 8 frames; `open tab:mods` → `OpenMods`, workspace open on MODS in 10 frames, log `shortcut opened through menu route=native raisedMenu=true reason=bridge:menu-open` then `settle re-selected MODS over native state=2 frame=0`; `close` with Mods open → `CloseWorkspaceThenDismiss`, log `close … reason=bridge:menu-close caller=ExecuteGameMenu`; the F10 recipe three times in a row: each first press raised the menu on MODS with the workspace open and no `native-tab` close, each second press logged `dismissed=true`. **Not live-verified:** title-screen answers, `open` with no tab (remembered tab), and status polling cost while playing.
+
+GAMEMENU1. `mods_ui menu` with `args.op` reads and drives the game's own full-screen menu (the EMOTES … SYSTEM, MODS bar) without focus or OS input. **Source-checked, built and game-free tested (`GameMenuControlTests`); not live-verified.**
+
+| Arguments | What it does |
+|---|---|
+| `{"action":"menu"}` | Unchanged: the read-only FullscreenMenu probe (graphics under the menu root). |
+| `{"action":"menu","op":"status"}` | Reads `{inWorld, hudMenu, menuOpen, tab, tabState, workspaceOpen}`. A light read (no workspace status unless `withStatus`), safe to poll. |
+| `{"action":"menu","op":"open"}` | Raises the menu with `HUDMenuManager.GoToMenu(FullscreenMenu)` on whatever tab the game picks. A no-op when it is already up. |
+| `{"action":"menu","op":"open","tab":"map"}` | Raises the menu if needed, waits for its tab bar and its own tab pick, then runs the native tab's own click handler (`OuterTabEntry.OnPointerClick`, as `native_tab` does), at most 3 clicks. Tabs: `emotes`, `vampire-powers`, `spellbook`, `map`, `vblood`, `social`, `system` (case, spaces and dashes ignored; the game's enum names also work). A no-op when the menu is already on that tab with the workspace closed. Clicking a native tab while the workspace is open closes it as a player's click would. |
+| `{"action":"menu","op":"open","tab":"mods"}` | The Mods shortcut's own route (`ModsMenu.ToggleFrom("bridge:menu-open")`, the F10 path): raises the menu when needed, opens the workspace on MODS and survives the menu's settle (F10SETTLE). A no-op when already open on MODS. Refused while the standalone window is open without the menu. |
+| `{"action":"menu","op":"close"}` | Back to gameplay as Escape does: an open workspace is closed first with the logged reason `bridge:menu-close`, then the menu is dismissed with `HUDMenuManager.GoToMenu(None)` (the call the workspace's Escape handling makes). A no-op with `why: no-menu` when the menu is not up (a standalone Mods window is left alone). |
+
+At the title screen every op answers that there is no game menu there: `open` fails with `why: title-screen…`, `close` is an `ok` no-op, and `status` reads `inWorld: false`.
+
+**Verified reply.** `open` and `close` do not return `pending`. They poll each frame until the requested state has held for 8 frames, which is longer than the frames in which a raised menu picks its remembered tab. They give up after 180 frames with `ok: false` and the state they saw.
+
+The reply's `detail` has these fields:
+- `op`, `tab` and `step`: one of `Dismiss`, `CloseWorkspaceThenDismiss`, `Raise`, `RaiseThenSelect`, `Select`, `OpenMods` or `NoOp`.
+- `handler`: the game call that was used.
+- `menuBefore` and `menuAfter`: the status shape above.
+- `framesWaited`, `clicks` and `clickResults`.
+- `noop` and `why` on a no-op, and `readback: verified-after-frames`.
+
+The usual workspace `before` / `after` status still wraps it.
+
+**Recipe: the F10 raised-menu path end to end.** This replaces the user's Escape. Write each JSON to a file and call `node tools/mcp/call.mjs client <op> "@file"`.
+1. `mods_ui {"action":"menu","op":"close"}`: plain gameplay. `detail.menuAfter.menuOpen=false` and `workspaceOpen=false`. If no menu was up, this is a no-op.
+2. `keybind_press {"chord":"F10"}` (or `{"bind":"OpenSettingsPanel"}`): the real key dispatch. Expect `fired: 1`.
+3. `mods_ui {"action":"menu","op":"status"}` after a second: `menuOpen=true`, `tab=mods`, `workspaceOpen=true`. Then `mods_ui {"action":"tabs"}`: `shortcutRoute.raisedMenu=true` and `shortcutRoute.settle.reselectsTotal` incremented when the menu tried its remembered tab. The log has `shortcut opened through menu route=native raisedMenu=true` and, when the menu picked another tab, `menu settle re-selected MODS …`.
+4. `keybind_press {"chord":"F10"}` again: back to gameplay. `menu op=status` reads `menuOpen=false` and `workspaceOpen=false`, and the log has `shortcut closed to gameplay dismissed=true`.
+
+Repeat 1–4 to check that the first press opens on MODS every time. `mods_ui {"action":"menu","op":"open","tab":"mods"}` takes the same route as step 2 without a keybind.
+
+### Where a setting is drawn (`settings_places`)
+
+`mods_ui {"action":"settings_places"}` returns every placed setting of Progenitor's own as `{settingId: {home, places[], value, display, known, store, source}}`, each value read from its one store now ([mods-menu.md](mods-menu.md#where-progenitors-settings-are-drawn), [settings-organization.md](settings-organization.md#overlap-one-stored-value-many-places)). It is a light read: no workspace status unless `withStatus`, and it works with the workspace closed. The settings rows in `widget_read` carry the same `settingId`, `home` and `alsoAt`. Source-checked, built and game-free tested (`SettingPlacesTests`); not live-verified.
+
+**Recipe: one stored value (acceptance procedure — not run).** On the Steam client at the title screen:
+
+1. `mods_ui {"action":"settings_places"}`: read `progenitor/Mods/InstallView` (`home preferences`, `places [preferences, install-toolbar]`) and note its `value`.
+2. `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select_tab","tab":"install"}`, `{"action":"widget_read","pane":"content"}`: the toolbar row's `view` readback has `settingId progenitor/Mods/InstallView`, `home preferences`, `alsoAt [install-toolbar]` and the same `value`.
+3. Press the toolbar's other view (`{"action":"widget_click","label":"toolbar/view-advanced"}`, or `toolbar/view-simple`), then `settings_places` again: `value` is the new view, and `BepInEx/config/progenitor.cfg` has `InstallView = <it>`. Switch back.
+4. `mods_ui {"action":"select","plugin":"progenitor","page":"overview"}`, `widget_read`: every `page-setting` row has `settingId`, `home` and `alsoAt`; the Core keybind rows read `home progenitor-page/keys`, `alsoAt [keybinds-tab]`.
+5. Close the workspace (`{"action":"close"}`).
+
+*The settings-organization recipes below (stages 3 to 8) predate three homes (2026-10-06): read **Configuration** as **Preferences** (`select_tab preferences`), the link rows as the Preferences purpose links and Progenitor's `link-server`, and Progenitor's **Server settings** as the **Server** tab ([Recipe: three homes](#recipe-three-homes) covers the new placement).*
+
+**Recipe: the Configuration tab (settings organization stage 3; acceptance procedure — not run).** Core and Dev from the branch on the Steam client (hot-swappable; no Bootstrap change). Title screen first, then joined to the isolated test server as an admin (the client's SteamID in its `adminlist.txt`) and as a non-admin (removed from it, then rejoin). Read once per step; take a capture (`capture`) for the look.
+
+1. Title screen: `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select_tab","tab":"configuration"}`, `{"action":"widget_read","pane":"content"}`. Expect the first content row after the title to be the cell row `link-progenitor` with `page-link {target progenitor-page, landing top}`. Then two `page-section` rows (`Mods menu`, `Sources`, cell keys `config-section-0` / `-1`), each with the red rule in the capture. Then the `Local dedicated server` heading and its rows. No `Progenitor settings` button, no Progenitor heading. Every `page-setting` row has `home configuration`.
+2. Edit other mods' settings live: `{"action":"widget_click","label":"Edit other mods' settings","value":"true"}`; then `{"action":"select","plugin":"<a plain BepInEx mod with a cfg>","page":"overview"}` and `widget_read`. Its rows read `control` other than `readonly` without a Core reload; the log has `Ui: [Settings] EditOtherModsSettings = True (changed)`. Set it back to `false`; the open page reads `readonly` again.
+3. Install view overlap: on Configuration `{"action":"widget_click","label":"Install view","value":"Advanced"}`; `select_tab install`, `widget_read`: the toolbar's `view.mode advanced`, `view.value Advanced`; `{"action":"widget_click","label":"toolbar/view-simple"}`; `select_tab configuration`, `widget_read`: the Install view row's `value Simple`; `settings_places` agrees.
+4. Remember filters: on Configuration turn **Remember Install filters and sort** on; on the Install tab pick a Side chip and a sort; close the workspace; `BepInEx/config/progenitor.cfg` has `InstallFiltersRemembered = v1;side=…`. Restart the client (an authorized restart) or reload Core, open the Install tab: the filters and sort are the remembered ones. Turn the switch off; after the next restart the tab opens on the defaults.
+5. The Advanced fold: `{"action":"widget_click","label":"Expand"}`: `Package index path` and `Keep the in-game frame canonical` rows appear; `Collapse` hides them.
+6. As **admin** in game: on Configuration `widget_click {"label":"link-progenitor/open"}`; then `{"action":"nav_state"}`: `current.place progenitor-page@server-settings`; Progenitor's page `widget_read`: the `Server settings` heading row has `page-server-jump {found true, landed true}`. `{"action":"nav_back"}`, then `nav_state`: `current.place configuration`.
+7. As **non-admin**, and at the title screen: the same click gives `current.place progenitor-page` (the page's top); `page-link.landing top`.
+8. `{"action":"close"}`; after a game test, disconnect and leave the client at the title screen.
+
+**Recipe: Progenitor's page, Your settings (settings organization stage 4; acceptance procedure — not run).** Same build, the Steam client at the title screen.
+
+1. `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select","plugin":"progenitor","page":"overview"}`, `{"action":"widget_read","pane":"content"}`. Expect, under `Your settings`, first the cell row `link-configuration` with `page-link {target configuration}`. Then the `page-section` rows `Keys`, `Gameplay`, `UI`, `Private games`, in that order. Keys holds every Core keybind (`home progenitor-page/keys`, `alsoAt [keybinds-tab]`) and **The game's keys win clashes**. Private games holds **Load Progenitor in the private games I host** (`control toggle`, `home progenitor-page/private-games`) and **Remove Progenitor from this PC** (`confirm "Remove Progenitor from this client?"`, `progenitorUninstall.requested false`). No `General` section. Capture it for the look: the subheadings in small caps, the Uninstall button in the danger tone.
+2. Overlap with the Keybinds tab: `{"action":"select_tab","tab":"keybinds"}`, `{"action":"keys","op":"read"}` (find Navigate back's row id), `{"action":"keys","op":"capture","target":"<that id>","chord":"F7"}`, `{"action":"keys","op":"save"}`. Then back on Progenitor's page, `widget_read`: the `progenitor/Keybinds/NavigateBack` row's `value` is `F7` (keybinds are placed by rule, so `settings_places` does not list them), and `progenitor.ui.cfg` has `NavigateBack = F7`. Put it back (`keys op=reset` on that row).
+3. The link: `{"action":"widget_click","label":"link-configuration/open"}`, `nav_state`: `current.place configuration`; `nav_back`: `current.place progenitor-page`.
+4. Uninstall, without removing anything: `{"action":"widget_click","label":"Uninstall"}` opens the dialog (`mods_ui status` → `dialog.title "Remove Progenitor from this client?"`); `{"action":"dialog_choose","choice":"no"}`: nothing written (`progenitorUninstall.requested false`). Then click again and `dialog_choose yes`: `BepInEx/progenitor-uninstall.json` exists, the rows read **Removal requested** and **Keep Progenitor**; `{"action":"widget_click","label":"Keep Progenitor"}` deletes the file. **Never quit the game while the request is on disk.**
+5. The Configuration tab has no uninstall row (`select_tab configuration`, `widget_read`). Close the workspace.
+
+**Recipe: Server rules, read-only (settings organization stage 6; acceptance procedure — not run).** Core and Dev from the branch on the Steam client **and** the isolated test server (`<testserver>`); join as an admin. Read once per step.
+
+1. Server: `server_rules {"action":"read"}`: `gameLayers` names the install's default, `_testserver\save-data\Settings\ServerGameSettings.json` (read) and the save folder's file (missing unless one exists); `gameWriteTarget` is the save folder's file when it exists, else the persistent-data one; `state.rows` match the files (ClanSize 4, GameModeType PvP, CastleHeartDamageMode CanBeDestroyedByPlayers on this server); `state.merciless.now true`; `tags` has `ded`, `pvp`, `cs4`, `hc`, `dif_no`.
+2. Client: `server_rules {"action":"get"}`: `supported true`, the same `state`; the password reads only `set` / `nextSet`.
+3. `mods_ui` open, `select` `progenitor` `page overview`, `widget_read`: the `Server rules · applied at the next restart` `page-section` after `Players without Progenitor`; each rule is a `page-setting` with `kind admin-setting`, `serverRule {loaded, next, pending, …}`, `enabled true` and `readOnlyReason ""` for an admin (stage 7 made them editable); the info rows Restart, Listed as Merciless (`Yes`), Territory, Days running, Standard settings and Next scheduled wipe (`Off`); **Server name** under Server list. Capture for the look.
+4. Pending: stop nothing; edit the test server's `save-data\Settings\ServerGameSettings.json` `ClanSize` to 3 by hand. Within 30 s of the page re-evaluating (or after reopening it) the Clan size row reads `pending true`, **Pending changes** reads `1 change applies at the next restart: Clan size 4 → 3.` (gold), and Standard settings adds `may change after the restart` only if a non-clan row is pending (it is not). Put `ClanSize` back to 4.
+5. Presets, file only, no restart: set `GameSettingsPreset` to `StandardPvP` in the test server's `ServerHostSettings.json`; reopen the page: every game row reads `This server uses the StandardPvP preset, which replaces these settings at start.`; set it to `StandardPvPP`: the **Preset** line warns that the server would run built-in defaults. Restore `""`.
+6. As a non-admin: every rule reads `Only an admin of this server can change it.`.
+7. `{"action":"close"}`, disconnect normally, title screen.
+
+**Recipe: Server rules, writes (settings organization stage 7; acceptance procedure — not run).** Same build and server, joined as an admin. Restore every value at the end. Never answer **yes** to scheduled wipes on a world anyone needs, and never restart the server unless the session authorizes it.
+
+1. Clan size: on Progenitor's page type `3` into **Clan size** (`field_focus`, `type`) and `field_apply`. The row's `status` is `Saved: applies at the next restart.`, `serverRule {next 3, loaded 4, pending true}`; **Pending changes** reads `1 change applies at the next restart: Clan size 4 → 3.` (gold). On the server, the save folder's `ServerGameSettings.json` if it exists (else `save-data\Settings\ServerGameSettings.json`) differs from before only in `"ClanSize": 3`; `progenitor-settings.log` has one accepted line `progenitor/ServerRules/ClanSize` 4 → 3. The Join Game listing still says 4 (the running server is unchanged). If a restart is authorized: after it, `pending false` and the listing says 3 (`cs3`). Put 4 back.
+2. Bounds and conflicts: `server_rules {"action":"write","key":"ClanSize","value":"11"}`: `refused: Give a whole number from 1 to 10.`; `"key":"MaxConnectedUsers","value":"125"` with 4 admins: refused (1 to 124).
+3. Server name, for the restart: write `Progenitor Test 2`; the note is `Saved: applies at the next restart.`, the file has it and the row is `pending true`; the Join Game browser keeps the old name until a restart. Write `progenitor test 2` (capitals only): it is written too. Put the old name back.
+4. Password, live: write `hunter2` (`field_apply` on **Password**); the row reads `Set`; `server_rules read` has `password {set true, nextSet true}` and no password text anywhere; a second client (or a headless join) without the password is refused `Incorrect Password`. Apply an empty field: **Remove the password?** → `dialog_choose yes`; the row reads `Not set`; the audit lines read `<hidden>` and `not set`.
+5. Scheduled wipes: type `7` into **Scheduled wipes every (days)** and Apply: **Turn on scheduled wipes?** opens with the start date and the first reset date (on a world older than 7 days the body starts `The next start resets this world:`); `dialog_choose no`: nothing written, the field reads `0` again. `server_rules {"action":"write","key":"ResetDaysInterval","value":"7"}` without `confirm`: `refused: Confirm first: …` with an audit line, nothing written. (Do not answer yes, or pass `confirm`, on this world.)
+6. Lock: `[ServerSettings] LockedInGame = server-rules` on the server; a write refuses `Locked in the server's config file (ServerSettings LockedInGame: server-rules).` with an audit line naming the entry, the rows read `locked true` with that help line and a **Locked** marker. Clear it.
+7. As a non-admin: `server_rules write` refuses `Only server administrators can change the server rules.` with an audit line; the rows read `Only an admin of this server can change it.`.
+8. `{"action":"close"}`, disconnect normally, title screen.
+
+**Recipe: the Install tab's Server settings link (settings organization stage 8; acceptance procedure — not run).** Core from the branch on the Steam client, joined to the isolated test server as an admin, Install view Simple.
+
+1. `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select_tab","tab":"install"}`, `{"action":"widget_read","pane":"content"}`: the toolbar row has `view.actsOnServer true` and `serverSettingsLink {shown true, target progenitor-page, landing server-settings}`; capture for the look (the key cap at the right of the search row).
+2. `{"action":"widget_click","label":"toolbar/server-settings"}`, then `{"action":"nav_state"}`: `current.place progenitor-page@server-settings`; the page's Server settings heading reads `page-server-jump {found true, landed true}`. `{"action":"nav_back"}`: back on the Install tab.
+3. Switch to Advanced (`toolbar/view-advanced`): no link. Back to Simple.
+4. As a non-admin (removed from `adminlist.txt`, rejoined), and at the title screen: `serverSettingsLink.shown false`, no `server-settings` cell.
+5. `{"action":"close"}`, disconnect normally, title screen.
+
+**Recipe: Progenitor's page, Server settings and the lock list (settings organization stage 5; acceptance procedure — not run).** Core and Dev from the branch on the Steam client **and** on the isolated test server (`<testserver>`; the new `'PrJa'` operations are the server's). No Bootstrap change. Join the test server as an admin (the client's SteamID in its `adminlist.txt`). Read once per step. Each edit writes one line to the server's `BepInEx/progenitor-settings.log`.
+
+1. `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select","plugin":"progenitor","page":"overview"}`, `{"action":"widget_read","pane":"content"}`. Under `Server settings`, the `page-section` rows are `When players join`, `Mods players need`, `Server list`, `Players without Progenitor`, `Gameplay`, `Operator`, in that order. The `kind admin-setting` rows have `known true` once the server answered (a `get` goes out when the page is drawn). Capture it for the look.
+2. One stored value: `{"action":"widget_click","label":"Mods break rules while playing","value":"disconnect"}`. The row's `status` goes from `Waiting for the server…` to `Saved by the server.`, and `value` reads `disconnect`. `join_admin read` shows `midSession: disconnect`, the Players joining popup shows **Disconnect them** selected, and `settings_places` has `progenitor/JoinAdmin/mid-session` with `value disconnect`. The audit log has one line for it. Set it back to `warn`.
+3. The seconds: `{"action":"field_focus","label":"Seconds before disconnect"}`, `{"action":"type","text":"999"}`, `{"action":"field_apply","label":"Seconds before disconnect"}`. The row reads `value 300` with `status "Clamped to 300 seconds (0 to 300)."`, and the server's `progenitor.cfg` has `HandshakeAnswerTimeoutSeconds = 300`. Put back `20` the same way.
+4. Gameplay: `{"action":"widget_click","label":"Allow photo mode","value":"false"}`. The server's cfg has `AllowOnThisServer = false`, and the client's photo-mode key is refused at once. Turn it back on. Then **Ally-safe hits** off and on: each change writes the cfg and one audit line.
+5. Operator, with confirmations: `{"action":"widget_click","label":"Remote mod installs","value":"false"}` opens **Turn off remote installs?** (`mods_ui status` → `dialog`); `{"action":"dialog_choose","choice":"no"}`: nothing is sent, and the row reads `Not changed.`. Type another admin's SteamID64 alone into **Admins who may install mods** and `field_apply`: **Remove yourself from the list?** opens; answer `no`. Type `<your id>, <other id>` and `field_apply`: saved with no question. The audit line has the before and after lists. Clear the field and `field_apply` to restore `any admin`.
+6. Lock by group: edit the server's `BepInEx/config/progenitor.cfg`, `[ServerSettings] LockedInGame = operator`, and save (the config watcher reloads it). Within 30 seconds of the page re-evaluating (or after reopening the page), the Operator rows read `locked true`, `lockedBy operator`, `enabled false`, with `Locked in the server's config file.` in `helpLine`, and their values still shown. A `widget_click` on **Remote mod installs** sends nothing. The Gameplay rows stay editable.
+7. Lock on the server whatever the client sends: with the lock still on, `join_admin {"action":"request","op":"remote-install","value":"false"}` (the bridge's "client that skips the panel": it sends even a locked request). The answer is refused with `Locked in the server's config file.`, the cfg is unchanged, and the audit log has the refusal naming `LockedInGame: operator`.
+8. Lock a ConfigSync row and the popup: `LockedInGame = join, mods-players-need`. On the page, **Message** reads `control readonly`, `locked true`, `lockedBy join`. In the **Players joining this server** popup (`join_admin open`, `join_admin read`), `locked` names `mods-players-need` for every list and choice, the sections show the note, and their buttons do nothing. `*` locks every row. Then set `LockedInGame =` (empty) and check that the rows are editable again.
+9. Deprecated switch: `[RemoteInstall] AllowedSteamIdsInGame = false` locks only **Admins who may install mods**, and the server log has the deprecation warning once. Set it back to `true`.
+10. As a **non-admin** (removed from `adminlist.txt`, rejoined): no `admin-setting` rows. The server message rows read `Admin only · …`.
+11. Restore every value. `{"action":"close"}`, disconnect normally, and leave the client at the title screen.
+
+### Recipe: three homes
+
+**Acceptance procedure — not run.** Three homes ([settings-organization.md](settings-organization.md#three-homes-2026-10-06), [mods-menu.md](mods-menu.md#where-progenitors-settings-are-drawn)). Build: Core and Dev from the branch, deployed to the Steam client (a Core and Dev hot swap; Bootstrap is unchanged) and to the isolated test server (Core: the lock list's group for the moved toggles). Only inside an authorized test session; never the live server. Read once per step (no polling). Write each request to a JSON file and call `node tools/mcp/call.mjs client mods_ui "@file"`; take each screenshot with `tools/observe.ps1` (focus-free).
+
+New ops and readback used here:
+
+- `mods_ui {"action":"select_tab","tab":"server"}` and `"tab":"preferences"` (`configuration` stays an alias).
+- `mods_ui {"action":"section","group":"<caption or slug>","tab":"<optional>"}`: the left-list click. `widget_click` with `"pane":"list","label":"nav/<group>"` is the same click on the row.
+- `mods_ui {"action":"drawer","group":"<caption or slug>","open":true|false}` (no `open`: toggle). `widget_click` with `"label":"drawer/<group>"` clicks the header.
+- `widget_read`: a group heading's `page-section {title, group, drawer, open, count, key}` (a drawer adds `titleShown`, `chevron.shown` and `heading {chevronLeft, titleLeft, titleWidth, titleNeeds, …}`); a left-list row's `sectionNav {tab, group, slug, highlighted, jumped}`; the Server tab's `server-tab-head {state, title, line, canEdit, groups}` and, when empty, `server-tab-empty {state, line}`; the Preferences purpose line `preferences-purpose`.
+- `nav_state`: `sectionNav {tab, groups, highlighted, jumped, pinned, drawers[], lastJump {found, openedDrawer, measured, landed, rowTop, viewportTop}, storedClosedDrawers}`.
+- `mods_ui {"action":"tabs"}`: `trimNotch {flairCenterX, lineCenterX, lineLeft, lineRight, centered, source: drawn}` in screen pixels from the drawn trim; `mods_ui {"action":"status"}`: `hosts.windowRects.notchRect.centerX` and `hosts.windowRects.lineRect.centerX` in screen pixels.
+
+**A. Title screen, not connected.**
+
+1. `{"action":"open","site":"standalone"}`, then `{"action":"status"}`: the strip reads Mods / Install Mods / Keybinds / Preferences / Server. `{"action":"tabs"}`: `trimNotch.split true`, and `notchX` equal to the midpoint of `lastTabRight` and the line's right end (frame-center units); `flairCenterX` lies right of the last tab (`centered` is false: it compares with the whole line's center). **Screenshot** the strip: the ornament is centered in the dead space of the silver line right of the Server tab. Resize the game window (or change the resolution with `{"action":"resolution",…}`) and repeat the two reads: still equal.
+2. `{"action":"select_tab","tab":"server"}`, `{"action":"widget_read","pane":"content"}`: `server-tab-head.title Server`, `server-tab-empty {state not-connected}` with the not-connected explanation, six `serverEmptyGroup` lines, no `page-setting` rows. `{"action":"widget_read","pane":"list"}`: six `sectionNav` rows, each `dimmed true`. The Last server row is covered by [Recipe: Server tab, not connected](#recipe-server-tab-not-connected-serverempty1). **Screenshot.**
+3. `{"action":"select_tab","tab":"preferences"}`, `widget_read` content: `preferences-purpose` with the user's sentence; the `link-purpose` row with **Mods »** and **Server »**; `page-section` **Mods tab** (`count 1`), **Install Mods tab** (`count 2`), **Sources and downloads** (`count 3`), **Join Game** (`count 1`, BROWSERFILTER1) and **Local server**, all `drawer false` (the 2026-10-06 trim). No row for Background intensity, Background contrast, Game menu tabs in back/forward, Authenticate-as-admin button, Current game update tag or the Nexus Mods note. `{"action":"settings_places"}`: `progenitor/Workspace/BackgroundIntensity` reads `home cfg`, `cfgOnly true`, `hidden` with the date and the reason. **Screenshot.**
+4. Left list: `{"action":"widget_click","pane":"list","label":"nav/local-server"}`, then `{"action":"nav_state"}`: `current.place preferences@Local server`, `sectionNav.highlighted Local server`, `lastJump.found true`, `lastJump.measured true`. **Screenshot** (Local server at the top, or the page at its end; its item highlighted).
+5. Scroll highlight: `{"action":"scroll","pane":"content","to":"top"}`, `nav_state`: `sectionNav.highlighted Mods tab`. `{"action":"scroll","pane":"content","to":0.5}`, `nav_state`: the group whose heading is at the top. **Screenshot** each (the highlighted item matches the group at the top).
+6. Drawer (Progenitor's page, since Preferences has none): `{"action":"section","tab":"mods","group":"Keys"}`, then `{"action":"drawer","group":"Keys","open":false}`: `open false`, `stored` contains `progenitor/keys`; `widget_read` content: no keybind rows; the client's `BepInEx/config/progenitor.ui.cfg` has `ClosedDrawers = progenitor/keys`. **Screenshot.**
+7. Back and forward: `{"action":"select_tab","tab":"preferences"}`, `{"action":"section","group":"mods-tab"}`, then `{"action":"nav_back"}` and `nav_state`: the place before it; `{"action":"nav_forward"}`: `preferences@Mods tab`.
+8. Drawer survives a client restart (authorized restart of the Steam client only, matched by its full path, console minimized): after the restart, open the workspace, open Progenitor's page, `widget_read` content: **Keys** `open false`. `{"action":"section","tab":"mods","group":"Keys"}`: `lastJump.openedDrawer true` and the drawer reads `open true`. **Screenshot** before and after.
+8a. Drawer header after a value change (the 2026-10-06 `ION (5)` defect): open Progenitor's page with **Keys** open, change a value on the page (for example **Breadcrumbs** under Build menu: `{"action":"widget_click","label":"Breadcrumbs"}`), then `widget_read` content: **Keys** reads `titleShown true`, `chevron.shown true`, `heading.titleLeft` greater than `heading.chevronLeft`. On the Server tab as an admin (B), change **First notice after** and read **Operator** the same way. **Screenshot** each: the gold arrow at the left, then the whole title, then the count. Put each value back.
+
+**B. Joined to the isolated test server as an admin** (the client's SteamID in its `adminlist.txt`).
+
+9. `{"action":"select_tab","tab":"server"}`, `widget_read` content: `server-tab-head {state ready, title <server name>, canEdit true}`; `page-section` titles in order When players join, Mods players need, Server list, Server rules · applied at the next restart, Players without Progenitor, Operator; **Operator** `drawer true, count 5`. `widget_read` list: six `sectionNav` rows. **Screenshot.**
+10. `{"action":"widget_click","pane":"list","label":"nav/server-rules"}`, `nav_state`: `current.place server@Server rules`, `highlighted Server rules`. Close the **Operator** drawer (`{"action":"widget_click","label":"drawer/Operator"}`), `widget_read`: its rows are gone, `open false`. **Screenshot.** Open it again.
+11. Progenitor's page: `{"action":"section","tab":"mods","group":"On this server"}`. `nav_state`: `progenitor-page@On this server`. `widget_read` content: exactly two `admin-setting` rows (**Allow photo mode on this server**, **Ally-safe hits**) and `link-server`; no server message, Server rules or Operator rows. `widget_read` list: the five Progenitor `sectionNav` rows under its entry (no UI since the 2026-10-06 trim), **On this server** highlighted. No **Mouse capture for Progenitor panels** or **The game's keys win clashes** row on the page. **Screenshot.** `{"action":"widget_click","label":"link-server/open"}`: the Server tab; `nav_back`: Progenitor's page again.
+12. Install link: `{"action":"select_tab","tab":"install"}` (Simple view), `{"action":"widget_click","label":"toolbar/server-settings"}`: the Server tab (`nav_state` `current.place server`).
+13. Lock list on Progenitor's page: on the server's `BepInEx/config/progenitor.cfg` set `[ServerSettings] LockedInGame = gameplay`, save; reopen Progenitor's page: both toggles read `locked true, lockedBy gameplay`. `join_admin {"action":"request","op":"photo-mode","value":"false"}` is refused with the lock note and one audit line in the server's `progenitor-settings.log`. Restore `LockedInGame =`.
+
+**C. As a player who is not an admin** (removed from `adminlist.txt`, rejoined).
+
+14. `select_tab server`, `widget_read` content: `canEdit false`; no `admin-setting` row of the admin channel; **Mods players need** and **Operator** each show the `Admin only` · `Only an admin of this server sees these settings.` line; Server rules rows read `control readonly`, `viewOnly true`; the password row reads `Admin only · Set` (or `Not set`) and has no field. **Screenshot.** Progenitor's page: **On this server** shows only the link row.
+
+**D. Cleanup.** Put the client's SteamID back in `adminlist.txt`, reopen any drawer you closed, `{"action":"close"}`, disconnect normally, and leave the client at the title screen.
+
+### Recipe: Server tab, not connected (SERVEREMPTY1)
+
+**Acceptance procedure — not run.** The Server tab's empty states and its Last server row ([mods-menu.md](mods-menu.md#the-server-tab), [join-flow.md](join-flow.md#the-last-server-serverempty1)). Build: Core from the branch, deployed to the Steam client as a Core hot swap (Bootstrap and Dev are unchanged); the isolated test server running at 127.0.0.1:9976 with Progenitor. Only inside an authorized test session; never the live server. Write each request to a JSON file and call `node tools/mcp/call.mjs client mods_ui "@file"`; take each screenshot with `tools/observe.ps1` (focus-free); read once per step.
+
+1. **Record.** Join the test server once (the server list, or the bridge's `connect` to 127.0.0.1:9976), wait for the handshake, then leave normally. Expected: the client log has `JoinFlow: last server <name> (127.0.0.1:9976, SteamIPv4)`, and `BepInEx/config/progenitor-last-server.json` holds `address 127.0.0.1`, `port 9976`, `protocol SteamIPv4`, the server's name, `needsPassword false`, and no `password` key.
+2. **Title screen.** `{"action":"open","site":"standalone"}`, `{"action":"select_tab","tab":"server"}`, `{"action":"widget_read","pane":"content"}`: `serverEmpty {state not-connected, lastServer {name <server name>, address 127.0.0.1:9976}, joinShown true, joinEnabled true}`; six `serverEmptyGroup` lines; `serverLast {state ready}`. `widget_read` list: six `sectionNav` rows, `dimmed true`, none highlighted. **Screenshot**: the dimmed list, the explanation, the gold group names with muted descriptions, `Last server: <name> · 127.0.0.1:9976` and a steel **Join** button.
+3. **Dimmed list.** `{"action":"section","tab":"server","group":"Operator"}`: refused (`the server tab has no left-list groups now`). Hover a dimmed item: no hover tint.
+4. **Join.** `{"action":"widget_click","pane":"content","label":"server-last/join"}`. Expected: the Mods window closes, the **Joining <server>** page shows `Connecting to 127.0.0.1:9976…`, the client log has `Ui: the Server tab's Last server Join: joining`, `JoinFlow: Server tab Join: …` and `JoinFlow: reconnect: LaunchGame SteamIPv4://127.0.0.1:9976`, and the client joins the test server (`JoinFlow: reconnect joined`). **Screenshot** the Joining page and the world.
+5. **Connected states.** In the world, open the Server tab: its groups (`server-tab-head.state ready`), no Last server row. On a server without Progenitor (if one is available), `state no-progenitor`, the explanation and the dimmed list, no Last server row. **Screenshot.**
+6. **Password (JOINPW1, not run).** *No password, stale hint:* with the test server's password empty, edit `progenitor-last-server.json` to `needsPassword true` (or keep one from an earlier password join). Press **Join**: no prompt; the log has `JoinFlow: reconnect: LaunchGame …` and `reconnect joined`; after the handshake the record reads `needsPassword false`. **Screenshot** the joined world. *Password set:* as admin, `server_rules {"action":"write","key":"Password","value":"<test value>"}` (when `server_rules read` shows it pending a restart (`password.set` false, `nextSet` true), restart the isolated test server first), leave, open Server, press **Join**. Expected: `LaunchGame` without a password, then `JoinFlow: reconnect: 127.0.0.1:9976 refused the join without a password; opening the game's password prompt`, the record `needsPassword true`, back to the title view, `JoinFlow: reconnect: the game's password prompt for …`, `reconnect prompted`, and the game's **Enter Password** prompt (filled by RetainedPassword when installed). **Screenshot** the prompt. Cancel it: nothing reconnects (`join_ui read` `reconnect null`). Press **Join** again and confirm the password: the client joins. *Cleanup:* `server_rules {"action":"write","key":"Password","value":""}` with `"confirm"` as asked, restart, and confirm a Join without a prompt. No password appears in the record, the log or any readback.
+7. **Cleanup.** Disconnect normally and leave the client at the title screen with the Mods window closed.
+
+### Recipe: Server tab review fixes (2026-10-06)
+
+**Acceptance procedure — not run.** Client joined to the isolated test server as an admin, Core from this branch (hot-swappable; no Bootstrap change).
+
+1. **Inline Apply (INLINEAPPLY1).** `{"action":"select_tab","tab":"server"}`, `{"action":"widget_read","pane":"content"}`. Expected: every row with a one-line field and **Apply** (Clan size and the other rule fields, Password, Server name, the Operator fields) has `inlineButtons [{caption Apply, art game-button}]`; none reads `kit`. **Screenshots:** Server rules and Operator, each showing the inline Apply in the same steel art as **Show** and **Close Mods**, and as tall as its field. Then hot-swap Core (`progenitor_reload`) with the Server tab open, reopen it, and read again: still `game-button` (a `game-button-pending` that turns into `game-button` within a few frames is fine).
+
+2. **Dropdowns (DROPDOWN1).** Server tab › Server rules. Note the server's last audit lines: `node tools/mcp/call.mjs server setting` with `{"action":"audit","lines":5}`. `{"action":"widget_click","pane":"content","label":"Game mode"}`, then `widget_read`: the Game mode row has `dropdown {open true, options [PvP, PvE, …] with current marked}`; the audit has no new line. **Screenshot** the list open under Game mode (the current value in gold). `{"action":"dropdown_choose","label":"Game mode","value":"PvE"}`: `written true`, `dropdown.open false`; exactly one new audit line (`GameModeType PvP → PvE`). **Screenshot** after the pick. Dismissals, each followed by an audit read with no new line: open it and press Escape in the game window (a brief foreground input test), open it and click outside the list, open it and pick the current value. Wipe on: pick a day with `dropdown_choose`: the scheduled-wipes confirmation appears (`dialog_choose no` cancels with no write). Preferences › Install view and Mods players need › Mods break rules while playing behave the same. Put Game mode back to PvP with one `dropdown_choose`.
+
+3. **Pending changes (PENDING1).** Server rules, nothing pending: `widget_read` content: the `info/Pending changes` row reads `None. Changes here apply when the server restarts.`, `style status`, `tone muted`, `pendingRestart {count 0}`. Pick another Clan size and Game mode (inline Apply, `dropdown_choose`): the row reads `2 changes apply at the next restart: Clan size 4 → 3, Game mode PvP → PvE.` in gold, `pendingRestart {count 2, items [{key ClanSize, loaded 4, next 3}, {key GameModeType, …}]}`; hover it: the description lists both. **Screenshot** both states. Put both rules back (the row returns to muted).
+
+4. **Message without Progenitor (NOPROGMSG1).** Players without Progenitor, the message empty: `widget_read` content: the row is a text area, its readback `placeholder` is the default text, **Length** reads `Using the default message.` (`tone muted`), `noProgenitorMessage {usingDefault true, chars 0, preview "This server uses mods. … disconnected in 20 seconds."}`; no **Use the default** row. **Screenshot.** Type `Get <Progenitor>: {mods}. Bye in {seconds} s.` (`field_focus`, `type`, `field_blur`): **Players see** reads `Get (Progenitor): Progenitor. Bye in 20 s.` and **Length** `45 / 300` before Apply. Apply (`field_apply`): one audit line; **Use the default** appears; press it (`widget_click label="Use the default"`): one audit line, the field empty with the muted default, **Length** back to `Using the default message.`. **Screenshot** both states. As a player who is not an admin, the row reads `Admin only · This server uses mods. …`.
+### Restart for pending installs recipe (INSTALLRESTART1)
+
+**Acceptance procedure — not run.** The pending-restart bar, Restart and rejoin, and Restart and resume ([mods-menu.md](mods-menu.md#restart-for-pending-installs-installrestart1)). Build: Core and Dev from the branch on the Steam client (both hot-swap; no Bootstrap change); the isolated test server at 127.0.0.1:9976 with Progenitor. Only inside an authorized test session; never the live server. Write each request to a JSON file and call `node tools/mcp/call.mjs client mods_ui "@file"`; take screenshots with `tools/observe.ps1` (focus-free); read once per step. Part B and Part C quit V Rising: client restarts are authorized for testing, and the relaunched game **takes focus** when it comes up. Check that the user is not playing before each real restart.
+
+**Setup: a client mod that needs a restart.** Either a small Thunderstore mod that is not hot-loadable (any ordinary BepInEx plugin installs with `Loads at next start`), or a local-index dummy: `.\tools\make-dummy-package.ps1 -Out <testserver>\dummy-restart -Sample HotDemo -Package HotDemoRestart -NotHotLoadable` (writes only under `-Out`), then at the title screen set `[Install] LocalIndexPath = <testserver>\dummy-restart` in Progenitor's config file (note the old value). The client must not have HotDemo installed already.
+
+**Part A: dry run (no restart).**
+1. Join the test server (the server list, or the bridge's `connect` to 127.0.0.1:9976) and wait for the handshake.
+2. `{"action":"open","site":"shortcut"}`, `{"action":"select_tab","tab":"install"}`; install the restart-needing mod with its row's **Install** (Simple) and confirm. The row reads `Loads at next start`.
+3. `{"action":"widget_read","pane":"content"}`: the `install-restart` row's `pendingRestart` reads `count 1`, `kind restart-rejoin`, `canRestart true`, `sentence "1 mod loads after a restart"`, `button "Restart and rejoin <server>"`, `rejoinTarget {kind dedicated, address 127.0.0.1, port 9976, protocol SteamIPv4, needsPassword false}`. **Screenshot** the band (Simple), then `widget_click toolbar/view-advanced` and **screenshot** it in Advanced. Open the Mods tab: the same band at the top of the list (two rows). **Screenshot.**
+4. `{"action":"widget_click","pane":"content","label":"install-restart/restart-button"}`: the confirmation `Restart V Rising to finish installing 1 mod?` · `You'll rejoin <server> automatically.` with **Restart** / **Not now**. **Screenshot.** Close it with **Not now** (`{"action":"restart","op":"cancel"}`): `result "not now"`, no file written.
+5. `{"action":"restart","op":"press"}`, then `{"action":"restart","op":"confirm","dryRun":true}`: `result dry-run`, `lastRestart {dryRun true, mode automatic, leaveFirst true, arguments …Start-Process 'steam://run/1604030'…}`, `rejoinRecord {kind dedicated, address 127.0.0.1, port 9976, dryRun true}`, `installRecord {dryRun true, returnTo dedicated, mods [<the mod>]}`. Open both files under `BepInEx\config`: no `password` key. The client is still in the world.
+6. Clean up the dry run: `join_ui {"action":"rejoin_clear"}` and `{"action":"restart","op":"pickup"}` (removes the install-restart record; `afterRestart` names the mod as `Not loaded`).
+
+**Part B: real Restart and rejoin.**
+7. With the mod still pending and the client in the world, `{"action":"restart","op":"press"}`, then `{"action":"restart","op":"confirm"}` (or click **Restart** in the box). Expected client log: `Install restart: restart-rejoin, 1 change(s); return dedicated <server>; relaunch automatic; leaving the world first`, `JoinFlow: reconnect: leaving the server (ExitGame view)`, `JoinFlow: relauncher started (pid …)`, `JoinFlow: quitting V Rising for the restart in 0 s`. The test server logs the disconnect.
+8. Within about a minute one new `VRising.exe` (match by full path) starts through Steam. The new client log has `Install restart: after the restart at start: Installed: <mod>.`, `JoinFlow: rejoin record at start: rejoin`, `JoinFlow: rejoining 127.0.0.1:9976 (SteamIPv4)`, then `JoinFlow: reconnect joined`. **Screenshot** the **Rejoining <server>** page and the joined page reading `Installed: <mod>. Rejoined <server>.`
+9. Open Mods > Install: the row reads Installed, and there is no pending-restart band. The mod is loaded (`mods_ui status` or the Mods tab). **Screenshot.**
+
+**Part C: hosted private game (Restart and resume).**
+10. Disconnect, start a private game from the menu (the user's existing test save, or a new one), install another restart-needing mod (or uninstall the one from Part B: `1 mod change applies after a restart`). `widget_read`: `kind restart-resume`, `button "Restart and resume <save>"`, `rejoinTarget {kind hosted, save <save>}`. If it reads `restart-to-menu`, note `rejoinTarget.why`.
+11. Dry run first (`press`, then `confirm` with `dryRun true`): `rejoinRecord {kind hosted, save <save>, dryRun true}`; clean up as in step 6. Then the real `confirm`.
+12. After the relaunch: `JoinFlow: resuming the private game <save> through the title screen's Continue`, `JoinFlow: resume: MainMenuNewView.ContinueButton_OnClick (<save>)`, the private game starts, and the **Resuming <save>** page reads `Installed: <mod>. Resumed <save>.` **Screenshot.** If it fails with `The title screen's Continue is for X, not Y`, record X and Y.
+
+**Part D: no relauncher (optional).** With Steam's `steam://` handler unavailable (do not change system settings for this: run it only where it is naturally absent), the box reads `V Rising can't restart itself here` with **Quit to desktop**; after quitting, a manual start within 10 minutes rejoins.
+
+**Restore.** Uninstall the test mod (or keep it if wanted), `LocalIndexPath` back to its old value, `join_ui rejoin_clear`; disconnect normally and leave the client at the title screen with the Mods window closed.
+
+## `mods_ui` text-field tests (TEXTTEST1)
+
+**Live (2026-10-04, Steam client 3840×1080 in game on the isolated test server, branch fix/settings-textarea):**
+
+**Human keystroke check (ab1143c7, client restarted with the new Bootstrap).** The log showed `TextInputQueue: subscribed to Keyboard.onTextInput (device 1)`. After the user typed and pasted, `focus.textInput` read `received 81, proven true, source os-text`.
+
+**This recipe, run through the bridge (dddee0cd, Core and Dev hot-swapped, generation 2):**
+- **Notes:**
+  - `adsf`: line 0, column 4, `endOnLastLine` and `insideField` true, `caretSource tmp-lines`.
+  - Enter: line 1, column 0.
+  - ``Hello! @#$% (test) <b>x</b> ~{}|:"?``: 35 accepted, 0 rejected, text exact, shown as plain text in the capture.
+  - `é` via os-text: accepted.
+- **Demo count:** `1a2b-` → `12`, 3 rejected by `Integer`, committed `12`.
+- **Demo tint:** `#00ff7fzz` → `#00ff7f`, 2 rejected by `Hex`, committed `#00FF7F`.
+- **5,000-char paste:**
+  - 4,096 accepted, 904 rejected by the limit;
+  - 136 lines, matching TMP;
+  - caret on the last line inside the field;
+  - `drawsOutsideFrame false`;
+  - 120 frames: one 84 ms frame, avg 8.8 ms.
+- **300 idle frames, focused on the 4,096-char field:** avg 8.2 ms, p95 9 ms; `textDirtyBeforePump`, `textDirtyByPump`, `caretMeasureCalls`, `caretWrites` and `scrollWrites` all 0.
+- **Restore:** Notes cleared and the Demo values reset through the same ops.
+
+**Not live-verified:**
+- a non-US layout, AltGr and dead keys;
+- the US-map fallback on an older Bootstrap;
+- the admin edit of a text area over the wire;
+- server-side refusals.
+
+Focus-free, OS-input-free tests of the Mods workspace's text fields through the paths a player's input takes. **Source-checked, built and game-free tested (`TextFieldTestHarnessTests`; the `field_expand`, `field_scroll`, `field_cancel` and `field_apply` rows: `TextExpandTests` for the Core half, the bridge half only built); not live-verified.** Core half: `Progenitor.Ui.UiTextTestBridge` (internal, reached by reflection from Dev; no plugin or network path). Core-only plus Dev: hot-swappable, no Bootstrap change.
+
+| Action and arguments | What it does | Result `detail` |
+|---|---|---|
+| `field_focus {label, pane?}` | Focuses the armed field on the row captioned `label` (case-insensitive; `"search"` for the sidebar search, `"dialog"` for an open dialog's field) through `FocusOwnedField`, the click path (event-system selection, `ActivateInputField`, the pump's owned focus). `pane`: `content`, `sidebar` or `dialog`. The pointer hover that lights a row is not simulated. | `{ok, label, kind, pane, matches, multiline, filter, characterLimit, field}` |
+| `field_blur` | A click outside every field: `EventSystem.SetSelectedGameObject(null)` and the pump's focus cleared; TMP's deselect ends the edit, which commits a settings row. Read two frames later. | `{ok, was, label, committed, persist}` (`committed`: the row's stored `page-setting.value`; `persist`: the row's `page-setting.persist`, below) |
+| `field_submit` | Enter in a single-line field: `onSubmit`, then the same deselect. Refused in a text area (Enter is a line break there). In the expanded editor it is **Done** (`UiDialog.Submit`: the length check, the row's validation, then the commit); refused when the editor is read-only. | as `field_blur`, plus `closed`, `error`, `row` for the editor |
+| `field_expand {label}` | TEXTEXPAND1: the expand button of the settings row captioned `label` (its display name), as a click; then focuses the editor's field, so `type` and `paste` go there. Read two frames later. | `{ok, row, open, readOnly, maxLength, counter, focus, field, dialog}` |
+| `field_scroll {notches}` or `{to: "top"\|"end"}` | TEXTEXPAND1: wheel notches on the focused text area or the open editor through the wheel's own path (positive toward the end, as a wheel turned toward the player, at most ±10,000), or straight to an end. | `{ok, notchesApplied, pixels, view}` |
+| `field_cancel` | One Escape through the key hook the player's Escape takes (`Ui.OnBootstrapKey` 27 then 17): the editor's Cancel. | `{ok, was, closed, dialog}` |
+| `field_apply {label}` | TEXTLIMIT1: the **Apply** of the administrator row captioned `label`, with its field's text; waits up to 12 s of game time for the server's answer. | `{ok, row, status, waiting, saved, fieldLength, fieldLineBreaks, fieldHash, storedLength, storedLineBreaks, storedHash, helpLine, sent}` |
+| `type {text, via: "os-text", perFrame?}` | Queues `text` behind the OS text drained from Bootstrap's `TextInputQueue`: the control-character drop, the field's character filter, its limit, the caret code. Injected text never marks the OS queue as proven. | `{started, frames, accepted, rejected {filter, limit, control}, notApplied, field}` |
+| `type {keys: [...], via: "keys", perFrame?}` | Chords (`"H"`, `"Shift+1"`, `"Enter"`, `"Backspace"`, `"Left"`, `"Ctrl+A"`, `"Numpad5"`, `"Shift+/"`; modifiers `Ctrl`, `Alt`, `Shift`, `Meta`) through `UiTypedKeys.Decide` and the pump's key handling, as the US physical-key fallback sees them. Enter in a single-line field submits it. | as above |
+| `paste {text, repeat?}` or `paste {length, seed?}`, `measureFrames?` | The real Ctrl+V path with a test clipboard (`UiTextInjection.Clipboard`): the player's clipboard is never read or written, and the test clipboard is cleared when the call ends. `length` generates that many characters of words, periods and line breaks (deterministic per `seed`, at most 1,000,000). `measureFrames` also samples that many frames from the paste frame on, as `perf` does. | as `type`, plus `perf` |
+| `perf {frames?}` (default 120, at most 3,000) | Samples the next frames. A light read: no workspace status before or after. | `{frames, frameTimeMs, ourFrameMs, outsideMs {min, avg, p95, max}, worstHandler, worstHandlerMs, worstHandlerFrames, focusedField {caption, textDirtyBeforePump, textDirtyByPump, caretMeasureCalls, caretWrites, scrollWrites, layoutRebuilds}, field}` |
+
+`perFrame` defaults to 1 item a frame (typing, not one insert), at most 1,000. Every `field` readback is `{caption, length, hash, text (≤200 characters) or head/tail, caretBlock (the focus.caret block: line, column, lineCount, tmpLineCount, caretRect, fieldRect, checks.insideField …), scrollOffset, viewportMasked, textAboveViewport, textBelowViewport, drawsOutsideFrame, caretSource (tmp-lines | measured | stale), filter, characterLimit, inEditor}`; a multi-line field adds `lineBreaks` and `view {viewHeight, textAbove, textBelow, fraction (0 top … 1 end), atTop, atEnd, lineCount, firstVisibleLine, lastVisibleLine, visibleLines, firstVisibleChar, lastVisibleChar, viewHeld, caretOutOfView, readOnly, bar {visible, size, value, expectedValue, direction, agrees}}` (TEXTEXPAND1). The bar is synced to the text before it is read, so `value` describes this view. `direction` is `bottom-to-top`: `value = 1 − fraction`, so it is 1 at the top and 0 at the end. `expectedValue` is that mapping, and `agrees` compares it with the live `Scrollbar.value` (TEXTUNDO1 polish). Every `field` readback also has `undo {depth, redoDepth, totalChars, lastKind, maxEntries, maxChars, evicted, refused, lastClear, readOnly, undoApplied, redoApplied, ignoredReadOnly}` (TEXTUNDO1, [undo and redo](ui.md#undo-and-redo-textundo1)). `caretBlock` adds `caretHidden` (a read-only field) and `caretAlpha`. `type` and `paste` also report `rejected.readOnly`. A sample is read at a frame's drain and describes the frame before it; `outsideMs` (the game, uGUI/TMP layout and rendering) of a frame shows one sample later still. `worstHandler` names the type too (`NativeModsEntry.Tick`). `textDirtyBeforePump` counts frames where the focused field's TMP text was already marked for a new layout when the pump started (someone changed it since the last render); `textDirtyByPump` frames where the pump marked it. Layout rebuilds are not counted (no counter on this build).
+
+**Safety.** Dev bridge only. `type`, `paste` and the `field_*` actions refuse with the workspace closed and `type` / `paste` refuse without a focused workspace field (`field_focus` first). One call at a time (the bridge's one-op gate); a second `type` while one runs is refused. Queued input and the test clipboard are cleared on completion, on error and when the gate abandons the call. No OS input is sent and no window focus is taken. A call stops after 20 s of game time and reports what it applied; set `PROGENITOR_CALL_TIMEOUT_MS=40000` for long `perf` or slow `type` calls.
+
+**What this does not exercise.** The OS and IME → `Keyboard.onTextInput` hop into Bootstrap's queue, and TMP's own key handling (armed fields are read-only to TMP). After each Bootstrap change, one human keystroke check is still needed: type a few characters (an accented one on a non-US layout if possible) and confirm `mods_ui status` → `focus.textInput.proven` is true with no doubled characters.
+
+### Text field test recipe
+
+Open the Sample's settings page first (`mods_ui select` on the Sample, then its settings), then run these in order. Expected values are expectations, not captured output.
+
+| # | Check | `mods_ui` JSON | Expect |
+|---|---|---|---|
+| 1 | Notes caret after `adsf` | `{"action":"field_focus","label":"Notes"}`, then `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, then `{"action":"type","text":"adsf"}` | `field.text` `adsf`; `caretBlock.line` 0, `column` 4, `checks.endOnLastLine` and `endAtRightEdge` true, `insideField` true |
+| 2 | Enter | `{"action":"type","via":"keys","keys":["Enter"]}` | `field.text` `adsf\n`; `caretBlock.line` 1, `column` 0 |
+| 3 | Symbols and markup | `{"action":"type","text":"Hello! @#$% (test) <b>x</b> ~{}\|:\"?"}` | appended exactly; `rejected.filter` 0; `caretBlock.richText` false |
+| 4 | Accented letter (OS text) | `{"action":"type","text":"é"}` | `é` appended, `accepted` 1 |
+| 5 | Letters into Demo count | `{"action":"field_focus","label":"Demo count"}`, `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"type","text":"1a2b-"}`, `{"action":"field_blur"}` | `rejected.filter` 3 (`a`, `b`, the trailing `-`), `field.text` `12`; `committed` `12` |
+| 6 | Hex into Demo tint | `{"action":"field_focus","label":"Demo tint"}`, `{"action":"type","via":"keys","keys":["Ctrl+A"]}`, `{"action":"type","text":"#00ff7fzz"}`, `{"action":"field_blur"}` | `field.text` `#00ff7f`, `rejected.filter` 2; `committed` the color |
+| 7 | 5,000-character paste with perf | `{"action":"field_focus","label":"Notes"}`, `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"paste","length":5000,"measureFrames":120}` | `field.length` 4,096 (the default cap), `rejected.limit` 904; `caretBlock.beyondView` false, `caretRect` inside `fieldRect`, `caretSource` `tmp-lines`, `textBelowViewport` 0 (scrolled to the end), `drawsOutsideFrame` false; one paste frame, then `perf.frameTimeMs.p95` back to the idle figure |
+| 8 | Idle focused field | `{"action":"perf","frames":300}` (Notes still focused, 4,096 characters) | `focusedField.textDirtyBeforePump` and `textDirtyByPump` 0, `caretMeasureCalls` 0, `caretWrites` 0, `scrollWrites` 0 (blinking only changes the bar's alpha); `ourFrameMs.avg` near 0 |
+| 9 | Clean up | `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"field_blur"}` | Notes empty again |
+
+From bash: `node tools/mcp/call.mjs client mods_ui '<json>'`. From PowerShell, write the JSON to a UTF-8 file without a BOM and pass `@path` ([reload guide](hot-reload.md)).
+
+### Undo and redo recipe (TEXTUNDO1)
+
+**Live (2026-10-04, Steam client 3840×1080 joined to the isolated test server, branch feat/text-undo-polish):**
+
+**Undo and polish** (da1abee7, Core 2026.10.51.1 on both sides; the full TEXTUNDO1 recipe through the bridge, readbacks in each step's `field.undo`):
+- `alpha beta gamma` was depth 3. Two Ctrl+Z gave `alpha beta ` (caret 11), then `alpha ` (caret 6). Ctrl+Y and Ctrl+Shift+Z restored it to caret 16.
+- Ctrl+Z, `delta`, Ctrl+Y: redo was dropped (redoDepth 0).
+- A paste and a backspace run were each their own step.
+- Ten 4,096-char pastes: depth 8, 65,536 characters, evicted 5. Eight Ctrl+Z landed on the seed-2 hash.
+- Blur then refocus: depth 0, `lastClear blur`.
+- `"  spaced out  "` committed as `"spaced out"`.
+- Demo count `123` undid in one step (it committed 99, the setting's max).
+- Editor bar `agrees true` at values 1, 0.7944 and 0 (`bottom-to-top`).
+- Server notice: 1,500-char paste, then Done and Apply. `fieldLength` = `storedLength` = 999, and the server reported 999.
+- Non-admin read-only editor: `caretHidden true`; Ctrl+Z ignored with the text unchanged.
+
+**Save hold** (3b314fc6, Core 2026.10.51.2 on both sides, Dev on the client; joined as admin, the Sample cfg held by the synced Server notice, `locked true`):
+- Notes `persist A` and Demo count `7`: `persist {persisted true, how "explicit-save …"}`, with `entryInstance` = `entryInstanceNow`. Both values were on disk immediately.
+- After a disconnect and rejoin, the page showed `persist A`. Notes `persist C` and Demo count `3` were saved and on disk before any disconnect; this is the case that failed before the fix.
+- A hand edit to the cfg while joined reloaded it (`ConfigHelper: reloaded`), and the values stayed.
+- The cfg was restored from a backup afterwards.
+
+**Not run. Source-checked and game-free tested (`TextUndoTests`); nothing here has been observed in the game.** This needs Core and Dev from the same build on the client; both hot-swap, with no Bootstrap change. Open the Sample's settings page first, as above. Bridge typing runs at one item a frame, well inside the 1 s pause that ends a step. Expected values are expectations, not captured output.
+
+| # | Check | `mods_ui` JSON | Expect |
+|---|---|---|---|
+| 1 | Empty Notes, fresh history | `{"action":"field_focus","label":"Notes"}`, `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"field_blur"}`, `{"action":"field_focus","label":"Notes"}` | the second `field_focus`: `field.text` `""`, `field.undo.depth` 0, `redoDepth` 0 (`lastClear` `blur` when Notes had text) |
+| 2 | Words coalesce | `{"action":"type","text":"alpha beta gamma"}` | `field.text` `alpha beta gamma`; `undo {depth 3, redoDepth 0, totalChars 16, lastKind typing}` |
+| 3 | Undo twice | `{"action":"type","via":"keys","keys":["Ctrl+Z"]}` twice | `alpha beta `, then `alpha `; `depth` 2 then 1, `redoDepth` 1 then 2, `totalChars` 16; `caretBlock.caret` 11, then 6 |
+| 4 | Redo both ways | `{"action":"type","via":"keys","keys":["Ctrl+Y"]}`, then `{"action":"type","via":"keys","keys":["Ctrl+Shift+Z"]}` | `alpha beta `, then `alpha beta gamma`; `depth` 3, `redoDepth` 0, `caretBlock.caret` 16 |
+| 5 | A new edit drops redo | `{"action":"type","via":"keys","keys":["Ctrl+Z"]}`, `{"action":"type","text":"delta"}`, `{"action":"type","via":"keys","keys":["Ctrl+Y"]}` | `alpha beta delta`, `redoDepth` 0; Ctrl+Y changes nothing (`undo.redoApplied` unchanged) |
+| 6 | Paste is one step | `{"action":"paste","text":" PASTED words"}`, `{"action":"type","via":"keys","keys":["Ctrl+Z"]}` | after the paste `lastKind paste`, `depth` 4; after the undo `alpha beta delta`, `lastKind typing`, `redoDepth` 1 |
+| 7 | Backspace run | `{"action":"type","via":"keys","keys":["Backspace","Backspace","Backspace"]}`, `{"action":"type","via":"keys","keys":["Ctrl+Z"]}` | `alpha beta de`, `lastKind backspace` (one step); the undo gives `alpha beta delta` with `caretBlock.caret` 16 |
+| 8 | Bounds: repeated large pastes | 10 times, with `seed` 1 to 10: `{"action":"type","via":"keys","keys":["Ctrl+A"]}`, `{"action":"paste","length":4096,"seed":<n>}`. Note `field.hash` after seed 2. | each paste `field.length` 4,096; after the 10th `undo.totalChars` ≤ 65,536, `depth` about 8 (each step holds about 8,192 characters), `evicted` ≥ 1 |
+| 9 | Undo to the oldest kept step | `{"action":"type","via":"keys","keys":["Ctrl+Z"]}` repeated `depth` times (or one call with that many `"Ctrl+Z"` keys) | `depth` 0; `field.length` 4,096 and `field.hash` the seed-2 hash; one more Ctrl+Z changes nothing |
+| 10 | Clear on blur | `{"action":"field_blur"}`, `{"action":"field_focus","label":"Notes"}` | `field.undo.depth` 0, `redoDepth` 0, `lastClear` `blur` (focus loss clears even without a change) |
+| 11 | Commit trim | `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"type","text":"  spaced out  "}`, `{"action":"field_blur"}` | `committed` `spaced out`; refocused, `field.text` `spaced out`, `undo.depth` 0 |
+| 12 | Number box | `{"action":"field_focus","label":"Demo count"}`, `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"type","text":"123"}`, `{"action":"type","via":"keys","keys":["Ctrl+Z"]}`, `{"action":"type","via":"keys","keys":["Ctrl+Y"]}`, `{"action":"field_blur"}` | after Ctrl+Z the text before `123` (one step), after Ctrl+Y `123`; `committed` `123` |
+| 13 | Search | `{"action":"field_focus","label":"search"}`, `{"action":"type","text":"sample"}`, `{"action":"type","via":"keys","keys":["Ctrl+Z"]}`, `{"action":"field_blur"}` | `field.text` `""` after the undo, and `status.search` `""` (the live filter follows) |
+| 14 | Clean up | Notes: `field_focus`, `Ctrl+A`, `Backspace`, `field_blur`; Demo count: set back to its starting value the same way | Notes empty |
+
+`field_focus` returns the `field` readback, so steps 1 and 10 read the history without typing. Ctrl+Z in a Mods field does not reach a keybind. While a framework field has owned focus, a bind on a key the field takes (`UiTypedKeys.FieldTakes`: printable keys, Ctrl+letter, editing keys) does not fire. `keybind_press` of such a bind is refused with `suppressed: a framework text field has focus and takes this key`. A bind that is not registered `allowWhileCaptured` is already refused, because the workspace takes input. F10 and the mouse's Back and Forward still fire.
+
+### Settings reach the cfg while joined (SAVEHOLD1)
+
+**Not run. Source-checked and game-free tested (`SettingPersistenceTests`); not live-verified.** This needs Core and Dev from the same build on the client. Server notice is synced, and Notes and Demo count share its cfg (`BepInEx/config/progenitor.sample.cfg`), so while joined the file's auto-save is held off. Every page write of a row now reports `page-setting.persist` (also in `field_blur`): `{persisted, how, why, file, entryInstance, fileInstance, entryInstanceNow, changed, valueLength, diskFound, diskLength, ageMs}`.
+- `persisted` is read back from the disk at the time of the readback: the key's value in the cfg equals the entry's.
+- `how` is one of:
+  - `save-on-set`: BepInEx saved the file itself.
+  - `explicit-save (…held off by a synced lock)`: the fix.
+  - `unchanged`.
+  - `not-saved: the server owns this value for the session`.
+  - `not-saved: the mod turned SaveOnConfigSet off`.
+  - `not-saved`, with a `why` when a synced key could not be parked.
+- `entryInstance` equal to `entryInstanceNow` means the write went to the entry the page shows now, not to a stale generation's.
+
+| # | Step | Command | Expect |
+|---|---|---|---|
+| 1 | Joined as admin, the Sample's page open | `client setting {"action":"get","row":"progenitor.sample/Menu/ServerNotice"}` | `locked true`, so the file's auto-save is held off |
+| 2 | Notes | `mods_ui {"action":"field_focus","label":"Notes"}`, `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"type","text":"persist A"}`, `{"action":"field_blur"}` | `committed "persist A"`, `persist {persisted true, how "explicit-save …", file …progenitor.sample.cfg}`, `entryInstance` = `entryInstanceNow`; the cfg on disk has `Notes = persist A` at once (no disconnect) |
+| 3 | Demo count | `{"action":"field_focus","label":"Demo count"}`, `{"action":"type","via":"keys","keys":["Ctrl+A","Backspace"]}`, `{"action":"type","text":"7"}`, `{"action":"field_blur"}` | `committed "7"`, `persist.persisted true`; `DemoCount = 7` on disk |
+| 4 | Synced key untouched | read the cfg | `ServerNotice` holds the client's pre-join local, not the server's text |
+| 5 | Disconnect and rejoin | `node tools/mcp/call.mjs client disconnect`, wait for the title screen, then rejoin as admin (`rejoin.sh`), reopen the Sample's page | `widget_read` Notes `value "persist A"`, Demo count `7`; the cfg unchanged |
+| 6 | Again in the new session | step 2 with `persist C`, step 3 with `3` | `persisted true`, `how "explicit-save …"`; the cfg has `persist C` and `3` before any disconnect |
+| 7 | Reload while joined | add a comment line to the cfg by hand, wait for `ConfigHelper: reloaded …sample.cfg` | `widget_read` still shows `persist C` and `3` (before the fix the reload put the old disk values back) |
+| 8 | Disconnect, restore | `field_focus Notes`, `Ctrl+A`, `Backspace`, `field_blur`; Demo count back to its starting value; disconnect to the title screen | the cfg holds the restored values |
+
+### Server-wide text and expanded editor recipe (TEXTLIMIT1, TEXTEXPAND1)
+
+**Live (2026-10-04, Steam client 3840×1080 joined to the isolated test server, branch feat/text-server-limits-expand b5fd16b2, Core, Dev and Sample 2026.10.50.1 hot-swapped on both sides):** this recipe ran through the bridge with no OS input.
+
+**As admin:**
+- **Server notice row:** the server's `setting get` read `declared {maxLength 1000, multiline true, effective 1000}`.
+- **Typed three lines and Apply:** `saved true` with 2 line breaks. The server stored the same hash with `lineBreaks 2`, and the audit read `accepted … "" -> "Line one\nLine two\nLine th…"`. The client's synced copy had the same hash and `locked true`.
+- **Editor, 1,500-character paste:** 1,000 accepted, 500 rejected by the limit; Done closed it. The server stored 999 characters: BepInEx trims the trailing space.
+- **Hostile request** (`skipClientCheck`, 1,500 characters): "The value is longer than 1,000 characters (1,500); shorten it to 1,000.", audited as refused, and the value was unchanged.
+- **700 × `€`:** refused before sending ("2,100 of 2,048 bytes").
+- **`C:\new`:** refused for the backslash.
+- **Notes editor with 4,096 characters** (98 lines, 24 visible):
+  - top: `firstVisibleLine 0`;
+  - 5 notches: lines 15–38;
+  - end: lines 74–97 with `atEnd true`;
+  - the captures showed the scroll handle at the top, then the bottom;
+  - 300 idle frames with the editor open: `caretWrites` and `scrollWrites` 0, average frame 10.9 ms;
+  - Cancel left the user's Notes unchanged.
+
+**As non-admin** (adminlist emptied, rejoined):
+- The editor opened read-only with only Close and "999 characters". Typing was rejected (`readOnly 1`), and the whole value scrolled to `atEnd`.
+- A request was refused with "Only server administrators can change this setting.", audited with role `none`, and the server value was unchanged.
+
+**Restored:** the adminlist, and the Server notice cleared as admin.
+
+**Not live-verified:**
+- dragging the scrollbar with the mouse;
+- mouse-wheel routing between panels;
+- the expand button's own click (the bridge calls the same handler).
+
+**Live findings, fixed in TEXTUNDO1 (source-checked and game-free tested, not live-verified):**
+- `view.bar.value` did not track the view in the readback: 0.0005 at the top, 1 after 5 notches, 0.7944 at the end, although the captured handle position was right. **Cause:** each readback showed the previous view's value. The wheel moved the text, but the bar followed only on the next frames (`TickEditorBars`), and `field_scroll` read the bar in the same call. The bar itself was right a frame later, so a drag did not jump. **Fix:** a wheel or `field_scroll` move syncs the bar at once, and the readback syncs before it reads. Expect `value` 1 at the top, about 0.8 after 5 notches, and 0 at the end, with `agrees true`.
+- The read-only editor drew a caret. It draws none now (`caretBlock.caretHidden true`, `caretAlpha 0`).
+- BepInEx trimmed a trailing space, so the stored value could be one shorter than what Done committed. Commits now trim leading and trailing spaces first, on the client and the server, and the field shows the trimmed value ([commit trim](mod-settings.md#text-settings-limits-and-plain-text)).
+
+**Acceptance procedure — not run.** Source-checked, built and game-free tested (`ServerTextLimitTests`, `TextExpandTests`); nothing here has been observed in the game. Needs Core, Dev and the Sample from the same build on **both** sides (the Sample's Server notice row exists only in this build, and the handshake refuses a join when the Sample versions differ). Core, Dev and the Sample hot-swap; no Bootstrap change. Joined to the isolated test server, the Sample's page open (`mods_ui select` on the Sample). Expected values are expectations.
+
+| # | Check | Command | Expect |
+|---|---|---|---|
+| 1 | Server's starting value | `server setting {"action":"get","row":"progenitor.sample/Menu/ServerNotice"}` | `ok`, `declared {maxLength 1000, multiline true, effective 1000}`, `adminEditable true` |
+| 2 | Admin row is a text area | `client mods_ui {"action":"widget_read","pane":"content"}` | `page-setting` `…/Menu/ServerNotice`: `control server-request`, `multiline true`, `lines 4`, `maxLength 1000`, `expandable true` |
+| 3 | Type three lines inline | `field_focus {"label":"Server notice"}`, `type {"via":"keys","keys":["Ctrl+A","Backspace"]}`, `type {"text":"Line one"}`, `type {"via":"keys","keys":["Enter"]}`, `type {"text":"Line two"}`, `type {"via":"keys","keys":["Enter"]}`, `type {"text":"Line three"}` | `field.lineBreaks` 2, `field.text` `Line one\nLine two\nLine three` |
+| 4 | Apply | `field_apply {"label":"Server notice"}` | `saved true`, `status` `Saved by the server.`, `fieldLineBreaks` 2 |
+| 5 | Server stored it | `server setting {"action":"get","row":"…/Menu/ServerNotice"}` then `server setting {"action":"audit","lines":3}` | `value` with both `\n`, `lineBreaks` 2; the last audit line `settings accepted by … "" -> "Line one\nLine two\nLine three"` |
+| 6 | Client synced copy | `client setting {"action":"get","row":"…/Menu/ServerNotice"}` | same `hash` and `lineBreaks` 2 as step 5, `locked true` |
+| 7 | Expand, paste over the limit, Done | `field_expand {"label":"Server notice"}`, `type {"via":"keys","keys":["Ctrl+A","Backspace"]}`, `paste {"length":1500}`, `field_submit` | the paste stops at 1,000 (`rejected.limit` 500), `dialog.editor.counter` `1,000 / 1,000`; Done closes and sends (`closed true`); a moment later `server setting get` reads the trimmed length (1,000, or 999 when the 1,000th character is a space: TEXTUNDO1 trims before sending), `field_apply`'s `fieldLength` equals `storedLength`, and `widget_read` shows the row's help line `Saved by the server.` |
+| 8 | Hostile length (client check skipped) | `client setting {"action":"request","row":"…/Menu/ServerNotice","repeat":"x","count":1500,"skipClientCheck":true}` | `success false`, `error` `The value is longer than 1,000 characters (1,500); shorten it to 1,000.`; `server setting audit` ends with that refusal; `server setting get` unchanged |
+| 9 | Byte limit | `client setting {"action":"request","row":"…/Menu/ServerNotice","repeat":"€","count":700}` | refused before sending: `error` `The value is too long to send: 2,100 of 2,048 bytes (…)`, no new audit line |
+| 10 | Expand a Personal text area to 4,096 and scroll | `field_expand {"label":"Notes"}`, `type {"via":"keys","keys":["Ctrl+A","Backspace"]}`, `paste {"length":4096}`, `field_scroll {"to":"top"}`, `field_scroll {"notches":5}`, `field_scroll {"to":"end"}` | counter `4,096 / 4,096`; at the top `view.firstVisibleLine` 0, `atTop true`; after 5 notches `firstVisibleLine` about 15 (three lines a notch); at the end `lastVisibleLine` = `lineCount − 1`, `atEnd true`; `bar.value` 1 at the top, about 0.8 after 5 notches, 0 at the end, `bar.agrees true` each time |
+| 11 | Cancel discards | `field_cancel` | `closed true`; `widget_read` Notes `value` unchanged |
+| 12 | Idle cost | `field_expand {"label":"Notes"}`, `perf {"frames":300}` | `focusedField.caretWrites`, `scrollWrites` 0; then `field_cancel` |
+| 13 | Non-admin | remove the SteamID from the test server's `adminlist.txt`, rejoin, reopen the Sample's page; `widget_read`, then `field_expand {"label":"Server notice"}`, `type {"text":"x"}`, `type {"via":"keys","keys":["Ctrl+Z"]}`, `field_scroll {"to":"end"}`, `field_cancel` | `control readonly`, `adminOnly true`, `expandable true`; the editor is read-only (`dialog.editor.readOnly true`, `cancel` Close, counter `N characters`), `rejected.readOnly` 1, `field.caretBlock.caretHidden true` and `caretAlpha` 0; Ctrl+Z changes nothing (`undo.ignoredReadOnly` up by 1, `undo.depth` 0); the whole value scrolls |
+| 14 | Non-admin attempt | `client setting {"action":"request","row":"…/Menu/ServerNotice","value":"not an admin"}` | `success false`, `error` `Only server administrators can change this setting.`; audit `settings refused … : Only server administrators …`; server value unchanged |
+
+Restore afterward: put the SteamID back in `adminlist.txt`, set the notice back (step 3 with empty text, then Apply), clear Notes (`field_focus Notes`, `Ctrl+A`, `Backspace`, `field_blur`), leave the client at the title screen.
+
+## `mods_ui` date-time picker actions (JOINFLOW1)
+
+Focus-free tests of the date-time picker (`IUiPanel.DateTimeField`, the settings builder's `.DateTime(...)`). **Source-checked, built and game-free tested (`DateTimePickerTests` drives the same Core handlers); the bridge half is only built; not live-verified.** Core half: `Progenitor.Ui.UiDateTimeBridge` (internal, reached by reflection from Dev's `ModsUiOps.DateTime.cs`; no plugin or network path). Client only, main thread. Each action calls the handler the matching button calls; no OS input is sent and no focus is taken. Every reply is the `mods_ui` envelope with the result in `detail`, `readback: same-drain`. Core and Dev hot-swap; no Bootstrap change.
+
+| Action and args | Does | Readback |
+|---|---|---|
+| `datetime_open {label}` | The button of the date-time row captioned `label` (its display name) on the open mod page, as a click. Refused on a grayed row. Needs the Mods workspace open. | the `datetime_read` keys plus `handler` |
+| `datetime_read` | Reads the open picker. | `{ok, open, title, viewYear, viewMonth, caption, selectedLocal (yyyy-MM-ddTHH:mm:ss), display, iso, zone, note, noteShown, precision (minute\|second), hour, minute, second, fieldValue, cells [42 × {date (yyyy-MM-dd), inMonth, selected, today}]}`; `{ok, open: false}` when none is open |
+| `datetime_month {delta}` or `{year, month}` | `delta` presses `<` (negative) or `>` that many times (at most 1,200). `{year, month}` shows that month directly; it is the one action no button does. | the `datetime_read` keys |
+| `datetime_day {day}` | Clicks day `day` of the shown month (its grid cell). | the `datetime_read` keys plus `clickedCell` (0-41) |
+| `datetime_time {hour, minute, second}` (any subset) | Presses the `-` / `+` steppers until each unit reads the asked value, the shorter way round; `second` is refused at minute precision. | the `datetime_read` keys plus `presses` |
+| `datetime_done` | Presses **Done**: closes the picker; when the value changed the field stores it and raises its change (a settings row commits or sends it). | `{ok, open, iso, fieldValue, display, handler}` |
+| `datetime_cancel` | Presses **Cancel**: closes the picker, nothing written. | `{ok, open, fieldValue, handler}` |
+
+**Bridge recipe — not run.** Needs the Sample built from this branch (its **Event time** row in the Demo section, `Menu/DemoEventTime`, default empty). Client only; no server needed. Read each state once (no polling: [no bridge polling while playing](dev-loop.md#client-testing-restrictions)).
+
+| # | Step | Command | Expect |
+|---|---|---|---|
+| 1 | Open the Sample's page | `mods_ui {"action":"open","site":"standalone"}`, `mods_ui {"action":"select","plugin":"progenitor.sample","page":"overview"}` | the Sample's mod page is on show |
+| 2 | Read the row | `mods_ui {"action":"widget_read","pane":"content"}` | `page-setting` `…/Menu/DemoEventTime`: `control datetime`, `iso ""`, `display Not set`, `zone Your time: UTC±hh:mm (<this computer's zone name>)`, `seconds false` |
+| 3 | Open the picker | `mods_ui {"action":"datetime_open","label":"Event time"}` | `ok`, `open true`, `title Event time`, `precision minute`, 42 `cells` (the first a Sunday), one `selected` (tomorrow at the next whole hour, local) and one `today` |
+| 4 | Next month | `mods_ui {"action":"datetime_month","delta":1}` | `viewMonth` one later (December → January of the next year), `caption` its name and year; `selectedLocal` unchanged |
+| 5 | Click a day | `mods_ui {"action":"datetime_day","day":17}` | `selectedLocal` the 17th of that month at the same time; that cell `selected true` |
+| 6 | Set the time | `mods_ui {"action":"datetime_time","hour":18,"minute":30}` | `hour 18`, `minute 30`, `second 0`; `iso` is that local time converted to UTC; `note ""` (unless the day is a daylight-saving change and 18:30 is affected, which it is not) |
+| 7 | Done | `mods_ui {"action":"datetime_done"}` | `open false`, `fieldValue` equals step 6's `iso`, `display` the wall-clock value with its offset |
+| 8 | Read the stored ISO | `mods_ui {"action":"widget_read","pane":"content"}` | `page-setting` `…/Menu/DemoEventTime`: `iso` equal to step 6's, `modified true`, `reset changed`, help line ends `Saved.`; the Sample's cfg holds `DemoEventTime = <iso>` |
+| 9 | Cancel discards | `datetime_open`, `datetime_day {"day":3}`, `datetime_cancel`; `widget_read` | `open false`; `iso` still step 6's |
+
+Restore afterward: press the row's reset arrow (or set `DemoEventTime` back to empty) and leave the client at the title screen.
+
+## `setting`
+
+Both sides, main thread (TEXTLIMIT1). Core's `ServerSettingsTestBridge`, reached by reflection; no plugin or network path reaches it. Source-checked and built, not live-verified.
+
+| Arguments | Side | Result |
+|---|---|---|
+| `{"action":"get","row":"<plugin guid>/<Section>/<Key>"}` | both | The synced setting's stored value on this side (the server's own value, or the client's synced copy): `{side, row, type, locked, adminEditable, canRequest, length, utf8Bytes, escapedBytes, lineBreaks, hash, value (≤200 characters) or head/tail, declared {maxLength, multiline, limit, effective}, fits}` |
+| `{"action":"audit","lines":5}` | server | The last lines (at most 200) of `BepInEx/progenitor-settings.log` |
+| `{"action":"request","row":"…","value":"…"}` (or `"repeat":"x","count":N`, at most 20,000 characters), optional `"skipClientCheck":true`, `"expected":"…"` | client | An administrator edit sent as the page's **Apply** sends it (the expected value is the client's displayed value unless given). `skipClientCheck` skips the client's own length check, as a client that does not run it would; the server's check is unchanged. Waits up to 10 s: `{done, success, error, answeredValue/answeredLength/answeredHash…, request}` |
