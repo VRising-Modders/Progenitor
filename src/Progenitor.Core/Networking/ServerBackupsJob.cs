@@ -174,13 +174,15 @@ internal static class ServerBackupsJob
         if (run.Generation != _generation || _current != run) return;
         run.Saving = false;
         run.Job.Progress.Phase = BackupProgress.PhaseCopying;
+        var zone = ServerBackupsServer.ZoneNow();
         var env = new RestoreEnvironment
         {
             BepInExRoot = bepInExRoot,
             ProgenitorVersion = ProgenitorVersion,
             Log = line => run.Lines.Enqueue(line),
             UtcNow = NowUtc,
-            LocalNow = () => NowUtc().ToLocalTime(),
+            LocalNow = () => WorldTime.ToLocal(NowUtc(), zone),
+            Zone = zone,
         };
         try
         {
@@ -340,7 +342,7 @@ internal static class ServerBackupsJob
         if (!ServerBackupsServer.TryLayout(out var layout, out _, out _)) return null;
         if (!_lastScheduledKnown)
         {
-            try { _lastScheduledUtc = WorldBackupSchedule.LastScheduledUtc(WorldBackupCatalog.List(ServerBackupsServer.Fs, layout)); }
+            try { _lastScheduledUtc = WorldBackupSchedule.LastScheduledUtc(WorldBackupCatalog.List(ServerBackupsServer.Fs, layout, ServerBackupsServer.ZoneNow())); }
             catch { _lastScheduledUtc = null; }
             _lastScheduledKnown = true;
             try

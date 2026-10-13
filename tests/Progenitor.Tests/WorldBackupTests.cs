@@ -71,9 +71,9 @@ public sealed class WorldBackupTests
         Assert.Null(WorldRestoreApply.MatchesSidecar(f.Fs, o.BackupPath, WorldManifest.Build(f.Fs, o.BackupPath, hash: true, WorldRestoreApply.SkipForStaging)));
 
         // Listed as its own kind, restorable, and never part of the restore chain.
-        var e = WorldBackupCatalog.List(f.Fs, f.Layout).Single(x => x.FolderName == o.FolderName);
+        var e = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Single(x => x.FolderName == o.FolderName);
         Assert.Equal("Manual backup", e.KindLabel);
-        Assert.Equal("Manual backup from " + WorldBackupCatalog.FormatTime(NowUtc.ToLocalTime()), e.DisplayName);
+        Assert.Equal("Manual backup from " + WorldBackupCatalog.FormatTime(WorldTime.ToLocal(NowUtc, WorldRestoreApplyTests.Zone)), e.DisplayName);
         Assert.StartsWith("the manual backup from ", e.BaseLabel);
         Assert.True(e.Restorable);
         Assert.True(e.IsMadeBackup);
@@ -300,7 +300,7 @@ public sealed class WorldBackupTests
         }
 
         // A restore of the oldest manual backup is waiting: retention keeps it.
-        var oldest = WorldBackupCatalog.List(f.Fs, f.Layout).Single(e => e.FolderName == made[0]);
+        var oldest = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Single(e => e.FolderName == made[0]);
         var request = f.Request();
         request.SourceKind = WorldBackupEntry.KindBackup;
         request.SourcePath = oldest.Path;
@@ -347,7 +347,7 @@ public sealed class WorldBackupTests
         var job = Job(f, WorldRestorePaths.KindScheduled);
         job.Trigger = WorldRestorePaths.TriggerStart;
         Assert.True(WorldBackupMaker.Make(f.Fs, job, f.Env()).Ok);
-        var last = WorldBackupSchedule.LastScheduledUtc(WorldBackupCatalog.List(f.Fs, f.Layout));
+        var last = WorldBackupSchedule.LastScheduledUtc(WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone));
         Assert.Equal(NowUtc, last);
         Assert.Equal(NowUtc.AddHours(4), WorldBackupSchedule.NextDueUtc(4, last, NowUtc.AddMinutes(-1), null));
     }

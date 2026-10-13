@@ -17,7 +17,14 @@ namespace Progenitor.Tests;
 /// </summary>
 public sealed class WorldRestoreApplyTests
 {
-    internal static readonly DateTime Local0 = new(2026, 10, 7, 9, 30, 0, DateTimeKind.Local);
+    /// <summary>
+    /// The zone the fixtures' local times are in: <see cref="Local0"/> 09:30 is the clock's 13:30 UTC. Fixed (no daylight
+    /// saving), so the expected names and world ages read the same on a machine in any zone, CI's UTC included.
+    /// </summary>
+    internal static readonly TimeZoneInfo Zone =
+        TimeZoneInfo.CreateCustomTimeZone("Progenitor test UTC-4", TimeSpan.FromHours(-4), "Progenitor test UTC-4", "Progenitor test UTC-4");
+
+    internal static readonly DateTime Local0 = new(2026, 10, 7, 9, 30, 0, DateTimeKind.Unspecified);
 
     /// <summary>One save with a wipe archive, a Progenitor backup and the host settings, on a fake file system.</summary>
     internal sealed class Fixture
@@ -78,7 +85,7 @@ public sealed class WorldRestoreApplyTests
             }
         }
 
-        internal WorldBackupEntry Entry(string kind) => WorldBackupCatalog.List(Fs, Layout).First(x => x.Kind == kind);
+        internal WorldBackupEntry Entry(string kind) => WorldBackupCatalog.List(Fs, Layout, WorldRestoreApplyTests.Zone).First(x => x.Kind == kind);
 
         internal RestoreRequest Request(string kind = WorldBackupEntry.KindArchive, string wipe = WipeModes.None, int interval = 0, string day = "",
             string date = "2026-10-20")
@@ -109,6 +116,7 @@ public sealed class WorldRestoreApplyTests
         {
             UtcNow = () => new DateTime(2026, 10, 7, 13, 30, 0, DateTimeKind.Utc),
             LocalNow = () => Local0,
+            Zone = Zone,
             Args = new[] { "VRisingServer.exe", "-persistentDataPath", Persist, "-saveName", "world1" },
             ProcessPath = Path.Combine(FakeWorldFs.Root, "server", "VRisingServer.exe"),
             ProgenitorVersion = "test",
@@ -146,7 +154,7 @@ public sealed class WorldRestoreApplyTests
         Assert.DoesNotContain(f.Fs.Dirs, d => Path.GetFileName(d).EndsWith(".partial", StringComparison.OrdinalIgnoreCase)
             || Path.GetFileName(d).StartsWith(".incoming", StringComparison.Ordinal) || Path.GetFileName(d).StartsWith(".outgoing", StringComparison.Ordinal));
         Assert.False(f.Fs.Has(f.Journal), context + ": the journal is gone");
-        Assert.Equal(backups, WorldBackupCatalog.List(f.Fs, f.Layout).Count(e => e.Kind == WorldBackupEntry.KindBackup));
+        Assert.Equal(backups, WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Count(e => e.Kind == WorldBackupEntry.KindBackup));
     }
 
     [Fact]
@@ -178,7 +186,7 @@ public sealed class WorldRestoreApplyTests
         Assert.All(sidecar.Files, x => Assert.Equal(64, x.Sha256.Length));
         Assert.Equal("Before restore of the wipe archive from Wed, Sep 30, 2026 4:00 AM, Wed, Oct 7, 2026 9:30 AM", r.BackupName);
         Assert.Equal("Restored the wipe archive from Wed, Sep 30, 2026 4:00 AM. Backup of the previous world: " + r.BackupName + ".", r.Summary);
-        var listed = WorldBackupCatalog.List(f.Fs, f.Layout);
+        var listed = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone);
         Assert.Contains(listed, e => e.DisplayName == "Before restore of the wipe archive from Wed, Sep 30, 2026 4:00 AM, Wed, Oct 7, 2026 9:30 AM");
         var newest = WorldManifest.NewestSave(WorldManifest.Build(f.Fs, f.Save, hash: false))!;
         Assert.Equal("AutoSave_4.save.gz", newest.Path);
@@ -464,7 +472,7 @@ public sealed class WorldRestoreApplyTests
         WorldRestoreMarker.Write(f.Fs, f.BepInEx, f.Request());
         WorldRestoreMarker.ApplyAtStart(f.Fs, f.BepInEx, f.Env());
         Assert.True(f.Fs.HasDir(f.Outgoing()));
-        int before = WorldBackupCatalog.List(f.Fs, f.Layout).Count(e => e.Kind == WorldBackupEntry.KindBackup);
+        int before = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Count(e => e.Kind == WorldBackupEntry.KindBackup);
 
         var second = f.Request(WorldBackupEntry.KindBackup);
         second.RequestId = "20261007-100000-beef";
@@ -472,7 +480,7 @@ public sealed class WorldRestoreApplyTests
         var r = WorldRestoreMarker.ApplyAtStart(f.Fs, f.BepInEx, f.Env())!;
         Assert.True(r.Ok, r.Summary);
         Assert.False(f.Fs.HasDir(f.Outgoing()));
-        var backups = WorldBackupCatalog.List(f.Fs, f.Layout).Where(e => e.Kind == WorldBackupEntry.KindBackup).ToList();
+        var backups = WorldBackupCatalog.List(f.Fs, f.Layout, WorldRestoreApplyTests.Zone).Where(e => e.Kind == WorldBackupEntry.KindBackup).ToList();
         // The replaced world became a backup of its own, and the second restore made one more.
         Assert.Equal(before + 2, backups.Count);
         Assert.Contains(backups, e => e.FolderName.EndsWith("-replaced", StringComparison.Ordinal));

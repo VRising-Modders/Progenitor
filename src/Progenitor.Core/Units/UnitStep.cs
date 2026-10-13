@@ -264,8 +264,8 @@ public sealed class UnitStep
         UnitStepKind.Follow => "Follow " + Target,
         UnitStepKind.FaceEntity => "Face " + Target,
         UnitStepKind.FacePosition => "Face " + Position,
-        UnitStepKind.Wait => "Wait " + Seconds.ToString("0.##") + "s",
-        UnitStepKind.Animate => "Animate '" + Animation + "' " + Seconds.ToString("0.##") + "s",
+        UnitStepKind.Wait => "Wait " + Seconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "s",
+        UnitStepKind.Animate => "Animate '" + Animation + "' " + Seconds.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "s",
         UnitStepKind.Invoke => CallbackDropped ? "Then (" + CallbackDroppedReason + ")" : "Then",
         _ => "Idle",
     };

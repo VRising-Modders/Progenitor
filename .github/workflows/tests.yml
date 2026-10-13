@@ -27,6 +27,14 @@ jobs:
       - name: Test
         run: dotnet test tests/Progenitor.Tests --configuration Release --logger trx
 
+      # The runner is in UTC with en-US; run the suite again as a machine at UTC+14 with a decimal comma, so a test that
+      # depends on the machine's zone or culture fails here and not only on someone's machine (docs/dev-loop.md#ci).
+      - name: Test in another time zone and culture
+        env:
+          PROGENITOR_TEST_TIME_ZONE: Line Islands Standard Time
+          PROGENITOR_TEST_CULTURE: de-DE
+        run: dotnet test tests/Progenitor.Tests --configuration Release --no-build
+
       # Mod compatibility C5: Progenitor.Testing and the samples' replay tests (game-free, like the suite above).
       - name: Test Progenitor.Testing
         run: dotnet test tests/Progenitor.Testing.Tests --configuration Release --logger trx

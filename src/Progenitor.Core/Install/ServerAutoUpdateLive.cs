@@ -494,7 +494,7 @@ internal static class ServerAutoUpdateLive
     private static IReadOnlyList<WorldBackupEntry> BackupEntries()
     {
         if (!ServerBackupsServer.TryLayout(out var layout, out _, out _)) return Array.Empty<WorldBackupEntry>();
-        return WorldBackupCatalog.List(ServerBackupsServer.Fs, layout);
+        return WorldBackupCatalog.List(ServerBackupsServer.Fs, layout, ServerBackupsServer.ZoneNow());
     }
 
     // ---- the Server tab -----------------------------------------------------------------------------------

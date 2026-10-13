@@ -87,6 +87,8 @@ namespace Progenitor.Tests
             ResetArt();
             var saved = new DateTime(2026, 9, 29, 10, 0, 0, DateTimeKind.Utc);
             KeybindGameCache.UtcNow = () => saved;
+            // The note's dates are local; a fixed zone keeps the expected date the same on every machine.
+            KeybindGameCache.Zone = () => TimeZoneInfo.Utc;
             UseGame(GameIn("Interact", new KeyChord(UiKey.E), GameKeybindCatalog.General, description: "Use things"),
                 new KeybindClaim(KeybindSource.Game, KeybindArbiter.GameOwnerId, "Primary", "Primary", KeyChord.None,
                     chordText: "Left Mouse", comparable: false, category: GameKeybindCatalog.Skills),

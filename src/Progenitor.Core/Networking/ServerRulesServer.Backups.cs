@@ -38,6 +38,16 @@ internal static class ServerBackupsServer
     internal static Func<DateTime> NowLocal { get; set; } = () => DateTime.Now;
     internal static Func<DateTime> NowUtc { get; set; } = () => DateTime.UtcNow;
 
+    /// <summary>The zone <see cref="NowLocal"/> runs in: the restore points' times and the shown times are read in it (default: the machine's zone).</summary>
+    internal static Func<TimeZoneInfo> Zone { get; set; } = () => TimeZoneInfo.Local;
+
+    /// <summary><see cref="Zone"/>, or the machine's zone when it fails.</summary>
+    internal static TimeZoneInfo ZoneNow()
+    {
+        try { return Zone() ?? TimeZoneInfo.Local; }
+        catch { return TimeZoneInfo.Local; }
+    }
+
     /// <summary>"Restore and restart now": start the countdown that stops the server. Null when started, else why not.</summary>
     internal static Func<string, string?>? StartRestartCountdown { get; set; }
 
@@ -240,7 +250,7 @@ internal static class ServerBackupsServer
         s.RestoreRefusal = refusal;
         if (layout.SaveFolder != null && layout.SaveFolder.Length > 0)
         {
-            try { all = WorldBackupCatalog.List(Fs, layout); }
+            try { all = WorldBackupCatalog.List(Fs, layout, ZoneNow()); }
             catch (Exception e) { Plugin.Logger?.LogWarning("WorldRestore: listing the restore points threw: " + e.Message); }
             try { s.CurrentBytes = WorldManifest.TotalBytes(WorldManifest.Build(Fs, layout.SaveFolder, hash: false)); }
             catch { s.CurrentBytes = 0; }
@@ -249,8 +259,8 @@ internal static class ServerBackupsServer
             s.AutosaveKnown = !autosaves.Missing;
             s.AutosaveCount = autosaves.Count;
             s.AutosaveBytes = autosaves.Bytes;
-            s.AutosaveNewest = autosaves.NewestUtc?.ToLocalTime().ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture) ?? "";
-            s.AutosaveOldest = autosaves.OldestUtc?.ToLocalTime().ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture) ?? "";
+            s.AutosaveNewest = autosaves.NewestUtc is { } newest ? WorldTime.ToLocal(newest, ZoneNow()).ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture) : "";
+            s.AutosaveOldest = autosaves.OldestUtc is { } oldest ? WorldTime.ToLocal(oldest, ZoneNow()).ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture) : "";
         }
 
         // M1: what the next restore's retention would delete (its new backup counted, the pending request's source kept).
@@ -341,7 +351,7 @@ internal static class ServerBackupsServer
         try
         {
             if (ServerBackupsJob.NextDueUtc(settings, all) is { } due)
-                s.NextScheduled = due.ToLocalTime().ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture);
+                s.NextScheduled = WorldTime.ToLocal(due, ZoneNow()).ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture);
         }
         catch { /* no schedule line */ }
 
@@ -357,7 +367,7 @@ internal static class ServerBackupsServer
         {
             s.LastBackupSummary = last.Summary;
             s.LastBackupOk = last.Ok;
-            s.LastBackupFinished = last.FinishedUtc == default ? "" : last.FinishedUtc.ToLocalTime().ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture);
+            s.LastBackupFinished = last.FinishedUtc == default ? "" : WorldTime.ToLocal(last.FinishedUtc, ZoneNow()).ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture);
         }
 
         if (!string.IsNullOrEmpty(root))
@@ -366,7 +376,7 @@ internal static class ServerBackupsServer
             if (failure != null)
             {
                 s.ScheduleFailure = failure.Summary;
-                s.ScheduleFailureAt = failure.FinishedUtc == default ? "" : failure.FinishedUtc.ToLocalTime().ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture);
+                s.ScheduleFailureAt = failure.FinishedUtc == default ? "" : WorldTime.ToLocal(failure.FinishedUtc, ZoneNow()).ToString(ServerBackups.LocalFormat, CultureInfo.InvariantCulture);
             }
         }
 
@@ -377,7 +387,7 @@ internal static class ServerBackupsServer
             if (!string.IsNullOrEmpty(root) && WorldRestoreMarker.ReadPending(Fs, root!, out _) is { } p) pendingSource = p.SourcePath;
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (string kind in new[] { WorldRestorePaths.KindManual, WorldRestorePaths.KindScheduled })
-                foreach (var e in WorldBackupRetention.NextDeletes(all, settings.Policy, NowUtc(), kind, pendingSource))
+                foreach (var e in WorldBackupRetention.NextDeletes(all, settings.Policy, NowUtc(), kind, ZoneNow(), pendingSource))
                     if (seen.Add(e.Id) && s.PruneNextBackup.Count < ServerBackups.MaxEntries)
                         s.PruneNextBackup.Add(new ServerBackupView { Id = e.Id, Name = e.DisplayName });
         }
@@ -631,6 +641,7 @@ internal static class ServerBackupsServer
         ArgsProbe = null;
         NowLocal = () => DateTime.Now;
         NowUtc = () => DateTime.UtcNow;
+        Zone = () => TimeZoneInfo.Local;
         StartRestartCountdown = null;
         CountdownProbe = null;
         CancelCountdown = null;

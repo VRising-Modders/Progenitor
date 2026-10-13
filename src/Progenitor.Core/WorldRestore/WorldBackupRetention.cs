@@ -156,7 +156,7 @@ internal static class WorldBackupRetention
             var keepPaths = new List<string?>(protect ?? Array.Empty<string?>());
             if (!string.IsNullOrEmpty(env.BepInExRoot) && WorldRestoreMarker.ReadPending(fs, env.BepInExRoot, out _) is { } pending)
                 keepPaths.Add(pending.SourcePath);
-            foreach (var old in PreUpdatePruneList(WorldBackupCatalog.List(fs, layout), keep, keepPaths.ToArray()))
+            foreach (var old in PreUpdatePruneList(WorldBackupCatalog.List(fs, layout, env.Zone), keep, keepPaths.ToArray()))
             {
                 try
                 {
@@ -174,12 +174,11 @@ internal static class WorldBackupRetention
         catch (Exception e) { warnings.Add("Pre-update backup retention did not run (" + e.Message + ")."); }
     }
 
-    /// <summary>Days since the backup was made (fractional), from its local creation time.</summary>
+    /// <summary>Days since the backup was made (fractional), from its UTC creation time (a hand-built entry: its local one).</summary>
     internal static double AgeDays(WorldBackupEntry e, DateTime nowUtc)
     {
-        if (e.CreatedLocal == DateTime.MinValue) return double.MaxValue;
-        var made = e.CreatedLocal.Kind == DateTimeKind.Utc ? e.CreatedLocal : DateTime.SpecifyKind(e.CreatedLocal, DateTimeKind.Local).ToUniversalTime();
-        return (nowUtc.ToUniversalTime() - made).TotalDays;
+        if (e.CreatedLocal == DateTime.MinValue && e.CreatedUtc == default) return double.MaxValue;
+        return (nowUtc.ToUniversalTime() - e.CreatedUtcOr(null)).TotalDays;
     }
 
     /// <summary>
@@ -187,14 +186,21 @@ internal static class WorldBackupRetention
     /// of that kind, made now).
     /// </summary>
     internal static List<WorldBackupEntry> NextDeletes(IReadOnlyList<WorldBackupEntry> entries, BackupPolicy policy, DateTime nowUtc, string kind,
-        params string?[] protect)
+        params string?[] protect) =>
+        NextDeletes(entries, policy, nowUtc, kind, null, protect);
+
+    /// <summary><see cref="NextDeletes(IReadOnlyList{WorldBackupEntry}, BackupPolicy, DateTime, string, string?[])"/> for entries the catalog read in <paramref name="zone"/>.</summary>
+    internal static List<WorldBackupEntry> NextDeletes(IReadOnlyList<WorldBackupEntry> entries, BackupPolicy policy, DateTime nowUtc, string kind,
+        TimeZoneInfo? zone, params string?[] protect)
     {
         var imagined = new List<WorldBackupEntry>(entries)
         {
             new()
             {
                 Kind = WorldBackupEntry.KindBackup, BackupKind = kind, FolderName = "(next)", Path = "(next " + kind + ")",
-                CreatedLocal = nowUtc.ToLocalTime().AddSeconds(1),
+                // Newest of its kind in any zone: the catalog's entries sort by their local times, read in its zone.
+                CreatedLocal = WorldTime.ToLocal(nowUtc, zone).AddSeconds(1),
+                CreatedUtc = DateTime.SpecifyKind(nowUtc.ToUniversalTime(), DateTimeKind.Utc).AddSeconds(1),
             },
         };
         var list = PruneList(imagined, policy, nowUtc, protect);
@@ -214,7 +220,7 @@ internal static class WorldBackupRetention
             var keep = new List<string?>(protect ?? Array.Empty<string?>());
             if (!string.IsNullOrEmpty(env.BepInExRoot) && WorldRestoreMarker.ReadPending(fs, env.BepInExRoot, out _) is { } pending)
                 keep.Add(pending.SourcePath);
-            var entries = WorldBackupCatalog.List(fs, layout);
+            var entries = WorldBackupCatalog.List(fs, layout, env.Zone);
             foreach (var old in PruneList(entries, policy, env.UtcNow(), keep.ToArray()))
             {
                 try

@@ -288,6 +288,9 @@ internal static class KeybindGameCache
     /// <summary>The clock for the age text; a seam for tests.</summary>
     internal static Func<DateTime> UtcNow { get; set; } = () => DateTime.UtcNow;
 
+    /// <summary>The zone the note's dates are in (default: the machine's); a seam for tests.</summary>
+    internal static Func<TimeZoneInfo> Zone { get; set; } = () => TimeZoneInfo.Local;
+
     private static string? DefaultDirectory()
     {
 #if PROGENITOR_TESTS
@@ -420,9 +423,21 @@ internal static class KeybindGameCache
     internal static string ReadNote(DateTime savedUtc)
     {
         var now = UtcNow();
-        bool today = savedUtc.ToLocalTime().Date == now.ToLocalTime().Date;
+        var saved = ToLocal(savedUtc);
+        bool today = saved.Date == ToLocal(now).Date;
         return today ? "As last read in a world today."
-            : "As last read in a world on " + savedUtc.ToLocalTime().ToString("MMMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture) + ".";
+            : "As last read in a world on " + saved.ToString("MMMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture) + ".";
+    }
+
+    /// <summary>A UTC time in <see cref="Zone"/> (the machine's zone: exactly <see cref="DateTime.ToLocalTime"/>).</summary>
+    private static DateTime ToLocal(DateTime utc)
+    {
+        TimeZoneInfo zone;
+        try { zone = Zone() ?? TimeZoneInfo.Local; }
+        catch { zone = TimeZoneInfo.Local; }
+        if (ReferenceEquals(zone, TimeZoneInfo.Local)) return utc.ToLocalTime();
+        if (utc.Kind == DateTimeKind.Local) utc = utc.ToUniversalTime();
+        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone);
     }
 
     /// <summary><c>today</c>, <c>1 day ago</c>, <c>5 days ago</c>.</summary>
@@ -453,5 +468,6 @@ internal static class KeybindGameCache
 
         Directory = DefaultDirectory;
         UtcNow = () => DateTime.UtcNow;
+        Zone = () => TimeZoneInfo.Local;
     }
 }

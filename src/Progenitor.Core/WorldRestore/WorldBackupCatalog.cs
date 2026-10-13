@@ -21,6 +21,16 @@ internal sealed class WorldBackupEntry
     /// <summary>When it was made: the wipe (archive, from its ticks) or the backup (its sidecar), local time.</summary>
     public DateTime CreatedLocal { get; set; }
 
+    /// <summary>
+    /// When it was made, UTC: a backup's sidecar time, or an archive's wipe time read in the catalog's zone. Default (unset)
+    /// for an entry built by hand; <see cref="CreatedUtcOr"/> then converts <see cref="CreatedLocal"/>.
+    /// </summary>
+    public DateTime CreatedUtc { get; set; }
+
+    /// <summary><see cref="CreatedUtc"/>, else <see cref="CreatedLocal"/> read in <paramref name="zone"/> (null: the machine's zone).</summary>
+    internal DateTime CreatedUtcOr(TimeZoneInfo? zone) =>
+        CreatedUtc != default ? DateTime.SpecifyKind(CreatedUtc, DateTimeKind.Utc) : WorldTime.ToUtc(CreatedLocal, zone);
+
     /// <summary>The newest save file's write time (UTC), or null when the folder has none.</summary>
     public DateTime? LastPlayedUtc { get; set; }
 
@@ -120,8 +130,11 @@ internal static class WorldBackupCatalog
 
     internal static string FormatTime(DateTime local) => local.ToString("ddd, MMM d, yyyy h:mm tt", English);
 
-    /// <summary>The restore points of the save at <paramref name="layout"/>, newest first.</summary>
-    internal static List<WorldBackupEntry> List(IWorldFs fs, WorldRestorePaths.SaveLayout layout)
+    /// <summary>
+    /// The restore points of the save at <paramref name="layout"/>, newest first, their times read in <paramref name="zone"/>
+    /// (null: the machine's zone; the apply and backup paths pass <see cref="RestoreEnvironment.Zone"/>).
+    /// </summary>
+    internal static List<WorldBackupEntry> List(IWorldFs fs, WorldRestorePaths.SaveLayout layout, TimeZoneInfo? zone = null)
     {
         var list = new List<WorldBackupEntry>();
         foreach (string dir in SafeDirs(fs, layout.VersionRoot))
@@ -129,8 +142,9 @@ internal static class WorldBackupCatalog
             string name = System.IO.Path.GetFileName(dir);
             if (!WorldRestorePaths.IsArchiveName(layout.SaveName, name, out long ticks)) continue;
             if (WorldRestorePaths.ArchiveTime(ticks) is not { } when) continue;
-            var e = Describe(fs, dir, WorldBackupEntry.KindArchive, null);
+            var e = Describe(fs, dir, WorldBackupEntry.KindArchive, null, zone);
             e.CreatedLocal = when;
+            e.CreatedUtc = WorldTime.ToUtc(when, zone);
             list.Add(e);
         }
 
@@ -144,8 +158,9 @@ internal static class WorldBackupCatalog
             try { if (sidecarPath != null) sidecar = BackupSidecar.Parse(fs.ReadAllBytes(sidecarPath)); }
             catch { sidecar = null; }
             if (sidecar == null) continue;
-            var e = Describe(fs, dir, WorldBackupEntry.KindBackup, sidecar);
-            e.CreatedLocal = sidecar.CreatedUtc == default ? DateTime.MinValue : sidecar.CreatedUtc.ToLocalTime();
+            var e = Describe(fs, dir, WorldBackupEntry.KindBackup, sidecar, zone);
+            e.CreatedLocal = sidecar.CreatedUtc == default ? DateTime.MinValue : WorldTime.ToLocal(sidecar.CreatedUtc, zone);
+            e.CreatedUtc = sidecar.CreatedUtc == default ? default : DateTime.SpecifyKind(sidecar.CreatedUtc, DateTimeKind.Utc);
             e.BackupKind = sidecar.Kind;
             e.RestoreOf = sidecar.RestoreOf;
             e.ChainId = sidecar.ChainId;
@@ -164,8 +179,11 @@ internal static class WorldBackupCatalog
         catch { return Array.Empty<string>(); }
     }
 
-    /// <summary>A folder as a restore point: its files (minus <c>.TEMP</c> and the sidecar), start date, age and size.</summary>
-    internal static WorldBackupEntry Describe(IWorldFs fs, string dir, string kind, BackupSidecar? sidecar)
+    /// <summary>
+    /// A folder as a restore point: its files (minus <c>.TEMP</c> and the sidecar), start date, age (the day of its newest
+    /// save in <paramref name="zone"/>; null: the machine's zone) and size.
+    /// </summary>
+    internal static WorldBackupEntry Describe(IWorldFs fs, string dir, string kind, BackupSidecar? sidecar, TimeZoneInfo? zone = null)
     {
         string name = System.IO.Path.GetFileName(dir);
         var e = new WorldBackupEntry { Id = kind + ":" + name, Kind = kind, FolderName = name, Path = dir };
@@ -184,7 +202,7 @@ internal static class WorldBackupCatalog
         e.LastPlayedUtc = newest?.LastWriteUtc;
         e.StartDate = ReadStartDate(fs, dir) ?? WorldRestoreWipe.ParseStartDate(sidecar?.StartDate);
         if (e.StartDate is { } start && e.LastPlayedUtc is { } played)
-            e.AgeDays = Math.Max(0, (int)(played.ToLocalTime().Date - start).TotalDays);
+            e.AgeDays = Math.Max(0, (int)(WorldTime.ToLocal(played, zone).Date - start).TotalDays);
         if (newest == null) e.Reason = "It holds no save file.";
         else e.Restorable = true;
         return e;
@@ -284,6 +302,36 @@ internal static class WorldBackupCatalog
         double mb = kb / 1024.0;
         if (mb < 1024) return mb.ToString("0.#", CultureInfo.InvariantCulture) + " MB";
         return (mb / 1024.0).ToString("0.##", CultureInfo.InvariantCulture) + " GB";
+    }
+}
+
+/// <summary>
+/// The world backup and restore path's conversion between UTC and local time. Callers pass the zone their environment
+/// names (<see cref="RestoreEnvironment.Zone"/>, <c>ServerBackupsServer.Zone</c>). Null or the machine's own zone (what
+/// production passes) converts exactly as <see cref="DateTime.ToLocalTime"/> and <see cref="DateTime.ToUniversalTime"/>
+/// do; tests pass a fixed zone so the suite reads the same in every machine zone.
+/// </summary>
+internal static class WorldTime
+{
+    /// <summary><paramref name="utc"/> (Unspecified counts as UTC, as <see cref="DateTime.ToLocalTime"/> reads it) in <paramref name="zone"/>.</summary>
+    internal static DateTime ToLocal(DateTime utc, TimeZoneInfo? zone)
+    {
+        if (zone == null || ReferenceEquals(zone, TimeZoneInfo.Local)) return utc.ToLocalTime();
+        if (utc.Kind == DateTimeKind.Local) utc = utc.ToUniversalTime();
+        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), zone);
+    }
+
+    /// <summary>
+    /// A wall-clock time of <paramref name="zone"/> as UTC (a UTC value is returned as is). A time the zone skips (its clock
+    /// moved forward) reads with the zone's standard offset rather than throw.
+    /// </summary>
+    internal static DateTime ToUtc(DateTime local, TimeZoneInfo? zone)
+    {
+        if (local.Kind == DateTimeKind.Utc) return local;
+        if (zone == null || ReferenceEquals(zone, TimeZoneInfo.Local)) return DateTime.SpecifyKind(local, DateTimeKind.Local).ToUniversalTime();
+        var wall = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        if (zone.IsInvalidTime(wall)) return DateTime.SpecifyKind(wall - zone.BaseUtcOffset, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeToUtc(wall, zone);
     }
 }
 
