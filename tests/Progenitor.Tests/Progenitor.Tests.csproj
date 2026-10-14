@@ -69,6 +69,8 @@
     <Compile Include="..\..\samples\Progenitor.Sample\SampleForms.cs" Link="Linked\SampleForms.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleCamera.cs" Link="Linked\SampleCamera.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleCompat.cs" Link="Linked\SampleCompat.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleExchange.cs" Link="Linked\SampleExchange.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleExchangeMessages.cs" Link="Linked\SampleExchangeMessages.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerAccountId.cs" Link="Linked\PlayerAccountId.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerSessionRef.cs" Link="Linked\PlayerSessionRef.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerInfo.cs" Link="Linked\PlayerInfo.cs" />
@@ -600,6 +602,11 @@
     <Compile Include="..\..\src\Progenitor.Core\Networking\ModFeatures.cs" Link="Linked\ModFeatures.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageCodec.cs" Link="Linked\ModMessageCodec.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageEnvelope.cs" Link="Linked\ModMessageEnvelope.cs" />
+    <!-- Requests, large messages and subscriptions: the 'PrXc' chunk frame, reassembly, send queue and both state machines
+         (game-free; ExchangeNet.cs and Plugins/PluginExchange.cs are the live halves). -->
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ExchangeWire.cs" Link="Linked\ExchangeWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ExchangeEngine.cs" Link="Linked\ExchangeEngine.cs" />
+    <Compile Include="..\..\src\Progenitor.Testing\ExchangeLoopback.cs" Link="Linked\ExchangeLoopback.cs" />
     <!-- Mod compatibility C5: the message fixture format and the bounded recorder behind messages_record (game-free). -->
     <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageFixtures.cs" Link="Linked\ModMessageFixtures.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\MessagesRecordArgs.cs" Link="Linked\MessagesRecordArgs.cs" />

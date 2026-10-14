@@ -228,6 +228,10 @@ public sealed class Plugin : ProgenitorPlugin<SampleContext>
         // .shot packet; the server registers `.compat`, which prints both sides' views. See SampleCompat.cs.
         SampleCompat.Attach(ctx);
 
+        // ctx.Requests and ctx.Subscriptions: the server registers `.request` and `.subscribe`, a request handler and the
+        // `board` topic; the client sends the request or subscribes when the server asks it to. See SampleExchange.cs.
+        SampleExchange.Attach(ctx);
+
         // Map-scope keybinds (ctx.Keybinds.RegisterInMap / RegisterHoldInMap) and the WorldMap
         // pointer: a client-only map ruler. See SampleMap.cs.
         SampleMap.Attach(ctx);

@@ -224,6 +224,8 @@ public sealed class Plugin
         // Registered through the owned-id path like every Core channel. One side each.
         try { Networking.ModCompatNet.Install(); }
         catch (Exception e) { Logger?.LogWarning($"ModCompatNet.Install: {e.Message}"); }
+        try { Networking.ExchangeNet.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"ExchangeNet.Install: {e.Message}"); }
         // Job FCOMPAT3: [Compat] RewriteMode is bound like every other Core section, through
         // ConfigHelper on the shared ConfigFile, so the key and its description appear in
         // BepInEx/config/progenitor.cfg instead of being an undocumented string an
@@ -359,6 +361,8 @@ public sealed class Plugin
             Progenitor.Chat.ChatCommandHintsServer.Uninstall();
         }
         catch (Exception e) { Logger?.LogWarning($"ChatCommandHints.Uninstall: {e.Message}"); }
+        try { Networking.ExchangeNet.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"ExchangeNet.Uninstall: {e.Message}"); }
         try { Networking.ModCompatNet.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ModCompatNet.Uninstall: {e.Message}"); }
         try { Progenitor.Ui.Ui.Uninstall(); }

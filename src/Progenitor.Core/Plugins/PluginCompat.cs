@@ -156,7 +156,7 @@ public sealed class PluginMessages
         }
     }
 
-    private static ModMessageAttribute Attr(MessageSchema schema)
+    internal static ModMessageAttribute Attr(MessageSchema schema)
     {
         var attr = schema.Message ?? throw new InvalidOperationException(schema.Type.FullName + " has no [ModMessage] attribute.");
         if (!ModMessageEnvelope.IsValidName(attr.Name))

@@ -183,7 +183,8 @@ public sealed class MessageFixtures
             MinReaderVersion = attr.MinReaderVersion,
             Direction = string.IsNullOrWhiteSpace(direction) ? ModMessageFixtureFormat.AnyDirection : direction.Trim(),
             Source = "test",
-            Payload = MessageCompat.EncodeWith(schema, message),
+            // Up to the exchange's limit: a request, reply, snapshot or delta may span several packets.
+            Payload = MessageCompat.EncodeWith(schema, message, ExchangeLimits.MaxBodyBytes),
             Schema = schema.Shape(),
         };
         try

@@ -67,3 +67,13 @@ The Sample's other packets stay raw `ctx.Net` on purpose: the Sample is declared
 Status: source-checked, built and game-free tested (`SampleCompatTests`), **not verified live**.
 
 **Acceptance procedure (not run).** With the Sample on the test client and the isolated test server, joined: `.compat` replies `This server's Sample offers no features.`, `Your client, as this server sees it: Progenitor <version>; this mod <version>; camera yes.` and `Asked your client for its view; …`; the client log shows `Sample compat: this client offers camera=1.` and `Sample compat: the joined server: Progenitor <version>; this mod <version>; camera no.`
+
+## Requests and subscriptions (`.request`, `.subscribe`)
+
+`SampleExchange.cs` is the plugin example for `ctx.Requests` and `ctx.Subscriptions` ([modules.md](../../docs/modules.md#requests-large-messages-and-subscriptions)). Its message types are in `SampleExchangeMessages.cs`, which `tests/Progenitor.Testing.Tests` links for its round-trip and replay tests. Chat commands run on the server, so each command asks the caller's client to act with a versioned message (`exchange.start`). The client acts and logs `Sample exchange: …`, and its result comes back to the player as a whisper.
+
+- **`.request [kib]`** (default 64, range 1 to 1000). The client sends `exchange.blob.get`. The server's handler answers with that many deterministic bytes and their checksum; 64 KiB takes five packets. The handler allows a burst of 3 requests, then one every two seconds. The client checks the checksum.
+- **`.subscribe start|stop [key]`** (default key `lobby`). `start` subscribes the client to the server's `board` topic for that key. The client logs the snapshot (padded to two packets) and every line posted after it. `stop` unsubscribes.
+- **`.subscribe post [@key] <text>`** appends a line and publishes it to every subscriber. **`.subscribe status [key]`** shows the board and its subscribers.
+
+Status: source-checked, built and game-free tested (`SampleExchangeTests`, `SampleExchangeRoundTripTests`), **not verified live**. Acceptance procedure: [modules.md](../../docs/modules.md#live-acceptance-procedure-not-run).

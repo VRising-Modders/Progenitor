@@ -322,6 +322,14 @@ public static partial class Handshake
         /// same way whatever it declared.
         /// </summary>
         ProgenitorExact = 67108864,
+
+        /// <summary>
+        /// Requests, large messages and subscriptions (docs/modules.md): this peer reads the <c>'PrXc'</c> exchange channel
+        /// (<c>ctx.Requests</c>, <c>ctx.Subscriptions</c>). Both directions, like <see cref="ModMessages"/>: exchange traffic
+        /// goes only to a peer that declared it and whose feature table lists the mod; anything else is refused at the
+        /// sender with <c>SendResult.PeerTooOld</c> or <c>PeerLacksMod</c>.
+        /// </summary>
+        ModExchange = 134217728,
     }
 
     /// <summary>This Core's version for a refusal's text, or empty when it cannot be read.</summary>
@@ -350,7 +358,7 @@ public static partial class Handshake
         | Capability.JoinAdmin | Capability.ClientPolicy | Capability.ClientFix | Capability.PolicyRecheck
         | Capability.CommandHints | Capability.PolicyRuleUpdates | Capability.ModFeatures | Capability.ModMessages
         | Capability.ItemStatSync | Capability.ItemLedgerChunks | Capability.ItemDefinitionPriority
-        | Capability.VersionRanges | Capability.ProgenitorExact;
+        | Capability.VersionRanges | Capability.ProgenitorExact | Capability.ModExchange;
 
     /// <summary>
     /// Reserved row carrying <see cref="Capability"/>. Reserved like

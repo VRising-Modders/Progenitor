@@ -212,6 +212,15 @@ public class PluginContext
     /// <summary>Versioned, tolerant messages (mod compatibility C2). Handlers are tracked: unload removes them.</summary>
     public PluginMessages Messages { get { EnsureAttached(); return _messages ??= new PluginMessages(this); } }
 
+    private PluginRequests? _requests;
+    private PluginSubscriptions? _subscriptions;
+
+    /// <summary>Typed request and reply, larger than one packet when needed (docs/modules.md, "Requests, large messages and subscriptions"). Tracked.</summary>
+    public PluginRequests Requests { get { EnsureAttached(); return _requests ??= new PluginRequests(this); } }
+
+    /// <summary>Snapshot then deltas of keyed server state for an open panel. Tracked: unload ends every subscription and topic.</summary>
+    public PluginSubscriptions Subscriptions { get { EnsureAttached(); return _subscriptions ??= new PluginSubscriptions(this); } }
+
     /// <summary>
     /// Named virtual systems recorded for undo. These are callbacks on
     /// <see cref="SystemHooks"/>, not injected <c>SystemBase</c> types — that is what makes
