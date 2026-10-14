@@ -1557,6 +1557,39 @@ internal static class BootstrapLink
         TryInvokeHostSet("TrySetServerReceiveSlot", null);
     }
 
+    /// <summary>
+    /// Bind Core's four material seam handlers into Bootstrap's opt-in seams (P3 spike), or clear them
+    /// with four nulls. False when Bootstrap is absent, older than the seams, or did not arm them.
+    /// </summary>
+    internal static bool TrySetMaterialSlots(Delegate? countGate, Delegate? compose, Delegate? payGate, Delegate? pay)
+    {
+        try
+        {
+            var host = _hostType ?? FindHostType();
+            var mi = host?.GetMethod("TrySetMaterialSlots", BindingFlags.Public | BindingFlags.Static);
+            if (mi == null) return false;
+            return mi.Invoke(null, new object?[] { countGate, compose, payGate, pay }) is true;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("materials: binding Bootstrap seams threw: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Bootstrap's <c>materials:</c> state line, or a line saying this Bootstrap has no material seams.</summary>
+    internal static string MaterialSeamsDescribe()
+    {
+        try
+        {
+            var host = _hostType ?? FindHostType();
+            var mi = host?.GetMethod("MaterialSeamsDescribe", BindingFlags.Public | BindingFlags.Static);
+            if (mi?.Invoke(null, null) is string s) return s;
+        }
+        catch { /* fall through */ }
+        return "materials: this Bootstrap has no material seams (update Bootstrap and restart to arm them)";
+    }
+
     private static bool TryInvokeHostSet(string method, Delegate? dispatcher)
     {
         try

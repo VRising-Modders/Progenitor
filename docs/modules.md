@@ -1902,17 +1902,156 @@ of the save made for this test.
 ## Material sources
 
 `Progenitor.Materials`, `ctx.MaterialSource`. Milestone P3, **spike**. One provider decides which
-containers pay for building and crafting; the totals the player sees and the server's payment
-both follow it. Status: registration, invalidation and the status readback are landed and
-game-free tested. The native seams are described below; they are opt-in and not live-verified.
+containers pay for building (B menu, shared-inventory mode) and workstation crafting; the totals the
+player sees and the server's payment both follow it.
+
+| Part | Status |
+|---|---|
+| Registration, invalidation, `Status` readback | landed, game-free tested (`MaterialSourceRegistryTests`) |
+| Transaction planner, material service, scope, totals wire | landed, game-free tested (`MaterialPlannerTests`, `MaterialServiceTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
+| Native availability and payment seams (Bootstrap) | built, **opt-in, off by default, never run** |
+| Client cost display from server totals | built, **never run** |
 
 ```csharp
 var handle = ctx.MaterialSource.Register(myProvider);   // second registration throws, naming the owner
 ctx.Logger.LogInfo(ctx.MaterialSource.Status.ToString()); // materials: provider=… hooks=off (…) wired=- …
+ctx.Events.On<MaterialPaid>(e => ctx.Logger.LogInfo(e.Item + " paid " + e.Paid + " from " + string.Join(",", e.Debits)));
 ```
 
 Read `Status` before claiming anything changed in the game: `HooksInstalled` is false, and `Wired`
 is empty, until a Bootstrap with the material seams armed is running and Core bound its handlers.
+
+### Provider contract
+
+`IMaterialSourceProvider` is called on the server main thread, inside the game's own affordability
+check or payment, so it must be fast, must not move items and must not throw.
+
+- `Operations`: what it governs. Only `Build` and `Craft` are wired; others are logged once at
+  registration (`not-wired=…`) and stay vanilla. Re-read on `InvalidateAll`.
+- `Candidates(ctx)`: every container that may pay for any item in this context. Progenitor reads them
+  to find which items exist for the displayed totals. **Empty = this context is not governed**; the
+  game's own shared storage applies.
+- `Sources(ctx, item)`: that item's containers in spend order and its pool reserve. Each item has its
+  own order (reverse deposit priority is per item). `null` = the game pays this item by its own rules.
+- `Revision(ctx)`: changes whenever the provider's policy does; part of the displayed-view fingerprint.
+- A provider that throws governs with **no** remote sources for that call. It never falls back to the
+  game's shared storage, which could be less restrictive than the provider's rules.
+
+### What a payment does
+
+The player's bag (including bag items in equipment) and the workstation's own inventory pay first, in
+the game's own order, by the game's own removal. Only what they did not cover goes to the provider's
+pool. The pool pays it **all or nothing**: the planner builds the debit list in the item's spend order
+(each physical inventory once, the reserve subtracted once from the pool total, the bag and a plain
+station left out because the game already counted them), then takes each debit with the server's
+inventory code and reads it back; a short take gives back every take already made, exactly, and the
+line is reported unpaid. A workstation that is itself shared storage is drained first, ahead of the
+provider's order, so it keeps its vanilla priority.
+
+Validation and payment happen in **one synchronous step on the main thread**. Both governed game
+paths check affordability and pay in the same call: placement checks then charges inside one build
+handler (both the direct build event and the cast-finished path), and the craft start checks every
+ingredient against the merged count then removes each one in the same body. No seam spans a frame,
+no reservation is held, and a station feeder that moves items between frames can never interleave
+between the check and the payment. A displayed count is never authorization; the server re-checks.
+
+Native bookkeeping is kept: the craft start still records the requested amount and the returned item
+entity in its queued-craft rows, so cancel refunds follow the game's own rule (the station, then the
+character) with item identity intact. Refunds never go back to remote chests. The pool pays only from
+slots without an item entity; an item that carries one is paid by the bag and station only.
+
+The explicit local-inventory build mode (`BuildResourceConsumeType.LocalInventory`) uses a different
+removal that the seams do not touch, so it stays local.
+
+### What the player sees
+
+The server recomputes each online player's Build and Craft totals every second, and at once after an
+invalidation or a governed payment, and sends a view only when it changed (`'PrMv'`, Core's reserved
+range; epoch, provider revision and a per-player sequence; at most 1500 items, flagged when cut). The
+client's merged count then returns the bag rows from the game plus exactly the server's rows, which
+covers the build menu cost list, the workstation recipe costs and the client-side placement check, all
+of which read that count. The Craft view applies while the local character's interaction target is a
+workstation; otherwise the Build view applies. Without a view the game's own counts are shown.
+
+### Native seams (Bootstrap, opt-in)
+
+`[Materials] NativeSeams = true` in Bootstrap's config, then restart the process (client and server
+each). Default false. Two process-lifetime detours through the same native detour mechanism the
+receive seams use; Core binds four handlers into them and clears them on uninstall, so the logic is
+in Core and swaps with it.
+
+| Seam | Game method (castle-heart overload) | Sides | What it does when governed |
+|---|---|---|---|
+| availability | `MergedInventoriesUtility.GetCastleMergedInventoryDatas(EntityManager, Entity castleHeart, Entity target, bool, bool)` | both | Calls the game twice, with and without the castle heart; returns the bag rows plus Core's pool rows in a Bootstrap-owned buffer |
+| payment | `MergedInventoriesUtility.RemoveItemGetRemainder(EntityManager, Entity castleHeart, Entity target, PrefabGUID, int, out int, out Entity, bool, bool, bool)` | server | Calls the game without the castle heart (bag and station), then Core pays the remainder from the pool |
+
+Facts verified offline against the game's metadata and interop assemblies (this build):
+
+- The territory overloads of both methods resolve the castle heart from the target's position and call
+  the castle-heart overloads directly; the craft start, build check and charge, and the client cost
+  record all reach these two. Covering the two castle-heart overloads covers every caller.
+- Signatures and ABI: `EntityManager` (16 bytes) travels through a hidden pointer; `Entity` and
+  `PrefabGUID` by value; the 16-byte `NativeArray<InventoryBuffer>` return through a hidden first
+  argument whose address is also returned; `out` parameters are plain pointers; `bool` is one byte;
+  a trailing method-info pointer. This is the platform's only calling convention applied to the
+  metadata's types, and the bodies agree.
+- The returned array is a view over a temporary list with allocator label `None`; no caller frees it.
+  The composed array carries the same label (Bootstrap refuses to replace any other label), so no caller
+  frees Bootstrap's buffer.
+- `InventoryBuffer` rows: stride 24, `ItemType` at 0xC, `Amount` at 0x10 (`layout.txt`, checked).
+- Passing no castle heart skips the shared-storage branch in both bodies; the bag, equipment and
+  eligible interaction inventory are unaffected.
+- The craft start and build systems are managed main-thread systems (`StartCraftingSystem`,
+  `PlaceTileModelSystem`); the governed scope is opened and closed by `SystemHooks` on them.
+
+Not proven until a live run:
+
+- That the detours install and run cleanly on both binaries (the shapes above are not guessed, but no
+  detour over them has executed).
+- That the game's shared-storage totals refresh after the pool takes from a shared chest.
+- That the character's `Interactor.Target` is the workstation the craft event names while its window
+  is open, on the server and on the client.
+- That the cost display redraws when a new view arrives without reopening the menu.
+- Client display outside build and craft: while a view is held, other client screens that read the
+  same count (repair, research) show the governed totals; the server still pays those by vanilla rules.
+
+Known limits of the spike: items the provider returns `null` for show bag-only counts on the client
+(the server still checks and pays them by the game's rules); `Repair` and `Upgrade` are not wired.
+
+### Live spike plan (not run)
+
+Isolated test server and a test copy of a save only. Never the live server.
+
+1. Build and deploy the matched pair (Bootstrap and Core) with no other change. Set
+   `[Materials] NativeSeams = true` in Bootstrap's config on the test server and on the test client,
+   then restart both processes (a Bootstrap change). Expect at start:
+   `materials: native seams enabled count=armed@0x… pay=armed@0x…` (server; client has no `pay=`)
+   and, after Core loads, `materials: Core seam handlers bound (server: availability + payment)`.
+   A `failed (…)` state or `not armed` leaves the game vanilla: stop and report.
+2. With no provider registered, open the build menu and a workstation: counts and payments must be
+   exactly vanilla (`ctx.MaterialSource.Status` shows `provider=none hooks=on`).
+3. Register a test provider (the shared-resources test mod) whose candidates are the chests on the
+   player's castles. Plot A has a tailoring bench, plot B a plain chest with cloth; the player's bag
+   and the bench hold none. Expect `materials: provider registered owner=…`.
+4. Stand on plot A, open the bench: the cloth recipe shows the chest's cloth (the client received a
+   view: one `PrMv` packet; no `dropped a malformed totals packet` line). Start one craft. Expect
+   `materials: paid Craft user=… territory=… station=c-… item=… amount=… from=c-…x…`, a
+   `MaterialPaid` event with the chest's id, the chest's count down by exactly the recipe amount
+   (`.items count <chest> <cloth>` before and after) and the craft queued.
+5. Cancel the craft: the refund goes to the bench (then the character) with the vanilla amount; the
+   remote chest is unchanged.
+6. Place one building piece from the B menu on plot A that costs an item stored only on plot B:
+   expect a `paid Build` line and the chest debited once.
+7. Shortage: leave one unit fewer than a recipe needs (or set a reserve that crosses it): the recipe
+   shows unaffordable, a forced start is refused by the game's own check, nothing is taken.
+8. Unregister (unload the test mod): the next view is cleared and counts return to vanilla.
+9. Core swap with the provider registered: `Core seam handlers bound` again in the new generation,
+   no strand; then remove the test mod and set `NativeSeams = false` before handing the test rig back.
+
+Fallback when a seam misbehaves: set `[Materials] NativeSeams = false` and restart that process; the
+game's own rules return and `Status` says `hooks=off`. If only availability misbehaves, the payment
+seam alone still cannot overspend (it pays only what the pool holds); if payment misbehaves, the
+planner's rollback and the `ERROR materials: pay Inconsistent` line say which container is short.
 
 ## Main thread
 

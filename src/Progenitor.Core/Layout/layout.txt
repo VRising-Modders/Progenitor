@@ -720,3 +720,12 @@ offset CastleHeartLevelBlobLevelOffset             = 0x0  : CastleHeartLevelBlob
 offset CastleHeartLevelBlobItemSlotsOffset         = 0x4  : CastleHeartLevelBlobData.ItemSlots
 offset CastleHeartLevelBlobRaidCostsOffset         = 0x20 : CastleHeartLevelBlobData.RaidCosts   # last field; stride = this + one BlobArray (8)
 offset NameableInteractableNameOffset              = 0x0  : NameableInteractable.Name            # FixedString64Bytes, 64 bytes
+
+# ---- Materials: rows of the game's merged material count (src/Progenitor.Core/Materials/MaterialSeamRuntime.cs) ----
+# The availability seam reads and writes InventoryBuffer rows in the array the game's merged count
+# returns. Bootstrap's MaterialSeamPolicy.InventoryBufferStride carries the stride across the
+# assembly boundary; MaterialSeamLayoutTests pins the two.
+dump server
+size   InventoryBufferStride                       = 24   : InventoryBuffer    # NetworkedEntity ItemEntity (0x0), ItemType, Amount, MaxAmountOverride (0x14)
+offset InventoryBufferItemTypeOffset               = 0xC  : InventoryBuffer.ItemType
+offset InventoryBufferAmountOffset                 = 0x10 : InventoryBuffer.Amount

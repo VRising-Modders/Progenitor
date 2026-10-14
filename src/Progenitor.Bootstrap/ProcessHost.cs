@@ -476,6 +476,12 @@ public static class ProcessHost
             Log?.LogError($"Receive detours failed; Core will own them if it loads: {e}");
         }
 
+        try { MaterialSeams.Install(); }
+        catch (Exception e)
+        {
+            Log?.LogError($"materials: native seams failed to install; the game's own rules apply: {e}");
+        }
+
         IsInstalled = true;
 
         var coreLog = BepInEx.Logging.Logger.CreateLogSource("Progenitor");
@@ -758,6 +764,16 @@ public static class ProcessHost
     /// Returns false when Bootstrap did not apply the server detour.
     /// </summary>
     public static bool TrySetServerReceiveSlot(Delegate? dispatcher) => ReceiveDetours.TrySetServer(dispatcher);
+
+    /// <summary>
+    /// Core binds its four material seam handlers (count gate, count compose, pay gate, pay), or clears
+    /// them with four nulls. False when this process did not arm the opt-in seams it needs.
+    /// </summary>
+    public static bool TrySetMaterialSlots(Delegate? countGate, Delegate? compose, Delegate? payGate, Delegate? pay) =>
+        MaterialSeams.TrySet(countGate, compose, payGate, pay);
+
+    /// <summary>The <c>materials:</c> state line: enabled or not, and what each seam did at install.</summary>
+    public static string MaterialSeamsDescribe() => MaterialSeams.Describe();
 
     /// <summary>
     /// Record an event id Core (or a plugin through Core) owns. Process-lifetime: Core

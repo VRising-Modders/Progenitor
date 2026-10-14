@@ -32,6 +32,14 @@ internal static unsafe class NativeMethod
         return Pointer(interopType, match.Name);
     }
 
+    /// <summary>
+    /// The compiled function pointer behind one exact <c>NativeMethodInfoPtr_*</c> field: the way to
+    /// name one overload unambiguously (the address library's overload ids collide when two overloads
+    /// share an IL2CPP type signature).
+    /// </summary>
+    public static IntPtr PointerByField(Type interopType, string nativeMethodInfoField) =>
+        Pointer(interopType, nativeMethodInfoField);
+
     private static IntPtr Pointer(Type interopType, string nativeMethodInfoField)
     {
         RuntimeHelpers.RunClassConstructor(interopType.TypeHandle);

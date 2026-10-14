@@ -126,6 +126,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialService.cs" Link="Linked\MaterialService.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialScope.cs" Link="Linked\MaterialScope.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialViewWire.cs" Link="Linked\MaterialViewWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialRows.cs" Link="Linked\MaterialRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\MaterialSeamPolicy.cs" Link="Linked\MaterialSeamPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLogic.cs" Link="Linked\ChatLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatWindowLogic.cs" Link="Linked\ChatWindowLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandLogic.cs" Link="Linked\ChatCommandLogic.cs" />

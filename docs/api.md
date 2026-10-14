@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **813** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **815** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -1014,7 +1014,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 813 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 815 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1139,6 +1139,8 @@ Purpose lines are the first sentence of each type's own doc comment.
 | `IconCachePolicy` | Game-free key, hash, and lifetime rules for the process-lifetime buff-icon cache. | tests |
 | `IconCacheTable` | Process-lifetime table of cache rows without Unity types. | tests |
 | `LogLine` | DTO so Core can map Bootstrap log rows onto Progenitor.Dev.LogBuffer.Entry without sharing a type. | tests |
+| `MaterialSeamPolicy` | Game-free facts and decisions behind the opt-in material seams (P3 spike): config key, the castle-heart overload fields, row stride, allocator label, count-seam decisions. | tests |
+| `MaterialSeamPolicy.CountDecision` | What the availability seam does with Core's compose answer: keep the game's array, use the composed rows, or grow and retry once. | tests |
 | `NativePinRegistry` | Process-lifetime table of GCHandles and native function pointers, keyed by (name, sequence) inside a Core generation (ALC name). | Bootstrap-Core boundary |
 | `PatchSlots` | A fixed pool of process-lifetime Harmony patch bodies that a collectible assembly can borrow, so that no MethodInfo from a collectible AssemblyLoadContext is ever handed to HarmonyX. | Bootstrap-Core boundary |
 | `PatchSlots.Body` | The collectible side's behavior. | Bootstrap-Core boundary |
