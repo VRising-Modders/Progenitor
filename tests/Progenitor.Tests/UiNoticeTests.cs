@@ -356,4 +356,33 @@ public sealed class UiNoticeTests
         Assert.Equal(4, colors.Count);
         Assert.Equal(UiNoticeBand.KindRuleAlpha, UiNoticeBand.RuleColor(UiNoticeKind.Error).A);
     }
+
+    [Fact]
+    public void Every_kind_reads_apart_from_Info_on_the_band()
+    {
+        // P7b live: a Warning band looked like an Info one (the pending amber against the gold, on a 1-unit rule).
+        static float Distance(PaletteColor a, PaletteColor b) =>
+            (float)Math.Sqrt((a.R - b.R) * (a.R - b.R) + (a.G - b.G) * (a.G - b.G) + (a.B - b.B) * (a.B - b.B));
+        var kinds = (UiNoticeKind[])Enum.GetValues(typeof(UiNoticeKind));
+        foreach (var a in kinds)
+            foreach (var b in kinds)
+                if (a < b) Assert.True(Distance(UiNoticeBand.Accent(a), UiNoticeBand.Accent(b)) > 0.25f, a + " vs " + b);
+        Assert.Equal(MenuPalette.OrangeText, UiNoticeBand.Accent(UiNoticeKind.Warning));
+        Assert.Equal(MenuPalette.Gold, UiNoticeBand.Accent(UiNoticeKind.Info));
+        Assert.Equal(MenuPalette.OkText, UiNoticeBand.Accent(UiNoticeKind.Success));
+        Assert.Equal(MenuPalette.Red, UiNoticeBand.Accent(UiNoticeKind.Error));
+        // The kinds that are not Info: a thicker rule and the accent mark before the header.
+        Assert.Equal(UiNoticeBand.RuleThickness, UiNoticeBand.RuleThicknessFor(UiNoticeKind.Info));
+        Assert.False(UiNoticeBand.MarkShown(UiNoticeKind.Info));
+        Assert.Equal(0f, UiNoticeBand.MarkRoom(UiNoticeKind.Info));
+        foreach (var k in new[] { UiNoticeKind.Success, UiNoticeKind.Warning, UiNoticeKind.Error })
+        {
+            Assert.True(UiNoticeBand.RuleThicknessFor(k) >= 2f);
+            Assert.True(UiNoticeBand.MarkShown(k));
+            Assert.True(UiNoticeBand.RuleColor(k).A > UiNoticeBand.RuleColor(UiNoticeKind.Info).A);
+        }
+
+        // The mark sits left of the header with its gap, the header's width taken into account.
+        Assert.Equal(-100f - UiNoticeBand.MarkGap - UiNoticeBand.MarkSize / 2f, UiNoticeBand.MarkX(200f));
+    }
 }

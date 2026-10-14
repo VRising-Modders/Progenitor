@@ -50,6 +50,11 @@ internal sealed partial class UnityUiRuntime
     private static Texture2D? _bandTexture;
     private static UiNoticeHandle? _bandNotice;
 
+    /// <summary>P7b: the accent mark before the band's header, and its art.</summary>
+    private static Image? _bandMark;
+    private static Sprite? _bandMarkSprite;
+    private static Texture2D? _bandMarkTexture;
+
     /// <summary>P7b: the notice the game's banner was just asked to play, and when (the banner check).</summary>
     private static UiNoticeHandle? _bannerCheckNotice;
     private static double _bannerCheckAskedAt;
@@ -398,8 +403,14 @@ internal sealed partial class UnityUiRuntime
         try
         {
             var accent = ToColor(UiNoticeBand.RuleColor(notice.Kind));
-            if (_bandRuleTop != null) _bandRuleTop.color = accent;
-            if (_bandRuleBottom != null) _bandRuleBottom.color = accent;
+            float thickness = UiNoticeBand.RuleThicknessFor(notice.Kind);
+            foreach (var rule in new[] { _bandRuleTop, _bandRuleBottom })
+            {
+                if (rule == null) continue;
+                rule.color = accent;
+                var rrt = rule.rectTransform;
+                rrt.sizeDelta = new Vector2(0f, thickness);
+            }
             bool hasDetail = notice.Detail.Length > 0;
             float headerWidth = 0f, detailWidth = 0f;
             if (_bandHeader != null)
@@ -416,7 +427,23 @@ internal sealed partial class UnityUiRuntime
                     detailWidth = _bandDetail.GetPreferredValues(notice.Detail, float.PositiveInfinity, float.PositiveInfinity).x;
             }
 
-            float width = UiNoticeBand.Width(headerWidth, detailWidth);
+            // P7b: a small accent mark before the header for every kind but Info, so the kind reads at a glance.
+            bool mark = UiNoticeBand.MarkShown(notice.Kind);
+            if (_bandMark != null)
+            {
+                _bandMark.gameObject.SetActive(mark);
+                if (mark)
+                {
+                    _bandMark.color = ToColor(UiNoticeBand.Accent(notice.Kind));
+                    var mrt = _bandMark.rectTransform;
+                    mrt.sizeDelta = new Vector2(UiNoticeBand.MarkSize, UiNoticeBand.MarkSize);
+                    // The header centers in the band; with the mark the pair centers (the mark takes its room on the left).
+                    mrt.anchoredPosition = new Vector2(UiNoticeBand.MarkX(headerWidth) + UiNoticeBand.MarkRoom(notice.Kind) / 2f,
+                        -UiNoticeBand.PadY - UiNoticeBand.HeaderHeight / 2f);
+                }
+            }
+
+            float width = UiNoticeBand.Width(headerWidth + UiNoticeBand.MarkRoom(notice.Kind), detailWidth);
             float height = UiNoticeBand.Height(hasDetail);
             var rt = _band!.GetComponent<RectTransform>();
             rt.sizeDelta = new Vector2(width, height);
@@ -425,7 +452,7 @@ internal sealed partial class UnityUiRuntime
             {
                 var hr = _bandHeader.rectTransform;
                 hr.sizeDelta = new Vector2(inner, UiNoticeBand.HeaderHeight);
-                hr.anchoredPosition = new Vector2(0f, -UiNoticeBand.PadY);
+                hr.anchoredPosition = new Vector2(UiNoticeBand.MarkRoom(notice.Kind) / 2f, -UiNoticeBand.PadY);
             }
 
             if (_bandDetail != null)
@@ -501,6 +528,16 @@ internal sealed partial class UnityUiRuntime
 
             _bandRuleTop = Rule(band, "rule-top", top: true);
             _bandRuleBottom = Rule(band, "rule-bottom", top: false);
+            if (!Alive(_bandMarkSprite))
+                _bandMarkSprite = HudSprite("hud-notice-mark", 32, 32, (x, y) =>
+                {
+                    float dx = x + 0.5f - 16f, dy = y + 0.5f - 16f;
+                    float d = 15f - (float)Math.Sqrt(dx * dx + dy * dy);
+                    return d <= -0.5f ? 0f : d >= 0.5f ? 1f : d + 0.5f;
+                }, out _bandMarkTexture);
+            var markGo = HudChild(band, "mark", new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f), new Vector2(UiNoticeBand.MarkSize, UiNoticeBand.MarkSize));
+            _bandMark = HudImage(markGo, _bandMarkSprite, Color.white);
+            markGo.SetActive(false);
 
             var header = HudChild(band, "header", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(UiNoticeBand.MinWidth, UiNoticeBand.HeaderHeight));
             _bandHeader = HudText(header, UiNoticeBand.HeaderSize, ToColor(MenuPalette.Text));
@@ -539,6 +576,7 @@ internal sealed partial class UnityUiRuntime
         _bandCanvas = _band = null;
         _bandGroup = null;
         _bandRuleTop = _bandRuleBottom = null;
+        _bandMark = null;
         _bandHeader = _bandDetail = null;
         _bandNotice = null;
     }
@@ -559,6 +597,10 @@ internal sealed partial class UnityUiRuntime
         DestroyBand();
         FreeHudAsset(_bandSprite);
         FreeHudAsset(_bandTexture);
+        FreeHudAsset(_bandMarkSprite);
+        FreeHudAsset(_bandMarkTexture);
+        _bandMarkSprite = null;
+        _bandMarkTexture = null;
         _bandSprite = null;
         _bandTexture = null;
         foreach (var key in NoticeKeys)

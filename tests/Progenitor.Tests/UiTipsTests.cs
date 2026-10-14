@@ -50,9 +50,10 @@ public sealed class UiTipsTests : IDisposable
         UiApi.ResetForTests();
     }
 
-    private IUiTip Tip(string id, object? owner = null, string plugin = PluginA, IUiPanel? anchor = null, Action? onShowAll = null) =>
+    private IUiTip Tip(string id, object? owner = null, string plugin = PluginA, IUiPanel? anchor = null, Action? onShowAll = null,
+        IUiHandle? control = null) =>
         UiTips.Request(owner ?? _ownerA, plugin, id, "Title " + id, "Body of " + id + ".",
-            new UiTipOptions { Anchor = anchor, OnShowAll = onShowAll });
+            new UiTipOptions { Anchor = anchor, OnShowAll = onShowAll, AnchorControl = control });
 
     private IUiPanel ShownPanel(string title = "Belts")
     {
@@ -278,6 +279,62 @@ public sealed class UiTipsTests : IDisposable
         Assert.False(UiTips.EscapeCard());
         Assert.False(UiApi.TryEscapeHandlers()); // nothing of the card left in the Escape chain
         Assert.Equal(UiTipState.Done, tip.State);
+    }
+
+    [Fact]
+    public void A_card_steps_out_of_sight_while_its_control_is_on_another_tab_and_comes_back()
+    {
+        var page = ShownPanel("Widgets");
+        var tabs = page.Tabs("tabs", new[] { "Lists", "Help" }, selected: 1);
+        var button = tabs.Add(1, page.Button("Show tip"));
+        var tip = Tip("on-help", anchor: page, control: button);
+        var card = Card!;
+        Assert.Equal(UiHandleState.Shown, card.State);
+
+        tabs.Selected = 0; // the Help tab's content hides
+        _runtime.Tick();
+        Assert.Equal(UiTipState.Showing, tip.State); // still the tip on screen in the queue's eyes, not answered
+        Assert.NotEqual(UiHandleState.Shown, card.State); // but out of sight
+        Assert.False(UiTips.IsSeen(PluginA, "on-help"));
+        Assert.False(UiTips.EscapeCard()); // a hidden card takes no Escape
+        int placed = _runtime.Placed.Count;
+        _runtime.Tick();
+        Assert.Equal(placed, _runtime.Placed.Count); // not placed while hidden
+
+        tabs.Selected = 1;
+        _runtime.Tick();
+        Assert.Equal(UiHandleState.Shown, card.State); // back with its control
+        Assert.Equal(UiTipState.Showing, tip.State);
+        _runtime.Tick();
+        Assert.True(_runtime.Placed.Count > placed);
+    }
+
+    [Fact]
+    public void A_card_whose_control_is_removed_is_dropped_unseen_and_a_suspended_card_goes_with_its_panel()
+    {
+        var page = ShownPanel("Widgets");
+        var label = page.Label("Belts");
+        var tip = Tip("gone", anchor: page, control: label);
+        label.Dispose(); // the page was rebuilt
+        _runtime.Tick();
+        Assert.Equal(UiTipState.Dropped, tip.State);
+        Assert.False(UiTips.IsSeen(PluginA, "gone"));
+
+        var other = page.Label("Cap");
+        var held = Tip("held", anchor: page, control: other);
+        other.Visible = false;
+        _runtime.Tick();
+        Assert.Equal(UiTipState.Showing, held.State);
+        page.Hide();
+        _runtime.Tick();
+        Assert.Equal(UiTipState.Dropped, held.State);
+    }
+
+    [Fact]
+    public void The_card_lets_the_wheel_through_to_the_panel_beneath()
+    {
+        Tip("wheel");
+        Assert.Contains(_runtime.WheelPassed, p => ReferenceEquals(p, (Card as UiHandle)!.Runtime));
     }
 
     [Fact]

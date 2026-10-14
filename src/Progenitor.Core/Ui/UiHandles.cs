@@ -1836,6 +1836,10 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
     }
 
     /// <summary>The caption a header cell shows: uppercase, with the indicator on the sorted column.</summary>
+    /// <summary>P7b: an input cell's text as drawn: its value, or its hint (trimmed) while the value is empty.</summary>
+    internal static string InputShown(string? text, string? placeholder) =>
+        string.IsNullOrEmpty(text) ? (placeholder ?? "").Trim() : text!;
+
     internal string HeaderCaptionOf(CellSpec cell) =>
         CellLayout.HeaderCaption(
             cell.Text, _sortedKey != null && string.Equals(cell.SortKey, _sortedKey, StringComparison.Ordinal), _sortAscending, cell.SmallCaps);
@@ -1869,6 +1873,8 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
             };
             // LIST3: an input cell reads back `{kind: input, text, placeholder}` — text is its value.
             if (cell.Kind == CellKind.Input) described["placeholder"] = cell.Placeholder;
+            // P7b: what the field shows on screen: its value, or its gray hint while empty (a data table's inherited value).
+            if (cell.Kind == CellKind.Input) described["shown"] = InputShown(cell.Text, cell.Placeholder);
             // SEARCHCLEAR1: a search box says so (it draws the clear button while it has text).
             if (cell.Kind == CellKind.Input && cell.Clearable) described["clearable"] = true;
             // INSTALLCOLS1: a two-line cell's toned lead (the Install list's update note).

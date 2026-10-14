@@ -574,14 +574,36 @@ internal static class UiNoticeBand
     /// <summary>Band height: one header line, plus a detail line when there is one.</summary>
     internal static float Height(bool hasDetail) => 2f * PadY + HeaderHeight + (hasDetail ? DetailHeight : 0f);
 
-    /// <summary>The rules' accent for <paramref name="kind"/>: gold for Info, the palette's green, amber and red otherwise.</summary>
+    /// <summary>
+    /// The accent for <paramref name="kind"/>: Info the game's gold, Success the palette's green (<c>OkText</c>), Warning
+    /// the framework's warning orange-amber (<c>OrangeText</c>; P7b live 2026-10-14: the pending amber <c>PendText</c> read
+    /// the same as the gold on a thin rule), Error the palette's red.
+    /// </summary>
     internal static PaletteColor Accent(UiNoticeKind kind) => kind switch
     {
         UiNoticeKind.Success => MenuPalette.OkText,
-        UiNoticeKind.Warning => MenuPalette.PendText,
+        UiNoticeKind.Warning => MenuPalette.OrangeText,
         UiNoticeKind.Error => MenuPalette.Red,
         _ => MenuPalette.Gold,
     };
+
+    /// <summary>The rules' thickness: Info's quiet 1-unit hairline, the other kinds a 2-unit rule that reads at a glance.</summary>
+    internal static float RuleThicknessFor(UiNoticeKind kind) => kind == UiNoticeKind.Info ? RuleThickness : KindRuleThickness;
+
+    internal const float KindRuleThickness = 2f;
+
+    /// <summary>A small accent mark before the header (every kind but Info): its side and the gap to the header.</summary>
+    internal const float MarkSize = 10f;
+
+    internal const float MarkGap = 10f;
+
+    internal static bool MarkShown(UiNoticeKind kind) => kind != UiNoticeKind.Info;
+
+    /// <summary>The header's room for the mark (0 for Info), added to the measured header width.</summary>
+    internal static float MarkRoom(UiNoticeKind kind) => MarkShown(kind) ? MarkSize + MarkGap : 0f;
+
+    /// <summary>The mark's center x from the band's center for a header <paramref name="headerWidth"/> wide.</summary>
+    internal static float MarkX(float headerWidth) => -(Finite(headerWidth) / 2f) - MarkGap - MarkSize / 2f;
 
     /// <summary>
     /// The two rules' color: Info keeps the game's quiet gold at <see cref="RuleAlpha"/>; the other kinds show their
@@ -590,7 +612,7 @@ internal static class UiNoticeBand
     internal static PaletteColor RuleColor(UiNoticeKind kind) =>
         Accent(kind).WithAlpha(kind == UiNoticeKind.Info ? RuleAlpha : KindRuleAlpha);
 
-    internal const float KindRuleAlpha = 0.7f;
+    internal const float KindRuleAlpha = 0.9f;
 
     /// <summary>Alpha (0..1) of a band shown at <paramref name="shownAt"/> that ends at <paramref name="endsAt"/>.</summary>
     internal static float Alpha(double now, double shownAt, double endsAt)

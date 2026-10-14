@@ -752,6 +752,11 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
     public readonly List<Action> Ticks = new();
     public readonly List<(IRuntimePanel Card, ScreenRect Anchor, IReadOnlyList<ScreenRect> Controls)> Placed = new();
 
+    /// <summary>The cards asked to let the wheel through.</summary>
+    public readonly List<IRuntimePanel> WheelPassed = new();
+
+    public void PassWheel(IRuntimePanel card) => WheelPassed.Add(card);
+
     /// <summary>The text rects the last placement got.</summary>
     public IReadOnlyList<ScreenRect>? LastTexts;
 

@@ -614,6 +614,9 @@ internal static unsafe class WorldPickBackend
                 return;
             }
 
+            // First, before anything that lays the panel out (the footer write, the title, self-placement each re-lay it):
+            // the band has no scroll view, so no pass may arm a scroll-bar read-back.
+            Ui.NoScrollPanel(panel);
             try { panel.Footer = ""; } catch { /* */ }
             UiWorldPickCoordinator? c;
             lock (Gate) c = _coordinator;
@@ -623,7 +626,6 @@ internal static unsafe class WorldPickBackend
             HoldCloseKey(c != null && UiWorldPickEscape.BandHoldsCloseKey(EscapeOwnerNow(c)));
             Ui.HidePaneTitle(panel);
             Ui.SelfPlacePanel(panel);
-            Ui.NoScrollPanel(panel); // before the first layout pass: no bar, no read-back
             panel.Show();
             StyleBand(handle);
         }

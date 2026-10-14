@@ -1462,6 +1462,38 @@ public sealed class UiDataTableTests : IDisposable
     public void The_first_focus_select_all_is_selected_then_held_until_a_key(int passes, bool same, bool whole, int expected) =>
         Assert.Equal((UiSelectAllStep)expected, UiFocusSelectAll.Step(passes, same, whole));
 
+    // ---- Live review round 8 --------------------------------------------------------------------------
+
+    [Fact]
+    public void The_readback_reports_what_a_value_box_shows_its_value_or_its_hint()
+    {
+        var panel = NewPanel();
+        var spec = new CellRowSpec("box", new List<CellSpec>
+        {
+            new CellSpec(CellKind.Input, "e:cap") { Skin = CellSkin.ValueBox }.With(text: "", placeholder: "10", width: CellWidth.Px(90f)),
+        });
+        var row = panel.CellRow(spec);
+        Dictionary<string, object?> Box() => (Dictionary<string, object?>)((List<object?>)row.Describe()["cells"]!)[0]!;
+        Assert.Equal("", Box()["text"]); // the value: empty (inherited)
+        Assert.Equal("10", Box()["placeholder"]);
+        Assert.Equal("10", Box()["shown"]); // what the screen shows
+        row.SetCell("e:cap", "40");
+        Assert.Equal("40", Box()["shown"]);
+        Assert.Equal("", UiCellRowHandle.InputShown("", " ")); // the table's blank hint shows nothing
+    }
+
+    [Fact]
+    public void An_inherited_table_cell_reads_back_its_shown_inherited_value()
+    {
+        var rows = Sample();
+        rows[1].Number("cap", 25, inherited: true);
+        NewTable(rows);
+        var cell = Cell(Row("t:row1"), "e:cap");
+        Assert.Equal("25", UiCellRowHandle.InputShown(cell.Text, cell.Placeholder));
+        var own = Cell(Row("t:row0"), "e:cap");
+        Assert.Equal("100", UiCellRowHandle.InputShown(own.Text, own.Placeholder));
+    }
+
     // ---- Term markers on the header -------------------------------------------------------
 
     [Fact]

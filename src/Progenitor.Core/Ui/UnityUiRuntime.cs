@@ -4379,7 +4379,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         for (int i = ShownPanels.Count - 1; i >= 0; i--)
         {
             var panel = ShownPanels[i];
-            if (panel == null || !panel.Alive || !panel.Visible) continue;
+            if (panel == null || !panel.Alive || !panel.Visible || panel.WheelPassThrough) continue;
             var view = panel.ViewportScreenRect;
             if (view.IsKnown && view.Contains(pointer.X, pointer.Y))
             {
@@ -13566,7 +13566,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private void ReadBackScrollbar(string when)
         {
-            if (!_verdictPending) return;
+            // P7b: a panel with no scroll view (NoScroll) has no bar to agree or disagree, whenever the pass was armed.
+            if (!ScrollbarVerdict.ShouldReadBack(_verdictPending, NoScroll))
+            {
+                _verdictPending = false;
+                return;
+            }
+
             _verdictPending = false;
             if (_scrollbar == null) return;
 

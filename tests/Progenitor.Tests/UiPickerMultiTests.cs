@@ -151,4 +151,70 @@ public sealed class UiPickerMultiTests : IDisposable
             Assert.True(placed.Single(p => p.Key == UiPickerHandle.CellClear).Visible, "Clear dropped at " + width);
         }
     }
+
+    [Fact]
+    public void Only_a_resolved_icon_gets_a_well_and_the_captions_still_line_up()
+    {
+        var panel = UiApi.Panel("Picker", _owner, "example.picker");
+        _panels.Add(panel);
+        panel.Picker("ic", new[]
+        {
+            new UiPickerEntry("crystal", "Crystal") { Icon = new object() },          // an icon
+            new UiPickerEntry("ore", "Iron Ore") { ItemPrefab = 5 },                 // a prefab whose icon does not resolve here
+            new UiPickerEntry("furnace", "Furnace") { Note = "plot A" },             // a station: no icon
+        });
+        var crystal = Row("ic:line0");
+        Assert.True(Cell(crystal, UiWidgetLayout.CellIcon).Visible);
+        Assert.False(Cell(crystal, UiWidgetLayout.CellIconPad).Visible);
+        foreach (var key in new[] { "ic:line1", "ic:line2" })
+        {
+            Assert.False(Cell(Row(key), UiWidgetLayout.CellIcon).Visible, "an empty well on " + key);
+            Assert.True(Cell(Row(key), UiWidgetLayout.CellIconPad).Visible);
+        }
+
+        float? captionLeft = null;
+        foreach (var key in new[] { "ic:line0", "ic:line1", "ic:line2" })
+        {
+            var placed = MenuPanelLayout.CellColumns(760f, new CellRowSpec(key, Row(key).Cells().ToList(), rightInset: UiPickerLayout.RightInset));
+            float left = placed.Single(p => p.Key == UiWidgetLayout.CellTitle).Left;
+            captionLeft ??= left;
+            Assert.Equal(captionLeft.Value, left, 2);
+        }
+    }
+
+    [Fact]
+    public void The_note_keeps_the_rows_right_inset_instead_of_touching_the_edge()
+    {
+        var panel = UiApi.Panel("Picker", _owner, "example.picker");
+        _panels.Add(panel);
+        var picker = (UiPickerHandle)panel.Picker("n", new[] { new UiPickerEntry("furnace", "Furnace") { Note = "plot A" } });
+        Assert.Equal(UiPickerLayout.RightInset, picker.SlotAt(0).RightInset);
+        var row = Row("n:line0");
+        foreach (float width in UiWidgetLayout.CheckedRowWidths)
+        {
+            var placed = MenuPanelLayout.CellColumns(width, new CellRowSpec("n", row.Cells().ToList(), rightInset: UiPickerLayout.RightInset));
+            var note = placed.Single(p => p.Key == UiWidgetLayout.CellNote);
+            Assert.True(note.Visible);
+            Assert.Equal(width / 2f - UiPickerLayout.RightInset, note.Right, 1);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]
+    [InlineData(true, true, false)]   // a panel with no scroll view is never read back, whenever it was armed
+    [InlineData(false, false, false)]
+    [InlineData(false, true, false)]
+    public void A_no_scroll_panel_is_never_read_back(bool pending, bool noScroll, bool read) =>
+        Assert.Equal(read, ScrollbarVerdict.ShouldReadBack(pending, noScroll));
+
+    [Fact]
+    public void The_pick_band_is_marked_no_scroll_before_anything_lays_it_out()
+    {
+        string source = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "WorldPickBackend.cs");
+        string show = SourcePin.MethodBody(source, "private static void ShowBand()");
+        int noScroll = show.IndexOf("Ui.NoScrollPanel(panel);", StringComparison.Ordinal);
+        Assert.True(noScroll > 0, "ShowBand does not mark the band no-scroll");
+        foreach (var later in new[] { "panel.Footer", "Ui.HidePaneTitle(panel)", "Ui.SelfPlacePanel(panel)", "panel.Show()" })
+            Assert.True(noScroll < show.IndexOf(later, StringComparison.Ordinal), "the band is laid out (" + later + ") before it is marked no-scroll");
+    }
 }

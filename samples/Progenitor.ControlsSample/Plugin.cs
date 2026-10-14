@@ -97,6 +97,9 @@ internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDem
             new UiWorldPickOptions { Repeat = true });
     }
 
+    public string Tip(string id, string title, string body, IUiPanel? anchor, IUiHandle? control) =>
+        _ctx.Hud.Tip(id, title, body, new UiTipOptions { Anchor = anchor, AnchorControl = control }).State.ToString();
+
     public string Tip(string id, string title, string body, IUiPanel? anchor) =>
         _ctx.Hud.Tip(id, title, body, new UiTipOptions { Anchor = anchor }).State.ToString();
 

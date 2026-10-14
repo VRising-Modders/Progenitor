@@ -67,8 +67,9 @@ internal sealed partial class WidgetsDemo
             Report("help markers shown");
         });
         var tip = tabs.Add(tab, panel.Button("Show tip"));
+        // The tip explains this tab's words: it belongs to the Show tip button (on screen only while this tab is).
         tip.OnClick(() => Report("help tip = " + (HelpHud?.Tip(HelpTipId, "Explained words",
-            "Words with a small circle-i have an explanation. Hover them to read it.", panel) ?? "no HUD")));
+            "Words with a small circle-i have an explanation. Hover them to read it.", panel, tip) ?? "no HUD")));
         var all = tabs.Add(tab, panel.Button("All tips"));
         all.OnClick(() =>
         {
@@ -90,6 +91,12 @@ internal interface IHelpDemoHud
 {
     /// <summary><c>ctx.Hud.Tip(id, title, body, new UiTipOptions { Anchor = anchor })</c>; returns the request's state name.</summary>
     string Tip(string id, string title, string body, IUiPanel? anchor);
+
+    /// <summary>
+    /// As above with <c>UiTipOptions.AnchorControl = control</c>: the card is out of sight while that control is (another
+    /// tab selected). A HUD that does not implement it shows the card for the whole panel.
+    /// </summary>
+    string Tip(string id, string title, string body, IUiPanel? anchor, IUiHandle? control) => Tip(id, title, body, anchor);
 
     /// <summary><c>ctx.Hud.ShowAllTips()</c>.</summary>
     void ShowAllTips();

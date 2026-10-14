@@ -295,6 +295,17 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
         catch { /* the button's light caption stays */ }
     }
 
+    public void PassWheel(IRuntimePanel card)
+    {
+        if (card is UnityPanel host && host.Alive) host.WheelPassThrough = true;
+    }
+
+    /// <summary>P7b: the panel lets the wheel through to the panel beneath it (the tip card).</summary>
+    private sealed partial class UnityPanel
+    {
+        internal bool WheelPassThrough;
+    }
+
     public ScreenRect TextRect(IRuntimeWidget widget)
     {
         try

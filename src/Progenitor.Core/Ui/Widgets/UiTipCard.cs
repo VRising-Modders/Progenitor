@@ -253,7 +253,25 @@ internal sealed class UiTipCardView : IUiTipCardView
 
     public bool Shown => !_closed && !_panel.IsDisposed && _panel.State == UiHandleState.Shown;
 
-    public bool HiddenByOther => !_closed && !_panel.IsDisposed && _panel.State != UiHandleState.Shown;
+    public bool HiddenByOther => !_closed && !_suspended && !_panel.IsDisposed && _panel.State != UiHandleState.Shown;
+
+    private bool _suspended;
+
+    public bool Suspended => _suspended && !_closed && !_panel.IsDisposed;
+
+    public void Suspend()
+    {
+        if (_closed || _suspended || _panel.IsDisposed) return;
+        _suspended = true;
+        _panel.Hide();
+    }
+
+    public void Resume()
+    {
+        if (_closed || !_suspended || _panel.IsDisposed) return;
+        _suspended = false;
+        _panel.Show();
+    }
 
     public void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null)
     {
@@ -261,6 +279,7 @@ internal sealed class UiTipCardView : IUiTipCardView
         var help = UiHelpRuntime.Current;
         if (help == null) return;
         help.PlaceTipCard(runtime, anchor, controls, texts);
+        help.PassWheel(runtime);
         help.TintTipCard(Title, Buttons, UiTipCopy.GotItKey);
     }
 

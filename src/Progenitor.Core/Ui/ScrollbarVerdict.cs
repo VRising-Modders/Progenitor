@@ -53,6 +53,12 @@ internal static class ScrollbarVerdict
     internal static bool IsWarning(bool ourScrolls, ScrollbarState observed) => !Agrees(ourScrolls, observed);
 
     /// <summary>
+    /// P7b: whether an armed read-back is taken at all. A panel with no scroll view (<c>NoScroll</c>, the pick band)
+    /// has no bar whose answer could agree or disagree with the layout's, so it is never read, whenever it was armed.
+    /// </summary>
+    internal static bool ShouldReadBack(bool pending, bool noScroll) => pending && !noScroll;
+
+    /// <summary>
     /// The line itself. It names which verdict is being checked, what was read, and when it was
     /// read, because the whole failure mode this replaces was a true sentence about our numbers
     /// printed next to a screen showing somebody else's.

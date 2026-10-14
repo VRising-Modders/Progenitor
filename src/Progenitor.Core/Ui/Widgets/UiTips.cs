@@ -18,6 +18,14 @@ public sealed class UiTipOptions
     /// Help page opens it here). Called on the main thread; a throw is logged.
     /// </summary>
     public Action? OnShowAll { get; set; }
+
+    /// <summary>
+    /// P7b: the control the tip explains (a button, a label, a widget on one tab). While it is not on screen (its tab is
+    /// not selected, it is hidden, scrolled out of its panel) the card steps out of sight and comes back when it shows
+    /// again; it is not marked seen meanwhile. A control that is disposed (its page was rebuilt) drops the tip unshown.
+    /// Null: the card follows only <see cref="Anchor"/>.
+    /// </summary>
+    public IUiHandle? AnchorControl { get; set; }
 }
 
 /// <summary>P7b: where a tip request is.</summary>
@@ -96,6 +104,7 @@ internal sealed class UiTipRequest : IUiTip
         Title = title ?? "";
         Body = body ?? "";
         Anchor = options?.Anchor;
+        AnchorControl = options?.AnchorControl;
         OnShowAll = options?.OnShowAll;
         Serial = serial;
     }
@@ -111,6 +120,9 @@ internal sealed class UiTipRequest : IUiTip
     internal string Body { get; }
 
     internal IUiPanel? Anchor { get; }
+
+    /// <summary>The control the tip explains (<see cref="UiTipOptions.AnchorControl"/>), or null.</summary>
+    internal IUiHandle? AnchorControl { get; private set; }
 
     internal Action? OnShowAll { get; private set; }
 
@@ -135,7 +147,11 @@ internal sealed class UiTipRequest : IUiTip
     internal string Key => UiHelpStore.Key(PluginId, Id);
 
     /// <summary>Release the plugin's delegate (unload).</summary>
-    internal void ForgetCallbacks() => OnShowAll = null;
+    internal void ForgetCallbacks()
+    {
+        OnShowAll = null;
+        AnchorControl = null;
+    }
 
     public void Dispose() => UiTips.Withdraw(this, "disposed");
 }
@@ -148,6 +164,15 @@ internal interface IUiTipCardView : IDisposable
 
     /// <summary>Its panel still exists but something else hid it (the framework's Escape sweep).</summary>
     bool HiddenByOther { get; }
+
+    /// <summary>P7b: stepped out of sight while its control is not on screen (<see cref="Suspend"/>).</summary>
+    bool Suspended { get; }
+
+    /// <summary>Hide the card while its control is off screen; not an answer, not a close.</summary>
+    void Suspend();
+
+    /// <summary>Show the card again after <see cref="Suspend"/>.</summary>
+    void Resume();
 
     /// <summary>Place the card beside <paramref name="anchor"/> (screen pixels; unknown for the screen corner).</summary>
     void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null);
@@ -473,6 +498,45 @@ internal static class UiTips
         catch { modal = false; }
 
         var s = _showing;
+        if (s != null && s.AnchorControl != null && s.View != null)
+        {
+            // P7b: the card belongs to the control it explains: out of sight while that control is (another tab
+            // selected, hidden, scrolled out of its panel), back when it shows again. Never marked seen meanwhile.
+            var view = s.View;
+            var control = ControlState(s);
+            if (control == AnchorControlState.Gone)
+            {
+                _showing = null;
+                CloseView(s);
+                Drop(s, "its control was removed");
+            }
+            else if (view.Suspended)
+            {
+                if (s.Anchor != null && !AnchorShown(s.Anchor))
+                {
+                    _showing = null;
+                    CloseView(s);
+                    Drop(s, "its panel closed");
+                }
+                else if (control == AnchorControlState.Shown && !modal)
+                {
+                    try { view.Resume(); }
+                    catch { /* it stays out of sight */ }
+                }
+                else
+                {
+                    return;
+                }
+            }
+            else if (control == AnchorControlState.Hidden)
+            {
+                try { view.Suspend(); }
+                catch { /* */ }
+                return;
+            }
+        }
+
+        s = _showing;
         if (s != null)
         {
             var view = s.View;
@@ -546,6 +610,12 @@ internal static class UiTips
             if (next.Anchor != null && !AnchorShown(next.Anchor))
             {
                 Drop(next, "its panel closed before it showed");
+                continue;
+            }
+
+            if (ControlState(next) == AnchorControlState.Gone)
+            {
+                Drop(next, "its control was removed before it showed");
                 continue;
             }
 
@@ -633,6 +703,41 @@ internal static class UiTips
             tip.Texts = Array.Empty<ScreenRect>();
         }
         return tip.Controls;
+    }
+
+    internal enum AnchorControlState
+    {
+        Shown,
+        Hidden,
+        Gone,
+    }
+
+    /// <summary>
+    /// Whether the tip's control is on screen: not disposed (else <see cref="AnchorControlState.Gone"/>), visible, with a
+    /// known rect that overlaps its anchor panel's rect when the tip has one (a row scrolled out of the panel is not).
+    /// </summary>
+    internal static AnchorControlState ControlState(UiTipRequest tip)
+    {
+        var control = tip.AnchorControl;
+        if (control == null) return AnchorControlState.Shown;
+        if (control.IsDisposed) return AnchorControlState.Gone;
+        bool visible;
+        try { visible = control.Visible; }
+        catch { visible = false; }
+        if (!visible) return AnchorControlState.Hidden;
+        ScreenRect rect = ScreenRect.Unknown;
+        try
+        {
+            if (control is UiCellRowHandle row) rect = row.NavRect(null);
+            else if (control is UiHandle { Runtime: { Alive: true } runtime }) rect = Ui.CurrentRuntime().WidgetRect(runtime);
+        }
+        catch { rect = ScreenRect.Unknown; }
+
+        if (!rect.IsKnown) return AnchorControlState.Hidden;
+        var anchor = AnchorRect(tip.Anchor);
+        if (anchor.IsKnown && (rect.MaxX <= anchor.MinX || rect.MinX >= anchor.MaxX || rect.MaxY <= anchor.MinY || rect.MinY >= anchor.MaxY))
+            return AnchorControlState.Hidden;
+        return AnchorControlState.Shown;
     }
 
     private static bool AnchorShown(IUiPanel anchor)

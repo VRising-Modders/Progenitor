@@ -31,6 +31,12 @@ internal interface IUiHelpRuntime
     bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null);
 
     /// <summary>
+    /// P7b: the card never takes the wheel: a notch over it scrolls the panel beneath (the pump skips it when it picks
+    /// the hovered panel); its buttons still take clicks. Asked with every placement.
+    /// </summary>
+    void PassWheel(IRuntimePanel card) { }
+
+    /// <summary>
     /// The screen rect of the text a widget draws (its caption's own extent, not its row's), or unknown. The tip card uses
     /// it to keep off a page's words where it can.
     /// </summary>
