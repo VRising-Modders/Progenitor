@@ -763,6 +763,85 @@ public class VanillaPanelTests : IDisposable
         left.Dispose();
     }
 
+    [Fact]
+    public void Every_panel_site_samples_on_all_five_window_mappers_and_a_frame_watchdog()
+    {
+        // Source pin on the Unity half (not compiled here). Live 1.1.13.0: the inventory site, on
+        // InventoryMenuMapper alone, never sampled while a chest was open, and a window can close
+        // together with the only mapper that would have seen it close.
+        string src = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        foreach (var mapper in new[] { "ContainerMenuMapper", "WorkstationMenuMapper", "RefinementstationMenuMapper", "CastleHeartMenuMapper", "InventoryMenuMapper" })
+            Assert.Contains("SystemHooks.After<" + mapper + ">(frame, VanillaUiSites.WatchOptions(site))", src);
+        Assert.Contains("Plugin.Frame += watchdog;", src);
+        Assert.Contains("if (now == watch.Frame) return;", src);
+    }
+
+    [Fact]
+    public void Closing_a_chest_and_its_bag_in_one_frame_raises_exactly_one_Closed_per_open()
+    {
+        // Escape closes the chest and the bag beside it together. Each site's watch reads closed on
+        // the next frame it samples (a mapper hook or the frame watchdog): one Closed per Opened,
+        // never a second one on the frames after, and a reopen starts the count again.
+        var chest = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        var events = new List<string>();
+        chest.OnPanel(e => events.Add("chest " + e.Change));
+        bag.OnPanel(e => events.Add("bag " + e.Change));
+        var bagTarget = new VanillaPanelTarget(VanillaPanelKind.Container, 812, 3, 40, 1, 0);
+
+        for (int round = 0; round < 2; round++)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+                _client.Fire(VanillaUiSite.InventoryPanel, Open(21, bagTarget));
+            }
+
+            // The same frame: both windows gone.
+            _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+            _client.Fire(VanillaUiSite.InventoryPanel, VanillaSiteSample.Absent);
+            for (int i = 0; i < 5; i++)
+            {
+                _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+                _client.Fire(VanillaUiSite.InventoryPanel, VanillaSiteSample.Absent);
+            }
+
+            Assert.False(chest.IsOpen);
+            Assert.False(bag.IsOpen);
+            Assert.Equal(0, _client.LiveContainers);
+        }
+
+        Assert.Equal(new[]
+        {
+            "chest Opened", "bag Opened", "chest Closed", "bag Closed",
+            "chest Opened", "bag Opened", "chest Closed", "bag Closed",
+        }, events);
+        Assert.Equal(2, Lines.Count(l => l.StartsWith("Ui: panel ContainerPanel closed", StringComparison.Ordinal)));
+        chest.Dispose();
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void A_BesideSort_handle_with_three_buttons_is_one_row_and_is_hidden_whole_when_it_does_not_fit()
+    {
+        // Three captions on one handle are one row in one container: the fit is for the row, so
+        // either all three show or none does (with the reason), never a partial row.
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:mod/overlap:ParentContainerInventory");
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        bag.Button("Stash");
+        bag.Button("Inventory");
+        bag.Button("Find");
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0)));
+        var d = ReadbackOf(bag);
+        Assert.Equal(true, d["attached"]);
+        Assert.Equal(false, d["shown"]);
+        Assert.Equal("blocked", d["fit"]);
+        Assert.Equal("overflow:mod/overlap:ParentContainerInventory", d["fitReason"]);
+        Assert.Equal(3, ((List<object?>)d["buttons"]!).Count);
+        Assert.Single(Lines, l => l.Contains("anchor=sort hidden reason=overflow:mod/overlap:ParentContainerInventory"));
+        bag.Dispose();
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime

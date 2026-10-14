@@ -26,9 +26,10 @@ namespace Progenitor.Ui;
 /// <c>[RequireMatchingQueriesForUpdate]</c>, so with the default option the hook would fire only on
 /// frames the mapper's own queries match: a site that reads a second mapper (the station site reads
 /// the refinement mapper too; the inventory sites read all five) would miss opens, and a close would
-/// never be seen, leaving an edge column on screen. With the option off the hook fires every frame
-/// the client world updates its UI group, and the site reads every mapper it needs from one shared
-/// per-frame scan (<see cref="EnsureScan"/>). Never Harmony on a mapper, never a mapper's Burst
+/// never be seen, leaving an edge column on screen. With the option off the hook fires whenever the
+/// mapper updates, and the site reads every mapper it needs from one shared per-frame scan
+/// (<see cref="EnsureScan"/>). The mappers do not all update every frame, so every site hooks all
+/// five and has a frame watchdog for its close (<see cref="WatchPanelSite"/>). Never Harmony on a mapper, never a mapper's Burst
 /// <c>LambdaJob_*</c>, never a method of the window (<c>FakeTooltip.SetTooltip</c> takes a dozen
 /// <c>Nullable</c> structs by value and is not a seam).</para>
 ///
@@ -335,11 +336,47 @@ internal sealed partial class UnityUiRuntime
         Target = target,
     };
 
+    /// <summary>
+    /// One site's watch: when it last sampled, on which world, and whether that sample was open.
+    /// The five mapper hooks and the frame watchdog share it, so a site samples once a frame.
+    /// </summary>
+    private sealed class SiteWatch
+    {
+        internal int Frame = -1;
+        internal World? World;
+        internal bool Open;
+    }
+
+    /// <summary>
+    /// Frames a site may go without a mapper hook while it last read open before the watchdog
+    /// samples it on its own. Two, so the ordinary one-frame gap between the frame tick and the UI
+    /// group never triggers it.
+    /// </summary>
+    private const int WatchdogFrames = 2;
+
+    /// <summary>
+    /// Watch one panel site. Live 1.1.13.0 showed the window mappers do not all update on every
+    /// frame: the inventory site, hooked on <c>InventoryMenuMapper</c> alone, never saw the bag
+    /// beside an open chest (it first resolved when the character menu opened), and a window that
+    /// closes together with the mapper that drives it may leave no frame in which its own mapper
+    /// sees it closed. So every panel site hooks <b>all five</b> window mappers and samples on the
+    /// first of them to run each frame; and while the site last read open, a frame watchdog
+    /// (<c>Plugin.Frame</c>) samples it on the last world when no mapper has run for
+    /// <see cref="WatchdogFrames"/> frames. A window that went inactive or was destroyed then reads
+    /// closed on the next frame either way, and the tracker raises exactly one Closed per Opened.
+    /// </summary>
     internal static IDisposable? WatchPanelSite(VanillaUiSite site, Action<VanillaSiteSample> onFrame)
     {
         if (!PanelViews.ContainsKey(site)) PanelViews[site] = new PanelView();
-        Action<SystemHookContext> frame = ctx =>
+        var watch = new SiteWatch();
+
+        void Sample(World? world)
         {
+            int now = Time.frameCount;
+            if (now == watch.Frame) return;
+            watch.Frame = now;
+            if (world != null) watch.World = world;
+
             VanillaSiteSample sample;
             if (VanillaSiteHealth.IsAbsent(site))
             {
@@ -347,7 +384,7 @@ internal sealed partial class UnityUiRuntime
             }
             else
             {
-                try { sample = SamplePanel(site, ctx?.World); }
+                try { sample = SamplePanel(site, world); }
                 catch (Exception e)
                 {
                     // The resolver itself failed: a member the game removed or renamed. One line,
@@ -359,20 +396,93 @@ internal sealed partial class UnityUiRuntime
                 }
             }
 
+            watch.Open = sample.Resolved;
             onFrame(sample);
+        }
+
+        Action<SystemHookContext> frame = ctx => Sample(ctx?.World);
+        Action watchdog = () =>
+        {
+            if (!watch.Open || Time.frameCount - watch.Frame < WatchdogFrames) return;
+            var world = watch.World;
+            Sample(world != null && world.IsCreated ? world : null);
         };
 
-        // Any one mapper of the UI group will do as the frame source, because the hook fires on
-        // every Update call; the site's own mapper is used for readability of the pin line.
-        return site switch
+        var leases = new List<IDisposable>();
+        try
         {
-            VanillaUiSite.ContainerPanel => SystemHooks.After<ContainerMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
-            VanillaUiSite.StationPanel => SystemHooks.After<WorkstationMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
-            VanillaUiSite.CastleHeartPanel => SystemHooks.After<CastleHeartMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
-            VanillaUiSite.InventoryPanel => SystemHooks.After<InventoryMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
-            VanillaUiSite.InventoryTooltip => SystemHooks.After<InventoryMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
-            _ => null,
-        };
+            // The site's own mapper first, for the pin line's readability; the rest because any one
+            // of them may be the only one updating this frame.
+            switch (site)
+            {
+                case VanillaUiSite.ContainerPanel:
+                case VanillaUiSite.StationPanel:
+                case VanillaUiSite.CastleHeartPanel:
+                case VanillaUiSite.InventoryPanel:
+                case VanillaUiSite.InventoryTooltip:
+                    break;
+                default:
+                    return null;
+            }
+
+            Add(leases, SystemHooks.After<ContainerMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
+            Add(leases, SystemHooks.After<WorkstationMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
+            Add(leases, SystemHooks.After<RefinementstationMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
+            Add(leases, SystemHooks.After<CastleHeartMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
+            Add(leases, SystemHooks.After<InventoryMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
+            Plugin.Frame += watchdog;
+            leases.Add(new FrameLease(watchdog));
+        }
+        catch
+        {
+            foreach (var l in leases)
+            {
+                try { l.Dispose(); } catch { /* */ }
+            }
+
+            throw;
+        }
+
+        return new LeaseSet(leases);
+    }
+
+    private static void Add(List<IDisposable> leases, IDisposable? lease)
+    {
+        if (lease != null) leases.Add(lease);
+    }
+
+    private sealed class FrameLease : IDisposable
+    {
+        private Action? _tick;
+
+        internal FrameLease(Action tick) => _tick = tick;
+
+        public void Dispose()
+        {
+            var tick = _tick;
+            _tick = null;
+            if (tick != null) Plugin.Frame -= tick;
+        }
+    }
+
+    /// <summary>One site watch: the five mapper hooks and the watchdog, released together.</summary>
+    private sealed class LeaseSet : IDisposable
+    {
+        private List<IDisposable>? _leases;
+
+        internal LeaseSet(List<IDisposable> leases) => _leases = leases;
+
+        public void Dispose()
+        {
+            var leases = _leases;
+            _leases = null;
+            if (leases == null) return;
+            foreach (var l in leases)
+            {
+                try { l.Dispose(); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: attach watch release threw: " + e.Message); }
+            }
+        }
     }
 
     /// <summary>Core Uninstall: drop every reference this half holds.</summary>

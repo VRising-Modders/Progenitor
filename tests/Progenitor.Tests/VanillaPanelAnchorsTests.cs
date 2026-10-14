@@ -252,6 +252,19 @@ public class VanillaPanelAnchorsTests
     }
 
     [Fact]
+    public void Three_buttons_on_one_BesideSort_handle_are_one_row_that_fits_neither_slot_on_this_build()
+    {
+        // "Stash", "Inventory", "Find": 72 + 115 + 72 with 8 between = 275 units. Right of the bar
+        // there are 88; above the sort button the row would cover the item area. Hidden, with both reasons.
+        float row = 72 + 115 + 72 + 2 * 8;
+        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, row, 36,
+            Inventory, BarObstacles(), out var slot);
+        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
+        Assert.Equal(BesideSlot.None, slot);
+        Assert.Equal("overflow:mod/overlap:ParentContainerInventory", verdict.Reason);
+    }
+
+    [Fact]
     public void Above_the_sort_button_is_taken_when_the_right_slot_is_full_and_the_space_above_is_free()
     {
         // A build with more room above the bar: the button centers over the sort button.
