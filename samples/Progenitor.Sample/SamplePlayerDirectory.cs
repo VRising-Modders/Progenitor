@@ -11,9 +11,10 @@ using Progenitor.Players;
 namespace Progenitor.Sample;
 
 /// <summary>
-/// <c>.players</c>, <c>.players name &lt;text&gt;</c> and <c>.players account &lt;platformId&gt;</c> —
-/// <c>ctx.Players</c>, the server player directory. Online enumeration, name lookup (ambiguous
-/// names stay ambiguous) and account lookup. Session entity text is printed only beside
+/// <c>.players</c>, <c>.players name &lt;text&gt;</c>, <c>.players account &lt;platformId&gt;</c> and
+/// <c>.players where</c> — <c>ctx.Players</c>, the server player directory. Online enumeration, name
+/// lookup (ambiguous names stay ambiguous), account lookup, and where each online character stands
+/// (<c>OnlinePositions</c>, one read per player per call). Session entity text is printed only beside
 /// <c>IsFresh</c>, because a stale <c>index:version</c> must not be treated as identity.
 ///
 /// <para>Read-only. Admin-gated because the reply includes platform ids. Parsing and every reply
@@ -23,7 +24,7 @@ internal static class SamplePlayerDirectory
 {
     internal const string Area = "players";
 
-    internal const string UsageReply = "Usage: .players | .players name <displayName> | .players account <platformId>";
+    internal const string UsageReply = "Usage: .players | .players name <displayName> | .players account <platformId> | .players where";
 
     /// <summary>How many online rows one reply lists before it says how many were left out.</summary>
     internal const int MaxListed = 8;
@@ -33,6 +34,7 @@ internal static class SamplePlayerDirectory
         Online = 1,
         Name = 2,
         Account = 3,
+        Where = 4,
     }
 
     /// <summary>One directory row reduced to the fields the reply prints. No entity handles.</summary>
@@ -69,6 +71,9 @@ internal static class SamplePlayerDirectory
                 kind = Kind.Name;
                 name = tail;
                 return name.Length > 0;
+            case "where":
+                kind = Kind.Where;
+                return tail.Length == 0;
             case "account":
                 kind = Kind.Account;
                 return ulong.TryParse(tail, NumberStyles.Integer, CultureInfo.InvariantCulture, out platformId)
@@ -126,6 +131,25 @@ internal static class SamplePlayerDirectory
         return "No player named '" + query + "'.";
     }
 
+    /// <summary>One line: <c>2 online with a position. Ada @ 10.0, 0.0, -5.0; Bo @ ...</c>.</summary>
+    internal static string WhereReply(IReadOnlyList<(string Name, float X, float Y, float Z)> rows)
+    {
+        var text = new StringBuilder();
+        text.Append(rows.Count.ToString(CultureInfo.InvariantCulture)).Append(" online with a position.");
+        int shown = Math.Min(rows.Count, MaxListed);
+        for (int i = 0; i < shown; i++)
+        {
+            var r = rows[i];
+            text.Append(i == 0 ? " " : "; ").Append(r.Name.Length == 0 ? "(no name)" : r.Name).Append(" @ ")
+                .Append(r.X.ToString("0.0", CultureInfo.InvariantCulture)).Append(", ")
+                .Append(r.Y.ToString("0.0", CultureInfo.InvariantCulture)).Append(", ")
+                .Append(r.Z.ToString("0.0", CultureInfo.InvariantCulture));
+        }
+
+        if (rows.Count > shown) text.Append(" +").Append((rows.Count - shown).ToString(CultureInfo.InvariantCulture)).Append(" more.");
+        return text.ToString();
+    }
+
     internal static string AccountReply(ulong platformId, bool found, Row row) =>
         found
             ? "Account " + platformId.ToString(CultureInfo.InvariantCulture) + " is " + FormatRow(row)
@@ -170,6 +194,16 @@ internal static class SamplePlayerDirectory
                 bool found = players.TryGetByAccount(platformId, out PlayerInfo info);
                 ctx.Reply(AccountReply(platformId, found, found ? ToRow(players, info) : default));
                 SampleLog.Info(Area, "account " + platformId + " found=" + found);
+                return;
+            }
+            case Kind.Where:
+            {
+                IReadOnlyList<PlayerPosition> positions = players.OnlinePositions();
+                var rows = new List<(string, float, float, float)>(positions.Count);
+                for (int i = 0; i < positions.Count; i++)
+                    rows.Add((positions[i].Player.DisplayName, positions[i].X, positions[i].Y, positions[i].Z));
+                ctx.Reply(WhereReply(rows));
+                SampleLog.Info(Area, "where " + positions.Count);
                 return;
             }
             default:

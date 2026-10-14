@@ -55,6 +55,11 @@
     <Compile Include="..\..\src\Progenitor.Core\Stations\StationModels.cs" Link="Linked\StationModels.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Stations\StationLogic.cs" Link="Linked\StationLogic.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleStations.cs" Link="Linked\SampleStations.cs" />
+    <!-- Braziers (ctx.Stations), the client sort event and online player positions: game-free halves. -->
+    <Compile Include="..\..\src\Progenitor.Core\Stations\BrazierModels.cs" Link="Linked\BrazierModels.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleBraziers.cs" Link="Linked\SampleBraziers.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\InventorySort.cs" Link="Linked\InventorySort.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerPosition.cs" Link="Linked\PlayerPosition.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Abilities\AbilityCooldownPolicy.cs" Link="Linked\AbilityCooldownPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Abilities\AbilitySlotPolicy.cs" Link="Linked\AbilitySlotPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Units\UnitBloodPolicy.cs" Link="Linked\UnitBloodPolicy.cs" />
