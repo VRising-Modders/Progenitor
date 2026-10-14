@@ -67,5 +67,5 @@ not controls and are left to `Progenitor.Sample`.
 kind, `ctx.Dialogs` method or `UiLook` helper has no demo here, and when a controller walking the page
 does not reach every interactive control.
 
-Verification: built and game-free tested; not live-verified. Remove it from `BepInEx/progenitor-reload`
+Verification: built and game-free tested. The Widgets page: live-verified on the test client 2026-10-14 through the bridge at 1920x1080 and 2560x1440, plus a 2x supersample capture (layout only), its Locate button excepted; not verified: native 4K pixel density, the feel of a real-mouse drag, and controller hardware (navigation was driven through the bridge's virtual pad, not a physical controller). Remove it from `BepInEx/progenitor-reload`
 after a test batch (CLAUDE.md sample cleanup).
