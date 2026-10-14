@@ -141,6 +141,10 @@ public sealed class Plugin
         // SystemHooks on three servant systems and one Plugin.Frame handler.
         try { Servants.ServantRuntime.Install(); }
         catch (Exception e) { Logger?.LogWarning($"Servants.Install: {e.Message}"); }
+        // ctx.MaterialSource (P3 spike): the provider registry and, when Bootstrap armed them, the
+        // availability / payment seam handlers. Both sides (the client binds the display seam).
+        try { Materials.MaterialRuntime.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"Materials.Install: {e.Message}"); }
         // Death + damage EventBus publishers (UnitDied / PlayerDied / DamageDealt).
         // Kill postfix via PatchRegistry (ctx.Patches path); damage via SystemHooks.After StatChangeSystem.
         Combat.CombatHooks.Install();
@@ -445,6 +449,9 @@ public sealed class Plugin
         // both must go before the ALC unloads or they pin this Core generation.
         try { Servants.ServantRuntime.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"Servants.Uninstall: {e.Message}"); }
+        // Materials first: its seam handlers read inventories and castles.
+        try { Materials.MaterialRuntime.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"Materials.Uninstall: {e.Message}"); }
         try { Castles.CastlePresenceRuntime.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"CastlePresence.Uninstall: {e.Message}"); }
         try { Inventory.InventoryRuntime.Uninstall(); }

@@ -48,7 +48,11 @@ public sealed class CastleContainerInfo
     /// <summary>A refinement station's output (instance 1); <see cref="InventoryRef.None"/> otherwise.</summary>
     public InventoryRef Output { get; init; }
 
-    /// <summary>True for a crafting or refinement station (<c>CastleWorkstation</c> or <c>Refinementstation</c>).</summary>
+    /// <summary>
+    /// True for a crafting or refinement station: a model with a recipe list (<c>WorkstationRecipesBuffer</c>)
+    /// or a <c>Refinementstation</c>. Storage that carries <c>CastleWorkstation</c> only for room and servant
+    /// bonuses is a container, not a station.
+    /// </summary>
     public bool IsStation { get; init; }
 
     /// <summary>True for a refinement station: separate input and output inventories.</summary>

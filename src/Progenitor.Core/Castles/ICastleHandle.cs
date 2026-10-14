@@ -154,8 +154,9 @@ public interface ICastleHandle
     IReadOnlyList<CastleContainerInfo> Containers();
 
     /// <summary>
-    /// Every crafting and refinement station (<c>CastleWorkstation</c> or
-    /// <c>Refinementstation</c>), with stable ids. A refinement station's row carries both
+    /// Every crafting and refinement station (a recipe list, <c>WorkstationRecipesBuffer</c>, or
+    /// <c>Refinementstation</c>), with stable ids. Storage that carries <c>CastleWorkstation</c> only
+    /// for room and servant bonuses is in <see cref="Containers"/>. A refinement station's row carries both
     /// <see cref="CastleContainerInfo.Main"/> (input) and <see cref="CastleContainerInfo.Output"/>.
     /// Live read; empty on a disabled handle.
     /// </summary>

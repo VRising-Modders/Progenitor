@@ -853,3 +853,12 @@ offset SendEventToUserUserIndexOffset                = 0x0  : SendEventToUser.Us
 offset NetworkIdNormalIndexOffset                    = 0x0  : NetworkId.Normal_Index
 offset NetworkIdNormalGenerationOffset               = 0x4  : NetworkId.Normal_Generation                # byte
 offset NetworkIdTypeOffset                           = 0x8  : NetworkId.Type                              # last field; NetworkId is 12 bytes
+
+# ---- Materials: rows of the game's merged material count (src/Progenitor.Core/Materials/MaterialSeamRuntime.cs) ----
+# The availability seam reads and writes InventoryBuffer rows in the array the game's merged count
+# returns. Bootstrap's MaterialSeamPolicy.InventoryBufferStride carries the stride across the
+# assembly boundary; MaterialSeamLayoutTests pins the two.
+dump server
+size   InventoryBufferStride                       = 24   : InventoryBuffer    # NetworkedEntity ItemEntity (0x0), ItemType, Amount, MaxAmountOverride (0x14)
+offset InventoryBufferItemTypeOffset               = 0xC  : InventoryBuffer.ItemType
+offset InventoryBufferAmountOffset                 = 0x10 : InventoryBuffer.Amount

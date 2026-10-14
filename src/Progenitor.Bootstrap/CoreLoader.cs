@@ -611,6 +611,8 @@ public static class CoreLoader
         catch (Exception e) { ProcessHost.Log?.LogWarning($"receive.client null after failed install: {e.Message}"); }
         try { ReceiveDetours.TrySetServer(null); }
         catch (Exception e) { ProcessHost.Log?.LogWarning($"receive.server null after failed install: {e.Message}"); }
+        try { MaterialSeams.TrySet(null, null, null, null); }
+        catch (Exception e) { ProcessHost.Log?.LogWarning($"materials slots null after failed install: {e.Message}"); }
         try { ProcessHost.SetLifetimeQuitting(null); }
         catch (Exception e) { ProcessHost.Log?.LogWarning($"lifetime.quitting null after failed install: {e.Message}"); }
         try { ProcessHost.SetLifetimeFrame(null); }

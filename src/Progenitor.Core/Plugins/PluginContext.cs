@@ -403,6 +403,18 @@ public class PluginContext
         get { EnsureAttached(); return _inventory ??= new Progenitor.Inventory.PluginInventory(this); }
     }
 
+    private Progenitor.Materials.PluginMaterialSource? _materialSource;
+
+    /// <summary>
+    /// Build and craft material sources (P3, experimental): register the one provider that decides
+    /// which containers pay, and read what is actually armed (<c>Status</c>). Register and
+    /// invalidate are server only.
+    /// </summary>
+    public Progenitor.Materials.PluginMaterialSource MaterialSource
+    {
+        get { EnsureAttached(); return _materialSource ??= new Progenitor.Materials.PluginMaterialSource(this); }
+    }
+
     /// <summary>Server clans: a user's clan, its members and castles. Client calls throw.</summary>
     public Progenitor.Clans.PluginClans Clans
     {
