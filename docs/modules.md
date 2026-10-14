@@ -1948,6 +1948,222 @@ a powered furnace (castle heart burning blood essence) that lists the copper and
 10. Clean up: `.stations toggle Sulfur on`, take the ore out, and remove the Sample from the reload
     folders.
 
+## Inventory
+
+`ctx.Inventory` (`Progenitor.Inventory`) reads and moves items in any inventory on the server:
+chests, a station's input and output, a castle heart, a servant, a player's bag. Server only and
+main-thread only; on the client every call throws `InvalidOperationException` ("ctx.Inventory.X
+runs on the server side only"). Built and game-free tested (`InventoryEngineTests`,
+`ContainerIdTests`, `CastleContainersTests`); **not live-verified** — the acceptance procedure is
+below. API table: [api.md, Inventory](api.md#inventory).
+
+```csharp
+// Two chests in the castle the player stands on, then a move of 50 iron ore that conserves the total.
+var castle = ctx.Castles.At(characterEntity);
+var chests = castle.Containers();
+var from = chests[0].Main;
+var to = chests[1].Main;
+int ore = ironOreGuid; // PrefabGUID hash
+InventoryResult r = ctx.Inventory.Transfer(from, to, ore, 50);
+ctx.Log.LogInfo($"{r.Outcome}: moved {r.Done}; source {r.SourceBefore}->{r.SourceAfter}, target {r.TargetBefore}->{r.TargetAfter}");
+
+// Persist the chest, not the entity: the id survives restarts.
+ContainerId keep = chests[0].Id;
+if (ctx.Inventory.TryFind(keep, out var chest, out var why)) { /* chest is the live entity */ }
+```
+
+### Which inventory
+
+`InventoryRef` is a session handle: owner entity, instance and the world epoch it was taken in.
+A reference from before a save reload is refused as stale; keep a `ContainerId` instead.
+
+| Owner | Where the slots are (game facts, server metadata) | `InventoryRef` |
+|---|---|---|
+| Chest, castle heart, player bag entity | The entity carries `InventoryBuffer` itself | `Of(owner)` (instance 0 only) |
+| Player character, servant | `InventoryInstanceElement` rows point at external inventory entities (one row on a character: the bag) | `Of(character)` |
+| Refinement station (furnace, sawmill, …) | Two external inventories, spawned input then output (8 slots each, unrestricted) | `InputOf(station)` = instance 0, `OutputOf(station)` = instance 1 |
+| Crafting station | One inventory | `InputOf(station)` / `Of(station)` |
+
+`Instances(owner)` says how many there are. The heart's inventory is reached with
+`Of(heart)`; which slots are its fuel pads is read from its level table
+(`ICastleHandle.HeartFuel().UnlockedSlots`), see [Castles: containers, stations and the heart](#castles-containers-stations-and-the-heart).
+
+### Rules the reads follow
+
+Item facts, the stack size included, come from the server item table (`GameDataSystem.ItemHashLookupMap`),
+the same table the game's own add and move read. An item missing from the table is refused ("not in the
+server item table").
+
+- **Restrictions** (`RestrictedInventory` on the inventory entity, exposed as
+  `InventoryRestriction`): a container admits an item when both fields are 0, or when the type is
+  0 or the item, **and** the category is 0 or shares a flag with the item's
+  `ItemData.ItemCategory`. So a storage restricted to precious categories refuses Blood Essence.
+- **Capacity**: a slot holds its `MaxAmountOverride` when that is above 0, otherwise the item's
+  stack size. The game stacks onto matching slots below capacity first, then fills empty slots
+  (item 0).
+- **Player bags**: the game keeps stackables, jewels and tech items off the eight action-bar
+  slots first, so `FreeSpace` on a bag is an upper bound; every write reads its result back
+  regardless.
+
+### Writes
+
+| Call | Game path | Guarantee |
+|---|---|---|
+| `TryAdd` | `ServerGameManager.TryAddInventoryItem` (the `ctx.Items.Grant` path); the character as target for a player's bag, the inventory entity otherwise | Partial adds allowed; `Done` and `Remainder` are read-backs. |
+| `TryRemove` | `InventoryUtilitiesServer.RemoveItemGetRemainder` on that inventory | Never asks for more than the inventory holds. Asking for more would make the game fall back to unequipping worn gear, which this call never reaches. |
+| `Transfer` | `InventoryUtilitiesServer.TryMoveItem`, one source slot at a time, with the target instance index set | Conserves the total and never creates or destroys items (below). A completed game move keeps the item's own entity (durability, stats). |
+| `TransferAll` | One `Transfer` per item type the filter accepts | Stops at the first `Inconsistent` row. |
+
+**How the transfer keeps the total.** The game's slot move adds into the target first, clears the
+source slot only when that add succeeded, and puts the part that did not fit back into the slot it
+came from. Around each step the engine reads both containers back and checks that the source lost
+exactly what the target gained.
+
+- **Equipped on arrival.** The game's move equips gear when the target's owner (a player, a
+  servant) has a free matching slot, so the unit leaves the target inventory for the owner's
+  equipment. The engine counts the owner's worn copies (`Equipment`, `ServantEquipment`) before and
+  after each step and reports those units as moved (`InventoryResult.Equipped`); nothing is
+  restored for them.
+- **Restore only for interchangeable items.** When a step does not conserve the total and the item
+  is a stackable or consumable without its own item entity in either container, the restore step
+  adds the missing units back to the source (then the target) or removes the extra units from the
+  target (then the source), never more than that side holds. For anything else — gear, or any
+  copy with its own entity — nothing is added or removed: the transfer stops with
+  `InventoryOutcome.Inconsistent` instead of guessing which copy to recreate or delete.
+- If the total still differs, the transfer stops with `Inconsistent`, logs `Inventory: transfer …`
+  as an error, and reports both containers' counts.
+- Two references that resolve to the same inventory entity (a character and its own bag entity)
+  are refused.
+- The move keeps relic and soulbound rules on (`MoveItemResult` `Failed_ItemIsSoulBound` /
+  `Failed_BlockedByRelicRules` end the transfer as `Nothing` with the reason).
+
+### Watch
+
+`Watch(container, handler, interval)` compares a content fingerprint (slot count, then each slot's
+item and amount) every `interval` (default 500 ms, minimum 100 ms; at most 1024 watches on a
+server). Cost per watch per check: one buffer read and one pass over the slots, no item-table
+lookups. A `ctx.Inventory` write pokes the watches
+on the containers it touched, so those report on the next frame. The handler gets
+`InventoryChangeKind.Changed`, or `Gone` once (owner destroyed or world reloaded) after which the
+watch stops. Watches are tracked on the plugin context.
+
+The game does create `InventoryChangedEvent` entities on its add, remove and move paths, but which
+system consumes them and whether every inventory writer creates one is not established, so the
+watch does not depend on them.
+
+### Stable container ids
+
+`ContainerId` (`c-` plus 32 hex digits) names a placed container, station or heart across
+restarts. `IdOf(entity)`, `Status(id)` (`Unknown`, `Live`, `Unbound`, `Gone`) and
+`TryFind(id, out entity, out reason)`; castle rows carry it as `CastleContainerInfo.Id` and
+`ICastleHandle.HeartId`.
+
+How it works: the framework assigns a random id the first time a container is asked about and
+records it against the container's **anchor** — territory index, prefab, origin tile, height level
+and rotation, which the world save keeps for every placed model and which no two live models of one
+prefab share. The book lives in that world's mod save (`progenitor/progenitor.inventory.json` beside
+the autosaves), so another world never sees it; it is updated in the store the moment an id is
+issued and written to disk with each world save. After a load the framework re-reads it, binds each
+saved id to the container standing on its anchor and retires ids whose anchor holds nothing; while
+the server runs, a sweep every two seconds retires ids whose container was destroyed and moves the
+anchor of a model that was moved, so a new chest on a freed or destroyed tile gets a new id. Ids
+are random, so a retired id is never issued again.
+
+Failure modes, by design:
+
+1. A container destroyed and replaced on the same tile while Progenitor was not running (or within
+   the two-second sweep window before a shutdown save) inherits the old id.
+2. A world rolled back to an older autosave can bring back a container whose id was already
+   retired; it gets a new id.
+3. Relocating a castle rebuilds and moves every model, so every container gets a new id. (A model moved while the server runs keeps its id: the sweep follows it to its new tile.)
+4. Player bags and servants have no id; address them through their owner.
+
+Ids are not available until the world's mod save has loaded and the castles are visible after a
+load (`IdOf` returns `ContainerId.None` with the reason meanwhile).
+
+### Castles: containers, stations and the heart
+
+| Member | What |
+|---|---|
+| `ICastleHandle.Containers()` | Placed models with an inventory that are not a station or the heart. |
+| `ICastleHandle.Stations()` | `CastleWorkstation` or `Refinementstation` models; refinement rows carry `Output`. |
+| `ICastleHandle.Name` | The heart's nameplate. |
+| `ICastleHandle.HeartId` | The heart's stable id. |
+| `ICastleHandle.HeartFuel()` | `Level` (`CastleHeart.Level`), `UnlockedSlots` (the `ItemSlots` of that level's row in the heart's own level table, `CastleHeart.Data`), `LevelRows`, `FuelQuantity`. |
+| `ctx.Castles.Nameplate(entity)` / `TrySetNameplate(entity, name, out reason)` | `NameableInteractable.Name`, a networked fixed string: at most 61 UTF-8 bytes, no control characters, empty clears. Written through the component overlay at the metadata offset. |
+| `ctx.Castles.RelationTo(user, castle)` | `Owner`, `ClanMember` (in the owner's clan), `Allied` (the game's `Team.IsAllies` between the user's character and the heart), or `None`. |
+
+Other castle inventories, from the server metadata (fields verified, behavior inferred, not
+live-checked): a horse stable carries `Stables_Shared` (the mount is referenced by
+`MountEntity`, it is not an item) and has an inventory whose items feed stat upgrades (items with
+`StablesIngredient`) and receive `MountItemGainPerSecond`; unit spawners (`UnitSpawnerstation`)
+run recipes from an inventory, and whether they have one or two instances is not in the metadata —
+`Instances(entity)` answers it live; a servant coffin has no inventory of its own (the servant unit
+does), and a prison cell references its prisoner.
+
+### Clans
+
+`ctx.Clans.Of(user)` returns a `ClanRef` (`Entity`, `ClanGuid` from `ClanTeam` — the key to
+persist — and `Name`), `Members(clan)` every user whose `User.ClanEntity` is the clan (offline
+included, ordered by name) and `Castles(clan)` every castle whose owner's clan it is. Server only.
+
+### Presence events
+
+| Event | When | Cost |
+|---|---|---|
+| `PlayerTerritoryChanged` | A connected player now stands on another territory (`OldTerritory`, `NewTerritory`, -1 for none, `Castle`, `Initial` for the first reading on a plot). Debounced over two consecutive readings. | Only while subscribed: once a second, one position read per connected player and an `IsInside` test per castle; the castle list is re-read every 10 s or after a load. |
+| `PlayerReady` | Once per session, after `PlayerConnected`, when the user's `LocalCharacter` is live and `User.LastFullyAckedFrame` has advanced (the client is simulating the world). **Experimental**: the signal is inferred, not live-verified. Players already in the world when Core installs are not announced. | Four checks a second per pending session, nothing after. |
+
+`PlayerConnected` remains the earlier signal (connection approved, the character may not be in the
+world yet).
+
+### Sample commands
+
+`samples/Progenitor.Sample/SampleInventory.cs`, admin only, through `.items`:
+`chests`, `slots <c>`, `count <c> <item>`, `free <c> <item>`, `move <from> <to> <item> <amount>`,
+`moveall <from> <to>`, `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `watch <c>`,
+`heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
+`index:version` entity, `bag` or `heart`; append `/out` for a refinement station's output. Items are
+a spawnable name or a GUID hash. Every action logs a `Sample items: …` line; the sample also logs
+`PlayerReady` and `PlayerTerritoryChanged`.
+
+### Live acceptance (procedure — not run)
+
+Goal: move 50 Iron Ore between two chests of a castle on a copy of a real save with the total conserved and
+counts that match the vanilla container panels. Run on the isolated test server only, with a copy
+of the save made for this test.
+
+1. Deploy Core and `Progenitor.Sample` to the test server ([dev-loop.md](dev-loop.md)), join with
+   an admin character, and stand inside a castle that has at least two chests.
+2. `.items chests`. Expect one reply per row, `#1 <entity> c-<id> "<name>" <prefab> slots=<n>`,
+   and the same rows in the server log as `Sample items: chest #1 …`. Without a client, the
+   bridge `castles` op (`{what: "buildings", plot: <territory>}`) lists the same entities.
+3. Pick a source chest holding Iron Ore: `.items count #1 Item_Ingredient_Mineral_IronOre`. If it
+   holds fewer than 50, `.items add #1 Item_Ingredient_Mineral_IronOre 60` first. Note both
+   chests' counts and open each chest's vanilla panel to compare.
+4. `.items move #1 #2 Item_Ingredient_Mineral_IronOre 50`. Expect the reply
+   `Moved 50/50 Item_Ingredient_Mineral_IronOre. #1: A -> A-50, #2: B -> B+50 (Complete)` and the
+   log line `Sample items: move from=#1 to=#2 item=<guid> requested=50 moved=50 outcome=Complete
+   from_before=A from_after=A-50 to_before=B to_after=B+50 total_before=A+B total_after=A+B steps=<k>
+   compensated=0`. The vanilla panels show the same counts.
+5. Conservation checks: fill the target so only part fits and repeat (expect `Partial` with
+   `total_before == total_after`); move into a refusing target such as the heart
+   (`.items move #1 heart … 1`, expect `Nothing … refuses this item`). No `Inventory: transfer …
+   could not be restored` error appears.
+6. Gear into an owner that can wear it: put one weapon or armor piece in chest #1 (`.items add #1
+   <gear prefab> 1`), take off the matching piece on your character, then `.items move #1 bag <gear
+   prefab> 1`. Expect `Moved 1/1 … (Complete; 1 equipped by the target's owner)`, the piece worn
+   and no copy left in the chest (`.items count #1 <gear prefab>` is 0). Repeat into a servant
+   with an empty matching slot (`.items move #1 <servant index:version> <gear prefab> 1`, the
+   entity from the bridge `castles`/`get` ops): the servant wears it and the chest has none. Then
+   with the slot filled: the piece lands in the bag or servant inventory instead.
+7. Ids: note `.items id #1`, restart the test server, rejoin, `.items id #1` again (same id,
+   status `Live`); destroy a chest, wait two seconds, `.items id c-<old id>` (expect `was
+   destroyed`); place a new chest on the same tile (expect a new id).
+8. Optional: `.items watch #1`, move items by hand in the panel, expect `Sample items: watch #1
+   Changed`; `.items heart`, `.items clan`, `.items name #1 "Ore"` (the panel shows the name).
+9. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
+
 ## Main thread
 
 Research notes (internal): `MainThread` ownership, collectible-ALC sweep.

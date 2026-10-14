@@ -111,6 +111,19 @@
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleEvents.cs" Link="Linked\CastleEvents.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\Castles.cs" Link="Linked\Castles.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleCastle.cs" Link="Linked\SampleCastle.cs" />
+    <!-- Milestone P-a: ctx.Inventory engine, container ids, clans, castle containers, presence
+         events. Every file here is game-free; the Unity* / Plugin* files are not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryTypes.cs" Link="Linked\InventoryTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryMath.cs" Link="Linked\InventoryMath.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryEngine.cs" Link="Linked\InventoryEngine.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryWatchHub.cs" Link="Linked\InventoryWatchHub.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerId.cs" Link="Linked\ContainerId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Clans\ClanTypes.cs" Link="Linked\ClanTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleContainers.cs" Link="Linked\CastleContainers.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\NameplateCodec.cs" Link="Linked\NameplateCodec.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleHeartFuel.cs" Link="Linked\CastleHeartFuel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\PlayerPresence.cs" Link="Linked\PlayerPresence.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleInventory.cs" Link="Linked\SampleInventory.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLogic.cs" Link="Linked\ChatLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatWindowLogic.cs" Link="Linked\ChatWindowLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandLogic.cs" Link="Linked\ChatCommandLogic.cs" />

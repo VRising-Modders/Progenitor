@@ -353,6 +353,77 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         }
     }
 
+    public IReadOnlyList<CastleInventoryRow> Inventories(CastleId heart)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated || heart.IsNone) return Array.Empty<CastleInventoryRow>();
+        var plot = CastleReader.PlotOf(world, heart.ToEntity());
+        if (plot == null) return Array.Empty<CastleInventoryRow>();
+
+        var em = world.EntityManager;
+        var buildings = CastleReader.Buildings(world, plot);
+        var rows = new List<CastleInventoryRow>();
+        for (int i = 0; i < buildings.Count; i++)
+        {
+            var b = buildings[i];
+            var e = b.Entity;
+            try
+            {
+                if (e.Has<CastleHeart>(em) || !Inventory.UnityInventoryBackend.HasInventory(em, e)) continue;
+                bool refinement = e.Has<Refinementstation>(em);
+                bool station = refinement || e.Has<CastleWorkstation>(em);
+                CastleNameplates.TryRead(em, e, out bool nameable, out string name);
+                rows.Add(new CastleInventoryRow
+                {
+                    Building = ToInfo(b),
+                    IsStation = station,
+                    IsRefinement = refinement,
+                    SlotCount = Inventory.UnityInventoryBackend.SlotCount(em, e, 0),
+                    Nameable = nameable,
+                    Nameplate = name,
+                });
+            }
+            catch (Exception ex)
+            {
+                Plugin.Logger?.LogWarning("Castles: inventory row for " + e.Index + ":" + e.Version + " threw: " + ex.Message);
+            }
+        }
+
+        return rows;
+    }
+
+    public string HeartName(CastleId heart)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated || heart.IsNone) return "";
+        return CastleNameplates.TryRead(world.EntityManager, heart.ToEntity(), out _, out string name) ? name : "";
+    }
+
+    public CastleHeartFuel HeartFuel(CastleId heart)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return CastleHeartFuel.Fail("no server world");
+        try
+        {
+            var em = world.EntityManager;
+            byte* p = Ai.AiRuntime.RO<CastleHeart>(em, heart.ToEntity(), Layout.CastleHeartDataOffset + sizeof(long));
+            if (p == null) return CastleHeartFuel.Fail("the entity is not a live castle heart");
+            int level = p[Layout.CastleHeartLevelOffset];
+            int fuel = *(int*)(p + Layout.CastleHeartFuelQuantityOffset);
+            byte* blob = Ai.AiRuntime.BlobData(p + Layout.CastleHeartDataOffset);
+            int length = Ai.AiRuntime.BlobLength(blob);
+            if (blob == null || length <= 0)
+                return new CastleHeartFuel { Level = level, FuelQuantity = fuel, Reason = "the heart's level table is not readable" };
+            if (!CastleHeartLevels.TryItemSlots(new ReadOnlySpan<byte>(blob, length), level, out int slots, out int rows))
+                return new CastleHeartFuel { Level = level, FuelQuantity = fuel, LevelRows = rows, Reason = "no row for level " + level + " in the heart's level table" };
+            return new CastleHeartFuel { Level = level, FuelQuantity = fuel, UnlockedSlots = slots, LevelRows = rows };
+        }
+        catch (Exception e)
+        {
+            return CastleHeartFuel.Fail("heart read threw: " + e.Message);
+        }
+    }
+
     private static CastleSnapshot ToSnapshot(CastlePlot plot) => new()
     {
         Heart = CastleId.From(plot.HeartEntity),

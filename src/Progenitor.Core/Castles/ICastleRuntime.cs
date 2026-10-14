@@ -80,6 +80,15 @@ internal interface ICastleRuntime
 
     /// <summary>The user's <c>User.ClanEntity</c>. False when the user has no clan or was unreadable.</summary>
     bool TryGetClan(CastleId user, out CastleId clan);
+
+    /// <summary>Placed models with an inventory on one castle (containers and stations), sorted like <see cref="Buildings"/>.</summary>
+    IReadOnlyList<CastleInventoryRow> Inventories(CastleId heart);
+
+    /// <summary>The heart's nameplate, empty when unnamed or unreadable.</summary>
+    string HeartName(CastleId heart);
+
+    /// <summary>The heart's level, unlocked slots from its level table, and fuel quantity.</summary>
+    CastleHeartFuel HeartFuel(CastleId heart);
 }
 
 /// <summary>
@@ -142,4 +151,10 @@ internal sealed class NullCastleRuntime : ICastleRuntime
         clan = CastleId.None;
         return false;
     }
+
+    public IReadOnlyList<CastleInventoryRow> Inventories(CastleId heart) => System.Array.Empty<CastleInventoryRow>();
+
+    public string HeartName(CastleId heart) => "";
+
+    public CastleHeartFuel HeartFuel(CastleId heart) => CastleHeartFuel.Fail("no server world");
 }
