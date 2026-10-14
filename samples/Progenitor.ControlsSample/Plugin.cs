@@ -39,8 +39,10 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
             "Open or close the Controls Sample page in the Mods menu (every Progenitor UI control, game look).",
             () => TogglePage(ctx));
 
+        var hud = new ControlsHud(ctx);
         ctx.Menu.Register(Name, "Every Progenitor UI control, each wired to a log line and a status label.")
-            .Page(ControlsDemo.PageId, panel => new ControlsDemo(log, dialog).Build(panel, ctx.Guid, ControlsDemo.OpenBindId));
+            .Page(ControlsDemo.PageId, panel => new ControlsDemo(log, dialog).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
+            .Page(WidgetsDemo.PageId, panel => new WidgetsDemo(log, hud).Build(panel));
 
         ControlsSettings.Register(ctx, log, window);
         log(ControlsDemo.LogPrefix + "loaded; Ctrl+F7 opens the All controls page");
@@ -68,6 +70,39 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
 
 /// <summary>Empty context (repository convention).</summary>
 public sealed class ControlsContext : PluginContext { }
+
+/// <summary>
+/// The Widgets page's HUD calls on <c>ctx.Hud</c>: a notification, a pick in world, and a Locate ping on the last pick.
+/// The pick and the ping are this plugin's and go with it on every unload.
+/// </summary>
+internal sealed class ControlsHud : IWidgetsHud
+{
+    private readonly PluginContext _ctx;
+    private UiWorldPickResult? _picked;
+    private IUiLocatePing? _ping;
+
+    internal ControlsHud(PluginContext ctx) => _ctx = ctx;
+
+    public void Notify(string text, string detail, UiNoticeKind kind) => _ctx.Hud.Notify(text, detail, kind);
+
+    public void Pick(Action<string> done) =>
+        _ctx.Hud.PickInWorld(
+            result =>
+            {
+                _picked = result;
+                done(result.Kind + " " + result.Menu + " (" + result.EntityIndex + ":" + result.EntityVersion + ")");
+            },
+            () => done("Pick cancelled."));
+
+    public string LocatePicked()
+    {
+        if (_picked is not { } picked) return "nothing picked yet";
+        if (!picked.IsCurrent) return "the picked target belongs to an earlier world";
+        _ping?.Dispose();
+        _ping = _ctx.Hud.Locate(picked.Entity, picked.Menu, seconds: 10);
+        return "pinged " + picked.EntityIndex + ":" + picked.EntityVersion;
+    }
+}
 
 /// <summary>One <c>ctx.Dialogs</c> call per kind in <see cref="ControlsDemo.DialogKinds"/>.</summary>
 internal static class ControlsDialogs

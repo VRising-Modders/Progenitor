@@ -80,6 +80,14 @@ public class PluginContext
     /// context subclass. See <c>docs/ui.md</c> "Dialogs".
     /// </summary>
     public Progenitor.Ui.PluginDialogs Dialogs { get { EnsureAttached(); return _dialogs ??= new Progenitor.Ui.PluginDialogs(this); } }
+
+    private Progenitor.Ui.PluginHud? _hud;
+
+    /// <summary>
+    /// P7: notifications in the game's announcement style, a Locate ping on a world entity, and a pick-in-world mode.
+    /// Client only; tracked on every unload reason. See <c>docs/ui.md</c> "HUD: notifications, locate and pick in world".
+    /// </summary>
+    public Progenitor.Ui.PluginHud Hud { get { EnsureAttached(); return _hud ??= new Progenitor.Ui.PluginHud(this); } }
     private IModStore? _save;
     private IModStore? _serverSave;
     private Harmony? _harmony;

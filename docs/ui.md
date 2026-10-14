@@ -58,6 +58,7 @@ Ui.RemoveAll(this);
 | `RemoveAll(owner)` | Dispose that plugin's handles and destroy the exact DontDestroyOnLoad root `progenitor-ui-<pluginId>`. A longer GUID (`example.sample.extra`) is a different root. |
 | `panel.Dropdown` / `Number` / `SliderField` / `ColorField` / `KeyField` | The settings kit (SETTINGS1). See [Settings kit controls](#settings-kit-controls-settings1-source-checked-and-game-free-tested-not-live-verified). |
 | `panel.TextArea` / `Radio` / `MultiSelect` / `Info` / `Divider` / `ConfirmButton`, `IUiHandle.Interactable` | SETTINGS1 stage 2. See [Stage 2 controls](#stage-2-controls-settings1-source-checked-and-game-free-tested-not-live-verified). |
+| `panel.OrderedList` / `Picker` / `Tabs` / `CodeArea`, `handle.Tooltip` (`UiWidgets`); `ctx.Hud.Notify` / `Locate` / `PickInWorld` | P7, experimental. See [Widgets](#widgets-p7) and [HUD](#hud-notifications-locate-and-pick-in-world). |
 
 Keybinds are registered per plugin through `ctx.Keybinds.Register(id, defaultKey, description, onPressed, allowWhileCaptured: false)`, which binds the chord to that plugin's own cfg file. See [Keybinds](#keybinds-edges-come-from-held-state).
 
@@ -656,6 +657,163 @@ On the isolated test client (not a client someone is playing), with a candidate 
 9. Restore: close the workspace; leave the client at the title screen.
 
 Guessed sizes (set from the glyph estimate, not measured live): the 16-unit top pad, 24/17/16 px text, the 520/460/420/360 widths, the 52-unit button row, the ×1.3 + 40 button width with the 120 floor, the 6-unit text pad, the 10-option Choose cap and the 250 ms Enter grace.
+
+## Widgets (P7)
+
+Composed widgets for a mod's panel or Mods page: an ordered list, an entity and item picker, tabs with count badges, tooltips, and a code text area. Each one is built from the kit's own cell rows and buttons, so it draws in the game's look, sits on the settings grid with the rows around it, is reached by a controller like every other kit control, and is released with its panel. On a runtime that cannot draw (the server, a skipped module) a widget keeps its state and draws nothing, like every other handle. The HUD pieces (notifications, Locate, pick in world) are on `ctx.Hud`, [below](#hud-notifications-locate-and-pick-in-world).
+
+**Status: experimental.** Source-checked, built and game-free tested (`UiWidgetsTests`, `UiCodeAreaTests`); **not verified live**. The live procedure is [Widgets acceptance procedure](#widgets-acceptance-procedure-not-run). Reference page: the Controls sample's **Widgets** page ([`WidgetsDemo.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.cs)).
+
+```csharp
+using Progenitor.Ui;
+
+ctx.Menu.Register("My mod", "…").Page("Targets", panel =>
+{
+    var tabs = panel.Tabs("tabs", new[] { "Targets", "Rules" });
+    var list = tabs.Add(0, panel.OrderedList("targets", new[]
+    {
+        new UiListItem("chest-a", "Storage chest") { Note = "plot A", Badge = "12", Detail = "Accepts ore and stone." },
+        new UiListItem("furnace-a", "Furnace input") { Note = "plot A" },
+    }));
+    list.OnReorder(m => ctx.Log.LogInfo(m.Id + " moved to " + m.To));
+    list.OnRemove(item => ctx.Log.LogInfo("removed " + item.Id));
+    tabs.SetBadge(0, list.Items.Count);
+
+    var picker = tabs.Add(1, panel.Picker("item", new[]
+    {
+        new UiPickerEntry("crystal", "Crystal") { Section = "Resources", ItemPrefab = -257494203 },
+        new UiPickerEntry("dark", "Dark Silver Ingot") { Section = "Resources", DisabledReason = "Unlocked by research" },
+    }));
+    picker.OnPicked(sel => ctx.Log.LogInfo("picked " + string.Join(",", sel.Select(e => e.Id))));
+
+    var rules = tabs.Add(1, panel.CodeArea("Rules", "send 50 to \"Furnace\"", lines: 8));
+    rules.SetHighlighter(MyHighlighter);            // Func<string, IReadOnlyList<UiTextSpan>>
+    rules.OnChanged(text => rules.SetErrors(MyChecker(text)));
+});
+```
+
+| Widget | Call | Vanilla counterpart and borrowed art |
+|---|---|---|
+| Ordered list | `panel.OrderedList(key, items, options)` → `IUiOrderedList` | The game's settings list: one settings-grid row per item with the list's separator rule, the game's entry highlight band for the held row, the game's dropdown arrow (`DropDownButton_Arrow`) as the expander, box-less glyph buttons in the muted gold for grip, up, down and remove, the kit's count badge (the client gold) and the game item icon in the kit's icon well. The drawer is the Install list's drawer (`JoinAbove`). |
+| Picker | `panel.Picker(key, entries, options)` → `IUiPicker` | The search field is the game's settings value box (`SimpleBox_Normal`) with the kit's clear button; results are settings-grid rows with the entry band for the selection; section headings are gold captions; grayed rows use the kit's faint tone; the autofill suggestion is the kit's link (`#9fc7e8`, underlined). |
+| Tabs | `panel.Tabs(key, captions, selected)` → `IUiTabs` | The Install tab's filter chips: the game's popup button (`SmallerButton_*`) with the gold plate on the selected one; a count badge after each caption. |
+| Tooltip | `handle.Tooltip(text, title)` (any kit control), `UiListItem.Tooltip`, `UiPickerEntry.DisabledReason` / `Tooltip`, `IUiTabs.SetTooltip` | The dropdown description box (DROPHOVER1): the game's frame sprite (`PassiveFrame_Normal`) or its dark fill, a gold title line, a light body, on its own canvas above every mod panel. |
+| Code area | `panel.CodeArea(text, initial, lines)` → `IUiCodeArea` | The settings value box's multi-line editor (TEXTEXPAND1) with the game's scroll bar (`ScrollBar_Bar` / `ScrollBar_Handle`), a line-number gutter, caller colors drawn over the field's own (transparent) glyphs, and a red marker and band on each line with an error. |
+
+### Ordered list
+
+The list changes itself and then raises the event, so a plugin never has to redraw it. `SetItems` replaces the items (no event), which is also how a plugin undoes a change it refuses.
+
+| Member | Behavior |
+|---|---|
+| `UiListItem(id, title)` | `Id` is the caller's stable key; duplicate ids are refused (`ArgumentException`, nothing changes). `Note` (muted, after the caption, the first cell a narrow row drops), `Badge` (count text), `Detail` (the drawer's text; empty means no drawer), `Icon` (a `Sprite`) or `ItemPrefab` (a game item's prefab id; the client shows that item's own inventory icon, `ManagedItemData.Icon`), `Removable`, `Tooltip`. |
+| `UiOrderedListOptions` | `Capacity` (rows made; 0 = the first item count, at least 8, at most 64), `Reorder` (grip and arrows, on), `Remove` (on), `DetailLines` (1–6, 2), `EmptyText`. |
+| `Items`, `Capacity`, `Overflow` | The order now; the rows the list can draw; items past the capacity (kept, not drawn; the footer says how many). |
+| `Move(id, index)`, `Remove(id)`, `SetExpanded(id, open)`, `IsExpanded(id)` | Programmatic changes; each raises its event. |
+| `OnReorder(UiListReorder)` | After every move: `Id`, `From`, `To` and the whole new `Order`. |
+| `OnRemove(UiListItem)`, `OnExpand(item, open)` | After a removal; after a drawer opened or closed. |
+
+**Drag.** Press the grip (`≡`) with the left button and move: the held row is lit with the game's entry band, and the rows close up around it live, showing the order the drop will leave. Let go to drop; one `OnReorder` follows. The slot under the pointer is decided from the slots' fixed centers, not from the moving content, so it cannot flicker. A release the grip did not see (the pointer let go outside the window) drops on the next frame, from the framework's held-button sample. A right or middle press, a hidden list and a disposed list start no drag. The pointer events come from an owned `EventTrigger` on the grip through the Bootstrap trampoline (`Ui.WatchPointer`'s path); the pointer position from the framework's input layer. No key is read.
+
+**Buttons.** Up and down move one step; the top row's up and the bottom row's down are drawn faint and do nothing. Remove is faint on a row whose item is not `Removable`. The expander is faint on a row with no drawer. A click elsewhere on a row opens or closes its drawer.
+
+### Picker
+
+| Member | Behavior |
+|---|---|
+| `UiPickerEntry(id, label)` | `Section` (heading), `Note` (muted, right), `Icon` / `ItemPrefab`, `DisabledReason` (grays the row, refuses selection, shown in the note and the tooltip), `Tooltip`, `Keywords` (more words the search matches). |
+| `UiPickerOptions` | `Multi` (each click flips; off: one), `Rows` (result lines incl. headings, 4–30, 8), `Placeholder`, `Autofill` (on), `Selected` (initial ids). |
+| `Query` | The search text; typing in the field sets it. |
+| `Matches`, `Suggestion`, `AcceptSuggestion()` | The matching entries; the autofill completion; complete the query to it (and select it in single mode). |
+| `Selected`, `Select(id, on)`, `ClearSelection()`, `OnPicked(entries)` | The selection, in selection order; `OnPicked` after every change. |
+| `SetEntries(entries)` | Replace the entries; selected ids that remain stay selected. |
+
+**Matching.** Case- and accent-insensitive, on the label and the keywords. Best first: the label equals the query; starts with it; a word of the label starts with it; every query word starts some label word; the label contains it; a keyword contains it. No match, not listed. Sections keep the order of their first entry in the caller's list; within a section, rank, then pickable before grayed, then the caller's order. **Autofill:** the best pickable match whose label starts with the query is offered as a link under the field (`Use "Iron Ore"`); a click completes the query (and picks it in single mode). There is no completion key, so the field never fights the keybinds. **Lines:** headings and entries share the `Rows` slots; a heading never ends the window; what did not fit is counted in the status line ("12 matches. Keep typing to narrow them down.").
+
+### Tabs and badges
+
+`Tabs(key, captions, selected)`; `Add(tab, handle)` makes a control part of a tab (shown only while it is selected; add the controls after the tab row so they sit under it); `Selected` (setting it raises `OnChanged`); `SetBadge(tab, count)` (0 hides; over 99 reads `99+`, `UiBadge.Text`); `SetBadge(tab, text, tone)` (`Danger` / `Warn` / `Orange` draw the server red, `Ok` green, otherwise the client gold); `SetTooltip(tab, text)`.
+
+### Tooltips
+
+One tooltip box exists at a time, on its own overlay canvas (`progenitor-ui-core-tooltip`, sorting order 5060: above panels and an open dropdown list), with no raycaster so it never takes the pointer it describes. It is at most 340 units wide, its body wrapped; it sits 8 units right of the hovered control, top edges aligned, flips to the left when that leaves the canvas, goes under the control when neither side fits, and is always clamped 8 units inside the canvas (`UiTooltipLayout`, tested at 1920×1080, 2560×1440, 3840×2160 and 3440×1440). `handle.Tooltip(...)` puts owned PointerEnter/PointerExit rows on the control's object through the Bootstrap trampoline (`UiHoverWatch`); the watch is owner-tagged and released by `Ui.RemoveAll` and the Core teardown like any pointer watch.
+
+### Code area
+
+`CodeArea(text, initial, lines)` (2–40 lines) → `IUiCodeArea`: `Value`, `OnChanged` (per edit; a programmatic `Value` write raises nothing), `SetHighlighter(Func<string, IReadOnlyList<UiTextSpan>>)` (run again on every change; a highlighter that throws is logged once and the last colors stay), `SetSpans`, `SetErrors(IReadOnlyList<UiLineError>)`, `Errors`, `LineCount`, `Describe()`.
+
+- `UiTextSpan(start, length, color)`: character offsets into `Value`, the color as `#RRGGBB` or `#RRGGBBAA`. Overlapping spans: the later one wins and splits the earlier. Spans are clipped to the text; empty ones and ones past the end are dropped. The text is always escaped, so a `<` the player types never becomes markup.
+- `UiLineError(line, message)`: 1-based lines; sorted, one per line (messages on one line joined), repeats dropped, lines past the end moved to the last line. The gutter shows a red dot (`MenuPalette.Red`) and a faint band across the line; hovering the dot shows the message in the tooltip; an orange summary row under the area reads `(!) Line N: message (+k more)` and keeps its height when empty so the page never jumps.
+- Line endings `\r\n` and `\r` become `\n` on every write, so the field, the colors and the gutter count the same lines. Word wrap is off: a long line is clipped at the field's right edge (no sideways scroll).
+
+### Layout rules
+
+These are the numbers in `UiWidgetLayout`, `UiPickerLayout`, `UiTabsLayout` and `UiTooltipLayout`; `UiWidgetsTests.Every_widget_row_fits_its_cells_at_every_checked_width` resolves every widget row at 560, 760, 1108 and 1248 units (the floating window's row and the Mods pages') and fails when a cell leaves the row, two cells overlap, or a cell is squeezed under its floor.
+
+1. Every widget row is a kit cell row 40 units tall on the panel's grid with the settings list's separator rule; a widget lines up with the settings rows above and below it.
+2. Small actions are box-less glyph buttons 28 units wide (the grip 24), packed at the row's right edge in a fixed order — badge, up, down, expand, remove — so their columns line up from row to row whether a row has a badge or not (`Glyph_buttons_line_up_from_row_to_row`).
+3. Icons are 30 units in the kit's icon well. The caption takes the remainder (never under 120); the muted note is the first cell a narrow row drops.
+4. A drawer row continues the row above it, its text indented to the caption's start, 21 units a line plus 12.
+5. Glyphs fall back to ASCII when the game font lacks them (`≡` `=`, `▲` `^`, `▼` `v`, `×` `x`, `√` `*`), so nothing draws as a missing-glyph box.
+6. Rows are made once, in page order, and rewritten in place; a slot past the item count is hidden. A change never rebuilds the page or loses its scroll.
+7. Text comes in through the kit's own row text paths and is escaped; nothing a caller passes becomes markup.
+
+## HUD: notifications, locate and pick in world
+
+`ctx.Hud` (`PluginHud`) acts on the game's HUD and world rather than on a panel. Everything a call starts belongs to the plugin and ends on every unload reason without running a callback (a queued notice is dropped, a ping disappears, an armed pick is cancelled). Client only: on the server each call logs once and returns a handle that does nothing. **Status: experimental** — source-checked, built and game-free tested (`UiNoticeTests`, `UiLocateTests`, `UiWorldPickTests`); **not verified live**.
+
+```csharp
+ctx.Hud.Notify("Deposit list saved", "3 containers", UiNoticeKind.Success);
+
+ctx.Hud.PickInWorld(
+    picked =>
+    {
+        if (!picked.IsCurrent) return;              // validate the world epoch before using the entity
+        ctx.Hud.Locate(picked.Entity, "Target", seconds: 10);
+    },
+    onCancelled: () => ctx.Log.LogInfo("pick cancelled"));
+```
+
+### Notifications
+
+`Notify(text, detail = "", kind = Info, seconds = 0)` → `IUiNotice` (`State`: `Queued`, `Showing`, `Done`, `Dropped`; `Dispose` takes a queued notice out). `UiNoticeKind`: `Info`, `Success`, `Warning`, `Error`.
+
+- **Vanilla counterpart:** the game's own center announcement banner (the one achievements use), through `AnnouncementHUDParent.ShowBasicAnnouncement(header, subHeader)`, an ordinary instance method taking two `LocalizationKey`s by value. The texts are registered as mod strings; an empty detail hides the banner's second line. The banner shows every kind the same.
+- **The game's banner has no queue** (a second call restarts its animation and overwrites the text), so the framework queues: one notice at a time across all plugins, first posted first shown; the same text within 4 s is dropped; a plugin may post 6 per 10 s; at most 8 wait (the oldest is dropped); a notice waits up to 8 s while the banner is busy. `seconds` 0 is the banner's own animation length; a longer value holds the slot longer. A vanilla achievement that fires during a notice replaces it on the banner, and the other way round.
+- **Fallback band:** with no banner (title screen, no world, HUD hidden, a refused call) the notice is drawn on a framework band in the same style: a dark top-center band between thin rules in the game's body font, the detail line muted. `kind` tints only the band's rules (Info gold, Success green, Warning amber, Error red). One log line names the path in use.
+
+### Locate
+
+`Locate(Entity target, label = "", seconds = 10)` / `Locate(float3 position, label = "", seconds = 10)` → `IUiLocatePing` (`Active`, `Dispose`).
+
+- The game has no world ping, so this is framework UI drawn each frame over the game camera: a gold diamond marker 1.6 m above the target with `<label> · 14 m` (the distance from the player's character), and, while the target is off screen or behind the camera, an arrow on the screen edge pointing the way to turn. It pulses for its first second and fades in and out.
+- The marker and arrow are drawn into textures (as the kit's radio circles are), not font glyphs, so no glyph can be missing. `UiLocate` places them: the edge clamp keeps a margin at every resolution and aspect (tested at 1920×1080, 2560×1440, 3840×2160, 3440×1440), and a target behind the camera flips its arrow.
+- A ping ends when its time is up (0 or less: until disposed), the entity no longer exists, the client world changes, or the plugin unloads. At most 8 at once; a ninth ends the oldest. The `Entity` overload takes a client-world entity.
+
+### Pick in world
+
+`PickInWorld(onPicked, onCancelled = null, options = null)` → `IUiWorldPick` (`Active`, `State`: `Idle` / `Armed` / `Picked` / `Cancelled` / `TimedOut` / `Disposed`, `Cancel()`).
+
+- **What the player does:** a band at the bottom of the screen shows the prompt (`UiWorldPickOptions.Prompt`, default `Pick a container or station`) with the game's key caps for the Interact key (the player's actual binding, read from the game) and Escape. The next interact on a matching target is captured: its panel does not open, and `onPicked` receives a `UiWorldPickResult` (`Entity`, `Kind`, `Menu`, `MenuType`, `WorldEpoch`, `IsCurrent`, `Suppressed`). Escape cancels; an interact on another kind (a door, a waygate) behaves normally and the pick stays armed.
+- **Options:** `Kinds` (`UiWorldPickKinds`: `Containers`, `Stations`, `Other` — castle heart, prison, servant, trader and the like; default containers and stations), `TimeoutSeconds` (0: none), `SuppressPanel` (true; false lets the panel open and still reports the pick).
+- **One pick at a time, process-wide.** A second `PickInWorld` cancels the first (its `onCancelled` runs) before arming. `onCancelled` runs for Escape, `Cancel()`, replacement, a timeout (`TimedOut`), the world ending, or a call with no world. `Dispose`, plugin unload and Core unload end it with no callback.
+- **Seam:** a Core-owned `Before<OpenHUDMenuSystem>` system hook, installed only while a pick is armed (and 3 s after, so a repeated open of the same interaction stays closed). It reads each `OpenMenuEvent` and its init data (`ContainerMenu.InitData.TargetContainer`, the station menus' `TargetWorkstation`), destroys those two client-only entities so the panel never opens, and ends the interaction on the server with `StopInteractingWithObjectEvent`, sent the way the framework's other client events are sent. It never skips the system, adds no Harmony patch and never uses `ctx.UnsafeHarmony`. Escape comes through the framework's consumed-Escape path (the band is a kit panel), not a key read, so one Escape cancels the pick without opening the game's menu.
+- **Limits:** the interact animation still plays; picking needs the Interact key released first, like closing a panel; the waygate and blood altar menus carry no target and cannot be picked.
+
+### Widgets acceptance procedure (not run)
+
+Focus-free unless marked **foreground test** (a real pointer or key, run separately). Deploy Core and `Progenitor.ControlsSample`; afterwards remove the sample from `BepInEx/progenitor-reload` on the client.
+
+1. Title screen: `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select","plugin":"progenitor.controlssample","page":"Widgets"}`, `{"action":"widget_read","pane":"content"}`. Expect the cell rows `demo-tabs:tabs` (chips `tab0` to `tab3`; `badge0` `4`; `badge2` `1` in the server red), `demo-list:row0` to `row3` (titles in the sample's order, the notes, badges `12` and `3`), `demo-list:drawer0` to `3` hidden, `demo-list:footer` hidden. **Screenshot** at 1920×1080, 2560×1440 and 3840×2160: no clipped or overlapping text; the rows line up with the settings grid.
+2. `widget_click {"label":"demo-list:row0/down"}`: the log has `Controls sample: widget list reorder chest-a 0->1 = furnace-a,chest-a,chest-b,sawmill-b`; `widget_read` shows `row0` titled `Furnace input`. `widget_click demo-list:row1/expand`: `drawer1` visible with the detail text. `widget_click demo-list:row3/remove` (`Sawmill output`, not removable): nothing happens. `widget_click demo-list:row2/remove`: `widget list remove chest-b`, `badge0` reads `3`.
+3. **Foreground test:** drag `row0`'s grip below the last row: the held row lights, the rows close up live, one `list reorder` line on release.
+4. `widget_click demo-tabs:tabs/tab1`: the picker rows show and the list rows hide. Focus the picker's search field and type `cr` (`field_focus`, `type`; if `field_focus` cannot address a cell-row field, this step is a **foreground test**): `demo-picker:status` shows the match count and the `use` link `Use “Crystal”`; `widget_click demo-picker:status/use`: `widget picker = crystal`. In a world, `demo-picker:line1` shows the Crystal inventory icon (**screenshot**).
+5. **Foreground test:** hover a grayed row (the second `Furnace`, *Not your clan's castle*): the tooltip box beside it with a gold title and the reason; at a window edge it flips or clamps and stays on screen.
+6. `widget_click demo-tabs:tabs/tab2`: the code area shows line numbers 1 to 10, colored keywords, strings and comments, a red dot and band on line 4, and the summary `(!) Line 4: Expected "to" before the target.` **Foreground test:** type in it; the colors follow, and fixing line 4 clears the dot and the tab badge.
+7. In a world with a castle chest: `widget_click demo-tabs:tabs/tab3`, then **Notify info** four times quickly: one `Ui: ctx.Hud.Notify shows notices on the game's announcement banner …` line, and the notices show one after another on the game's banner (**screenshot**). At the title screen the same press logs `Ui: ctx.Hud.Notify draws notices on the framework band (…)`.
+8. **Foreground test:** **Pick in world**, walk to the chest and press Interact: the chest's panel does not open; the log has `Ui: world pick #N picked …`, `Ui: world pick sent StopInteractingWithObjectEvent for buff …` and `Controls sample: widget pick = Container ContainerMenu (…)`. Interact again: the chest opens normally. Arm again and press Escape: `Ui: world pick #N cancelled by Escape.` and no pause menu.
+9. **Locate the picked target**: one `Ui: ctx.Hud.Locate draws pings as framework UI over the game camera …` line; the marker over the chest with its distance (**screenshot**). **Foreground test:** turn the camera away: the edge arrow points back; after 10 s it fades.
+10. Remove the sample: no `Ui: ctx.Hud …` warning; the tooltip, the band and the pings are gone.
 
 ## Ownership and teardown
 

@@ -624,6 +624,10 @@ public static class Ui
         try { dialogs = UiDialog.CloseAllForUnload(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog unload threw: " + e.Message); }
 
+        // P7: the widget backends' process-wide state (tooltip, HUD notices, Locate pings, a world pick, a drag).
+        try { UiWidgetLifetime.Uninstall(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget teardown threw: " + e.Message); }
+
         // NAV1: the focus marker comes off before the panels it is drawn on go.
         try { UiNav.Reset(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: navigation reset threw: " + e.Message); }
