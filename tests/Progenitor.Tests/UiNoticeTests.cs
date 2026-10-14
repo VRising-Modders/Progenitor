@@ -154,6 +154,26 @@ public sealed class UiNoticeTests
     }
 
     [Fact]
+    public void The_menu_or_the_workspace_in_a_world_holds_the_banner_and_a_short_settle_follows()
+    {
+        Assert.True(UiNoticeRules.MenuHolds(gameMenuOpen: true, workspaceOpen: false, inWorld: true));
+        Assert.True(UiNoticeRules.MenuHolds(gameMenuOpen: false, workspaceOpen: true, inWorld: true));
+        Assert.False(UiNoticeRules.MenuHolds(gameMenuOpen: false, workspaceOpen: true, inWorld: false)); // title: the band
+        Assert.False(UiNoticeRules.MenuHolds(false, false, true));
+
+        var n = _queue.Enqueue(_a, "after the menu", "", UiNoticeKind.Info, 0, 0);
+        // The HUD reads visible (the live case): only the menu hold keeps the banner from playing unseen.
+        Assert.Null(_queue.Next(1.0, false, Present, 0, menuHold: true));
+        Assert.Null(_queue.Next(5.0, false, Present, 0, menuHold: true));
+        Assert.Empty(_presented);
+        // The menu closes at 5: the queue settles before it shows.
+        Assert.Null(_queue.Next(5.0 + UiNoticeRules.MenuSettleSeconds - 0.1, false, Present, 0, menuHold: false));
+        Assert.Equal(UiNoticeState.Queued, n.State);
+        Assert.Same(n, _queue.Next(5.0 + UiNoticeRules.MenuSettleSeconds + 0.05, false, Present, 0, menuHold: false));
+        Assert.Equal(new[] { "after the menu" }, _presented);
+    }
+
+    [Fact]
     public void A_notice_held_by_the_menu_still_expires_after_the_hold_limit_and_a_hidden_HUD_after_the_wait()
     {
         var expired = new List<UiNoticeHandle>();

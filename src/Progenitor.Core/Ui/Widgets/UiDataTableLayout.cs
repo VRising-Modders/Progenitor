@@ -116,6 +116,12 @@ internal static class UiDataTableLayout
     /// A text column packed from the right (after the fill column) whose text must still read left-justified (the
     /// runtime justifies it apart from the packing). Numbers are right-justified everywhere.
     /// </summary>
+    /// <summary>
+    /// The room a left-justified text column after a right-justified one keeps before its text (header and body), so its
+    /// caption never butts against the previous column's caption, term marker or sort mark.
+    /// </summary>
+    internal const float LeftTextLead = 12f;
+
     internal static bool NeedsLeftJustify(IReadOnlyList<UiTableColumn> columns, UiTableColumn column)
     {
         if (column.Kind != UiTableColumnKind.Text) return false;
@@ -190,10 +196,12 @@ internal static class UiDataTableLayout
         {
             var col = columns[i];
             bool isFill = i == fill;
-            float w = WidthOf(col, isFill);
+            float w = WidthOf(col, isFill) + (NeedsLeftJustify(columns, col) ? LeftTextLead : 0f);
             var align = AlignOf(i, fill);
             bool optional = col.Hideable && !isFill;
-            var kind = col.Kind == UiTableColumnKind.Number ? CellKind.Mono : CellKind.Text;
+            // Numbers are proportional body text, right-justified: the monospace run spaced the thousands separator
+            // ("266 , 400"); the game's figures are lining, and right-justified they line up on their last digit.
+            var kind = CellKind.Text;
             cells.Add(new CellSpec(kind, ViewKey(col.Key)) { MinWidth = w }
                 .With(text: "", width: WidthSpec(col, isFill, w), align: align, optional: optional));
             if (col.Editable && col.Kind == UiTableColumnKind.Number)
@@ -227,7 +235,7 @@ internal static class UiDataTableLayout
         {
             var col = columns[i];
             bool isFill = i == fill;
-            float w = WidthOf(col, isFill);
+            float w = WidthOf(col, isFill) + (NeedsLeftJustify(columns, col) ? LeftTextLead : 0f);
             var cell = new CellSpec(CellKind.Text, ViewKey(col.Key)) { MinWidth = w, SmallCaps = true, FontSizeOverride = InstallColumns.HeaderFontSize }
                 .With(text: col.Caption, width: WidthSpec(col, isFill, w), align: AlignOf(i, fill), optional: col.Hideable && !isFill);
             if (col.Sortable) cell.SortKey = col.Key;

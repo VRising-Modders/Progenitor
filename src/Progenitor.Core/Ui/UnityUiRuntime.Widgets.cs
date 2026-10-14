@@ -88,6 +88,12 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         }
     }
 
+    private static bool AnyPanelShown()
+    {
+        try { return Ui.ShownPanelsSnapshot().Count > 0; }
+        catch { return true; }
+    }
+
     /// <summary>The screen rects of the shown panels (the tooltip's area candidates).</summary>
     private List<ScreenRect> ShownPanelRects()
     {
@@ -110,7 +116,9 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
     private void WatchTooltip()
     {
         bool keep;
-        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && (_tipStillShown == null || _tipStillShown()); }
+        // P7b: a kit tooltip always belongs to a control on a shown panel; with none shown (Escape hid them all, the
+        // workspace closed) it goes, whatever its own liveness check says.
+        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && AnyPanelShown() && (_tipStillShown == null || _tipStillShown()); }
         catch { keep = false; }
         if (!keep) HideTooltip();
     }

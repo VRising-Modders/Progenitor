@@ -86,6 +86,19 @@ internal static class UiNoticeRules
     /// </summary>
     internal const double MaxHeldSeconds = 600.0;
 
+    /// <summary>
+    /// P7b: after the menu or the workspace closes, the queue still waits this long before it shows a held notice, so the
+    /// game has put its HUD back (the banner's canvas and its animation) before the banner is asked to play.
+    /// </summary>
+    internal const double MenuSettleSeconds = 0.75;
+
+    /// <summary>
+    /// P7b: whether the banner is out of sight behind a menu: the game's full-screen menu is open, or (in a world, where
+    /// notices go on the game's HUD banner) the Mods workspace is open over the HUD. At the title screen the workspace
+    /// does not hold: notices go on the framework band, drawn above it.
+    /// </summary>
+    internal static bool MenuHolds(bool gameMenuOpen, bool workspaceOpen, bool inWorld) => gameMenuOpen || (workspaceOpen && inWorld);
+
     /// <summary>Longest header and detail kept; longer text is cut with an ellipsis.</summary>
     internal const int MaxHeaderChars = 120;
 
@@ -207,6 +220,9 @@ internal sealed class UiNoticeQueue
 
     /// <summary>The time of the previous step (for <see cref="UiNoticeHandle.HeldSeconds"/>); NaN before the first.</summary>
     private double _lastStep = double.NaN;
+
+    /// <summary>P7b: the queue holds until this time after a menu hold ends (<see cref="UiNoticeRules.MenuSettleSeconds"/>).</summary>
+    private double _settleUntil = double.NegativeInfinity;
     private long _serial;
 
     /// <summary>Raised (outside the lock) when the showing notice must be taken off screen early: disposed or its owner unloaded.</summary>
@@ -292,9 +308,12 @@ internal sealed class UiNoticeQueue
         if (present == null) throw new ArgumentNullException(nameof(present));
         UiNoticeHandle? next = null;
         List<UiNoticeHandle>? lapsed = null;
-        if (menuHold) hostWait = true;
         lock (Gate)
         {
+            // The hold, then the settle after it: both keep the queue (and the hold's time off the expiry).
+            if (menuHold) _settleUntil = now + UiNoticeRules.MenuSettleSeconds;
+            else if (now < _settleUntil) menuHold = true;
+            if (menuHold) hostWait = true;
             double step = double.IsNaN(_lastStep) || now < _lastStep ? 0 : now - _lastStep;
             _lastStep = now;
             for (int i = _queued.Count - 1; i >= 0; i--)

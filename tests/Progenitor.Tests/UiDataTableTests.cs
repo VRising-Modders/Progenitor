@@ -1080,7 +1080,7 @@ public sealed class UiDataTableTests : IDisposable
         Assert.Equal(0, UiDataTableLayout.FillIndex(cols));
         var cells = UiDataTableLayout.RowCells(cols, multi: false);
         Assert.Equal(CellAlign.Right, cells.Single(c => c.Key == "c:total").Align);
-        Assert.Equal(CellKind.Mono, cells.Single(c => c.Key == "c:total").Kind); // tabular figures
+        Assert.Equal(CellKind.Text, cells.Single(c => c.Key == "c:total").Kind); // proportional: no spaced separators
         Assert.Equal("1,234,567", UiDataTableModel.FormatValue(1234567, cols[1]));
     }
 
@@ -1390,6 +1390,36 @@ public sealed class UiDataTableTests : IDisposable
         Assert.True(UiDataTableLayout.ScrollInset >= UiDataTableLayout.ScrollBarWidth + 6f);
     }
 
+    // ---- Live review round 6 --------------------------------------------------------------------------
+
+    [Fact]
+    public void A_left_justified_text_column_after_a_right_justified_one_keeps_a_lead_before_its_caption()
+    {
+        var cols = Columns(); // note (text) follows cap (number, right-justified)
+        NewTable(options: Options(visible: 4));
+        Assert.Equal(UiDataTableLayout.LeftTextLead, _runtime.Leads["t:header/c:note"]);
+        Assert.Equal(UiDataTableLayout.LeftTextLead, _runtime.Leads["t:row0/c:note"]);
+        // The lead is part of the column's width on the header and the body alike.
+        var header = UiDataTableLayout.HeaderCells(cols, multi: false).Single(c => c.Key == "c:note");
+        var body = UiDataTableLayout.RowCells(cols, multi: false).Single(c => c.Key == "c:note");
+        Assert.Equal(UiDataTableLayout.WidthOf(cols[3], fill: false) + UiDataTableLayout.LeftTextLead, header.Width.Value, 2);
+        Assert.Equal(header.Width.Value, body.Width.Value, 2);
+    }
+
+    [Fact]
+    public void Totals_and_every_number_are_proportional_text_with_unspaced_grouping()
+    {
+        var rows = Many(3);
+        rows[0].Number("total", 266_000);
+        rows[1].Number("total", 400);
+        var (_, _) = NewTable(rows, Options(visible: 6));
+        var totalLine = Enumerable.Range(0, 6).Select(i => Row("t:row" + i)).First(r => Cell(r, "c:name").Text == "Total");
+        var total = Cell(totalLine, "c:total");
+        Assert.Equal(CellKind.Text, total.Kind); // no monospace run spacing the comma
+        Assert.Equal("266,402", total.Text);
+        Assert.All(UiDataTableLayout.RowCells(Columns(), multi: true), c => Assert.NotEqual(CellKind.Mono, c.Kind));
+    }
+
     // ---- Term markers on the header -------------------------------------------------------
 
     [Fact]
@@ -1562,7 +1592,13 @@ internal sealed class TableRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunti
     /// <summary>The cells justified apart from their packing, by row key and cell.</summary>
     public readonly Dictionary<string, CellAlign> Justified = new();
 
-    public void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align) => Justified[row.Text + "/" + cellKey] = align;
+    public readonly Dictionary<string, float> Leads = new();
+
+    public void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align, float leadPad)
+    {
+        Justified[row.Text + "/" + cellKey] = align;
+        Leads[row.Text + "/" + cellKey] = leadPad;
+    }
 
     /// <summary>The last color each header caption was asked to take (null: its own tone).</summary>
     public readonly Dictionary<string, PaletteColor?> TextColors = new();

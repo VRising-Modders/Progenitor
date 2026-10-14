@@ -52,9 +52,9 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
             brt.anchorMax = new Vector2(0.5f, 0.5f);
             brt.pivot = new Vector2(1f, 1f);
             brt.sizeDelta = new Vector2(UiDataTableLayout.ScrollBarWidth, 10f);
+            // Exactly the page's own scroll bar (MakeScrollbar): plain images, no sprite, a faint light track and a light
+            // gray handle as wide as the track.
             var track = TryAdd<Image>(bar);
-            PaintPart(track, GameArt.SettingsArtPart.ScrollbarTrack, Color.white, UnityPanel.ScrollTrack);
-            // The page's own scroll bar's tint (UnityPanel.PaintScrollbar): a faint light track, a light gray handle.
             if (track != null) try { track.color = new Color(1f, 1f, 1f, 0.10f); } catch { /* */ }
             var area = new GameObject("sliding-area");
             area.transform.SetParent(bar.transform, false);
@@ -63,7 +63,6 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
             handle.transform.SetParent(area.transform, false);
             Stretch(handle);
             var handleImage = TryAdd<Image>(handle);
-            PaintPart(handleImage, GameArt.SettingsArtPart.ScrollbarHandle, Color.white, UnityPanel.ScrollHandle);
             if (handleImage != null) try { handleImage.color = new Color(1f, 1f, 1f, 0.45f); } catch { /* */ }
             scrollbar = TryAdd<Scrollbar>(bar);
             if (scrollbar != null)
@@ -375,7 +374,7 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
         catch { /* the band stays */ }
     }
 
-    public void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align)
+    public void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align, float leadPad)
     {
         if (row is not UnityCellRow cells || cellKey == null) return;
         var tmp = cells.CellText(cellKey);
@@ -388,8 +387,36 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
                 CellAlign.Center => HorizontalAlignmentOptions.Center,
                 _ => HorizontalAlignmentOptions.Left,
             };
+            if (leadPad > 0f)
+            {
+                var m = tmp.margin;
+                tmp.margin = new Vector4(2f + leadPad, m.y, m.z, m.w);
+            }
         }
         catch { /* the cell keeps its alignment */ }
+    }
+
+    /// <summary>
+    /// P7b: the value box that took the keyboard and selects its whole value at the start of the next typed-key pass, after
+    /// anything the same click did to its caret (a click places a caret; the first click on such a box selects instead).
+    /// </summary>
+    private static TMP_InputField? _selectAllPending;
+
+    /// <summary>
+    /// True while <paramref name="field"/> waits for its select-all: a pointer caret placement on this same click must not
+    /// run (the first click on a table value box selects its value; a second click places the caret).
+    /// </summary>
+    internal static bool SelectAllPendingFor(TMP_InputField? field) =>
+        field != null && _selectAllPending != null && ReferenceEquals(_selectAllPending, field);
+
+    /// <summary>Run a pending select-all on the focused field (the typed-key pass calls it before any key).</summary>
+    private static void ApplyPendingSelectAll(TMP_InputField? focused)
+    {
+        var pending = _selectAllPending;
+        if (pending == null) return;
+        _selectAllPending = null;
+        if (focused == null || !ReferenceEquals(focused, pending) || !Alive(pending)) return;
+        ApplyShortcut(pending, 'a');
     }
 
     public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits, bool selectAllOnFocus)

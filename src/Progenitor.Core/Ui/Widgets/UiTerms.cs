@@ -602,7 +602,7 @@ internal sealed class UiTermBinding : IDisposable
                 catch { return ScreenRect.Unknown; }
             },
             () => handle.IsDisposed,
-            kit?.Owner);
+            kit?.Owner) { _control = handle };
         if (kit == null || kit.IsDisposed || !kit.Enabled || kit.Runtime == null) return binding;
         var widgets = WidgetRuntime.Current;
         try { binding._hover = widgets?.WatchHover(kit.Runtime, binding.Hover, kit.Owner); }
@@ -618,7 +618,7 @@ internal sealed class UiTermBinding : IDisposable
         var binding = new UiTermBinding(UiHelpOwner.PluginOf(row), term,
             () => handle == null || handle.IsDisposed ? ScreenRect.Unknown : handle.NavRect(cellKey),
             () => row.IsDisposed,
-            handle?.Owner);
+            handle?.Owner) { _control = row };
         if (handle == null || handle.IsDisposed || !handle.Enabled) return binding;
         try { if (watchHover) binding._hover = row.OnCellHover(cellKey, binding.Hover); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: term '" + term + "' hover on cell '" + cellKey + "' failed: " + e.Message); }
@@ -676,6 +676,9 @@ internal sealed class UiTermBinding : IDisposable
         var runtime = WidgetRuntime.Current;
         if (runtime != null && rect.IsKnown)
         {
+            // The panel the control is on: the tooltip goes when that panel is hidden or closed (Escape, a workspace
+            // close), even where the control's own rect still reads (a cell row's cells keep their rects while hidden).
+            _panel = UiHelpOwner.ShownPanelOf(_control);
             try
             {
                 runtime.ShowTooltip(rect, UiTerms.Written(_pluginId, Term), explanation, StillShown);
@@ -687,7 +690,13 @@ internal sealed class UiTermBinding : IDisposable
         if (first) UiTerms.NoteHover(_pluginId, Term);
     }
 
-    private bool StillShown() => !_disposed && !Dead && _anchor().IsKnown;
+    internal bool StillShown() => !_disposed && !Dead && UiHelpOwner.PanelStillShown(_panel) && _anchor().IsKnown;
+
+    /// <summary>The control this binding marks (its panel is looked up when a tooltip shows).</summary>
+    private IUiHandle? _control;
+
+    /// <summary>The shown panel the control was on when the tooltip showed, or null.</summary>
+    private UiPanelHandle? _panel;
 
     private bool _entered;
 

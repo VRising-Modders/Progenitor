@@ -4737,7 +4737,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         bool wasFocused = ReferenceEquals(_ownedFocusField, field);
         NoteOwnedFocus(field);
         // P7b: a data table's value box selects its whole value when it takes the keyboard, so typing replaces it.
-        if (!wasFocused && SelectsAllOnFocus(field)) ApplyShortcut(field, 'a');
+        if (!wasFocused && SelectsAllOnFocus(field)) _selectAllPending = field;
         return true;
     }
 
@@ -4861,6 +4861,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         keys = 0;
         typed = '\0';
         var field = FocusedArmedField();
+        ApplyPendingSelectAll(field); // P7b: after this frame's click and caret placement, before any key
         var keyboard = Keyboard.current;
         if (keyboard == null)
         {

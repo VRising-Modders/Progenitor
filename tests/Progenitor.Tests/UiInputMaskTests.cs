@@ -805,9 +805,12 @@ public class UiInputMaskTests
             .Where(l => l.Contains("InputMaskPlan.ScopeFor(", StringComparison.Ordinal))
             .ToArray();
 
+        // P7b: the term is the panels' share of the wanted state (PanelsWantedLocked), so a close-key hold — which also
+        // registers the context — can never be what asks for the full mask.
         Assert.Equal(
-            new[] { "InputMaskPlan.ScopeFor(_pointerBlock && WantedLocked());" },
+            new[] { "InputMaskPlan.ScopeFor(_pointerBlock && PanelsWantedLocked());" },
             derivations);
+        SourcePin.AssertStatement(source, "private static bool PanelsWantedLocked() => _enabled && _count > 0;");
 
         SourcePin.AssertStatement(source, "private static ScopePush ScopeLocked(bool force = false) =>");
         SourcePin.AssertStatementExactly(source, "new(_blocker, EffectiveScopeLocked(), force);");

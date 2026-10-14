@@ -30,7 +30,7 @@ internal interface IWidgetCellField
     void FrameNavFocus(IRuntimeCellRow row) { }
 
     /// <summary>Justify cell <paramref name="cellKey"/>'s text independently of where the cell is packed.</summary>
-    void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align) { }
+    void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align, float leadPad) { }
 
     /// <summary>
     /// Draw the text of cell <paramref name="cellKey"/> in <paramref name="color"/>, or back in its own tone when null (a
@@ -255,9 +255,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             {
                 if (!UiDataTableLayout.NeedsLeftJustify(cols, col)) continue;
                 string cell = UiDataTableLayout.ViewKey(col.Key);
-                if (header != null) field.SetCellJustify(header, cell, CellAlign.Left);
+                if (header != null) field.SetCellJustify(header, cell, CellAlign.Left, UiDataTableLayout.LeftTextLead);
                 foreach (var slot in _slots)
-                    if (RuntimeRowOf(slot) is { } row) field.SetCellJustify(row, cell, CellAlign.Left);
+                    if (RuntimeRowOf(slot) is { } row) field.SetCellJustify(row, cell, CellAlign.Left, UiDataTableLayout.LeftTextLead);
             }
 
             foreach (var slot in _slots)

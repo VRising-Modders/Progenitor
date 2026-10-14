@@ -89,12 +89,14 @@ internal enum UiWorldPickEscapeOwner
 /// &gt; the armed pick. Only when nothing above the pick is open does Escape cancel it; otherwise the
 /// press does what it would do with no pick armed and the pick stays armed.</para>
 ///
-/// <para><b>Why the band's capture mode follows it.</b> A shown panel with capture
-/// (<see cref="UiCaptureMode.WhenHovered"/>/<see cref="UiCaptureMode.WhileShown"/>) registers the input
-/// context that takes the game's Back and Menu_Close in every scope, so while it is registered a game
-/// menu could not be closed with Escape. The band therefore asks for capture only while the pick is
-/// topmost (<see cref="BandMode"/>), so its context exists exactly when Escape is the pick's. A
-/// <see cref="UiCaptureMode.Never"/> panel still keeps Bootstrap forwarding Escape to the framework.</para>
+/// <para><b>The band takes the close key and nothing else.</b> The band is a <see cref="UiCaptureMode.Never"/>
+/// panel (<see cref="BandMode"/>): the pointer never routes it, so it never asks for the full mask (a
+/// <c>WhenHovered</c> band failed closed to it with an unreadable pointer, a controller player's case). While the
+/// pick is topmost (<see cref="BandHoldsCloseKey"/>) it holds a close-key-only context
+/// (<c>UiInputCapture.AcquireCloseKey</c>): the game's Back and Menu_Close are taken, so Escape cancels the pick
+/// without opening the system menu, and movement, aim, zoom and every other key stay the game's. Otherwise it holds
+/// nothing, so no context of ours stands between the game and its own menu's close. A <see cref="UiCaptureMode.Never"/>
+/// panel still keeps Bootstrap forwarding Escape to the framework.</para>
 /// </summary>
 internal static class UiWorldPickEscape
 {
@@ -111,9 +113,14 @@ internal static class UiWorldPickEscape
         return UiWorldPickEscapeOwner.Pick;
     }
 
-    /// <summary>The band's capture mode: capture (for Escape) only while the pick owns Escape.</summary>
-    internal static UiCaptureMode BandMode(UiWorldPickEscapeOwner owner) =>
-        owner == UiWorldPickEscapeOwner.Pick ? UiCaptureMode.WhenHovered : UiCaptureMode.Never;
+    /// <summary>The band's capture mode: always <see cref="UiCaptureMode.Never"/> (it never asks for a gameplay block).</summary>
+    internal static UiCaptureMode BandMode(UiWorldPickEscapeOwner owner) => UiCaptureMode.Never;
+
+    /// <summary>Whether the band holds a close-key-only context: only while the pick owns Escape.</summary>
+    internal static bool BandHoldsCloseKey(UiWorldPickEscapeOwner owner) => owner == UiWorldPickEscapeOwner.Pick;
+
+    /// <summary>The mask the band's hold asks for: the close key only, wherever the pointer is.</summary>
+    internal static UiMaskScope BandScope => UiMaskScope.CloseKeyOnly;
 
     /// <summary>
     /// The game's open HUD menu (<c>OpenHUDMenuSystem.CurrentMenuType</c>) counts as open for any value

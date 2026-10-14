@@ -621,6 +621,33 @@ public sealed class UiTermsTests : IDisposable
     private static float Luma(PaletteColor c) => 0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B;
 
     [Fact]
+    public void A_term_tooltip_goes_when_the_panel_its_control_is_on_is_hidden()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        var panel = NewPanel();
+        panel.Show();
+        panel.Label("Belts").Term("Belt");
+        var tabs = panel.Tabs("ht2", new[] { "Belts", "Other" });
+        tabs.SetTerm(0, "Belt");
+
+        // A kit control.
+        _runtime.Hover(_runtime.Labels.Single(w => w.Text == "Belts"), true);
+        Assert.NotNull(_runtime.TooltipStillShown);
+        Assert.True(_runtime.TooltipStillShown!());
+        var labelCheck = _runtime.TooltipStillShown;
+
+        // A tab caption (a cell: its rect still reads while its panel is hidden).
+        _now += 5;
+        Assert.True(UiCellRowHandle.TryHoverCell("ht2:tabs", "tab0", true));
+        var cellCheck = _runtime.TooltipStillShown!;
+        Assert.True(cellCheck());
+
+        panel.Hide(); // Escape's sweep, or the workspace closing
+        Assert.False(labelCheck!());
+        Assert.False(cellCheck());
+    }
+
+    [Fact]
     public void Describe_reads_back_the_glossary_and_marker_state()
     {
         UiTerms.Define(PluginA, "Belt", "x");
@@ -784,7 +811,13 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
     }
 
     // IWidgetRuntime
-    public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null) => Tooltip = (title, body);
+    public Func<bool>? TooltipStillShown;
+
+    public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null)
+    {
+        Tooltip = (title, body);
+        TooltipStillShown = stillShown;
+    }
 
     public void HideTooltip() => Tooltip = null;
 

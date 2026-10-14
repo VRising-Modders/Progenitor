@@ -58,6 +58,20 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             try { KeybindArtDonors.Prepare(); } catch { /* the kit cap and a flat rule */ }
             try { host.Title?.SetActive(false); } catch { /* */ }
             try { host.ViewportObject?.SetActive(false); } catch { /* */ }
+            // The band never scrolls: its frame is zero-sized (below), so a live ScrollRect over the hidden viewport would
+            // judge the empty content as overflowing and show its bar ("SHOWN while the last verdict was (fits)"). Turn
+            // the ScrollRect off and its bar with it; the panel's read-back then finds the bar hidden, as the layout says.
+            try
+            {
+                var scroll = host.Scroll;
+                if (scroll != null)
+                {
+                    var bar = scroll.verticalScrollbar;
+                    scroll.enabled = false;
+                    if (bar != null && bar.gameObject.activeSelf) bar.gameObject.SetActive(false);
+                }
+            }
+            catch { /* the bar is a diagnostic's concern only: the band draws the same */ }
 
             // The frame: zero-sized below the screen edge, its own image off (see the class remarks).
             var frameImage = frame.GetComponent<Image>();

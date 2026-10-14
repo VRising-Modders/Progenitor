@@ -92,10 +92,12 @@ internal sealed partial class UnityUiRuntime
         try
         {
             double now = HudNow();
-            bool wait = NoticeHostWait(now);
-            // P7b: the game's full-screen menu hides the HUD; the notice waits for it to close, and that wait does not
-            // count toward its expiry (UiNoticeRules.MaxHeldSeconds bounds it).
-            bool menuHold = wait && _hudHidden && GameMenuOpenNow();
+            // P7b: while the game's full-screen menu is open, or the Mods workspace covers the HUD in a world, the game's
+            // banner cannot be seen (live 2026-10-14: the HUD canvas stays enabled under the menu, so "HUD hidden" read
+            // false and the banner played unseen). The notice waits for both to close (and a short settle), and that
+            // wait does not count toward its expiry (UiNoticeRules.MaxHeldSeconds bounds it).
+            bool menuHold = UiNoticeRules.MenuHolds(GameMenuOpenNow(), WorkspaceOpenNow(), Worlds.Client != null);
+            bool wait = menuHold || NoticeHostWait(now);
             NoticeQueue.Next(now, wait, PresentNotice, Progenitor.WorldState.WorldEpoch.Current, menuHold);
             UpdateBand(now);
             if (!NoticeQueue.HasWork && _bandNotice == null) StopNoticeTick();
@@ -113,6 +115,13 @@ internal sealed partial class UnityUiRuntime
     private static bool GameMenuOpenNow()
     {
         try { return GameMenuHistory.Probe.MenuOpen; }
+        catch { return false; }
+    }
+
+    /// <summary>Whether the Mods workspace is open (in a world it covers the HUD and the banner).</summary>
+    private static bool WorkspaceOpenNow()
+    {
+        try { return ModsMenu.IsOpen; }
         catch { return false; }
     }
 
