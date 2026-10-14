@@ -403,6 +403,33 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.Equal("dword:100", back.Registry["Screenmanager Window Position X_h4088080503"]);
     }
 
+    [Fact]
+    public void A_pending_baseline_from_an_earlier_run_is_restored_only_while_the_window_is_the_test_setting()
+    {
+        var b = new DisplayPlan.Baseline { Width = 3840, Height = 1080, Mode = 1, HasRequest = true, RequestedWidth = 2560, RequestedHeight = 1440, RequestedMode = 3 };
+        var back = DisplayPlan.ParseBaseline(DisplayPlan.SerializeBaseline(b))!;
+        Assert.True(back.HasRequest);
+        Assert.Equal(2560, back.RequestedWidth);
+        Assert.True(DisplayPlan.PendingOnLoad(back, 2560, 1440, 3).Restore);
+        var moved = DisplayPlan.PendingOnLoad(back, 3840, 1080, 1);   // the user (or a restore) changed it since
+        Assert.False(moved.Restore);
+        Assert.Contains("not the test setting", moved.Why);
+        Assert.False(DisplayPlan.PendingOnLoad(back, 2560, 1440, 1).Restore); // same size, other mode
+        Assert.False(DisplayPlan.PendingOnLoad(new DisplayPlan.Baseline { Width = 1920, Height = 1080, Mode = 3 }, 1920, 1080, 3).Restore);
+    }
+
+    [Fact]
+    public void Display_reports_focus_from_one_reading_and_finds_the_game_window_by_its_class()
+    {
+        string ops = SourcePin.ReadFile("src", "Progenitor.Dev", "Ops", "DisplayOps.cs");
+        SourcePin.AssertNoStatementContaining(ops, "Application.isFocused");
+        SourcePin.AssertUncommented(ops, "Before = GameWindow.Focus()");
+        string window = SourcePin.ReadFile("src", "Progenitor.Dev", "Ops", "GameWindow.cs");
+        SourcePin.AssertNoStatementContaining(window, "MainWindowHandle");
+        SourcePin.AssertUncommented(window, "GameWindowClass");
+        SourcePin.AssertUncommented(SourcePin.ReadFile("src", "Progenitor.Dev", "Plugin.cs"), "Ops.DisplayOps.OnLoad();");
+    }
+
     // ---- The Unity half, pinned in source (it needs the game to run) ------------------------------
 
     [Fact]

@@ -6,7 +6,7 @@ Operation reference for the [development bridge](bridge.md), part 5 of 5: keybin
 
 **Experimental development tooling**, client, main thread; part of the Dev `bot` op ([tools/bots/README.md](../tools/bots/README.md), [input.md](input.md)). Not a framework API.
 
-`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range.
+`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range: about 1.7 m from the target worked live (2026-10-14), while 3 m gave `not confirmed`; move closer first.
 
 | Field of `bot` `{"action":"status"}` | Meaning |
 |---|---|

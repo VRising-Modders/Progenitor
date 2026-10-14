@@ -45,6 +45,8 @@ internal static class DisplayOps
     }
 
     internal static void Shutdown() { }
+
+    internal static void OnLoad() { }
 #else
     /// <summary>Frames <c>set</c> and <c>restore</c> wait for the window to take the change before they compare.</summary>
     private const int SettleFramesMax = 90;
@@ -152,6 +154,14 @@ internal static class DisplayOps
             SaveBaseline(baseline);
         }
 
+        // The test setting this set asks for, on disk before the call: a later Dev load restores a pending baseline only
+        // while the window is still this.
+        baseline.HasRequest = true;
+        baseline.RequestedWidth = r.Width;
+        baseline.RequestedHeight = r.Height;
+        baseline.RequestedMode = (int)r.WindowMode;
+        SaveBaseline(baseline);
+
         ReadSettingsFields(out int beforeW, out int beforeH, out int beforeMode);
         string beforeStamp = SettingsFileStamp();
         var foreground = KeepForeground();
@@ -221,21 +231,26 @@ internal static class DisplayOps
     private sealed class Foreground
     {
         internal IntPtr Previous;
-        internal bool WasGame;
+
+        /// <summary>The one focus reading (<see cref="GameWindow.Focus"/>) taken before the call.</summary>
+        internal Dictionary<string, object?> Before = new();
         internal bool GaveBack;
+
+        /// <summary>The game's window was found and was the foreground before the call; null when unknown.</summary>
+        internal bool? WasForeground => Before.TryGetValue("foreground", out var f) ? f as bool? : null;
 
         internal void Check(Dictionary<string, object?>? reply)
         {
-            if (WasGame) return;
-            if (GameWindow.GiveForegroundBack(Previous)) GaveBack = true;
+            // Only when it is known the game was not in front: an unknown window is never pushed back.
+            if (WasForeground == false && GameWindow.GiveForegroundBack(Previous)) GaveBack = true;
             if (reply == null) return;
-            reply["focusedBefore"] = WasGame;
+            reply["focusBefore"] = Before;
+            reply["focusNow"] = GameWindow.Focus();
             reply["foregroundGivenBack"] = GaveBack;
-            reply["focusedNow"] = GameWindow.IsForeground();
         }
     }
 
-    private static Foreground KeepForeground() => new() { Previous = GameWindow.Foreground(), WasGame = GameWindow.IsForeground() };
+    private static Foreground KeepForeground() => new() { Previous = GameWindow.Foreground(), Before = GameWindow.Focus() };
 
     /// <summary>A windowed baseline's top-left back on the desktop (no resize, no activation).</summary>
     private static object RestorePosition(DisplayPlan.Baseline b)
@@ -350,6 +365,48 @@ internal static class DisplayOps
         catch (Exception e) { Plugin.Logger?.LogWarning("Dev display: restore on unload failed (the baseline stays for display restore): " + e.Message); }
     }
 
+    /// <summary>
+    /// Dev load: a baseline an earlier run left pending (the process died between set and restore) is restored only when
+    /// the window is still that run's test setting (<see cref="DisplayPlan.PendingOnLoad"/>); otherwise it is forgotten
+    /// and logged, so a load never resizes a window the user has set since. Runs a few seconds after load, on the main
+    /// thread, once the window exists.
+    /// </summary>
+    internal static void OnLoad()
+    {
+        try
+        {
+            if (Progenitor.Plugin.IsServerProcess || LoadBaseline() == null) return;
+            MainThread.PostDelayed(3.0, CheckPendingBaseline, TickOwner);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Dev display: pending baseline check could not be scheduled: " + e.Message); }
+    }
+
+    private static readonly object TickOwner = new();
+
+    private static void CheckPendingBaseline()
+    {
+        try
+        {
+            var b = LoadBaseline();
+            if (b == null) return;
+            var (restore, why) = DisplayPlan.PendingOnLoad(b, Screen.width, Screen.height, (int)Screen.fullScreenMode);
+            if (!restore)
+            {
+                ForgetBaseline();
+                Plugin.Logger?.LogWarning("Dev display: discarded a baseline an earlier run left pending (" + why + "); nothing was resized.");
+                return;
+            }
+
+            var front = KeepForeground();
+            RestoreNow(b, "restore of an earlier run's pending set (" + why + ")");
+            front.Check(null);
+            RestorePosition(b);
+            WriteScreenRegistry(b.Registry);
+            ForgetBaseline();
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Dev display: pending baseline check failed: " + e.Message); }
+    }
+
     private static Dictionary<string, object?> Read()
     {
         var d = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -360,7 +417,6 @@ internal static class DisplayOps
             d["mode"] = Screen.fullScreenMode.ToString();
             var cur = Screen.currentResolution;
             d["monitor"] = cur.width + "x" + cur.height;
-            d["focused"] = Application.isFocused;
         }
         catch (Exception e) { d["screenError"] = e.Message; }
 
@@ -470,7 +526,7 @@ internal static class DisplayOps
         }
 
         reply["window"] = windowW + "x" + windowH;
-        reply["focused"] = Application.isFocused;
+        reply["focus"] = GameWindow.Focus();
         reply["superSize"] = shot.SuperSize;
         ScreenCapture.CaptureScreenshot(path, shot.SuperSize);
         Plugin.Logger?.LogInfo("Dev screenshot: " + path + " (superSize " + shot.SuperSize + ")");

@@ -106,6 +106,26 @@ internal static class DisplayPlan
         /// names start with <see cref="ScreenRegistryPrefix"/>) before the first set, encoded by <see cref="EncodeRegistry"/>.
         /// </summary>
         public Dictionary<string, string> Registry { get; set; } = new(StringComparer.Ordinal);
+
+        /// <summary>The last test setting a set asked for (what the window should still be while the baseline is pending).</summary>
+        public bool HasRequest { get; set; }
+        public int RequestedWidth { get; set; }
+        public int RequestedHeight { get; set; }
+        public int RequestedMode { get; set; }
+    }
+
+    /// <summary>
+    /// What a Dev load does with a baseline an earlier run left pending (the process died between set and restore): put
+    /// the window back only when it is still the test setting, so a window the user has resized since is never changed
+    /// by surprise; otherwise forget the baseline. Returns (restore, why).
+    /// </summary>
+    internal static (bool Restore, string Why) PendingOnLoad(Baseline b, int width, int height, int mode)
+    {
+        if (!b.HasRequest) return (false, "it records no test setting");
+        if (!Matches(width, height, mode, b.RequestedWidth, b.RequestedHeight, b.RequestedMode))
+            return (false, "the window is " + width + "x" + height + " " + ModeName(mode) + ", not the test setting "
+                + b.RequestedWidth + "x" + b.RequestedHeight + " " + ModeName(b.RequestedMode));
+        return (true, "the window is still the test setting " + b.RequestedWidth + "x" + b.RequestedHeight + " " + ModeName(b.RequestedMode));
     }
 
     /// <summary>The game's per-user engine preferences key (under HKEY_CURRENT_USER).</summary>

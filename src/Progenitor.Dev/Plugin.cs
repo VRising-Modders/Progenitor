@@ -64,6 +64,10 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
         var tokenPath = ResolveTokenPath(tokenPathEntry.Value);
         InstanceTag = Environment.GetEnvironmentVariable("PROGENITOR_INSTANCE")?.Trim() ?? "";
 
+        // BRIDGEUI1: a display baseline an earlier run left pending is restored only while the window is still its test
+        // setting, else forgotten. Not in an extra instance: those share this BepInEx/config with the primary client.
+        if (InstanceTag.Length == 0) Ops.DisplayOps.OnLoad();
+
         if (!enabled.Value)
         {
             Log.LogInfo($"{MyPluginInfo.PLUGIN_NAME} loaded on {side}; bridge disabled by config.");
