@@ -460,6 +460,7 @@ internal static class PrefabApplicator
             gameData.ItemHashLookupMap.Remove(target);
             removedItem = true;
             bool addedItem = gameData.ItemHashLookupMap.TryAdd(target, itemData);
+            Progenitor.Items.ItemCatalogVersion.Bump();
             sb.Append($"itemMap={addedItem}; ");
 
             bool hadUndo = def.HasRecordedUndo;
@@ -651,6 +652,7 @@ internal static class PrefabApplicator
             {
                 var itemData = em.GetComponentData<ItemData>(clone);
                 addedItem = gameData.ItemHashLookupMap.TryAdd(target, itemData);
+                Progenitor.Items.ItemCatalogVersion.Bump();
                 sb.Append($"itemMap={addedItem}; ");
 
                 addedManaged = EnsureManagedData(gameData, def, source, target, replaceExisting: replaceManaged, out var managedWhy);
@@ -844,6 +846,7 @@ internal static class PrefabApplicator
                     {
                         data.ItemCategory = (ItemCategory)after;
                         em.SetComponentData(clone, data);
+                        Progenitor.Items.ItemCatalogVersion.Bump();
                         stripped = true;
                         written++;
                     }
@@ -862,6 +865,7 @@ internal static class PrefabApplicator
                         row.ItemCategory = (ItemCategory)after;
                         gameData.ItemHashLookupMap.Remove(target);
                         gameData.ItemHashLookupMap.TryAdd(target, row);
+                        Progenitor.Items.ItemCatalogVersion.Bump();
                         stripped = true;
                         written++;
                     }
@@ -1100,6 +1104,7 @@ internal static class PrefabApplicator
         catch (Exception e) { Plugin.Logger?.LogWarning($"PrefabApplicator: retarget conversion map threw: {e.Message}"); }
         try { gameData.ItemHashLookupMap.Remove(target); }
         catch (Exception e) { Plugin.Logger?.LogWarning($"PrefabApplicator: retarget item map threw: {e.Message}"); }
+        Progenitor.Items.ItemCatalogVersion.Bump();
     }
 
     /// <summary>
@@ -1136,6 +1141,7 @@ internal static class PrefabApplicator
         {
             if (rows.HadItem && gameData != null)
                 gameData.ItemHashLookupMap.TryAdd(target, rows.Item);
+            Progenitor.Items.ItemCatalogVersion.Bump();
         }
         catch { ok = false; }
 
@@ -1580,6 +1586,7 @@ internal static class PrefabApplicator
                 gameData.ItemHashLookupMap.Remove(target);
                 if (hadPrevious)
                     gameData.ItemHashLookupMap.TryAdd(target, previousMap);
+                Progenitor.Items.ItemCatalogVersion.Bump();
             }
         }
         catch (Exception e)
@@ -1611,6 +1618,7 @@ internal static class PrefabApplicator
             {
                 try { gameData.ItemHashLookupMap.Remove(target); }
                 catch (Exception e) { Plugin.Logger?.LogWarning($"PrefabApplicator: rollback ItemHashLookupMap threw: {e.Message}"); }
+                Progenitor.Items.ItemCatalogVersion.Bump();
             }
             if (addedSpawn)
             {
@@ -1712,7 +1720,11 @@ internal static class PrefabApplicator
     /// insert or in-place update, and on soft unapply that kept the entity, so a later
     /// Core generation's snapshot still owns it.
     /// </summary>
-    internal static void RememberClone(PrefabGUID guid) => Ledger.RememberClone(guid.GuidHash);
+    internal static void RememberClone(PrefabGUID guid)
+    {
+        Ledger.RememberClone(guid.GuidHash);
+        Progenitor.Items.ItemCatalogVersion.Bump();
+    }
 
     /// <summary>
     /// Record the resolved source and kind for a GUID this process just applied, or
@@ -1750,7 +1762,11 @@ internal static class PrefabApplicator
 
     private static void RememberAppend(PrefabGUID guid, int index) => Ledger.RememberAppend(guid.GuidHash, index);
 
-    private static void ForgetClone(PrefabGUID guid) => Ledger.ForgetClone(guid.GuidHash);
+    private static void ForgetClone(PrefabGUID guid)
+    {
+        Ledger.ForgetClone(guid.GuidHash);
+        Progenitor.Items.ItemCatalogVersion.Bump();
+    }
 
     /// <summary>
     /// A new client world replaced the one every clone and key row was recorded in. Returns how

@@ -361,6 +361,8 @@ public sealed class PrefabEditHandle
     {
         retargeted = false;
         if (!string.Equals(typeName, "ItemData", StringComparison.Ordinal)) return false;
+        // An ItemData value landed on the prefab: the item catalog (ctx.Items.Catalog) must rebuild.
+        Progenitor.Items.ItemCatalogVersion.Bump();
         try
         {
             var em = world.EntityManager;

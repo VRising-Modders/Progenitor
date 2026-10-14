@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **861** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **864** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -73,7 +73,7 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Inventory` (`PluginInventory`) | landed | Server inventories of any kind: read, count, free space, add, remove, a total-conserving transfer, watches, stable container ids. Client throws. [Inventory](#inventory). | `SampleInventory.cs` (`.items chests`, `.items move`) |
 | `ctx.Clans` (`PluginClans`) | landed | Server clans: a user's clan, its members and its castles. Client throws. [Clans](#clans). | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Units` | verified live | Server unit spawn and steering. Client returns disabled handles. | `SampleUnits.cs` (`.rat`) |
-| `ctx.Items` | verified live | Server inventory grant and equip. Client throws. Defaults stack, accept a partial add, do not equip, leave durability. | `SampleItems.cs` (`.items grant`, `.items equip`); unit test `ItemGrantPolicyTests`; live `give` / `equip` on the isolated server (the wrapper sample itself is not live-verified) |
+| `ctx.Items` | verified live (grant, equip); landed (catalog) | Server inventory grant and equip (client throws; defaults stack, accept a partial add, do not equip, leave durability), and a read-only item catalog on both sides. [Items](#items). | `SampleItems.cs` (`.items grant`, `.items equip`); unit test `ItemGrantPolicyTests`; live `give` / `equip` on the isolated server (the wrapper sample itself is not live-verified) |
 | `ctx.Stations` (`PluginStations`) | landed, not live-verified | Server castle recipe stations: a station's recipes (inputs, outputs, duration, enabled), the refinement station's own per-recipe switch, a pure whole-craft count, and current progress. Every member except `CraftsPossible` throws on the client. [Stations](#stations), [modules.md](modules.md#stations). | `SampleStations.cs` (`.stations`); unit test `StationLogicTests` |
 | `ctx.Abilities` (`PluginAbilities`) | landed; `SetSlot` live-verified, `ForceCast`/`NoCooldowns` exercised by the necro sample | Server ability control: `ForceCast` through `ServerGameManager.ForceCastAbilityGroup` (starts groups that are not on the bar), and `NoCooldowns` holds that keep a character's abilities off cooldown with full charges, and `SetSlot`, which puts a chosen group on a bar slot. Holds are tracked. Client throws. [Abilities](#abilities), [modules.md](modules.md#abilities). | unit tests `AbilityCooldownPolicyTests`, `AbilitySlotPolicyTests`; sample `Progenitor.NecroArmyExample` |
 | `ctx.Time` (`PluginTime`) | landed, not live-verified | Server time of day: read it (`GetTimeOfDay`), move it and let it run (`SetTimeOfDay`), or freeze it (`HoldTimeOfDay`) for filming. Connected clients' lighting follows through the game's replicated day/night fields; the game clock `ServerTime` and every timer are untouched. Overrides are tracked and stack. Also world speed: `Freeze` / `SlowMotion` stop or slow the whole simulation (and the game clock) on the server and every client through the game's replicated `TimeScale`. Client throws. [Time of day](#time-of-day), [World speed](#world-speed), [modules.md](modules.md#time-of-day). | `SampleTime.cs` (`.time`), `SampleSpeed.cs` (`.speed`); unit tests `TimeOfDayMathTests`, `TimeScalePolicyTests` |
@@ -445,6 +445,26 @@ range before the call.
 | `ItemDurability` | verified live | `Leave`, `Indestructible`. | live `Durability.LossType` None on the tier-9 set |
 | `ItemGrantResult` | verified live | `Ok`, `Action`, `Reason`, `Added`, `DidNotFit`, `Slot`, `ItemEntity`, `Equipped`, `DurabilityCleared`. | returned by `Grant` and `Equip` |
 | `ItemGrantPolicy` / `ItemPresence` / `ItemGrantStep` | landed | Game-free decisions the live call runs before it touches an inventory. | unit test `ItemGrantPolicyTests` |
+| `ctx.Items.Catalog()` → `IReadOnlyList<ItemCatalogEntry>` | landed (source-checked, built, game-free tested; not live-verified) | Every item prefab of the current world, vanilla and custom, sorted by prefab name. Both sides. Built on the first call of a world load, rebuilt on a new world-load epoch, when a custom item is applied or removed, or when Core writes an item's `ItemData` (plugin and server edits, keep rules); other calls return the same list. Empty, and not cached, before the world's prefabs exist; on the client a build made before the local character exists is not cached either (uncached builds repeat at most once per frame). Main thread (throws elsewhere). [Item catalog](#item-catalog). | `SampleItemCatalog.cs` (`.items catalog [filter]`); Dev op `item_catalog`; unit test `ItemCatalogTests` |
+| `ctx.Items.CatalogEntry(int prefabGuid)` → `ItemCatalogEntry?` | landed (not live-verified) | Lookup by GUID hash from the same build; null when the GUID is not an item. | `SampleItemCatalog.cs` (a GUID filter); unit test `ItemCatalogTests` |
+| `ctx.Items.CatalogInfo()` → `ItemCatalogInfo` | landed (not live-verified) | `Built`, `Side` (`server` / `client`), `Count`, `WithDisplayName`, `Custom`, `BuildMilliseconds`, `Epoch`, `Builds`. Describes the last build; `Built` false with zero counts once the world is gone. Does not build. | `SampleItemCatalog.cs` (summary line) |
+| `ctx.Items.InvalidateCatalog()` | landed (not live-verified) | Drop the cache; the next call rebuilds. Only for an item write Progenitor did not make. | unit test `ItemCatalogTests` |
+| `ItemCatalogEntry` | landed (not live-verified) | `PrefabGuid` (int, as `ctx.Inventory` takes), `PrefabName`, `DisplayName` (localized; null for vanilla items on the server), `MaxAmount` (stack size from the prefab's `ItemData`; the item lookup table `ctx.Inventory` reads is the filter and the fallback), `ItemCategory` (flags, long), `ItemType` (int), `IsCustom`, `Matches(string? filter)` (GUID, or case-insensitive substring of either name). | unit test `ItemCatalogTests` |
+
+### Item catalog
+
+`ctx.Items.Catalog()` lists item prefabs: prefab entities carrying `ItemData` whose GUID is in
+`GameDataSystem.ItemHashLookupMap`, the table the game's inventory code reads stack sizes from
+(a custom item applied in this process is listed even if the table misses it). Stack size,
+category and type come from the prefab's own `ItemData`. Live item copies in inventories are not prefabs and are not listed. Custom items registered with
+`DefineItem` or a data pack appear once their clone is applied on that side. Narrative and the
+live acceptance procedure: [modules.md](modules.md#item-catalog).
+
+| Field | Server | Client |
+|---|---|---|
+| `PrefabGuid`, `PrefabName`, `MaxAmount`, `ItemCategory`, `ItemType` | yes | yes |
+| `DisplayName`, vanilla item | null: the dedicated server ships no localization tables | the game's localized name in the current language (`ManagedItemData.Name`), the resolver chat item links use |
+| `DisplayName`, custom item | its `Named(...)` text | the game string it registered, else its `Named(...)` text |
 
 ## Stations
 
@@ -983,6 +1003,7 @@ surface.
 | `dump` | Socket thread. Never takes the one-op gate. Starts a dedicated short-lived background thread that writes one minidump of this process (`MiniDumpNormal \| MiniDumpWithHandleData \| MiniDumpWithThreadInfo`, no full memory) through dbghelp `MiniDumpWriteDump` to `BepInEx/progenitor-dumps/freeze-<utc>-frame<n>.dmp`. Returns immediately `{started: true, path}` (or `{started: false, error}` if the cap of 3 is reached or a dump is already in progress). Args `{reason}`. `bridge_status.dumpInProgress` is true until that thread finishes, then `lastFreezeDump` is `{path, at, frozenMs}`. The writer holds no framework lock around `MiniDumpWriteDump` (that call suspends other threads itself). Unload / `Stop` cancel the poller and do not join a dump in flight. Shares the cap of 3 dumps per process with the freeze watchdog (which polls the drain/frame counter every 2 s from a Dev background thread and starts the same kind of dump after `freezeSeconds` of a stuck frame). The watchdog also logs one `freeze began frozenForMs=… frame=… window=… userIdleS=… hint=…` line per stall (even after the cap) and `freeze ended frozenForMs=… frame=… window=…` on the first frame after it, with the game window's minimized/visible/cloaked/foreground state and the user's input idle time; a stall while the window is hidden is the engine waiting for the last presentation, not Progenitor code. Missing dbghelp is logged, not thrown. Source-checked and unit-tested; the began/ended lines are not yet live-verified. | this row |
 | `reload` / `core_reload` / `reload_status` | Plugin folder scan; Core swap; `lastReload`. | tutorial section 8, [bridge-ops.md](bridge-ops.md#reload) |
 | `time` | Server. World speed through `TimeScaleBridge` (the `ctx.Time.Freeze` / `SlowMotion` leases). `action` `status` (default), `speed` with `value` in [0.001, 1], `freeze`, `resume`, `release`. The bridge holds one lease (owner `progenitor.dev bridge`); `resume` and `release` drop it. Every action returns `{action, ok, refused, released, value, paused, engineScale, governing, bridgeHolds, leases:[{owner, kind, scale, governs}], readError}`. MCP `progenitor_time`. Source-checked and unit-tested, not live-verified. | [bridge-ops-player.md](bridge-ops-player.md#time) |
+| `item_catalog` | Both sides, read-only: `ctx.Items.Catalog()` of this process. Args `filter` (GUID, or substring of the prefab or display name), `limit` (rows, default 20, at most 500), `rebuild` (drop the cache first to time a build). Returns `{side, built, count, withDisplayName, custom, buildMs, epoch, builds, filter, matches, entries:[{guid, prefab, display, maxAmount, category, type, custom}]}`. Source-checked and built, not live-verified. | [Item catalog](#item-catalog) |
 | `photo` | Photo mode through `PhotoModeBridge`. `action` `status` (default; either side), `on` (client; `enable: true` first turns `[PhotoMode] Enabled` on), `off` (client; leaves and resumes a pause it asked for). Returns `{side, enabled, active, paused, pausePending, hudHidden, pose, speed, fov, holdsInput, serverPauses, action, ok, refused, changed}`. The pause itself is the `PhotoModePause` keybind (`keybind_press`). MCP `progenitor_photo`. Source-checked and unit-tested, not live-verified. | [bridge-ops-player.md](bridge-ops-player.md#photo) |
 | `users` / `players` / `worlds` | Users (including the handshake token), characters, world names. | [bridge-ops.md](bridge-ops.md#users) |
 | `command` / `broadcast` / `chat_observe` | Inject `.…`; server chat send; watch `ChatMessageServerEvent`. | tutorial section 8 (`command`, `ghost`) |
@@ -1031,7 +1052,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 861 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 864 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1504,6 +1525,12 @@ Purpose lines are the first sentence of each type's own doc comment.
 | `GodModeGuard.GodModeOwner` | Two owners cannot be told apart by a plugin reference alone: one plugin holds a guard for several unrelated reasons (Core's .debug buff and the Sample's .godmode debug command are the reference case), and before R40 finding 5 either command's removal dropp… | tests |
 | `GodModePolicy` | The game-free half of the kill-path prefixes' decisions (job FHARM2, R32 findings 5 and 9). | tests |
 | `GodModePolicy.GuardDecision` | What DecideGuard concluded about one GodMode.Add. | tests |
+
+#### `Progenitor.Items`
+
+| Type | Purpose | Why public |
+|---|---|---|
+| `ItemCatalogBridge` | The Dev bridge's `item_catalog` op over the cache behind `ctx.Items.Catalog()`. Not a plugin API. | Dev bridge |
 
 #### `Progenitor.Localization`
 

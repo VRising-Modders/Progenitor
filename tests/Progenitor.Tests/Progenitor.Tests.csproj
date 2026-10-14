@@ -68,6 +68,8 @@
     <Compile Include="..\..\samples\Progenitor.Sample\SampleTime.cs" Link="Linked\SampleTime.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleTriggers.cs" Link="Linked\SampleTriggers.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleItems.cs" Link="Linked\SampleItems.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Items\ItemCatalog.cs" Link="Linked\ItemCatalog.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleItemCatalog.cs" Link="Linked\SampleItemCatalog.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleDebugProtect.cs" Link="Linked\SampleDebugProtect.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SamplePlayerDirectory.cs" Link="Linked\SamplePlayerDirectory.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleForms.cs" Link="Linked\SampleForms.cs" />
