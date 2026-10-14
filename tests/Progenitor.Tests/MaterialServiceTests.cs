@@ -24,6 +24,8 @@ public partial class MaterialServiceTests
         public readonly Dictionary<int, long> HeartAggregate = new();
         public InventoryRef Bag = new(1, 1, 0, MaterialServiceTests.Epoch);
         public InventoryRef Station = InventoryRef.None;
+        /// <summary>The castle heart whose window is open (the Upgrade station); its inventory, if any.</summary>
+        public InventoryRef Heart = InventoryRef.None;
         public bool StationIsSharedStorage;
         /// <summary>Simulates a world whose bag-and-station answer misses the station (another identification of it).</summary>
         public bool VanillaCountedMissesStation;
@@ -52,7 +54,8 @@ public partial class MaterialServiceTests
         {
             context = default;
             if (!character.Equals(Player)) return false;
-            var station = operation == MaterialOperation.Craft && !Station.IsNone ? IdOf(Station) : ContainerId.None;
+            var at = StationInventory(new MaterialContext(User, Player, Epoch, operation, Territory, ContainerId.None));
+            var station = at.IsNone ? ContainerId.None : IdOf(at);
             context = new MaterialContext(User, Player, Epoch, operation, Territory, station);
             return true;
         }
@@ -69,13 +72,18 @@ public partial class MaterialServiceTests
         {
             into.Add(Bag);
             if (!Station.IsNone && !StationIsSharedStorage && !VanillaCountedMissesStation) into.Add(Station);
+            if (context.Operation == MaterialOperation.Upgrade && !Heart.IsNone) into.Add(Heart); // the open window
         }
 
-        public InventoryRef StationInventory(in MaterialContext context) =>
-            context.Operation == MaterialOperation.Craft ? Station : InventoryRef.None;
+        public InventoryRef StationInventory(in MaterialContext context) => context.Operation switch
+        {
+            MaterialOperation.Craft or MaterialOperation.Repair => Station,
+            MaterialOperation.Upgrade => Heart,
+            _ => InventoryRef.None,
+        };
 
         public InventoryRef PoolFront(in MaterialContext context) =>
-            context.Operation == MaterialOperation.Craft && StationIsSharedStorage ? Station : InventoryRef.None;
+            context.Operation is MaterialOperation.Craft or MaterialOperation.Repair && StationIsSharedStorage ? Station : InventoryRef.None;
 
         public void VanillaSharedItems(in MaterialContext context, ICollection<int> into)
         {

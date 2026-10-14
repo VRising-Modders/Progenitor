@@ -54,3 +54,38 @@ internal static class MaterialRows
     /// <summary>Bytes for <paramref name="rows"/> rows.</summary>
     internal static int Bytes(int rows) => checked(rows * Stride);
 }
+
+/// <summary>
+/// The development trace of one governed check (bridge <c>materials</c> <c>trace</c>): what the game's
+/// own count without shared storage returned, the pool lines Progenitor appended, and the totals of the
+/// rows handed to the game's check. Game-free.
+/// </summary>
+internal static class MaterialTrace
+{
+    internal static string Describe(MaterialOperation operation, Progenitor.Castles.CastleId character,
+        ReadOnlySpan<byte> bagRows, int bagCount, IReadOnlyList<MaterialLine> extra, ReadOnlySpan<byte> composed, int composedCount)
+    {
+        var bag = new Dictionary<int, long>();
+        var total = new Dictionary<int, long>();
+        MaterialRows.Sum(bagRows, bagCount, bag);
+        MaterialRows.Sum(composed, composedCount, total);
+        var sb = new System.Text.StringBuilder();
+        sb.Append("materials: trace ").Append(operation).Append(" character=").Append(character)
+          .Append(" rows=").Append(composedCount).Append(" bag=");
+        Append(sb, bag);
+        sb.Append(" pool=");
+        var lines = new List<MaterialLine>(extra);
+        lines.Sort((a, b) => a.Item.CompareTo(b.Item));
+        for (int i = 0; i < lines.Count; i++) sb.Append(i == 0 ? "" : ",").Append(lines[i].Item).Append(':').Append(lines[i].Amount);
+        sb.Append(" total=");
+        Append(sb, total);
+        return sb.ToString();
+    }
+
+    private static void Append(System.Text.StringBuilder sb, Dictionary<int, long> rows)
+    {
+        var keys = new List<int>(rows.Keys);
+        keys.Sort();
+        for (int i = 0; i < keys.Count; i++) sb.Append(i == 0 ? "" : ",").Append(keys[i]).Append(':').Append(rows[keys[i]]);
+    }
+}

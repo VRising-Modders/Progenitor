@@ -24,7 +24,10 @@ internal sealed class MaterialView
     /// <summary>Network id (packed) of the castle heart at the player's standing plot; 0 for none.</summary>
     internal ulong HeartNet { get; }
 
-    /// <summary>Network id (packed) of the workstation a Craft view was computed for; 0 otherwise.</summary>
+    /// <summary>
+    /// Network id (packed) of the structure the view was computed for: the workstation of a Craft view,
+    /// the castle heart of an Upgrade view; 0 otherwise.
+    /// </summary>
     internal ulong StationNet { get; }
 
     /// <summary>
@@ -187,7 +190,7 @@ internal sealed class MaterialViewBook
         _seq.Clear();
     }
 
-    private static readonly MaterialOperation[] Operations = { MaterialOperation.Build, MaterialOperation.Craft };
+    private static readonly IReadOnlyList<MaterialOperation> Operations = MaterialClientPolicy.ViewOperations;
 
     /// <summary>
     /// FNV-1a over territory, revision, the heart and station ids and the sorted totals. Never returns
@@ -425,6 +428,12 @@ internal readonly struct MaterialClientCall
 
     /// <summary>The build menu is shown, or the build-mode placement update is running.</summary>
     internal bool BuildContext { get; init; }
+
+    /// <summary>
+    /// Network id (packed) of the castle heart the local character is interacting with (its window is
+    /// open); 0 when the interaction target is not a castle heart.
+    /// </summary>
+    internal ulong HeartTargetNet { get; init; }
 }
 
 /// <summary>
@@ -433,25 +442,53 @@ internal readonly struct MaterialClientCall
 /// castle heart it was computed at, and only in its own operation: Build while the build menu is shown
 /// or build-mode placement runs (the build menu and the station windows are exclusive HUD menus, so a
 /// lingering interaction target does not matter there), otherwise Craft at the very workstation the
-/// server computed it for. Every other count (another screen, another station, another plot, another
-/// entity) keeps the game's own result. The display is never authorization: the server checks again
-/// and pays at action time.
+/// server computed it for, otherwise Upgrade while the window of the very castle heart the server
+/// computed it for is open and the count is at that heart. Every other count (another screen, another
+/// station, another plot, another entity) keeps the game's own result. The display is never
+/// authorization: the server checks again and pays at action time.
+///
+/// <para>No Repair view is sent: the game shows a repair cost in an item tooltip, which no existing
+/// seam can tell apart from the other counts of the same screen (a repair is paid on the server whatever
+/// the client shows; the inventory menu's repair input does not check the merged count, and whether the
+/// equipped-item repair input does is not verified). An Upgrade view is computed only for a heart the
+/// player or the player's clan owns (<see cref="MayViewUpgrade"/>).</para>
 /// </summary>
 internal static class MaterialClientPolicy
 {
+    /// <summary>The operations the server sends views for, in refresh order.</summary>
+    internal static IReadOnlyList<MaterialOperation> ViewOperations { get; } =
+        Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade });
+
+    /// <summary>
+    /// A view of this operation only means something at a structure (Craft: a workstation, Upgrade: a
+    /// castle heart's window); without one the server sends none and skips the provider calls.
+    /// </summary>
+    internal static bool NeedsStation(MaterialOperation operation) =>
+        operation is MaterialOperation.Craft or MaterialOperation.Upgrade;
+
+    /// <summary>
+    /// An Upgrade view is computed only for a heart the player owns or whose owner is in the player's
+    /// clan: an enemy's or a decaying heart's window (claim, raid, destroy) never shows pool totals,
+    /// whatever the provider would answer. The game's team check (allied) is not enough.
+    /// </summary>
+    internal static bool MayViewUpgrade(Progenitor.Castles.CastleRelation relation) =>
+        relation is Progenitor.Castles.CastleRelation.Owner or Progenitor.Castles.CastleRelation.ClanMember;
+
     /// <summary>
     /// What the client knows about one count, built from raw game reads: whether it is for the local
     /// character, the castle heart the game resolved for it, whether the build menu is shown or build-mode
     /// placement runs, and the network id of the workstation the local character is interacting with (0
     /// for none or for anything that is not a workstation).
     /// </summary>
-    internal static MaterialClientCall Call(bool localCharacter, ulong heartNet, bool buildMenuOrPlacement, ulong workstationNet) => new()
+    internal static MaterialClientCall Call(bool localCharacter, ulong heartNet, bool buildMenuOrPlacement, ulong workstationNet,
+        ulong heartTargetNet = 0) => new()
     {
         LocalCharacter = localCharacter,
         HeartNet = heartNet,
         BuildContext = buildMenuOrPlacement,
         TargetNet = workstationNet,
         TargetIsWorkstation = workstationNet != 0,
+        HeartTargetNet = heartTargetNet,
     };
 
     internal static bool TrySelect(MaterialOverlayStore store, in MaterialClientCall call, out MaterialOperation operation,
@@ -467,10 +504,20 @@ internal static class MaterialClientPolicy
             operation = MaterialOperation.Build;
             return true;
         }
-        if (call.TargetNet == 0 || !call.TargetIsWorkstation) return false;
-        if (!store.TryGet(MaterialOperation.Craft, out var craft, out totals)) return false;
-        if (craft.StationNet == 0 || craft.StationNet != call.TargetNet || craft.HeartNet != call.HeartNet) return false;
-        operation = MaterialOperation.Craft;
+        if (call.TargetNet != 0 && call.TargetIsWorkstation)
+        {
+            if (!store.TryGet(MaterialOperation.Craft, out var craft, out totals)) return false;
+            if (craft.StationNet == 0 || craft.StationNet != call.TargetNet || craft.HeartNet != call.HeartNet) return false;
+            operation = MaterialOperation.Craft;
+            return true;
+        }
+        if (call.HeartTargetNet == 0) return false;
+        // The heart window's upgrade cost: the game counts at the heart itself (claim, raid and destroy
+        // costs of an enemy heart are counted at that heart too, and the server sends an Upgrade view
+        // only where the provider governs that heart's context).
+        if (!store.TryGet(MaterialOperation.Upgrade, out var upgrade, out totals)) return false;
+        if (upgrade.StationNet == 0 || upgrade.StationNet != call.HeartTargetNet || upgrade.StationNet != call.HeartNet) return false;
+        operation = MaterialOperation.Upgrade;
         return true;
     }
 

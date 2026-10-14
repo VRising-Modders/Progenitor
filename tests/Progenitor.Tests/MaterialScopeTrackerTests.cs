@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Progenitor.Materials;
 using Xunit;
@@ -11,6 +12,7 @@ namespace Progenitor.Tests;
 public class MaterialScopeTrackerTests
 {
     private const string Craft = "StartCraftingSystem", Build = "PlaceTileModelSystem";
+    private const string Repair = "RepairItemSystem", Heart = "CastleHeartEventSystem";
 
     private static (MaterialScopeTracker tracker, List<string> closed) Make()
     {
@@ -83,5 +85,165 @@ public class MaterialScopeTrackerTests
         t.Tick(11);
         Assert.Single(closed);
         Assert.Null(t.OpenSystem);
+    }
+
+    [Fact]
+    public void Repair_and_upgrade_systems_pair_like_build_and_craft()
+    {
+        var (t, closed) = Make();
+        // One frame running every governed system in turn, each one paired by its own After.
+        var systems = new[]
+        {
+            (MaterialOperation.Repair, Repair), (MaterialOperation.Upgrade, Heart),
+            (MaterialOperation.Craft, Craft), (MaterialOperation.Build, Build),
+        };
+        foreach (var (op, system) in systems)
+        {
+            t.Before(op, system, 20);
+            Assert.True(t.TryCurrent(20, out var current, out long token));
+            Assert.Equal(op, current);
+            Assert.NotEqual(0, token);
+            Assert.Equal(system, t.OpenSystem);
+            t.After(system);
+            Assert.False(t.TryCurrent(20, out _, out _));
+        }
+        Assert.Equal(4, closed.Count);
+    }
+
+    [Fact]
+    public void A_throwing_repair_is_closed_by_the_heart_systems_before_and_each_scope_has_its_own_token()
+    {
+        var (t, closed) = Make();
+        t.Before(MaterialOperation.Repair, Repair, 30); // throws: no After
+        Assert.True(t.TryCurrent(30, out _, out long repairToken));
+        t.After(Heart); // not the opening system: ignored
+        Assert.Empty(closed);
+        t.Before(MaterialOperation.Upgrade, Heart, 30);
+        Assert.Single(closed);
+        Assert.True(t.TryCurrent(30, out var op, out long heartToken));
+        Assert.Equal(MaterialOperation.Upgrade, op);
+        Assert.NotEqual(repairToken, heartToken);
+        t.After(Heart);
+        Assert.Equal(2, closed.Count);
+    }
+
+    private static readonly ulong RepairKey = MaterialSystemKey.Pack(41, 1, 7), ForgeKey = MaterialSystemKey.Pack(42, 1, 7);
+
+    [Fact]
+    public void A_scope_with_an_opener_is_current_only_while_that_system_executes()
+    {
+        var (t, _) = Make();
+        t.Before(MaterialOperation.Repair, Repair, 40, RepairKey);
+        Assert.Equal(RepairKey, t.Opener);
+        Assert.True(t.TryCurrent(40, RepairKey, out var op, out _));
+        Assert.Equal(MaterialOperation.Repair, op);
+        Assert.False(t.TryCurrent(40, ForgeKey, out _, out _)); // another system's call
+        Assert.False(t.TryCurrent(40, 0, out _, out _));        // the executing system is unreadable
+        Assert.False(t.TryCurrent(40, out _, out _));
+        t.After(Repair);
+        Assert.Equal(0UL, t.Opener);
+    }
+
+    [Fact]
+    public void A_stranded_repair_scope_never_pays_a_later_systems_cost_in_the_same_frame()
+    {
+        // RepairItemSystem throws (no After); the forge, research, stables or a coffin then pays in the
+        // same frame through the same seams. Their calls must not be routed as a Repair.
+        var (t, closed) = Make();
+        t.Before(MaterialOperation.Repair, Repair, 50, RepairKey);
+        Assert.False(t.TryCurrent(50, ForgeKey, out _, out _));
+        Assert.Empty(closed); // a seam call never closes (or publishes) anything
+        t.Tick(51);
+        Assert.Single(closed);
+    }
+
+    [Fact]
+    public void An_unreadable_opener_refuses_every_call()
+    {
+        var (t, _) = Make();
+        t.Before(MaterialOperation.Upgrade, Heart, 60, MaterialSystemKey.Unreadable);
+        Assert.False(t.TryCurrent(60, MaterialSystemKey.Pack(0, 0, 0), out _, out _));
+        Assert.False(t.TryCurrent(60, MaterialSystemKey.Pack(ushort.MaxValue, ushort.MaxValue, uint.MaxValue), out _, out _));
+        Assert.False(t.TryCurrent(60, 0, out _, out _));
+    }
+
+    [Fact]
+    public void Build_and_craft_scopes_without_an_opener_keep_the_frame_rule()
+    {
+        var (t, _) = Make();
+        t.Before(MaterialOperation.Craft, Craft, 70);
+        Assert.Equal(0UL, t.Opener);
+        Assert.True(t.TryCurrent(70, ForgeKey, out var op, out _));
+        Assert.Equal(MaterialOperation.Craft, op);
+    }
+
+    [Fact]
+    public void System_keys_are_never_zero_or_the_unreadable_marker()
+    {
+        Assert.NotEqual(0UL, MaterialSystemKey.Pack(0, 0, 0));
+        Assert.NotEqual(MaterialSystemKey.Unreadable, MaterialSystemKey.Pack(ushort.MaxValue, ushort.MaxValue, uint.MaxValue));
+        Assert.NotEqual(MaterialSystemKey.Pack(1, 2, 3), MaterialSystemKey.Pack(1, 2, 4));
+        Assert.NotEqual(MaterialSystemKey.Pack(1, 2, 3), MaterialSystemKey.Pack(2, 2, 3));
+        Assert.NotEqual(MaterialSystemKey.Pack(1, 2, 3), MaterialSystemKey.Pack(1, 3, 3));
+    }
+}
+
+/// <summary>
+/// Inside the castle heart system's scope only the calls of an upgrade request are an Upgrade: claim,
+/// raid and destroy costs reach the same count and removal in the same update and stay vanilla.
+/// </summary>
+public class MaterialUpgradeFilterTests
+{
+    private const ulong Alice = 0x0000000100000010UL, Bob = 0x0000000100000020UL;
+    private const ulong Home = 0x0000000A00000001UL, Enemy = 0x0000000B00000001UL;
+
+    private static Action<List<MaterialHeartRequest>> Requests(params MaterialHeartRequest[] rows) => into => into.AddRange(rows);
+
+    [Fact]
+    public void Only_the_character_and_heart_of_an_upgrade_request_are_an_upgrade()
+    {
+        var f = new MaterialUpgradeFilter();
+        var load = Requests(new MaterialHeartRequest(Alice, Home, true), new MaterialHeartRequest(Bob, Enemy, false));
+        Assert.True(f.IsUpgrade(1, Alice, Home, load));
+        Assert.False(f.IsUpgrade(1, Alice, Enemy, load)); // another heart
+        Assert.False(f.IsUpgrade(1, Bob, Enemy, load));   // a claim, raid or destroy request
+        Assert.False(f.IsUpgrade(1, Bob, Home, load));    // another character
+    }
+
+    [Fact]
+    public void A_pair_with_an_upgrade_and_another_request_in_one_update_is_not_governed()
+    {
+        var f = new MaterialUpgradeFilter();
+        var load = Requests(new MaterialHeartRequest(Alice, Home, true), new MaterialHeartRequest(Alice, Home, false));
+        Assert.False(f.IsUpgrade(1, Alice, Home, load));
+    }
+
+    [Fact]
+    public void Requests_are_read_once_per_scope_and_again_for_a_new_scope()
+    {
+        var f = new MaterialUpgradeFilter();
+        int reads = 0;
+        var rows = new List<MaterialHeartRequest> { new(Alice, Home, true) };
+        Action<List<MaterialHeartRequest>> load = into => { reads++; into.AddRange(rows); };
+        Assert.True(f.IsUpgrade(5, Alice, Home, load));
+        Assert.True(f.IsUpgrade(5, Alice, Home, load));
+        Assert.Equal(1, reads);
+        rows.Clear(); // the next update has no upgrade request
+        Assert.False(f.IsUpgrade(6, Alice, Home, load));
+        Assert.Equal(2, reads);
+    }
+
+    [Fact]
+    public void Unreadable_requests_and_missing_ids_are_never_an_upgrade()
+    {
+        var f = new MaterialUpgradeFilter();
+        Assert.False(f.IsUpgrade(1, Alice, Home, _ => throw new InvalidOperationException("layout")));
+        var load = Requests(new MaterialHeartRequest(Alice, Home, true));
+        Assert.False(f.IsUpgrade(0, Alice, Home, load)); // no scope
+        Assert.False(f.IsUpgrade(2, 0, Home, load));
+        Assert.False(f.IsUpgrade(2, Alice, 0, load));
+        Assert.True(f.IsUpgrade(3, Alice, Home, load));
+        f.Clear();
+        Assert.True(f.IsUpgrade(3, Alice, Home, load)); // cleared: read again
     }
 }

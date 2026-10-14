@@ -63,6 +63,21 @@ public class MaterialSeamLayoutTests
     }
 
     [Fact]
+    public void Trace_names_the_bag_the_pool_lines_and_the_totals_the_check_saw()
+    {
+        var bag = Rows((100, 5, 0), (200, 1, 42));
+        var extra = new[] { new MaterialLine(300, 4), new MaterialLine(100, 30) };
+        var output = new byte[MaterialRows.Bytes(4)];
+        int n = MaterialRows.Compose(output, bag, 2, extra);
+        string line = MaterialTrace.Describe(MaterialOperation.Repair, new Progenitor.Castles.CastleId(7, 1), bag, 2, extra, output, n);
+        Assert.StartsWith("materials: trace Repair character=", line);
+        Assert.Contains(" rows=4 ", line);
+        Assert.Contains(" bag=100:5,200:1 ", line);
+        Assert.Contains(" pool=100:30,300:4 ", line);
+        Assert.EndsWith(" total=100:35,200:1,300:4", line);
+    }
+
+    [Fact]
     public void Compose_refuses_a_buffer_that_is_too_small()
     {
         var bag = Rows((100, 5, 0));

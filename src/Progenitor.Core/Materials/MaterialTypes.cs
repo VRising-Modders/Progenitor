@@ -18,10 +18,17 @@ public enum MaterialOperation
     /// <summary>Starting a craft at a castle workstation.</summary>
     Craft = 1,
 
-    /// <summary>Repairing an item (planned: not wired yet).</summary>
+    /// <summary>
+    /// Repairing an item: an equipped item from the character menu, or an item in an inventory at a
+    /// workstation (the game's two repair events, both paid by its repair system from the merged
+    /// shared-storage count).
+    /// </summary>
     Repair = 2,
 
-    /// <summary>Castle heart and other upgrade costs (planned: not wired yet).</summary>
+    /// <summary>
+    /// Upgrading a castle heart's level, the one castle upgrade the game pays from shared storage.
+    /// Claiming, raiding and destroying a heart pay through the same helpers and stay vanilla.
+    /// </summary>
     Upgrade = 3,
 
     /// <summary>Research costs (stays vanilla).</summary>
@@ -35,16 +42,17 @@ public enum MaterialOperation
 public static class MaterialOperations
 {
     /// <summary>
-    /// The operations whose availability and payment seams are wired: <see cref="MaterialOperation.Build"/>
-    /// and <see cref="MaterialOperation.Craft"/>. A provider that names others is told so once at
+    /// The operations whose availability and payment seams are wired: <see cref="MaterialOperation.Build"/>,
+    /// <see cref="MaterialOperation.Craft"/>, <see cref="MaterialOperation.Repair"/> and
+    /// <see cref="MaterialOperation.Upgrade"/>. A provider that names others is told so once at
     /// registration and those operations stay vanilla.
     /// </summary>
-    public static IReadOnlyCollection<MaterialOperation> Supported { get; } =
-        new[] { MaterialOperation.Build, MaterialOperation.Craft };
+    public static IReadOnlyCollection<MaterialOperation> Supported { get; } = Array.AsReadOnly(
+        new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade });
 
     /// <summary>True when <paramref name="operation"/> is wired.</summary>
     public static bool IsSupported(MaterialOperation operation) =>
-        operation == MaterialOperation.Build || operation == MaterialOperation.Craft;
+        operation is MaterialOperation.Build or MaterialOperation.Craft or MaterialOperation.Repair or MaterialOperation.Upgrade;
 }
 
 /// <summary>
@@ -71,7 +79,19 @@ public readonly struct MaterialContext : IEquatable<MaterialContext>
     /// </summary>
     public int StandingTerritory { get; }
 
-    /// <summary>The workstation for <see cref="MaterialOperation.Craft"/>; <see cref="ContainerId.None"/> otherwise.</summary>
+    /// <summary>
+    /// The structure the operation runs at, so a provider can leave it out of the sources (Progenitor
+    /// drops it from the pool in any case):
+    /// <list type="bullet">
+    /// <item><description><see cref="MaterialOperation.Craft"/>: the workstation.</description></item>
+    /// <item><description><see cref="MaterialOperation.Repair"/>: the workstation the character is working at
+    /// (a repair at a station); <see cref="ContainerId.None"/> for a repair from the character menu with no
+    /// workstation open.</description></item>
+    /// <item><description><see cref="MaterialOperation.Upgrade"/>: the castle heart being upgraded (its
+    /// inventory's id), or <see cref="ContainerId.None"/> when it has no inventory id.</description></item>
+    /// <item><description><see cref="MaterialOperation.Build"/>: <see cref="ContainerId.None"/>.</description></item>
+    /// </list>
+    /// </summary>
     public ContainerId Station { get; }
 
     /// <summary>Construct a context. Progenitor builds these; tests and providers may too.</summary>
@@ -138,7 +158,7 @@ public sealed class ItemSources
 /// treated as "no remote sources" for that context or item (never as vanilla storage rules, which
 /// could be less restrictive than the provider's).</para>
 ///
-/// <para>One game operation (one craft start, one placement) asks the provider once per item, at the
+/// <para>One game operation (one craft start, one placement, one repair, one heart upgrade) asks the provider once per item, at the
 /// game's own affordability check, and pays every cost line from that same answer: a provider that
 /// changes its mind or starts throwing between the check and the payment cannot change what that
 /// operation pays from.</para>
@@ -184,7 +204,7 @@ public sealed class MaterialPaid
     public MaterialContext Context { get; }
 
     /// <summary>
-    /// Identifies the game operation (one craft start, one placement) this line belongs to; every line
+    /// Identifies the game operation (one craft start, one placement, one repair, one heart upgrade) this line belongs to; every line
     /// of one operation carries the same value. Increasing and unique within a server process, Core swaps
     /// included (seeded from the clock); also printed as <c>tx=</c> in the <c>materials:</c> log lines.
     /// </summary>

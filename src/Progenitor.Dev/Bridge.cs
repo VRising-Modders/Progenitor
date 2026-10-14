@@ -37,11 +37,7 @@ internal sealed class Bridge : IMainThreadDropTarget
     private int _liveConnections;
     private readonly BridgeUserTracker _users;
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
+    private static JsonSerializerOptions JsonOptions => BridgeJson.Options;
 
     public Bridge(int port, string token, string instance, object? owner = null, string? usersPath = null)
     {

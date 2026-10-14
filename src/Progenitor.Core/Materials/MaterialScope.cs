@@ -71,6 +71,11 @@ internal sealed class MaterialScope
 /// <item><description>An After closes the scope only when it is the opening system's.</description></item>
 /// <item><description>A scope is current only in the frame it was opened in; <see cref="Tick"/> closes one
 /// left over from an earlier frame.</description></item>
+/// <item><description>A scope opened with an <i>opener</i> key (the opening system's identity) is
+/// current only for a seam call made while that same system is executing: a system that throws leaves
+/// its scope open without its After, and a later system's call in the same frame (a forge, a research
+/// desk, stables, a coffin) is then refused instead of being routed as the stranded operation.
+/// </description></item>
 /// </list>
 /// <see cref="Closed"/> runs whenever a scope ends, never from inside a seam call.
 /// </summary>
@@ -80,6 +85,7 @@ internal sealed class MaterialScopeTracker
     private long _token;
     private long _frame;
     private string? _system;
+    private ulong _opener;
 
     /// <summary>Called after a scope ended (paired, stranded, or cleared).</summary>
     internal Action? Closed { get; set; }
@@ -87,13 +93,21 @@ internal sealed class MaterialScopeTracker
     /// <summary>The system that opened the current scope, or null.</summary>
     internal string? OpenSystem => _token != 0 ? _system : null;
 
-    internal void Before(MaterialOperation operation, string system, long frame)
+    /// <summary>
+    /// Open a scope for <paramref name="system"/>. <paramref name="opener"/>: the opening system's
+    /// identity (nonzero), so seam calls are honored only while it executes; 0 for the frame rule only.
+    /// </summary>
+    internal void Before(MaterialOperation operation, string system, long frame, ulong opener = 0)
     {
         if (_token != 0) Close();
         _token = _scope.Enter(operation, frame);
         _frame = frame;
         _system = system;
+        _opener = opener;
     }
+
+    /// <summary>The opening system's identity when the current scope requires it, else 0.</summary>
+    internal ulong Opener => _token != 0 ? _opener : 0;
 
     internal void After(string system)
     {
@@ -101,12 +115,21 @@ internal sealed class MaterialScopeTracker
         Close();
     }
 
-    /// <summary>The current scope for a seam call in <paramref name="frame"/>. Never closes anything.</summary>
-    internal bool TryCurrent(long frame, out MaterialOperation operation, out long token)
+    /// <summary>The current scope for a seam call in <paramref name="frame"/> whose executing system is unknown. Never closes anything.</summary>
+    internal bool TryCurrent(long frame, out MaterialOperation operation, out long token) =>
+        TryCurrent(frame, 0, out operation, out token);
+
+    /// <summary>
+    /// The current scope for a seam call in <paramref name="frame"/> made while <paramref name="executing"/>
+    /// runs (0 = unknown). A scope opened with an opener key is current only when the two match. Never
+    /// closes anything.
+    /// </summary>
+    internal bool TryCurrent(long frame, ulong executing, out MaterialOperation operation, out long token)
     {
         operation = default;
         token = 0;
         if (_token == 0 || frame != _frame) return false;
+        if (_opener != 0 && executing != _opener) return false;
         return _scope.TryCurrent(frame, out operation, out token);
     }
 
@@ -121,6 +144,7 @@ internal sealed class MaterialScopeTracker
         _scope.Clear();
         _token = 0;
         _system = null;
+        _opener = 0;
     }
 
     private void Close()
@@ -128,6 +152,95 @@ internal sealed class MaterialScopeTracker
         _scope.Exit(_token);
         _token = 0;
         _system = null;
+        _opener = 0;
         Closed?.Invoke();
+    }
+}
+
+/// <summary>
+/// One castle heart request the game is handling in the current system update: who sent it, for which
+/// heart (packed network id), and whether it is an upgrade. Game-free.
+/// </summary>
+internal readonly struct MaterialHeartRequest
+{
+    internal ulong Character { get; }
+    internal ulong HeartNet { get; }
+    internal bool Upgrade { get; }
+
+    internal MaterialHeartRequest(ulong character, ulong heartNet, bool upgrade)
+    {
+        Character = character;
+        HeartNet = heartNet;
+        Upgrade = upgrade;
+    }
+}
+
+/// <summary>
+/// Which seam calls inside the castle heart system's scope are an <see cref="MaterialOperation.Upgrade"/>.
+/// The game's castle heart system handles upgrade, claim, raid, destroy, abandon and expose requests in
+/// one update, and the upgrade, claim, raid and destroy costs all reach the same count and removal. A
+/// call is an upgrade only when the character sent an upgrade request for that very heart in this
+/// update and no other kind of request for it; everything else (claim, raid and destroy costs, an
+/// unreadable request) keeps the game's own rules. The requests are read once per scope, on the first
+/// call that asks. Game-free.
+/// </summary>
+internal sealed class MaterialUpgradeFilter
+{
+    private long _token;
+    private readonly HashSet<(ulong, ulong)> _upgrade = new();
+    private readonly HashSet<(ulong, ulong)> _other = new();
+    private readonly List<MaterialHeartRequest> _scratch = new();
+
+    /// <summary>
+    /// True when the call for <paramref name="character"/> at <paramref name="heartNet"/> inside scope
+    /// <paramref name="token"/> is an upgrade. <paramref name="load"/> fills the requests of this
+    /// update; it runs once per scope and a throw means "no upgrade requests".
+    /// </summary>
+    internal bool IsUpgrade(long token, ulong character, ulong heartNet, Action<List<MaterialHeartRequest>> load)
+    {
+        if (token == 0 || character == 0 || heartNet == 0) return false;
+        if (token != _token)
+        {
+            _token = token;
+            _upgrade.Clear();
+            _other.Clear();
+            _scratch.Clear();
+            try { load(_scratch); }
+            catch { _scratch.Clear(); }
+            foreach (var r in _scratch)
+            {
+                if (r.Character == 0 || r.HeartNet == 0) continue;
+                (r.Upgrade ? _upgrade : _other).Add((r.Character, r.HeartNet));
+            }
+            _scratch.Clear();
+        }
+        var key = (character, heartNet);
+        return _upgrade.Contains(key) && !_other.Contains(key);
+    }
+
+    internal void Clear()
+    {
+        _token = 0;
+        _upgrade.Clear();
+        _other.Clear();
+        _scratch.Clear();
+    }
+}
+
+/// <summary>A system's identity (its <c>SystemHandle</c> fields) packed into one nonzero value. Game-free.</summary>
+internal static class MaterialSystemKey
+{
+    /// <summary>
+    /// The opener key of a scope whose opening system could not be identified: no executing system
+    /// ever packs to it, so every seam call in that scope is refused (never routed by the frame rule).
+    /// </summary>
+    internal const ulong Unreadable = ulong.MaxValue;
+
+    /// <summary>Pack a system handle; never 0 (an unknown executing system) and never <see cref="Unreadable"/>.</summary>
+    internal static ulong Pack(ushort handle, ushort version, uint worldSequence)
+    {
+        ulong key = handle | ((ulong)version << 16) | ((ulong)worldSequence << 32);
+        if (key == 0) return 1UL << 63;
+        return key == Unreadable ? Unreadable - 1 : key;
     }
 }
