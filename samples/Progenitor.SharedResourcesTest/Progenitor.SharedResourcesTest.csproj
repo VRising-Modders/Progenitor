@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.SharedResourcesTest</AssemblyName>
+    <RootNamespace>Progenitor.SharedResourcesTest</RootNamespace>
+    <ReferenceGame>true</ReferenceGame>
+    <Description>Reloadable shared resource inventory evidence harness.</Description>
+    <SharedResourcesCoreProject Condition="'$(SharedResourcesCoreProject)' == ''">../../src/Progenitor.Core/Progenitor.Core.csproj</SharedResourcesCoreProject>
+    <DefineConstants Condition="'$(SharedResourcesMaterials)' == 'true'">$(DefineConstants);SHARED_MATERIALS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(SharedResourcesCoreProject)" Private="false" />
+  </ItemGroup>
+</Project>
