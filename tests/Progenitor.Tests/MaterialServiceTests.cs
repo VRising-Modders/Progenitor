@@ -26,6 +26,8 @@ public partial class MaterialServiceTests
         public InventoryRef Station = InventoryRef.None;
         /// <summary>The castle heart whose window is open (the Upgrade station); its inventory, if any.</summary>
         public InventoryRef Heart = InventoryRef.None;
+        /// <summary>An open window that is not shared storage (a chest): the game's own pass reaches it for Repair, Upgrade and CharacterCraft.</summary>
+        public InventoryRef Window = InventoryRef.None;
         public bool StationIsSharedStorage;
         /// <summary>Simulates a world whose bag-and-station answer misses the station (another identification of it).</summary>
         public bool VanillaCountedMissesStation;
@@ -73,6 +75,8 @@ public partial class MaterialServiceTests
             into.Add(Bag);
             if (!Station.IsNone && !StationIsSharedStorage && !VanillaCountedMissesStation) into.Add(Station);
             if (context.Operation == MaterialOperation.Upgrade && !Heart.IsNone) into.Add(Heart); // the open window
+            if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade or MaterialOperation.CharacterCraft && !Window.IsNone)
+                into.Add(Window);
         }
 
         public InventoryRef StationInventory(in MaterialContext context) => context.Operation switch

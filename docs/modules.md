@@ -2705,7 +2705,8 @@ with empty inventories, and a second castle B of the same player or clan with at
 
 `Progenitor.Materials`, `ctx.MaterialSource` (alias `ctx.Stations.MaterialSource`, the same object).
 Milestone P3, **experimental**. One provider decides which containers pay for building (B menu, the
-game's shared-inventory mode), workstation crafting, item repair and castle heart upgrades; the totals
+game's shared-inventory mode), workstation crafting, crafting from the Character window on a plot, item
+repair and castle heart upgrades; the totals
 the player sees (where an existing seam can show them, below) and the server's payment both follow it. The game's own rules apply when nothing is registered, for
 operations the provider does not govern, for contexts it returns no candidates for, and for items it
 returns `null` for.
@@ -2717,11 +2718,12 @@ returns `null` for.
 | Per-player totals: refresh, resend, wire, client selection | landed, game-free tested (`MaterialViewSyncTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
 | Refresh cost: per-refresh reads, reuse of unchanged views, `Recomputes`/`Skips` | game-free tested (`MaterialViewRefreshTests`, `MaterialViewRefreshBenchTests`), **not live-verified** |
 | Native availability and payment seams (Bootstrap) | **experimental, opt-in, off by default**; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified (below) |
+| `CharacterCraft` (crafting from the Character window on a plot: scope, plot rule, the CharacterCraft view) | **experimental, opt-in, game-free tested, not live-verified** (`MaterialCharacterCraftTests`, `MaterialViewSyncTests`, `MaterialEventArgsTests`); the same two native seams, no new one; live procedure: [Shared Resources Test, character crafting cases](../samples/Progenitor.SharedResourcesTest/README.md#character-crafting-cases) |
 | `Repair` and `Upgrade` (scopes, the upgrade request filter, the Upgrade view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair (`MaterialTransactionTests`, `MaterialScopeTrackerTests`, `MaterialUpgradeFilterTests`, `MaterialViewSyncTests`); the same two native seams, no new one |
 
 ```csharp
 var handle = ctx.MaterialSource.Register(myProvider);     // second registration throws, naming the owner
-ctx.Log.LogInfo(ctx.MaterialSource.Status.ToString());     // materials: provider=… hooks=on wired=Build,Craft,Repair,Upgrade … faults=0 shortfalls=0
+ctx.Log.LogInfo(ctx.MaterialSource.Status.ToString());     // materials: provider=… hooks=on wired=Build,Craft,Repair,Upgrade,CharacterCraft … faults=0 shortfalls=0
 ctx.Events.On<MaterialPaid>(e => ctx.Log.LogInfo("tx " + e.Transaction + ": " + e.Item + " x" + e.Paid + " from " + string.Join(",", e.Debits)));
 ```
 
@@ -2747,9 +2749,10 @@ Start lines: Bootstrap logs `materials: native seams enabled count=armed pay=arm
 check (one synchronous system update) or while the per-player totals are refreshed. It must be fast,
 must not move items, must not call back into `ctx.MaterialSource` and must not throw.
 
-- `Operations`: what it governs. `Build`, `Craft`, `Repair` and `Upgrade` are wired
+- `Operations`: what it governs. `Build`, `Craft`, `Repair`, `Upgrade` and `CharacterCraft` are wired
   (`MaterialOperations.Supported`); `Research` and `Other` are logged once at registration
-  (`not-wired=…`) and stay vanilla. Re-read on `InvalidateAll`.
+  (`not-wired=…`) and stay vanilla. Re-read on `InvalidateAll`. `CharacterCraft` is separate from
+  `Craft`: a provider that names only `Craft` leaves crafting from the Character window to the game.
 - `Candidates(ctx)`: every container that may pay for any item in this context; used to find which
   items exist for the totals. **Empty = this context is not governed**: the game's own rules apply.
 - `Sources(ctx, item)`: that item's containers in spend order (first drained first) and its pool
@@ -2783,6 +2786,13 @@ any case):
 | `Repair` | The workstation the character is working at (its window open), for a repair at a station and also for a worn-item repair made while a station's window is open (the game's own pass reaches that station's inventory then, so it is named and left out of the pool); `ContainerId.None` with no workstation open |
 | `Upgrade` | The castle heart being upgraded (its `ContainerId`; hearts have one): the heart the game passed to the call, else the heart whose window is open, else the heart of the standing plot |
 | `Build` | `ContainerId.None` |
+| `CharacterCraft` | `ContainerId.None` (the Character window's crafting has no workstation). `StandingTerritory` is always set: the operation is governed only on a plot |
+
+**`CharacterCraft` only on a plot.** Crafting from the Character window is governed only while the
+character stands on a castle plot: the game itself passes the plot's castle heart to the count and the
+removal, resolved from the character's position (`MaterialOperations.RequiresStandingPlot`). Off a plot
+the game passes no heart and reaches no shared storage, so Progenitor neither asks the provider nor
+sends a view, and the craft keeps the game's own rules (the bag and an open window's inventory).
 
 ### One operation, one transaction
 
@@ -2793,7 +2803,9 @@ merged count then removes each line in the same body; the repair system (`Repair
 equipped-item repair and the repair of an item at a workstation) computes the repair cost, checks it
 against the merged count and removes each line in the same body; and the castle heart system
 (`CastleHeartEventSystem`) checks an upgrade's costs at the heart and removes each line in the same
-call. Progenitor opens a scope in a Before hook on each of these systems and closes it in the After hook. Both hooks run even when another plugin skips the
+call; the character crafting system (`StartCharacterCraftingSystem`, the request the Character window's
+crafting sends) checks the recipe's ingredients against the count at the standing plot and removes each
+line at that plot's heart in the same body. Progenitor opens a scope in a Before hook on each of these systems and closes it in the After hook. Both hooks run even when another plugin skips the
 system, so they always pair; the scope records the system that opened it and only that system's After
 closes it. The governed systems never nest, so a Before while a scope is open closes the open one (its
 system threw, so its After never ran), and a scope is current only in the frame it was opened in. Only
@@ -2859,8 +2871,8 @@ What this guarantees, and what it cannot:
   count for a call (an unexpected array shape, logged once, or composed rows that did not fit the
   buffer), the payment of that operation also follows the game's own rules.
 - **A scope can outlive its system only when the system throws**, and then only for the rest of that
-  frame or until the next governed system starts. For `Repair` and `Upgrade` a seam call is honored
-  only while the opening system itself executes: the scope records the opening system's handle, and
+  frame or until the next governed system starts. For `Repair`, `Upgrade` and `CharacterCraft` a seam
+  call is honored only while the opening system itself executes: the scope records the opening system's handle, and
   the call compares it with the world's executing system (`WorldUnmanaged.ExecutingSystem`, which the
   game's `SystemBase.Update` sets to the updating system before its `OnUpdate`; checked in the
   method body). A forge, research desk, stables or coffin paying in that window keeps the game's own
@@ -2868,10 +2880,11 @@ What this guarantees, and what it cannot:
   and `Craft` keep the frame rule (live-verified): a seam call from another system in that window is
   routed as the stranded operation.
 
-**Repair and Upgrade with a window open.** Both run with any window open (a chest, the castle heart):
-the game's own pass without shared storage counts and pays from an interaction inventory that is not
-shared storage, so for these two operations the pool leaves the interaction target out whatever kind
-it is, and a workstation that is itself shared storage pays first for a repair at it, as for a craft.
+**Repair, Upgrade and CharacterCraft with a window open.** These run with any window open (a chest,
+the castle heart): the game's own pass without shared storage counts and pays from an interaction
+inventory that is not shared storage, so for these operations the pool leaves the interaction target
+out whatever kind it is, and a workstation that is itself shared storage pays first for a repair at it,
+as for a craft.
 
 **The craft's station.** Progenitor identifies the station as the character's interaction target
 (`Interactor.Target`, when it has a recipe list). The game's own removal reaches the interaction
@@ -2882,14 +2895,16 @@ counted twice.
 
 Bookkeeping stays the game's: the craft start still records the requested amount and the returned
 item entity in its queued-craft rows, so cancel refunds follow the game's own rule (the station, then
-the character) with item identity intact; refunds never go back to remote chests. The pool pays only
+the character; for a character craft, the character) with item identity intact; refunds never go back
+to remote chests. The pool pays only
 from slots without an item entity. The explicit local-inventory build mode
 (`BuildResourceConsumeType.LocalInventory`) uses a different removal that the seams do not touch, so
 it stays local. Nothing is ever written to a castle heart's shared aggregate.
 
 ### What the player sees
 
-The server refreshes each online player's Build totals, while the player works at a workstation their
+The server refreshes each online player's Build totals, while the player stands on a plot their
+CharacterCraft totals, while the player works at a workstation their
 Craft totals, and while the window of a castle heart the player or the player's clan owns is open
 their Upgrade totals (never for an enemy's or a decaying heart, even an allied one), every second, and
 at once after an invalidation or a governed payment; a refresh recomputes a view only when something it
@@ -2956,6 +2971,7 @@ own result stands:
 | Build: the build menu is shown or the build-mode placement update runs | Repair, research, chests and other screens that read the same count keep the game's own result; the build menu and station windows are exclusive HUD menus. |
 | Craft (otherwise): the local character's interaction target is a workstation and is the view's station | Another station never shows this station's pool. |
 | Upgrade (otherwise): the local character's interaction target is a castle heart, it is the view's heart, and the count is at that heart | The heart window's cost entries and its upgrade button both read this count; the button sends the upgrade only when the count covers the cost, so without the view the client would refuse what the pool can pay. |
+| CharacterCraft: the count is made inside the update of the Character window's crafting menu (`CharacterCraftingSubMenuMapper`) while the Character window is open, and the game resolved the view's heart for it (the character stands on that plot) | That update computes the recipe costs the crafting list shows and the per-recipe "requirements met" flag, and the Character window's craft input (`InventorySubMenu.CheckCraftingInput`) sends the request only when that flag is set (otherwise the client shows missing materials itself, checked in the method body), so without the view the client would refuse what the pool can pay. Inside that update only a CharacterCraft view applies, and none while the Character window is closed (never Build, Craft or Upgrade, whatever menu or window is also up); outside it a CharacterCraft view never applies. |
 | Repair: never | No Repair view is sent (below). |
 
 The replaced count is the bag rows from the game, then for each governed item the pool amount, and for
@@ -3001,7 +3017,9 @@ four handlers into them and clears them on uninstall, so the logic is in Core an
 Facts checked against the game's metadata and interop assemblies for this build:
 
 - The territory overloads of both methods resolve the castle heart from the target's position and call
-  the castle-heart overloads directly; the craft start, the build check and charge, both repair jobs
+  the castle-heart overloads directly; the craft start, the character craft start (the territory count;
+  the removal at the castle-heart overload with the heart of the plot the character stands on, or none
+  off a plot, `destroyItem` false), the build check and charge, both repair jobs
   (the territory overloads, removal with `destroyItem` true), the heart cost check and charge used by the
   upgrade, claim, raid and destroy requests (the castle-heart overloads with the heart itself, removal
   with `destroyItem` false), and the client cost displays all reach these two. The remove overloads
@@ -3041,6 +3059,8 @@ The game never counted more than once per operation. **Not live-verified:** othe
 the same count (repair, research, a chest window), a cancelled craft, and transaction ids increasing
 across a server Core swap (no payment was made after the swap). `Repair` and `Upgrade` were live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair ([procedure](../samples/Progenitor.SharedResourcesTest/README.md#repair-and-upgrade-cases)): a worn-item and a workstation repair and a castle heart upgrade from level 1 to 2 were each paid from remote chests in one transaction with one `MaterialPaid` per line, a short repair and a short upgrade were refused at the game's check with nothing taken, and the Upgrade view showed the heart while its window was open. An earlier, unhardened build also ran
 live on 2026-10-13 (a prison cell fed from a remote chest; the same Build totals on two plots).
+`CharacterCraft` is game-free tested only and **not live-verified** (procedure: [character crafting
+cases](../samples/Progenitor.SharedResourcesTest/README.md#character-crafting-cases)).
 
 Not proven live on any build:
 

@@ -46,7 +46,7 @@ public sealed partial class TestContext
             var status = MaterialSource.Status;
             ProviderStatus = status.ToString();
             if (!status.HooksInstalled || FixedMaterialProvider.Governed.Any(op => !status.Wired.Contains(op)))
-                throw new InvalidOperationException("Framework hooks not ready (Build, Craft, Repair and Upgrade must be wired): " + status);
+                throw new InvalidOperationException("Framework hooks not ready (Build, Craft, Repair, Upgrade and CharacterCraft must be wired): " + status);
             _provider = registration;
             enabled = true;
             MaterialSource.Invalidate(Actor);
@@ -83,9 +83,9 @@ public sealed partial class TestContext
         private readonly Dictionary<int, ItemSources> _items = new();
         private readonly IReadOnlyList<ContainerId> _candidates;
         private static readonly ItemSources Empty = new(Array.Empty<ContainerId>());
-        /// <summary>Every operation the test covers: build, craft, repair and castle heart upgrade.</summary>
+        /// <summary>Every operation the test covers: build, craft, repair, castle heart upgrade and character crafting.</summary>
         internal static readonly IReadOnlyList<MaterialOperation> Governed = Array.AsReadOnly(new[]
-            { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade });
+            { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft });
 
         public IReadOnlyCollection<MaterialOperation> Operations => Governed;
 
@@ -103,9 +103,12 @@ public sealed partial class TestContext
             _candidates = Array.AsReadOnly(_items.Values.SelectMany(x => x.SpendOrder).Distinct().ToArray());
         }
 
+        // A character craft is also answered for "no plot" (-1): Progenitor never asks there (off a plot the
+        // game's own rules apply), so a governed character craft off a plot would show that rule failing.
         private bool Applies(in MaterialContext context) => context.User.Equals(_actor)
             && context.WorldEpoch == _epoch && _test.WorldState.LoadEpoch == _epoch
-            && context.StandingTerritory == _territory
+            && (context.StandingTerritory == _territory
+                || (context.Operation == MaterialOperation.CharacterCraft && context.StandingTerritory < 0))
             && Governed.Contains(context.Operation);
 
         // This deliberately governs only one testing admin on one plot. It is not a sharing policy for real players.

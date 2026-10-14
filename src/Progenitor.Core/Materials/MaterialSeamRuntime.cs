@@ -37,20 +37,23 @@ internal static class MaterialNet
 /// per-player totals that the client's cost display reads.
 ///
 /// <para><b>Server.</b> A scope is open while <c>StartCraftingSystem</c> (Craft),
-/// <c>PlaceTileModelSystem</c> (Build), <c>RepairItemSystem</c> (Repair) or <c>CastleHeartEventSystem</c>
-/// (Upgrade) updates; only seam calls inside a scope are routed to the provider, and inside the castle
-/// heart system only the calls of an upgrade request (<see cref="MaterialUpgradeFilter"/>). Each system
+/// <c>PlaceTileModelSystem</c> (Build), <c>RepairItemSystem</c> (Repair), <c>CastleHeartEventSystem</c>
+/// (Upgrade) or <c>StartCharacterCraftingSystem</c> (CharacterCraft) updates; only seam calls inside a
+/// scope are routed to the provider, inside the castle heart system only the calls of an upgrade request
+/// (<see cref="MaterialUpgradeFilter"/>), and inside the character crafting system only calls the game
+/// made with a castle heart (the character stands on a plot). Each system
 /// checks affordability and pays in the same synchronous call on the main thread, so one game operation
 /// is one <see cref="MaterialService"/> session: the provider is asked once at the check, every line is
 /// paid from that answer, and the queued <see cref="MaterialPaid"/> events are published when the
 /// system's update ends. Every second (and right after an invalidation or a governed payment) each
-/// online player's Build, Craft and Upgrade totals are refreshed and sent when they changed
+/// online player's Build, Craft, Upgrade and CharacterCraft totals are refreshed and sent when they changed
 /// (<see cref="MaterialRefreshPolicy"/>, <see cref="MaterialViewPublisher"/>); a refresh recomputes a
 /// view only when something it depends on changed (<see cref="MaterialService.RefreshView"/>).</para>
 ///
 /// <para><b>Client.</b> A received view replaces the shared-storage rows of the game's merged count
 /// only for the local character, at the castle heart the view was computed at, and only in its own
-/// operation (<see cref="MaterialClientPolicy"/>): items the provider governs show the server's pool
+/// operation (<see cref="MaterialClientPolicy"/>; CharacterCraft only inside the Character window
+/// crafting menu's update while that window is open): items the provider governs show the server's pool
 /// amount, every other item keeps the game's own shared amount. Without a matching view the game's own
 /// counts are shown. A displayed count is never authorization: the server checks again and pays at
 /// action time.</para>
@@ -72,7 +75,7 @@ internal static unsafe class MaterialSeamRuntime
 
     /// <summary>Development bridge: log the rows the next governed check hands to the game (one shot).</summary>
     internal static void TraceNextCheck() => _traceNextCheck = true;
-    private static ulong _repairKey, _heartKey, _repairKeyWorld, _heartKeyWorld;
+    private static ulong _repairKey, _heartKey, _repairKeyWorld, _heartKeyWorld, _characterCraftKey, _characterCraftKeyWorld;
     private static readonly MaterialViewPublisher Publisher = new();
     private static readonly MaterialRefreshPolicy Refresh = new();
     private static readonly MaterialOverlayStore Overlay = new();
@@ -96,6 +99,11 @@ internal static unsafe class MaterialSeamRuntime
     private static long _buildModeFrame = -1;
     private static long _buildMenuFrame = -1;
     private static bool _buildMenuShown;
+    // Client: inside the Character window crafting menu's update, and whether the Character window is open (per frame).
+    private static bool _inCharacterCraftMenu;
+    private static long _characterCraftMenuFrame = -1;
+    private static long _characterWindowFrame = -1;
+    private static bool _characterWindowOpen;
 
     internal static (bool installed, string reason) HookState() => (_bound, _bound ? "" : _reason);
 
@@ -170,6 +178,12 @@ internal static unsafe class MaterialSeamRuntime
             Hooks.Add(SystemHooks.Before<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.Before(MaterialOperation.Upgrade, ctx.SystemName, FrameNow(),
                 OpenerKey<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx.World, ref _heartKey, ref _heartKeyWorld)), always));
             Hooks.Add(SystemHooks.After<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.After(ctx.SystemName), always));
+            // Crafting from the Character window: this system handles only that request, checking the
+            // territory count and paying at the standing plot's heart in one main-thread body. Guarded
+            // like Repair (opener key), and governed only when the game passed a castle heart.
+            Hooks.Add(SystemHooks.Before<ProjectM.Gameplay.Systems.StartCharacterCraftingSystem>(ctx => Scope.Before(MaterialOperation.CharacterCraft, ctx.SystemName, FrameNow(),
+                OpenerKey<ProjectM.Gameplay.Systems.StartCharacterCraftingSystem>(ctx.World, ref _characterCraftKey, ref _characterCraftKeyWorld)), always));
+            Hooks.Add(SystemHooks.After<ProjectM.Gameplay.Systems.StartCharacterCraftingSystem>(ctx => Scope.After(ctx.SystemName), always));
             Publisher.ClearEveryoneOnce();
             _disconnected = EventBus.On<PlayerDisconnected>(e => { Publisher.Disconnected(CastleId.From(e.UserEntity)); });
         }
@@ -189,6 +203,14 @@ internal static unsafe class MaterialSeamRuntime
                 _inBuildMode = false;
                 MaterialPlacementDispatch.Restore();
             }, always));
+            // The Character window's Crafting tab computes its recipe costs (and the flag its craft input
+            // checks before sending the request) in this system's update.
+            Hooks.Add(SystemHooks.Before<ProjectM.UI.CharacterCraftingSubMenuMapper>(_ =>
+            {
+                _inCharacterCraftMenu = true;
+                _characterCraftMenuFrame = FrameNow();
+            }, always));
+            Hooks.Add(SystemHooks.After<ProjectM.UI.CharacterCraftingSubMenuMapper>(_ => _inCharacterCraftMenu = false, always));
             CustomEvents.OnReceive(MaterialViewWire.EventId, OnView);
             _clientHandler = true;
             Handshake.ClientConnectionEnded += OnConnectionEnded;
@@ -227,6 +249,8 @@ internal static unsafe class MaterialSeamRuntime
         Dirty.Clear();
         _inBuildMode = false;
         _buildMenuFrame = -1;
+        _inCharacterCraftMenu = false;
+        _characterWindowFrame = -1;
         _service = null;
         _world = null;
         _registry = null;
@@ -267,6 +291,8 @@ internal static unsafe class MaterialSeamRuntime
             return false;
         }
         if (op == MaterialOperation.Upgrade && !IsUpgradeCall(token, target, heart)) return false;
+        // Off a plot the game passes no castle heart (it reaches no shared storage): keep its own rules.
+        if (MaterialOperations.RequiresStandingPlot(op) && heart == 0) return false;
         _service.BeginScope(token);
         return true;
     }
@@ -496,7 +522,8 @@ internal static unsafe class MaterialSeamRuntime
     {
         MaterialViewContent? content = null;
         // A Craft view only means something at a workstation and an Upgrade view only with a castle
-        // heart's window open; skip the provider calls otherwise. A Repair view is not sent (see
+        // heart's window open; skip the provider calls otherwise. A CharacterCraft view is computed only
+        // on a plot (MaterialService refuses it off one). A Repair view is not sent (see
         // MaterialClientPolicy.ViewOperations).
         ulong stationNet = op switch
         {
@@ -551,6 +578,21 @@ internal static unsafe class MaterialSeamRuntime
         return _buildMenuShown;
     }
 
+    /// <summary>Inside the Character window crafting menu's update (stamped with its frame, so a throwing update cannot leave it set).</summary>
+    private static bool InCharacterCraftMenu() => _inCharacterCraftMenu && _characterCraftMenuFrame == FrameNow();
+
+    /// <summary>Whether the Character window is open (its open state read once per frame).</summary>
+    private static bool CharacterWindowOpen(World world)
+    {
+        long frame = FrameNow();
+        if (frame != _characterWindowFrame)
+        {
+            _characterWindowFrame = frame;
+            _characterWindowOpen = Ui.BuildMenuOpener.CurrentMenuType(world) == Layout.HUDMenuTypeCharacterInfo;
+        }
+        return _characterWindowOpen;
+    }
+
     private static bool TryClientSelect(ulong target, ulong heart, out IReadOnlyDictionary<int, int> totals)
     {
         totals = null!;
@@ -560,6 +602,11 @@ internal static unsafe class MaterialSeamRuntime
         var em = world.EntityManager;
         var character = Ent(target);
         if (!character.Exists(em) || !character.Has<LocalCharacter>(em)) return false;
+        // The Character window's crafting list: only a CharacterCraft view, and only while that window is
+        // open; never another operation's view.
+        if (InCharacterCraftMenu())
+            return CharacterWindowOpen(world) && MaterialClientPolicy.TrySelect(Overlay,
+                MaterialClientPolicy.Call(true, MaterialNet.Of(em, Ent(heart)), false, 0, 0, characterCraft: true), out _, out totals);
         var station = UnityMaterialWorld.StationOf(em, character);
         var heartTarget = station == Entity.Null ? UnityMaterialWorld.HeartTargetOf(em, character) : Entity.Null;
         var call = MaterialClientPolicy.Call(true, MaterialNet.Of(em, Ent(heart)), BuildContext(world),

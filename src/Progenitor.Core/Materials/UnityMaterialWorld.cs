@@ -64,7 +64,8 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     /// The structure an operation runs at: the workstation for Craft and Repair (the character's
     /// interaction target when it is a castle workstation), the castle heart for Upgrade (the heart the
     /// game passed to this call, else the heart whose window the character has open, else the heart of
-    /// the plot it stands on), nothing for Build.
+    /// the plot it stands on), nothing for Build and CharacterCraft (the Character window's Crafting tab
+    /// has no workstation).
     /// </summary>
     private Entity StationFor(EntityManager em, Entity character, MaterialOperation operation, int territory)
     {
@@ -107,11 +108,11 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         into.Add(InventoryRef.For(ch, 0));
         var station = StationOf(em, ch);
         if (station != Entity.Null && !station.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(station, 0));
-        if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade)
+        if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade or MaterialOperation.CharacterCraft)
         {
-            // Repair and Upgrade run with any window open (a chest, the castle heart): the game's own
-            // pass without shared storage already counts and pays from an interaction inventory that is
-            // not shared storage, so the pool leaves it out, whatever kind it is.
+            // Repair, Upgrade and character crafting run with any window open (a chest, the castle heart):
+            // the game's own pass without shared storage already counts and pays from an interaction
+            // inventory that is not shared storage, so the pool leaves it out, whatever kind it is.
             var target = InteractionTarget(em, ch);
             if (target != Entity.Null && !target.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(target, 0));
         }

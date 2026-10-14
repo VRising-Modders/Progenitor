@@ -85,4 +85,25 @@ public class MaterialEventArgsTests
         Assert.Equal(0, raw[0xC]); // CastleHeartInteractEventType.Upgrade
         Assert.Equal(13, MaterialEventArgs.HeartEventBytes);
     }
+
+    [Fact]
+    public void Character_craft_needs_a_nonzero_recipe()
+    {
+        var r = MaterialEventArgs.Parse(Args("{\"event\":\"character_craft\",\"user\":\"A\",\"recipe\":-1234567}"));
+        Assert.Equal(MaterialEventArgs.Kind.CharacterCraft, r.Kind);
+        Assert.Equal(-1234567, r.Recipe);
+        Assert.Throws<ArgumentException>(() => MaterialEventArgs.Parse(Args("{\"event\":\"character_craft\"}")));
+        Assert.Throws<ArgumentException>(() => MaterialEventArgs.Parse(Args("{\"event\":\"character_craft\",\"recipe\":0}")));
+        Assert.Throws<ArgumentException>(() => MaterialEventArgs.Parse(Args("{\"event\":\"character_craft\",\"recipe\":\"x\"}")));
+    }
+
+    [Fact]
+    public void Character_craft_payload_is_the_recipe_guid()
+    {
+        var raw = Enumerable.Repeat((byte)0xEE, MaterialEventArgs.CharacterCraftBytes).ToArray();
+        MaterialEventArgs.WriteCharacterCraft(raw, -1234567);
+        Assert.Equal(-1234567, BinaryPrimitives.ReadInt32LittleEndian(raw));
+        Assert.Equal(4, MaterialEventArgs.CharacterCraftBytes);
+        Assert.Throws<ArgumentException>(() => MaterialEventArgs.WriteCharacterCraft(new byte[3], 1));
+    }
 }

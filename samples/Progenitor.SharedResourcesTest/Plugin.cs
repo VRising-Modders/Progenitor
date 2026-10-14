@@ -247,14 +247,14 @@ public static class TestCommands
     [Command("disable", adminOnly: true)]
     public static void Disable(ICommandContext c) => Run(c, t => { t.Disable(); t.Report(c, "Provider disabled; normal game behavior restored."); });
 
-    [Command("baseline", adminOnly: true, description: "Capture the disabled-provider attempt (build, craft, repair or upgrade) on a resource-poor plot; expect no payment.")]
+    [Command("baseline", adminOnly: true, description: "Capture the disabled-provider attempt (build, craft, repair, upgrade or charcraft) on a resource-poor plot; expect no payment.")]
     public static void Baseline(ICommandContext c, string operation) => Run(c, t =>
     {
         if (t.ProviderEnabled) throw new InvalidOperationException("Disable the provider first.");
         Capture(c, t, operation, false);
     });
 
-    [Command("begin", adminOnly: true, description: "Capture all configured ingredients; then perform exactly one build, craft, repair or upgrade.")]
+    [Command("begin", adminOnly: true, description: "Capture all configured ingredients; then perform exactly one build, craft, repair, upgrade or charcraft.")]
     public static void Begin(ICommandContext c, string operation) => Run(c, t =>
     {
         if (!t.ProviderEnabled) throw new InvalidOperationException("Enable the provider first, or use baseline for the disabled test.");
@@ -263,8 +263,8 @@ public static class TestCommands
 
     private static void Capture(ICommandContext c, TestContext t, string operation, bool expectPayment)
     {
-        if (operation is not ("build" or "craft" or "repair" or "upgrade"))
-            throw new ArgumentException("Operation must be build, craft, repair or upgrade.");
+        if (operation is not ("build" or "craft" or "repair" or "upgrade" or "charcraft"))
+            throw new ArgumentException("Operation must be build, craft, repair, upgrade or charcraft.");
         var bag = t.Inventory.Of(c.CharacterEntity);
         if (!t.Containers.Any(x => x.Value == bag && !t.SourceIds.ContainsKey(x.Key)))
             throw new InvalidOperationException("Watch the player bag with .srtest bag before capturing.");
