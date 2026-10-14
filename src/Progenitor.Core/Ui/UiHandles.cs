@@ -849,9 +849,39 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
         }
     }
 
+    /// <summary>P7: composed widgets (and anything else) that must be disposed with this panel, before its rows.</summary>
+    private readonly List<IDisposable> _attached = new();
+
+    /// <summary>P7: dispose <paramref name="part"/> when this panel is disposed (a composed widget's leases and drag).</summary>
+    internal void AttachDisposable(IDisposable part)
+    {
+        if (part == null) return;
+        if (IsDisposed)
+        {
+            try { part.Dispose(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: attached dispose threw: " + e.Message); }
+            return;
+        }
+
+        lock (_attached) _attached.Add(part);
+    }
+
     protected override void OnDispose()
     {
         HideCore();
+        IDisposable[] attached;
+        lock (_attached)
+        {
+            attached = _attached.ToArray();
+            _attached.Clear();
+        }
+
+        for (int i = attached.Length - 1; i >= 0; i--)
+        {
+            try { attached[i].Dispose(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: attached dispose threw: " + e.Message); }
+        }
+
         UiHandle[] snapshot;
         lock (_children)
             snapshot = _children.ToArray();

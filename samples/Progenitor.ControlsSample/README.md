@@ -21,6 +21,14 @@ Plugin GUID `progenitor.controlssample`; version comes from git (docs/versioning
 - **Mods workspace → Progenitor Controls Sample → Settings** shows every `ctx.Settings.Page` row kind;
   each change logs `Controls sample: setting <key> = <value>`.
 
+- **Mods workspace → Progenitor Controls Sample → Widgets** shows the composed widgets
+  ([WidgetsDemo.cs](WidgetsDemo.cs), docs/ui.md "Widgets") under a tab row with count badges: **List** (an
+  ordered list of four sample targets: drag by the grip, arrows, a drawer, remove, **Reset list** with a tooltip),
+  **Pickers** (a single and a multiple picker with sections, two game item icons and grayed rows),
+  **Code** (a code area with a toy highlighter and checker; line 4 starts with an error) and **HUD**
+  (`ctx.Hud.Notify` in four kinds, **Pick in world**, **Locate the picked target**). Each event logs
+  `Controls sample: widget <event>`.
+
 There is no chat command: chat commands run on the server, and this mod is client-only; opening
 a client panel from chat would need a server half and a custom event (see `Progenitor.Sample`'s `.ui`).
 
@@ -40,6 +48,8 @@ a client panel from chat would need a server half and a custom event (see `Proge
 | `ctx.Settings.Page` | `Section`, `Setting`, `Toggle`, `Number`, `Slider`, `Dropdown` + `OptionDescriptions`, `Radio`, `MultiSelect`, `Text` + `MaxLength`, `Text(multiline)`, `Color`, `DateTime`, `Keybind`, `Divider`, `Info`, `Button` (plain and confirmed), `HideWhenAlone` |
 | `ctx.Keybinds` / `ctx.Menu` | `Register` (the Ctrl+F7 bind), `Register(...).Page`, `OpenPage` |
 | `UiLook` | `GameStyle`, `Label(text, LabelTone)`; `IUiToneLabel.SetText` |
+| `UiWidgets` (Widgets page) | `OrderedList`, `Picker` (single and `Multi`), `Tabs` (`Add`, `SetBadge` both overloads, `SetTooltip`, `OnChanged`), `CodeArea` (`SetHighlighter`, `SetErrors`, `OnChanged`), `Tooltip` |
+| `ctx.Hud` (Widgets page, HUD tab) | `Notify` (`Info`, `Success`, `Warning`, `Error`), `PickInWorld`, `Locate(Entity, …)` |
 
 Not demonstrated: `SettingsPageBuilder.InScope` (marks a button or info line server-wide; meaningless
 for a client-only mod). Lower-level surfaces `Ui.AttachToVanilla`, `Ui.WatchPointer` and `WorldMap` are

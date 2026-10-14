@@ -1153,7 +1153,7 @@ public static class Layout
     /// <summary>Native size / array stride of <c>BuildMenuBlueprintBlob</c> (client metadata). PrefabGUID, LocalizationKey (16), AssetGuid (16).</summary>
     public const int BuildMenuBlueprintStride = 36;
 
-    /// <summary>Field offset of <c>OpenMenuEvent.Menu</c> (client metadata). HUDMenuType, int.</summary>
+    /// <summary>Field offset of <c>OpenMenuEvent.Menu</c> (client metadata). HUDMenuType, byte enum (3 padding bytes before InitDataEntity).</summary>
     public const int OpenMenuEventMenuOffset = 0x0;
 
     /// <summary>Field offset of <c>OpenMenuEvent.InitDataEntity</c> (client metadata). Entity {Index, Version}.</summary>
