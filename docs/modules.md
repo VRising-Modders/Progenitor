@@ -2848,8 +2848,14 @@ What this guarantees, and what it cannot:
   count for a call (an unexpected array shape, logged once, or composed rows that did not fit the
   buffer), the payment of that operation also follows the game's own rules.
 - **A scope can outlive its system only when the system throws**, and then only for the rest of that
-  frame or until the next governed system starts. A seam call from another system in that window is
-  routed as the stranded operation: the hooks cannot tell which system is running.
+  frame or until the next governed system starts. For `Repair` and `Upgrade` a seam call is honored
+  only while the opening system itself executes: the scope records the opening system's handle, and
+  the call compares it with the world's executing system (`WorldUnmanaged.ExecutingSystem`, which the
+  game's `SystemBase.Update` sets to the updating system before its `OnUpdate`; checked in the
+  method body). A forge, research desk, stables or coffin paying in that window keeps the game's own
+  rules (one `materials:` warning), and an unreadable handle refuses every call of that scope. `Build`
+  and `Craft` keep the frame rule (live-verified): a seam call from another system in that window is
+  routed as the stranded operation.
 
 **Repair and Upgrade with a window open.** Both run with any window open (a chest, the castle heart):
 the game's own pass without shared storage counts and pays from an interaction inventory that is not
@@ -2873,7 +2879,8 @@ it stays local. Nothing is ever written to a castle heart's shared aggregate.
 ### What the player sees
 
 The server recomputes each online player's Build totals, while the player works at a workstation their
-Craft totals, and while a castle heart's window is open their Upgrade totals, every second, at once after an invalidation or a governed payment, and sends a view only
+Craft totals, and while the window of a castle heart the player or the player's clan owns is open
+their Upgrade totals (never for an enemy's or a decaying heart, even an allied one), every second, at once after an invalidation or a governed payment, and sends a view only
 when it changed; every 10 seconds (and after a provider registers or goes away) every player is sent
 their view again even when unchanged, and a send the transport refused is retried on the next refresh.
 A player who had a view and is no longer governed gets one cleared view (retried the same way). A
@@ -2914,13 +2921,16 @@ pays at action time.
 user-interface helper that reads the same count; no ECS system update brackets it, so no existing seam
 tells that count apart from the other counts of the same screen (at a workstation the Craft view applies
 to the tooltip too). Showing the pool there needs a new hook on that helper, which is not part of this
-milestone. A repair still works from the pool: the client's repair input sends the request without
-checking the merged count (its own affordability helper reads only the bag and the open container), and
-the server checks and pays from the provider's containers.
+milestone. A repair from an inventory window still works from the pool: the inventory menu's repair
+input (`RepairItemEvent`) sends the request without checking the merged count (checked in the method
+body; its own affordability helper reads only the bag and the open container), and the server checks
+and pays from the provider's containers. **Not verified:** the equipped-item repair
+(`RepairEquippedItemEvent`); its sender sends without a check, but the input that calls it was not
+found, so whether the client refuses it on its own count is unknown (live case 16 tests it).
 
-The heart window's claim, raid and destroy panels read the same count at the same heart. A provider that
-governs `Upgrade` for the context of a heart whose window shows those panels would show its pool there
-too; the server still pays those costs by the game's own rules.
+The heart window's claim, raid and destroy panels read the same count at the same heart. They never
+show pool totals: an Upgrade view is sent only for a heart the player or the player's clan owns, and
+the server pays those costs by the game's own rules.
 
 ### Native seams (Bootstrap)
 

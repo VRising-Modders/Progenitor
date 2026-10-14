@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using ProjectM;
 using ProjectM.CastleBuilding;
+using ProjectM.Network;
 using ProjectM.Shared;
 using Progenitor.Castles;
 using Progenitor.Ecs;
@@ -170,6 +171,34 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     {
         var heart = HeartTargetOf(Em, new Entity { Index = character.Index, Version = character.Version });
         return heart == Entity.Null ? 0 : MaterialNet.Of(Em, heart);
+    }
+
+    /// <summary>
+    /// How <paramref name="user"/> stands to the castle of <paramref name="heart"/> (owner, the owner's
+    /// clan, or neither), read now from the castle and the user's clan; <see cref="CastleRelation.None"/>
+    /// when either is unreadable. The team check is not consulted: only ownership counts here.
+    /// </summary>
+    internal CastleRelation OwnershipOf(CastleId user, ulong heartNet, CastleId character)
+    {
+        try
+        {
+            var em = Em;
+            var heart = HeartTargetOf(em, new Entity { Index = character.Index, Version = character.Version });
+            if (heart == Entity.Null || MaterialNet.Of(em, heart) != heartNet) return CastleRelation.None;
+            var key = CastleId.From(heart);
+            ICastleHandle? castle = null;
+            RefreshCastles();
+            for (int i = 0; i < _castles.Count; i++)
+                if (_castles[i].Heart.Equals(key)) { castle = _castles[i]; break; }
+            if (castle == null) return CastleRelation.None;
+            castle = castle.Refresh();
+            if (!castle.Enabled) return CastleRelation.None;
+            var userEntity = new Entity { Index = user.Index, Version = user.Version };
+            if (!userEntity.Exists(em) || !userEntity.Has<User>(em)) return CastleRelation.None;
+            var clan = CastleId.From(em.GetComponentData<User>(userEntity).ClanEntity._Entity); // existing typed accessor
+            return Progenitor.Clans.ClanLogic.Relation(user, clan, castle.Owner, teamAllied: null);
+        }
+        catch { return CastleRelation.None; }
     }
 
     private ICastleHandle? CastleAt(int territory)

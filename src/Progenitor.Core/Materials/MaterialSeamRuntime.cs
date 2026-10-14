@@ -67,7 +67,8 @@ internal static unsafe class MaterialSeamRuntime
     private static UnityMaterialWorld? _world;
     private static readonly MaterialScopeTracker Scope = new();
     private static readonly MaterialUpgradeFilter UpgradeFilter = new();
-    private static bool _heartRequestLogged;
+    private static bool _heartRequestLogged, _foreignCallLogged;
+    private static ulong _repairKey, _heartKey, _repairKeyWorld, _heartKeyWorld;
     private static readonly MaterialViewPublisher Publisher = new();
     private static readonly MaterialRefreshPolicy Refresh = new();
     private static readonly MaterialOverlayStore Overlay = new();
@@ -154,11 +155,16 @@ internal static unsafe class MaterialSeamRuntime
             Hooks.Add(SystemHooks.Before<PlaceTileModelSystem>(ctx => Scope.Before(MaterialOperation.Build, ctx.SystemName, FrameNow()), always));
             Hooks.Add(SystemHooks.After<PlaceTileModelSystem>(ctx => Scope.After(ctx.SystemName), always));
             // Both repair events (equipped item, item at a workstation) are paid in this system's update.
-            Hooks.Add(SystemHooks.Before<RepairItemSystem>(ctx => Scope.Before(MaterialOperation.Repair, ctx.SystemName, FrameNow()), always));
+            // Repair has no request filter: its scope honors seam calls only while RepairItemSystem itself
+            // executes, so a stranded scope (the system threw before its After) never routes another
+            // system's payment (forge, research, stables, coffin) as a Repair. The same for Upgrade.
+            Hooks.Add(SystemHooks.Before<RepairItemSystem>(ctx => Scope.Before(MaterialOperation.Repair, ctx.SystemName, FrameNow(),
+                OpenerKey<RepairItemSystem>(ctx.World, ref _repairKey, ref _repairKeyWorld)), always));
             Hooks.Add(SystemHooks.After<RepairItemSystem>(ctx => Scope.After(ctx.SystemName), always));
             // Heart upgrades, claims, raids and destroys are all paid in this update; UpgradeFilter keeps
             // only the calls of an upgrade request governed.
-            Hooks.Add(SystemHooks.Before<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.Before(MaterialOperation.Upgrade, ctx.SystemName, FrameNow()), always));
+            Hooks.Add(SystemHooks.Before<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.Before(MaterialOperation.Upgrade, ctx.SystemName, FrameNow(),
+                OpenerKey<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx.World, ref _heartKey, ref _heartKeyWorld)), always));
             Hooks.Add(SystemHooks.After<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.After(ctx.SystemName), always));
             Publisher.ClearEveryoneOnce();
             _disconnected = EventBus.On<PlayerDisconnected>(e => { Publisher.Disconnected(CastleId.From(e.UserEntity)); });
@@ -242,10 +248,64 @@ internal static unsafe class MaterialSeamRuntime
     private static bool TryOperation(ulong target, ulong heart, out MaterialOperation op)
     {
         op = default;
-        if (_service == null || !Dev.MainThread.IsMainThread || !Scope.TryCurrent(FrameNow(), out op, out long token)) return false;
+        if (_service == null || !Dev.MainThread.IsMainThread) return false;
+        long frame = FrameNow();
+        ulong opener = Scope.Opener;
+        ulong executing = opener != 0 ? ExecutingSystemKey() : 0;
+        if (!Scope.TryCurrent(frame, executing, out op, out long token))
+        {
+            if (opener != 0 && executing != opener && !_foreignCallLogged && Scope.TryCurrent(frame, opener, out var stranded, out _))
+            {
+                _foreignCallLogged = true;
+                Plugin.Logger?.LogWarning("materials: a seam call inside the " + stranded + " scope came from another system (its opener threw before its After, or the executing system is unreadable); that call keeps the game's own rules");
+            }
+            return false;
+        }
         if (op == MaterialOperation.Upgrade && !IsUpgradeCall(token, target, heart)) return false;
         _service.BeginScope(token);
         return true;
+    }
+
+    /// <summary>
+    /// The opening system's key for a scope, cached per world (a lookup only after a world change).
+    /// <see cref="MaterialSystemKey.Unreadable"/> when the system or its handle cannot be read: that
+    /// scope then refuses every seam call rather than falling back to the frame rule.
+    /// </summary>
+    private static ulong OpenerKey<TSystem>(World world, ref ulong key, ref ulong keyWorld) where TSystem : ComponentSystemBase
+    {
+        try
+        {
+            ulong seq = world.SequenceNumber;
+            if (key != 0 && keyWorld == seq) return key;
+            var system = world.GetExistingSystemManaged<TSystem>();
+            if (system == null) return MaterialSystemKey.Unreadable;
+            var h = system.SystemHandle;
+            key = MaterialSystemKey.Pack(h.m_Handle, h.m_Version, h.m_WorldSeqNo);
+            keyWorld = seq;
+            return key;
+        }
+        catch (Exception e)
+        {
+            if (!_foreignCallLogged)
+            {
+                _foreignCallLogged = true;
+                Plugin.Logger?.LogWarning("materials: the " + typeof(TSystem).Name + " handle is unreadable; its scope keeps the game's own rules: " + e.Message);
+            }
+            return MaterialSystemKey.Unreadable;
+        }
+    }
+
+    /// <summary>The system the server world is executing now (<c>WorldUnmanaged.ExecutingSystem</c>), or 0 when unreadable.</summary>
+    private static ulong ExecutingSystemKey()
+    {
+        try
+        {
+            var world = Worlds.Server;
+            if (world == null || !world.IsCreated) return 0;
+            var h = world.Unmanaged.ExecutingSystem;
+            return MaterialSystemKey.Pack(h.m_Handle, h.m_Version, h.m_WorldSeqNo);
+        }
+        catch { return 0; }
     }
 
     /// <summary>
@@ -415,6 +475,10 @@ internal static unsafe class MaterialSeamRuntime
             MaterialOperation.Upgrade => _world!.HeartTargetNet(character),
             _ => 0,
         };
+        // Upgrade: only the window of a heart the player or the player's clan owns.
+        if (op == MaterialOperation.Upgrade && stationNet != 0
+            && !MaterialClientPolicy.MayViewUpgrade(_world!.OwnershipOf(user, stationNet, character)))
+            stationNet = 0;
         if ((!MaterialClientPolicy.NeedsStation(op) || stationNet != 0)
             && _service!.TryView(character, op, TotalsScratch, out var ctx, out long revision))
         {

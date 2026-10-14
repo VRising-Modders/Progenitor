@@ -126,6 +126,66 @@ public class MaterialScopeTrackerTests
         t.After(Heart);
         Assert.Equal(2, closed.Count);
     }
+
+    private static readonly ulong RepairKey = MaterialSystemKey.Pack(41, 1, 7), ForgeKey = MaterialSystemKey.Pack(42, 1, 7);
+
+    [Fact]
+    public void A_scope_with_an_opener_is_current_only_while_that_system_executes()
+    {
+        var (t, _) = Make();
+        t.Before(MaterialOperation.Repair, Repair, 40, RepairKey);
+        Assert.Equal(RepairKey, t.Opener);
+        Assert.True(t.TryCurrent(40, RepairKey, out var op, out _));
+        Assert.Equal(MaterialOperation.Repair, op);
+        Assert.False(t.TryCurrent(40, ForgeKey, out _, out _)); // another system's call
+        Assert.False(t.TryCurrent(40, 0, out _, out _));        // the executing system is unreadable
+        Assert.False(t.TryCurrent(40, out _, out _));
+        t.After(Repair);
+        Assert.Equal(0UL, t.Opener);
+    }
+
+    [Fact]
+    public void A_stranded_repair_scope_never_pays_a_later_systems_cost_in_the_same_frame()
+    {
+        // RepairItemSystem throws (no After); the forge, research, stables or a coffin then pays in the
+        // same frame through the same seams. Their calls must not be routed as a Repair.
+        var (t, closed) = Make();
+        t.Before(MaterialOperation.Repair, Repair, 50, RepairKey);
+        Assert.False(t.TryCurrent(50, ForgeKey, out _, out _));
+        Assert.Empty(closed); // a seam call never closes (or publishes) anything
+        t.Tick(51);
+        Assert.Single(closed);
+    }
+
+    [Fact]
+    public void An_unreadable_opener_refuses_every_call()
+    {
+        var (t, _) = Make();
+        t.Before(MaterialOperation.Upgrade, Heart, 60, MaterialSystemKey.Unreadable);
+        Assert.False(t.TryCurrent(60, MaterialSystemKey.Pack(0, 0, 0), out _, out _));
+        Assert.False(t.TryCurrent(60, MaterialSystemKey.Pack(ushort.MaxValue, ushort.MaxValue, uint.MaxValue), out _, out _));
+        Assert.False(t.TryCurrent(60, 0, out _, out _));
+    }
+
+    [Fact]
+    public void Build_and_craft_scopes_without_an_opener_keep_the_frame_rule()
+    {
+        var (t, _) = Make();
+        t.Before(MaterialOperation.Craft, Craft, 70);
+        Assert.Equal(0UL, t.Opener);
+        Assert.True(t.TryCurrent(70, ForgeKey, out var op, out _));
+        Assert.Equal(MaterialOperation.Craft, op);
+    }
+
+    [Fact]
+    public void System_keys_are_never_zero_or_the_unreadable_marker()
+    {
+        Assert.NotEqual(0UL, MaterialSystemKey.Pack(0, 0, 0));
+        Assert.NotEqual(MaterialSystemKey.Unreadable, MaterialSystemKey.Pack(ushort.MaxValue, ushort.MaxValue, uint.MaxValue));
+        Assert.NotEqual(MaterialSystemKey.Pack(1, 2, 3), MaterialSystemKey.Pack(1, 2, 4));
+        Assert.NotEqual(MaterialSystemKey.Pack(1, 2, 3), MaterialSystemKey.Pack(2, 2, 3));
+        Assert.NotEqual(MaterialSystemKey.Pack(1, 2, 3), MaterialSystemKey.Pack(1, 3, 3));
+    }
 }
 
 /// <summary>

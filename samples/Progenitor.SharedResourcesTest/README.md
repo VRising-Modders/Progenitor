@@ -119,6 +119,10 @@ Run them with the same deployment (a Core with `wired=…,Repair,Upgrade`) and t
 Each operation is its own capture: `.srtest end`, then `cost` the new ingredients (disable first, then
 `enable` again) before each `begin`.
 
+Repair and Upgrade scopes honor a seam call only while their own system executes; a log line
+`materials: a seam call inside the … scope came from another system` during these cases means the
+executing-system check refused a call and must be reported.
+
 **Repair setup.** Damage one piece of gear whose repair costs an ingredient X of the plot (wear it in a
 fight, or pick a piece already below full durability), read its repair cost from the item tooltip, and
 empty X from the bag and the workstation. `.srtest cost X <the tooltip's amount> 0`. The tooltip shows the
@@ -131,12 +135,12 @@ costs show the pool once the Upgrade view arrives (up to about 1 s after opening
 | # | Case | Do | Expect |
 |---|---|---|---|
 | 15 | Repair baseline | `disable`, `baseline repair`, repair the piece from the character menu | The game charges nothing (it shows missing materials); zero debit; `enable` again |
-| 16 | Repair equipped | `begin repair`, repair the worn piece from the character menu | One `materials: check Repair … tx=<t>`, then one `materials: paid Repair … tx=<t>` per ingredient in the per-item order; one `Shared Resources Test: MaterialPaid tx=<t> Repair …` per line; `verify` MATCH; the piece is at full durability |
+| 16 | Repair equipped | `begin repair`, repair the worn piece from the character menu | One `materials: check Repair … tx=<t>`, then one `materials: paid Repair … tx=<t>` per ingredient in the per-item order; one `Shared Resources Test: MaterialPaid tx=<t> Repair …` per line; `verify` MATCH; the piece is at full durability. Also the unverified client side of this path: no `check Repair` line at all means the client refused the equipped repair on its own count (report it; it would need a client view or a hook) |
 | 17 | Repair at a station | Damage another piece, put it in the bench's inventory window or keep it in the bag, open the bench, `begin repair`, repair it there | Same lines as 16; the `check` context names the bench as `station=`; the bench's own stock is not debited by the pool (watch it with `.srtest watch bench …`); `verify` MATCH |
 | 18 | Repair shortfall | Leave one unit fewer of X across A and B, `begin repair`, repair | The game refuses at its check (missing materials); zero debit; `shortfalls` unchanged |
 | 19 | Upgrade short | Leave one unit too few of one cost across A and B, `begin upgrade`, press upgrade | The view shows the short amount; the client's own check refuses (the button does nothing) or the server's check does; zero debit; then restore the unit and `end` |
 | 20 | Upgrade | `begin upgrade`, open P's heart window, read the costs, press upgrade | Client bridge `materials`: `views.Upgrade.station` is P's heart network id while the window is open, and its costs show the pool; one `materials: check Upgrade … station=<heart id> tx=<t>`, one `paid Upgrade` line per cost line, `MaterialPaid` per line; `verify` MATCH; the heart's level rose by one |
-| 21 | Claim, raid and destroy stay vanilla | Only on a throwaway copy of a save with a second test character's decaying heart: try a claim with its cost staged only in A | The game's own rules: A is not debited (no `materials: check Upgrade` line); the heart window's claim cost shows the game's own count |
+| 21 | Claim, raid and destroy stay vanilla | Only on a throwaway copy of a save with a second test character's decaying heart: try a claim with its cost staged only in A | The game's own rules: A is not debited (no `materials: check Upgrade` line); the heart window's claim cost shows the game's own count; with that heart's window open the client's `views.Upgrade` stays `null` (Upgrade views only for hearts the player or the clan owns) |
 | 22 | Other screens | With an Upgrade view held, open a chest and a workstation | Their counts are the game's own (the chest) or the Craft view (the workstation) |
 
 **Clean up.** `.srtest clear`; remove this plugin from the server's reload folder and check its

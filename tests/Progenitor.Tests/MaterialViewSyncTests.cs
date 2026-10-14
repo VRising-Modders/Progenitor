@@ -332,6 +332,16 @@ public class MaterialViewSyncTests
     }
 
     [Fact]
+    public void Upgrade_views_are_computed_only_for_hearts_the_player_or_the_clan_owns()
+    {
+        Assert.True(MaterialClientPolicy.MayViewUpgrade(Progenitor.Castles.CastleRelation.Owner));
+        Assert.True(MaterialClientPolicy.MayViewUpgrade(Progenitor.Castles.CastleRelation.ClanMember));
+        // An enemy's or a decaying heart's window (claim, raid, destroy), even an allied one, never shows pool totals.
+        Assert.False(MaterialClientPolicy.MayViewUpgrade(Progenitor.Castles.CastleRelation.Allied));
+        Assert.False(MaterialClientPolicy.MayViewUpgrade(Progenitor.Castles.CastleRelation.None));
+    }
+
+    [Fact]
     public void Build_and_craft_take_precedence_over_a_held_upgrade_view()
     {
         var store = StoreWithUpgrade();

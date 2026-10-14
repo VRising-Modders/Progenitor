@@ -449,7 +449,9 @@ internal readonly struct MaterialClientCall
 ///
 /// <para>No Repair view is sent: the game shows a repair cost in an item tooltip, which no existing
 /// seam can tell apart from the other counts of the same screen (a repair is paid on the server whatever
-/// the client shows, and the client's repair input does not check the merged count).</para>
+/// the client shows; the inventory menu's repair input does not check the merged count, and whether the
+/// equipped-item repair input does is not verified). An Upgrade view is computed only for a heart the
+/// player or the player's clan owns (<see cref="MayViewUpgrade"/>).</para>
 /// </summary>
 internal static class MaterialClientPolicy
 {
@@ -463,6 +465,14 @@ internal static class MaterialClientPolicy
     /// </summary>
     internal static bool NeedsStation(MaterialOperation operation) =>
         operation is MaterialOperation.Craft or MaterialOperation.Upgrade;
+
+    /// <summary>
+    /// An Upgrade view is computed only for a heart the player owns or whose owner is in the player's
+    /// clan: an enemy's or a decaying heart's window (claim, raid, destroy) never shows pool totals,
+    /// whatever the provider would answer. The game's team check (allied) is not enough.
+    /// </summary>
+    internal static bool MayViewUpgrade(Progenitor.Castles.CastleRelation relation) =>
+        relation is Progenitor.Castles.CastleRelation.Owner or Progenitor.Castles.CastleRelation.ClanMember;
 
     /// <summary>
     /// What the client knows about one count, built from raw game reads: whether it is for the local
