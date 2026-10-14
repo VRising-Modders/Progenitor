@@ -846,7 +846,8 @@ public sealed class ServerSettingsPageTests : IDisposable
         ServerRulesRows.CanEditProbe = () => true;
         ServerRulesRows.Requester = (request, answer) =>
         {
-            if (request.Op == ServerRulesRequest.OpGet) return null;
+            // Reads, not writes: the Backups rows ask for their list on a draw unless a recent ask throttles it (timing-dependent).
+            if (request.Op == ServerRulesRequest.OpGet || request.Op == ServerRulesRequest.OpBackups) return null;
             sent.Add(request);
             answers.Add(answer);
             return null;
@@ -878,8 +879,10 @@ public sealed class ServerSettingsPageTests : IDisposable
         Assert.Equal("0", Row(Content(), ServerRules.ResetDaysInterval).GetProperty("field").GetString());
         Assert.True(_runtime.FireText(wipeLabel, "7"));
         View.ApplyForBridge(wipeLabel);
-        UiDialog.ChooseForBridge("yes");
-        Assert.Single(sent); // not typed yet
+        // Not typed yet: the grayed main button is refused (GRAYCLICK1) and nothing is sent.
+        var grayed = Assert.Throws<ArgumentException>(() => UiDialog.ChooseForBridge("yes"));
+        Assert.Contains("disabled (not interactable)", grayed.Message, StringComparison.Ordinal);
+        Assert.Single(sent);
         Assert.False((bool)UiDialog.Describe()["mainEnabled"]!);
         ModsMenu.TypeDialog("wipe");
         Assert.True((bool)UiDialog.Describe()["mainEnabled"]!);
