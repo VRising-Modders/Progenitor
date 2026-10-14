@@ -123,6 +123,11 @@ internal sealed class UiTipRequest : IUiTip
 
     internal IUiTipCardView? View { get; set; }
 
+    /// <summary>The anchor's controls (screen rects) for the anchor rect <see cref="ControlsFor"/>.</summary>
+    internal IReadOnlyList<ScreenRect> Controls { get; set; } = Array.Empty<ScreenRect>();
+
+    internal ScreenRect? ControlsFor { get; set; }
+
     /// <summary>The stored seen key.</summary>
     internal string Key => UiHelpStore.Key(PluginId, Id);
 
@@ -142,7 +147,7 @@ internal interface IUiTipCardView : IDisposable
     bool HiddenByOther { get; }
 
     /// <summary>Place the card beside <paramref name="anchor"/> (screen pixels; unknown for the screen corner).</summary>
-    void Place(ScreenRect anchor);
+    void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls);
 
     /// <summary>The card's panel (readback), or null.</summary>
     IUiPanel? Panel { get; }
@@ -205,6 +210,9 @@ internal static class UiTips
     private static (object Owner, IUiTipListView View)? _list;
     private static IDisposable? _tick;
     private static bool _pumping;
+
+    /// <summary>The Escape lease held while a card is on screen (<see cref="Ui.PushEscape"/>).</summary>
+    private static IDisposable? _escape;
     private static bool _waitLogged;
     private static bool _teardownRegistered;
     private static long _serial;
@@ -448,7 +456,11 @@ internal static class UiTips
         if (_pumping) return;
         _pumping = true;
         try { PumpOnce(); }
-        finally { _pumping = false; }
+        finally
+        {
+            _pumping = false;
+            SyncEscape();
+        }
     }
 
     private static void PumpOnce()
@@ -493,7 +505,7 @@ internal static class UiTips
             }
             else
             {
-                try { view!.Place(AnchorRect(s.Anchor)); }
+                try { view!.Place(AnchorRect(s.Anchor), ControlsOf(s)); }
                 catch { /* the framework's placement stays */ }
                 return;
             }
@@ -547,13 +559,73 @@ internal static class UiTips
             tip.View = view;
             tip.State = UiTipState.Showing;
             _showing = tip;
-            try { view.Place(AnchorRect(tip.Anchor)); }
+            try { view.Place(AnchorRect(tip.Anchor), ControlsOf(tip)); }
             catch { /* */ }
             Plugin.Logger?.LogInfo("Ui: tip '" + tip.Id + "' of " + tip.PluginId + " shown.");
             break;
         }
 
         if (_showing == null && Queue.Count == 0) StopTick();
+    }
+
+    // ---- Escape -------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The card is the topmost layer while it shows: it takes the framework's consumed Escape (B on a controller)
+    /// through <see cref="Ui.PushEscape"/>, which runs after an open dialog is answered and before the sweep that hides
+    /// every shown panel. One press closes the card (as Got it) and nothing else; the Mods workspace stays open, and the
+    /// next press closes it as usual.
+    /// </summary>
+    private static void SyncEscape()
+    {
+        if (_showing != null)
+        {
+            if (_escape == null)
+            {
+                try { _escape = Ui.PushEscape(EscapeCard); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: the tip card's Escape could not be taken: " + e.Message); }
+            }
+        }
+        else
+        {
+            ReleaseEscape();
+        }
+    }
+
+    private static void ReleaseEscape()
+    {
+        var lease = _escape;
+        _escape = null;
+        try { lease?.Dispose(); }
+        catch { /* */ }
+    }
+
+    /// <summary>Escape with the card on screen: dismiss it (Got it) and take the press.</summary>
+    internal static bool EscapeCard()
+    {
+        var s = _showing;
+        if (s == null) return false;
+        bool shown;
+        try { shown = s.View != null && s.View.Shown; }
+        catch { shown = false; }
+        if (!shown) return false;
+        Dismiss(s, "escape");
+        Pump();
+        return true;
+    }
+
+    /// <summary>
+    /// The anchor panel's controls the card must not cover (<see cref="UiTipObstacles.Of"/>), read again only when the
+    /// anchor's rect changes, so the card does not move while the player uses the panel.
+    /// </summary>
+    private static IReadOnlyList<ScreenRect> ControlsOf(UiTipRequest tip)
+    {
+        var rect = AnchorRect(tip.Anchor);
+        if (tip.ControlsFor is { } at && at.Equals(rect)) return tip.Controls;
+        tip.ControlsFor = rect;
+        try { tip.Controls = UiTipObstacles.Of(tip.Anchor, rect); }
+        catch { tip.Controls = Array.Empty<ScreenRect>(); }
+        return tip.Controls;
     }
 
     private static bool AnchorShown(IUiPanel anchor)
@@ -633,6 +705,7 @@ internal static class UiTips
     internal static void Teardown()
     {
         StopTick();
+        ReleaseEscape();
         foreach (var q in Queue)
         {
             q.ForgetCallbacks();

@@ -202,11 +202,13 @@ public sealed class UiWidgetsTests : IDisposable
         _runtime.Pointer = PointerSample.At(10f, 500f);
         _runtime.Press(Row("targets:row0"), UiWidgetLayout.CellGrip, UiPointerEventKind.Down);
         Assert.Single(_runtime.Ticks);
-        Assert.True(Row("targets:row0").Selected); // the held row is lit
+        Assert.True(((UiOrderedListHandle)list).HeldAt(0)); // the held row is lit (the one held-row style, UiTileState.Held)
 
         _runtime.Pointer = PointerSample.At(10f, 0f); // below every row
         _runtime.Tick();
-        Assert.True(Row("targets:row2").Selected); // the preview put a in the last slot
+        Assert.True(((UiOrderedListHandle)list).HeldAt(2)); // the preview put a in the last slot
+        Assert.False(((UiOrderedListHandle)list).HeldAt(0));
+        Assert.Equal(CellTone.Gold, Row("targets:row2").Cells().Single(c => c.Key == UiWidgetLayout.CellTitle).Tone);
         Assert.Equal("Item a", Row("targets:row2").Cells().Single(c => c.Key == UiWidgetLayout.CellTitle).Text);
         Assert.Empty(moves);
 

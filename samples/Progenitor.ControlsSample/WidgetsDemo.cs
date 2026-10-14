@@ -257,7 +257,7 @@ internal sealed partial class WidgetsDemo
             _pickStatus?.SetText("Waiting for an interact on a container or station.", LabelTone.Pending);
             _hud?.Pick(result =>
             {
-                _pickStatus?.SetText(result, LabelTone.Ok);
+                _pickStatus?.SetText(result, result == ControlsHudWords.PickCancelled ? LabelTone.Muted : LabelTone.Ok);
                 Report("pick = " + result);
             });
         });
@@ -278,4 +278,10 @@ internal interface IWidgetsHud
 
     /// <summary>Ping the last picked entity; returns what happened.</summary>
     string LocatePicked();
+}
+
+/// <summary>Words the HUD adapter and the page share, so the page can tell a cancelled pick from a picked one.</summary>
+internal static class ControlsHudWords
+{
+    internal const string PickCancelled = "Pick cancelled.";
 }

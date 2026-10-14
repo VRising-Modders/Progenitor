@@ -32,6 +32,12 @@ internal enum UiMarkShape
 
     /// <summary>A drag grip: three short horizontal bars.</summary>
     Grip = 8,
+
+    /// <summary>An empty check box (a selectable row not selected): a square outline.</summary>
+    CheckEmpty = 9,
+
+    /// <summary>A checked box (a selected row): the square outline with the check inside.</summary>
+    CheckBox = 10,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -86,6 +92,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     /// <summary>An icon button's mark: <see cref="UiMarkShape.Up"/>, <see cref="UiMarkShape.Down"/>, <see cref="UiMarkShape.Remove"/>, <see cref="UiMarkShape.Check"/> or <see cref="UiMarkShape.Grip"/>.</summary>
     internal static UiDrawnMark Icon(UiMarkShape shape) =>
         shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
+            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
             ? new UiDrawnMark(shape, 0, 0)
             : None;
 
@@ -94,9 +101,12 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static readonly UiDrawnMark RemoveMark = Icon(UiMarkShape.Remove);
     internal static readonly UiDrawnMark CheckMark = Icon(UiMarkShape.Check);
     internal static readonly UiDrawnMark GripMark = Icon(UiMarkShape.Grip);
+    internal static readonly UiDrawnMark CheckEmptyMark = Icon(UiMarkShape.CheckEmpty);
+    internal static readonly UiDrawnMark CheckBoxMark = Icon(UiMarkShape.CheckBox);
 
     /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
-    internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip;
+    internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
+        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox;
 
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
@@ -112,6 +122,8 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.Remove => "remove",
         UiMarkShape.Check => "check",
         UiMarkShape.Grip => "grip",
+        UiMarkShape.CheckEmpty => "check-empty",
+        UiMarkShape.CheckBox => "check-box",
         _ => "",
     };
 
@@ -145,6 +157,8 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "remove":
             case "check":
             case "grip":
+            case "check-empty":
+            case "check-box":
                 if (colon >= 0) return false;
                 mark = Icon(head switch
                 {
@@ -152,6 +166,8 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
                     "down" => UiMarkShape.Down,
                     "remove" => UiMarkShape.Remove,
                     "check" => UiMarkShape.Check,
+                    "check-empty" => UiMarkShape.CheckEmpty,
+                    "check-box" => UiMarkShape.CheckBox,
                     _ => UiMarkShape.Grip,
                 });
                 return true;
@@ -179,7 +195,7 @@ internal static class UiDrawnMarkArt
     internal const int ArrowWidth = 40;
 
     /// <summary>The order digit's width in texture pixels, and the gap before it.</summary>
-    internal const int DigitWidth = 24;
+    internal const int DigitWidth = 28;
 
     internal const int DigitGap = 4;
 
@@ -192,7 +208,7 @@ internal static class UiDrawnMarkArt
         UiMarkShape.SortUp or UiMarkShape.SortDown => (mark.Digit > 0 ? ArrowWidth + DigitGap + DigitWidth : ArrowWidth, TextureHeight),
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
         UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
-        UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip => (TextureHeight, TextureHeight),
+        UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -277,6 +293,10 @@ internal static class UiDrawnMarkArt
                 return Clamp01(Strokes2(px, py, 0.10f, new[] { 0.2f, 0.2f, 0.8f, 0.8f }, new[] { 0.2f, 0.8f, 0.8f, 0.2f }));
             case UiMarkShape.Check:
                 return Clamp01(Strokes2(px, py, 0.10f, new[] { 0.14f, 0.50f, 0.40f, 0.24f, 0.88f, 0.78f }));
+            case UiMarkShape.CheckEmpty:
+                return Clamp01(Box(px, py));
+            case UiMarkShape.CheckBox:
+                return Clamp01(Math.Max(Box(px, py), Strokes2(px, py, 0.075f, new[] { 0.30f, 0.52f, 0.45f, 0.36f, 0.72f, 0.68f })));
             case UiMarkShape.Grip:
                 return Clamp01(Strokes2(px, py, 0.065f, new[] { 0.18f, 0.28f, 0.82f, 0.28f }, new[] { 0.18f, 0.5f, 0.82f, 0.5f }, new[] { 0.18f, 0.72f, 0.82f, 0.72f }));
             default:
@@ -301,9 +321,26 @@ internal static class UiDrawnMarkArt
         return side * baseEdge * apexEdge;
     }
 
+    /// <summary>A square check box outline, 0.16 to 0.84 of the texture, its stroke 0.06 of the side.</summary>
+    private static float Box(float px, float py)
+    {
+        float n = TextureHeight;
+        float gx = px / n, gy = py / n;
+        const float lo = 0.16f, hi = 0.84f, half = 0.03f;
+        // Distance to the square's outline (inside or outside).
+        float dx = Math.Max(lo - gx, gx - hi), dy = Math.Max(lo - gy, gy - hi);
+        float outside = (float)Math.Sqrt(Math.Max(dx, 0f) * Math.Max(dx, 0f) + Math.Max(dy, 0f) * Math.Max(dy, 0f));
+        float inside = Math.Min(Math.Max(dx, dy), 0f);
+        float d = Math.Abs(outside + inside);
+        return Smooth((half - d) * n);
+    }
+
+    /// <summary>The share of the texture's height the order digit takes (the caption's cap height times about 0.7).</summary>
+    internal const float DigitHeightShare = 0.78f;
+
     /// <summary>
-    /// The digit's strokes on a 2 x 4 grid (x right, y up), as polylines; drawn with round ends, the box's lower 60%
-    /// (a small digit beside the arrow, sitting on the arrow's base line).
+    /// The digit's strokes on a 2 x 4 grid (x right, y up), as polylines; drawn with round ends, <see cref="DigitHeightShare"/>
+    /// of the texture tall, sitting on the arrow's base line.
     /// </summary>
     private static readonly Dictionary<int, float[][]> Strokes = new()
     {
@@ -326,7 +363,7 @@ internal static class UiDrawnMarkArt
     {
         if (!Strokes.TryGetValue(digit, out var lines)) return 0f;
         float h = TextureHeight;
-        float boxH = h * 0.60f, bottom = (h - h * 0.70f) / 2f; // on the arrow's base line
+        float boxH = h * DigitHeightShare, bottom = (h - h * 0.70f) / 2f; // on the arrow's base line
         float unit = boxH / 4.6f;
         float pad = unit * 0.3f;
         float gx = (px - pad) / unit, gy = (py - bottom - pad) / unit;

@@ -113,8 +113,15 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
             int next = Clamp(value);
             if (IsDisposed || next == _selected) return;
             _selected = next;
-            Render();
-            Raise(_changed, next, "tab change");
+            // The handlers run inside the switch's layout batch too: a handler that rewrites a label or shows a control
+            // (the sample's status line) would otherwise lay the page out a second time right after the switch's own pass.
+            UiLayoutBatch.Begin();
+            try
+            {
+                Render();
+                Raise(_changed, next, "tab change");
+            }
+            finally { UiLayoutBatch.End(); }
         }
     }
 

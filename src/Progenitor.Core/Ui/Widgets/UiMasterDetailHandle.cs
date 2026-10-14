@@ -148,6 +148,12 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
     }
 
     /// <summary>Tests and readback: the drawn mark on row <paramref name="r"/>'s icon button and whether it is drawn enabled.</summary>
+    /// <summary>Tests: the color row <paramref name="r"/>'s icon mark is drawn in now (a held row's grip is lit).</summary>
+    internal PaletteColor MarkColorAt(int r, string cellKey) => _marks.ColorOf(_rows[r], cellKey);
+
+    /// <summary>Tests and readback: whether row <paramref name="r"/>'s detail half is drawn as the held member row.</summary>
+    internal bool HeldAt(int r) => _rows[r] is UiCellRowHandle h && h.TileStateOf(UiTileLook.HeldTile) == UiTileState.Held;
+
     internal (UiDrawnMark Mark, bool Enabled) MarkAt(int r, string cellKey) =>
         (_marks.MarkOf(_rows[r], cellKey), _marks.EnabledOf(_rows[r], cellKey));
 
@@ -452,13 +458,19 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         _hoverSide = side;
         DrawMasterState(r);
         HideTooltip();
-        LeaveTerms(r);
-        if (_model.Page.Members.Dragging) return;
-
-        // A caption that explains a term shows the glossary line (the binding draws the box, anchored on the caption).
-        var term = side == 1 ? _masterTerms[r] : side == 2 ? _detailTerms[r] : null;
-        if (term != null && term.Explains)
+        var term = _model.Page.Members.Dragging ? null : side == 1 ? _masterTerms[r] : side == 2 ? _detailTerms[r] : null;
+        if (term == null || !term.Explains) term = null;
+        // Moving between the halves or a scroll under the pointer is not a new visit of the same word: the binding the
+        // pointer is still on keeps its visit (UiTerms counts visits toward hiding the marker).
+        if (!ReferenceEquals(term, _enteredTerm))
         {
+            _enteredTerm?.Hover(false);
+            _enteredTerm = null;
+        }
+
+        if (term != null)
+        {
+            _enteredTerm = term;
             term.Hover(true);
             return;
         }
@@ -486,11 +498,17 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         if (r >= 0 && r < _rows.Count) DrawMasterState(r);
     }
 
+    /// <summary>The term binding the pointer is visiting now (one visit counts once toward hiding its marker).</summary>
+    private UiTermBinding? _enteredTerm;
+
     private void LeaveTerms(int r)
     {
         if (r < 0 || r >= _rows.Count) return;
-        _masterTerms[r]?.Hover(false);
-        _detailTerms[r]?.Hover(false);
+        var entered = _enteredTerm;
+        if (entered == null) return;
+        if (!ReferenceEquals(entered, _masterTerms[r]) && !ReferenceEquals(entered, _detailTerms[r])) return;
+        _enteredTerm = null;
+        entered.Hover(false);
     }
 
     /// <summary>The pointer is on row <paramref name="r"/>.</summary>
@@ -776,7 +794,12 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         for (int r = 0; r < _rows.Count; r++)
         {
             var row = _rows[r];
-            Set(row, UiMasterDetailLayout.CellMIcon, visible: icons);
+            // The icon column: the well on a row whose entry has an icon, its pad on every other row (no empty well).
+            bool rowIcon = icons && r >= firstMaster && r - firstMaster < masterWindow.Count
+                           && masterWindow[r - firstMaster] is { Kind: UiMasterLineKind.Entry } iconLine
+                           && (iconLine.Entry!.Icon != null || iconLine.Entry.ItemPrefab != 0);
+            Set(row, UiMasterDetailLayout.CellMIcon, visible: r < firstMaster ? icons : rowIcon);
+            Set(row, UiMasterDetailLayout.CellMIconPad, visible: icons && !rowIcon);
             Set(row, UiMasterDetailLayout.CellMCount, visible: counts);
             if (r < firstMaster)
             {
@@ -847,7 +870,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         Set(row, UiMasterDetailLayout.CellMTitle, title, tone);
         Set(row, UiMasterDetailLayout.CellMNote, note, CellTone.Muted);
         Set(row, UiMasterDetailLayout.CellMCount, count, CellTone.Client);
-        if (icons) row.SetImage(UiMasterDetailLayout.CellMIcon, icon);
+        if (icons && icon != null) row.SetImage(UiMasterDetailLayout.CellMIcon, icon);
     }
 
     /// <summary>
@@ -936,7 +959,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
                         }
                     }
 
-                    show[UiMasterDetailLayout.CellText] = (item.Title, held ? CellTone.Gold : CellTone.Normal);
+                    show[UiMasterDetailLayout.CellText] = (item.Title, held ? UiTileLook.HeldCaption : CellTone.Normal);
                     if (item.Note.Length > 0) show[UiMasterDetailLayout.CellDNote] = (item.Note, CellTone.Muted);
                     if (item.Badge.Length > 0) show[UiMasterDetailLayout.CellDCount] = (item.Badge, CellTone.Client);
                     if (line.Reorder)
@@ -1014,8 +1037,14 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         }
 
         // The icon buttons' faces follow their cells: a mark while shown, faint when the button does nothing on this row.
+        bool heldRow = slot is { Kind: UiDetailSlotKind.Member } hs && members.Dragging && hs.MemberIndex == members.DragTarget;
         foreach (var (key, mark) in IconCells)
+        {
             _marks.Set(row, key, show.TryGetValue(key, out var face) ? mark : UiDrawnMark.None, show.TryGetValue(key, out face) && face.Tone != CellTone.Faint);
+            _marks.SetLit(row, key, heldRow && key == UiMasterDetailLayout.CellGrip);
+        }
+
+        Tile(row, UiTileLook.HeldTile, heldRow ? UiTileState.Held : UiTileState.Hidden);
 
         if (iconCell) row.SetImage(UiMasterDetailLayout.CellDIcon, icon);
         if (row.Expanded != open) row.SetExpanded(open);

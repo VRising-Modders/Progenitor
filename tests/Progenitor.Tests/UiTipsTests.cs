@@ -256,6 +256,31 @@ public sealed class UiTipsTests : IDisposable
     }
 
     [Fact]
+    public void One_Escape_closes_the_card_and_leaves_the_panels_behind_it_open()
+    {
+        var workspace = ShownPanel("Mods"); // the panel the card explains, open behind it
+        var tip = Tip("esc-top", anchor: workspace);
+        Assert.Equal(UiTipState.Showing, tip.State);
+        UiApi.PressEscapeForBridge(); // one physical Escape: 27, then the paired Back 17
+        Assert.Equal(UiTipState.Done, tip.State);
+        Assert.Equal("escape", ((UiTipRequest)tip).Reason);
+        Assert.Equal(UiHandleState.Shown, workspace.State); // the workspace stays open
+        // The next Escape is the usual sweep: no card holds it any more.
+        UiApi.PressEscapeForBridge();
+        Assert.NotEqual(UiHandleState.Shown, workspace.State);
+    }
+
+    [Fact]
+    public void The_card_releases_the_Escape_it_held_when_it_closes()
+    {
+        var tip = Tip("lease");
+        _runtime.ClickCell(UiTipCopy.ButtonsRow, UiTipCopy.GotItKey);
+        Assert.False(UiTips.EscapeCard());
+        Assert.False(UiApi.TryEscapeHandlers()); // nothing of the card left in the Escape chain
+        Assert.Equal(UiTipState.Done, tip.State);
+    }
+
+    [Fact]
     public void Disposing_a_request_drops_it_without_marking_it_seen()
     {
         var shown = Tip("a");
@@ -440,7 +465,8 @@ public sealed class UiTipsTests : IDisposable
         string screen, float w, float h, float minX, float minY, float maxX, float maxY, float listMinX)
     {
         const float cardW = 640f, cardH = 236f;
-        var p = UiTipLayout.Place(true, minX, minY, maxX, maxY, cardW, cardH, w, h);
+        var controls = HelpTabControls(minX, maxY);
+        var p = UiTipLayout.Place(true, minX, minY, maxX, maxY, cardW, cardH, w, h, controls);
         if (w > 1920f)
         {
             Assert.Equal(UiTipLayout.Side.Right, p.Side); // an ultrawide screen has room beside the workspace
@@ -450,13 +476,57 @@ public sealed class UiTipsTests : IDisposable
         {
             Assert.Equal(UiTipLayout.Side.Inside, p.Side);
             Assert.Equal(maxX - UiTipLayout.InsideInset - cardW, p.X); // inside the page's right edge
-            Assert.Equal(minY + UiTipLayout.InsideBottom, p.Y); // above its footer band
+            Assert.True(p.Y + cardH <= maxY - UiTipLayout.InsideTop + 0.01f, screen + ": over the page's title band");
+            Assert.True(p.Y >= minY + UiTipLayout.InsideBottom - 0.01f, screen + ": over the footer band");
             Assert.True(p.X >= minX + UiTipLayout.InsideInset, screen + ": the card left the page");
             Assert.True(p.X > listMinX + 360f, screen + ": the card is over the Mods list");
+            // It covers none of the page's controls: the buttons, the tabs, the list rows, the toggle, Reset tips.
+            Assert.Equal(0f, UiTipLayout.Covered(p.X, p.Y, cardW, cardH, controls));
         }
 
         Assert.True(p.X >= UiTipLayout.Margin && p.X + cardW <= w - UiTipLayout.Margin, screen + ": off the canvas");
         Assert.True(p.Y >= UiTipLayout.Margin && p.Y + cardH <= h - UiTipLayout.Margin, screen + ": off the canvas");
+    }
+
+    /// <summary>
+    /// The interactive controls of the Help tab in the live capture (1920x1080 design units, measured from the top of
+    /// the page and its left edge, turned into bottom-left canvas rects): the tab row, the Notify and Pick buttons, the
+    /// Category button, the inner tabs, the two list rows, the markers toggle and the four buttons at the bottom.
+    /// </summary>
+    private static List<ScreenRect> HelpTabControls(float pageMinX, float pageMaxY)
+    {
+        // (left, top, right, bottom) from the capture, in screen units with y down; the page's top is at 128.
+        var rects = new (float L, float T, float R, float B)[]
+        {
+            (525, 211, 1017, 241),   // tab row chips
+            (525, 306, 1187, 338),   // Notify info .. Notify error
+            (525, 354, 950, 386),    // Pick in world, Locate
+            (525, 610, 684, 642),    // Category: Ore
+            (525, 754, 758, 786),    // Belts / Categories tabs
+            (525, 798, 1771, 838),   // list row Ore in (the whole row takes a click)
+            (525, 846, 1771, 886),   // list row Iron bin
+            (1600, 905, 1640, 945),  // Show help markers toggle
+            (525, 968, 1180, 1000),  // Show markers again .. Reset tips
+        };
+        float dx = pageMinX - 515f;
+        var list = new List<ScreenRect>();
+        foreach (var r in rects)
+            list.Add(ScreenRect.FromCorners(r.L + dx, 1080f - r.B, r.R + dx, 1080f - r.T));
+        return list;
+    }
+
+    [Fact]
+    public void Inside_a_page_with_no_free_spot_the_card_takes_the_spot_that_covers_the_least()
+    {
+        // A page full of rows that take a click: no spot is free; the card covers as little as it can.
+        var rows = new List<ScreenRect>();
+        for (float y = 40; y < 900; y += 50) rows.Add(ScreenRect.FromCorners(530, y, 1780, y + 40));
+        rows.Add(ScreenRect.FromCorners(530, 500, 1780, 900)); // a big block lower down
+        var p = UiTipLayout.Place(true, 515, 35, 1795, 952, 640, 236, 1920, 1080, rows);
+        Assert.Equal(UiTipLayout.Side.Inside, p.Side);
+        float covered = UiTipLayout.Covered(p.X, p.Y, 640, 236, rows);
+        for (float y = 35 + UiTipLayout.InsideBottom; y <= 952 - UiTipLayout.InsideTop - 236; y += UiTipLayout.InsideStep)
+            Assert.True(covered <= UiTipLayout.Covered(p.X, y, 640, 236, rows) + 0.5f);
     }
 
     [Fact]

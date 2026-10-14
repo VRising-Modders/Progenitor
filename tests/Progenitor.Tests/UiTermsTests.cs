@@ -593,6 +593,34 @@ public sealed class UiTermsTests : IDisposable
     }
 
     [Fact]
+    public void A_marker_on_a_selected_chips_gold_plate_turns_dark_and_follows_the_selection()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        UiTerms.Define(PluginA, "Category", "y");
+        var panel = NewPanel();
+        var tabs = panel.Tabs("pt", new[] { "Belts", "Categories" });
+        tabs.SetTerm(0, "Belt");
+        tabs.SetTerm(1, "Category");
+        var belts = _runtime.Markers.Single(m => m.CellKey == "tab0");
+        var cats = _runtime.Markers.Single(m => m.CellKey == "tab1");
+        Assert.True(belts.OnPlate!()); // the selected tab sits on the gold plate
+        Assert.False(cats.OnPlate!());
+        tabs.Selected = 1;
+        Assert.False(belts.OnPlate!());
+        Assert.True(cats.OnPlate!());
+        Assert.Equal(UiTermMarkerArt.Plate, UiTermMarkerArt.ColorOn(true));
+        Assert.Equal(UiTermMarkerArt.Normal, UiTermMarkerArt.ColorOn(false));
+        // Dark on the plate: much darker than the plate's fill, and darker than the marker's own gold.
+        Assert.True(Luma(UiTermMarkerArt.Plate) < Luma(MenuPalette.ChipOnFill) * 0.6f);
+        Assert.True(Luma(UiTermMarkerArt.Plate) < Luma(UiTermMarkerArt.Normal) * 0.4f);
+        // A plain control has no plate.
+        panel.Label("Belts").Term("Belt");
+        Assert.Null(_runtime.Markers.Last().OnPlate);
+    }
+
+    private static float Luma(PaletteColor c) => 0.2126f * c.R + 0.7152f * c.G + 0.0722f * c.B;
+
+    [Fact]
     public void Describe_reads_back_the_glossary_and_marker_state()
     {
         UiTerms.Define(PluginA, "Belt", "x");
@@ -695,7 +723,7 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
     public readonly List<CellRowTests.FakeWidget> Buttons = new();
     public readonly List<FakeMarker> Markers = new();
     public readonly List<Action> Ticks = new();
-    public readonly List<(IRuntimePanel Card, ScreenRect Anchor)> Placed = new();
+    public readonly List<(IRuntimePanel Card, ScreenRect Anchor, IReadOnlyList<ScreenRect> Controls)> Placed = new();
     private readonly Dictionary<IRuntimeWidget, Action<bool>> _hovers = new();
     public (string Title, string Body)? Tooltip;
 
@@ -792,9 +820,9 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
         return m;
     }
 
-    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor)
+    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls)
     {
-        Placed.Add((card, anchor));
+        Placed.Add((card, anchor, controls));
         return true;
     }
 
@@ -813,6 +841,7 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
 
         public IRuntimeWidget Widget { get; }
         public string? CellKey { get; }
+        public Func<bool>? OnPlate { get; set; }
         public bool ReserveRoom { get; set; }
         public bool Shown { get; set; } = true;
         public bool Disposed { get; private set; }

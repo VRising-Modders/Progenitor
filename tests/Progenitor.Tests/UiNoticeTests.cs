@@ -138,6 +138,38 @@ public sealed class UiNoticeTests
     }
 
     [Fact]
+    public void A_notice_posted_while_the_games_full_screen_menu_hides_the_HUD_shows_when_the_menu_closes()
+    {
+        var expired = new List<UiNoticeHandle>();
+        _queue.Expired += expired.Add;
+        var n = _queue.Enqueue(_a, "while the menu is open", "", UiNoticeKind.Info, 0, 0);
+        // The menu stays open three times the ordinary wait: the notice waits and does not expire.
+        for (double t = 0; t <= UiNoticeRules.MaxWaitSeconds * 3; t += 1.0)
+            Assert.Null(_queue.Next(t, true, Present, 0, menuHold: true));
+        Assert.Equal(UiNoticeState.Queued, n.State);
+        Assert.Empty(expired);
+        // The menu closes: it shows.
+        Assert.Same(n, _queue.Next(UiNoticeRules.MaxWaitSeconds * 3 + 1, false, Present));
+        Assert.Equal(new[] { "while the menu is open" }, _presented);
+    }
+
+    [Fact]
+    public void A_notice_held_by_the_menu_still_expires_after_the_hold_limit_and_a_hidden_HUD_after_the_wait()
+    {
+        var expired = new List<UiNoticeHandle>();
+        _queue.Expired += expired.Add;
+        var held = _queue.Enqueue(_a, "held", "", UiNoticeKind.Info, 0, 0);
+        for (double t = 0; t <= UiNoticeRules.MaxHeldSeconds + 1; t += 5.0)
+            _queue.Next(t, true, Present, 0, menuHold: true);
+        Assert.Equal(UiNoticeState.Dropped, held.State);
+        // The player's own hidden HUD (no menu): the ordinary 30 s wait.
+        var hidden = _queue.Enqueue(_b, "hidden", "", UiNoticeKind.Info, 0, 1000);
+        _queue.Next(1000 + UiNoticeRules.MaxWaitSeconds + 0.5, true, Present, 0, menuHold: false);
+        Assert.Equal(UiNoticeState.Dropped, hidden.State);
+        Assert.Equal(2, expired.Count);
+    }
+
+    [Fact]
     public void A_notice_that_waits_too_long_expires_unshown_and_is_reported()
     {
         var expired = new List<UiNoticeHandle>();

@@ -30,13 +30,21 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
 
     private sealed class TermMarkerView : IUiTermMarkerView
     {
-        internal TermMarkerView(TextMeshProUGUI text, GameObject marker, RectTransform rt, bool reserveRoom)
+        internal TermMarkerView(TextMeshProUGUI text, GameObject marker, RectTransform rt, bool reserveRoom, Image image)
         {
             Text = text;
             Marker = marker;
             Rt = rt;
             ReserveRoom = reserveRoom;
+            Image = image;
         }
+
+        internal readonly Image Image;
+
+        public Func<bool>? OnPlate { get; set; }
+
+        /// <summary>The plate state last painted (null before the first paint).</summary>
+        internal bool? PaintedOnPlate;
 
         internal readonly TextMeshProUGUI Text;
         internal readonly GameObject Marker;
@@ -111,14 +119,10 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
             try { image.type = Image.Type.Simple; } catch { /* */ }
             try { image.preserveAspect = true; } catch { /* */ }
             try { image.raycastTarget = false; } catch { /* */ }
-            try
-            {
-                var gold = ToColor(MenuPalette.TextColor(CellTone.Gold));
-                image.color = new Color(gold.r * 0.85f, gold.g * 0.85f, gold.b * 0.85f, 1f);
-            }
+            try { image.color = ToColor(UiTermMarkerArt.Normal); }
             catch { /* */ }
 
-            var view = new TermMarkerView(text, marker, rt, reserveRoom);
+            var view = new TermMarkerView(text, marker, rt, reserveRoom, image);
             try { view.BaseMargin = text.margin; } catch { view.BaseMargin = Vector4.zero; }
             PlaceTermMarker(view);
             TermMarkers.Add(view);
@@ -206,6 +210,16 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
                 view.Written = null;
             }
 
+            // P7b: dark on a selected chip's gold plate, the muted gold elsewhere; follows the selection.
+            bool plate = false;
+            try { plate = view.OnPlate?.Invoke() ?? false; }
+            catch { plate = false; }
+            if (view.PaintedOnPlate != plate)
+            {
+                view.PaintedOnPlate = plate;
+                try { view.Image.color = ToColor(UiTermMarkerArt.ColorOn(plate)); } catch { /* */ }
+            }
+
             bool visible = false;
             if (view.Shown)
             {
@@ -281,7 +295,7 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
         catch { /* the button's light caption stays */ }
     }
 
-    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor)
+    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls)
     {
         if (card is not UnityPanel host || !host.Alive) return false;
         try
@@ -300,7 +314,13 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
             Vector2 a = default, b = default;
             if (anchor.IsKnown && ToCanvas(parent, anchor.MinX, anchor.MinY, out a) && ToCanvas(parent, anchor.MaxX, anchor.MaxY, out b))
                 hasAnchor = true;
-            var place = UiTipLayout.Place(hasAnchor, a.x, a.y, b.x, b.y, size.x, size.y, pr.width, pr.height);
+            // The anchor panel's controls, in the same canvas units, so the card covers none of them (UiTipLayout).
+            var canvasControls = new List<ScreenRect>(controls?.Count ?? 0);
+            if (controls != null)
+                foreach (var c in controls)
+                    if (c.IsKnown && ToCanvas(parent, c.MinX, c.MinY, out var cmin) && ToCanvas(parent, c.MaxX, c.MaxY, out var cmax))
+                        canvasControls.Add(ScreenRect.FromCorners(cmin.x, cmin.y, cmax.x, cmax.y));
+            var place = UiTipLayout.Place(hasAnchor, a.x, a.y, b.x, b.y, size.x, size.y, pr.width, pr.height, canvasControls);
 
             // The card's bottom-left in the parent's bottom-left units -> its pivot -> its anchored position.
             float pivotX = pr.xMin + place.X + size.x * rt.pivot.x;

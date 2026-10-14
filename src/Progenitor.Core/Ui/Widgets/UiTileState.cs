@@ -22,6 +22,12 @@ internal enum UiTileState
 
     /// <summary>A 1-unit vertical rule in the row separator's color down the tile's center, joined to the row above.</summary>
     Rule = 4,
+
+    /// <summary>
+    /// The row a drag holds (the ordered list's and the master-detail member list's one held-row style): the Mods list
+    /// entry band at its hover strength with the gold stripe; the widget also draws the caption gold and lights the grip.
+    /// </summary>
+    Held = 5,
 }
 
 /// <summary>P7b: the colors and sizes of <see cref="UiTileState"/> (existing palette entries; no new color).</summary>
@@ -37,11 +43,18 @@ internal static class UiTileLook
         UiTileState.Selected => ModsListLayout.RowFill(true),
         UiTileState.SelectedHover => ModsListLayout.RowHover(true),
         UiTileState.Rule => MenuPalette.RowSeparator,
+        UiTileState.Held => ModsListLayout.RowHover(true),
         _ => MenuPalette.RowFill,
     };
 
     /// <summary>Whether the state draws the gold stripe (<see cref="MenuPalette.SelectedStripe"/>, <see cref="MenuPalette.SelectedStripeWidth"/>) at its left.</summary>
-    internal static bool Stripe(UiTileState state) => state is UiTileState.Selected or UiTileState.SelectedHover;
+    internal static bool Stripe(UiTileState state) => state is UiTileState.Selected or UiTileState.SelectedHover or UiTileState.Held;
+
+    /// <summary>The held row's caption tone (with <see cref="UiTileState.Held"/> and a lit grip): one style for every list.</summary>
+    internal const CellTone HeldCaption = CellTone.Gold;
+
+    /// <summary>The tile number a list row's cells share for its held band (the ordered list; the master-detail detail half).</summary>
+    internal const int HeldTile = 3;
 
     /// <summary>The state's band for an entry: selected or not, hovered or not.</summary>
     internal static UiTileState Entry(bool selected, bool hovered) =>

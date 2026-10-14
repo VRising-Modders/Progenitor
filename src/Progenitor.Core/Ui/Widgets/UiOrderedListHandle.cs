@@ -39,8 +39,13 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         {
             int slot = i;
             var cells = UiWidgetLayout.ListRowCells(_options.Reorder, _options.Remove, expand: true, icon: true);
+            // One held-row style for every list (UiTileState.Held): the row's cells are one state tile, lit while a drag holds it.
+            foreach (var c in cells) c.Tile = UiTileLook.HeldTile;
             var row = Part(panel.CellRow(new CellRowSpec(
-                RowKey("row" + i), cells, hover: true, skin: CellRowSkin.GameEntry, separator: true, quietHover: true)));
+                RowKey("row" + i), cells, hover: true, skin: CellRowSkin.GameEntry, separator: true, quietHover: true)
+            {
+                TileStates = true,
+            }));
             _rows.Add(row);
             if (_options.Reorder)
             {
@@ -93,6 +98,13 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
     }
 
     /// <summary>Tests and readback: the drawn mark on a row's icon button and whether it is drawn enabled.</summary>
+    /// <summary>Tests and readback: whether slot <paramref name="slot"/> is drawn as the held row (the band, the gold caption, the lit grip).</summary>
+    internal bool HeldAt(int slot) =>
+        _rows[slot] is UiCellRowHandle h && h.TileStateOf(UiTileLook.HeldTile) == UiTileState.Held;
+
+    /// <summary>Tests: the color slot <paramref name="slot"/>'s icon mark is drawn in now (a held row's grip is lit).</summary>
+    internal PaletteColor MarkColorAt(int slot, string cellKey) => _marks.ColorOf(_rows[slot], cellKey);
+
     internal (UiDrawnMark Mark, bool Enabled) MarkAt(int slot, string cellKey) =>
         (_marks.MarkOf(_rows[slot], cellKey), _marks.EnabledOf(_rows[slot], cellKey));
 
@@ -367,7 +379,8 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
 
             var item = display[i];
             int realIndex = _model.Dragging ? -1 : i;
-            row.SetCell(UiWidgetLayout.CellTitle, item.Title);
+            bool held = _model.Dragging && i == _model.DragTarget;
+            row.SetCell(UiWidgetLayout.CellTitle, item.Title, held ? UiTileLook.HeldCaption : CellTone.Normal);
             SyncTerm(i, item.Term);
             row.SetCell(UiWidgetLayout.CellNote, item.Note, visible: item.Note.Length > 0);
             row.SetCell(UiWidgetLayout.CellBadge, item.Badge, visible: item.Badge.Length > 0);
@@ -378,6 +391,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
                 row.SetCell(UiWidgetLayout.CellUp, tone: up ? CellTone.Normal : CellTone.Faint);
                 row.SetCell(UiWidgetLayout.CellDown, tone: down ? CellTone.Normal : CellTone.Faint);
                 _marks.Set(row, UiWidgetLayout.CellGrip, UiDrawnMark.GripMark);
+                _marks.SetLit(row, UiWidgetLayout.CellGrip, held);
                 _marks.Set(row, UiWidgetLayout.CellUp, UiDrawnMark.UpMark, up);
                 _marks.Set(row, UiWidgetLayout.CellDown, UiDrawnMark.DownMark, down);
             }
@@ -406,7 +420,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
             }
 
             row.SetExpanded(open);
-            row.SetSelected(_model.Dragging && i == _model.DragTarget);
+            if (row is UiCellRowHandle cells) cells.SetTileState(UiTileLook.HeldTile, held ? UiTileState.Held : UiTileState.Hidden);
             TrySetVisible(row, true);
             drawer.SetCell(UiWidgetLayout.CellIconPad, visible: _icons);
             drawer.SetCell(UiWidgetLayout.CellDetail, open ? item.Detail : "");

@@ -27,6 +27,13 @@ internal static class UiChipsLayout
     /// <summary>A set of text chips: the Install filter chip's captured height.</summary>
     internal const float TextChipHeight = 31f;
 
+    /// <summary>
+    /// A selected chip's gold plate inset from the chip art's sides (CellSkin.Chip: these chips, the tabs and the Install
+    /// filter chips): just inside the art's rim and its dark line, which take 3 units (measured on a live capture), the
+    /// same as the plate's top and bottom inset. The column overlay's 8 left a dark band at each end.
+    /// </summary>
+    internal const float PlateInset = 3f;
+
     /// <summary>The line row: the settings grid's row height, a 36 chip centered in it.</summary>
     internal const float LineHeight = 40f;
 
@@ -85,6 +92,16 @@ internal static class UiChipsLayout
 
     /// <summary>The <c>+N more</c> chip's caption.</summary>
     internal static string MoreCaption(int hidden) => "+" + hidden.ToString(System.Globalization.CultureInfo.InvariantCulture) + " more";
+
+    /// <summary>The <c>+N more</c> chip's tooltip title: <c>N more</c>.</summary>
+    internal static string MoreTitle(int hidden) => hidden.ToString(System.Globalization.CultureInfo.InvariantCulture) + " more";
+
+    /// <summary>The add chip's tooltip title: its caption without the plus (<c>+ Add belt</c> → <c>Add belt</c>), else <c>Add</c>.</summary>
+    internal static string AddTitle(string? addText)
+    {
+        string t = (addText ?? "").Trim().TrimStart('+').Trim();
+        return t.Length > 0 ? t : "Add";
+    }
 
     /// <summary>The chip height for a set: <see cref="ItemChipHeight"/> when any chip has an icon, else <see cref="TextChipHeight"/>.</summary>
     internal static float ChipHeight(bool anyItem) => anyItem ? ItemChipHeight : TextChipHeight;

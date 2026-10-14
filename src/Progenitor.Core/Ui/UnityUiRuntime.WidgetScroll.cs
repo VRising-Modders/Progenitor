@@ -54,6 +54,8 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
             brt.sizeDelta = new Vector2(UiDataTableLayout.ScrollBarWidth, 10f);
             var track = TryAdd<Image>(bar);
             PaintPart(track, GameArt.SettingsArtPart.ScrollbarTrack, Color.white, UnityPanel.ScrollTrack);
+            // The page's own scroll bar's tint (UnityPanel.PaintScrollbar): a faint light track, a light gray handle.
+            if (track != null) try { track.color = new Color(1f, 1f, 1f, 0.10f); } catch { /* */ }
             var area = new GameObject("sliding-area");
             area.transform.SetParent(bar.transform, false);
             Stretch(area);
@@ -62,6 +64,7 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
             Stretch(handle);
             var handleImage = TryAdd<Image>(handle);
             PaintPart(handleImage, GameArt.SettingsArtPart.ScrollbarHandle, Color.white, UnityPanel.ScrollHandle);
+            if (handleImage != null) try { handleImage.color = new Color(1f, 1f, 1f, 0.45f); } catch { /* */ }
             scrollbar = TryAdd<Scrollbar>(bar);
             if (scrollbar != null)
             {
@@ -322,10 +325,78 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
         return false;
     }
 
-    public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits)
+    /// <summary>P7b: the value boxes whose whole value is selected when they take the keyboard (typing replaces it).</summary>
+    private static readonly List<TMP_InputField> SelectAllFields = new();
+
+    /// <summary>True for a value box that selects its value on focus (a data table cell); dead entries are pruned.</summary>
+    private static bool SelectsAllOnFocus(TMP_InputField field)
+    {
+        for (int i = SelectAllFields.Count - 1; i >= 0; i--)
+        {
+            var f = SelectAllFields[i];
+            if (f == null || !Alive(f))
+            {
+                SelectAllFields.RemoveAt(i);
+                continue;
+            }
+
+            if (ReferenceEquals(f, field)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>P7b: the cell rows NAV1 marks with its frame instead of the row band (a soft row's own fill covers the band).</summary>
+    private static readonly List<GameObject> NavFramedRows = new();
+
+    /// <summary>Whether <paramref name="go"/> is a row that takes NAV1's frame; dead entries are pruned.</summary>
+    private static bool NavFramedRow(GameObject? go)
+    {
+        if (go == null) return false;
+        for (int i = NavFramedRows.Count - 1; i >= 0; i--)
+        {
+            var g = NavFramedRows[i];
+            if (g == null || !Alive(g))
+            {
+                NavFramedRows.RemoveAt(i);
+                continue;
+            }
+
+            if (g.Pointer == go.Pointer) return true;
+        }
+
+        return false;
+    }
+
+    public void FrameNavFocus(IRuntimeCellRow row)
+    {
+        if (row is not UnityCellRow cells || !cells.Alive) return;
+        try { if (!NavFramedRow(cells.GameObject)) NavFramedRows.Add(cells.GameObject); }
+        catch { /* the band stays */ }
+    }
+
+    public void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align)
+    {
+        if (row is not UnityCellRow cells || cellKey == null) return;
+        var tmp = cells.CellText(cellKey);
+        if (tmp == null || !Alive(tmp)) return;
+        try
+        {
+            tmp.horizontalAlignment = align switch
+            {
+                CellAlign.Right => HorizontalAlignmentOptions.Right,
+                CellAlign.Center => HorizontalAlignmentOptions.Center,
+                _ => HorizontalAlignmentOptions.Left,
+            };
+        }
+        catch { /* the cell keeps its alignment */ }
+    }
+
+    public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits, bool selectAllOnFocus)
     {
         var field = CellField(row, cellKey);
         if (field == null) return;
+        if (selectAllOnFocus && !SelectsAllOnFocus(field)) SelectAllFields.Add(field);
         if (rightAligned)
         {
             // The numbers line up on their last digit, as the column's figures do (the owned caret follows the alignment).

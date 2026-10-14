@@ -4734,7 +4734,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         catch { /* */ }
         try { field.Select(); } catch { /* */ }
         try { field.ActivateInputField(); } catch { /* */ }
+        bool wasFocused = ReferenceEquals(_ownedFocusField, field);
         NoteOwnedFocus(field);
+        // P7b: a data table's value box selects its whole value when it takes the keyboard, so typing replaces it.
+        if (!wasFocused && SelectsAllOnFocus(field)) ApplyShortcut(field, 'a');
         return true;
     }
 
@@ -11360,6 +11363,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private float TitleBand =>
             _dialog ? DialogLayout.FrameTopPad
+            // P7b: a game window that draws its own title row (the tip card's dialog rows) keeps only the dialog's top pad.
+            : _gameWindow && _hideTitle && !_menuPane ? DialogLayout.FrameTopPad
             : _menuPane && (MenuPaneModes.Titleless(_mode) || _hideTitle) ? 0f : PanelLayout.HeaderHeight;
 
         /// <summary>
@@ -16902,7 +16907,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 cell.Fill.color = Color.white;
             }
             catch { return false; }
-            SetPlate(cell, on ? ToColor(MenuPalette.ChipOnPlate) : (Color?)null);
+            // Live 2026-10-14: at the column overlay's 8-unit side inset the gold plate left a dark band inside the chip's
+            // rim on both sides while it met the rim top and bottom (3). A chip's plate fills the art evenly inside the rim.
+            SetPlate(cell, on ? ToColor(MenuPalette.ChipOnPlate) : (Color?)null, UiChipsLayout.PlateInset);
             try { if (cell.Rim != null) cell.Rim.effectColor = new Color(0f, 0f, 0f, 0f); } catch { /* */ }
             if (cell.Tmp != null)
             {
@@ -16932,7 +16939,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// <see cref="InstallColumns.ButtonTintInsetY"/> from its edges), under the caption, so the
         /// sprite's decorated ends and rim stay visible around it with their swaps. Null hides it.
         /// </summary>
-        private static void SetPlate(Cell cell, Color? color)
+        private static void SetPlate(Cell cell, Color? color, float insetX = InstallColumns.ButtonTintInsetX)
         {
             try
             {
@@ -16958,6 +16965,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 }
 
                 if (cell.Tint == null) return;
+                InsetStretch(cell.Tint.gameObject, insetX, InstallColumns.ButtonTintInsetY);
                 cell.Tint.gameObject.SetActive(true);
                 cell.Tint.sprite = null;
                 cell.Tint.type = Image.Type.Simple;

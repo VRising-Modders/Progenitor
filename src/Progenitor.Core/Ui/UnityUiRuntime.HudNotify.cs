@@ -92,7 +92,11 @@ internal sealed partial class UnityUiRuntime
         try
         {
             double now = HudNow();
-            NoticeQueue.Next(now, NoticeHostWait(now), PresentNotice, Progenitor.WorldState.WorldEpoch.Current);
+            bool wait = NoticeHostWait(now);
+            // P7b: the game's full-screen menu hides the HUD; the notice waits for it to close, and that wait does not
+            // count toward its expiry (UiNoticeRules.MaxHeldSeconds bounds it).
+            bool menuHold = wait && _hudHidden && GameMenuOpenNow();
+            NoticeQueue.Next(now, wait, PresentNotice, Progenitor.WorldState.WorldEpoch.Current, menuHold);
             UpdateBand(now);
             if (!NoticeQueue.HasWork && _bandNotice == null) StopNoticeTick();
         }
@@ -103,6 +107,13 @@ internal sealed partial class UnityUiRuntime
             HideBand();
             StopNoticeTick();
         }
+    }
+
+    /// <summary>Whether the game's full-screen menu is open (the HUD is hidden by the menu, not by the player).</summary>
+    private static bool GameMenuOpenNow()
+    {
+        try { return GameMenuHistory.Probe.MenuOpen; }
+        catch { return false; }
     }
 
     private static void OnNoticeExpired(UiNoticeHandle notice)

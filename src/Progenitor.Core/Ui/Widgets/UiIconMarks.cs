@@ -46,6 +46,7 @@ internal sealed class UiIconMarks : IDisposable
         internal UiDrawnMark Mark = UiDrawnMark.None;
         internal bool Enabled = true;
         internal bool Hovered;
+        internal bool Lit;
         internal bool OnPlate;
         internal bool Drawn;
         internal PaletteColor DrawnColor;
@@ -106,11 +107,19 @@ internal sealed class UiIconMarks : IDisposable
 
     /// <summary>The color the cell's mark is drawn in now (tests).</summary>
     internal PaletteColor ColorOf(IUiCellRow row, string cellKey) =>
-        _slots.TryGetValue((row, cellKey), out var slot) ? ColorFor(slot.Enabled, slot.Hovered, slot.OnPlate) : Normal;
+        _slots.TryGetValue((row, cellKey), out var slot) ? ColorFor(slot.Enabled, slot.Hovered || slot.Lit, slot.OnPlate) : Normal;
+
+    /// <summary>Draw the cell's mark bright whatever the pointer does (a held row's grip), or let it follow the pointer again.</summary>
+    internal void SetLit(IUiCellRow row, string cellKey, bool lit)
+    {
+        if (_disposed || !_slots.TryGetValue((row, cellKey), out var slot) || slot.Lit == lit) return;
+        slot.Lit = lit;
+        Apply(slot);
+    }
 
     private static void Apply(Slot slot)
     {
-        var color = ColorFor(slot.Enabled, slot.Hovered, slot.OnPlate);
+        var color = ColorFor(slot.Enabled, slot.Hovered || slot.Lit, slot.OnPlate);
         if (slot.Drawn && slot.DrawnMark.Equals(slot.Mark) && slot.DrawnColor.Equals(color)) return;
         slot.Drawn = true;
         slot.DrawnMark = slot.Mark;

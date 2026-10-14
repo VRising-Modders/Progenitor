@@ -24,7 +24,13 @@ internal interface IWidgetCellField
     /// Once per input cell: <paramref name="rightAligned"/> draws its value (and hint) right-justified; with
     /// <paramref name="enterCommits"/> Enter makes the box give up the keyboard (the table then commits the draft).
     /// </summary>
-    void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits) { }
+    void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits, bool selectAllOnFocus) { }
+
+    /// <summary>NAV1 marks <paramref name="row"/> with its focus frame (a soft row's own fill would cover the row band).</summary>
+    void FrameNavFocus(IRuntimeCellRow row) { }
+
+    /// <summary>Justify cell <paramref name="cellKey"/>'s text independently of where the cell is packed.</summary>
+    void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align) { }
 
     /// <summary>
     /// Draw the text of cell <paramref name="cellKey"/> in <paramref name="color"/>, or back in its own tone when null (a
@@ -179,7 +185,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 // Numbers right-justified in the box, and Enter commits (the box gives up the keyboard).
                 if (WidgetRuntime.Current is IWidgetCellField setup && RuntimeRowOf(row) is { } runtimeRow)
                 {
-                    try { setup.SetupCellField(runtimeRow, UiDataTableLayout.EditKey(c.Key), rightAligned: true, enterCommits: true); }
+                    try { setup.SetupCellField(runtimeRow, UiDataTableLayout.EditKey(c.Key), rightAligned: true, enterCommits: true, selectAllOnFocus: true); }
                     catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' value box: " + e.Message); }
                 }
             }
@@ -231,7 +237,33 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
         // Escape in one of the table's value boxes reverts the typing and leaves the field; the panel stays.
         Lease(Ui.PushEscape(EscapeField));
+        SetupJustifyAndFocus(cols);
         Render();
+    }
+
+    /// <summary>
+    /// Text columns read left-justified wherever they are packed (a text column after the fill column is packed from the
+    /// right to keep the caller's order); numbers stay right-justified. Body rows take NAV1's visible focus frame.
+    /// </summary>
+    private void SetupJustifyAndFocus(IReadOnlyList<UiTableColumn> cols)
+    {
+        if (WidgetRuntime.Current is not IWidgetCellField field) return;
+        try
+        {
+            var header = RuntimeRowOf(_header);
+            foreach (var col in cols)
+            {
+                if (!UiDataTableLayout.NeedsLeftJustify(cols, col)) continue;
+                string cell = UiDataTableLayout.ViewKey(col.Key);
+                if (header != null) field.SetCellJustify(header, cell, CellAlign.Left);
+                foreach (var slot in _slots)
+                    if (RuntimeRowOf(slot) is { } row) field.SetCellJustify(row, cell, CellAlign.Left);
+            }
+
+            foreach (var slot in _slots)
+                if (RuntimeRowOf(slot) is { } row) field.FrameNavFocus(row);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' text alignment: " + e.Message); }
     }
 
     private static bool IsEditable(UiTableColumn c) => c.Editable && c.Kind == UiTableColumnKind.Number;
@@ -646,6 +678,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             // Inherited and own values differ by words as well as by tone (the style guide: never color alone).
             var cell = row[col.Key];
             if (cell is { Inherited: true }) body.Add(UiDataTableLayout.InheritedLine(col, cell));
+            // A value its column cuts short is read whole here.
+            else if (UiDataTableLayout.IsCut(_model.Columns, col, UiDataTableModel.Display(cell, col)))
+                body.Add(col.Caption + ": " + UiDataTableModel.Display(cell, col));
         }
 
         if (body.Count == 0)
@@ -1177,7 +1212,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         if (_multi)
         {
             Write(slot, UiDataTableLayout.CellCheck, "", CellTone.Gold, true);
-            _checkMarks.Set(row, UiDataTableLayout.CellCheck, isRow && selected ? UiDrawnMark.CheckMark : UiDrawnMark.None);
+            // Every row reads as selectable: an empty box, or the box with its check when selected; other lines draw none.
+            _checkMarks.Set(row, UiDataTableLayout.CellCheck,
+                !isRow ? UiDrawnMark.None : selected ? UiDrawnMark.CheckBoxMark : UiDrawnMark.CheckEmptyMark);
         }
 
         // The item's own icon in its well; a row with no icon (none given, or the game has none for its prefab) draws

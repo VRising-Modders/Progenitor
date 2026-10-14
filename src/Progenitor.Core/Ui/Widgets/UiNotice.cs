@@ -78,6 +78,14 @@ internal static class UiNoticeRules
     /// </summary>
     internal const double MaxWaitSeconds = 30.0;
 
+    /// <summary>
+    /// P7b: while the game's full-screen menu is open the game hides its HUD, its announcement banner included, and
+    /// shows nothing there until the menu closes. A notice posted then (from a mod's page in the Mods workspace, which
+    /// lives in that menu) waits for the menu to close: that time does not count toward <see cref="MaxWaitSeconds"/>.
+    /// A notice is still dropped once it is this old, however long the menu stayed open.
+    /// </summary>
+    internal const double MaxHeldSeconds = 600.0;
+
     /// <summary>Longest header and detail kept; longer text is cut with an ellipsis.</summary>
     internal const int MaxHeaderChars = 120;
 
@@ -149,6 +157,9 @@ internal sealed class UiNoticeHandle : IUiNotice
 
     internal double PostedAt { get; }
 
+    /// <summary>P7b: seconds it waited while the game's full-screen menu held the HUD (not counted toward the expiry).</summary>
+    internal double HeldSeconds { get; set; }
+
     internal long Serial { get; }
 
     /// <summary>The world epoch it was posted in; a queued notice from another epoch is dropped (<c>world-changed</c>).</summary>
@@ -193,6 +204,9 @@ internal sealed class UiNoticeQueue
     private readonly Dictionary<object, List<double>> _rate = new(ReferenceEqualityComparer.Instance);
     private UiNoticeHandle? _showing;
     private double _gapUntil = double.NegativeInfinity;
+
+    /// <summary>The time of the previous step (for <see cref="UiNoticeHandle.HeldSeconds"/>); NaN before the first.</summary>
+    private double _lastStep = double.NaN;
     private long _serial;
 
     /// <summary>Raised (outside the lock) when the showing notice must be taken off screen early: disposed or its owner unloaded.</summary>
@@ -269,19 +283,27 @@ internal sealed class UiNoticeQueue
     /// the lock. Before that, queued notices posted in another world epoch than <paramref name="epoch"/> are dropped
     /// (<c>world-changed</c>) and those waiting longer than <see cref="UiNoticeRules.MaxWaitSeconds"/> are dropped
     /// (<c>expired</c>); both raise <see cref="Expired"/>. While <paramref name="hostWait"/> holds, nothing is shown.
+    /// <para>P7b: <paramref name="menuHold"/> true (the game's full-screen menu is open and hides the HUD) holds the
+    /// queue like <paramref name="hostWait"/>, and the time it holds does not count toward the expiry
+    /// (<see cref="UiNoticeRules.MaxHeldSeconds"/> still bounds it): the notice shows when the menu closes.</para>
     /// </summary>
-    internal UiNoticeHandle? Next(double now, bool hostWait, Func<UiNoticeHandle, double> present, int epoch = 0)
+    internal UiNoticeHandle? Next(double now, bool hostWait, Func<UiNoticeHandle, double> present, int epoch = 0, bool menuHold = false)
     {
         if (present == null) throw new ArgumentNullException(nameof(present));
         UiNoticeHandle? next = null;
         List<UiNoticeHandle>? lapsed = null;
+        if (menuHold) hostWait = true;
         lock (Gate)
         {
+            double step = double.IsNaN(_lastStep) || now < _lastStep ? 0 : now - _lastStep;
+            _lastStep = now;
             for (int i = _queued.Count - 1; i >= 0; i--)
             {
                 var q = _queued[i];
+                if (menuHold) q.HeldSeconds += step;
+                double waited = now - q.PostedAt - q.HeldSeconds;
                 string? reason = q.Epoch != epoch ? "world-changed"
-                    : now - q.PostedAt >= UiNoticeRules.MaxWaitSeconds ? "expired" : null;
+                    : waited >= UiNoticeRules.MaxWaitSeconds || now - q.PostedAt >= UiNoticeRules.MaxHeldSeconds ? "expired" : null;
                 if (reason == null) continue;
                 _queued.RemoveAt(i);
                 Drop(q, reason);

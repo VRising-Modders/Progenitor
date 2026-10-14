@@ -42,7 +42,7 @@ internal static class UiDataTableLayout
     internal const float ScrollInset = 18f;
 
     /// <summary>The scroll bar's width inside <see cref="ScrollInset"/> (the game's thin bar, as the README reader's).</summary>
-    internal const float ScrollBarWidth = CellLayout.ScrollBarWidth;
+    internal const float ScrollBarWidth = PanelLayout.ScrollbarWidth;
 
     /// <summary>The narrowest editable number column: the value box with five digits.</summary>
     internal const float MinEditWidth = 84f;
@@ -110,6 +110,38 @@ internal static class UiDataTableLayout
         }
 
         return UiDrawnMark.None;
+    }
+
+    /// <summary>
+    /// A text column packed from the right (after the fill column) whose text must still read left-justified (the
+    /// runtime justifies it apart from the packing). Numbers are right-justified everywhere.
+    /// </summary>
+    internal static bool NeedsLeftJustify(IReadOnlyList<UiTableColumn> columns, UiTableColumn column)
+    {
+        if (column.Kind != UiTableColumnKind.Text) return false;
+        int fill = FillIndex(columns);
+        for (int i = 0; i < columns.Count; i++)
+            if (ReferenceEquals(columns[i], column)) return i > fill;
+        return false;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> is cut by its column (a fixed-width text column; the fill column only ever grows):
+    /// the row's tooltip then shows the value whole. Text cells never wrap: every body line is one fixed-height row.
+    /// </summary>
+    internal static bool IsCut(IReadOnlyList<UiTableColumn> columns, UiTableColumn column, string text)
+    {
+        if (column.Kind != UiTableColumnKind.Text || string.IsNullOrEmpty(text)) return false;
+        int fill = FillIndex(columns);
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (!ReferenceEquals(columns[i], column)) continue;
+            if (i == fill) return false;
+            var probe = new CellSpec(CellKind.Text, "probe").With(text: text);
+            return !CellLayout.CaptionFits(probe, WidthOf(column, fill: false));
+        }
+
+        return false;
     }
 
     /// <summary>The word a pending clear shows (sentence case, the value box's gray hint look): back to the inherited value.</summary>

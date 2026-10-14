@@ -112,6 +112,73 @@ internal sealed class UiTipCardPresenter : IUiTipPresenter
     }
 }
 
+/// <summary>
+/// P7b: the controls of a panel a tip card must not cover, in screen pixels: every visible control that takes input
+/// (buttons, toggles, fields, sliders, dropdowns, key fields), and of a cell row its button, field, switch and expander
+/// cells, or the whole row when the row itself takes a click (a list row). Labels, headings, notes and read-outs are
+/// not controls. Only what lies over the anchor's own rect counts.
+/// </summary>
+internal static class UiTipObstacles
+{
+    internal static IReadOnlyList<ScreenRect> Of(IUiPanel? anchor, ScreenRect anchorRect)
+    {
+        var list = new List<ScreenRect>();
+        if (anchor is not UiPanelHandle host || host.IsDisposed || !anchorRect.IsKnown) return list;
+        IUiRuntime runtime;
+        try { runtime = Ui.CurrentRuntime(); }
+        catch { return list; }
+        foreach (var child in host.ChildrenSnapshot())
+        {
+            if (child == null || child.IsDisposed || !child.Visible) continue;
+            switch (child)
+            {
+                case UiLabelHandle or UiToneLabelHandle or UiInfoHandle:
+                    continue;
+                case UiCellRowHandle row:
+                    AddRow(list, row, anchorRect);
+                    continue;
+                default:
+                    if (child.Runtime is not { Alive: true } widget) continue;
+                    ScreenRect r;
+                    try { r = runtime.WidgetRect(widget); }
+                    catch { continue; }
+                    Add(list, r, anchorRect);
+                    continue;
+            }
+        }
+
+        return list;
+    }
+
+    private static void AddRow(List<ScreenRect> list, UiCellRowHandle row, ScreenRect anchorRect)
+    {
+        bool rowClick = false;
+        try { rowClick = row.NavWidget(null) is IRuntimeCellRow { ClickEvent: not null }; }
+        catch { rowClick = false; }
+        if (rowClick)
+        {
+            Add(list, row.NavRect(null), anchorRect);
+            return;
+        }
+
+        foreach (var cell in row.Cells)
+        {
+            if (!cell.Visible || !IsControl(cell.Kind)) continue;
+            Add(list, row.NavRect(cell.Key), anchorRect);
+        }
+    }
+
+    internal static bool IsControl(CellKind kind) =>
+        kind is CellKind.Button or CellKind.Input or CellKind.Switch or CellKind.Chevron;
+
+    private static void Add(List<ScreenRect> list, ScreenRect r, ScreenRect anchorRect)
+    {
+        if (!r.IsKnown) return;
+        if (r.MaxX <= anchorRect.MinX || r.MinX >= anchorRect.MaxX || r.MaxY <= anchorRect.MinY || r.MinY >= anchorRect.MaxY) return;
+        list.Add(r);
+    }
+}
+
 /// <summary>The open tip list's panel.</summary>
 internal sealed class UiTipListView : IUiTipListView
 {
@@ -173,12 +240,12 @@ internal sealed class UiTipCardView : IUiTipCardView
 
     public bool HiddenByOther => !_closed && !_panel.IsDisposed && _panel.State != UiHandleState.Shown;
 
-    public void Place(ScreenRect anchor)
+    public void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls)
     {
         if (!Shown || _panel is not UiHandle { Runtime: IRuntimePanel runtime }) return;
         var help = UiHelpRuntime.Current;
         if (help == null) return;
-        help.PlaceTipCard(runtime, anchor);
+        help.PlaceTipCard(runtime, anchor, controls);
         help.TintTipCard(Title, Buttons, UiTipCopy.GotItKey);
     }
 

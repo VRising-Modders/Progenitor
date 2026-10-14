@@ -47,7 +47,7 @@ internal sealed partial class WidgetsDemo
     internal static List<UiTableColumn> TableColumns() => new()
     {
         new UiTableColumn("item", "Item") { Hideable = false, Tooltip = "The item's name." },
-        new UiTableColumn("category", "Category") { Width = 130f },
+        new UiTableColumn("category", "Category") { Width = 200f }, // "Alchemy, Building" whole
         new UiTableColumn("total", "Total", UiTableColumnKind.Number) { Width = 84f, Hideable = false, Subtotal = UiTableSubtotal.Sum, Tooltip = "Count in chests on the island." },
         new UiTableColumn("here", "Here", UiTableColumnKind.Number) { Width = 84f, Subtotal = UiTableSubtotal.Sum },
         new UiTableColumn("reserve", "Reserve", UiTableColumnKind.Number) { Width = 100f, Editable = true, Term = "Reserve" },

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Progenitor.Ui;
 
@@ -27,7 +28,7 @@ internal interface IUiHelpRuntime
     /// clamped onto the canvas. Asked after the show and once a frame while the card is up (a re-flow of the other
     /// panels may move it). False when the card cannot be placed (it keeps the framework's placement).
     /// </summary>
-    bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor);
+    bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls);
 
     /// <summary>
     /// Draw the tip card's title (<paramref name="title"/>, the dialog title row) and its main answer's caption (the cell
@@ -42,6 +43,13 @@ internal interface IUiTermMarkerView : IDisposable
 {
     /// <summary>The marker is drawn (the text's own visibility still applies).</summary>
     bool Shown { get; set; }
+
+    /// <summary>
+    /// Asked once a frame while the marker shows: true while its text sits on a selected chip's gold plate (a selected
+    /// tab, a selected filter chip), where the marker takes its dark variant (<see cref="UiTermMarkerArt.ColorOn"/>). Null:
+    /// never on a plate.
+    /// </summary>
+    Func<bool>? OnPlate { get; set; }
 }
 
 /// <summary>Resolves the current runtime's help half.</summary>
@@ -128,6 +136,28 @@ internal static class UiTermMarkerArt
         return a < 0f ? 0f : a > 1f ? 1f : a;
     }
 
+    /// <summary>The marker's muted gold: the widgets' glyph buttons' (<c>CellTone.Gold</c> at 85 %).</summary>
+    internal static PaletteColor Normal
+    {
+        get
+        {
+            var gold = MenuPalette.TextColor(CellTone.Gold);
+            return new PaletteColor(gold.R * 0.85f, gold.G * 0.85f, gold.B * 0.85f, 1f);
+        }
+    }
+
+    /// <summary>
+    /// On a selected chip's gold plate the muted gold vanishes into the plate: the marker is drawn dark there, the deep
+    /// brown of the plate's own shadowed rim, as the game draws dark glyphs on its gold buttons.
+    /// </summary>
+    internal static readonly PaletteColor Plate = PaletteColor.Hex(0x2a1c0a);
+
+    /// <summary>The marker's color for a text on a plate or not.</summary>
+    internal static PaletteColor ColorOn(bool onPlate) => onPlate ? Plate : Normal;
+
+    /// <summary>Whether a cell's tone is a selected chip's gold plate.</summary>
+    internal static bool IsPlate(CellTone tone) => tone == CellTone.ChipOn;
+
     private static float Smooth(float d) => d <= -0.5f ? 0f : d >= 0.5f ? 1f : d + 0.5f;
 }
 
@@ -167,9 +197,18 @@ internal static class UiTipLayout
     /// <summary>Inside the anchor: from its bottom edge, clear of a panel's 24-unit version footer band.</summary>
     internal const float InsideBottom = 40f;
 
+    /// <summary>Inside the anchor: below its top edge, clear of a pane's title band (<c>PanelLayout.HeaderHeight</c>).</summary>
+    internal const float InsideTop = 72f;
+
+    /// <summary>Inside the anchor: the card's search step down the panel, and the room it keeps from every control.</summary>
+    internal const float InsideStep = 8f;
+
+    internal const float ControlClearance = 8f;
+
     /// <summary>The card's bottom-left corner. <paramref name="hasAnchor"/> false ignores the anchor rect.</summary>
     internal static (float X, float Y, Side Side) Place(
-        bool hasAnchor, float minX, float minY, float maxX, float maxY, float width, float height, float canvasWidth, float canvasHeight)
+        bool hasAnchor, float minX, float minY, float maxX, float maxY, float width, float height, float canvasWidth, float canvasHeight,
+        IReadOnlyList<ScreenRect>? controls = null)
     {
         width = Finite(width);
         height = Finite(height);
@@ -186,14 +225,50 @@ internal static class UiTipLayout
             float above = maxY + Gap;
             if (above <= yMax) return (Clamp(minX, Margin, xMax), above, Side.Above);
 
-            // No room around the panel (the Mods workspace at 16:9 fills the screen): inside it, in its bottom-right
-            // corner above its footer, the part of a page its rows reach last. Never over another panel beside it.
+            // No room around the panel (the Mods workspace at 16:9 fills the screen): inside it, against its right edge,
+            // at the highest spot below its title band that covers none of its controls (rows that take a click, buttons,
+            // fields, toggles, chips), searched downward to its footer; where every spot covers one, the spot that covers
+            // the least. Never over another panel beside it.
             float insideX = maxX - InsideInset - width;
-            if (insideX >= minX + InsideInset && maxY - minY >= height + InsideBottom + InsideInset)
-                return (Clamp(insideX, Margin, xMax), Clamp(minY + InsideBottom, Margin, yMax), Side.Inside);
+            float top = maxY - InsideTop - height, bottom = minY + InsideBottom;
+            if (insideX >= minX + InsideInset && top >= bottom)
+            {
+                float x = Clamp(insideX, Margin, xMax);
+                float bestY = bottom, bestCover = float.MaxValue;
+                for (float y = top; y >= bottom - 0.01f; y -= InsideStep)
+                {
+                    float cover = Covered(x, y, width, height, controls);
+                    if (cover <= 0f) return (x, Clamp(y, Margin, yMax), Side.Inside);
+                    if (cover < bestCover)
+                    {
+                        bestCover = cover;
+                        bestY = y;
+                    }
+                }
+
+                float last = Covered(x, bottom, width, height, controls);
+                if (last < bestCover) bestY = bottom;
+                return (x, Clamp(bestY, Margin, yMax), Side.Inside);
+            }
         }
 
         return (Clamp(xMax, Margin, xMax), Clamp(Margin, Margin, yMax), Side.Corner);
+    }
+
+    /// <summary>The area of <paramref name="controls"/> a card at (x, y) would cover, each grown by <see cref="ControlClearance"/>.</summary>
+    internal static float Covered(float x, float y, float width, float height, IReadOnlyList<ScreenRect>? controls)
+    {
+        if (controls == null) return 0f;
+        float sum = 0f;
+        foreach (var c in controls)
+        {
+            if (!c.IsKnown) continue;
+            float w = Math.Min(x + width, c.MaxX + ControlClearance) - Math.Max(x, c.MinX - ControlClearance);
+            float h = Math.Min(y + height, c.MaxY + ControlClearance) - Math.Max(y, c.MinY - ControlClearance);
+            if (w > 0f && h > 0f) sum += w * h;
+        }
+
+        return sum;
     }
 
     private static float Clamp(float v, float lo, float hi) => hi < lo ? lo : v < lo ? lo : v > hi ? hi : v;

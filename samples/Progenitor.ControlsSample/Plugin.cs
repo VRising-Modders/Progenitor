@@ -113,7 +113,7 @@ internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDem
                 _picked = result;
                 done(result.Kind + " " + result.Menu + " (" + result.EntityIndex + ":" + result.EntityVersion + ")");
             },
-            () => done("Pick cancelled."));
+            () => done(ControlsHudWords.PickCancelled));
 
     public string LocatePicked()
     {

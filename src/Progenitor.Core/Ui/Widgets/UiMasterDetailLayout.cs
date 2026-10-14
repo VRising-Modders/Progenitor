@@ -45,8 +45,13 @@ internal static class UiMasterDetailLayout
     internal const float NoteMin = 40f;
     internal const float NoteMax = 140f;
 
-    internal const float MarkWidth = 16f;
-    internal const float CountWidth = 32f;
+    internal const float MarkWidth = 12f;
+    /// <summary>
+    /// A master count's column: three tabular characters (<c>99+</c>) at the monospace treatment's own pitch, the text's
+    /// insets on both sides and a unit of air, so a count is never cut to an ellipsis.
+    /// </summary>
+    internal static readonly float CountWidth =
+        (float)Math.Ceiling(CellLayout.EstimateTextWidth("99+", CellLayout.MonoFontSize, mono: true) + 2f * CellLayout.TextInset + 2f);
     internal const float DividerWidth = 8f;
 
     /// <summary>
@@ -87,6 +92,9 @@ internal static class UiMasterDetailLayout
 
     internal const string CellMark = "m-mark";
     internal const string CellMIcon = "m-icon";
+
+    /// <summary>The icon column's stand-in on an entry row without an icon (the new-entry line, an entry with none): no well.</summary>
+    internal const string CellMIconPad = "m-icon-pad";
     internal const string CellMTitle = "m-title";
     internal const string CellMSearch = "m-search";
     internal const string CellMNote = "m-note";
@@ -178,6 +186,10 @@ internal static class UiMasterDetailLayout
                 : new CellSpec(CellKind.Image, CellMIcon) { MinWidth = UiWidgetLayout.IconSize, Skin = CellSkin.IconWell, Visible = false }
                     .With(width: CellWidth.Px(UiWidgetLayout.IconSize)),
         };
+        // An entry row shows exactly one of the icon well and its pad while the column is on, so its width never changes.
+        if (!searchRow)
+            cells.Add(new CellSpec(CellKind.Muted, CellMIconPad) { MinWidth = UiWidgetLayout.IconSize, Visible = false }
+                .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconSize)));
 
         CellSpec main = searchRow
             ? new CellSpec(CellKind.Input, CellMSearch) { Clearable = true, Skin = CellSkin.ValueBox }
@@ -193,6 +205,7 @@ internal static class UiMasterDetailLayout
             .With(text: "", width: CellWidth.Px(CountWidth), tone: CellTone.Client));
         if (!searchRow)
             foreach (var c in cells) c.Tile = MasterTile; // the selection band spans the master half
+        int detailFrom = cells.Count + 1; // after the divider
         cells.Add(new CellSpec(CellKind.Muted, CellDivider) { MinWidth = DividerWidth, Tile = DividerTile }
             .With(text: "", width: CellWidth.Px(DividerWidth)));
 
@@ -220,6 +233,9 @@ internal static class UiMasterDetailLayout
         for (int i = 0; i < UiDetailLine.MaxButtons; i++)
             cells.Add(new CellSpec(CellKind.Button, CellButton(i)) { Skin = CellSkin.PopupButton, Visible = false, MinWidth = CellLayout.MinButtonWidth }
                 .With(text: "", width: CellWidth.Px(CellLayout.MinButtonWidth)));
+
+        // The detail cells share one state tile: the held member row's band (UiTileState.Held).
+        for (int i = detailFrom; i < cells.Count; i++) cells[i].Tile = UiTileLook.HeldTile;
 
         // Everything but the member row's right-hand group (badge, up, down, expand, remove) sits from the left.
         foreach (var c in cells)

@@ -228,12 +228,13 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
         string title, body;
         if (placed.Index == UiChipsLayout.AddIndex)
         {
-            title = "";
+            // Every tooltip box has its gold title line (live 2026-10-14: the more chip's box opened on an empty title).
+            title = UiChipsLayout.AddTitle(_options.AddText);
             body = _options.AddTooltip ?? "";
         }
         else if (placed.Index == UiChipsLayout.MoreIndex)
         {
-            title = "";
+            title = UiChipsLayout.MoreTitle(_pack.Overflow);
             body = HiddenSummary();
         }
         else if (placed.Index >= 0 && placed.Index < _model.Count)

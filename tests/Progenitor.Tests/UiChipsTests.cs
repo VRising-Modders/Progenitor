@@ -826,6 +826,54 @@ public sealed class UiChipsTabsRoundTests : IDisposable
     }
 
     [Fact]
+    public void A_tab_change_handler_that_relays_the_page_joins_the_switchs_one_layout()
+    {
+        // Live 2026-10-14: two layouts per switch, the second from the sample's status line rewritten in OnChanged.
+        var counter = new Counter();
+        UiLayoutBatch.BindFlush(() => counter.Flushes++);
+        var tabs = NewPanel().Tabs("lh", new[] { "One", "Two" });
+        var status = new LayoutProbe(counter);
+        for (int i = 0; i < 10; i++)
+        {
+            tabs.Add(0, new LayoutProbe(counter));
+            tabs.Add(1, new LayoutProbe(counter));
+        }
+
+        tabs.OnChanged(_ => status.Visible = !status.Visible); // a handler whose write asks for a layout
+        counter.Immediate = 0;
+        counter.Flushes = 0;
+        tabs.Selected = 1;
+        Assert.Equal(0, counter.Immediate);
+        Assert.Equal(1, counter.Flushes);
+    }
+
+    [Fact]
+    public void The_more_and_add_chips_tooltips_have_a_title()
+    {
+        Assert.Equal("2 more", UiChipsLayout.MoreTitle(2));
+        Assert.Equal("Add", UiChipsLayout.AddTitle("+"));
+        Assert.Equal("Add belt", UiChipsLayout.AddTitle("+ Add belt"));
+        Assert.Equal("Add", UiChipsLayout.AddTitle(null));
+
+        var many = Enumerable.Range(0, 6).Select(i => new UiChip("c" + i, "Cat " + i)).ToList();
+        NewPanel().Chips("mt", many, new UiChipsOptions { Add = true, AddTooltip = "Add a category.", MaxLines = 1, MaxPerLine = 4, RowWidth = 1248f });
+        Assert.True(UiCellRowHandle.TryHoverCell("mt:line0", "chip2", true)); // "+4 more"
+        Assert.Equal(("4 more", "Cat 2, Cat 3, Cat 4, Cat 5"), _runtime.Tooltip);
+        UiCellRowHandle.TryHoverCell("mt:line0", "chip2", false);
+        Assert.True(UiCellRowHandle.TryHoverCell("mt:line0", "chip3", true)); // "+"
+        Assert.Equal(("Add", "Add a category."), _runtime.Tooltip);
+    }
+
+    [Fact]
+    public void A_selected_chips_plate_fills_the_art_inside_its_rim()
+    {
+        // The plate's side inset equals its top and bottom inset (3: inside the art's rim and dark line), not the
+        // column overlay's 8 that left a dark band at each end of a selected chip.
+        Assert.Equal(InstallColumns.ButtonTintInsetY, UiChipsLayout.PlateInset);
+        Assert.True(UiChipsLayout.PlateInset < InstallColumns.ButtonTintInsetX);
+    }
+
+    [Fact]
     public void A_chip_without_an_item_id_draws_no_empty_well_and_the_remove_button_is_a_drawn_mark()
     {
         var chips = NewPanel().Chips("pl", Progenitor.ControlsSample.WidgetsDemo.SampleMembers(), new UiChipsOptions { RowWidth = 1108f });

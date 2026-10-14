@@ -626,6 +626,11 @@ internal sealed class UiTermBinding : IDisposable
         {
             if (handle.NavWidget(null) is IRuntimeCellRow runtimeRow)
                 binding._view = UiHelpRuntime.Current?.AttachTermMarker(runtimeRow, cellKey, reserveRoom);
+            // A chip cell's selection moves its tone between the plain chip and the gold plate; the marker follows it.
+            CellSpec? spec = null;
+            foreach (var c in row.Cells)
+                if (string.Equals(c.Key, cellKey, StringComparison.Ordinal)) spec = c;
+            if (binding._view != null && spec != null) binding._view.OnPlate = () => UiTermMarkerArt.IsPlate(spec.Tone);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: term '" + term + "' marker on cell '" + cellKey + "' failed: " + e.Message); }
         return binding;

@@ -92,8 +92,10 @@ internal sealed partial class WidgetsDemo
         MasterDetail = md;
         // The words the screen explains on hover: the Belts entries' captions and the Used by heading.
         // One glossary for the whole page (the Help tab's wording), so every "Belt" marker explains the same line.
-        UiTerms.Define(panel.PluginId, SampleGlossary());
-        UiTerms.Define(panel.PluginId, UsedByTerm, "Every list and rule that names this belt.");
+        // On the plugin the page explains its words for (on a Mods page, the page's mod), as the Help tab does.
+        string glossary = UiTerms.PluginOf(panel);
+        UiTerms.Define(glossary, SampleGlossary());
+        UiTerms.Define(glossary, UsedByTerm, "Every list and rule that names this belt.");
         md.SetTexts(1, "+ New category", "No categories yet.", "A category is a set of items.\nSelect a category to see its items.");
         LoadMasterDetail();
 

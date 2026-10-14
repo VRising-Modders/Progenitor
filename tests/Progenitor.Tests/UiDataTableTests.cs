@@ -280,13 +280,18 @@ public sealed class UiDataTableTests : IDisposable
             var art = Paint(UiDrawnMark.Sort(true, d));
             float ink = Sum(art, w + UiDrawnMarkArt.DigitGap, w + UiDrawnMarkArt.DigitGap + UiDrawnMarkArt.DigitWidth, 0, h);
             Assert.True(ink > 20f, "digit " + d + " has no ink");
-            Assert.Equal(0f, Sum(art, w + UiDrawnMarkArt.DigitGap, art.GetLength(0), (int)(h * 0.80f), h)); // small: the lower part
+            // About the arrow's height (the mockup's digit, 70% of the caption's capitals): ink in the upper half too,
+            // nothing in the top rows.
+            Assert.True(Sum(art, w + UiDrawnMarkArt.DigitGap, art.GetLength(0), h / 2, h) > 10f, "digit " + d + " is too small");
+            Assert.Equal(0f, Sum(art, w + UiDrawnMarkArt.DigitGap, art.GetLength(0), h - 1, h));
             inks.Add(ink.ToString("0"));
         }
 
         Assert.True(inks.Count >= 7, "the digits look alike");
-        // A small digit beside the arrow at the header's size.
-        Assert.True(UiDrawnMarkArt.Width(withDigit, 15f) < 20f);
+        // A digit beside the arrow at the header's size, not a speck: about 70% of the caption's capitals.
+        float drawnDigit = UiDrawnMarkArt.Height(withDigit, 15f) * UiDrawnMarkArt.DigitHeightShare;
+        Assert.InRange(drawnDigit, 15f * 0.7f * 0.65f, 15f * 0.7f * 1.1f);
+        Assert.True(UiDrawnMarkArt.Width(withDigit, 15f) < 22f);
     }
 
     [Fact]
@@ -429,7 +434,7 @@ public sealed class UiDataTableTests : IDisposable
         Assert.True(Row("t:row1").Selected);
         Assert.True(Row("t:row3").Selected);
         Assert.False(Row("t:row0").Selected);
-        Assert.Equal(UiDrawnMark.CheckMark, handle.CheckMarkAt(3)); // the drawn check mark, not a text glyph
+        Assert.Equal(UiDrawnMark.CheckBoxMark, handle.CheckMarkAt(3)); // the drawn checked box, not a text glyph
         Assert.Equal("", Cell(Row("t:row3"), UiDataTableLayout.CellCheck).Text);
         table.SetRows(Sample().Where(r => r.Id != "d"));
         Assert.Equal(new[] { "b" }, table.Selected);
@@ -1238,7 +1243,7 @@ public sealed class UiDataTableTests : IDisposable
     {
         NewTable(options: Options(visible: 4));
         Assert.Equal(4, _runtime.Setups.Count); // one editable column, four slots
-        Assert.All(_runtime.Setups, s => Assert.Equal(("e:cap", true, true), (s.Cell, s.Right, s.Enter)));
+        Assert.All(_runtime.Setups, s => Assert.Equal(("e:cap", true, true, true), (s.Cell, s.Right, s.Enter, s.SelectAll)));
     }
 
     [Fact]
@@ -1320,6 +1325,69 @@ public sealed class UiDataTableTests : IDisposable
         Assert.Equal("1 chest", Progenitor.ControlsSample.WidgetsDemo.Chests(1));
         Assert.Equal("2 chests", Progenitor.ControlsSample.WidgetsDemo.Chests(2));
         Assert.DoesNotContain(Progenitor.ControlsSample.WidgetsDemo.TableRows(), r => r.Detail.Contains(" 1 chests", StringComparison.Ordinal));
+    }
+
+    // ---- Live review round 5 --------------------------------------------------------------------------
+
+    [Fact]
+    public void Text_columns_read_left_justified_wherever_they_pack_and_numbers_stay_right()
+    {
+        var cols = Columns(); // name (fill), total, cap, note (text, after the fill)
+        Assert.False(UiDataTableLayout.NeedsLeftJustify(cols, cols[0])); // packed from the left already
+        Assert.False(UiDataTableLayout.NeedsLeftJustify(cols, cols[1]));
+        Assert.True(UiDataTableLayout.NeedsLeftJustify(cols, cols[3]));
+        NewTable(options: Options(visible: 4));
+        Assert.Equal(CellAlign.Left, _runtime.Justified["t:header/c:note"]);
+        for (int i = 0; i < 4; i++) Assert.Equal(CellAlign.Left, _runtime.Justified["t:row" + i + "/c:note"]);
+        Assert.DoesNotContain(_runtime.Justified.Keys, k => k.EndsWith("/c:total", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_value_its_column_cuts_is_read_whole_in_the_row_tooltip()
+    {
+        var rows = Sample();
+        rows[0].Text("note", "A very long note that no 120-unit column can hold");
+        var (_, handle) = NewTable(rows);
+        handle.HoverSlotForTests(0, true);
+        Assert.Contains("Note: A very long note that no 120-unit column can hold", _runtime.Tooltip!.Value.Body);
+        handle.HoverSlotForTests(1, true); // "nb" fits: no tooltip
+        Assert.Null(_runtime.Tooltip);
+        var demo = Progenitor.ControlsSample.WidgetsDemo.TableColumns();
+        var category = demo.Single(c => c.Key == "category");
+        Assert.False(UiDataTableLayout.IsCut(demo, category, "Alchemy, Building")); // the demo's longest category fits
+    }
+
+    [Fact]
+    public void Body_rows_take_the_focus_frame_and_the_check_column_shows_an_empty_box_until_selected()
+    {
+        var (table, handle) = NewTable(options: Options(visible: 4));
+        Assert.Equal(new[] { "t:row0", "t:row1", "t:row2", "t:row3" }, _runtime.Framed);
+        Assert.Equal(UiDrawnMark.CheckEmptyMark, handle.CheckMarkAt(0));
+        table.SetSelected(new[] { "a" });
+        Assert.Equal(UiDrawnMark.CheckBoxMark, handle.CheckMarkAt(0));
+        Assert.Equal(UiDrawnMark.CheckEmptyMark, handle.CheckMarkAt(1));
+    }
+
+    [Fact]
+    public void The_check_box_marks_draw_a_box_and_the_checked_one_adds_the_check()
+    {
+        Assert.True(UiDrawnMark.TryParse("check-empty", out var empty) && empty.Equals(UiDrawnMark.CheckEmptyMark));
+        Assert.True(UiDrawnMark.TryParse("check-box", out var box) && box.Equals(UiDrawnMark.CheckBoxMark));
+        Assert.True(UiDrawnMark.TryParse("check", out var check) && check.Equals(UiDrawnMark.CheckMark)); // kept
+        var e = Paint(UiDrawnMark.CheckEmptyMark);
+        var b = Paint(UiDrawnMark.CheckBoxMark);
+        int n = UiDrawnMarkArt.TextureHeight;
+        Assert.True(e[n / 2, (int)(n * 0.16f)] > 0.5f && e[(int)(n * 0.16f), n / 2] > 0.5f); // the outline
+        Assert.True(e[n / 2, n / 2] < 0.1f); // hollow
+        Assert.True(Sum(b, 0, n, 0, n) > Sum(e, 0, n, 0, n) + 30f); // the check inside
+        Assert.True(b[(int)(n * 0.45f), (int)(n * 0.37f)] > 0.5f);
+    }
+
+    [Fact]
+    public void The_scroll_bar_is_as_wide_as_the_page_bar_and_fits_the_inset()
+    {
+        Assert.Equal(PanelLayout.ScrollbarWidth, UiDataTableLayout.ScrollBarWidth);
+        Assert.True(UiDataTableLayout.ScrollInset >= UiDataTableLayout.ScrollBarWidth + 6f);
     }
 
     // ---- Term markers on the header -------------------------------------------------------
@@ -1481,10 +1549,20 @@ internal sealed class TableRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunti
     public void SetCellHint(IRuntimeCellRow row, string cellKey, string hint) { }
 
     /// <summary>The value boxes set up (right-aligned, Enter commits), by row key and cell.</summary>
-    public readonly List<(string Row, string Cell, bool Right, bool Enter)> Setups = new();
+    public readonly List<(string Row, string Cell, bool Right, bool Enter, bool SelectAll)> Setups = new();
 
-    public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits) =>
-        Setups.Add((row.Text, cellKey, rightAligned, enterCommits));
+    public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits, bool selectAllOnFocus) =>
+        Setups.Add((row.Text, cellKey, rightAligned, enterCommits, selectAllOnFocus));
+
+    /// <summary>The rows set to take NAV1's frame.</summary>
+    public readonly List<string> Framed = new();
+
+    public void FrameNavFocus(IRuntimeCellRow row) => Framed.Add(row.Text);
+
+    /// <summary>The cells justified apart from their packing, by row key and cell.</summary>
+    public readonly Dictionary<string, CellAlign> Justified = new();
+
+    public void SetCellJustify(IRuntimeCellRow row, string cellKey, CellAlign align) => Justified[row.Text + "/" + cellKey] = align;
 
     /// <summary>The last color each header caption was asked to take (null: its own tone).</summary>
     public readonly Dictionary<string, PaletteColor?> TextColors = new();

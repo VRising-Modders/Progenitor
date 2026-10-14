@@ -544,13 +544,120 @@ public sealed class UiMasterDetailTests : IDisposable
         _runtime.Pointer = PointerSample.At(1000f, 0f); // below every row: the last member slot
         _runtime.Tick();
         Assert.Equal("Member a", Cell(Row("md:row3"), L.CellText).Text); // the preview
-        Assert.Equal(CellTone.Gold, Cell(Row("md:row3"), L.CellText).Tone);
+        // The one held-row style, the same as the ordered list's: the band, the gold caption, the lit grip.
+        Assert.Equal(UiTileLook.HeldCaption, Cell(Row("md:row3"), L.CellText).Tone);
+        Assert.True(md.HeldAt(3));
+        Assert.False(md.HeldAt(1));
+        Assert.Equal(UiIconMarks.Bright, md.MarkColorAt(3, L.CellGrip));
+        Assert.Equal(UiIconMarks.Normal, md.MarkColorAt(1, L.CellGrip));
         Assert.Empty(moves);
         _runtime.Held = false;
         _runtime.Tick(); // a release the grip did not see
         Assert.Equal(new[] { "b", "c", "a" }, md.Members.Select(m => m.Id));
         Assert.Single(moves);
         Assert.Empty(_runtime.Ticks);
+        Assert.False(md.HeldAt(3)); // dropped: no row looks held
+        Assert.Equal(UiIconMarks.Normal, md.MarkColorAt(3, L.CellGrip));
+    }
+
+    [Fact]
+    public void The_held_style_is_one_style_for_both_lists()
+    {
+        Assert.Equal(ModsListLayout.RowHover(true), UiTileLook.Fill(UiTileState.Held)); // the entry band at its hover strength
+        Assert.True(UiTileLook.Stripe(UiTileState.Held));
+        var panel = NewPanel();
+        var list = (UiOrderedListHandle)panel.OrderedList("ol", new[] { new UiListItem("a", "A"), new UiListItem("b", "B") });
+        for (int i = 0; i < 2; i++)
+            Row("ol:row" + i).RectOverride = ScreenRect.FromCorners(0f, 400f - 40f * (i + 1), 600f, 400f - 40f * i);
+        _runtime.Held = true;
+        _runtime.Press(Row("ol:row0"), UiWidgetLayout.CellGrip, UiPointerEventKind.Down);
+        Assert.True(list.HeldAt(0));
+        Assert.False(Row("ol:row0").Selected); // not the game's blue entry band any more
+        Assert.Equal(UiTileLook.HeldCaption, Row("ol:row0").Cells().Single(c => c.Key == UiWidgetLayout.CellTitle).Tone);
+        Assert.Equal(UiIconMarks.Bright, list.MarkColorAt(0, UiWidgetLayout.CellGrip));
+        _runtime.Held = false;
+        _runtime.Tick();
+        Assert.False(list.HeldAt(0));
+        Assert.Equal(CellTone.Normal, Row("ol:row0").Cells().Single(c => c.Key == UiWidgetLayout.CellTitle).Tone);
+    }
+
+    [Fact]
+    public void A_row_without_an_icon_shows_no_well_and_keeps_the_divider_still()
+    {
+        var md = Build(new UiMasterDetailOptions { Rows = 6, NewCaption = "+ New category" }, entries: 0);
+        md.SetEntries(new[] { new UiMasterEntry("gems", "Gems") { ItemPrefab = 5 }, new UiMasterEntry("wood", "Wood") });
+        Assert.True(Cell(Row("md:row1"), L.CellMIcon).Visible);
+        Assert.False(Cell(Row("md:row1"), L.CellMIconPad).Visible);
+        foreach (int r in new[] { 2, 3, 4 }) // no icon, the new-entry line, an empty row
+        {
+            Assert.False(Cell(Row("md:row" + r), L.CellMIcon).Visible, "a well on row " + r);
+            Assert.True(Cell(Row("md:row" + r), L.CellMIconPad).Visible);
+        }
+
+        float? divider = null;
+        for (int r = 0; r < 6; r++)
+        {
+            var placed = MenuPanelLayout.CellColumns(760f, new CellRowSpec("x", Row("md:row" + r).Cells().ToList(), rightInset: L.ScrollInset));
+            float left = placed.Single(p => p.Key == L.CellDivider).Left;
+            divider ??= left;
+            Assert.Equal(divider.Value, left, 2);
+        }
+
+        md.SetEntries(new[] { new UiMasterEntry("wood", "Wood") }); // no icon anywhere: neither column
+        Assert.False(Cell(Row("md:row1"), L.CellMIcon).Visible);
+        Assert.False(Cell(Row("md:row1"), L.CellMIconPad).Visible);
+    }
+
+    [Fact]
+    public void The_count_column_holds_three_tabular_characters()
+    {
+        float need = CellLayout.EstimateTextWidth(L.CountText("99+"), CellLayout.MonoFontSize, mono: true) + 2f * CellLayout.TextInset;
+        Assert.True(L.CountWidth >= need, "the count column cuts 99+ to an ellipsis");
+        Assert.Equal("  2", L.CountText("2"));
+        var md = Build(new UiMasterDetailOptions { Rows = 6 }, entries: 0);
+        md.SetEntries(new[] { new UiMasterEntry("j", "Jewel cabinets") { Badge = "2" } });
+        Assert.Equal(L.CountWidth, Cell(Row("md:row1"), L.CellMCount).Width.Value);
+    }
+
+    [Fact]
+    public void Resting_on_a_word_is_one_visit_however_many_frames_pass()
+    {
+        UiTerms.Define("example.md", "Belt", "Chests used together.");
+        var md = Build(new UiMasterDetailOptions { Rows = 6 }, entries: 0);
+        md.SetEntries(new[] { new UiMasterEntry("a", "Ore in") { Term = "Belt" } });
+        md.SetDetail(new[] { UiDetailLine.Title("Ore in"), UiDetailLine.Line("x") });
+        float dividerX = Row("md:row1").CellRects().Single(p => p.Key == L.CellDivider).Value.MinX;
+        _runtime.Pointer = PointerSample.At(dividerX - 100f, 120f);
+        md.HoverRowForTests(1, true);
+        Assert.Equal(1, UiTerms.Hovers("example.md", "Belt"));
+        for (int i = 0; i < 10; i++)
+        {
+            _now += 2;
+            _runtime.Tick(); // the pointer rests on the caption
+        }
+
+        Assert.Equal(1, UiTerms.Hovers("example.md", "Belt"));
+        _runtime.Pointer = PointerSample.At(dividerX + 200f, 120f); // onto the detail half (no word there)
+        _runtime.Tick();
+        Assert.Null(_runtime.Tooltip);
+        Assert.Equal(1, UiTerms.Hovers("example.md", "Belt"));
+    }
+
+    [Fact]
+    public void The_entry_caption_gets_the_term_marker_on_the_pages_plugin()
+    {
+        var help = new HelpRuntimeFake();
+        UiApi.SetRuntimeForTests(help);
+        var panel = NewPanel();
+        UiTerms.Define(UiTerms.PluginOf(panel), "Belt", "Chests used together.");
+        var md = (UiMasterDetailHandle)panel.MasterDetail("md2", new UiMasterDetailOptions { Rows = 6 });
+        md.SetEntries(new[] { new UiMasterEntry("a", "Ore in") { Term = "Belt" }, new UiMasterEntry("b", "Line 1") });
+        var marker = Assert.Single(help.Markers.Where(m => !m.Disposed));
+        Assert.Equal(L.CellMTitle, marker.CellKey);
+        Assert.True(marker.Shown);
+        Assert.Equal("Belt", md.MasterTermAt(1));
+        md.Dispose();
+        Assert.True(marker.Disposed);
     }
 
     [Fact]
@@ -781,6 +888,7 @@ public sealed class UiMasterDetailTests : IDisposable
         demo.BuildMasterDetail(panel, tabs, 1);
         var md = (UiMasterDetailHandle)demo.MasterDetail!;
         Assert.Equal(16, md.Entries.Count);
+        Assert.True(UiTerms.IsDefined(UiTerms.PluginOf(panel), Progenitor.ControlsSample.WidgetsDemo.UsedByTerm)); // the page's glossary
         // The belts' notes are their real member counts, with the right word.
         Assert.Equal("6 chests", md.Entries.Single(e => e.Id == "belt-ore").Note);
         Assert.Equal("2 chests", md.Entries.Single(e => e.Id == "belt-line").Note);
