@@ -879,6 +879,47 @@ public class VanillaPanelTests : IDisposable
         rename.Dispose();
     }
 
+    [Fact]
+    public void A_placed_container_is_never_shown_while_its_window_slides_in()
+    {
+        // The runtime says Settling while the window moves: the container stays hidden, nothing is
+        // logged as a refusal, and it is measured again on the next frame until the window is at rest.
+        _client.FitQueue.Enqueue(VanillaFitResult.Moving);
+        _client.FitQueue.Enqueue(VanillaFitResult.Moving);
+        _client.FitQueue.Enqueue(VanillaFitResult.Moving);
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok", retry: true);
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        bag.Button("Storage", VanillaButtonIcon.Item(123));
+        var character = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0);
+
+        var seen = new List<bool>();
+        for (int i = 0; i < 4; i++)
+        {
+            _client.Fire(VanillaUiSite.InventoryPanel, Open(21, character));
+            seen.Add(_client.LiveContainerVisible);
+        }
+
+        Assert.Equal(new[] { false, false, false, true }, seen);
+        Assert.Equal(4, _client.FitCalls);
+        Assert.DoesNotContain(Lines, l => l.Contains("hidden reason"));
+        Assert.Equal("ok", ReadbackOf(bag)["fit"]);
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void A_button_icon_is_an_item_or_a_drawn_mark_and_the_chest_by_default()
+    {
+        Assert.Equal("mark:chest", VanillaButtonIcon.Default.ToString());
+        Assert.Equal("item:1234", VanillaButtonIcon.Item(1234).ToString());
+        Assert.Equal("mark:check", VanillaButtonIcon.Drawn("check").ToString());
+        Assert.Equal(VanillaButtonIcon.Default, VanillaButtonIcon.Drawn(" "));
+        Assert.True(UiDrawnMark.TryParse("chest", out var chest) && chest.IsIcon);
+        Assert.Equal("chest", UiDrawnMark.ChestMark.Name);
+        // The chest is drawn: its outline and its lid line have coverage, the middle of the lid does not.
+        Assert.True(UiDrawnMarkArt.Alpha(UiDrawnMark.ChestMark, 24, (int)(0.58f * 48)) > 0.5f);
+        Assert.True(UiDrawnMarkArt.Alpha(UiDrawnMark.ChestMark, 12, 34) < 0.1f);
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime
@@ -896,6 +937,12 @@ public class VanillaPanelTests : IDisposable
         public VanillaFitResult Fit { get; set; } = new(VanillaFit.Fits, "ok");
 
         public int FitCalls { get; private set; }
+
+        /// <summary>Verdicts handed out before <see cref="Fit"/>, one per fit.</summary>
+        public Queue<VanillaFitResult> FitQueue { get; } = new();
+
+        /// <summary>The containers, for a test that checks one was never visible.</summary>
+        public bool LiveContainerVisible => _containers.Exists(c => c.Alive && c.Visible);
 
         public HashSet<VanillaPanelAnchor> RefuseAnchors { get; } = new();
 
@@ -986,6 +1033,7 @@ public class VanillaPanelTests : IDisposable
             VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons)
         {
             FitCalls++;
+            if (FitQueue.Count > 0) return FitQueue.Dequeue();
             return Fit;
         }
 

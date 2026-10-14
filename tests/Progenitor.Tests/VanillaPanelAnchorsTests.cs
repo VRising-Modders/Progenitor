@@ -191,17 +191,22 @@ public class VanillaPanelAnchorsTests
         Assert.False(VanillaPanelAnchors.SortControl(null, null, null).Found);
     }
 
-    // The character inventory beside a chest on 1.1.13.0, in the window parent's units, from the
-    // live site line (inventory (5,3 620x925), bar (223,67 124x36)) and the shipped prefab: the bar
-    // sits 30 units left of the window's center, its four 116x36 cells 8 apart are centered on it,
-    // and the item area (ParentContainerInventory: top-pivoted 442 below the body's top, 275 high,
-    // 12 in from each side of a body inset 8 per side) ends 38 units above the bar.
-    private static readonly UiRect Inventory = new(5, 3, 620, 925);
-    private static readonly UiRect DropAllCell = new(41, 67, 116, 36);
-    private static readonly UiRect SortCell = new(165, 67, 116, 36);
-    private static readonly UiRect SmartTakeCell = new(289, 67, 116, 36);
-    private static readonly UiRect SmartMergeCell = new(413, 67, 116, 36);
-    private static readonly UiRect ItemArea = new(25, 141, 580, 275);
+    // The character window's inventory on 1.1.13.0 AT REST, in the window's own units (origin at
+    // its top-left corner, y down is negative), from the live placement line of 5001a8916:
+    //   rest:    last=(438,-861 116x36) frame=(0,-925 620x925)
+    //   sliding: last=(408,-861 116x36) frame=(-22,-925 642x925)
+    // The bar is centered (its four 116x36 cells 8 apart, from 66 to 554); the item area
+    // (ParentContainerInventory: the body inset 8 a side, then 12 a side, top-pivoted 442 below the
+    // body's top, 275 high) ends 74 units above the bar's bottom; the body (SharedForNowAtLeast) ends at the bar's bottom.
+    private static readonly UiRect Frame = new(0, -925, 620, 925);
+    private static readonly UiRect SlidingFrame = new(-22, -925, 642, 925);
+    private static readonly UiRect DropAllCell = new(66, -861, 116, 36);
+    private static readonly UiRect SortCell = new(190, -861, 116, 36);
+    private static readonly UiRect SmartTakeCell = new(314, -861, 116, 36);
+    private static readonly UiRect SmartMergeCell = new(438, -861, 116, 36);
+    private static readonly UiRect SlidingSmartMerge = new(408, -861, 116, 36);
+    private static readonly UiRect ItemArea = new(20, -787, 580, 275);
+    private static readonly UiRect Body = new(8, -861, 604, 791);
 
     private static List<UiObstacle> BarObstacles() => new()
     {
@@ -209,123 +214,111 @@ public class VanillaPanelAnchorsTests
         new("SmartMergeButtonNew", SmartMergeCell), new("ParentContainerInventory", ItemArea),
     };
 
+    private static VanillaFitResult Row(float textWidth, float textMin, int buttons, out BesideSlot slot, bool icons = true) =>
+        VanillaPanelPlacement.PlaceBesideRow(SmartMergeCell, SortCell, allowAbove: true, icons, 8, textWidth, textMin, buttons, 36,
+            Frame, BarObstacles(), out slot);
+
     [Fact]
-    public void The_measured_bar_is_off_center_and_its_cells_are_where_the_grid_puts_them()
+    public void At_rest_the_bar_is_centered_and_the_slot_right_of_it_is_58_units()
     {
-        var bar = new UiRect(223, 67, 124, 36);
-        float barCenter = bar.X + bar.Width / 2f;
-        Assert.Equal(-30f, barCenter - (Inventory.X + Inventory.Width / 2f));
-        Assert.Equal(barCenter - (4 * 116f + 3 * 8f) / 2f, DropAllCell.X);
+        Assert.Equal(Frame.X + Frame.Width / 2f, (DropAllCell.X + SmartMergeCell.XMax) / 2f);
         Assert.Equal(DropAllCell.XMax + 8f, SortCell.X);
-        Assert.Equal(SmartMergeCell.XMax, barCenter + 244f);
+        Assert.Equal(554f, SmartMergeCell.XMax);
+        Assert.Equal(58f, Frame.XMax - (SmartMergeCell.XMax + 8f));
+
+        // The slide: 30 units left, frame widened to 642 by the body that slides out past the window.
+        Assert.Equal(-30f, SlidingSmartMerge.X - SmartMergeCell.X);
+        Assert.Equal(88f, SlidingFrame.XMax - (SlidingSmartMerge.XMax + 8f));
     }
 
     [Fact]
-    public void A_one_word_BesideSort_button_goes_right_of_SmartMerge_inside_the_window()
+    public void A_short_caption_shows_as_text_full_size_up_to_30_units_and_squeezed_up_to_40()
     {
-        // 88 units are left between SmartMerge (ends at 529) plus the 8-unit gap and the window's
-        // right edge (625): a 72-unit "Stash" fits; the old cell-wide 116 never could.
-        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 72, 36,
-            Inventory, BarObstacles(), out var slot);
+        // 58 = caption + 14 padding a side: 30 units at the game's 16-unit size; down to 0.75 of it, 40.
+        Assert.Equal(58f, 30f + 2 * 14f);
+        Assert.Equal(58f, VanillaPanelAnchors.MinButtonWidth(40f, 14f, 36f));
+
+        // "Go" (about 22 units): a 72-unit button by its compact minimum, squeezed to 58.
+        var verdict = Row(72, VanillaPanelAnchors.MinButtonWidth(22f, 14f, 36f), 1, out var slot);
         Assert.Equal(VanillaFit.Fits, verdict.Fit);
+        Assert.False(verdict.Icons);
         Assert.Equal(BesideSlot.After, slot);
-        Assert.Equal(537f, verdict.Rect.X);
-        Assert.Equal(67f, verdict.Rect.Y);
-        Assert.True(verdict.Rect.XMax <= Inventory.XMax);
+        Assert.Equal(new UiRect(562, -861, 58, 36).ToString(), verdict.Rect.ToString());
 
-        // The widest caption that still fits the slot.
-        verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 88, 36,
-            Inventory, BarObstacles(), out slot);
-        Assert.Equal(BesideSlot.After, slot);
+        // A 40-unit caption still fits as text; 41 does not.
+        Assert.False(Row(68, VanillaPanelAnchors.MinButtonWidth(40f, 14f, 36f), 1, out _).Icons);
+        Assert.True(Row(69, VanillaPanelAnchors.MinButtonWidth(41f, 14f, 36f), 1, out _).Icons);
     }
 
     [Fact]
-    public void A_wide_BesideSort_button_fits_neither_slot_on_this_build_and_is_hidden_with_both_reasons()
+    public void Storage_and_Stash_fall_back_to_a_36_unit_icon_button_right_of_the_bar()
     {
-        // Right: past the window edge. Above the sort button: the 38-unit gap under the item area
-        // cannot take a 36-unit button and an 8-unit gap, so it would cover the items by 6 units.
-        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 116, 36,
-            Inventory, BarObstacles(), out var slot);
+        // "Storage" (64-unit caption, 92 wide, at least 76) and "Stash" (72 wide) do not fit 58 as
+        // text: each is a square icon button, 36 + the 8-unit gap = 44 of the 58, with its caption as tooltip.
+        foreach (var (width, min) in new[] { (92f, VanillaPanelAnchors.MinButtonWidth(64f, 14f, 36f)), (72f, 72f) })
+        {
+            var verdict = Row(width, min, 1, out var slot);
+            Assert.Equal(VanillaFit.Fits, verdict.Fit);
+            Assert.True(verdict.Icons);
+            Assert.True(verdict.Retry);
+            Assert.Equal(BesideSlot.After, slot);
+            Assert.Equal(new UiRect(562, -861, 36, 36).ToString(), verdict.Rect.ToString());
+            Assert.True(Frame.Contains(verdict.Rect));
+            foreach (var o in BarObstacles()) Assert.False(verdict.Rect.Overlaps(o.Rect), o.Name);
+        }
+
+        // Without an icon face (any other anchor) the same row is hidden with the reason.
+        var noIcons = Row(92, 76, 1, out var none, icons: false);
+        Assert.Equal(VanillaFit.Blocked, noIcons.Fit);
+        Assert.Equal(BesideSlot.None, none);
+        Assert.Equal("overflow:mod/overlap:ParentContainerInventory", noIcons.Reason);
+    }
+
+    [Fact]
+    public void Three_icons_do_not_fit_the_58_unit_slot_so_a_three_button_handle_is_hidden()
+    {
+        // 3 x 36 + 2 x 8 = 124 > 58, and above the sort button the row meets the item area.
+        var verdict = Row(275, 233, 3, out var slot);
         Assert.Equal(VanillaFit.Blocked, verdict.Fit);
         Assert.Equal(BesideSlot.None, slot);
         Assert.Equal("overflow:mod/overlap:ParentContainerInventory", verdict.Reason);
     }
 
     [Fact]
-    public void The_slot_right_of_the_bar_takes_captions_up_to_80_units_shrinking_those_over_60()
+    public void Above_the_sort_button_and_below_the_bar_are_rejected_at_rest()
     {
-        // 88 units are left right of SmartMerge. A button is its caption plus 14 padding a side, so a
-        // caption of up to 60 units shows at the game's full 16-unit size; up to 80 it is squeezed to
-        // the slot with the caption down to 0.75 of that size (12 units); wider is hidden.
-        Assert.Equal(88f, Inventory.XMax - (SmartMergeCell.XMax + 8f));
-        Assert.Equal(88f, 60f + 2 * 14f);
-        Assert.Equal(88f, VanillaPanelAnchors.MinButtonWidth(80f, 14f, 36f));
+        // Above Sort: the slot (8 above the bar) is 36 high and the item area starts 38 above the bar.
+        var above = new UiRect(SortCell.X, SortCell.YMax + 8, 116, 36);
+        Assert.True(above.Overlaps(ItemArea));
+        Assert.Equal(6f, above.YMax - ItemArea.Y);
 
-        // "Storage": a 64-unit caption, 92 wide at full size, at least 76 squeezed: it gets the slot.
-        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 92, 36,
-            Inventory, BarObstacles(), out var slot, minWidth: VanillaPanelAnchors.MinButtonWidth(64f, 14f, 36f));
-        Assert.Equal(VanillaFit.Fits, verdict.Fit);
-        Assert.Equal(BesideSlot.After, slot);
-        Assert.Equal(new UiRect(537, 67, 88, 36).ToString(), verdict.Rect.ToString());
-        Assert.True(verdict.Retry);
-        foreach (var o in BarObstacles()) Assert.False(verdict.Rect.Overlaps(o.Rect), o.Name);
-
-        // "Stash" fits unsqueezed.
-        verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 72, 36,
-            Inventory, BarObstacles(), out slot, minWidth: 72);
-        Assert.Equal(new UiRect(537, 67, 72, 36).ToString(), verdict.Rect.ToString());
-
-        // An 81-unit caption cannot be squeezed into 88: hidden, and asked again later.
-        verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 81 + 28, 36,
-            Inventory, BarObstacles(), out slot, minWidth: VanillaPanelAnchors.MinButtonWidth(81f, 14f, 36f));
-        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
-        Assert.True(verdict.Retry);
+        // Below the bar: outside the window's content body, which ends at the bar's bottom; the 64
+        // units to the window's edge are its bottom border, leaving 20 under a 36-unit row and its gap.
+        var below = new UiRect(SortCell.X, SortCell.Y - 8 - 36, 116, 36);
+        Assert.False(Body.Contains(below));
+        Assert.Equal(64f, SortCell.Y - Frame.Y);
+        Assert.Equal(20f, below.Y - Frame.Y);
     }
 
     [Fact]
-    public void Measured_while_the_window_slides_in_the_slot_is_short_and_the_refusal_is_retried()
+    public void A_window_is_judged_only_after_three_equal_measurements()
     {
-        // Live 468b89120: the first fit of a one-button row read the bar 30 units right of where it
-        // rests (the window's open motion), so the slot was 58 wide and even "Stash" was refused.
-        // The refusal carries Retry, so the handle asks again once the window has come to rest.
-        var shifted = new UiRect(SmartMergeCell.X + 30, SmartMergeCell.Y, SmartMergeCell.Width, SmartMergeCell.Height);
-        var verdict = VanillaPanelPlacement.PlaceBeside(shifted, SortCell, allowAbove: true, 8, 72, 36,
-            Inventory, BarObstacles(), out var slot, minWidth: 72);
-        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
-        Assert.Equal(BesideSlot.None, slot);
-        Assert.True(verdict.Retry);
-        Assert.False(VanillaPanelPlacement.CheckInline(new UiRect(0, 0, 10, 10), new UiRect(0, 0, 5, 5), null).Retry);
-    }
+        // The live open: two sliding frames, then rest. The slot is judged on the third rest frame,
+        // never on a sliding one, so a placement is never shown and then hidden.
+        var settle = new PlacementSettle();
+        Assert.False(settle.Observe(SlidingFrame, SlidingSmartMerge));
+        Assert.False(settle.Observe(new UiRect(-10, -925, 630, 925), new UiRect(426, -861, 116, 36)));
+        Assert.False(settle.Observe(Frame, SmartMergeCell));
+        Assert.False(settle.Observe(Frame, SmartMergeCell));
+        Assert.True(settle.Observe(Frame, SmartMergeCell));
+        Assert.True(settle.Observe(Frame, SmartMergeCell));
 
-    [Fact]
-    public void Three_buttons_on_one_BesideSort_handle_are_one_row_that_fits_neither_slot_on_this_build()
-    {
-        // "Stash", "Inventory", "Find": 72 + 115 + 72 with 8 between = 275 units. Right of the bar
-        // there are 88; above the sort button the row would cover the item area. Hidden, with both reasons.
-        float row = 72 + 115 + 72 + 2 * 8;
-        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, row, 36,
-            Inventory, BarObstacles(), out var slot);
-        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
-        Assert.Equal(BesideSlot.None, slot);
-        Assert.Equal("overflow:mod/overlap:ParentContainerInventory", verdict.Reason);
-    }
-
-    [Fact]
-    public void Above_the_sort_button_is_taken_when_the_right_slot_is_full_and_the_space_above_is_free()
-    {
-        // A build with more room above the bar: the button centers over the sort button.
-        var obstacles = BarObstacles();
-        obstacles[4] = new UiObstacle("ParentContainerInventory", new UiRect(25, 160, 580, 275));
-        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 116, 36,
-            Inventory, obstacles, out var slot);
-        Assert.Equal(VanillaFit.Fits, verdict.Fit);
-        Assert.Equal(BesideSlot.Above, slot);
-        Assert.Equal(new UiRect(165, 111, 116, 36).ToString(), verdict.Rect.ToString());
-        foreach (var o in obstacles) Assert.False(verdict.Rect.Overlaps(o.Rect), o.Name);
-
-        // The rename row never tries above: one slot only.
-        VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: false, 8, 116, 36, Inventory, obstacles, out slot);
-        Assert.Equal(BesideSlot.None, slot);
+        // Moving again (a resolution change) starts the count again.
+        Assert.False(settle.Observe(SlidingFrame, SmartMergeCell));
+        settle.Reset();
+        Assert.False(settle.Observe(Frame, SmartMergeCell));
+        Assert.True(VanillaFitResult.Moving.Settling);
+        Assert.True(VanillaFitResult.Moving.Shown);
     }
 
     // ---------------------------------------------------------------- BesideRename

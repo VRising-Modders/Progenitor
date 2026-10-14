@@ -571,6 +571,10 @@ internal interface IUiRuntime
     /// </summary>
     IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption) => null;
 
+    /// <summary>P6: <see cref="ClonePanelButton(VanillaUiSite, IRuntimeWidget, string)"/> with the icon its face falls back to.</summary>
+    IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon) =>
+        ClonePanelButton(site, container, caption);
+
     /// <summary>
     /// P6: place (edge anchors) or verify (inline and tooltip anchors) the container against the
     /// live panel, per <see cref="VanillaPanelPlacement"/>. Called after every build and every

@@ -105,6 +105,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private readonly VanillaPanelTracker _tracker = new();
     private readonly List<Action<VanillaPanelEvent>> _panelHandlers = new();
     private readonly List<string> _captions = new();
+    private readonly List<VanillaButtonIcon> _icons = new();
     private readonly List<bool> _buttonShown = new();
     private readonly List<ushort> _buttonIds = new();
     private readonly List<IRuntimeWidget?> _buttons = new();
@@ -201,7 +202,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         lock (_gate) _panelHandlers.Remove(handler);
     }
 
-    public IUiButton Button(string caption)
+    public IUiButton Button(string caption) => Button(caption, VanillaButtonIcon.Default);
+
+    public IUiButton Button(string caption, VanillaButtonIcon icon)
     {
         if (!Enabled || IsDisposed || !VanillaUiSites.Info(Site).AcceptsButtons) return DisabledAttachButton.Instance;
         int index;
@@ -210,6 +213,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         {
             index = _captions.Count;
             _captions.Add(caption ?? "");
+            _icons.Add(icon);
             _buttonShown.Add(true);
             _buttonIds.Add(id);
             _buttons.Add(null);
@@ -320,6 +324,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _rows.Clear();
             ids = _buttonIds.ToArray();
             _captions.Clear();
+            _icons.Clear();
             _buttonShown.Clear();
             _buttonIds.Clear();
             _buttons.Clear();
@@ -595,6 +600,18 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             result = new VanillaFitResult(VanillaFit.Blocked, "threw");
         }
 
+        if (result.Settling)
+        {
+            // The window is still sliding in: judge nothing, show nothing, measure again next frame.
+            // A placement is never shown and then hidden because it was judged on moving rects.
+            _fit = VanillaFit.Unknown;
+            _fitRetry = true;
+            _fitDirty = true;
+            try { if (_container!.Visible) _container.Visible = false; }
+            catch { /* a container Unity just destroyed is the next frame's rebuild */ }
+            return;
+        }
+
         _fit = result.Fit;
         _fitRetry = result.Retry;
 
@@ -691,7 +708,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             }
 
             IRuntimeWidget? button = null;
-            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i]); }
+            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i], i < _icons.Count ? _icons[i] : VanillaButtonIcon.Default); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button clone threw: " + e.Message);

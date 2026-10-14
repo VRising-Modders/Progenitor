@@ -1274,7 +1274,10 @@ internal sealed partial class UnityUiRuntime
         catch { /* */ }
     }
 
-    public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption)
+    public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption) =>
+        ClonePanelButton(site, container, caption, VanillaButtonIcon.Default);
+
+    public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon)
     {
         if (container is not PanelContainerWidget host || !host.Alive) return null;
         if (host.Anchor == VanillaPanelAnchor.TooltipBody) return null;
@@ -1320,7 +1323,10 @@ internal sealed partial class UnityUiRuntime
                 return ButtonFailed(site, "clone has no SimpleStunButton on its root");
             }
 
-            var widget = new PanelButtonWidget(clone, label, stun.onClick, size);
+            // BesideSort may fall back to a square icon face (PlaceBesideRow); its icon is built now,
+            // hidden, so the switch is a SetActive and never a clone.
+            GameObject? face = host.Anchor == VanillaPanelAnchor.BesideSort ? AddIconFace(clone, label, icon, size) : null;
+            var widget = new PanelButtonWidget(clone, label, stun.onClick, size, face, this);
             var element = clone.GetComponent<LayoutElement>() ?? clone.AddComponent<LayoutElement>();
             element.ignoreLayout = false;
             element.preferredHeight = size.y;
@@ -1339,6 +1345,75 @@ internal sealed partial class UnityUiRuntime
             TryDestroyImmediate(clone);
             return null;
         }
+    }
+
+    /// <summary>Icon face size as a share of the button's height (24 on the 36-unit bar).</summary>
+    private const float IconFaceShare = 0.67f;
+
+    /// <summary>
+    /// The icon an icon-mode button shows: the item's own game icon (<c>ManagedItemData.Icon</c>) for
+    /// <see cref="VanillaButtonIcon.Item"/>, else the framework's drawn mark, tinted with the caption's
+    /// color. Built hidden; the caption's object is the one that hides when it shows.
+    /// </summary>
+    private static GameObject? AddIconFace(GameObject clone, TextMeshProUGUI caption, VanillaButtonIcon icon, Vector2 size)
+    {
+        GameObject? go = null;
+        try
+        {
+            Sprite? sprite = null;
+            bool itemIcon = false;
+            if (icon.ItemGuid != 0)
+            {
+                sprite = ItemIconSprite(icon.ItemGuid);
+                itemIcon = sprite != null;
+            }
+
+            if (sprite == null)
+            {
+                if (!UiDrawnMark.TryParse(icon.Mark, out var mark) || !mark.IsIcon) mark = UiDrawnMark.ChestMark;
+                sprite = MarkSprite(mark);
+            }
+
+            if (sprite == null) return null;
+            go = new GameObject("icon");
+            var rt = go.AddComponent<RectTransform>();
+            rt.SetParent(clone.transform, false);
+            float side = Mathf.Round(size.y * IconFaceShare);
+            rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(side, side);
+            rt.anchoredPosition = Vector2.zero;
+            var layout = go.AddComponent<LayoutElement>();
+            layout.ignoreLayout = true;
+            var image = go.AddComponent<Image>();
+            image.sprite = sprite;
+            image.preserveAspect = true;
+            image.raycastTarget = false;
+            image.color = itemIcon ? Color.white : caption.color;
+            go.SetActive(false);
+            return go;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach icon face not built: " + e.Message);
+            TryDestroyImmediate(go);
+            return null;
+        }
+    }
+
+    /// <summary>An item's own inventory icon from the client's game data, or null.</summary>
+    private static Sprite? ItemIconSprite(int guid)
+    {
+        try
+        {
+            var world = Worlds.Client;
+            if (world == null || !world.IsCreated) return null;
+            var registry = world.GetExistingSystemManaged<ProjectM.GameDataSystem>()?.ManagedDataRegistry;
+            if (registry == null) return null;
+            if (registry.TryGet<ProjectM.ManagedItemData>(new Stunlock.Core.PrefabGUID(guid), out var data) && data != null)
+                return data.Icon;
+        }
+        catch { /* the drawn mark stands in */ }
+        return null;
     }
 
     /// <summary>
@@ -1595,22 +1670,39 @@ internal sealed partial class UnityUiRuntime
         if (host.Mode == InlineMode.Positioned)
         {
             if (lastMember.IsEmpty) lastMember = RectIn(panelSpace, group.TryCast<RectTransform>());
+
+            // Judge only a window at rest: it slides in when it opens, and a slot measured mid-slide
+            // is the wrong slot (live: 88 wide sliding, 58 at rest). Until the frame and the bar have
+            // measured the same three frames running, nothing is shown and nothing is logged.
+            if (!host.Settle.Observe(frame, lastMember))
+            {
+                FitScratch.Clear();
+                return VanillaFitResult.Moving;
+            }
+
             var reference = host.Anchor == VanillaPanelAnchor.BesideSort && Alive(view.Sort)
                 ? RectIn(panelSpace, Rt(view.Sort))
                 : default;
             float rowSpacing = GroupSpacing(host.Transform, VanillaPanelPlacement.DefaultSpacing);
-            float width = host.InlineWidth(rowSpacing);
+            float width = host.TextRowWidth(rowSpacing);
             float gap = VanillaPanelAnchors.PositionedSpacing(GroupSpacing(group, 0f));
-            inlineVerdict = VanillaPanelPlacement.PlaceBeside(
-                lastMember, reference, allowAbove: host.Anchor == VanillaPanelAnchor.BesideSort, gap, width, host.ButtonSize.y,
-                frame, FitScratch, out var slot, host.MinInlineWidth(rowSpacing));
+            int capable = host.IconCapableCount(out int visibleButtons);
+            bool allowIcons = host.Anchor == VanillaPanelAnchor.BesideSort && visibleButtons > 0 && capable == visibleButtons;
+            inlineVerdict = VanillaPanelPlacement.PlaceBesideRow(
+                lastMember, reference, allowAbove: host.Anchor == VanillaPanelAnchor.BesideSort, allowIcons, gap,
+                width, host.MinInlineWidth(rowSpacing), visibleButtons, host.ButtonSize.y, frame, FitScratch, out var slot);
             host.Slot = slot;
-            if (inlineVerdict.Fit == VanillaFit.Fits) Place(host, panelSpace, inlineVerdict.Rect);
+            if (inlineVerdict.Fit == VanillaFit.Fits)
+            {
+                if (host.IconRow != inlineVerdict.Icons) host.SetIconRow(inlineVerdict.Icons);
+                Place(host, panelSpace, inlineVerdict.Rect);
+            }
 
             // The geometry the verdict was made on, said when it changes (a refused slot is asked
             // again every 30 frames; the line repeats only if something moved).
             string geometry = "Ui: attach " + VanillaUiSites.Key(host.Site) + " anchor=" + VanillaUiSites.AnchorKey(host.Anchor)
                 + " slot=" + (slot == BesideSlot.After ? "after" : slot == BesideSlot.Above ? "above" : "none")
+                + " face=" + (inlineVerdict.Fit == VanillaFit.Fits ? (inlineVerdict.Icons ? "icon" : "text") : "none")
                 + " last=" + lastMember + " frame=" + frame + " row=" + Mathf.RoundToInt(width) + "/min" + Mathf.RoundToInt(host.MinInlineWidth(rowSpacing))
                 + " placed=" + inlineVerdict.Rect + " reason=" + inlineVerdict.Reason;
             if (!PlacementSaid.TryGetValue((host.Site, host.Anchor), out var said) || said != geometry)
@@ -1742,7 +1834,10 @@ internal sealed partial class UnityUiRuntime
             catch { /* */ }
             d["rect"] = rect;
             if (rb.Container is PanelContainerWidget placed && placed.Mode == InlineMode.Positioned)
+            {
                 d["slot"] = placed.Slot == BesideSlot.After ? "after" : placed.Slot == BesideSlot.Above ? "above" : "none";
+                d["face"] = placed.IconRow ? "icon" : "text";
+            }
 
             if (d["buttons"] is List<object?> buttons)
             {
@@ -1840,6 +1935,50 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>Where a placed container went on its last fit (<see cref="BesideSlot.None"/> otherwise).</summary>
         internal BesideSlot Slot { get; set; }
+
+        /// <summary>Whether the window this placed container measures has come to rest.</summary>
+        internal PlacementSettle Settle { get; } = new();
+
+        /// <summary>The row is shown as icon buttons (the captions did not fit the slot).</summary>
+        internal bool IconRow { get; private set; }
+
+        /// <summary>Switch every button between its text and icon face.</summary>
+        internal void SetIconRow(bool icons)
+        {
+            IconRow = icons;
+            for (int i = 0; i < Buttons.Count; i++)
+                if (Buttons[i].Alive) Buttons[i].SetIconMode(icons);
+        }
+
+        /// <summary>The visible buttons with an icon face (an icon row needs every one of them).</summary>
+        internal int IconCapableCount(out int visible)
+        {
+            visible = 0;
+            int capable = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                if (!Buttons[i].Alive || !Buttons[i].Visible) continue;
+                visible++;
+                if (Buttons[i].HasIcon) capable++;
+            }
+
+            return capable;
+        }
+
+        /// <summary>The row's width as text at full size.</summary>
+        internal float TextRowWidth(float spacing)
+        {
+            float w = 0f;
+            int n = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                if (!Buttons[i].Alive || !Buttons[i].Visible) continue;
+                w += Buttons[i].TextWidth;
+                n++;
+            }
+
+            return n == 0 ? 0f : w + (n - 1) * Mathf.Max(0f, spacing);
+        }
 
         private readonly Transform _group;
 
@@ -1967,17 +2106,87 @@ internal sealed partial class UnityUiRuntime
     {
         private GameObject? _go;
         private TextMeshProUGUI? _caption;
+        private GameObject? _icon;
+        private UiHoverWatch? _hover;
+        private bool _hovered;
+        private readonly UnityUiRuntime? _runtime;
         private readonly object? _click;
         private readonly Vector2 _donorSize;
         private UiDestroyVerdict _verdict = UiDestroyVerdict.Failed;
+        private float _textWidth;
 
-        internal PanelButtonWidget(GameObject go, TextMeshProUGUI caption, object? click, Vector2 donorSize)
+        internal PanelButtonWidget(GameObject go, TextMeshProUGUI caption, object? click, Vector2 donorSize,
+            GameObject? icon = null, UnityUiRuntime? runtime = null)
         {
             _go = go;
             _caption = caption;
             _click = click;
             _donorSize = donorSize;
-            PreferredWidth = donorSize.x;
+            _icon = icon;
+            _runtime = runtime;
+            _textWidth = donorSize.x;
+            if (icon != null && runtime != null)
+            {
+                try { _hover = UiHoverWatch.Create(go, OnHover, null); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: attach icon button tooltip unavailable: " + e.Message); }
+            }
+        }
+
+        /// <summary>
+        /// Shown as a square icon button (its caption hidden, the caption as its tooltip) because the
+        /// caption does not fit the slot (<see cref="VanillaPanelPlacement.PlaceBesideRow"/>).
+        /// </summary>
+        internal bool IconMode { get; private set; }
+
+        /// <summary>The width this button asks for as text: donor width or caption plus padding.</summary>
+        internal float TextWidth => _textWidth;
+
+        /// <summary>An icon face was built (a <see cref="VanillaPanelAnchor.BesideSort"/> button).</summary>
+        internal bool HasIcon => UnityUiRuntime.Alive(_icon);
+
+        internal void SetIconMode(bool icon)
+        {
+            if (_icon == null) icon = false;
+            if (icon == IconMode) return;
+            IconMode = icon;
+            try
+            {
+                if (_caption != null) _caption.gameObject.SetActive(!icon);
+                if (UnityUiRuntime.Alive(_icon)) _icon!.SetActive(icon);
+                if (Element != null)
+                {
+                    Element.preferredWidth = PreferredWidth;
+                    Element.minWidth = icon ? _donorSize.y : -1f;
+                }
+            }
+            catch { /* the face it had stays */ }
+
+            if (!icon && _hovered) HideTip();
+        }
+
+        private void OnHover(bool inside)
+        {
+            _hovered = inside;
+            if (!inside || !IconMode)
+            {
+                HideTip();
+                return;
+            }
+
+            try
+            {
+                var rt = Rect;
+                if (rt == null || _runtime == null) return;
+                string caption = _caption != null ? (_caption.text ?? "") : "";
+                _runtime.ShowTooltip(ScreenRectOf(rt), caption, "", () => _hovered && IconMode && Alive);
+            }
+            catch { /* no tooltip is a cosmetic miss */ }
+        }
+
+        private void HideTip()
+        {
+            try { _runtime?.HideTooltip(); }
+            catch { /* */ }
         }
 
         internal LayoutElement? Element { get; set; }
@@ -1987,8 +2196,11 @@ internal sealed partial class UnityUiRuntime
             get { try { return UnityUiRuntime.Alive(_go) ? _go!.GetComponent<RectTransform>() : null; } catch { return null; } }
         }
 
-        /// <summary>Donor width, or the caption at full size plus the padding, whichever is wider.</summary>
-        internal float PreferredWidth { get; private set; }
+        /// <summary>
+        /// Text: donor width, or the caption at full size plus the padding, whichever is wider. Icon:
+        /// square, the button's height.
+        /// </summary>
+        internal float PreferredWidth => IconMode ? _donorSize.y : _textWidth;
 
         /// <summary>The caption's own width at full size (no padding), measured by the last refit.</summary>
         internal float CaptionWidth { get; private set; }
@@ -2000,10 +2212,10 @@ internal sealed partial class UnityUiRuntime
                 if (_caption == null) return;
                 var pref = _caption.GetPreferredValues(_caption.text ?? "", 9999f, _donorSize.y);
                 CaptionWidth = pref.x;
-                PreferredWidth = Mathf.Max(_donorSize.x, pref.x + 2f * CaptionPadding);
+                _textWidth = Mathf.Max(_donorSize.x, pref.x + 2f * CaptionPadding);
                 if (Element != null) Element.preferredWidth = PreferredWidth;
             }
-            catch { PreferredWidth = _donorSize.x; }
+            catch { _textWidth = _donorSize.x; }
         }
 
         public UiDestroyVerdict LastRelease => _verdict;
@@ -2051,6 +2263,19 @@ internal sealed partial class UnityUiRuntime
 
         public void Release()
         {
+            if (_hover != null)
+            {
+                try { _hover.Dispose(); }
+                catch { /* */ }
+                _hover = null;
+            }
+
+            if (_hovered)
+            {
+                _hovered = false;
+                HideTip();
+            }
+
             var go = _go;
             if (go == null || !UnityUiRuntime.Alive(go))
             {
