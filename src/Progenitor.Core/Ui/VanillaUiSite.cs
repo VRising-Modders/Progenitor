@@ -1,3 +1,5 @@
+using Progenitor.Hooks;
+
 namespace Progenitor.Ui;
 
 /// <summary>
@@ -275,6 +277,15 @@ internal static class VanillaUiSites
 
         return false;
     }
+
+    /// <summary>
+    /// The options every site's frame watch is installed with: <c>OnlyWhenSystemRuns = false</c>.
+    /// Every driving mapper (<c>MapMenuMapper</c> and the five window mappers) only updates while its
+    /// own queries match, so with the default option a watch skips frames and can miss an open or
+    /// never see a close. The watch has to run on exactly the frames the mapper does not. A new
+    /// instance per call, because <c>HookOptions</c> is mutable.
+    /// </summary>
+    internal static HookOptions WatchOptions(VanillaUiSite site) => new() { OnlyWhenSystemRuns = false };
 
     /// <summary>Whether <paramref name="anchor"/> is one of the column anchors placed by Progenitor.</summary>
     internal static bool IsEdge(VanillaPanelAnchor anchor) =>

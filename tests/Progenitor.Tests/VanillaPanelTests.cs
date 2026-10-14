@@ -59,6 +59,39 @@ public class VanillaPanelTests : IDisposable
         Assert.False(VanillaUiSites.IsDefined((VanillaUiSite)7));
     }
 
+    [Theory]
+    [InlineData(VanillaUiSite.MapWarEventInfo)]
+    [InlineData(VanillaUiSite.ContainerPanel)]
+    [InlineData(VanillaUiSite.StationPanel)]
+    [InlineData(VanillaUiSite.InventoryPanel)]
+    [InlineData(VanillaUiSite.CastleHeartPanel)]
+    [InlineData(VanillaUiSite.InventoryTooltip)]
+    public void Every_site_watch_runs_on_frames_its_mapper_skips(VanillaUiSite site)
+    {
+        // Every driving mapper (the map card's included) updates only while its queries match. A
+        // watch with the default OnlyWhenSystemRuns = true skips exactly the frames on which a
+        // window closes, so the close and the detach are lost. Both resolvers install with this.
+        var options = VanillaUiSites.WatchOptions(site);
+        Assert.False(options.OnlyWhenSystemRuns);
+        Assert.Equal(1, options.EveryNFrames);
+        Assert.NotSame(options, VanillaUiSites.WatchOptions(site));
+    }
+
+    [Fact]
+    public void Both_resolvers_install_their_watches_with_the_site_watch_options()
+    {
+        // Source pin on the Unity half, which this project does not compile: no After<...> in
+        // either resolver may be installed without the site's watch options.
+        foreach (var file in new[] { "MapWarEventSiteResolver.cs", "VanillaPanelSiteResolver.cs" })
+        {
+            string src = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", file);
+            int afters = System.Text.RegularExpressions.Regex.Matches(src, @"SystemHooks\.After<\w+>\(").Count;
+            int withOptions = System.Text.RegularExpressions.Regex.Matches(src, @"VanillaUiSites\.WatchOptions\(site\)").Count;
+            Assert.True(afters > 0, file);
+            Assert.Equal(afters, withOptions);
+        }
+    }
+
     [Fact]
     public void ThronePanel_is_the_castle_heart_window_under_its_requirements_name()
     {

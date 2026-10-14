@@ -58,8 +58,6 @@ internal sealed partial class UnityUiRuntime
     /// <summary>Smallest caption size; below it the caption ends in an ellipsis rather than overflowing.</summary>
     private const float CaptionMinSize = 10f;
 
-    private static readonly HookOptions EveryFrame = new() { OnlyWhenSystemRuns = false };
-
     /// <summary>One view per site, reused every frame (no per-frame allocation).</summary>
     private static readonly Dictionary<VanillaUiSite, PanelView> PanelViews = new();
 
@@ -199,11 +197,11 @@ internal sealed partial class UnityUiRuntime
         // every Update call; the site's own mapper is used for readability of the pin line.
         return site switch
         {
-            VanillaUiSite.ContainerPanel => SystemHooks.After<ContainerMenuMapper>(frame, EveryFrame),
-            VanillaUiSite.StationPanel => SystemHooks.After<WorkstationMenuMapper>(frame, EveryFrame),
-            VanillaUiSite.CastleHeartPanel => SystemHooks.After<CastleHeartMenuMapper>(frame, EveryFrame),
-            VanillaUiSite.InventoryPanel => SystemHooks.After<InventoryMenuMapper>(frame, EveryFrame),
-            VanillaUiSite.InventoryTooltip => SystemHooks.After<InventoryMenuMapper>(frame, EveryFrame),
+            VanillaUiSite.ContainerPanel => SystemHooks.After<ContainerMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
+            VanillaUiSite.StationPanel => SystemHooks.After<WorkstationMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
+            VanillaUiSite.CastleHeartPanel => SystemHooks.After<CastleHeartMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
+            VanillaUiSite.InventoryPanel => SystemHooks.After<InventoryMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
+            VanillaUiSite.InventoryTooltip => SystemHooks.After<InventoryMenuMapper>(frame, VanillaUiSites.WatchOptions(site)),
             _ => null,
         };
     }

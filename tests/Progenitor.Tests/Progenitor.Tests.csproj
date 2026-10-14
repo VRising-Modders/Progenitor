@@ -420,6 +420,7 @@
     <!-- P6: panel sites. The open/close/target tracker, the placement rules and the
          missing-site reporter are game-free; VanillaPanelSiteResolver.cs is the Unity half. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanel.cs" Link="Linked\VanillaPanel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Hooks\HookOptions.cs" Link="Linked\HookOptions.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\IVanillaAttachHandle.cs" Link="Linked\IVanillaAttachHandle.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachHandle.cs" Link="Linked\VanillaAttachHandle.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachRegistry.cs" Link="Linked\VanillaAttachRegistry.cs" />
