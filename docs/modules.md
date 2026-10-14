@@ -2376,6 +2376,199 @@ On the isolated test server with Core, Dev and `Progenitor.Sample` deployed, an 
    and its own name.
 7. Clean up: remove the Sample from both reload folders and confirm the clean unload in the logs.
 
+## Servants
+
+`ctx.Servants` (`Progenitor.Servants`) reads a castle's servants and hunts on the server, sends
+servants on a hunt the way the game's throne does, announces finished hunts, and can swap the
+throne's servant list for one player. **Experimental**: source-checked against the game's metadata
+and code, built, and game-free tested (`ServantLogicTests`); nothing has run in the game yet. The
+live acceptance procedure is below. Server only and main thread only; on the client every member
+throws. API table: [api.md, Servants](api.md#servants).
+
+```csharp
+// Send two idle servants of the castle the player stands in on a hunt, then resend whoever comes back.
+var castle = ctx.Castles.At(characterEntity);
+var idle = ctx.Servants.List(castle.Heart.ToEntity()).Where(s => s.State == ServantState.Free).Take(2);
+var sent = ctx.Servants.Send(new ServantSendRequest
+{
+    Heart = castle.Heart,
+    Servants = idle.Select(s => s.Servant).ToList(),
+    MissionGuid = missionGuid,          // a zone's mission: ctx.Servants.MissionOf(zone), or ServantMission.MissionGuid
+    DataSlot = 1,                       // the hunt length choice, as the throne offers it
+    User = CastleId.From(userEntity),   // whose map discovery is checked
+});
+if (!sent.Ok) ctx.Log.LogInfo($"refused ({sent.Refusal}): {sent.Reason}");
+
+ctx.Events.On<ServantsReturned>(ev =>
+{
+    foreach (var s in ev.Servants)
+        if (s.Outcome == ServantOutcome.Returned)
+            ctx.Inventory.TransferAll(s.Inventory, stashChest);   // the game sends only empty servants
+    var again = ctx.Servants.Resend(ev);                         // same heart, mission and length choice
+});
+```
+
+### What the game does (source-checked)
+
+| Step | Game behavior |
+|---|---|
+| Hunt record | A castle heart carries an `ActiveServantMission` buffer (networked, so every client's throne map shows it): mission prefab, start (`DateTime.UtcNow` ticks), length in seconds, the length choice (`MissiontDataId`, an index into the game's mission settings), up to three servants and their count. |
+| Send | The client's `SendOnMissionEvent` is handled by `ServantMissionActionSystem`. In order it checks: the sender's progression is readable and has discovered the zone (skipped by the "all progression unlocked" debug setting); the zone has a mission; the servants exist, are not on a hunt, not dead, carry nothing, and are not injured; the sender could interact with the throne and every servant's coffin is connected to the throne's heart; the heart has no hunt on that mission yet (one hunt per zone and castle) and no hunt naming those servants; no more servants than the mission's `MissionData.ServantSlots`; the length choice exists. Any failure drops the event silently. |
+| Send writes | One row added to the heart's record (length = the setting's length, times 1e-5 with the "servant timers disabled" debug setting); the mission buff (`ServantMissionSettingsSingleton.MissionBuff`) applied to each servant, whose server script sets `ServantData.IsOnMission` (and clears it when the buff goes); a "mission started" notice to the sender's allies. **No success chance or injury is rolled at the send.** |
+| Return | `ServantMissionUpdateSystem` finishes every hunt whose start plus length has passed: it rolls each servant's success there (`GetMissionSuccessChanceForServant_Server`), destroys the servants that failed or injures them (coffin `InjuryEndTimeTicks`, `Injury`), adds randomized loot to the survivors' inventories, summons them back to their coffins, removes the row, removes the mission buff and notifies allies. |
+| Throne list | `ServantInfoEventSystem_Server` answers a player who opens a throne with every coffin connected to the throne's heart that holds a living, revivable or reviving servant. State: revivable or reviving coffin is `Dead`; an injury still running is `Injured`; named by the heart's record is `AwayOnHunt`; carrying items is `HasItems`; otherwise `Free`. Proficiency is `round(gear level × 10) + 100 + round(expertise × 100)`. |
+
+### Send and resend
+
+`Send` reads every fact the game checks, validates them in the game's order with the game-free
+`ServantLogic.PlanSend`, and refuses with a `ServantSendRefusal` and a sentence naming the servant,
+zone or setting. On success it applies the mission buff to each servant (through the debug-event
+buff path Progenitor already uses on units, which spawns the buff in the call) and checks that each
+servant carries it, then appends the row with the non-generic
+`UnsafeEntityManagerUtility.AddBufferElement` at the [layout constants](#layout-constants), and
+reads the record back. If a servant does not get the buff, nothing is written and the buffs already
+applied are removed; if the row cannot be written or does not read back, the buffs are removed. A
+servant that still carries the mission buff of its last hunt (the game removes it a moment after
+the return) is refused as `ServantBusy`. A second later the log says `servants: send confirmed …`
+once every servant carries the buff and reads `IsOnMission`, warns naming the servant, or says the
+hunt `already returned before the check` (with the game's servant timers off). `ServantsSent` is
+published for every send Progenitor makes.
+
+Differences from the throne send, by design:
+
+- **No throne, no seated player.** The interaction check is skipped; the coffin-to-heart check is kept.
+- **Discovery** is checked for `ServantSendRequest.User` (default: the heart's owner) against any zone
+  of the mission; `CheckDiscovered = false` skips it. `Resend` skips it, because the game accepted
+  the zone for the first send.
+- **The "mission started" notice** to allies is not sent (it is a client notice only); a mod that wants
+  one sends its own from `ServantsSent`.
+- **The success chance is never touched.** The game rolls it at the return, as for any hunt.
+  Progenitor patches no success-chance method: their list parameter breaks the hook trampoline.
+
+`Resend(returned)` sends the servants that came back unhurt, from the same heart, on the same
+mission and length choice. A servant that still carries its loot is refused (`ServantHasItems`), as
+the game would: move the loot first (`ctx.Inventory.TransferAll(servant.Inventory, chest)`). A return
+from an earlier world load is refused.
+
+### Returns
+
+`ServantsReturned` is published a moment after the game finished a hunt: servants back in their
+coffins, loot in their inventories, injuries applied, the row gone. The game destroys the servants
+that died and removes the survivors' mission buff a moment after the return, so the event waits
+until both have happened (at least half a second, at most five), which is what lets a handler call
+`Resend` directly. Progenitor watches only while something is subscribed: before
+`ServantMissionUpdateSystem` updates, it snapshots the
+record of every heart with a hunt due within two seconds (the list of hearts with hunts is re-read
+once a second, after every send Progenitor makes, and on every update while the game's servant
+timers are off); after the update, the rows that are gone are the hunts that
+returned. Each servant's `Outcome` is `Dead` (destroyed or being destroyed, or its coffin is
+revivable), `Injured` (an injury running) or `Returned`; `Loot` is what its inventory holds at the
+publish, which is the hunt's haul because the game sends only empty servants (`LootIsHaul` is false
+for a dead servant or an inventory that could not be read). An aborted hunt (the throne's abort) is
+not reported as a return.
+
+### Throne list for one player (experimental)
+
+`RegisterListProvider(IServantListProvider)` registers the one provider that decides, per player,
+whose servants a throne lists. Like the material source provider, there is one provider at a time
+(a second registration throws naming the owner), the handle is tracked, and unload or a Core swap
+removes it, so thrones list their own castle again. When a player opens a throne, the provider gets
+`ServantListRequest` (`User`, `Character`, `Heart` and `Territory` of the castle the player stands
+in) and returns the hearts whose servants to list, or null for the game's own list.
+
+How it works: after `ServantInfoEventSystem_Server` built the game's answer (the response event to
+that user, created immediately), Progenitor rewrites its `Result` list with the servants of the
+provider's hearts, filled the way the game fills an entry, at most 36. State is read against each
+servant's own heart (the game would read every servant against the throne's heart, which shows
+another castle's hunting servants as free). A send from that list naming servants of another heart
+would be refused by the game (their coffins are not the throne's), so Progenitor, before
+`ServantMissionActionSystem` updates, performs it with its own send on each servant's own heart,
+with the game's checks and the sender's discovery, and drops that client event. It does so only
+when the send names the throne the same player opened within the last two minutes (the shown list
+is dropped when the player disconnects), while the player still stands in the castle they stood in
+when the list was shown (in place of the game's reach check; the throne entity itself is not
+resolved), and only when every servant named was on that list; otherwise the event is left to the
+game. The provider is then asked again, and every heart the send names must still be in its answer
+(a player who left the clan cannot send from an older list). The send is all or nothing: every
+heart's send is validated first, and only then is the client event dropped and the sends written;
+if any check fails nothing is sent and the event is dropped (the game would refuse it). Sends naming
+only the throne's own servants are left to the game. Counters: `ListStatus`.
+
+**The provider is the authorization boundary.** Every heart it returns becomes sendable by that
+player, with no other ownership check. Return only castles the player may command (the sample
+returns castles the player owns or the player's clan owns, each confirmed with `ctx.Castles.RelationTo`).
+
+### Limits and open questions
+
+- Nothing here has run in the game. Inferred, not observed: the response list offset (8, from the
+  Collections padding rule and the game's serializer); that the response is sent after the
+  update group in the same frame; that the debug-event buff path gives the mission buff the same
+  creator as the game's send and spawns it in the call; the timing of the return detector against
+  the game's clock; that a servant that died is destroyed, and the survivors' buff removed, within
+  five seconds of the return.
+- The user's progression must be readable only when discovery is checked; the game reads it for
+  every throne send.
+- The game's servant-timers and all-progression debug settings are read from the server's
+  `SyncedServerDebugSettings`; the heart-connection debug setting of the throne list is not.
+- A return seen but not yet published (the half second to five seconds `ServantsReturned` waits) is
+  lost when Core is swapped or unloaded in that window, and so is the throne list a player was
+  shown; the hunt itself is unaffected.
+- `ServantsSent` covers Progenitor's sends only. The game's own sends show up in `Missions` and, when
+  they finish, in `ServantsReturned`.
+- Servant entities and coffins are session ids. Persist the heart's `ContainerId`, the territory
+  index, the mission GUID and the length choice.
+
+### Sample commands
+
+`samples/Progenitor.Sample/SampleServants.cs`, admin only, through `.servants`: `list` (the throne
+list of the castle you stand on, rows `#1..`), `hunts` (its hunt record with zones `x,y#zone`),
+`send <#n[,#n,#n]> <missionGuid|x,y#zone> <slot>`, `watch on|off|resend` (log every return; `resend`
+also resends), `again` (resend the last return of this castle), `swap on|off` (a provider that lists
+every castle you own or your clan owns, this castle first) and `status`. Every action logs a
+`Sample servants: …` line.
+
+### Live acceptance (procedure — not run)
+
+On the isolated test server with a copy of the test save, a connected admin client, Core and
+`Progenitor.Sample` deployed. Choose a castle (called A below) with at least two living servants
+with empty inventories, and a second castle B of the same player or clan with at least one.
+
+1. Stand in castle A. `.servants list`: one row per coffin, the same names and states as the
+   throne's servant list. `.servants hunts`: `0 hunt(s)` (or the hunts the throne map shows).
+2. Shorten hunts for the test: run the game's `DisableServantTimers` admin console command (the
+   server's servant-timers debug setting), or plan for the shortest real length. With timers off a
+   hunt returns on the next frame; servants can die on a failed roll, so use servants you can
+   lose on the save copy.
+3. Send from the throne the normal way once (pick a zone on its map) so the zone is known. `.servants
+   hunts` shows it with `zone x,y#z slot n`. Wait for it to return.
+4. `.servants watch on`, then `.servants send #1,#2 <x,y#z from step 3> <slot>`. Expect the reply
+   `sent 2 servant(s) on mission <guid> slot <n> for <s> s`, the log lines `servants: sent by=<sample
+   guid> heart=<i:v> …` and, a second later, `servants: send confirmed …` (with servant timers off:
+   `… already returned before the check`). With real timers, open the throne: the map shows the
+   hunt with its timer, and the two servants are away (not standing in the castle).
+5. When it returns (within five seconds of the game's return): the log has `servants: hunt
+   returned heart=… servants=[…] loot=[…]` and
+   `Sample servants: returned heart=… territory=… loot=…`. Compare the loot with the servants'
+   inventories in the coffin panels.
+6. `.servants again` with the loot still on them: expect `refused (ServantHasItems): servant
+   '<name>' … still carries N stack(s) …`. Move the loot out (`.items moveall <servant i:v> #1`, the
+   servant id from `.servants list`), then `.servants again`: expect `sent …`, and the throne's map
+   shows the resend on the same zone with the same length.
+7. Refusals: `.servants again` immediately again (expect `ZoneBusy` or `ServantBusy`); a send naming
+   an injured or dead servant (expect `ServantInjured` / `ServantDead`); a slot number past the
+   throne's choices (expect `DataSlotUnknown`). Nothing changes in the throne's map on a refusal.
+8. `.servants watch resend` and let a hunt return with empty-inventory survivors: the log shows the
+   return and `Sample servants: resend … sent …`.
+9. List swap: `.servants swap on`, then sit on castle A's throne. The list shows A's servants, then
+   B's; the log has `servants: throne list swapped for user … (N servant(s) of 2 heart(s) …)`. Pick
+   one of B's free servants and a zone on the map: the log has `servants: sent by=progenitor.throne
+   heart=<B>`; `.servants hunts` standing in B lists the hunt and B's throne map shows it.
+   `.servants status` counts one swap and one routed send. `.servants swap off`, reopen the throne:
+   only A's servants.
+10. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
+    Sample from the test server's reload folder and confirm the clean unload (`servants: list
+    provider unregistered` if the swap was left on).
+
 ## Main thread
 
 Research notes (internal): `MainThread` ownership, collectible-ALC sweep.

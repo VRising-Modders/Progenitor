@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **874** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **890** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -72,6 +72,7 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Castles` | verified live | Server castle plot / tile / building reads and handles on this plugin's world. | `SampleCastle.cs` (`.castle`) |
 | `ctx.Inventory` (`PluginInventory`) | landed | Server inventories of any kind: read, count, free space, add, remove, a total-conserving transfer, watches, stable container ids. Client throws. [Inventory](#inventory). | `SampleInventory.cs` (`.items chests`, `.items move`) |
 | `ctx.Clans` (`PluginClans`) | landed | Server clans: a user's clan, its members and its castles. Client throws. [Clans](#clans). | `SampleInventory.cs` (`.items clan`) |
+| `ctx.Servants` (`PluginServants`) | experimental | Server castle servants and hunts: the throne's list, the heart's hunt record, server sends and resends with the game's checks, the `ServantsReturned` event, and a one-provider throne list swap. Client throws. [Servants](#servants). | `SampleServants.cs` (`.servants`) |
 | `ctx.Units` | verified live | Server unit spawn and steering. Client returns disabled handles. | `SampleUnits.cs` (`.rat`) |
 | `ctx.Items` | verified live (grant, equip); landed (catalog) | Server inventory grant and equip (client throws; defaults stack, accept a partial add, do not equip, leave durability), and a read-only item catalog on both sides. [Items](#items). | `SampleItems.cs` (`.items grant`, `.items equip`); unit test `ItemGrantPolicyTests`; live `give` / `equip` on the isolated server (the wrapper sample itself is not live-verified) |
 | `ctx.Stations` (`PluginStations`) | landed, not live-verified | Server castle recipe stations: a station's recipes (inputs, outputs, duration, enabled), the refinement station's own per-recipe switch, a pure whole-craft count, and current progress. Also braziers: read a burning structure's switch, burn state and fuel, and set its switch. Every member except `CraftsPossible` throws on the client. [Stations](#stations), [modules.md](modules.md#stations). | `SampleStations.cs` (`.stations`), `SampleBraziers.cs` (`.brazier`); unit tests `StationLogicTests`, `SortBrazierPositionTests` |
@@ -542,6 +543,27 @@ the clan, offline users included. Built and game-free tested; **not live-verifie
 | `ctx.Clans.Of(Entity user)` / `FromEntity(Entity clan)` → `ClanRef` | landed | `Entity` (session), `ClanGuid` (`ClanTeam.ClanGuid`, the key to persist), `Name`, `IsNone`. | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Clans.Members(ClanRef)` → `ClanMember` | landed | `User`, `PlatformId`, `Name`, `IsConnected`, ordered by name. | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Clans.Castles(ClanRef)` | landed | Castles whose owner's clan is this clan. | `SampleInventory.cs` (`.items clan`) |
+
+## Servants
+
+Castle servants and their hunts on the server. **Experimental**: source-checked against the
+game's metadata and code and game-free tested (`ServantLogicTests`); nothing has run in the game.
+Server only, main thread; client calls throw `InvalidOperationException`. Ids are session ids
+(`CastleId`) stamped with the world-load epoch; persist the heart's `ContainerId` or the
+territory index, never an entity. Narrative, game facts and the live acceptance:
+[modules.md, Servants](modules.md#servants).
+
+| Member | Status | Intent | Example |
+|---|---|---|---|
+| `ctx.Servants` (`PluginServants`) `List(Entity throneOrHeart)` → `ServantInfo` | experimental | The servants the castle's throne lists, in the game's order and with the state it shows: `Servant`, `Coffin`, `Heart`, `Name`, `State` (`ServantState`: `Dead`, `Injured`, `AwayOnHunt`, `HasItems`, `Free`), `InjuryEndsUtc`, `Injury`, `HuntProficiency`, `LootFactor`, `GearLevel`, `Expertise`, `Perk0`/`Perk1`, `Inventory` (`InventoryRef`), `ItemStacks`, `Epoch`. | `SampleServants.cs` (`.servants list`) |
+| `ctx.Servants.Missions(Entity throneOrHeart)` → `ServantMission` | experimental | The heart's hunt record: `MissionGuid`, `MissionName`, `Zone` (`MissionZone`), `DataSlot` (the hunt length choice), `StartedUtc`, `LengthSeconds`, `EndsUtc`, `Servants`, `Row`, `Epoch`. | `SampleServants.cs` (`.servants hunts`) |
+| `ctx.Servants.ZonesOf(int missionGuid)` / `MissionOf(MissionZone)` | experimental | Map zone(s) of a servant mission and back. `MissionZone` is the game's `MapZoneId` (`ChunkX`, `ChunkY`, `ZoneId` = zone index + 1). | `SampleServants.cs` (`.servants send … x,y#zone …`) |
+| `ctx.Servants.Send(ServantSendRequest)` / `Send(Entity heart, IReadOnlyList<Entity> servants, int missionGuid, int dataSlot, Entity user = default, bool checkDiscovered = true)` → `ServantSendResult` | experimental | A server send with the writes the game's throne send makes (one `ActiveServantMission` row, the mission buff on each servant), validated with the game's checks and refused with `ServantSendRefusal` + `Reason`. Never synthesizes the client's throne event; never touches the success chance. | `SampleServants.cs` (`.servants send`); unit test `ServantLogicTests` (the checks and the row) |
+| `ctx.Servants.Resend(ServantsReturned)` → `ServantSendResult` | experimental | The unhurt servants of a finished hunt again: same heart, mission and length choice. Refuses a servant still carrying loot, and a return from another world load. | `SampleServants.cs` (`.servants again`, `.servants watch resend`) |
+| `ServantsReturned` (event, `ctx.Events.On<ServantsReturned>`) | experimental | After the game finished a hunt: `Heart`, `HeartId`, `Territory`, `MissionGuid`, `MissionName`, `Zone`, `DataSlot`, `LengthSeconds`, `StartedUtc`, `ReturnedUtc`, `Servants` (`ReturnedServant`: `Servant`, `Coffin`, `Name`, `Outcome` = `ServantOutcome.Returned`/`Injured`/`Dead`, `InjuryEndsUtc`, `Inventory`, `Loot` (`ServantLoot`), `LootIsHaul`), `TotalLoot`, `Epoch`. Watched only while subscribed. | `SampleServants.cs` (`.servants watch on`) |
+| `ServantsSent` (event) | experimental | After a send Progenitor made: `Result`, `By` (plugin GUID, or `progenitor.throne` for a routed throne send). The game's own sends are not announced. | none (read by `SampleServants.cs` only through the reply) |
+| `ServantSendRequest` / `ServantSendResult` / `ServantSendRefusal` | experimental | Request: `Heart`, `Servants` (1–3), `MissionGuid`, `DataSlot`, `User` (whose discovery is checked; default the heart's owner), `CheckDiscovered`, `Epoch`. Result: `Ok`, `Refusal`, `Reason`, `Heart`, `MissionGuid`, `Zone`, `DataSlot`, `LengthSeconds`, `StartedUtc`, `Servants`, `BuffApplied`. | unit test `ServantLogicTests` |
+| `ctx.Servants.RegisterListProvider(IServantListProvider)` → `IDisposable` / `ListStatus` → `ServantListStatus` | experimental | One provider, player-scoped: `HeartsFor(ServantListRequest)` (`User`, `Character`, `Heart`, `Territory`) returns the hearts whose servants the throne lists for that player, or null for the game's list. A throne send naming servants of another heart is performed by Progenitor on their own heart. Tracked; a second provider throws naming the owner. | `SampleServants.cs` (`.servants swap on`); unit test `ServantLogicTests` (registry) |
 
 ## Buffs
 
@@ -1073,7 +1095,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 874 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 890 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API

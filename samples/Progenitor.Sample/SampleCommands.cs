@@ -599,6 +599,29 @@ internal static class SampleCommands
         }
     }
 
+    // adminOnly: send and swap act on any castle's servants, including another player's.
+    [Command("servants", adminOnly: true, usage: ".servants list | hunts | send <#n[,#n,#n]> <missionGuid|x,y#zone> <slot> | watch on|off|resend | again | swap on|off | status", description: "Admin only. Castle servants and hunts through ctx.Servants (experimental): the throne list, the hunt record, server sends and resends, the throne list provider.")]
+    public static void Servants(ICommandContext ctx, string verb = "", string a = "", string b = "", string c = "")
+    {
+        try
+        {
+            if (!SampleServants.TryParse(verb, a, b, c, out var request))
+            {
+                ctx.Reply(SampleServants.UsageReply);
+                return;
+            }
+
+#if !PROGENITOR_TESTS
+            SampleServants.HandleCommand(ctx, request);
+#endif
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Sample .servants threw: " + e);
+            ctx.Reply("Sample servants failed. See the server log.");
+        }
+    }
+
     // adminOnly: this applies the debug protection buff and the kill-path guard.
     [Command("protect", adminOnly: true, usage: ".protect on | alive | off", description: "Admin only. ctx.Debug Protect, KeepAlive or Release on your character. Separate from .godmode and from Core's .debug.")]
     public static void Protect(ICommandContext ctx, string what = "")
