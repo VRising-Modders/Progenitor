@@ -493,7 +493,7 @@ Read only, no lease, light.
 | `tooltip` | `shown`, `title`, `body`, `rect` (screen pixels). |
 | `widgets` | Every live composed widget: `key`, `type`, `plugin`, `visible`, `state`. |
 | `widget` + `key` | That widget's own readback: a data table's `sort`, `sortMarks`, `hidden`, `slots` (the visible rows), `top`, `pending` edits, groups; chips and their lines, `add`, `more`; a master-detail's tops; an ordered list; a picker. |
-| `panels` | Every shown panel: `title`, `plugin`, `root`, `capture`, `rect`, and the screen size. |
+| `panels` | Every shown panel: `title`, `plugin`, `root`, `capture`, `rect`, and the screen size; and `attached`, every `Ui.AttachToVanilla` handle with its site, anchor, state, withheld reason, anchor status, buttons and rects ([fields](ui.md#reading-attachments-over-the-bridge)). |
 | `tips` | The tip cards (`showing`, `waiting`, `modal`, `listOpen`) plus `cardRect` (from the tip's view, else the shown panel titled as the tip: `cardSource`), `anchorRect` (the tip's anchor panel, else the largest other shown panel, the Mods workspace when it is open: `anchorSource`), `relative` (`left`, `bottom`, `rightGap`, `insideAnchor`), `screen`, `cardOnScreen` and `cardMargins` (to each screen edge), and a `note` when no card is showing. |
 | `terms` + `plugin` | Explained words: each term's `marker` (visible), `hovers`, and `markersOn`. |
 | `target` + target fields | The point `ui_input` would use and the target's rect. |

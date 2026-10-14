@@ -130,6 +130,14 @@ public interface IVanillaAttachHandle : IDisposable
     /// </summary>
     IUiButton Button(string caption) => DisabledAttachButton.Instance;
 
+    /// <summary>
+    /// <see cref="Button(string)"/> with the face it falls back to when its caption does not fit its
+    /// slot (<see cref="VanillaPanelAnchor.BesideSort"/>): a square button in the game's bar art with
+    /// <paramref name="icon"/> and the caption as its tooltip. <see cref="Button(string)"/> uses
+    /// <see cref="VanillaButtonIcon.Default"/> (a drawn chest).
+    /// </summary>
+    IUiButton Button(string caption, VanillaButtonIcon icon) => Button(caption);
+
     /// <summary>How many buttons this attachment holds.</summary>
     int ButtonCount => 0;
 }

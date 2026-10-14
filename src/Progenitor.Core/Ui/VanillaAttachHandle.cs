@@ -105,11 +105,18 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private readonly VanillaPanelTracker _tracker = new();
     private readonly List<Action<VanillaPanelEvent>> _panelHandlers = new();
     private readonly List<string> _captions = new();
+    private readonly List<VanillaButtonIcon> _icons = new();
     private readonly List<bool> _buttonShown = new();
     private readonly List<ushort> _buttonIds = new();
     private readonly List<IRuntimeWidget?> _buttons = new();
     private VanillaFit _fit = VanillaFit.Unknown;
     private string _fitReason = "";
+    private bool _fitRetry;
+
+    // Why nothing is drawn right now, for ui_read: "" while a container is attached, else the
+    // plan's reason ("site" while the window is closed, "donor") or "container" when the runtime
+    // could not build one (an anchor group missing on this build).
+    private string _withheld = "site";
 
     // Refit scheduling (review of P6, finding 5): the fit reads rects and walks the vanilla group,
     // so it runs when something that can move the container changed - a build, a row or button
@@ -195,7 +202,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         lock (_gate) _panelHandlers.Remove(handler);
     }
 
-    public IUiButton Button(string caption)
+    public IUiButton Button(string caption) => Button(caption, VanillaButtonIcon.Default);
+
+    public IUiButton Button(string caption, VanillaButtonIcon icon)
     {
         if (!Enabled || IsDisposed || !VanillaUiSites.Info(Site).AcceptsButtons) return DisabledAttachButton.Instance;
         int index;
@@ -204,6 +213,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         {
             index = _captions.Count;
             _captions.Add(caption ?? "");
+            _icons.Add(icon);
             _buttonShown.Add(true);
             _buttonIds.Add(id);
             _buttons.Add(null);
@@ -314,6 +324,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _rows.Clear();
             ids = _buttonIds.ToArray();
             _captions.Clear();
+            _icons.Clear();
             _buttonShown.Clear();
             _buttonIds.Clear();
             _buttons.Clear();
@@ -419,10 +430,18 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             switch (decision.Action)
             {
                 case VanillaAttachAction.Keep:
-                    if (IsPanel && ShouldRefitLocked()) FitLocked(first: false);
+                    if (IsPanel && ShouldRefitLocked())
+                    {
+                        // A button whose clone failed on the build (a donor not ready that frame) is
+                        // asked for again on the refit cadence, not only on the next close and reopen.
+                        if (MissingButtonsLocked()) SyncButtonsLocked();
+                        FitLocked(first: false);
+                    }
+
                     return;
 
                 case VanillaAttachAction.Degrade:
+                    _withheld = decision.Reason;
                     if (decision.DestroyOld)
                     {
                         DestroyContainerLocked();
@@ -490,6 +509,8 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
         if (container == null || !container.Alive)
         {
+            _withheld = "container";
+
             // Said once per handle, not once per frame: the watch fires every frame the map is
             // open and a per-frame warning would bury the log it is meant to explain.
             if (!_warnedContainer)
@@ -506,6 +527,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         _container = container;
         _instanceId = sample.InstanceId;
         _warnedContainer = false;
+        _withheld = "";
         // _fitReason is deliberately kept across builds: the tooltip rebuilds on every hover, and a
         // reason already said for this handle is not said again until the container fits once.
         _fit = VanillaFit.Unknown;
@@ -558,7 +580,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     /// </summary>
     private bool ShouldRefitLocked()
     {
-        if (_fit == VanillaFit.Blocked && !VanillaUiSites.IsEdge(Anchor)) return false;
+        if (_fit == VanillaFit.Blocked && !VanillaUiSites.IsEdge(Anchor) && !_fitRetry) return false;
         if (_fitDirty) return true;
         if (++_keptFrames < RefitEvery) return false;
         _keptFrames = 0;
@@ -578,7 +600,20 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             result = new VanillaFitResult(VanillaFit.Blocked, "threw");
         }
 
+        if (result.Settling)
+        {
+            // The window is still sliding in: judge nothing, show nothing, measure again next frame.
+            // A placement is never shown and then hidden because it was judged on moving rects.
+            _fit = VanillaFit.Unknown;
+            _fitRetry = true;
+            _fitDirty = true;
+            try { if (_container!.Visible) _container.Visible = false; }
+            catch { /* a container Unity just destroyed is the next frame's rebuild */ }
+            return;
+        }
+
         _fit = result.Fit;
+        _fitRetry = result.Retry;
 
         // Unknown is "not measurable yet" (a group not laid out on its build frame): shown, and
         // asked again next frame, a bounded number of times. Never a hide.
@@ -673,7 +708,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             }
 
             IRuntimeWidget? button = null;
-            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i]); }
+            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i], i < _icons.Count ? _icons[i] : VanillaButtonIcon.Default); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button clone threw: " + e.Message);
@@ -706,6 +741,45 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _buttons[i] = button;
             if (!_buttonShown[i]) button.Visible = false;
         }
+    }
+
+    /// <summary>
+    /// Everything <c>ui_read panels</c> reports about this attachment, copied under the gate. The
+    /// widgets are the live clones (or null), for the Unity half to read rects from.
+    /// </summary>
+    internal VanillaAttachReadback Readback()
+    {
+        lock (_gate)
+        {
+            bool attached = ContainerAliveLocked();
+            return new VanillaAttachReadback
+            {
+                Site = Site,
+                Anchor = Anchor,
+                PluginId = PluginId,
+                ContainerName = ContainerName,
+                Enabled = Enabled,
+                Open = _tracker.IsOpen,
+                Target = _tracker.Target,
+                Visible = _visible,
+                Attached = attached,
+                Fit = FitWord(_fit),
+                FitReason = _fitReason,
+                Withheld = attached ? "" : (Enabled ? _withheld : "disabled"),
+                Captions = _captions.ToArray(),
+                ButtonsShown = _buttonShown.ToArray(),
+                Buttons = _buttons.ToArray(),
+                Rows = _texts.ToArray(),
+                Container = attached ? _container : null,
+            };
+        }
+    }
+
+    private bool MissingButtonsLocked()
+    {
+        for (int i = 0; i < _captions.Count; i++)
+            if (i >= _buttons.Count || _buttons[i] is not { Alive: true }) return true;
+        return false;
     }
 
     internal string CaptionAt(int index)
@@ -960,6 +1034,90 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     }
 
     private bool ContainerAliveLocked() => _container is { Alive: true };
+}
+
+/// <summary>One attachment's state for <c>ui_read panels</c>. Game-free; the Unity half adds the rects.</summary>
+internal sealed class VanillaAttachReadback
+{
+    internal VanillaUiSite Site { get; init; }
+
+    internal VanillaPanelAnchor Anchor { get; init; }
+
+    internal string PluginId { get; init; } = "";
+
+    internal string ContainerName { get; init; } = "";
+
+    internal bool Enabled { get; init; }
+
+    internal bool Open { get; init; }
+
+    internal VanillaPanelTarget Target { get; init; }
+
+    /// <summary>The plugin's <c>Visible</c> wish.</summary>
+    internal bool Visible { get; init; }
+
+    /// <summary>A container exists under the vanilla window.</summary>
+    internal bool Attached { get; init; }
+
+    /// <summary><c>ok</c>, <c>blocked</c> or <c>unknown</c>.</summary>
+    internal string Fit { get; init; } = "unknown";
+
+    /// <summary>The last <c>hidden reason=</c> word, or empty once it fits again.</summary>
+    internal string FitReason { get; init; } = "";
+
+    /// <summary>
+    /// Empty when attached; else <c>site</c> (the window is closed), <c>donor</c> (no button donor),
+    /// <c>container</c> (the anchor's group is missing; the site line names it) or <c>disabled</c>.
+    /// </summary>
+    internal string Withheld { get; init; } = "";
+
+    internal string[] Captions { get; init; } = Array.Empty<string>();
+
+    internal bool[] ButtonsShown { get; init; } = Array.Empty<bool>();
+
+    internal IRuntimeWidget?[] Buttons { get; init; } = Array.Empty<IRuntimeWidget?>();
+
+    internal string[] Rows { get; init; } = Array.Empty<string>();
+
+    internal IRuntimeWidget? Container { get; init; }
+
+    /// <summary>The game-free part of the readback.</summary>
+    internal Dictionary<string, object?> Describe()
+    {
+        var buttons = new List<object?>();
+        for (int i = 0; i < Captions.Length; i++)
+        {
+            var w = i < Buttons.Length ? Buttons[i] : null;
+            bool built = w != null && w.Alive;
+            buttons.Add(new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["caption"] = Captions[i],
+                ["wanted"] = i < ButtonsShown.Length && ButtonsShown[i],
+                ["built"] = built,
+                ["shown"] = built && w!.Visible,
+            });
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["site"] = VanillaUiSites.Key(Site),
+            ["anchor"] = Anchor.ToString(),
+            ["plugin"] = PluginId,
+            ["container"] = ContainerName,
+            ["enabled"] = Enabled,
+            ["open"] = Open,
+            ["target"] = Target.ToString(),
+            ["visible"] = Visible,
+            ["attached"] = Attached,
+            ["shown"] = Container != null && Container.Alive && Container.Visible,
+            ["fit"] = Fit,
+            ["fitReason"] = FitReason,
+            ["withheld"] = Withheld,
+            ["buttons"] = buttons,
+            ["rows"] = new List<string>(Rows),
+        };
+    }
 }
 
 /// <summary>

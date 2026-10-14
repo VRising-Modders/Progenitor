@@ -387,7 +387,16 @@ internal static class UiInputTestBridge
                 ["rect"] = UnityUiRuntime.RectDict(PanelRect(p)),
             });
         var (w, h) = UnityUiRuntime.ScreenSize();
-        return new Dictionary<string, object?> { ["ok"] = true, ["screenWidth"] = w, ["screenHeight"] = h, ["panels"] = list };
+
+        // Vanilla attachments (Ui.AttachToVanilla) are not panels of their own: they live inside the
+        // game's windows, so they are listed beside the panels with their site, anchor, state and rects.
+        List<object?> attached;
+        try { attached = UnityUiRuntime.DescribeAttachments(); }
+        catch (Exception e) { attached = new List<object?> { new Dictionary<string, object?> { ["error"] = e.Message } }; }
+        return new Dictionary<string, object?>
+        {
+            ["ok"] = true, ["screenWidth"] = w, ["screenHeight"] = h, ["panels"] = list, ["attached"] = attached,
+        };
     }
 
     public static Dictionary<string, object?> Tooltip() => UnityUiRuntime.DescribeTooltip();

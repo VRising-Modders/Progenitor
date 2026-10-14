@@ -58,12 +58,12 @@ public enum VanillaUiSite
     /// the target is not null.</description></item>
     /// <item><description><b>Anchors:</b> <see cref="VanillaPanelAnchor.LeftEdge"/> (default),
     /// <see cref="VanillaPanelAnchor.RightEdge"/>, <see cref="VanillaPanelAnchor.BesideRename"/>
-    /// (inside <c>ContainerSubMenu.OpenTagEditButtonParent</c>, after
-    /// <c>OpenTagEditButton</c>).</description></item>
-    /// <item><description><b>Donors:</b> buttons clone the inventory bottom bar's
-    /// <c>SelfSortButton</c>; captions clone the label of the inventory's own tab buttons and rows
+    /// (in the title row after <c>OpenTagEditButton</c>; its group is <c>OpenTagEditButtonParent</c>, or the
+    /// rename button's own parent when the game leaves that field empty, as 1.1.13.0 does).</description></item>
+    /// <item><description><b>Donors:</b> buttons clone a button of the inventory bottom bar (the
+    /// first live, clone-safe one of <c>SelfSortButton</c>, <c>AllSortButton</c>, <c>SmartMergeButton</c>, <c>SmartTakeButton</c>, <c>DropAllButton</c>, then any bar child: <c>DropAllButton</c> on 1.1.13.0); captions clone the label of the inventory's own tab buttons and rows
     /// clone the tooltip's body text (<c>FakeTooltip.Description</c>).</description></item>
-    /// <item><description><b>Refresh:</b> <c>SystemHooks.After&lt;ContainerMenuMapper&gt;</c> with
+    /// <item><description><b>Refresh:</b> <c>SystemHooks.After</c> on all five window mappers (any one may be the only one updating) with
     /// <c>OnlyWhenSystemRuns = false</c> (every panel site uses that option: the mappers only run
     /// while their queries match, and a close must be seen), reading every mapper from one shared
     /// per-frame scan.</description></item>
@@ -87,7 +87,7 @@ public enum VanillaUiSite
     /// <c>InventoryMenu</c> and the inventory half of the container, station and castle heart
     /// windows (each mapper's <c>_InventorySubMenu</c>; the active one wins). Anchor:
     /// <see cref="VanillaPanelAnchor.BesideSort"/> (inside
-    /// <c>InventorySubMenu.BottomBarButtonsParent</c>, right after <c>SelfSortButton</c>).
+    /// <c>InventorySubMenu.BottomBarButtonsParent</c>, right after the sort button: <c>SelfSortButton</c>, else <c>AllSortButton</c>, which is the only sort button on 1.1.13.0).
     /// <see cref="VanillaPanelTarget"/> names the window the inventory is shown in and, beside a
     /// container or station, that window's target. Refresh:
     /// <c>SystemHooks.After&lt;InventoryMenuMapper&gt;</c>.
@@ -188,7 +188,7 @@ internal static class VanillaUiSites
     private static readonly VanillaUiSiteInfo Container = new(
         VanillaUiSite.ContainerPanel,
         key: "ContainerPanel",
-        donor: "SelfSortButton",
+        donor: "BottomBarButtonsParent button",
         system: "ContainerMenuMapper",
         allowIgnoreLayout: true,
         anchors: new[] { VanillaPanelAnchor.LeftEdge, VanillaPanelAnchor.RightEdge, VanillaPanelAnchor.BesideRename });
@@ -196,7 +196,7 @@ internal static class VanillaUiSites
     private static readonly VanillaUiSiteInfo Station = new(
         VanillaUiSite.StationPanel,
         key: "StationPanel",
-        donor: "SelfSortButton",
+        donor: "BottomBarButtonsParent button",
         system: "WorkstationMenuMapper",
         allowIgnoreLayout: true,
         anchors: new[] { VanillaPanelAnchor.LeftEdge, VanillaPanelAnchor.RightEdge });
@@ -204,7 +204,7 @@ internal static class VanillaUiSites
     private static readonly VanillaUiSiteInfo Inventory = new(
         VanillaUiSite.InventoryPanel,
         key: "InventoryPanel",
-        donor: "SelfSortButton",
+        donor: "BottomBarButtonsParent button",
         system: "InventoryMenuMapper",
         allowIgnoreLayout: true,
         anchors: new[] { VanillaPanelAnchor.BesideSort });
@@ -212,7 +212,7 @@ internal static class VanillaUiSites
     private static readonly VanillaUiSiteInfo CastleHeart = new(
         VanillaUiSite.CastleHeartPanel,
         key: "CastleHeartPanel",
-        donor: "SelfSortButton",
+        donor: "BottomBarButtonsParent button",
         system: "CastleHeartMenuMapper",
         allowIgnoreLayout: true,
         anchors: new[] { VanillaPanelAnchor.LeftEdge, VanillaPanelAnchor.RightEdge });

@@ -25,20 +25,62 @@ public enum VanillaPanelAnchor
     RightEdge = 2,
 
     /// <summary>
-    /// Mod buttons inside the vanilla button group that holds the panel's rename button, right after
-    /// it. The game's own layout group sizes and spaces them, which is what makes them line up with
-    /// the vanilla buttons at every resolution.
+    /// Mod buttons in the title row, right after the panel's rename button. On game build 1.1.13.0
+    /// the rename button's group is a fixed 24-unit group beside the window title that does not size
+    /// its children, so the buttons are placed after it on its row (title-row height, the bar
+    /// button's art) rather than joined to it, which would push the rename button over the title.
     /// </summary>
     BesideRename = 3,
 
     /// <summary>
-    /// Mod buttons inside the inventory's bottom button bar, right after the sort button. The bar's
-    /// own layout group sizes and spaces them.
+    /// Mod buttons in the inventory's bottom button bar, right after the sort button. On game build
+    /// 1.1.13.0 the bar is a grid of 116x36 cells; the container is one more cell, sized and spaced by
+    /// the grid like the game's own buttons (one button per cell reads best: several buttons share it).
     /// </summary>
     BesideSort = 4,
 
     /// <summary>The item tooltip's own text column, after the description (<see cref="VanillaUiSite.InventoryTooltip"/>).</summary>
     TooltipBody = 5,
+}
+
+/// <summary>
+/// The face a P6 button shows when its caption does not fit its slot (spec P6; today only
+/// <see cref="VanillaPanelAnchor.BesideSort"/> falls back): a square button in the game's bar art
+/// with this icon, and the caption as its tooltip. Game-free.
+/// </summary>
+public readonly struct VanillaButtonIcon : IEquatable<VanillaButtonIcon>
+{
+    private VanillaButtonIcon(int itemGuid, string mark)
+    {
+        ItemGuid = itemGuid;
+        Mark = mark ?? "";
+    }
+
+    /// <summary>An item's prefab id whose game icon is shown (the item's own inventory icon), or 0.</summary>
+    public int ItemGuid { get; }
+
+    /// <summary>
+    /// The framework's drawn mark shown when there is no item icon: <c>chest</c> (the default),
+    /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c> or <c>grip</c>.
+    /// </summary>
+    public string Mark { get; }
+
+    /// <summary>The drawn chest mark.</summary>
+    public static VanillaButtonIcon Default => new(0, "chest");
+
+    /// <summary>The game icon of item <paramref name="prefabGuid"/>; the chest mark when the item has none.</summary>
+    public static VanillaButtonIcon Item(int prefabGuid) => new(prefabGuid, "chest");
+
+    /// <summary>A drawn mark by name (see <see cref="Mark"/>); an unknown name gives the chest.</summary>
+    public static VanillaButtonIcon Drawn(string mark) => new(0, string.IsNullOrWhiteSpace(mark) ? "chest" : mark.Trim());
+
+    public bool Equals(VanillaButtonIcon other) => ItemGuid == other.ItemGuid && string.Equals(Mark, other.Mark, StringComparison.Ordinal);
+
+    public override bool Equals(object? obj) => obj is VanillaButtonIcon o && Equals(o);
+
+    public override int GetHashCode() => ItemGuid * 31 + (Mark?.GetHashCode() ?? 0);
+
+    public override string ToString() => ItemGuid != 0 ? "item:" + ItemGuid : "mark:" + (string.IsNullOrEmpty(Mark) ? "chest" : Mark);
 }
 
 /// <summary>Which vanilla window an attachment's panel belongs to.</summary>
@@ -317,6 +359,55 @@ internal readonly struct UiRect
     private static string Fmt(float v) => v.ToString("0", CultureInfo.InvariantCulture);
 }
 
+/// <summary>Where a placed inline container went (<see cref="VanillaPanelPlacement.PlaceBeside"/>).</summary>
+internal enum BesideSlot
+{
+    /// <summary>No slot fits.</summary>
+    None = 0,
+
+    /// <summary>Right of the group's last visible member, on its row.</summary>
+    After = 1,
+
+    /// <summary>Centered above the reference control.</summary>
+    Above = 2,
+}
+
+/// <summary>
+/// Whether a window has come to rest: the frame and the group's last member measured the same
+/// (within half a unit) <see cref="VanillaPanelPlacement.SettleFrames"/> times in a row. A window
+/// slides in when it opens; a slot judged mid-slide is judged on the wrong rects (live 1.1.13.0: the
+/// sliding frame read 642 wide and the slot 88, at rest they are 620 and 58). Game-free.
+/// </summary>
+internal sealed class PlacementSettle
+{
+    private UiRect _frame;
+    private UiRect _last;
+    private int _same = -1;
+
+    /// <summary>Record one measurement; true once the last <see cref="VanillaPanelPlacement.SettleFrames"/> agreed.</summary>
+    internal bool Observe(in UiRect frame, in UiRect last)
+    {
+        if (_same >= 0 && Same(frame, _frame) && Same(last, _last))
+        {
+            _same++;
+        }
+        else
+        {
+            _frame = frame;
+            _last = last;
+            _same = 0;
+        }
+
+        return _same >= VanillaPanelPlacement.SettleFrames - 1;
+    }
+
+    internal void Reset() => _same = -1;
+
+    private static bool Same(in UiRect a, in UiRect b) =>
+        Math.Abs(a.X - b.X) <= 0.5f && Math.Abs(a.Y - b.Y) <= 0.5f
+        && Math.Abs(a.Width - b.Width) <= 0.5f && Math.Abs(a.Height - b.Height) <= 0.5f;
+}
+
 /// <summary>Whether an attachment's container may be shown where it is.</summary>
 internal enum VanillaFit
 {
@@ -333,12 +424,35 @@ internal enum VanillaFit
 /// <summary>A placement verdict and the one word the log line carries.</summary>
 internal readonly struct VanillaFitResult
 {
-    internal VanillaFitResult(VanillaFit fit, string reason, UiRect rect = default)
+    internal VanillaFitResult(VanillaFit fit, string reason, UiRect rect = default, bool retry = false, bool settling = false, bool icons = false)
     {
         Fit = fit;
         Reason = reason ?? "";
         Rect = rect;
+        Retry = retry;
+        Settling = settling;
+        Icons = icons;
     }
+
+    /// <summary>
+    /// The window is still moving (its open motion): nothing is judged, the container stays hidden
+    /// and is measured again on the next frame. Never logged as a refusal.
+    /// </summary>
+    internal bool Settling { get; }
+
+    /// <summary>The row fits only as icon buttons (<see cref="VanillaPanelPlacement.PlaceBesideRow"/>).</summary>
+    internal bool Icons { get; }
+
+    internal static VanillaFitResult Moving => new(VanillaFit.Unknown, "settling", default, retry: true, settling: true);
+
+    /// <summary>
+    /// A refusal that may change without the container being rebuilt, so it is asked again on the
+    /// refit cadence. True for placed containers: hiding one moves nothing, and the window's content
+    /// slides in under its open motion, so a slot measured on the first frames can be off by the
+    /// motion's offset. A joined container's refusal stays final, because hiding it reflows the
+    /// group and asking again would make it flicker.
+    /// </summary>
+    internal bool Retry { get; }
 
     internal VanillaFit Fit { get; }
 
@@ -477,6 +591,143 @@ internal static class VanillaPanelPlacement
 
         return new VanillaFitResult(VanillaFit.Fits, "ok", ours);
     }
+
+    /// <summary>
+    /// A positioned inline container: right of <paramref name="reference"/> (the group's last
+    /// visible member, or the group itself when it has none) by <paramref name="spacing"/>, centered
+    /// on its row. All in the group's local units.
+    /// </summary>
+    internal static UiRect PlaceAfter(in UiRect reference, float spacing, float width, float height)
+    {
+        float sp = spacing < 0 ? 0 : spacing;
+        float centerY = reference.Y + reference.Height * 0.5f;
+        return new UiRect(reference.XMax + sp, centerY - height * 0.5f, width, height);
+    }
+
+    /// <summary>
+    /// A placed inline container (one that never joins the vanilla group): the first of its
+    /// candidate slots that lies inside <paramref name="frame"/> and covers no obstacle.
+    /// <list type="number">
+    /// <item><description><see cref="BesideSlot.After"/>: right of the group's last visible member
+    /// (<paramref name="lastMember"/>), on its row (<see cref="PlaceAfter"/>).</description></item>
+    /// <item><description><see cref="BesideSlot.Above"/> (only with <paramref name="allowAbove"/>):
+    /// centered over <paramref name="reference"/> (the sort button), <paramref name="spacing"/> above it.</description></item>
+    /// </list>
+    /// All rects in one space (the container's parent). When no slot fits, the verdict is the first
+    /// slot's refusal, with every slot's reason joined by <c>/</c>.
+    /// </summary>
+    internal static VanillaFitResult PlaceBeside(
+        in UiRect lastMember, in UiRect reference, bool allowAbove, float spacing, float width, float height,
+        in UiRect frame, IReadOnlyList<UiObstacle>? obstacles, out BesideSlot slot, float minWidth = 0f)
+    {
+        float sp = spacing < 0 ? 0 : spacing;
+        var after = PlaceAfter(lastMember, sp, width, height);
+
+        // The slot right of the group ends at the frame. A row a little wider than what is left is
+        // narrowed to it, down to minWidth (the captions at their smallest readable size), rather
+        // than refused: its captions shrink to fit, as the game's own do.
+        if (!frame.IsEmpty && after.XMax > frame.XMax && minWidth > 0f)
+        {
+            float room = frame.XMax - after.X;
+            if (room >= minWidth) after = new UiRect(after.X, after.Y, room, height);
+        }
+
+        var first = CheckPlaced(after, frame, obstacles);
+        if (first.Fit == VanillaFit.Fits)
+        {
+            slot = BesideSlot.After;
+            return Placed(first);
+        }
+
+        if (allowAbove && !reference.IsEmpty)
+        {
+            var above = new UiRect(reference.X + (reference.Width - width) * 0.5f, reference.YMax + sp, width, height);
+            var second = CheckPlaced(above, frame, obstacles);
+            if (second.Fit == VanillaFit.Fits)
+            {
+                slot = BesideSlot.Above;
+                return Placed(second);
+            }
+
+            slot = BesideSlot.None;
+            return new VanillaFitResult(VanillaFit.Blocked, first.Reason + "/" + second.Reason, after, retry: true);
+        }
+
+        slot = BesideSlot.None;
+        return Placed(first);
+    }
+
+    private static VanillaFitResult Placed(in VanillaFitResult r) => new(r.Fit, r.Reason, r.Rect, retry: true);
+
+    /// <summary>
+    /// A placed row of <paramref name="buttons"/> captioned buttons, in the order the rule tries
+    /// them: as text at full size (<paramref name="textWidth"/>) or squeezed to
+    /// <paramref name="textMin"/> (<see cref="PlaceBeside"/>); then, with <paramref name="allowIcons"/>,
+    /// as square icon buttons <paramref name="height"/> on a side, <paramref name="spacing"/> apart,
+    /// with the captions as tooltips. The first that fits wins; the result says which
+    /// (<see cref="VanillaFitResult.Icons"/>). When none fits, the text attempt's refusal is returned.
+    /// </summary>
+    internal static VanillaFitResult PlaceBesideRow(
+        in UiRect lastMember, in UiRect reference, bool allowAbove, bool allowIcons, float spacing,
+        float textWidth, float textMin, int buttons, float height,
+        in UiRect frame, IReadOnlyList<UiObstacle>? obstacles, out BesideSlot slot)
+    {
+        var text = PlaceBeside(lastMember, reference, allowAbove, spacing, textWidth, height, frame, obstacles, out slot, textMin);
+        if (text.Fit == VanillaFit.Fits || !allowIcons || buttons <= 0) return text;
+
+        float sp = spacing < 0 ? 0 : spacing;
+        float iconRow = buttons * height + (buttons - 1) * sp;
+        var icons = PlaceBeside(lastMember, reference, allowAbove, spacing, iconRow, height, frame, obstacles, out var iconSlot);
+        if (icons.Fit != VanillaFit.Fits)
+            return new VanillaFitResult(VanillaFit.Blocked, text.Reason, text.Rect, retry: true);
+        slot = iconSlot;
+        return new VanillaFitResult(VanillaFit.Fits, "ok", icons.Rect, retry: true, icons: true);
+    }
+
+    private static VanillaFitResult CheckPlaced(in UiRect rect, in UiRect frame, IReadOnlyList<UiObstacle>? obstacles)
+    {
+        if (rect.IsEmpty) return new VanillaFitResult(VanillaFit.Fits, "empty", rect);
+        if (!frame.IsEmpty && !frame.Contains(rect)) return new VanillaFitResult(VanillaFit.Blocked, "overflow:mod", rect);
+        if (obstacles != null)
+        {
+            for (int i = 0; i < obstacles.Count; i++)
+            {
+                if (rect.Overlaps(obstacles[i].Rect))
+                    return new VanillaFitResult(VanillaFit.Blocked, "overlap:" + obstacles[i].Name, rect);
+            }
+        }
+
+        return new VanillaFitResult(VanillaFit.Fits, "ok", rect);
+    }
+
+    /// <summary>
+    /// The frame an inline container must stay inside: the window's own rect, widened to the first
+    /// ancestor of the vanilla group (nearest first) that is at least <see cref="FrameWidthShare"/>
+    /// of the window's width. That ancestor is the strip the group lives on: the title strip of a
+    /// container sits above its window's rect (so the rename group is outside the window rect and
+    /// inside the strip), while the inventory's bottom bar lives on a body as wide as the window.
+    /// Narrower ancestors (the title text, the 24-unit rename group) are not frames.
+    /// </summary>
+    internal static UiRect InlineFrame(in UiRect panel, IReadOnlyList<UiRect>? ancestors)
+    {
+        if (panel.IsEmpty || ancestors == null) return panel;
+        for (int i = 0; i < ancestors.Count; i++)
+        {
+            var a = ancestors[i];
+            if (a.IsEmpty || a.Width < panel.Width * FrameWidthShare) continue;
+            return UiRect.FromMinMax(
+                Math.Min(panel.X, a.X), Math.Min(panel.Y, a.Y),
+                Math.Max(panel.XMax, a.XMax), Math.Max(panel.YMax, a.YMax));
+        }
+
+        return panel;
+    }
+
+    /// <summary>How many consecutive equal measurements count as a window at rest.</summary>
+    internal const int SettleFrames = 3;
+
+    /// <summary>How wide an ancestor must be, against the window, to count as the group's frame.</summary>
+    internal const float FrameWidthShare = 0.9f;
 
     /// <summary>The tooltip line is only placed into a column the game lays out.</summary>
     internal static VanillaFitResult CheckTooltip(bool parentHasVerticalLayout) =>

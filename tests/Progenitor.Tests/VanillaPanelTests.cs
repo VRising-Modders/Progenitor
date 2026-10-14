@@ -656,6 +656,285 @@ public class VanillaPanelTests : IDisposable
         h.Dispose();
     }
 
+    // ---------------------------------------------------------------- ui_read readback
+
+    private static Dictionary<string, object?> ReadbackOf(IVanillaAttachHandle h) =>
+        VanillaAttachRegistry.Snapshot().Single(x => ReferenceEquals(x, h)).Readback().Describe();
+
+    [Fact]
+    public void The_readback_says_why_nothing_is_drawn_and_what_is_once_attached()
+    {
+        // ui_read panels lists every attachment under "attached": a bridge test reads whether the
+        // window is open, whether a container exists, why not, and each button's state.
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        left.Button("Deposit");
+        left.Row("status");
+
+        var closed = ReadbackOf(left);
+        Assert.Equal("ContainerPanel", closed["site"]);
+        Assert.Equal("LeftEdge", closed["anchor"]);
+        Assert.Equal(false, closed["open"]);
+        Assert.Equal(false, closed["attached"]);
+        Assert.Equal("site", closed["withheld"]);
+
+        // The window opens without a button donor: the plan withholds the container and says why.
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest(), donor: false));
+        var noDonor = ReadbackOf(left);
+        Assert.Equal(true, noDonor["open"]);
+        Assert.Equal(false, noDonor["attached"]);
+        Assert.Equal("donor", noDonor["withheld"]);
+
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        var open = ReadbackOf(left);
+        Assert.Equal(true, open["attached"]);
+        Assert.Equal(true, open["shown"]);
+        Assert.Equal("", open["withheld"]);
+        Assert.Equal("ok", open["fit"]);
+        var button = Assert.IsType<Dictionary<string, object?>>(Assert.Single((List<object?>)open["buttons"]!));
+        Assert.Equal("Deposit", button["caption"]);
+        Assert.Equal(true, button["built"]);
+        Assert.Equal(true, button["shown"]);
+        Assert.Equal(new List<string> { "status" }, open["rows"]);
+        left.Dispose();
+    }
+
+    [Fact]
+    public void The_readback_names_a_missing_anchor_group_as_container()
+    {
+        _client.RefuseAnchors.Add(VanillaPanelAnchor.BesideRename);
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        rename.Button("Locate");
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        var d = ReadbackOf(rename);
+        Assert.Equal(true, d["open"]);
+        Assert.Equal(false, d["attached"]);
+        Assert.Equal("container", d["withheld"]);
+        rename.Dispose();
+    }
+
+    [Fact]
+    public void Buttons_declared_before_any_open_are_built_on_open_and_rebuilt_on_reopen()
+    {
+        // A plugin declares its handles and buttons at load, long before a chest is opened.
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        left.Button("Deposit");
+        rename.Button("Locate");
+        Assert.Equal(0, _client.LiveButtons);
+
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(2, _client.LiveButtons);
+        foreach (var h in new[] { left, rename })
+        {
+            var d = ReadbackOf(h);
+            Assert.Equal(true, d["attached"]);
+            var b = Assert.IsType<Dictionary<string, object?>>(Assert.Single((List<object?>)d["buttons"]!));
+            Assert.Equal(true, b["built"]);
+            Assert.Equal(true, b["shown"]);
+        }
+
+        _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+        Assert.Equal(0, _client.LiveButtons);
+        Assert.Equal(false, ReadbackOf(left)["attached"]);
+
+        // A reopen builds a new container and every declared button in it again, exactly once.
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(12, Chest()));
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(12, Chest()));
+        Assert.Equal(2, _client.LiveButtons);
+        var reopened = (Dictionary<string, object?>)((List<object?>)ReadbackOf(rename)["buttons"]!)[0]!;
+        Assert.Equal(true, reopened["built"]);
+        left.Dispose();
+        rename.Dispose();
+    }
+
+    [Fact]
+    public void A_button_whose_clone_failed_on_the_build_is_asked_for_again_while_the_window_stays_open()
+    {
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        left.Button("Deposit");
+        _client.RefuseClones = 1;
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(0, _client.LiveButtons);
+        var first = (Dictionary<string, object?>)((List<object?>)ReadbackOf(left)["buttons"]!)[0]!;
+        Assert.Equal(false, first["built"]);
+
+        for (int i = 0; i < 40; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(1, _client.LiveButtons);
+        left.Dispose();
+    }
+
+    [Fact]
+    public void Every_panel_site_samples_on_all_five_window_mappers_and_a_frame_watchdog()
+    {
+        // Source pin on the Unity half (not compiled here). Live 1.1.13.0: the inventory site, on
+        // InventoryMenuMapper alone, never sampled while a chest was open, and a window can close
+        // together with the only mapper that would have seen it close.
+        string src = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        foreach (var mapper in new[] { "ContainerMenuMapper", "WorkstationMenuMapper", "RefinementstationMenuMapper", "CastleHeartMenuMapper", "InventoryMenuMapper" })
+            Assert.Contains("SystemHooks.After<" + mapper + ">(frame, VanillaUiSites.WatchOptions(site))", src);
+        Assert.Contains("Plugin.Frame += watchdog;", src);
+        Assert.Contains("if (now == watch.Frame) return;", src);
+    }
+
+    [Fact]
+    public void Closing_a_chest_and_its_bag_in_one_frame_raises_exactly_one_Closed_per_open()
+    {
+        // Escape closes the chest and the bag beside it together. Each site's watch reads closed on
+        // the next frame it samples (a mapper hook or the frame watchdog): one Closed per Opened,
+        // never a second one on the frames after, and a reopen starts the count again.
+        var chest = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        var events = new List<string>();
+        chest.OnPanel(e => events.Add("chest " + e.Change));
+        bag.OnPanel(e => events.Add("bag " + e.Change));
+        var bagTarget = new VanillaPanelTarget(VanillaPanelKind.Container, 812, 3, 40, 1, 0);
+
+        for (int round = 0; round < 2; round++)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+                _client.Fire(VanillaUiSite.InventoryPanel, Open(21, bagTarget));
+            }
+
+            // The same frame: both windows gone.
+            _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+            _client.Fire(VanillaUiSite.InventoryPanel, VanillaSiteSample.Absent);
+            for (int i = 0; i < 5; i++)
+            {
+                _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+                _client.Fire(VanillaUiSite.InventoryPanel, VanillaSiteSample.Absent);
+            }
+
+            Assert.False(chest.IsOpen);
+            Assert.False(bag.IsOpen);
+            Assert.Equal(0, _client.LiveContainers);
+        }
+
+        Assert.Equal(new[]
+        {
+            "chest Opened", "bag Opened", "chest Closed", "bag Closed",
+            "chest Opened", "bag Opened", "chest Closed", "bag Closed",
+        }, events);
+        Assert.Equal(2, Lines.Count(l => l.StartsWith("Ui: panel ContainerPanel closed", StringComparison.Ordinal)));
+        chest.Dispose();
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void A_BesideSort_handle_with_three_buttons_is_one_row_and_is_hidden_whole_when_it_does_not_fit()
+    {
+        // Three captions on one handle are one row in one container: the fit is for the row, so
+        // either all three show or none does (with the reason), never a partial row.
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:mod/overlap:ParentContainerInventory");
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        bag.Button("Stash");
+        bag.Button("Inventory");
+        bag.Button("Find");
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0)));
+        var d = ReadbackOf(bag);
+        Assert.Equal(true, d["attached"]);
+        Assert.Equal(false, d["shown"]);
+        Assert.Equal("blocked", d["fit"]);
+        Assert.Equal("overflow:mod/overlap:ParentContainerInventory", d["fitReason"]);
+        Assert.Equal(3, ((List<object?>)d["buttons"]!).Count);
+        Assert.Single(Lines, l => l.Contains("anchor=sort hidden reason=overflow:mod/overlap:ParentContainerInventory"));
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void A_placed_container_refused_on_open_is_shown_once_a_later_refit_fits()
+    {
+        // A joined container's Blocked is final (hiding it reflows the group); a placed one's carries
+        // Retry and is asked again on the 30-frame refit, so the slot measured mid open motion does
+        // not hide the button for the whole session.
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:mod", retry: true);
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        bag.Button("Storage");
+        var character = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0);
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, character));
+        Assert.Equal(false, ReadbackOf(bag)["shown"]);
+
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok", retry: true);
+        for (int i = 0; i < 31; i++) _client.Fire(VanillaUiSite.InventoryPanel, Open(21, character));
+        var d = ReadbackOf(bag);
+        Assert.Equal(true, d["shown"]);
+        Assert.Equal("ok", d["fit"]);
+        Assert.Contains(Lines, l => l.Contains("anchor=sort shown again"));
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void A_joined_container_refused_after_layout_stays_hidden_until_rebuilt()
+    {
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:DropAllButton");
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        rename.Button("Locate");
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        int calls = _client.FitCalls;
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok");
+        for (int i = 0; i < 61; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(calls, _client.FitCalls);
+        Assert.Equal(false, ReadbackOf(rename)["shown"]);
+        rename.Dispose();
+    }
+
+    [Fact]
+    public void A_placed_container_is_never_shown_while_its_window_slides_in()
+    {
+        // The runtime says Settling while the window moves: the container stays hidden, nothing is
+        // logged as a refusal, and it is measured again on the next frame until the window is at rest.
+        _client.FitQueue.Enqueue(VanillaFitResult.Moving);
+        _client.FitQueue.Enqueue(VanillaFitResult.Moving);
+        _client.FitQueue.Enqueue(VanillaFitResult.Moving);
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok", retry: true);
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        bag.Button("Storage", VanillaButtonIcon.Item(123));
+        var character = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0);
+
+        var seen = new List<bool>();
+        for (int i = 0; i < 4; i++)
+        {
+            _client.Fire(VanillaUiSite.InventoryPanel, Open(21, character));
+            seen.Add(_client.LiveContainerVisible);
+        }
+
+        Assert.Equal(new[] { false, false, false, true }, seen);
+        Assert.Equal(4, _client.FitCalls);
+        Assert.DoesNotContain(Lines, l => l.Contains("hidden reason"));
+        Assert.Equal("ok", ReadbackOf(bag)["fit"]);
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void An_icon_buttons_tooltip_stays_up_without_a_mod_panel_and_says_why_once_when_it_cannot()
+    {
+        // Source pins on the Unity half (not compiled here). Live c24906668: hovering the icon in the
+        // character window showed no tooltip and logged nothing. The kit tooltip's frame watch hid every
+        // box when no mod panel was shown, which inside a game window is always: up one frame, gone the next.
+        string widgets = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Widgets.cs");
+        Assert.Contains("(!_tipNeedsPanel || AnyPanelShown())", widgets);
+        Assert.Contains("internal void ShowGameControlTooltip(", widgets);
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("_runtime.ShowGameControlTooltip(anchor, caption", resolver);
+        Assert.Contains("icon tooltip not shown: ", resolver);
+        Assert.Contains("[\"hoverEvents\"] = tipped.HoverEvents", resolver);
+    }
+
+    [Fact]
+    public void A_button_icon_is_an_item_or_a_drawn_mark_and_the_chest_by_default()
+    {
+        Assert.Equal("mark:chest", VanillaButtonIcon.Default.ToString());
+        Assert.Equal("item:1234", VanillaButtonIcon.Item(1234).ToString());
+        Assert.Equal("mark:check", VanillaButtonIcon.Drawn("check").ToString());
+        Assert.Equal(VanillaButtonIcon.Default, VanillaButtonIcon.Drawn(" "));
+        Assert.True(UiDrawnMark.TryParse("chest", out var chest) && chest.IsIcon);
+        Assert.Equal("chest", UiDrawnMark.ChestMark.Name);
+        // The chest is drawn: its outline and its lid line have coverage, the middle of the lid does not.
+        Assert.True(UiDrawnMarkArt.Alpha(UiDrawnMark.ChestMark, 24, (int)(0.58f * 48)) > 0.5f);
+        Assert.True(UiDrawnMarkArt.Alpha(UiDrawnMark.ChestMark, 12, 34) < 0.1f);
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime
@@ -674,7 +953,16 @@ public class VanillaPanelTests : IDisposable
 
         public int FitCalls { get; private set; }
 
+        /// <summary>Verdicts handed out before <see cref="Fit"/>, one per fit.</summary>
+        public Queue<VanillaFitResult> FitQueue { get; } = new();
+
+        /// <summary>The containers, for a test that checks one was never visible.</summary>
+        public bool LiveContainerVisible => _containers.Exists(c => c.Alive && c.Visible);
+
         public HashSet<VanillaPanelAnchor> RefuseAnchors { get; } = new();
+
+        /// <summary>The next this-many button clones fail (a donor the clone gate refuses).</summary>
+        public int RefuseClones { get; set; }
 
         public int WatchCount => _watches.Count;
 
@@ -736,6 +1024,12 @@ public class VanillaPanelTests : IDisposable
         public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption)
         {
             if (container is not FakeWidget c || !c.Alive) return null;
+            if (RefuseClones > 0)
+            {
+                RefuseClones--;
+                return null;
+            }
+
             var b = new FakeWidget(caption, true) { Click = new object() };
             c.Children.Add(b);
             _buttons.Add(b);
@@ -754,6 +1048,7 @@ public class VanillaPanelTests : IDisposable
             VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons)
         {
             FitCalls++;
+            if (FitQueue.Count > 0) return FitQueue.Dequeue();
             return Fit;
         }
 

@@ -32,6 +32,36 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
 
     /// <summary>The shown tooltip's liveness question, and the frame tick that asks it.</summary>
     private static Func<bool>? _tipStillShown;
+
+    /// <summary>
+    /// The shown box belongs to a control on a mod panel and goes when no panel is shown. False for a
+    /// tooltip on a control inside a game window (a P6 icon button), which has no mod panel at all:
+    /// with the rule applied to it, the box was hidden on the frame after it was shown.
+    /// </summary>
+    private static bool _tipNeedsPanel = true;
+
+    /// <summary>The kit tooltip box is up.</summary>
+    internal static bool TooltipShown
+    {
+        get { try { return Alive(_tipRoot) && _tipRoot!.activeSelf; } catch { return false; } }
+    }
+
+    /// <summary>The shown tooltip's title (empty when none is up).</summary>
+    internal static string TooltipTitle
+    {
+        get { try { return TooltipShown && _tipTitle != null ? (_tipTitle.text ?? "") : ""; } catch { return ""; } }
+    }
+
+    /// <summary>
+    /// <see cref="ShowTooltip"/> for a control that lives in a game window rather than on a mod
+    /// panel: the same box, above every game and mod canvas, kept while <paramref name="stillShown"/>
+    /// says so whether or not a mod panel is shown.
+    /// </summary>
+    internal void ShowGameControlTooltip(ScreenRect anchor, string title, string body, Func<bool> stillShown)
+    {
+        ShowTooltip(anchor, title, body, stillShown);
+        if (TooltipShown) _tipNeedsPanel = false;
+    }
     private static IDisposable? _tipWatch;
 
     public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null)
@@ -80,6 +110,7 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             box.anchoredPosition = new Vector2(place.X, place.Y);
             if (!_tipRoot!.activeSelf) _tipRoot.SetActive(true);
             _tipStillShown = stillShown;
+            _tipNeedsPanel = true;
             _tipWatch ??= EveryFrame(WatchTooltip);
         }
         catch (Exception e)
@@ -118,7 +149,7 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         bool keep;
         // P7b: a kit tooltip always belongs to a control on a shown panel; with none shown (Escape hid them all, the
         // workspace closed) it goes, whatever its own liveness check says.
-        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && AnyPanelShown() && (_tipStillShown == null || _tipStillShown()); }
+        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && (!_tipNeedsPanel || AnyPanelShown()) && (_tipStillShown == null || _tipStillShown()); }
         catch { keep = false; }
         if (!keep) HideTooltip();
     }
@@ -126,6 +157,7 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
     public void HideTooltip()
     {
         _tipStillShown = null;
+        _tipNeedsPanel = true;
         var watch = _tipWatch;
         _tipWatch = null;
         try { watch?.Dispose(); }

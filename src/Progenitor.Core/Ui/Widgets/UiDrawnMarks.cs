@@ -38,6 +38,9 @@ internal enum UiMarkShape
 
     /// <summary>A checked box (a selected row): the square outline with the check inside.</summary>
     CheckBox = 10,
+
+    /// <summary>A storage chest: a box outline, its lid line and a latch (the default face of a P6 icon button).</summary>
+    Chest = 11,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -92,7 +95,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     /// <summary>An icon button's mark: <see cref="UiMarkShape.Up"/>, <see cref="UiMarkShape.Down"/>, <see cref="UiMarkShape.Remove"/>, <see cref="UiMarkShape.Check"/> or <see cref="UiMarkShape.Grip"/>.</summary>
     internal static UiDrawnMark Icon(UiMarkShape shape) =>
         shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
+            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest
             ? new UiDrawnMark(shape, 0, 0)
             : None;
 
@@ -103,10 +106,11 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static readonly UiDrawnMark GripMark = Icon(UiMarkShape.Grip);
     internal static readonly UiDrawnMark CheckEmptyMark = Icon(UiMarkShape.CheckEmpty);
     internal static readonly UiDrawnMark CheckBoxMark = Icon(UiMarkShape.CheckBox);
+    internal static readonly UiDrawnMark ChestMark = Icon(UiMarkShape.Chest);
 
     /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
     internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox;
+        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest;
 
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
@@ -124,6 +128,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.Grip => "grip",
         UiMarkShape.CheckEmpty => "check-empty",
         UiMarkShape.CheckBox => "check-box",
+        UiMarkShape.Chest => "chest",
         _ => "",
     };
 
@@ -159,6 +164,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "grip":
             case "check-empty":
             case "check-box":
+            case "chest":
                 if (colon >= 0) return false;
                 mark = Icon(head switch
                 {
@@ -168,6 +174,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
                     "check" => UiMarkShape.Check,
                     "check-empty" => UiMarkShape.CheckEmpty,
                     "check-box" => UiMarkShape.CheckBox,
+                    "chest" => UiMarkShape.Chest,
                     _ => UiMarkShape.Grip,
                 });
                 return true;
@@ -208,7 +215,8 @@ internal static class UiDrawnMarkArt
         UiMarkShape.SortUp or UiMarkShape.SortDown => (mark.Digit > 0 ? ArrowWidth + DigitGap + DigitWidth : ArrowWidth, TextureHeight),
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
         UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
-        UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox => (TextureHeight, TextureHeight),
+        UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
+            or UiMarkShape.Chest => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -297,6 +305,10 @@ internal static class UiDrawnMarkArt
                 return Clamp01(Box(px, py));
             case UiMarkShape.CheckBox:
                 return Clamp01(Math.Max(Box(px, py), Strokes2(px, py, 0.075f, new[] { 0.30f, 0.52f, 0.45f, 0.36f, 0.72f, 0.68f })));
+            case UiMarkShape.Chest:
+                // The check box's square outline, a lid line two fifths down and a short latch below it.
+                return Clamp01(Math.Max(Box(px, py), Strokes2(px, py, 0.03f,
+                    new[] { 0.16f, 0.58f, 0.84f, 0.58f }, new[] { 0.5f, 0.58f, 0.5f, 0.44f })));
             case UiMarkShape.Grip:
                 return Clamp01(Strokes2(px, py, 0.065f, new[] { 0.18f, 0.28f, 0.82f, 0.28f }, new[] { 0.18f, 0.5f, 0.82f, 0.5f }, new[] { 0.18f, 0.72f, 0.82f, 0.72f }));
             default:
