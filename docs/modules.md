@@ -2716,7 +2716,7 @@ returns `null` for.
 | Planner, per-operation transaction, scope | landed, game-free tested (`MaterialPlannerTests`, `MaterialServiceTests`, `MaterialTransactionTests`, `MaterialViewTests`) |
 | Per-player totals: refresh, resend, wire, client selection | landed, game-free tested (`MaterialViewSyncTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
 | Native availability and payment seams (Bootstrap) | **experimental, opt-in, off by default**; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified (below) |
-| `Repair` and `Upgrade` (scopes, the upgrade request filter, the Upgrade view) | **experimental, opt-in, game-free tested, not live-verified** (`MaterialTransactionTests`, `MaterialScopeTrackerTests`, `MaterialUpgradeFilterTests`, `MaterialViewSyncTests`); the same two native seams, no new one |
+| `Repair` and `Upgrade` (scopes, the upgrade request filter, the Upgrade view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair (`MaterialTransactionTests`, `MaterialScopeTrackerTests`, `MaterialUpgradeFilterTests`, `MaterialViewSyncTests`); the same two native seams, no new one |
 
 ```csharp
 var handle = ctx.MaterialSource.Register(myProvider);     // second registration throws, naming the owner
@@ -2754,6 +2754,7 @@ must not move items, must not call back into `ctx.MaterialSource` and must not t
 - `Sources(ctx, item)`: that item's containers in spend order (first drained first) and its pool
   reserve (kept once across the pool). Each item has its own order. **`null` = the game's own rules
   pay and show this item**, exactly as if no provider were registered.
+- **Governed with no sources is zero, not vanilla.** For an operation the provider governs, an ingredient it returns `null` for keeps the game's own rules, but an ingredient it governs with no sources (an empty `SpendOrder`, or no container that holds it) counts as **zero** in the game's check, even when the plot's own shared storage holds it: the pool replaces the game's shared storage. Give every ingredient of every cost the provider can be asked about a source, or return `null` for it. (Live 2026-10-14: a sword repair needed a third ingredient, Gem Dust, with no bound source, and the game refused the repair at its check.)
 - `Revision(ctx)`: changes whenever the provider's policy does; part of the displayed-view fingerprint.
 - A provider call that throws is logged, counted in `Status.Faults`, and means **no remote sources**
   for that context (`Candidates`) or item (`Sources`). It never falls back to the game's shared
@@ -2989,8 +2990,7 @@ re-verification procedure but one):
 
 The game never counted more than once per operation. **Not live-verified:** other screens reading
 the same count (repair, research, a chest window), a cancelled craft, and transaction ids increasing
-across a server Core swap (no payment was made after the swap). That run predates `Repair` and
-`Upgrade`: neither is live-verified ([re-verification procedure](../samples/Progenitor.SharedResourcesTest/README.md#repair-and-upgrade-cases-not-yet-run-live)). An earlier, unhardened build also ran
+across a server Core swap (no payment was made after the swap). `Repair` and `Upgrade` were live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair ([procedure](../samples/Progenitor.SharedResourcesTest/README.md#repair-and-upgrade-cases)): a worn-item and a workstation repair and a castle heart upgrade from level 1 to 2 were each paid from remote chests in one transaction with one `MaterialPaid` per line, a short repair and a short upgrade were refused at the game's check with nothing taken, and the Upgrade view showed the heart while its window was open. An earlier, unhardened build also ran
 live on 2026-10-13 (a prison cell fed from a remote chest; the same Build totals on two plots).
 
 Not proven live on any build:
@@ -3003,10 +3003,12 @@ Not proven live on any build:
   walks off, and clears when the target changes.
 - How the game's check treats a recipe that lists one item twice.
 
-Not proven live for `Repair` and `Upgrade`: that the server's interaction target is the castle heart
-while its window is open (the Upgrade view and `Station` rely on it), that the repair system and the
-castle heart system each count once per request, and that the heart window's costs redraw when a new
-view arrives. `Research` and `Other` are not wired; they stay vanilla.
+Observed live for `Repair` and `Upgrade` on 2026-10-14: the server's interaction target is the castle
+heart while its window is open (the Upgrade view carried the heart, and the upgrade's `check` named it as
+`station=`), each repair and each upgrade counted once per request, and the heart window's costs showed
+the pool. Not verified: a claim staying vanilla (case 21) and the client's own path of an equipped-item
+repair (every repair was sent from the server bridge). `Research` and `Other` are not wired; they stay
+vanilla.
 
 ## Main thread
 

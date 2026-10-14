@@ -112,9 +112,11 @@ may log nothing while `faults` keeps growing.
 | 13 | Unload | Hot-unload this plugin | `materials: provider unregistered owner=progenitor.sharedresourcestest`; views cleared |
 | 14 | Server Core swap | Re-enable, then swap the server's Core (`core_reload` on the server) and do not re-enable | Within about 1 s of the new Core's first refresh, both client views are `null` (a cleared view per operation) |
 
-### Repair and Upgrade cases (not yet run live)
+### Repair and Upgrade cases
 
-Repair and Upgrade were added after the run above: experimental, game-free tested, **not live-verified**.
+**Run on the isolated test rig on 2026-10-14:** cases 15, 16, 17, 18, 19, 20 and 22 (22 partially: the
+chest half) passed; case 21 (claim) was not run, and the client's own path of an equipped-item repair
+was not exercised (every repair was sent from the server bridge).
 Run them with the same deployment (a Core with `wired=…,Repair,Upgrade`) and the same scope and sources.
 Each operation is its own capture: `.srtest end`, then `cost` the new ingredients (disable first, then
 `enable` again) before each `begin`.
@@ -137,6 +139,13 @@ the server bridge, as the event the player's client would send (`materials` `sen
 The server bridge's `bot_repair` `repair` action sends the same worn-item event. A sent event is
 silent when the game refuses it: read the result (durability, the heart level, the `materials:` lines).
 
+**Bind a source for every ingredient of the cost.** The provider governs every item it is asked about,
+and the pool replaces the plot's shared storage: an ingredient with no bound source counts as zero at the
+game's check even when the plot's own chests hold it, and the game refuses the whole operation. Read the
+item's full repair cost (the `ItemRepairBuffer` of its repair recipe) before `cost` and `rank`.
+`inspect` at depth 1 truncates buffers: check `elementsTruncated` in the reply and read deeper when it is
+true (on 2026-10-14 the first read of a sword's repair buffer showed two of its three ingredients).
+
 **Repair setup.** Damage one piece of gear whose repair costs an ingredient X of the plot (wear it in a
 fight, or pick a piece already below full durability), read its repair cost from the item tooltip, and
 empty X from the bag and the workstation. `.srtest cost X <the tooltip's amount> 0`. The tooltip shows the
@@ -150,7 +159,7 @@ costs show the pool once the Upgrade view arrives (up to about 1 s after opening
 |---|---|---|---|
 | 15 | Repair baseline | `disable`, `baseline repair`, repair the piece from the character menu | The game charges nothing (it shows missing materials); zero debit; `enable` again |
 | 16 | Repair equipped | `begin repair`, repair the worn piece from the character menu (or `send` `repair_equipped`) | One `materials: check Repair … tx=<t>`, then one `materials: paid Repair … tx=<t>` per ingredient in the per-item order; one `Shared Resources Test: MaterialPaid tx=<t> Repair …` per line; `verify` MATCH; the piece is at full durability. Also the unverified client side of this path: no `check Repair` line at all means the client refused the equipped repair on its own count (report it; it would need a client view or a hook). With a station's window still open, `check` names that station as `station=`: expected, because the game's own pass for a worn-item repair also reaches the open interaction inventory, so Progenitor names it and leaves it out of the pool (live run 2026-10-14) |
-| 17 | Repair at a station | Damage another piece and keep it in the bag, open the bench's window, `begin repair`, arm `materials` `{"action":"trace"}` on the server, then `send` `repair_item` with `station` `target` and the piece's bag `slot`. **2026-10-14: FAILED, open:** each send logged one `check Repair` and then the game refused at its own check (no `paid` line, no repair, zero debit). The trace line shows whether the rows the check saw (`total=`) cover the repair cost; compare them with the item's repair cost (`ItemRepairBuffer` of its repair recipe, scaled by the wear) | Same lines as 16; the `check` context names the bench as `station=`; the bench's own stock is not debited by the pool (watch it with `.srtest watch bench …`); `verify` MATCH |
+| 17 | Repair at a station | Damage another piece and keep it in the bag, bind a source for every ingredient of its repair cost, open the bench's window, `begin repair`, arm `materials` `{"action":"trace"}` on the server (optional), then `send` `repair_item` with `station` `target` and the piece's bag `slot` | One `check Repair … station=<bench>`, one `paid Repair` line per ingredient with one `tx`, one `MaterialPaid` per line, `verify` MATCH, the piece at full durability. **PASSED 2026-10-14** (Iron Bar, Plank and Gem Dust from three chests). An earlier attempt was refused at the game's check because one ingredient (Gem Dust) had no bound source |
 | 18 | Repair shortfall | Leave one unit fewer of X across A and B, `begin repair`, repair | The game refuses at its check (missing materials); zero debit; `shortfalls` unchanged |
 | 19 | Upgrade short | Leave one unit too few of one cost across A and B, `begin upgrade`, open the heart's window, `send` `heart_upgrade` (or press upgrade) | The view shows the short amount; the client's own check refuses (the button does nothing) or, for a `send`, the server's check does; zero debit; then restore the unit and `end` |
 | 20 | Upgrade | `begin upgrade`, open P's heart window, read the costs, `send` `heart_upgrade` (or press upgrade) | Client bridge `materials`: `views.Upgrade.station` is P's heart network id while the window is open, and its costs show the pool; one `materials: check Upgrade … station=<heart id> tx=<t>`, one `paid Upgrade` line per cost line, `MaterialPaid` per line; `verify` MATCH; the heart's level rose by one |
