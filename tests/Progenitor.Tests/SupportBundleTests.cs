@@ -222,26 +222,31 @@ public sealed class SupportRedactorTests
     [Fact]
     public void Pathological_inputs_redact_in_linear_time()
     {
-        var shapes = new[]
+        // Each shape at 4x its small size; the large size is the shape's unit repeated `count` times (1 to 2 MB).
+        var shapes = new (string Unit, int Count)[]
         {
-            string.Concat(Enumerable.Repeat("ab-", 1_400_000)),            // one 4 MB word of key characters
-            string.Concat(Enumerable.Repeat("a:", 2_000_000)),             // a separator after every key
-            string.Concat(Enumerable.Repeat("'a'x", 1_000_000)),           // quoted words with no override text
-            string.Concat(Enumerable.Repeat("a.b@", 1_000_000)),           // email-like runs
-            string.Concat(Enumerable.Repeat("-a ", 1_400_000)),            // argument-like runs
-            string.Concat(Enumerable.Repeat("1.2.", 1_000_000)),           // address-like runs
-            string.Concat(Enumerable.Repeat("a:b:", 1_000_000)),           // IPv6-like runs
-            string.Concat(Enumerable.Repeat("token=", 700_000)),           // secret names with no value
+            ("ab-", 700_000),       // one long word of key characters
+            ("a:", 1_000_000),      // a separator after every key
+            ("'a'x", 500_000),      // quoted words with no override text
+            ("a.b@", 500_000),      // email-like runs
+            ("-a ", 700_000),       // argument-like runs
+            ("1.2.", 500_000),      // address-like runs
+            ("a:b:", 500_000),      // IPv6-like runs
+            ("token=", 350_000),    // secret names with no value
         };
-        foreach (string input in shapes)
+        foreach (var (unit, count) in shapes)
         {
-            var r = New();
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            string output = r.Redact(input);
-            watch.Stop();
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(4), input.Substring(0, 8) + ": " + watch.Elapsed);
-            Assert.Equal(0, r.WithheldCount);
-            Assert.NotNull(output);
+            ScalingAssert.SubQuadratic(unit, size =>
+            {
+                string input = string.Concat(Enumerable.Repeat(unit, size));
+                var r = New();
+                return () =>
+                {
+                    Assert.NotNull(r.Redact(input));
+                    // A regex timeout withholds the text and returns fast, which would hide a quadratic pattern.
+                    Assert.Equal(0, r.WithheldCount);
+                };
+            }, count / 4);
         }
     }
 }

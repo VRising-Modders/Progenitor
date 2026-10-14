@@ -343,7 +343,7 @@ public class FreezeDumpTests
         FreezeDump.WriteDump = _ =>
         {
             entered.Set();
-            if (!release.Wait(TimeSpan.FromSeconds(5))) return -1;
+            if (!release.Wait(TimeSpan.FromSeconds(30))) return -1;
             return 0;
         };
         try
@@ -352,7 +352,8 @@ public class FreezeDumpTests
             Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
             var sw = Stopwatch.StartNew();
             FreezeDump.Stop();
-            Assert.True(sw.ElapsedMilliseconds < 500);
+            // Joining would wait for the held writer (30 s); the bound only has to tell the two apart.
+            Assert.True(sw.ElapsedMilliseconds < 10_000, "Stop took " + sw.ElapsedMilliseconds + " ms");
             FreezeDump.Snapshot(out _, out _, out _, out _, out bool dumpInProgress);
             Assert.True(dumpInProgress);
         }

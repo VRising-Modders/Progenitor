@@ -678,10 +678,14 @@ public sealed class InstallListPolishTests : IDisposable
         Assert.Equal(15, pane.SideCacheCount);
 
         // Game-free cost (the fake runtime has no Unity layout; the live number is the readback's).
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        for (int i = 0; i < 20; i++) pane.RefilterListings();
-        watch.Stop();
-        double perRefilter = watch.Elapsed.TotalMilliseconds / 20;
+        // Best of 20, not the mean: a preempted run on a busy CI runner must not decide the result.
+        double perRefilter = double.MaxValue;
+        for (int i = 0; i < 20; i++)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            pane.RefilterListings();
+            perRefilter = Math.Min(perRefilter, watch.Elapsed.TotalMilliseconds);
+        }
         pane.InvalidateSideCache();
         var cold = System.Diagnostics.Stopwatch.StartNew();
         pane.RefilterListings();

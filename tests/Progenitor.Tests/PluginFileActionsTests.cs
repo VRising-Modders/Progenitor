@@ -985,7 +985,8 @@ public sealed class PluginFileActionsTests : IDisposable
             Assert.Equal(PluginFileActions.WhyBusy, error);
             Assert.False(PluginFileActions.Cancel(_root, "author.mod", out error, TimeSpan.FromMilliseconds(250)));
             Assert.Equal(PluginFileActions.WhyBusy, error);
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+            // Two 250 ms lock waits; waiting for the holder would take its full 30 s.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
         }
         finally
         {
