@@ -252,6 +252,52 @@ public class VanillaPanelAnchorsTests
     }
 
     [Fact]
+    public void The_slot_right_of_the_bar_takes_captions_up_to_80_units_shrinking_those_over_60()
+    {
+        // 88 units are left right of SmartMerge. A button is its caption plus 14 padding a side, so a
+        // caption of up to 60 units shows at the game's full 16-unit size; up to 80 it is squeezed to
+        // the slot with the caption down to 0.75 of that size (12 units); wider is hidden.
+        Assert.Equal(88f, Inventory.XMax - (SmartMergeCell.XMax + 8f));
+        Assert.Equal(88f, 60f + 2 * 14f);
+        Assert.Equal(88f, VanillaPanelAnchors.MinButtonWidth(80f, 14f, 36f));
+
+        // "Storage": a 64-unit caption, 92 wide at full size, at least 76 squeezed: it gets the slot.
+        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 92, 36,
+            Inventory, BarObstacles(), out var slot, minWidth: VanillaPanelAnchors.MinButtonWidth(64f, 14f, 36f));
+        Assert.Equal(VanillaFit.Fits, verdict.Fit);
+        Assert.Equal(BesideSlot.After, slot);
+        Assert.Equal(new UiRect(537, 67, 88, 36).ToString(), verdict.Rect.ToString());
+        Assert.True(verdict.Retry);
+        foreach (var o in BarObstacles()) Assert.False(verdict.Rect.Overlaps(o.Rect), o.Name);
+
+        // "Stash" fits unsqueezed.
+        verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 72, 36,
+            Inventory, BarObstacles(), out slot, minWidth: 72);
+        Assert.Equal(new UiRect(537, 67, 72, 36).ToString(), verdict.Rect.ToString());
+
+        // An 81-unit caption cannot be squeezed into 88: hidden, and asked again later.
+        verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 81 + 28, 36,
+            Inventory, BarObstacles(), out slot, minWidth: VanillaPanelAnchors.MinButtonWidth(81f, 14f, 36f));
+        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
+        Assert.True(verdict.Retry);
+    }
+
+    [Fact]
+    public void Measured_while_the_window_slides_in_the_slot_is_short_and_the_refusal_is_retried()
+    {
+        // Live 468b89120: the first fit of a one-button row read the bar 30 units right of where it
+        // rests (the window's open motion), so the slot was 58 wide and even "Stash" was refused.
+        // The refusal carries Retry, so the handle asks again once the window has come to rest.
+        var shifted = new UiRect(SmartMergeCell.X + 30, SmartMergeCell.Y, SmartMergeCell.Width, SmartMergeCell.Height);
+        var verdict = VanillaPanelPlacement.PlaceBeside(shifted, SortCell, allowAbove: true, 8, 72, 36,
+            Inventory, BarObstacles(), out var slot, minWidth: 72);
+        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
+        Assert.Equal(BesideSlot.None, slot);
+        Assert.True(verdict.Retry);
+        Assert.False(VanillaPanelPlacement.CheckInline(new UiRect(0, 0, 10, 10), new UiRect(0, 0, 5, 5), null).Retry);
+    }
+
+    [Fact]
     public void Three_buttons_on_one_BesideSort_handle_are_one_row_that_fits_neither_slot_on_this_build()
     {
         // "Stash", "Inventory", "Find": 72 + 115 + 72 with 8 between = 275 units. Right of the bar

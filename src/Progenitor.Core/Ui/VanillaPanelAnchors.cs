@@ -260,6 +260,17 @@ internal static class VanillaPanelAnchors
     internal static float CompactWidth(float height) => Math.Max(MinPositionedHeight, height) * 2f;
 
     /// <summary>
+    /// How far a placed row's captions may shrink to fit its slot: 0.75 of the game's size, which
+    /// is 12 units for the 16-unit label the buttons clone. Below that a caption stops reading as the
+    /// game's own, so the row is hidden instead.
+    /// </summary>
+    internal const float MinCaptionScale = 0.75f;
+
+    /// <summary>A button's narrowest width: its caption at <see cref="MinCaptionScale"/> plus the padding, at least 36.</summary>
+    internal static float MinButtonWidth(float captionWidth, float padding, float height) =>
+        Math.Max(36f, captionWidth * MinCaptionScale + 2f * padding);
+
+    /// <summary>
     /// The gap a positioned container keeps from the group's last member: the group's own spacing
     /// when it has a visible one, else <see cref="VanillaPanelPlacement.DefaultSpacing"/> (the rename
     /// group's spacing is 0, and 8 is the gap the game leaves between the title and that group).

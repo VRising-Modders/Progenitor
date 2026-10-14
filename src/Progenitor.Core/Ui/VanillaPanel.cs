@@ -348,12 +348,22 @@ internal enum VanillaFit
 /// <summary>A placement verdict and the one word the log line carries.</summary>
 internal readonly struct VanillaFitResult
 {
-    internal VanillaFitResult(VanillaFit fit, string reason, UiRect rect = default)
+    internal VanillaFitResult(VanillaFit fit, string reason, UiRect rect = default, bool retry = false)
     {
         Fit = fit;
         Reason = reason ?? "";
         Rect = rect;
+        Retry = retry;
     }
+
+    /// <summary>
+    /// A refusal that may change without the container being rebuilt, so it is asked again on the
+    /// refit cadence. True for placed containers: hiding one moves nothing, and the window's content
+    /// slides in under its open motion, so a slot measured on the first frames can be off by the
+    /// motion's offset. A joined container's refusal stays final, because hiding it reflows the
+    /// group and asking again would make it flicker.
+    /// </summary>
+    internal bool Retry { get; }
 
     internal VanillaFit Fit { get; }
 
@@ -519,15 +529,25 @@ internal static class VanillaPanelPlacement
     /// </summary>
     internal static VanillaFitResult PlaceBeside(
         in UiRect lastMember, in UiRect reference, bool allowAbove, float spacing, float width, float height,
-        in UiRect frame, IReadOnlyList<UiObstacle>? obstacles, out BesideSlot slot)
+        in UiRect frame, IReadOnlyList<UiObstacle>? obstacles, out BesideSlot slot, float minWidth = 0f)
     {
         float sp = spacing < 0 ? 0 : spacing;
         var after = PlaceAfter(lastMember, sp, width, height);
+
+        // The slot right of the group ends at the frame. A row a little wider than what is left is
+        // narrowed to it, down to minWidth (the captions at their smallest readable size), rather
+        // than refused: its captions shrink to fit, as the game's own do.
+        if (!frame.IsEmpty && after.XMax > frame.XMax && minWidth > 0f)
+        {
+            float room = frame.XMax - after.X;
+            if (room >= minWidth) after = new UiRect(after.X, after.Y, room, height);
+        }
+
         var first = CheckPlaced(after, frame, obstacles);
         if (first.Fit == VanillaFit.Fits)
         {
             slot = BesideSlot.After;
-            return first;
+            return Placed(first);
         }
 
         if (allowAbove && !reference.IsEmpty)
@@ -537,16 +557,18 @@ internal static class VanillaPanelPlacement
             if (second.Fit == VanillaFit.Fits)
             {
                 slot = BesideSlot.Above;
-                return second;
+                return Placed(second);
             }
 
             slot = BesideSlot.None;
-            return new VanillaFitResult(VanillaFit.Blocked, first.Reason + "/" + second.Reason, after);
+            return new VanillaFitResult(VanillaFit.Blocked, first.Reason + "/" + second.Reason, after, retry: true);
         }
 
         slot = BesideSlot.None;
-        return first;
+        return Placed(first);
     }
+
+    private static VanillaFitResult Placed(in VanillaFitResult r) => new(r.Fit, r.Reason, r.Rect, retry: true);
 
     private static VanillaFitResult CheckPlaced(in UiRect rect, in UiRect frame, IReadOnlyList<UiObstacle>? obstacles)
     {

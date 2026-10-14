@@ -110,6 +110,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private readonly List<IRuntimeWidget?> _buttons = new();
     private VanillaFit _fit = VanillaFit.Unknown;
     private string _fitReason = "";
+    private bool _fitRetry;
 
     // Why nothing is drawn right now, for ui_read: "" while a container is attached, else the
     // plan's reason ("site" while the window is closed, "donor") or "container" when the runtime
@@ -574,7 +575,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     /// </summary>
     private bool ShouldRefitLocked()
     {
-        if (_fit == VanillaFit.Blocked && !VanillaUiSites.IsEdge(Anchor)) return false;
+        if (_fit == VanillaFit.Blocked && !VanillaUiSites.IsEdge(Anchor) && !_fitRetry) return false;
         if (_fitDirty) return true;
         if (++_keptFrames < RefitEvery) return false;
         _keptFrames = 0;
@@ -595,6 +596,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         }
 
         _fit = result.Fit;
+        _fitRetry = result.Retry;
 
         // Unknown is "not measurable yet" (a group not laid out on its build frame): shown, and
         // asked again next frame, a bounded number of times. Never a hide.

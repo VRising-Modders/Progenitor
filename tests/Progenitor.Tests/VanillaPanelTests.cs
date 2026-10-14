@@ -842,6 +842,43 @@ public class VanillaPanelTests : IDisposable
         bag.Dispose();
     }
 
+    [Fact]
+    public void A_placed_container_refused_on_open_is_shown_once_a_later_refit_fits()
+    {
+        // A joined container's Blocked is final (hiding it reflows the group); a placed one's carries
+        // Retry and is asked again on the 30-frame refit, so the slot measured mid open motion does
+        // not hide the button for the whole session.
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:mod", retry: true);
+        var bag = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        bag.Button("Storage");
+        var character = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0);
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, character));
+        Assert.Equal(false, ReadbackOf(bag)["shown"]);
+
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok", retry: true);
+        for (int i = 0; i < 31; i++) _client.Fire(VanillaUiSite.InventoryPanel, Open(21, character));
+        var d = ReadbackOf(bag);
+        Assert.Equal(true, d["shown"]);
+        Assert.Equal("ok", d["fit"]);
+        Assert.Contains(Lines, l => l.Contains("anchor=sort shown again"));
+        bag.Dispose();
+    }
+
+    [Fact]
+    public void A_joined_container_refused_after_layout_stays_hidden_until_rebuilt()
+    {
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:DropAllButton");
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        rename.Button("Locate");
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        int calls = _client.FitCalls;
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok");
+        for (int i = 0; i < 61; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(calls, _client.FitCalls);
+        Assert.Equal(false, ReadbackOf(rename)["shown"]);
+        rename.Dispose();
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime

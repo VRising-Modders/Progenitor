@@ -495,6 +495,7 @@ internal sealed partial class UnityUiRuntime
         RenameGroups.Clear();
         ButtonFailures.Clear();
         AnchorStatusKey.Clear();
+        PlacementSaid.Clear();
         AnchorStatus.Clear();
         _hovered = null;
         _scanFrame = -1;
@@ -1256,6 +1257,9 @@ internal sealed partial class UnityUiRuntime
 
     private static readonly Dictionary<(VanillaUiSite, VanillaPanelAnchor), string> AnchorStatusKey = new();
 
+    /// <summary>The last placement geometry line said per site and anchor.</summary>
+    private static readonly Dictionary<(VanillaUiSite, VanillaPanelAnchor), string> PlacementSaid = new();
+
     /// <summary>Give our inline container the donor button's flexible width, so the vanilla group treats it like a button.</summary>
     private static void CopyFlexible(LayoutElement ours, GameObject? donor)
     {
@@ -1594,13 +1598,26 @@ internal sealed partial class UnityUiRuntime
             var reference = host.Anchor == VanillaPanelAnchor.BesideSort && Alive(view.Sort)
                 ? RectIn(panelSpace, Rt(view.Sort))
                 : default;
-            float width = host.InlineWidth(GroupSpacing(host.Transform, VanillaPanelPlacement.DefaultSpacing));
+            float rowSpacing = GroupSpacing(host.Transform, VanillaPanelPlacement.DefaultSpacing);
+            float width = host.InlineWidth(rowSpacing);
             float gap = VanillaPanelAnchors.PositionedSpacing(GroupSpacing(group, 0f));
             inlineVerdict = VanillaPanelPlacement.PlaceBeside(
                 lastMember, reference, allowAbove: host.Anchor == VanillaPanelAnchor.BesideSort, gap, width, host.ButtonSize.y,
-                frame, FitScratch, out var slot);
+                frame, FitScratch, out var slot, host.MinInlineWidth(rowSpacing));
             host.Slot = slot;
             if (inlineVerdict.Fit == VanillaFit.Fits) Place(host, panelSpace, inlineVerdict.Rect);
+
+            // The geometry the verdict was made on, said when it changes (a refused slot is asked
+            // again every 30 frames; the line repeats only if something moved).
+            string geometry = "Ui: attach " + VanillaUiSites.Key(host.Site) + " anchor=" + VanillaUiSites.AnchorKey(host.Anchor)
+                + " slot=" + (slot == BesideSlot.After ? "after" : slot == BesideSlot.Above ? "above" : "none")
+                + " last=" + lastMember + " frame=" + frame + " row=" + Mathf.RoundToInt(width) + "/min" + Mathf.RoundToInt(host.MinInlineWidth(rowSpacing))
+                + " placed=" + inlineVerdict.Rect + " reason=" + inlineVerdict.Reason;
+            if (!PlacementSaid.TryGetValue((host.Site, host.Anchor), out var said) || said != geometry)
+            {
+                PlacementSaid[(host.Site, host.Anchor)] = geometry;
+                Plugin.Logger?.LogInfo(geometry);
+            }
         }
         else
         {
@@ -1862,6 +1879,25 @@ internal sealed partial class UnityUiRuntime
             return w;
         }
 
+        /// <summary>
+        /// The narrowest this row may be squeezed to: each button at its caption's
+        /// <see cref="VanillaPanelAnchors.MinCaptionScale"/> of full size plus the padding, never
+        /// below the bar button's 36 units.
+        /// </summary>
+        internal float MinInlineWidth(float spacing)
+        {
+            float w = 0f;
+            int n = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                if (!Buttons[i].Alive || !Buttons[i].Visible) continue;
+                w += VanillaPanelAnchors.MinButtonWidth(Buttons[i].CaptionWidth, CaptionPadding, ButtonSize.y);
+                n++;
+            }
+
+            return n == 0 ? 0f : w + (n - 1) * Mathf.Max(0f, spacing);
+        }
+
         internal float InlineWidth(float spacing)
         {
             float w = 0f;
@@ -1954,12 +1990,16 @@ internal sealed partial class UnityUiRuntime
         /// <summary>Donor width, or the caption at full size plus the padding, whichever is wider.</summary>
         internal float PreferredWidth { get; private set; }
 
+        /// <summary>The caption's own width at full size (no padding), measured by the last refit.</summary>
+        internal float CaptionWidth { get; private set; }
+
         internal void Refit()
         {
             try
             {
                 if (_caption == null) return;
                 var pref = _caption.GetPreferredValues(_caption.text ?? "", 9999f, _donorSize.y);
+                CaptionWidth = pref.x;
                 PreferredWidth = Mathf.Max(_donorSize.x, pref.x + 2f * CaptionPadding);
                 if (Element != null) Element.preferredWidth = PreferredWidth;
             }
