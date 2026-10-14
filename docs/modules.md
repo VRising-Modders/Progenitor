@@ -2011,7 +2011,7 @@ server item table").
 |---|---|---|
 | `TryAdd` | `ServerGameManager.TryAddInventoryItem` (the `ctx.Items.Grant` path); the character as target for a player's bag, the inventory entity otherwise | Partial adds allowed; `Done` and `Remainder` are read-backs. |
 | `TryRemove` | `InventoryUtilitiesServer.RemoveItemGetRemainder` on that inventory | Never asks for more than the inventory holds. Asking for more would make the game fall back to unequipping worn gear, which this call never reaches. |
-| `Transfer` | `InventoryUtilitiesServer.TryMoveItem`, one source slot at a time, with the target instance index set | Conserves the total and never creates or destroys items (below). A completed game move keeps the item's own entity (durability, stats). |
+| `Transfer` | `InventoryUtilitiesServer.TryMoveItem`, one source slot at a time, with the target instance index set | Conserves the total of interchangeable items; for any other item a step that does not conserve the total is detected and the transfer stops (`Inconsistent`) without creating or deleting a copy (below). A completed game move keeps the item's own entity (durability, stats). |
 | `TransferAll` | One `Transfer` per item type the filter accepts | Stops at the first `Inconsistent` row. |
 
 **How the transfer keeps the total.** The game's slot move adds into the target first, clears the
@@ -2026,10 +2026,14 @@ exactly what the target gained.
   restored for them.
 - **Restore only for interchangeable items.** When a step does not conserve the total and the item
   is a stackable or consumable without its own item entity in either container, the restore step
-  adds the missing units back to the source (then the target) or removes the extra units from the
-  target (then the source), never more than that side holds. For anything else — gear, or any
+  adds the missing units back to the source (never anywhere else) or removes the extra units from
+  the target (then the source), never more than that side holds. For anything else — gear, or any
   copy with its own entity — nothing is added or removed: the transfer stops with
   `InventoryOutcome.Inconsistent` instead of guessing which copy to recreate or delete.
+- **Worn copies are counted by entity.** A wielded weapon can keep its bag slot; a worn copy whose
+  entity is also a row of the target inventory is counted once, as an inventory unit. For a bag
+  entity the owner is the character its `InventoryConnection` names. `TryAdd` applies the same
+  accounting.
 - If the total still differs, the transfer stops with `Inconsistent`, logs `Inventory: transfer …`
   as an error, and reports both containers' counts.
 - Two references that resolve to the same inventory entity (a character and its own bag entity)
@@ -2062,8 +2066,8 @@ How it works: the framework assigns a random id the first time a container is as
 records it against the container's **anchor** — territory index, prefab, origin tile, height level
 and rotation, which the world save keeps for every placed model and which no two live models of one
 prefab share. The book lives in that world's mod save (`progenitor/progenitor.inventory.json` beside
-the autosaves), so another world never sees it; it is updated in the store the moment an id is
-issued and written to disk with each world save. After a load the framework re-reads it, binds each
+the autosaves) and carries that world's identity (`progenitor/inventory-world-id.txt`, copied with the save), so a book from another world is ignored; new ids reach the store at the end of the frame and before every
+world save, and the store is written to disk with each world save. After a load the framework re-reads it, binds each
 saved id to the container standing on its anchor and retires ids whose anchor holds nothing; while
 the server runs, a sweep every two seconds retires ids whose container was destroyed and moves the
 anchor of a model that was moved, so a new chest on a freed or destroyed tile gets a new id. Ids
@@ -2076,7 +2080,9 @@ Failure modes, by design:
 2. A world rolled back to an older autosave can bring back a container whose id was already
    retired; it gets a new id.
 3. Relocating a castle rebuilds and moves every model, so every container gets a new id. (A model moved while the server runs keeps its id: the sweep follows it to its new tile.)
-4. Player bags and servants have no id; address them through their owner.
+4. A model moved within the two seconds before a save (before the sweep saw the move) is
+   found on its old tile after a restart, so it loses its id and gets a new one.
+5. Player bags and servants have no id; address them through their owner.
 
 Ids are not available until the world's mod save has loaded and the castles are visible after a
 load (`IdOf` returns `ContainerId.None` with the reason meanwhile).
@@ -2150,13 +2156,17 @@ of the save made for this test.
    `total_before == total_after`); move into a refusing target such as the heart
    (`.items move #1 heart … 1`, expect `Nothing … refuses this item`). No `Inventory: transfer …
    could not be restored` error appears.
-6. Gear into an owner that can wear it: put one weapon or armor piece in chest #1 (`.items add #1
-   <gear prefab> 1`), take off the matching piece on your character, then `.items move #1 bag <gear
-   prefab> 1`. Expect `Moved 1/1 … (Complete; 1 equipped by the target's owner)`, the piece worn
-   and no copy left in the chest (`.items count #1 <gear prefab>` is 0). Repeat into a servant
-   with an empty matching slot (`.items move #1 <servant index:version> <gear prefab> 1`, the
-   entity from the bridge `castles`/`get` ops): the servant wears it and the chest has none. Then
-   with the slot filled: the piece lands in the bag or servant inventory instead.
+6. Gear into an owner that can wear it: put one armor piece in chest #1 (`.items add #1
+   <armor prefab> 1`), take off the matching piece on your character, then `.items move #1 bag
+   <armor prefab> 1`. Expect `Moved 1/1 … (Complete; 1 equipped by the target's owner)`, the piece
+   worn and no copy left in the chest (`.items count #1 <armor prefab>` is 0). Repeat into a
+   servant with an empty matching slot (`.items move #1 <servant index:version> <armor prefab> 1`,
+   the entity from the bridge `castles`/`get` ops): the servant wears it and the chest has none.
+   Then with the slot filled: the piece lands in the bag or servant inventory instead.
+   **Weapon:** with an empty weapon slot, `.items move #1 bag <weapon prefab> 1`. Expect `Moved 1/1`
+   and `Complete`, never `Inconsistent`: whether the game also keeps the wielded weapon in an
+   action-bar slot or not, it is counted once (`equipped` is 1 only when it left the bag). Then two
+   weapons of one prefab with one free slot: `Moved 2/2`, one wielded and one in the bag.
 7. Ids: note `.items id #1`, restart the test server, rejoin, `.items id #1` again (same id,
    status `Live`); destroy a chest, wait two seconds, `.items id c-<old id>` (expect `was
    destroyed`); place a new chest on the same tile (expect a new id).

@@ -168,6 +168,22 @@ public class ContainerIdTests
     }
 
     [Fact]
+    public void Retiring_an_old_record_never_drops_another_records_entity_binding()
+    {
+        var book = new ContainerIdRegistry();
+        var chestC = new ContainerAnchor(13, 279811010, 2800, 2985, 10, 0);
+        // Epoch 1: A on entity 100, B on entity 101.
+        var a = book.IdFor(Seen(ChestA, 100), 1, IsLive);
+        var b = book.IdFor(Seen(ChestB, 101), 1, IsLive);
+        // Epoch 2 (reload): B now happens to be entity 100; A's tile is empty.
+        _live.Clear();
+        book.Prime(2, new[] { Seen(ChestB, 100) });
+        Assert.Equal(ContainerIdStatus.Gone, book.Status(a, 2));
+        // B is moved: found through its entity binding, it keeps its id.
+        Assert.Equal(b, book.IdFor(Seen(chestC, 100), 2, IsLive));
+    }
+
+    [Fact]
     public void Validate_retires_one_dead_id()
     {
         var book = new ContainerIdRegistry();

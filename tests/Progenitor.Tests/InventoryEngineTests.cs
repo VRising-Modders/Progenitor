@@ -255,6 +255,67 @@ public class InventoryEngineTests
     }
 
     [Fact]
+    public void Two_swords_into_one_free_slot_equip_one_and_bag_the_other()
+    {
+        var b = NewBackend();
+        var chest = b.AddContainer(10, 4);
+        var bag = b.AddContainer(52, 4);
+        b.FreeEquipSlots[(52, 1)] = new List<int> { Sword };
+        b.Put(chest, 0, Sword, 1, hasEntity: true);
+        b.Put(chest, 1, Sword, 1, hasEntity: true);
+        var r = new InventoryEngine(b).Transfer(chest, bag, Sword, 2);
+        Assert.Equal(InventoryOutcome.Complete, r.Outcome);
+        Assert.Equal(2, r.Done);
+        Assert.Equal(1, r.Equipped);
+        Assert.Equal(1, b.CountOf(bag, Sword));
+        Assert.Equal(0, b.CountOf(chest, Sword));
+    }
+
+    [Fact]
+    public void A_wielded_weapon_that_keeps_its_bag_slot_is_not_counted_twice()
+    {
+        var b = NewBackend();
+        var chest = b.AddContainer(10, 4);
+        var bag = b.AddContainer(53, 4);
+        b.FreeEquipSlots[(53, 1)] = new List<int> { Sword };
+        b.WieldKeepsBagSlot = true;
+        b.Put(chest, 0, Sword, 1, hasEntity: true);
+        var r = new InventoryEngine(b).Transfer(chest, bag, Sword, 1);
+        Assert.Equal(InventoryOutcome.Complete, r.Outcome);
+        Assert.Equal(1, r.Done);
+        Assert.Equal(0, r.Equipped);
+    }
+
+    [Fact]
+    public void TryAdd_counts_an_add_the_game_equipped()
+    {
+        var b = NewBackend();
+        var bag = b.AddContainer(54, 4);
+        b.FreeEquipSlots[(54, 1)] = new List<int> { Sword };
+        b.EquipOnAdd = true;
+        var r = new InventoryEngine(b).TryAdd(bag, Sword, 1);
+        Assert.Equal(InventoryOutcome.Complete, r.Outcome);
+        Assert.Equal(1, r.Done);
+        Assert.Equal(1, r.Equipped);
+        Assert.Equal(0, r.TargetAfter);
+    }
+
+    [Fact]
+    public void The_restore_step_never_adds_into_the_target()
+    {
+        var b = NewBackend();
+        var a = b.AddContainer(10, 1);
+        var c = b.AddContainer(11, 4);
+        b.Put(a, 0, IronOre, 100);
+        b.LoseOnMove = 7;
+        b.SourceRefusesAdds = true; // the source will not take the units back
+        var r = new InventoryEngine(b).Transfer(a, c, IronOre, 50);
+        Assert.Equal(InventoryOutcome.Inconsistent, r.Outcome);
+        Assert.Equal(1, b.Adds); // one attempt, into the source only
+        Assert.Equal(43, b.CountOf(c, IronOre));
+    }
+
+    [Fact]
     public void A_non_interchangeable_item_is_never_recreated_or_deleted_to_restore_a_total()
     {
         var b = NewBackend();
@@ -479,6 +540,7 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
     public int DuplicateOnMove { get; set; }
     public int DuplicateIntoSourceOnMove { get; set; }
     public bool AddFails { get; set; }
+    public bool SourceRefusesAdds { get; set; }
     public int Adds { get; private set; }
     public int LastRemoveAsk { get; private set; }
     public int OverRemoves { get; private set; }
@@ -573,13 +635,16 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
         var ownerKey = (to.OwnerIndex, to.OwnerVersion);
         if (FreeEquipSlots.TryGetValue(ownerKey, out var free) && free.Contains(s.Item))
         {
-            // The game's move equips gear onto an owner with a free matching slot.
+            // The game's move equips gear onto an owner with a free matching slot; MoveItemResult
+            // has no equipped value, the move reports Success_Complete (0).
             free.Remove(s.Item);
-            Worn[ownerKey] = (Worn.TryGetValue(ownerKey, out var w) ? w : new List<int>());
-            Worn[ownerKey].Add(s.Item);
+            bool inBag = WieldKeepsBagSlot;
+            if (inBag) AddInto(dst, s.Item, 1, s.Entity); // a wielded weapon keeps its bag slot
+            Worn[ownerKey] = (Worn.TryGetValue(ownerKey, out var w) ? w : new List<(int, bool)>());
+            Worn[ownerKey].Add((s.Item, inBag));
             src.Slots[slot] = s.Amount - 1 > 0 ? (s.Item, s.Amount - 1, s.Entity) : (0, 0, false);
-            detail = "Success_Equipped";
-            return 2;
+            detail = "Success_Complete";
+            return 0;
         }
 
         int added = AddInto(dst, s.Item, ask, s.Entity);
@@ -620,9 +685,18 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
         Adds++;
         detail = "";
         if (AddFails) { detail = "Failed_InventoryFull"; return false; }
+        if (SourceRefusesAdds && container.OwnerIndex == 10) { detail = "Failed_InventoryFull"; return false; }
         var box = Get(container);
         if (box == null) { detail = "missing"; return false; }
-        AddInto(box, item, amount, false);
+        var ownerKey = (container.OwnerIndex, container.OwnerVersion);
+        if (EquipOnAdd && FreeEquipSlots.TryGetValue(ownerKey, out var free) && free.Remove(item))
+        {
+            Worn[ownerKey] = Worn.TryGetValue(ownerKey, out var w) ? w : new List<(int, bool)>();
+            Worn[ownerKey].Add((item, false));
+            amount--;
+        }
+
+        if (amount > 0) AddInto(box, item, amount, false);
         return true;
     }
 
@@ -630,13 +704,20 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
     public Dictionary<(int, int), List<int>> FreeEquipSlots { get; } = new();
 
     /// <summary>What each owner wears.</summary>
-    public Dictionary<(int, int), List<int>> Worn { get; } = new();
+    public Dictionary<(int, int), List<(int Item, bool InBag)>> Worn { get; } = new();
+
+    /// <summary>A wielded weapon keeps its bag slot (it is in the inventory and equipped).</summary>
+    public bool WieldKeepsBagSlot { get; set; }
+
+    /// <summary>The add path equips too (Success_Equipped).</summary>
+    public bool EquipOnAdd { get; set; }
 
     public int EquippedCount(InventoryRef container, int item)
     {
         var k = (container.OwnerIndex, container.OwnerVersion);
         if (!FreeEquipSlots.ContainsKey(k)) return -1;
-        return Worn.TryGetValue(k, out var w) ? w.Count(i => i == item) : 0;
+        // Worn copies that are also rows of the inventory are not counted (the backend's rule).
+        return Worn.TryGetValue(k, out var w) ? w.Count(x => x.Item == item && !x.InBag) : 0;
     }
 
     public bool TryFingerprint(InventoryRef container, out ulong fingerprint)

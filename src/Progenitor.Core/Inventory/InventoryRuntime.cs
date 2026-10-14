@@ -60,7 +60,7 @@ internal static class InventoryRuntime
         _store = ModSave.Store(StoreId);
         _ready = _store.WhenReady(store =>
         {
-            int dropped = _book!.Load(store.Get<ContainerIdDocument>(BookKey));
+            int dropped = _book!.Load(ForThisWorld(store.Get<ContainerIdDocument>(BookKey)));
             _loaded = true;
             Plugin.Logger?.LogInfo("Inventory: container ids loaded (" + _book.Count + " live, "
                 + _book.RetiredCount + " retired" + (dropped > 0 ? ", " + dropped + " unreadable rows dropped" : "") + ")");
@@ -68,6 +68,7 @@ internal static class InventoryRuntime
         CastleContainerRows.IdResolver = ResolveForCastle;
         CastleContainerRows.HeartIdResolver = heart => IdOf(heart.ToEntity(), out _);
         Plugin.Frame += Tick;
+        ModSave.BeforeSave += Flush;
         _hooked = true;
         Plugin.Logger?.LogInfo("Inventory: installed (server)");
     }
@@ -75,6 +76,7 @@ internal static class InventoryRuntime
     internal static void Uninstall()
     {
         if (_hooked) Plugin.Frame -= Tick;
+        ModSave.BeforeSave -= Flush;
         _hooked = false;
         CastleContainerRows.IdResolver = null;
         CastleContainerRows.HeartIdResolver = null;
@@ -91,6 +93,7 @@ internal static class InventoryRuntime
         _loaded = false;
         _deferLogged = false;
         _emptyScans = 0;
+        _worldKey = _worldKeyFolder = null;
     }
 
     internal static string DescribePins() =>
@@ -102,6 +105,7 @@ internal static class InventoryRuntime
         {
             long now = Environment.TickCount64;
             _hub?.Tick(now);
+            if (_book is { Dirty: true }) Flush();
             if (now < _nextUpkeep) return;
             _nextUpkeep = now + UpkeepMs;
             Upkeep();
@@ -128,11 +132,68 @@ internal static class InventoryRuntime
         Flush();
     }
 
+    private static string? _worldKeyFolder, _worldKey;
+
+    /// <summary>
+    /// This world's identity: a random id kept in <c>progenitor/inventory-world-id.txt</c> beside
+    /// the autosaves, created on first use. A copied save folder copies it (and keeps its ids); a
+    /// book written by another world carries another id. That matters because a store handed out
+    /// before the save folder was known can merge a pending write from the previous world over the
+    /// next world's file.
+    /// </summary>
+    private static string WorldKey()
+    {
+        string? dir = ModSave.CurrentSaveDirectory;
+        if (string.IsNullOrEmpty(dir)) return "";
+        if (_worldKey != null && _worldKeyFolder == dir) return _worldKey;
+        try
+        {
+            string folder = System.IO.Path.Combine(dir, "progenitor");
+            System.IO.Directory.CreateDirectory(folder);
+            string path = System.IO.Path.Combine(folder, "inventory-world-id.txt");
+            if (!System.IO.File.Exists(path))
+            {
+                try
+                {
+                    using var stream = new System.IO.FileStream(path, System.IO.FileMode.CreateNew, System.IO.FileAccess.Write, System.IO.FileShare.None);
+                    byte[] bytes = System.Text.Encoding.UTF8.GetBytes(Guid.NewGuid().ToString("N"));
+                    stream.Write(bytes, 0, bytes.Length);
+                    stream.Flush(true);
+                }
+                catch (System.IO.IOException) { /* created concurrently: read it below */ }
+            }
+
+            string id = System.IO.File.ReadAllText(path).Trim();
+            if (!Guid.TryParseExact(id, "N", out _)) return "";
+            _worldKeyFolder = dir;
+            _worldKey = id;
+            return id;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Inventory: world identity file unreadable: " + e.Message);
+            return "";
+        }
+    }
+
+    /// <summary>The document, or null when it names another world (logged once per load).</summary>
+    private static ContainerIdDocument? ForThisWorld(ContainerIdDocument? doc)
+    {
+        if (doc == null || string.IsNullOrEmpty(doc.World)) return doc;
+        string key = WorldKey();
+        if (key.Length == 0 || string.Equals(doc.World, key, StringComparison.OrdinalIgnoreCase)) return doc;
+        Plugin.Logger?.LogWarning("Inventory: the container-id book in this save names another world; starting an empty book.");
+        return null;
+    }
+
     private static void Flush()
     {
         var book = _book;
         if (book == null || _store == null || !_loaded) return;
-        if (book.TakeDirty()) _store.Set(BookKey, book.Save());
+        if (!book.TakeDirty()) return;
+        var doc = book.Save();
+        doc.World = WorldKey();
+        _store.Set(BookKey, doc);
     }
 
     /// <summary>
@@ -147,7 +208,7 @@ internal static class InventoryRuntime
         // loaded in the same process never sees another world's ids. The book is flushed on
         // every change, so nothing of the previous load is lost by this.
         if (book.PrimedEpoch != int.MinValue && _store != null)
-            book.Load(_store.Get<ContainerIdDocument>(BookKey));
+            book.Load(ForThisWorld(_store.Get<ContainerIdDocument>(BookKey)));
         if (book.Count == 0)
         {
             book.Prime(epoch, Array.Empty<ContainerSighting>());
@@ -290,10 +351,10 @@ internal static class InventoryRuntime
         int epoch = Progenitor.WorldState.WorldEpoch.Current;
         if (!EnsurePrimed(world, epoch)) return ContainerId.None;
         var em = world.EntityManager;
-        var id = book.IdFor(s, epoch, (i, v) => new Entity { Index = i, Version = v }.Exists(em));
-        // Persist right away: a handed-out id must never read Unknown after the next restart.
-        Flush();
-        return id;
+        // Written to the store at the end of this frame (one write however many ids were issued)
+        // and before any world save (ModSave.BeforeSave), so a handed-out id is never Unknown
+        // after the next restart.
+        return book.IdFor(s, epoch, (i, v) => new Entity { Index = i, Version = v }.Exists(em));
     }
 
     /// <summary>Where a bound model stands now (territory and prefab kept from the record).</summary>

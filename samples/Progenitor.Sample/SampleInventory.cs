@@ -24,7 +24,7 @@ namespace Progenitor.Sample;
 /// <item><description><c>.items slots &lt;c&gt;</c>, <c>.items count &lt;c&gt; &lt;item&gt;</c>,
 /// <c>.items free &lt;c&gt; &lt;item&gt;</c>.</description></item>
 /// <item><description><c>.items move &lt;from&gt; &lt;to&gt; &lt;item&gt; &lt;amount&gt;</c>: an
-/// total-conserving transfer (never creates or destroys items); replies with the counts before and after in both containers.</description></item>
+/// transfer that conserves the total of interchangeable items and stops on anything else; replies with the counts before and after in both containers.</description></item>
 /// <item><description><c>.items moveall &lt;from&gt; &lt;to&gt;</c>, <c>.items add|remove &lt;c&gt;
 /// &lt;item&gt; &lt;amount&gt;</c>, <c>.items name &lt;c&gt; "&lt;text&gt;"</c>, <c>.items id
 /// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items heart</c>, <c>.items clan</c>.</description></item>

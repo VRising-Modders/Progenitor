@@ -159,6 +159,12 @@ internal sealed class ContainerIdDocument
     /// <summary>Format version.</summary>
     public int Schema { get; set; } = 1;
 
+    /// <summary>
+    /// Which world the book belongs to (a hash of the world's save folder). A book read with a
+    /// different key belongs to another world and is ignored.
+    /// </summary>
+    public string World { get; set; } = "";
+
     /// <summary>Ids still in use: <c>id</c> and anchor key.</summary>
     public List<ContainerIdRow> Live { get; set; } = new();
 
@@ -483,7 +489,7 @@ internal sealed class ContainerIdRegistry
 
     private void Bind(Record r, int index, int version, int epoch)
     {
-        if (r.Epoch == epoch) _byEntity.Remove(EntityKey(r.EntityIndex, r.EntityVersion));
+        if (r.Epoch == epoch) RemoveEntityKey(r);
         r.EntityIndex = index;
         r.EntityVersion = version;
         r.Epoch = epoch;
@@ -494,7 +500,7 @@ internal sealed class ContainerIdRegistry
     {
         _records.Remove(r.Id);
         if (_byAnchor.TryGetValue(r.Anchor, out var a) && a == r.Id) _byAnchor.Remove(r.Anchor);
-        _byEntity.Remove(EntityKey(r.EntityIndex, r.EntityVersion));
+        RemoveEntityKey(r);
         if (_retired.Add(r.Id))
         {
             _retiredOrder.AddLast(r.Id);
@@ -506,6 +512,13 @@ internal sealed class ContainerIdRegistry
         }
 
         Dirty = true;
+    }
+
+    /// <summary>Drop the entity index entry only when it still points at this record.</summary>
+    private void RemoveEntityKey(Record r)
+    {
+        long key = EntityKey(r.EntityIndex, r.EntityVersion);
+        if (_byEntity.TryGetValue(key, out var owner) && owner == r.Id) _byEntity.Remove(key);
     }
 
     private static long EntityKey(int index, int version) => ((long)index << 32) | (uint)version;

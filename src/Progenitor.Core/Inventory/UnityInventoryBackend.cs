@@ -69,7 +69,7 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
                 int over = row.MaxAmountOverride;
                 bool hasEntity = false;
                 try { hasEntity = row.ItemEntity.GetEntityOnServer() != Entity.Null; }
-                catch { hasEntity = false; }
+                catch { hasEntity = true; } // unreadable: treat as a copy with its own state
                 int max = 0;
                 if (item != 0)
                     max = InventoryMath.SlotCapacity(over, TryItemInfo(item, out var info) ? info.MaxAmount : 0);
@@ -194,52 +194,100 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
         }
     }
 
+    /// <summary>
+    /// Worn copies of <paramref name="item"/> on the inventory's owner that are <b>not</b> also
+    /// sitting in that inventory: a wielded weapon can keep its action-bar slot in the bag, and
+    /// counting it twice would look like a duplicate. The owner is the reference's owner, or for
+    /// a bag entity the character its <c>InventoryConnection</c> names. -1 when no owner wears gear.
+    /// </summary>
     public int EquippedCount(InventoryRef container, int item)
     {
         if (item == 0 || !TryWorld(out var world, out _)) return -1;
         var em = world.EntityManager;
-        var owner = container.Owner;
         try
         {
+            var owner = container.Owner;
             if (!owner.Exists(em)) return -1;
+            if (!owner.Has<Equipment>(em) && !owner.Has<ServantEquipment>(em)
+                && owner.TryRead(em, out InventoryConnection conn) && conn.InventoryOwner.Exists(em))
+                owner = conn.InventoryOwner;
+
+            _worn.Clear();
             if (owner.Has<Equipment>(em))
             {
                 // Typed read: Equipment carries NetworkedEntity slots (not C# unmanaged); the same
                 // read ctx.Items uses.
                 var eq = em.GetComponentData<Equipment>(owner);
-                int n = 0;
-                n += Is(eq.ArmorHeadgearSlot, item) + Is(eq.ArmorChestSlot, item) + Is(eq.WeaponSlot, item)
-                    + Is(eq.GrimoireSlot, item) + Is(eq.ArmorFootgearSlot, item) + Is(eq.ArmorLegsSlot, item)
-                    + Is(eq.CloakSlot, item) + Is(eq.ArmorGlovesSlot, item) + Is(eq.BagSlot, item)
-                    + Is(eq.ChestCosmeticSlot, item) + Is(eq.FootgearCosmeticSlot, item) + Is(eq.LegsCosmeticSlot, item)
-                    + Is(eq.CloakCosmeticSlot, item) + Is(eq.GlovesCosmeticSlot, item);
-                return n;
+                Worn(eq.ArmorHeadgearSlot, item); Worn(eq.ArmorChestSlot, item); Worn(eq.WeaponSlot, item);
+                Worn(eq.GrimoireSlot, item); Worn(eq.ArmorFootgearSlot, item); Worn(eq.ArmorLegsSlot, item);
+                Worn(eq.CloakSlot, item); Worn(eq.ArmorGlovesSlot, item); Worn(eq.BagSlot, item);
+                Worn(eq.ChestCosmeticSlot, item); Worn(eq.FootgearCosmeticSlot, item); Worn(eq.LegsCosmeticSlot, item);
+                Worn(eq.CloakCosmeticSlot, item); Worn(eq.GlovesCosmeticSlot, item);
             }
-
-            if (owner.Has<ServantEquipment>(em))
+            else if (owner.Has<ServantEquipment>(em))
             {
                 int need = Layout.ServantEquipmentArmorGlovesSlotIdOffset + sizeof(int);
                 byte* p = Ai.AiRuntime.RO<ServantEquipment>(em, owner, need);
                 if (p == null) return -1;
-                int n = 0;
-                if (*(int*)(p + Layout.ServantEquipmentArmorChestSlotIdOffset) == item) n++;
-                if (*(int*)(p + Layout.ServantEquipmentWeaponSlotIdOffset) == item) n++;
-                if (*(int*)(p + Layout.ServantEquipmentGrimoireSlotIdOffset) == item) n++;
-                if (*(int*)(p + Layout.ServantEquipmentArmorFootgearSlotIdOffset) == item) n++;
-                if (*(int*)(p + Layout.ServantEquipmentArmorLegsSlotIdOffset) == item) n++;
-                if (*(int*)(p + Layout.ServantEquipmentArmorGlovesSlotIdOffset) == item) n++;
-                return n;
+                ServantSlot(p, Layout.ServantEquipmentArmorChestSlotEntityOffset, Layout.ServantEquipmentArmorChestSlotIdOffset, item);
+                ServantSlot(p, Layout.ServantEquipmentWeaponSlotEntityOffset, Layout.ServantEquipmentWeaponSlotIdOffset, item);
+                ServantSlot(p, Layout.ServantEquipmentGrimoireSlotEntityOffset, Layout.ServantEquipmentGrimoireSlotIdOffset, item);
+                ServantSlot(p, Layout.ServantEquipmentArmorFootgearSlotEntityOffset, Layout.ServantEquipmentArmorFootgearSlotIdOffset, item);
+                ServantSlot(p, Layout.ServantEquipmentArmorLegsSlotEntityOffset, Layout.ServantEquipmentArmorLegsSlotIdOffset, item);
+                ServantSlot(p, Layout.ServantEquipmentArmorGlovesSlotEntityOffset, Layout.ServantEquipmentArmorGlovesSlotIdOffset, item);
+            }
+            else
+            {
+                return -1;
             }
 
-            return -1;
+            if (_worn.Count == 0) return 0;
+            // Exclude worn entities that are also rows of the target inventory.
+            if (TryInventoryEntity(em, container.Owner, container.Instance, out var inv, out _))
+            {
+                var buffer = em.GetBuffer<InventoryBuffer>(inv);
+                for (int i = 0; i < buffer.Length && _worn.Count > 0; i++)
+                {
+                    var row = buffer[i];
+                    if (row.ItemType.GuidHash != item) continue;
+                    Entity e;
+                    try { e = row.ItemEntity.GetEntityOnServer(); } catch { continue; }
+                    if (e != Entity.Null) _worn.Remove(((long)e.Index << 32) | (uint)e.Version);
+                }
+            }
+
+            return _worn.Count + _wornUnknown;
         }
         catch
         {
             return -1;
         }
+        finally
+        {
+            _wornUnknown = 0;
+        }
     }
 
-    private static int Is(EquipmentSlot slot, int item) => slot.SlotId.GuidHash == item ? 1 : 0;
+    private readonly HashSet<long> _worn = new();
+    private int _wornUnknown;
+
+    private void Worn(EquipmentSlot slot, int item)
+    {
+        if (slot.SlotId.GuidHash != item) return;
+        Entity e = Entity.Null;
+        try { e = slot.SlotEntity.GetEntityOnServer(); } catch { }
+        if (e == Entity.Null) _wornUnknown++;
+        else _worn.Add(((long)e.Index << 32) | (uint)e.Version);
+    }
+
+    private void ServantSlot(byte* p, int entityOffset, int idOffset, int item)
+    {
+        if (*(int*)(p + idOffset) != item) return;
+        int index = *(int*)(p + entityOffset);
+        int version = *(int*)(p + entityOffset + 4);
+        if (index == 0 && version == 0) _wornUnknown++;
+        else _worn.Add(((long)index << 32) | (uint)version);
+    }
 
     public bool TryFingerprint(InventoryRef container, out ulong fingerprint)
     {

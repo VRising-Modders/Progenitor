@@ -203,21 +203,32 @@ internal sealed class InventoryEngine
         if (InventoryMath.FreeSpace(_a, item, info.MaxAmount, true) <= 0)
             return Nothing(item, amount, "the container is full for this item", targetBefore: before);
 
+        // An add the game equips onto the owner leaves the inventory unchanged: count it too, so a
+        // caller never reads "nothing fit" for an item that was handed out (and retries).
+        int eqBefore = _backend.EquippedCount(container, item);
         bool called = _backend.Add(container, item, amount, out string detail);
         Touched?.Invoke(container);
         if (!_backend.TryRead(container, _a, out _, out why))
             return Inconsistent(item, amount, 0, "could not read the container back after the add: " + why, 1);
         int after = InventoryMath.Count(_a, item);
-        int done = after - before;
-        if (done < 0 || done > amount)
+        int equipped = 0;
+        if (eqBefore >= 0)
         {
-            string text = "add read-back out of range: before=" + before + " after=" + after + " requested=" + amount;
-            _logError?.Invoke("Inventory: " + text + " container=" + container + " item=" + item);
-            return Inconsistent(item, amount, Math.Max(0, done), text, 1, targetBefore: before, targetAfter: after);
+            int e = _backend.EquippedCount(container, item);
+            if (e >= 0) equipped = Math.Max(0, e - eqBefore);
         }
 
-        return Finish(item, amount, done, called ? "" : detail, steps: 1, targetBefore: before, targetAfter: after,
+        int done = after - before + equipped;
+        if (done < 0 || done > amount)
+        {
+            string text = "add read-back out of range: before=" + before + " after=" + after + " equipped=" + equipped + " requested=" + amount;
+            _logError?.Invoke("Inventory: " + text + " container=" + container + " item=" + item);
+            return Inconsistent(item, amount, Math.Max(0, done), text, 1, targetBefore: before, targetAfter: after, equipped: equipped);
+        }
+
+        var added = Finish(item, amount, done, called ? "" : detail, steps: 1, targetBefore: before, targetAfter: after,
             shortfall: "only " + done + " of " + amount + " fit");
+        return equipped == 0 ? added : added.WithEquipped(equipped);
     }
 
     internal InventoryResult TryRemove(InventoryRef container, int item, int amount)
@@ -384,9 +395,9 @@ internal sealed class InventoryEngine
 
     /// <summary>
     /// Restore the total of an interchangeable (plain) item after a move that did not conserve
-    /// it. Units that vanished are added back to the source, then to the target if the source
-    /// refuses them; units that appeared are removed from the target, then from the source, never
-    /// more than that side holds. Returns how many units the step restored. Never called for an
+    /// it. Units that vanished are added back to the source only (if that does not restore the
+    /// total, the transfer stops as Inconsistent); units that appeared are removed from the
+    /// target, then from the source, never more than that side holds. Returns how many units the step restored. Never called for an
     /// item with its own entity: guessing which copy to recreate or delete is refused instead.
     /// </summary>
     private int Compensate(InventoryRef from, InventoryRef to, int item, int total)
@@ -398,7 +409,10 @@ internal sealed class InventoryEngine
         {
             if (now > 0)
             {
-                _backend.Add(attempt == 0 ? from : to, item, now, out _);
+                // Units vanished: put them back into the source only. A second add elsewhere
+                // could double up if the game's add had already dropped a remainder somewhere.
+                if (attempt > 0) break;
+                _backend.Add(from, item, now, out _);
             }
             else
             {

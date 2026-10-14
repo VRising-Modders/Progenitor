@@ -151,9 +151,18 @@ public static unsafe class ModSave
     /// Also flushes the server-level stores (<see cref="ServerSave.SaveAll"/>), which share these
     /// triggers and do not depend on the world save folder being known.
     /// </summary>
+    /// <summary>
+    /// Core-internal: runs at the start of <see cref="SaveAll"/>, before any store is written, so
+    /// a module that batches its <c>Set</c> calls can flush its latest state into the store.
+    /// </summary>
+    internal static event Action? BeforeSave;
+
     public static void SaveAll()
     {
         if (!Plugin.IsServerProcess) return;
+        // Core modules that coalesce their store writes put the latest state in first.
+        try { BeforeSave?.Invoke(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning($"ModSave: a before-save handler threw: {e.Message}"); }
         ServerSave.SaveAll();
         try
         {
