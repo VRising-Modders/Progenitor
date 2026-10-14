@@ -296,6 +296,9 @@ internal static class ModsUiArgs
         internal string? Label { get; init; }
         internal int? Index { get; init; }
         internal string? Value { get; init; }
+
+        /// <summary>BRIDGEUI1 <c>widget_click</c>: Shift (1) and Ctrl (2) held for the click (multi-key sort, range select).</summary>
+        internal int Modifiers { get; init; }
         internal string? Tab { get; init; }
         internal int? TabIndex { get; init; }
         internal bool Same { get; init; }
@@ -755,6 +758,7 @@ internal static class ModsUiArgs
             Label = label,
             Index = index,
             Value = OptionalString(args, "value"),
+            Modifiers = UiInputPlan.ParseModifiers(args),
         };
     }
 
@@ -3050,6 +3054,22 @@ internal static partial class ModsUiOps
     }
 
     private static (bool ok, object detail) DoWidgetClick(ModsUiArgs.Request request)
+    {
+        if (request.Modifiers == 0) return DoWidgetClickCore(request);
+        // BRIDGEUI1: the click's Shift / Ctrl come from the framework's input layer (HeldClickModifiers), which reads the
+        // synthetic input's modifiers while it is held; set them for this one dispatch.
+        int token = UiInputOps.Bridge("BeginClickModifiers", request.Modifiers) is int t ? t : -2;
+        if (token == -2) throw new InvalidOperationException("widget_click: the click modifiers could not be set (another holder has the synthetic input)");
+        try
+        {
+            var (ok, detail) = DoWidgetClickCore(request);
+            if (detail is Dictionary<string, object?> d) d["modifiers"] = UiInputPlan.ModifierNames(request.Modifiers);
+            return (ok, detail);
+        }
+        finally { UiInputOps.Bridge("EndClickModifiers", token); }
+    }
+
+    private static (bool ok, object detail) DoWidgetClickCore(ModsUiArgs.Request request)
     {
         try
         {

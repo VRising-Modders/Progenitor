@@ -2226,6 +2226,9 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         return rect.IsKnown;
     }
 
+    /// <summary>BRIDGEUI1: the live, visible cell row <paramref name="key"/> (the bridge's targets), or null.</summary>
+    internal static UiCellRowHandle? VisibleRow(string? key) => FindVisible(key);
+
     private static UiCellRowHandle? FindVisible(string? key)
     {
         if (string.IsNullOrEmpty(key)) return null;

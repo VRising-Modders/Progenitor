@@ -135,9 +135,68 @@ internal static class NavOps
             }
             case "pad_remove":
                 return PadRemove();
+            case "hold":
+            {
+                // BRIDGEUI1: buttons held through NAV1's own per-frame sample (repeat included), no device.
+                string buttons = HoldButtons(Button(args));
+                return SyntheticHold("HoldNav", new object?[] { buttons, HoldMs(args) }, HoldMs(args));
+            }
+            case "stick":
+            {
+                // BRIDGEUI1: the right stick's vertical axis through the same sample.
+                float y = StickY(args);
+                return SyntheticHold("Stick", new object?[] { y, HoldMs(args) }, HoldMs(args));
+            }
+            case "focus":
+            {
+                // BRIDGEUI1: the focus straight onto a visible cell row (or one of its cells): into a content pane or a
+                // row past the first screen without a walk of presses.
+                string row = (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("row", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null)
+                    ?? throw new ArgumentException("nav focus needs args.row (a cell row key) and optionally args.cell");
+                string? cell = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("cell", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+                return UiInputOps.Dict(UiInputOps.Bridge("NavFocus", row.Trim(), cell?.Trim()));
+            }
             default:
-                throw new ArgumentException("args.action is state, press, pad or pad_remove");
+                throw new ArgumentException("args.action is state, press, pad, pad_remove, hold, stick or focus");
         }
+    }
+
+    /// <summary>BRIDGEUI1: <c>hold</c>'s buttons: one or several of the nav buttons joined by <c>+</c> or <c>,</c>.</summary>
+    internal static string HoldButtons(string? text)
+    {
+        var parts = (text ?? "").Split(new[] { '+', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0) throw new ArgumentException("args.button is required: " + Buttons + " (several joined by +)");
+        var list = new List<string>();
+        foreach (var p in parts)
+            list.Add(Normalize(p) ?? throw new ArgumentException("args.button '" + p + "' is not one of " + Buttons));
+        return string.Join("+", list);
+    }
+
+    /// <summary>BRIDGEUI1: <c>stick</c>'s <c>y</c>, -1..1 (positive up), not 0.</summary>
+    internal static float StickY(JsonElement args)
+    {
+        if (args.ValueKind != JsonValueKind.Object || !args.TryGetProperty("y", out var y) || y.ValueKind != JsonValueKind.Number
+            || !y.TryGetDouble(out double v) || double.IsNaN(v) || v < -1 || v > 1 || v == 0)
+            throw new ArgumentException("nav stick needs args.y, the right stick's vertical axis from -1 to 1 (positive up), not 0");
+        return (float)v;
+    }
+
+    private static object SyntheticHold(string method, object?[] args, int ms)
+    {
+#if PROGENITOR_TESTS
+        throw new InvalidOperationException(ClientOnlyMessage);
+#else
+        var held = UiInputOps.Dict(UiInputOps.Bridge(method, args));
+        var deferred = new DeferredResult(ms + 5_000);
+        MainThread.PostDelayed(ms / 1000.0 + 0.1, () =>
+        {
+            if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
+            held["nav"] = Bridge("State");
+            held["ok"] = true;
+            deferred.SetResult(held);
+        }, deferred);
+        return deferred;
+#endif
     }
 
 #if PROGENITOR_TESTS

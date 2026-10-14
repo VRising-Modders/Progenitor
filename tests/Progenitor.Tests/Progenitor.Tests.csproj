@@ -816,6 +816,14 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\NavOps.cs" Link="Linked\NavOps.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\MouseInjectPlan.cs" Link="Linked\MouseInjectPlan.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\MouseInjectOps.cs" Link="Linked\MouseInjectOps.cs" />
+    <!-- BRIDGEUI1: ui_input / ui_read / display / screenshot parsing, timelines and crops are game-free; the game calls are behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\UiInputPlan.cs" Link="Linked\UiInputPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\UiInputOps.cs" Link="Linked\UiInputOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\UiReadOps.cs" Link="Linked\UiReadOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\DisplayPlan.cs" Link="Linked\DisplayPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\DisplayOps.cs" Link="Linked\DisplayOps.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiSyntheticInput.cs" Link="Linked\UiSyntheticInput.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiCaretLines.cs" Link="Linked\UiCaretLines.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\BridgeStatus.cs" Link="Linked\BridgeStatus.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeDump.cs" Link="Linked\FreezeDump.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeWindowState.cs" Link="Linked\FreezeWindowState.cs" />

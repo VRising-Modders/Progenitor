@@ -3885,6 +3885,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
     private static PointerSample SamplePointer(bool ignoreFocus = false)
     {
+        // BRIDGEUI1: the bridge's synthetic pointer replaces the device while its lease is held. It needs no window
+        // focus: it is the framework's own reading, not a device's.
+        if (UiSyntheticInput.Active)
+        {
+            if (!UiSyntheticInput.HasPointer) return PointerSample.Outside;
+            return SyntheticPointerSample(UiSyntheticInput.X, UiSyntheticInput.Y);
+        }
+
         try
         {
             var mouse = UnityEngine.InputSystem.Mouse.current;
@@ -4086,8 +4094,58 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             catch { /* */ }
         }
 
+        ApplySyntheticNav(ref s);
         return s;
     }
+
+    private static int _navSyntheticSerial = -1;
+
+    /// <summary>
+    /// BRIDGEUI1: the bridge's synthetic navigation (held buttons, the right stick, UI-layer arrow, Space and Enter taps)
+    /// joins the device read, and the synthetic pointer moving or clicking counts as the pointer in use.
+    /// </summary>
+    private static void ApplySyntheticNav(ref NavSample s)
+    {
+        var nav = UiSyntheticInput.NavHeld;
+        if (nav != UiSyntheticNav.None)
+        {
+            s.Up |= (nav & UiSyntheticNav.Up) != 0;
+            s.Down |= (nav & UiSyntheticNav.Down) != 0;
+            s.Left |= (nav & UiSyntheticNav.Left) != 0;
+            s.Right |= (nav & UiSyntheticNav.Right) != 0;
+            s.Submit |= (nav & UiSyntheticNav.Submit) != 0;
+            s.Cancel |= (nav & UiSyntheticNav.Cancel) != 0;
+            s.Reset |= (nav & UiSyntheticNav.Reset) != 0;
+            s.TabPrev |= (nav & UiSyntheticNav.TabPrev) != 0;
+            s.TabNext |= (nav & UiSyntheticNav.TabNext) != 0;
+        }
+
+        float stick = UiSyntheticInput.StickHeld;
+        if (stick != 0f && Math.Abs(stick) > Math.Abs(s.Scroll)) s.Scroll = stick;
+        if (!UiSyntheticInput.Active) return;
+        int frame;
+        try { frame = Time.frameCount; }
+        catch { frame = 0; }
+        if (!s.TextFocused)
+        {
+            s.Up |= UiSyntheticInput.KeyHeld(UiKey.UpArrow, frame);
+            s.Down |= UiSyntheticInput.KeyHeld(UiKey.DownArrow, frame);
+            s.Left |= UiSyntheticInput.KeyHeld(UiKey.LeftArrow, frame);
+            s.Right |= UiSyntheticInput.KeyHeld(UiKey.RightArrow, frame);
+            s.Submit |= UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.Space, frame), _navSpaceGated, ref _navSyntheticSpaceLatched);
+            s.Submit |= UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.Enter, frame), _navEnterGated, ref _navSyntheticEnterLatched);
+        }
+
+        int serial = UiSyntheticInput.PointerSerial;
+        if (serial != _navSyntheticSerial)
+        {
+            if (_navSyntheticSerial >= 0) s.PointerActive = true;
+            _navSyntheticSerial = serial;
+        }
+    }
+
+    private static bool _navSyntheticSpaceLatched;
+    private static bool _navSyntheticEnterLatched;
 
     /// <summary>
     /// P7b: the Shift and Ctrl keys held now, for a click's multi-select meaning (Ctrl adds a row, Shift extends a
@@ -4096,6 +4154,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     internal static UiClickModifiers HeldClickModifiers()
     {
         var held = UiClickModifiers.None;
+        // BRIDGEUI1: the synthetic modifiers held with the synthetic pointer's click.
+        if (UiSyntheticInput.Active) return UiSyntheticInput.Modifiers;
         try
         {
             var keyboard = Keyboard.current;
@@ -4117,6 +4177,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// </summary>
     internal static bool PrimaryPointerHeld()
     {
+        if (UiSyntheticInput.Active) return (UiSyntheticInput.Buttons & UiSyntheticButtons.Left) != 0;
         try
         {
             var mouse = Mouse.current;
@@ -4126,6 +4187,69 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// BRIDGEUI1: the left button for the shown-input pump: the synthetic pointer's while its lease is held, else the
+    /// mouse's. False with neither.
+    /// </summary>
+    private static bool LeftButtonHeld(Mouse? mouse)
+    {
+        if (UiSyntheticInput.Active) return (UiSyntheticInput.Buttons & UiSyntheticButtons.Left) != 0;
+        try { return mouse != null && mouse.leftButton != null && mouse.leftButton.isPressed; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// BRIDGEUI1: the wheel reading for one pump sample: the synthetic notches while the lease is held (one notch a
+    /// sample with a zero between, the edge a real notch makes), else the mouse's scroll.
+    /// </summary>
+    private static float WheelDeltaY(Mouse? mouse)
+    {
+        if (UiSyntheticInput.Active) return UiSyntheticInput.SampleWheel();
+        try { return mouse == null ? 0f : mouse.scroll.ReadValue().y; }
+        catch { return 0f; }
+    }
+
+    /// <summary>
+    /// BRIDGEUI1: whether the player used the real mouse or keyboard since the last call (a button or key held, or the
+    /// pointer moved more than a few pixels), so the bridge's synthetic input yields to them. Reads the devices: part of
+    /// the framework's input layer. Binds no action.
+    /// </summary>
+    internal static bool PhysicalInputUsed(ref float lastX, ref float lastY, ref bool havePointer)
+    {
+        bool used = false;
+        try
+        {
+            var mouse = Mouse.current;
+            if (mouse != null)
+            {
+                if ((mouse.leftButton != null && mouse.leftButton.isPressed)
+                    || (mouse.rightButton != null && mouse.rightButton.isPressed)
+                    || (mouse.middleButton != null && mouse.middleButton.isPressed)) used = true;
+                var p = mouse.position.ReadValue();
+                if (havePointer && (Math.Abs(p.x - lastX) > 3f || Math.Abs(p.y - lastY) > 3f)) used = true;
+                lastX = p.x;
+                lastY = p.y;
+                havePointer = true;
+            }
+
+            var keyboard = Keyboard.current;
+            if (keyboard != null && keyboard.anyKey != null && keyboard.anyKey.isPressed) used = true;
+        }
+        catch { /* a device mid-teardown is no activity */ }
+
+        return used;
+    }
+
+    /// <summary>BRIDGEUI1: a key the synthetic input holds for the typed-key pump (a tap, or a held modifier).</summary>
+    private static bool SyntheticKeyHeld(UiKey ui, int frame)
+    {
+        if (!UiSyntheticInput.Active) return false;
+        if (UiSyntheticInput.KeyHeld(ui, frame)) return true;
+        var m = UiSyntheticInput.Modifiers;
+        return ((m & UiClickModifiers.Shift) != 0 && ui == UiKey.LeftShift)
+            || ((m & UiClickModifiers.Ctrl) != 0 && ui == UiKey.LeftCtrl);
     }
 
     private static void PumpShownInputBody(int frame)
@@ -4148,10 +4272,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         bool dragging = false;
         try
         {
-            if (mouse != null)
+            // BRIDGEUI1: the synthetic pointer stands in for the mouse (it needs no device).
+            if (mouse != null || UiSyntheticInput.Active)
             {
-                try { dragging = mouse.leftButton != null && mouse.leftButton.isPressed; }
-                catch { dragging = false; }
+                dragging = LeftButtonHeld(mouse);
                 ObservePanelWheel(pointer, mouse, out deltaY, out hitName, out pos, out contentH, out viewH);
             }
         }
@@ -4228,7 +4352,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         try
         {
-            if (mouse != null)
+            if (mouse != null || UiSyntheticInput.Active)
                 PumpTextField(pointer, mouse, frame, out keys, out typed, out focused, out selected, out click, out activated);
         }
         catch { /* typing is best-effort */ }
@@ -4272,7 +4396,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// </summary>
     private static void ObservePanelWheel(
         PointerSample pointer,
-        Mouse mouse,
+        Mouse? mouse,
         out float deltaY,
         out string hitName,
         out float pos,
@@ -4284,10 +4408,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         pos = 1f;
         contentH = 0f;
         viewH = 0f;
-        Vector2 delta;
-        try { delta = mouse.scroll.ReadValue(); }
-        catch { delta = Vector2.zero; }
-        deltaY = delta.y;
+        deltaY = WheelDeltaY(mouse);
 
         if (pointer.Kind != PointerKind.Inside) return;
         UnityPanel? hit = ResolveHoveredPanel(pointer);
@@ -4563,7 +4684,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
     private static void PumpTextField(
         PointerSample pointer,
-        Mouse mouse,
+        Mouse? mouse,
         int frame,
         out int keys,
         out char typed,
@@ -4579,9 +4700,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         click = false;
         activated = false;
 
-        bool held = false;
-        try { held = mouse.leftButton != null && mouse.leftButton.isPressed; }
-        catch { held = false; }
+        bool held = LeftButtonHeld(mouse);
         bool pressed = held && !_leftHeld;
         _leftHeld = held;
         if (pressed)
@@ -4869,14 +4988,18 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         var field = FocusedArmedField();
         ApplyPendingSelectAll(field); // P7b: after this frame's click and caret placement, before any key
         var keyboard = Keyboard.current;
-        if (keyboard == null)
+        // BRIDGEUI1: the synthetic keys need no keyboard device; the key helpers below read them with a null keyboard.
+        if (keyboard == null && !UiSyntheticInput.Active)
         {
             // TEXTTEST1: bridge-injected input does not need a keyboard device.
             if (field != null) PumpInjected(field, ref keys, ref typed);
             return;
         }
 
-        try { TypeEdges.NoteDevice(keyboard.deviceId); } catch { /* */ }
+        if (keyboard != null)
+        {
+            try { TypeEdges.NoteDevice(keyboard.deviceId); } catch { /* */ }
+        }
 
         SampleTypeEdges(keyboard, frame);
         // P7b: a widget's value box released the keyboard mid-typing; its burst ends when every typing key is up.
@@ -5230,32 +5353,33 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         catch { return false; }
     }
 
-    private static bool KeyHeld(Keyboard keyboard, UiKey ui)
+    private static bool KeyHeld(Keyboard? keyboard, UiKey ui)
     {
         if (!Enum.TryParse(ui.ToString(), out Key key)) return false;
         return KeyHeld(keyboard, key);
     }
 
-    private static void SampleTypeEdges(Keyboard keyboard, int frame)
+    private static void SampleTypeEdges(Keyboard? keyboard, int frame)
     {
         for (int i = 0; i < TypedSampleKeys.Length; i++)
             TypeKeyDown(keyboard, TypedSampleKeys[i], frame);
     }
 
-    private static bool TypeKeyDown(Keyboard keyboard, UiKey ui, int frame)
+    private static bool TypeKeyDown(Keyboard? keyboard, UiKey ui, int frame)
     {
         if (!Enum.TryParse(ui.ToString(), out Key key)) return false;
         return TypeKeyDown(keyboard, key, ui, frame);
     }
 
-    private static bool TypeKeyDown(Keyboard keyboard, Key key, UiKey ui, int frame)
+    private static bool TypeKeyDown(Keyboard? keyboard, Key key, UiKey ui, int frame)
     {
         try
         {
-            var control = keyboard[key];
-            if (control == null) return false;
-            bool held = control.isPressed;
-            bool raw = control.wasPressedThisFrame;
+            // BRIDGEUI1: with no keyboard device only the synthetic keys are read.
+            var control = keyboard?[key];
+            bool held = (control != null && control.isPressed) || SyntheticKeyHeld(ui, frame);
+            bool raw = control != null && control.wasPressedThisFrame;
+            if (control == null && keyboard != null) return false;
             return TypeEdges.Observe(ui, frame, held, raw);
         }
         catch
@@ -5264,12 +5388,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
     }
 
-    private static bool KeyHeld(Keyboard keyboard, Key key)
+    private static bool KeyHeld(Keyboard? keyboard, Key key)
     {
         try
         {
-            var control = keyboard[key];
-            return control != null && control.isPressed;
+            var control = keyboard?[key];
+            if (control != null && control.isPressed) return true;
+            // BRIDGEUI1: a key the synthetic input holds (an Escape or Enter tap, a held Shift or Ctrl).
+            return UiSyntheticInput.Active && Enum.TryParse(key.ToString(), out UiKey ui) && SyntheticKeyHeld(ui, Time.frameCount);
         }
         catch
         {
@@ -5717,7 +5843,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     }
 
     /// <summary>P7b: whether any typing key (the pump's sampled set, Enter included) is held now.</summary>
-    private static bool AnyTypingKeyHeld(Keyboard keyboard)
+    private static bool AnyTypingKeyHeld(Keyboard? keyboard)
     {
         for (int i = 0; i < TypedSampleKeys.Length; i++)
             if (KeyHeld(keyboard, TypedSampleKeys[i])) return true;

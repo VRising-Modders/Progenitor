@@ -6,7 +6,7 @@ Operation reference for the [development bridge](bridge.md), part 5 of 5: keybin
 
 **Experimental development tooling**, client, main thread; part of the Dev `bot` op ([tools/bots/README.md](../tools/bots/README.md), [input.md](input.md)). Not a framework API.
 
-`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range.
+`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range: about 1.7 m from the target worked live (2026-10-14), while 3 m gave `not confirmed`; move closer first. Side and angle matter too: a crafting bench took the interaction only from its south side, at 1.4 m (live 2026-10-14); when a request is `not confirmed` within range, approach from another side.
 
 | Field of `bot` `{"action":"status"}` | Meaning |
 |---|---|
@@ -130,12 +130,17 @@ Client, main thread. NAV1 [controller and keyboard navigation](ui.md#controller-
 | `{"action":"press","button":"down"}` | One navigation step through the model (`UiNav.Execute`); replies `taken` and the focus after it. No device is involved. |
 | `{"action":"pad","button":"a","ms":120}` | Add a virtual gamepad to the Input System (once), make it current, queue its state with the button held, and release it after `ms` (default 120, at most 5000). The step goes through the real device read, and the game sees a controller. Read `state` after the hold. `background:true` lets the Input System take the pad's events while the window is in the background (as `key` does); the setting goes back 0.2 s after the release. A newer press is not cut short by an older press's release. |
 | `{"action":"pad_remove"}` | Remove the virtual gamepad and restore the background setting. Also done on Dev unload. |
+| `{"action":"hold","button":"down","ms":900}` | BRIDGEUI1: hold one or several buttons (`down+a`) through the framework's own per-frame navigation sample (`SampleNav`) for `ms` (default 120, at most 5000), so a held direction repeats (0.40 s, then every 0.09 s) exactly as a held D-pad does. No device, no background setting, no focus. It takes the [`ui_input`](bridge-ops-ui.md#ui-input-without-focus-bridgeui1) lease, so the player touching the real mouse or keyboard, a `ui_input release`, a Core swap or Dev unload ends it at once. Replies after the hold with `nav`. |
+| `{"action":"stick","y":-1,"ms":400}` | BRIDGEUI1: the right stick's vertical axis (-1 to 1, positive up) through the same sample: scrolls the focused list (a data table's body, a master-detail half). |
+| `{"action":"focus","row":"demo-table:row0","cell":"check"}` | BRIDGEUI1: put the focus on a visible cell row, or one of its cells, of the screen navigation is on, and draw its marker, as a run of presses ending there would. This is the way into a content pane and to a row past the first screen. `ok false` when the row is not a stop of that screen (a window that captures only under the pointer is never navigated). |
 
 `button` is `up`, `down`, `left`, `right`, `a`, `b`, `x`, `lt` or `rt`. The pad's state is the dump's `GamepadState` (28 bytes: buttons, two sticks, two trigger floats); a direction is the D-pad bit, a trigger its float at 1.
 
 Log lines: `Dev nav: added a virtual gamepad (device N)`, `Dev nav: removed the virtual gamepad.`, `Ui: nav tab <tab> reason=nav-tab` (diagnostic).
 
 A virtual gamepad can switch the game into its controller look while it exists. Remove it at the end of a test batch.
+
+MCP: `progenitor_nav`. `hold`, `stick` and `focus` are live-verified on the test client 2026-10-14 (the focus into a data table's body, presses from there, a held direction repeating, the right stick scrolling) and game-free tested (`BridgeUiInputTests`).
 
 Source-checked against `src/Progenitor.Dev/Ops/NavOps.cs`, built, and game-free tested (button names, the pad state and event bytes against the dump's layout in `UiNavTests`). **Run live 2026-10-10** on the Steam client at the title screen with `background:true`: the pad was added, became current and drove every step of the procedure below except the in-world ones; `pad_remove` removed it. The game shows its controller prompts while the pad exists and goes back to the mouse's when the real mouse moves.
 

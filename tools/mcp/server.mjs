@@ -844,6 +844,17 @@ server.tool("progenitor_photo", "Photo mode (built-in, off by default): fly came
   },
   async ({ side, ...args }) => { try { return text(await bridge(side ?? "client", "photo", args)); } catch (e) { return fail(e); } });
 
+// BRIDGEUI1: focus-free UI acceptance tools (ui_input, ui_read, nav, display, screenshot). Implementations live in
+// ui-tools.mjs; a load error must not block the other tools.
+{
+  try {
+    const ui = await import("./ui-tools.mjs");
+    ui.registerUiTools(server, { z, bridge, text, fail });
+  } catch (e) {
+    console.error(`[progenitor-mcp] ui tools not registered: ${e?.message ?? e}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Offline catalog recipe tools. Implementations live in catalog-tools.mjs;
 // this block only registers them. Other agents own the rest of this file —
