@@ -139,6 +139,16 @@
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantLogic.cs" Link="Linked\ServantLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantListRegistry.cs" Link="Linked\ServantListRegistry.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleServants.cs" Link="Linked\SampleServants.cs" />
+    <!-- Milestone P3 spike: ctx.MaterialSource. Game-free halves only; the Plugin*, *Runtime and
+         Unity* files are not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialTypes.cs" Link="Linked\MaterialTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialSourceRegistry.cs" Link="Linked\MaterialSourceRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialPlanner.cs" Link="Linked\MaterialPlanner.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialService.cs" Link="Linked\MaterialService.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialScope.cs" Link="Linked\MaterialScope.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialViewWire.cs" Link="Linked\MaterialViewWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialRows.cs" Link="Linked\MaterialRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\MaterialSeamPolicy.cs" Link="Linked\MaterialSeamPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLogic.cs" Link="Linked\ChatLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatWindowLogic.cs" Link="Linked\ChatWindowLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandLogic.cs" Link="Linked\ChatCommandLogic.cs" />

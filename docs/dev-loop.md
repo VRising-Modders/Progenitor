@@ -19,7 +19,7 @@ Never deploy Progenitor.Dev, and never point these tools, at the live dedicated 
 | [Bridge operations: players, world and capture](bridge-ops-player.md) | `heal`, `protect`, `time`, `photo`, `teleport`, `give`, `unlock`, `inspect`, snapshots, saves, `connect`, `host`, `capture`, `perf` |
 | [Bridge operations: Mods workspace UI](bridge-ops-ui.md) | `mods_ui`, the game menu, text-field and date-time picker tests, `setting` |
 | [Bridge operations: server info and join flow](bridge-ops-join.md) | `messages_record`, `server_rules`, `world_backups`, `server_desc`, `server_browser`, `join_ui`, `join_admin` and their acceptance recipes |
-| [Bridge operations: input, install and session](bridge-ops-client.md) | `keybind_press`, `map`, `key`, `mouse`, `nav`, `build_search`, `dye`, `install_local`, `remote_install`, `disconnect`, `quit`, `auto_update` |
+| [Bridge operations: input, install and session](bridge-ops-client.md) | `bot` interaction, `keybind_press`, `map`, `key`, `mouse`, `nav`, `build_search`, `materials`, `dye`, `install_local`, `remote_install`, `disconnect`, `quit`, `auto_update` |
 | [MCP server and tools](mcp.md) | MCP tools, examples, registering the server in Claude Code |
 | [Watching the client](observe-tool.md) | `tools/observe.ps1`: screenshots, synthetic input and the unattended capture queue |
 | [Test rig](test-rig.md) | Local Thunderstore, extra and headless clients, the install-window acceptance procedure, unattended server verification |

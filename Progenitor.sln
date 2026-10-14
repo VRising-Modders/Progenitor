@@ -57,6 +57,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Progenitor.ControlsSample",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Progenitor.PanelsExample", "samples\Progenitor.PanelsExample\Progenitor.PanelsExample.csproj", "{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Progenitor.SharedResourcesTest", "samples\Progenitor.SharedResourcesTest\Progenitor.SharedResourcesTest.csproj", "{7EC95154-6AC3-45A1-82AC-CD37D11115CE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -158,6 +160,10 @@ Global
 		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7EC95154-6AC3-45A1-82AC-CD37D11115CE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EC95154-6AC3-45A1-82AC-CD37D11115CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7EC95154-6AC3-45A1-82AC-CD37D11115CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7EC95154-6AC3-45A1-82AC-CD37D11115CE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{C0416915-6A07-4EB8-A72C-EBD68F7CA9A4} = {47176581-9DA0-420D-83FD-D31CA0AC5A06}
@@ -183,5 +189,6 @@ Global
 		{3DDE0D77-594C-4381-BE60-26D2BE08946D} = {3B59C840-1870-4669-B060-E0E4757A375C}
 		{87903479-EAFC-4DF5-9840-46783EE71698} = {8C2E5A91-4F3B-4D17-9A6E-1B7C8D0E2F45}
 		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A} = {8C2E5A91-4F3B-4D17-9A6E-1B7C8D0E2F45}
+		{7EC95154-6AC3-45A1-82AC-CD37D11115CE} = {8C2E5A91-4F3B-4D17-9A6E-1B7C8D0E2F45}
 	EndGlobalSection
 EndGlobal

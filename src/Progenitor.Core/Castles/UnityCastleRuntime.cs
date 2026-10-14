@@ -371,7 +371,9 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
             {
                 if (e.Has<CastleHeart>(em) || !Inventory.UnityInventoryBackend.HasInventory(em, e)) continue;
                 bool refinement = e.Has<Refinementstation>(em);
-                bool station = refinement || e.Has<CastleWorkstation>(em);
+                // Ordinary storage also carries CastleWorkstation for room/servant
+                // bonuses. The recipe buffer distinguishes a crafting workstation.
+                bool station = refinement || e.Has<WorkstationRecipesBuffer>(em);
                 CastleNameplates.TryRead(em, e, out bool nameable, out string name);
                 rows.Add(new CastleInventoryRow
                 {

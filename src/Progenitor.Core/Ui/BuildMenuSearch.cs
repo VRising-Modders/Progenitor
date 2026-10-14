@@ -1049,6 +1049,7 @@ internal static class BuildMenuSearch
             ["crumbShown"] = BuildMenuCrumb.Shown,
             ["crumbHoveredGuid"] = BuildMenuCrumb.HoveredGuid,
             ["crumbHost"] = BuildMenuCrumb.Describe(),
+            ["materialViews"] = Progenitor.Materials.MaterialSeamRuntime.DescribeViews(),
             ["indexFailure"] = BuildMenuIndex.LastFailure,
             ["cells"] = cells,
         };
@@ -1115,6 +1116,24 @@ internal static class BuildMenuSearch
         var r = Describe(0);
         r["hovered"] = index;
         return r;
+    }
+
+    internal static Dictionary<string, object?> Select(int index)
+    {
+        if (_group == null || !Alive(_group)) throw new InvalidOperationException("the build menu is not open");
+        var entries = _group.Entries;
+        int count = Math.Min(_group.DataCount, entries == null ? 0 : entries.Count);
+        if (index < 0 || index >= count) throw new ArgumentOutOfRangeException(nameof(index));
+        var entry = entries![index].Primary;
+        if (!Alive(entry) || entry.IsDisabled || !entry.gameObject.activeInHierarchy)
+            throw new InvalidOperationException("build cell is unavailable");
+        var pointer = new UnityEngine.EventSystems.PointerEventData(UnityEngine.EventSystems.EventSystem.current);
+        pointer.button = UnityEngine.EventSystems.PointerEventData.InputButton.Left;
+        if (entry.SelectOnMouseDown) entry.OnPointerDown(pointer);
+        else entry.OnPointerClick(pointer);
+        var result = Describe(0);
+        result["selected"] = index;
+        return result;
     }
 
     internal static Dictionary<string, object?> PressClear()
@@ -1192,6 +1211,7 @@ internal static class BuildSearchTestBridge
     /// tooltip. The real pointer clears it again on its next enter or exit.
     /// </summary>
     public static Dictionary<string, object?> Hover(int index) => BuildMenuSearch.Hover(index);
+    public static Dictionary<string, object?> Select(int index) => BuildMenuSearch.Select(index);
 
     /// <summary>BUILDSEARCH4: close the build menu (the character menu hosting it), as the B key does.</summary>
     public static Dictionary<string, object?> CloseMenu()

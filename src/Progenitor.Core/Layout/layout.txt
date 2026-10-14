@@ -859,3 +859,12 @@ offset NetworkIdTypeOffset                           = 0x8  : NetworkId.Type    
 # whose only field (_Value) is at 0x0; read the byte raw instead of calling the wrapper's getter.
 dump server
 offset ShapeshiftIsShapeshiftedOffset             = 0x0  : Shapeshift.IsShapeshifted
+
+# ---- Materials: rows of the game's merged material count (src/Progenitor.Core/Materials/MaterialSeamRuntime.cs) ----
+# The availability seam reads and writes InventoryBuffer rows in the array the game's merged count
+# returns. Bootstrap's MaterialSeamPolicy.InventoryBufferStride carries the stride across the
+# assembly boundary; MaterialSeamLayoutTests pins the two.
+dump server
+size   InventoryBufferStride                       = 24   : InventoryBuffer    # NetworkedEntity ItemEntity (0x0), ItemType, Amount, MaxAmountOverride (0x14)
+offset InventoryBufferItemTypeOffset               = 0xC  : InventoryBuffer.ItemType
+offset InventoryBufferAmountOffset                 = 0x10 : InventoryBuffer.Amount

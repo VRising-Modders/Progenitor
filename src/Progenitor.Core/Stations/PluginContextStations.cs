@@ -27,6 +27,13 @@ public sealed class PluginStations
         return _ctx.World ?? throw new InvalidOperationException("no world");
     }
 
+    /// <summary>
+    /// Alias of <see cref="PluginContext.MaterialSource"/> (the same object): the one provider that decides
+    /// which containers pay for workstation crafting and for building. Kept here because crafting is a
+    /// station feature; building is not, so the canonical name is <c>ctx.MaterialSource</c>.
+    /// </summary>
+    public Progenitor.Materials.PluginMaterialSource MaterialSource => _ctx.MaterialSource;
+
     /// <summary>Refinement station, workstation, or <see cref="StationKind.None"/>.</summary>
     public StationKind Kind(Entity station) => Stations.KindOf(World(), station);
 
