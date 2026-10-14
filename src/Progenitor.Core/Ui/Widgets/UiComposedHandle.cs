@@ -24,6 +24,8 @@ internal abstract class UiComposedHandle : IUiHandle
         Panel = panel ?? throw new ArgumentNullException(nameof(panel));
         Key = string.IsNullOrWhiteSpace(key) ? "widget" : key.Trim();
         _text = text ?? "";
+        // BRIDGEUI1: listed for the bridge's widget readback until disposed.
+        lock (LiveGate) LiveWidgets.Add(this);
         // Disposed with its panel (a Close, Ui.RemoveAll, the Core teardown), so a drag, a tooltip or a lease never
         // outlives the rows it belongs to.
         if (panel is UiPanelHandle host) host.AttachDisposable(this);
@@ -51,6 +53,15 @@ internal abstract class UiComposedHandle : IUiHandle
     }
 
     protected IReadOnlyList<IUiHandle> Parts => _parts;
+
+    private static readonly object LiveGate = new();
+    private static readonly List<UiComposedHandle> LiveWidgets = new();
+
+    /// <summary>BRIDGEUI1: the composed widgets not yet disposed (the bridge's <c>ui_read widgets</c>).</summary>
+    internal static UiComposedHandle[] LiveSnapshot()
+    {
+        lock (LiveGate) return LiveWidgets.ToArray();
+    }
 
     public virtual string Text
     {
@@ -123,6 +134,7 @@ internal abstract class UiComposedHandle : IUiHandle
     {
         if (_disposed) return;
         _disposed = true;
+        lock (LiveGate) LiveWidgets.Remove(this);
         try { OnDisposing(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget '" + Key + "' dispose threw: " + e.Message); }
         HideTooltip();

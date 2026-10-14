@@ -170,6 +170,8 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
             Ops.MouseInjectOps.Shutdown();
             // And the virtual gamepad the nav op added.
             Ops.NavOps.Shutdown();
+            // And the synthetic UI input the ui_input op holds (buttons up, exits sent, navigation holds dropped).
+            Ops.UiInputOps.Shutdown();
 #if PROGENITOR_EXTRA_INSTANCE
             Ops.ExtraInstanceAuth.Shutdown();
             Ops.ExtraInstanceServerAuth.Shutdown();

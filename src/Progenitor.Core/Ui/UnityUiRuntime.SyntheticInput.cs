@@ -1,0 +1,657 @@
+#if !PROGENITOR_TESTS
+using System;
+using System.Collections.Generic;
+using TMPro;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.UI;
+
+namespace Progenitor.Ui;
+
+/// <summary>
+/// BRIDGEUI1: the Unity half of <see cref="UiSyntheticInput"/>. While the bridge holds the synthetic input, once a frame:
+/// the game's <c>EventSystem</c> raycasts at the synthetic point, and the objects under it get the pointer events an
+/// input module sends for a real mouse: enter and exit along the hovered chain, down and up on the pressed object, a
+/// click when the release lands on the object that took the press, and initialize-drag, begin-drag, drag and end-drag
+/// on the drag handler. Events go to the handlers this UI uses (<c>EventTrigger</c>, which carries every kit watch and
+/// slot trampoline; <c>Selectable</c> and its subclasses: buttons, toggles, scroll bars, sliders, input fields;
+/// <c>ScrollRect</c>; the game's <c>SimpleStunButton</c>), called directly on the component with a synthetic
+/// <c>PointerEventData</c>, as RADIOCLICK1's <c>click_at</c> already does. No OS input, no Input System event, no window
+/// focus: the raycast and the handlers do not read a device.
+///
+/// <para>Limits. Only those handler types are reached (a game script's own pointer interface on another component is
+/// not). The wheel is not sent to uGUI's scroll handlers: the kit's wheel mover is the shown-input pump, which reads
+/// the synthetic notches itself. The real mouse's own hover, handled by the game's input module, is not changed; do
+/// not move the real mouse during a run (doing so ends the lease: <c>user-activity</c>).</para>
+/// </summary>
+internal sealed partial class UnityUiRuntime
+{
+    private static bool _synthOn;
+    private static PointerEventData? _synthEvent;
+    private static readonly List<GameObject> SynthHovered = new();
+    private static GameObject? _synthTop;
+    private static string _synthTopPath = "";
+    private static RaycastResult _synthTopResult;
+    private static UiSyntheticButtons _synthButtonsSeen;
+    private static GameObject? _synthPress;
+    private static GameObject? _synthClick;
+    private static string? _synthClickKind;
+    private static GameObject? _synthDrag;
+    private static bool _synthDragging;
+    private static PointerEventData.InputButton _synthPressButton;
+    private static Vector2 _synthPressAt;
+    private static Vector2 _synthLast = new(float.NaN, float.NaN);
+    private static float _physX, _physY;
+    private static bool _physHave;
+    private static readonly List<string> SynthLog = new();
+
+    /// <summary>The last events the driver sent, newest last (readback; at most 40).</summary>
+    internal static IReadOnlyList<string> SyntheticEventLog => SynthLog;
+
+    /// <summary>Start the per-frame driver (idempotent). Called when the bridge takes the lease.</summary>
+    internal static void EnsureSyntheticDriver()
+    {
+        UiSyntheticInput.BeforeEnd = SyntheticBeforeEnd;
+        if (_synthOn) return;
+        _synthOn = true;
+        _physHave = false;
+        try { Plugin.Frame += SyntheticFrame; }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic input driver could not start: " + e.Message); _synthOn = false; }
+        UiWidgetLifetime.Register("synthetic-input", () =>
+        {
+            // Core unload: the objects are going; drop the state without sending into them.
+            UiSyntheticInput.BeforeEnd = null;
+            UiSyntheticInput.End("unload");
+            UiSyntheticInput.ClearNav();
+            StopSyntheticDriver();
+            ResetSyntheticState();
+        });
+    }
+
+    private static void StopSyntheticDriver()
+    {
+        if (!_synthOn) return;
+        _synthOn = false;
+        try { Plugin.Frame -= SyntheticFrame; }
+        catch { /* */ }
+    }
+
+    private static void ResetSyntheticState()
+    {
+        SynthHovered.Clear();
+        _synthTop = null;
+        _synthTopPath = "";
+        _synthButtonsSeen = UiSyntheticButtons.None;
+        _synthPress = _synthClick = _synthDrag = null;
+        _synthClickKind = null;
+        _synthDragging = false;
+        _synthEvent = null;
+        _synthLast = new Vector2(float.NaN, float.NaN);
+    }
+
+    /// <summary>The lease ends: release the buttons (no click) and exit every hovered object, then forget them.</summary>
+    private static void SyntheticBeforeEnd(string reason)
+    {
+        try
+        {
+            var ev = SynthEvent();
+            if (ev != null)
+            {
+                if (_synthPress != null || _synthDragging) ReleasePress(ev, click: false);
+                for (int i = SynthHovered.Count - 1; i >= 0; i--) SendExit(SynthHovered[i], ev);
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic input release threw: " + e.Message); }
+
+        ResetSyntheticState();
+        Plugin.Logger?.LogInfo("Ui: synthetic input ended (" + reason + ").");
+    }
+
+    private static void SyntheticFrame()
+    {
+        int frame;
+        try { frame = Time.frameCount; }
+        catch { frame = 0; }
+        if (UiSyntheticInput.Tick() || !UiSyntheticInput.Active)
+        {
+            StopSyntheticDriver();
+            return;
+        }
+
+        UiSyntheticInput.PruneKeys(frame);
+        if (PhysicalInputUsed(ref _physX, ref _physY, ref _physHave))
+        {
+            UiSyntheticInput.End("user-activity");
+            StopSyntheticDriver();
+            return;
+        }
+
+        if (!UiSyntheticInput.HasPointer) return;
+        try { SyntheticPointerFrame(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic pointer frame threw: " + e.Message); }
+    }
+
+    private static PointerEventData? SynthEvent()
+    {
+        if (_synthEvent != null) return _synthEvent;
+        EventSystem? es = null;
+        try { es = EventSystem.current; } catch { /* */ }
+        if (es == null) return null;
+        _synthEvent = new PointerEventData(es) { pointerId = -1 };
+        return _synthEvent;
+    }
+
+    private static void SyntheticPointerFrame()
+    {
+        var ev = SynthEvent();
+        if (ev == null) return;
+        var pos = new Vector2(UiSyntheticInput.X, UiSyntheticInput.Y);
+        Vector2 delta = float.IsNaN(_synthLast.x) ? Vector2.zero : pos - _synthLast;
+        _synthLast = pos;
+        ev.position = pos;
+        ev.delta = delta;
+
+        // The topmost UI object under the point.
+        GameObject? top = null;
+        _synthTopResult = default;
+        try
+        {
+            var es = EventSystem.current;
+            if (es != null)
+            {
+                var probe = new PointerEventData(es) { position = pos };
+                var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+                es.RaycastAll(probe, results);
+                if (results != null && results.Count > 0)
+                {
+                    _synthTopResult = results[0];
+                    top = results[0].gameObject;
+                }
+            }
+        }
+        catch { top = null; }
+
+        try { ev.pointerCurrentRaycast = _synthTopResult; } catch { /* */ }
+        if (!ReferenceEquals(top, _synthTop))
+        {
+            _synthTop = top;
+            _synthTopPath = top == null ? "" : SafePath(top);
+            UpdateHover(top, ev);
+        }
+
+        // Buttons: one press at a time, as a mouse's left / right / middle.
+        var buttons = UiSyntheticInput.Buttons;
+        if (buttons != _synthButtonsSeen)
+        {
+            var went = buttons & ~_synthButtonsSeen;
+            var gone = _synthButtonsSeen & ~buttons;
+            _synthButtonsSeen = buttons;
+            if (gone != UiSyntheticButtons.None && _synthPress != null && (gone & ToFlag(_synthPressButton)) != 0)
+                ReleasePress(ev, click: true);
+            if (went != UiSyntheticButtons.None && _synthPress == null)
+                Press(top, ev, (went & UiSyntheticButtons.Left) != 0 ? PointerEventData.InputButton.Left
+                    : (went & UiSyntheticButtons.Right) != 0 ? PointerEventData.InputButton.Right
+                    : PointerEventData.InputButton.Middle);
+        }
+
+        if (_synthDrag != null && (_synthPress != null || _synthDragging))
+        {
+            float threshold = 10f;
+            try { threshold = EventSystem.current != null ? EventSystem.current.pixelDragThreshold : 10f; } catch { /* */ }
+            if (!_synthDragging && (pos - _synthPressAt).sqrMagnitude >= threshold * threshold)
+            {
+                _synthDragging = true;
+                try { ev.dragging = true; } catch { /* */ }
+                SendDrag(_synthDrag, ev, "begin-drag");
+            }
+
+            if (_synthDragging && delta.sqrMagnitude > 0f) SendDrag(_synthDrag, ev, "drag");
+        }
+    }
+
+    private static UiSyntheticButtons ToFlag(PointerEventData.InputButton b) => b switch
+    {
+        PointerEventData.InputButton.Right => UiSyntheticButtons.Right,
+        PointerEventData.InputButton.Middle => UiSyntheticButtons.Middle,
+        _ => UiSyntheticButtons.Left,
+    };
+
+    // ---- Hover --------------------------------------------------------------------------------------
+
+    /// <summary>Exit what is no longer under the point (leaf first), enter what newly is (leaf first), as the input module does.</summary>
+    private static void UpdateHover(GameObject? top, PointerEventData ev)
+    {
+        var chain = new List<GameObject>();
+        var t = top == null ? null : top.transform;
+        int guard = 0;
+        while (t != null && guard++ < 64)
+        {
+            chain.Add(t.gameObject);
+            t = t.parent;
+        }
+
+        for (int i = 0; i < SynthHovered.Count; i++)
+        {
+            var old = SynthHovered[i];
+            if (!ContainsGo(chain, old)) SendExit(old, ev);
+        }
+
+        try { ev.pointerEnter = top; } catch { /* */ }
+        for (int i = 0; i < chain.Count; i++)
+            if (!ContainsGo(SynthHovered, chain[i])) SendEnter(chain[i], ev);
+        SynthHovered.Clear();
+        SynthHovered.AddRange(chain);
+    }
+
+    private static bool ContainsGo(List<GameObject> list, GameObject go)
+    {
+        for (int i = 0; i < list.Count; i++)
+            if (ReferenceEquals(list[i], go) || (list[i] != null && go != null && list[i].GetInstanceID() == go.GetInstanceID())) return true;
+        return false;
+    }
+
+    private static void SendEnter(GameObject go, PointerEventData ev)
+    {
+        if (!Alive(go)) return;
+        bool sent = false;
+        try { var trigger = go.GetComponent<EventTrigger>(); if (trigger != null) { trigger.OnPointerEnter(ev); sent = true; } } catch { /* */ }
+        try { var sel = go.GetComponent<Selectable>(); if (sel != null) { sel.OnPointerEnter(ev); sent = true; } } catch { /* */ }
+        if (sent) Note("enter " + SafePath(go));
+    }
+
+    private static void SendExit(GameObject go, PointerEventData ev)
+    {
+        if (!Alive(go)) return;
+        bool sent = false;
+        try { var trigger = go.GetComponent<EventTrigger>(); if (trigger != null) { trigger.OnPointerExit(ev); sent = true; } } catch { /* */ }
+        try { var sel = go.GetComponent<Selectable>(); if (sel != null) { sel.OnPointerExit(ev); sent = true; } } catch { /* */ }
+        if (sent) Note("exit " + SafePath(go));
+    }
+
+    // ---- Press, release, click, drag ---------------------------------------------------------------
+
+    private static bool HasDownHandler(GameObject go)
+    {
+        try { if (go.GetComponent<EventTrigger>() != null) return true; } catch { /* */ }
+        try { if (go.GetComponent<Selectable>() != null) return true; } catch { /* */ }
+        return false;
+    }
+
+    private static bool HasDragHandler(GameObject go)
+    {
+        try { if (go.GetComponent<EventTrigger>() != null) return true; } catch { /* */ }
+        try { if (go.GetComponent<Scrollbar>() != null) return true; } catch { /* */ }
+        try { if (go.GetComponent<ScrollRect>() != null) return true; } catch { /* */ }
+        try { if (go.GetComponent<Slider>() != null) return true; } catch { /* */ }
+        try { if (go.GetComponent<TMP_InputField>() != null) return true; } catch { /* */ }
+        return false;
+    }
+
+    private static GameObject? FirstUp(GameObject? from, Func<GameObject, bool> has)
+    {
+        var t = from == null ? null : from.transform;
+        int guard = 0;
+        while (t != null && guard++ < 64)
+        {
+            if (has(t.gameObject)) return t.gameObject;
+            t = t.parent;
+        }
+
+        return null;
+    }
+
+    private static string? ClickKindUp(GameObject? from, out GameObject? at)
+    {
+        at = null;
+        var t = from == null ? null : from.transform;
+        int guard = 0;
+        while (t != null && guard++ < 64)
+        {
+            string? kind = ClickHandlerKind(t.gameObject);
+            if (kind != null)
+            {
+                at = t.gameObject;
+                return kind;
+            }
+
+            t = t.parent;
+        }
+
+        return null;
+    }
+
+    private static void Press(GameObject? top, PointerEventData ev, PointerEventData.InputButton button)
+    {
+        _synthPressButton = button;
+        _synthPressAt = ev.position;
+        try
+        {
+            ev.button = button;
+            ev.pointerId = button == PointerEventData.InputButton.Left ? -1 : button == PointerEventData.InputButton.Right ? -2 : -3;
+            ev.pressPosition = ev.position;
+            ev.pointerPressRaycast = _synthTopResult;
+            ev.eligibleForClick = true;
+            ev.delta = Vector2.zero;
+            ev.dragging = false;
+            ev.useDragThreshold = true;
+        }
+        catch { /* */ }
+
+        // The input module's DeselectIfSelectionChanged: a press on another selectable drops the selection.
+        try
+        {
+            var es = EventSystem.current;
+            var selectable = FirstUp(top, go => { try { return go.GetComponent<Selectable>() != null; } catch { return false; } });
+            if (es != null && es.currentSelectedGameObject != null
+                && (selectable == null || es.currentSelectedGameObject.GetInstanceID() != selectable.GetInstanceID()))
+                es.SetSelectedGameObject(null, ev);
+        }
+        catch { /* */ }
+
+        var press = FirstUp(top, HasDownHandler);
+        _synthPress = press;
+        try { ev.pointerPress = press; ev.rawPointerPress = top; } catch { /* */ }
+        if (press != null)
+        {
+            try { press.GetComponent<EventTrigger>()?.OnPointerDown(ev); } catch { /* */ }
+            try { press.GetComponent<Selectable>()?.OnPointerDown(ev); } catch { /* */ }
+            Note("down " + button.ToString().ToLowerInvariant() + " " + SafePath(press));
+        }
+
+        _synthClickKind = ClickKindUp(top, out _synthClick);
+        _synthDrag = FirstUp(top, HasDragHandler);
+        _synthDragging = false;
+        try { ev.pointerDrag = _synthDrag; } catch { /* */ }
+        if (_synthDrag != null) SendDrag(_synthDrag, ev, "init-drag");
+        if (press == null && _synthClick == null) Note("down " + button.ToString().ToLowerInvariant() + " on nothing that takes a press");
+    }
+
+    private static void ReleasePress(PointerEventData ev, bool click)
+    {
+        var press = _synthPress;
+        try { ev.button = _synthPressButton; } catch { /* */ }
+        if (press != null && Alive(press))
+        {
+            try { press.GetComponent<EventTrigger>()?.OnPointerUp(ev); } catch { /* */ }
+            try { press.GetComponent<Selectable>()?.OnPointerUp(ev); } catch { /* */ }
+            Note("up " + SafePath(press));
+        }
+
+        if (click && _synthClick != null && _synthClickKind != null && Alive(_synthClick))
+        {
+            // A click only when the release is over the object that took the press (the input module's rule).
+            ClickKindUp(_synthTop, out var nowClick);
+            if (nowClick != null && nowClick.GetInstanceID() == _synthClick.GetInstanceID())
+            {
+                bool invoked;
+                if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger")
+                {
+                    // Buttons, toggles and the game's buttons answer the left button only; a trigger on the same object takes any.
+                    var trigger = _synthClick.GetComponent<EventTrigger>();
+                    invoked = false;
+                    if (trigger != null)
+                    {
+                        try { trigger.OnPointerClick(ev); invoked = true; } catch { /* */ }
+                    }
+                }
+                else if (_synthClickKind == "input")
+                {
+                    invoked = false;
+                    try { _synthClick.GetComponent<TMP_InputField>()?.OnPointerClick(ev); invoked = true; } catch { /* */ }
+                }
+                else invoked = InvokePointerClick(_synthClick, _synthClickKind, ev);
+
+                Note("click " + _synthPressButton.ToString().ToLowerInvariant() + " " + SafePath(_synthClick) + (invoked ? "" : " (not taken)"));
+            }
+            else Note("click dropped: released off " + SafePath(_synthClick));
+        }
+
+        if (_synthDragging && _synthDrag != null && Alive(_synthDrag)) SendDrag(_synthDrag, ev, "end-drag");
+        _synthPress = null;
+        _synthClick = null;
+        _synthClickKind = null;
+        _synthDrag = null;
+        _synthDragging = false;
+        try
+        {
+            ev.pointerPress = null;
+            ev.rawPointerPress = null;
+            ev.pointerDrag = null;
+            ev.dragging = false;
+            ev.eligibleForClick = false;
+        }
+        catch { /* */ }
+    }
+
+    private static void SendDrag(GameObject go, PointerEventData ev, string phase)
+    {
+        if (!Alive(go)) return;
+        try
+        {
+            var trigger = go.GetComponent<EventTrigger>();
+            if (trigger != null)
+            {
+                if (phase == "init-drag") trigger.OnInitializePotentialDrag(ev);
+                else if (phase == "begin-drag") trigger.OnBeginDrag(ev);
+                else if (phase == "drag") trigger.OnDrag(ev);
+                else trigger.OnEndDrag(ev);
+            }
+        }
+        catch { /* */ }
+
+        try
+        {
+            var bar = go.GetComponent<Scrollbar>();
+            if (bar != null)
+            {
+                if (phase == "init-drag") bar.OnInitializePotentialDrag(ev);
+                else if (phase == "begin-drag") bar.OnBeginDrag(ev);
+                else if (phase == "drag") bar.OnDrag(ev);
+            }
+        }
+        catch { /* */ }
+
+        try
+        {
+            var scroll = go.GetComponent<ScrollRect>();
+            if (scroll != null)
+            {
+                if (phase == "init-drag") scroll.OnInitializePotentialDrag(ev);
+                else if (phase == "begin-drag") scroll.OnBeginDrag(ev);
+                else if (phase == "drag") scroll.OnDrag(ev);
+                else scroll.OnEndDrag(ev);
+            }
+        }
+        catch { /* */ }
+
+        try
+        {
+            var slider = go.GetComponent<Slider>();
+            if (slider != null)
+            {
+                if (phase == "init-drag") slider.OnInitializePotentialDrag(ev);
+                else if (phase == "drag") slider.OnDrag(ev);
+            }
+        }
+        catch { /* */ }
+
+        if (phase != "drag") Note(phase + " " + SafePath(go));
+    }
+
+    private static void Note(string line)
+    {
+        SynthLog.Add(line);
+        if (SynthLog.Count > 40) SynthLog.RemoveAt(0);
+    }
+
+    // ---- Bridge helpers ------------------------------------------------------------------------------
+
+    /// <summary>The driver's readback: the topmost hit, the hovered chain (leaf first), the press, the drag, the log.</summary>
+    internal static Dictionary<string, object?> DescribeSynthetic()
+    {
+        var hovered = new List<string>();
+        for (int i = 0; i < SynthHovered.Count && i < 12; i++)
+            hovered.Add(Alive(SynthHovered[i]) ? SafePath(SynthHovered[i]) : "(destroyed)");
+        string selected = "";
+        try
+        {
+            var es = EventSystem.current;
+            if (es != null && es.currentSelectedGameObject != null) selected = SafePath(es.currentSelectedGameObject);
+        }
+        catch { /* */ }
+
+        var d = UiSyntheticInput.Describe();
+        d["driver"] = _synthOn;
+        d["top"] = _synthTopPath;
+        d["topOurs"] = _synthTop != null && IsOurs(_synthTop);
+        d["hovered"] = hovered;
+        d["pressed"] = _synthPress != null && Alive(_synthPress) ? SafePath(_synthPress) : "";
+        d["dragging"] = _synthDragging;
+        d["dragTarget"] = _synthDrag != null && Alive(_synthDrag) ? SafePath(_synthDrag) : "";
+        d["selected"] = selected;
+        d["events"] = new List<string>(SynthLog);
+        return d;
+    }
+
+    internal static void ClearSyntheticLog() => SynthLog.Clear();
+
+    /// <summary>
+    /// Give the text field under (or inside) the UI object at the screen point the keyboard, through the kit's own focus
+    /// (the click path's <see cref="FocusOwnedField"/>). For a cell-row value box when a synthetic click is not wanted.
+    /// </summary>
+    internal static Dictionary<string, object?> BridgeFocusFieldAt(float x, float y)
+    {
+        var d = new Dictionary<string, object?> { ["ok"] = false };
+        // The click path first: the shown-input pump's own click-to-focus over the armed fields' rects.
+        bool clickPath = false;
+        try { clickPath = FocusFieldAt(x, y); } catch { clickPath = false; }
+        if (clickPath && FocusedArmedField() is { } byClick)
+        {
+            d["ok"] = true;
+            d["field"] = SafePath(byClick.gameObject);
+            d["focused"] = true;
+            d["path"] = "click-to-focus";
+            return d;
+        }
+
+        EventSystem? es = null;
+        try { es = EventSystem.current; } catch { /* */ }
+        if (es == null)
+        {
+            d["error"] = "EventSystem.current is null";
+            return d;
+        }
+
+        var ev = new PointerEventData(es) { position = new Vector2(x, y) };
+        var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+        es.RaycastAll(ev, results);
+        if (results == null || results.Count == 0)
+        {
+            d["error"] = "nothing under (" + x.ToString("F0") + ", " + y.ToString("F0") + ")";
+            return d;
+        }
+
+        var hit = results[0].gameObject;
+        d["hit"] = hit == null ? null : SafePath(hit);
+        TMP_InputField? field = null;
+        var t = hit == null ? null : hit.transform;
+        int guard = 0;
+        while (t != null && field == null && guard++ < 8)
+        {
+            try { field = t.GetComponent<TMP_InputField>(); } catch { field = null; }
+            if (field == null)
+            {
+                try { field = t.GetComponentInChildren<TMP_InputField>(); } catch { field = null; }
+            }
+
+            t = t.parent;
+        }
+
+        if (field == null)
+        {
+            d["error"] = "no text field at or above the hit object";
+            return d;
+        }
+
+        if (!FocusOwnedField(field))
+        {
+            d["error"] = "the field is not armed by the kit (not a kit text field)";
+            d["field"] = SafePath(field.gameObject);
+            return d;
+        }
+
+        d["ok"] = true;
+        d["field"] = SafePath(field.gameObject);
+        d["focused"] = ReferenceEquals(FocusedArmedField(), field) || FocusedArmedField()?.GetInstanceID() == field.GetInstanceID();
+        return d;
+    }
+
+    /// <summary>Whether a kit text field has the keyboard now, and its path.</summary>
+    internal static Dictionary<string, object?> DescribeFocusedField()
+    {
+        var field = FocusedArmedField();
+        if (field == null) return new Dictionary<string, object?> { ["focused"] = false };
+        string text = "";
+        try { text = field.text ?? ""; } catch { /* */ }
+        return new Dictionary<string, object?>
+        {
+            ["focused"] = true,
+            ["path"] = SafePath(field.gameObject),
+            ["text"] = text.Length > 200 ? text.Substring(0, 200) + "…" : text,
+            ["multiline"] = IsMultiline(field),
+        };
+    }
+
+    /// <summary>The kit tooltip box: shown, title, body and its rect in screen pixels (origin bottom-left).</summary>
+    internal static Dictionary<string, object?> DescribeTooltip()
+    {
+        var d = new Dictionary<string, object?> { ["shown"] = false };
+        try
+        {
+            if (!Alive(_tipRoot) || !_tipRoot!.activeSelf) return d;
+            d["shown"] = true;
+            d["title"] = _tipTitle != null && _tipTitle.gameObject.activeSelf ? _tipTitle.text : "";
+            d["body"] = _tipBody != null && _tipBody.gameObject.activeSelf ? _tipBody.text : "";
+            if (_tipBox != null) d["rect"] = RectDict(ScreenRectOf(_tipBox));
+        }
+        catch (Exception e) { d["error"] = e.Message; }
+        return d;
+    }
+
+    internal static Dictionary<string, object?>? RectDict(ScreenRect r) => !r.IsKnown ? null : new Dictionary<string, object?>
+    {
+        ["x"] = Math.Round(r.MinX, 1),
+        ["y"] = Math.Round(r.MinY, 1),
+        ["w"] = Math.Round(r.MaxX - r.MinX, 1),
+        ["h"] = Math.Round(r.MaxY - r.MinY, 1),
+    };
+
+    /// <summary>The submit half of a synthetic Enter on a focused single-line field (TMP's own Enter reads the OS queue).</summary>
+    internal static bool SyntheticSubmitFocused()
+    {
+        var field = FocusedArmedField();
+        if (field == null || IsMultiline(field)) return false;
+        UiTextInjection.Keys.Enqueue(new UiTestChord(UiKey.Enter, ctrl: false, alt: false, shift: false, meta: false));
+        return true;
+    }
+
+    /// <summary>
+    /// A synthetic point as the pointer sample: inside the window whatever the focus (it is the framework's own reading,
+    /// so the focus test that guards the device does not apply), outside past the window's edges. The window's size here
+    /// is the same device-pixel ruler as the pointer-bounds test.
+    /// </summary>
+    private static PointerSample SyntheticPointerSample(float x, float y)
+    {
+        var (w, h) = ScreenSize();
+        if (w > 0 && h > 0 && (x < 0f || y < 0f || x > w || y > h)) return PointerSample.Outside;
+        return PointerSample.At(x, y);
+    }
+
+    /// <summary>The current screen size in pixels.</summary>
+    internal static (int Width, int Height) ScreenSize()
+    {
+        try { return (Screen.width, Screen.height); }
+        catch { return (0, 0); }
+    }
+}
+#endif

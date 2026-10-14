@@ -432,6 +432,82 @@ Focus-free tests of the date-time picker (`IUiPanel.DateTimeField`, the settings
 
 Restore afterward: press the row's reset arrow (or set `DemoEventTime` back to empty) and leave the client at the title screen.
 
+## UI input without focus (BRIDGEUI1)
+
+Status: **built, game-free tested (`BridgeUiInputTests`, `tools/mcp/test/ui-tools.test.mjs`), not live-verified.**
+
+Four client ops drive and read the Progenitor UI kit for acceptance tests without OS input and without the game window's focus: `ui_input`, `ui_read`, `display` and `screenshot`, plus new `nav` actions ([`nav`](bridge-ops-client.md#nav): `hold`, `stick`, `focus`) and `widget_click` modifiers. MCP: `progenitor_ui_input`, `progenitor_ui_read`, `progenitor_nav`, `progenitor_display`, `progenitor_screenshot` (`tools/mcp/ui-tools.mjs`); or `node tools/mcp/call.mjs client <op> @args.json`.
+
+**Why no focus is needed.** The device-level [`mouse`](bridge-ops-client.md#mouse) and [`key`](bridge-ops-client.md#key) ops queue Input System events. With the window in the background the Input System disables the mouse and keyboard and drops those events unless `background:true` changes `InputSettings.backgroundBehavior`, and even then a moved pointer is not always reported (live 2026-10-14: `positionReached false` unfocused), and the kit's wheel handler read `deltaY=0`. `ui_input` does not go through a device at all. Core's `UiSyntheticInput` holds a synthetic pointer (position, buttons, Shift and Ctrl, queued wheel notches), UI-layer key taps and navigation holds. While the bridge holds its lease, the kit's own reads take that state instead of the devices:
+
+| Kit read | What it gets from the synthetic input |
+|---|---|
+| `SamplePointer` (hover gate, `HoverCapture`, the widgets' `ReadPointer`, the hovered panel, the chat box, the map) | The synthetic point, inside the window whatever the focus |
+| `PrimaryPointerHeld`, the pump's click-to-focus and drag test | The synthetic left button |
+| `HeldClickModifiers` (a click's multi-select meaning) | The synthetic Shift and Ctrl |
+| The shown-input pump's wheel sample | One queued notch a sample, a zero between, so each is a 0 to non-zero edge: the wheel claims (`UiWheelClaims`), text areas, inner scroll blocks and the hovered panel take it in their usual precedence |
+| The typed-key pump (`KeyEdgeTracker`) | Tapped keys held for their frames; an Escape tap first goes through the framework's Escape hook (`Ui.PressEscapeForBridge`, the path Bootstrap's forwarder calls), so dialog, capture, screen Back, inline edit and panel sweep precedence all run |
+| `SampleNav` | Held navigation buttons, the right stick, the arrow, Space and Enter taps; the synthetic pointer moving puts the focus marker away |
+
+A per-frame driver sends the pointer events a real mouse produces to the objects under the synthetic point, found by the game's `EventSystem.RaycastAll`: enter and exit along the hovered chain (leaf first), down on the first object up the chain that takes a press, up and a click when the release is over the object that took the click (the input module's rule), and initialize-drag, begin-drag (past the event system's drag threshold), drag and end-drag on the drag handler. They are called on the components this UI uses: `EventTrigger` (every kit pointer watch, hover watch and slot trampoline), `Selectable` and its subclasses (buttons, toggles, scroll bars, sliders, text fields, the game's `SimpleStunButton`) and `ScrollRect`. Right and middle clicks reach event triggers only, as in uGUI. Nothing reads window focus.
+
+**What it does not cover.** The game's own input (its actions, its pause menu, its camera) never sees these events: Escape through `ui_input` does not test whether the game's pause menu opens; use `key` with `background:true` for that. A game script's own pointer interface on some other component is not called. The wheel goes only to the kit's wheel handler, not to uGUI's scroll handlers (the kit sets `scrollSensitivity = 0`; uGUI's scroll is not its mover). Keys are UI-layer events for the kit's fields and Escape and Enter handling, never keybinds: press a bind with [`keybind_press`](bridge-ops-client.md#keybind_press). A focused single-line field's Enter is submitted the way the `type` path does it (TMP's own Enter reads the OS queue).
+
+**Lease.** The first action takes a lease (`leaseMs`, default 30000, 500 to 300000); every later action renews it, so a hover stays while you read the tooltip. It ends on `release` (or `"release": true` on any action), at its time, when the player touches the real mouse or keyboard (`user-activity`: a held button or key, or the pointer moving more than 3 px), on a Core swap (`unload`) and on Dev unload. Ending lets go of every button (no click), sends the pointer's exits and drops queued notches and keys; the log line is `Ui: synthetic input ended (<reason>).` Client availability is still the caller's rule ([AGENTS.md](../AGENTS.md)): do not run these ops on a client someone is playing.
+
+`mods_ui hover {label, cell}` dispatches only to cells declared as hover cells (chips, tab chips); for data table header cells, master-detail halves and any other control, hover with `ui_input`, which goes through the pointer path.
+
+**Targets.** `row` (a cell row key, as `mods_ui widget_read` and `ui_read widget` show it) with an optional `cell`, or `panel` (a shown panel's title, see `ui_read panels`), or `x` and `y` in screen pixels with the origin at the bottom left (the Input System's convention, as `mouse`; `mods_ui click_at` uses the top-left client convention). `fx` and `fy` (0 to 1, default 0.5) pick the point inside the target's rect from its left and bottom; `dx` and `dy` add pixels. `ui_read {"what":"target", ...}` shows the point before you act.
+
+### `ui_input`
+
+| Arguments | Does |
+|---|---|
+| `{"action":"move","row":"demo-table:header","cell":"c:reserve"}` (alias `hover`) | The pointer to the target; replies after `settleFrames` (default 3) with `state` (hovered chain, top hit, recent events) and `tooltip`. |
+| `{"action":"click","row":"demo-chips-belts:line0","cell":"x0"}` | Rest on the target `settleFrames`, button down, hold `holdFrames` (default 3), up: a click when still over the same object. `button` `left` (default), `right`, `middle`; `modifiers` `["shift"]`, `["ctrl"]` or both, held through the click. |
+| `{"action":"drag","row":"demo-list:row0","cell":"grip","to":{"row":"demo-list:row3","fy":0.2},"steps":20}` | Press at the target, move to `to` one step a frame (`steps`, default 12), release a frame after the last. `toX` and `toY` also work. `"keepDown": true` leaves the button held at `to` (read `ui_read state`, take a `screenshot` of the held look), and `{"action":"up"}` lets go there later. |
+| `{"action":"wheel","row":"demo-table:row4","notches":-2}` | The pointer to the target, then `notches` notches (positive up, toward the start; -20 to 20). Replies once the shown-input pump took them all (`ok false` and `notchesNotTaken` when no Progenitor panel is shown, because the pump only runs then). |
+| `{"action":"key","key":"Escape"}` | One UI-layer key tap held `frames` frames (default 2): `Escape`, `Enter`, `Tab`, `Backspace`, `Delete`, `Left`, `Right`, `Up`, `Down`, `Home`, `End`, `Space`, a letter or digit. Replies with `focus` (the field with the keyboard, the controller focus). The kit has no Tab handling; a Tab reaches nothing. |
+| `{"action":"focus","row":"demo-table:row0","cell":"e:reserve"}` | Give the kit field at the target the keyboard: the pump's own click-to-focus first, else the field at or above the raycast hit through the kit's focus. A synthetic `click` on a field does the same through the full pointer path. |
+| `{"action":"type","text":"40"}` | Type into the focused kit field through the injected-text path `mods_ui type` uses (at most 2000 characters). Then `key Enter` or `key Escape`. |
+| `{"action":"status"}` / `{"action":"release"}` | Read the lease and the driver; end the lease. |
+
+### `ui_read`
+
+Read only, no lease, light.
+
+| `what` | Reply |
+|---|---|
+| `state` | The synthetic input: `active`, `msLeft`, `pointer`, `buttons`, `modifiers`, `top` (topmost hit), `topOurs`, `hovered` (leaf first), `pressed`, `dragging`, `dragTarget`, `selected` (the event system's selected object), `events` (the last 40: `enter …`, `down left …`, `click left …`, `begin-drag …`). |
+| `focus` | `field` (the kit field with the keyboard: `path`, `text`, `multiline`), `nav` (the controller focus, as `nav state`), `synthetic`. |
+| `tooltip` | `shown`, `title`, `body`, `rect` (screen pixels). |
+| `widgets` | Every live composed widget: `key`, `type`, `plugin`, `visible`, `state`. |
+| `widget` + `key` | That widget's own readback: a data table's `sort`, `sortMarks`, `hidden`, `slots` (the visible rows), `top`, `pending` edits, groups; chips and their lines, `add`, `more`; a master-detail's tops; an ordered list; a picker. |
+| `panels` | Every shown panel: `title`, `plugin`, `root`, `capture`, `rect`, and the screen size. |
+| `tips` | The tip cards (`showing`, `waiting`, `modal`, `listOpen`) plus `cardRect`, `anchorRect`, `relative` (`left`, `bottom`, `rightGap`, `insideAnchor`) and `cardOnScreen`. |
+| `terms` + `plugin` | Explained words: each term's `marker` (visible), `hovers`, and `markersOn`. |
+| `target` + target fields | The point `ui_input` would use and the target's rect. |
+
+### `mods_ui widget_click` modifiers
+
+`{"action":"widget_click","label":"demo-table:header/c:item","modifiers":["shift"]}` runs the slot click with Shift (or Ctrl) held for the framework's click-modifier read, the same read a real Shift-click makes. The reply carries `modifiers`. Use it for multi-key sort and range or toggle selection when the pointer path is not under test.
+
+### `display`
+
+| Arguments | Does |
+|---|---|
+| `{"action":"status"}` | `before`: the window's `width`, `height`, `mode`, the `monitor`, and the game's saved graphics fields `settingsResolution` and `settingsWindowMode`; `baseline` when a set ran. |
+| `{"action":"set","width":2560,"height":1440,"mode":"windowed"}` | Records the baseline (first set only), then `ProjectM.GraphicsSettingsManager.SetResolution(width, height, mode)`, the game's own path behind its Options rows. Replies ten frames later with `after`. `mode`: `windowed`, `fullscreenwindow`, `exclusive`, `maximized`. |
+| `{"action":"restore"}` | Back to the baseline window size and mode, and the two saved fields put back if the game changed them. |
+
+**This can change the user's saved graphics settings.** Whether `SetResolution` writes the game's client settings was not checked against its native body; `before` and `after` show it. If it does, the game's next settings save keeps the test resolution. Always run `restore` at the end, and restore before a Dev reload (the baseline lives in the Dev generation that recorded it). Not live-verified.
+
+**4K on a smaller monitor.** A window cannot be larger than the monitor that shows it (5120x1440 cannot host a 3840x2160 window), and the kit's overlay canvases are not drawn by a camera, so they cannot be rendered offscreen into a larger target without changing every canvas's render mode, which this op does not do. What works: the kit and the game's scaler size the UI from the screen at a fixed aspect ratio, so a 1920x1080 or 2560x1440 window has the same layout in canvas units as 3840x2160. Set a 16:9 window that fits, check layout there, and take `screenshot {"superSize":2}` on 1920x1080 for a 3840x2160 image. That checks clipping, overlap and layout at 16:9; it does not check how a 4K display's pixel density looks, which needs a 4K display.
+
+### `screenshot`
+
+`{"superSize":1, "path":"C:/…/shot.png", "rect":{"x":0,"y":0,"w":800,"h":600} | "row":"…","cell":"…" | "panel":"…", "pad":8}`. `ScreenCapture.CaptureScreenshot`: the game writes the frame it renders, UI included, at the end of the frame. No focus is needed (a minimized window renders nothing, and the op then fails after 300 frames). `superSize` 1 to 4 renders that frame at a multiple of the window's size; whether the game's renderer honors it is not live-verified (the reply's `width` and `height` are read from the file). The default path is `BepInEx/progenitor-shots/<utc>.png`. A region (a rect in screen pixels with the origin at the bottom left, or a row, cell or panel, plus `pad`) is cropped from the file into `<name>-region.png` (`region {path, x, y, width, height}`). For the whole window from outside the game, [observe.ps1](observe-capture.md) remains the other focus-free option.
+
 ## `setting`
 
 Both sides, main thread (TEXTLIMIT1). Core's `ServerSettingsTestBridge`, reached by reflection; no plugin or network path reaches it. Source-checked and built, not live-verified.

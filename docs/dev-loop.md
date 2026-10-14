@@ -4,6 +4,8 @@ How to build a change, get it into a running V Rising client or staged test serv
 
 Agents should use the Progenitor tools to build, deploy, request reloads and read the result; see the [hot-swap quickstart](hot-reload.md) for the primary MCP workflow and a small plugin example. Core scheduling/status currently use the direct bridge `core_reload` / `reload_status` operations; do not invent MCP wrappers. This page is the overview; the tool and operation reference is split across the [pages below](#reference-pages). Entity snapshots use the `snapshot` / `restore` operations; screenshots use [observe.ps1](observe-capture.md).
 
+For Progenitor UI tests (hover, tooltips, clicks with Shift or Ctrl, drags, the wheel, typing, Escape and Enter, controller navigation, widget readback, resolution and captures), use [`ui_input`, `ui_read`, `display` and `screenshot`](bridge-ops-ui.md#ui-input-without-focus-bridgeui1) and [`nav`](bridge-ops-client.md#nav). They act at the UI kit's own input layer: no OS input, no Input System device, no window focus. MCP: `progenitor_ui_input`, `progenitor_ui_read`, `progenitor_nav`, `progenitor_display`, `progenitor_screenshot`.
+
 For authorized gameplay tests, use the existing [keyboard](bridge-ops-client.md#key) and [mouse](bridge-ops-client.md#mouse) bridge operations before asking a person to repeat movement or attacks. These operations work through the game's input without moving the OS cursor; `background:true` supports an unfocused client. They have no dedicated MCP wrappers: use `node tools/mcp/call.mjs client <op> @request.json`. Check menus, current bindings and input status first; a successful input report is not proof of the resulting animation or ability. See the [animation test procedure](player-animation-import.md#repeatable-gameplay-capture).
 
 Current instructions belong here. Investigations, dated deployment state and superseded approaches are preserved in the internal research notes; they are evidence, not current operating instructions.
@@ -17,7 +19,7 @@ Never deploy Progenitor.Dev, and never point these tools, at the live dedicated 
 | [Development bridge](bridge.md) | Wire protocol, bridge users and the bridge queue, logging policy, ports, token, the opt-in gate, calling without MCP, main-thread ops |
 | [Bridge operations: core, entities and samples](bridge-ops.md) | `ping`, `logs`, `reload`, `core_reload`, users, worlds, commands, ghost users, entity ops, `.debug` tools, Sample commands |
 | [Bridge operations: players, world and capture](bridge-ops-player.md) | `heal`, `protect`, `time`, `photo`, `teleport`, `give`, `unlock`, `inspect`, snapshots, saves, `connect`, `host`, `capture`, `perf` |
-| [Bridge operations: Mods workspace UI](bridge-ops-ui.md) | `mods_ui`, the game menu, text-field and date-time picker tests, `setting` |
+| [Bridge operations: Mods workspace UI](bridge-ops-ui.md) | `mods_ui`, the game menu, text-field and date-time picker tests, `setting`, focus-free UI input (`ui_input`, `ui_read`, `display`, `screenshot`) |
 | [Bridge operations: server info and join flow](bridge-ops-join.md) | `messages_record`, `server_rules`, `world_backups`, `server_desc`, `server_browser`, `join_ui`, `join_admin` and their acceptance recipes |
 | [Bridge operations: input, install and session](bridge-ops-client.md) | `bot` interaction, `keybind_press`, `map`, `key`, `mouse`, `nav`, `build_search`, `materials`, `dye`, `install_local`, `remote_install`, `disconnect`, `quit`, `auto_update` |
 | [MCP server and tools](mcp.md) | MCP tools, examples, registering the server in Claude Code |
@@ -190,7 +192,7 @@ not have, so both name their bytes in the log and both can be gated. Full refere
    Deploy builds the solution unless `-NoBuild` is set; `-Projects` selects copied artifacts, not the build scope. Projects outside the solution need an explicit build before deploy with `-NoBuild`. Script defaults are Bootstrap, Core, Dev and Sample; the MCP deploy wrapper defaults to Bootstrap, Core and Dev. Pass project and side explicitly to limit the change.
 
 5. Verify the loaded image and behavior. Use `reload_status`, `ping` and bridge logs. If the bridge is unavailable, read the disk log. For native failures, inspect both the BepInEx log and the Unity game log; the bridge ring does not contain every native error.
-6. For visual work, capture the result with [observe.ps1](observe-capture.md). Use focus-free capture by default, and use synthetic input only when the user has authorized client testing. Check the visible result, then repeat after reload to detect duplicate handlers or stale resources.
+6. For visual work, capture the result with [observe.ps1](observe-capture.md) or the bridge's in-process [`screenshot`](bridge-ops-ui.md#screenshot). Use focus-free capture by default, and use synthetic input only when the user has authorized client testing. Check the visible result, then repeat after reload to detect duplicate handlers or stale resources.
 
 Typical consumer loop: edit → build → deploy that project to the selected test side → verify plugin load → exercise one behavior → inspect logs and, when relevant, a screenshot. A successful reload must leave one working instance of each handler and no resource from the retired plugin that changes subsequent behavior. See the [minimal quickstart](hot-reload.md).
 

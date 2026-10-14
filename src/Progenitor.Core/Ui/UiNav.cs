@@ -498,6 +498,25 @@ internal static class UiNav
         return Execute(command, surface);
     }
 
+    /// <summary>
+    /// BRIDGEUI1 (the bridge's <c>nav focus</c>): put the controller focus on a stop of the active screen, as a run of
+    /// direction presses that ended there would, and draw its marker. <paramref name="part"/> is a cell key of a cell row
+    /// (empty: the row). False when no screen takes navigation or the handle is not one of its stops.
+    /// </summary>
+    internal static bool FocusOn(UiHandle handle, string part)
+    {
+        var surface = SafeActive();
+        if (surface == null || handle == null || !IsStop(handle)) return false;
+        if (PaneOf(surface, handle) < 0) return false;
+        var target = new NavTarget(handle, part ?? "");
+        if (!Stops(handle).Contains(target)) return false;
+        _active = true;
+        if (!string.Equals(surface.Key, _surface, StringComparison.Ordinal)) Enter(surface);
+        SetFocus(target);
+        Mark();
+        return true;
+    }
+
     private static bool Execute(NavCommand command, NavSurface surface)
     {
         if (command == NavCommand.None) return false;
