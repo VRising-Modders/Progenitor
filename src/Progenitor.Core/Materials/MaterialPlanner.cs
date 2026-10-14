@@ -213,6 +213,30 @@ internal static class MaterialPlanner
     }
 
     /// <summary>
+    /// <see cref="Pool"/>'s <see cref="MaterialPool{TSource}.Available"/> alone, without building the
+    /// rows: the same dedup, exclusion and reserve, with a caller-owned scratch set (cleared here), so a
+    /// view of many items allocates nothing per item.
+    /// </summary>
+    internal static int Available<TSource>(int item, MaterialPoolSpec<TSource> spec, IMaterialLedger<TSource> ledger,
+        ICollection<TSource>? exclude, HashSet<TSource> seen)
+        where TSource : IEquatable<TSource>
+    {
+        if (spec == null) throw new ArgumentNullException(nameof(spec));
+        if (ledger == null) throw new ArgumentNullException(nameof(ledger));
+        seen.Clear();
+        long total = 0;
+        foreach (var source in spec.Order)
+        {
+            if (!seen.Add(source)) continue;
+            if (exclude != null && exclude.Contains(source)) continue;
+            int n = ledger.Count(source, item);
+            if (n > 0) total += n;
+        }
+        long a = total - spec.Reserve;
+        return a <= 0 ? 0 : a > int.MaxValue ? int.MaxValue : (int)a;
+    }
+
+    /// <summary>
     /// Plan every line. <paramref name="specFor"/> returns null for an item the provider does not
     /// govern; that line is listed in <see cref="MaterialPlan{TSource}.Ungoverned"/> and not planned.
     /// When any governed line is short, the plan has no steps.

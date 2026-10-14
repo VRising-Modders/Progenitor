@@ -44,8 +44,26 @@ public sealed class MaterialSourceStatus
     /// <summary>Governed payments made since the provider registered (lines that touched the pool).</summary>
     public long Payments { get; }
 
-    /// <summary>Availability views computed since the provider registered.</summary>
+    /// <summary>
+    /// Per-player view packets the server sent (and the transport accepted) since the provider
+    /// registered: changed views, the periodic resends and cleared views. A view that did not change
+    /// is not sent and not counted. Zero on a client.
+    /// </summary>
     public long Views { get; }
+
+    /// <summary>
+    /// Per-player views recomputed since the provider registered (server): the provider asked for its
+    /// sources and every total counted again, because something the view depends on changed, an
+    /// invalidation or a governed payment marked the player, or the view was new.
+    /// </summary>
+    public long Recomputes { get; }
+
+    /// <summary>
+    /// Per-player view refreshes that reused the last computed view since the provider registered
+    /// (server): the provider's <c>Revision</c>, the context and the stock of every container the view
+    /// read were unchanged, so no source was asked and no total recounted.
+    /// </summary>
+    public long Skips { get; }
 
     /// <summary>
     /// Provider calls that threw since the provider registered. Each one was treated as "no remote
@@ -64,8 +82,10 @@ public sealed class MaterialSourceStatus
 
     internal MaterialSourceStatus(bool registered, string owner, bool hooksInstalled, string hooksReason,
         IReadOnlyCollection<MaterialOperation> requested, IReadOnlyCollection<MaterialOperation> wired,
-        long revision, long payments, long views, long faults = 0, long shortfalls = 0)
+        long revision, long payments, long views, long faults = 0, long shortfalls = 0, long recomputes = 0, long skips = 0)
     {
+        Recomputes = recomputes;
+        Skips = skips;
         Faults = faults;
         Shortfalls = shortfalls;
         Registered = registered;
@@ -79,7 +99,7 @@ public sealed class MaterialSourceStatus
         Views = views;
     }
 
-    /// <summary>One grep-able line: <c>materials: provider=… hooks=… wired=… revision=… faults=… shortfalls=…</c>.</summary>
+    /// <summary>One grep-able line: <c>materials: provider=… hooks=… wired=… revision=… views=… recomputes=… skips=… faults=… shortfalls=…</c>.</summary>
     public override string ToString()
     {
         var sb = new StringBuilder("materials: provider=");
@@ -91,6 +111,8 @@ public sealed class MaterialSourceStatus
         sb.Append(" revision=").Append(Revision);
         sb.Append(" payments=").Append(Payments);
         sb.Append(" views=").Append(Views);
+        sb.Append(" recomputes=").Append(Recomputes);
+        sb.Append(" skips=").Append(Skips);
         sb.Append(" faults=").Append(Faults);
         sb.Append(" shortfalls=").Append(Shortfalls);
         return sb.ToString();
@@ -121,6 +143,8 @@ internal sealed class MaterialSourceRegistry
     private long _views;
     private long _faults;
     private long _shortfalls;
+    private long _recomputes;
+    private long _skips;
     private bool _invalidateAll;
     private readonly HashSet<CastleId> _invalidUsers = new();
 
@@ -168,6 +192,8 @@ internal sealed class MaterialSourceRegistry
             _views = 0;
             _faults = 0;
             _shortfalls = 0;
+            _recomputes = 0;
+            _skips = 0;
             _invalidateAll = true;
             _invalidUsers.Clear();
         }
@@ -279,7 +305,12 @@ internal sealed class MaterialSourceRegistry
 
     internal void CountPayment() { lock (_gate) _payments++; }
 
+    /// <summary>A per-player view packet was sent.</summary>
     internal void CountView() { lock (_gate) _views++; }
+
+    internal void CountRecompute() { lock (_gate) _recomputes++; }
+
+    internal void CountSkip() { lock (_gate) _skips++; }
 
     internal void CountFault() { lock (_gate) _faults++; }
 
@@ -296,7 +327,7 @@ internal sealed class MaterialSourceRegistry
                 foreach (var op in _requested)
                     if (MaterialOperations.IsSupported(op)) wired.Add(op);
             return new MaterialSourceStatus(_provider != null, _owner, installed, installed ? "" : reason,
-                requested, wired, _revision, _payments, _views, _faults, _shortfalls);
+                requested, wired, _revision, _payments, _views, _faults, _shortfalls, _recomputes, _skips);
         }
     }
 

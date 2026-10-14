@@ -85,9 +85,24 @@ public partial class MaterialServiceTests
         public InventoryRef PoolFront(in MaterialContext context) =>
             context.Operation is MaterialOperation.Craft or MaterialOperation.Repair && StationIsSharedStorage ? Station : InventoryRef.None;
 
-        public void VanillaSharedItems(in MaterialContext context, ICollection<int> into)
+        /// <summary>The plot's own shared storage, holding <see cref="HeartAggregate"/>.</summary>
+        public InventoryRef SharedStore = new(90, 1, 0, MaterialServiceTests.Epoch);
+
+        public void VanillaSharedInventories(in MaterialContext context, ICollection<InventoryRef> into)
         {
-            foreach (var kv in HeartAggregate) into.Add(kv.Key);
+            if (HeartAggregate.Count > 0) into.Add(SharedStore);
+        }
+
+        public bool ReadStock(InventoryRef inventory, Dictionary<int, long> into)
+        {
+            if (inventory.Equals(SharedStore))
+            {
+                foreach (var kv in HeartAggregate) into[kv.Key] = kv.Value;
+                return true;
+            }
+            foreach (var kv in Stock)
+                if (kv.Key.Item1.Equals(inventory) && kv.Value > 0) into[kv.Key.Item2] = kv.Value;
+            return true;
         }
 
         public void Items(InventoryRef inventory, ICollection<int> into)

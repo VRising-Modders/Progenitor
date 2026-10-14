@@ -302,7 +302,8 @@ internal sealed class MaterialViewPublisher
 
 /// <summary>
 /// Server side, game-free: when a refresh runs and whom it covers. Every <see cref="IntervalMs"/>
-/// every online player is recomputed (sent only when changed); right after an invalidation or a
+/// every online player is refreshed (recomputed only when something changed, sent only when the view
+/// changed; <see cref="MaterialService.RefreshView"/>); right after an invalidation or a
 /// payment the marked players are; every <see cref="ResyncMs"/> (and after a provider change) every
 /// player is sent their view again even when unchanged, which repairs a packet the transport accepted
 /// but the client never applied (a client Core reload, a lost packet).
