@@ -846,6 +846,9 @@ internal sealed partial class UnityUiRuntime
         }
 
         if (field == null || FindArmed(field) == null) return;
+        // A first click focuses the field and the kit selects its whole value (FocusOwnedField); only a click on a field
+        // that already has the keyboard places the caret, as with the mouse.
+        if (FieldId(FocusedArmedField()) != FieldId(field)) return;
         _caretClickFieldId = FieldId(field);
         _caretClickAt = at;
         _caretClickFrames = 6;

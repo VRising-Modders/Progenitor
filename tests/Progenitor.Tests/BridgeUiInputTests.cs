@@ -415,6 +415,13 @@ public sealed class BridgeUiInputTests : IDisposable
     }
 
     [Fact]
+    public void A_first_click_keeps_the_kits_select_all_and_only_a_later_click_places_the_caret()
+    {
+        string note = SourcePin.MethodBody(Driver(), "private static void NoteCaretClick(");
+        SourcePin.AssertUncommented(note, "if (FieldId(FocusedArmedField()) != FieldId(field)) return;");
+    }
+
+    [Fact]
     public void Display_set_gives_back_a_foreground_it_took_and_restores_the_position_and_registry()
     {
         string ops = SourcePin.ReadFile("src", "Progenitor.Dev", "Ops", "DisplayOps.cs");
