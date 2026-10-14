@@ -123,6 +123,20 @@ Repair and Upgrade scopes honor a seam call only while their own system executes
 `materials: a seam call inside the … scope came from another system` during these cases means the
 executing-system check refused a call and must be reported.
 
+**Sending the events focus-free.** Each repair and upgrade can be sent without the game window, from
+the server bridge, as the event the player's client would send (`materials` `send`, see
+[bridge-ops-client.md](../../docs/bridge-ops-client.md#materials)); `<name>` is the test character:
+
+- worn item: `node tools/mcp/call.mjs server materials '{"action":"send","event":"repair_equipped","user":"<name>","equipment":"chest"}'`
+- item at a workstation: open the bench's window on the client first (the server checks the
+  interaction), then `{"action":"send","event":"repair_item","user":"<name>","station":"target","slot":<bag index>}`
+  (`inventory` defaults to the bag; pass the bench's `index:version` as `inventory` for an item in the bench)
+- heart upgrade: open the heart's window on the client first, then
+  `{"action":"send","event":"heart_upgrade","user":"<name>"}` (`heart` defaults to the open window's heart)
+
+The server bridge's `bot_repair` `repair` action sends the same worn-item event. A sent event is
+silent when the game refuses it: read the result (durability, the heart level, the `materials:` lines).
+
 **Repair setup.** Damage one piece of gear whose repair costs an ingredient X of the plot (wear it in a
 fight, or pick a piece already below full durability), read its repair cost from the item tooltip, and
 empty X from the bag and the workstation. `.srtest cost X <the tooltip's amount> 0`. The tooltip shows the
@@ -135,11 +149,11 @@ costs show the pool once the Upgrade view arrives (up to about 1 s after opening
 | # | Case | Do | Expect |
 |---|---|---|---|
 | 15 | Repair baseline | `disable`, `baseline repair`, repair the piece from the character menu | The game charges nothing (it shows missing materials); zero debit; `enable` again |
-| 16 | Repair equipped | `begin repair`, repair the worn piece from the character menu | One `materials: check Repair … tx=<t>`, then one `materials: paid Repair … tx=<t>` per ingredient in the per-item order; one `Shared Resources Test: MaterialPaid tx=<t> Repair …` per line; `verify` MATCH; the piece is at full durability. Also the unverified client side of this path: no `check Repair` line at all means the client refused the equipped repair on its own count (report it; it would need a client view or a hook) |
-| 17 | Repair at a station | Damage another piece, put it in the bench's inventory window or keep it in the bag, open the bench, `begin repair`, repair it there | Same lines as 16; the `check` context names the bench as `station=`; the bench's own stock is not debited by the pool (watch it with `.srtest watch bench …`); `verify` MATCH |
+| 16 | Repair equipped | `begin repair`, repair the worn piece from the character menu (or `send` `repair_equipped`) | One `materials: check Repair … tx=<t>`, then one `materials: paid Repair … tx=<t>` per ingredient in the per-item order; one `Shared Resources Test: MaterialPaid tx=<t> Repair …` per line; `verify` MATCH; the piece is at full durability. Also the unverified client side of this path: no `check Repair` line at all means the client refused the equipped repair on its own count (report it; it would need a client view or a hook). With a station's window still open, `check` names that station as `station=`: expected, because the game's own pass for a worn-item repair also reaches the open interaction inventory, so Progenitor names it and leaves it out of the pool (live run 2026-10-14) |
+| 17 | Repair at a station | Damage another piece and keep it in the bag, open the bench's window, `begin repair`, `send` `repair_item` with `station` `target` and the piece's bag `slot` | Same lines as 16; the `check` context names the bench as `station=`; the bench's own stock is not debited by the pool (watch it with `.srtest watch bench …`); `verify` MATCH |
 | 18 | Repair shortfall | Leave one unit fewer of X across A and B, `begin repair`, repair | The game refuses at its check (missing materials); zero debit; `shortfalls` unchanged |
-| 19 | Upgrade short | Leave one unit too few of one cost across A and B, `begin upgrade`, press upgrade | The view shows the short amount; the client's own check refuses (the button does nothing) or the server's check does; zero debit; then restore the unit and `end` |
-| 20 | Upgrade | `begin upgrade`, open P's heart window, read the costs, press upgrade | Client bridge `materials`: `views.Upgrade.station` is P's heart network id while the window is open, and its costs show the pool; one `materials: check Upgrade … station=<heart id> tx=<t>`, one `paid Upgrade` line per cost line, `MaterialPaid` per line; `verify` MATCH; the heart's level rose by one |
+| 19 | Upgrade short | Leave one unit too few of one cost across A and B, `begin upgrade`, open the heart's window, `send` `heart_upgrade` (or press upgrade) | The view shows the short amount; the client's own check refuses (the button does nothing) or, for a `send`, the server's check does; zero debit; then restore the unit and `end` |
+| 20 | Upgrade | `begin upgrade`, open P's heart window, read the costs, `send` `heart_upgrade` (or press upgrade) | Client bridge `materials`: `views.Upgrade.station` is P's heart network id while the window is open, and its costs show the pool; one `materials: check Upgrade … station=<heart id> tx=<t>`, one `paid Upgrade` line per cost line, `MaterialPaid` per line; `verify` MATCH; the heart's level rose by one |
 | 21 | Claim, raid and destroy stay vanilla | Only on a throwaway copy of a save with a second test character's decaying heart: try a claim with its cost staged only in A | The game's own rules: A is not debited (no `materials: check Upgrade` line); the heart window's claim cost shows the game's own count; with that heart's window open the client's `views.Upgrade` stays `null` (Upgrade views only for hearts the player or the clan owns) |
 | 22 | Other screens | With an Upgrade view held, open a chest and a workstation | Their counts are the game's own (the chest) or the Craft view (the workstation) |
 

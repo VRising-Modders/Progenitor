@@ -2769,7 +2769,7 @@ any case):
 | Operation | `Station` |
 |---|---|
 | `Craft` | The workstation (`ContainerId`) |
-| `Repair` | The workstation the character is working at (a repair at a station); `ContainerId.None` for a repair from the character menu with no workstation open |
+| `Repair` | The workstation the character is working at (its window open), for a repair at a station and also for a worn-item repair made while a station's window is open (the game's own pass reaches that station's inventory then, so it is named and left out of the pool); `ContainerId.None` with no workstation open |
 | `Upgrade` | The castle heart being upgraded (its `ContainerId`; hearts have one): the heart the game passed to the call, else the heart whose window is open, else the heart of the standing plot |
 | `Build` | `ContainerId.None` |
 

@@ -104,7 +104,7 @@ internal sealed class Handlers
             // BUILDSEARCH1: the search box Core adds to the game's build menu (client).
             case "build_search": return Ops.BuildSearchOps.Run(args);
             // ctx.MaterialSource seams: status on either side; a one-shot fault injection on the server.
-            case "materials": return Ops.MaterialsOps.Run(args);
+            case "materials": return Ops.MaterialsOps.IsSend(args) ? Ops.MaterialEventOps.Send(RequireWorld(args), args) : Ops.MaterialsOps.Run(args);
             case "engage": return Ops.EngageOps.Run(RequireWorld(args), args);
             case "protect": return Ops.ProtectOps.Run(RequireWorld(args), args);
             case "bind": return Ops.BindOps.Run(RequireWorld(args), args);

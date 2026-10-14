@@ -19,6 +19,8 @@ namespace Progenitor.Dev.Ops;
 /// governed check, move every unit of the item from one container to the other, so that operation's
 /// payment meets a container that changed between its check and its payment.</item>
 /// <item><c>{"action":"clear"}</c> (server): drop an injection that has not run.</item>
+/// <item><c>{"action":"send","event":"repair_item|repair_equipped|heart_upgrade",…}</c> (server):
+/// queue the event a player's client sends (<see cref="MaterialEventOps"/>).</item>
 /// </list>
 /// </summary>
 internal static class MaterialsOps
@@ -36,9 +38,13 @@ internal static class MaterialsOps
                 Str(args, "to") ?? throw new ArgumentException("args.to (c-…) is required for inject"),
                 Int(args, "item") ?? throw new ArgumentException("args.item is required for inject")),
             "clear" => Call("ClearInjection"),
-            _ => throw new ArgumentException("args.action must be status, inject or clear"),
+            _ => throw new ArgumentException("args.action must be status, inject, clear or send"),
         };
     }
+
+    /// <summary><c>{"action":"send",…}</c> (server): handled by <see cref="MaterialEventOps"/>, which needs the world.</summary>
+    internal static bool IsSend(JsonElement args) =>
+        string.Equals(Str(args, "action")?.Trim(), "send", StringComparison.OrdinalIgnoreCase);
 
     private static Dictionary<string, object?> Call(string method, params object?[] args)
     {
