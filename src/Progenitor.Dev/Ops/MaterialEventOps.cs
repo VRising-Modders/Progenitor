@@ -13,11 +13,12 @@ namespace Progenitor.Dev.Ops;
 /// <summary>
 /// Server half of <c>materials</c> <c>{"action":"send"}</c>: queue, for a connected player, the event the
 /// player's client sends to repair an item at a workstation (<c>RepairItemEvent</c>), repair a worn item
-/// (<c>RepairEquippedItemEvent</c>) or upgrade a castle heart (<c>CastleHeartInteractEvent</c> with
-/// <c>EventType</c> Upgrade). Focus-free: an event entity with the payload and the player's
+/// (<c>RepairEquippedItemEvent</c>), upgrade a castle heart (<c>CastleHeartInteractEvent</c> with
+/// <c>EventType</c> Upgrade) or craft from the Character window's Crafting tab
+/// (<c>StartCharacterCraftItemEvent</c>). Focus-free: an event entity with the payload and the player's
 /// <c>FromCharacter</c>, the server-side recipe <c>bot_repair</c> and <c>bot_use</c> use; the game's own
 /// system handles it next update with its normal validation (interaction with the station or the heart,
-/// costs, permissions). A refused event is silent: observe the result (durability, heart level, the
+/// an unlocked recipe, costs, permissions). A refused event is silent: observe the result (durability, heart level, the
 /// <c>materials:</c> log lines).
 ///
 /// <para>Layout: every field offset is checked against the interop wrapper (<c>Marshal.OffsetOf</c>)
@@ -70,6 +71,18 @@ internal static class MaterialEventOps
                     action = "send", @event = "repair_equipped", user = name, character = Format(character), entity = Format(ev),
                     equipmentType = request.EquipmentType,
                     note = "queued; observe durability and the materials: check Repair line",
+                };
+            }
+            case MaterialEventArgs.Kind.CharacterCraft:
+            {
+                var ev = Queue<StartCharacterCraftItemEvent>(em, from, MaterialEventArgs.CharacterCraftBytes,
+                    raw => MaterialEventArgs.WriteCharacterCraft(raw, request.Recipe));
+                Log("character_craft recipe " + request.Recipe, name, ev);
+                return new
+                {
+                    action = "send", @event = "character_craft", user = name, character = Format(character), entity = Format(ev),
+                    recipe = request.Recipe,
+                    note = "queued; the server needs the recipe unlocked for the player and the character on a plot for the pool to pay. Observe the craft queue and the materials: check CharacterCraft line",
                 };
             }
             default:
@@ -163,6 +176,7 @@ internal static class MaterialEventOps
         Expect<RepairEquippedItemEvent>(nameof(RepairEquippedItemEvent.EquipmentType), MaterialEventArgs.EquipmentTypeOffset);
         Expect<CastleHeartInteractEvent>(nameof(CastleHeartInteractEvent.CastleHeart), MaterialEventArgs.HeartOffset);
         Expect<CastleHeartInteractEvent>(nameof(CastleHeartInteractEvent.EventType), MaterialEventArgs.HeartEventTypeOffset);
+        Expect<StartCharacterCraftItemEvent>(nameof(StartCharacterCraftItemEvent.RecipeId), MaterialEventArgs.RecipeOffset);
         if ((byte)CastleHeartInteractEventType.Upgrade != MaterialEventArgs.HeartUpgrade)
             throw new InvalidOperationException("CastleHeartInteractEventType.Upgrade is not 0; refusing");
         s_layoutChecked = true;

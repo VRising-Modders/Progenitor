@@ -36,6 +36,14 @@ public enum MaterialOperation
 
     /// <summary>Anything else that pays with materials (stays vanilla).</summary>
     Other = 5,
+
+    /// <summary>
+    /// Crafting from the Character window's Crafting tab (no workstation; the game's character crafting
+    /// request). Governed only while the character stands on a castle plot
+    /// (<see cref="MaterialContext.StandingTerritory"/> set, <see cref="MaterialContext.Station"/> none);
+    /// off a plot the game has no shared storage to reach and the craft keeps the game's own rules.
+    /// </summary>
+    CharacterCraft = 6,
 }
 
 /// <summary>Which operations Progenitor can currently route through a provider.</summary>
@@ -43,16 +51,24 @@ public static class MaterialOperations
 {
     /// <summary>
     /// The operations whose availability and payment seams are wired: <see cref="MaterialOperation.Build"/>,
-    /// <see cref="MaterialOperation.Craft"/>, <see cref="MaterialOperation.Repair"/> and
-    /// <see cref="MaterialOperation.Upgrade"/>. A provider that names others is told so once at
-    /// registration and those operations stay vanilla.
+    /// <see cref="MaterialOperation.Craft"/>, <see cref="MaterialOperation.Repair"/>,
+    /// <see cref="MaterialOperation.Upgrade"/> and <see cref="MaterialOperation.CharacterCraft"/>. A
+    /// provider that names others is told so once at registration and those operations stay vanilla.
     /// </summary>
     public static IReadOnlyCollection<MaterialOperation> Supported { get; } = Array.AsReadOnly(
-        new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade });
+        new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft });
 
     /// <summary>True when <paramref name="operation"/> is wired.</summary>
     public static bool IsSupported(MaterialOperation operation) =>
-        operation is MaterialOperation.Build or MaterialOperation.Craft or MaterialOperation.Repair or MaterialOperation.Upgrade;
+        operation is MaterialOperation.Build or MaterialOperation.Craft or MaterialOperation.Repair or MaterialOperation.Upgrade
+            or MaterialOperation.CharacterCraft;
+
+    /// <summary>
+    /// True when <paramref name="operation"/> is governed only while the character stands on a castle
+    /// plot (<see cref="MaterialOperation.CharacterCraft"/>): with no standing plot the provider is not
+    /// asked and the game's own rules apply.
+    /// </summary>
+    public static bool RequiresStandingPlot(MaterialOperation operation) => operation == MaterialOperation.CharacterCraft;
 }
 
 /// <summary>
@@ -90,6 +106,9 @@ public readonly struct MaterialContext : IEquatable<MaterialContext>
     /// <item><description><see cref="MaterialOperation.Upgrade"/>: the castle heart being upgraded (its
     /// inventory's id), or <see cref="ContainerId.None"/> when it has no inventory id.</description></item>
     /// <item><description><see cref="MaterialOperation.Build"/>: <see cref="ContainerId.None"/>.</description></item>
+    /// <item><description><see cref="MaterialOperation.CharacterCraft"/>: <see cref="ContainerId.None"/> (the
+    /// Character window's Crafting tab has no workstation; <see cref="StandingTerritory"/> is always set,
+    /// since the operation is governed only on a plot).</description></item>
     /// </list>
     /// </summary>
     public ContainerId Station { get; }
@@ -158,7 +177,7 @@ public sealed class ItemSources
 /// treated as "no remote sources" for that context or item (never as vanilla storage rules, which
 /// could be less restrictive than the provider's).</para>
 ///
-/// <para>One game operation (one craft start, one placement, one repair, one heart upgrade) asks the provider once per item, at the
+/// <para>One game operation (one craft start, one placement, one repair, one heart upgrade, one character craft) asks the provider once per item, at the
 /// game's own affordability check, and pays every cost line from that same answer: a provider that
 /// changes its mind or starts throwing between the check and the payment cannot change what that
 /// operation pays from.</para>
@@ -204,7 +223,7 @@ public sealed class MaterialPaid
     public MaterialContext Context { get; }
 
     /// <summary>
-    /// Identifies the game operation (one craft start, one placement, one repair, one heart upgrade) this line belongs to; every line
+    /// Identifies the game operation (one craft start, one placement, one repair, one heart upgrade, one character craft) this line belongs to; every line
     /// of one operation carries the same value. Increasing and unique within a server process, Core swaps
     /// included (seeded from the clock); also printed as <c>tx=</c> in the <c>materials:</c> log lines.
     /// </summary>

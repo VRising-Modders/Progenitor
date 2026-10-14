@@ -330,6 +330,13 @@ public static partial class Handshake
         /// sender with <c>SendResult.PeerTooOld</c> or <c>PeerLacksMod</c>.
         /// </summary>
         ModExchange = 134217728,
+
+        /// <summary>
+        /// Material sources (client only, in its answer): this client reads a material totals view (<c>'PrMv'</c>) for
+        /// <c>MaterialOperation.CharacterCraft</c>. The server computes and sends CharacterCraft views only to a client that
+        /// declared it; an older client would drop each one as malformed and log a warning every resend.
+        /// </summary>
+        MaterialCharacterCraft = 268435456,
     }
 
     /// <summary>This Core's version for a refusal's text, or empty when it cannot be read.</summary>
@@ -358,7 +365,7 @@ public static partial class Handshake
         | Capability.JoinAdmin | Capability.ClientPolicy | Capability.ClientFix | Capability.PolicyRecheck
         | Capability.CommandHints | Capability.PolicyRuleUpdates | Capability.ModFeatures | Capability.ModMessages
         | Capability.ItemStatSync | Capability.ItemLedgerChunks | Capability.ItemDefinitionPriority
-        | Capability.VersionRanges | Capability.ProgenitorExact | Capability.ModExchange;
+        | Capability.VersionRanges | Capability.ProgenitorExact | Capability.ModExchange | Capability.MaterialCharacterCraft;
 
     /// <summary>
     /// Reserved row carrying <see cref="Capability"/>. Reserved like

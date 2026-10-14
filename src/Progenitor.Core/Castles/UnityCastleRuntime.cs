@@ -273,6 +273,14 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         }
     }
 
+    public bool IsTileModel(CastleId entity)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated || entity.IsNone) return false;
+        try { return entity.ToEntity().Has<ProjectM.Tiles.TileModel>(world.EntityManager); }
+        catch { return false; }
+    }
+
     public bool TryGetPosition(CastleId entity, out CastleVec3 position)
     {
         position = default;

@@ -326,10 +326,12 @@ internal sealed class CastleHandle : ICastleHandle
         if (!Enabled || _runtime == null || entity.IsNone) return false;
 
         // A tile-model knows its own tile and height level; that is the exact answer.
-        if (_runtime.TryGetTilePosition(entity, out int tx, out int ty, out int height))
+        if (_runtime.IsTileModel(entity) && _runtime.TryGetTilePosition(entity, out int tx, out int ty, out int height))
             return IsTileInside(tx, ty, height);
 
-        // Everything else (player characters, units, dropped items) has a Translation.
+        // Everything else (player characters, units, dropped items) by its Translation, the position
+        // the game's own standing-plot rule reads. A character's TilePosition is written in a deferred
+        // pass and can name the old plot for seconds after a teleport.
         if (_runtime.TryGetPosition(entity, out var position))
             return IsInside(position);
 

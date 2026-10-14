@@ -91,7 +91,7 @@ internal readonly struct MaterialPayResult
 /// <summary>
 /// The game-free core of the material seams.
 ///
-/// <para><b>One operation, one answer.</b> A governed game operation (one craft start, one placement, one repair, one heart upgrade)
+/// <para><b>One operation, one answer.</b> A governed game operation (one craft start, one placement, one repair, one heart upgrade, one character craft)
 /// runs inside one synchronous main-thread system update: the game first checks affordability with its
 /// merged count, then removes each cost line. The first count inside a scope opens an
 /// <i>operation session</i> for that character: the provider's candidates and, per item, its
@@ -413,6 +413,8 @@ internal sealed class MaterialService
     {
         if (entry.NoReuse || !ReferenceEquals(entry.Provider, provider)) return false;
         if (!_world.TryContext(entry.Context.Character, operation, out var context) || !context.Equals(entry.Context)) return false;
+        // Still off a plot for an operation that needs one: nothing to ask the provider (the context is unchanged).
+        if (entry.PlotRefused) return true;
         long revision;
         // A throwing Revision means a recompute; the recompute asks again and counts the fault once.
         long t0 = Stopwatch.GetTimestamp();
@@ -457,6 +459,7 @@ internal sealed class MaterialService
         entry.Revision = 0;
         entry.Governed = false;
         entry.NoReuse = false;
+        entry.PlotRefused = false;
         entry.Front = InventoryRef.None;
         entry.Station = InventoryRef.None;
         entry.Exclusions.Clear();
@@ -474,11 +477,16 @@ internal sealed class MaterialService
             entry.Context = s.Context;
             if (!s.HasContext) return false;
             entry.Provider = provider;
-            if (!s.Governed) return false;
+            entry.PlotRefused = s.PlotRefused;
+            // Off a plot (an operation that needs one) the provider is never asked, not even for its revision.
+            if (s.PlotRefused) return false;
             long t0 = Stopwatch.GetTimestamp();
-            try { entry.Revision = s.Provider!.Revision(in s.Context); }
+            // Also for a context the provider does not govern (no candidates): the reuse check compares it, so a
+            // provider that starts governing bumps it, and an unchanged one is not asked for candidates every refresh.
+            try { entry.Revision = provider!.Revision(in s.Context); }
             catch (Exception e) { Fault("Revision", e); }
             finally { _providerTicks += Stopwatch.GetTimestamp() - t0; }
+            if (!s.Governed) return false;
             entry.Governed = true;
             entry.Front = s.Front;
             entry.Station = s.Station;
@@ -679,6 +687,13 @@ internal sealed class MaterialService
         if (provider == null) return s;
         if (!_world.TryContext(character, operation, out s.Context)) return s;
         s.HasContext = true;
+        // Character crafting off a plot: the game reaches no shared storage there, so the provider is
+        // not asked and the craft keeps the game's own rules.
+        if (MaterialOperations.RequiresStandingPlot(operation) && s.Context.StandingTerritory < 0)
+        {
+            s.PlotRefused = true;
+            return s;
+        }
         IReadOnlyList<ContainerId>? candidates;
         long t0 = Stopwatch.GetTimestamp();
         try { candidates = provider.Candidates(in s.Context); }
@@ -855,6 +870,8 @@ internal sealed class MaterialService
         internal long Transaction;
         internal MaterialContext Context;
         internal bool HasContext;
+        /// <summary>The operation needs a standing plot and the character stands on none: the provider was not asked.</summary>
+        internal bool PlotRefused;
         internal bool Governed;
         internal bool ProviderFaulted;
         internal IMaterialSourceProvider? Provider;

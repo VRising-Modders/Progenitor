@@ -110,7 +110,7 @@ internal static class MaterialViewWire
         if (s.Length < 1) { reason = "empty"; return false; }
         if (s[0] != Version) { reason = "version " + s[0]; return false; }
         if (s.Length < HeaderBytes) { reason = "short header " + s.Length; return false; }
-        if (s[1] > (byte)MaterialOperation.Other) { reason = "operation " + s[1]; return false; }
+        if (s[1] > (byte)MaterialOperation.CharacterCraft) { reason = "operation " + s[1]; return false; }
         int count = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(24));
         if (count < 0 || count > MaxRows) { reason = "row count " + count; return false; }
         if (s.Length != HeaderBytes + count * 8) { reason = "length " + s.Length + " for " + count + " rows"; return false; }
@@ -431,6 +431,12 @@ internal readonly struct MaterialClientCall
     internal bool BuildContext { get; init; }
 
     /// <summary>
+    /// The count is made inside the update of the game's Character window crafting menu (the system that
+    /// computes the Crafting tab's recipe costs) while the Character window is open.
+    /// </summary>
+    internal bool CharacterCraftContext { get; init; }
+
+    /// <summary>
     /// Network id (packed) of the castle heart the local character is interacting with (its window is
     /// open); 0 when the interaction target is not a castle heart.
     /// </summary>
@@ -444,7 +450,9 @@ internal readonly struct MaterialClientCall
 /// or build-mode placement runs (the build menu and the station windows are exclusive HUD menus, so a
 /// lingering interaction target does not matter there), otherwise Craft at the very workstation the
 /// server computed it for, otherwise Upgrade while the window of the very castle heart the server
-/// computed it for is open and the count is at that heart. Every other count (another screen, another
+/// computed it for is open and the count is at that heart. A count made by the Character window's
+/// crafting menu while that window is open is a CharacterCraft count only (never Build, Craft or
+/// Upgrade), at the castle heart of the plot the character stands on. Every other count (another screen, another
 /// station, another plot, another entity) keeps the game's own result. The display is never
 /// authorization: the server checks again and pays at action time.
 ///
@@ -458,7 +466,15 @@ internal static class MaterialClientPolicy
 {
     /// <summary>The operations the server sends views for, in refresh order.</summary>
     internal static IReadOnlyList<MaterialOperation> ViewOperations { get; } =
-        Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade });
+        Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft });
+
+    /// <summary>
+    /// Whether a client reads views of this operation. A CharacterCraft view goes only to a client that
+    /// declared it (<c>Handshake.Capability.MaterialCharacterCraft</c>): an older client drops operation 6
+    /// as malformed and would warn at every resend. Nothing is computed or sent for the others.
+    /// </summary>
+    internal static bool ReadByPeer(MaterialOperation operation, bool peerReadsCharacterCraft) =>
+        operation != MaterialOperation.CharacterCraft || peerReadsCharacterCraft;
 
     /// <summary>
     /// A view of this operation only means something at a structure (Craft: a workstation, Upgrade: a
@@ -482,7 +498,7 @@ internal static class MaterialClientPolicy
     /// for none or for anything that is not a workstation).
     /// </summary>
     internal static MaterialClientCall Call(bool localCharacter, ulong heartNet, bool buildMenuOrPlacement, ulong workstationNet,
-        ulong heartTargetNet = 0) => new()
+        ulong heartTargetNet = 0, bool characterCraft = false) => new()
     {
         LocalCharacter = localCharacter,
         HeartNet = heartNet,
@@ -490,6 +506,7 @@ internal static class MaterialClientPolicy
         TargetNet = workstationNet,
         TargetIsWorkstation = workstationNet != 0,
         HeartTargetNet = heartTargetNet,
+        CharacterCraftContext = characterCraft,
     };
 
     internal static bool TrySelect(MaterialOverlayStore store, in MaterialClientCall call, out MaterialOperation operation,
@@ -498,6 +515,15 @@ internal static class MaterialClientPolicy
         operation = default;
         totals = null!;
         if (!call.LocalCharacter) return false;
+        if (call.CharacterCraftContext)
+        {
+            // The Crafting tab's recipe costs: only a CharacterCraft view, and only at the heart the game
+            // resolved from the character's standing plot (off a plot it passes none and nothing applies).
+            if (call.HeartNet == 0 || !store.TryGet(MaterialOperation.CharacterCraft, out var character, out totals)) return false;
+            if (character.HeartNet != call.HeartNet) return false;
+            operation = MaterialOperation.CharacterCraft;
+            return true;
+        }
         if (call.BuildContext)
         {
             if (!store.TryGet(MaterialOperation.Build, out var build, out totals)) return false;
