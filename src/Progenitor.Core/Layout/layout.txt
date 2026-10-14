@@ -705,3 +705,18 @@ enum ItemStatAdd = 3 : ModificationType.Add
 enum ItemStatMaxHealth = 4 : UnitStatType.MaxHealth
 enum ItemStatPhysicalPower = 0 : UnitStatType.PhysicalPower
 enum ItemStatSpellPower = 25 : UnitStatType.SpellPower
+
+# ---- Castles: heart level data and nameplates (src/Progenitor.Core/Castles/CastleHeartFuel.cs, ----
+# ---- UnityCastleRuntime nameplate read/write) ------------------------------------------------------
+# CastleHeart.Data is a BlobAssetReference<CastleHeartBlobData>; its first 8 bytes are the data
+# pointer (BlobAssetReferenceData.m_Ptr). Levels is a BlobArray<CastleHeartLevelBlobData>; the
+# element is int Level, int ItemSlots and four BlobArray<CastleHeartCost> (8 bytes each).
+dump server
+offset CastleHeartLevelOffset                      = 0x2  : CastleHeart.Level
+offset CastleHeartFuelQuantityOffset               = 0x20 : CastleHeart.FuelQuantity
+offset CastleHeartDataOffset                       = 0x50 : CastleHeart.Data
+offset CastleHeartBlobLevelsOffset                 = 0x0  : CastleHeartBlobData.Levels
+offset CastleHeartLevelBlobLevelOffset             = 0x0  : CastleHeartLevelBlobData.Level
+offset CastleHeartLevelBlobItemSlotsOffset         = 0x4  : CastleHeartLevelBlobData.ItemSlots
+offset CastleHeartLevelBlobRaidCostsOffset         = 0x20 : CastleHeartLevelBlobData.RaidCosts   # last field; stride = this + one BlobArray (8)
+offset NameableInteractableNameOffset              = 0x0  : NameableInteractable.Name            # FixedString64Bytes, 64 bytes

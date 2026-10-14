@@ -128,6 +128,12 @@ public sealed class Plugin
         // backs CastleHeartPlaced / CastleHeartDestroyed. CastleReader.Install (the raw reader's
         // skip log) already ran from HarmonyFallback.InstallModules.
         Castles.Castles.Install();
+        // ctx.Inventory (engine, watches, container-id book) and the PlayerReady /
+        // PlayerTerritoryChanged publishers. Server only; each holds one Plugin.Frame handler.
+        try { Inventory.InventoryRuntime.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"Inventory.Install: {e.Message}"); }
+        try { Castles.CastlePresenceRuntime.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"CastlePresence.Install: {e.Message}"); }
         // Death + damage EventBus publishers (UnitDied / PlayerDied / DamageDealt).
         // Kill postfix via PatchRegistry (ctx.Patches path); damage via SystemHooks.After StatChangeSystem.
         Combat.CombatHooks.Install();
@@ -426,6 +432,10 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"Units.Uninstall: {e.Message}"); }
         // Castles holds one Plugin.Frame handler and the change detector's previous snapshot;
         // both must go before the ALC unloads or they pin this Core generation.
+        try { Castles.CastlePresenceRuntime.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"CastlePresence.Uninstall: {e.Message}"); }
+        try { Inventory.InventoryRuntime.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"Inventory.Uninstall: {e.Message}"); }
         try { Castles.Castles.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"Castles.Uninstall: {e.Message}"); }
         // Abilities: the no-cooldowns Plugin.Frame handler and its hold table.

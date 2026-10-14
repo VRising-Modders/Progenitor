@@ -373,6 +373,21 @@ public class PluginContext
         }
     }
 
+    private Progenitor.Inventory.PluginInventory? _inventory;
+    private Progenitor.Clans.PluginClans? _clans;
+
+    /// <summary>Server inventories: read, add, remove, atomic transfer, watches, stable container ids. Client calls throw.</summary>
+    public Progenitor.Inventory.PluginInventory Inventory
+    {
+        get { EnsureAttached(); return _inventory ??= new Progenitor.Inventory.PluginInventory(this); }
+    }
+
+    /// <summary>Server clans: a user's clan, its members and castles. Client calls throw.</summary>
+    public Progenitor.Clans.PluginClans Clans
+    {
+        get { EnsureAttached(); return _clans ??= new Progenitor.Clans.PluginClans(this); }
+    }
+
     /// <summary>
     /// Server ability control (<see cref="Progenitor.Abilities.PluginAbilities"/>): force-cast a
     /// group the character need not have on its bar, and hold a character's cooldowns at zero.
@@ -1502,7 +1517,7 @@ public sealed class PluginContent
 /// Castle-read facade bound to one plugin's side world. Pass-through to
 /// <see cref="CastleReader"/> so a mod does not have to pick <c>Worlds.Server</c> itself.
 /// </summary>
-public sealed class PluginCastles
+public sealed partial class PluginCastles
 {
     private readonly PluginContext _ctx;
     internal PluginCastles(PluginContext ctx) => _ctx = ctx;

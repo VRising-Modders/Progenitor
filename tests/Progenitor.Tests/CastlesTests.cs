@@ -1630,6 +1630,20 @@ public class CastlesTests : IDisposable
 
         public bool TryGetClan(CastleId user, out CastleId clan) =>
             Clans.TryGetValue(user, out clan);
+
+        public Dictionary<CastleId, List<CastleInventoryRow>> InventoryRows { get; } = new();
+
+        public Dictionary<CastleId, string> HeartNames { get; } = new();
+
+        public Dictionary<CastleId, CastleHeartFuel> Fuel { get; } = new();
+
+        IReadOnlyList<CastleInventoryRow> ICastleRuntime.Inventories(CastleId heart) =>
+            InventoryRows.TryGetValue(heart, out var rows) ? rows.ToArray() : Array.Empty<CastleInventoryRow>();
+
+        public string HeartName(CastleId heart) => HeartNames.TryGetValue(heart, out var n) ? n : "";
+
+        public CastleHeartFuel HeartFuel(CastleId heart) =>
+            Fuel.TryGetValue(heart, out var f) ? f : CastleHeartFuel.Fail("no fuel row in the fake");
     }
 }
 

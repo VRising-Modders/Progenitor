@@ -201,19 +201,19 @@ public static class Items
     /// <c>StartItems</c> at byte 40 and that blob reference is 8 bytes. Live inspect of a
     /// player reported element size 48.
     /// </summary>
-    private const int InstanceStride = 48;
+    internal const int InstanceStride = 48;
 
     /// <summary>
     /// <c>ExternalInventoryEntity</c> (<c>NetworkedEntity._Entity</c>) inside one instance
     /// element. Interop offset 16. The following int is the entity version.
     /// </summary>
-    private const int InstanceEntityOffset = 16;
+    internal const int InstanceEntityOffset = 16;
 
     /// <summary>
     /// A character has one bag instance. Anything longer than this is not walked: a huge
     /// <c>GetBufferLength</c> must not be treated as a real inventory list.
     /// </summary>
-    private const int MaxInventoryInstances = 8;
+    internal const int MaxInventoryInstances = 8;
 
     private static ItemPresence Scan(EntityManager em, Entity character, PrefabGUID guid, out Entity equippedItem)
     {

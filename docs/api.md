@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **782** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **804** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -69,6 +69,8 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Peer` (`PluginPeer`) / `ctx.Peers` (`PluginPeers`) | verified live (2026-10-09) | Client: the joined server's features and mod versions (`Known`, `Has`, `ModVersion`, `CoreVersion`, `Changed`). Server: `Peers.Of(user)` per connected client, `Peers.Changed(Entity)`. | `samples/Progenitor.CompatTest` (test plugin) |
 | `ctx.Messages` (`PluginMessages`) | verified live (2026-10-09) | Versioned, tolerant messages on Core's `'PrMs'` envelope: `On<T>`, `SendToServer`, `SendTo`, `SendToAll`, plus the hand-written `MessageWriter` / `MessageReader` overloads. Sends are gated on the peer's capability and feature table. | `samples/Progenitor.CompatTest` (test plugin) |
 | `ctx.Castles` | verified live | Server castle plot / tile / building reads and handles on this plugin's world. | `SampleCastle.cs` (`.castle`) |
+| `ctx.Inventory` (`PluginInventory`) | landed | Server inventories of any kind: read, count, free space, add, remove, atomic transfer, watches, stable container ids. Client throws. [Inventory](#inventory). | `SampleInventory.cs` (`.items chests`, `.items move`) |
+| `ctx.Clans` (`PluginClans`) | landed | Server clans: a user's clan, its members and its castles. Client throws. [Clans](#clans). | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Units` | verified live | Server unit spawn and steering. Client returns disabled handles. | `SampleUnits.cs` (`.rat`) |
 | `ctx.Items` | verified live | Server inventory grant and equip. Client throws. Defaults stack, accept a partial add, do not equip, leave durability. | `SampleItems.cs` (`.items grant`, `.items equip`); unit test `ItemGrantPolicyTests`; live `give` / `equip` on the isolated server (the wrapper sample itself is not live-verified) |
 | `ctx.Abilities` (`PluginAbilities`) | landed; `SetSlot` live-verified, `ForceCast`/`NoCooldowns` exercised by the necro sample | Server ability control: `ForceCast` through `ServerGameManager.ForceCastAbilityGroup` (starts groups that are not on the bar), and `NoCooldowns` holds that keep a character's abilities off cooldown with full charges, and `SetSlot`, which puts a chosen group on a bar slot. Holds are tracked. Client throws. [Abilities](#abilities), [modules.md](modules.md#abilities). | unit tests `AbilityCooldownPolicyTests`, `AbilitySlotPolicyTests`; sample `Progenitor.NecroArmyExample` |
@@ -302,6 +304,12 @@ missing components never throw.
 | `ICastleHandle.Buildings` / `BuildingsByPrefab` / `Tiles` | verified live | Live reads as `CastleBuildingInfo` / `CastleTileInfo` (game-free). NetworkId and row-major order. | `SampleCastle.cs`: `.castle` (`Buildings`, `CastleCounts.ByPrefab`), `.castle tiles` (`Tiles`: count, floor-type census, first 4 rows with a `+N more` tail) |
 | `ICastleHandle.IsInside(CastleVec3\|CastleId)` / `IsTilePrecise` | landed | X/Z only — there is no verified world-Y → height level. Uses the `CastleTerritoryTiles` mask when its length equals the computed tile count, else `WorldBounds` with one info line per territory. | `SampleCastle.cs` (`.castle inside`) |
 | `ICastleHandle.CanPlace(prefabGuid, position, rotation=0)` → `CastlePlacementCheck` | experimental | Read-only subset: territory, tile mask, height band, occupancy. `Complete` is **always false**; `NotChecked` lists the 11 vanilla rules skipped. | `SampleCastle.cs`: `.castle canplace <prefabGuidOrName>`; prints the verdict, the resolved footprint and height level, `FootprintResolved` / `BuildableTilesRead` / `HeightAmbiguous`, `Complete=no`, and the first 3 of the 11 `NotChecked` rules with a `+8 more` tail |
+| `ICastleHandle.Containers()` / `Stations()` → `CastleContainerInfo` | landed | Placed models with an inventory: chests and storage, then crafting and refinement stations. Each row: `Building`, stable `Id` (`ContainerId`), `Nameplate`, `Nameable`, `Main` / `Output` (`InventoryRef`; `Output` only on refinement stations), `IsStation`, `IsRefinement`, `SlotCount`. | `SampleInventory.cs` (`.items chests`) |
+| `ICastleHandle.Name` / `HeartId` / `HeartFuel()` → `CastleHeartFuel` | landed | The heart's nameplate; the heart's stable id (same scheme as containers); `Level`, `UnlockedSlots` (the game's per-level `ItemSlots`, not a default), `LevelRows`, `FuelQuantity`, `Ok` / `Reason`. | `SampleInventory.cs` (`.items heart`) |
+| `ctx.Castles.RelationTo(Entity user, ICastleHandle)` → `CastleRelation` | landed | `Owner`, `ClanMember` (the owner's clan), `Allied` (the game's team check between the user's character and the heart), `None`. | `SampleInventory.cs` (`.items clan`) |
+| `ctx.Castles.Nameplate(Entity)` / `TrySetNameplate(Entity, string, out string reason)` | landed | Read or write a chest's, station's or heart's player-set name (`NameableInteractable.Name`, networked). Null when not nameable; at most 61 UTF-8 bytes, no control characters; empty clears. | `SampleInventory.cs` (`.items name`) |
+| `PlayerTerritoryChanged` (event) | landed | A connected player now stands on another castle territory (`OldTerritory` / `NewTerritory`, -1 = none, `Castle`, `Initial`). Server poll once a second while subscribed, debounced over two readings. | `SampleInventory.cs` (logged as `Sample items: territory …`) |
+| `PlayerReady` (event) | experimental | Once per session, when the character is live and the client has started acknowledging snapshots (`User.LastFullyAckedFrame` advanced). The signal is inferred, not live-verified. `PlayerConnected` fires earlier (connection approved). | `SampleInventory.cs` (logged as `Sample items: player ready …`) |
 | `CastleGeometry` `WorldToTile` / `TileToWorld` / `LocalTileIndex` / `LocalToWorldBounds` | verified live | `tile = floor(world / 0.5) + 6400`, both constants live-derived. The rotation transform is inferred. | `SampleCastle.cs` (`TryWorldToTile`) |
 
 ## World
@@ -431,6 +439,38 @@ range before the call.
 | `ItemDurability` | verified live | `Leave`, `Indestructible`. | live `Durability.LossType` None on the tier-9 set |
 | `ItemGrantResult` | verified live | `Ok`, `Action`, `Reason`, `Added`, `DidNotFit`, `Slot`, `ItemEntity`, `Equipped`, `DurabilityCleared`. | returned by `Grant` and `Equip` |
 | `ItemGrantPolicy` / `ItemPresence` / `ItemGrantStep` | landed | Game-free decisions the live call runs before it touches an inventory. | unit test `ItemGrantPolicyTests` |
+
+## Inventory
+
+Server inventories of any kind: chests, station input and output, castle hearts (fuel),
+servants and player bags. Every write goes through the game's own server inventory code and is
+read back; every count in a result is a read-back. Server only, main thread; client calls throw
+`InvalidOperationException`. Narrative, rules and the live acceptance:
+[modules.md, Inventory](modules.md#inventory). Built and game-free tested; **not live-verified**.
+
+| Member | Status | Intent | Example |
+|---|---|---|---|
+| `ctx.Inventory.Of(Entity owner, InventoryPart part = Main)` / `InputOf(Entity)` / `OutputOf(Entity)` → `InventoryRef` | landed | Session handle for one inventory (owner + instance + world epoch). `InventoryPart`: `Main` / `Input` (instance 0), `Output` (instance 1, refinement stations). A reference from before a save reload is refused as stale. | `SampleInventory.cs` (container tokens `#n`, `bag`, `heart`, `/out`) |
+| `ctx.Inventory.Instances(Entity)` | landed | How many inventories the owner has (1 chest or heart, 2 refinement station, 0 none). | none (diagnostic) |
+| `ctx.Inventory.Read(InventoryRef)` → `InventorySnapshot` / `ReadInto(InventoryRef, InventorySlot[])` | landed | Slots in buffer order: `InventorySlot` (`Slot`, `Item`, `Amount`, `MaxStack`, `StackOverride`, `HasItemEntity`), plus the container's `InventoryRestriction` (`Item`, `Category`). `ReadInto` fills a caller array and allocates nothing. | `SampleInventory.cs` (`.items slots`) |
+| `ctx.Inventory.Count` / `CountMany` / `FreeSpace` | landed | Totals; free space honors stack size, slot overrides and `RestrictedInventory` (exact for chests, stations and hearts, an upper bound for a player bag). | `SampleInventory.cs` (`.items count`, `.items free`) |
+| `ctx.Inventory.TryAdd` / `TryRemove` → `InventoryResult` | landed | Partial allowed; the result says how much and why not. Removal never asks for more than the inventory holds, so worn equipment is never touched. | `SampleInventory.cs` (`.items add`, `.items remove`) |
+| `ctx.Inventory.Transfer(from, to, item, amount)` → `InventoryResult` | landed | Atomic: the game's own slot move per source slot, read back after each step; a step that does not conserve the total is compensated, and an unrestorable total stops with `Inconsistent` and an error line. Never duplicates or destroys. | `SampleInventory.cs` (`.items move`) |
+| `ctx.Inventory.TransferAll(from, to, Func<int,bool>? filter)` → `InventoryTransferAllResult` | landed | One `Transfer` per item type the filter accepts. | `SampleInventory.cs` (`.items moveall`) |
+| `InventoryResult` / `InventoryOutcome` / `InventoryTransferAllResult` | landed | `Outcome` (`Complete`, `Partial`, `Nothing`, `Refused`, `Inconsistent`), `Ok`, `Requested`, `Done`, `Remainder`, `Reason`, `SourceBefore`/`After`, `TargetBefore`/`After`, `Compensated`, `Steps`. | returned by the writes |
+| `ctx.Inventory.Watch(InventoryRef, Action<InventoryChange>, TimeSpan? interval)` → `IInventoryWatch` | landed | Fingerprint poll (default 500 ms, minimum 100 ms) plus an immediate check after a `ctx.Inventory` write. `InventoryChange` (`Container`, `Kind`: `InventoryChangeKind.Changed` / `Gone`, fingerprints). Tracked; `Dispose` / `Poke`. | `SampleInventory.cs` (`.items watch`) |
+| `ContainerId` / `ctx.Inventory.IdOf(Entity)` / `Status(ContainerId)` → `ContainerIdStatus` / `TryFind(ContainerId, out Entity, out string)` | landed | Stable id of a placed container, station or heart: survives restarts, never reused (`Unknown`, `Live`, `Unbound`, `Gone`). Text form `c-` + 32 hex. | `SampleInventory.cs` (`.items id`, `c-…` tokens) |
+
+## Clans
+
+Server only, main thread; client calls throw. Membership is every user whose `User.ClanEntity` is
+the clan, offline users included. Built and game-free tested; **not live-verified**.
+
+| Member | Status | Intent | Example |
+|---|---|---|---|
+| `ctx.Clans.Of(Entity user)` / `FromEntity(Entity clan)` → `ClanRef` | landed | `Entity` (session), `ClanGuid` (`ClanTeam.ClanGuid`, the key to persist), `Name`, `IsNone`. | `SampleInventory.cs` (`.items clan`) |
+| `ctx.Clans.Members(ClanRef)` → `ClanMember` | landed | `User`, `PlatformId`, `Name`, `IsConnected`, ordered by name. | `SampleInventory.cs` (`.items clan`) |
+| `ctx.Clans.Castles(ClanRef)` | landed | Castles whose owner's clan is this clan. | `SampleInventory.cs` (`.items clan`) |
 
 ## Buffs
 
@@ -954,7 +994,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 782 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 804 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
