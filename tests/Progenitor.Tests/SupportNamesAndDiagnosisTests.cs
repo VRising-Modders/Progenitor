@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -126,22 +125,27 @@ public sealed class SupportNamesAndDiagnosisTests : IDisposable
     }
 
     [Fact]
-    public void Two_thousand_names_over_4_MB_redact_in_linear_time()
+    public void Two_thousand_names_redact_in_linear_time()
     {
         var r = new SupportRedactor(null, null, null);
         var names = Enumerable.Range(0, 2000).Select(i => "Vamp" + i.ToString("D4") + "x").ToList();
         r.AddNames(names);
         r.AddNames(Enumerable.Range(0, 50).Select(i => "Night Owl " + i));
-        var sb = new StringBuilder();
-        var rng = new Random(5);
-        while (sb.Length < 4 * 1024 * 1024)
-            sb.Append("[Info   :Chat] ").Append(names[rng.Next(names.Count)]).Append(" hit a ghoul for 12 damage near the castle\n");
-        var watch = Stopwatch.StartNew();
-        string output = r.Redact(sb.ToString());
-        watch.Stop();
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
-        Assert.DoesNotContain("Vamp", output);
-        Assert.Equal(0, r.WithheldCount);
+        // A chat log of 512 KB, then 2 MB.
+        ScalingAssert.SubQuadratic("names", size =>
+        {
+            var sb = new StringBuilder();
+            var rng = new Random(5);
+            while (sb.Length < size)
+                sb.Append("[Info   :Chat] ").Append(names[rng.Next(names.Count)]).Append(" hit a ghoul for 12 damage near the castle\n");
+            string input = sb.ToString();
+            return () =>
+            {
+                string output = r.Redact(input);
+                Assert.DoesNotContain("Vamp", output);
+                Assert.Equal(0, r.WithheldCount);
+            };
+        }, 512 * 1024);
     }
 
     // ---- the diagnosis --------------------------------------------------------------------------------------------
@@ -293,23 +297,27 @@ public sealed class SupportNamesAndDiagnosisTests : IDisposable
     }
 
     [Fact]
-    public void Sixteen_megabytes_of_log_diagnose_in_linear_time()
+    public void A_long_log_diagnoses_in_linear_time()
     {
-        var sb = new StringBuilder();
-        int i = 0;
-        while (sb.Length < 16 * 1024 * 1024)
+        // A log of 2 MB, then 8 MB.
+        ScalingAssert.SubQuadratic("diagnosis", size =>
         {
-            sb.Append(i % 50 == 0 ? "[Error  :Alpha Mod] failure " : "[Info   :Beta Mod] tick ").Append(i).Append('\n');
-            if (i % 500 == 0) sb.Append("System.Exception: boom\n  at System.Foo.Bar ()\n  at AlphaMod.Feature.X.Y ()\n");
-            i++;
-        }
-        var d = new SupportDiagnosis(new[] { Alpha(), Beta() });
-        var watch = Stopwatch.StartNew();
-        d.Feed("bepinex/LogOutput.log", sb.ToString());
-        var report = d.Finish();
-        watch.Stop();
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), watch.Elapsed.ToString());
-        Assert.Equal("Alpha Mod", report.TopName);
+            var sb = new StringBuilder();
+            int i = 0;
+            while (sb.Length < size)
+            {
+                sb.Append(i % 50 == 0 ? "[Error  :Alpha Mod] failure " : "[Info   :Beta Mod] tick ").Append(i).Append('\n');
+                if (i % 500 == 0) sb.Append("System.Exception: boom\n  at System.Foo.Bar ()\n  at AlphaMod.Feature.X.Y ()\n");
+                i++;
+            }
+            string log = sb.ToString();
+            return () =>
+            {
+                var d = new SupportDiagnosis(new[] { Alpha(), Beta() });
+                d.Feed("bepinex/LogOutput.log", log);
+                Assert.Equal("Alpha Mod", d.Finish().TopName);
+            };
+        }, 2 * 1024 * 1024);
     }
 
     // ---- baseline noise --------------------------------------------------------------------------------------------

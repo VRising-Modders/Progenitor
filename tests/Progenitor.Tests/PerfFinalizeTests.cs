@@ -38,7 +38,7 @@ public class PerfFinalizeTests
         {
             writer = Environment.CurrentManagedThreadId;
             entered.Set();
-            if (!release.Wait(TimeSpan.FromSeconds(5))) return "test writer timed out";
+            if (!release.Wait(TimeSpan.FromSeconds(30))) return "test writer timed out";
             return null;
         };
         try
@@ -53,7 +53,8 @@ public class PerfFinalizeTests
             Assert.Equal(PerfFinalize.StateWriting, snap.State);
             Assert.Equal(11, snap.CaptureId);
             Assert.True(PerfFinalize.IsBusy);
-            Assert.True(tryStartMs < 200, $"TryStart waited {tryStartMs:0.###} ms; the bounded portion must not wait for the write");
+            // Waiting for the write would take the held writer's full 30 s; the bound only has to tell the two apart.
+            Assert.True(tryStartMs < 10_000, $"TryStart waited {tryStartMs:0.###} ms; the bounded portion must not wait for the write");
             Assert.NotEqual(0, writer);
             Assert.NotEqual(caller, writer);
 

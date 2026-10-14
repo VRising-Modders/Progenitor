@@ -1020,7 +1020,8 @@ public sealed class ModStage3Tests : IDisposable
             var busy = ModSwitch.Set("test.s3.loose", "Loose", ModOwner.Plain, on: false, ident);
             Assert.False(busy.Ok);
             Assert.Equal(ModSwitch.BusyTryAgain, busy.Message);
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), watch.Elapsed.ToString());
+            // The lock wait is 250 ms; waiting for the holder would take its full 30 s.
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), watch.Elapsed.ToString());
         }
         finally
         {

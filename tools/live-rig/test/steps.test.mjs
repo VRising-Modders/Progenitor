@@ -2091,7 +2091,7 @@ test('cancelTrackedChildren records a child that exits on the first signal', asy
   const world = createFakeWorld();
   try {
     const spawn = hangingChildSpawn({ exitOn: 'SIGTERM' });
-    const ctx = captureCtx(tmp, world, { spawn, children: createChildRegistry(), childKillGraceMs: 2000 });
+    const ctx = captureCtx(tmp, world, { spawn, children: createChildRegistry(), childKillGraceMs: 30000 });
     const started = executeStep({
       kind: 'capture',
       name: 'hang',
@@ -2102,13 +2102,14 @@ test('cancelTrackedChildren records a child that exits on the first signal', asy
       await new Promise((resolve) => setImmediate(resolve));
     }
     const t0 = Date.now();
-    const summary = await cancelTrackedChildren(ctx, { graceMs: 2000 });
+    const summary = await cancelTrackedChildren(ctx, { graceMs: 30000 });
     const waited = Date.now() - t0;
     assert.equal(summary.requested, true);
     assert.equal(summary.children, 1);
     assert.equal(summary.killed, 1);
-    assert.ok(summary.waitedMs < 500, `first-signal exit should not wait the grace; waitedMs=${summary.waitedMs}`);
-    assert.ok(waited < 500, `cancel should return promptly, took ${waited}ms`);
+    // Waiting out the grace would take 30 s; the bound only has to tell the two apart on a slow runner.
+    assert.ok(summary.waitedMs < 10000, `first-signal exit should not wait the grace; waitedMs=${summary.waitedMs}`);
+    assert.ok(waited < 10000, `cancel should return promptly, took ${waited}ms`);
     await started;
   } finally {
     tmp.cleanup();

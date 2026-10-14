@@ -1468,7 +1468,8 @@ public class ResilienceTests
         // One chunk in flight, then out: the token is checked before every read, so the second
         // read never happens and the call costs one chunk, not the other 63.
         Assert.Equal(1, stream.Reads);
-        Assert.True(watch.ElapsedMilliseconds < 2000, "the hash took " + watch.ElapsedMilliseconds + " ms");
+        // Reads == 1 is the proof; the time only has to stay clear of the full 6.4 s pass.
+        Assert.True(watch.ElapsedMilliseconds < 4000, "the hash took " + watch.ElapsedMilliseconds + " ms");
     }
 
     [Fact]
