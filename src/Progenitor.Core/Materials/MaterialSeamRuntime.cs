@@ -494,7 +494,14 @@ internal static unsafe class MaterialSeamRuntime
         if (bootstrap == null) return false;
         if (Reads == null) Reads = new MaterialStockReads(_world);
         Reads.Clear();
-        if (everyone) _service.BeginFullRefresh();
+        _world.InRefresh = true;
+        try { return PushPlayers(world, em, bootstrap, everyone, force); }
+        finally { _world.InRefresh = false; }
+    }
+
+    private static bool PushPlayers(World world, EntityManager em, ServerBootstrapSystem bootstrap, bool everyone, bool force)
+    {
+        if (everyone) _service!.BeginFullRefresh();
         foreach (var p in PlayerDirectory.Online(world))
         {
             var s = p.Session;
@@ -511,8 +518,11 @@ internal static unsafe class MaterialSeamRuntime
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
             catch { continue; }
+            // A CharacterCraft view only to a client that declared it reads one (an older Core drops it as malformed).
+            bool readsCharacterCraft = (Handshake.CapsOf(userIndex) & Handshake.Capability.MaterialCharacterCraft) != 0;
             foreach (var op in MaterialClientPolicy.ViewOperations)
-                Push(bootstrap, userIndex, user, character, op, force || dirty, dirty, Reads);
+                if (MaterialClientPolicy.ReadByPeer(op, readsCharacterCraft))
+                    Push(bootstrap, userIndex, user, character, op, force || dirty, dirty, Reads);
         }
         return true;
     }
@@ -558,13 +568,21 @@ internal static unsafe class MaterialSeamRuntime
     {
         if (!MaterialViewWire.TryDecode(new ReadOnlySpan<byte>(payload, length), out var view, out string why))
         {
-            Plugin.Logger?.LogWarning("materials: dropped a malformed totals packet: " + why);
+            // Once per connection: a newer server resends every view every few seconds.
+            if (_malformedViews++ == 0)
+                Plugin.Logger?.LogWarning("materials: dropped a malformed totals packet: " + why + " (further drops this session are not logged)");
             return;
         }
         Overlay.Apply(view!);
     }
 
-    private static void OnConnectionEnded() => Overlay.Clear();
+    private static int _malformedViews;
+
+    private static void OnConnectionEnded()
+    {
+        Overlay.Clear();
+        _malformedViews = 0;
+    }
 
     private static bool BuildContext(World world)
     {

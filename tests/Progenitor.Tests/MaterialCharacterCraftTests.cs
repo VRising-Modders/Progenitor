@@ -105,7 +105,7 @@ public partial class MaterialServiceTests
         service.EndScope();
         Assert.Empty(paid);
         Assert.Empty(provider.Seen);
-        Assert.Equal(0, provider.SourcesCalls.Count);
+        Assert.Empty(provider.SourcesCalls);
         Assert.Equal(10, world.Get(provider.All[0], Iron));
         Assert.False(service.TryView(world.Player, CharacterCraft, new Dictionary<int, int>(), out var ctx, out _));
         Assert.Equal(-1, ctx.StandingTerritory);
@@ -220,6 +220,59 @@ public partial class MaterialServiceTests
         Assert.Equal(new[] { CharacterCraft, MaterialOperation.Craft }, paid.Select(p => p.Context.Operation));
         Assert.Equal(2, paid.Select(p => p.Transaction).Distinct().Count());
         Assert.Equal(5, world.Get(a, Iron));
+    }
+
+    [Fact]
+    public void Off_a_plot_the_refresh_reuses_the_character_craft_entry_without_asking_the_provider()
+    {
+        var (world, provider, registry, service, _, _) = Setup();
+        provider.Operations = new[] { CharacterCraft };
+        provider.All.Add(world.Chest(1, (Iron, 9)));
+        registry.Register(provider, "test");
+        world.Territory = -1;
+
+        Assert.Equal(MaterialViewOutcome.NotGoverned, service.RefreshView(world.Player, CharacterCraft, new MaterialStockReads(world), false, out _));
+        Assert.Equal(MaterialViewOutcome.NotGoverned, service.RefreshView(world.Player, CharacterCraft, new MaterialStockReads(world), false, out _));
+        Assert.Equal(1, registry.Status().Recomputes);
+        Assert.Equal(1, registry.Status().Skips);
+        Assert.Equal(0, provider.RevisionCalls); // not even its revision
+        Assert.Empty(provider.Seen);
+
+        // Back on the plot: the context changed, so the view is recomputed at once.
+        world.Territory = 4;
+        Assert.Equal(MaterialViewOutcome.Computed, service.RefreshView(world.Player, CharacterCraft, new MaterialStockReads(world), false, out var view));
+        Assert.Equal(4, view.Context.StandingTerritory);
+        Assert.Equal(9, view.Rows.Single(r => r.Item == Iron).Amount);
+    }
+
+    [Fact]
+    public void A_context_the_provider_does_not_govern_is_reused_while_its_revision_holds()
+    {
+        var (world, provider, registry, service, _, _) = Setup();
+        provider.Operations = new[] { CharacterCraft };
+        registry.Register(provider, "test"); // no candidates: not governed on this plot
+
+        Assert.Equal(MaterialViewOutcome.NotGoverned, service.RefreshView(world.Player, CharacterCraft, new MaterialStockReads(world), false, out _));
+        Assert.Equal(MaterialViewOutcome.NotGoverned, service.RefreshView(world.Player, CharacterCraft, new MaterialStockReads(world), false, out _));
+        Assert.Equal(1, registry.Status().Recomputes);
+        Assert.Equal(1, registry.Status().Skips);
+        Assert.Single(provider.Seen); // candidates asked once
+
+        // The provider starts governing and says so through its revision: recomputed.
+        provider.All.Add(world.Chest(1, (Iron, 5)));
+        provider.Rev++;
+        Assert.Equal(MaterialViewOutcome.Computed, service.RefreshView(world.Player, CharacterCraft, new MaterialStockReads(world), false, out var view));
+        Assert.Equal(5, view.Rows.Single(r => r.Item == Iron).Amount);
+    }
+
+    [Fact]
+    public void Character_craft_views_go_only_to_clients_that_read_them()
+    {
+        Assert.True(MaterialClientPolicy.ReadByPeer(CharacterCraft, true));
+        Assert.False(MaterialClientPolicy.ReadByPeer(CharacterCraft, false));
+        foreach (var op in MaterialClientPolicy.ViewOperations.Where(o => o != CharacterCraft))
+            Assert.True(MaterialClientPolicy.ReadByPeer(op, false));
+        Assert.True((Progenitor.Networking.Handshake.SelfCapabilities & Progenitor.Networking.Handshake.Capability.MaterialCharacterCraft) != 0);
     }
 
     [Fact]

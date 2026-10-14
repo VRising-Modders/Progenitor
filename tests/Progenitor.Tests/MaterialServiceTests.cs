@@ -146,7 +146,8 @@ public partial class MaterialServiceTests
         public readonly List<MaterialContext> Seen = new();
         public readonly Dictionary<int, int> SourcesCalls = new();
 
-        public long Revision(in MaterialContext context) => Rev;
+        public int RevisionCalls;
+        public long Revision(in MaterialContext context) { RevisionCalls++; return Rev; }
         public IReadOnlyList<ContainerId> Candidates(in MaterialContext context)
         {
             Seen.Add(context);

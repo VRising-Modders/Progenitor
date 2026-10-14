@@ -409,6 +409,24 @@ public class CastlesTests : IDisposable
     }
 
     [Fact]
+    public void A_character_is_placed_by_its_Translation_even_with_a_stale_TilePosition()
+    {
+        // Right after a teleport onto the plot the game still has the character's old tile.
+        var castle = CastlesApi.ForUser(TestPlayer);
+        _server.NotTileModels.Add(Character);
+        _server.TilePositions[Character] = (0, 0, 11);
+        _server.Positions[Character] = new CastleVec3(-1807.5f, 5f, -1707.5f);
+        Assert.True(castle.IsInside(Character));
+        Assert.Equal(TerritoryIndex, CastlesApi.At(Character).Territory.Index);
+
+        // And the reverse: teleported off the plot, the old tile still inside.
+        _server.TilePositions[Character] = (2785, 2985, 11);
+        _server.Positions[Character] = new CastleVec3(-1847.0658f, 5f, -1363.5184f);
+        Assert.False(castle.IsInside(Character));
+        Assert.False(CastlesApi.At(Character).Enabled);
+    }
+
+    [Fact]
     public void At_finds_the_castle_that_contains_a_position_and_nothing_outside()
     {
         Assert.Equal(TerritoryIndex, CastlesApi.At(new CastleVec3(-1807.5f, 5f, -1707.5f)).Territory.Index);
@@ -1609,6 +1627,11 @@ public class CastlesTests : IDisposable
 
         public bool TryGetPosition(CastleId entity, out CastleVec3 position) =>
             Positions.TryGetValue(entity, out position);
+
+        /// <summary>Entities that are not tile models (characters, units); everything else is one.</summary>
+        public HashSet<CastleId> NotTileModels { get; } = new();
+
+        public bool IsTileModel(CastleId entity) => !NotTileModels.Contains(entity);
 
         public bool TryGetPrefabFootprint(int prefabGuid, out int localMinX, out int localMinY, out int localMaxX, out int localMaxY)
         {

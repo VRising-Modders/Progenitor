@@ -64,10 +64,17 @@ internal interface ICastleRuntime
     bool TryGetBuildableTiles(CastleId territory, int expectedTileCount, out bool[] tiles);
 
     /// <summary>
-    /// The entity's <c>TilePosition</c>. False when it has none (most entities, including
-    /// player characters, do not).
+    /// The entity's <c>TilePosition</c>. False when it has none. Characters and units carry one
+    /// too, but the game writes theirs in a deferred pass that can lag behind a teleport, so
+    /// <see cref="IsTileModel"/> decides whether it is used for a territory test.
     /// </summary>
     bool TryGetTilePosition(CastleId entity, out int tileX, out int tileY, out int heightLevel);
+
+    /// <summary>
+    /// True for a placed tile model (<c>TileModel</c>): its <c>TilePosition</c> is its placed tile.
+    /// False for anything else (characters, units, items) and when unreadable.
+    /// </summary>
+    bool IsTileModel(CastleId entity);
 
     /// <summary>The entity's world position from <c>Translation</c>. False when it has none.</summary>
     bool TryGetPosition(CastleId entity, out CastleVec3 position);
@@ -130,6 +137,8 @@ internal sealed class NullCastleRuntime : ICastleRuntime
         heightLevel = -1;
         return false;
     }
+
+    public bool IsTileModel(CastleId entity) => false;
 
     public bool TryGetPosition(CastleId entity, out CastleVec3 position)
     {

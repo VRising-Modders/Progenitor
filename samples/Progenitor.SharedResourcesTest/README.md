@@ -169,7 +169,10 @@ costs show the pool once the Upgrade view arrives (up to about 1 s after opening
 
 ### Character crafting cases
 
-**Not run yet.** `CharacterCraft` (crafting from the Character window) is game-free tested only. Run
+**Run on the isolated test rig on 2026-10-14** (build b6f997d61, by another session with its own provider
+rather than this plugin): the equivalents of cases 24, 25 and 27 passed (pool totals in the crafting list
+on a plot, one `check` and one `paid` line for a bridge-sent craft, nothing off a plot). Cases 23, 26 and
+28 were not run. Run
 these with the same deployment (a Core with `wired=…,CharacterCraft`), the same scope P and sources A and
 B on R. Every step below is a bridge call (no mouse, no window focus); `<name>` is the test character.
 
@@ -195,11 +198,9 @@ Keep no other window open (an open chest's inventory is the game's own and is le
 | 26 | Short | Leave one unit fewer of X across A and B, open the Character window as in 24, read `views.CharacterCraft`, close it; `begin charcraft`, `send` | The view shows the short amount of X. The game refuses at its check: one `check CharacterCraft` line, no `paid` line, no queued craft, zero debit, `shortfalls` unchanged. Restore the unit and `end` |
 | 27 | Off a plot stays vanilla | `teleport` the character to a point on no plot (stock in A and B unchanged, bag still empty of X and Y), open the Character window as in 24 and read `views.CharacterCraft`, close it; then `send` | `views.CharacterCraft` is `null` (the server sends a cleared view off a plot); no `materials: check CharacterCraft` line (the provider answers for no plot, so a check line would mean the plot rule failed); the game refuses (missing materials); A and B unchanged (`.srtest containers <R> <X>`). Put X and Y in the bag and `send` once more: the game pays from the bag alone, still no `check` line. Teleport back to P |
 
-The client's own craft input (the button and its "requirements met" flag) needs a click on the recipe
-in the crafting list; case 24's capture shows the flag's effect (the recipe not grayed). A click through
-the client bridge's `mouse` op on the recipe, with the pool covering the cost and the bag empty, should
-queue the craft with the same lines as case 25; without the view the client itself would show missing
-materials and send nothing.
+| # | Case | Do | Expect |
+|---|---|---|---|
+| 28 | The client's own craft click | The client's craft input sends the request only when the recipe's "requirements met" flag is set, and that flag comes from the count the CharacterCraft view replaces. Standing on P with the pool covering the cost and X and Y out of the bag: open the Character window (`key` tap as in 24) on its Inventory tab, `screenshot` (focus-free) to find the recipe's cell, `begin charcraft`, then client `mouse` `{"action":"move","x":…,"y":…,"background":true}` onto the cell and `{"action":"click","x":…,"y":…,"background":true}` (screen pixels, origin bottom left; the game's input reads `mouse`, which `ui_input` does not reach) | The recipe is not grayed in the screenshot; after the click one `check CharacterCraft … tx=<t>` and the `paid` lines as in 25, `verify` MATCH, the craft queued. With the provider disabled (`disable`, `baseline charcraft`), the same click shows the game's own missing-materials message and sends nothing (no `check` line). `mouse` reports `pressReached`; if it is false, the window needs `background:true` honored (see `mouse`), report it rather than taking focus |
 
 **Clean up.** `.srtest clear`; remove this plugin from the server's reload folder and check its
 unload line; set `NativeSeams = false` on both and restart them if the rig is handed back; restore the

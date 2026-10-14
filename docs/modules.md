@@ -1830,7 +1830,7 @@ if (castle.Enabled)
         ctx.Log.LogInfo($"{row.Key} x{row.Value}");
 
     bool here = castle.IsInside(somePosition);            // X/Z; tile mask when readable, else bounds
-    bool standing = castle.IsInside(CastleId.From(characterEntity)); // TilePosition when it has one
+    bool standing = castle.IsInside(CastleId.From(characterEntity)); // tile models by TilePosition, characters by Translation
     var check = castle.CanPlace(prefabGuidHash, somePosition);
 }
 
@@ -2718,7 +2718,7 @@ returns `null` for.
 | Per-player totals: refresh, resend, wire, client selection | landed, game-free tested (`MaterialViewSyncTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
 | Refresh cost: per-refresh reads, reuse of unchanged views, `Recomputes`/`Skips` | game-free tested (`MaterialViewRefreshTests`, `MaterialViewRefreshBenchTests`), **not live-verified** |
 | Native availability and payment seams (Bootstrap) | **experimental, opt-in, off by default**; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified (below) |
-| `CharacterCraft` (crafting from the Character window on a plot: scope, plot rule, the CharacterCraft view) | **experimental, opt-in, game-free tested, not live-verified** (`MaterialCharacterCraftTests`, `MaterialViewSyncTests`, `MaterialEventArgsTests`); the same two native seams, no new one; live procedure: [Shared Resources Test, character crafting cases](../samples/Progenitor.SharedResourcesTest/README.md#character-crafting-cases) |
+| `CharacterCraft` (crafting from the Character window on a plot: scope, plot rule, the CharacterCraft view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (build b6f997d61, run by another session with its own provider): wired, the crafting list showed pool totals on a plot, a bridge-sent craft logged one check and one paid line, `payments` rose and the item was crafted, and off a plot there was no check or paid line and nothing was crafted; not verified: the client's own craft click, a short craft, and the later changes (capability gate, reuse without provider calls, character placement by `Translation`) (`MaterialCharacterCraftTests`, `MaterialViewSyncTests`, `MaterialEventArgsTests`); the same two native seams, no new one; live procedure: [Shared Resources Test, character crafting cases](../samples/Progenitor.SharedResourcesTest/README.md#character-crafting-cases) |
 | `Repair` and `Upgrade` (scopes, the upgrade request filter, the Upgrade view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair (`MaterialTransactionTests`, `MaterialScopeTrackerTests`, `MaterialUpgradeFilterTests`, `MaterialViewSyncTests`); the same two native seams, no new one |
 
 ```csharp
@@ -2792,7 +2792,23 @@ any case):
 character stands on a castle plot: the game itself passes the plot's castle heart to the count and the
 removal, resolved from the character's position (`MaterialOperations.RequiresStandingPlot`). Off a plot
 the game passes no heart and reaches no shared storage, so Progenitor neither asks the provider nor
-sends a view, and the craft keeps the game's own rules (the bag and an open window's inventory).
+sends a view, and the craft keeps the game's own rules (the bag and an open window's inventory). The
+refresh reuses that off-plot result without any provider call (not even `Revision`) until the context
+changes.
+
+**Who gets CharacterCraft views.** Anyone standing on a plot the provider governs for them: there is no
+ownership gate (unlike Upgrade, as for Build); whether a visitor or an ally is governed is the
+provider's call through `Candidates`. The views go only to clients whose Core declared it reads them
+(handshake capability `MaterialCharacterCraft`, 268435456); an older client gets none (it would drop
+operation 6 as malformed) and keeps the game's own counts in the Character window. Capabilities are
+learned at the handshake, so right after a server Core swap a client gets CharacterCraft views again
+once its handshake was re-answered.
+
+**Plot edges.** The server places the character with its `Translation` (the position the game's own
+craft check reads) and the client applies a CharacterCraft view only when the heart the game resolved
+for that count is the view's heart. Where the two disagree for a moment (an edge tile, right after a
+teleport), the client shows the game's own counts for that count, and the server still checks and pays
+at the plot it resolves; the display can only be less generous than the payment, never wrong about it.
 
 ### One operation, one transaction
 
@@ -2933,7 +2949,9 @@ Upgrade view not refreshed at that moment, its window closed, is recomputed when
 anything the last computation depended on differs at the next refresh:
 
 - the provider's `Revision(ctx)` for that context;
-- the context: user, character, world epoch, standing plot, station;
+- the context: user, character, world epoch, standing plot, station (a context the provider returned no
+  candidates for is reused while its `Revision` holds; an off-plot CharacterCraft context is reused with
+  no provider call at all);
 - the inventories the pool leaves out (the bag, a plain station, an open window for `Repair` and
   `Upgrade`) and the station put first;
 - the plot's own shared-storage containers (listed once per refresh by a query of only the
@@ -2943,8 +2961,10 @@ anything the last computation depended on differs at the next refresh:
   containers, the plot's shared storage, the bag and the station.
 
 Otherwise the refresh reuses the last view: one `Revision` call, one read of each of those inventories
-and no `Sources` call. Within one refresh every inventory is read at most once and every container id
-resolved at most once, however many items, operations and players need it. With 136 provider chests
+and no `Sources` call. Within one refresh every inventory is read at most once, every container id
+resolved at most once and every player's standing plot resolved once, however many items, operations
+and players need it (the plot's shared-storage listing is kept per plot, so the Build and CharacterCraft
+views of one player on one plot share it). With 136 provider chests
 and 40 item types (game-free benchmark, `MaterialViewRefreshBenchTests`) a refresh of one Build view
 went from 5712 inventory reads, 5576 id resolutions, two castle building scans and 42 provider calls to
 137 reads, 136 resolutions and one provider call while nothing changes; a recompute costs the same 137
@@ -3059,7 +3079,7 @@ The game never counted more than once per operation. **Not live-verified:** othe
 the same count (repair, research, a chest window), a cancelled craft, and transaction ids increasing
 across a server Core swap (no payment was made after the swap). `Repair` and `Upgrade` were live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair ([procedure](../samples/Progenitor.SharedResourcesTest/README.md#repair-and-upgrade-cases)): a worn-item and a workstation repair and a castle heart upgrade from level 1 to 2 were each paid from remote chests in one transaction with one `MaterialPaid` per line, a short repair and a short upgrade were refused at the game's check with nothing taken, and the Upgrade view showed the heart while its window was open. An earlier, unhardened build also ran
 live on 2026-10-13 (a prison cell fed from a remote chest; the same Build totals on two plots).
-`CharacterCraft` is game-free tested only and **not live-verified** (procedure: [character crafting
+`CharacterCraft` is live-verified on the isolated test rig on 2026-10-14 (build b6f997d61, run by another session with its own provider): wired, the crafting list showed pool totals on a plot, a bridge-sent craft logged one check and one paid line, `payments` rose and the item was crafted, and off a plot there was no check or paid line and nothing was crafted; not verified: the client's own craft click, a short craft, and the later changes (capability gate, reuse without provider calls, character placement by `Translation`) (procedure: [character crafting
 cases](../samples/Progenitor.SharedResourcesTest/README.md#character-crafting-cases)).
 
 Not proven live on any build:

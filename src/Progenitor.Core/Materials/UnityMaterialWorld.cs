@@ -346,11 +346,33 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
             for (int i = 0; i < _castles.Count; i++)
                 if (_castles[i].Heart.Equals(key)) return _castles[i].Territory.Index;
         }
-        if (!character.TryRead(em, out Translation t)) return -1;
-        CastleVec3 pos = t.Value;
-        for (int i = 0; i < _castles.Count; i++)
-            if (_castles[i].IsInside(pos)) return _castles[i].Territory.Index;
-        return -1;
+        // During a view refresh, one position test per character: the refresh builds a context for every
+        // operation (Build, Craft, Upgrade, CharacterCraft) of the same player, twice when it checks reuse.
+        // A seam call always reads the position fresh.
+        if (!InRefresh) _standing.Clear();
+        else if (_standing.TryGetValue(character, out int known)) return known;
+        int found = -1;
+        if (character.TryRead(em, out Translation t))
+        {
+            CastleVec3 pos = t.Value;
+            for (int i = 0; i < _castles.Count; i++)
+                if (_castles[i].IsInside(pos)) { found = _castles[i].Territory.Index; break; }
+        }
+        if (InRefresh) _standing[character] = found;
+        return found;
+    }
+
+    private readonly Dictionary<Entity, int> _standing = new();
+    private bool _inRefresh;
+
+    /// <summary>
+    /// Set by the per-player view refresh for its duration (main thread, one frame): standing plots are
+    /// then resolved once per character. Cleared (and the memo dropped) when the refresh ends.
+    /// </summary>
+    internal bool InRefresh
+    {
+        get => _inRefresh;
+        set { _inRefresh = value; _standing.Clear(); }
     }
 
     private void RefreshCastles()

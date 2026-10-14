@@ -469,6 +469,14 @@ internal static class MaterialClientPolicy
         Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft });
 
     /// <summary>
+    /// Whether a client reads views of this operation. A CharacterCraft view goes only to a client that
+    /// declared it (<c>Handshake.Capability.MaterialCharacterCraft</c>): an older client drops operation 6
+    /// as malformed and would warn at every resend. Nothing is computed or sent for the others.
+    /// </summary>
+    internal static bool ReadByPeer(MaterialOperation operation, bool peerReadsCharacterCraft) =>
+        operation != MaterialOperation.CharacterCraft || peerReadsCharacterCraft;
+
+    /// <summary>
     /// A view of this operation only means something at a structure (Craft: a workstation, Upgrade: a
     /// castle heart's window); without one the server sends none and skips the provider calls.
     /// </summary>
