@@ -515,11 +515,19 @@ internal static class SampleCommands
     }
 
     // adminOnly: this puts items into an inventory.
-    [Command("items", adminOnly: true, usage: ".items grant <prefabNameOrGuid> [amount] | .items equip <slot>", description: "Admin only. Grant a prefab into your bag or equip a bag slot through ctx.Items.")]
-    public static void Items(ICommandContext ctx, string verb = "", string token = "", string extra = "")
+    [Command("items", adminOnly: true, usage: ".items grant <prefabNameOrGuid> [amount] | equip <slot> | chests | slots <c> | move <from> <to> <item> <amount> | moveall <from> <to> | count|free <c> <item> | add|remove <c> <item> <n> | name <c> \"text\" | id <c> | watch <c> | heart | clan", description: "Admin only. ctx.Items grant/equip, and ctx.Inventory / ctx.Clans: list castle containers, read slots, move items with a total-conserving transfer, rename, stable ids.")]
+    public static void Items(ICommandContext ctx, string verb = "", string token = "", string extra = "", string third = "", string fourth = "")
     {
         try
         {
+            if (SampleInventory.Handles(verb))
+            {
+#if !PROGENITOR_TESTS
+                SampleInventory.Handle(ctx, verb.Trim().ToLowerInvariant(), token, extra, third, fourth);
+#endif
+                return;
+            }
+
             if (!SampleItems.TryParse(verb, token, extra, out var kind, out string nameOrGuid, out int amount, out int slot))
             {
                 ctx.Reply(SampleItems.UsageReply);

@@ -48,7 +48,7 @@ public class PluginContextContractTests
 
         int start = src.IndexOf("public sealed class BuffDefinitionBuilder", StringComparison.Ordinal);
         Assert.True(start >= 0, "PluginContent.BuffDefinitionBuilder is missing");
-        int end = src.IndexOf("public sealed class PluginCastles", start, StringComparison.Ordinal);
+        int end = src.IndexOf("partial class PluginCastles", start, StringComparison.Ordinal);
         Assert.True(end > start, "could not bound BuffDefinitionBuilder");
         string builder = src.Substring(start, end - start);
         SourcePin.AssertUncommented(builder, "CloneOf(PrefabGUID source)");

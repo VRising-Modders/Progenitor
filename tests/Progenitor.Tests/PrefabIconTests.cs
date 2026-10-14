@@ -364,7 +364,7 @@ public class PrefabIconTests
         var src = ReadRepoFile("src", "Progenitor.Core", "Plugins", "PluginContext.cs");
         int start = src.IndexOf("public sealed class BuffDefinitionBuilder", StringComparison.Ordinal);
         Assert.True(start >= 0);
-        int end = src.IndexOf("public sealed class PluginCastles", start, StringComparison.Ordinal);
+        int end = src.IndexOf("partial class PluginCastles", start, StringComparison.Ordinal);
         Assert.True(end > start);
         string builder = src.Substring(start, end - start);
         SourcePin.AssertStatement(builder, "public BuffDefinitionBuilder Icon(string relativePath)");

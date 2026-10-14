@@ -126,6 +126,42 @@ public interface ICastleHandle
     CastlePlacementCheck CanPlace(int prefabGuid, CastleVec3 position, byte rotation = 0);
 
     /// <summary>
+    /// The heart's player-set name (<c>NameableInteractable.Name</c> on the heart); empty when
+    /// unnamed, unreadable, or on a disabled handle. Live read.
+    /// </summary>
+    string Name { get; }
+
+    /// <summary>
+    /// The heart's stable id (the same scheme as container ids: survives restarts, never
+    /// reused). Pass it to <c>ctx.Inventory.TryFind</c> to get the heart back after a restart.
+    /// <see cref="Progenitor.Inventory.ContainerId.None"/> on a disabled handle or while the
+    /// Inventory module is not running.
+    /// </summary>
+    Progenitor.Inventory.ContainerId HeartId { get; }
+
+    /// <summary>
+    /// The heart's level, the number of item slots (fuel pads) the game's level table unlocks at
+    /// that level, and its fuel quantity. Live read; a failed read says why.
+    /// </summary>
+    CastleHeartFuel HeartFuel();
+
+    /// <summary>
+    /// Every placed model with an inventory that is not a station or the heart: chests and
+    /// other storage. Each row carries the stable <c>ContainerId</c>, the nameplate and the
+    /// <c>InventoryRef</c> to pass to <c>ctx.Inventory</c>. Sorted like <see cref="Buildings"/>.
+    /// Live read; empty on a disabled handle.
+    /// </summary>
+    IReadOnlyList<CastleContainerInfo> Containers();
+
+    /// <summary>
+    /// Every crafting and refinement station (<c>CastleWorkstation</c> or
+    /// <c>Refinementstation</c>), with stable ids. A refinement station's row carries both
+    /// <see cref="CastleContainerInfo.Main"/> (input) and <see cref="CastleContainerInfo.Output"/>.
+    /// Live read; empty on a disabled handle.
+    /// </summary>
+    IReadOnlyList<CastleContainerInfo> Stations();
+
+    /// <summary>
     /// Re-read this castle from the world through its <c>Territory.Index</c> — the key that
     /// survives a save reload. Returns a new handle, or a disabled one when the territory no
     /// longer holds a castle. The original handle keeps its old snapshot.

@@ -231,6 +231,61 @@ internal sealed class CastleHandle : ICastleHandle
     public IReadOnlyList<KeyValuePair<string, int>> BuildingsByPrefab() =>
         CastleCounts.ByPrefab(Buildings());
 
+    public string Name
+    {
+        get
+        {
+            if (!Enabled || _runtime == null) return "";
+            try { return _runtime.HeartName(Heart) ?? ""; }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Castles: HeartName(" + Heart + ") threw: " + e.Message);
+                return "";
+            }
+        }
+    }
+
+    public Progenitor.Inventory.ContainerId HeartId
+    {
+        get
+        {
+            var resolver = CastleContainerRows.HeartIdResolver;
+            if (!Enabled || resolver == null) return Progenitor.Inventory.ContainerId.None;
+            try { return resolver(Heart); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Castles: heart id for " + Heart + " threw: " + e.Message);
+                return Progenitor.Inventory.ContainerId.None;
+            }
+        }
+    }
+
+    public CastleHeartFuel HeartFuel()
+    {
+        if (!Enabled || _runtime == null) return CastleHeartFuel.Fail(DisabledReason.Length > 0 ? DisabledReason : NoCastleReason);
+        try { return _runtime.HeartFuel(Heart) ?? CastleHeartFuel.Fail("no answer"); }
+        catch (Exception e) { return CastleHeartFuel.Fail("heart read threw: " + e.Message); }
+    }
+
+    public IReadOnlyList<CastleContainerInfo> Containers() => InventoryRows(stations: false);
+
+    public IReadOnlyList<CastleContainerInfo> Stations() => InventoryRows(stations: true);
+
+    private IReadOnlyList<CastleContainerInfo> InventoryRows(bool stations)
+    {
+        if (!Enabled || _runtime == null) return Array.Empty<CastleContainerInfo>();
+        try
+        {
+            return CastleContainerRows.Build(_runtime.Inventories(Heart), Territory.Index, stations,
+                Progenitor.WorldState.WorldEpoch.Current);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Castles: Inventories(" + Heart + ") threw: " + e.Message);
+            return Array.Empty<CastleContainerInfo>();
+        }
+    }
+
     public IReadOnlyList<CastleTileInfo> Tiles()
     {
         if (!Enabled || _runtime == null) return Array.Empty<CastleTileInfo>();

@@ -277,6 +277,8 @@ public sealed class Plugin : ProgenitorPlugin<SampleContext>
             // only: PlayerControl.TryGetConnection + Disconnect; the reason text is logged, not shown).
             SampleEcs.Attach(ctx);
             SamplePlayers.Attach(ctx);
+            // Milestone P-a: logs PlayerReady and PlayerTerritoryChanged for the .items acceptance.
+            SampleInventory.Attach(ctx);
 
             // Job FCFGEX. ConfigHelper: Bind, BindEnum/ReadEnum, SharedFileName, and the disk
             // Watch whose whole point is an operator editing this plugin's GUID.cfg by hand while
@@ -338,6 +340,7 @@ public sealed class Plugin : ProgenitorPlugin<SampleContext>
         SamplePatchDemo.Detach();
         SampleEcs.Detach();
         SamplePlayers.Detach();
+        SampleInventory.Detach();
         SampleLogPanel.Detach();
         SampleEpoch.Reset();
         SampleHooks.Detach();
