@@ -378,8 +378,8 @@ public class PluginContext
 
 
     /// <summary>
-    /// Server inventory grant and equip (<see cref="Progenitor.Items.Items"/>). Client calls throw.
-    /// Defaults stack, accept a partial add, do not equip, and leave durability alone.
+    /// Server inventory grant and equip (<see cref="Progenitor.Items.Items"/>; client calls throw),
+    /// and the item catalog (<c>Catalog()</c>, both sides). Grant defaults stack, accept a partial add, do not equip, and leave durability alone.
     /// </summary>
     public PluginItems Items
     {

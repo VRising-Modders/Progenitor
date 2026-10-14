@@ -37,10 +37,8 @@ internal static class ChatGameData
         try
         {
             var guid = new PrefabGUID(prefabId);
-            var registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry;
-            if (registry != null && registry.TryGet<ManagedItemData>(guid, out var data) && data != null
-                && Localization.Localization.TryGetGameString(data.Name, out var s) && !string.IsNullOrWhiteSpace(s))
-                name = s.Trim();
+            if (TryLocalizedItemName(world, guid, out var s))
+                name = s;
             if (name.Length == 0 && PrefabLookup.TryGetName(world, guid, out var prefab) && prefab.StartsWith("Item_", StringComparison.Ordinal))
                 name = prefab;
         }
@@ -48,6 +46,29 @@ internal static class ChatGameData
 
         ItemNames[prefabId] = name;
         return name.Length == 0 ? null : name;
+    }
+
+    /// <summary>
+    /// An item's localized name: <c>ManagedItemData.Name</c> from <c>GameDataSystem.ManagedDataRegistry</c>,
+    /// resolved through the game's string table (<see cref="Localization.Localization.TryGetGameString"/>).
+    /// Uncached. Always false on the server, which has no string table. Shared with the item catalog.
+    /// </summary>
+    internal static bool TryLocalizedItemName(World world, PrefabGUID guid, out string name)
+    {
+        name = "";
+        if (world == null || !world.IsCreated) return false;
+        try
+        {
+            var registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry;
+            if (registry != null && registry.TryGet<ManagedItemData>(guid, out var data) && data != null
+                && Localization.Localization.TryGetGameString(data.Name, out var s) && !string.IsNullOrWhiteSpace(s))
+            {
+                name = s.Trim();
+                return true;
+            }
+        }
+        catch { name = ""; }
+        return false;
     }
 
     /// <summary>An item's prefab id from its spawnable prefab name (<c>Item_Weapon_Sword_T01_Bone</c>), or 0.</summary>

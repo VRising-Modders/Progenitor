@@ -2174,6 +2174,78 @@ of the save made for this test.
    Changed`; `.items heart`, `.items clan`, `.items name #1 "Ore"` (the panel shows the name).
 9. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
 
+## Item catalog
+
+`ctx.Items.Catalog()` is a read-only list of every item the world knows, for pickers, category
+rules and settings pages: `IReadOnlyList<ItemCatalogEntry>` with `PrefabGuid`, `PrefabName`,
+`DisplayName`, `MaxAmount`, `ItemCategory`, `ItemType` and `IsCustom`. `ctx.Items.CatalogEntry(guid)`
+looks one up from the same build; `ctx.Items.CatalogInfo()` reports the last build. Status:
+**landed** (source-checked against the game's metadata, built, game-free tested in
+`ItemCatalogTests`); not live-verified. Signatures: [api.md](api.md#item-catalog).
+
+```csharp
+foreach (var item in ctx.Items.Catalog())
+    if ((item.ItemCategory & someCategoryBits) != 0 && item.MaxAmount > 1)
+        Log.LogInfo(item.PrefabName + " " + (item.DisplayName ?? "(no name on this side)"));
+
+var ore = ctx.Items.CatalogEntry(1332980397);   // Item_Ingredient_Mineral_IronOre, or null
+```
+
+**Where it comes from.** A prefab-inclusive query for entities with `ItemData`, `PrefabGUID` and
+`Prefab` (so item copies sitting in inventories are not visited), then
+`GameDataSystem.ItemHashLookupMap` for the stack size, category and type, the same table
+`ctx.Inventory` and the game's own add and move code read. A prefab missing from that table is
+not listed. Prefab names come from the prefab collection's lookup map. Custom items cloned with
+`DefineItem` or a data pack are included on each side once their clone is applied there
+(`IsCustom` true).
+
+**Display names.** The client resolves `ManagedItemData.Name` through the game's string table,
+the resolver chat item links already use, so names follow the client's language. The dedicated
+server ships no localization tables, so a vanilla item's `DisplayName` is null there; Progenitor
+does not load tables on the server. A custom item's `Named(...)` text is its display name on both
+sides. Show names from the client, or send GUIDs and let the client name them.
+
+**When it builds.** Lazily, on the first call after a world load; the result is cached for that
+world, its world-load epoch and the content version (bumped when a custom item is applied or
+removed on that side). Repeated calls return the same list object and allocate nothing. Before the
+world's prefabs exist (main menu, early join) the result is empty and not cached, so a later call
+builds. On the client, a call made while the join is still loading prefabs could cache a partial
+list for that world; call it once the local character exists (for example when a panel opens), or call
+`InvalidateCatalog()` first. A vanilla stack-size or category edit made after the first build in the same world load is
+picked up by `ctx.Items.InvalidateCatalog()` or the next load. Main thread only.
+
+**Cost.** One prefab query plus one lookup-table read and one name lookup per item, once per world
+load; the entry count is a few thousand. The measured count and build time (`CatalogInfo().Count`,
+`BuildMilliseconds`) are recorded by the live acceptance below; until then they are unmeasured.
+
+**Sample and bridge.** `.items catalog [filter]` (admin, `SampleItemCatalog.cs`) prints the summary
+and up to eight matching rows on the server; the filter is a GUID or a case-insensitive part of the
+prefab or display name. The Dev bridge op `item_catalog` returns the same data from either side,
+which is how to see the client's display names.
+
+### Live acceptance (procedure, not run)
+
+On the isolated test server with Core, Dev and `Progenitor.Sample` deployed, an admin client joined:
+
+1. Server: `.items catalog`. Expect `Item catalog (server): N items, C with display names, C custom,
+   built in T ms. N match.` with N in the low thousands and C equal to the number of named custom
+   items (0 without a data pack), and the log line `Sample items: catalog side=server count=N named=C
+   custom=C buildMs=T builds=1 filter=`. A second `.items catalog` logs the same `builds` value.
+2. `.items catalog IronOre`: a row `1332980397 Item_Ingredient_Mineral_IronOre stack <n> type <t>
+   cat 0x<c>` with no quoted name; `.items catalog 1332980397` returns the same row. Compare the
+   stack with the vanilla tooltip.
+3. Client: `node tools/mcp/call.mjs client item_catalog '{"filter":"Iron Ore"}'`. Expect
+   `side: "client"`, `count` equal to the server's N, `withDisplayName` close to `count`, and an
+   entry `{prefab: "Item_Ingredient_Mineral_IronOre", display: "Iron Ore"}` with the server's
+   `maxAmount`. Repeat with `"Copper Ore"` and `"Blood Essence"`.
+4. `{"rebuild": true}` on both bridges: record `count` and `buildMs` for each side in the Cost
+   paragraph above.
+5. Restart the test server (or load another save) and call `item_catalog` again: `epoch` changes and
+   `builds` rises by one on the first call only.
+6. With a data pack that defines a named item: that item appears on both sides with `custom: true`
+   and its own name.
+7. Clean up: remove the Sample from both reload folders and confirm the clean unload in the logs.
+
 ## Main thread
 
 Research notes (internal): `MainThread` ownership, collectible-ALC sweep.

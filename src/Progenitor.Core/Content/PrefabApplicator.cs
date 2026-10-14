@@ -1712,7 +1712,19 @@ internal static class PrefabApplicator
     /// insert or in-place update, and on soft unapply that kept the entity, so a later
     /// Core generation's snapshot still owns it.
     /// </summary>
-    internal static void RememberClone(PrefabGUID guid) => Ledger.RememberClone(guid.GuidHash);
+    internal static void RememberClone(PrefabGUID guid)
+    {
+        Ledger.RememberClone(guid.GuidHash);
+        System.Threading.Interlocked.Increment(ref _contentVersion);
+    }
+
+    private static int _contentVersion;
+
+    /// <summary>
+    /// Bumped whenever this process applies, updates or removes a clone. The item catalog
+    /// (<c>ctx.Items.Catalog()</c>) rebuilds when it changes.
+    /// </summary>
+    internal static int ContentVersion => System.Threading.Volatile.Read(ref _contentVersion);
 
     /// <summary>
     /// Record the resolved source and kind for a GUID this process just applied, or
@@ -1750,7 +1762,11 @@ internal static class PrefabApplicator
 
     private static void RememberAppend(PrefabGUID guid, int index) => Ledger.RememberAppend(guid.GuidHash, index);
 
-    private static void ForgetClone(PrefabGUID guid) => Ledger.ForgetClone(guid.GuidHash);
+    private static void ForgetClone(PrefabGUID guid)
+    {
+        Ledger.ForgetClone(guid.GuidHash);
+        System.Threading.Interlocked.Increment(ref _contentVersion);
+    }
 
     /// <summary>
     /// A new client world replaced the one every clone and key row was recorded in. Returns how
