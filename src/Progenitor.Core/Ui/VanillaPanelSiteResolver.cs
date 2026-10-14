@@ -76,12 +76,24 @@ internal sealed partial class UnityUiRuntime
         internal InventorySubMenu? Inventory;
         internal GameObject? Obstacle;
         internal Transform? RenameGroup;
+        internal string RenameSource = "";
         internal GameObject? RenameButton;
         internal TextMeshProUGUI? CaptionDonor;
         internal TextMeshProUGUI? BodyDonor;
         internal FakeTooltip? Tooltip;
         internal RectTransform? RootCanvas;
         internal int RootCanvasFor;
+
+        /// <summary>The bar button every P6 button is cloned from (<see cref="VanillaPanelAnchors.PickButtonDonor"/>).</summary>
+        internal GameObject? ButtonDonor;
+        internal string DonorSource = "";
+
+        /// <summary>The control <see cref="VanillaPanelAnchor.BesideSort"/> goes beside.</summary>
+        internal GameObject? Sort;
+        internal string SortSource = "";
+
+        /// <summary>The inventory's bottom bar (<c>BottomBarButtonsParent</c>).</summary>
+        internal Transform? Bar;
 
         internal void Reset()
         {
@@ -92,12 +104,163 @@ internal sealed partial class UnityUiRuntime
             Inventory = null;
             Obstacle = null;
             RenameGroup = null;
+            RenameSource = "";
             RenameButton = null;
             CaptionDonor = null;
             BodyDonor = null;
             Tooltip = null;
+            ButtonDonor = null;
+            DonorSource = "";
+            Sort = null;
+            SortSource = "";
+            Bar = null;
         }
     }
+
+    // ------------------------------------------------------------------ anchors on this build
+
+    /// <summary>
+    /// A <c>Transform</c> as <see cref="VanillaPanelAnchors"/> sees it. Built only when an
+    /// inventory's donor and sort control are (re)resolved, never per frame.
+    /// </summary>
+    private sealed class TransformNode : IAnchorNode
+    {
+        internal TransformNode(Transform t) => Transform = t;
+
+        internal Transform Transform { get; }
+
+        internal static TransformNode? Of(Component? c)
+        {
+            try { return Alive(c) && c!.transform != null ? new TransformNode(c.transform) : null; }
+            catch { return null; }
+        }
+
+        public string Name => SafeObjectName(Transform != null ? Transform.gameObject : null);
+
+        public bool Active
+        {
+            get { try { return Alive(Transform) && Transform.gameObject.activeInHierarchy; } catch { return false; } }
+        }
+
+        public bool IsButton
+        {
+            get { try { return Alive(Transform) && Transform.GetComponent<SimpleStunButton>() != null; } catch { return false; } }
+        }
+
+        public float Width => Size().x;
+
+        public float Height => Size().y;
+
+        public AnchorLayout Layout => LayoutOf(Transform);
+
+        public IAnchorNode? Parent
+        {
+            get { try { return Alive(Transform) && Transform.parent != null ? new TransformNode(Transform.parent) : null; } catch { return null; } }
+        }
+
+        public int ChildCount
+        {
+            get { try { return Alive(Transform) ? Transform.childCount : 0; } catch { return 0; } }
+        }
+
+        public IAnchorNode? Child(int index)
+        {
+            try
+            {
+                var c = Alive(Transform) ? Transform.GetChild(index) : null;
+                return c != null ? new TransformNode(c) : null;
+            }
+            catch { return null; }
+        }
+
+        private Vector2 Size()
+        {
+            try
+            {
+                var rt = Alive(Transform) ? Transform.TryCast<RectTransform>() : null;
+                return rt != null ? rt.rect.size : Vector2.zero;
+            }
+            catch { return Vector2.zero; }
+        }
+    }
+
+    private static AnchorLayout LayoutOf(Transform? t)
+    {
+        try
+        {
+            if (!Alive(t)) return AnchorLayout.None;
+            var grid = t!.GetComponent<GridLayoutGroup>();
+            if (grid != null && grid.enabled) return AnchorLayout.Grid;
+            var h = t.GetComponent<HorizontalLayoutGroup>();
+            if (h != null && h.enabled)
+                return h.childControlWidth ? AnchorLayout.HorizontalControlled : AnchorLayout.HorizontalFree;
+            var v = t.GetComponent<VerticalLayoutGroup>();
+            if (v != null && v.enabled) return AnchorLayout.Vertical;
+        }
+        catch { /* */ }
+        return AnchorLayout.None;
+    }
+
+    private static GameObject? GoOf(IAnchorNode? node)
+    {
+        try { return node is TransformNode tn && Alive(tn.Transform) ? tn.Transform.gameObject : null; }
+        catch { return null; }
+    }
+
+    /// <summary>One inventory window's donor and sort control, re-resolved only when one of them dies.</summary>
+    private sealed class InventoryAnchorCache
+    {
+        internal GameObject? Donor;
+        internal string DonorSource = "";
+        internal GameObject? Sort;
+        internal string SortSource = "";
+        internal int Frame;
+    }
+
+    private static readonly Dictionary<int, InventoryAnchorCache> InventoryAnchors = new();
+
+    /// <summary>Each container window's rename group and the rule that found it.</summary>
+    private static readonly Dictionary<int, (Transform? Group, string Source, int Frame)> RenameGroups = new();
+
+    /// <summary>
+    /// The last word on each site and anchor: <c>ok ...</c> naming the host, the mode and the donor,
+    /// or <c>missing ...</c> naming what was not found. Read by <c>ui_read panels</c>.
+    /// </summary>
+    private static readonly Dictionary<(VanillaUiSite, VanillaPanelAnchor), string> AnchorStatus = new();
+
+    private static InventoryAnchorCache AnchorsOf(InventorySubMenu inv)
+    {
+        int id = inv.GetInstanceID();
+        if (InventoryAnchors.TryGetValue(id, out var cached) && !Stale(cached.Donor, cached.Frame) && !Stale(cached.Sort, cached.Frame))
+            return cached;
+        if (InventoryAnchors.Count > 8) InventoryAnchors.Clear();
+
+        var bar = TransformNode.Of(inv.BottomBarButtonsParent);
+        var named = new IAnchorNode?[]
+        {
+            TransformNode.Of(inv.SelfSortButton), TransformNode.Of(inv.AllSortButton), TransformNode.Of(inv.SmartMergeButton),
+            TransformNode.Of(inv.SmartTakeButton), TransformNode.Of(inv.DropAllButton),
+        };
+        var donor = VanillaPanelAnchors.PickButtonDonor(named, bar);
+        var sort = VanillaPanelAnchors.SortControl(named[0], named[1], bar);
+        var entry = new InventoryAnchorCache
+        {
+            Donor = GoOf(donor.Node),
+            DonorSource = donor.Source,
+            Sort = GoOf(sort.Node),
+            SortSource = sort.Source,
+            Frame = Time.frameCount,
+        };
+        InventoryAnchors[id] = entry;
+        return entry;
+    }
+
+    /// <summary>Frames between two lookups of a piece that was not found (a found one is re-read only when it dies).</summary>
+    private const int MissingRetryFrames = 60;
+
+    /// <summary>A cached piece needs looking up again: it died, or it was missing and the retry interval passed.</summary>
+    private static bool Stale(UnityEngine.Object? found, int frame) =>
+        found is null ? Time.frameCount - frame >= MissingRetryFrames : !Alive(found);
 
     // ------------------------------------------------------------------ the shared per-frame scan
 
@@ -212,6 +375,9 @@ internal sealed partial class UnityUiRuntime
         PanelViews.Clear();
         PanelHierarchyLogged.Clear();
         GridCaches.Clear();
+        InventoryAnchors.Clear();
+        RenameGroups.Clear();
+        AnchorStatus.Clear();
         _hovered = null;
         _scanFrame = -1;
         _scanWorld = null;
@@ -266,6 +432,14 @@ internal sealed partial class UnityUiRuntime
         view.Inventory = inv;
         view.CaptionDonor = CaptionDonorOf(inv);
         view.BodyDonor = Alive(inv) ? TmpOf(inv!.FakeTooltip != null ? inv.FakeTooltip.Description : null) : null;
+        if (!Alive(inv)) return;
+        try { view.Bar = Alive(inv!.BottomBarButtonsParent) ? inv.BottomBarButtonsParent.transform : null; }
+        catch { view.Bar = null; }
+        var anchors = AnchorsOf(inv!);
+        view.ButtonDonor = Alive(anchors.Donor) ? anchors.Donor : null;
+        view.DonorSource = anchors.DonorSource;
+        view.Sort = Alive(anchors.Sort) ? anchors.Sort : null;
+        view.SortSource = anchors.SortSource;
     }
 
     private static VanillaSiteSample SampleContainer(PanelView view, World world)
@@ -277,8 +451,23 @@ internal sealed partial class UnityUiRuntime
         view.Reset();
         view.Panel = sub.gameObject;
         view.Grid = RectOf(sub.EquipmentItemsParent);
-        view.RenameGroup = Alive(sub.OpenTagEditButtonParent) ? sub.OpenTagEditButtonParent.transform : null;
         view.RenameButton = Alive(sub.OpenTagEditButton) ? sub.OpenTagEditButton.gameObject : null;
+
+        // OpenTagEditButtonParent is empty in the shipped prefab (1.1.13.0); the rename button's
+        // own parent is the group then (VanillaPanelAnchors.RenameGroup), cached per window.
+        int subId = sub.GetInstanceID();
+        if (!RenameGroups.TryGetValue(subId, out var rename) || Stale(rename.Group, rename.Frame))
+        {
+            if (RenameGroups.Count > 8) RenameGroups.Clear();
+            var pick = VanillaPanelAnchors.RenameGroup(
+                TransformNode.Of(sub.OpenTagEditButtonParent), TransformNode.Of(sub.OpenTagEditButton));
+            var group = GoOf(pick.Node);
+            rename = (group != null ? group.transform : null, pick.Source, Time.frameCount);
+            RenameGroups[subId] = rename;
+        }
+
+        view.RenameGroup = Alive(rename.Group) ? rename.Group : null;
+        view.RenameSource = rename.Source;
         FromInventory(view, _container.Inventory);
         view.Obstacle = _container.InventoryShown ? _container.Inventory!.gameObject : null;
         return Finish(VanillaUiSite.ContainerPanel, view, world, VanillaPanelKind.Container, _container.Target);
@@ -482,9 +671,17 @@ internal sealed partial class UnityUiRuntime
         }
         else
         {
-            donor = Alive(view.Inventory) && Alive(view.Inventory!.SelfSortButton) && Alive(view.CaptionDonor);
-            if (!donor) Degraded(site, !Alive(view.Inventory) || !Alive(view.Inventory!.SelfSortButton) ? "InventorySubMenu.SelfSortButton" : "InventorySubMenu.TabButtons caption");
-            if (!Alive(view.BodyDonor)) Degraded(site, "body text");
+            // The button donor is the first live bar button (VanillaPanelAnchors.PickButtonDonor):
+            // SelfSortButton is empty on 1.1.13.0 and was, alone, why no P6 button ever appeared.
+            donor = Alive(view.ButtonDonor) && Alive(view.CaptionDonor);
+            if (!donor)
+            {
+                Degraded(site, !Alive(view.ButtonDonor)
+                    ? "button donor: InventorySubMenu." + string.Join("/", VanillaPanelAnchors.ButtonDonorFields) + " and the BottomBarButtonsParent buttons are all missing"
+                    : "button caption: InventorySubMenu.TabButtons has no visible label");
+            }
+
+            if (!Alive(view.BodyDonor)) Degraded(site, "row text: InventorySubMenu.FakeTooltip.Description");
         }
 
         view.Live = true;
@@ -634,7 +831,7 @@ internal sealed partial class UnityUiRuntime
     {
         try
         {
-            var rt = Rt(view.Inventory != null && Alive(view.Inventory.SelfSortButton) ? view.Inventory.SelfSortButton.gameObject : null);
+            var rt = Rt(view.ButtonDonor);
             if (rt != null)
             {
                 var r = rt.rect;
@@ -642,7 +839,7 @@ internal sealed partial class UnityUiRuntime
             }
         }
         catch { /* */ }
-        return new Vector2(110f, 34f);
+        return new Vector2(116f, 36f);
     }
 
     private static float RowHeightOf(PanelView view)
@@ -679,28 +876,34 @@ internal sealed partial class UnityUiRuntime
         try
         {
             Transform? host;
+            GameObject? reference = null;
+            string missing = "";
             int siblingIndex = -1;
             switch (anchor)
             {
                 case VanillaPanelAnchor.LeftEdge:
                 case VanillaPanelAnchor.RightEdge:
                     host = view.Panel!.transform.parent;
+                    if (host == null) missing = "the window's parent";
                     break;
                 case VanillaPanelAnchor.BesideRename:
                     host = Alive(view.RenameGroup) ? view.RenameGroup : null;
-                    if (host != null && Alive(view.RenameButton)) siblingIndex = view.RenameButton!.transform.GetSiblingIndex() + 1;
+                    reference = Alive(view.RenameButton) ? view.RenameButton : null;
+                    if (host == null) missing = "ContainerSubMenu.OpenTagEditButtonParent and OpenTagEditButton";
                     break;
                 case VanillaPanelAnchor.BesideSort:
-                    var sort = view.Inventory != null ? view.Inventory.SelfSortButton : null;
-                    host = Alive(sort) ? sort!.transform.parent : null;
-                    if (host != null) siblingIndex = sort!.transform.GetSiblingIndex() + 1;
+                    reference = Alive(view.Sort) ? view.Sort : null;
+                    host = reference != null ? reference.transform.parent : null;
+                    if (host == null) missing = "InventorySubMenu.SelfSortButton, AllSortButton and a sort button on BottomBarButtonsParent";
                     break;
                 case VanillaPanelAnchor.TooltipBody:
                     var frame = view.Tooltip != null ? view.Tooltip.DescriptionFrame : null;
                     host = Alive(frame) ? frame!.transform.parent : null;
+                    if (host == null) missing = "FakeTooltip.DescriptionFrame";
                     break;
                 default:
                     host = null;
+                    missing = "an anchor this site does not have";
                     break;
             }
 
@@ -708,9 +911,18 @@ internal sealed partial class UnityUiRuntime
             {
                 // This anchor's group is missing; only this handle goes without a container (it
                 // says so once itself). The site and every other anchor keep working.
-                Degraded(site, "anchor " + VanillaUiSites.AnchorKey(anchor));
+                SetAnchorStatus(site, anchor, "missing: " + missing);
+                Degraded(site, "anchor " + VanillaUiSites.AnchorKey(anchor) + ": " + missing);
                 return null;
             }
+
+            var mode = VanillaUiSites.IsEdge(anchor) || anchor == VanillaPanelAnchor.TooltipBody
+                ? InlineMode.None
+                : PlanInline(host);
+            if (mode == InlineMode.GridCell || mode == InlineMode.Group)
+                siblingIndex = reference != null && reference.transform.parent != null && reference.transform.parent.Pointer == host.Pointer
+                    ? reference.transform.GetSiblingIndex() + 1
+                    : -1;
 
             go = new GameObject(containerName);
             var rt = go.AddComponent<RectTransform>();
@@ -719,7 +931,12 @@ internal sealed partial class UnityUiRuntime
             else rt.SetAsLastSibling();
             rt.localScale = Vector3.one;
 
-            var size = DonorButtonSize(view);
+            var size = ButtonSizeFor(view, anchor, mode, host, reference);
+            SetAnchorStatus(site, anchor, "ok host=" + SafeObjectName(host.gameObject)
+                + " mode=" + (VanillaUiSites.IsEdge(anchor) ? "column" : anchor == VanillaPanelAnchor.TooltipBody ? "tooltip" : VanillaPanelAnchors.ModeWord(mode))
+                + (anchor == VanillaPanelAnchor.BesideSort ? " sort=" + view.SortSource : "")
+                + (anchor == VanillaPanelAnchor.BesideRename ? " group=" + view.RenameSource : "")
+                + (anchor == VanillaPanelAnchor.TooltipBody ? "" : " donor=" + view.DonorSource + " button=" + Mathf.RoundToInt(size.x) + "x" + Mathf.RoundToInt(size.y)));
             float tooltipWidth = 0f;
             if (VanillaUiSites.IsEdge(anchor))
             {
@@ -741,7 +958,7 @@ internal sealed partial class UnityUiRuntime
                 column.childControlHeight = true;
                 column.childForceExpandWidth = true;
                 column.childForceExpandHeight = false;
-                column.spacing = GroupSpacing(view.Inventory != null && Alive(view.Inventory.BottomBarButtonsParent) ? view.Inventory.BottomBarButtonsParent.transform : null, VanillaPanelPlacement.DefaultSpacing);
+                column.spacing = GroupSpacing(view.Bar, VanillaPanelPlacement.DefaultSpacing);
             }
             else if (anchor == VanillaPanelAnchor.TooltipBody)
             {
@@ -766,26 +983,39 @@ internal sealed partial class UnityUiRuntime
             }
             else
             {
-                // Inline: laid out by the game's own group like one more of its buttons.
+                // Inline. A grid cell or a group member is laid out by the game's own group like one
+                // more of its buttons; a positioned row is ignored by the group and placed by the fit
+                // right after the group's last visible member (VanillaPanelAnchors.PlanInline).
                 var row = go.AddComponent<HorizontalLayoutGroup>();
                 row.childAlignment = TextAnchor.MiddleCenter;
                 row.childControlWidth = true;
                 row.childControlHeight = true;
                 row.childForceExpandWidth = true;
                 row.childForceExpandHeight = true;
-                row.spacing = GroupSpacing(host, VanillaPanelPlacement.DefaultSpacing);
+                row.spacing = InlineSpacing(host, mode);
                 var element = go.AddComponent<LayoutElement>();
-                element.preferredWidth = 0f;
-                element.preferredHeight = size.y;
-                element.minHeight = size.y;
-                CopyFlexible(element, anchor == VanillaPanelAnchor.BesideSort
-                    ? (view.Inventory != null && Alive(view.Inventory.SelfSortButton) ? view.Inventory.SelfSortButton.gameObject : null)
-                    : view.RenameButton);
+                if (mode == InlineMode.Positioned)
+                {
+                    element.ignoreLayout = true;
+                    var hostRt = host.TryCast<RectTransform>();
+                    var pivot = hostRt != null ? hostRt.pivot : new Vector2(0.5f, 0.5f);
+                    rt.anchorMin = pivot;
+                    rt.anchorMax = pivot;
+                    rt.pivot = Vector2.zero;
+                    rt.sizeDelta = new Vector2(0f, size.y);
+                }
+                else
+                {
+                    element.preferredWidth = 0f;
+                    element.preferredHeight = size.y;
+                    element.minHeight = size.y;
+                    if (mode == InlineMode.Group) CopyFlexible(element, reference);
+                }
             }
 
             bool hostLaid = false;
             try { hostLaid = host.GetComponent<VerticalLayoutGroup>() != null; } catch { /* */ }
-            return new PanelContainerWidget(go, site, anchor, hostLaid);
+            return new PanelContainerWidget(go, site, anchor, hostLaid, mode, size);
         }
         catch (Exception e)
         {
@@ -793,6 +1023,80 @@ internal sealed partial class UnityUiRuntime
             TryDestroy(go, immediate: true);
             return null;
         }
+    }
+
+    private static InlineMode PlanInline(Transform host)
+    {
+        try { return VanillaPanelAnchors.PlanInline(new TransformNode(host)); }
+        catch { return InlineMode.Positioned; }
+    }
+
+    private static GridLayoutGroup? GridOf(Transform? t)
+    {
+        try { return Alive(t) ? t!.GetComponent<GridLayoutGroup>() : null; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// The size of one button in this container: the bar button's own size for a column and a
+    /// group member; the grid's cell for a grid cell (the grid sizes it anyway, and this keeps the
+    /// caption's arithmetic on the same numbers); for a positioned row the reference control's row
+    /// height (the rename button's 24 units) at the bar button's proportions.
+    /// </summary>
+    private static Vector2 ButtonSizeFor(PanelView view, VanillaPanelAnchor anchor, InlineMode mode, Transform host, GameObject? reference)
+    {
+        var donor = DonorButtonSize(view);
+        if (VanillaUiSites.IsEdge(anchor) || anchor == VanillaPanelAnchor.TooltipBody) return donor;
+        switch (mode)
+        {
+            case InlineMode.GridCell:
+                try
+                {
+                    var grid = GridOf(host);
+                    if (grid != null && grid.cellSize.x > 1f && grid.cellSize.y > 1f) return grid.cellSize;
+                }
+                catch { /* */ }
+                return donor;
+            case InlineMode.Positioned:
+                float refHeight = 0f;
+                try
+                {
+                    var rrt = Rt(reference);
+                    if (rrt != null) refHeight = rrt.rect.height;
+                }
+                catch { /* */ }
+                float h = VanillaPanelAnchors.PositionedHeight(refHeight, donor.y);
+                return new Vector2(VanillaPanelAnchors.ScaledWidth(donor.x, donor.y, h), h);
+            default:
+                return donor;
+        }
+    }
+
+    /// <summary>Spacing between our own buttons inside an inline container, and (positioned) from the group.</summary>
+    private static float InlineSpacing(Transform? host, InlineMode mode)
+    {
+        if (mode == InlineMode.GridCell)
+        {
+            try
+            {
+                var grid = GridOf(host);
+                if (grid != null) return grid.spacing.x;
+            }
+            catch { /* */ }
+            return VanillaPanelPlacement.DefaultSpacing;
+        }
+
+        if (mode == InlineMode.Positioned) return VanillaPanelAnchors.PositionedSpacing(GroupSpacing(host, 0f));
+        return GroupSpacing(host, VanillaPanelPlacement.DefaultSpacing);
+    }
+
+    /// <summary>Record the last word on an anchor; a change is logged once (found or missing, with what).</summary>
+    private static void SetAnchorStatus(VanillaUiSite site, VanillaPanelAnchor anchor, string status)
+    {
+        if (AnchorStatus.TryGetValue((site, anchor), out var old) && old == status) return;
+        AnchorStatus[(site, anchor)] = status;
+        if (status.StartsWith("ok", StringComparison.Ordinal))
+            Plugin.Logger?.LogInfo("Ui: site " + VanillaUiSites.Key(site) + " anchor=" + VanillaUiSites.AnchorKey(anchor) + " " + status);
     }
 
     /// <summary>Give our inline container the donor button's flexible width, so the vanilla group treats it like a button.</summary>
@@ -814,19 +1118,19 @@ internal sealed partial class UnityUiRuntime
         if (container is not PanelContainerWidget host || !host.Alive) return null;
         if (host.Anchor == VanillaPanelAnchor.TooltipBody) return null;
         if (!PanelViews.TryGetValue(site, out var view) || view == null || !view.Live) return null;
-        var donor = view.Inventory != null ? view.Inventory.SelfSortButton : null;
+        var donor = view.ButtonDonor;
         if (!Alive(donor) || !Alive(view.CaptionDonor)) return null;
 
         GameObject? clone = null;
         try
         {
-            clone = CloneButton(donor!.gameObject, host.GameObject!);
+            clone = CloneButton(donor!, host.GameObject!);
             if (clone == null) return null;
             clone.name = host.Name + "-button";
 
             // Buttons stack before rows in a column; in an inline group there are only buttons.
             clone.transform.SetSiblingIndex(host.Buttons.Count);
-            var size = DonorButtonSize(view);
+            var size = host.ButtonSize;
             var rt = clone.GetComponent<RectTransform>();
             if (rt != null)
             {
@@ -1042,7 +1346,7 @@ internal sealed partial class UnityUiRuntime
                 if (!g.IsEmpty) gridTop = g.YMax;
             }
 
-            var size = DonorButtonSize(view);
+            var size = host.ButtonSize;
             float width = Mathf.Max(size.x, host.WidestButton());
             float spacing = GroupSpacing(host.Transform, VanillaPanelPlacement.DefaultSpacing);
             var column = VanillaPanelPlacement.ColumnSize(buttons, rows < 0 ? 0 : rows, width, size.y, RowHeightOf(view), spacing);
@@ -1071,21 +1375,44 @@ internal sealed partial class UnityUiRuntime
         // Measuring before the group has laid us out reads a default rect and would hide the
         // buttons for good (review of P6, finding 2).
         var group = host.Transform != null ? host.Transform.parent : null;
-        float groupSpacing = GroupSpacing(group, VanillaPanelPlacement.DefaultSpacing);
-        try
+        if (host.Mode == InlineMode.Positioned)
         {
-            var element = host.GameObject!.GetComponent<LayoutElement>();
-            float want = host.InlineWidth(groupSpacing);
-            if (element != null && Mathf.Abs(element.preferredWidth - want) > 0.5f) element.preferredWidth = want;
-            var groupRt = group != null ? group.TryCast<RectTransform>() : null;
-            if (groupRt != null) LayoutRebuilder.ForceRebuildLayoutImmediate(groupRt);
+            PlacePositioned(host, group);
         }
-        catch { /* */ }
+        else
+        {
+            // A group member asks for its width; a grid cell is sized by the grid (the width ask is
+            // ignored there). Either way the group lays out now, before anything is measured.
+            float groupSpacing = GroupSpacing(group, VanillaPanelPlacement.DefaultSpacing);
+            try
+            {
+                var element = host.GameObject!.GetComponent<LayoutElement>();
+                float want = host.InlineWidth(groupSpacing);
+                if (element != null && host.Mode == InlineMode.Group && Mathf.Abs(element.preferredWidth - want) > 0.5f)
+                    element.preferredWidth = want;
+                var groupRt = group != null ? group.TryCast<RectTransform>() : null;
+                if (groupRt != null) LayoutRebuilder.ForceRebuildLayoutImmediate(groupRt);
+            }
+            catch { /* */ }
+        }
 
         var panelSpace = view.Panel!.transform;
         var panelLocal = RectIn(panelSpace, panelRt);
         var ours = RectIn(panelSpace, host.Rect);
         if (ours.IsEmpty || panelLocal.IsEmpty) return new VanillaFitResult(VanillaFit.Unknown, "pending");
+
+        // The frame is the window widened to the strip the group lives on (the container's title
+        // strip sits above its window rect).
+        FitScratchRects.Clear();
+        try
+        {
+            var a = group != null ? group.parent : null;
+            for (int depth = 0; a != null && depth < 8 && a.Pointer != panelSpace.Pointer; depth++, a = a.parent)
+                FitScratchRects.Add(RectIn(panelSpace, a.TryCast<RectTransform>()));
+        }
+        catch { /* the window rect alone is the frame */ }
+        var frame = VanillaPanelPlacement.InlineFrame(panelLocal, FitScratchRects);
+        FitScratchRects.Clear();
 
         FitScratch.Clear();
         if (group != null)
@@ -1098,9 +1425,41 @@ internal sealed partial class UnityUiRuntime
             }
         }
 
-        var inline = VanillaPanelPlacement.CheckInline(ours, panelLocal, FitScratch);
+        var inline = VanillaPanelPlacement.CheckInline(ours, frame, FitScratch);
         FitScratch.Clear();
         return inline;
+    }
+
+    private static readonly List<UiRect> FitScratchRects = new();
+
+    /// <summary>
+    /// A positioned row (<see cref="InlineMode.Positioned"/>): as wide as its buttons, as tall as one
+    /// of them, right after the group's last visible member before it (the rename button), by the
+    /// group's spacing, on that member's row. In the group's own units; the container is anchored at
+    /// the group's pivot, so its anchored position is a point in those units.
+    /// </summary>
+    private static void PlacePositioned(PanelContainerWidget host, Transform? group)
+    {
+        try
+        {
+            var rt = host.Rect;
+            if (rt == null || group == null) return;
+            float width = host.InlineWidth(GroupSpacing(host.Transform, VanillaPanelPlacement.DefaultSpacing));
+            float height = host.ButtonSize.y;
+            int before = VanillaPanelAnchors.LastVisibleBefore(new TransformNode(group), host.Transform!.GetSiblingIndex());
+            var reference = before >= 0
+                ? RectIn(group, group.GetChild(before).TryCast<RectTransform>())
+                : RectIn(group, group.TryCast<RectTransform>());
+            if (reference.IsEmpty && before < 0) return;
+            float gap = VanillaPanelAnchors.PositionedSpacing(GroupSpacing(group, 0f));
+            var place = VanillaPanelPlacement.PlaceAfter(reference, gap, width, height);
+            var pos = new Vector2(place.X, place.Y);
+            var size = new Vector2(place.Width, place.Height);
+            if ((rt.anchoredPosition - pos).sqrMagnitude > 0.01f) rt.anchoredPosition = pos;
+            if ((rt.sizeDelta - size).sqrMagnitude > 0.01f) rt.sizeDelta = size;
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+        }
+        catch { /* measured as it is; the check below decides */ }
     }
 
     /// <summary>
@@ -1134,6 +1493,70 @@ internal sealed partial class UnityUiRuntime
     // ------------------------------------------------------------------ diagnostics
 
     /// <summary>
+    /// Every tracked vanilla attachment for <c>ui_read panels</c> (<c>attached</c>): the handle's
+    /// state (<see cref="VanillaAttachReadback.Describe"/>), the last word on its anchor
+    /// (<c>anchorStatus</c>: <c>ok host=... mode=... donor=...</c> or <c>missing: ...</c>), and the
+    /// screen rects of the container and of each built button while they are shown. Main thread.
+    /// </summary>
+    internal static List<object?> DescribeAttachments()
+    {
+        var list = new List<object?>();
+        foreach (var handle in VanillaAttachRegistry.Snapshot())
+        {
+            Dictionary<string, object?> d;
+            VanillaAttachReadback rb;
+            try
+            {
+                rb = handle.Readback();
+                d = rb.Describe();
+            }
+            catch (Exception e)
+            {
+                list.Add(new Dictionary<string, object?> { ["error"] = e.Message });
+                continue;
+            }
+
+            if (VanillaUiSites.IsPanel(rb.Site))
+            {
+                d["anchorStatus"] = VanillaSiteHealth.IsAbsent(rb.Site) ? "absent"
+                    : AnchorStatus.TryGetValue((rb.Site, rb.Anchor), out var s) ? s
+                    : "not resolved yet (the window has not been open with this anchor attached)";
+                if (PanelViews.TryGetValue(rb.Site, out var view) && view.Live)
+                    d["donor"] = view.DonorSource.Length > 0 ? view.DonorSource : "<none>";
+            }
+
+            object? rect = null;
+            try
+            {
+                if (rb.Container is PanelContainerWidget pc && pc.Alive && pc.GameObject!.activeInHierarchy && pc.Rect != null)
+                    rect = RectDict(ScreenRectOf(pc.Rect));
+            }
+            catch { /* */ }
+            d["rect"] = rect;
+
+            if (d["buttons"] is List<object?> buttons)
+            {
+                for (int i = 0; i < buttons.Count && i < rb.Buttons.Length; i++)
+                {
+                    if (buttons[i] is not Dictionary<string, object?> b) continue;
+                    object? brect = null;
+                    try
+                    {
+                        if (rb.Buttons[i] is PanelButtonWidget pb && pb.Alive && pb.Rect != null && pb.Rect.gameObject.activeInHierarchy)
+                            brect = RectDict(ScreenRectOf(pb.Rect));
+                    }
+                    catch { /* */ }
+                    b["rect"] = brect;
+                }
+            }
+
+            list.Add(d);
+        }
+
+        return list;
+    }
+
+    /// <summary>
     /// One line per site and process naming what is actually there: the hierarchy, the layout
     /// components and the rects are serialized data the offline research cannot read. This is the
     /// line the first live acceptance run reads.
@@ -1158,9 +1581,10 @@ internal sealed partial class UnityUiRuntime
                 + " parent=" + (parent != null ? SafeObjectName(parent.gameObject) : "<none>")
                 + " parentGroup=" + (parent != null && parent.GetComponent<LayoutGroup>() != null)
                 + Describe("grid", view.Grid)
-                + Describe("sort", view.Inventory != null ? view.Inventory.SelfSortButton : null)
-                + Describe("bar", view.Inventory != null ? view.Inventory.BottomBarButtonsParent : null)
-                + Describe("renameGroup", view.RenameGroup)
+                + Describe("sort", view.Sort != null ? view.Sort.transform : null) + (view.Sort != null ? "{" + view.SortSource + "}" : "")
+                + Describe("donor", view.ButtonDonor != null ? view.ButtonDonor.transform : null) + (view.ButtonDonor != null ? "{" + view.DonorSource + "}" : "")
+                + Describe("bar", view.Bar) + (view.Bar != null ? "{" + LayoutOf(view.Bar) + "}" : "")
+                + Describe("renameGroup", view.RenameGroup) + (view.RenameGroup != null ? "{" + view.RenameSource + "}" : "")
                 + Describe("caption", view.CaptionDonor)
                 + Describe("body", view.BodyDonor)
                 + (view.Tooltip != null ? Describe("tooltipFrame", view.Tooltip.DescriptionFrame != null ? view.Tooltip.DescriptionFrame.transform : null) : "")
@@ -1180,18 +1604,27 @@ internal sealed partial class UnityUiRuntime
         private GameObject? _go;
         private UiDestroyVerdict _verdict = UiDestroyVerdict.Failed;
 
-        internal PanelContainerWidget(GameObject go, VanillaUiSite site, VanillaPanelAnchor anchor, bool hostLaidOut)
+        internal PanelContainerWidget(
+            GameObject go, VanillaUiSite site, VanillaPanelAnchor anchor, bool hostLaidOut, InlineMode mode, Vector2 buttonSize)
         {
             _go = go;
             Site = site;
             Anchor = anchor;
             HostLaidOut = hostLaidOut;
+            Mode = mode;
+            ButtonSize = buttonSize;
             Name = SafeObjectName(go);
         }
 
         internal VanillaUiSite Site { get; }
 
         internal VanillaPanelAnchor Anchor { get; }
+
+        /// <summary>How an inline container joined its group (<see cref="InlineMode.None"/> for columns and the tooltip).</summary>
+        internal InlineMode Mode { get; }
+
+        /// <summary>One button's size in this container (its minimum width before the caption widens it).</summary>
+        internal Vector2 ButtonSize { get; }
 
         /// <summary>The vanilla parent has a vertical layout group (the tooltip rule).</summary>
         internal bool HostLaidOut { get; }
@@ -1303,6 +1736,11 @@ internal sealed partial class UnityUiRuntime
         }
 
         internal LayoutElement? Element { get; set; }
+
+        internal RectTransform? Rect
+        {
+            get { try { return UnityUiRuntime.Alive(_go) ? _go!.GetComponent<RectTransform>() : null; } catch { return null; } }
+        }
 
         /// <summary>Donor width, or the caption at full size plus the padding, whichever is wider.</summary>
         internal float PreferredWidth { get; private set; }

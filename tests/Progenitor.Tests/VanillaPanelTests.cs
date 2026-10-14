@@ -656,6 +656,62 @@ public class VanillaPanelTests : IDisposable
         h.Dispose();
     }
 
+    // ---------------------------------------------------------------- ui_read readback
+
+    private static Dictionary<string, object?> ReadbackOf(IVanillaAttachHandle h) =>
+        VanillaAttachRegistry.Snapshot().Single(x => ReferenceEquals(x, h)).Readback().Describe();
+
+    [Fact]
+    public void The_readback_says_why_nothing_is_drawn_and_what_is_once_attached()
+    {
+        // ui_read panels lists every attachment under "attached": a bridge test reads whether the
+        // window is open, whether a container exists, why not, and each button's state.
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        left.Button("Deposit");
+        left.Row("status");
+
+        var closed = ReadbackOf(left);
+        Assert.Equal("ContainerPanel", closed["site"]);
+        Assert.Equal("LeftEdge", closed["anchor"]);
+        Assert.Equal(false, closed["open"]);
+        Assert.Equal(false, closed["attached"]);
+        Assert.Equal("site", closed["withheld"]);
+
+        // The window opens without a button donor: the plan withholds the container and says why.
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest(), donor: false));
+        var noDonor = ReadbackOf(left);
+        Assert.Equal(true, noDonor["open"]);
+        Assert.Equal(false, noDonor["attached"]);
+        Assert.Equal("donor", noDonor["withheld"]);
+
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        var open = ReadbackOf(left);
+        Assert.Equal(true, open["attached"]);
+        Assert.Equal(true, open["shown"]);
+        Assert.Equal("", open["withheld"]);
+        Assert.Equal("ok", open["fit"]);
+        var button = Assert.IsType<Dictionary<string, object?>>(Assert.Single((List<object?>)open["buttons"]!));
+        Assert.Equal("Deposit", button["caption"]);
+        Assert.Equal(true, button["built"]);
+        Assert.Equal(true, button["shown"]);
+        Assert.Equal(new List<string> { "status" }, open["rows"]);
+        left.Dispose();
+    }
+
+    [Fact]
+    public void The_readback_names_a_missing_anchor_group_as_container()
+    {
+        _client.RefuseAnchors.Add(VanillaPanelAnchor.BesideRename);
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        rename.Button("Locate");
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        var d = ReadbackOf(rename);
+        Assert.Equal(true, d["open"]);
+        Assert.Equal(false, d["attached"]);
+        Assert.Equal("container", d["withheld"]);
+        rename.Dispose();
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime

@@ -149,6 +149,12 @@ internal static class VanillaAttachRegistry
         get { lock (Gate) return _heartbeat != null; }
     }
 
+    /// <summary>The tracked attachments, copied under the lock (the <c>ui_read panels</c> readback).</summary>
+    internal static VanillaAttachHandle[] Snapshot()
+    {
+        lock (Gate) return Live.ToArray();
+    }
+
     /// <summary>One grep line for <c>Ui.DescribePins</c>.</summary>
     internal static string Describe()
     {

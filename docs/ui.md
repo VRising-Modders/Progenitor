@@ -1304,7 +1304,7 @@ The container is parented into the vanilla tree, so it is **not** under `progeni
 
 ## Vanilla panel sites (P6)
 
-The same `Ui.AttachToVanilla`, pointed at the game's interaction windows: the storage container, the crafting and refinement stations, the player inventory, the castle heart and the item tooltip. Each site reports **open, close and which entity the window shows**, and hosts buttons and rows that are clones of the game's own, so a mod's controls read as part of the window. Experimental: source-checked against the game's metadata, built and game-free tested; **nothing here has run on a client yet** (see the live acceptance procedure below).
+The same `Ui.AttachToVanilla`, pointed at the game's interaction windows: the storage container, the crafting and refinement stations, the player inventory, the castle heart and the item tooltip. Each site reports **open, close and which entity the window shows**, and hosts buttons and rows that are clones of the game's own, so a mod's controls read as part of the window. Experimental. Open, close and the target were seen live on game build 1.1.13.0 (a chest, 2026-10-14). The buttons and rows were not: on that run no button was drawn, because the donor the first design cloned (`InventorySubMenu.SelfSortButton`) is empty in the shipped prefab. The anchors and donors below are rebuilt from the prefabs this build ships: **built, game-free tested, not live-verified** (see the live acceptance procedure below).
 
 ```csharp
 using Progenitor.Ui;
@@ -1336,6 +1336,20 @@ ctx.Track(tip.OnPanel(e => tip.SetRows(new[] { "In storage: " + CountInStorage(e
 
 `ThronePanel` and `CastleHeartPanel` are the same value. The throne has no window of its own on this build (sitting on it is the `UseThrone` interaction); the castle list and the blood essence fuel live in the castle heart window, so both names address it.
 
+### Anchors on game build 1.1.13.0
+
+Read from the UI prefabs the game ships, not from a live run. Two serialized fields the first design used are empty on this build, so each anchor has a fallback (`VanillaPanelAnchors`, game-free tested against a fake hierarchy of these prefabs in `VanillaPanelAnchorsTests`). Status of every row: **built, game-free tested, not live-verified**.
+
+| Site, anchor | Host (where the container goes) | How it joins | Button size |
+|---|---|---|---|
+| any panel, button donor | the inventory bottom bar (`BottomBarButtonsParent`, object `ButtonsLayoutNew`): the first live of `SelfSortButton` (empty on this build), `AllSortButton` (object `SortButtonNew`), `SmartMergeButton`, `SmartTakeButton`, `DropAllButton`, then any button on the bar | cloned, icon hidden, captioned | the bar button: 116x36 |
+| `ContainerPanel` `LeftEdge` / `RightEdge`, `StationPanel` and `CastleHeartPanel` edges | the window's parent (`MenuParent`, a horizontal group that does not size its children) | `column`: ignored by the group, placed 8 units outside the frame | 116x36, widened to the caption |
+| `ContainerPanel` `BesideRename` | `OpenTagEditButtonParent` when set; on this build it is empty, so the rename button's own parent (`ButtonLayoutParent`: a 24x24 right-aligned group beside the window title that keeps its children's widths) | `after`: ignored by the group and placed after the rename button on the title row, 8 units from it. Joining that group would push the rename button over the title. | the title row's 24 units high at the bar button's proportions (77x24), widened to the caption |
+| `InventoryPanel` `BesideSort` | the bar, after the sort control: `SelfSortButton` when set, else `AllSortButton` (the only sort button on this build), else a bar button named like sort | `grid`: one more cell of the bar's grid (116x36 cells, 8 apart), right after the sort button; the grid moves the two buttons after it one cell right | the cell, 116x36. Several buttons in one handle share the cell; use one button per `BesideSort` handle |
+| `InventoryTooltip` `TooltipBody` | `FakeTooltip.DescriptionFrame`'s parent (a vertical group) | `tooltip`: the last line of the text column | rows only |
+
+The inventory bar holds four game buttons. A fifth cell (one `BesideSort` handle) spans 612 of the inventory's 620 units and fits; a second plugin's cell would overflow the window, so it is hidden with `hidden reason=overflow:<name>`.
+
 An anchor a site does not list gives a disabled handle and one line: `Ui: attach InventoryPanel anchor LeftEdge is not an anchor this site accepts; returning a disabled handle.`
 
 ### API
@@ -1346,7 +1360,7 @@ An anchor a site does not list gives a disabled handle and one line: `Ui: attach
 | `handle.OnPanel(Action<VanillaPanelEvent>)` → `IDisposable` | `Opened`, `TargetChanged`, `Closed`, with `Target` and `Previous`. Runs on the main thread inside the site's frame watch, **before** the frame's rows and buttons are synchronized, so a `SetRows` from the handler shows on the same frame. Subscribing while the window is open delivers `Opened` at once (a hot reload with a chest open). A handler that throws is logged and the frame continues. |
 | `handle.IsOpen`, `handle.Target`, `handle.Anchor` | The current state, readable any time. |
 | `handle.Visible` | The plugin's wish, kept across close and reopen. The container is drawn only while the window is open, attached and the placement fits, and then only if this is true. |
-| `handle.Button(caption)` → `IUiButton` | A clone of the game's own inventory bar button (its art and its hover and press transitions; the icon and any donor label switched off), captioned with a clone of the label of the inventory's own tab buttons (font, material, color, size) and **sized to its caption** with the game's padding (never narrower than the bar button). Addressed by position like a row and **kept across close and reopen**: the caption, `Visible` and the Bootstrap click slot live on the handle, and each rebuilt clone is rewired to the same slot. One click handler per button, as every `IUiButton`: a later `OnClick` replaces the earlier one. A clone that cannot be wired is destroyed and logged rather than shown dead. Disabled on the map card and on the tooltip site. |
+| `handle.Button(caption)` → `IUiButton` | A clone of the game's own inventory bar button (the donor row of the [anchor table](#anchors-on-game-build-11130); its art and its hover and press transitions, the icon and any donor label switched off), captioned with a clone of the label of the inventory's own tab buttons (font, material, color, size) and **sized to its caption** with the game's padding (never narrower than the bar button). Addressed by position like a row and **kept across close and reopen**: the caption, `Visible` and the Bootstrap click slot live on the handle, and each rebuilt clone is rewired to the same slot. One click handler per button, as every `IUiButton`: a later `OnClick` replaces the earlier one. A clone that cannot be wired is destroyed and logged rather than shown dead. Disabled on the map card and on the tooltip site. |
 | `handle.Row(text)` / `SetRows(...)` | Rows in an edge column (under the buttons) and the tooltip line, cloned from the game's body text (the tooltip's `Description`) unchanged. Inline anchors take buttons only: a text row inside a button bar would read as a broken button. |
 | `VanillaPanelTarget` | `Kind`, `EntityIndex` / `EntityVersion` (client world), the target's `NetworkId` as `NetworkId0` (`Normal_Index`), `NetworkId1` (`Normal_Generation`, padding cleared) and `NetworkId2` (the id type: 1 for every placed container, station and heart), with `NetworkIdIndex` / `NetworkIdGeneration` as shorthands; `ItemGuid` / `ItemAmount` (tooltip); `HasEntity`, `HasNetworkId`, `ToString()` → `kind=Container entity=812:3 net=40:1`. The id is read only when the interop's `NetworkId` is the 12 bytes the read assumes. |
 
@@ -1397,8 +1411,8 @@ How the server resolves: the game keeps its own network id map (`NetworkIdSystem
 
 These are the rules the code applies (`VanillaPanelPlacement`, tested at 1920x1080, 2560x1440 and 3840x2160). The game's HUD scaler matches height to a 1920x1080 reference, so the three resolutions lay out the same canvas and the rules are written in canvas units.
 
-1. **Inline anchors join the game's own button group.** `BesideSort` puts our buttons into `InventorySubMenu.BottomBarButtonsParent` right after `SelfSortButton`; `BesideRename` into `ContainerSubMenu.OpenTagEditButtonParent` right after `OpenTagEditButton`. The vanilla layout group sizes and spaces them exactly like its own buttons, which is the only way to line up with the game at every resolution. Our container asks for its buttons' caption-fitted widths plus the group's spacing and copies the donor's flexible width. This is a deliberate exception to the map card's sibling rule: the container is a child of a vanilla group, so the group reflows when we come and when we go, and nothing vanilla needs restoring (destroying our container is the whole undo).
-2. **The check runs after the game has laid them out.** The group is rebuilt (`LayoutRebuilder.ForceRebuildLayoutImmediate`) before anything is measured; a rect that still cannot be measured is "not yet", which never hides anything and is asked again the next frame. Then every button in the group must lie inside the window's frame and ours must cover no vanilla button. A bar that does not shrink its children would push the buttons past the frame; then ours is hidden (the group reflows back) with one line, `hidden reason=overflow:<name>`, and that verdict stands until the window is closed and reopened.
+1. **Inline anchors go where the group's own controls are, the way the group allows.** The host group decides (`VanillaPanelAnchors.PlanInline`): a **grid** (the inventory bar on this build) takes our container as one more cell right after the reference control, so the grid sizes and spaces it exactly like its own buttons; a horizontal group that **sizes its children** takes it as one more member asking for its caption-fitted width (the donor's flexible width copied); any other group (the rename group on this build, fixed-size and keeping its children's widths) gets a container that it ignores, **placed after** its last visible member on that member's row, by the group's spacing (8 units when it has none), at the row's height. In the first two cases the group reflows when we come and when we go; in the third nothing vanilla moves. Destroying our container is the whole undo.
+2. **The check runs after layout.** A joined group is rebuilt (`LayoutRebuilder.ForceRebuildLayoutImmediate`) before anything is measured; a rect that still cannot be measured is "not yet", which never hides anything and is asked again the next frame. Then every member of the group must lie inside the frame and ours must cover no vanilla member. The frame is the window's rect widened to the strip the group lives on: the first ancestor of the group at least 90% as wide as the window (the container's title strip sits above its window rect; the inventory bar's body is the window). A bar that does not shrink its children can push buttons past the frame; then ours is hidden (the group reflows back) with one line, `hidden reason=overflow:<name>`, and that verdict stands until the window is closed and reopened.
 3. **Edge columns sit outside the frame.** `EdgeGap` (8 canvas units) from the window's left or right frame edge, top-aligned with the window's item grid (`EquipmentItemsParent` for a container, `RecipesParent` for a station; the frame top for the castle heart), one button per line, the column as wide as the widest caption-fitted button, with the inventory bar's spacing; rows follow the buttons. The column is ignored by any vanilla layout group (`LayoutElement.ignoreLayout`), so no vanilla element moves.
 4. **A column that does not fit is not drawn.** If it would leave the canvas, or cover another window that is open at the same time (the player inventory beside a chest is checked as an obstacle), it is hidden with `hidden reason=offscreen` or `reason=overlap:<name>`, and shown again with `shown again` when it fits. There is no fallback position: a mod button floating somewhere else reads as bolted on. Use the other edge or `BesideRename` when one side is taken.
 5. **When placement is checked.** On every build, on a change of row or button count, of the target or of `Visible`, and otherwise once every 30 frames (which follows a resolution change and an edge column's obstacle going away). Nothing is measured every frame.
@@ -1412,11 +1426,40 @@ The mockups these rules were drawn from (rendered over a 1080p capture of the ch
 Two cases, kept apart so one plugin's missing piece never takes a site away from another:
 
 - **The resolver fails** (a member the game removed or renamed throws when it is touched): the site is **absent** for the Core generation, for every plugin, with one line. `pin-diag Ui` lists it as `missing=<Site>:<what>`.
-- **A piece is missing** (a donor, an anchor's button group): one line per site and piece, and only what needs the piece is withheld — a handle whose anchor group is gone gets no container (and says so once), while the site keeps resolving, still reports `Opened` and `Closed`, and every other anchor and plugin keeps working. A missing button donor withholds the buttons and rows for that frame, not for the session.
+- **A piece is missing** (a donor, an anchor's button group): one warning per site and piece naming every field that was tried, and only what needs the piece is withheld — a handle whose anchor group is gone gets no container (and says so once), while the site keeps resolving, still reports `Opened` and `Closed`, and every other anchor and plugin keeps working. A missing button donor withholds the buttons and rows for that frame, not for the session. `ui_read panels` shows the same thing per attachment (`withheld`, `anchorStatus`, [below](#reading-attachments-over-the-bridge)).
 
 ```
-Ui: site ContainerPanel not found (anchor rename); what needs it stays hidden until the game provides it.
+Ui: site ContainerPanel not found (anchor rename: ContainerSubMenu.OpenTagEditButtonParent and OpenTagEditButton); what needs it stays hidden until the game provides it.
+Ui: site InventoryPanel not found (anchor sort: InventorySubMenu.SelfSortButton, AllSortButton and a sort button on BottomBarButtonsParent); what needs it stays hidden until the game provides it.
+Ui: site ContainerPanel not found (button donor: InventorySubMenu.SelfSortButton/AllSortButton/SmartMergeButton/SmartTakeButton/DropAllButton and the BottomBarButtonsParent buttons are all missing); what needs it stays hidden until the game provides it.
 ```
+
+When an anchor is found, one info line per site and anchor names where it went (again only when that changes):
+
+```
+Ui: site ContainerPanel anchor=rename ok host=ButtonLayoutParent mode=after group=OpenTagEditButton.parent donor=AllSortButton button=77x24
+Ui: site InventoryPanel anchor=sort ok host=ButtonsLayoutNew mode=grid sort=AllSortButton donor=AllSortButton button=116x36
+Ui: site ContainerPanel anchor=left ok host=MenuParent mode=column donor=AllSortButton button=116x36
+```
+
+The `Ui: attached <Site> ... layout=` line says `column`, `group` (every inline mode) or `tooltip`; the `anchor=... ok` line above names the inline mode (`grid`, `group`, `after`).
+
+### Reading attachments over the bridge
+
+`ui_read {"what":"panels"}` (MCP `progenitor_ui_read`) returns, beside the shown panels, `attached`: one entry per `Ui.AttachToVanilla` handle, in every state, so a bridge test can check an attachment without a screenshot.
+
+| Field | Meaning |
+|---|---|
+| `site`, `anchor`, `plugin`, `container` | Which attachment (`container` is its GameObject name). |
+| `enabled`, `open`, `target` | Disabled handles are listed too. `open` and `target` are what `IsOpen` and `Target` say. |
+| `visible` | The plugin's `Visible` wish. |
+| `attached`, `shown` | A container exists under the vanilla window; it is active (fits and visible). |
+| `withheld` | Empty when attached. Else `site` (the window is closed), `donor` (no button donor), `container` (the anchor's group is missing: see `anchorStatus`) or `disabled`. |
+| `fit`, `fitReason` | `ok`, `blocked` or `unknown`, and the last `hidden reason=` word. |
+| `anchorStatus` | Panel sites: the last `ok host=... mode=... donor=... button=WxH` or `missing: <fields>`; `not resolved yet` before the window was open with this anchor attached; `absent` when the site's resolver failed. |
+| `donor` | The field the button donor came from while the window is open (`AllSortButton` on 1.1.13.0). |
+| `buttons[]` | `index`, `caption`, `wanted` (the button's `Visible`), `built`, `shown`, `rect`. |
+| `rows[]`, `rect` | The row texts; the container's rect while it is shown. Rects are screen pixels, origin bottom-left, like the panels' rects. |
 
 ### Release
 
@@ -1427,11 +1470,11 @@ Everything goes on dispose, `Ui.RemoveAll(owner)` and Core Uninstall, through th
 Run by the coordinator; not run for this change. Uses `samples/Progenitor.PanelsExample` (both sides: the client attaches the panels, the server only answers the `Locate` request; nothing moves an item).
 
 1. Build and deploy Core and the example to the test client and the isolated test server (`progenitor_build`, then `progenitor_deploy` with side both and `Progenitor.PanelsExample`), join the isolated test server, and confirm `Panels example: loaded (tooltip enabled=True)` in the client log and `Panels example: loaded (server: resolve handler)` in the server log.
-2. In a castle, open a chest, a workstation, a furnace, the castle heart and the character inventory in turn (walk up and interact; this needs the game window, so it is an authorized foreground step), closing each before the next.
-3. For each window, read the client log once (`progenitor_logs`, filter `Ui: site|Ui: attached|Ui: panel|Panels example|hidden reason|not found`) and expect, in order:
-   - `Ui: site <Site> panel=<name>(x,y wxh) parent=<name> ... grid=... sort=... bar=...` once per site (the rects for the placement check);
+2. In a castle, open a chest, a workstation, a furnace, the castle heart and the character inventory in turn, closing each before the next. Without focus: stand within about 1.7 m (`teleport`) and use `bot {"action":"interact","entity":"<i>:<v>"}` on the client entity ([bot interaction](bridge-ops-client.md#bot-interaction)); otherwise walk up and interact (an authorized foreground step).
+3. For each window, read `ui_read {"what":"panels"}` once: every example handle of that site has `open: true`, `attached: true`, `shown: true`, `withheld: ""`, `fit: "ok"`, its one button `built: true, shown: true` with a `rect`, and an `anchorStatus` starting `ok` that matches the [anchor table](#anchors-on-game-build-11130). Then read the client log once (`progenitor_logs`, filter `Ui: site|Ui: attached|Ui: panel|Panels example|hidden reason|not found`) and expect, in order:
+   - `Ui: site <Site> panel=<name>(x,y wxh) parent=<name> ... grid=... sort=...{AllSortButton} donor=...{AllSortButton} bar=ButtonsLayoutNew(...)[group]{Grid} renameGroup=ButtonLayoutParent(...)[group]{OpenTagEditButton.parent} ...` once per site (`sort` and `renameGroup` only where the window has them);
    - `Ui: panel <Site> opened kind=<Kind> entity=<i>:<v> net=<n>:<g> plugin=progenitor.panelsexample` and `Panels example: <Site> <Anchor> Opened kind=...` — the net index is non-zero for a placed building;
-   - `Ui: attached <Site> anchor=<left|right|rename|sort> fit=ok buttons=1 ... layout=<column|group>`; a `hidden reason=...` line instead names the rule that refused it;
+   - `Ui: site <Site> anchor=<left|right|rename|sort> ok host=... mode=...` once per anchor, then `Ui: attached <Site> anchor=<...> fit=ok buttons=1 ... layout=<column|group>`; a `hidden reason=...` line instead names the rule that refused it; no `not found` line;
    - on close, `Ui: panel <Site> closed ...` and `Panels example: <Site> <Anchor> Closed ...`.
 4. Capture each open window with the focus-free capture tool (`progenitor_capture`) at 1920x1080, then at 2560x1440 and 3840x2160 if the client can be switched: the buttons must sit on the bar or beside the frame as described above, in the game's art, not overlapping or clipped. Compare with the mockup.
 5. Click each example button once (foreground step): one `Panels example: click <Site> <Anchor> '<caption>' kind=...` line each.

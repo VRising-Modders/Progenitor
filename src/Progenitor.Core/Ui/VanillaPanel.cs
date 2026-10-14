@@ -25,15 +25,17 @@ public enum VanillaPanelAnchor
     RightEdge = 2,
 
     /// <summary>
-    /// Mod buttons inside the vanilla button group that holds the panel's rename button, right after
-    /// it. The game's own layout group sizes and spaces them, which is what makes them line up with
-    /// the vanilla buttons at every resolution.
+    /// Mod buttons in the title row, right after the panel's rename button. On game build 1.1.13.0
+    /// the rename button's group is a fixed 24-unit group beside the window title that does not size
+    /// its children, so the buttons are placed after it on its row (title-row height, the bar
+    /// button's art) rather than joined to it, which would push the rename button over the title.
     /// </summary>
     BesideRename = 3,
 
     /// <summary>
-    /// Mod buttons inside the inventory's bottom button bar, right after the sort button. The bar's
-    /// own layout group sizes and spaces them.
+    /// Mod buttons in the inventory's bottom button bar, right after the sort button. On game build
+    /// 1.1.13.0 the bar is a grid of 116x36 cells; the container is one more cell, sized and spaced by
+    /// the grid like the game's own buttons (one button per cell reads best: several buttons share it).
     /// </summary>
     BesideSort = 4,
 
@@ -477,6 +479,44 @@ internal static class VanillaPanelPlacement
 
         return new VanillaFitResult(VanillaFit.Fits, "ok", ours);
     }
+
+    /// <summary>
+    /// A positioned inline container: right of <paramref name="reference"/> (the group's last
+    /// visible member, or the group itself when it has none) by <paramref name="spacing"/>, centered
+    /// on its row. All in the group's local units.
+    /// </summary>
+    internal static UiRect PlaceAfter(in UiRect reference, float spacing, float width, float height)
+    {
+        float sp = spacing < 0 ? 0 : spacing;
+        float centerY = reference.Y + reference.Height * 0.5f;
+        return new UiRect(reference.XMax + sp, centerY - height * 0.5f, width, height);
+    }
+
+    /// <summary>
+    /// The frame an inline container must stay inside: the window's own rect, widened to the first
+    /// ancestor of the vanilla group (nearest first) that is at least <see cref="FrameWidthShare"/>
+    /// of the window's width. That ancestor is the strip the group lives on: the title strip of a
+    /// container sits above its window's rect (so the rename group is outside the window rect and
+    /// inside the strip), while the inventory's bottom bar lives on a body as wide as the window.
+    /// Narrower ancestors (the title text, the 24-unit rename group) are not frames.
+    /// </summary>
+    internal static UiRect InlineFrame(in UiRect panel, IReadOnlyList<UiRect>? ancestors)
+    {
+        if (panel.IsEmpty || ancestors == null) return panel;
+        for (int i = 0; i < ancestors.Count; i++)
+        {
+            var a = ancestors[i];
+            if (a.IsEmpty || a.Width < panel.Width * FrameWidthShare) continue;
+            return UiRect.FromMinMax(
+                Math.Min(panel.X, a.X), Math.Min(panel.Y, a.Y),
+                Math.Max(panel.XMax, a.XMax), Math.Max(panel.YMax, a.YMax));
+        }
+
+        return panel;
+    }
+
+    /// <summary>How wide an ancestor must be, against the window, to count as the group's frame.</summary>
+    internal const float FrameWidthShare = 0.9f;
 
     /// <summary>The tooltip line is only placed into a column the game lays out.</summary>
     internal static VanillaFitResult CheckTooltip(bool parentHasVerticalLayout) =>
