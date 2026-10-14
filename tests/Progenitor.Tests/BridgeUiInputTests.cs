@@ -445,8 +445,36 @@ public sealed class BridgeUiInputTests : IDisposable
     public void A_first_click_keeps_the_kits_select_all_and_only_a_later_click_places_the_caret()
     {
         string note = SourcePin.MethodBody(Driver(), "private static void NoteCaretClick(");
-        SourcePin.AssertUncommented(note, "UiCaretLines.ClickPlacesCaret(FieldId(FocusedArmedField()) == FieldId(field), SelectAllPendingFor(field))");
+        SourcePin.AssertUncommented(note, "UiCaretLines.ClickPlacesCaret(focusedAtPress != 0 && focusedAtPress == FieldId(field), SelectAllPendingFor(field))");
         SourcePin.AssertUncommented(SourcePin.MethodBody(Driver(), "private static void PlaceCaretClick("), "if (SelectAllPendingFor(field))");
+    }
+
+    [Fact]
+    public void The_focus_snapshot_is_taken_before_any_pointer_down_and_a_kit_field_is_left_to_the_kit()
+    {
+        string press = SourcePin.MethodBody(Driver(), "private static void Press(");
+        int snapshot = press.IndexOf("int focusedAtPress = FieldId(FocusedArmedField());", StringComparison.Ordinal);
+        int firstDown = press.IndexOf("OnPointerDown(ev)", StringComparison.Ordinal);
+        Assert.True(snapshot > 0 && firstDown > snapshot, "the focus snapshot comes before the first pointer-down dispatch");
+        SourcePin.AssertUncommented(press, "NoteCaretClick(top, ev.position, focusedAtPress);");
+        SourcePin.AssertUncommented(press, "if (IsKitField(press))");
+        string note = SourcePin.MethodBody(Driver(), "private static void NoteCaretClick(");
+        SourcePin.AssertNoStatementContaining(note, "FocusedArmedField()");
+    }
+
+    [Fact]
+    public void The_games_own_pointer_handlers_get_every_phase_through_an_il2cpp_class_test()
+    {
+        string driver = Driver();
+        string others = SourcePin.MethodBody(driver, "private static List<T> OtherHandlers<T>(");
+        SourcePin.AssertUncommented(others, "go.GetComponents(Il2CppInterop.Runtime.Il2CppType.Of<MonoBehaviour>())");
+        SourcePin.AssertUncommented(others, "c.TryCast<T>()");
+        foreach (var phase in new[] { "enter", "exit", "down", "up", "click", "init-drag", "begin-drag", "drag", "end-drag" })
+            SourcePin.AssertUncommented(SourcePin.MethodBody(driver, "private static int DispatchOther("), "case \"" + phase + "\":");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(driver, "private static string? ClickKindUp("), "kind = \"game-handler\";");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(driver, "private static void SendEnter("), "DispatchOther(go, ev, \"enter\")");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(driver, "private static void SendExit("), "DispatchOther(go, ev, \"exit\")");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(driver, "private static void ReleasePress("), "stun.OnPointerClick(ev);");
     }
 
     [Fact]

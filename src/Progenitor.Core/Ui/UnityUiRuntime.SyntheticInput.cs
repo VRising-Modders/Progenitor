@@ -363,6 +363,7 @@ internal sealed partial class UnityUiRuntime
         bool sent = false;
         try { var trigger = go.GetComponent<EventTrigger>(); if (trigger != null) { trigger.OnPointerEnter(ev); sent = true; } } catch { /* */ }
         try { var sel = go.GetComponent<Selectable>(); if (sel != null) { sel.OnPointerEnter(ev); sent = true; } } catch { /* */ }
+        if (DispatchOther(go, ev, "enter") > 0) sent = true;
         if (sent) Note("enter " + SafePath(go));
     }
 
@@ -372,6 +373,7 @@ internal sealed partial class UnityUiRuntime
         bool sent = false;
         try { var trigger = go.GetComponent<EventTrigger>(); if (trigger != null) { trigger.OnPointerExit(ev); sent = true; } } catch { /* */ }
         try { var sel = go.GetComponent<Selectable>(); if (sel != null) { sel.OnPointerExit(ev); sent = true; } } catch { /* */ }
+        if (DispatchOther(go, ev, "exit") > 0) sent = true;
         if (sent) Note("exit " + SafePath(go));
     }
 
@@ -381,7 +383,73 @@ internal sealed partial class UnityUiRuntime
     {
         try { if (go.GetComponent<EventTrigger>() != null) return true; } catch { /* */ }
         try { if (go.GetComponent<Selectable>() != null) return true; } catch { /* */ }
-        return false;
+        return OtherHandlers<IPointerDownHandler>(go).Count > 0;
+    }
+
+    /// <summary>A kit-armed text field (the kit owns its focus, caret and typing).</summary>
+    private static bool IsKitField(GameObject? go)
+    {
+        if (go == null) return false;
+        try
+        {
+            var field = go.GetComponent<TMP_InputField>();
+            return field != null && FindArmed(field) != null;
+        }
+        catch { return false; }
+    }
+
+    // ---- The game's own pointer handlers -----------------------------------------------------------
+    //
+    // Live 2026-10-14: the castle heart's Upgrade entry did not take a synthetic click. The game's UI also uses its own
+    // MonoBehaviours that implement the pointer interfaces themselves (GridSelectionEntry: OnPointerDown, OnPointerClick
+    // with OnLeftClicked, OnPointerEnter / Exit, drag), neither an EventTrigger nor a Selectable. The input module reaches
+    // them through ExecuteEvents, which calls every component of the object that implements the interface. The driver does
+    // the same without a generic ExecuteEvents call: each component of the object is tested against the interface with
+    // TryCast (the IL2CPP class test, not a managed `is`), and the interface method runs on the component.
+
+    /// <summary>The components of <paramref name="go"/> implementing <typeparamref name="T"/>, other than EventTrigger and Selectable (sent to by type).</summary>
+    private static List<T> OtherHandlers<T>(GameObject go) where T : Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase
+    {
+        var list = new List<T>();
+        try
+        {
+            var comps = go.GetComponents(Il2CppInterop.Runtime.Il2CppType.Of<MonoBehaviour>());
+            if (comps == null) return list;
+            for (int i = 0; i < comps.Length; i++)
+            {
+                var c = comps[i];
+                if (c == null) continue;
+                if (c.TryCast<EventTrigger>() != null || c.TryCast<Selectable>() != null || c.TryCast<ScrollRect>() != null) continue;
+                var h = c.TryCast<T>();
+                if (h != null) list.Add(h);
+            }
+        }
+        catch { /* an object mid-teardown has no handlers */ }
+
+        return list;
+    }
+
+    /// <summary>Send one pointer phase to the game's own handlers on <paramref name="go"/>; returns how many took it.</summary>
+    private static int DispatchOther(GameObject go, PointerEventData ev, string phase)
+    {
+        int n = 0;
+        try
+        {
+            switch (phase)
+            {
+                case "enter": foreach (var h in OtherHandlers<IPointerEnterHandler>(go)) { h.OnPointerEnter(ev); n++; } break;
+                case "exit": foreach (var h in OtherHandlers<IPointerExitHandler>(go)) { h.OnPointerExit(ev); n++; } break;
+                case "down": foreach (var h in OtherHandlers<IPointerDownHandler>(go)) { h.OnPointerDown(ev); n++; } break;
+                case "up": foreach (var h in OtherHandlers<IPointerUpHandler>(go)) { h.OnPointerUp(ev); n++; } break;
+                case "click": foreach (var h in OtherHandlers<IPointerClickHandler>(go)) { h.OnPointerClick(ev); n++; } break;
+                case "init-drag": foreach (var h in OtherHandlers<IInitializePotentialDragHandler>(go)) { h.OnInitializePotentialDrag(ev); n++; } break;
+                case "begin-drag": foreach (var h in OtherHandlers<IBeginDragHandler>(go)) { h.OnBeginDrag(ev); n++; } break;
+                case "drag": foreach (var h in OtherHandlers<IDragHandler>(go)) { h.OnDrag(ev); n++; } break;
+                case "end-drag": foreach (var h in OtherHandlers<IEndDragHandler>(go)) { h.OnEndDrag(ev); n++; } break;
+            }
+        }
+        catch (Exception e) { Note(phase + " to a game handler on " + SafePath(go) + " threw: " + e.Message); }
+        return n;
     }
 
     private static bool HasDragHandler(GameObject go)
@@ -391,7 +459,7 @@ internal sealed partial class UnityUiRuntime
         try { if (go.GetComponent<ScrollRect>() != null) return true; } catch { /* */ }
         try { if (go.GetComponent<Slider>() != null) return true; } catch { /* */ }
         try { if (go.GetComponent<TMP_InputField>() != null) return true; } catch { /* */ }
-        return false;
+        return OtherHandlers<IDragHandler>(go).Count > 0;
     }
 
     private static GameObject? FirstUp(GameObject? from, Func<GameObject, bool> has)
@@ -415,6 +483,8 @@ internal sealed partial class UnityUiRuntime
         while (t != null && guard++ < 64)
         {
             string? kind = ClickHandlerKind(t.gameObject);
+            // The game's own click handlers (GridSelectionEntry and the like), when no known kind is on the object.
+            if (kind == null && OtherHandlers<IPointerClickHandler>(t.gameObject).Count > 0) kind = "game-handler";
             if (kind != null)
             {
                 at = t.gameObject;
@@ -431,6 +501,10 @@ internal sealed partial class UnityUiRuntime
     {
         _synthPressButton = button;
         _synthPressAt = ev.position;
+        // Which kit field has the keyboard BEFORE anything is dispatched: a text field takes the keyboard in its own
+        // pointer-down, so a read after it would call a first click a click on a focused field (live 2026-10-14: the
+        // caret went to 0 and "type 40" gave "4020").
+        int focusedAtPress = FieldId(FocusedArmedField());
         try
         {
             ev.button = button;
@@ -461,11 +535,20 @@ internal sealed partial class UnityUiRuntime
         if (press != null)
         {
             try { press.GetComponent<EventTrigger>()?.OnPointerDown(ev); } catch { /* */ }
-            try { press.GetComponent<Selectable>()?.OnPointerDown(ev); } catch { /* */ }
+            // A kit text field is the kit's alone (read-only to TMP, an owned caret): it takes a press through the
+            // shown-input pump's click-to-focus, which selects its value on a first focus. TMP's own pointer-down would
+            // take the keyboard first and make that click look like a click on a focused field.
+            if (IsKitField(press)) Note("down on a kit field: left to the kit's click-to-focus");
+            else
+            {
+                try { press.GetComponent<Selectable>()?.OnPointerDown(ev); } catch { /* */ }
+            }
+
+            DispatchOther(press, ev, "down");
             Note("down " + button.ToString().ToLowerInvariant() + " " + SafePath(press));
         }
 
-        if (button == PointerEventData.InputButton.Left) NoteCaretClick(top, ev.position);
+        if (button == PointerEventData.InputButton.Left) NoteCaretClick(top, ev.position, focusedAtPress);
         _synthClickKind = ClickKindUp(top, out _synthClick);
         _synthDrag = FirstUp(top, HasDragHandler);
         _synthDragging = false;
@@ -481,7 +564,12 @@ internal sealed partial class UnityUiRuntime
         if (press != null && Alive(press))
         {
             try { press.GetComponent<EventTrigger>()?.OnPointerUp(ev); } catch { /* */ }
-            try { press.GetComponent<Selectable>()?.OnPointerUp(ev); } catch { /* */ }
+            if (!IsKitField(press))
+            {
+                try { press.GetComponent<Selectable>()?.OnPointerUp(ev); } catch { /* */ }
+            }
+
+            DispatchOther(press, ev, "up");
             Note("up " + SafePath(press));
         }
 
@@ -492,24 +580,64 @@ internal sealed partial class UnityUiRuntime
             if (nowClick != null && nowClick.GetInstanceID() == _synthClick.GetInstanceID())
             {
                 bool invoked;
-                if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger")
+                string? why = null;
+                if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger" && _synthClickKind != "game-handler")
                 {
-                    // Buttons, toggles and the game's buttons answer the left button only; a trigger on the same object takes any.
+                    // Buttons, toggles and the game's buttons answer the left button only; a trigger or a game handler on the
+                    // same object takes any (GridSelectionEntry has its own right and middle click actions).
                     var trigger = _synthClick.GetComponent<EventTrigger>();
                     invoked = false;
                     if (trigger != null)
                     {
                         try { trigger.OnPointerClick(ev); invoked = true; } catch { /* */ }
                     }
+
+                    if (DispatchOther(_synthClick, ev, "click") > 0) invoked = true;
+                    if (!invoked) why = "a " + _synthClickKind + " answers the left button only";
                 }
                 else if (_synthClickKind == "input")
                 {
-                    invoked = false;
-                    try { _synthClick.GetComponent<TMP_InputField>()?.OnPointerClick(ev); invoked = true; } catch { /* */ }
+                    invoked = true;
+                    if (IsKitField(_synthClick)) why = null; // the kit's click-to-focus took it at the press
+                    else
+                    {
+                        try { _synthClick.GetComponent<TMP_InputField>()?.OnPointerClick(ev); } catch { invoked = false; }
+                    }
                 }
-                else invoked = InvokePointerClick(_synthClick, _synthClickKind, ev);
+                else if (_synthClickKind == "game-handler")
+                {
+                    invoked = DispatchOther(_synthClick, ev, "click") > 0;
+                    if (!invoked) why = "the game handler threw or went away";
+                }
+                else if (_synthClickKind == "stun-button")
+                {
+                    // The game's own button: its own pointer-click, as the input module calls it (its sound, its submit
+                    // routine), not only its onClick list.
+                    invoked = false;
+                    try
+                    {
+                        var stun = _synthClick.GetComponent<ProjectM.UI.SimpleStunButton>();
+                        if (stun != null && stun.IsActive() && stun.IsInteractable())
+                        {
+                            stun.OnPointerClick(ev);
+                            invoked = true;
+                        }
+                    }
+                    catch (Exception e) { why = "the game's button threw: " + e.Message; }
 
-                Note("click " + _synthPressButton.ToString().ToLowerInvariant() + " " + SafePath(_synthClick) + (invoked ? "" : " (not taken)"));
+                    if (!invoked) why ??= ClickRefusal(_synthClick, _synthClickKind);
+                    if (DispatchOther(_synthClick, ev, "click") > 0) invoked = true;
+                }
+                else
+                {
+                    invoked = InvokePointerClick(_synthClick, _synthClickKind, ev);
+                    if (!invoked) why = ClickRefusal(_synthClick, _synthClickKind);
+                    // Unity sends a click to every handler of the object; the game's own ones too.
+                    if (DispatchOther(_synthClick, ev, "click") > 0) invoked = true;
+                }
+
+                Note("click " + _synthPressButton.ToString().ToLowerInvariant() + " " + SafePath(_synthClick) + " (" + _synthClickKind + ")"
+                    + (invoked ? "" : " not taken: " + (why ?? "the handler refused it")));
             }
             else Note("click dropped: released off " + SafePath(_synthClick));
         }
@@ -583,7 +711,22 @@ internal sealed partial class UnityUiRuntime
         }
         catch { /* */ }
 
+        DispatchOther(go, ev, phase);
         if (phase != "drag") Note(phase + " " + SafePath(go));
+    }
+
+    /// <summary>Why a known click handler did not take the click: inactive, not interactable, or gone.</summary>
+    private static string ClickRefusal(GameObject go, string kind)
+    {
+        try
+        {
+            var sel = go.GetComponent<Selectable>();
+            if (sel == null) return "no " + kind + " on the object any more";
+            if (!sel.IsActive()) return "the " + kind + " is not active";
+            if (!sel.IsInteractable()) return "the " + kind + " is not interactable (the game has it disabled now)";
+        }
+        catch (Exception e) { return "the " + kind + " could not be read: " + e.Message; }
+        return "the " + kind + " refused it";
     }
 
     private static void Note(string line)
@@ -833,7 +976,7 @@ internal sealed partial class UnityUiRuntime
     private static int _caretClickFrames;
 
     /// <summary>A press over a kit text field: once the click has focused it, its caret goes to the pressed character.</summary>
-    private static void NoteCaretClick(GameObject? top, Vector2 at)
+    private static void NoteCaretClick(GameObject? top, Vector2 at, int focusedAtPress)
     {
         _caretClickFieldId = 0;
         TMP_InputField? field = null;
@@ -847,8 +990,13 @@ internal sealed partial class UnityUiRuntime
 
         if (field == null || FindArmed(field) == null) return;
         // A first click focuses the field and the kit selects its whole value (FocusOwnedField); only a click on a field
-        // that already has the keyboard places the caret, as with the mouse.
-        if (!UiCaretLines.ClickPlacesCaret(FieldId(FocusedArmedField()) == FieldId(field), SelectAllPendingFor(field))) return;
+        // that had the keyboard before this press (the snapshot taken before any dispatch) places the caret.
+        if (!UiCaretLines.ClickPlacesCaret(focusedAtPress != 0 && focusedAtPress == FieldId(field), SelectAllPendingFor(field)))
+        {
+            Note("caret click: not placed (a first click keeps the field's select-all)");
+            return;
+        }
+
         _caretClickFieldId = FieldId(field);
         _caretClickAt = at;
         _caretClickFrames = 6;
