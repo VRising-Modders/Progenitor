@@ -145,6 +145,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialSourceRegistry.cs" Link="Linked\MaterialSourceRegistry.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialPlanner.cs" Link="Linked\MaterialPlanner.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialService.cs" Link="Linked\MaterialService.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialViewCache.cs" Link="Linked\MaterialViewCache.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialScope.cs" Link="Linked\MaterialScope.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialViewWire.cs" Link="Linked\MaterialViewWire.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialRows.cs" Link="Linked\MaterialRows.cs" />

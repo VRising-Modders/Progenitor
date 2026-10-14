@@ -5,6 +5,7 @@ using ProjectM;
 using ProjectM.CastleBuilding;
 using ProjectM.Network;
 using ProjectM.Shared;
+using ProjectM.Tiles;
 using Progenitor.Castles;
 using Progenitor.Ecs;
 using Progenitor.Inventory;
@@ -134,22 +135,88 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     }
 
     /// <summary>
-    /// Item types in the game's own shared storage at the standing plot: every container on that
-    /// castle that carries <c>CastleSharedInventory</c>, read through the inventory engine (discovery
-    /// only; the game's own aggregate on the heart is never read or written).
+    /// The game's own shared storage at the standing plot: every container on that castle that carries
+    /// <c>CastleSharedInventory</c> (discovery only; the game's own aggregate on the heart is never read
+    /// or written), listed by <see cref="ListShared"/> and kept per plot for <see cref="SharedListRefreshMs"/>;
+    /// the caller reads the contents fresh.
     /// </summary>
-    public void VanillaSharedItems(in MaterialContext context, ICollection<int> into)
+    public void VanillaSharedInventories(in MaterialContext context, ICollection<InventoryRef> into)
     {
-        var castle = CastleAt(context.StandingTerritory);
-        if (castle == null) return;
+        int territory = context.StandingTerritory;
+        if (territory < 0) return;
+        long now = Environment.TickCount64;
+        int epoch = Epoch;
+        if (!_shared.TryGetValue(territory, out var cached) || cached.Epoch != epoch || now - cached.Stamp >= SharedListRefreshMs)
+        {
+            var list = new List<InventoryRef>();
+            var castle = CastleAt(territory);
+            if (castle != null) ListShared(castle.Heart.ToEntity(), list);
+            cached = (epoch, now, list);
+            _shared[territory] = cached;
+        }
+        foreach (var inv in cached.List) into.Add(inv);
+    }
+
+    /// <summary>
+    /// How long a plot's shared-storage list is kept (the contents are always read fresh): one refresh,
+    /// so the operations and players of one refresh share one listing.
+    /// </summary>
+    internal const long SharedListRefreshMs = 1_000;
+
+    /// <summary>
+    /// The placed shared-storage containers of one castle: a query of only the tile models that carry
+    /// <c>CastleSharedInventory</c> and a heart connection (a few hundred server-wide, not every castle
+    /// building), kept when connected to <paramref name="heart"/> (the connection read through the
+    /// existing guarded raw reader) and holding an inventory. Hearts are left out, as the castle's
+    /// container rows leave them out. Sorted by entity, so an unchanged castle lists the same order.
+    /// </summary>
+    private static void ListShared(Entity heart, List<InventoryRef> into)
+    {
+        if (heart == Entity.Null) return;
         var em = Em;
-        foreach (var list in new[] { castle.Containers(), castle.Stations() })
-            foreach (var row in list)
+        var rows = Query.Entities(em, includeDisabled: true, includeSystems: false,
+            ComponentIndex.Of<TileModel>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<CastleSharedInventory>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<CastleHeartConnection>(ComponentType.AccessMode.ReadOnly));
+        var found = new List<Entity>();
+        foreach (var e in rows)
+        {
+            try
             {
-                var e = row.Entity.ToEntity();
-                if (!e.Exists(em) || !e.Has<CastleSharedInventory>(em)) continue;
-                Items(row.Main, into);
+                if (e.Has<CastleHeart>(em) || !UnityInventoryBackend.HasInventory(em, e)) continue;
+                if (Servants.ServantRuntime.HeartOf(em, e) != heart) continue;
+                found.Add(e);
             }
+            catch { /* unreadable entity: not listed */ }
+        }
+        found.Sort((a, b) => a.Index != b.Index ? a.Index.CompareTo(b.Index) : a.Version.CompareTo(b.Version));
+        foreach (var e in found) into.Add(InventoryRef.For(e, 0));
+    }
+
+    private readonly Dictionary<int, (int Epoch, long Stamp, List<InventoryRef> List)> _shared = new();
+
+    private InventorySlot[] _slots = new InventorySlot[64];
+
+    /// <summary>One slot-buffer read through the inventory engine, summed per item (slots without an item entity).</summary>
+    public bool ReadStock(InventoryRef inventory, Dictionary<int, long> into)
+    {
+        var engine = InventoryRuntime.Engine;
+        int n = engine.ReadInto(inventory, _slots);
+        if (n < 0) return false;
+        if (n > _slots.Length)
+        {
+            _slots = new InventorySlot[Math.Max(n, _slots.Length * 2)];
+            n = engine.ReadInto(inventory, _slots);
+            if (n < 0) return false;
+            n = Math.Min(n, _slots.Length);
+        }
+        for (int i = 0; i < n; i++)
+        {
+            var slot = _slots[i];
+            if (slot.IsEmpty || slot.HasItemEntity || slot.Amount <= 0) continue;
+            into[slot.Item] = (into.TryGetValue(slot.Item, out long had) ? had : 0) + slot.Amount;
+        }
+        return true;
     }
 
     /// <summary>Packed network id of the castle heart at <paramref name="territory"/>; 0 for none or unreadable.</summary>

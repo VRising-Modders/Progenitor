@@ -2715,6 +2715,7 @@ returns `null` for.
 | Registration, invalidation, `Status` readback | landed, game-free tested (`MaterialSourceRegistryTests`) |
 | Planner, per-operation transaction, scope | landed, game-free tested (`MaterialPlannerTests`, `MaterialServiceTests`, `MaterialTransactionTests`, `MaterialViewTests`) |
 | Per-player totals: refresh, resend, wire, client selection | landed, game-free tested (`MaterialViewSyncTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
+| Refresh cost: per-refresh reads, reuse of unchanged views, `Recomputes`/`Skips` | game-free tested (`MaterialViewRefreshTests`, `MaterialViewRefreshBenchTests`), **not live-verified** |
 | Native availability and payment seams (Bootstrap) | **experimental, opt-in, off by default**; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified (below) |
 | `Repair` and `Upgrade` (scopes, the upgrade request filter, the Upgrade view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair (`MaterialTransactionTests`, `MaterialScopeTrackerTests`, `MaterialUpgradeFilterTests`, `MaterialViewSyncTests`); the same two native seams, no new one |
 
@@ -2756,11 +2757,20 @@ must not move items, must not call back into `ctx.MaterialSource` and must not t
   pay and show this item**, exactly as if no provider were registered.
 - **Governed with no sources is zero, not vanilla.** For an operation the provider governs, an ingredient it returns `null` for keeps the game's own rules, but an ingredient it governs with no sources (an empty `SpendOrder`, or no container that holds it) counts as **zero** in the game's check, even when the plot's own shared storage holds it: the pool replaces the game's shared storage. Give every ingredient of every cost the provider can be asked about a source, or return `null` for it. (Live 2026-10-14: a sword repair needed a third ingredient, Gem Dust, with no bound source, and the game refused the repair at its check.)
 - `Revision(ctx)`: changes whenever the provider's policy does; part of the displayed-view fingerprint.
+  The server reuses a player's displayed view while the revision is unchanged and none of the stock
+  the view read changed, **without calling `Candidates` or `Sources` again**: when an answer from either
+  changes, bump the revision or call `Invalidate(user)` (that player's views, every operation) or
+  `InvalidateAll`; either one is enough. Keep the revision stable otherwise (a counter bumped on a real change, not a
+  clock or a per-call value), or every view is recomputed every second
+  ([refresh cost](#refresh-cost)). `Revision` itself is called once per player and view every second,
+  so it must be cheap.
 - A provider call that throws is logged, counted in `Status.Faults`, and means **no remote sources**
   for that context (`Candidates`) or item (`Sources`). It never falls back to the game's shared
   storage, which could be less restrictive than the provider's rules. The fault log is capped at 20
   lines per service lifetime (per Core load); the counter keeps counting after the cap.
-- `Status` counters (`Payments`, `Views`, `Faults`, `Shortfalls`) reset on every provider registration.
+- `Status` counters (`Payments`, `Views`, `Recomputes`, `Skips`, `Faults`, `Shortfalls`) reset on every
+  provider registration. `Views` counts view packets the server sent; `Recomputes` and `Skips` count
+  per-player view refreshes that were recomputed or reused ([refresh cost](#refresh-cost)).
 
 `MaterialContext` carries `User`, `Character` (session ids, `CastleId`), `WorldEpoch`, `Operation`,
 `StandingTerritory` (-1 = no plot, the game's own standing rule) and `Station`, the structure the
@@ -2879,11 +2889,13 @@ it stays local. Nothing is ever written to a castle heart's shared aggregate.
 
 ### What the player sees
 
-The server recomputes each online player's Build totals, while the player works at a workstation their
+The server refreshes each online player's Build totals, while the player works at a workstation their
 Craft totals, and while the window of a castle heart the player or the player's clan owns is open
-their Upgrade totals (never for an enemy's or a decaying heart, even an allied one), every second, at once after an invalidation or a governed payment, and sends a view only
+their Upgrade totals (never for an enemy's or a decaying heart, even an allied one), every second, and
+at once after an invalidation or a governed payment; a refresh recomputes a view only when something it
+depends on changed ([refresh cost](#refresh-cost)), and sends a view only
 when it changed; every 10 seconds (and after a provider registers or goes away) every player is sent
-their view again even when unchanged, and a send the transport refused is retried on the next refresh.
+their view again even when unchanged (the cached view, not a recompute), and a send the transport refused is retried on the next refresh.
 A player who had a view and is no longer governed gets one cleared view (retried the same way). A
 disconnect forgets what the player was sent; sequence numbers keep rising, so a reconnecting or
 reloaded client accepts the next view. A fresh server install (a server Core swap included) does not
@@ -2896,6 +2908,43 @@ A view (`'PrMv'`, Core's reserved range, version 2) lists **only the items the p
 revision, the server publisher's generation, a per-player sequence, and the network ids of the castle heart at the player's standing plot
 and of the structure it was computed for (Craft: the workstation; Upgrade: the castle heart whose window
 is open). At most 1500 items, flagged when cut.
+
+#### Refresh cost
+
+A view is recomputed (the provider asked for `Candidates` and each item's `Sources`, every total
+counted) only when it is new, the player was marked by an invalidation (`Invalidate(user)` or
+`InvalidateAll`) or a governed payment (which drops every cached view of that player, so a Craft or
+Upgrade view not refreshed at that moment, its window closed, is recomputed when the window reopens), the provider registered, went away or was replaced, or when
+anything the last computation depended on differs at the next refresh:
+
+- the provider's `Revision(ctx)` for that context;
+- the context: user, character, world epoch, standing plot, station;
+- the inventories the pool leaves out (the bag, a plain station, an open window for `Repair` and
+  `Upgrade`) and the station put first;
+- the plot's own shared-storage containers (listed once per refresh by a query of only the
+  shared-storage tile models, not a scan of every castle building; their contents are read fresh);
+- every container id it resolved (a container that is gone or rebound);
+- the stock (per item, slots without an item entity) of every inventory it read: the provider's
+  containers, the plot's shared storage, the bag and the station.
+
+Otherwise the refresh reuses the last view: one `Revision` call, one read of each of those inventories
+and no `Sources` call. Within one refresh every inventory is read at most once and every container id
+resolved at most once, however many items, operations and players need it. With 136 provider chests
+and 40 item types (game-free benchmark, `MaterialViewRefreshBenchTests`) a refresh of one Build view
+went from 5712 inventory reads, 5576 id resolutions, two castle building scans and 42 provider calls to
+137 reads, 136 resolutions and one provider call while nothing changes; a recompute costs the same 137
+reads plus the provider's `Candidates` and `Sources` calls and about 0.5 ms of Progenitor's own work for
+40 item types (3.5 ms for 400; items that share one spend order resolve it once). A recompute or reuse
+slower than 20 ms logs one `materials: slow view refresh op=… outcome=… ms=… provider=… reads=…(n)
+sharedList=… other=…` line (at most one per 5 s), which splits the time between the provider's calls,
+the inventory reads, the shared-storage listing and the rest.
+
+This is the display only: a governed check and its payment never read a cached view or the refresh's
+reads. They ask the provider and count the containers live at the check, as before. Provider authors keep the
+refresh cheap by keeping `Revision` stable while their answers stay the same, and when an answer of
+`Candidates` or `Sources` changes, by bumping it or calling `ctx.MaterialSource.Invalidate(user)`
+(either is enough; prefer `Invalidate(user)` over `InvalidateAll` when only one player's answer changed). `materials status` (development bridge) and
+`Status` show `views` (packets sent), `recomputes` and `skips`.
 
 On the client the game's merged count is replaced only when all of these hold; otherwise the game's
 own result stands:

@@ -44,8 +44,9 @@ internal static class MaterialNet
 /// is one <see cref="MaterialService"/> session: the provider is asked once at the check, every line is
 /// paid from that answer, and the queued <see cref="MaterialPaid"/> events are published when the
 /// system's update ends. Every second (and right after an invalidation or a governed payment) each
-/// online player's Build, Craft and Upgrade totals are recomputed and sent when they changed
-/// (<see cref="MaterialRefreshPolicy"/>, <see cref="MaterialViewPublisher"/>).</para>
+/// online player's Build, Craft and Upgrade totals are refreshed and sent when they changed
+/// (<see cref="MaterialRefreshPolicy"/>, <see cref="MaterialViewPublisher"/>); a refresh recomputes a
+/// view only when something it depends on changed (<see cref="MaterialService.RefreshView"/>).</para>
 ///
 /// <para><b>Client.</b> A received view replaces the shared-storage rows of the game's merged count
 /// only for the local character, at the castle heart the view was computed at, and only in its own
@@ -229,6 +230,7 @@ internal static unsafe class MaterialSeamRuntime
         _service = null;
         _world = null;
         _registry = null;
+        Reads = null;
     }
 
     internal static void OnRegistrationChanged()
@@ -436,18 +438,27 @@ internal static unsafe class MaterialSeamRuntime
         if (Scope.OpenSystem == null && (_service.OpenSessions > 0 || _service.PendingEvents > 0)) CloseOperations();
         registry.DrainInvalidations(Drain, out bool all);
         foreach (var u in Drain) Dirty.Add(u);
+        // Every view stale (InvalidateAll, a provider registered or went away): recompute everyone.
+        if (all) _service.ForgetViews();
         if (!Refresh.Tick(Environment.TickCount64, all, Dirty.Count > 0, out bool everyone, out bool force)) return;
         try
         {
             if (PushViews(everyone, force) && everyone) Publisher.FirstRefreshDone();
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("materials: view refresh threw: " + e.Message); }
+        finally { Reads?.Clear(); }
         Dirty.Clear();
     }
 
-    private static readonly Dictionary<int, int> TotalsScratch = new();
+    /// <summary>The refresh's read cache: each inventory read at most once per refresh, cleared after it.</summary>
+    private static MaterialStockReads? Reads;
 
-    /// <summary>Recompute and send; false when the world was not ready (nothing was sent).</summary>
+    /// <summary>
+    /// Refresh and send; false when the world was not ready (nothing was sent). A player's view is
+    /// recomputed only when it is new, the player is dirty (an invalidation or a governed payment), or
+    /// something it depends on changed (<see cref="MaterialService.RefreshView"/>); otherwise the cached
+    /// view is reused, and a forced resend sends it again unchanged.
+    /// </summary>
     private static bool PushViews(bool everyone, bool force)
     {
         var world = Worlds.Server;
@@ -455,6 +466,9 @@ internal static unsafe class MaterialSeamRuntime
         var em = world.EntityManager;
         var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
         if (bootstrap == null) return false;
+        if (Reads == null) Reads = new MaterialStockReads(_world);
+        Reads.Clear();
+        if (everyone) _service.BeginFullRefresh();
         foreach (var p in PlayerDirectory.Online(world))
         {
             var s = p.Session;
@@ -463,17 +477,22 @@ internal static unsafe class MaterialSeamRuntime
             bool dirty = Dirty.Contains(user);
             if (!everyone && !dirty) continue;
             var character = new CastleId(s.CharacterIndex, s.CharacterVersion);
+            // Dirty is cleared after this refresh: drop every cached view of the character now, so a
+            // view this refresh skips (Craft with no workstation open, Upgrade with no heart window)
+            // is recomputed when it is next refreshed instead of reused.
+            if (dirty) _service.ForgetViews(character);
             var userEntity = new Entity { Index = s.UserIndex, Version = s.UserVersion };
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
             catch { continue; }
             foreach (var op in MaterialClientPolicy.ViewOperations)
-                Push(bootstrap, userIndex, user, character, op, force || dirty);
+                Push(bootstrap, userIndex, user, character, op, force || dirty, dirty, Reads);
         }
         return true;
     }
 
-    private static void Push(ServerBootstrapSystem bootstrap, int userIndex, CastleId user, CastleId character, MaterialOperation op, bool force)
+    private static void Push(ServerBootstrapSystem bootstrap, int userIndex, CastleId user, CastleId character, MaterialOperation op, bool force,
+        bool recompute, MaterialStockReads reads)
     {
         MaterialViewContent? content = null;
         // A Craft view only means something at a workstation and an Upgrade view only with a castle
@@ -490,18 +509,20 @@ internal static unsafe class MaterialSeamRuntime
             && !MaterialClientPolicy.MayViewUpgrade(_world!.OwnershipOf(user, stationNet, character)))
             stationNet = 0;
         if ((!MaterialClientPolicy.NeedsStation(op) || stationNet != 0)
-            && _service!.TryView(character, op, TotalsScratch, out var ctx, out long revision))
+            && _service!.RefreshView(character, op, reads, recompute, out var result) != MaterialViewOutcome.NotGoverned)
         {
-            var rows = new List<MaterialLine>(TotalsScratch.Count);
-            foreach (var kv in TotalsScratch) rows.Add(new MaterialLine(kv.Key, kv.Value));
-            rows.Sort((a, b) => a.Item.CompareTo(b.Item));
-            content = new MaterialViewContent(ctx.StandingTerritory, revision, _world!.HeartNet(ctx.StandingTerritory), stationNet, rows);
+            var ctx = result.Context;
+            content = new MaterialViewContent(ctx.StandingTerritory, result.Revision, _world!.HeartNet(ctx.StandingTerritory), stationNet, result.Rows);
         }
         var view = Publisher.Next(user, op, Progenitor.WorldState.WorldEpoch.Current, content, force);
         if (view == null) return;
         bool delivered = false;
         try { delivered = CustomEvents.SendToUser(bootstrap, userIndex, MaterialViewWire.EventId, MaterialViewWire.Encode(view)); }
-        finally { Publisher.Sent(user, op, delivered); }
+        finally
+        {
+            Publisher.Sent(user, op, delivered);
+            if (delivered) _registry?.CountView();
+        }
     }
 
     // ---- client ------------------------------------------------------------------------------------

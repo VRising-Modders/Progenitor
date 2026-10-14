@@ -26,12 +26,16 @@ internal static class MaterialsTestBridge
             ["payments"] = status.Payments,
             ["faults"] = status.Faults,
             ["shortfalls"] = status.Shortfalls,
+            ["viewsSent"] = status.Views,
+            ["recomputes"] = status.Recomputes,
+            ["skips"] = status.Skips,
             ["bootstrap"] = BootstrapLink.MaterialSeamsDescribe(),
         };
         if (Plugin.IsServerProcess)
         {
             var service = MaterialSeamRuntime.Service;
             result["openOperations"] = service?.OpenSessions ?? 0;
+            result["cachedViews"] = service?.CachedViews ?? 0;
             result["injection"] = service?.DescribeInjection() ?? "seams not bound";
         }
         else
