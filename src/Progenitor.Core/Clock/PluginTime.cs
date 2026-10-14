@@ -4,7 +4,8 @@ using Progenitor.Plugins;
 namespace Progenitor.Clock;
 
 /// <summary>
-/// <see cref="PluginContext.Time"/>: the world's time of day, server-side. Every member throws
+/// <see cref="PluginContext.Time"/>: the world's time of day, server-side. Every member except
+/// <see cref="GetTimeOfDay"/> (which reads the client's own clock there) throws
 /// <see cref="InvalidOperationException"/> on the client (a programming error, like
 /// <c>ctx.Abilities</c>); ordinary refusals on the server are logged and return an inert handle
 /// or false. Main thread (a command, <c>Plugin.Frame</c> or an event handler).
@@ -54,10 +55,22 @@ public sealed class PluginTime
     /// The world clock now: day number, hour (fraction = minutes), day or night, the configured
     /// day length and sunrise/sunset hours, and whether an override governs it. Null (logged) when
     /// the world or its <c>DayNightCycle</c> singleton is not ready.
+    ///
+    /// <para>The one member that also works on the client: there it reads the client world's own
+    /// clock, which follows the server's replicated time, so it is the hour the player's sun shows.
+    /// On the client <see cref="TimeOfDayReading.Override"/> is always
+    /// <see cref="TimeOfDayOverrideKind.None"/> (override leases live on the server). One singleton
+    /// read per call; nothing runs between calls.</para>
     /// </summary>
     public TimeOfDayReading? GetTimeOfDay()
     {
-        RequireServer("GetTimeOfDay");
+        _ctx.EnsureAttached();
+        if (!_ctx.IsServer)
+        {
+            var mine = TimeOfDayRuntime.ReadClient(_ctx.World, out string whyClient);
+            if (mine == null) _ctx.Log.LogDebug("Time.GetTimeOfDay: " + whyClient);
+            return mine;
+        }
         var reading = TimeOfDayRuntime.Read(_ctx.World, out string why);
         if (reading == null) _ctx.Log.LogDebug("Time.GetTimeOfDay: " + why);
         return reading;

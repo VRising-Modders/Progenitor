@@ -10,7 +10,8 @@ namespace Progenitor.Stations;
 /// <summary>
 /// <see cref="PluginContext.Stations"/>: recipe lists, the per-recipe switch, and progress for castle
 /// refinement stations and crafting workstations (<see cref="Stations"/>). Every member except
-/// <c>CraftsPossible</c> (pure) throws on the client. Stations are passed as entities, valid for the current world load only. Nothing here
+/// <c>CraftsPossible</c> (pure) throws on the client. Also the on/off switch of burning structures
+/// (braziers). Stations are passed as entities, valid for the current world load only. Nothing here
 /// registers anything, so unload has nothing to release.
 /// </summary>
 public sealed class PluginStations
@@ -56,5 +57,27 @@ public sealed class PluginStations
 
     /// <summary>Recipe stations within <paramref name="radius"/> meters of <paramref name="position"/>, nearest first.</summary>
     public IReadOnlyList<StationInfo> Near(float3 position, float radius) => Stations.Near(World(), position, radius);
+
+    // ---- braziers (BurnContainer) ----------------------------------------------------------------
+
+    /// <summary>True when <paramref name="entity"/> is a burning structure (has the game's <c>BurnContainer</c>, e.g. the mist brazier).</summary>
+    public bool IsBrazier(Entity entity) => Braziers.IsBrazier(World(), entity);
+
+    /// <summary>
+    /// The switch, burn state and fuel of a burning structure (<see cref="Braziers"/>); null for
+    /// anything else.
+    /// </summary>
+    public BrazierState? Brazier(Entity entity) => Braziers.Read(World(), entity);
+
+    /// <summary>
+    /// Turn a burning structure's switch on or off, as the vanilla window's toggle does, without a
+    /// player at it. A set, not a flip: no write when it already reads <paramref name="on"/>.
+    /// Replicated to every client. Whether it then burns is the game's rule (day, fuel inside, not
+    /// damaged).
+    /// </summary>
+    public BrazierToggleResult SetBrazierEnabled(Entity entity, bool on) => Braziers.SetEnabled(World(), entity, on);
+
+    /// <summary>Burning structures within <paramref name="radius"/> meters of <paramref name="position"/>, nearest first, each with its state.</summary>
+    public IReadOnlyList<BrazierInfo> BraziersNear(float3 position, float radius) => Braziers.Near(World(), position, radius);
 }
 #endif

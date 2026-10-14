@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BepInEx;
+using Progenitor.Inventory;
 using Progenitor.Plugins;
 using Progenitor.Ui;
 using UiApi = Progenitor.Ui.Ui;
@@ -18,6 +19,9 @@ namespace Progenitor.PanelsExample;
 /// <item><description>Player inventory: <c>Stash</c> beside the sort button.</description></item>
 /// <item><description>Castle heart window (also reachable as <c>ThronePanel</c>): <c>Castles</c> left, <c>Fuel</c> right.</description></item>
 /// <item><description>Item tooltip: one line naming the hovered item and its stack.</description></item>
+/// <item><description>The game's sort (key or button): every <see cref="InventorySortUsed"/> is logged with
+/// the client's hour of day (<c>ctx.Time.GetTimeOfDay</c>), and a second sort of the same inventory
+/// within <see cref="DoubleSortMs"/> is logged as a double sort.</description></item>
 /// </list>
 ///
 /// Every open, close and target change and every click is one log line starting
@@ -32,6 +36,9 @@ namespace Progenitor.PanelsExample;
 [ProgenitorSide(Side.Both)]
 public sealed class Plugin : ProgenitorPlugin<PanelsContext>
 {
+    /// <summary>Two sorts of one inventory closer than this count as a double sort.</summary>
+    internal const long DoubleSortMs = 400;
+
     protected override void OnLoad(PanelsContext ctx)
     {
         if (ctx.IsServer)
@@ -67,6 +74,17 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
             line[0] = "Example: item " + e.Target.ItemGuid + " x" + e.Target.ItemAmount;
             tooltip.SetRows(line);
         }));
+
+        // The game's sort, key or button: no input is read, the framework reports the request.
+        var sortLog = ctx.Log;
+        var time = ctx.Time;
+        ctx.Events.On<InventorySortUsed>(e =>
+        {
+            var clock = time.GetTimeOfDay();
+            sortLog.LogInfo("Panels example: " + e + " at " + (clock == null ? "unknown time" : clock.ToString()));
+            if (e.SincePreviousMs >= 0 && e.SincePreviousMs <= DoubleSortMs)
+                sortLog.LogInfo("Panels example: double sort " + e.Target + " (" + e.SincePreviousMs + " ms apart)");
+        });
 
         ctx.Log.LogInfo("Panels example: loaded (tooltip enabled=" + tooltip.Enabled + ")");
     }

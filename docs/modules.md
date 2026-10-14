@@ -1466,8 +1466,8 @@ Named `WorldState` because `ctx.World` is already this plugin's `Unity.Entities.
 
 ## Time of day
 
-`Progenitor.Clock`, reached as `ctx.Time` (`PluginTime`). Server only: every member throws on the
-client. Main thread. **Landed, not live-verified**: nothing below has been run in the game yet. The
+`Progenitor.Clock`, reached as `ctx.Time` (`PluginTime`). Server only, except `GetTimeOfDay`
+(below): every other member throws on the client. Main thread. **Landed, not live-verified**: nothing below has been run in the game yet. The
 game facts come from the server metadata and the game's native code (internal research notes).
 
 ```csharp
@@ -1477,6 +1477,13 @@ if (!hold.IsLive) ctx.Log.LogWarning(hold.RefusedReason);
 hold.Dispose();                                 // the world's own time returns
 var shift = ctx.Time.SetTimeOfDay(21.5);        // jump to 21:30 and keep running; dispose to undo
 ```
+
+**On the client**, `GetTimeOfDay()` reads the client world's own `DayNightCycle`. The client copies
+the server's replicated time into it, so the reading is the hour the player's sun and lighting show
+(source-checked, not live-verified). `Override` is always `None` there because override leases live
+on the server; `WorldClockStopped` is the replicated `DayNightCycleDisabled` flag, or false when the
+client has no such singleton. It is one singleton read per call; nothing runs between calls. A
+client mod that needs "is it night" reads `!reading.IsDay` without a round trip to the server.
 
 | Member | What it does |
 |---|---|
@@ -1948,6 +1955,55 @@ a powered furnace (castle heart burning blood essence) that lists the copper and
 10. Clean up: `.stations toggle Sulfur on`, take the ore out, and remove the Sample from the reload
     folders.
 
+### Braziers
+
+`ctx.Stations` also reads and sets the on/off switch of burning structures: every entity with the
+game's `BurnContainer`. The mist brazier is the one checked against the game's code; any other
+structure carrying `BurnContainer` is accepted the same way. Server only. **Landed, not
+live-verified.**
+
+```csharp
+foreach (var b in ctx.Stations.BraziersNear(position, 30f))       // nearest first, with state
+    ctx.Log.LogInfo($"{b.Name} {b.State}");                       // on, burning 80%, fuel 12x <guid> (...)
+var state = ctx.Stations.Brazier(brazier);                        // null for anything else
+var result = ctx.Stations.SetBrazierEnabled(brazier, on: true);   // the window's toggle, as a set
+if (!result.Ok) ctx.Log.LogWarning(result.Reason);
+bool night = !ctx.Time.GetTimeOfDay()!.IsDay;                     // e.g. a night-only brazier
+bool someoneNear = PlayerPositionMath.AnyWithin(ctx.Players.OnlinePositions(), x, z, 20f);
+```
+
+| Fact (source-checked) | Detail |
+|---|---|
+| The switch | `BurnContainer.Enabled` (networked, persistent). The vanilla window's toggle sends `ToggleRefiningEvent`; the server's `ToggleRefiningSystem` checks the sender is using the structure and **flips** `Enabled`. `SetBrazierEnabled` writes the same byte on the server, only when it differs, and reads it back; every client's window and effect follow through replication. |
+| Burning | `BonfireSystem_Server` burns while `Enabled` is on, it is **day** (the whole day span of `DayNightCycle`), and the structure is not damaged (`EditableTileModel.CanRepair`). `Bonfire.IsActive` is the result; `Bonfire.Strength` ramps up while burning and down after. Turning the switch on at night lights it at the next sunrise. |
+| Fuel | One `Bonfire.InputItem` per `Bonfire.BurnTime` seconds, taken from the structure's **own** inventory only (castle storage is never drawn on). Nothing burns at night, so fuel lasts through it. `BurnContainer.Progress` is the progress through the started item; turning the switch off keeps it, and it resumes. `BrazierState.FuelAmount` counts the waiting items (`ctx.Inventory.Count` on instance 0); `FuelSecondsLeft` is daytime burning seconds. To refuel, move the fuel item in with `ctx.Inventory.TryAdd` or `Transfer`. |
+| Shade | The mist brazier's effect is a cloud cookie around it whose opacity follows `Strength`; a player is shaded only while it is strong enough and only in a small area around the structure. |
+
+#### Live test (acceptance procedure, not run)
+
+Isolated test server with a connected client, the Sample loaded, an admin character next to a placed
+mist brazier with a few of its fuel items inside, during the day (`.time set 12` if needed).
+
+1. `.brazier list`. The reply lists the brazier with an `index:version@epoch` id and its state, for
+   example `on, burning 80%, fuel 4x <guid> (...)` or `off, dark 0%, ...`. The server log has
+   `brazier: list radius=20 found=1`.
+2. Open the brazier's window. `.brazier off`. The reply says `is now off`; the window's toggle shows
+   off within a second without reopening, and the mist fades over the next seconds.
+   `.brazier status` reads `off, dark …` once `Strength` has ramped down.
+3. `.brazier off` again: `is now off (no change)`.
+4. `.brazier on`: `is now on`. Within a few seconds `.brazier status` reads `on, burning …`, and the
+   fuel count drops by one when a new item is started.
+5. Toggle it off with the window's own button, then `.brazier status`: `off`. `.brazier on` turns it
+   back on (the API and the vanilla toggle agree on one switch).
+6. `.time set 22` (night): `.brazier status` reads `on, dark …` and the fuel count stays put.
+   `.time release`.
+7. Take every fuel item out: once the started item ends, `.brazier status` reads `on, dark …` with
+   `fuel 0x`.
+8. On a recipe station: `.brazier status <station id from .stations list>` replies
+   `is not a brazier`; `.brazier on <that id>` is refused with `has no BurnContainer`.
+9. Clean up: restore the switch and fuel as found, release any time override, and remove the
+   Sample from the reload folders.
+
 ## Inventory
 
 `ctx.Inventory` (`Progenitor.Inventory`) reads and moves items in any inventory on the server:
@@ -2190,6 +2246,56 @@ of the save made for this test.
 8. Optional: `.items watch #1`, move items by hand in the panel, expect `Sample items: watch #1
    Changed`; `.items heart`, `.items clan`, `.items name #1 "Ore"` (the panel shows the name).
 9. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
+
+### Vanilla sort event (client)
+
+`InventorySortUsed` is a client event on `ctx.Events`: the player used the game's sort, by the sort
+key or a sort button, on their own inventory or on an open container. **Landed, not live-verified.**
+
+```csharp
+ctx.Events.On<InventorySortUsed>(e =>
+{
+    if (e.Target == InventorySortTarget.Own && e.SincePreviousMs is >= 0 and <= 400)
+        RequestQuickStash();                              // a double-tap of the vanilla sort
+    if (e.IsFor(openContainer.Target)) { /* the sort was for the container panel showing */ }
+});
+```
+
+| Fact (source-checked) | Detail |
+|---|---|
+| What the game sends | Sorting creates one client-to-server event entity: `SortSingleInventoryEvent` or `SortAllInventoriesEvent`, each carrying the inventory's `NetworkId`. The server's `SortSingleInventorySystem` / `SortAllInventoriesSystem` do the sort. The key and the button make the same request, so the event cannot say which was used. |
+| The seam | A `SystemHooks.Before` on the client's `SerializeAndSendClientEventsSystem` reads those entities just before they are sent. Nothing reads input, nothing is patched, and the request is never changed or held back. |
+| Cost | The hook runs only on frames where the client has an event to send, and returns at once while nothing subscribes. With a subscriber: two cached queries per such frame; on a sort, one id read and a lookup of the local character to classify it. |
+| Duplicates | The same request entity seen on two frames, or a second request of the same scope for the same inventory within 50 ms, is raised once. A human double press (well above 50 ms) raises two events; `SincePreviousMs` is their interval. |
+| Own or other | `Own` when the id is the local character's or its bag's; `Other` otherwise (compare with a vanilla panel site's target through `IsFor`); `Unknown` without a local character. |
+
+#### Live test (acceptance procedure, not run)
+
+Client with Core and `Progenitor.PanelsExample` in the reload folder, joined to the isolated test
+server, standing next to a chest.
+
+1. Open the inventory and press the sort key once. The client log has one
+   `Panels example: sort Single Own net=<n>:<g> seq=1 since=first at day … hh:mm …` line; the hour
+   matches `.time status` on the server within a game minute.
+2. Click the inventory's sort button once: one more line, `seq=2`, with `since=` the time since
+   step 1. No second line for the same click.
+3. Double-press the sort key quickly: two lines, then
+   `Panels example: double sort Own (<n> ms apart)` with n under 400.
+4. Open the chest and use its sort: the line reads `Other`, and its `net=` equals the
+   `Panels example: ContainerPanel … Opened kind=Container … net=<n>:<g>` line of that chest.
+5. If the game offers a sort-all action, use it: a line with `sort All`.
+6. Clean up: remove `Progenitor.PanelsExample` from the client's reload folder and confirm the clean
+   unload in the log.
+
+### Online player positions
+
+`ctx.Players.OnlinePositions()` returns a `PlayerPosition` (directory row plus `X`, `Y`, `Z`) for
+every online player whose character is in the world, read from the character's `Translation` once
+per call; nothing runs between calls. `TryGetPosition(player, out position)` reads one.
+`PlayerPositionMath.AnyWithin` / `Within` answer "is anyone within 20 m of this brazier" without
+more reads. Server only. **Landed, not live-verified.** Live check (procedure, not run): with two
+connected characters, `.players where` lists both with coordinates; walk one 10 m and repeat: its
+X/Z change by about 10 and the other's do not.
 
 ## Item catalog
 

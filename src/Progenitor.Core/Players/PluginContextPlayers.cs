@@ -2,7 +2,9 @@
 using System;
 using System.Collections.Generic;
 using Progenitor.Plugins;
+using Progenitor.Ecs;
 using Unity.Entities;
+using Unity.Transforms;
 
 namespace Progenitor.Players;
 
@@ -61,6 +63,63 @@ public sealed class PluginPlayers
     {
         _ctx.EnsureAttached();
         return PlayerDirectory.IsFresh(info);
+    }
+
+    /// <summary>
+    /// Where every online player's character stands now: one <c>Translation</c> read per connected
+    /// player with a live character, per call, and nothing between calls (no per-frame cost). Players
+    /// still loading in (no character yet) are left out. Server only; throws on the client. Main thread.
+    /// </summary>
+    public IReadOnlyList<PlayerPosition> OnlinePositions()
+    {
+        var world = RequireServer(nameof(OnlinePositions));
+        var em = world.EntityManager;
+        var online = PlayerDirectory.Online(world);
+        var list = new List<PlayerPosition>(online.Count);
+        for (int i = 0; i < online.Count; i++)
+            if (TryRead(em, online[i], out var position)) list.Add(position);
+        return list;
+    }
+
+    /// <summary>
+    /// Where <paramref name="player"/>'s character stands now. False when the row is not online, has
+    /// no character, is from an earlier world load, or the position cannot be read. Server only.
+    /// </summary>
+    public bool TryGetPosition(PlayerInfo player, out PlayerPosition position)
+    {
+        position = default;
+        var world = RequireServer(nameof(TryGetPosition));
+        if (player == null || !player.IsOnline || player.WorldEpoch != Progenitor.WorldState.WorldEpoch.Current) return false;
+        return TryRead(world.EntityManager, player, out position);
+    }
+
+    private static bool TryRead(EntityManager em, PlayerInfo player, out PlayerPosition position)
+    {
+        position = default;
+        var s = player.Session;
+        if (!s.HasCharacter) return false;
+        var character = new Entity { Index = s.CharacterIndex, Version = s.CharacterVersion };
+        try
+        {
+            if (!em.Exists(character) || !character.TryRead(em, out Translation t)) return false;
+            position = new PlayerPosition(player, t.Value.x, t.Value.y, t.Value.z);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private World RequireServer(string op)
+    {
+        _ctx.EnsureAttached();
+        if (!_ctx.IsServer)
+            throw new InvalidOperationException("ctx.Players." + op + " is server-only.");
+        var world = _ctx.World;
+        if (world == null || !world.IsCreated)
+            throw new InvalidOperationException("ctx.Players." + op + ": the server world does not exist yet.");
+        return world;
     }
 
     /// <summary>Current directory cache revision.</summary>

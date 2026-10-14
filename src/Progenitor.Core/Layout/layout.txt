@@ -767,3 +767,19 @@ offset ServantEquipmentGrimoireSlotEntityOffset      = 0x20 : ServantEquipment.G
 offset ServantEquipmentArmorFootgearSlotEntityOffset = 0x30 : ServantEquipment.ArmorFootgearSlotEntity
 offset ServantEquipmentArmorLegsSlotEntityOffset     = 0x40 : ServantEquipment.ArmorLegsSlotEntity
 offset ServantEquipmentArmorGlovesSlotEntityOffset   = 0x50 : ServantEquipment.ArmorGlovesSlotEntity
+
+# ---- Braziers and the client sort event (src/Progenitor.Core/Stations/Braziers.cs, ----------------
+# ---- src/Progenitor.Core/Inventory/InventorySortRuntime.cs) -------------------------------------------
+# BurnContainer is the player's on/off switch of a burning structure (the mist brazier); the game's
+# toggle (ToggleRefiningSystem) flips Enabled. Bonfire is the burn state BonfireSystem_Server drives
+# from it. Read through GetComponentDataRawRO, Enabled written one byte through the overlay.
+# The two client-to-server sort events carry the sorted inventory's NetworkId (12 bytes) first.
+dump server
+offset BurnContainerProgressOffset                 = 0x0  : ProjectM.BurnContainer.Progress               # float 0..1 through the current fuel item
+offset BurnContainerEnabledOffset                  = 0x4  : ProjectM.BurnContainer.Enabled                # bool, the player's switch
+offset BonfireInputItemOffset                      = 0xC  : Bonfire.InputItem                    # PrefabGUID, the fuel item
+offset BonfireStrengthOffset                       = 0x10 : Bonfire.Strength                     # float 0..1
+offset BonfireBurnTimeOffset                       = 0x14 : Bonfire.BurnTime                     # float seconds per fuel item
+offset BonfireIsActiveOffset                       = 0x28 : Bonfire.IsActive                     # bool, burning now
+offset SortSingleInventoryEventInventoryOffset     = 0x0  : SortSingleInventoryEvent.Inventory   # NetworkId, 12 bytes
+offset SortAllInventoriesEventInventoryOffset      = 0x0  : SortAllInventoriesEvent.Inventory    # NetworkId, 12 bytes

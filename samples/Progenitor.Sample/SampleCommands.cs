@@ -576,6 +576,29 @@ internal static class SampleCommands
         }
     }
 
+    // adminOnly: on/off sets the switch of any brazier, including another player's.
+    [Command("brazier", adminOnly: true, usage: ".brazier list [radius] | status [id] | on [id] | off [id]", description: "Admin only. Find braziers, read their switch, burn state and fuel, and turn them on or off through ctx.Stations.")]
+    public static void Brazier(ICommandContext ctx, string verb = "", string a = "")
+    {
+        try
+        {
+            if (!SampleBraziers.TryParse(verb, a, out var request))
+            {
+                ctx.Reply(SampleBraziers.UsageReply);
+                return;
+            }
+
+#if !PROGENITOR_TESTS
+            SampleBraziers.HandleCommand(ctx, request);
+#endif
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Sample .brazier threw: " + e);
+            ctx.Reply("Sample brazier failed. See the server log.");
+        }
+    }
+
     // adminOnly: this applies the debug protection buff and the kill-path guard.
     [Command("protect", adminOnly: true, usage: ".protect on | alive | off", description: "Admin only. ctx.Debug Protect, KeepAlive or Release on your character. Separate from .godmode and from Core's .debug.")]
     public static void Protect(ICommandContext ctx, string what = "")
@@ -600,7 +623,7 @@ internal static class SampleCommands
     }
 
     // adminOnly: the reply includes platform ids.
-    [Command("players", adminOnly: true, usage: ".players | .players name <displayName> | .players account <platformId>", description: "Admin only. List online players or look one up through ctx.Players. Ambiguous names are not picked.")]
+    [Command("players", adminOnly: true, usage: ".players | .players name <displayName> | .players account <platformId> | .players where", description: "Admin only. List online players, look one up, or print where each online character stands, through ctx.Players. Ambiguous names are not picked.")]
     public static void Players(ICommandContext ctx, string verb = "", [Remainder] string rest = "")
     {
         try

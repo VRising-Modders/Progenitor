@@ -134,6 +134,9 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"Inventory.Install: {e.Message}"); }
         try { Castles.CastlePresenceRuntime.Install(); }
         catch (Exception e) { Logger?.LogWarning($"CastlePresence.Install: {e.Message}"); }
+        // InventorySortUsed: client only; a Before hook on the client's event sender.
+        try { Inventory.InventorySortRuntime.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"InventorySort.Install: {e.Message}"); }
         // Death + damage EventBus publishers (UnitDied / PlayerDied / DamageDealt).
         // Kill postfix via PatchRegistry (ctx.Patches path); damage via SystemHooks.After StatChangeSystem.
         Combat.CombatHooks.Install();
@@ -440,6 +443,8 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"CastlePresence.Uninstall: {e.Message}"); }
         try { Inventory.InventoryRuntime.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"Inventory.Uninstall: {e.Message}"); }
+        try { Inventory.InventorySortRuntime.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"InventorySort.Uninstall: {e.Message}"); }
         try { Castles.Castles.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"Castles.Uninstall: {e.Message}"); }
         // Abilities: the no-cooldowns Plugin.Frame handler and its hold table.

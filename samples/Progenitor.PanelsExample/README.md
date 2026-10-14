@@ -12,6 +12,8 @@ Deploy it to both sides. The client half is the panels. The server half only ans
 | Castle heart (also `ThronePanel`) | left edge, right edge | `Castles`, `Fuel` |
 | Item tooltip | tooltip body | `Example: item <guid> x<amount>` |
 
+It also subscribes to `InventorySortUsed` ([docs/api.md](../../docs/api.md#inventory)): every use of the game's sort, by key or button, logs `Panels example: sort Single Own net=… seq=… since=… at day … hh:mm …` with the client's own hour of day (`ctx.Time.GetTimeOfDay()` on the client), and two sorts of the same inventory within 400 ms log `Panels example: double sort Own (… ms apart)`.
+
 Log lines start with `Panels example:`; the framework's own lines start with `Ui: panel`, `Ui: attached` and `Ui: site`. The contract, the placement rules and the full live acceptance procedure are in [docs/ui.md](../../docs/ui.md#vanilla-panel-sites-p6).
 
 ## Status

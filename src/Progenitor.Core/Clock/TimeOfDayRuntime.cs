@@ -179,6 +179,43 @@ internal static unsafe class TimeOfDayRuntime
             c.NextBloodMoonDay);
     }
 
+    // The client world's own singletons, cached apart from the server's: a client-hosted process
+    // has both worlds, and a cached entity that stops resolving is simply looked up again.
+    private static Entity _clientCycle = Entity.Null;
+    private static Entity _clientSettings = Entity.Null;
+
+    /// <summary>
+    /// Read the client world's clock: the client copies the server's replicated
+    /// <c>DayNightCycle.ServerTime</c> into its own <c>DayNightCycle</c>, so this is the hour its
+    /// sun and lighting show. <see cref="TimeOfDayReading.Override"/> is always
+    /// <see cref="TimeOfDayOverrideKind.None"/> here (override leases live on the server);
+    /// <see cref="TimeOfDayReading.WorldClockStopped"/> is the replicated flag when the client has
+    /// it, else false. Null with <paramref name="why"/> when the world or its clock is not there.
+    /// </summary>
+    internal static TimeOfDayReading? ReadClient(World? world, out string why)
+    {
+        if (world == null || !world.IsCreated)
+        {
+            why = "time-of-day: the client world is not ready.";
+            return null;
+        }
+        var em = world.EntityManager;
+        if (!TryReadCycle(em, ref _clientCycle, out var c, out why)) return null;
+        bool stopped = TryReadFlag(em, ref _clientSettings, out bool flag) && flag;
+        why = "";
+        return new TimeOfDayReading(
+            TimeOfDayMath.DayOf(c.Time, c.DayLength),
+            TimeOfDayMath.HourOf(c.Time, c.DayLength),
+            TimeOfDayMath.IsDay(c.Time, c.DayLength, c.DayStart, c.DayDuration),
+            c.DayLength,
+            TimeOfDayMath.HourForSeconds(c.DayStart, c.DayLength),
+            TimeOfDayMath.HourForSeconds(c.DayStart + c.DayDuration, c.DayLength) % TimeOfDayMath.HoursPerDay,
+            stopped,
+            TimeOfDayOverrideKind.None,
+            TimeOfDayMath.IsBloodMoonNight(c.Time, c.DayLength, c.DayStart, c.DayDuration, c.NextBloodMoonDay),
+            c.NextBloodMoonDay);
+    }
+
     /// <summary>
     /// Start an override and apply it now. Null with <paramref name="why"/> when the world has not
     /// finished loading, or the clock, the game clock or the debug-settings singleton cannot be
@@ -617,10 +654,13 @@ internal static unsafe class TimeOfDayRuntime
         return cached == Entity.Null ? null : AiRuntime.RO<T>(em, cached, need);
     }
 
-    private static bool TryReadCycle(EntityManager em, out CycleRead c, out string why)
+    private static bool TryReadCycle(EntityManager em, out CycleRead c, out string why) =>
+        TryReadCycle(em, ref _cycle, out c, out why);
+
+    private static bool TryReadCycle(EntityManager em, ref Entity cache, out CycleRead c, out string why)
     {
         c = default;
-        byte* p = ReadSingleton<DayNightCycle>(em, ref _cycle, CycleReadExtent);
+        byte* p = ReadSingleton<DayNightCycle>(em, ref cache, CycleReadExtent);
         if (p == null)
         {
             why = "time-of-day refused: no DayNightCycle singleton.";
@@ -642,9 +682,11 @@ internal static unsafe class TimeOfDayRuntime
         return true;
     }
 
-    private static bool TryReadFlag(EntityManager em, out bool flag)
+    private static bool TryReadFlag(EntityManager em, out bool flag) => TryReadFlag(em, ref _settings, out flag);
+
+    private static bool TryReadFlag(EntityManager em, ref Entity cache, out bool flag)
     {
-        byte* p = ReadSingleton<SyncedServerDebugSettings>(em, ref _settings, FlagExtent);
+        byte* p = ReadSingleton<SyncedServerDebugSettings>(em, ref cache, FlagExtent);
         flag = p != null && p[Layout.SyncedServerDebugSettingsDayNightCycleDisabledOffset] != 0;
         return p != null;
     }
