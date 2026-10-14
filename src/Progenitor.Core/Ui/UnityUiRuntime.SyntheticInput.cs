@@ -848,7 +848,7 @@ internal sealed partial class UnityUiRuntime
         if (field == null || FindArmed(field) == null) return;
         // A first click focuses the field and the kit selects its whole value (FocusOwnedField); only a click on a field
         // that already has the keyboard places the caret, as with the mouse.
-        if (FieldId(FocusedArmedField()) != FieldId(field)) return;
+        if (!UiCaretLines.ClickPlacesCaret(FieldId(FocusedArmedField()) == FieldId(field), SelectAllPendingFor(field))) return;
         _caretClickFieldId = FieldId(field);
         _caretClickAt = at;
         _caretClickFrames = 6;
@@ -867,6 +867,12 @@ internal sealed partial class UnityUiRuntime
         var field = FocusedArmedField();
         if (field == null || FieldId(field) != _caretClickFieldId) return;
         _caretClickFieldId = 0;
+        // The kit's select-all of a first focus wins: it runs on the next typed-key pass, after this.
+        if (SelectAllPendingFor(field))
+        {
+            Note("caret click: skipped, the field's select-all is pending");
+            return;
+        }
         try
         {
             var tmp = field.textComponent;

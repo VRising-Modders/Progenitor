@@ -445,7 +445,26 @@ public sealed class BridgeUiInputTests : IDisposable
     public void A_first_click_keeps_the_kits_select_all_and_only_a_later_click_places_the_caret()
     {
         string note = SourcePin.MethodBody(Driver(), "private static void NoteCaretClick(");
-        SourcePin.AssertUncommented(note, "if (FieldId(FocusedArmedField()) != FieldId(field)) return;");
+        SourcePin.AssertUncommented(note, "UiCaretLines.ClickPlacesCaret(FieldId(FocusedArmedField()) == FieldId(field), SelectAllPendingFor(field))");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(Driver(), "private static void PlaceCaretClick("), "if (SelectAllPendingFor(field))");
+    }
+
+    [Fact]
+    public void A_first_click_then_type_40_gives_40_and_a_second_click_places_the_caret()
+    {
+        // First synthetic click on an unfocused value box holding "12": it did not have the keyboard at the press, and the
+        // kit's select-all is pending, so the bridge places no caret; the pump's select-all runs, and typing replaces.
+        Assert.False(UiCaretLines.ClickPlacesCaret(hadKeyboardAtPress: false, selectAllPending: true));
+        Assert.False(UiCaretLines.ClickPlacesCaret(hadKeyboardAtPress: true, selectAllPending: true));
+        var state = UiTextEdit.SelectAll(new UiTextEditState("12", 0, 0));
+        state = UiTextEdit.Insert(state, "4");
+        state = UiTextEdit.Insert(state, "0");
+        Assert.Equal("40", state.Text);
+        // Had the bridge put the caret at 0 first (the bug), typing would have prefixed instead.
+        var wrong = UiTextEdit.Insert(UiTextEdit.Insert(new UiTextEditState("12", 0, 0), "4"), "0");
+        Assert.Equal("4012", wrong.Text);
+        // A second click, on the box that now has the keyboard and no pending select-all, places the caret.
+        Assert.True(UiCaretLines.ClickPlacesCaret(hadKeyboardAtPress: true, selectAllPending: false));
     }
 
     [Fact]

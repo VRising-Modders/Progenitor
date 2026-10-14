@@ -37,6 +37,14 @@ internal static class UiCaretLines
         return next > 0 && next <= text.Length && text[next - 1] == '\n' ? next - 1 : next;
     }
 
+    /// <summary>
+    /// Whether a synthetic click places the caret at the clicked character: only on a field that already had the
+    /// keyboard when the click pressed, and never while the kit's select-all of a first focus is still pending (it runs
+    /// on the next typed-key pass, so a caret placed now would be undone or, worse, put the caret at 0 before typing).
+    /// A first click keeps the kit's select-all, so typing replaces the value.
+    /// </summary>
+    internal static bool ClickPlacesCaret(bool hadKeyboardAtPress, bool selectAllPending) => hadKeyboardAtPress && !selectAllPending;
+
     /// <summary>Whether <paramref name="key"/> is one of the line moves.</summary>
     internal static bool IsLineKey(UiKey key) => key is UiKey.Home or UiKey.End or UiKey.UpArrow or UiKey.DownArrow;
 
