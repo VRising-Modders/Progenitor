@@ -13,6 +13,22 @@ internal enum ScrollbarState
     Hidden = 2,
 }
 
+/// <summary>What a pass over a panel does with the verdict it may still owe a read-back.</summary>
+internal enum ReadBackAction
+{
+    /// <summary>Nothing is owed, or the panel has no scroll view: clear the pending flag, log nothing.</summary>
+    None = 0,
+
+    /// <summary>The bar cannot hold the answer yet and a later pass can still read it: keep it pending.</summary>
+    Defer = 1,
+
+    /// <summary>The bar cannot hold the answer yet and this pass ends the verdict: clear it, log nothing.</summary>
+    Drop = 2,
+
+    /// <summary>The bar holds <c>ScrollRect</c>'s answer to this verdict: read it and log.</summary>
+    Read = 3,
+}
+
 /// <summary>
 /// The sentence a panel prints when it reads back what actually happened to its scrollbar.
 ///
@@ -34,7 +50,8 @@ internal enum ScrollbarState
 /// in its own update, so a read taken immediately would report the previous content's answer while
 /// looking like this one's. A verdict is therefore logged, and then checked the next time anything
 /// touches the panel — a re-layout or a reposition — which is the first moment the answer is about
-/// the content that produced it.
+/// the content that produced it. "Next pass" means a later frame with the panel live: see
+/// <see cref="Decide"/>.
 /// </para>
 /// </summary>
 internal static class ScrollbarVerdict
@@ -57,6 +74,45 @@ internal static class ScrollbarVerdict
     /// has no bar whose answer could agree or disagree with the layout's, so it is never read, whenever it was armed.
     /// </summary>
     internal static bool ShouldReadBack(bool pending, bool noScroll) => pending && !noScroll;
+
+    /// <summary>
+    /// Whether the bar can hold <c>ScrollRect</c>'s answer to the pending verdict, and what to do when it cannot.
+    ///
+    /// <para>
+    /// <b>Why (2026-10-14 live passes, about 160 false "they disagree" lines per pass).</b> <c>ScrollRect</c>
+    /// sets the bar in its own <c>LateUpdate</c>, which runs once per frame and only while it is active and
+    /// enabled. The framework lays a panel out from its tick, before that update, and a panel being built
+    /// re-lays itself out once per added row, several times in one frame and usually before it is shown. The
+    /// "next pass" the read-back was deferred to was then the same frame, or a frame in which the panel was
+    /// inactive, and the bar still carried the answer to an older content: every first build of the Widgets
+    /// page and the Mods workspace read its empty-panel <c>(fits)</c> against the bar of the last open.
+    /// </para>
+    ///
+    /// <para>
+    /// So a read is taken only when the <c>ScrollRect</c> is live now and a frame has started since the
+    /// verdict (<paramref name="nowFrame"/> &gt; <paramref name="verdictFrame"/>). <c>Show</c> lays the panel
+    /// out before it activates it, so a verdict made while hidden is replaced before the bar can run, and
+    /// <c>Hide</c> reads before it deactivates. Otherwise the pass defers the read, unless it
+    /// <paramref name="endsVerdict"/> — a re-layout replaces the verdict and a hide is the last check — in
+    /// which case the unsettled verdict is dropped unlogged: it was never checkable, and printing it as a
+    /// disagreement is the false report this exists to stop. An unreadable frame counter is passed as
+    /// <see cref="int.MinValue"/> and never reads.
+    /// </para>
+    /// </summary>
+    internal static ReadBackAction Decide(
+        bool pending, bool noScroll, bool scrollLive, int verdictFrame, int nowFrame, bool endsVerdict)
+    {
+        if (!ShouldReadBack(pending, noScroll)) return ReadBackAction.None;
+        bool settled = scrollLive && nowFrame != int.MinValue && verdictFrame != int.MinValue && nowFrame > verdictFrame;
+        if (settled) return ReadBackAction.Read;
+        return endsVerdict ? ReadBackAction.Drop : ReadBackAction.Defer;
+    }
+
+    /// <summary>
+    /// Whether a read-back line is printed: only when it differs from the last one this panel printed since it
+    /// was shown. A panel re-laid out on every keystroke otherwise repeats the same agreeing sentence each time.
+    /// </summary>
+    internal static bool ShouldLog(string? lastLogged, string line) => !string.Equals(lastLogged, line, System.StringComparison.Ordinal);
 
     /// <summary>
     /// The line itself. It names which verdict is being checked, what was read, and when it was
