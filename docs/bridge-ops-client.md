@@ -6,7 +6,7 @@ Operation reference for the [development bridge](bridge.md), part 5 of 5: keybin
 
 **Experimental development tooling**, client, main thread; part of the Dev `bot` op ([tools/bots/README.md](../tools/bots/README.md), [input.md](input.md)). Not a framework API.
 
-`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range: about 1.7 m from the target worked live (2026-10-14), while 3 m gave `not confirmed`; move closer first.
+`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range: about 1.7 m from the target worked live (2026-10-14), while 3 m gave `not confirmed`; move closer first. Side and angle matter too: a crafting bench took the interaction only from its south side, at 1.4 m (live 2026-10-14); when a request is `not confirmed` within range, approach from another side.
 
 | Field of `bot` `{"action":"status"}` | Meaning |
 |---|---|
@@ -140,7 +140,7 @@ Log lines: `Dev nav: added a virtual gamepad (device N)`, `Dev nav: removed the 
 
 A virtual gamepad can switch the game into its controller look while it exists. Remove it at the end of a test batch.
 
-MCP: `progenitor_nav`. `hold`, `stick` and `focus` are built and game-free tested (`BridgeUiInputTests`), not live-verified.
+MCP: `progenitor_nav`. `hold`, `stick` and `focus` are live-verified on the test client 2026-10-14 (the focus into a data table's body, presses from there, a held direction repeating, the right stick scrolling) and game-free tested (`BridgeUiInputTests`).
 
 Source-checked against `src/Progenitor.Dev/Ops/NavOps.cs`, built, and game-free tested (button names, the pad state and event bytes against the dump's layout in `UiNavTests`). **Run live 2026-10-10** on the Steam client at the title screen with `background:true`: the pad was added, became current and drove every step of the procedure below except the in-world ones; `pad_remove` removed it. The game shows its controller prompts while the pad exists and goes back to the mouse's when the real mouse moves.
 
