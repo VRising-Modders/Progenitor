@@ -179,8 +179,8 @@ public sealed class NoServerDistributionTests : IDisposable
         // CLIENTPOLICY3 added PolicyRecheck (512), chat command hints CommandHints (1024) and REQRULE2 PolicyRuleUpdates (8192);
         // mod compatibility C1/C2 added ModFeatures (32768) and ModMessages (65536); items added ItemStatSync (131072),
         // ItemLedgerChunks (262144) and ItemDefinitionPriority (2097152); C3 added VersionRanges (8388608); C4 added
-        // ProgenitorExact (67108864).
-        Assert.Equal("14a7a7c7", row.Version);
+        // ProgenitorExact (67108864); requests and subscriptions added ModExchange (134217728).
+        Assert.Equal("1ca7a7c7", row.Version);
 
         // The handshake and the client policy both ask the same question.
         string hs = SourcePin.ReadFile("src", "Progenitor.Core", "Networking", "Handshake.cs");

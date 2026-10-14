@@ -1056,7 +1056,7 @@ internal static class ModCompatCaps
 {
     /// <summary>The bits a server puts on every handshake request (and the client refresh request).</summary>
     internal const Handshake.Capability RequestBits = Handshake.Capability.ModFeatures | Handshake.Capability.ModMessages
-        | Handshake.Capability.VersionRanges;
+        | Handshake.Capability.VersionRanges | Handshake.Capability.ModExchange;
 
     /// <summary>
     /// <see cref="RequestBits"/> plus compat C3's Version matching bits for the server's current setting (a strict mode

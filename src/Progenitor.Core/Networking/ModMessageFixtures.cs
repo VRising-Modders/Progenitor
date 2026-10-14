@@ -67,8 +67,11 @@ internal static class ModMessageFixtureFormat
     internal const string PayloadExtension = ".bin";
     internal const string SidecarExtension = ".json";
 
-    /// <summary>The largest payload a fixture may hold: one envelope's payload.</summary>
-    internal const int MaxPayloadBytes = ModMessageEnvelope.MaxPayloadBytes;
+    /// <summary>
+    /// The largest payload a fixture may hold: the largest exchange body (a reply, snapshot or delta of
+    /// <c>ctx.Requests</c> / <c>ctx.Subscriptions</c>); a <c>ctx.Messages</c> payload is at most one envelope's.
+    /// </summary>
+    internal const int MaxPayloadBytes = ExchangeLimits.MaxBodyBytes;
 
     /// <summary>The largest sidecar read back (a few hundred bytes, a few KiB with a schema).</summary>
     internal const int MaxSidecarBytes = 256 * 1024;

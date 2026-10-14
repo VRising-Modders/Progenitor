@@ -162,14 +162,14 @@ public static class MessageCompat
         messageType.GetCustomAttribute<ModMessageAttribute>(inherit: false)?.Name
         ?? throw new MessageCompatException(messageType.FullName + " has no [ModMessage] attribute.");
 
-    internal static byte[] EncodeWith(MessageSchema schema, object message)
+    internal static byte[] EncodeWith(MessageSchema schema, object message, int maxBytes = ModMessageEnvelope.MaxPayloadBytes)
     {
         try
         {
             var payload = schema.Encode(message);
-            if (payload.Length > ModMessageEnvelope.MaxPayloadBytes)
+            if (payload.Length > maxBytes)
                 throw new MessageCompatException(message.GetType().Name + " encodes to " + payload.Length + " bytes; a message holds at most "
-                                                 + ModMessageEnvelope.MaxPayloadBytes + " (the game's send returns TooLarge).");
+                                                 + maxBytes + " (the game's send returns TooLarge).");
             return payload;
         }
         catch (MessageTooLargeException e) { throw new MessageCompatException(e.Message + " (the game's send returns TooLarge)."); }

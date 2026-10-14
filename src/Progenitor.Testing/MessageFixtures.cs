@@ -148,7 +148,12 @@ public sealed class MessageFixtures
     /// null labels all <c>any</c>.
     /// </summary>
     public static IReadOnlyList<MessageFixture> SaveRelease(string directory, string mod, string modVersion, IEnumerable<object> messages,
-        Func<object, string>? direction = null)
+        Func<object, string>? direction = null) =>
+        SaveReleaseWith(directory, mod, modVersion, messages, direction, ModMessageEnvelope.MaxPayloadBytes);
+
+    /// <summary><see cref="SaveRelease"/> with a payload cap: one envelope for <c>ctx.Messages</c>, 1 MiB for exchange types (<see cref="ExchangeCompat.SaveRelease"/>).</summary>
+    internal static IReadOnlyList<MessageFixture> SaveReleaseWith(string directory, string mod, string modVersion, IEnumerable<object> messages,
+        Func<object, string>? direction, int maxBytes)
     {
         if (messages == null) throw new ArgumentNullException(nameof(messages));
         string folder = System.IO.Path.Combine(directory, ModMessageFixtureFormat.Segment(modVersion));
@@ -159,7 +164,7 @@ public sealed class MessageFixtures
         var list = messages.ToList();
         foreach (var m in list) MessageCompat.SchemaOf(m.GetType()); // every type valid before anything is written
         var saved = new List<MessageFixture>(list.Count);
-        foreach (var m in list) saved.Add(Save(directory, mod, modVersion, m, direction?.Invoke(m) ?? ModMessageFixtureFormat.AnyDirection));
+        foreach (var m in list) saved.Add(SaveWith(directory, mod, modVersion, m, direction?.Invoke(m) ?? ModMessageFixtureFormat.AnyDirection, maxBytes));
         return saved;
     }
 
@@ -170,7 +175,11 @@ public sealed class MessageFixtures
     /// once, use <see cref="SaveRelease"/>. Returns the fixture. Throws <see cref="MessageCompatException"/> when the
     /// message's type is not a valid message type.
     /// </summary>
-    public static MessageFixture Save<T>(string directory, string mod, string modVersion, T message, string direction = "any") where T : class
+    public static MessageFixture Save<T>(string directory, string mod, string modVersion, T message, string direction = "any") where T : class =>
+        SaveWith(directory, mod, modVersion, message, direction, ModMessageEnvelope.MaxPayloadBytes);
+
+    /// <summary><see cref="Save{T}"/> with a payload cap (see <see cref="SaveReleaseWith"/>).</summary>
+    internal static MessageFixture SaveWith(string directory, string mod, string modVersion, object message, string direction, int maxBytes)
     {
         if (message == null) throw new ArgumentNullException(nameof(message));
         var (schema, attr) = MessageCompat.SchemaOf(message.GetType());
@@ -183,7 +192,8 @@ public sealed class MessageFixtures
             MinReaderVersion = attr.MinReaderVersion,
             Direction = string.IsNullOrWhiteSpace(direction) ? ModMessageFixtureFormat.AnyDirection : direction.Trim(),
             Source = "test",
-            Payload = MessageCompat.EncodeWith(schema, message),
+            // One envelope for a ctx.Messages type; the exchange's 1 MiB through ExchangeCompat.Save / SaveRelease.
+            Payload = MessageCompat.EncodeWith(schema, message, maxBytes),
             Schema = schema.Shape(),
         };
         try

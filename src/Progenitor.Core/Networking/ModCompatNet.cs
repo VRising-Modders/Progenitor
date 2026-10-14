@@ -185,6 +185,13 @@ internal static unsafe class ModCompatNet
     /// <summary>Server: after an ok handshake. Sends this server's full table to a client that declared ModFeatures.</summary>
     internal static void OnHandshakeOk(World? world, Entity userEntity, Handshake.Capability clientCaps)
     {
+        // Requests and subscriptions: what the server held for this user's previous client state is reset.
+        try
+        {
+            if (_installed && _server && world != null && world.IsCreated && world.EntityManager.HasComponent<User>(userEntity))
+                ExchangeNet.OnHandshakeOk(userEntity, world.EntityManager.GetComponentData<User>(userEntity).Index);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Exchange: the handshake reset threw: " + e.Message); }
         if (!_installed || !_server || world == null || (clientCaps & Handshake.Capability.ModFeatures) == 0) return;
         try
         {
