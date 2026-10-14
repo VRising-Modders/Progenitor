@@ -681,7 +681,7 @@ h.Cancel();                                                          // optional
 RequestResult<Page> r2 = await ctx.Requests.SendAsync<PageRequest, Page>(req);   // never faults; read r2.Status
 ```
 
-`RequestStatus`: `Ok`, `Refused` (the handler's reason), `NotSent` (`NotSent` holds the `SendResult`: no server, an older Progenitor, or the server lacks the mod), `Timeout`, `Cancelled` (`Cancel`, or this mod unloaded), `Disconnected`, `NoHandler`, `RateLimited`, `Busy` (too many waiting requests, or a full send queue), `TooLarge`, `Failed`, `Unsupported` (a minimum reader version above the other side's), `Unloaded` (the server's mod unloaded first) and `Malformed`. Each request has a 32-bit correlation id, so answers that arrive in any order reach their own callbacks. An answer that arrives after a timeout or a cancel is dropped. A client timeout also cancels the request on the server, so a deferred responder sees `IsOpen == false`.
+`RequestStatus`: `Ok`, `Refused` (the handler's reason), `NotSent` (`NotSent` holds the `SendResult`: no server, an older Progenitor, or the server lacks the mod), `Timeout`, `Cancelled` (`Cancel`, or this mod unloaded), `Disconnected`, `NoHandler`, `RateLimited`, `Busy` (too many waiting requests, or a full send queue), `TooLarge`, `Failed`, `Unsupported` (a minimum reader version above the other side's), `Unloaded` (the server's mod unloaded first), `Malformed` and `NotNegotiated` (the server does not see this mod in the client's feature table, usually right after a join or a reload; the handler did not run). Each request has a 32-bit correlation id that starts at a random point per Core generation, so answers that arrive in any order reach their own callbacks and an answer meant for a previous generation is not taken for a new request. An answer that arrives after a timeout or a cancel is dropped. A client timeout also cancels the request on the server, so a deferred responder sees `IsOpen == false`.
 
 **Subscriptions.** The server declares a topic with a snapshot function. A client subscribes to one key. It gets the snapshot, then every delta the server publishes for that key, in order. Each subscription has its own sequence numbers. If a delta is missing, the client stops applying deltas and asks for a fresh snapshot, which also covers everything it missed.
 
@@ -705,13 +705,13 @@ var sub = ctx.Subscriptions.Subscribe<StashState, StashChange>("stash", containe
 sub.Dispose();                                           // close the panel: unsubscribes; no end callback
 ```
 
-`SubscriptionState`: `Pending` (waiting for the snapshot), `Live`, `Resyncing`, `Retrying` and `Ended`. `SubscriptionEndReason`: `Closed`, `Refused`, `NoTopic`, `Unloaded`, `Disconnected`, `Timeout`, `RateLimited`, `Busy`, `Unsupported`, `NotSent`, `Failed`, `BadKey` and `Reset`.
+`SubscriptionState`: `Pending` (waiting for the snapshot), `Live`, `Resyncing`, `Retrying` and `Ended`. `SubscriptionEndReason`: `Closed`, `Refused`, `NoTopic`, `Unloaded`, `Disconnected`, `Timeout`, `RateLimited`, `Busy`, `Unsupported`, `NotSent`, `Failed`, `BadKey`, `Reset` and `NotNegotiated`.
 
 - **Lost snapshot.** If the snapshot does not arrive within 10 s, the client asks again. After three tries, the subscription ends with `Timeout`.
 - **Server mod reload.** When the server's mod unloads, subscribers get `Unloaded`. When the server forgets a client's state, the subscriber gets `Reset`. In both cases the client resubscribes after 1, 2, 4, 8 and 16 s, and stays `Retrying` until then. If the topic does not come back, the subscription ends with the last reason.
 - **Full send queue.** When a subscriber's send queue is full, a publish skips that subscriber. Once there is room, the subscriber gets a fresh snapshot. The server sends at most one snapshot per second to each subscription.
 
-**Limits.** Core enforces every limit; a mod cannot raise them. Server-side checks treat every request, subscribe and resync as untrusted input.
+**Limits.** Core enforces every limit; a mod cannot raise them. Server-side checks treat every request, subscribe and resync as untrusted input: a resync spends the same per-topic budget as a subscribe, a snapshot is built only when the user's send queue has room for it (at most one attempt per second per subscription, and at most 8 builds per frame for the whole server), and a request is answered only for a client whose feature table, as the server sees it, lists the mod.
 
 | Limit | Value | When exceeded |
 |---|---|---|
@@ -725,19 +725,20 @@ sub.Dispose();                                           // close the panel: uns
 | Subscriptions | `MaxPerUser` per topic (default 8), and 64 per user in total | `Busy` |
 | Subscribe rate per user and topic | `Burst` (default 10), then `PerSecond` (default 2) | `RateLimited` |
 | Client waiting requests and open subscriptions | 64 requests and 32 subscriptions per mod | `Busy` |
-| Reassembly memory | One body at a time per connection: 256 KiB plus a 280-byte header on the server, 1 MiB plus the same header on the client | Over the cap: skipped. Out of order: the open body is dropped. |
-| Send queue | 4 MiB per user on the server, 1 MiB on the client; a body is queued whole or not at all | `Busy`; for a subscription, a later snapshot |
+| Subscribe and resync rate per user and topic | The topic's `Burst` and `PerSecond`, shared by subscribes and resyncs | A subscribe ends `RateLimited`; a resync is dropped and the client asks again after its snapshot timeout |
+| Reassembly memory | One body at a time per connection: 256 KiB plus a 280-byte header on the server, 1 MiB plus the same header on the client; a body whose next chunk has not come for 30 s is dropped | Over the cap: skipped. Out of order: the open body is dropped. |
+| Send queue | 4 MiB per user and 64 MiB for all users on the server, 1 MiB on the client; a body is queued whole or not at all | `Busy`; for a subscription, a later snapshot |
 | Pacing | Server to each client: 512 KiB/s after a 128 KiB burst. Client to server: 8 packets/s after a burst of 20, under the server's `[Networking] ReceivePacketsPerSecond` and `ReceiveBurstPackets` defaults (20 and 60) | Queued, not dropped |
 
-A 1 MiB reply takes about two seconds. A 256 KiB request is 17 packets, which fits in the client's burst. If a server lowers its receive budget, its mods should keep requests small: the server's receive gate counts every Progenitor packet, and a dropped chunk drops its whole body. That request then times out.
+A 1 MiB reply takes about two seconds. A 256 KiB request is 18 packets, which fits in the client's burst. If a server lowers its receive budget, its mods should keep requests small: the server's receive gate counts every Progenitor packet, and a dropped chunk drops its whole body. That request then times out.
 
 **Lifetime.** Everything is tracked; no handler or callback needs explicit cleanup.
 
 - **Client unload.** The mod's requests end `Cancelled` (callbacks still run, so an awaited task completes). Its subscriptions end `Closed`, and the server is told.
 - **Server unload.** Handlers and topics are removed. Waiting requests are answered `Unloaded`. Subscribers get `Unloaded` and resubscribe, so a hot reload carries an open panel through. Disposing a topic yourself ends its subscriptions with `Closed`, and they do not retry.
 - **Disconnect.** Everything on the client ends `Disconnected`. On the server, that user's subscriptions close and `Closed` runs for each of them.
-- **Re-handshake.** When a user's handshake passes again (after a client Core swap, for example), the server resets what it held for them. Live subscriptions get `Reset`, so the client resubscribes.
-- **Core swap.** The outgoing Core sends end frames on each side (best effort) before it goes.
+- **Re-handshake.** When a user's handshake passes again with the post-join steps (after a client Core swap, for example), the server resets what it held for them. Live subscriptions get `Reset`, so the client resubscribes; waiting deferred requests are answered, and the client sees `Cancelled` with the reason `the server reset this connection`. A quick re-answer that skips those steps does not reset; random request ids keep a stale answer from matching a new request.
+- **Core swap.** Best effort, before the outgoing Core goes. The server's Core sends each subscriber an `Unloaded` end frame and answers each waiting request `Unloaded`. A client's Core sends the server an `Unsubscribe` per open subscription and a `Cancel` per waiting request, as far as its packet burst (20) allows; the server cleans up the rest when the client's next handshake resets it.
 
 **Threads.** Everything runs on the game's main thread: `Send`, `Subscribe`, `Publish`, `Resync`, the responder methods, and `Dispose` of a subscription. From another thread these throw `InvalidOperationException`; post the call with `MainThread.Post`. Handlers and callbacks run on the main thread, inside the receive dispatch or the frame tick.
 
@@ -765,8 +766,9 @@ This is the `ctx.Messages.On` contract: a mistake fails `OnLoad`. `Send` and `Su
   - A chunk out of order drops its whole body, and the request times out.
   - A gap in a subscription's sequence triggers a resync.
   - A packet the transport refuses stays at the head of the queue and is tried again next frame. After 300 frames of refusals, that connection's queue is dropped.
+- **Warnings.** Drop and refusal lines are rate-limited per kind (one line per kind per minute, the next one counting what was held back), keyed on fixed kinds rather than anything a peer sends, so a flood of bad packets cannot silence other warnings.
 
-**Testing** (`Progenitor.Testing`). The request, reply, snapshot and delta types record and replay like any message: `MessageFixtures.SaveRelease` and `MessageCompat.Replay<T>`. A fixture payload may now be up to 1 MiB. `ExchangeCompat` runs game-free round trips through Core's real exchange engines and chunk frames:
+**Testing** (`Progenitor.Testing`). The request, reply, snapshot and delta types record and replay like any message, with `MessageCompat.Replay<T>`. Record them with `ExchangeCompat.SaveRelease` (or `ExchangeCompat.Save`), which takes payloads up to 1 MiB; `MessageFixtures.SaveRelease` keeps a plain `ctx.Messages` type to one packet's payload. `ExchangeCompat` runs game-free round trips through Core's real exchange engines and chunk frames:
 
 ```csharp
 ExchangeCompat.AssertRequestPair<PageRequest, Page>();

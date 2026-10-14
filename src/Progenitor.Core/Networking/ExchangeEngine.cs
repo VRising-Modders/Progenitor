@@ -128,6 +128,8 @@ internal static class ExchangeCodes
         ExchangeCode.Unloaded => RequestStatus.Unloaded,
         ExchangeCode.Timeout => RequestStatus.Timeout,
         ExchangeCode.Malformed => RequestStatus.Malformed,
+        ExchangeCode.NotNegotiated => RequestStatus.NotNegotiated,
+        ExchangeCode.Reset => RequestStatus.Cancelled,
         _ => RequestStatus.Failed,
     };
 
@@ -144,6 +146,7 @@ internal static class ExchangeCodes
         ExchangeCode.Reset => SubscriptionEndReason.Reset,
         ExchangeCode.BadKey => SubscriptionEndReason.BadKey,
         ExchangeCode.Timeout => SubscriptionEndReason.Timeout,
+        ExchangeCode.NotNegotiated => SubscriptionEndReason.NotNegotiated,
         _ => SubscriptionEndReason.Failed,
     };
 
@@ -205,8 +208,31 @@ internal sealed class ExchangeClientEngine
 
     private readonly Dictionary<uint, Pending> _pending = new();
     private readonly Dictionary<uint, Sub> _subs = new();
-    private uint _nextRequest;
-    private uint _nextSub;
+    // Ids start at a random point per engine (one per Core generation), so an answer the server still holds for the
+    // previous generation's request cannot be taken for a new request with the same id.
+    private uint _nextRequest = RandomStart();
+    private uint _nextSub = RandomStart();
+
+    /// <summary>Subscription ids closed lately: a frame for one gets one Unsubscribe, not one per frame.</summary>
+    private readonly HashSet<uint> _closedRecently = new();
+    private readonly Queue<uint> _closedOrder = new();
+    internal const int ClosedIdsKept = 256;
+
+    private static uint RandomStart()
+    {
+        var b = new byte[4];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(b);
+        return BitConverter.ToUInt32(b, 0);
+    }
+
+    /// <summary>Remember <paramref name="id"/> as closed. False when it was already remembered.</summary>
+    private bool NoteClosed(uint id)
+    {
+        if (!_closedRecently.Add(id)) return false;
+        _closedOrder.Enqueue(id);
+        while (_closedOrder.Count > ClosedIdsKept) _closedRecently.Remove(_closedOrder.Dequeue());
+        return true;
+    }
 
     internal int PendingCount => _pending.Count;
     internal int SubscriptionCount => _subs.Count;
@@ -358,13 +384,15 @@ internal sealed class ExchangeClientEngine
         s.State = SubscriptionState.Ended;
         s.EndReason = SubscriptionEndReason.Closed;
         s.EndText = "closed";
-        if (wasOpen && Gate(s.Mod) == SendResult.Sent) SendUnsubscribe(s.ModHash, s.TopicHash, s.Id);
+        if (!wasOpen) return;
+        NoteClosed(s.Id);
+        if (Gate(s.Mod) == SendResult.Sent) SendUnsubscribe(s.ModHash, s.TopicHash, s.Id);
     }
 
     private void End(Sub s, SubscriptionEndReason reason, string text, bool notify)
     {
         if (s.State == SubscriptionState.Ended) return;
-        _subs.Remove(s.Id);
+        if (_subs.Remove(s.Id)) NoteClosed(s.Id);
         s.State = SubscriptionState.Ended;
         s.EndReason = reason;
         s.EndText = text ?? "";
@@ -388,7 +416,7 @@ internal sealed class ExchangeClientEngine
                 OnSubFrame(b);
                 return;
             default:
-                Warn?.Invoke("op|" + b.Op, "Requests: dropped a " + b.Op + " frame from the server (a client never receives one)");
+                Warn?.Invoke("op-down", "Requests: dropped a " + b.Op + " frame from the server (a client never receives one)");
                 return;
         }
     }
@@ -422,8 +450,10 @@ internal sealed class ExchangeClientEngine
     {
         if (!_subs.TryGetValue(b.Id, out var s) || s.ModHash != b.ModHash)
         {
-            // The server still sends to a subscription this side closed or never had (a Core swap): tell it to stop.
-            if (b.Op != ExchangeOp.Ended) SendUnsubscribe(b.ModHash, 0, b.Id);
+            // The server still sends to a subscription this side never had (a Core swap): tell it to stop, once per id. An id
+            // this side closed itself was told when it closed; frames already on their way cost nothing more.
+            if (b.Op != ExchangeOp.Ended && NoteClosed(b.Id)) SendUnsubscribe(b.ModHash, 0, b.Id);
+
             return;
         }
 
@@ -568,10 +598,13 @@ internal sealed class ExchangeClientEngine
             End(s, SubscriptionEndReason.Closed, "Progenitor is reloading", notify: false);
         }
 
+        // Waiting requests: the server is told (so it stops holding them); no callbacks, the plugins are going away too.
         foreach (var p in new List<Pending>(_pending.Values))
         {
             p.Finished = true;
             _pending.Remove(p.Id);
+            try { Send(new ExchangeBody { Op = ExchangeOp.Cancel, ModHash = p.ModHash, Id = p.Id }.Pack()); }
+            catch { /* best effort */ }
         }
     }
 }
@@ -642,8 +675,26 @@ internal sealed class ExchangeServerEngine
     /// <summary>May the server send <c>mod</c>'s traffic to this user now?</summary>
     internal Func<int, string, SendResult> Gate { get; set; } = (_, _) => SendResult.NotConnected;
 
-    /// <summary>Queue one body for a user; false when that user's send queue is full.</summary>
+    /// <summary>
+    /// Queue one body for a user; false when that user's send queue is full. The body is copied before this returns (a
+    /// fan-out patches and reuses one buffer).
+    /// </summary>
     internal Func<int, byte[], bool> Send { get; set; } = (_, _) => false;
+
+    /// <summary>Does this user's send queue have room for a snapshot now? Checked before a snapshot is built, so a full queue costs no build.</summary>
+    internal Func<int, bool> HasRoom { get; set; } = _ => true;
+
+    /// <summary>Snapshots built so far (every call of a topic's snapshot function). Diagnostics and tests.</summary>
+    internal long SnapshotBuilds { get; private set; }
+
+    /// <summary>At most this many snapshots are built per <see cref="Tick"/>; the rest wait for the next frame.</summary>
+    internal const int MaxSnapshotBuildsPerTick = 8;
+
+    /// <summary>The user can be reached on the exchange channel, but the server does not see the mod in their feature table.</summary>
+    private static bool NotNegotiated(SendResult gate) => gate is SendResult.PeerLacksMod or SendResult.PeerNotReady;
+
+    private static string NotNegotiatedText(string mod, SendResult gate) =>
+        "the server does not see " + mod + " in your client's feature table (" + gate + ")";
 
     /// <summary>The user's version of a mod, from its feature table (for <see cref="MessageInfo.SenderModVersion"/>).</summary>
     internal Func<int, string, string?>? PeerModVersion { get; set; }
@@ -847,7 +898,7 @@ internal sealed class ExchangeServerEngine
             case ExchangeOp.Unsubscribe: OnUnsubscribe(user, b); return;
             case ExchangeOp.Resync: OnResync(user, b); return;
             default:
-                Warn?.Invoke("op|" + user + "|" + b.Op, "Requests: dropped a " + b.Op + " frame from user " + user + " (a server never receives one)");
+                Warn?.Invoke("op-up", "Requests: dropped a " + b.Op + " frame from user " + user + " (a server never receives one)");
                 return;
         }
     }
@@ -886,6 +937,14 @@ internal sealed class ExchangeServerEngine
             return;
         }
 
+        var gate = Gate(user, m.Guid);
+        if (gate != SendResult.Sent)
+        {
+            // The handler would run for nothing: its reply could not go back.
+            if (NotNegotiated(gate)) SendError(user, b.ModHash, b.Id, ExchangeCode.NotNegotiated, NotNegotiatedText(m.Guid, gate));
+            return;
+        }
+
         var u = UserOf(user);
         if (!TakeToken(u, h, h.Options.Burst, h.Options.PerSecond))
         {
@@ -895,7 +954,7 @@ internal sealed class ExchangeServerEngine
 
         if (u.Pending.ContainsKey((b.ModHash, b.Id)))
         {
-            Warn?.Invoke("dup|" + user, "Requests: user " + user + " reused a waiting request id; dropped");
+            Warn?.Invoke("dup", "Requests: user " + user + " reused a waiting request id; dropped");
             return;
         }
 
@@ -958,7 +1017,13 @@ internal sealed class ExchangeServerEngine
             return false;
         }
 
-        if (Gate(r.User, r.Handler.Mod) != SendResult.Sent) return false;
+        var gate = Gate(r.User, r.Handler.Mod);
+        if (gate != SendResult.Sent)
+        {
+            if (NotNegotiated(gate)) SendError(r.User, r.ModHash, r.Id, ExchangeCode.NotNegotiated, NotNegotiatedText(r.Handler.Mod, gate));
+            return false;
+        }
+
         var body = new ExchangeBody
         {
             Op = ExchangeOp.Reply, ModHash = r.ModHash, MessageHash = type.Hash, Version = type.Version, MinReader = type.MinReader, Id = r.Id, Payload = payload,
@@ -982,6 +1047,13 @@ internal sealed class ExchangeServerEngine
         if (!_mods.TryGetValue(b.ModHash, out var m) || !m.Topics.TryGetValue(b.MessageHash, out var topic))
         {
             SendEnded(user, b.ModHash, b.Id, ExchangeCode.NoTopic, "the server runs no such topic");
+            return;
+        }
+
+        var gate = Gate(user, topic.Mod);
+        if (gate != SendResult.Sent)
+        {
+            if (NotNegotiated(gate)) SendEnded(user, b.ModHash, b.Id, ExchangeCode.NotNegotiated, NotNegotiatedText(topic.Mod, gate));
             return;
         }
 
@@ -1038,6 +1110,25 @@ internal sealed class ExchangeServerEngine
     private bool SendSnapshot(Sub sub, bool first)
     {
         var topic = sub.Topic;
+        // Every attempt counts toward the one-per-second pacing, whatever its outcome, and nothing is built for a user
+        // who cannot take it now: a full queue or a closed gate costs a check, not a snapshot.
+        sub.LastSnapshot = Clock();
+        var gate = Gate(sub.User, topic.Mod);
+        if (gate != SendResult.Sent || !HasRoom(sub.User))
+        {
+            if (first)
+            {
+                if (gate == SendResult.Sent) SendEnded(sub.User, topic.ModHash, sub.Id, ExchangeCode.Busy, "the server's send queue for you is full");
+                else if (NotNegotiated(gate)) SendEnded(sub.User, topic.ModHash, sub.Id, ExchangeCode.NotNegotiated, NotNegotiatedText(topic.Mod, gate));
+                return false;
+            }
+
+            sub.NeedsSnapshot = true;
+            _resync.Add(sub);
+            return false;
+        }
+
+        SnapshotBuilds++;
         byte[] payload;
         ExchangeCode fail = ExchangeCode.None;
         string reason = "";
@@ -1066,7 +1157,6 @@ internal sealed class ExchangeServerEngine
 
         if (fail == ExchangeCode.None)
         {
-            if (Gate(sub.User, topic.Mod) != SendResult.Sent) return false;
             var body = new ExchangeBody
             {
                 Op = ExchangeOp.Snapshot, ModHash = topic.ModHash, MessageHash = topic.Snapshot.Hash, Version = topic.Snapshot.Version,
@@ -1075,7 +1165,6 @@ internal sealed class ExchangeServerEngine
             if (Send(sub.User, body.Pack()))
             {
                 sub.NeedsSnapshot = false;
-                sub.LastSnapshot = Clock();
                 _resync.Remove(sub);
                 return true;
             }
@@ -1108,6 +1197,14 @@ internal sealed class ExchangeServerEngine
         if (!_users.TryGetValue(user, out var u) || !u.Subs.TryGetValue(b.Id, out var s) || s.Topic.ModHash != b.ModHash)
         {
             SendEnded(user, b.ModHash, b.Id, ExchangeCode.Reset, "the server does not know that subscription");
+            return;
+        }
+
+        // A resync costs a snapshot, so it spends the topic's subscribe budget. Over it, the request is dropped: the client
+        // asks again after its snapshot timeout.
+        if (!TakeToken(u, s.Topic, s.Topic.Options.Burst, s.Topic.Options.PerSecond))
+        {
+            Warn?.Invoke("resync-rate", "Subscriptions: a user's resyncs of " + s.Topic.Mod + " " + s.Topic.Name + " are over the topic's rate; dropped until the next try");
             return;
         }
 
@@ -1146,7 +1243,8 @@ internal sealed class ExchangeServerEngine
             return 0;
         }
 
-        byte[] template = new ExchangeBody
+        // One buffer for every subscriber: only the id and the sequence differ, and Send copies before it returns.
+        byte[] body = new ExchangeBody
         {
             Op = ExchangeOp.Delta, ModHash = topic.ModHash, MessageHash = topic.Delta.Hash, Version = topic.Delta.Version, MinReader = topic.Delta.MinReader,
             Payload = payload,
@@ -1155,9 +1253,15 @@ internal sealed class ExchangeServerEngine
         foreach (var s in new List<Sub>(set))
         {
             if (s.NeedsSnapshot) continue; // the coming snapshot covers this delta
-            if (Gate(s.User, topic.Mod) != SendResult.Sent) continue;
+            if (Gate(s.User, topic.Mod) != SendResult.Sent)
+            {
+                // Not reachable for this mod now: a fresh snapshot once it is, instead of a silent gap.
+                s.NeedsSnapshot = true;
+                _resync.Add(s);
+                continue;
+            }
+
             uint seq = unchecked(s.Seq + 1);
-            var body = (byte[])template.Clone();
             ExchangeBody.WriteU32(body, ExchangeBody.IdOffset, s.Id);
             ExchangeBody.WriteU32(body, ExchangeBody.SeqOffset, seq);
             if (Send(s.User, body))
@@ -1219,6 +1323,7 @@ internal sealed class ExchangeServerEngine
         }
 
         if (_resync.Count == 0) return;
+        long budgetEnd = SnapshotBuilds + MaxSnapshotBuildsPerTick;
         foreach (var s in new List<Sub>(_resync))
         {
             if (!s.NeedsSnapshot || s.Topic.Disposed)
@@ -1228,6 +1333,7 @@ internal sealed class ExchangeServerEngine
             }
 
             if (now - s.LastSnapshot < ExchangeLimits.MinSnapshotIntervalSeconds) continue;
+            if (SnapshotBuilds >= budgetEnd) break;
             SendSnapshot(s, first: false);
         }
     }
@@ -1244,12 +1350,14 @@ internal sealed class ExchangeServerEngine
     /// <summary>
     /// A user handshaked again (a client Core swap, or a refresh): what the server held for them belongs to the client's
     /// previous state. Live subscriptions are told <c>Reset</c> (a client that still has them subscribes again) and
-    /// dropped; waiting requests are cancelled.
+    /// dropped; waiting deferred requests are answered <c>Reset</c> (the client sees <c>Cancelled</c>).
     /// </summary>
     internal void ResetUser(int user)
     {
         if (!_users.TryGetValue(user, out var u)) return;
         foreach (var s in new List<Sub>(u.Subs.Values)) SendEnded(user, s.Topic.ModHash, s.Id, ExchangeCode.Reset, "the server reset this connection");
+        // Waiting deferred requests are answered (the client gets Cancelled with this reason) rather than left to time out.
+        foreach (var r in new List<ExchangeResponder>(u.Pending.Values)) r.Fail(ExchangeCode.Reset, "the server reset this connection");
         UserLeft(user);
     }
 

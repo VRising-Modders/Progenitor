@@ -55,6 +55,8 @@ internal sealed class ExchangeLoopback
                 ? (p.ClientRunsMod(mod) ? SendResult.Sent : SendResult.PeerLacksMod)
                 : SendResult.NotConnected,
             Send = (user, body) => Clients.TryGetValue(user, out var p) && p.Down.Enqueue(body),
+            // As in the game: room for a snapshot while the user's queue is at most half full.
+            HasRoom = user => Clients.TryGetValue(user, out var p) && p.Down.QueuedBytes * 2 <= p.Down.MaxBytes,
             PeerModVersion = (_, _) => "1.0.0",
             Warn = (_, line) => Warnings.Add(line),
         };
@@ -91,7 +93,7 @@ internal sealed class ExchangeLoopback
     {
         p.PacketsUp++;
         if (DeliverUp != null && !DeliverUp(p.User, packet)) return;
-        var r = p.AtServer.Add(packet, (first, total) => Server.Admit(p.User, first, total), out var body, out var error);
+        var r = p.AtServer.Add(packet, (first, total) => Server.Admit(p.User, first, total), out var body, out var error, Now);
         if (error != null) Warnings.Add("server<-" + p.User + ": " + error);
         if (r != ChunkResult.Complete) return;
         if (ExchangeBody.TryParse(body, out var parsed, out var bad)) Server.Receive(p.User, parsed);
@@ -102,7 +104,7 @@ internal sealed class ExchangeLoopback
     {
         p.PacketsDown++;
         if (DeliverDown != null && !DeliverDown(p.User, packet)) return;
-        var r = p.AtClient.Add(packet, null, out var body, out var error);
+        var r = p.AtClient.Add(packet, null, out var body, out var error, Now);
         if (error != null) Warnings.Add(p.User + "<-server: " + error);
         if (r != ChunkResult.Complete) return;
         if (ExchangeBody.TryParse(body, out var parsed, out var bad)) p.Engine.Receive(parsed);

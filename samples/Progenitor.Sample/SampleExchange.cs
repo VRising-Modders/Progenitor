@@ -79,7 +79,7 @@ internal static class SampleExchange
     private const int ChunkData = 15 * 1024 - 14;
 
 #if !PROGENITOR_TESTS
-    private static readonly Dictionary<string, SampleExchangeData.Board> Boards = new(StringComparer.Ordinal);
+    private static readonly SampleExchangeData.BoardBook Boards = new();
     private static readonly Dictionary<string, Subscription<BoardSnapshot, BoardLine>> Subscriptions = new(StringComparer.Ordinal);
     private static SubscriptionTopic<BoardSnapshot, BoardLine>? _topic;
 
@@ -111,7 +111,8 @@ internal static class SampleExchange
         _topic = ctx.Subscriptions.Topic<BoardSnapshot, BoardLine>(Topic, (user, key) =>
         {
             if (!TryParseKey(key, out var k) || k != key) throw new RequestRefusedException("a board key is 1 to 32 characters of a-z, 0-9 and -");
-            return BoardOf(key).Snapshot();
+            // A key is untrusted input: an unknown board is an empty snapshot, not a new board (only a post creates one).
+            return Boards.Snapshot(key);
         }, new TopicOptions { MaxKeyBytes = 32, MaxPerUser = 4 });
         _topic.Opened += (user, key) => SampleLog.Info(Area, "board " + key + ": a player subscribed (" + (_topic?.Subscribers(key).Count ?? 0) + " now).");
         _topic.Closed += (user, key) => SampleLog.Info(Area, "board " + key + ": a player unsubscribed (" + (_topic?.Subscribers(key).Count ?? 0) + " now).");
@@ -124,11 +125,7 @@ internal static class SampleExchange
         ctx.Commands.Register(typeof(SampleExchangeCommands));
     }
 
-    private static SampleExchangeData.Board BoardOf(string key)
-    {
-        if (!Boards.TryGetValue(key, out var b)) Boards[key] = b = new SampleExchangeData.Board();
-        return b;
-    }
+
 
     private static void AttachClient(PluginContext ctx)
     {
@@ -198,7 +195,8 @@ internal static class SampleExchange
 
     internal static string Post(string key, string text)
     {
-        var board = BoardOf(key);
+        var board = Boards.GetOrCreate(key);
+        if (board == null) return "board " + key + ": not created; this server keeps at most " + SampleExchangeData.MaxBoards + " boards.";
         var delta = board.Post(text);
         int n = _topic?.Publish(key, delta) ?? 0;
         return SampleLog.Info(Area, "board " + key + ": rev " + delta.Revision + " posted to " + n + " subscriber(s).");
@@ -206,9 +204,9 @@ internal static class SampleExchange
 
     internal static string Status(string key)
     {
-        var board = BoardOf(key);
+        var board = Boards.Find(key);
         int subs = _topic?.Subscribers(key).Count ?? 0;
-        return "board " + key + ": rev " + board.Revision + ", " + board.Lines.Count + " line(s), " + subs + " subscriber(s); keys with subscribers: "
+        return "board " + key + ": rev " + (board?.Revision ?? 0) + ", " + (board?.Lines.Count ?? 0) + " line(s), " + subs + " subscriber(s); keys with subscribers: "
                + (_topic == null || _topic.Keys.Count == 0 ? "none" : string.Join(", ", _topic.Keys)) + ".";
     }
 

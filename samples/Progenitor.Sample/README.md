@@ -75,5 +75,6 @@ Status: source-checked, built and game-free tested (`SampleCompatTests`), **not 
 - **`.request [kib]`** (default 64, range 1 to 1000). The client sends `exchange.blob.get`. The server's handler answers with that many deterministic bytes and their checksum; 64 KiB takes five packets. The handler allows a burst of 3 requests, then one every two seconds. The client checks the checksum.
 - **`.subscribe start|stop [key]`** (default key `lobby`). `start` subscribes the client to the server's `board` topic for that key. The client logs the snapshot (padded to two packets) and every line posted after it. `stop` unsubscribes.
 - **`.subscribe post [@key] <text>`** appends a line and publishes it to every subscriber. **`.subscribe status [key]`** shows the board and its subscribers.
+- Keys come from players, so the Sample bounds what it keeps for them: only a post creates a board, at most 16 boards exist, and a subscribe or `status` for an unknown key sees an empty board without creating one. Copy that pattern.
 
 Status: source-checked, built and game-free tested (`SampleExchangeTests`, `SampleExchangeRoundTripTests`), **not verified live**. Acceptance procedure: [modules.md](../../docs/modules.md#live-acceptance-procedure-not-run).

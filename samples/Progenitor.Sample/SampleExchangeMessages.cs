@@ -68,6 +68,9 @@ internal static class SampleExchangeData
     /// <summary>Lines one board keeps (the oldest go first).</summary>
     internal const int MaxBoardLines = 50;
 
+    /// <summary>Boards one server keeps. Keys come from players, so a mod bounds what it creates for them.</summary>
+    internal const int MaxBoards = 16;
+
     /// <summary>The longest posted line.</summary>
     internal const int MaxLineChars = 200;
 
@@ -130,5 +133,31 @@ internal static class SampleExchangeData
         {
             Lines = new List<string>(Lines), Revision = Revision, Padding = new byte[SampleExchangeData.SnapshotPaddingBytes],
         };
+    }
+
+    /// <summary>
+    /// The server's boards by key. Keys come from players, so <see cref="Find"/> never creates one and
+    /// <see cref="GetOrCreate"/> stops at <see cref="MaxBoards"/>: a mod bounds what it keeps for untrusted keys.
+    /// </summary>
+    internal sealed class BoardBook
+    {
+        private readonly Dictionary<string, Board> _boards = new(StringComparer.Ordinal);
+
+        internal int Count => _boards.Count;
+
+        internal Board? Find(string key) => _boards.TryGetValue(key ?? "", out var b) ? b : null;
+
+        /// <summary>The board of <paramref name="key"/>, created while fewer than <see cref="MaxBoards"/> exist; else null.</summary>
+        internal Board? GetOrCreate(string key)
+        {
+            if (_boards.TryGetValue(key ?? "", out var b)) return b;
+            if (_boards.Count >= MaxBoards) return null;
+            return _boards[key ?? ""] = new Board();
+        }
+
+        /// <summary>The snapshot of <paramref name="key"/>: an empty board's for a key nobody posted to.</summary>
+        internal BoardSnapshot Snapshot(string key) => (Find(key) ?? new Board()).Snapshot();
+
+        internal void Clear() => _boards.Clear();
     }
 }

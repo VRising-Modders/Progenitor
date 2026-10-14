@@ -79,7 +79,10 @@ public class SampleExchangeRoundTripTests
         {
             var board = new SampleExchangeData.Board();
             board.Post("one");
-            MessageFixtures.SaveRelease(dir, "progenitor.sample", "1.0.0", new object[]
+            // A plain ctx.Messages fixture stays at one packet: the 64 KiB reply is refused there.
+            Assert.Throws<MessageCompatException>(() =>
+                MessageFixtures.Save(dir, "progenitor.sample", "0.9.0", SampleExchangeData.Answer(new BlobRequest { KiB = 64 })));
+            ExchangeCompat.SaveRelease(dir, "progenitor.sample", "1.0.0", new object[]
             {
                 new BlobRequest { KiB = 64 },
                 SampleExchangeData.Answer(new BlobRequest { KiB = 64 }), // 64 KiB: larger than one ctx.Messages packet

@@ -157,6 +157,22 @@ public static class ExchangeCompat
             throw new MessageCompatException("topic '" + topic + "', snapshot '" + snap.Name + "' and delta '" + delta.Name + "' need three different names.");
     }
 
+    /// <summary>
+    /// <see cref="MessageFixtures.SaveRelease"/> for request, reply, snapshot and delta types: the same layout and the same
+    /// never-rewrite rule, with payloads up to <see cref="ExchangeLimits.MaxBodyBytes"/> (a plain <c>ctx.Messages</c>
+    /// fixture stays at one packet's payload).
+    /// </summary>
+    public static IReadOnlyList<MessageFixture> SaveRelease(string directory, string mod, string modVersion, IEnumerable<object> messages,
+        Func<object, string>? direction = null) =>
+        MessageFixtures.SaveReleaseWith(directory, mod, modVersion, messages, direction, ExchangeLimits.MaxBodyBytes);
+
+    /// <summary><see cref="MessageFixtures.Save{T}"/> for an exchange type, with payloads up to <see cref="ExchangeLimits.MaxBodyBytes"/>.</summary>
+    public static MessageFixture Save<T>(string directory, string mod, string modVersion, T message, string direction = "any") where T : class
+    {
+        if (message == null) throw new ArgumentNullException(nameof(message));
+        return MessageFixtures.SaveWith(directory, mod, modVersion, message, direction, ExchangeLimits.MaxBodyBytes);
+    }
+
     /// <summary>The encoded payload of a request, reply, snapshot or delta (up to <see cref="ExchangeLimits.MaxBodyBytes"/>).</summary>
     public static byte[] Encode<T>(T message) where T : class
     {

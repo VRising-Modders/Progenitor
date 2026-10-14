@@ -47,6 +47,12 @@ public static class ExchangeLimits
     /// <summary>Server: bytes queued for one user before a send is refused (and a subscription falls back to a fresh snapshot).</summary>
     public const int ServerQueueBytesPerUser = 4 * 1024 * 1024;
 
+    /// <summary>Server: bytes queued for all users together before a send is refused.</summary>
+    public const int ServerQueueBytesTotal = 64 * 1024 * 1024;
+
+    /// <summary>Seconds a partly received body may wait for its next chunk before it is dropped.</summary>
+    public const double PartialBodyIdleSeconds = 30;
+
     /// <summary>Client: bytes queued for the server before a send is refused.</summary>
     public const int ClientQueueBytes = 1024 * 1024;
 
@@ -113,6 +119,12 @@ public enum RequestStatus
 
     /// <summary>The reply could not be decoded, or was not the reply type this request expects.</summary>
     Malformed = 13,
+
+    /// <summary>
+    /// The server does not see this mod in the client's feature table (it has not arrived, or it does not list the mod), so
+    /// the handler did not run: its reply could not be sent back. Usually transient right after a join or a reload.
+    /// </summary>
+    NotNegotiated = 14,
 }
 
 /// <summary>Where a client subscription is.</summary>
@@ -175,6 +187,9 @@ public enum SubscriptionEndReason
 
     /// <summary>The server forgot the subscription (this client's connection was reset) and it did not come back within the retries.</summary>
     Reset = 12,
+
+    /// <summary>The server does not see this mod in the client's feature table, so it cannot send the subscription's frames.</summary>
+    NotNegotiated = 13,
 }
 
 /// <summary>The one-byte code an error or end frame carries.</summary>
@@ -197,6 +212,9 @@ internal enum ExchangeCode : byte
     /// <summary>The server forgot the subscription (this user re-handshaked, or it never knew the id). Retryable.</summary>
     Reset = 13,
     BadKey = 14,
+
+    /// <summary>The server does not see the mod in this client's feature table, so it cannot answer for it.</summary>
+    NotNegotiated = 15,
 }
 
 /// <summary>What a body is.</summary>
@@ -501,6 +519,18 @@ internal sealed class ExchangeAssembler
     private byte[]? _buffer;
     private bool _open;
     private bool _skipping;
+    private double _lastChunk;
+
+    /// <summary>
+    /// Drop a body whose next chunk has not come for <paramref name="idleSeconds"/> (a sender that stopped mid-body
+    /// would otherwise hold its memory until its next body). True when one was dropped.
+    /// </summary>
+    internal bool ExpireIdle(double now, double idleSeconds)
+    {
+        if (!_open || now - _lastChunk <= idleSeconds) return false;
+        Reset();
+        return true;
+    }
 
     /// <summary>Bytes held right now (at most <see cref="MaxBody"/>).</summary>
     internal int HeldBytes => _buffer?.Length ?? 0;
@@ -509,10 +539,11 @@ internal sealed class ExchangeAssembler
     /// Add one packet. <paramref name="admit"/> sees the first chunk's data and the declared total of a new body and
     /// returns null to accept it, or a reason to skip the whole body (the caller answers it).
     /// </summary>
-    internal ChunkResult Add(ReadOnlySpan<byte> packet, Func<byte[], int, string?>? admit, out byte[] body, out string? error)
+    internal ChunkResult Add(ReadOnlySpan<byte> packet, Func<byte[], int, string?>? admit, out byte[] body, out string? error, double now = 0)
     {
         body = Array.Empty<byte>();
         error = null;
+        _lastChunk = now;
         if (!ExchangeChunks.TryHeader(packet, out uint transfer, out int seq, out int count, out int total, out error))
         {
             Reset();
@@ -723,5 +754,45 @@ internal sealed class ExchangeOutbox
         _queue.Clear();
         _queuedBytes = 0;
         _failedDrains = 0;
+    }
+}
+
+/// <summary>
+/// Rate-limits the exchange's warning lines by a fixed key (a kind of event, never a number a peer chose): at most one
+/// line per key per <see cref="IntervalSeconds"/>, the next one saying how many were held back. At most
+/// <see cref="MaxKeys"/> keys are tracked; any further key shares one slot. Separate from the message router's
+/// once-per-generation set, so a flood of bad packets can neither fill that set nor silence other warnings.
+/// </summary>
+internal sealed class ExchangeWarnLimiter
+{
+    internal const double IntervalSeconds = 60;
+    internal const int MaxKeys = 128;
+
+    private readonly Dictionary<string, (double Last, int Held)> _keys = new(StringComparer.Ordinal);
+
+    internal Func<double> Clock { get; set; } = () => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
+
+    /// <summary>The line to log now, or null when it is held back.</summary>
+    internal string? Admit(string key, string line)
+    {
+        lock (_keys)
+        {
+            if (!_keys.ContainsKey(key) && _keys.Count >= MaxKeys) key = "(other)";
+            double now = Clock();
+            if (_keys.TryGetValue(key, out var k) && now - k.Last < IntervalSeconds)
+            {
+                _keys[key] = (k.Last, k.Held + 1);
+                return null;
+            }
+
+            int held = _keys.TryGetValue(key, out k) ? k.Held : 0;
+            _keys[key] = (now, 0);
+            return held > 0 ? line + " (" + held + " more like it held back)" : line;
+        }
+    }
+
+    internal void Clear()
+    {
+        lock (_keys) _keys.Clear();
     }
 }

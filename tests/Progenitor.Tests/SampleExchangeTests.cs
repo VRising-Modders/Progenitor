@@ -60,6 +60,19 @@ public class SampleExchangeTests
     }
 
     [Fact]
+    public void Untrusted_keys_never_create_boards_and_posts_stop_at_the_cap()
+    {
+        var book = new SampleExchangeData.BoardBook();
+        Assert.Empty(book.Snapshot("anything").Lines);
+        Assert.Null(book.Find("anything"));
+        Assert.Equal(0, book.Count);
+        for (int i = 0; i < SampleExchangeData.MaxBoards; i++) Assert.NotNull(book.GetOrCreate("b" + i));
+        Assert.Null(book.GetOrCreate("one-too-many"));
+        Assert.Same(book.Find("b0"), book.GetOrCreate("b0"));
+        Assert.Equal(SampleExchangeData.MaxBoards, book.Count);
+    }
+
+    [Fact]
     public void A_board_keeps_its_last_lines_and_numbers_its_revisions()
     {
         var board = new SampleExchangeData.Board();

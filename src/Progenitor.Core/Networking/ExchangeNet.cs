@@ -29,6 +29,7 @@ internal static unsafe class ExchangeNet
     private static readonly Dictionary<int, Link> UserLinks = new();
     private static readonly Dictionary<int, Entity> UserEntities = new();
     private static Link? _serverLink;
+    private static readonly ExchangeWarnLimiter Warnings = new();
 
     private static bool _installed;
     private static bool _server;
@@ -53,7 +54,8 @@ internal static unsafe class ExchangeNet
             if (_server)
             {
                 Server.Gate = UserGate;
-                Server.Send = (user, body) => LinkOf(user).Out.Enqueue(body);
+                Server.Send = (user, body) => TotalQueued() + body.Length <= ExchangeLimits.ServerQueueBytesTotal && LinkOf(user).Out.Enqueue(body);
+                Server.HasRoom = HasRoom;
                 Server.PeerModVersion = ModCompatNet.PeerModVersion;
                 CustomEvents.OnReceiveFromClient(ExchangeChunks.EventId, OnServerPacket);
                 _connected = Events.EventBus.On<Events.PlayerConnected>(ev => ForgetUser(ev.UserIndex), priority: 895);
@@ -75,8 +77,9 @@ internal static unsafe class ExchangeNet
     internal static void Uninstall()
     {
         if (!_installed) return;
-        // Best effort, straight to the transport (the queues die with this generation): subscribers learn the server's
-        // mods are going away and resubscribe to the next Core; the server learns this client's subscriptions are gone.
+        // Best effort, straight to the transport (the queues die with this generation). Server: every subscriber gets an end
+        // frame and every waiting request an error, so clients resubscribe to the next Core. Client: the server gets an
+        // Unsubscribe per open subscription and a Cancel per waiting request, as far as the client's packet burst allows.
         try
         {
             if (_server) Server.Teardown();
@@ -109,14 +112,33 @@ internal static unsafe class ExchangeNet
         Server.Gate = (_, _) => SendResult.NotConnected;
         Server.Send = (_, _) => false;
         Server.PeerModVersion = null;
+        Server.HasRoom = _ => true;
+        Warnings.Clear();
         Client.Warn = null;
         Server.Warn = null;
     }
 
+    /// <summary>Keys are fixed kinds, never peer-chosen numbers or texts (see <see cref="ExchangeWarnLimiter"/>).</summary>
     private static void Warn(string key, string line)
     {
-        var once = ModCompatNet.Router.Once("xc|" + key, line);
-        if (once != null) Plugin.Logger?.LogWarning(once);
+        var admitted = Warnings.Admit(key, line);
+        if (admitted != null) Plugin.Logger?.LogWarning(admitted);
+    }
+
+    /// <summary>Server: bytes queued for every user together.</summary>
+    private static long TotalQueued()
+    {
+        long n = 0;
+        foreach (var l in UserLinks.Values) n += l.Out.QueuedBytes;
+        return n;
+    }
+
+    /// <summary>Server: room for a snapshot (at most 1 MiB) in this user's queue and in the shared budget.</summary>
+    private static bool HasRoom(int user)
+    {
+        long queued = UserLinks.TryGetValue(user, out var l) ? l.Out.QueuedBytes : 0;
+        return queued + ExchangeLimits.MaxBodyBytes + 64 * 1024 <= ExchangeLimits.ServerQueueBytesPerUser
+               && TotalQueued() + ExchangeLimits.MaxBodyBytes + 64 * 1024 <= ExchangeLimits.ServerQueueBytesTotal;
     }
 
     // ---- links ----------------------------------------------------------------------------------------------------------
@@ -222,19 +244,19 @@ internal static unsafe class ExchangeNet
         int index = user.Index;
         if (Handshake.UserAnswerStatus(index) != "ok")
         {
-            Warn("notok|" + index, "Exchange: dropped a packet from user " + index.ToString(CultureInfo.InvariantCulture) + ": its handshake has not passed");
+            Warn("notok", "Exchange: dropped a packet from user " + index.ToString(CultureInfo.InvariantCulture) + ": its handshake has not passed");
             return;
         }
 
         if (!user.IsConnected) return;
         UserEntities[index] = userEntity;
         var link = LinkOf(index);
-        var result = link.In.Add(new ReadOnlySpan<byte>(payload, length), (first, total) => Server.Admit(index, first, total), out var body, out var error);
-        if (error != null) Warn("chunk|" + index + "|" + error, "Exchange: user " + index.ToString(CultureInfo.InvariantCulture) + ": " + error);
+        var result = link.In.Add(new ReadOnlySpan<byte>(payload, length), (first, total) => Server.Admit(index, first, total), out var body, out var error, Now());
+        if (error != null) Warn("chunk-up-" + result, "Exchange: user " + index.ToString(CultureInfo.InvariantCulture) + ": " + error);
         if (result != ChunkResult.Complete) return;
         if (!ExchangeBody.TryParse(body, out var parsed, out var bad))
         {
-            Warn("body|" + index, "Exchange: dropped a malformed body from user " + index.ToString(CultureInfo.InvariantCulture) + ": " + bad);
+            Warn("body-up", "Exchange: dropped a malformed body from user " + index.ToString(CultureInfo.InvariantCulture) + ": " + bad);
             return;
         }
 
@@ -246,12 +268,12 @@ internal static unsafe class ExchangeNet
     {
         if (payload == null || length <= 0) return;
         var link = ServerLink();
-        var result = link.In.Add(new ReadOnlySpan<byte>(payload, length), null, out var body, out var error);
-        if (error != null) Warn("chunk|server|" + error, "Exchange: from the server: " + error);
+        var result = link.In.Add(new ReadOnlySpan<byte>(payload, length), null, out var body, out var error, Now());
+        if (error != null) Warn("chunk-down-" + result, "Exchange: from the server: " + error);
         if (result != ChunkResult.Complete) return;
         if (!ExchangeBody.TryParse(body, out var parsed, out var bad))
         {
-            Warn("body|server", "Exchange: dropped a malformed body from the server: " + bad);
+            Warn("body-down", "Exchange: dropped a malformed body from the server: " + bad);
             return;
         }
 
@@ -270,7 +292,7 @@ internal static unsafe class ExchangeNet
             else Client.Tick();
             Drain();
         }
-        catch (Exception e) { Warn("tick|" + e.GetType().Name, "Exchange: the frame tick threw: " + e.Message); }
+        catch (Exception e) { Warn("tick", "Exchange: the frame tick threw: " + e.Message); }
     }
 
     private static void Drain()
@@ -279,6 +301,9 @@ internal static unsafe class ExchangeNet
         if (_server)
         {
             if (UserLinks.Count == 0) return;
+            foreach (var kv in UserLinks)
+                if (kv.Value.In.ExpireIdle(now, ExchangeLimits.PartialBodyIdleSeconds))
+                    Warn("idle-up", "Exchange: user " + kv.Key + " stopped sending in the middle of a body; dropped it after " + ExchangeLimits.PartialBodyIdleSeconds + " s");
             var world = Worlds.Server;
             var bootstrap = world == null || !world.IsCreated ? null : world.GetExistingSystemManaged<ServerBootstrapSystem>();
             if (bootstrap == null) return;
@@ -287,13 +312,16 @@ internal static unsafe class ExchangeNet
                 if (kv.Value.Out.Count == 0) continue;
                 int index = kv.Key;
                 int sent = kv.Value.Out.Drain(now, p => CustomEvents.SendToUser(bootstrap, index, ExchangeChunks.EventId, new ReadOnlySpan<byte>(p)));
-                if (sent < 0) Warn("dropq|" + index, "Exchange: the transport refused user " + index + "'s packets for " + ExchangeOutbox.MaxFailedDrains + " frames; their queue was dropped");
+                if (sent < 0) Warn("dropq-up", "Exchange: the transport refused user " + index + "'s packets for " + ExchangeOutbox.MaxFailedDrains + " frames; their queue was dropped");
             }
         }
-        else if (_serverLink != null && _serverLink.Out.Count > 0)
+        else if (_serverLink != null)
         {
+            if (_serverLink.In.ExpireIdle(now, ExchangeLimits.PartialBodyIdleSeconds))
+                Warn("idle-down", "Exchange: the server stopped sending in the middle of a body; dropped it after " + ExchangeLimits.PartialBodyIdleSeconds + " s");
+            if (_serverLink.Out.Count == 0) return;
             int sent = _serverLink.Out.Drain(now, p => CustomEvents.SendToServer(ExchangeChunks.EventId, new ReadOnlySpan<byte>(p)));
-            if (sent < 0) Warn("dropq|server", "Exchange: the transport refused packets to the server for " + ExchangeOutbox.MaxFailedDrains + " frames; the queue was dropped");
+            if (sent < 0) Warn("dropq-down", "Exchange: the transport refused packets to the server for " + ExchangeOutbox.MaxFailedDrains + " frames; the queue was dropped");
         }
     }
 
