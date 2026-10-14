@@ -25,16 +25,20 @@ internal static class UiInputPlan
 
         /// <summary>Let go of the buttons a <c>drag</c> with <c>keepDown</c> left held (a click lands if over the press).</summary>
         Up,
+
+        /// <summary>The submit event (a controller's confirm) to the button at the target, found as a click finds it.</summary>
+        Submit,
     }
 
     internal const string UsageMessage =
-        "ui_input needs args.action: move (alias hover), click, drag, up, wheel, key, type, focus, status or release. "
+        "ui_input needs args.action: move (alias hover), click, submit, drag, up, wheel, key, type, focus, status or release. "
         + "A target is args.row (a cell row key, with args.cell for one of its cells), args.panel (a shown panel's title) "
         + "or args.x and args.y (screen pixels, origin bottom-left); args.fx / args.fy (0..1 inside the target, default "
         + "the center) and args.dx / args.dy (pixels) adjust the point. click: args.button left|right|middle, "
         + "args.modifiers [\"shift\",\"ctrl\"], args.holdFrames. drag: args.to {row, cell, panel, x, y, fx, fy, dx, dy}, "
         + "args.steps, args.keepDown (leave the button held; then action up). wheel: args.notches (-20..20, not 0; positive up). key: args.key Escape|Enter|Tab|Backspace|… "
-        + "type: args.text into the focused kit field. focus: give the kit field at the target the keyboard.";
+        + "type: args.text into the focused kit field. focus: give the kit field at the target the keyboard. "
+        + "submit: the submit event (a controller's confirm) to the button at the target, with no pointer press.";
 
     // Bounds: every action ends well inside the bridge's 30 s cap for one op. The frame bounds keep an action under
     // MaxTimelineFrames (about 10 s at 30 fps); DeadlineMs is the wall-clock backstop when the game runs slower.
@@ -167,6 +171,7 @@ internal static class UiInputPlan
             "focus" => Action.Focus,
             "release" => Action.Release,
             "up" => Action.Up,
+            "submit" => Action.Submit,
             _ => throw new ArgumentException("ui_input: args.action '" + actionText + "' is not known. " + UsageMessage),
         };
 
@@ -177,7 +182,7 @@ internal static class UiInputPlan
         if (keepDown && action != Action.Drag) throw new ArgumentException("ui_input: args.keepDown is for drag.");
 
         Target? at = null;
-        if (action is Action.Move or Action.Click or Action.Drag or Action.Wheel or Action.Focus)
+        if (action is Action.Move or Action.Click or Action.Drag or Action.Wheel or Action.Focus or Action.Submit)
         {
             at = ParseTarget(args, "ui_input");
             if (at.IsEmpty) throw new ArgumentException("ui_input: " + actionText + " needs a target (args.row, args.panel, or args.x and args.y). " + UsageMessage);

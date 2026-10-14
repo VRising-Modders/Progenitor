@@ -52,6 +52,62 @@ public class BridgeKeyInjectTests
     }
 
     [Theory]
+    [InlineData("`", UiKey.Backquote)]
+    [InlineData("~", UiKey.Backquote)]
+    [InlineData("Backquote", UiKey.Backquote)]
+    [InlineData("Tilde", UiKey.Backquote)]
+    [InlineData("'", UiKey.Quote)]
+    [InlineData(";", UiKey.Semicolon)]
+    [InlineData(",", UiKey.Comma)]
+    [InlineData(".", UiKey.Period)]
+    [InlineData("/", UiKey.Slash)]
+    [InlineData("\\", UiKey.Backslash)]
+    [InlineData("[", UiKey.LeftBracket)]
+    [InlineData("]", UiKey.RightBracket)]
+    [InlineData("-", UiKey.Minus)]
+    [InlineData("=", UiKey.Equals)]
+    [InlineData("Minus", UiKey.Minus)]
+    public void Punctuation_keys_have_character_and_enum_names(string keys, UiKey expected)
+    {
+        Assert.True(KeyInjectPlan.TryParseKeys(keys, out var parsed, out string why), why);
+        Assert.Equal(K(expected), parsed);
+    }
+
+    [Theory]
+    [InlineData("Ctrl++")]
+    [InlineData("Ctrl +")]
+    [InlineData("+")]
+    [InlineData("+ F9")]
+    public void A_typed_chord_with_an_empty_part_is_refused_the_same_way_as_the_key_op(string text)
+    {
+        Assert.False(KeyChord.TryParseTyped(text, out _, out string error));
+        Assert.Equal(KeyChord.EmptyPartReason, error);
+        Assert.False(KeyInjectPlan.TryParseKeys(text, out _, out string why));
+        Assert.Equal(KeyChord.EmptyPartReason, why);
+    }
+
+    [Theory]
+    [InlineData("", UiKey.None)]
+    [InlineData("None", UiKey.None)]
+    [InlineData("` + Ctrl", UiKey.Backquote)]
+    public void A_typed_chord_still_reads_unbound_and_punctuation(string text, UiKey key)
+    {
+        Assert.True(KeyChord.TryParseTyped(text, out var chord, out string error), error);
+        Assert.Equal(key, chord.Key);
+    }
+
+    [Fact]
+    public void The_console_key_takes_modifiers_and_round_trips_through_the_cfg_form()
+    {
+        Assert.True(KeyInjectPlan.TryParseKeys("Ctrl+`", out var parsed, out string why), why);
+        Assert.Equal(K(UiKey.LeftCtrl, UiKey.Backquote), parsed);
+        Assert.True(KeyChord.TryParse("~ + Ctrl", out var chord));
+        Assert.Equal(new KeyChord(UiKey.Backquote, KeyModifiers.Ctrl), chord);
+        Assert.True(KeyChord.TryParse(chord.ToString(), out var back));
+        Assert.Equal(chord, back);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("Ctrl+")]
     [InlineData("A+B")]

@@ -92,6 +92,17 @@ public sealed class BridgeUiInputTests : IDisposable
     }
 
     [Fact]
+    public void Submit_needs_a_target_and_takes_no_button_or_modifiers()
+    {
+        var r = Parse("{\"action\":\"submit\",\"x\":640,\"y\":360}");
+        Assert.Equal(UiInputPlan.Action.Submit, r.Action);
+        Assert.True(r.At!.HasPoint);
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"submit\"}"));
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"submit\",\"x\":1,\"y\":1,\"button\":\"right\"}"));
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"submit\",\"x\":1,\"y\":1,\"modifiers\":[\"shift\"]}"));
+    }
+
+    [Fact]
     public void A_drag_needs_a_destination_and_takes_steps()
     {
         var r = Parse("{\"action\":\"drag\",\"row\":\"demo-list:row0\",\"cell\":\"grip\",\"to\":{\"row\":\"demo-list:row3\",\"fy\":0.1},\"steps\":20}");

@@ -1,5 +1,5 @@
 // BRIDGEUI1: MCP tools for focus-free UI acceptance tests (docs/bridge-ops-ui.md, "UI input without focus").
-// Each tool wraps one client bridge op: ui_input, ui_read, nav, display, screenshot. The registration is separate from
+// Each tool wraps one client bridge op: ui_input, ui_read, nav, display, screenshot, console. The registration is separate from
 // server.mjs so the schemas and the argument mapping can be tested without a game (test/ui-tools.test.mjs).
 
 const TARGET_HELP =
@@ -34,6 +34,12 @@ export function compact(obj) {
  */
 export const UI_INPUT_TIMEOUT_MS = 30000;
 
+/** The MCP wait for one console call: the op's own output wait (at most 10 s) plus slack. */
+export function consoleTimeoutMs(waitMs) {
+  const w = Number.isFinite(waitMs) ? Math.min(Math.max(waitMs, 0), 10000) : 1000;
+  return w + 10000;
+}
+
 export function registerUiTools(server, { z, bridge, text, fail }) {
   const target = targetSchema(z);
 
@@ -48,10 +54,13 @@ export function registerUiTools(server, { z, bridge, text, fail }) {
       "replaces the mouse for the kit's own reads and sends pointer events through the game's EventSystem raycast. A " +
       "lease (leaseMs, default 30 s) is renewed by every call; it ends on action=release, release:true, timeout, the " +
       "player touching the real mouse or keyboard, a Core swap or Dev unload. The game itself (its pause menu, camera) " +
-      "does not see these events. " + TARGET_HELP,
+      "does not see these events. click and submit also reach the game's own buttons (SimpleStunButton, and the " +
+      "System menu's rows through the button each row holds); submit sends the submit event (a controller's confirm) " +
+      "with no pointer press. " + TARGET_HELP,
     {
-      action: z.enum(["move", "hover", "click", "drag", "up", "wheel", "key", "type", "focus", "status", "release"]).describe(
-        "move/hover: pointer to the target. click: press and release there. drag: press at the target, move to `to`, release " +
+      action: z.enum(["move", "hover", "click", "submit", "drag", "up", "wheel", "key", "type", "focus", "status", "release"]).describe(
+        "move/hover: pointer to the target. click: press and release there. submit: the submit event to the button at " +
+          "the target, found as a click finds it (no press). drag: press at the target, move to `to`, release " +
           "(keepDown: stay pressed there; up lets go later, so a capture can show the held state). " +
           "wheel: notches over the target. key: one UI-layer key tap. type: text into the focused kit field. focus: give the " +
           "kit field at the target the keyboard. status: lease, hovered chain, recent events. release: end the lease."),
@@ -149,4 +158,26 @@ export function registerUiTools(server, { z, bridge, text, fail }) {
       pad: z.number().min(0).max(2000).optional().describe("Pixels around the region."),
     },
     async (args) => { try { return text(await bridge("client", "screenshot", compact(args), 30000)); } catch (e) { return fail(e); } });
+
+  server.tool(
+    "progenitor_console",
+    "Client only. Run one command line through the game's own console command dispatcher " +
+      "(StunConsole.Commands.TryCommand, the call the console's input box makes) and return the lines the console " +
+      "printed for it. Works whether or not the console is enabled in Options or open, with the window in the " +
+      "background: no key, no focus. Client commands that need the server send their own event (adminauth sends the " +
+      "game's admin-auth request; the server checks its admin list). Output is the console window's new messages, read " +
+      "waitMs after the command (a later server answer may arrive after that; check the server side, for example " +
+      "progenitor_users for IsAdmin). ok is false when the console has no such command. Every command is logged. " +
+      "Dev bridge only.",
+    {
+      text: z.string().min(1).max(512).describe("One command line, e.g. adminauth. The first word is the command (any case)."),
+      waitMs: z.number().int().min(0).max(10000).optional().describe("How long to collect output after the command. Default 1000."),
+      echo: z.boolean().optional().describe("Show '> text' in the console as if typed. Default true."),
+    },
+    async (args) => {
+      try {
+        const a = compact(args);
+        return text(await bridge("client", "console", a, consoleTimeoutMs(a.waitMs)));
+      } catch (e) { return fail(e); }
+    });
 }

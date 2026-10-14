@@ -37,7 +37,7 @@ internal sealed class Handlers
         "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore",
         "status", "save", "world_save", "core_reload", "reload_status", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles",
         "capture", "perf", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "build_search", "materials", "dye", "remote_install",
-        "ui_input", "ui_read", "display", "screenshot",
+        "ui_input", "ui_read", "display", "screenshot", "console",
         "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release",
         "freeze_hold", "time", "photo", "setting", "join_ui", "messages_record", "item_catalog",
         "join_admin", "server_desc", "server_rules", "world_backups", "server_browser", "auto_update",
@@ -156,6 +156,7 @@ internal sealed class Handlers
             // path; and an in-process screenshot.
             case "ui_input": return Ops.UiInputOps.Run(args);
             case "ui_read": return Ops.UiReadOps.Run(args);
+            case "console": return Ops.ConsoleOps.Run(args);
             case "display": return Ops.DisplayOps.Run(args);
             case "screenshot": return Ops.DisplayOps.Screenshot(args);
             // Client, main thread, read only: Dye all's scan, picker, watches and last hold (DyeAllTestBridge).
@@ -198,7 +199,7 @@ internal sealed class Handlers
             case "dump": return Ops.FreezeDump.Run(args);
             // Main thread. Bounded synthetic occupancy for watchdog validation. Requires synthetic=true.
             case "freeze_hold": return Ops.FreezeHoldOps.Run(args);
-            case "ops": return new { ops = new[] { "ping", "logs", "bridge_status", "bridge_users", "dump", "freeze_hold", "reload", "users", "worlds", "command", "chat_observe", "broadcast", "ghost", "core_reload", "reload_status", "query", "get", "set", "components", "spawn", "entity", "prefab", "buff", "heal", "damage", "kill", "downed", "respawn", "create_character", "wake", "headless", "bot", "bot_look", "bot_cast", "bot_inventory", "bot_path", "bot_daytime", "bot_quests", "bot_event", "bot_cost", "bot_territories", "bot_use", "bot_recipes", "bot_blueprints", "bot_canplace", "bot_prefabs", "bot_threats", "bot_station", "bot_exit_graveyard", "bot_repair", "equip", "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore", "players", "status", "save", "world_save", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles", "time", "photo", "item_catalog", "capture", "perf", "perf_status", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "ui_input", "ui_read", "display", "screenshot", "build_search", "materials", "dye", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release", "install_local", "remote_install", "setting", "messages_record", "ops" } };
+            case "ops": return new { ops = new[] { "ping", "logs", "bridge_status", "bridge_users", "dump", "freeze_hold", "reload", "users", "worlds", "command", "chat_observe", "broadcast", "ghost", "core_reload", "reload_status", "query", "get", "set", "components", "spawn", "entity", "prefab", "buff", "heal", "damage", "kill", "downed", "respawn", "create_character", "wake", "headless", "bot", "bot_look", "bot_cast", "bot_inventory", "bot_path", "bot_daytime", "bot_quests", "bot_event", "bot_cost", "bot_territories", "bot_use", "bot_recipes", "bot_blueprints", "bot_canplace", "bot_prefabs", "bot_threats", "bot_station", "bot_exit_graveyard", "bot_repair", "equip", "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore", "players", "status", "save", "world_save", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles", "time", "photo", "item_catalog", "capture", "perf", "perf_status", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "ui_input", "ui_read", "display", "screenshot", "console", "build_search", "materials", "dye", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release", "install_local", "remote_install", "setting", "messages_record", "ops" } };
             default: throw new ArgumentException($"unknown op '{op}'");
         }
     }

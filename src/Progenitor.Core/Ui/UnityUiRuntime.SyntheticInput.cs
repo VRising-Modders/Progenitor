@@ -491,10 +491,185 @@ internal sealed partial class UnityUiRuntime
                 return kind;
             }
 
+            // A game menu row that holds its button in a field (the System menu's Resume / Options / Leave rows).
+            var held = HeldStunButton(t.gameObject, out bool rowDisabled);
+            if (rowDisabled)
+            {
+                // The row itself says it is not interactable (the game greys it out): refused, never sent past it.
+                at = t.gameObject;
+                return MenuRowDisabled;
+            }
+
+            if (held != null)
+            {
+                at = held;
+                return "stun-button";
+            }
+
             t = t.parent;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The game's menu rows (<c>MenuButton</c>: the System menu's Resume, Options, Leave and the like) take the pointer's
+    /// enter and exit themselves and keep their <c>SimpleStunButton</c> in a field (<c>MenuButton.StunButton</c>; the
+    /// game's <c>MenuCollection.ClickButton</c> invokes that button's click event), so the button need not be on the hit
+    /// object's parent chain. A click walking up from the hit found only the row's hover handlers and stopped there.
+    /// </summary>
+    private static GameObject? HeldStunButton(GameObject go, out bool rowDisabled)
+    {
+        rowDisabled = false;
+        try
+        {
+            var row = go.GetComponent<ProjectM.UI.MenuButton>();
+            if (row == null) return null;
+            var stun = row.StunButton;
+            if (stun == null) return null;
+            rowDisabled = !row.Interactable;
+            return stun.gameObject;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The click kind of a game menu row whose own <c>Interactable</c> is false: found, and refused.</summary>
+    private const string MenuRowDisabled = "menu-row-disabled";
+
+    private const string MenuRowDisabledReason = "the game's menu row is not interactable (the game has it disabled now)";
+
+    /// <summary>Whether an <c>EventTrigger</c> has an entry for the submit event (its <c>OnSubmit</c> does nothing otherwise).</summary>
+    private static bool HasSubmitEntry(EventTrigger trigger)
+    {
+        try
+        {
+            var entries = trigger.triggers;
+            if (entries == null) return false;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                if (e != null && e.eventID == EventTriggerType.Submit) return true;
+            }
+        }
+        catch { /* */ }
+        return false;
+    }
+
+    /// <summary>
+    /// The bridge's <c>ui_input submit</c>: the submit event (what a controller's confirm or Enter on a selected button
+    /// sends) to the button at the screen point, found the way a click finds it (<see cref="ClickKindUp"/>: the game's
+    /// buttons, a menu row's held button, Unity buttons and toggles, the game's own submit handlers). Runs at once, with
+    /// no pointer press: it does not depend on the pointer's press state or on device input.
+    /// </summary>
+    internal static Dictionary<string, object?> BridgeSubmitAt(float x, float y)
+    {
+        var d = new Dictionary<string, object?> { ["ok"] = false };
+        EventSystem? es = null;
+        try { es = EventSystem.current; } catch { /* */ }
+        if (es == null)
+        {
+            d["error"] = "EventSystem.current is null";
+            return d;
+        }
+
+        var pointer = new PointerEventData(es) { position = new Vector2(x, y) };
+        var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+        es.RaycastAll(pointer, results);
+        if (results == null || results.Count == 0)
+        {
+            d["error"] = "nothing under (" + x.ToString("F0") + ", " + y.ToString("F0") + ")";
+            return d;
+        }
+
+        var hit = results[0].gameObject;
+        d["hit"] = hit == null ? null : SafePath(hit);
+        string? kind = ClickKindUp(hit, out var target);
+        d["kind"] = kind;
+        d["target"] = target == null ? null : SafePath(target);
+        if (target == null || kind == null)
+        {
+            d["error"] = "nothing at or above the hit object takes a submit or a click";
+            return d;
+        }
+
+        var ev = new BaseEventData(es);
+        int taken = 0;
+        string? why = null;
+        try
+        {
+            switch (kind)
+            {
+                case "stun-button":
+                {
+                    var stun = target.GetComponent<ProjectM.UI.SimpleStunButton>();
+                    if (stun == null) why = "the game's button went away";
+                    else if (!stun.IsActive()) why = "the game's button is not active";
+                    else if (!stun.IsInteractable()) why = "the game's button is not interactable (the game has it disabled now)";
+                    else
+                    {
+                        stun.OnSubmit(ev);
+                        taken++;
+                    }
+
+                    break;
+                }
+                case "button":
+                {
+                    var button = target.GetComponent<Button>();
+                    if (button == null || !button.IsActive() || !button.IsInteractable()) why = ClickRefusal(target, kind);
+                    else
+                    {
+                        button.OnSubmit(ev);
+                        taken++;
+                    }
+
+                    break;
+                }
+                case "toggle":
+                {
+                    var toggle = target.GetComponent<Toggle>();
+                    if (toggle == null || !toggle.IsActive() || !toggle.IsInteractable()) why = ClickRefusal(target, kind);
+                    else
+                    {
+                        toggle.OnSubmit(ev);
+                        taken++;
+                    }
+
+                    break;
+                }
+                case "event-trigger":
+                {
+                    var trigger = target.GetComponent<EventTrigger>();
+                    if (trigger != null && HasSubmitEntry(trigger))
+                    {
+                        trigger.OnSubmit(ev);
+                        taken++;
+                    }
+
+                    break;
+                }
+                case MenuRowDisabled:
+                    why = MenuRowDisabledReason;
+                    break;
+            }
+
+            // The game's own submit handlers on the same object (other than the ones sent to above).
+            if (kind is not ("stun-button" or "button" or "toggle" or MenuRowDisabled))
+            {
+                foreach (var h in OtherHandlers<ISubmitHandler>(target))
+                {
+                    h.OnSubmit(ev);
+                    taken++;
+                }
+            }
+        }
+        catch (Exception e) { why = "the submit handler threw: " + e.Message; }
+
+        Note("submit " + SafePath(target) + " (" + kind + ")" + (taken > 0 ? "" : " not taken: " + (why ?? "no submit handler; use click")));
+        d["ok"] = taken > 0;
+        d["handlers"] = taken;
+        if (taken == 0) d["error"] = why ?? "the " + kind + " at the point has no submit handler; use click";
+        return d;
     }
 
     private static void Press(GameObject? top, PointerEventData ev, PointerEventData.InputButton button)
@@ -581,7 +756,12 @@ internal sealed partial class UnityUiRuntime
             {
                 bool invoked;
                 string? why = null;
-                if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger" && _synthClickKind != "game-handler")
+                if (_synthClickKind == MenuRowDisabled)
+                {
+                    invoked = false;
+                    why = MenuRowDisabledReason;
+                }
+                else if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger" && _synthClickKind != "game-handler")
                 {
                     // Buttons, toggles and the game's buttons answer the left button only; a trigger or a game handler on the
                     // same object takes any (GridSelectionEntry has its own right and middle click actions).

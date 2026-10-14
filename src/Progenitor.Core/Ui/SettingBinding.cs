@@ -413,11 +413,7 @@ public sealed class SettingBinding : IDisposable
         parsed = null;
         if (_keybind != null)
         {
-            if (!KeyChord.TryParse(text, out _))
-            {
-                error = "not a key chord (e.g. \"F10 + Ctrl\")";
-                return false;
-            }
+            if (!KeyChord.TryParseTyped(text, out _, out error)) return false;
 
             error = "";
             return true;

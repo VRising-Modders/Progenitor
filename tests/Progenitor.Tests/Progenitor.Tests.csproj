@@ -828,6 +828,9 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\UiReadOps.cs" Link="Linked\UiReadOps.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\DisplayPlan.cs" Link="Linked\DisplayPlan.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\DisplayOps.cs" Link="Linked\DisplayOps.cs" />
+    <!-- console: parsing, the command word and the plain-text output are game-free; the game calls are behind !PROGENITOR_TESTS. -->
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ConsolePlan.cs" Link="Linked\ConsolePlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ConsoleOps.cs" Link="Linked\ConsoleOps.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiSyntheticInput.cs" Link="Linked\UiSyntheticInput.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiCaretLines.cs" Link="Linked\UiCaretLines.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\BridgeStatus.cs" Link="Linked\BridgeStatus.cs" />

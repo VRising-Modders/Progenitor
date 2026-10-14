@@ -157,7 +157,7 @@ internal static class KeyInjectPlan
             string token = raw.Trim();
             if (token.Length == 0)
             {
-                why = "an empty key name";
+                why = KeyChord.EmptyPartReason;
                 return false;
             }
 

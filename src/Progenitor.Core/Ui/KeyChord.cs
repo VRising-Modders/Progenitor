@@ -353,6 +353,37 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         return true;
     }
 
+    /// <summary>Why an empty part of a typed chord is refused: <c>+</c> only joins keys.</summary>
+    public const string EmptyPartReason =
+        "an empty key name: '+' joins keys and is not a key itself (for the plus key use \"Equals + Shift\" or \"NumpadPlus\")";
+
+    /// <summary>
+    /// The parse for a chord a person typed (the Keybinds settings field): as <see cref="TryParse"/>, but an empty part
+    /// between, before or after a <c>+</c> (<c>Ctrl++</c>, <c>Ctrl +</c>, <c>+</c>) is refused with
+    /// <see cref="EmptyPartReason"/> instead of being skipped, which would read <c>Ctrl++</c> as an unbound key. Empty
+    /// text and <c>None</c> still mean unbound. The cfg read keeps the lenient <see cref="TryParse"/>.
+    /// </summary>
+    public static bool TryParseTyped(string? text, out KeyChord chord, out string error)
+    {
+        chord = None;
+        error = "";
+        if (!string.IsNullOrWhiteSpace(text) && text!.IndexOf('+') >= 0)
+        {
+            foreach (var part in text.Split('+'))
+            {
+                if (part.Trim().Length == 0)
+                {
+                    error = EmptyPartReason;
+                    return false;
+                }
+            }
+        }
+
+        if (TryParse(text, out chord)) return true;
+        error = "not a key chord (e.g. \"F10 + Ctrl\")";
+        return false;
+    }
+
     /// <summary>Parse, or <paramref name="fallback"/> when the text is not a chord.</summary>
     public static KeyChord Parse(string? text, KeyChord fallback) =>
         TryParse(text, out var chord) ? chord : fallback;
@@ -454,6 +485,10 @@ public readonly struct KeyChord : IEquatable<KeyChord>
             case "9": key = UiKey.Digit9; return true;
         }
 
+        // The punctuation keys by the character they type on a US layout, and their common names. The console key is
+        // Backquote: "`" and "~" (its shifted character) both name it. "+" cannot be a key name: it joins a chord.
+        if (TryPunctuationKey(token, out key)) return true;
+
         // KEYS4: the mouse buttons by the game's words too ("Mouse Button 4" is the forward button).
         switch (token.Replace(" ", "").ToLowerInvariant())
         {
@@ -501,5 +536,39 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         if (char.IsDigit(token[0])) return false;
         key = parsed;
         return true;
+    }
+
+    /// <summary>
+    /// A punctuation key by its US-layout character (<c>`</c>, <c>~</c>, <c>'</c>, <c>;</c>, <c>,</c>, <c>.</c>,
+    /// <c>/</c>, <c>\</c>, <c>[</c>, <c>]</c>, <c>-</c>, <c>=</c>) or a common name (<c>Tilde</c>, <c>Grave</c>,
+    /// <c>Apostrophe</c>, <c>Hyphen</c>, <c>Dash</c>). The enum names (<c>Backquote</c>, <c>Quote</c>, <c>Minus</c>...)
+    /// parse through the enum. A shifted character names its key (<c>~</c> is Backquote), never a Shift chord.
+    /// </summary>
+    public static bool TryPunctuationKey(string token, out UiKey key)
+    {
+        key = token switch
+        {
+            "`" or "~" => UiKey.Backquote,
+            "'" => UiKey.Quote,
+            ";" => UiKey.Semicolon,
+            "," => UiKey.Comma,
+            "." => UiKey.Period,
+            "/" => UiKey.Slash,
+            "\\" => UiKey.Backslash,
+            "[" => UiKey.LeftBracket,
+            "]" => UiKey.RightBracket,
+            "-" => UiKey.Minus,
+            "=" => UiKey.Equals,
+            _ => UiKey.None,
+        };
+        if (key != UiKey.None) return true;
+        key = token.ToLowerInvariant() switch
+        {
+            "tilde" or "grave" or "backtick" => UiKey.Backquote,
+            "apostrophe" => UiKey.Quote,
+            "hyphen" or "dash" => UiKey.Minus,
+            _ => UiKey.None,
+        };
+        return key != UiKey.None;
     }
 }

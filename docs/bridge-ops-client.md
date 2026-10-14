@@ -1,6 +1,6 @@
 # Bridge operations: input, install and session
 
-Operation reference for the [development bridge](bridge.md), part 5 of 5: keybinds, map, keyboard, mouse and gamepad input, the `bot` interaction, build search, material sources, dye, local and remote installs, disconnect, quit and auto-update. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md). Part of the [development loop](dev-loop.md).
+Operation reference for the [development bridge](bridge.md), part 5 of 5: keybinds, map, the game's console, keyboard, mouse and gamepad input, the `bot` interaction, build search, material sources, dye, local and remote installs, disconnect, quit and auto-update. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md). Part of the [development loop](dev-loop.md).
 
 ## `bot` interaction
 
@@ -60,6 +60,34 @@ node tools/mcp/call.mjs client map "@$bridgeArgs"
 
 `mods_ui {"action":"menu","op":"open","tab":"map"}` also reaches the Map tab, through the tab's click handler; `map` is the narrower tool for map tests. Source-checked against `src/Progenitor.Dev/Ops/MapOps.cs` and built; the three game calls are each in live use elsewhere in Core (the Mods route, the native MODS tab, the build menu opener), but `map` itself has not been run live.
 
+## `console`
+
+Client, main thread. Runs one command line through the game's own console command dispatcher and returns what the console printed for it. MCP: `progenitor_console`.
+
+| Arguments | Does |
+|---|---|
+| `{"text":"adminauth"}` | Runs the line, then collects the console's output for `waitMs` (default 1000) and replies. |
+| `{"text":"ClanInvite Some Player","waitMs":3000,"echo":false}` | `waitMs` 0 to 10000 (0 replies at once, with what was printed during the call). `echo` (default true) shows `> <text>` in the console's history, as typing it does. |
+
+The call is `StunConsole.Commands.TryCommand(text, echo)`, the one the console's input box makes (Core's **Authenticate as admin** button makes it for `adminauth`). The console looks the first word up in its command table, without case, and runs that command's handler; the rest of the line is the command's arguments, parsed by the console as when typed. The client's command set is registered at startup whatever the player's Options say: the **Enable console** setting and the console window only govern the console key and the window, so the op works with the console disabled, closed, and the game window in the background. No key, focus or device input is involved.
+
+**It changes the client for real.** Client commands act on the player's own game as if typed: `bind` and the keybinding commands change the console's key bindings, `Disconnect` leaves the server, `Kill` kills the character, the camera, HUD and rendering commands change settings for the session. Run only what the test needs, on a client nobody is playing, and undo it afterwards.
+
+A client command that needs the server sends its own network event; the server decides. `adminauth` sends the game's admin-auth request, and the server sets `User.IsAdmin` when the player's platform ID is on its admin list. The client-side handler itself prints nothing. Read the result on the server: [`users`](bridge-ops.md#users) gives each user's `admin` (`User.IsAdmin`).
+
+The reply: `request`, `known` (the command word is in the console's command table; `null` when the table could not be read), `output` (the console window's messages added after the command, read `waitMs` later, one line per row with the color tags removed, the newest 200), `truncated`, `waitedMs`, `ok` (false when the console has no such command: `known false` or a `COMMAND NOT FOUND>` line) and `error`. Output a server sends back later than `waitMs` is not included. Lines come from the console window (`ConsoleUI_Unity`), which the game creates at startup; `outputError` says when it is missing.
+
+Security: like every op, Dev bridge only (loopback plus the token). Each command line is logged before it runs (`Dev console: running the game console command '<text>'`) and after (`Dev console: '<text>' ran; N output line(s)` or `was not found`); the game also logs `[StunConsole.TryCommand] <text>` to its Unity log.
+
+```powershell
+$bridgeArgs = Join-Path $env:TEMP 'console.json'
+[System.IO.File]::WriteAllText($bridgeArgs, '{"text":"adminauth","waitMs":2000}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs client console "@$bridgeArgs"
+node tools/mcp/call.mjs server users
+```
+
+Source-checked against `src/Progenitor.Dev/Ops/ConsoleOps.cs` and the game's console code (`ConsoleCommandHandler.TryCommand`, the client command system's `Allowed` returning true, `ConsoleSystem.OnCreate` creating and registering the console window, `StunConsole.Write` adding to the window's messages), built, and game-free tested (`BridgeConsoleTests`: arguments, the command word, the output lines). The `adminauth` call itself was live-checked through Core's button on 2026-10-01; this op has not been run live.
+
 ## `key`
 
 Client, main thread. Passes keystrokes into the game's own input with no OS input and no window focus, so the game and Progenitor's keybinds react as if the player pressed them. Each change of the held keys is queued as a whole-keyboard state event for `Keyboard.current` through `InputSystem.QueueEvent`; the next input update applies it like a device report. No MCP wrapper; use `call.mjs`.
@@ -74,7 +102,7 @@ Client, main thread. Passes keystrokes into the game's own input with no OS inpu
 | `{"action":"type","text":"hello"}` | Queue one text event per character (at most 256). |
 | `{"action":"status"}` | The held keys and the `input` block below. |
 
-`keys` uses the `[Keybinds]` cfg key names joined with `+`: one key plus any modifiers. `Ctrl`, `Shift` and `Alt` press the left key; `RightCtrl`, `RightShift`, `RightAlt` (or `AltGr`) the right one. Modifiers go down one event before the main key and come up one event after it. Mouse buttons are refused.
+`keys` uses the `[Keybinds]` cfg key names joined with `+`: one key plus any modifiers. The punctuation keys also take the character they type on a US layout: `` ` `` and `~` (both the console key, `Backquote`; also `Tilde`, `Grave`), `'`, `;`, `,`, `.`, `/`, `\`, `[`, `]`, `-`, `=` (also `Apostrophe`, `Hyphen`, `Dash`); a shifted character names its key, not a Shift chord. `+` cannot name a key (it joins the chord); use `Equals` with `Shift` or `NumpadPlus`. `Ctrl`, `Shift` and `Alt` press the left key; `RightCtrl`, `RightShift`, `RightAlt` (or `AltGr`) the right one. Modifiers go down one event before the main key and come up one event after it. Mouse buttons are refused.
 
 Every press is released: by `up` or `release`, by its `ms`, and on Dev unload or a Core swap (`Dev key: released … on unload`). While keys are held, the injected state replaces the physical keyboard's state, so do not type on the test client during a `key` run.
 
