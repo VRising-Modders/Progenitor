@@ -3,6 +3,9 @@
 using System;
 using System.Text.Json;
 using ProjectM.Network;
+using ProjectM;
+using ProjectM.Shared;
+using ProjectM.UI;
 using Progenitor.Ecs;
 using Progenitor.Inputs;
 using Unity.Entities;
@@ -61,6 +64,10 @@ internal static class BotDriver
     private static float3 _lastPos;
     private static bool _arrived;
     private static string _lastIssue = "";
+    private static Entity _interactTarget;
+    private static double _interactDeadline;
+    private static int _interactFrames;
+    private static string _interaction = "none";
 
     public static object Run(World world, JsonElement args)
     {
@@ -74,14 +81,37 @@ internal static class BotDriver
             return Status();
         }
 
-        if (action is not ("move" or "walk" or "aim" or "hold" or "release" or "tap" or "hover" or "unhover"))
-            throw new ArgumentException("args.action must be move, walk, aim, hold, release, tap, hover, unhover, stop or status");
+        if (action is not ("move" or "walk" or "aim" or "hold" or "release" or "tap" or "hover" or "unhover" or "interact"))
+            throw new ArgumentException("args.action must be move, walk, aim, hold, release, tap, hover, unhover, interact, stop or status");
 
         // Arguments are parsed before the lease is taken: a malformed request must not preempt
         // another holder and then throw.
         double now = Time.realtimeSinceStartupAsDouble;
         switch (action)
         {
+            case "interact":
+            {
+                var text = Str(args, "entity") ?? throw new ArgumentException("args.entity (client index:version) is required");
+                var parts = text.Split(':');
+                if (parts.Length != 2 || !int.TryParse(parts[0], out int index) || !int.TryParse(parts[1], out int version))
+                    throw new ArgumentException("args.entity must be index:version");
+                var entity = new Entity { Index = index, Version = version };
+                var em = world.EntityManager;
+                if (!entity.Exists(em) || !entity.Has<NetworkId>(em) || !entity.Has<Interactable>(em))
+                    throw new ArgumentException("Target must be a live client interactable with a NetworkId");
+                Stop();
+                HUDMenuManager.CloseMenu(world);
+                var lease = EnsureLease();
+                try { lease.Hover(entity); lease.AimAt(entity); }
+                catch { Stop(); _interaction = "failed to initialize interaction"; throw; }
+                _hasHover = true;
+                _hoverText = text;
+                _interactTarget = entity;
+                _interactFrames = 0;
+                _interactDeadline = now + 3;
+                _interaction = "pending: ordinary interaction input; server validation still applies";
+                break;
+            }
             case "move":
             {
                 var target = new float3(Num(args, "x"), 0, Num(args, "z"));
@@ -186,6 +216,7 @@ internal static class BotDriver
             lastSent = lease?.LastSent.ToString() ?? InputLeases.Status.LastSent.ToString(),
             input = InputLeases.Status.ToString(),
             issue = _lastIssue,
+            interaction = _interaction,
         };
     }
 
@@ -220,6 +251,7 @@ internal static class BotDriver
         _hasHover = false;
         _hoverText = null;
         _held = 0;
+        _interactTarget = Entity.Null;
     }
 
     private static InputLease EnsureLease()
@@ -252,6 +284,12 @@ internal static class BotDriver
     /// <summary>Per frame, before Core writes input: refresh the position and steer.</summary>
     private static void OnFrame(InputLease lease)
     {
+        if (_interactTarget != Entity.Null && Time.realtimeSinceStartupAsDouble >= _interactDeadline)
+        {
+            _interaction = "not confirmed: target unavailable, out of range, blocked, or interaction refused";
+            Stop();
+            return;
+        }
         var world = Progenitor.Worlds.Client;
         if (world == null || !world.IsCreated) { _lastIssue = "no client world"; return; }
         var em = world.EntityManager;
@@ -261,6 +299,26 @@ internal static class BotDriver
         if (!locals[0].TryRead<Translation>(em, out var tr)) { _lastIssue = "no Translation"; return; }
         _lastPos = tr.Value;
         double now = Time.realtimeSinceStartupAsDouble;
+
+        if (_interactTarget != Entity.Null)
+        {
+            if (_interactFrames >= 3 && now >= _interactDeadline - 2.25
+                && locals[0].TryRead<Interactor>(em, out var interaction) && interaction.Target == _interactTarget
+                && interaction.InteractAbilityGuid.GuidHash != 0)
+            {
+                _interaction = "input completed; client target=" + _hoverText + "; server confirmation required";
+                Stop();
+                return;
+            }
+            if (!em.Exists(_interactTarget) || now >= _interactDeadline)
+            {
+                _interaction = "not confirmed: target unavailable, out of range, blocked, or interaction refused";
+                Stop();
+                return;
+            }
+            // Let the hover reach the outgoing command before the interaction edge.
+            if (++_interactFrames == 3) lease.Press(SyncedButtons.Interact, 0.4f);
+        }
 
         if (_mode == MoveMode.Target)
         {

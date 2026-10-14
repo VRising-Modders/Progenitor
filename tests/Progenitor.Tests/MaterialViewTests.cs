@@ -95,6 +95,21 @@ public class MaterialViewTests
     }
 
     [Fact]
+    public void Failed_clear_is_retried_until_accepted()
+    {
+        var book = new MaterialViewBook();
+        var user = new CastleId(9, 1);
+        Assert.True(book.ShouldSend(user, MaterialOperation.Build, 123, false, out _));
+        Assert.True(book.ShouldSend(user, MaterialOperation.Build, MaterialViewBook.ClearedFingerprint, false, out var first));
+        book.Retry(user, MaterialOperation.Build);
+        Assert.True(book.HasView(user, MaterialOperation.Build));
+        Assert.True(book.ShouldSend(user, MaterialOperation.Build, MaterialViewBook.ClearedFingerprint, false, out var retry));
+        Assert.True(retry > first);
+        Assert.False(book.HasView(user, MaterialOperation.Build));
+        Assert.False(book.ShouldSend(user, MaterialOperation.Build, MaterialViewBook.ClearedFingerprint, false, out _));
+    }
+
+    [Fact]
     public void Scope_governs_only_inside_the_frame_it_was_opened_in()
     {
         var scope = new MaterialScope();

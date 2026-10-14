@@ -2,6 +2,14 @@
 
 Operation reference for the [development bridge](bridge.md), part 5 of 5: keybinds, map, keyboard, mouse and gamepad input, build search, dye, local and remote installs, disconnect, quit and auto-update. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md). Part of the [development loop](dev-loop.md).
 
+## `bot` interaction
+
+Client, development-only: `{"action":"interact","entity":"index:version"}` requests an ordinary interaction with a client-world workbench, prison cell or container. It closes the previous HUD menu, aims and hovers through the framework input lease, then pulses Interact. It never moves the OS mouse or brings the game to the foreground. The character must be in normal interaction range.
+
+Read `bot` status afterward. `interaction` reports pending, input completed, or not confirmed; every completed or timed-out request releases its lease. Client target selection is predicted: confirm the server character's `Interactor.Target` against the corresponding server entity before crafting or moving items. Crowded containers can cause the game to select a nearer object. `bot` with `{"action":"stop"}` cancels the request.
+
+Use `query` separately on each side and match the object's `NetworkId`; entity indices are not interchangeable. Observed live: background workbench and prison interaction, a nearby container, and bounded out-of-range refusal. No production API guarantee is implied.
+
 ## `keybind_press`
 
 Client, main thread. Presses a registered keybind without the keyboard or window focus. The dispatch is Core's `Keybinds.SimulatePress`, the path a real key-down takes: chat and text-field suppression, panel capture and winner enforcement all apply, so a bind that would not fire for the player does not fire here. Refuses on the server. No MCP wrapper; use `call.mjs`.

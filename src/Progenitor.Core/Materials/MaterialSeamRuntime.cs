@@ -60,10 +60,19 @@ internal static unsafe class MaterialSeamRuntime
     private static PayFn? _pay;
     private static bool _bound, _server, _frameHooked, _clientHandler;
     private static string _reason = "not installed";
-    private static long _nextView;
+    private static long _nextView, _nextResync;
+    private static bool _forceViews;
     private static IDisposable? _disconnected;
 
     internal static (bool installed, string reason) HookState() => (_bound, _bound ? "" : _reason);
+
+    internal static Dictionary<string, object?> DescribeViews()
+    {
+        var result = new Dictionary<string, object?>();
+        foreach (var op in new[] { MaterialOperation.Build, MaterialOperation.Craft })
+            result[op.ToString()] = Overlay.TryGet(op, out var totals) ? new Dictionary<int, int>(totals) : null;
+        return result;
+    }
 
     internal static void Install(MaterialSourceRegistry registry)
     {
@@ -103,6 +112,9 @@ internal static unsafe class MaterialSeamRuntime
         }
         else
         {
+            Hooks.Add(SystemHooks.Before<ProjectM.CastleBuilding.Systems.BuildModeSystem>(hook =>
+                MaterialPlacementDispatch.Enter(Overlay.TryGet(MaterialOperation.Build, out _))));
+            Hooks.Add(SystemHooks.After<ProjectM.CastleBuilding.Systems.BuildModeSystem>(_ => MaterialPlacementDispatch.Restore()));
             CustomEvents.OnReceive(MaterialViewWire.EventId, OnView);
             _clientHandler = true;
             Handshake.ClientConnectionEnded += OnConnectionEnded;
@@ -114,6 +126,7 @@ internal static unsafe class MaterialSeamRuntime
 
     internal static void Uninstall()
     {
+        if (!_server) MaterialPlacementDispatch.Restore();
         if (_bound) BootstrapLink.TrySetMaterialSlots(null, null, null, null);
         _bound = false;
         _reason = "Core uninstalled";
@@ -142,7 +155,8 @@ internal static unsafe class MaterialSeamRuntime
 
     internal static void OnRegistrationChanged()
     {
-        Book.ForgetViews();
+        // Keep recipients so a removed provider can send their clearing packets.
+        _forceViews = true;
         _nextView = 0;
     }
 
@@ -233,12 +247,14 @@ internal static unsafe class MaterialSeamRuntime
         var registry = _registry;
         if (registry == null || _service == null) return;
         registry.DrainInvalidations(Drain, out bool all);
-        if (all) Book.ForgetViews();
+        if (all) _forceViews = true;
         foreach (var u in Drain) Dirty.Add(u);
         if (!all && Dirty.Count == 0 && now < _nextView) return;
         bool full = all || now >= _nextView;
         if (full) _nextView = now + ViewIntervalMs;
-        try { PushViews(full); }
+        bool force = _forceViews || now >= _nextResync;
+        if (force) { _nextResync = now + 10_000; _forceViews = false; }
+        try { PushViews(full || force, force); }
         catch (Exception e) { Plugin.Logger?.LogWarning("materials: view refresh threw: " + e.Message); }
         Dirty.Clear();
     }
@@ -246,7 +262,7 @@ internal static unsafe class MaterialSeamRuntime
     private static readonly Dictionary<int, int> TotalsScratch = new();
     private static readonly List<MaterialLine> RowsScratch = new();
 
-    private static void PushViews(bool everyone)
+    private static void PushViews(bool everyone, bool force)
     {
         var world = Worlds.Server;
         if (world == null || !world.IsCreated || _service == null) return;
@@ -264,8 +280,8 @@ internal static unsafe class MaterialSeamRuntime
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
             catch { continue; }
-            Push(bootstrap, userIndex, user, character, MaterialOperation.Build, Dirty.Contains(user));
-            Push(bootstrap, userIndex, user, character, MaterialOperation.Craft, Dirty.Contains(user));
+            Push(bootstrap, userIndex, user, character, MaterialOperation.Build, force || Dirty.Contains(user));
+            Push(bootstrap, userIndex, user, character, MaterialOperation.Craft, force || Dirty.Contains(user));
         }
     }
 
@@ -291,7 +307,11 @@ internal static unsafe class MaterialSeamRuntime
             view = new MaterialView(op, Progenitor.WorldState.WorldEpoch.Current, 0, seq, -1, true, false, Array.Empty<MaterialLine>());
         }
         var bytes = MaterialViewWire.Encode(view);
-        CustomEvents.SendToUser(bootstrap, userIndex, MaterialViewWire.EventId, bytes);
+        try
+        {
+            if (!CustomEvents.SendToUser(bootstrap, userIndex, MaterialViewWire.EventId, bytes)) Book.Retry(user, op);
+        }
+        catch { Book.Retry(user, op); throw; }
     }
 
     // ---- client ------------------------------------------------------------------------------------
@@ -324,6 +344,8 @@ internal static unsafe class MaterialSeamRuntime
         if (world == null || !world.IsCreated || !Ent(target).Has<PlayerCharacter>(world.EntityManager)) return false;
         return Overlay.TryGet(ClientOperation(target), out _);
     }
+
+
 
     private static int ClientCompose(ulong target, ulong heart, IntPtr fullRows, int fullLength, IntPtr bagRows, int bagLength, IntPtr outRows, int capacity)
     {

@@ -113,6 +113,7 @@ internal sealed class MaterialViewBook
 {
     private readonly Dictionary<(CastleId, MaterialOperation), ulong> _last = new();
     private readonly Dictionary<CastleId, uint> _seq = new();
+    private readonly HashSet<(CastleId, MaterialOperation)> _retry = new();
 
     /// <summary>
     /// True when <paramref name="fingerprint"/> differs from what this player last got for this
@@ -121,7 +122,8 @@ internal sealed class MaterialViewBook
     internal bool ShouldSend(CastleId user, MaterialOperation operation, ulong fingerprint, bool force, out uint sequence)
     {
         sequence = 0;
-        if (!force && _last.TryGetValue((user, operation), out var prev) && prev == fingerprint) return false;
+        if (!force && !_retry.Remove((user, operation)) && _last.TryGetValue((user, operation), out var prev) && prev == fingerprint) return false;
+        _retry.Remove((user, operation));
         _last[(user, operation)] = fingerprint;
         _seq.TryGetValue(user, out uint s);
         sequence = ++s;
@@ -131,7 +133,9 @@ internal sealed class MaterialViewBook
 
     /// <summary>True when this player has been sent a non-cleared view for this operation.</summary>
     internal bool HasView(CastleId user, MaterialOperation operation) =>
-        _last.TryGetValue((user, operation), out var f) && f != ClearedFingerprint;
+        _retry.Contains((user, operation)) || (_last.TryGetValue((user, operation), out var f) && f != ClearedFingerprint);
+
+    internal void Retry(CastleId user, MaterialOperation operation) => _retry.Add((user, operation));
 
     /// <summary>The fingerprint of a cleared view.</summary>
     internal const ulong ClearedFingerprint = 0;
@@ -139,6 +143,8 @@ internal sealed class MaterialViewBook
     /// <summary>Forget a player (disconnect). The sequence is kept so a reconnect never goes backwards.</summary>
     internal void Forget(CastleId user)
     {
+        _retry.Remove((user, MaterialOperation.Build));
+        _retry.Remove((user, MaterialOperation.Craft));
         _last.Remove((user, MaterialOperation.Build));
         _last.Remove((user, MaterialOperation.Craft));
     }
@@ -148,6 +154,7 @@ internal sealed class MaterialViewBook
 
     internal void Clear()
     {
+        _retry.Clear();
         _last.Clear();
         _seq.Clear();
     }
