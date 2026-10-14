@@ -556,15 +556,22 @@ public static partial class ModsMenu
 
     /// <summary>
     /// AUTOUPDATE2 (phase 1 open issue 3): <c>[Install] DevThunderstoreUrl</c> takes effect without a Core reload. Every
-    /// two seconds (the title screen's tick) the index URL the catalog was built for is compared with the one the setting
+    /// two seconds (the Mods entry's tick) the index URL the catalog was built for is compared with the one the setting
     /// gives now (the loopback and developer-tree rule of <see cref="ThunderstoreMirror"/> still decides); on a change the
     /// catalog, its refresher and the Install tab are rebuilt, the new URL's cached index is served and one check is made
     /// (a dev-only setting change, not a timer). Nothing changes while an update or install runs; the next tick retries.
+    /// INSTALLERR1 (live 2026-10-14: a URL cleared in a world kept the stand-in's list and checked the old http base): it
+    /// runs in a world too, every Install-tab build forces it (<paramref name="force"/>), and a shown Install tab is redrawn
+    /// for the new source (<paramref name="rebuildPanes"/>).
     /// </summary>
-    internal static void FollowIndexSource()
+    internal static void FollowIndexSource() => FollowIndexSource(force: false, rebuildPanes: true);
+
+    private static bool _followingSource;
+
+    internal static void FollowIndexSource(bool force, bool rebuildPanes)
     {
         double now = System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
-        if (now < _sourceNextCheck) return;
+        if (!force && now < _sourceNextCheck) return;
         _sourceNextCheck = now + 2.0;
         if (_catalog is not InstallCatalogService) return;
         string want;
@@ -574,17 +581,43 @@ public static partial class ModsMenu
         if (ClientUpdates.Busy) return;
         string was = _catalogIndexUrl;
         Plugin.Logger?.LogInfo("Install: the index source changed (" + was + " -> " + want + "); the catalog is rebuilt for it.");
-        _catalog = null;
-        _installPane = null;
+        _followingSource = true;
         try
         {
-            EnsureBindings();
-            EnsureCatalog();
-            ServeCachedIndexNow();
-            if (ThunderstoreEnabled) QueueInstallIndexLoad();
+            _catalog = null;
+            _installPane = null;
+            try
+            {
+                EnsureBindings();
+                EnsureCatalog();
+                ServeCachedIndexNow();
+                if (ThunderstoreEnabled) QueueInstallIndexLoad();
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Install: rebuilding the catalog for the new index source failed: " + e.Message); }
+            RecheckUpdates("index-source");
+            if (rebuildPanes && IsOpen && _tabState != null && _tabState.Selected == ModsTab.InstallMods)
+            {
+                try { BuildInstallPanes(); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Install: redrawing the Install tab for the new index source failed: " + e.Message); }
+            }
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("Install: rebuilding the catalog for the new index source failed: " + e.Message); }
-        RecheckUpdates("index-source");
+        finally { _followingSource = false; }
+    }
+
+    /// <summary>
+    /// INSTALLERR1: the Install tab's <b>Use thunderstore.io</b> (offered only while the local stand-in is the source and
+    /// refused the connection): clears <c>[Install] DevThunderstoreUrl</c> through the shared cfg, then follows the new
+    /// source at once (the catalog is rebuilt for thunderstore.io and the tab redrawn). The setting stays cfg only.
+    /// </summary>
+    private static void UseThunderstoreFromInstallTab()
+    {
+        if (!ThunderstoreMirror.ClearConfiguredUrl())
+        {
+            Plugin.Logger?.LogWarning("Install: Use thunderstore.io could not clear [Install] DevThunderstoreUrl.");
+            return;
+        }
+
+        FollowIndexSource(force: true, rebuildPanes: true);
     }
 
     /// <summary>The index URL the catalog was built for (bridge readback).</summary>

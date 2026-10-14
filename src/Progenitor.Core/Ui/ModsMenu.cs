@@ -2646,6 +2646,15 @@ public static partial class ModsMenu
 
     private static void BuildInstallPanes()
     {
+#if !PROGENITOR_TESTS
+        // INSTALLERR1: a changed index source (the dev URL set or cleared) is followed on every Install-tab build, in a
+        // world as well as at the title screen, so a list from the old source is never drawn.
+        if (!_followingSource)
+        {
+            try { FollowIndexSource(force: true, rebuildPanes: false); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Install: index source check threw: " + e.Message); }
+        }
+#endif
         ParkSidebar(Sidebar.Take());
         // REMOTEINST1: ask the connected server again what it allows. An admin who ran adminauth
         // after joining is only seen as one once the server re-reads User.IsAdmin; a server that
@@ -3045,6 +3054,10 @@ public static partial class ModsMenu
             // INSTALLRESTART1: the pending-restart bar.
             _installPane.RestartOfferProbe = JoinFlowClient.CurrentRestartOffer;
             _installPane.RestartPress = () => JoinFlowClient.PressRestartButton();
+            // INSTALLERR1: Use thunderstore.io (offered only while the local stand-in refuses the connection).
+#if !PROGENITOR_TESTS
+            _installPane.UseThunderstorePress = UseThunderstoreFromInstallTab;
+#endif
             // DL1: a phase change (download started/landed, review, confirm) recomposes the
             // detail for the same selected entry on the next Drain; the sidebar is untouched.
             _installPane.SetDetailRebuild(() => MainThread.Post(RebuildInstallDetailAfterAction, Owner));
@@ -3697,7 +3710,7 @@ public static partial class ModsMenu
         var pane = EnsureInstallPane();
         if (!refresher.CacheServed && refresher.TryServeCache(out var cached))
         {
-            pane.NoteLoadResult(cached);
+            pane.NoteLoadResult(cached, refresher.SourceUrl, fromCache: true);
             NoteIndexContent("index-cache-served");
             try { Plugin.Logger?.LogInfo("Install: cached index served (" + cached.Count + " listings, fetched " + (refresher.CacheStampUtc?.ToString("u") ?? "?") + ")."); }
             catch { /* */ }
@@ -3717,7 +3730,7 @@ public static partial class ModsMenu
         var pane = EnsureInstallPane();
         if (refresher.TryServeCache(out var cached))
         {
-            pane.NoteLoadResult(cached);
+            pane.NoteLoadResult(cached, refresher.SourceUrl, fromCache: true);
             NoteIndexContent("index-cache-served");
             try { Plugin.Logger?.LogInfo("Install: cached index served ahead of the open (" + cached.Count + " listings)."); }
             catch { /* */ }

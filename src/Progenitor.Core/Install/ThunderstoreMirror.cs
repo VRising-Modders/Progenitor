@@ -77,6 +77,20 @@ internal static class ThunderstoreMirror
         }
     }
 
+    private static bool LiveClear()
+    {
+        BindOnce();
+        BepInEx.Configuration.ConfigEntry<string>? url;
+        lock (Gate) url = _url;
+        if (url == null) return false;
+        url.Value = "";
+        try { url.ConfigFile.Save(); }
+        catch { /* SaveOnConfigSet already wrote it */ }
+        try { Plugin.Logger?.LogWarning("Install: [" + Section + "] " + UrlKey + " cleared from the Install tab; the mod list comes from thunderstore.io."); }
+        catch { /* */ }
+        return true;
+    }
+
     private static string? LiveUrl()
     {
         BindOnce();
@@ -102,6 +116,22 @@ internal static class ThunderstoreMirror
         return _watchCore.Value;
     }
 #endif
+
+    /// <summary>
+    /// INSTALLERR1: clears <c>[Install] DevThunderstoreUrl</c> through the shared cfg (the Install tab's <b>Use thunderstore.io</b>).
+    /// True when it was written. Tests set their own.
+    /// </summary>
+    internal static Func<bool>? ClearProbe { get; set; }
+#if !PROGENITOR_TESTS
+        = LiveClear;
+#endif
+
+    /// <summary>INSTALLERR1: clear the dev URL (see <see cref="ClearProbe"/>); false when nothing could be written.</summary>
+    public static bool ClearConfiguredUrl()
+    {
+        try { return ClearProbe?.Invoke() ?? false; }
+        catch { return false; }
+    }
 
     private static string _lastNote = "";
 
