@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Progenitor.Inventory;
 
 namespace Progenitor.Materials;
@@ -88,6 +89,9 @@ internal sealed class MaterialStockReads : IMaterialLedger<InventoryRef>
     /// <summary>Inventory reads that reached the world (since construction).</summary>
     internal long WorldReads { get; private set; }
 
+    /// <summary>Stopwatch ticks spent in world reads and id resolutions (since construction; diagnostics).</summary>
+    internal long ReadTicks { get; private set; }
+
     /// <summary>Forget this refresh's reads.</summary>
     internal void Clear()
     {
@@ -120,8 +124,10 @@ internal sealed class MaterialStockReads : IMaterialLedger<InventoryRef>
         MaterialStock stock;
         _scratch.Clear();
         WorldReads++;
+        long t0 = Stopwatch.GetTimestamp();
         try { stock = _world.ReadStock(inventory, _scratch) ? MaterialStock.From(_scratch) : MaterialStock.Unreadable; }
         catch { stock = MaterialStock.Unreadable; }
+        ReadTicks += Stopwatch.GetTimestamp() - t0;
         _stock[inventory] = stock;
         return stock;
     }
@@ -131,8 +137,10 @@ internal sealed class MaterialStockReads : IMaterialLedger<InventoryRef>
     {
         if (!_resolved.TryGetValue(id, out inventory))
         {
+            long t0 = Stopwatch.GetTimestamp();
             try { if (!_world.TryResolve(id, out inventory)) inventory = InventoryRef.None; }
             catch { inventory = InventoryRef.None; }
+            ReadTicks += Stopwatch.GetTimestamp() - t0;
             _resolved[id] = inventory;
         }
         if (_trackIds != null) _trackIds[id] = inventory;

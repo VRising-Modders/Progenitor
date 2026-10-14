@@ -2921,8 +2921,8 @@ anything the last computation depended on differs at the next refresh:
 - the context: user, character, world epoch, standing plot, station;
 - the inventories the pool leaves out (the bag, a plain station, an open window for `Repair` and
   `Upgrade`) and the station put first;
-- the plot's own shared-storage containers (the list is read again every 10 seconds; a shared container
-  built since then is listed at the next read, and its contents are always read fresh);
+- the plot's own shared-storage containers (listed once per refresh by a query of only the
+  shared-storage tile models, not a scan of every castle building; their contents are read fresh);
 - every container id it resolved (a container that is gone or rebound);
 - the stock (per item, slots without an item entity) of every inventory it read: the provider's
   containers, the plot's shared storage, the bag and the station.
@@ -2933,7 +2933,11 @@ resolved at most once, however many items, operations and players need it. With 
 and 40 item types (game-free benchmark, `MaterialViewRefreshBenchTests`) a refresh of one Build view
 went from 5712 inventory reads, 5576 id resolutions, two castle building scans and 42 provider calls to
 137 reads, 136 resolutions and one provider call while nothing changes; a recompute costs the same 137
-reads plus the provider's `Candidates` and `Sources` calls.
+reads plus the provider's `Candidates` and `Sources` calls and about 0.5 ms of Progenitor's own work for
+40 item types (3.5 ms for 400; items that share one spend order resolve it once). A recompute or reuse
+slower than 20 ms logs one `materials: slow view refresh op=… outcome=… ms=… provider=… reads=…(n)
+sharedList=… other=…` line (at most one per 5 s), which splits the time between the provider's calls,
+the inventory reads, the shared-storage listing and the rest.
 
 This is the display only: a governed check and its payment never read a cached view or the refresh's
 reads. They ask the provider and count the containers live at the check, as before. Provider authors keep the

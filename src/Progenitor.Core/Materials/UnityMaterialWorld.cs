@@ -5,6 +5,7 @@ using ProjectM;
 using ProjectM.CastleBuilding;
 using ProjectM.Network;
 using ProjectM.Shared;
+using ProjectM.Tiles;
 using Progenitor.Castles;
 using Progenitor.Ecs;
 using Progenitor.Inventory;
@@ -136,9 +137,8 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     /// <summary>
     /// The game's own shared storage at the standing plot: every container on that castle that carries
     /// <c>CastleSharedInventory</c> (discovery only; the game's own aggregate on the heart is never read
-    /// or written). Listing a castle's containers scans every castle building on the server, so the list
-    /// is kept per plot for <see cref="SharedListRefreshMs"/> (like the castle list itself); the caller
-    /// reads the contents fresh. A shared container built since is listed at the next listing.
+    /// or written), listed by <see cref="ListShared"/> and kept per plot for <see cref="SharedListRefreshMs"/>;
+    /// the caller reads the contents fresh.
     /// </summary>
     public void VanillaSharedInventories(in MaterialContext context, ICollection<InventoryRef> into)
     {
@@ -150,25 +150,48 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         {
             var list = new List<InventoryRef>();
             var castle = CastleAt(territory);
-            if (castle != null)
-            {
-                var em = Em;
-                foreach (var rows in new[] { castle.Containers(), castle.Stations() })
-                    foreach (var row in rows)
-                    {
-                        var e = row.Entity.ToEntity();
-                        if (!e.Exists(em) || !e.Has<CastleSharedInventory>(em)) continue;
-                        list.Add(row.Main);
-                    }
-            }
+            if (castle != null) ListShared(castle.Heart.ToEntity(), list);
             cached = (epoch, now, list);
             _shared[territory] = cached;
         }
         foreach (var inv in cached.List) into.Add(inv);
     }
 
-    /// <summary>How long a plot's shared-storage list is kept (the contents are always read fresh).</summary>
-    internal const long SharedListRefreshMs = 10_000;
+    /// <summary>
+    /// How long a plot's shared-storage list is kept (the contents are always read fresh): one refresh,
+    /// so the operations and players of one refresh share one listing.
+    /// </summary>
+    internal const long SharedListRefreshMs = 1_000;
+
+    /// <summary>
+    /// The placed shared-storage containers of one castle: a query of only the tile models that carry
+    /// <c>CastleSharedInventory</c> and a heart connection (a few hundred server-wide, not every castle
+    /// building), kept when connected to <paramref name="heart"/> (the connection read through the
+    /// existing guarded raw reader) and holding an inventory. Hearts are left out, as the castle's
+    /// container rows leave them out. Sorted by entity, so an unchanged castle lists the same order.
+    /// </summary>
+    private static void ListShared(Entity heart, List<InventoryRef> into)
+    {
+        if (heart == Entity.Null) return;
+        var em = Em;
+        var rows = Query.Entities(em, includeDisabled: true, includeSystems: false,
+            ComponentIndex.Of<TileModel>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<CastleSharedInventory>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<CastleHeartConnection>(ComponentType.AccessMode.ReadOnly));
+        var found = new List<Entity>();
+        foreach (var e in rows)
+        {
+            try
+            {
+                if (e.Has<CastleHeart>(em) || !UnityInventoryBackend.HasInventory(em, e)) continue;
+                if (Servants.ServantRuntime.HeartOf(em, e) != heart) continue;
+                found.Add(e);
+            }
+            catch { /* unreadable entity: not listed */ }
+        }
+        found.Sort((a, b) => a.Index != b.Index ? a.Index.CompareTo(b.Index) : a.Version.CompareTo(b.Version));
+        foreach (var e in found) into.Add(InventoryRef.For(e, 0));
+    }
 
     private readonly Dictionary<int, (int Epoch, long Stamp, List<InventoryRef> List)> _shared = new();
 

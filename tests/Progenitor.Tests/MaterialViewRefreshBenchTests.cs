@@ -51,7 +51,7 @@ public class MaterialViewRefreshBenchTests
 
         public long SlotReads, Resolves, CastleScans;
 
-        public BenchWorld(int seed = 1)
+        public BenchWorld(int seed = 1, int itemTypes = ItemTypes)
         {
             var rng = new Random(seed);
             Slots[Bag] = new (int, int)[SlotsPerChest];
@@ -63,7 +63,7 @@ public class MaterialViewRefreshBenchTests
                 var slots = new (int, int)[SlotsPerChest];
                 // A chest holds a few item types, several stacks each; some slots stay empty.
                 for (int s = 0; s < SlotsPerChest; s++)
-                    slots[s] = rng.Next(4) == 0 ? (0, 0) : (Item(rng.Next(ItemTypes)), 1 + rng.Next(100));
+                    slots[s] = rng.Next(4) == 0 ? (0, 0) : (Item(rng.Next(itemTypes)), 1 + rng.Next(100));
                 Slots[inv] = slots;
                 var id = new ContainerId(new Guid(c + 1, 0, 0, new byte[8]));
                 Ids[id] = inv;
@@ -224,9 +224,9 @@ public class MaterialViewRefreshBenchTests
     internal sealed record Sample(int Ops, double Reads, double Resolves, double Scans, double ProviderCalls, double Micros, double Bytes,
         double Recomputes, double Skips);
 
-    internal static Sample Run(int opCount, int refreshes, Load load)
+    internal static Sample Run(int opCount, int refreshes, Load load, int itemTypes = ItemTypes)
     {
-        var world = new BenchWorld();
+        var world = new BenchWorld(1, itemTypes);
         var provider = new BenchProvider(world.ChestIds);
         var registry = new MaterialSourceRegistry { HookState = () => (true, "") };
         registry.Register(provider, "bench");
@@ -254,7 +254,7 @@ public class MaterialViewRefreshBenchTests
             if (load == Load.OneChestChangesEverySecond)
             {
                 var slots = world.Slots[world.ChestRefs[r % Chests]];
-                slots[0] = (BenchWorld.Item(r % ItemTypes), 1 + r % 50);
+                slots[0] = (BenchWorld.Item(r % itemTypes), 1 + r % 50);
             }
             Refresh();
         }
@@ -289,6 +289,43 @@ public class MaterialViewRefreshBenchTests
                     Assert.Equal(ops, s.ProviderCalls); // one Revision per view, no Candidates, no Sources
                 }
             }
+        }
+    }
+
+    [Fact]
+    public void One_recompute_cost_with_136_chests()
+    {
+        _out.WriteLine("item types | recompute us (median of 41) | inventory reads | id resolves | bytes");
+        foreach (int itemTypes in new[] { 40, 400 })
+        {
+            var world = new BenchWorld(1, itemTypes);
+            var provider = new BenchProvider(world.ChestIds);
+            var registry = new MaterialSourceRegistry { HookState = () => (true, "") };
+            registry.Register(provider, "bench");
+            var service = new MaterialService(registry, world, _ => { });
+            var reads = new MaterialStockReads(world);
+            var times = new List<double>();
+            long readsTotal = 0, resolvesTotal = 0, bytesTotal = 0;
+            for (int i = 0; i < 46; i++)
+            {
+                world.SlotReads = world.Resolves = 0;
+                long b0 = GC.GetAllocatedBytesForCurrentThread();
+                long t0 = Stopwatch.GetTimestamp();
+                service.RefreshView(world.Player, MaterialOperation.Build, reads, recompute: true, out _);
+                long t1 = Stopwatch.GetTimestamp();
+                long b1 = GC.GetAllocatedBytesForCurrentThread();
+                reads.Clear();
+                if (i < 5) continue; // JIT warm-up
+                times.Add((t1 - t0) * 1e6 / Stopwatch.Frequency);
+                readsTotal += world.SlotReads;
+                resolvesTotal += world.Resolves;
+                bytesTotal += b1 - b0;
+            }
+            times.Sort();
+            int n = times.Count;
+            _out.WriteLine($"{itemTypes} | {times[n / 2]:F0} | {readsTotal / n} | {resolvesTotal / n} | {bytesTotal / n}");
+            Assert.True(readsTotal / n <= Chests + 1);
+            Assert.True(resolvesTotal / n <= Chests);
         }
     }
 }

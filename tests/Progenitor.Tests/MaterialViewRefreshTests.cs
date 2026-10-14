@@ -55,9 +55,12 @@ public class MaterialViewRefreshTests
         public long Revision(in MaterialContext context) =>
             ThrowOnRevision ? throw new InvalidOperationException("provider bug") : Rev;
 
+        public TimeSpan Delay;
+
         public IReadOnlyList<ContainerId> Candidates(in MaterialContext context)
         {
             CandidatesCalls++;
+            if (Delay > TimeSpan.Zero) System.Threading.Thread.Sleep(Delay);
             return _all;
         }
 
@@ -252,6 +255,69 @@ public class MaterialViewRefreshTests
         Assert.Equal(rig.Fresh(MaterialOperation.Craft), after.Rows);
         Assert.NotEqual(before.Rows, after.Rows);
         Assert.Equal(MaterialViewOutcome.Reused, rig.Refresh(MaterialOperation.Craft, out _));
+    }
+
+    [Fact]
+    public void A_stock_change_recomputes_only_the_views_that_read_that_container()
+    {
+        var rig = new Rig();
+        void Both(out MaterialViewOutcome build, out MaterialViewOutcome craft)
+        {
+            rig.World.Now += 1000;
+            rig.Service.BeginFullRefresh();
+            build = rig.Service.RefreshView(rig.World.Player, MaterialOperation.Build, rig.Reads, false, out _);
+            craft = rig.Service.RefreshView(rig.World.Player, MaterialOperation.Craft, rig.Reads, false, out _);
+            rig.Reads.Clear();
+        }
+        Both(out _, out _);
+        // The workstation is read by the Craft view only (left out of its pool); the Build view never reads it.
+        rig.World.Slots[rig.World.Station][0] = (World.Item(2), 9);
+        Both(out var build, out var craft);
+        Assert.Equal(MaterialViewOutcome.Reused, build);
+        Assert.Equal(MaterialViewOutcome.Computed, craft);
+        // A chest both views read recomputes both.
+        rig.Change(0, 0, World.Item(2), 9);
+        Both(out build, out craft);
+        Assert.Equal(MaterialViewOutcome.Computed, build);
+        Assert.Equal(MaterialViewOutcome.Computed, craft);
+        var status = rig.Registry.Status();
+        Assert.Equal(5, status.Recomputes);
+        Assert.Equal(1, status.Skips);
+    }
+
+    [Fact]
+    public void A_slow_refresh_logs_where_the_time_went()
+    {
+        var rig = new Rig();
+        rig.Provider.Delay = TimeSpan.FromMilliseconds(MaterialService.SlowViewMs + 5);
+        rig.Refresh(MaterialOperation.Build, out _);
+        var line = Assert.Single(rig.Log, l => l.StartsWith("materials: slow view refresh"));
+        Assert.Contains("op=Build outcome=Computed", line);
+        Assert.Contains(" provider=", line);
+        Assert.Contains(" reads=", line);
+        Assert.Contains(" sharedList=", line);
+        rig.Provider.Delay = TimeSpan.Zero;
+        rig.Refresh(MaterialOperation.Build, out _);
+        Assert.Single(rig.Log, l => l.StartsWith("materials: slow view refresh"));
+    }
+
+    [Fact]
+    public void Items_sharing_one_spend_order_get_the_same_totals_as_distinct_orders()
+    {
+        // BenchProvider hands every item the same list instance (resolved once per view), MixedProvider
+        // hands each item its own list; both must agree with the pool rule item by item.
+        var world = new World(11);
+        var registry = new MaterialSourceRegistry { HookState = () => (true, "") };
+        registry.Register(new MaterialViewRefreshBenchTests.BenchProvider(world.ChestIds), "bench");
+        var service = new MaterialService(registry, world, _ => { });
+        var totals = new Dictionary<int, int>();
+        Assert.True(service.TryView(world.Player, MaterialOperation.Craft, totals, out _, out _));
+        foreach (var (item, amount) in totals)
+        {
+            long expected = 0;
+            foreach (var inv in world.ChestRefs) expected += world.Count(inv, item);
+            Assert.Equal(expected, amount);
+        }
     }
 
     [Fact]

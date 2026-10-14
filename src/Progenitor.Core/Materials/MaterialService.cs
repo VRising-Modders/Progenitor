@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Progenitor.Castles;
 using Progenitor.Inventory;
 
@@ -264,6 +265,33 @@ internal sealed class MaterialService
     private readonly Dictionary<ContainerId, InventoryRef> _trackIds = new();
     private readonly Dictionary<int, int> _viewTotals = new();
     private readonly HashSet<InventoryRef> _poolSeen = new();
+    private readonly Dictionary<IReadOnlyList<InventoryRef>, InventoryRef[]> _uniqueOrders = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// <see cref="MaterialPlanner.Available"/> for a view: the deduplicated, exclusion-filtered order is
+    /// built once per shared spend order (one view's exclusions are fixed), then each item only sums
+    /// its counts. Same rule: each inventory once, excluded ones dropped, the reserve subtracted once.
+    /// </summary>
+    private int Available(int item, MaterialPoolSpec<InventoryRef> spec, MaterialStockReads reads, HashSet<InventoryRef> exclude)
+    {
+        if (!_uniqueOrders.TryGetValue(spec.Order, out var unique))
+        {
+            _poolSeen.Clear();
+            var list = new List<InventoryRef>(spec.Order.Count);
+            foreach (var source in spec.Order)
+                if (_poolSeen.Add(source) && !exclude.Contains(source)) list.Add(source);
+            unique = list.ToArray();
+            _uniqueOrders[spec.Order] = unique;
+        }
+        long total = 0;
+        foreach (var source in unique)
+        {
+            int n = reads.Count(source, item);
+            if (n > 0) total += n;
+        }
+        long a = total - spec.Reserve;
+        return a <= 0 ? 0 : a > int.MaxValue ? int.MaxValue : (int)a;
+    }
     private long _viewStamp;
     private int _faultCount;
 
@@ -282,6 +310,36 @@ internal sealed class MaterialService
     /// never reads a cached view or <paramref name="reads"/>.
     /// </summary>
     internal MaterialViewOutcome RefreshView(CastleId character, MaterialOperation operation, MaterialStockReads reads, bool recompute,
+        out MaterialViewResult view)
+    {
+        long start = Stopwatch.GetTimestamp();
+        _providerTicks = _sharedTicks = 0;
+        long readTicks = reads.ReadTicks, readCount = reads.WorldReads;
+        var outcome = RefreshViewCore(character, operation, reads, recompute, out view);
+        long total = Stopwatch.GetTimestamp() - start;
+        if (total * 1000 >= SlowViewMs * Stopwatch.Frequency)
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (now - _lastSlowLog >= 5 * Stopwatch.Frequency || _lastSlowLog == 0)
+            {
+                _lastSlowLog = now;
+                long r = reads.ReadTicks - readTicks;
+                _log("materials: slow view refresh op=" + operation + " outcome=" + outcome + " ms=" + Ms(total)
+                    + " provider=" + Ms(_providerTicks) + " reads=" + Ms(r) + "(" + (reads.WorldReads - readCount) + ")"
+                    + " sharedList=" + Ms(_sharedTicks) + " other=" + Ms(total - _providerTicks - r - _sharedTicks));
+            }
+        }
+        return outcome;
+    }
+
+    /// <summary>A single refresh slower than this logs one <c>materials: slow view refresh</c> line (at most one per 5 s) with where the time went.</summary>
+    internal const int SlowViewMs = 20;
+
+    private long _providerTicks, _sharedTicks, _lastSlowLog;
+
+    private static string Ms(long ticks) => (ticks * 1000.0 / Stopwatch.Frequency).ToString("F1", System.Globalization.CultureInfo.InvariantCulture);
+
+    private MaterialViewOutcome RefreshViewCore(CastleId character, MaterialOperation operation, MaterialStockReads reads, bool recompute,
         out MaterialViewResult view)
     {
         view = default;
@@ -357,8 +415,10 @@ internal sealed class MaterialService
         if (!_world.TryContext(entry.Context.Character, operation, out var context) || !context.Equals(entry.Context)) return false;
         long revision;
         // A throwing Revision means a recompute; the recompute asks again and counts the fault once.
+        long t0 = Stopwatch.GetTimestamp();
         try { revision = provider.Revision(in context); }
         catch { return false; }
+        finally { _providerTicks += Stopwatch.GetTimestamp() - t0; }
         if (revision != entry.Revision) return false;
         if (!entry.Governed) return true;
 
@@ -368,7 +428,9 @@ internal sealed class MaterialService
         if (!_world.PoolFront(in context).Equals(entry.Front)) return false;
         if (!_world.StationInventory(in context).Equals(entry.Station)) return false;
         _checkShared.Clear();
+        long t1 = Stopwatch.GetTimestamp();
         _world.VanillaSharedInventories(in context, _checkShared);
+        _sharedTicks += Stopwatch.GetTimestamp() - t1;
         if (_checkShared.Count != entry.Shared.Count) return false;
         for (int i = 0; i < _checkShared.Count; i++)
             if (!_checkShared[i].Equals(entry.Shared[i])) return false;
@@ -404,6 +466,7 @@ internal sealed class MaterialService
         entry.Rows = Array.Empty<MaterialLine>();
 
         var provider = _registry.Provider;
+        _uniqueOrders.Clear();
         reads.BeginTrack(_trackStock, _trackIds);
         try
         {
@@ -412,13 +475,17 @@ internal sealed class MaterialService
             if (!s.HasContext) return false;
             entry.Provider = provider;
             if (!s.Governed) return false;
+            long t0 = Stopwatch.GetTimestamp();
             try { entry.Revision = s.Provider!.Revision(in s.Context); }
             catch (Exception e) { Fault("Revision", e); }
+            finally { _providerTicks += Stopwatch.GetTimestamp() - t0; }
             entry.Governed = true;
             entry.Front = s.Front;
             entry.Station = s.Station;
             foreach (var x in s.Exclusions) entry.Exclusions.Add(x);
+            long t1 = Stopwatch.GetTimestamp();
             _world.VanillaSharedInventories(in s.Context, entry.Shared);
+            _sharedTicks += Stopwatch.GetTimestamp() - t1;
             var shared = new List<int>();
             foreach (var inv in entry.Shared) reads.Stock(inv).AddItems(shared);
             _viewTotals.Clear();
@@ -426,7 +493,7 @@ internal sealed class MaterialService
             {
                 var spec = SpecOf(s, item);
                 if (spec == null) continue;
-                _viewTotals[item] = MaterialPlanner.Available(item, spec, reads, s.Exclusions, _poolSeen);
+                _viewTotals[item] = Available(item, spec, reads, s.Exclusions);
             }
             var rows = new List<MaterialLine>(_viewTotals.Count);
             foreach (var kv in _viewTotals) rows.Add(new MaterialLine(kv.Key, kv.Value));
@@ -445,6 +512,7 @@ internal sealed class MaterialService
             foreach (var inv in _trackStock) entry.Stocks.Add((inv, reads.Stock(inv)));
             _trackIds.Clear();
             _trackStock.Clear();
+            _uniqueOrders.Clear();
         }
     }
 
@@ -612,11 +680,13 @@ internal sealed class MaterialService
         if (!_world.TryContext(character, operation, out s.Context)) return s;
         s.HasContext = true;
         IReadOnlyList<ContainerId>? candidates;
+        long t0 = Stopwatch.GetTimestamp();
         try { candidates = provider.Candidates(in s.Context); }
         catch (Exception e)
         {
             // A throwing provider governs with no remote sources; it never falls back to the
             // game's shared storage, which could be less restrictive than the provider's rules.
+            _providerTicks += Stopwatch.GetTimestamp() - t0;
             Fault("Candidates", e);
             s.Provider = provider;
             s.Governed = true;
@@ -624,6 +694,7 @@ internal sealed class MaterialService
             Prepare(s);
             return s;
         }
+        _providerTicks += Stopwatch.GetTimestamp() - t0;
         if (candidates == null || candidates.Count == 0) return s;
         s.Provider = provider;
         s.Governed = true;
@@ -651,6 +722,7 @@ internal sealed class MaterialService
         if (s.ProviderFaulted || s.Checked) sources = EmptySources;
         else
         {
+            long t0 = Stopwatch.GetTimestamp();
             try { sources = s.Provider!.Sources(in s.Context, item); }
             catch (Exception e)
             {
@@ -658,9 +730,12 @@ internal sealed class MaterialService
                 // A throwing provider means "no remote sources", never "vanilla storage rules".
                 sources = EmptySources;
             }
+            finally { _providerTicks += Stopwatch.GetTimestamp() - t0; }
         }
         MaterialPoolSpec<InventoryRef>? spec = null;
-        if (sources != null)
+        if (sources != null && s.Reads != null && TryMemoOrder(s, sources.SpendOrder, out var memo))
+            spec = new MaterialPoolSpec<InventoryRef>(memo, sources.PoolReserve);
+        else if (sources != null)
         {
             var order = new List<InventoryRef>(sources.SpendOrder.Count + 1);
             if (!s.Front.IsNone) order.Add(s.Front);
@@ -673,9 +748,37 @@ internal sealed class MaterialService
                 order.Add(inv);
             }
             spec = new MaterialPoolSpec<InventoryRef>(order, sources.PoolReserve);
+            if (s.Reads != null && s.OrderMemo.Count < 16) s.OrderMemo.Add((ToArray(sources.SpendOrder), order));
         }
         s.Specs[item] = spec;
         return spec;
+    }
+
+    /// <summary>
+    /// A view's items often share one spend order (the provider hands back the same list): resolve an
+    /// order once per view and reuse it for every item that names the same containers in the same order
+    /// (compared element by element, so a list the provider changed between calls is resolved again).
+    /// </summary>
+    private static bool TryMemoOrder(Session s, IReadOnlyList<ContainerId> ids, out List<InventoryRef> order)
+    {
+        foreach (var (known, resolved) in s.OrderMemo)
+        {
+            if (known.Length != ids.Count) continue;
+            bool same = true;
+            for (int i = 0; i < known.Length && same; i++) same = known[i].Equals(ids[i]);
+            if (!same) continue;
+            order = resolved;
+            return true;
+        }
+        order = null!;
+        return false;
+    }
+
+    private static ContainerId[] ToArray(IReadOnlyList<ContainerId> ids)
+    {
+        var copy = new ContainerId[ids.Count];
+        for (int i = 0; i < copy.Length; i++) copy[i] = ids[i];
+        return copy;
     }
 
     private static readonly ItemSources EmptySources = new(Array.Empty<ContainerId>());
@@ -758,6 +861,8 @@ internal sealed class MaterialService
         internal IReadOnlyList<ContainerId> Candidates = Array.Empty<ContainerId>();
         /// <summary>A displayed view's per-refresh read cache; null for an operation (its check and payment read live).</summary>
         internal MaterialStockReads? Reads;
+        /// <summary>A view's resolved spend orders (<see cref="TryMemoOrder"/>).</summary>
+        internal readonly List<(ContainerId[] Ids, List<InventoryRef> Order)> OrderMemo = new();
         internal InventoryRef Front = InventoryRef.None;
         internal readonly HashSet<InventoryRef> Exclusions = new();
         internal readonly Dictionary<int, MaterialPoolSpec<InventoryRef>?> Specs = new();
