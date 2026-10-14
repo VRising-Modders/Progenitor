@@ -74,6 +74,7 @@ internal static class UiWidgetLayout
     internal const string CellDetail = "detail";
     internal const string CellCheck = "check";
     internal const string CellReason = "reason";
+    internal const string CellIconPad = "icon-pad";
 
     /// <summary>The cells of one ordered-list row, in the fixed order the columns line up in.</summary>
     internal static List<CellSpec> ListRowCells(bool reorder, bool remove, bool expand, bool icon)
@@ -106,13 +107,18 @@ internal static class UiWidgetLayout
     }
 
     /// <summary>A drawer row's one wrapping, muted cell, indented under the caption.</summary>
-    internal static List<CellSpec> DrawerCells(float indent)
+    /// <summary>
+    /// A drawer row: its text starts under the caption, past the grip and (when the list shows icons) the icon column.
+    /// A kit spacer takes no width of its own (it only shares a row's remainder), so each indent is an empty muted cell
+    /// of that width, as CellTiles pads a tile; the icon pad (<see cref="CellIconPad"/>) is hidden while the list shows
+    /// no icons, and the cell gaps make the total exactly <see cref="DrawerIndent"/>.
+    /// </summary>
+    internal static List<CellSpec> DrawerCells(bool grip)
     {
-        var cells = new List<CellSpec>(2);
-        // A kit spacer takes no width of its own (it only shares a row's remainder), so the indent is an empty muted
-        // cell of that width, as CellTiles pads a tile.
-        if (indent > 0f)
-            cells.Add(new CellSpec(CellKind.Muted, "indent") { MinWidth = indent }.With(text: "", width: CellWidth.Px(indent)));
+        var cells = new List<CellSpec>(3);
+        if (grip)
+            cells.Add(new CellSpec(CellKind.Muted, "indent") { MinWidth = GripWidth }.With(text: "", width: CellWidth.Px(GripWidth)));
+        cells.Add(new CellSpec(CellKind.Muted, CellIconPad) { MinWidth = IconSize }.With(text: "", width: CellWidth.Px(IconSize)));
         cells.Add(new CellSpec(CellKind.Muted, CellDetail)
             .With(width: CellWidth.Fill(CaptionMinWidth), wrap: CellWrap.Wrap, vAlign: CellVAlign.Top, minWidth: CaptionMinWidth));
         return cells;

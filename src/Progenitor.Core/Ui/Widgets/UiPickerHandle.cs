@@ -16,7 +16,7 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
 
     private readonly UiPickerModel _model;
     private readonly UiPickerOptions _options;
-    private readonly bool _icons;
+    private bool _icons;
     private readonly IUiCellRow _search;
     private readonly IUiCellRow _status;
     private readonly List<IUiCellRow> _slots = new();
@@ -48,7 +48,7 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         {
             int slot = i;
             var row = Part(panel.CellRow(new CellRowSpec(
-                RowKey("line" + i), UiPickerLayout.LineCells(_options.Multi, _icons), hover: true,
+                RowKey("line" + i), UiPickerLayout.LineCells(_options.Multi, icon: true), hover: true,
                 skin: CellRowSkin.GameEntry, separator: true, quietHover: true)));
             _slots.Add(row);
             Lease(row.OnRowClick(() => ClickSlot(slot)));
@@ -189,7 +189,8 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
             return;
         }
 
-        ShowTooltip(RectOf(_slots[slot]), entry.Label, body);
+        var row = _slots[slot];
+        ShowTooltip(RectOf(row), entry.Label, body, () => row.Visible && RectOf(row).IsKnown);
     }
 
     // ---- Drawing -------------------------------------------------------------------------------
@@ -206,6 +207,7 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         TrySetVisible(_search, true);
         TrySetVisible(_status, true);
 
+        _icons = AnyIcon(_model.Entries); // the column follows the entries (SetEntries can add the first icon)
         var runtime = WidgetRuntime.Current;
         for (int i = 0; i < _slots.Count; i++)
         {
@@ -221,7 +223,7 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
             {
                 row.SetCell(UiWidgetLayout.CellTitle, line.Text, CellTone.Gold);
                 row.SetCell(UiWidgetLayout.CellNote, "", visible: false);
-                if (_icons) row.SetCell(UiWidgetLayout.CellIcon, visible: false);
+                row.SetCell(UiWidgetLayout.CellIcon, visible: false);
                 if (_options.Multi) row.SetCell(UiWidgetLayout.CellCheck, "", visible: false);
                 row.SetSelected(false);
             }
@@ -235,6 +237,7 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
                 row.SetCell(UiWidgetLayout.CellNote, note, e.Disabled ? CellTone.Faint : CellTone.Muted, visible: note.Length > 0);
                 if (_options.Multi)
                     row.SetCell(UiWidgetLayout.CellCheck, on ? _check : "", e.Disabled ? CellTone.Faint : CellTone.Gold, visible: true);
+                row.SetCell(UiWidgetLayout.CellIcon, visible: _icons);
                 if (_icons)
                 {
                     object? icon = e.Icon;
@@ -244,7 +247,6 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
                         catch { icon = null; }
                     }
 
-                    row.SetCell(UiWidgetLayout.CellIcon, visible: true);
                     row.SetImage(UiWidgetLayout.CellIcon, icon);
                 }
 

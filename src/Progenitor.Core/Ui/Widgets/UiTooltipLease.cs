@@ -52,10 +52,18 @@ internal sealed class UiTooltipLease : IDisposable
         if (!rect.IsKnown) return;
         try
         {
-            runtime.ShowTooltip(rect, _title, _text);
+            runtime.ShowTooltip(rect, _title, _text, StillShown);
             _shown = true;
         }
         catch { /* */ }
+    }
+
+    /// <summary>The control is still on screen (not disposed, not hidden, its object active in a shown panel).</summary>
+    private bool StillShown()
+    {
+        if (_disposed || _handle.IsDisposed || !_handle.Visible || _handle.Runtime == null) return false;
+        try { return Ui.CurrentRuntime().WidgetRect(_handle.Runtime).IsKnown; }
+        catch { return false; }
     }
 
     private void Hide(IWidgetRuntime runtime)

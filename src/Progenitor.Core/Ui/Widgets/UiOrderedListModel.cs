@@ -160,24 +160,28 @@ internal sealed class UiOrderedListModel
 
     /// <summary>
     /// The drop slot for a pointer at <paramref name="pointerY"/> (screen pixels, up is larger) over slots whose vertical
-    /// centers are <paramref name="slotCenters"/> (top slot first): the number of slots whose center is above the pointer,
-    /// clamped to the drawn slots. NaN centers (an unreadable row) are skipped; with none readable, -1.
+    /// centers are <paramref name="slotCenters"/> (top slot first): the slot whose center is nearest the pointer, so the
+    /// target changes on the boundary halfway between two rows, never half a row late. Above the top slot is slot 0,
+    /// below the last is the last. NaN centers (an unreadable row) are skipped; with none readable, -1.
     /// </summary>
     internal static int DropIndex(float pointerY, IReadOnlyList<float> slotCenters)
     {
         if (slotCenters == null || slotCenters.Count == 0 || float.IsNaN(pointerY) || float.IsInfinity(pointerY)) return -1;
-        int above = 0;
-        int readable = 0;
+        int best = -1;
+        float bestDistance = float.MaxValue;
         for (int i = 0; i < slotCenters.Count; i++)
         {
             float c = slotCenters[i];
             if (float.IsNaN(c) || float.IsInfinity(c)) continue;
-            readable++;
-            if (c > pointerY) above++;
+            float d = Math.Abs(c - pointerY);
+            if (d < bestDistance)
+            {
+                bestDistance = d;
+                best = i;
+            }
         }
 
-        if (readable == 0) return -1;
-        return Math.Min(above, slotCenters.Count - 1);
+        return best;
     }
 
     /// <summary>Move the drop target. True when it changed (the slots need a repaint).</summary>

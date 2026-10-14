@@ -48,6 +48,34 @@ internal sealed class UiPickerModel
     internal const int MaxRows = 30;
 
     private readonly List<UiPickerEntry> _entries = new();
+
+    /// <summary>Each entry's folded label, label words and keywords, made once in <see cref="SetEntries"/>, not per keystroke.</summary>
+    private readonly List<FoldedEntry> _folded = new();
+    private readonly Dictionary<UiPickerEntry, FoldedEntry> _foldedBy = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>An entry's search text, folded once.</summary>
+    internal sealed class FoldedEntry
+    {
+        internal FoldedEntry(UiPickerEntry entry)
+        {
+            Label = Fold(entry.Label);
+            Words = SplitWords(Label);
+            var keys = new List<string>();
+            foreach (var k in entry.Keywords ?? Array.Empty<string>())
+            {
+                string f = Fold(k);
+                if (f.Length > 0) keys.Add(f);
+            }
+
+            Keywords = keys.ToArray();
+        }
+
+        internal string Label { get; }
+
+        internal string[] Words { get; }
+
+        internal string[] Keywords { get; }
+    }
     private readonly List<string> _selected = new();
     private List<UiPickerEntry> _matches = new();
     private string _query = "";
@@ -100,6 +128,14 @@ internal sealed class UiPickerModel
 
         _entries.Clear();
         _entries.AddRange(next);
+        _folded.Clear();
+        _foldedBy.Clear();
+        foreach (var e in next)
+        {
+            var f = new FoldedEntry(e);
+            _folded.Add(f);
+            _foldedBy[e] = f;
+        }
         _selected.RemoveAll(id => !seen.Contains(id) || Find(id)?.Disabled == true);
         Refilter();
     }
@@ -181,16 +217,18 @@ internal sealed class UiPickerModel
     }
 
     /// <summary>How well <paramref name="entry"/> matches the folded query (lower is better), or -1 for no match.</summary>
-    internal static int Rank(UiPickerEntry entry, string foldedQuery)
+    internal static int Rank(UiPickerEntry entry, string foldedQuery) => Rank(new FoldedEntry(entry), foldedQuery, SplitWords(foldedQuery));
+
+    /// <summary><see cref="Rank(UiPickerEntry, string)"/> over text folded once (the per-keystroke path).</summary>
+    internal static int Rank(FoldedEntry entry, string foldedQuery, string[] queryWords)
     {
         if (foldedQuery.Length == 0) return 0;
-        string label = Fold(entry.Label);
+        string label = entry.Label;
         if (label == foldedQuery) return 0;
         if (label.StartsWith(foldedQuery, StringComparison.Ordinal)) return 1;
-        var words = Words(label);
+        var words = entry.Words;
         foreach (var w in words)
             if (w.StartsWith(foldedQuery, StringComparison.Ordinal)) return 2;
-        var queryWords = Words(foldedQuery);
         if (queryWords.Length > 1)
         {
             bool all = true;
@@ -206,21 +244,19 @@ internal sealed class UiPickerModel
         }
 
         if (label.Contains(foldedQuery, StringComparison.Ordinal)) return 4;
-        foreach (var k in entry.Keywords ?? Array.Empty<string>())
-        {
-            string fk = Fold(k);
-            if (fk.Length > 0 && fk.Contains(foldedQuery, StringComparison.Ordinal)) return 5;
-        }
+        foreach (var fk in entry.Keywords)
+            if (fk.Contains(foldedQuery, StringComparison.Ordinal)) return 5;
 
         return -1;
     }
 
-    private static string[] Words(string folded) =>
+    private static string[] SplitWords(string folded) =>
         folded.Split(new[] { ' ', '-', '_', '(', ')', '/', ',', '.' }, StringSplitOptions.RemoveEmptyEntries);
 
     private void Refilter()
     {
         string q = Fold(_query);
+        var queryWords = SplitWords(q);
         var sectionOrder = new Dictionary<string, int>(StringComparer.Ordinal);
         var ranked = new List<(UiPickerEntry Entry, int Section, int Rank, int Index)>();
         for (int i = 0; i < _entries.Count; i++)
@@ -233,7 +269,7 @@ internal sealed class UiPickerModel
                 sectionOrder[section] = s;
             }
 
-            int r = Rank(e, q);
+            int r = Rank(_folded[i], q, queryWords);
             if (r < 0) continue;
             ranked.Add((e, s, r, i));
         }
@@ -267,9 +303,10 @@ internal sealed class UiPickerModel
             foreach (var e in _matches)
             {
                 if (e.Disabled) continue;
-                string label = Fold(e.Label);
+                var folded = _foldedBy.TryGetValue(e, out var cached) ? cached : new FoldedEntry(e);
+                string label = folded.Label;
                 if (!label.StartsWith(q, StringComparison.Ordinal) || label.Length <= q.Length) continue;
-                int r = Rank(e, q);
+                int r = Rank(folded, q, SplitWords(q));
                 if (r < bestRank)
                 {
                     best = e;

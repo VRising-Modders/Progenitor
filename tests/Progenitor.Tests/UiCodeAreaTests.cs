@@ -348,6 +348,37 @@ public sealed class UiCodeAreaTests : IDisposable
     }
 
     [Fact]
+    public void A_pasted_crlf_or_lone_cr_is_stored_as_lf_and_written_back_with_one_OnChanged()
+    {
+        var runtime = new CodeRuntime();
+        var area = NewPanel(runtime).CodeArea("", "", lines: 4);
+        var seen = new List<string>();
+        area.OnChanged(seen.Add);
+
+        Type(runtime, "a\r\nb\rc");
+        Assert.Equal(new[] { "a\nb\nc" }, seen);
+        Assert.Equal("a\nb\nc", area.Value);
+        Assert.Equal(3, area.LineCount);
+        // The field gets the normalized text back; its echo is not a second edit.
+        Assert.Equal("a\nb\nc", runtime.Rows[0].Cells()[0].Text);
+        Assert.Equal(1, area.Describe()["normalizedWrites"]);
+        Type(runtime, "a\nb\nc");
+        Assert.Single(seen);
+        Assert.DoesNotContain('\r', runtime.Views.Single().Frames.Last().Markup);
+
+        // An edit that only adds a \r (the same text once normalized) is written back but is not a change.
+        Type(runtime, "a\r\nb\nc");
+        Assert.Single(seen);
+        Assert.Equal("a\nb\nc", runtime.Rows[0].Cells()[0].Text);
+        Assert.Equal(2, area.Describe()["normalizedWrites"]);
+
+        // A plain edit writes nothing back.
+        Type(runtime, "a\nb\nc\nd");
+        Assert.Equal(2, seen.Count);
+        Assert.Equal(2, area.Describe()["normalizedWrites"]);
+    }
+
+    [Fact]
     public void A_throwing_highlighter_keeps_the_previous_colors()
     {
         var runtime = new CodeRuntime();

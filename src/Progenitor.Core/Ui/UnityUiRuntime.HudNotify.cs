@@ -19,7 +19,8 @@ namespace Progenitor.Ui;
 /// argument's address through <c>il2cpp_runtime_invoke</c> (the standard by-value path, no by-ref struct). In the
 /// game's metadata it restarts the achievement banner's animation and overwrites its two texts (an all-zero key hides
 /// that line); it keeps no queue, so this side keeps one (<see cref="UiNoticeQueue"/>) and waits while the game's own
-/// banner is busy. Without a banner (main menu, no client world, the HUD not built or hidden) the notice is drawn on a
+/// banner is busy or the player has hidden the HUD (then nothing is drawn; a notice waits at most 30 s). Without a
+/// banner (main menu, no client world, the HUD not built) the notice is drawn on a
 /// framework band in the same place and the same style. Which path is in use is logged when it changes.
 /// </summary>
 internal sealed partial class UnityUiRuntime
@@ -30,6 +31,9 @@ internal sealed partial class UnityUiRuntime
     private static bool _noticeTicking;
     private static bool _noticeHooked;
     private static string _noticePath = "";
+    private static bool _hudHidden;
+    private static AnnouncementHUDParent? _hudCanvasOf;
+    private static Canvas? _hudCanvas;
 
     // The game's banner, cached per world epoch (a new client world builds a new HUD).
     private static AnnouncementHUDSystem? _announceSystem;
@@ -56,10 +60,12 @@ internal sealed partial class UnityUiRuntime
         {
             _noticeHooked = true;
             NoticeQueue.Withdrawn += OnNoticeWithdrawn;
+            NoticeQueue.Expired += OnNoticeExpired;
             UiWidgetLifetime.Register("hud-notices", TeardownNotices);
         }
 
-        var notice = NoticeQueue.Enqueue(owner, text, detail, kind, seconds, HudNow());
+        var notice = NoticeQueue.Enqueue(owner, text, detail, kind, seconds, HudNow(),
+            Progenitor.WorldState.WorldEpoch.Current);
         if (notice.State == UiNoticeState.Queued) EnsureNoticeTick();
         return notice;
     }
@@ -86,7 +92,7 @@ internal sealed partial class UnityUiRuntime
         try
         {
             double now = HudNow();
-            NoticeQueue.Next(now, NoticeHostBusy(now), PresentNotice);
+            NoticeQueue.Next(now, NoticeHostWait(now), PresentNotice, Progenitor.WorldState.WorldEpoch.Current);
             UpdateBand(now);
             if (!NoticeQueue.HasWork && _bandNotice == null) StopNoticeTick();
         }
@@ -99,10 +105,20 @@ internal sealed partial class UnityUiRuntime
         }
     }
 
+    private static void OnNoticeExpired(UiNoticeHandle notice)
+    {
+        Plugin.Logger?.LogInfo("Ui: ctx.Hud.Notify dropped a notice unshown (" + notice.DropReason
+            + (notice.DropReason == "expired"
+                ? ": the game's banner stayed busy or the HUD stayed hidden for " + UiNoticeRules.MaxWaitSeconds + " s"
+                : ": the world it was posted in is gone")
+            + "): \"" + notice.Header + "\".");
+    }
+
     /// <summary>Present <paramref name="notice"/>; returns the seconds it holds the screen (0: could not).</summary>
     private static double PresentNotice(UiNoticeHandle notice)
     {
         var parent = AnnouncementParent(HudNow(), out string why);
+        if (parent == null && _hudHidden) return 0; // the player hid the HUD: never draw over that choice
         if (parent != null)
         {
             double length = ShowOnBanner(parent, notice);
@@ -135,6 +151,7 @@ internal sealed partial class UnityUiRuntime
     private static AnnouncementHUDParent? AnnouncementParent(double now, out string why)
     {
         why = "";
+        _hudHidden = false;
         int epoch = Progenitor.WorldState.WorldEpoch.Current;
         if (epoch != _announceEpoch)
         {
@@ -184,9 +201,10 @@ internal sealed partial class UnityUiRuntime
 
         try
         {
-            if (!_announceParent.gameObject.activeInHierarchy)
+            if (HudHidden(_announceParent))
             {
                 why = "the HUD is hidden";
+                _hudHidden = true;
                 return null;
             }
 
@@ -206,14 +224,37 @@ internal sealed partial class UnityUiRuntime
     }
 
     /// <summary>
-    /// True while the game's own banner is playing something: a day/night announcement
-    /// (<c>AnnouncementHUDSystem._IsShowingAnnouncement</c>) or the achievement banner's animation, whose object the
-    /// motion deactivates when it finishes (unless <c>DontDisableOnFinish</c>). Read-only; never blocks the band.
+    /// True when the HUD's banner holder is inactive or its root canvas is disabled: the player (or a fullscreen game
+    /// menu) has hidden the HUD. The root canvas is looked up once per banner object.
     /// </summary>
-    private static bool NoticeHostBusy(double now)
+    private static bool HudHidden(AnnouncementHUDParent parent)
+    {
+        if (!parent.gameObject.activeInHierarchy) return true;
+        if (!ReferenceEquals(_hudCanvasOf, parent) || !Alive(_hudCanvas))
+        {
+            _hudCanvasOf = parent;
+            Canvas? canvas = null;
+            try { canvas = parent.GetComponentInParent<Canvas>(); } catch { /* no canvas: treat as shown */ }
+            try { if (canvas != null) canvas = canvas.rootCanvas; } catch { /* keep the nearest */ }
+            _hudCanvas = canvas;
+        }
+
+        try { return _hudCanvas != null && !_hudCanvas.isActiveAndEnabled; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// True while the queue must wait: the player has hidden the HUD (nothing is drawn, not even the band), or the
+    /// game's own banner is playing something: a day/night announcement (<c>AnnouncementHUDSystem._IsShowingAnnouncement</c>)
+    /// or the achievement banner's animation, whose object the motion deactivates when it finishes (unless
+    /// <c>DontDisableOnFinish</c>). A notice is never shown over either; it waits and expires after
+    /// <see cref="UiNoticeRules.MaxWaitSeconds"/>. Read-only.
+    /// </summary>
+    private static bool NoticeHostWait(double now)
     {
         if (NoticeQueue.QueuedCount == 0) return false;
         var parent = AnnouncementParent(now, out _);
+        if (_hudHidden) return true;
         if (parent == null) return false;
         try
         {
@@ -437,6 +478,10 @@ internal sealed partial class UnityUiRuntime
     {
         StopNoticeTick();
         NoticeQueue.Withdrawn -= OnNoticeWithdrawn;
+        NoticeQueue.Expired -= OnNoticeExpired;
+        _hudCanvasOf = null;
+        _hudCanvas = null;
+        _hudHidden = false;
         _noticeHooked = false;
         NoticeQueue.Clear();
         DestroyBand();

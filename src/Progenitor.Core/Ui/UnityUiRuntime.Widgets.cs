@@ -30,7 +30,11 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
     private static TextMeshProUGUI? _tipTitle;
     private static TextMeshProUGUI? _tipBody;
 
-    public void ShowTooltip(ScreenRect anchor, string title, string body)
+    /// <summary>The shown tooltip's liveness question, and the frame tick that asks it.</summary>
+    private static Func<bool>? _tipStillShown;
+    private static IDisposable? _tipWatch;
+
+    public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null)
     {
         if (!anchor.IsKnown || (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(body)))
         {
@@ -66,6 +70,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             box.sizeDelta = new Vector2(size.Width, size.Height);
             box.anchoredPosition = new Vector2(place.X, place.Y);
             if (!_tipRoot!.activeSelf) _tipRoot.SetActive(true);
+            _tipStillShown = stillShown;
+            _tipWatch ??= EveryFrame(WatchTooltip);
         }
         catch (Exception e)
         {
@@ -73,8 +79,22 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         }
     }
 
+    /// <summary>Once a frame while the box is up: hide it when its control left the screen without a pointer exit.</summary>
+    private void WatchTooltip()
+    {
+        bool keep;
+        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && (_tipStillShown == null || _tipStillShown()); }
+        catch { keep = false; }
+        if (!keep) HideTooltip();
+    }
+
     public void HideTooltip()
     {
+        _tipStillShown = null;
+        var watch = _tipWatch;
+        _tipWatch = null;
+        try { watch?.Dispose(); }
+        catch { /* */ }
         try
         {
             if (Alive(_tipRoot) && _tipRoot!.activeSelf) _tipRoot.SetActive(false);
@@ -135,12 +155,12 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             if (back != null)
             {
                 // The dropdown description box's look (DROPHOVER1): the game's frame sprite when it slices, else its dark fill.
-                ApplyFrame(back, new Color(0.07f, 0.08f, 0.10f, 0.98f));
+                ApplyFrame(back, ToColor(DialogFrameColors.Frame));
                 try { back.raycastTarget = false; } catch { /* */ }
             }
 
             _tipTitle = TipText(box, "tooltip-title", UiTooltipLayout.TitleFontSize, ToColor(MenuPalette.ClientText));
-            _tipBody = TipText(box, "tooltip-body", UiTooltipLayout.BodyFontSize, Grey(0.86f));
+            _tipBody = TipText(box, "tooltip-body", UiTooltipLayout.BodyFontSize, ToColor(MenuPalette.Text));
             _tipRoot = root;
             _tipCanvas = root.GetComponent<RectTransform>();
             _tipBox = boxRt;
@@ -179,6 +199,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
 
     private static void DestroyTooltip()
     {
+        _tipStillShown = null;
+        _tipWatch = null; // the widget tick list is cleared by its own teardown
         var root = _tipRoot;
         _tipRoot = null;
         _tipCanvas = null;
@@ -274,7 +296,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             var font = FindFont();
             if (font == null) return preferred;
             foreach (char c in preferred)
-                if (c > 0x7F && !font.HasCharacter(c, true, true)) return fallback ?? "";
+                // tryAddCharacter false: never add a glyph to the game's shared font atlas from a check.
+                if (c > 0x7F && !font.HasCharacter(c, true, false)) return fallback ?? "";
         }
         catch { return fallback ?? ""; }
 

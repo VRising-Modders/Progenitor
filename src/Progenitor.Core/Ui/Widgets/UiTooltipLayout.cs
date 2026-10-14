@@ -8,8 +8,9 @@ namespace Progenitor.Ui;
 ///
 /// <para>Rules: the box is the dropdown description box's look (the game's dark frame, <see cref="Pad"/> inside), at
 /// most <see cref="MaxWidth"/> wide, its body wrapped to that. It sits <see cref="Gap"/> right of the anchor, top edges
-/// aligned; when that would leave the canvas it goes to the anchor's left; when neither side fits it goes under the
-/// anchor. It is always clamped <see cref="Margin"/> inside the canvas, so it never draws off screen at any resolution.</para>
+/// aligned; when that would leave the canvas it goes to the anchor's left. A full-width anchor (a list row) gets the
+/// box under it, else over it, so the box never covers the row it describes unless neither side has room. It is always
+/// clamped <see cref="Margin"/> inside the canvas on both axes, so it never draws off screen at any resolution.</para>
 /// </summary>
 internal static class UiTooltipLayout
 {
@@ -39,24 +40,23 @@ internal static class UiTooltipLayout
     internal static (float X, float Y) Place(
         float minX, float minY, float maxX, float maxY, float width, float height, float canvasWidth, float canvasHeight)
     {
-        float x = maxX + Gap;
-        float top = maxY;
-        if (x + width > canvasWidth - Margin)
-        {
-            float left = minX - Gap - width;
-            if (left >= Margin) x = left;
-            else
-            {
-                // Neither side: under the anchor, starting at its left edge.
-                x = minX;
-                top = minY - Gap;
-            }
-        }
+        float yMax = canvasHeight - Margin - height;
 
-        float y = top - height;
-        x = Clamp(x, Margin, canvasWidth - Margin - width);
-        y = Clamp(y, Margin, canvasHeight - Margin - height);
-        return (x, y);
+        // Beside the anchor, top edges aligned: it never covers the anchor, so only the vertical clamp applies.
+        float right = maxX + Gap;
+        if (right + width <= canvasWidth - Margin) return (right, Clamp(maxY - height, Margin, yMax));
+        float left = minX - Gap - width;
+        if (left >= Margin) return (left, Clamp(maxY - height, Margin, yMax));
+
+        // A full-width anchor (a list row): under it, else over it, starting at its left edge; only when neither fits
+        // does the box take the roomier side and get clamped onto the canvas.
+        float x = Clamp(minX, Margin, canvasWidth - Margin - width);
+        float below = minY - Gap - height;
+        if (below >= Margin) return (x, below);
+        float above = maxY + Gap;
+        if (above <= yMax) return (x, above);
+        bool roomBelow = minY >= canvasHeight - maxY;
+        return (x, Clamp(roomBelow ? below : above, Margin, yMax));
     }
 
     private static float Clamp(float v, float lo, float hi) => hi < lo ? lo : v < lo ? lo : v > hi ? hi : v;

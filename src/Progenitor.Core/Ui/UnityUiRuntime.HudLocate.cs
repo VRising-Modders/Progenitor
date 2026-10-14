@@ -85,19 +85,26 @@ internal sealed partial class UnityUiRuntime
         {
             double now = HudNow();
             LocateSet.Sweep(now, Progenitor.WorldState.WorldEpoch.Current);
-            var pings = LocateSet.Snapshot();
-            if (pings.Count == 0)
+            // Readiness every tick: no client world ends every ping at once; no local character (a kick leaves the
+            // client world alive) ends them after a short grace. The epoch sweep above covers a world swap.
+            var world = Worlds.Client;
+            bool worldAlive = world != null && world.IsCreated;
+            bool hasCharacter = false;
+            Vector3 characterAt = default;
+            if (worldAlive) hasCharacter = TryLocalCharacterPosition(world!.EntityManager, now, out characterAt);
+            if (LocateSet.Readiness(now, worldAlive, hasCharacter) > 0)
+                Plugin.Logger?.LogInfo("Ui: ctx.Hud.Locate ended every ping: the player left the world.");
+            if (LocateSet.Count == 0)
             {
                 StopLocateTick();
                 if (Alive(_locateCanvas)) _locateCanvas!.SetActive(false);
                 return;
             }
 
-            var world = Worlds.Client;
             var cam = Camera.main;
-            if (world == null || !world.IsCreated || cam == null || !Alive(cam))
+            if (!worldAlive || !hasCharacter || cam == null || !Alive(cam))
             {
-                // No camera to draw against (loading, main menu): keep the pings and their clocks, draw nothing.
+                // A respawn or loading hitch: keep the pings (within the grace) and draw nothing this frame.
                 if (Alive(_locateCanvas)) _locateCanvas!.SetActive(false);
                 return;
             }
@@ -111,9 +118,8 @@ internal sealed partial class UnityUiRuntime
             if (canvasW <= 0f || canvasH <= 0f || screenW <= 0f || screenH <= 0f) return;
             float k = screenW / canvasW; // screen pixels per design pixel
 
-            Vector3 from = PlayerPosition(em, now, cam);
-            foreach (var ping in pings)
-                DrawPing(ping, em, cam, now, k, screenW, screenH, from);
+            foreach (var ping in LocateSet.Snapshot())
+                DrawPing(ping, em, cam, now, k, screenW, screenH, characterAt);
         }
         catch (Exception e)
         {
@@ -229,9 +235,10 @@ internal sealed partial class UnityUiRuntime
         return false;
     }
 
-    /// <summary>The local character's position (cached entity, re-found at most once a second), else the camera's.</summary>
-    private static Vector3 PlayerPosition(EntityManager em, double now, Camera cam)
+    /// <summary>The local character's position (cached entity, re-found at most once a second); false when there is none.</summary>
+    private static bool TryLocalCharacterPosition(EntityManager em, double now, out Vector3 position)
     {
+        position = default;
         try
         {
             if ((_localCharacter == Entity.Null || !em.Exists(_localCharacter)) && now - _localCharacterAt >= 1.0)
@@ -245,11 +252,14 @@ internal sealed partial class UnityUiRuntime
 
             if (_localCharacter != Entity.Null && em.Exists(_localCharacter)
                 && _localCharacter.TryRead<Translation>(em, out var tr))
-                return new Vector3(tr.Value.x, tr.Value.y, tr.Value.z);
+            {
+                position = new Vector3(tr.Value.x, tr.Value.y, tr.Value.z);
+                return true;
+            }
         }
-        catch { /* fall back to the camera */ }
+        catch { /* treated as no character this frame */ }
 
-        return cam.transform.position;
+        return false;
     }
 
     private static bool EnsureLocateCanvas()

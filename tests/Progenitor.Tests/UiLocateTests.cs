@@ -259,6 +259,46 @@ public sealed class UiLocateTests
             Assert.Equal(UiLocateGlyph.ArrowAlpha(i, s / 2 - 10), UiLocateGlyph.ArrowAlpha(i, s / 2 + 9), 4);
     }
 
+    [Fact]
+    public void Leaving_the_world_ends_every_ping_at_once()
+    {
+        var set = new UiLocateSet();
+        var owner = new object();
+        var a = set.Add(owner, UiLocateTarget.Point(0, 0, 0), "", 0, 0, 1);
+        var b = set.Add(owner, UiLocateTarget.Entity(3, 1), "", 10, 0, 1);
+
+        Assert.Equal(0, set.Readiness(0.5, worldAlive: true, characterPresent: true));
+        Assert.Equal(2, set.Readiness(1.0, worldAlive: false, characterPresent: false));
+        Assert.Equal("left-world", a.EndReason);
+        Assert.Equal("left-world", b.EndReason);
+        Assert.Equal(0, set.Count);
+    }
+
+    [Fact]
+    public void A_missing_character_ends_pings_only_after_the_grace()
+    {
+        var set = new UiLocateSet();
+        var ping = set.Add(new object(), UiLocateTarget.Point(0, 0, 0), "", 0, 0, 1);
+
+        // A respawn: the character is gone briefly, then back; the ping survives.
+        Assert.Equal(0, set.Readiness(1.0, true, false));
+        Assert.Equal(0, set.Readiness(1.0 + UiLocateLook.NoCharacterGraceSeconds - 0.1, true, false));
+        Assert.Equal(0, set.Readiness(4.5, true, true));
+        Assert.True(ping.Active);
+
+        // A kick: the client world stays, the character does not come back.
+        Assert.Equal(0, set.Readiness(10.0, true, false));
+        Assert.Equal(1, set.Readiness(10.0 + UiLocateLook.NoCharacterGraceSeconds, true, false));
+        Assert.Equal("left-world", ping.EndReason);
+    }
+
+    [Fact]
+    public void Locate_colors_come_from_the_kit_palette()
+    {
+        Assert.Equal(MenuPalette.PendText, UiLocateLook.Accent);
+        Assert.Equal(MenuPalette.ClientText, UiLocateLook.LabelColor);
+    }
+
     private static void AssertInside(UiLocatePlacement p, float w, float h)
     {
         Assert.InRange(p.X, Margin - 0.01f, w - Margin + 0.01f);

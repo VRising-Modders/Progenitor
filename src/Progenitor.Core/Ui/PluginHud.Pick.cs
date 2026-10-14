@@ -17,9 +17,16 @@ public sealed partial class PluginHud
     /// with anything else (a door, a waygate, a station of an unwanted kind) behaves as usual and
     /// the pick stays armed.</para>
     ///
-    /// <para><b>Escape</b> cancels the pick and nothing else: the key is taken before the game's
-    /// system menu and before the framework hides open panels. An open framework dialog still
-    /// answers Escape first.</para>
+    /// <para><b>Escape</b> cancels the pick only when the pick is the topmost thing. Precedence, first
+    /// match wins: a framework dialog (or open dropdown) &gt; a key capture &gt; the game's focused chat
+    /// box &gt; any other shown Progenitor panel (the Mods workspace, a mod's panel) &gt; an open game
+    /// menu or panel &gt; the pick. Anything above the pick closes as usual and the pick stays armed;
+    /// when the pick is topmost, one Escape cancels it and the game's system menu does not open. The
+    /// band never blocks gameplay input or clicks.</para>
+    ///
+    /// <para>The panel is kept closed only when the game could be told the interaction ended; if that
+    /// message cannot be sent, the panel opens as usual and <see cref="UiWorldPickResult.Suppressed"/>
+    /// is false. Leaving the world (or a kick or disconnect) cancels the pick.</para>
     ///
     /// <para><b>One pick at a time, process-wide.</b> A second call (from this plugin or another)
     /// ends the armed pick as Cancelled, running its <paramref name="onCancelled"/>, before arming

@@ -39,24 +39,35 @@ internal interface IWorldPickBandRuntime
 /// <para><b>The seam.</b> A <see cref="SystemHooks"/> Before hook on <c>OpenHUDMenuSystem</c> (the
 /// Bootstrap-slot <c>SystemBase.Update</c> patch every Core hook shares: no new Harmony patch, no native
 /// call). While a pick is armed it reads each <c>OpenMenuEvent</c> raw; for a wanted menu whose init
-/// entity really carries the expected <c>InitData</c> (checked, never assumed) it reads the target, then
-/// destroys the two client-only entities so the panel never opens, and sends the client-to-server
-/// <c>StopInteractingWithObjectEvent {NetworkId Target @0}</c> (event id 1426509984 in both the client
-/// and server metadata) for the interact buff — the message the game's own panel mappers send when a
-/// station panel closes — so the server ends the interaction. The event is built field by field with
+/// entity really carries the expected <c>InitData</c> (checked, never assumed) it reads the target and
+/// the interact buff, sends the client-to-server <c>StopInteractingWithObjectEvent {NetworkId Target @0}</c>
+/// (event id 1426509984 in both the client and server metadata) for the buff — the message the game's
+/// own panel mappers send when a station panel closes — and, only when that send succeeded, destroys
+/// the two client-only entities so the panel never opens (<see cref="UiWorldPickSuppression"/>). With
+/// no buff, or a send that failed, the panel opens as usual and the result says
+/// <c>Suppressed = false</c>. The event is built field by field with
 /// the recipe <c>DyeSender</c> uses (the entity, <c>NetworkEventType</c>, <c>SendNetworkEventTag</c>;
 /// offsets checked against the interop struct first). The game's <c>TrySendStopInteractingWith</c> is
 /// not called: it takes an <c>EntityManager</c> by value.</para>
 ///
 /// <para><b>Repeats.</b> Until the server has removed the buff, the HUD may ask for the same panel again;
-/// those events are destroyed too (<see cref="UiWorldPickSwallowList"/>, at most three seconds), so the
-/// hook stays installed a little after the pick ended and is removed as soon as the list is empty. With
-/// no pick armed and nothing to swallow, no hook and no frame subscription exist.</para>
+/// those events are destroyed too (<see cref="UiWorldPickSwallowList"/>) until the client stops seeing the
+/// buff entity (the server removed it), at most ten seconds. The hook stays installed that long after
+/// the pick ended and is removed as soon as the list is empty. With no pick armed and nothing to
+/// swallow, no hook and no frame subscription exist.</para>
 ///
-/// <para><b>Escape.</b> <see cref="Ui.PushEscape"/>: the framework's consumed-Escape path. The band is a
-/// <see cref="UiCaptureMode.WhenHovered"/> kit panel, so Bootstrap forwards Escape while it is shown and
-/// the framework's input context takes the game's Back / Menu_Close (the system menu does not open)
-/// while the player keeps full gameplay input away from the band. Plain Escape is not a rebindable mod
+/// <para><b>Escape</b> follows <see cref="UiWorldPickEscape"/>: dialog &gt; key capture &gt; focused chat
+/// &gt; other Progenitor panels &gt; an open game menu &gt; the pick. The handler is a
+/// <see cref="Ui.PushEscape"/> lease that acts (and takes the press) only when the pick is topmost; it
+/// returns false otherwise, so the press runs as if no pick were armed. The band is a shown kit panel,
+/// so Bootstrap forwards Escape; its capture mode is re-decided every frame
+/// (<see cref="UiWorldPickEscape.BandMode"/>): <see cref="UiCaptureMode.WhenHovered"/> while the pick
+/// is topmost — the registered context takes the game's Back / Menu_Close, so the system menu does not
+/// open — and <see cref="UiCaptureMode.Never"/> otherwise, so no context of ours stands between the
+/// game and its own menu's close. The band's frame rect is zero-sized below the screen edge (the
+/// visible band is a child), so the hover gate never sees the pointer over it: gameplay input is never
+/// blocked by the band, only the close key while it is topmost. When the Escape sweep hides the band
+/// together with another panel, the next frame shows it again. Plain Escape is not a rebindable mod
 /// key, so it is not registered through <c>Keybinds</c>.</para>
 /// </summary>
 internal static unsafe class WorldPickBackend
@@ -81,6 +92,12 @@ internal static unsafe class WorldPickBackend
     private static bool _frameHooked;
     private static bool _lifetimeRegistered;
     private static bool? _stopLayoutOk;
+    private static string _prompt = UiWorldPickOptions.DefaultPrompt;
+    private static UiCaptureMode _bandMode = UiCaptureMode.Never;
+    private static ulong? _armedWorldSeq;
+    private static Entity _armedCharacter;
+    private static ulong? _hudWorldSeq;
+    private static OpenHUDMenuSystem? _hudSystem;
 
     /// <summary>The process-wide pick state machine (one per Core generation).</summary>
     internal static UiWorldPickCoordinator Coordinator
@@ -121,6 +138,9 @@ internal static unsafe class WorldPickBackend
         Swallow.Clear();
         ReleaseHook();
         try { EventQuery.Release(); } catch { /* the world may be gone */ }
+        _armedWorldSeq = null;
+        _hudWorldSeq = null;
+        _hudSystem = null;
         lock (Gate)
         {
             _coordinator = null;
@@ -129,6 +149,12 @@ internal static unsafe class WorldPickBackend
     }
 
     private static double Now() => Clock.Elapsed.TotalSeconds;
+
+    private static ulong? SequenceOf(World world)
+    {
+        try { return world.SequenceNumber; }
+        catch { return null; }
+    }
 
     private static void Log(string line) => Plugin.Logger?.LogInfo(line);
 
@@ -150,9 +176,36 @@ internal static unsafe class WorldPickBackend
                 return false;
             }
 
-            if (!HasLocalCharacter(world.EntityManager))
+            if (!TryLocalCharacter(world.EntityManager, out var character))
             {
                 why = "no local character yet";
+                return false;
+            }
+
+            _armedWorldSeq = SequenceOf(world);
+            _armedCharacter = character;
+            why = "";
+            return true;
+        }
+
+        public bool StillReady(out string why)
+        {
+            var world = Worlds.Client;
+            if (world == null)
+            {
+                why = "the client world is gone (left, kicked or disconnected)";
+                return false;
+            }
+
+            if (SequenceOf(world) != _armedWorldSeq)
+            {
+                why = "the client world changed";
+                return false;
+            }
+
+            if (!world.IsCreated || !world.EntityManager.Exists(_armedCharacter))
+            {
+                why = "the local character is gone";
                 return false;
             }
 
@@ -166,15 +219,11 @@ internal static unsafe class WorldPickBackend
             EnsureFrame();
             if (_escape == null)
             {
-                _escape = Ui.PushEscape(() =>
-                {
-                    UiWorldPickCoordinator? c;
-                    lock (Gate) c = _coordinator;
-                    return c != null && c.Escape();
-                });
+                _escape = Ui.PushEscape(OnEscape);
             }
 
-            ShowBand(pick.Options.Prompt);
+            _prompt = pick.Options.Prompt;
+            ShowBand();
         }
 
         public void Disarmed()
@@ -185,11 +234,98 @@ internal static unsafe class WorldPickBackend
         }
     }
 
-    private static bool HasLocalCharacter(EntityManager em)
+    private static bool TryLocalCharacter(EntityManager em, out Entity character)
     {
+        character = Entity.Null;
         var locals = Query.Entities(em, includeDisabled: false, includeSystems: false,
             ComponentIndex.Of<LocalCharacter>(ComponentType.AccessMode.ReadOnly));
-        return locals.Count > 0 && em.Exists(locals[0]);
+        if (locals.Count == 0 || !em.Exists(locals[0])) return false;
+        character = locals[0];
+        return true;
+    }
+
+    // ---- Escape precedence ----
+
+    /// <summary>The Escape lease: cancel the pick only when it is topmost; otherwise pass the press on.</summary>
+    private static bool OnEscape()
+    {
+        UiWorldPickCoordinator? c;
+        lock (Gate) c = _coordinator;
+        if (c == null || !c.IsArmed) return false;
+        var owner = EscapeOwnerNow(c);
+        if (owner != UiWorldPickEscapeOwner.Pick)
+        {
+            Plugin.Logger?.LogDiag("Ui: world pick left Escape to " + owner + "; the pick stays armed.");
+            return false;
+        }
+
+        return c.Escape();
+    }
+
+    private static UiWorldPickEscapeOwner EscapeOwnerNow(UiWorldPickCoordinator c)
+    {
+        bool dialog = false, capture = false, chat = false;
+        int others = 0;
+        try { dialog = UiDialog.Current != null || UiChoiceHandle.AnyOpen; } catch { /* */ }
+        try { capture = Keybinds.EscapeBelongsToCapture; } catch { /* */ }
+        try { chat = Keybinds.ChatFocusNow == ChatFocus.Focused; } catch { /* */ }
+        try
+        {
+            foreach (var panel in Ui.ShownPanelsSnapshot())
+                if (!ReferenceEquals(panel, _band)) others++;
+        }
+        catch { /* */ }
+
+        return UiWorldPickEscape.Decide(c.IsArmed, dialog, capture, chat, others, UiWorldPickEscape.GameMenuOpen(MenuTypeNow()));
+    }
+
+    /// <summary><c>OpenHUDMenuSystem.CurrentMenuType</c> of the client world (the system cached per world), or -1.</summary>
+    private static int MenuTypeNow()
+    {
+        try
+        {
+            var world = Worlds.Client;
+            if (world == null) return -1;
+            if (SequenceOf(world) != _hudWorldSeq || _hudSystem == null)
+            {
+                _hudWorldSeq = SequenceOf(world);
+                _hudSystem = world.GetExistingSystemManaged<OpenHUDMenuSystem>();
+            }
+
+            return _hudSystem == null ? -1 : (int)_hudSystem.CurrentMenuType;
+        }
+        catch
+        {
+            _hudSystem = null;
+            return -1;
+        }
+    }
+
+    /// <summary>Per frame while armed: the band is shown (again, after an Escape sweep) and in the mode the precedence asks for.</summary>
+    private static void UpdateBand(UiWorldPickCoordinator c)
+    {
+        if (!c.IsArmed) return;
+        if (_band is not UiPanelHandle { IsDisposed: false } handle)
+        {
+            ShowBand();
+            return;
+        }
+
+        if (!handle.IsShownNow)
+        {
+            try
+            {
+                handle.Show();
+                StyleBand(handle);
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick prompt re-show threw: " + e.Message); }
+        }
+
+        var mode = UiWorldPickEscape.BandMode(EscapeOwnerNow(c));
+        if (mode == _bandMode) return;
+        _bandMode = mode;
+        try { handle.CaptureMode = mode; }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick prompt capture mode threw: " + e.Message); }
     }
 
     private static void EnsureHook()
@@ -237,6 +373,7 @@ internal static unsafe class WorldPickBackend
         lock (Gate) c = _coordinator;
         try { c?.Tick(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick tick threw: " + e.Message); }
+        if (c != null) UpdateBand(c);
 
         if (Swallow.Count > 0)
         {
@@ -309,18 +446,16 @@ internal static unsafe class WorldPickBackend
 
             var offer = coordinator.Offer(menu);
             if (offer == UiWorldPickOffer.PassThrough) continue;
-            bool suppress = offer == UiWorldPickOffer.TakeAndSuppress;
-            if (suppress)
-            {
-                DestroyPair(em, ev, init);
-                if (buff != Entity.Null)
-                {
-                    Swallow.Add(buffKey, now);
-                    SendStop(em, buff);
-                }
-            }
+            var buffForSend = buff;
+            var plan = UiWorldPickSuppression.Decide(offer, buff != Entity.Null, () => SendStop(em, buffForSend));
+            if (offer == UiWorldPickOffer.TakeAndSuppress && !plan.Suppressed)
+                Plugin.Logger?.LogWarning("Ui: world pick could not end the interaction on the server ("
+                                          + (buff == Entity.Null ? "no interact buff" : "the stop message was not sent")
+                                          + "); the " + info.Name + " opens as usual.");
+            if (plan.Suppressed) DestroyPair(em, ev, init);
+            if (plan.Swallow) Swallow.Add(buffKey, now);
 
-            coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, suppress);
+            coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, plan.Suppressed);
         }
     }
 
@@ -381,7 +516,7 @@ internal static unsafe class WorldPickBackend
     }
 
     /// <summary>Tell the server the interaction ended (what the game's panel mappers send on close).</summary>
-    private static void SendStop(EntityManager em, Entity buff)
+    private static bool SendStop(EntityManager em, Entity buff)
     {
         try
         {
@@ -391,20 +526,20 @@ internal static unsafe class WorldPickBackend
                                 && (int)Marshal.OffsetOf<StopInteractingWithObjectEvent>(nameof(StopInteractingWithObjectEvent.Target)) == 0;
                 if (_stopLayoutOk == false)
                     Plugin.Logger?.LogWarning("Ui: world pick: StopInteractingWithObjectEvent does not match the expected layout; "
-                                              + "the server interaction is not ended (the target stays in use until the player walks away).");
+                                              + "picks let the panel open instead of keeping it closed.");
             }
 
-            if (_stopLayoutOk != true) return;
+            if (_stopLayoutOk != true) return false;
             var netType = ComponentIndex.Of<NetworkId>(ComponentType.AccessMode.ReadOnly);
             if (!em.Exists(buff) || !em.HasComponent(buff, netType))
             {
                 Plugin.Logger?.LogWarning("Ui: world pick: the interact buff " + buff.Index + ":" + buff.Version
-                                          + " has no NetworkId; the server interaction is not ended.");
-                return;
+                                          + " has no NetworkId; the stop message cannot be sent.");
+                return false;
             }
 
             int* id = (int*)em.GetComponentDataRawRO(buff, netType.TypeIndex);
-            if (id == null) return;
+            if (id == null) return false;
             int a = id[0], b = id[1], c = id[2];
 
             var type = ComponentIndex.Of<StopInteractingWithObjectEvent>(ComponentType.AccessMode.ReadWrite);
@@ -429,21 +564,23 @@ internal static unsafe class WorldPickBackend
             }
 
             Plugin.Logger?.LogInfo("Ui: world pick sent StopInteractingWithObjectEvent for buff " + buff.Index + ":" + buff.Version + ".");
+            return true;
         }
         catch (Exception e)
         {
             Plugin.Logger?.LogWarning("Ui: world pick stop message threw: " + e.Message);
+            return false;
         }
     }
 
     // ---- the band ----
 
-    private static void ShowBand(string prompt)
+    private static void ShowBand()
     {
         ReleaseBand();
         try
         {
-            var panel = Ui.Panel("Pick in world", BandOwner, FrameworkVersions.CorePluginId);
+            var panel = Ui.Panel(UiWorldPickCopy.BandTitle, BandOwner, FrameworkVersions.CorePluginId);
             if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle)
             {
                 try { panel.Dispose(); } catch { /* */ }
@@ -451,18 +588,26 @@ internal static unsafe class WorldPickBackend
             }
 
             try { panel.Footer = ""; } catch { /* */ }
-            panel.CaptureMode = UiCaptureMode.WhenHovered;
+            UiWorldPickCoordinator? c;
+            lock (Gate) c = _coordinator;
+            _band = panel;
+            _bandMode = c == null ? UiCaptureMode.Never : UiWorldPickEscape.BandMode(EscapeOwnerNow(c));
+            panel.CaptureMode = _bandMode;
             Ui.HidePaneTitle(panel);
             Ui.SelfPlacePanel(panel);
             panel.Show();
-            _band = panel;
-            if (Ui.CurrentRuntime() is IWorldPickBandRuntime band && handle.RuntimePanel is { } runtimePanel)
-                band.StyleWorldPickBand(runtimePanel, prompt, InteractKeyText(), "Esc");
+            StyleBand(handle);
         }
         catch (Exception e)
         {
             Plugin.Logger?.LogWarning("Ui: world pick prompt could not be shown: " + e.Message);
         }
+    }
+
+    private static void StyleBand(UiPanelHandle handle)
+    {
+        if (Ui.CurrentRuntime() is IWorldPickBandRuntime band && handle.RuntimePanel is { } runtimePanel)
+            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey);
     }
 
     private static void ReleaseBand()
@@ -496,7 +641,7 @@ internal static unsafe class WorldPickBackend
             LogOnce("interactkey", "Ui: world pick could not read the Interact key: " + e.Message);
         }
 
-        return "Interact";
+        return UiWorldPickCopy.InteractFallback;
     }
 
     // ---- init data per menu ----

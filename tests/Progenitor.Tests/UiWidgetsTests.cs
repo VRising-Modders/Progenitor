@@ -94,9 +94,11 @@ public sealed class UiWidgetsTests : IDisposable
 
     [Theory]
     [InlineData(500f, 0)] // above every slot
-    [InlineData(185f, 1)] // between slot 0 (200) and slot 1 (160)
+    [InlineData(185f, 0)] // nearer slot 0 (200) than slot 1 (160): no change until the halfway line
+    [InlineData(179f, 1)] // just past the halfway line (180)
+    [InlineData(121f, 2)] // slot 2's center
     [InlineData(10f, 3)]  // below every slot: the last
-    public void Drop_index_counts_the_slot_centers_above_the_pointer(float pointerY, int expected)
+    public void Drop_index_is_the_slot_whose_center_is_nearest(float pointerY, int expected)
     {
         var centers = new List<float> { 200f, 160f, 120f, 80f };
         Assert.Equal(expected, UiOrderedListModel.DropIndex(pointerY, centers));
@@ -105,7 +107,7 @@ public sealed class UiWidgetsTests : IDisposable
     [Fact]
     public void Drop_index_skips_unreadable_rows_and_refuses_when_none_read()
     {
-        Assert.Equal(1, UiOrderedListModel.DropIndex(130f, new List<float> { 200f, float.NaN, 120f }));
+        Assert.Equal(2, UiOrderedListModel.DropIndex(130f, new List<float> { 200f, float.NaN, 120f }));
         Assert.Equal(-1, UiOrderedListModel.DropIndex(130f, new List<float> { float.NaN }));
         Assert.Equal(-1, UiOrderedListModel.DropIndex(float.NaN, new List<float> { 1f }));
     }
@@ -193,6 +195,8 @@ public sealed class UiWidgetsTests : IDisposable
         var list = panel.OrderedList("targets", Items("a", "b", "c"));
         var moves = new List<UiListReorder>();
         list.OnReorder(moves.Add);
+        for (int i = 0; i < 3; i++) // slots stacked down the screen, 40 px apart (up is larger)
+            Row("targets:row" + i).RectOverride = ScreenRect.FromCorners(0f, 400f - 40f * (i + 1), 600f, 400f - 40f * i);
 
         _runtime.Held = true;
         _runtime.Pointer = PointerSample.At(10f, 500f);
@@ -564,6 +568,83 @@ public sealed class UiWidgetsTests : IDisposable
             Assert.True(plugin.Contains("Hud." + m + "(", StringComparison.Ordinal), "the Controls sample does not call ctx.Hud." + m);
     }
 
+    [Theory]
+    [InlineData(1920f, 1080f)]
+    [InlineData(3840f, 2160f)]
+    public void A_full_width_row_gets_the_tooltip_under_it_or_over_it_never_on_it(float w, float h)
+    {
+        var size = UiTooltipLayout.Size(200f, 20f, 300f, 60f);
+        // Near the bottom: no room under the row, so over it.
+        var low = UiTooltipLayout.Place(0f, 20f, w, 60f, size.Width, size.Height, w, h);
+        Assert.True(low.Y >= 60f, "covers the row near the bottom");
+        // Near the top: under it.
+        var high = UiTooltipLayout.Place(0f, h - 60f, w, h - 20f, size.Width, size.Height, w, h);
+        Assert.True(high.Y + size.Height <= h - 60f, "covers the row near the top");
+        // Both stay on the canvas.
+        foreach (var p in new[] { low, high })
+            Assert.True(p.Y >= UiTooltipLayout.Margin && p.Y + size.Height <= h - UiTooltipLayout.Margin);
+    }
+
+    [Fact]
+    public void The_picker_filters_a_full_item_list_without_refolding_per_keystroke()
+    {
+        var entries = Enumerable.Range(0, 4000)
+            .Select(i => new UiPickerEntry("item" + i, "Item Ingredient Number " + i) { Section = "S" + (i % 12), Keywords = new[] { "prefab_" + i } })
+            .ToList();
+        var m = new UiPickerModel(entries, multi: false, rows: 8, selected: null);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        foreach (var q in new[] { "i", "it", "ite", "item", "item ", "item i", "item in", "number 39", "prefab_3999", "zzz" })
+            m.Query = q;
+        watch.Stop();
+        m.Query = "prefab_3999";
+        Assert.Equal("item3999", Assert.Single(m.Matches).Id); // keywords still match, folded once
+        Assert.True(watch.ElapsedMilliseconds < 2000, "10 queries over 4,000 entries took " + watch.ElapsedMilliseconds + " ms");
+    }
+
+    [Fact]
+    public void The_icon_and_expander_columns_follow_set_items()
+    {
+        var panel = NewPanel();
+        var list = panel.OrderedList("t", new[] { new UiListItem("a", "A") });
+        Assert.False(Row("t:row0").Cells().Single(c => c.Key == UiWidgetLayout.CellIcon).Visible);
+        Assert.False(Row("t:row0").Cells().Single(c => c.Key == UiWidgetLayout.CellExpand).Visible);
+        list.SetItems(new[] { new UiListItem("a", "A") { ItemPrefab = 5, Detail = "more" } });
+        Assert.True(Row("t:row0").Cells().Single(c => c.Key == UiWidgetLayout.CellIcon).Visible);
+        Assert.True(Row("t:row0").Cells().Single(c => c.Key == UiWidgetLayout.CellExpand).Visible);
+    }
+
+    [Fact]
+    public void Closing_the_panel_mid_drag_ends_the_drag_without_an_event()
+    {
+        var panel = NewPanel();
+        var list = panel.OrderedList("t", Items("a", "b"));
+        int events = 0;
+        list.OnReorder(_ => events++);
+        _runtime.Held = true;
+        var grip = _runtime.Watches[(Row("t:row0"), UiWidgetLayout.CellGrip)];
+        grip(new UiPointerEvent(UiPointerEventKind.Down, true));
+        Assert.Single(_runtime.Ticks);
+        panel.Dispose(); // the plugin unloads, Ui.RemoveAll, or the page closes
+        Assert.Empty(_runtime.Ticks);
+        Assert.True(list.IsDisposed);
+        grip(new UiPointerEvent(UiPointerEventKind.Up, false)); // a late release
+        Assert.Equal(0, events);
+    }
+
+    [Fact]
+    public void A_shown_tooltip_asks_to_hide_once_its_panel_is_hidden()
+    {
+        var panel = NewPanel();
+        panel.Show();
+        var handle = (UiPickerHandle)panel.Picker("pick", Entries());
+        handle.Query = "dark";
+        _runtime.Hover(Row("pick:line1"), true, handle);
+        Assert.NotNull(_runtime.TooltipStillShown);
+        Assert.True(_runtime.TooltipStillShown!());
+        panel.Hide(); // Escape's sweep: no pointer exit reaches the row
+        Assert.False(_runtime.TooltipStillShown());
+    }
+
     [Fact]
     public void Widget_teardowns_run_once_newest_first()
     {
@@ -596,7 +677,13 @@ internal sealed class WidgetRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunt
         return row;
     }
 
-    public void ShowTooltip(ScreenRect anchor, string title, string body) => Tooltip = (title, body);
+    public Func<bool>? TooltipStillShown;
+
+    public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null)
+    {
+        Tooltip = (title, body);
+        TooltipStillShown = stillShown;
+    }
 
     public void HideTooltip() => Tooltip = null;
 

@@ -32,6 +32,14 @@ public sealed class UiWorldPickTests
         }
 
         public void Disarmed() => DisarmedCalls++;
+
+        public bool StillAlive = true;
+
+        public bool StillReady(out string why)
+        {
+            why = StillAlive ? "" : "the client world is gone";
+            return StillAlive;
+        }
     }
 
     private sealed class Rig
@@ -382,5 +390,200 @@ public sealed class UiWorldPickTests
         long key = UiWorldPickSwallowList.Key(1, -1);
         Assert.Equal(1, (int)(key >> 32));
         Assert.Equal(-1, (int)(uint)key);
+    }
+
+    [Fact]
+    public void SwallowList_UpperBoundIsGenerous_ButTheBuffGoingAwayEndsItFirst()
+    {
+        Assert.True(UiWorldPickSwallowList.Ttl >= 10.0);
+        var list = new UiWorldPickSwallowList();
+        long key = UiWorldPickSwallowList.Key(77, 1);
+        list.Add(key, 0);
+        list.Prune(0.5, _ => true);
+        Assert.True(list.Contains(key, 0.5));
+        list.Prune(0.6, _ => false); // the server removed the buff
+        Assert.False(list.Contains(key, 0.6));
+    }
+
+    // ---- leaving the world ----
+
+    [Fact]
+    public void LeavingTheWorld_CancelsOnTheNextTick()
+    {
+        var rig = new Rig();
+        int cancelled = 0;
+        var pick = rig.Coordinator.Arm(OwnerA, "A", _ => { }, () => cancelled++, null);
+        rig.Coordinator.Tick();
+        Assert.Equal(UiWorldPickState.Armed, pick.State);
+
+        rig.Backend.StillAlive = false; // left, kicked or disconnected: same epoch, but no world/character
+        rig.Coordinator.Tick();
+        Assert.Equal(UiWorldPickState.Cancelled, pick.State);
+        Assert.Equal(1, cancelled);
+        Assert.Null(rig.Coordinator.Current);
+        Assert.Contains(rig.Log, l => l.Contains("the client world is gone"));
+    }
+
+    [Fact]
+    public void StillReadyThrowing_CancelsRatherThanStayingArmed()
+    {
+        var rig = new Rig();
+        var pick = rig.Coordinator.Arm(OwnerA, "A", _ => { }, null, null);
+        var throwing = new ThrowingStillReady(rig.Backend);
+        var coordinator = new UiWorldPickCoordinator(throwing, () => 0, () => 1);
+        var other = coordinator.Arm(OwnerA, "A", _ => { }, null, null);
+        coordinator.Tick();
+        Assert.Equal(UiWorldPickState.Cancelled, other.State);
+        Assert.Equal(UiWorldPickState.Armed, pick.State);
+    }
+
+    private sealed class ThrowingStillReady : IUiWorldPickBackend
+    {
+        private readonly FakeBackend _inner;
+
+        public ThrowingStillReady(FakeBackend inner) => _inner = inner;
+
+        public bool Ready(out string why) => _inner.Ready(out why);
+
+        public bool StillReady(out string why) => throw new InvalidOperationException("world torn down");
+
+        public void Armed(UiWorldPickHandle pick) { }
+
+        public void Disarmed() { }
+    }
+
+    // ---- Escape precedence ----
+
+    [Fact]
+    public void Escape_NoPick_HasNoSay()
+    {
+        Assert.Equal(UiWorldPickEscapeOwner.NoPick, UiWorldPickEscape.Decide(false, false, false, false, 0, false));
+        Assert.Equal(UiWorldPickEscapeOwner.NoPick, UiWorldPickEscape.Decide(false, true, true, true, 3, true));
+    }
+
+    [Fact]
+    public void Escape_PickOnlyWhenTopmost()
+    {
+        Assert.Equal(UiWorldPickEscapeOwner.Pick, UiWorldPickEscape.Decide(true, false, false, false, 0, false));
+    }
+
+    [Theory]
+    [InlineData(true, true, true, 2, true, (int)UiWorldPickEscapeOwner.Dialog)]
+    [InlineData(false, true, true, 2, true, (int)UiWorldPickEscapeOwner.KeyCapture)]
+    [InlineData(false, false, true, 2, true, (int)UiWorldPickEscapeOwner.Chat)]
+    [InlineData(false, false, false, 1, true, (int)UiWorldPickEscapeOwner.OpenPanels)]
+    [InlineData(false, false, false, 0, true, (int)UiWorldPickEscapeOwner.GameMenu)]
+    public void Escape_Precedence_DialogCaptureChatPanelsMenuThenPick(
+        bool dialog, bool capture, bool chat, int panels, bool gameMenu, int expected)
+    {
+        Assert.Equal((UiWorldPickEscapeOwner)expected, UiWorldPickEscape.Decide(true, dialog, capture, chat, panels, gameMenu));
+    }
+
+    [Fact]
+    public void Escape_ArmedFromTheModsWorkspace_ClosesTheWorkspaceFirst_ThenCancels()
+    {
+        // The workspace (one or more Progenitor panels) is shown when the pick is armed: the first Escape
+        // is the workspace's, and the pick stays armed. With it closed, the next Escape cancels.
+        var rig = new Rig();
+        var pick = rig.Coordinator.Arm(OwnerA, "A", _ => { }, null, null);
+        var first = UiWorldPickEscape.Decide(rig.Coordinator.IsArmed, false, false, false, otherPanelsShown: 3, gameMenuOpen: true);
+        Assert.Equal(UiWorldPickEscapeOwner.OpenPanels, first);
+        Assert.Equal(UiCaptureMode.Never, UiWorldPickEscape.BandMode(first));
+        Assert.Equal(UiWorldPickState.Armed, pick.State);
+
+        var second = UiWorldPickEscape.Decide(rig.Coordinator.IsArmed, false, false, false, 0, false);
+        Assert.Equal(UiWorldPickEscapeOwner.Pick, second);
+        Assert.Equal(UiCaptureMode.WhenHovered, UiWorldPickEscape.BandMode(second));
+        Assert.True(rig.Coordinator.Escape());
+        Assert.Equal(UiWorldPickState.Cancelled, pick.State);
+    }
+
+    [Theory]
+    [InlineData((int)UiWorldPickEscapeOwner.NoPick)]
+    [InlineData((int)UiWorldPickEscapeOwner.Dialog)]
+    [InlineData((int)UiWorldPickEscapeOwner.KeyCapture)]
+    [InlineData((int)UiWorldPickEscapeOwner.Chat)]
+    [InlineData((int)UiWorldPickEscapeOwner.OpenPanels)]
+    [InlineData((int)UiWorldPickEscapeOwner.GameMenu)]
+    public void BandTakesNoCloseKey_UnlessThePickOwnsEscape(int owner) =>
+        Assert.Equal(UiCaptureMode.Never, UiWorldPickEscape.BandMode((UiWorldPickEscapeOwner)owner));
+
+    [Theory]
+    [InlineData(-1, false)]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(23, true)]
+    public void GameMenuOpen_ReadsCurrentMenuType(int menuType, bool open) =>
+        Assert.Equal(open, UiWorldPickEscape.GameMenuOpen(menuType));
+
+    // ---- suppression only when the stop message went out ----
+
+    [Fact]
+    public void Suppression_SentStop_KeepsThePanelClosedAndSwallowsRepeats()
+    {
+        int sends = 0;
+        var plan = UiWorldPickSuppression.Decide(UiWorldPickOffer.TakeAndSuppress, buffKnown: true, () => { sends++; return true; });
+        Assert.True(plan.Suppressed);
+        Assert.True(plan.Swallow);
+        Assert.Equal(1, sends);
+    }
+
+    [Fact]
+    public void Suppression_UnsentStop_LetsThePanelOpenAndDoesNotSwallow()
+    {
+        var plan = UiWorldPickSuppression.Decide(UiWorldPickOffer.TakeAndSuppress, buffKnown: true, () => false);
+        Assert.False(plan.Suppressed);
+        Assert.False(plan.Swallow);
+
+        var threw = UiWorldPickSuppression.Decide(UiWorldPickOffer.TakeAndSuppress, buffKnown: true,
+            () => throw new InvalidOperationException("layout"));
+        Assert.False(threw.Suppressed);
+        Assert.False(threw.Swallow);
+    }
+
+    [Fact]
+    public void Suppression_NullBuff_NeverSendsAndLetsThePanelOpen()
+    {
+        int sends = 0;
+        var plan = UiWorldPickSuppression.Decide(UiWorldPickOffer.TakeAndSuppress, buffKnown: false, () => { sends++; return true; });
+        Assert.False(plan.Suppressed);
+        Assert.False(plan.Swallow);
+        Assert.Equal(0, sends);
+    }
+
+    [Theory]
+    [InlineData((int)UiWorldPickOffer.PassThrough)]
+    [InlineData((int)UiWorldPickOffer.TakeAndOpen)]
+    public void Suppression_NotAskedFor_NeverSends(int offer)
+    {
+        int sends = 0;
+        var plan = UiWorldPickSuppression.Decide((UiWorldPickOffer)offer, buffKnown: true, () => { sends++; return true; });
+        Assert.False(plan.Suppressed);
+        Assert.Equal(0, sends);
+    }
+
+    [Fact]
+    public void UnsentStop_ReportsSuppressedFalseToTheCaller()
+    {
+        var rig = new Rig();
+        UiWorldPickResult? got = null;
+        rig.Coordinator.Arm(OwnerA, "A", r => got = r, null, null);
+        var offer = rig.Coordinator.Offer(UiWorldPickMenus.ContainerMenu);
+        var plan = UiWorldPickSuppression.Decide(offer, buffKnown: true, () => false);
+        rig.Coordinator.Complete(UiWorldPickMenus.ContainerMenu, 9, 1, rig.Epoch, plan.Suppressed);
+        Assert.NotNull(got);
+        Assert.False(got!.Value.Suppressed);
+    }
+
+    // ---- words ----
+
+    [Fact]
+    public void BandWords_AreSentenceCased()
+    {
+        foreach (var word in new[] { UiWorldPickCopy.PickWord, UiWorldPickCopy.CancelWord, UiWorldPickCopy.InteractFallback, UiWorldPickOptions.DefaultPrompt })
+        {
+            Assert.True(char.IsUpper(word[0]), word);
+            Assert.NotEqual(word.ToUpperInvariant(), word);
+        }
     }
 }

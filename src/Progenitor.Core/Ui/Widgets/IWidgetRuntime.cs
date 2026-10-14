@@ -15,8 +15,11 @@ internal interface IWidgetRuntime
     /// Show the kit's tooltip box (the dropdown description box's look: the game's dark framed box, a
     /// gold title line, a body) beside <paramref name="anchor"/> (screen pixels), above every mod panel.
     /// One tooltip at a time: a second call moves and rewrites it. Empty title and body hide it.
+    /// <paramref name="stillShown"/>, when given, is asked once a frame while the box is up; the box hides itself the
+    /// first time it answers false (the hovered control left the screen without a pointer exit: Escape closed its
+    /// panel, a page was rebuilt, its plugin unloaded).
     /// </summary>
-    void ShowTooltip(ScreenRect anchor, string title, string body);
+    void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null);
 
     /// <summary>Hide the tooltip. No-op when none is shown.</summary>
     void HideTooltip();

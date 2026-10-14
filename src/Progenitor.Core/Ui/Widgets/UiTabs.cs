@@ -154,7 +154,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
             return;
         }
 
-        ShowTooltip(RectOf(_row, UiTabsLayout.TabKey(tab)), _captions[tab], _tips[tab]);
+        ShowTooltip(RectOf(_row, UiTabsLayout.TabKey(tab)), _captions[tab], _tips[tab], () => RectOf(_row).IsKnown);
     }
 
     protected override void OnHidden()

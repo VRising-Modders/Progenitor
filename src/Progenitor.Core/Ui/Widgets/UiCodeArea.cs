@@ -277,6 +277,7 @@ internal sealed class UiCodeAreaHandle : IUiCodeArea
             ["wrap"] = false,
             ["enabled"] = Enabled,
             ["renders"] = _renders,
+            ["normalizedWrites"] = NormalizedWrites,
         };
         if (_view != null)
         {
@@ -307,10 +308,16 @@ internal sealed class UiCodeAreaHandle : IUiCodeArea
     private void OnEdited(string value)
     {
         if (_disposed) return;
-        string next = value ?? "";
-        // The echo of a programmatic write (or a repeat of the same text) is not an edit.
-        if (string.Equals(next, _value, StringComparison.Ordinal)) return;
+        string raw = value ?? "";
+        // Line breaks are stored as \n, typed or pasted (a pasted \r\n or lone \r included).
+        string next = UiCodeAreaModel.Normalize(raw);
+        bool fieldHoldsCr = !string.Equals(raw, next, StringComparison.Ordinal);
+        bool changed = !string.Equals(next, _value, StringComparison.Ordinal);
+        // The value of record first, so the field's echo of the write-back below is ignored (no second OnChanged).
         _value = next;
+        if (fieldHoldsCr) WriteBackNormalized(next);
+        // The echo of a programmatic write (or a repeat of the same text) is not an edit.
+        if (!changed) return;
         Highlight();
         Render();
         var snapshot = _handlers.ToArray();
@@ -320,6 +327,20 @@ internal sealed class UiCodeAreaHandle : IUiCodeArea
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: code area change handler threw: " + e.Message); }
         }
     }
+
+    /// <summary>
+    /// The field held a <c>\r</c>: give it the normalized text. The cell rewrite only writes a differing value
+    /// (the caret is moved only by the characters removed), and its echo equals the value of record.
+    /// </summary>
+    private void WriteBackNormalized(string next)
+    {
+        NormalizedWrites++;
+        try { _row.SetCell(UiCodeAreaModel.CellKey, text: next); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: code area line-break write-back threw: " + e.Message); }
+    }
+
+    /// <summary>How many times an edit carrying <c>\r</c> was written back normalized (readback and tests).</summary>
+    internal int NormalizedWrites { get; private set; }
 
     private void Highlight()
     {

@@ -681,7 +681,7 @@ size   BuildMenuBlueprintStride                   = 36   : BuildMenuBlueprintBlo
 # OpenMenuEvent {Menu = CharacterInfo, InitDataEntity} plus an init entity carrying CharacterMenu.InitData
 # {DefaultTab = Building}; with one open, HUDMenuManager.CloseMenu(world).
 dump client
-offset OpenMenuEventMenuOffset                     = 0x0  : OpenMenuEvent.Menu                     # HUDMenuType, int
+offset OpenMenuEventMenuOffset                     = 0x0  : OpenMenuEvent.Menu                     # HUDMenuType, byte enum (3 padding bytes before InitDataEntity)
 offset OpenMenuEventInitDataEntityOffset           = 0x4  : OpenMenuEvent.InitDataEntity           # Entity {Index, Version}
 offset CharacterMenuInitDataDefaultTabOffset       = 0x0  : CharacterMenu.InitData.DefaultTab      # CharacterMenuTab, int
 enum   HUDMenuTypeCharacterInfo                    = 1    : HUDMenuType.CharacterInfo

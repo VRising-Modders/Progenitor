@@ -150,6 +150,12 @@ internal static class UiLocateLook
 
     internal const double FadeInSeconds = 0.15;
 
+    /// <summary>
+    /// How long the local character may be missing before every ping ends (<c>left-world</c>): long enough to ride out
+    /// a respawn or a loading hitch, short enough that a kick or a walk back to the menu clears the screen.
+    /// </summary>
+    internal const double NoCharacterGraceSeconds = 3.0;
+
     internal const double FadeOutSeconds = 0.5;
 
     /// <summary>The marker's and arrow's color: the mockup's warm gold (<see cref="MenuPalette.PendText"/>).</summary>
@@ -314,6 +320,7 @@ internal sealed class UiLocateSet
     internal readonly object Gate = new();
     private readonly List<UiLocatePingHandle> _pings = new();
     private long _serial;
+    private double _noCharacterSince = double.NaN;
 
     /// <summary>Raised (outside the lock) for every ping that ends, so the presenter frees its objects.</summary>
     internal event Action<UiLocatePingHandle>? Ended;
@@ -385,6 +392,31 @@ internal sealed class UiLocateSet
         return ended.Count;
     }
 
+    /// <summary>
+    /// The per-frame readiness check. No client world (left, kicked to the menu, reconnecting) ends every ping at
+    /// once; no local character for <see cref="UiLocateLook.NoCharacterGraceSeconds"/> ends every ping too (a kick
+    /// leaves the client world alive). Returns how many ended.
+    /// </summary>
+    internal int Readiness(double now, bool worldAlive, bool characterPresent)
+    {
+        if (worldAlive && characterPresent)
+        {
+            lock (Gate) _noCharacterSince = double.NaN;
+            return 0;
+        }
+
+        if (worldAlive)
+        {
+            lock (Gate)
+            {
+                if (double.IsNaN(_noCharacterSince)) _noCharacterSince = now;
+                if (now - _noCharacterSince < UiLocateLook.NoCharacterGraceSeconds) return 0;
+            }
+        }
+
+        return EndAll("left-world");
+    }
+
     /// <summary>The owner unloaded: end its pings. Returns how many.</summary>
     internal int DropOwner(object owner)
     {
@@ -406,14 +438,17 @@ internal sealed class UiLocateSet
     }
 
     /// <summary>Core teardown: every ping ends.</summary>
-    internal int Clear()
+    internal int Clear() => EndAll("core-unloaded");
+
+    private int EndAll(string reason)
     {
         List<UiLocatePingHandle> all;
         lock (Gate)
         {
             all = new List<UiLocatePingHandle>(_pings);
             _pings.Clear();
-            foreach (var p in all) p.MarkEnded("core-unloaded");
+            _noCharacterSince = double.NaN;
+            foreach (var p in all) p.MarkEnded(reason);
         }
 
         foreach (var p in all) Raise(p);

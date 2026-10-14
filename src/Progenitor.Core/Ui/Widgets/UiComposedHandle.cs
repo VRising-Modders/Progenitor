@@ -24,6 +24,9 @@ internal abstract class UiComposedHandle : IUiHandle
         Panel = panel ?? throw new ArgumentNullException(nameof(panel));
         Key = string.IsNullOrWhiteSpace(key) ? "widget" : key.Trim();
         _text = text ?? "";
+        // Disposed with its panel (a Close, Ui.RemoveAll, the Core teardown), so a drag, a tooltip or a lease never
+        // outlives the rows it belongs to.
+        if (panel is UiPanelHandle host) host.AttachDisposable(this);
     }
 
     protected IUiPanel Panel { get; }
@@ -153,14 +156,22 @@ internal abstract class UiComposedHandle : IUiHandle
     private bool _tooltipShown;
 
     /// <summary>Show the kit tooltip beside <paramref name="anchor"/>; nothing when either text is empty.</summary>
-    protected void ShowTooltip(ScreenRect anchor, string title, string body)
+    protected void ShowTooltip(ScreenRect anchor, string title, string body) => ShowTooltip(anchor, title, body, () => true);
+
+    /// <summary>
+    /// As above; <paramref name="anchorAlive"/> is asked every frame while the box is up (the hovered row still on
+    /// screen), and the box hides itself when it answers false: a panel closed by Escape, a page rebuilt, a plugin
+    /// unloaded — none of which sends the row a pointer exit.
+    /// </summary>
+    protected void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool> anchorAlive)
     {
         if (_disposed || (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(body)) || !anchor.IsKnown) return;
+        anchorAlive ??= () => true;
         var runtime = WidgetRuntime.Current;
         if (runtime == null) return;
         try
         {
-            runtime.ShowTooltip(anchor, title ?? "", body ?? "");
+            runtime.ShowTooltip(anchor, title ?? "", body ?? "", () => !_disposed && _visible && Panel.State == UiHandleState.Shown && anchorAlive());
             _tooltipShown = true;
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget '" + Key + "' tooltip threw: " + e.Message); }

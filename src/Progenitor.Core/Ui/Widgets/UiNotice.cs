@@ -72,10 +72,11 @@ internal static class UiNoticeRules
     internal const double MaxSeconds = 30.0;
 
     /// <summary>
-    /// The longest the queue waits for the game's own banner (a day/night or achievement announcement) to finish
-    /// before showing anyway: a busy flag that never clears must not hold notices forever.
+    /// The longest a notice waits unshown, counted from posting. The queue never overwrites a banner the game is
+    /// playing and never draws while the player has hidden the HUD; it waits instead, and a notice still waiting after
+    /// this long is dropped (<c>expired</c>) so a busy flag that never clears cannot hold the queue forever.
     /// </summary>
-    internal const double MaxHostWaitSeconds = 8.0;
+    internal const double MaxWaitSeconds = 30.0;
 
     /// <summary>Longest header and detail kept; longer text is cut with an ellipsis.</summary>
     internal const int MaxHeaderChars = 120;
@@ -113,8 +114,9 @@ internal sealed class UiNoticeHandle : IUiNotice
     private readonly UiNoticeQueue? _queue;
 
     internal UiNoticeHandle(UiNoticeQueue? queue, object? owner, string header, string detail, UiNoticeKind kind,
-        double seconds, double postedAt, long serial)
+        double seconds, double postedAt, long serial, int epoch = 0)
     {
+        Epoch = epoch;
         _queue = queue;
         Owner = owner;
         Header = header;
@@ -148,6 +150,9 @@ internal sealed class UiNoticeHandle : IUiNotice
     internal double PostedAt { get; }
 
     internal long Serial { get; }
+
+    /// <summary>The world epoch it was posted in; a queued notice from another epoch is dropped (<c>world-changed</c>).</summary>
+    internal int Epoch { get; }
 
     /// <summary>When it went on screen; NaN before.</summary>
     internal double ShownAt { get; set; } = double.NaN;
@@ -188,11 +193,13 @@ internal sealed class UiNoticeQueue
     private readonly Dictionary<object, List<double>> _rate = new(ReferenceEqualityComparer.Instance);
     private UiNoticeHandle? _showing;
     private double _gapUntil = double.NegativeInfinity;
-    private double _hostBusySince = double.NaN;
     private long _serial;
 
     /// <summary>Raised (outside the lock) when the showing notice must be taken off screen early: disposed or its owner unloaded.</summary>
     internal event Action<UiNoticeHandle>? Withdrawn;
+
+    /// <summary>Raised (outside the lock) for every queued notice dropped unshown by time or a world change (logged by the Unity half).</summary>
+    internal event Action<UiNoticeHandle>? Expired;
 
     /// <summary>Notices waiting.</summary>
     internal int QueuedCount
@@ -216,7 +223,8 @@ internal sealed class UiNoticeQueue
     /// Post a notice. Never throws for bad input: empty text, a duplicate or a rate-limited call returns a handle that
     /// is already <see cref="UiNoticeState.Dropped"/> with <see cref="UiNoticeHandle.DropReason"/> saying why.
     /// </summary>
-    internal UiNoticeHandle Enqueue(object? owner, string? header, string? detail, UiNoticeKind kind, double seconds, double now)
+    internal UiNoticeHandle Enqueue(object? owner, string? header, string? detail, UiNoticeKind kind, double seconds, double now,
+        int epoch = 0)
     {
         string h = UiNoticeRules.Clean(header, UiNoticeRules.MaxHeaderChars);
         string d = UiNoticeRules.Clean(detail, UiNoticeRules.MaxDetailChars);
@@ -228,7 +236,7 @@ internal sealed class UiNoticeQueue
 
         lock (Gate)
         {
-            var notice = new UiNoticeHandle(this, owner, h, d, kind, seconds, now, ++_serial);
+            var notice = new UiNoticeHandle(this, owner, h, d, kind, seconds, now, ++_serial, epoch);
             if (h.Length == 0) return Drop(notice, "empty");
 
             string key = UiNoticeRules.DedupeKey(h, d);
@@ -254,16 +262,40 @@ internal sealed class UiNoticeQueue
 
     /// <summary>
     /// One step of the queue at <paramref name="now"/>. Ends the showing notice when its slot is up; then, when the
-    /// screen is free, the gap has passed and the host is not busy (or has been busy longer than
-    /// <see cref="UiNoticeRules.MaxHostWaitSeconds"/>), takes the next notice and calls <paramref name="present"/>,
+    /// screen is free, the gap has passed and the host can show (<paramref name="hostWait"/> false: the game's banner is
+    /// not playing and the HUD is not hidden), takes the next notice and calls <paramref name="present"/>,
     /// which shows it and returns how many seconds it holds the screen (0 or less: it could not be shown, and the
     /// notice is dropped). Returns the notice that started showing, or null. <paramref name="present"/> runs outside
-    /// the lock.
+    /// the lock. Before that, queued notices posted in another world epoch than <paramref name="epoch"/> are dropped
+    /// (<c>world-changed</c>) and those waiting longer than <see cref="UiNoticeRules.MaxWaitSeconds"/> are dropped
+    /// (<c>expired</c>); both raise <see cref="Expired"/>. While <paramref name="hostWait"/> holds, nothing is shown.
     /// </summary>
-    internal UiNoticeHandle? Next(double now, bool hostBusy, Func<UiNoticeHandle, double> present)
+    internal UiNoticeHandle? Next(double now, bool hostWait, Func<UiNoticeHandle, double> present, int epoch = 0)
     {
         if (present == null) throw new ArgumentNullException(nameof(present));
-        UiNoticeHandle? next;
+        UiNoticeHandle? next = null;
+        List<UiNoticeHandle>? lapsed = null;
+        lock (Gate)
+        {
+            for (int i = _queued.Count - 1; i >= 0; i--)
+            {
+                var q = _queued[i];
+                string? reason = q.Epoch != epoch ? "world-changed"
+                    : now - q.PostedAt >= UiNoticeRules.MaxWaitSeconds ? "expired" : null;
+                if (reason == null) continue;
+                _queued.RemoveAt(i);
+                Drop(q, reason);
+                (lapsed ??= new List<UiNoticeHandle>()).Insert(0, q);
+            }
+        }
+
+        if (lapsed != null)
+            foreach (var q in lapsed)
+            {
+                try { Expired?.Invoke(q); }
+                catch { /* a log line must not break the queue */ }
+            }
+
         lock (Gate)
         {
             if (_showing != null)
@@ -275,19 +307,8 @@ internal sealed class UiNoticeQueue
                 _gapUntil = now + UiNoticeRules.GapSeconds;
             }
 
-            if (_queued.Count == 0 || now < _gapUntil)
-            {
-                if (_queued.Count == 0) _hostBusySince = double.NaN;
-                return null;
-            }
+            if (_queued.Count == 0 || now < _gapUntil || hostWait) return null;
 
-            if (hostBusy)
-            {
-                if (double.IsNaN(_hostBusySince)) _hostBusySince = now;
-                if (now - _hostBusySince < UiNoticeRules.MaxHostWaitSeconds) return null;
-            }
-
-            _hostBusySince = double.NaN;
             next = _queued[0];
             _queued.RemoveAt(0);
             next.StateValue = UiNoticeState.Showing;
@@ -393,7 +414,6 @@ internal sealed class UiNoticeQueue
             _recent.Clear();
             _rate.Clear();
             _gapUntil = double.NegativeInfinity;
-            _hostBusySince = double.NaN;
         }
     }
 
@@ -467,8 +487,8 @@ internal static class UiNoticeBand
 
     internal const float RuleAlpha = 0.35f;
 
-    /// <summary>The band's ground: the game's near-black warm tint at 86% in the middle, fading out at both ends.</summary>
-    internal static readonly PaletteColor Ground = PaletteColor.Hex(0x0a0608, 0.86f);
+    /// <summary>The band's ground: the kit's pane fill (<see cref="MenuPalette.PaneFill"/>) at 86% in the middle, fading out at both ends.</summary>
+    internal static readonly PaletteColor Ground = MenuPalette.PaneFill.WithAlpha(0.86f);
 
     /// <summary>Fraction of the width over which each end fades in (the mockup's 18%).</summary>
     internal const float FadeFraction = 0.18f;

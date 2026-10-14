@@ -127,12 +127,57 @@ public sealed class UiNoticeTests
     }
 
     [Fact]
-    public void The_queue_waits_for_a_busy_game_banner_but_not_forever()
+    public void A_busy_game_banner_or_hidden_HUD_is_never_overwritten_the_notice_waits()
     {
         var n = _queue.Enqueue(_a, "waits", "", UiNoticeKind.Info, 0, 0);
         Assert.Null(_queue.Next(0, true, Present));
-        Assert.Null(_queue.Next(UiNoticeRules.MaxHostWaitSeconds - 0.1, true, Present));
-        Assert.Same(n, _queue.Next(UiNoticeRules.MaxHostWaitSeconds + 0.1, true, Present));
+        Assert.Null(_queue.Next(UiNoticeRules.MaxWaitSeconds - 0.1, true, Present));
+        Assert.Equal(UiNoticeState.Queued, n.State);
+        Assert.Empty(_presented);
+        Assert.Same(n, _queue.Next(UiNoticeRules.MaxWaitSeconds - 0.05, false, Present)); // the banner freed up
+    }
+
+    [Fact]
+    public void A_notice_that_waits_too_long_expires_unshown_and_is_reported()
+    {
+        var expired = new List<UiNoticeHandle>();
+        _queue.Expired += expired.Add;
+        var old = _queue.Enqueue(_a, "old", "", UiNoticeKind.Info, 0, 0);
+        var young = _queue.Enqueue(_b, "young", "", UiNoticeKind.Info, 0, UiNoticeRules.MaxWaitSeconds - 1);
+
+        Assert.Null(_queue.Next(UiNoticeRules.MaxWaitSeconds, true, Present));
+        Assert.Equal(UiNoticeState.Dropped, old.State);
+        Assert.Equal("expired", old.DropReason);
+        Assert.Equal(new[] { old }, expired);
+        Assert.Equal(UiNoticeState.Queued, young.State);
+        Assert.Empty(_presented);
+    }
+
+    [Fact]
+    public void Notices_still_waiting_when_the_world_changes_are_dropped()
+    {
+        var expired = new List<UiNoticeHandle>();
+        _queue.Expired += expired.Add;
+        var showing = _queue.Enqueue(_a, "showing", "", UiNoticeKind.Info, 0, 0, epoch: 5);
+        var waiting = _queue.Enqueue(_a, "waiting", "", UiNoticeKind.Info, 0, 0, epoch: 5);
+        Assert.Same(showing, _queue.Next(0, false, Present, epoch: 5));
+
+        var posted = _queue.Enqueue(_b, "new world", "", UiNoticeKind.Info, 0, 1, epoch: 6);
+        Assert.Null(_queue.Next(1, false, Present, epoch: 6));
+        Assert.Equal("world-changed", waiting.DropReason);
+        Assert.Equal(new[] { waiting }, expired);
+        Assert.Equal(UiNoticeState.Showing, showing.State); // what is on screen finishes its slot
+        Assert.Null(_queue.Next(3.0, false, Present, epoch: 6)); // the slot ends; the gap runs
+        Assert.Same(posted, _queue.Next(3.0 + UiNoticeRules.GapSeconds, false, Present, epoch: 6));
+    }
+
+    [Fact]
+    public void The_band_ground_comes_from_the_kit_palette()
+    {
+        Assert.Equal(MenuPalette.PaneFill.R, UiNoticeBand.Ground.R);
+        Assert.Equal(MenuPalette.PaneFill.G, UiNoticeBand.Ground.G);
+        Assert.Equal(MenuPalette.PaneFill.B, UiNoticeBand.Ground.B);
+        Assert.InRange(UiNoticeBand.Ground.A, 0.5f, 1f);
     }
 
     [Fact]

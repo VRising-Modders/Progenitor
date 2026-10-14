@@ -12,6 +12,12 @@ internal interface IUiWorldPickBackend
     /// <summary>True when a pick can be armed now (a client world with a local character); else why not.</summary>
     bool Ready(out string why);
 
+    /// <summary>
+    /// Per tick while armed, cheap: the world and local character the pick was armed with are still
+    /// there (false on leaving the world, a kick, a disconnect or the character going away).
+    /// </summary>
+    bool StillReady(out string why);
+
     /// <summary><paramref name="pick"/> is now the armed pick (show its prompt, watch interacts, take Escape).</summary>
     void Armed(UiWorldPickHandle pick);
 
@@ -159,7 +165,7 @@ internal sealed class UiWorldPickCoordinator
         return true;
     }
 
-    /// <summary>Per frame: the timeout and the world-change check.</summary>
+    /// <summary>Per frame: the world-change and still-in-the-world checks, then the timeout.</summary>
     internal void Tick()
     {
         var pick = _current;
@@ -167,6 +173,22 @@ internal sealed class UiWorldPickCoordinator
         if (_epoch() != pick.Epoch)
         {
             _log("Ui: world pick #" + pick.Id + " cancelled: the world it was armed in ended.");
+            End(pick, UiWorldPickState.Cancelled, runCallback: true);
+            return;
+        }
+
+        string why;
+        bool alive;
+        try { alive = _backend.StillReady(out why); }
+        catch (Exception e)
+        {
+            alive = false;
+            why = "the readiness check threw: " + e.Message;
+        }
+
+        if (!alive)
+        {
+            _log("Ui: world pick #" + pick.Id + " cancelled: " + why + ".");
             End(pick, UiWorldPickState.Cancelled, runCallback: true);
             return;
         }
@@ -296,13 +318,14 @@ internal sealed class UiWorldPickHandle : IUiWorldPick
 /// <summary>
 /// The interact buffs a suppressed pick already ended. The game's interact HUD can ask for the same
 /// panel again on the next frames, until the server has removed the buff in answer to the stop
-/// message; those repeats must stay closed after the pick itself has finished. Each entry lives
-/// until <see cref="Ttl"/> seconds pass or the client stops seeing the buff.
+/// message; those repeats must stay closed after the pick itself has finished. An entry is only added
+/// when the stop message was actually sent, and it ends when the client stops seeing the buff (the
+/// server removed it); <see cref="Ttl"/> is only a safety net for a buff that never goes away.
 /// </summary>
 internal sealed class UiWorldPickSwallowList
 {
-    /// <summary>Seconds a swallowed buff is remembered at most (a round trip with plenty of margin).</summary>
-    internal const double Ttl = 3.0;
+    /// <summary>Upper bound in seconds on remembering a swallowed buff (normally it ends when the buff is gone).</summary>
+    internal const double Ttl = 10.0;
 
     private readonly List<(long Key, double Until)> _entries = new();
 

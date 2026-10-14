@@ -11,7 +11,8 @@ public sealed partial class PluginHud
     /// marker floats over it with "<paramref name="label"/> · 14 m" (the distance from the player's character), and
     /// while it is off screen or behind the camera an arrow on the screen edge points the way to turn. The marker
     /// pulses gently for its first second. <paramref name="seconds"/> is its lifetime (0 or less: until disposed). It
-    /// also ends when the entity no longer exists, the client world changes, or this plugin unloads. At most eight
+    /// also ends when the entity no longer exists, the client world changes, the player leaves the world (disconnect,
+    /// kick: no local character for 3 s), or this plugin unloads. At most eight
     /// pings show at once; a ninth ends the oldest. Client only; on the server it logs once and returns an inactive ping.
     ///
     /// <para><b>Status: experimental</b> (built and unit-tested; not yet verified live).</para>

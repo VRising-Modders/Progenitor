@@ -624,7 +624,10 @@ public sealed class CellRowTests : IDisposable
             return list;
         }
 
-        public ScreenRect RowRect() => ScreenRect.FromCorners(0f, 100f, 1664f, 100f + _spec.Height);
+        /// <summary>P7: a test may place the row (an ordered list's slots stacked down the screen).</summary>
+        public ScreenRect? RectOverride;
+
+        public ScreenRect RowRect() => RectOverride ?? ScreenRect.FromCorners(0f, 100f, 1664f, 100f + _spec.Height);
 
         public string Text { get => _spec.Key; set { } }
         public bool Visible { get => _visible; set { if (_visible != value && _runtime != null) _runtime.Relayouts++; _visible = value; } }

@@ -1,5 +1,6 @@
 #if !PROGENITOR_TESTS
 using System;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -8,20 +9,29 @@ namespace Progenitor.Ui;
 
 /// <summary>
 /// P7 item 3: the pick-in-world prompt band (<see cref="WorldPickBackend"/>). The band is an ordinary
-/// kit panel — so it shows, hides, hover-routes input and forwards Escape like every other panel —
-/// restyled after its first show: self-placed at the bottom center above the action bar, no title,
-/// no frame art, a soft dark ground with the game's gold category underline beneath it (the Bindings
-/// menu header rule, <see cref="KeybindArtDonors.TryRule"/>), the kit's body font, and the two keys
-/// drawn on the game's own key cap (<see cref="KeybindArtDonors.TryKeyCap"/>, the Bindings menu's key
-/// button). Either donor missing falls back to a flat gold rule and a bordered kit cap.
+/// kit panel — so it shows, hides and keeps Bootstrap forwarding Escape like every other panel —
+/// restyled after each show.
+///
+/// <para><b>Click-through.</b> The panel's own frame rect is zero-sized just below the bottom screen edge,
+/// with its frame image switched off; the visible band is a child placed above the action bar. The hover
+/// gate measures the frame rect, so the pointer is never "over" the band and gameplay input is never
+/// blocked by it, and every band graphic has <c>raycastTarget = false</c>, so attack clicks pass through.</para>
+///
+/// <para><b>Look.</b> The Mods palette's pane ground (the dialog frame color, <see cref="DialogFrameColors"/>)
+/// at reduced alpha, the game's gold category underline beneath it (the Bindings menu header rule,
+/// <see cref="KeybindArtDonors.TryRule"/>), the kit's body font, and the keys on the game's own key cap
+/// (<see cref="KeybindArtDonors.TryKeyCap"/>, the Bindings menu's key button). Either donor missing falls
+/// back to a flat palette gold rule and a bordered kit cap. The caller's prompt is escaped
+/// (<see cref="UiRichText.Literal"/>) and ends in an ellipsis past <see cref="UiWorldPickCopy.MaxPromptWidth"/>.</para>
 /// </summary>
 internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
 {
-    /// <summary>Name of the band's content child (one per band panel).</summary>
+    /// <summary>Name of the band's visible child (one per band panel).</summary>
     internal const string WorldPickBandName = UiOwnership.Prefix + "world-pick-band";
 
     private const float BandHeight = 50f;
     private const float BandBottom = 190f;
+    private const float FrameBelowEdge = 8f;
     private const float BandPadX = 28f;
     private const float PromptSize = 24f;
     private const float WordSize = 21f;
@@ -32,6 +42,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
     private const float GapCapWord = 8f;
     private const float GapBetweenKeys = 24f;
     private const float RuleHeight = 2f;
+    private const float GroundAlpha = 0.82f;
 
     public void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey)
     {
@@ -46,24 +57,35 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             try { host.Title?.SetActive(false); } catch { /* */ }
             try { host.ViewportObject?.SetActive(false); } catch { /* */ }
 
-            // The frame's own image becomes the band's ground: no 9-slice window art, a soft dark fill.
-            var ground = frame.GetComponent<Image>();
-            if (ground != null)
+            // The frame: zero-sized below the screen edge, its own image off (see the class remarks).
+            var frameImage = frame.GetComponent<Image>();
+            if (frameImage != null)
             {
-                try { ground.sprite = null; } catch { /* */ }
-                try { ground.type = Image.Type.Simple; } catch { /* */ }
-                try { ground.color = new Color(0.035f, 0.027f, 0.032f, 0.78f); } catch { /* */ }
-                try { ground.raycastTarget = true; } catch { /* */ }
+                try { frameImage.raycastTarget = false; } catch { /* */ }
+                try { frameImage.enabled = false; } catch { /* */ }
             }
+
+            frameRt.anchorMin = new Vector2(0.5f, 0f);
+            frameRt.anchorMax = new Vector2(0.5f, 0f);
+            frameRt.pivot = new Vector2(0.5f, 0f);
+            frameRt.sizeDelta = Vector2.zero;
+            frameRt.anchoredPosition = new Vector2(0f, -FrameBelowEdge);
 
             var old = frame.transform.Find(WorldPickBandName);
             if (old != null) TryDestroyImmediate(old.gameObject);
-            var row = new GameObject(WorldPickBandName);
-            row.transform.SetParent(frame.transform, false);
-            Stretch(row);
+            var band = new GameObject(WorldPickBandName);
+            band.transform.SetParent(frame.transform, false);
+            var bandRt = band.GetComponent<RectTransform>() ?? band.AddComponent<RectTransform>();
+
+            var ground = TryAdd<Image>(band);
+            if (ground != null)
+            {
+                try { ground.color = ToColor(DialogFrameColors.Frame.WithAlpha(GroundAlpha)); } catch { /* */ }
+                try { ground.raycastTarget = false; } catch { /* */ }
+            }
 
             float x = 0f;
-            var parts = new System.Collections.Generic.List<(RectTransform Rt, float Width)>();
+            var parts = new List<(RectTransform Rt, float Width)>();
             void Add(GameObject? go, float width)
             {
                 if (go == null) return;
@@ -73,24 +95,24 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
                 x += width;
             }
 
-            Add(BandText(row, prompt, PromptSize, ToColor(MenuPalette.Text), out float promptWidth), promptWidth);
+            var text = ToColor(MenuPalette.Text);
+            Add(BandText(band, UiRichText.Literal(prompt), PromptSize, text, UiWorldPickCopy.MaxPromptWidth, out float promptWidth), promptWidth);
             x += GapAfterPrompt;
-            Add(BandCap(row, interactKey, out float capA), capA);
+            Add(BandCap(band, interactKey, out float capA), capA);
             x += GapCapWord;
-            Add(BandText(row, "pick", WordSize, ToColor(MenuPalette.Text), out float pickWidth), pickWidth);
+            Add(BandText(band, UiWorldPickCopy.PickWord, WordSize, text, 0f, out float pickWidth), pickWidth);
             x += GapBetweenKeys;
-            Add(BandCap(row, cancelKey, out float capB), capB);
+            Add(BandCap(band, cancelKey, out float capB), capB);
             x += GapCapWord;
-            Add(BandText(row, "cancel", WordSize, ToColor(MenuPalette.Text), out float cancelWidth), cancelWidth);
+            Add(BandText(band, UiWorldPickCopy.CancelWord, WordSize, text, 0f, out float cancelWidth), cancelWidth);
 
             float width = Mathf.Ceil(x + 2f * BandPadX);
-            frameRt.anchorMin = new Vector2(0.5f, 0f);
-            frameRt.anchorMax = new Vector2(0.5f, 0f);
-            frameRt.pivot = new Vector2(0.5f, 0f);
-            frameRt.sizeDelta = new Vector2(width, BandHeight);
-            frameRt.anchoredPosition = new Vector2(0f, BandBottom);
+            bandRt.anchorMin = new Vector2(0.5f, 0f);
+            bandRt.anchorMax = new Vector2(0.5f, 0f);
+            bandRt.pivot = new Vector2(0.5f, 0f);
+            bandRt.sizeDelta = new Vector2(width, BandHeight);
+            bandRt.anchoredPosition = new Vector2(0f, BandBottom + FrameBelowEdge);
 
-            // Lay the parts out left to right, centered vertically, using the gaps added above.
             float cursor = -x / 2f;
             float[] gaps = { GapAfterPrompt, GapCapWord, GapBetweenKeys, GapCapWord, 0f };
             for (int i = 0; i < parts.Count; i++)
@@ -103,7 +125,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
                 cursor += w + (i < gaps.Length ? gaps[i] : 0f);
             }
 
-            BandRule(row, width);
+            BandRule(band, width);
             Plugin.Logger?.LogDiag("Ui: world pick band " + (int)width + "x" + (int)BandHeight + " keys=" + interactKey + "/" + cancelKey);
         }
         catch (Exception e)
@@ -112,7 +134,8 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
         }
     }
 
-    private static GameObject? BandText(GameObject parent, string text, float size, Color color, out float width)
+    /// <summary>One line of band text; <paramref name="maxWidth"/> above 0 caps it with an ellipsis.</summary>
+    private static GameObject? BandText(GameObject parent, string text, float size, Color color, float maxWidth, out float width)
     {
         width = 0f;
         var go = new GameObject("text");
@@ -126,11 +149,12 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
         try { tmp.color = color; } catch { /* */ }
         try { tmp.raycastTarget = false; } catch { /* */ }
         try { tmp.enableWordWrapping = false; } catch { /* */ }
-        try { tmp.overflowMode = TextOverflowModes.Overflow; } catch { /* */ }
+        try { tmp.overflowMode = maxWidth > 0f ? TextOverflowModes.Ellipsis : TextOverflowModes.Overflow; } catch { /* */ }
         try { tmp.alignment = TextAlignmentOptions.Left; } catch { /* */ }
         ApplyCachedFont(tmp);
         try { width = Mathf.Ceil(tmp.GetPreferredValues(tmp.text).x); } catch { width = (text ?? "").Length * size * 0.5f; }
         if (width <= 0f) width = (text ?? "").Length * size * 0.5f;
+        if (maxWidth > 0f && width > maxWidth) width = maxWidth;
         var rt = go.GetComponent<RectTransform>() ?? go.AddComponent<RectTransform>();
         rt.sizeDelta = new Vector2(width, size * 1.4f);
         return go;
@@ -165,7 +189,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             try { image.raycastTarget = false; } catch { /* */ }
         }
 
-        var label = BandText(cap, key, KeySize, ToColor(MenuPalette.ClientText), out float textWidth);
+        var label = BandText(cap, UiRichText.Literal(key), KeySize, ToColor(MenuPalette.ClientText), 0f, out float textWidth);
         width = Mathf.Max(CapHeight, textWidth + 2f * CapPadX);
         var rt = cap.GetComponent<RectTransform>() ?? cap.AddComponent<RectTransform>();
         rt.sizeDelta = new Vector2(width, CapHeight);
@@ -200,7 +224,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
         }
         else
         {
-            try { image.color = ToColor(MenuPalette.Gold.WithAlpha(0.85f)); } catch { /* */ }
+            try { image.color = ToColor(MenuPalette.Gold); } catch { /* */ }
         }
 
         try { image.raycastTarget = false; } catch { /* */ }

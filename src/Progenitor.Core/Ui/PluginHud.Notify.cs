@@ -10,7 +10,9 @@ public sealed partial class PluginHud
     /// <summary>
     /// Show <paramref name="text"/> (and an optional second, muted <paramref name="detail"/> line) as a notification in
     /// the game's own style: on the game's center announcement banner when it is on screen, otherwise on a framework band
-    /// in the same place and style (main menu, HUD hidden). One notice shows at a time, first posted first shown, across
+    /// in the same place and style (main menu, HUD not built). While the game's banner is playing or the player has
+    /// hidden the HUD a notice waits (never overwriting it, never drawn over a hidden HUD) and is dropped unshown after
+    /// 30 s; a notice still waiting when the world changes is dropped. One notice shows at a time, first posted first shown, across
     /// every plugin; the same text again within a few seconds is dropped as a duplicate, a plugin may post at most six
     /// in ten seconds, and at most eight wait (the oldest waiting one is dropped).
     ///

@@ -12,8 +12,9 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
 {
     private readonly UiOrderedListModel _model;
     private readonly UiOrderedListOptions _options;
-    private readonly bool _icons;
-    private readonly bool _expand;
+    // The icon and expander columns follow the items: decided again on every render (SetItems can add the first icon).
+    private bool _icons;
+    private bool _expand;
     private readonly List<IUiCellRow> _rows = new();
     private readonly List<IUiCellRow> _drawers = new();
     private readonly IUiCellRow _footer;
@@ -35,18 +36,18 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         _expand = AnyDetail(_model.Items);
         ResolveGlyphs();
 
-        float indent = UiWidgetLayout.DrawerIndent(_options.Reorder, _icons);
+        float indent = UiWidgetLayout.DrawerIndent(_options.Reorder, icon: true);
         float drawerHeight = UiWidgetLayout.DrawerHeight(_options.DetailLines);
         for (int i = 0; i < _model.Capacity; i++)
         {
             int slot = i;
-            var cells = UiWidgetLayout.ListRowCells(_options.Reorder, _options.Remove, _expand, _icons);
+            var cells = UiWidgetLayout.ListRowCells(_options.Reorder, _options.Remove, expand: true, icon: true);
             foreach (var c in cells) c.Text = Glyph(c);
             var row = Part(panel.CellRow(new CellRowSpec(
                 RowKey("row" + i), cells, hover: true, skin: CellRowSkin.GameEntry, separator: true, quietHover: true)));
             _rows.Add(row);
             var drawer = Part(panel.CellRow(new CellRowSpec(
-                RowKey("drawer" + i), UiWidgetLayout.DrawerCells(indent), height: drawerHeight, plain: true, joinAbove: true,
+                RowKey("drawer" + i), UiWidgetLayout.DrawerCells(_options.Reorder), height: drawerHeight, plain: true, joinAbove: true,
                 indent: indent)));
             _drawers.Add(drawer);
 
@@ -65,7 +66,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
                 }
             }
 
-            if (_expand) Lease(row.OnClick(UiWidgetLayout.CellExpand, () => ToggleSlot(slot)));
+            Lease(row.OnClick(UiWidgetLayout.CellExpand, () => ToggleSlot(slot)));
             if (_options.Remove) Lease(row.OnClick(UiWidgetLayout.CellRemove, () => RemoveSlot(slot)));
         }
 
@@ -234,7 +235,8 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
 
         var item = ItemAt(slot);
         if (item == null || string.IsNullOrWhiteSpace(item.Tooltip)) return;
-        ShowTooltip(RectOf(_rows[slot]), item.Title, item.Tooltip);
+        var row = _rows[slot];
+        ShowTooltip(RectOf(row), item.Title, item.Tooltip, () => row.Visible && RectOf(row).IsKnown);
     }
 
     /// <summary>A pointer event on slot <paramref name="slot"/>'s grip: a primary press starts a drag, the release drops it.</summary>
@@ -301,6 +303,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         if (!_model.Dragging) return;
         DisposeTick();
         bool moved = _model.EndDrag(out var change);
+        if (IsDisposed) return; // a release after the panel or the plugin went: no event into an unloaded handler
         Render();
         if (moved) Raise(_reorder, change, "reorder");
     }
@@ -334,6 +337,8 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         if (IsDisposed || !Visible) return;
         var display = _model.Display();
         int drawn = _model.Drawn;
+        _icons = AnyIcon(_model.Items);
+        _expand = AnyDetail(_model.Items);
         var runtime = WidgetRuntime.Current;
         for (int i = 0; i < _rows.Count; i++)
         {
@@ -360,7 +365,9 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
 
             bool hasDetail = UiOrderedListModel.HasDetail(item);
             bool open = hasDetail && _model.IsExpanded(item.Id) && !_model.Dragging;
-            if (_expand) row.SetCell(UiWidgetLayout.CellExpand, tone: hasDetail ? CellTone.Normal : CellTone.Faint);
+            // A column no item needs is hidden on every row, so the columns still line up row to row.
+            row.SetCell(UiWidgetLayout.CellExpand, tone: hasDetail ? CellTone.Normal : CellTone.Faint, visible: _expand);
+            row.SetCell(UiWidgetLayout.CellIcon, visible: _icons);
             if (_options.Remove) row.SetCell(UiWidgetLayout.CellRemove, tone: item.Removable && !_model.Dragging ? CellTone.Normal : CellTone.Faint);
             if (_icons)
             {
@@ -377,6 +384,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
             row.SetExpanded(open);
             row.SetSelected(_model.Dragging && i == _model.DragTarget);
             TrySetVisible(row, true);
+            drawer.SetCell(UiWidgetLayout.CellIconPad, visible: _icons);
             drawer.SetCell(UiWidgetLayout.CellDetail, open ? item.Detail : "");
             TrySetVisible(drawer, open);
         }
