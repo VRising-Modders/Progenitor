@@ -4968,6 +4968,7 @@ public static partial class ModsMenu
 
         if (target == null) throw new ArgumentException("no visible dropdown labeled '" + label + "'");
         if (!target.Enabled || target.WidgetId == 0) throw new InvalidOperationException("the dropdown '" + label + "' is not enabled");
+        if (!target.Interactable) throw UiClickGate.Refused(UiClickGate.DisabledMessage(label, target.Help));
         // The click first (it opens the list through the same slot a pointer uses), then the pick.
         if (!target.IsOpen) UiSlotTable.BootstrapDispatch(target.WidgetId, (byte)UiSlotKind.Click, 0, false, null);
         if (!target.IsOpen) target.OpenList();
@@ -5005,6 +5006,7 @@ public static partial class ModsMenu
 
         if (target == null) throw new ArgumentException("no visible radio list labeled '" + label + "'");
         if (!target.Enabled || target.WidgetId == 0) throw new InvalidOperationException("the radio list '" + label + "' is not enabled");
+        if (!target.Interactable) throw UiClickGate.Refused(UiClickGate.DisabledMessage(label, target.Help));
         int index = target.Find(value);
         if (index < 0) throw new ArgumentException("the radio list '" + label + "' has no option '" + value + "'");
         bool written = target.Click(index);
@@ -5173,17 +5175,22 @@ public static partial class ModsMenu
         // stops every click below it, so a bare caption names its button: `No` used to land on the
         // first workspace widget whose text contained "No" and leave the dialog standing.
         if (pane == null && index == null && !string.IsNullOrWhiteSpace(label)
-            && UiDialog.Current is { IsOpen: true } dialog
-            && dialog.TryClickForBridge(label, out var dialogDetail))
+            && UiDialog.Current is { IsOpen: true } dialog)
         {
-            return new
+            if (dialog.TryClickForBridge(label, out var dialogDetail))
             {
-                label = dialogDetail.TryGetValue("label", out var clicked) ? clicked as string ?? label : label,
-                index = -1,
-                kind = "dialog",
-                invoked = 1,
-                value = (string?)null,
-            };
+                return new
+                {
+                    label = dialogDetail.TryGetValue("label", out var clicked) ? clicked as string ?? label : label,
+                    index = -1,
+                    kind = "dialog",
+                    invoked = 1,
+                    value = (string?)null,
+                };
+            }
+
+            // A grayed dialog answer is refused (UiClickGate), not passed on to a workspace widget below the blocker.
+            if (UiClickGate.RefusalOf(dialogDetail) is { } dialogRefusal) throw UiClickGate.Refused(dialogRefusal);
         }
 
         if (!IsOpen) throw new ArgumentException(WorkspaceClosedMessage);
@@ -5241,6 +5248,7 @@ public static partial class ModsMenu
                         value = (string?)null,
                     };
                 }
+                if (UiClickGate.RefusalOf(cellDetail) is { } cellRefusal) throw UiClickGate.Refused(cellRefusal);
                 throw new ArgumentException("no visible widget labeled '" + label + "'");
             }
         }
@@ -7036,6 +7044,9 @@ public static partial class ModsMenu
     {
         newValue = WidgetValue(handle);
         if (handle.WidgetId == 0 || !handle.Enabled) return 0;
+        // A grayed control takes no click (UiClickGate): the bridge dispatches the slot directly, past
+        // Unity's own interactable check, so it must refuse here or it succeeds where a player cannot.
+        if (!handle.Interactable) throw UiClickGate.Refused(UiClickGate.DisabledMessage(handle.Text, handle.Help));
 
         if (handle is UiToggleHandle toggle)
         {

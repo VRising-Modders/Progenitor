@@ -431,7 +431,7 @@ public static partial class Handshake
                     var connected = world.EntityManager.GetComponentData<User>(userEntity);
                     if (!connected.IsConnected || connected.Index != index || connected.PlatformId != platform
                         || !HandshakeReask.RefreshAllowed(AnswerWatch.GetStatus(index) == HandshakeAnswerWatch.Status.Ok, SoftReaskPending(index))) return;
-                    var packed = Compare.PackRequest(RequestRowsNow());
+                    var packed = PackRequestNow(out string requestStamp);
                     // Mod compatibility C1/C2: the client's new generation must learn again that this server reads tables.
                     var refreshRows = new List<ModRecord>(packed.Rows);
                     Compare.MergeCapabilityBits(refreshRows, ModCompatCaps.RequestBitsNow());
@@ -439,6 +439,7 @@ public static partial class Handshake
                     var list = new ModList();
                     foreach (var record in refreshRows) list.Add(record);
                     bool sent = CustomEvents.SendToUser(world, userEntity, RequestEventId, list);
+                    if (sent) RequirementWatch.NoteSent(index, requestStamp);
                     Plugin.Logger?.LogInfo("Handshake: refreshed server request for client Core, user=" + index + "; sent=" + sent);
                 }
                 catch (Exception e) { Plugin.Logger?.LogWarning("Handshake refresh dispatch: " + e.Message); }

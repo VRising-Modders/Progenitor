@@ -2822,6 +2822,9 @@ internal static partial class ModsUiOps
         var button = go.GetComponent<Button>();
         if (button == null || button.onClick == null)
             return (false, ButtonDetail(site, menuOpenedBy, error: "owned " + site + " button has no onClick"));
+        // A grayed button takes no click: onClick.Invoke skips uGUI's interactable check, so refuse here.
+        if (!button.interactable)
+            return (false, ButtonDetail(site, menuOpenedBy, error: "owned " + site + " button is disabled (not interactable); not clicked"));
         button.onClick.Invoke();
         var invoked = ButtonDetail(site, menuOpenedBy, handler: goName + ".onClick");
         if (site == "top-tab") invoked["route"] = "imitation";
@@ -3053,6 +3056,25 @@ internal static partial class ModsUiOps
         catch { return false; }
     }
 
+    /// <summary>
+    /// The reason Core's click gate refused a grayed control (<c>UiClickGate</c>: the detail's <c>refused</c>, or an
+    /// exception whose <c>Data</c> carries it), or null. A refused click is reported as such and never retried by caption.
+    /// </summary>
+    internal static string? ClickRefusal(Dictionary<string, object?>? detail) =>
+        detail != null && detail.TryGetValue(ClickRefusedKey, out var value) && value is string s && s.Length > 0 ? s : null;
+
+    internal static bool IsClickRefusal(Exception e) => e.Data.Contains(ClickRefusedKey);
+
+    private static ArgumentException RefusedClick(string message)
+    {
+        var e = new ArgumentException(message);
+        e.Data[ClickRefusedKey] = true;
+        return e;
+    }
+
+    /// <summary>Core's <c>UiClickGate.RefusedKey</c> (Core is not visible to Dev).</summary>
+    internal const string ClickRefusedKey = "refused";
+
     private static (bool ok, object detail) DoWidgetClick(ModsUiArgs.Request request)
     {
         if (request.Modifiers == 0) return DoWidgetClickCore(request);
@@ -3071,6 +3093,7 @@ internal static partial class ModsUiOps
 
     private static (bool ok, object detail) DoWidgetClickCore(ModsUiArgs.Request request)
     {
+        string? refusal = null;
         try
         {
             var clicked = ModsMenu.ClickVisibleWidget(request.Pane, request.Label, request.Index, request.Value);
@@ -3082,18 +3105,23 @@ internal static partial class ModsUiOps
                 if (element.TryGetProperty("kind", out var kind) && kind.ValueKind == JsonValueKind.String
                     && string.Equals(kind.GetString(), "widget", StringComparison.Ordinal)
                     && element.TryGetProperty("invoked", out var invoked) && invoked.ValueKind == JsonValueKind.Number && invoked.GetInt32() == 0
-                    && element.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.String
-                    && CellRowInvoke(label.GetString(), out var rowDetail))
+                    && element.TryGetProperty("label", out var label) && label.ValueKind == JsonValueKind.String)
                 {
-                    rowDetail["index"] = element.TryGetProperty("index", out var index) && index.ValueKind == JsonValueKind.Number ? index.GetInt32() : -1;
-                    rowDetail["value"] = "";
-                    return (true, rowDetail);
+                    if (CellRowInvoke(label.GetString(), out var rowDetail))
+                    {
+                        rowDetail["index"] = element.TryGetProperty("index", out var index) && index.ValueKind == JsonValueKind.Number ? index.GetInt32() : -1;
+                        rowDetail["value"] = "";
+                        return (true, rowDetail);
+                    }
+                    if (ClickRefusal(rowDetail) is { } rowRefusal) refusal = rowRefusal;
                 }
             }
             catch { /* the menu's answer stands */ }
+            // A grayed control is refused (ok:false with the reason), never reported as clicked.
+            if (refusal != null) throw RefusedClick(refusal);
             return (true, clicked);
         }
-        catch (ArgumentException) when (!string.IsNullOrWhiteSpace(request.Label) && request.Index == null)
+        catch (ArgumentException e) when (!string.IsNullOrWhiteSpace(request.Label) && request.Index == null && !IsClickRefusal(e))
         {
             // LIST1: a cell row's button (`<rowKey>/<cellKey>` or its caption) is not a panel
             // child the menu can see; the row registry dispatches its slot instead.
@@ -3103,6 +3131,7 @@ internal static partial class ModsUiOps
                 detail["value"] = "";
                 return (true, detail);
             }
+            if (ClickRefusal(detail) is { } cellRefusal) throw RefusedClick(cellRefusal);
             throw;
         }
     }

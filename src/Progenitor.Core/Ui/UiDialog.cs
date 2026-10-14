@@ -1245,29 +1245,49 @@ internal sealed class UiDialog : IDisposable
     {
         detail = new Dictionary<string, object?>();
         if (!IsOpen || _view == null || string.IsNullOrWhiteSpace(label)) return false;
-        if (_view.Buttons is UiCellRowHandle buttons && buttons.TryInvokeCell(label, out detail)) return true;
-        for (int i = 0; i < _view.OptionRows.Count; i++)
+        // A grayed answer (a Disabled-tone button) is refused, not pressed (UiClickGate); the first
+        // refusal is what the caller reports when nothing clickable carries the label.
+        Dictionary<string, object?>? refused = null;
+        if (_view.Buttons is UiCellRowHandle buttons)
+        {
+            if (buttons.TryInvokeCell(label, out detail)) return true;
+            if (UiClickGate.RefusalOf(detail) != null) refused = detail;
+        }
+
+        bool done = TryClickRowsForBridge(label!, ref detail, ref refused);
+        if (!done && refused != null) detail = refused;
+        return done;
+    }
+
+    private bool TryClickRowsForBridge(string label, ref Dictionary<string, object?> detail, ref Dictionary<string, object?>? refused)
+    {
+        for (int i = 0; i < _view!.OptionRows.Count; i++)
         {
             if (_view.OptionRows[i] is not UiCellRowHandle row) continue;
             // LISTROWS1: a row option answers to its option key, its row key or its first line, through the row's own
             // click slot (the one a pointer click reaches).
             if (Content.OptionsAsRows)
             {
-                string key = label!.Trim();
+                string key = label.Trim();
                 bool match = string.Equals(key, UiDialogs.OptionKey(i), StringComparison.Ordinal)
                     || string.Equals(key, row.Key, StringComparison.Ordinal)
                     || (i < Content.Options.Count && string.Equals(key, Content.Options[i], StringComparison.OrdinalIgnoreCase));
-                if (match && row.TryInvokeRow(out detail)) return true;
+                if (!match) continue;
+                if (row.TryInvokeRow(out detail)) return true;
+                if (refused == null && UiClickGate.RefusalOf(detail) != null) refused = detail;
                 continue;
             }
 
             if (row.TryInvokeCell(label, out detail)) return true;
+            if (refused == null && UiClickGate.RefusalOf(detail) != null) refused = detail;
         }
 
         // WORLDRESTORE1: stacked extra answers (LIMITS1) are rows of their own.
         foreach (var (_, extraRow) in _view.ExtraRows)
         {
-            if (extraRow is UiCellRowHandle row && row.TryInvokeCell(label, out detail)) return true;
+            if (extraRow is not UiCellRowHandle row) continue;
+            if (row.TryInvokeCell(label, out detail)) return true;
+            if (refused == null && UiClickGate.RefusalOf(detail) != null) refused = detail;
         }
 
         return false;
@@ -1388,7 +1408,7 @@ internal sealed class UiDialog : IDisposable
         string? key = open.ChoiceKey(choice, out string error);
         if (key == null) throw new ArgumentException(error);
         if (!open.TryClickForBridge(key, out var detail))
-            throw new ArgumentException("the open dialog's '" + key + "' button could not be clicked; " + open.ChoicesText());
+            throw new ArgumentException(UiClickGate.RefusalOf(detail) ?? "the open dialog's '" + key + "' button could not be clicked; " + open.ChoicesText());
         detail["choice"] = (choice ?? "").Trim().ToLowerInvariant();
         detail["title"] = open.Content.Title;
         detail["answered"] = !open.IsOpen;

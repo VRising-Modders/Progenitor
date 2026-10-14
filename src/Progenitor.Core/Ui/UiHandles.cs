@@ -13,6 +13,41 @@ internal interface IHasOverlay
     IRuntimeWidget? Overlay { get; }
 }
 
+/// <summary>
+/// The bridge's click rule for grayed controls: a control a pointer cannot click (a handle with
+/// <see cref="IUiHandle.Interactable"/> false, a cell drawn <see cref="CellTone.Disabled"/>) is refused
+/// with this reason and its slot is not dispatched. Live 2026-10-14: <c>widget_click</c> reported
+/// <c>invoked:1</c> on a needs-server-part button the page had grayed.
+/// </summary>
+internal static class UiClickGate
+{
+    /// <summary>The key a refused click leaves in its detail dictionary.</summary>
+    internal const string RefusedKey = "refused";
+
+    /// <summary><c>'Open' is disabled (not interactable); not clicked: Needs the server part of this mod.</c></summary>
+    internal static string DisabledMessage(string? label, string? reason)
+    {
+        string why = (reason ?? "").Trim();
+        return "'" + (label ?? "").Trim() + "' is disabled (not interactable); not clicked" + (why.Length == 0 ? "." : ": " + why);
+    }
+
+    /// <summary>
+    /// The bridge's <c>ok:false</c> for a refused click. <see cref="Exception.Data"/> carries
+    /// <see cref="RefusedKey"/> so a caller does not retry the label on another path (the dev bridge
+    /// falls back to the cell-row registry for an unknown caption, and must not for a grayed one).
+    /// </summary>
+    internal static ArgumentException Refused(string message)
+    {
+        var e = new ArgumentException(message);
+        e.Data[RefusedKey] = true;
+        return e;
+    }
+
+    /// <summary>The refusal a click left in <paramref name="detail"/>, or null.</summary>
+    internal static string? RefusalOf(IReadOnlyDictionary<string, object?>? detail) =>
+        detail != null && detail.TryGetValue(RefusedKey, out var value) && value is string s && s.Length > 0 ? s : null;
+}
+
 internal abstract class UiHandle : IUiHandle
 {
     private int _disposed;
@@ -2099,6 +2134,12 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
                     detail["reachable"] = false;
                     return false;
                 }
+                if (row.ClickRefusal(null) is { } rowRefusal)
+                {
+                    detail["label"] = row.Key;
+                    detail[UiClickGate.RefusedKey] = rowRefusal;
+                    return false;
+                }
                 UiSlotTable.BootstrapDispatch(row.WidgetId, (byte)UiSlotKind.Click, 0f, false, null);
                 detail["label"] = row.Key;
                 detail["kind"] = row._header ? "cellheader" : "cellrow";
@@ -2107,6 +2148,12 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
             }
             if (row._inputKeys.Contains(cellKey)) return false;
             if (!row._cellIds.TryGetValue(cellKey, out ushort id) || id == 0) return false;
+            if (row.ClickRefusal(cellKey) is { } cellRefusal)
+            {
+                detail["label"] = row.Key + "/" + cellKey;
+                detail[UiClickGate.RefusedKey] = cellRefusal;
+                return false;
+            }
             UiSlotTable.BootstrapDispatch(id, (byte)UiSlotKind.Click, 0f, false, null);
             detail["label"] = row.Key + "/" + cellKey;
             detail["kind"] = "cell";
@@ -2114,7 +2161,9 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
             return true;
         }
 
-        // A bare caption: the first visible button cell showing it.
+        // A bare caption: the first visible button cell showing it that a pointer could click; a grayed
+        // match is reported only when no clickable one exists.
+        string? refusedLabel = null, refusal = null;
         UiCellRowHandle[] snapshot;
         lock (LiveRows) snapshot = LiveRows.ToArray();
         for (int i = 0; i < snapshot.Length; i++)
@@ -2126,6 +2175,11 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
                 if (!cell.Visible || !string.Equals(cell.Text, label, StringComparison.OrdinalIgnoreCase)) continue;
                 if (candidate._inputKeys.Contains(cell.Key)) continue;
                 if (!candidate._cellIds.TryGetValue(cell.Key, out ushort id) || id == 0) continue;
+                if (candidate.ClickRefusal(cell.Key) is { } why)
+                {
+                    if (refusal == null) { refusal = why; refusedLabel = candidate.Key + "/" + cell.Key; }
+                    continue;
+                }
                 UiSlotTable.BootstrapDispatch(id, (byte)UiSlotKind.Click, 0f, false, null);
                 detail["label"] = candidate.Key + "/" + cell.Key;
                 detail["kind"] = "cell";
@@ -2133,7 +2187,36 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
                 return true;
             }
         }
+        if (refusal != null)
+        {
+            detail["label"] = refusedLabel;
+            detail[UiClickGate.RefusedKey] = refusal;
+        }
         return false;
+    }
+
+    /// <summary>
+    /// The bridge's click rule (<see cref="UiClickGate"/>): null when a pointer could click this row
+    /// (<paramref name="cellKey"/> null) or its cell, else why not: the row is not interactable, or the
+    /// cell is drawn <see cref="CellTone.Disabled"/> (the runtime sets such a button non-interactable).
+    /// </summary>
+    internal string? ClickRefusal(string? cellKey)
+    {
+        CellSpec? cell = null;
+        if (cellKey != null)
+        {
+            foreach (var candidate in _spec.Cells)
+            {
+                if (candidate == null || !string.Equals(candidate.Key, cellKey, StringComparison.Ordinal)) continue;
+                cell = candidate;
+                break;
+            }
+        }
+
+        string label = cell != null ? (string.IsNullOrWhiteSpace(cell.Text) ? Key + "/" + cell.Key : cell.Text) : Key;
+        if (!Interactable) return UiClickGate.DisabledMessage(label, Help);
+        if (cell != null && cell.Tone == CellTone.Disabled) return UiClickGate.DisabledMessage(label, null);
+        return null;
     }
 
     /// <summary>
@@ -2154,6 +2237,13 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         {
             detail["label"] = Key;
             detail["reachable"] = false;
+            return false;
+        }
+
+        if (ClickRefusal(null) is { } refusal)
+        {
+            detail["label"] = Key;
+            detail[UiClickGate.RefusedKey] = refusal;
             return false;
         }
 
@@ -2188,6 +2278,13 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
 
         if (key == null || _inputKeys.Contains(key)) return false;
         if (!_cellIds.TryGetValue(key, out ushort id) || id == 0) return false;
+        if (ClickRefusal(key) is { } refusal)
+        {
+            detail["label"] = Key + "/" + key;
+            detail[UiClickGate.RefusedKey] = refusal;
+            return false;
+        }
+
         UiSlotTable.BootstrapDispatch(id, (byte)UiSlotKind.Click, 0f, false, null);
         detail["label"] = Key + "/" + key;
         detail["kind"] = "cell";
