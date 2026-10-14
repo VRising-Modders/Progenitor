@@ -516,8 +516,10 @@ internal sealed partial class UnityUiRuntime
     internal static void ClearSyntheticLog() => SynthLog.Clear();
 
     /// <summary>
-    /// Give the text field under (or inside) the UI object at the screen point the keyboard, through the kit's own focus
-    /// (the click path's <see cref="FocusOwnedField"/>). For a cell-row value box when a synthetic click is not wanted.
+    /// Give the kit text field at the screen point the keyboard through the shown-input pump's own click-to-focus
+    /// (<see cref="FocusFieldAt"/>: visible, inside its clipping viewport, not under a dialog). When that path refuses,
+    /// nothing is focused and the reply names the field the raycast found, so the bridge never succeeds where a click
+    /// would not.
     /// </summary>
     internal static Dictionary<string, object?> BridgeFocusFieldAt(float x, float y)
     {
@@ -573,16 +575,10 @@ internal sealed partial class UnityUiRuntime
             return d;
         }
 
-        if (!FocusOwnedField(field))
-        {
-            d["error"] = "the field is not armed by the kit (not a kit text field)";
-            d["field"] = SafePath(field.gameObject);
-            return d;
-        }
-
-        d["ok"] = true;
+        // Not focused here on purpose: the bridge succeeds only where a player's click would (the click path refused it:
+        // the field is hidden, clipped out of its viewport, under a dialog, or not a kit field).
         d["field"] = SafePath(field.gameObject);
-        d["focused"] = ReferenceEquals(FocusedArmedField(), field) || FocusedArmedField()?.GetInstanceID() == field.GetInstanceID();
+        d["error"] = "the click-to-focus path did not take this point (the field is hidden, clipped by its viewport, under a dialog, or not a kit field)";
         return d;
     }
 
@@ -631,6 +627,9 @@ internal sealed partial class UnityUiRuntime
     {
         var field = FocusedArmedField();
         if (field == null || IsMultiline(field)) return false;
+        // A widget's value box and an external field take Enter through the pump's own Enter branch (the synthetic key's
+        // edge: ReleaseWidgetField / NotifyExternalSubmit); only a plain kit field needs TMP's submit, as `type` gives it.
+        if (EnterLeavesField(field) || ExternalGuardId(field) != null) return false;
         UiTextInjection.Keys.Enqueue(new UiTestChord(UiKey.Enter, ctrl: false, alt: false, shift: false, meta: false));
         return true;
     }
