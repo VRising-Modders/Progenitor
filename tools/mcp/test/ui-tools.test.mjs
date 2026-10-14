@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { registerUiTools, compact, UI_INPUT_TIMEOUT_MS } from '../ui-tools.mjs';
+import { registerUiTools, compact, consoleTimeoutMs, UI_INPUT_TIMEOUT_MS } from '../ui-tools.mjs';
 import { isReadOnlyOp } from '../queue.mjs';
 
 function register() {
@@ -20,7 +20,7 @@ function register() {
 
 test('the UI tools are registered with descriptions', () => {
   const { tools } = register();
-  for (const name of ['progenitor_ui_input', 'progenitor_ui_read', 'progenitor_nav', 'progenitor_display', 'progenitor_screenshot']) {
+  for (const name of ['progenitor_ui_input', 'progenitor_ui_read', 'progenitor_nav', 'progenitor_display', 'progenitor_screenshot', 'progenitor_console']) {
     assert.ok(tools.has(name), name);
     assert.ok(tools.get(name).description.length > 80, name);
   }
@@ -78,6 +78,31 @@ test('ui_read, nav, display and screenshot reach their ops', async () => {
   assert.deepEqual(calls[0][2], { what: 'widget', key: 'demo-table' });
   assert.equal(tools.get('progenitor_nav').schema.safeParse({ action: 'stick', y: 2 }).success, false);
   assert.equal(tools.get('progenitor_display').schema.safeParse({ action: 'set', width: 100, height: 100 }).success, false);
+});
+
+test('ui_input takes submit with a target', async () => {
+  const { tools, calls } = register();
+  const t = tools.get('progenitor_ui_input');
+  await t.handler(t.schema.parse({ action: 'submit', x: 640, y: 360 }));
+  assert.deepEqual(calls[0][2], { action: 'submit', x: 640, y: 360 });
+});
+
+test('console sends one command line to the client and waits for its output', async () => {
+  const { tools, calls } = register();
+  const t = tools.get('progenitor_console');
+  assert.ok(t.description.includes('TryCommand'));
+  await t.handler(t.schema.parse({ text: 'adminauth' }));
+  assert.equal(calls[0][0], 'client');
+  assert.equal(calls[0][1], 'console');
+  assert.deepEqual(calls[0][2], { text: 'adminauth' });
+  assert.equal(calls[0][3], consoleTimeoutMs(undefined));
+  await t.handler(t.schema.parse({ text: 'adminauth', waitMs: 4000, echo: false }));
+  assert.deepEqual(calls[1][2], { text: 'adminauth', waitMs: 4000, echo: false });
+  assert.equal(calls[1][3], 14000);
+  assert.equal(t.schema.safeParse({ text: '' }).success, false);
+  assert.equal(t.schema.safeParse({ text: 'x'.repeat(513) }).success, false);
+  assert.equal(t.schema.safeParse({ text: 'a', waitMs: 10001 }).success, false);
+  assert.ok(!isReadOnlyOp('console', { text: 'adminauth' }));
 });
 
 test('compact drops undefined and null', () => {

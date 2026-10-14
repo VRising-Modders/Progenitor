@@ -454,6 +454,10 @@ public readonly struct KeyChord : IEquatable<KeyChord>
             case "9": key = UiKey.Digit9; return true;
         }
 
+        // The punctuation keys by the character they type on a US layout, and their common names. The console key is
+        // Backquote: "`" and "~" (its shifted character) both name it. "+" cannot be a key name: it joins a chord.
+        if (TryPunctuationKey(token, out key)) return true;
+
         // KEYS4: the mouse buttons by the game's words too ("Mouse Button 4" is the forward button).
         switch (token.Replace(" ", "").ToLowerInvariant())
         {
@@ -501,5 +505,39 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         if (char.IsDigit(token[0])) return false;
         key = parsed;
         return true;
+    }
+
+    /// <summary>
+    /// A punctuation key by its US-layout character (<c>`</c>, <c>~</c>, <c>'</c>, <c>;</c>, <c>,</c>, <c>.</c>,
+    /// <c>/</c>, <c>\</c>, <c>[</c>, <c>]</c>, <c>-</c>, <c>=</c>) or a common name (<c>Tilde</c>, <c>Grave</c>,
+    /// <c>Apostrophe</c>, <c>Hyphen</c>, <c>Dash</c>). The enum names (<c>Backquote</c>, <c>Quote</c>, <c>Minus</c>...)
+    /// parse through the enum. A shifted character names its key (<c>~</c> is Backquote), never a Shift chord.
+    /// </summary>
+    public static bool TryPunctuationKey(string token, out UiKey key)
+    {
+        key = token switch
+        {
+            "`" or "~" => UiKey.Backquote,
+            "'" => UiKey.Quote,
+            ";" => UiKey.Semicolon,
+            "," => UiKey.Comma,
+            "." => UiKey.Period,
+            "/" => UiKey.Slash,
+            "\\" => UiKey.Backslash,
+            "[" => UiKey.LeftBracket,
+            "]" => UiKey.RightBracket,
+            "-" => UiKey.Minus,
+            "=" => UiKey.Equals,
+            _ => UiKey.None,
+        };
+        if (key != UiKey.None) return true;
+        key = token.ToLowerInvariant() switch
+        {
+            "tilde" or "grave" or "backtick" => UiKey.Backquote,
+            "apostrophe" => UiKey.Quote,
+            "hyphen" or "dash" => UiKey.Minus,
+            _ => UiKey.None,
+        };
+        return key != UiKey.None;
     }
 }

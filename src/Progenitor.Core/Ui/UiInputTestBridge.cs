@@ -252,6 +252,9 @@ internal static class UiInputTestBridge
     /// <summary>Give the kit text field at the point the keyboard (a cell-row value box, a search box).</summary>
     public static Dictionary<string, object?> FocusAt(float x, float y) => UnityUiRuntime.BridgeFocusFieldAt(x, y);
 
+    /// <summary>The submit event (a controller's confirm) to the button at the point, found the way a click finds it.</summary>
+    public static Dictionary<string, object?> SubmitAt(float x, float y) => UnityUiRuntime.BridgeSubmitAt(x, y);
+
     // ---- Navigation ----------------------------------------------------------------------------------
 
     public static Dictionary<string, object?> HoldNav(string buttons, int ms)
