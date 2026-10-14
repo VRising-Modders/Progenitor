@@ -36,6 +36,7 @@
     <Compile Include="..\..\samples\Progenitor.SampleClientLed\ClientLedMessages.cs" Link="Samples\Progenitor.SampleClientLed\Linked\ClientLedMessages.cs" />
     <Compile Include="..\..\samples\Progenitor.CompatTest\CompatTestMessages.cs" Link="Samples\Progenitor.CompatTest\Linked\CompatTestMessages.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleExchangeMessages.cs" Link="Samples\Progenitor.Sample\Linked\SampleExchangeMessages.cs" />
+    <Compile Include="..\..\samples\Progenitor.SharedResourcesTest\Fixture.cs" Link="Samples\Progenitor.SharedResourcesTest\Linked\Fixture.cs" />
   </ItemGroup>
 
   <!-- The samples' recorded fixtures, beside their replay tests (Samples/<sample>/Fixtures/...). -->
