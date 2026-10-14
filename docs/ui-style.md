@@ -4,6 +4,8 @@ How to give a mod's UI the game's look and the framework's behavior. Use this pa
 
 The reference is **Progenitor.ControlsSample** (`samples/Progenitor.ControlsSample`). Its **All controls** page (Ctrl+F7 in a world, or the Mods menu: the mod's entry, then **All controls**) shows every control on the settings grid, and every control there is one line in [ControlsDemo.cs](../samples/Progenitor.ControlsSample/ControlsDemo.cs): find it by the caption the table in section 3 names. Its settings page is every `ctx.Settings.Page` row ([Plugin.cs](../samples/Progenitor.ControlsSample/Plugin.cs), `ControlsSettings`). **Progenitor.Sample**'s F9 window ([SampleUi.cs](../samples/Progenitor.Sample/SampleUi.cs), `OpenDemo`) is the reference for a floating window. Copy from those rather than from older panels; this page adds no code of its own.
 
+**The standard: first class.** Every piece of Progenitor UI, and every UI a mod builds with it, must look like part of the game: the game's own art, fonts, colors and spacing (through the kit's controls and `UiLook`), vanilla hover, press and selected states, and aligned rows. Nothing may be cut off or overlap at 1920x1080, 2560x1440 or 3840x2160. A control that looks like debug UI or bolted on is not finished: mock it up first, compare it with the game's own panel it sits next to, and check it in the game before calling it done.
+
 ## 1. Pick where the UI lives
 
 | The mod needs | Use | Why |
@@ -84,7 +86,7 @@ On a Mods page and a `GameWindow`, buttons and controls already use the game's a
 
 ## 7. Before you ship
 
-1. Open the page or window in the game at the resolution you play at and at a smaller one; nothing is cut off or overlaps.
+1. Open the page or window in the game at 1920x1080, 2560x1440 and 3840x2160; nothing is cut off or overlaps, and it reads as part of the game, not as debug UI.
 2. Walk it with a controller or the keyboard only: every control is reached, and Escape or B leaves.
 3. Hover every option of a dropdown or radio with descriptions; each reads well on its own.
 4. Unload the mod (or hot-reload it): its windows close and nothing it drew stays on screen.

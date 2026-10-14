@@ -46,6 +46,8 @@ Use the bridge for deterministic test actions and the focus-free observation too
 
 After a live test batch, restore the test state and disconnect normally. Remove every sample, example, ApiValidation, Exercise, HotDemo or harness plugin you deployed from `BepInEx/progenitor-reload` on the client and the server (keep Core, the Dev bridge and real third-party mods), confirm the clean unload in the logs, and say what you removed. Leftover samples keep running in a later game session.
 
+Player-facing UI must look first class: built from the kit's controls with the game's own art, fonts, colors and spacing, no clipping or overlap at common resolutions, mocked up before it is built and checked in the game with screenshots before it is called done. See the standard at the top of [ui-style.md](docs/ui-style.md).
+
 ## Native and interop constraints
 
 Read current source and existing notes before creating a live experiment. Interop assemblies expose signatures and layouts; their stubs do not contain the native method bodies. When behavior depends on the native implementation, inspect the type's interop signature, find the method in the game's metadata for the matching side, and check its native behavior with your own tooling. Keep tooling, query lists, exports, logs and findings outside this repository; only conclusions observed in the game go into [knowledge notes](knowledge/README.md) or the docs.
