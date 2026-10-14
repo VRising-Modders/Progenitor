@@ -290,27 +290,158 @@ public class VanillaPanelTests : IDisposable
     // ---------------------------------------------------------------- missing sites
 
     [Fact]
-    public void A_missing_site_is_reported_once_per_generation()
+    public void Only_a_resolver_failure_makes_a_site_absent_a_missing_piece_is_logged_once()
     {
-        Assert.True(VanillaSiteHealth.ReportMissing(VanillaUiSite.ContainerPanel, "SelfSortButton"));
-        Assert.False(VanillaSiteHealth.ReportMissing(VanillaUiSite.ContainerPanel, "SelfSortButton"));
-        Assert.False(VanillaSiteHealth.ReportMissing(VanillaUiSite.ContainerPanel, "other"));
-        Assert.True(VanillaSiteHealth.IsMissing(VanillaUiSite.ContainerPanel));
-        Assert.Equal("missing=ContainerPanel:SelfSortButton", VanillaSiteHealth.Describe());
-        Assert.Contains("Ui: site ContainerPanel not found (SelfSortButton)", VanillaSiteHealth.Line(VanillaUiSite.ContainerPanel, "SelfSortButton"));
+        // A missing donor or anchor group (degraded): one line per site and piece, site still live.
+        Assert.True(VanillaSiteHealth.LogOnce(VanillaUiSite.ContainerPanel, "anchor rename"));
+        Assert.False(VanillaSiteHealth.LogOnce(VanillaUiSite.ContainerPanel, "anchor rename"));
+        Assert.True(VanillaSiteHealth.LogOnce(VanillaUiSite.ContainerPanel, "body text"));
+        Assert.False(VanillaSiteHealth.IsAbsent(VanillaUiSite.ContainerPanel));
+        Assert.Equal("", VanillaSiteHealth.Describe());
+
+        // The resolver threw (a member the game removed): absent for the generation, one line.
+        Assert.True(VanillaSiteHealth.MarkAbsent(VanillaUiSite.StationPanel, "MissingFieldException"));
+        Assert.False(VanillaSiteHealth.MarkAbsent(VanillaUiSite.StationPanel, "MissingFieldException"));
+        Assert.True(VanillaSiteHealth.IsAbsent(VanillaUiSite.StationPanel));
+        Assert.False(VanillaSiteHealth.IsAbsent(VanillaUiSite.ContainerPanel));
+        Assert.Equal("missing=StationPanel:MissingFieldException", VanillaSiteHealth.Describe());
+        Assert.StartsWith("Ui: site StationPanel not found (x)", VanillaSiteHealth.Line(VanillaUiSite.StationPanel, "x"));
+
         VanillaSiteHealth.Clear();
-        Assert.False(VanillaSiteHealth.IsMissing(VanillaUiSite.ContainerPanel));
+        Assert.False(VanillaSiteHealth.IsAbsent(VanillaUiSite.StationPanel));
+        Assert.True(VanillaSiteHealth.LogOnce(VanillaUiSite.ContainerPanel, "anchor rename"));
     }
 
     [Fact]
-    public void A_missing_site_suppresses_the_registry_no_watch_line()
+    public void An_absent_site_suppresses_the_registry_no_watch_line()
     {
-        VanillaSiteHealth.ReportMissing(VanillaUiSite.StationPanel, "watch: TypeLoadException");
+        VanillaSiteHealth.MarkAbsent(VanillaUiSite.StationPanel, "watch: TypeLoadException");
         _client.RefuseWatch = true;
         var h = UiApi.AttachToVanilla(VanillaUiSite.StationPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
         Assert.DoesNotContain(Lines, l => l.Contains("has no frame watch"));
         h.Dispose();
     }
+
+    [Fact]
+    public void A_missing_anchor_group_fails_only_that_handle_not_the_site_or_other_plugins()
+    {
+        // The rename group is gone after an update: the BesideRename handle gets no container and
+        // says so once; the left column of the same site, and another plugin's, still build.
+        _client.RefuseAnchors.Add(VanillaPanelAnchor.BesideRename);
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        var other = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.RightEdge, new object(), "example.other");
+        rename.Button("Options");
+        left.Button("Deposit");
+        other.Button("Output");
+
+        for (int i = 0; i < 3; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+
+        Assert.False(rename.IsAttached);
+        Assert.True(left.IsAttached);
+        Assert.True(other.IsAttached);
+        Assert.True(rename.IsOpen);
+        Assert.Single(Lines, l => l.Contains("could not build its container") && l.Contains("example.panels"));
+        Assert.False(VanillaSiteHealth.IsAbsent(VanillaUiSite.ContainerPanel));
+        rename.Dispose();
+        left.Dispose();
+        other.Dispose();
+    }
+
+    [Fact]
+    public void An_unmeasurable_fit_never_hides_and_is_asked_again_next_frame()
+    {
+        // Review finding 2: an inline container measured before the group laid it out.
+        var h = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        h.Button("Stash");
+        _client.Fit = new VanillaFitResult(VanillaFit.Unknown, "pending");
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, Character()));
+        Assert.True(_client.ContainerVisible);
+        int calls = _client.FitCalls;
+
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok");
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, Character()));
+        Assert.Equal(calls + 1, _client.FitCalls);
+        Assert.True(_client.ContainerVisible);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void An_inline_refusal_is_final_for_its_container_and_asked_again_on_reopen()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, _owner, "example.panels");
+        h.Button("Stash");
+        _client.Fit = new VanillaFitResult(VanillaFit.Blocked, "overflow:DropAllButton");
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(21, Character()));
+        int calls = _client.FitCalls;
+        for (int i = 0; i < 100; i++) _client.Fire(VanillaUiSite.InventoryPanel, Open(21, Character()));
+        Assert.Equal(calls, _client.FitCalls);
+        Assert.False(_client.ContainerVisible);
+
+        _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok");
+        _client.Fire(VanillaUiSite.InventoryPanel, VanillaSiteSample.Absent);
+        _client.Fire(VanillaUiSite.InventoryPanel, Open(22, Character()));
+        Assert.True(_client.ContainerVisible);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void A_kept_container_is_refit_on_change_and_otherwise_rarely()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        h.Button("Deposit");
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        int start = _client.FitCalls;
+
+        for (int i = 0; i < 29; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(start, _client.FitCalls);
+
+        h.Row("status");
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(start + 1, _client.FitCalls);
+
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest(900)));
+        Assert.Equal(start + 2, _client.FitCalls);
+
+        h.SetRows(new[] { "same count" });
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest(900)));
+        Assert.Equal(start + 2, _client.FitCalls);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void Visible_false_is_kept_across_close_and_reopen()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        h.Button("Deposit");
+        h.Visible = false;
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.False(_client.ContainerVisible);
+        _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(12, Chest()));
+        Assert.False(_client.ContainerVisible);
+        h.Visible = true;
+        Assert.True(_client.ContainerVisible);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void A_later_OnClick_replaces_the_earlier_handler()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        var b = (VanillaAttachButton)h.Button("Deposit");
+        int first = 0, second = 0;
+        var lease = b.OnClick(() => first++);
+        b.OnClick(() => second++);
+        lease.Dispose();
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        UiSlotTable.BootstrapDispatch(b.WidgetId, (byte)UiSlotKind.Click, 0f, false, null);
+        Assert.Equal(0, first);
+        Assert.Equal(1, second);
+        h.Dispose();
+    }
+
+    private static VanillaPanelTarget Character() => new(VanillaPanelKind.Character, 0, 0);
 
     // ---------------------------------------------------------------- the handle
 
@@ -422,8 +553,10 @@ public class VanillaPanelTests : IDisposable
         Assert.False(_client.ContainerVisible);
         Assert.Single(Lines, l => l.Contains("hidden reason=overlap:InventorySubMenu"));
 
+        // The room appears (the other window closed): an edge column is refit on the periodic
+        // pass, not every frame, and comes back.
         _client.Fit = new VanillaFitResult(VanillaFit.Fits, "ok");
-        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        for (int i = 0; i < 30; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
         Assert.True(_client.ContainerVisible);
         Assert.Single(Lines, l => l.Contains("shown again"));
 
@@ -506,6 +639,10 @@ public class VanillaPanelTests : IDisposable
 
         public VanillaFitResult Fit { get; set; } = new(VanillaFit.Fits, "ok");
 
+        public int FitCalls { get; private set; }
+
+        public HashSet<VanillaPanelAnchor> RefuseAnchors { get; } = new();
+
         public int WatchCount => _watches.Count;
 
         public int ContainerBuilds { get; private set; }
@@ -556,6 +693,7 @@ public class VanillaPanelTests : IDisposable
 
         public IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName)
         {
+            if (RefuseAnchors.Contains(anchor)) return null;
             ContainerBuilds++;
             var c = new FakeWidget(containerName, false);
             _containers.Add(c);
@@ -580,7 +718,11 @@ public class VanillaPanelTests : IDisposable
         }
 
         public VanillaFitResult FitAttachContainer(
-            VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons) => Fit;
+            VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons)
+        {
+            FitCalls++;
+            return Fit;
+        }
 
         public bool TryWire(ushort widgetId, UiSlotKind kind, IRuntimeWidget widget)
         {

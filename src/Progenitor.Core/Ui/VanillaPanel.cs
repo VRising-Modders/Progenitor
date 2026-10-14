@@ -70,8 +70,8 @@ public enum VanillaPanelKind
 /// <para><b>Mapping to the server.</b> The client entity is only meaningful in the client world.
 /// The <c>NetworkId</c> is what the game itself uses to name the same object on both sides
 /// (<see cref="NetworkIdIndex"/> and <see cref="NetworkIdGeneration"/> are its
-/// <c>Normal_Index</c> and <c>Normal_Generation</c>); send the three raw words
-/// (<see cref="NetworkId0"/> .. <see cref="NetworkId2"/>) to the server and resolve them there.
+/// <c>Normal_Index</c> and <c>Normal_Generation</c>, and <see cref="NetworkId2"/> its type); send
+/// them to the server and resolve them there.
 /// It is a session-local allocation: never persist it, and never persist <see cref="EntityIndex"/>
 /// either.</para>
 /// </summary>
@@ -107,13 +107,20 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
     /// <summary>Client-world <c>Entity.Version</c>.</summary>
     public int EntityVersion { get; }
 
-    /// <summary>First 4 bytes of the target's <c>NetworkId</c> (<c>Normal_Index</c>).</summary>
+    /// <summary>
+    /// The <c>NetworkId</c>'s first word: <c>Normal_Index</c> for a normal id (every placed
+    /// container, station and heart). Only meaningful together with <see cref="NetworkId1"/> and
+    /// <see cref="NetworkId2"/>.
+    /// </summary>
     public int NetworkId0 { get; }
 
-    /// <summary>Bytes 4..7 of the <c>NetworkId</c> (<c>Normal_Generation</c> in the low byte).</summary>
+    /// <summary>
+    /// The second word: <c>Normal_Generation</c> (0..255) for a normal id, with the padding bytes
+    /// cleared; for a static-map id (<see cref="NetworkId2"/> = 2) the game's own second word.
+    /// </summary>
     public int NetworkId1 { get; }
 
-    /// <summary>Bytes 8..11 of the <c>NetworkId</c> (its type).</summary>
+    /// <summary>The id's type (<c>NetworkIdType</c>: 0 none, 1 normal, 2 static map object), padding cleared.</summary>
     public int NetworkId2 { get; }
 
     /// <summary>For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered item's <c>PrefabGUID</c>, else 0.</summary>
@@ -488,49 +495,71 @@ internal static class VanillaPanelPlacement
     }
 }
 
+
 /// <summary>
-/// "A site that cannot be found after a game update hides and logs one line." The one place that
-/// decides whether a missing piece has already been reported, so a per-frame resolver can call it
-/// every frame without spamming. Game-free; cleared on Core Uninstall.
+/// "A site that cannot be found after a game update hides and logs one line." Two different
+/// things, kept apart (review of P6, finding 3):
+///
+/// <list type="bullet">
+/// <item><description><b>Absent</b> (<see cref="MarkAbsent"/>): the resolver itself failed — a member
+/// the game removed or renamed throws when it is touched. Nothing about the site can be read, so it
+/// stays absent for the generation for every plugin, with one line.</description></item>
+/// <item><description><b>Degraded</b> (<see cref="LogOnce"/>): the window resolves but one piece is
+/// missing this time (a donor, an anchor's button group). Only the drawing that needs the piece is
+/// withheld, for this frame and this handle; the site keeps resolving, other anchors and other
+/// plugins are unaffected, and the line is said once per site and piece.</description></item>
+/// </list>
+/// Game-free; cleared on Core Uninstall.
 /// </summary>
 internal static class VanillaSiteHealth
 {
     private static readonly object Gate = new();
-    private static readonly Dictionary<VanillaUiSite, string> Missing = new();
+    private static readonly Dictionary<VanillaUiSite, string> Absent = new();
+    private static readonly HashSet<string> Said = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Record that <paramref name="site"/> is missing <paramref name="what"/>. True exactly once per
-    /// site and generation: the caller logs on true and stays silent after.
+    /// The resolver for <paramref name="site"/> failed: mark it absent for this generation. True
+    /// exactly once per site: the caller logs on true and stays silent after.
     /// </summary>
-    internal static bool ReportMissing(VanillaUiSite site, string what)
+    internal static bool MarkAbsent(VanillaUiSite site, string what)
     {
         lock (Gate)
         {
-            if (Missing.ContainsKey(site)) return false;
-            Missing[site] = what ?? "?";
+            if (Absent.ContainsKey(site)) return false;
+            Absent[site] = what ?? "?";
+            Said.Add(Key(site, what));
             return true;
         }
     }
 
-    /// <summary>Whether a site has been reported missing in this generation.</summary>
-    internal static bool IsMissing(VanillaUiSite site)
+    /// <summary>Whether the site's resolver failed in this generation.</summary>
+    internal static bool IsAbsent(VanillaUiSite site)
     {
-        lock (Gate) return Missing.ContainsKey(site);
+        lock (Gate) return Absent.ContainsKey(site);
     }
 
-    /// <summary>The line the first report produces. One format, so docs can quote it.</summary>
+    /// <summary>
+    /// A piece of <paramref name="site"/> is missing. True the first time this site and piece are
+    /// reported; the site is <b>not</b> marked absent.
+    /// </summary>
+    internal static bool LogOnce(VanillaUiSite site, string what)
+    {
+        lock (Gate) return Said.Add(Key(site, what));
+    }
+
+    /// <summary>The line a first report produces. One format, so docs can quote it.</summary>
     internal static string Line(VanillaUiSite site, string what) =>
         "Ui: site " + VanillaUiSites.Key(site) + " not found (" + (what ?? "?")
-        + "); its attachments stay hidden until the game provides it.";
+        + "); what needs it stays hidden until the game provides it.";
 
-    /// <summary><c>missing=&lt;site&gt;:&lt;what&gt;,...</c> for the pin line, or empty.</summary>
+    /// <summary><c>missing=&lt;site&gt;:&lt;what&gt;,...</c> for the pin line (absent sites only), or empty.</summary>
     internal static string Describe()
     {
         lock (Gate)
         {
-            if (Missing.Count == 0) return "";
+            if (Absent.Count == 0) return "";
             var parts = new List<string>();
-            foreach (var kv in Missing) parts.Add(VanillaUiSites.Key(kv.Key) + ":" + kv.Value);
+            foreach (var kv in Absent) parts.Add(VanillaUiSites.Key(kv.Key) + ":" + kv.Value);
             parts.Sort(StringComparer.Ordinal);
             return "missing=" + string.Join(",", parts);
         }
@@ -539,6 +568,12 @@ internal static class VanillaSiteHealth
     /// <summary>Core Uninstall and tests: the next generation reports afresh.</summary>
     internal static void Clear()
     {
-        lock (Gate) Missing.Clear();
+        lock (Gate)
+        {
+            Absent.Clear();
+            Said.Clear();
+        }
     }
+
+    private static string Key(VanillaUiSite site, string what) => (int)site + "|" + (what ?? "?");
 }

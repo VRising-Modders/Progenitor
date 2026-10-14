@@ -59,9 +59,12 @@ public enum VanillaUiSite
     /// (inside <c>ContainerSubMenu.OpenTagEditButtonParent</c>, after
     /// <c>OpenTagEditButton</c>).</description></item>
     /// <item><description><b>Donors:</b> buttons clone the inventory bottom bar's
-    /// <c>SelfSortButton</c>; captions and rows take the window's <c>HeaderText</c>
-    /// font.</description></item>
-    /// <item><description><b>Refresh:</b> <c>SystemHooks.After&lt;ContainerMenuMapper&gt;</c>.</description></item>
+    /// <c>SelfSortButton</c>; captions clone the label of the inventory's own tab buttons and rows
+    /// clone the tooltip's body text (<c>FakeTooltip.Description</c>).</description></item>
+    /// <item><description><b>Refresh:</b> <c>SystemHooks.After&lt;ContainerMenuMapper&gt;</c> with
+    /// <c>OnlyWhenSystemRuns = false</c> (every panel site uses that option: the mappers only run
+    /// while their queries match, and a close must be seen), reading every mapper from one shared
+    /// per-frame scan.</description></item>
     /// </list>
     /// </summary>
     ContainerPanel = 2,

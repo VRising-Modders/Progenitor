@@ -62,7 +62,11 @@ public interface IVanillaAttachHandle : IDisposable
     /// <summary>True after <see cref="IDisposable.Dispose"/>, including a second call.</summary>
     bool IsDisposed { get; }
 
-    /// <summary>Container active flag. Rows keep their text while hidden.</summary>
+    /// <summary>
+    /// The plugin's wish to show the attachment. Kept across close and reopen: the container is
+    /// drawn only while the site is open, attached, and (panel sites) the placement fits, and then
+    /// only if this is true. Rows and buttons keep their text while hidden.
+    /// </summary>
     bool Visible { get; set; }
 
     /// <summary>How many rows this attachment holds.</summary>
@@ -120,7 +124,9 @@ public interface IVanillaAttachHandle : IDisposable
     /// the vanilla group (inline anchors) or by the column (edge anchors). Like a row it is
     /// addressed by position and survives the panel being closed and reopened: the caption and the
     /// click handler live on the handle, and the clone is rewired to the same Bootstrap click slot
-    /// each time it is rebuilt. On the map card and the tooltip site the button is disabled.
+    /// each time it is rebuilt. A button has <b>one</b> click handler, as every <c>IUiButton</c>
+    /// does: a later <c>OnClick</c> replaces the earlier one, and disposing the earlier lease then
+    /// does nothing. On the map card and the tooltip site the button is disabled.
     /// </summary>
     IUiButton Button(string caption) => DisabledAttachButton.Instance;
 

@@ -32,9 +32,9 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
     {
         var container = Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, "Deposit");
         var status = container.Row("No container open");
-        container.OnPanel(e => status.Text = e.Change == VanillaPanelChange.Closed
+        ctx.Track(container.OnPanel(e => status.Text = e.Change == VanillaPanelChange.Closed
             ? "No container open"
-            : "Container " + e.Target.NetworkIdIndex);
+            : "Container " + e.Target.NetworkIdIndex));
         Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.RightEdge, "Output");
         Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, "Options");
         Attach(ctx, VanillaUiSite.StationPanel, VanillaPanelAnchor.LeftEdge, "Inputs");

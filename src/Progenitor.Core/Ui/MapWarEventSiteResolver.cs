@@ -68,7 +68,7 @@ internal static class VanillaSiteRuntime
             catch (Exception e)
             {
                 // A mapper type the game no longer has fails here, once, at install.
-                if (VanillaSiteHealth.ReportMissing(site, "watch: " + e.GetType().Name))
+                if (VanillaSiteHealth.MarkAbsent(site, "watch: " + e.GetType().Name))
                     Plugin.Logger?.LogWarning(VanillaSiteHealth.Line(site, "watch: " + e.GetType().Name + ": " + e.Message));
                 return null;
             }

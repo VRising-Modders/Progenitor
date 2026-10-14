@@ -111,6 +111,18 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private VanillaFit _fit = VanillaFit.Unknown;
     private string _fitReason = "";
 
+    // Refit scheduling (review of P6, finding 5): the fit reads rects and walks the vanilla group,
+    // so it runs when something that can move the container changed - a build, a row or button
+    // count change, a target change, a Visible write - and otherwise once every RefitEvery kept
+    // frames, to follow a resolution change. An inline or tooltip verdict of Blocked is final for
+    // the container it was made on (the game laid it out and it did not fit); the next build asks
+    // again.
+    private const int RefitEvery = 30;
+    private const int MaxPendingFits = 10;
+    private bool _fitDirty = true;
+    private int _keptFrames;
+    private int _pendingFits;
+
     internal VanillaAttachHandle(
         VanillaUiSite site,
         string pluginId,
@@ -195,6 +207,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _buttonShown.Add(true);
             _buttonIds.Add(id);
             _buttons.Add(null);
+            _fitDirty = true;
             if (ContainerAliveLocked()) SyncButtonsLocked();
         }
 
@@ -229,6 +242,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             lock (_gate)
             {
                 _visible = value;
+                _fitDirty = true;
                 if (ContainerAliveLocked()) _container!.Visible = value && _fit != VanillaFit.Blocked;
             }
         }
@@ -243,6 +257,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             index = _texts.Count;
             _texts.Add(text ?? "");
             _rows.Add(null);
+            _fitDirty = true;
             if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
         }
 
@@ -255,6 +270,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         lock (_gate)
         {
             int n = rows?.Count ?? 0;
+            if (n != _texts.Count) _fitDirty = true;
             while (_texts.Count > n)
             {
                 int last = _texts.Count - 1;
@@ -403,7 +419,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             switch (decision.Action)
             {
                 case VanillaAttachAction.Keep:
-                    if (IsPanel) FitLocked(first: false);
+                    if (IsPanel && ShouldRefitLocked()) FitLocked(first: false);
                     return;
 
                 case VanillaAttachAction.Degrade:
@@ -493,6 +509,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         // _fitReason is deliberately kept across builds: the tooltip rebuilds on every hover, and a
         // reason already said for this handle is not said again until the container fits once.
         _fit = VanillaFit.Unknown;
+        _fitDirty = true;
+        _keptFrames = 0;
+        _pendingFits = 0;
         container.Visible = _visible;
         SyncRowsLocked();
         if (IsPanel)
@@ -537,8 +556,19 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     /// the recovery, because "hidden because it would overlap" is otherwise indistinguishable from
     /// "never attached".
     /// </summary>
+    private bool ShouldRefitLocked()
+    {
+        if (_fit == VanillaFit.Blocked && !VanillaUiSites.IsEdge(Anchor)) return false;
+        if (_fitDirty) return true;
+        if (++_keptFrames < RefitEvery) return false;
+        _keptFrames = 0;
+        return true;
+    }
+
     private void FitLocked(bool first)
     {
+        _fitDirty = false;
+        _keptFrames = 0;
         if (!ContainerAliveLocked()) return;
         VanillaFitResult result;
         try { result = _runtime.FitAttachContainer(Site, Anchor, _container!, _texts.Count, _captions.Count); }
@@ -549,6 +579,14 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         }
 
         _fit = result.Fit;
+
+        // Unknown is "not measurable yet" (a group not laid out on its build frame): shown, and
+        // asked again next frame, a bounded number of times. Never a hide.
+        if (result.Fit == VanillaFit.Unknown && IsPanel && _pendingFits < MaxPendingFits)
+        {
+            _pendingFits++;
+            _fitDirty = true;
+        }
         bool show = _visible && result.Shown;
         try { if (_container!.Visible != show) _container.Visible = show; }
         catch { /* a container Unity just destroyed is the next frame's rebuild */ }
@@ -584,6 +622,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             if (IsDisposed) return;
             edge = _tracker.Observe(sample.Resolved, sample.Target, out previous);
             current = _tracker.Target;
+            if (edge != null) _fitDirty = true;
             if (edge != null && _panelHandlers.Count > 0) handlers = _panelHandlers.ToArray();
         }
 
