@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **804** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **815** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -69,6 +69,7 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Peer` (`PluginPeer`) / `ctx.Peers` (`PluginPeers`) | verified live (2026-10-09) | Client: the joined server's features and mod versions (`Known`, `Has`, `ModVersion`, `CoreVersion`, `Changed`). Server: `Peers.Of(user)` per connected client, `Peers.Changed(Entity)`. | `samples/Progenitor.CompatTest` (test plugin) |
 | `ctx.Messages` (`PluginMessages`) | verified live (2026-10-09) | Versioned, tolerant messages on Core's `'PrMs'` envelope: `On<T>`, `SendToServer`, `SendTo`, `SendToAll`, plus the hand-written `MessageWriter` / `MessageReader` overloads. Sends are gated on the peer's capability and feature table. | `samples/Progenitor.CompatTest` (test plugin) |
 | `ctx.Castles` | verified live | Server castle plot / tile / building reads and handles on this plugin's world. | `SampleCastle.cs` (`.castle`) |
+| `ctx.MaterialSource` (`PluginMaterialSource`) | experimental | The one build and craft material provider: register, invalidate, read what is armed. [Material sources](#material-sources). | unit test `MaterialSourceRegistryTests` |
 | `ctx.Inventory` (`PluginInventory`) | landed | Server inventories of any kind: read, count, free space, add, remove, atomic transfer, watches, stable container ids. Client throws. [Inventory](#inventory). | `SampleInventory.cs` (`.items chests`, `.items move`) |
 | `ctx.Clans` (`PluginClans`) | landed | Server clans: a user's clan, its members and its castles. Client throws. [Clans](#clans). | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Units` | verified live | Server unit spawn and steering. Client returns disabled handles. | `SampleUnits.cs` (`.rat`) |
@@ -455,7 +456,7 @@ read back; every count in a result is a read-back. Server only, main thread; cli
 | `ctx.Inventory.Read(InventoryRef)` → `InventorySnapshot` / `ReadInto(InventoryRef, InventorySlot[])` | landed | Slots in buffer order: `InventorySlot` (`Slot`, `Item`, `Amount`, `MaxStack`, `StackOverride`, `HasItemEntity`), plus the container's `InventoryRestriction` (`Item`, `Category`). `ReadInto` fills a caller array and allocates nothing. | `SampleInventory.cs` (`.items slots`) |
 | `ctx.Inventory.Count` / `CountMany` / `FreeSpace` | landed | Totals; free space honors stack size, slot overrides and `RestrictedInventory` (exact for chests, stations and hearts, an upper bound for a player bag). | `SampleInventory.cs` (`.items count`, `.items free`) |
 | `ctx.Inventory.TryAdd` / `TryRemove` → `InventoryResult` | landed | Partial allowed; the result says how much and why not. Removal never asks for more than the inventory holds, so worn equipment is never touched. | `SampleInventory.cs` (`.items add`, `.items remove`) |
-| `ctx.Inventory.Transfer(from, to, item, amount)` → `InventoryResult` | landed | Atomic: the game's own slot move per source slot, read back after each step; a step that does not conserve the total is compensated, and an unrestorable total stops with `Inconsistent` and an error line. Never duplicates or destroys. | `SampleInventory.cs` (`.items move`) |
+| `ctx.Inventory.Transfer(from, to, item, amount)` → `InventoryResult` | landed | Atomic by design (not yet live-verified): the game's own slot move per source slot, read back after each step; a step that does not conserve the total is compensated (removals capped at what each side holds), and an unrestorable total stops with `Inconsistent` and an error line. Two references to the same inventory (a character and its bag entity) are refused. | `SampleInventory.cs` (`.items move`) |
 | `ctx.Inventory.TransferAll(from, to, Func<int,bool>? filter)` → `InventoryTransferAllResult` | landed | One `Transfer` per item type the filter accepts. | `SampleInventory.cs` (`.items moveall`) |
 | `InventoryResult` / `InventoryOutcome` / `InventoryTransferAllResult` | landed | `Outcome` (`Complete`, `Partial`, `Nothing`, `Refused`, `Inconsistent`), `Ok`, `Requested`, `Done`, `Remainder`, `Reason`, `SourceBefore`/`After`, `TargetBefore`/`After`, `Compensated`, `Steps`. | returned by the writes |
 | `ctx.Inventory.Watch(InventoryRef, Action<InventoryChange>, TimeSpan? interval)` → `IInventoryWatch` | landed | Fingerprint poll (default 500 ms, minimum 100 ms) plus an immediate check after a `ctx.Inventory` write. `InventoryChange` (`Container`, `Kind`: `InventoryChangeKind.Changed` / `Gone`, fingerprints). Tracked; `Dispose` / `Poke`. | `SampleInventory.cs` (`.items watch`) |
@@ -471,6 +472,25 @@ the clan, offline users included. Built and game-free tested; **not live-verifie
 | `ctx.Clans.Of(Entity user)` / `FromEntity(Entity clan)` → `ClanRef` | landed | `Entity` (session), `ClanGuid` (`ClanTeam.ClanGuid`, the key to persist), `Name`, `IsNone`. | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Clans.Members(ClanRef)` → `ClanMember` | landed | `User`, `PlatformId`, `Name`, `IsConnected`, ordered by name. | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Clans.Castles(ClanRef)` | landed | Castles whose owner's clan is this clan. | `SampleInventory.cs` (`.items clan`) |
+
+## Material sources
+
+Milestone P3, **spike**: one provider decides which containers pay for building (B menu, shared
+mode) and workstation crafting, and the totals the player sees follow the same provider. The
+native availability and payment seams are opt-in Bootstrap seams, **off by default and not
+live-verified**; without them a registration is accepted and changes nothing in the game, and
+`Status` says so. Narrative, verified seam facts and the live plan:
+[modules.md, Material sources](modules.md#material-sources).
+
+| Member | Status | Intent | Example |
+|---|---|---|---|
+| `ctx.MaterialSource.Register(IMaterialSourceProvider)` → `IDisposable` | experimental | One provider at a time; a second registration throws `InvalidOperationException` naming the current owner. Tracked: unload releases it; dispose unregisters earlier. Server only, main thread. | unit test `MaterialSourceRegistryTests` |
+| `ctx.MaterialSource.Invalidate(Entity user)` / `InvalidateAll()` | experimental | Mark one player's (or every player's) displayed totals stale; `InvalidateAll` also re-reads `Operations`. Server only. | unit test `MaterialSourceRegistryTests` |
+| `ctx.MaterialSource.Status` → `MaterialSourceStatus` | experimental | `Registered`, `Owner`, `HooksInstalled` + `HooksReason`, `Requested`, `Wired` (requested ∩ supported, empty while the seams are off), `Revision`, `Payments`, `Views`. `ToString()` is one `materials:` log line. Both sides. | unit test `MaterialSourceRegistryTests` |
+| `IMaterialSourceProvider` (`Operations`, `Revision(in MaterialContext)`, `Candidates(in MaterialContext)`, `Sources(in MaterialContext, int item)` → `ItemSources?`) | experimental | Provider contract. `Sources` returns the item's containers in spend order (`ItemSources.SpendOrder`, `ContainerId`) and the pool reserve (`PoolReserve`, subtracted once). `null` = the game's own shared storage pays for that item; an empty `Candidates` list = this context is not governed. Called on the server main thread inside the game's own check or payment: fast, no item moves, no throws. | unit test (test doubles) |
+| `MaterialOperation` / `MaterialOperations.Supported` | experimental | `Build`, `Craft`, `Repair`, `Upgrade`, `Research`, `Other`. Wired: `Build`, `Craft`; the rest stay vanilla. | unit test `MaterialSourceRegistryTests` |
+| `MaterialContext` | experimental | `User`, `Character` (`CastleId`, session), `WorldEpoch`, `Operation`, `StandingTerritory` (-1 = no plot), `Station` (`ContainerId`, craft only). | unit test |
+| `MaterialPaid` (event) / `MaterialDebit` | experimental | Published on the server after the pool paid part of a governed cost line: `Context`, `Item`, `Requested`, `Paid`, `Debits` (container, amount, in the order taken). | unit test |
 
 ## Buffs
 
@@ -994,7 +1014,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 804 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 815 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1119,6 +1139,8 @@ Purpose lines are the first sentence of each type's own doc comment.
 | `IconCachePolicy` | Game-free key, hash, and lifetime rules for the process-lifetime buff-icon cache. | tests |
 | `IconCacheTable` | Process-lifetime table of cache rows without Unity types. | tests |
 | `LogLine` | DTO so Core can map Bootstrap log rows onto Progenitor.Dev.LogBuffer.Entry without sharing a type. | tests |
+| `MaterialSeamPolicy` | Game-free facts and decisions behind the opt-in material seams (P3 spike): config key, the castle-heart overload fields, row stride, allocator label, count-seam decisions. | tests |
+| `MaterialSeamPolicy.CountDecision` | What the availability seam does with Core's compose answer: keep the game's array, use the composed rows, or grow and retry once. | tests |
 | `NativePinRegistry` | Process-lifetime table of GCHandles and native function pointers, keyed by (name, sequence) inside a Core generation (ALC name). | Bootstrap-Core boundary |
 | `PatchSlots` | A fixed pool of process-lifetime Harmony patch bodies that a collectible assembly can borrow, so that no MethodInfo from a collectible AssemblyLoadContext is ever handed to HarmonyX. | Bootstrap-Core boundary |
 | `PatchSlots.Body` | The collectible side's behavior. | Bootstrap-Core boundary |

@@ -178,6 +178,9 @@ public sealed class Plugin : BasePlugin
         // Save-safety load guard (job FSAVE). Bound here because the guard must work in a
         // process where no Core and no plugin ever loads; both entries are plain bools.
         SaveSafety.BindConfig(Config);
+
+        // Material sources (P3 spike): opt-in native seams, read once at start.
+        MaterialSeams.BindConfig(Config);
     }
 
     private static class ServerTick

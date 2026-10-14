@@ -133,12 +133,28 @@ public class ContainerIdTests
     }
 
     [Fact]
+    public void A_moved_model_keeps_its_id_and_frees_its_old_tile()
+    {
+        var book = new ContainerIdRegistry();
+        var a = book.IdFor(Seen(ChestA, 100), 1, IsLive);
+        var moved = book.IdFor(Seen(ChestB, 100), 1, IsLive); // same entity, new tile
+        Assert.Equal(a, moved); // a moved model keeps its id
+        Assert.True(book.TryAnchor(a, out var anchor));
+        Assert.Equal(ChestB, anchor);
+        var newcomer = book.IdFor(Seen(ChestA, 101), 1, IsLive); // the old tile is free
+        Assert.False(newcomer.IsNone);
+        Assert.NotEqual(a, newcomer);
+        Assert.Equal(2, book.Count);
+    }
+
+    [Fact]
     public void A_prefab_change_on_the_same_tile_is_a_different_container()
     {
         var book = new ContainerIdRegistry();
         var a = book.IdFor(Seen(ChestA, 100), 1, IsLive);
         var other = new ContainerAnchor(ChestA.TerritoryIndex, 999, ChestA.TileX, ChestA.TileY, ChestA.HeightLevel, ChestA.Rotation);
-        Assert.NotEqual(a, book.IdFor(Seen(other, 100), 1, IsLive));
+        _live.Remove((100, 1)); // the old model was replaced by a different prefab
+        Assert.NotEqual(a, book.IdFor(Seen(other, 101), 1, IsLive));
     }
 
     [Fact]

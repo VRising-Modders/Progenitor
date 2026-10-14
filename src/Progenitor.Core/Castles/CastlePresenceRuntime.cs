@@ -74,7 +74,14 @@ internal static class CastlePresenceRuntime
             for (int i = 0; i < users.Count; i++)
             {
                 var user = em.GetComponentData<User>(users[i]);
-                if (user.IsConnected) Ready.AlreadyReady(Key(users[i]));
+                if (!user.IsConnected) continue;
+                // Someone still loading in when Core installs is still waited on.
+                var character = Entity.Null;
+                try { character = user.LocalCharacter._Entity; } catch { }
+                bool inWorld = character != Entity.Null && character.Exists(em) && character.Has<PlayerCharacter>(em)
+                    && user.LastFullyAckedFrame > 0;
+                if (inWorld) Ready.AlreadyReady(Key(users[i]));
+                else Ready.Connected(Key(users[i]));
             }
         }
         catch (Exception e)

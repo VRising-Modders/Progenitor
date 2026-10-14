@@ -350,8 +350,25 @@ internal sealed class ContainerIdRegistry
     public ContainerId IdFor(ContainerSighting s, int epoch, Func<int, int, bool> isLive)
     {
         if (_byEntity.TryGetValue(EntityKey(s.EntityIndex, s.EntityVersion), out var known)
-            && _records.TryGetValue(known, out var kr) && kr.Epoch == epoch && kr.Anchor.Equals(s.Anchor))
+            && _records.TryGetValue(known, out var kr) && kr.Epoch == epoch)
+        {
+            if (kr.Anchor.Equals(s.Anchor)) return known;
+            // The same entity on a new tile: the model was moved. It keeps its id; the old tile is
+            // freed and the record follows the model (saved with the next world save).
+            if (_byAnchor.TryGetValue(s.Anchor, out var occupant) && occupant != known)
+            {
+                var o = _records[occupant];
+                if (o.Epoch == epoch && isLive != null && isLive(o.EntityIndex, o.EntityVersion))
+                    return ContainerId.None; // another live model claims the new tile
+                Retire(o);
+            }
+
+            if (_byAnchor.TryGetValue(kr.Anchor, out var old) && old == known) _byAnchor.Remove(kr.Anchor);
+            kr.Anchor = s.Anchor;
+            _byAnchor[s.Anchor] = known;
+            Dirty = true;
             return known;
+        }
 
         if (_byAnchor.TryGetValue(s.Anchor, out var id))
         {
@@ -469,7 +486,7 @@ internal sealed class ContainerIdRegistry
         }
 
         internal ContainerId Id { get; }
-        internal ContainerAnchor Anchor { get; }
+        internal ContainerAnchor Anchor { get; set; }
         internal int EntityIndex { get; set; }
         internal int EntityVersion { get; set; }
         internal int Epoch { get; set; } = int.MinValue;

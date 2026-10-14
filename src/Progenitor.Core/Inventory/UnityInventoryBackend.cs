@@ -202,6 +202,22 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
         }
     }
 
+    public bool TryInventoryKey(InventoryRef container, out long key)
+    {
+        key = 0;
+        if (!TryWorld(out var world, out _)) return false;
+        try
+        {
+            if (!TryInventoryEntity(world.EntityManager, container.Owner, container.Instance, out var inv, out _)) return false;
+            key = ((long)inv.Index << 32) | (uint)inv.Version;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     // ---- shared helpers -----------------------------------------------------------------------
 
     private static bool TryWorld(out World world, out string reason)

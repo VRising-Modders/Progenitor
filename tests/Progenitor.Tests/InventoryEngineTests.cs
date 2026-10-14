@@ -195,6 +195,33 @@ public class InventoryEngineTests
     }
 
     [Fact]
+    public void Transfer_refuses_two_references_to_the_same_inventory()
+    {
+        var b = NewBackend();
+        var character = b.AddContainer(40, 4);
+        var bagEntity = b.AddContainer(41, 4);
+        b.Aliases[(40, 1, 0)] = 777;
+        b.Aliases[(41, 1, 0)] = 777;
+        b.Put(character, 0, IronOre, 20);
+        var r = new InventoryEngine(b).Transfer(character, bagEntity, IronOre, 5);
+        Assert.Equal(InventoryOutcome.Refused, r.Outcome);
+        Assert.Contains("same inventory", r.Reason);
+        Assert.Equal(20, b.CountOf(character, IronOre));
+    }
+
+    [Fact]
+    public void Compensation_never_removes_more_than_an_inventory_holds()
+    {
+        var b = NewBackend();
+        var a = b.AddContainer(10, 4);
+        var c = b.AddContainer(11, 4);
+        b.Put(a, 0, IronOre, 100);
+        b.DuplicateIntoSourceOnMove = 200; // the surplus appears in the source, more than the target holds
+        new InventoryEngine(b).Transfer(a, c, IronOre, 10);
+        Assert.Equal(0, b.OverRemoves);
+    }
+
+    [Fact]
     public void Transfer_compensates_a_move_that_destroys_units()
     {
         var b = NewBackend();
@@ -364,9 +391,11 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
     public Dictionary<int, InventoryItemInfo> Items { get; } = new();
     public int LoseOnMove { get; set; }
     public int DuplicateOnMove { get; set; }
+    public int DuplicateIntoSourceOnMove { get; set; }
     public bool AddFails { get; set; }
     public int Adds { get; private set; }
     public int LastRemoveAsk { get; private set; }
+    public int OverRemoves { get; private set; }
 
     public bool IsServer => Server;
     public int CurrentEpoch => Epoch;
@@ -478,6 +507,12 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
             DuplicateOnMove = 0;
         }
 
+        if (DuplicateIntoSourceOnMove > 0)
+        {
+            AddInto(src, s.Item, DuplicateIntoSourceOnMove, false);
+            DuplicateIntoSourceOnMove = 0;
+        }
+
         detail = added == ask ? "Success_Complete" : "Success_Partial";
         return added == ask ? 0 : 1;
     }
@@ -493,9 +528,21 @@ internal sealed class FakeInventoryBackend : IInventoryBackend
         return true;
     }
 
+    /// <summary>References that resolve to the same inventory (a character and its bag entity).</summary>
+    public Dictionary<(int, int, int), long> Aliases { get; } = new();
+
+    public bool TryInventoryKey(InventoryRef container, out long key)
+    {
+        var k = (container.OwnerIndex, container.OwnerVersion, container.Instance);
+        if (Aliases.TryGetValue(k, out key)) return true;
+        key = ((long)container.OwnerIndex << 20) ^ ((long)container.OwnerVersion << 8) ^ container.Instance;
+        return Get(container) != null;
+    }
+
     public bool Remove(InventoryRef container, int item, int amount, out string detail)
     {
         LastRemoveAsk = amount;
+        if (amount > CountOf(container, item)) OverRemoves++;
         detail = "";
         var box = Get(container);
         if (box == null) return false;
