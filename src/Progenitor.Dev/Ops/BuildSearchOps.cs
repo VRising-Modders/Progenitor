@@ -44,7 +44,8 @@ internal static class BuildSearchOps
             "open" => Call("OpenMenu"),
             "close" => Call("CloseMenu"),
             "hover" => Call("Hover", Int(args, "index") ?? throw new ArgumentException("args.index is required for hover (-1 for none)")),
-            _ => throw new ArgumentException("args.action must be status, open, close, hover, set, clear, focus, blur or type"),
+            "select" => Call("Select", Int(args, "index") ?? throw new ArgumentException("args.index is required for select")),
+            _ => throw new ArgumentException("args.action must be status, open, close, hover, select, set, clear, focus, blur or type"),
         };
     }
 
