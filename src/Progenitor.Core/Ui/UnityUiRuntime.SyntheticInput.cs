@@ -30,6 +30,8 @@ internal sealed partial class UnityUiRuntime
     private static PointerEventData? _synthEvent;
     private static readonly List<GameObject> SynthHovered = new();
     private static GameObject? _synthTop;
+    private static int _synthTopId;
+    private static readonly List<int> SynthHoveredIds = new();
     private static string _synthTopPath = "";
     private static RaycastResult _synthTopResult;
     private static UiSyntheticButtons _synthButtonsSeen;
@@ -59,7 +61,20 @@ internal sealed partial class UnityUiRuntime
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic input driver could not start: " + e.Message); _synthOn = false; }
         UiWidgetLifetime.Register("synthetic-input", () =>
         {
-            // Core unload: the objects are going; drop the state without sending into them.
+            // Core unload: the kit's objects are going, so no exits are sent into them; but a game Selectable still held
+            // down by the synthetic press gets its pointer-up first, or it stays pressed into the next generation.
+            try
+            {
+                var ev = _synthEvent;
+                if (ev != null && _synthPress != null && Alive(_synthPress))
+                {
+                    try { ev.button = _synthPressButton; } catch { /* */ }
+                    try { _synthPress.GetComponent<Selectable>()?.OnPointerUp(ev); } catch { /* */ }
+                }
+            }
+            catch { /* */ }
+
+            DropOwnedText();
             UiSyntheticInput.BeforeEnd = null;
             UiSyntheticInput.End("unload");
             UiSyntheticInput.ClearNav();
@@ -70,6 +85,7 @@ internal sealed partial class UnityUiRuntime
 
     private static void StopSyntheticDriver()
     {
+        ReleaseInputModule();
         if (!_synthOn) return;
         _synthOn = false;
         try { Plugin.Frame -= SyntheticFrame; }
@@ -79,7 +95,9 @@ internal sealed partial class UnityUiRuntime
     private static void ResetSyntheticState()
     {
         SynthHovered.Clear();
+        SynthHoveredIds.Clear();
         _synthTop = null;
+        _synthTopId = 0;
         _synthTopPath = "";
         _synthButtonsSeen = UiSyntheticButtons.None;
         _synthPress = _synthClick = _synthDrag = null;
@@ -103,6 +121,8 @@ internal sealed partial class UnityUiRuntime
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic input release threw: " + e.Message); }
 
+        DropOwnedText();
+        ReleaseInputModule();
         ResetSyntheticState();
         Plugin.Logger?.LogInfo("Ui: synthetic input ended (" + reason + ").");
     }
@@ -119,6 +139,15 @@ internal sealed partial class UnityUiRuntime
         }
 
         UiSyntheticInput.PruneKeys(frame);
+        // Text the bridge queued for a field that lost the keyboard (a dialog's Submit, a close, another field) is
+        // dropped, never typed into whatever is focused next.
+        if (UiSyntheticInput.TextOrphaned(FieldId(FocusedArmedField()), UiTextInjection.Pending))
+        {
+            Note("dropped " + UiTextInjection.Pending + " queued text item(s): their field lost the keyboard");
+            DropOwnedText();
+        }
+
+        UiSyntheticInput.NoteQueue(UiTextInjection.Pending);
         if (PhysicalInputUsed(ref _physX, ref _physY, ref _physHave))
         {
             UiSyntheticInput.End("user-activity");
@@ -126,10 +155,76 @@ internal sealed partial class UnityUiRuntime
             return;
         }
 
+        // While leased, the pointer is only the synthetic one: the event system's input module, which turns the real
+        // cursor's position into hover, enter and exit (tooltips, hover washes, the help markers' hover count), is held off.
+        HoldInputModule();
+        PlaceCaretClick();
         if (!UiSyntheticInput.HasPointer) return;
         try { SyntheticPointerFrame(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic pointer frame threw: " + e.Message); }
     }
+
+    private static BaseInputModule? _heldModule;
+
+    /// <summary>Disable the event system's current input module for the lease (kept off if something re-enables it).</summary>
+    private static void HoldInputModule()
+    {
+        try
+        {
+            var es = EventSystem.current;
+            var module = es == null ? null : es.currentInputModule;
+            if (module == null)
+            {
+                // The event system dropped its current module once ours was disabled: keep the held one off.
+                if (_heldModule != null && Alive(_heldModule) && _heldModule.enabled) _heldModule.enabled = false;
+                return;
+            }
+
+            if (!module.enabled) return;
+            module.enabled = false;
+            if (_heldModule == null || !Alive(_heldModule) || _heldModule.GetInstanceID() != module.GetInstanceID())
+            {
+                ReleaseInputModule();
+                _heldModule = module;
+                Note("input module held off: " + SafePath(module.gameObject));
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic input could not hold the input module: " + e.Message); }
+    }
+
+    /// <summary>Give the input module back (the lease ended, the Core unloads).</summary>
+    private static void ReleaseInputModule()
+    {
+        var module = _heldModule;
+        _heldModule = null;
+        if (module == null) return;
+        try { if (Alive(module) && !module.enabled) module.enabled = true; }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic input could not re-enable the input module: " + e.Message); }
+    }
+
+    private static int FieldId(TMP_InputField? field)
+    {
+        try { return field == null ? 0 : field.GetInstanceID(); }
+        catch { return 0; }
+    }
+
+    private static int GoId(GameObject? go)
+    {
+        try { return go == null ? 0 : go.GetInstanceID(); }
+        catch { return 0; }
+    }
+
+    /// <summary>Drop injected text and keys the bridge queued for one field (its field lost focus, or the lease ended).</summary>
+    private static void DropOwnedText()
+    {
+        if (UiSyntheticInput.TextOwner == 0) return;
+        UiTextInjection.Text.Clear();
+        UiTextInjection.Keys.Clear();
+        UiSyntheticInput.ClearTextOwner();
+    }
+
+    /// <summary>The bridge queued injected text for the focused field (its <c>type</c> path): track the owner.</summary>
+    internal static void NoteBridgeTextForFocused() => UiSyntheticInput.NoteTextFor(FieldId(FocusedArmedField()));
 
     private static PointerEventData? SynthEvent()
     {
@@ -172,8 +267,10 @@ internal sealed partial class UnityUiRuntime
         catch { top = null; }
 
         try { ev.pointerCurrentRaycast = _synthTopResult; } catch { /* */ }
-        if (!ReferenceEquals(top, _synthTop))
+        int topId = GoId(top);
+        if (topId != _synthTopId)
         {
+            _synthTopId = topId;
             _synthTop = top;
             _synthTopPath = top == null ? "" : SafePath(top);
             UpdateHover(top, ev);
@@ -186,9 +283,9 @@ internal sealed partial class UnityUiRuntime
             var went = buttons & ~_synthButtonsSeen;
             var gone = _synthButtonsSeen & ~buttons;
             _synthButtonsSeen = buttons;
-            if (gone != UiSyntheticButtons.None && _synthPress != null && (gone & ToFlag(_synthPressButton)) != 0)
+            if (gone != UiSyntheticButtons.None && (_synthPress != null || _synthDragging) && (gone & ToFlag(_synthPressButton)) != 0)
                 ReleasePress(ev, click: true);
-            if (went != UiSyntheticButtons.None && _synthPress == null)
+            if (went != UiSyntheticButtons.None && _synthPress == null && !_synthDragging)
                 Press(top, ev, (went & UiSyntheticButtons.Left) != 0 ? PointerEventData.InputButton.Left
                     : (went & UiSyntheticButtons.Right) != 0 ? PointerEventData.InputButton.Right
                     : PointerEventData.InputButton.Middle);
@@ -203,6 +300,20 @@ internal sealed partial class UnityUiRuntime
                 _synthDragging = true;
                 try { ev.dragging = true; } catch { /* */ }
                 SendDrag(_synthDrag, ev, "begin-drag");
+                // As the input module does when a drag starts on another object than the press: the press target gets
+                // its pointer-up now and the press is no longer eligible for a click. A drag never ends in a click.
+                if (_synthPress != null && GoId(_synthPress) != GoId(_synthDrag) && Alive(_synthPress))
+                {
+                    try { _synthPress.GetComponent<EventTrigger>()?.OnPointerUp(ev); } catch { /* */ }
+                    try { _synthPress.GetComponent<Selectable>()?.OnPointerUp(ev); } catch { /* */ }
+                    Note("up " + SafePath(_synthPress) + " (drag started)");
+                    _synthPress = null;
+                    try { ev.pointerPress = null; ev.rawPointerPress = null; } catch { /* */ }
+                }
+
+                _synthClick = null;
+                _synthClickKind = null;
+                try { ev.eligibleForClick = false; } catch { /* */ }
             }
 
             if (_synthDragging && delta.sqrMagnitude > 0f) SendDrag(_synthDrag, ev, "drag");
@@ -221,33 +332,29 @@ internal sealed partial class UnityUiRuntime
     /// <summary>Exit what is no longer under the point (leaf first), enter what newly is (leaf first), as the input module does.</summary>
     private static void UpdateHover(GameObject? top, PointerEventData ev)
     {
+        // Compared by instance id: two interop wrappers of one object are different managed references.
         var chain = new List<GameObject>();
+        var chainIds = new List<int>();
         var t = top == null ? null : top.transform;
         int guard = 0;
         while (t != null && guard++ < 64)
         {
-            chain.Add(t.gameObject);
+            var go = t.gameObject;
+            chain.Add(go);
+            chainIds.Add(GoId(go));
             t = t.parent;
         }
 
         for (int i = 0; i < SynthHovered.Count; i++)
-        {
-            var old = SynthHovered[i];
-            if (!ContainsGo(chain, old)) SendExit(old, ev);
-        }
+            if (!chainIds.Contains(SynthHoveredIds[i])) SendExit(SynthHovered[i], ev);
 
         try { ev.pointerEnter = top; } catch { /* */ }
         for (int i = 0; i < chain.Count; i++)
-            if (!ContainsGo(SynthHovered, chain[i])) SendEnter(chain[i], ev);
+            if (!SynthHoveredIds.Contains(chainIds[i])) SendEnter(chain[i], ev);
         SynthHovered.Clear();
         SynthHovered.AddRange(chain);
-    }
-
-    private static bool ContainsGo(List<GameObject> list, GameObject go)
-    {
-        for (int i = 0; i < list.Count; i++)
-            if (ReferenceEquals(list[i], go) || (list[i] != null && go != null && list[i].GetInstanceID() == go.GetInstanceID())) return true;
-        return false;
+        SynthHoveredIds.Clear();
+        SynthHoveredIds.AddRange(chainIds);
     }
 
     private static void SendEnter(GameObject go, PointerEventData ev)
@@ -358,6 +465,7 @@ internal sealed partial class UnityUiRuntime
             Note("down " + button.ToString().ToLowerInvariant() + " " + SafePath(press));
         }
 
+        if (button == PointerEventData.InputButton.Left) NoteCaretClick(top, ev.position);
         _synthClickKind = ClickKindUp(top, out _synthClick);
         _synthDrag = FirstUp(top, HasDragHandler);
         _synthDragging = false;
@@ -630,6 +738,8 @@ internal sealed partial class UnityUiRuntime
         // A widget's value box and an external field take Enter through the pump's own Enter branch (the synthetic key's
         // edge: ReleaseWidgetField / NotifyExternalSubmit); only a plain kit field needs TMP's submit, as `type` gives it.
         if (EnterLeavesField(field) || ExternalGuardId(field) != null) return false;
+        // Owned: dropped by the driver if the field loses the keyboard first (a dialog's Submit), and on the lease's end.
+        UiSyntheticInput.NoteTextFor(FieldId(field));
         UiTextInjection.Keys.Enqueue(new UiTestChord(UiKey.Enter, ctrl: false, alt: false, shift: false, meta: false));
         return true;
     }
@@ -644,6 +754,134 @@ internal sealed partial class UnityUiRuntime
         var (w, h) = ScreenSize();
         if (w > 0 && h > 0 && (x < 0f || y < 0f || x > w || y > h)) return PointerSample.Outside;
         return PointerSample.At(x, y);
+    }
+
+    // ---- Caret: line moves and a click at a text position ------------------------------------------
+
+    /// <summary>
+    /// The focused multi-line field's line starts: TMP's laid-out lines (wrapping included) when its layout matches the
+    /// text (no rich text, every character laid out), else the text's line breaks.
+    /// </summary>
+    private static int[] LineStarts(TMP_InputField field, string text)
+    {
+        try
+        {
+            var tmp = field.textComponent;
+            var info = tmp == null ? null : tmp.textInfo;
+            if (info != null && UiCaretLayout.TmpLayoutMatches(text, info.characterCount, info.lineCount))
+            {
+                var lines = info.lineInfo;
+                int n = info.lineCount;
+                if (lines != null && n > 0 && n <= lines.Length)
+                {
+                    var starts = new int[n];
+                    for (int i = 0; i < n; i++) starts[i] = Math.Max(0, Math.Min(text.Length, lines[i].firstCharacterIndex));
+                    starts[0] = 0;
+                    return starts;
+                }
+            }
+        }
+        catch { /* the line breaks below */ }
+
+        return UiCaretLines.BreakStarts(text);
+    }
+
+    /// <summary>Put the kit's owned caret (and the selection's anchor) at a string index, as the kit's own edits do.</summary>
+    private static UiTextEditState SetOwnedCaret(TMP_InputField field, int caret, int anchor)
+    {
+        string text = "";
+        try { text = field.text ?? ""; } catch { /* */ }
+        var state = UiTextEdit.Normalize(new UiTextEditState(text, caret, anchor));
+        var armed = FindArmed(field);
+        if (armed != null)
+        {
+            armed.Owned = state;
+            armed.HasOwned = true;
+        }
+
+        PushTmpCaret(field, state);
+        if (armed != null) NoteOwnedCaretEdit(armed);
+        try { SyncOwnedCarets(); } catch { /* */ }
+        return state;
+    }
+
+    /// <summary>
+    /// A UI-layer Up, Down, Home or End on a focused multi-line field: moved by line on the kit's owned caret (Shift keeps
+    /// the selection's anchor). Null when the key is not a line move there; the typed-key pump then takes the key.
+    /// </summary>
+    internal static Dictionary<string, object?>? SyntheticLineKey(UiKey key, bool shift)
+    {
+        if (!UiCaretLines.IsLineKey(key)) return null;
+        var field = FocusedArmedField();
+        if (field == null || !IsMultiline(field)) return null;
+        var before = ReadFieldState(field);
+        int caret = UiCaretLines.Move(key, before.Text, LineStarts(field, before.Text), before.Caret);
+        if (caret < 0) return null;
+        var after = SetOwnedCaret(field, caret, shift ? before.Anchor : caret);
+        return new Dictionary<string, object?>
+        {
+            ["key"] = key.ToString(),
+            ["caretBefore"] = before.Caret,
+            ["caret"] = after.Caret,
+            ["anchor"] = after.Anchor,
+            ["path"] = "line move on the owned caret",
+        };
+    }
+
+    private static int _caretClickFieldId;
+    private static Vector2 _caretClickAt;
+    private static int _caretClickFrames;
+
+    /// <summary>A press over a kit text field: once the click has focused it, its caret goes to the pressed character.</summary>
+    private static void NoteCaretClick(GameObject? top, Vector2 at)
+    {
+        _caretClickFieldId = 0;
+        TMP_InputField? field = null;
+        var t = top == null ? null : top.transform;
+        int guard = 0;
+        while (t != null && field == null && guard++ < 8)
+        {
+            try { field = t.GetComponent<TMP_InputField>(); } catch { field = null; }
+            t = t.parent;
+        }
+
+        if (field == null || FindArmed(field) == null) return;
+        _caretClickFieldId = FieldId(field);
+        _caretClickAt = at;
+        _caretClickFrames = 6;
+    }
+
+    /// <summary>Once a frame: place a noted click's caret as soon as its field has the keyboard (at most a few frames).</summary>
+    private static void PlaceCaretClick()
+    {
+        if (_caretClickFieldId == 0) return;
+        if (--_caretClickFrames < 0)
+        {
+            _caretClickFieldId = 0;
+            return;
+        }
+
+        var field = FocusedArmedField();
+        if (field == null || FieldId(field) != _caretClickFieldId) return;
+        _caretClickFieldId = 0;
+        try
+        {
+            var tmp = field.textComponent;
+            string text = field.text ?? "";
+            if (tmp == null) return;
+            var info = tmp.textInfo;
+            if (info == null || !UiCaretLayout.TmpLayoutMatches(text, info.characterCount, info.lineCount))
+            {
+                Note("caret click: the field's layout does not match its text; caret left where focus put it");
+                return;
+            }
+
+            int index = TMP_TextUtilities.GetCursorIndexFromPosition(tmp, new Vector3(_caretClickAt.x, _caretClickAt.y, 0f), null);
+            index = Math.Max(0, Math.Min(text.Length, index));
+            SetOwnedCaret(field, index, index);
+            Note("caret click: caret at " + index);
+        }
+        catch (Exception e) { Note("caret click failed: " + e.Message); }
     }
 
     /// <summary>The current screen size in pixels.</summary>

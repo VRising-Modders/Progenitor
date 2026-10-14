@@ -63,7 +63,8 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.Equal(UiInputPlan.Shift, Parse("{\"action\":\"click\",\"row\":\"h\",\"modifiers\":[\"shift\"]}").Modifiers);
         Assert.Equal(UiInputPlan.Shift | UiInputPlan.Ctrl, Parse("{\"action\":\"click\",\"row\":\"h\",\"modifiers\":\"Ctrl+Shift\"}").Modifiers);
         Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"click\",\"row\":\"h\",\"modifiers\":[\"alt\"]}"));
-        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"key\",\"key\":\"Escape\",\"modifiers\":[\"shift\"]}"));
+        Assert.Equal(UiInputPlan.Shift, Parse("{\"action\":\"key\",\"key\":\"End\",\"modifiers\":[\"shift\"]}").Modifiers);
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"wheel\",\"row\":\"r\",\"notches\":1,\"modifiers\":[\"shift\"]}"));
     }
 
     [Fact]
@@ -187,7 +188,6 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.Equal(UiClickModifiers.None, UiSyntheticInput.Modifiers);
         Assert.Equal(0, UiSyntheticInput.PendingNotches);
         Assert.Equal(0, UiSyntheticInput.HeldKeyCount);
-        Assert.False(UiSyntheticInput.TakeEscapeForward());
         Assert.Equal("timeout", UiSyntheticInput.LastEnd);
     }
 
@@ -223,16 +223,19 @@ public sealed class BridgeUiInputTests : IDisposable
         UiSyntheticInput.QueueWheel(-1);
         UiSyntheticInput.QueueWheel(-2);
         Assert.Equal(3, UiSyntheticInput.PendingNotches);
+        // Three notches, three edges: never one -240 reading the pump would count once.
         Assert.Equal(-120f, UiSyntheticInput.SampleWheel());
         Assert.Equal(0f, UiSyntheticInput.SampleWheel());
-        Assert.Equal(-240f, UiSyntheticInput.SampleWheel());
+        Assert.Equal(-120f, UiSyntheticInput.SampleWheel());
+        Assert.Equal(0f, UiSyntheticInput.SampleWheel());
+        Assert.Equal(-120f, UiSyntheticInput.SampleWheel());
         Assert.Equal(0f, UiSyntheticInput.SampleWheel());
         Assert.Equal(0f, UiSyntheticInput.SampleWheel());
         Assert.Equal(0, UiSyntheticInput.PendingNotches);
     }
 
     [Fact]
-    public void A_key_tap_is_held_for_its_frames_and_escape_is_forwarded_once()
+    public void A_key_tap_is_held_for_its_frames()
     {
         Assert.Null(UiSyntheticInput.Begin("bridge", 10_000));
         Assert.True(UiSyntheticInput.Tap(UiKey.Escape, 100, 2));
@@ -240,12 +243,65 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.True(UiSyntheticInput.KeyHeld(UiKey.Escape, 100));
         Assert.True(UiSyntheticInput.KeyHeld(UiKey.Escape, 101));
         Assert.False(UiSyntheticInput.KeyHeld(UiKey.Escape, 102));
-        Assert.True(UiSyntheticInput.TakeEscapeForward());
-        Assert.False(UiSyntheticInput.TakeEscapeForward());
         UiSyntheticInput.PruneKeys(102);
+        Assert.Equal(1, UiSyntheticInput.HeldKeyCount); // kept one frame past its end
+        UiSyntheticInput.PruneKeys(103);
         Assert.Equal(0, UiSyntheticInput.HeldKeyCount);
-        Assert.True(UiSyntheticInput.Tap(UiKey.Enter, 5));
-        Assert.False(UiSyntheticInput.TakeEscapeForward());
+    }
+
+    [Fact]
+    public void Back_to_back_taps_of_one_key_keep_a_released_frame_between_them()
+    {
+        Assert.Null(UiSyntheticInput.Begin("bridge", 10_000));
+        Assert.True(UiSyntheticInput.Tap(UiKey.Backspace, 100, 2)); // held 100, 101
+        Assert.True(UiSyntheticInput.Tap(UiKey.Backspace, 101, 2)); // queued after the released frame 102
+        Assert.False(UiSyntheticInput.KeyHeld(UiKey.Backspace, 102));
+        Assert.True(UiSyntheticInput.KeyHeld(UiKey.Backspace, 103));
+        Assert.True(UiSyntheticInput.KeyHeld(UiKey.Backspace, 104));
+        Assert.Equal(105, UiSyntheticInput.TapUntil(UiKey.Backspace));
+        Assert.True(UiSyntheticInput.Tap(UiKey.Backspace, 106, 2));
+        Assert.True(UiSyntheticInput.KeyHeld(UiKey.Backspace, 106));
+    }
+
+    [Fact]
+    public void Escape_goes_to_the_escape_hook_at_tap_time_only_while_a_panel_is_shown()
+    {
+        // Decided when the key is tapped, so nothing is left pending for a panel that opens later.
+        Assert.True(UiSyntheticInput.ForwardsEscape(UiKey.Escape, 1));
+        Assert.False(UiSyntheticInput.ForwardsEscape(UiKey.Escape, 0));
+        Assert.False(UiSyntheticInput.ForwardsEscape(UiKey.Enter, 3));
+    }
+
+    [Fact]
+    public void Queued_notches_are_drained_on_failure_and_on_the_lease_end()
+    {
+        Assert.Null(UiSyntheticInput.Begin("bridge", 10_000));
+        UiSyntheticInput.QueueWheel(3);
+        Assert.Equal(3, UiSyntheticInput.DrainWheel());
+        Assert.Equal(0, UiSyntheticInput.PendingNotches);
+        Assert.Equal(0f, UiSyntheticInput.SampleWheel());
+        UiSyntheticInput.QueueWheel(-2);
+        UiSyntheticInput.End("release");
+        Assert.Equal(0, UiSyntheticInput.PendingNotches);
+    }
+
+    [Fact]
+    public void Text_queued_for_one_field_is_orphaned_when_another_field_or_none_has_the_keyboard()
+    {
+        Assert.Null(UiSyntheticInput.Begin("bridge", 10_000));
+        UiSyntheticInput.NoteTextFor(42);
+        Assert.False(UiSyntheticInput.TextOrphaned(42, 1));   // still its field
+        Assert.True(UiSyntheticInput.TextOrphaned(0, 1));     // the field closed (a dialog took Enter)
+        Assert.True(UiSyntheticInput.TextOrphaned(7, 1));     // another field took focus
+        Assert.False(UiSyntheticInput.TextOrphaned(7, 0));    // nothing queued
+        UiSyntheticInput.NoteQueue(0);                        // drained: the bridge owns nothing any more
+        Assert.Equal(0, UiSyntheticInput.TextOwner);
+        Assert.False(UiSyntheticInput.TextOrphaned(7, 5));    // a later mods_ui type is not ours to drop
+        UiSyntheticInput.NoteTextFor(42);
+        UiSyntheticInput.NoteQueue(2);
+        Assert.Equal(42, UiSyntheticInput.TextOwner);
+        UiSyntheticInput.End("release");
+        Assert.Equal(0, UiSyntheticInput.TextOwner);
     }
 
     [Fact]
@@ -262,8 +318,20 @@ public sealed class BridgeUiInputTests : IDisposable
     }
 
     [Fact]
+    public void Navigation_holds_live_only_inside_the_lease()
+    {
+        UiSyntheticInput.HoldNav(UiSyntheticNav.Down, 500);
+        Assert.Equal(UiSyntheticNav.None, UiSyntheticInput.NavHeld);
+        Assert.Null(UiSyntheticInput.Begin("bridge", 10_000));
+        Assert.Equal(UiSyntheticNav.Down, UiSyntheticInput.NavHeld);
+        UiSyntheticInput.End("user-activity");
+        Assert.Equal(UiSyntheticNav.None, UiSyntheticInput.NavHeld);
+    }
+
+    [Fact]
     public void Navigation_holds_and_the_stick_expire_on_their_own_clock()
     {
+        Assert.Null(UiSyntheticInput.Begin("bridge", 10_000));
         UiSyntheticInput.HoldNav(UiSyntheticNav.Down, 500);
         UiSyntheticInput.HoldStick(-2f, 300);
         Assert.Equal(UiSyntheticNav.Down, UiSyntheticInput.NavHeld);
@@ -273,6 +341,134 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.Equal(UiSyntheticNav.Down, UiSyntheticInput.NavHeld);
         _now += 200;
         Assert.Equal(UiSyntheticNav.None, UiSyntheticInput.NavHeld);
+    }
+
+    // ---- Caret lines (Up, Down, Home, End in a multi-line field) ------------------------------------
+
+    [Fact]
+    public void Home_and_end_stay_on_the_caret_line()
+    {
+        const string text = "first\nsecond line\nx";
+        var starts = UiCaretLines.BreakStarts(text);
+        Assert.Equal(new[] { 0, 6, 18 }, starts);
+        Assert.Equal(6, UiCaretLines.Move(UiKey.Home, text, starts, 9));
+        Assert.Equal(17, UiCaretLines.Move(UiKey.End, text, starts, 9));
+        Assert.Equal(19, UiCaretLines.Move(UiKey.End, text, starts, 18));
+        Assert.Equal(-1, UiCaretLines.Move(UiKey.LeftArrow, text, starts, 9));
+    }
+
+    [Fact]
+    public void Up_and_down_keep_the_column_clamped_to_the_line()
+    {
+        const string text = "first\nsecond line\nx";
+        var starts = UiCaretLines.BreakStarts(text);
+        Assert.Equal(3, UiCaretLines.Move(UiKey.UpArrow, text, starts, 9));    // "sec|ond" -> "fir|st"
+        Assert.Equal(5, UiCaretLines.Move(UiKey.UpArrow, text, starts, 16));   // past "first"'s end: its end
+        Assert.Equal(19, UiCaretLines.Move(UiKey.DownArrow, text, starts, 9)); // onto "x", clamped to its end
+        Assert.Equal(0, UiCaretLines.Move(UiKey.UpArrow, text, starts, 3));    // first line: to the start
+        Assert.Equal(19, UiCaretLines.Move(UiKey.DownArrow, text, starts, 18)); // last line: to the end
+    }
+
+    [Fact]
+    public void Drawn_lines_from_wrapping_are_lines_too()
+    {
+        // "aaaa bbbb" wrapped after "aaaa ": the drawn line starts are 0 and 5, with no line break between them.
+        const string text = "aaaa bbbb";
+        var starts = new[] { 0, 5 };
+        Assert.Equal(5, UiCaretLines.Move(UiKey.End, text, starts, 2));
+        Assert.Equal(5, UiCaretLines.Move(UiKey.Home, text, starts, 7));
+        Assert.Equal(7, UiCaretLines.Move(UiKey.DownArrow, text, starts, 2));
+    }
+
+    // ---- display: the engine's remembered window values -----------------------------------------------
+
+    [Fact]
+    public void Registry_values_round_trip_and_only_screen_values_are_touched()
+    {
+        Assert.True(DisplayPlan.IsScreenValue("Screenmanager Resolution Width_h182942802"));
+        Assert.False(DisplayPlan.IsScreenValue("UnityGraphicsQuality_h1669003810"));
+        var dword = DisplayPlan.DecodeRegistry(DisplayPlan.EncodeRegistry("dword", 2560))!.Value;
+        Assert.Equal(("dword", (object)2560), (dword.Kind, dword.Value));
+        var binary = DisplayPlan.DecodeRegistry(DisplayPlan.EncodeRegistry("binary", new byte[] { 1, 2, 3 }))!.Value;
+        Assert.Equal(new byte[] { 1, 2, 3 }, (byte[])binary.Value);
+        Assert.Equal(-5L, DisplayPlan.DecodeRegistry("qword:-5")!.Value.Value);
+        Assert.Null(DisplayPlan.EncodeRegistry("dword", "x"));
+        Assert.Null(DisplayPlan.DecodeRegistry("dword:notanumber"));
+        Assert.Null(DisplayPlan.DecodeRegistry("multistring:a"));
+        var b = new DisplayPlan.Baseline { Width = 2560, Height = 1440, Mode = 3, HasWindowPosition = true, WindowX = 100, WindowY = 50 };
+        b.Registry["Screenmanager Window Position X_h4088080503"] = "dword:100";
+        var back = DisplayPlan.ParseBaseline(DisplayPlan.SerializeBaseline(b))!;
+        Assert.True(back.HasWindowPosition);
+        Assert.Equal(50, back.WindowY);
+        Assert.Equal("dword:100", back.Registry["Screenmanager Window Position X_h4088080503"]);
+    }
+
+    // ---- The Unity half, pinned in source (it needs the game to run) ------------------------------
+
+    [Fact]
+    public void While_leased_the_input_module_is_held_off_and_given_back_at_the_end()
+    {
+        string frame = SourcePin.MethodBody(Driver(), "private static void SyntheticFrame(");
+        SourcePin.AssertUncommented(frame, "HoldInputModule();");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(Driver(), "private static void SyntheticBeforeEnd("), "ReleaseInputModule();");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(Driver(), "private static void StopSyntheticDriver("), "ReleaseInputModule();");
+    }
+
+    [Fact]
+    public void Display_set_gives_back_a_foreground_it_took_and_restores_the_position_and_registry()
+    {
+        string ops = SourcePin.ReadFile("src", "Progenitor.Dev", "Ops", "DisplayOps.cs");
+        SourcePin.AssertUncommented(ops, "foreground.Check(reply);");
+        SourcePin.AssertUncommented(ops, "restored[\"registry\"] = WriteScreenRegistry(b0.Registry);");
+        SourcePin.AssertUncommented(ops, "baseline.Registry = ReadScreenRegistry();");
+        SourcePin.AssertUncommented(ops, "reply[\"afterCall\"] = Read();");
+    }
+
+    private static string Driver() => SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.SyntheticInput.cs");
+
+    [Fact]
+    public void A_drag_start_releases_the_press_target_and_ends_click_eligibility()
+    {
+        string frame = SourcePin.MethodBody(Driver(), "private static void SyntheticPointerFrame(");
+        int begin = frame.IndexOf("SendDrag(_synthDrag, ev, \"begin-drag\")", StringComparison.Ordinal);
+        Assert.True(begin > 0);
+        string after = frame.Substring(begin);
+        SourcePin.AssertUncommented(after, "_synthPress.GetComponent<Selectable>()?.OnPointerUp(ev)");
+        SourcePin.AssertUncommented(after, "_synthPress = null;");
+        SourcePin.AssertUncommented(after, "ev.eligibleForClick = false;");
+        SourcePin.AssertUncommented(after, "_synthClick = null;");
+    }
+
+    [Fact]
+    public void A_core_unload_sends_pointer_up_to_the_held_selectable_before_dropping_the_state()
+    {
+        string ensure = SourcePin.MethodBody(Driver(), "internal static void EnsureSyntheticDriver(");
+        int up = ensure.IndexOf("OnPointerUp(ev)", StringComparison.Ordinal);
+        int cleared = ensure.IndexOf("UiSyntheticInput.BeforeEnd = null;", StringComparison.Ordinal);
+        Assert.True(up > 0 && cleared > up, "the teardown sends pointer-up before it clears BeforeEnd");
+    }
+
+    [Fact]
+    public void The_driver_compares_interop_objects_by_instance_id()
+    {
+        SourcePin.AssertNoStatementContaining(Driver(), "ReferenceEquals(");
+    }
+
+    [Fact]
+    public void The_driver_drops_orphaned_text_and_the_lease_end_drops_owned_text()
+    {
+        string frame = SourcePin.MethodBody(Driver(), "private static void SyntheticFrame(");
+        SourcePin.AssertUncommented(frame, "UiSyntheticInput.TextOrphaned(");
+        SourcePin.AssertUncommented(SourcePin.MethodBody(Driver(), "private static void SyntheticBeforeEnd("), "DropOwnedText();");
+    }
+
+    [Fact]
+    public void Dev_unload_restores_a_pending_display_set()
+    {
+        string plugin = SourcePin.ReadFile("src", "Progenitor.Dev", "Plugin.cs");
+        SourcePin.AssertUncommented(plugin, "Ops.DisplayOps.Shutdown();");
+        string ops = SourcePin.ReadFile("src", "Progenitor.Dev", "Ops", "DisplayOps.cs");
+        SourcePin.AssertUncommented(ops, "RestoreNow(b, \"restore on unload\");");
     }
 
     // ---- nav, ui_read, widget_click ----------------------------------------------------------------
@@ -317,11 +513,93 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.Equal(DisplayPlan.Action.Set, r.Action);
         Assert.Equal(DisplayPlan.Mode.Windowed, r.WindowMode);
         Assert.Equal(DisplayPlan.Mode.FullScreenWindow, DisplayPlan.ParseMode("borderless"));
-        Assert.Equal(DisplayPlan.Mode.ExclusiveFullScreen, DisplayPlan.ParseMode("exclusive"));
+        Assert.Throws<ArgumentException>(() => DisplayPlan.ParseMode("exclusive"));
+        Assert.Throws<ArgumentException>(() => DisplayPlan.ParseMode("fullscreen"));
         Assert.Throws<ArgumentException>(() => DisplayPlan.Parse(Json("{\"action\":\"set\",\"width\":2560}")));
         Assert.Throws<ArgumentException>(() => DisplayPlan.ParseMode("tiny"));
         Assert.Equal(DisplayPlan.Action.Status, DisplayPlan.Parse(Json("{}")).Action);
         Assert.Equal(DisplayPlan.Action.Restore, DisplayPlan.Parse(Json("{\"action\":\"restore\"}")).Action);
+        Assert.False(r.AllowInWorld);
+        Assert.True(DisplayPlan.Parse(Json("{\"action\":\"set\",\"width\":2560,\"height\":1440,\"allowInWorld\":true}")).AllowInWorld);
+    }
+
+    [Fact]
+    public void Display_set_is_refused_in_a_world_unless_allowed()
+    {
+        Assert.NotNull(DisplayPlan.InWorldRefusal(clientWorldExists: true, allowInWorld: false));
+        Assert.Null(DisplayPlan.InWorldRefusal(clientWorldExists: true, allowInWorld: true));
+        Assert.Null(DisplayPlan.InWorldRefusal(clientWorldExists: false, allowInWorld: false));
+    }
+
+    [Fact]
+    public void The_display_baseline_round_trips_through_its_file_and_rejects_junk()
+    {
+        var b = new DisplayPlan.Baseline { Width = 3840, Height = 1080, Mode = 1, SettingsWidth = 3840, SettingsHeight = 1080, SettingsWindowMode = 1, SettingsWritten = true };
+        var back = DisplayPlan.ParseBaseline(DisplayPlan.SerializeBaseline(b))!;
+        Assert.Equal(3840, back.Width);
+        Assert.Equal(1080, back.Height);
+        Assert.Equal(1, back.Mode);
+        Assert.True(back.SettingsWritten);
+        Assert.False(back.SettingsFileWritten);
+        // A user who plays in exclusive full screen gets exactly that back.
+        Assert.Equal(0, DisplayPlan.ParseBaseline(DisplayPlan.SerializeBaseline(new DisplayPlan.Baseline { Width = 1920, Height = 1080, Mode = 0 }))!.Mode);
+        Assert.Null(DisplayPlan.ParseBaseline(""));
+        Assert.Null(DisplayPlan.ParseBaseline("{not json"));
+        Assert.Null(DisplayPlan.ParseBaseline("{\"Width\":0,\"Height\":1080,\"Mode\":3}"));
+        Assert.Null(DisplayPlan.ParseBaseline("{\"Width\":1920,\"Height\":1080,\"Mode\":9}"));
+    }
+
+    [Fact]
+    public void A_display_change_counts_only_when_the_window_matches()
+    {
+        Assert.True(DisplayPlan.Matches(1920, 1080, 3, 1920, 1080, 3));
+        Assert.True(DisplayPlan.Matches(1921, 1080, 3, 1920, 1080, 3));
+        Assert.False(DisplayPlan.Matches(1600, 900, 3, 1920, 1080, 3)); // the monitor did not hold it
+        Assert.False(DisplayPlan.Matches(1920, 1080, 1, 1920, 1080, 3)); // the mode did not change
+        Assert.True(DisplayPlan.Matches(5120, 1440, 1, 1920, 1080, 1)); // borderless takes the monitor's size
+    }
+
+    [Fact]
+    public void Screenshots_take_only_a_plain_name_and_never_replace_a_file()
+    {
+        Assert.True(DisplayPlan.IsSafeShotName("table-1080_2.png"));
+        foreach (var bad in new[] { "../x.png", "..\\x.png", "C:x.png", "a/b.png", "a\\b.png", "x.jpg", ".png", ".hidden.png", "x..png", new string('a', 81) + ".png" })
+            Assert.False(DisplayPlan.IsSafeShotName(bad), bad);
+        Assert.Throws<ArgumentException>(() => DisplayPlan.ParseShot(Json("{\"path\":\"C:/Windows/x.png\"}")));
+        Assert.Throws<ArgumentException>(() => DisplayPlan.ParseShot(Json("{\"name\":\"../evil.png\"}")));
+        var taken = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            System.IO.Path.Combine("shots", "a.png"),
+            System.IO.Path.Combine("shots", "a-2.png"),
+        };
+        Assert.Equal(System.IO.Path.Combine("shots", "a-3.png"), DisplayPlan.UniqueShotPath("shots", "a.png", DateTime.UtcNow, taken.Contains));
+        Assert.Equal(System.IO.Path.Combine("shots", "b.png"), DisplayPlan.UniqueShotPath("shots", "b.png", DateTime.UtcNow, taken.Contains));
+        Assert.EndsWith(".png", DisplayPlan.UniqueShotPath("shots", null, new DateTime(2026, 10, 14, 1, 2, 3, DateTimeKind.Utc), taken.Contains));
+    }
+
+    [Fact]
+    public void A_capture_is_capped_at_33_megapixels()
+    {
+        Assert.Null(DisplayPlan.PixelRefusal(1920, 1080, 4)); // 7680x4320
+        Assert.Null(DisplayPlan.PixelRefusal(3840, 2160, 2));
+        Assert.NotNull(DisplayPlan.PixelRefusal(5120, 1440, 4));
+        Assert.NotNull(DisplayPlan.PixelRefusal(3840, 2160, 3));
+    }
+
+    [Fact]
+    public void Every_action_fits_the_bridge_cap_and_long_ones_are_refused()
+    {
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"click\",\"x\":1,\"y\":1,\"holdFrames\":121}"));
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"drag\",\"x\":1,\"y\":1,\"toX\":2,\"toY\":2,\"steps\":181}"));
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"click\",\"x\":1,\"y\":1,\"settleFrames\":61}"));
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"key\",\"key\":\"Enter\",\"frames\":31}"));
+        Assert.Throws<ArgumentException>(() => Parse("{\"action\":\"type\",\"text\":\"" + new string('x', 401) + "\"}"));
+        var longest = Parse("{\"action\":\"drag\",\"x\":1,\"y\":1,\"toX\":2,\"toY\":2,\"steps\":180,\"settleFrames\":60}");
+        Assert.True(UiInputPlan.Timeline(longest, 1, 1, 2, 2)[^1].Frame <= UiInputPlan.MaxTimelineFrames);
+        Assert.True(UiInputPlan.DeadlineMs < 30_000);
+        Assert.Equal(1, UiInputPlan.TypePerFrame(40));
+        Assert.Equal(4, UiInputPlan.TypePerFrame(400));
+        Assert.True(400 / UiInputPlan.TypePerFrame(400) <= 120);
     }
 
     [Fact]
@@ -335,7 +613,8 @@ public sealed class BridgeUiInputTests : IDisposable
         Assert.Null(DisplayPlan.ParseShot(Json("{}")).Region);
         Assert.Throws<ArgumentException>(() => DisplayPlan.ParseShot(Json("{\"x\":1,\"y\":2}")));
         Assert.Throws<ArgumentException>(() => DisplayPlan.ParseShot(Json("{\"superSize\":5}")));
-        Assert.Throws<ArgumentException>(() => DisplayPlan.ParseShot(Json("{\"path\":\"a.jpg\"}")));
+        Assert.Throws<ArgumentException>(() => DisplayPlan.ParseShot(Json("{\"name\":\"a.jpg\"}")));
+        Assert.Equal("t.png", DisplayPlan.ParseShot(Json("{\"name\":\"t.png\"}")).Name);
     }
 
     [Fact]

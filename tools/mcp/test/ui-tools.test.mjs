@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { registerUiTools, compact, uiInputTimeout } from '../ui-tools.mjs';
+import { registerUiTools, compact, UI_INPUT_TIMEOUT_MS } from '../ui-tools.mjs';
 import { isReadOnlyOp } from '../queue.mjs';
 
 function register() {
@@ -44,13 +44,28 @@ test('ui_input click takes shift and ctrl, refuses alt, and a drag target is an 
   assert.equal(t.schema.safeParse({ action: 'wheel', row: 'r', notches: 21 }).success, false);
   await t.handler(t.schema.parse({ action: 'drag', row: 'demo-list:row0', cell: 'grip', to: { row: 'demo-list:row3', fy: 0.1 }, steps: 30 }));
   assert.deepEqual(calls[0][2].to, { row: 'demo-list:row3', fy: 0.1 });
-  assert.ok(calls[0][3] >= 25000);
+  assert.equal(calls[0][3], UI_INPUT_TIMEOUT_MS);
 });
 
-test('ui_input timeouts grow with long drags and typing, within bounds', () => {
-  assert.equal(uiInputTimeout({}), 25000);
-  assert.ok(uiInputTimeout({ steps: 600 }) > 25000);
-  assert.equal(uiInputTimeout({ text: 'x'.repeat(2000), steps: 600 }), 120000);
+test('ui_input waits no longer than the bridge cap and bounds its frames and text', () => {
+  const t = register().tools.get('progenitor_ui_input');
+  assert.equal(UI_INPUT_TIMEOUT_MS, 30000);
+  assert.equal(t.schema.safeParse({ action: 'drag', x: 1, y: 1, toX: 2, toY: 2, steps: 181 }).success, false);
+  assert.equal(t.schema.safeParse({ action: 'click', x: 1, y: 1, holdFrames: 121 }).success, false);
+  assert.equal(t.schema.safeParse({ action: 'type', text: 'x'.repeat(401) }).success, false);
+  assert.equal(t.schema.safeParse({ action: 'key', key: 'Escape', frames: 31 }).success, false);
+});
+
+test('display offers no exclusive mode and takes allowInWorld; screenshot takes only a plain file name', () => {
+  const { tools } = register();
+  const d = tools.get('progenitor_display').schema;
+  assert.equal(d.safeParse({ action: 'set', width: 1920, height: 1080, mode: 'exclusive' }).success, false);
+  assert.equal(d.safeParse({ action: 'set', width: 1920, height: 1080, allowInWorld: true }).success, true);
+  const s = tools.get('progenitor_screenshot').schema;
+  assert.equal(s.safeParse({ name: 'table-1080.png' }).success, true);
+  for (const bad of ['../x.png', 'C:/x.png', 'a/b.png', 'x.jpg', '.png'])
+    assert.equal(s.safeParse({ name: bad }).success, false, bad);
+  assert.equal(s.safeParse({ path: 'C:/Windows/x.png' }).data?.path, undefined);
 });
 
 test('ui_read, nav, display and screenshot reach their ops', async () => {
@@ -69,9 +84,9 @@ test('compact drops undefined and null', () => {
   assert.deepEqual(compact({ a: 1, b: undefined, c: null, d: 0 }), { a: 1, d: 0 });
 });
 
-test('the queue lets readback and screenshots through and gates input', () => {
+test('the queue lets readback through and gates input, display and screenshots', () => {
   assert.ok(isReadOnlyOp('ui_read', { what: 'state' }));
-  assert.ok(isReadOnlyOp('screenshot', {}));
+  assert.ok(!isReadOnlyOp('screenshot', {}));
   assert.ok(isReadOnlyOp('ui_input', { action: 'status' }));
   assert.ok(isReadOnlyOp('display', { action: 'status' }));
   assert.ok(!isReadOnlyOp('ui_input', { action: 'click' }));

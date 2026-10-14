@@ -69,9 +69,8 @@ internal static class UiSyntheticInput
     private static readonly Queue<int> Wheel = new();
     private static bool _wheelGap;
 
-    private static readonly Dictionary<UiKey, (int From, int Until)> KeyTaps = new();
+    private static readonly Dictionary<UiKey, List<(int From, int Until)>> KeyTaps = new();
     private static readonly List<UiKey> KeyScratch = new();
-    private static bool _escapeForward;
 
     private static UiSyntheticNav _nav;
     private static long _navUntilMs;
@@ -163,7 +162,7 @@ internal static class UiSyntheticInput
         Wheel.Clear();
         _wheelGap = false;
         KeyTaps.Clear();
-        _escapeForward = false;
+        TextOwner = 0;
         ClearNav();
         if (was) _lastEnd = reason ?? "";
     }
@@ -205,7 +204,10 @@ internal static class UiSyntheticInput
     internal static void QueueWheel(int notches)
     {
         if (!Active || notches == 0) return;
-        Wheel.Enqueue(notches);
+        // One notch a sample (live 2026-10-14: a -2 queued as one -240 reading was counted as one notch by the pump,
+        // which counts a 0 to non-zero crossing as one step).
+        int step = notches > 0 ? 1 : -1;
+        for (int i = 0; i < Math.Abs(notches); i++) Wheel.Enqueue(step);
     }
 
     /// <summary>
@@ -224,49 +226,92 @@ internal static class UiSyntheticInput
         return Wheel.Dequeue() * WheelDeltaPerNotch;
     }
 
-    // ---- Keys (UI layer: the typed-key pump and the Escape forward, never a keybind) ---------------
+    // ---- Keys (UI layer: the typed-key pump and the Escape hook, never a keybind) -------------------
 
     /// <summary>
     /// Hold <paramref name="key"/> from <paramref name="frame"/> for <paramref name="frames"/> frames, as the typed-key
-    /// pump reads a physical key. Escape is also forwarded once to the framework's Escape hook (the path Bootstrap's
-    /// forwarder calls), ahead of the pump's own sample.
+    /// pump reads a physical key. The Escape hook's half of an Escape is the caller's, at tap time
+    /// (<see cref="ForwardsEscape"/>), so nothing waits for a pump that may not run.
     /// </summary>
     internal static bool Tap(UiKey key, int frame, int frames = DefaultTapFrames)
     {
         if (!Active || key == UiKey.None) return false;
-        KeyTaps[key] = (frame, frame + Math.Max(1, frames));
-        if (key == UiKey.Escape) _escapeForward = true;
+        if (!KeyTaps.TryGetValue(key, out var spans)) KeyTaps[key] = spans = new List<(int From, int Until)>();
+        // A tap of a key still held (or released this very frame) is queued after one released frame, so the held-state
+        // edge tracker sees each press, never one merged press (live 2026-10-14: a Backspace tap was lost). Earlier
+        // taps stay: none is overwritten before it was sampled.
+        if (spans.Count > 0 && frame <= spans[spans.Count - 1].Until) frame = spans[spans.Count - 1].Until + 1;
+        spans.Add((frame, frame + Math.Max(1, frames)));
         return true;
     }
+
+    /// <summary>The frame at which <paramref name="key"/>'s last queued tap is released, or -1 when none is queued.</summary>
+    internal static int TapUntil(UiKey key) => KeyTaps.TryGetValue(key, out var spans) && spans.Count > 0 ? spans[spans.Count - 1].Until : -1;
+
+    /// <summary>
+    /// Whether a tap of <paramref name="key"/> goes to the framework's Escape hook now: an Escape while a panel is shown,
+    /// which is when Bootstrap's forwarder delivers a physical one. With no panel shown it reaches nothing, as a real one.
+    /// </summary>
+    internal static bool ForwardsEscape(UiKey key, int shownPanels) => key == UiKey.Escape && shownPanels > 0;
 
     /// <summary>Whether <paramref name="key"/> is held at <paramref name="frame"/>.</summary>
     internal static bool KeyHeld(UiKey key, int frame)
     {
-        if (!Active || !KeyTaps.TryGetValue(key, out var span)) return false;
-        return frame >= span.From && frame < span.Until;
+        if (!Active || !KeyTaps.TryGetValue(key, out var spans)) return false;
+        for (int i = 0; i < spans.Count; i++)
+            if (frame >= spans[i].From && frame < spans[i].Until) return true;
+        return false;
     }
 
-    /// <summary>Drop taps that ended before <paramref name="frame"/>.</summary>
+    /// <summary>Drop taps that ended before <paramref name="frame"/> (kept one frame past their end).</summary>
     internal static void PruneKeys(int frame)
     {
         if (KeyTaps.Count == 0) return;
         KeyScratch.Clear();
         foreach (var pair in KeyTaps)
-            if (frame >= pair.Value.Until) KeyScratch.Add(pair.Key);
+        {
+            pair.Value.RemoveAll(s => frame > s.Until);
+            if (pair.Value.Count == 0) KeyScratch.Add(pair.Key);
+        }
+
         foreach (var k in KeyScratch) KeyTaps.Remove(k);
     }
 
+    /// <summary>Keys with a tap held or queued.</summary>
     internal static int HeldKeyCount => KeyTaps.Count;
 
-    /// <summary>The Escape tap still owes its forward to the framework's Escape hook; true once.</summary>
-    internal static bool TakeEscapeForward()
+    /// <summary>Drop every queued wheel notch (an action that failed or was abandoned).</summary>
+    internal static int DrainWheel()
     {
-        if (!_escapeForward) return false;
-        _escapeForward = false;
-        return Active;
+        int n = PendingNotches;
+        Wheel.Clear();
+        _wheelGap = false;
+        return n;
     }
 
-    // ---- Navigation (NAV1's sample, no device) -----------------------------------------------------
+    // ---- Injected text the bridge queued for one field ---------------------------------------------
+
+    /// <summary>The field (its instance id) the bridge queued injected text or an Enter for; 0 when none.</summary>
+    internal static int TextOwner { get; private set; }
+
+    internal static void NoteTextFor(int fieldId) => TextOwner = fieldId;
+
+    internal static void ClearTextOwner() => TextOwner = 0;
+
+    /// <summary>
+    /// Whether queued injected text must be dropped: the bridge queued it for one field, some is still pending, and that
+    /// field no longer has the keyboard (it closed, a dialog took Enter, another field took focus). Text must never
+    /// land in a field it was not typed for.
+    /// </summary>
+    internal static bool TextOrphaned(int focusedFieldId, int pending) => TextOwner != 0 && pending > 0 && focusedFieldId != TextOwner;
+
+    /// <summary>Once the queue is empty the bridge owns nothing in it (a later <c>mods_ui type</c> is not ours to drop).</summary>
+    internal static void NoteQueue(int pending)
+    {
+        if (pending == 0) TextOwner = 0;
+    }
+
+    // ---- Navigation (NAV1's sample, no device; bounded by the lease) ------------------------------
 
     /// <summary>Hold navigation buttons for <paramref name="ms"/> through NAV1's own per-frame sample (repeat included).</summary>
     internal static void HoldNav(UiSyntheticNav buttons, int ms)
@@ -282,9 +327,10 @@ internal static class UiSyntheticInput
         _stickUntilMs = Clock() + Math.Max(1, ms);
     }
 
-    internal static UiSyntheticNav NavHeld => Clock() < _navUntilMs ? _nav : UiSyntheticNav.None;
+    /// <summary>Held navigation, only while the lease is held: the player's activity or a release ends it with the lease.</summary>
+    internal static UiSyntheticNav NavHeld => Active && Clock() < _navUntilMs ? _nav : UiSyntheticNav.None;
 
-    internal static float StickHeld => Clock() < _stickUntilMs ? _stick : 0f;
+    internal static float StickHeld => Active && Clock() < _stickUntilMs ? _stick : 0f;
 
     // ---- Readback ----------------------------------------------------------------------------------
 

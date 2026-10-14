@@ -4985,25 +4985,21 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     {
         keys = 0;
         typed = '\0';
-        // BRIDGEUI1: a synthetic Escape reaches the framework's Escape hook first, as Bootstrap's forwarder delivers a
-        // physical one before this pump samples it (the hide sweep runs first).
-        if (UiSyntheticInput.TakeEscapeForward())
-        {
-            try { Ui.PressEscapeForBridge(); }
-            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: synthetic Escape threw: " + e.Message); }
-        }
-
         var field = FocusedArmedField();
         ApplyPendingSelectAll(field); // P7b: after this frame's click and caret placement, before any key
         var keyboard = Keyboard.current;
-        if (keyboard == null)
+        // BRIDGEUI1: the synthetic keys need no keyboard device; the key helpers below read them with a null keyboard.
+        if (keyboard == null && !UiSyntheticInput.Active)
         {
             // TEXTTEST1: bridge-injected input does not need a keyboard device.
             if (field != null) PumpInjected(field, ref keys, ref typed);
             return;
         }
 
-        try { TypeEdges.NoteDevice(keyboard.deviceId); } catch { /* */ }
+        if (keyboard != null)
+        {
+            try { TypeEdges.NoteDevice(keyboard.deviceId); } catch { /* */ }
+        }
 
         SampleTypeEdges(keyboard, frame);
         // P7b: a widget's value box released the keyboard mid-typing; its burst ends when every typing key is up.
@@ -5357,32 +5353,33 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         catch { return false; }
     }
 
-    private static bool KeyHeld(Keyboard keyboard, UiKey ui)
+    private static bool KeyHeld(Keyboard? keyboard, UiKey ui)
     {
         if (!Enum.TryParse(ui.ToString(), out Key key)) return false;
         return KeyHeld(keyboard, key);
     }
 
-    private static void SampleTypeEdges(Keyboard keyboard, int frame)
+    private static void SampleTypeEdges(Keyboard? keyboard, int frame)
     {
         for (int i = 0; i < TypedSampleKeys.Length; i++)
             TypeKeyDown(keyboard, TypedSampleKeys[i], frame);
     }
 
-    private static bool TypeKeyDown(Keyboard keyboard, UiKey ui, int frame)
+    private static bool TypeKeyDown(Keyboard? keyboard, UiKey ui, int frame)
     {
         if (!Enum.TryParse(ui.ToString(), out Key key)) return false;
         return TypeKeyDown(keyboard, key, ui, frame);
     }
 
-    private static bool TypeKeyDown(Keyboard keyboard, Key key, UiKey ui, int frame)
+    private static bool TypeKeyDown(Keyboard? keyboard, Key key, UiKey ui, int frame)
     {
         try
         {
-            var control = keyboard[key];
-            if (control == null) return false;
-            bool held = control.isPressed || SyntheticKeyHeld(ui, frame);
-            bool raw = control.wasPressedThisFrame;
+            // BRIDGEUI1: with no keyboard device only the synthetic keys are read.
+            var control = keyboard?[key];
+            bool held = (control != null && control.isPressed) || SyntheticKeyHeld(ui, frame);
+            bool raw = control != null && control.wasPressedThisFrame;
+            if (control == null && keyboard != null) return false;
             return TypeEdges.Observe(ui, frame, held, raw);
         }
         catch
@@ -5391,11 +5388,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
     }
 
-    private static bool KeyHeld(Keyboard keyboard, Key key)
+    private static bool KeyHeld(Keyboard? keyboard, Key key)
     {
         try
         {
-            var control = keyboard[key];
+            var control = keyboard?[key];
             if (control != null && control.isPressed) return true;
             // BRIDGEUI1: a key the synthetic input holds (an Escape or Enter tap, a held Shift or Ctrl).
             return UiSyntheticInput.Active && Enum.TryParse(key.ToString(), out UiKey ui) && SyntheticKeyHeld(ui, Time.frameCount);
@@ -5846,7 +5843,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     }
 
     /// <summary>P7b: whether any typing key (the pump's sampled set, Enter included) is held now.</summary>
-    private static bool AnyTypingKeyHeld(Keyboard keyboard)
+    private static bool AnyTypingKeyHeld(Keyboard? keyboard)
     {
         for (int i = 0; i < TypedSampleKeys.Length; i++)
             if (KeyHeld(keyboard, TypedSampleKeys[i])) return true;

@@ -15,14 +15,15 @@ namespace Progenitor.Dev.Ops;
 ///
 /// <para><c>display set</c> changes the resolution and window mode through the game's own graphics path,
 /// <c>ProjectM.GraphicsSettingsManager.SetResolution(width, height, mode)</c> (what the Options menu's resolution and
-/// window-mode rows end in), and reports the game's client settings (<c>ClientSettings.GraphicSettings.Resolution</c> /
-/// <c>WindowMode</c>) before and after. Those are the user's saved settings: if the game wrote them, its next settings
-/// save keeps the test resolution. <c>display restore</c> puts back the resolution, the mode and those two fields as
-/// they were before the first <c>set</c> of this Dev generation. Always restore.</para>
+/// window-mode rows end in). It is refused while a client world exists unless <c>allowInWorld</c>, never sets exclusive
+/// full screen, and is <c>ok</c> only when the window matches. Each set measures whether the game wrote its client
+/// settings (<c>ClientSettings.GraphicSettings.Resolution</c> / <c>WindowMode</c>, and the settings file). The baseline is
+/// on disk before anything changes; <c>display restore</c>, Dev unload and so every Core swap put back the window, the two
+/// fields, and the settings file when a set had written it.</para>
 ///
 /// <para><c>screenshot</c> is <c>ScreenCapture.CaptureScreenshot</c>: the game writes the frame it renders, with its UI,
 /// at the end of the frame. It needs no window focus (the game renders in the background; a minimized window renders
-/// nothing). <c>superSize</c> renders that frame at a multiple of the window's size (2 on a 1920x1080 window gives
+/// nothing). Files go only under BepInEx/progenitor-shots, never over an existing file, at most 7680x4320 pixels. <c>superSize</c> renders that frame at a multiple of the window's size (2 on a 1920x1080 window gives
 /// 3840x2160 pixels; the UI's layout is the 1920x1080 one, which is the same in canvas units as 3840x2160 because the
 /// kit scales with the screen at a fixed aspect ratio). A region crops the file around a row, a panel or a rect.</para>
 /// </summary>
@@ -42,10 +43,46 @@ internal static class DisplayOps
         DisplayPlan.ParseShot(args);
         throw new InvalidOperationException(ClientOnlyMessage);
     }
+
+    internal static void Shutdown() { }
 #else
-    private static Dictionary<string, object?>? _baseline;
-    private static int _baseW, _baseH, _baseMode;
-    private static int _baseSettingsW = -1, _baseSettingsH = -1, _baseSettingsMode = -1;
+    /// <summary>Frames <c>set</c> and <c>restore</c> wait for the window to take the change before they compare.</summary>
+    private const int SettleFramesMax = 90;
+
+    private static string BaselinePath => Path.Combine(BepInEx.Paths.ConfigPath, DisplayPlan.BaselineFileName);
+
+    private static DisplayPlan.Baseline? LoadBaseline()
+    {
+        try { return File.Exists(BaselinePath) ? DisplayPlan.ParseBaseline(File.ReadAllText(BaselinePath)) : null; }
+        catch { return null; }
+    }
+
+    private static void SaveBaseline(DisplayPlan.Baseline b)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(BaselinePath)!);
+        File.WriteAllText(BaselinePath, DisplayPlan.SerializeBaseline(b));
+    }
+
+    private static void ForgetBaseline()
+    {
+        try { if (File.Exists(BaselinePath)) File.Delete(BaselinePath); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Dev display: could not remove " + BaselinePath + ": " + e.Message); }
+    }
+
+    private static Dictionary<string, object?> DescribeBaseline(DisplayPlan.Baseline? b)
+    {
+        if (b == null) return new Dictionary<string, object?> { ["pending"] = false };
+        var d = DisplayPlan.Describe(b.Width, b.Height, b.Mode);
+        d["pending"] = true;
+        d["settingsResolution"] = b.SettingsWidth < 0 ? null : b.SettingsWidth + "x" + b.SettingsHeight;
+        d["settingsWindowMode"] = b.SettingsWindowMode < 0 ? null : b.SettingsWindowMode;
+        d["settingsWritten"] = b.SettingsWritten;
+        d["settingsFileWritten"] = b.SettingsFileWritten;
+        d["windowPosition"] = b.HasWindowPosition ? b.WindowX + "," + b.WindowY : null;
+        d["registryValues"] = b.Registry?.Count ?? 0;
+        d["file"] = BaselinePath;
+        return d;
+    }
 
     internal static object Run(JsonElement args)
     {
@@ -53,7 +90,8 @@ internal static class DisplayOps
         if (Progenitor.Plugin.IsServerProcess) throw new InvalidOperationException(ClientOnlyMessage);
         var reply = new Dictionary<string, object?>(StringComparer.Ordinal) { ["action"] = r.Action.ToString().ToLowerInvariant() };
         reply["before"] = Read();
-        reply["baseline"] = _baseline;
+        var baseline = LoadBaseline();
+        reply["baseline"] = DescribeBaseline(baseline);
         if (r.Action == DisplayPlan.Action.Status)
         {
             reply["ok"] = true;
@@ -62,60 +100,254 @@ internal static class DisplayOps
 
         if (r.Action == DisplayPlan.Action.Restore)
         {
-            if (_baseline == null)
+            if (baseline == null)
             {
                 reply["ok"] = true;
-                reply["note"] = "nothing to restore: no display set ran in this Dev generation";
+                reply["note"] = "nothing to restore: no display set is pending";
                 return reply;
             }
 
-            ProjectM.GraphicsSettingsManager.SetResolution(_baseW, _baseH, (FullScreenMode)_baseMode);
-            RestoreSettingsFields();
-            Plugin.Logger?.LogInfo("Dev display restore: " + _baseW + "x" + _baseH + " " + (FullScreenMode)_baseMode);
-            return AfterFrames(reply, () => { _baseline = null; });
+            var keepFront = KeepForeground();
+            reply["restored"] = RestoreNow(baseline, "restore");
+            keepFront.Check(reply);
+            reply["afterCall"] = Read();
+            var b0 = baseline;
+            return AfterSettle(reply, baseline.Width, baseline.Height, baseline.Mode, keepFront, matched =>
+            {
+                // The window's place and the engine's remembered values last, once the size has landed.
+                var restored = (Dictionary<string, object?>)reply["restored"]!;
+                restored["position"] = RestorePosition(b0);
+                restored["registry"] = WriteScreenRegistry(b0.Registry);
+                if (matched) ForgetBaseline();
+            }, "the window did not return to the baseline; the baseline is kept, so restore can be run again");
         }
 
-        if (_baseline == null)
+        bool inWorld;
+        try { inWorld = Progenitor.Worlds.Client is { IsCreated: true }; }
+        catch { inWorld = false; }
+        string? refusal = DisplayPlan.InWorldRefusal(inWorld, r.AllowInWorld);
+        if (refusal != null)
         {
-            _baseW = Screen.width;
-            _baseH = Screen.height;
-            _baseMode = (int)Screen.fullScreenMode;
-            ReadSettingsFields(out _baseSettingsW, out _baseSettingsH, out _baseSettingsMode);
-            _baseline = DisplayPlan.Baseline(_baseW, _baseH, _baseMode);
-            _baseline["settingsResolution"] = _baseSettingsW < 0 ? null : _baseSettingsW + "x" + _baseSettingsH;
-            _baseline["settingsWindowMode"] = _baseSettingsMode < 0 ? null : _baseSettingsMode;
-            reply["baseline"] = _baseline;
+            reply["ok"] = false;
+            reply["error"] = refusal;
+            return reply;
         }
 
+        if (baseline == null)
+        {
+            baseline = new DisplayPlan.Baseline { Width = Screen.width, Height = Screen.height, Mode = (int)Screen.fullScreenMode };
+            ReadSettingsFields(out int sw, out int sh, out int sm);
+            baseline.SettingsWidth = sw;
+            baseline.SettingsHeight = sh;
+            baseline.SettingsWindowMode = sm;
+            if (GameWindow.TryRect(out int wx, out int wy, out _, out _))
+            {
+                baseline.HasWindowPosition = true;
+                baseline.WindowX = wx;
+                baseline.WindowY = wy;
+            }
+
+            baseline.Registry = ReadScreenRegistry();
+            // On disk before anything changes: a Dev reload, a Core swap or a crash after this keeps the way back.
+            SaveBaseline(baseline);
+        }
+
+        ReadSettingsFields(out int beforeW, out int beforeH, out int beforeMode);
+        string beforeStamp = SettingsFileStamp();
+        var foreground = KeepForeground();
         ProjectM.GraphicsSettingsManager.SetResolution(r.Width, r.Height, (FullScreenMode)(int)r.WindowMode);
+        foreground.Check(reply);
         Plugin.Logger?.LogInfo("Dev display set: " + r.Width + "x" + r.Height + " " + r.WindowMode + " (GraphicsSettingsManager.SetResolution)");
-        reply["requested"] = DisplayPlan.Baseline(r.Width, r.Height, (int)r.WindowMode);
-        reply["warning"] = "this can change the user's saved graphics settings; run display restore when done";
-        return AfterFrames(reply, null);
+        reply["requested"] = DisplayPlan.Describe(r.Width, r.Height, (int)r.WindowMode);
+        reply["afterCall"] = Read();
+        if (inWorld) reply["inWorld"] = true;
+        var kept = baseline;
+        return AfterSettle(reply, r.Width, r.Height, (int)r.WindowMode, foreground, matched =>
+        {
+            // Whether this set wrote the game's settings: its in-memory graphics fields and its settings file.
+            ReadSettingsFields(out int afterW, out int afterH, out int afterMode);
+            bool wrote = afterW != beforeW || afterH != beforeH || afterMode != beforeMode;
+            bool wroteFile = SettingsFileStamp() != beforeStamp;
+            reply["settingsWritten"] = wrote;
+            reply["settingsFileWritten"] = wroteFile;
+            kept.SettingsWritten |= wrote;
+            kept.SettingsFileWritten |= wroteFile;
+            try { SaveBaseline(kept); } catch (Exception e) { reply["baselineError"] = e.Message; }
+            reply["warning"] = "the game's display is changed until display restore (also run on Dev unload and Core swap)";
+        }, "the window is not what was asked (the monitor may not hold that size); run display restore");
     }
 
-    private static object AfterFrames(Dictionary<string, object?> reply, Action? done)
+    /// <summary>Wait until the window matches, at most <see cref="SettleFramesMax"/> frames; <c>ok</c> is whether it did.</summary>
+    private static object AfterSettle(Dictionary<string, object?> reply, int w, int h, int mode, Foreground foreground, Action<bool> done, string mismatch)
     {
-        var deferred = new DeferredResult(8_000);
+        var deferred = new DeferredResult(10_000);
         int frames = 0;
 
         void Step()
         {
-            if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
-            if (++frames < 10)
+            if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket))
+            {
+                // Abandoned: the reply is gone, but the window still must not keep a foreground it took.
+                foreground.Check(null);
+                return;
+            }
+
+            frames++;
+            foreground.Check(reply);
+            bool matched = DisplayPlan.Matches(Screen.width, Screen.height, (int)Screen.fullScreenMode, w, h, mode);
+            if (!matched && frames < SettleFramesMax)
             {
                 MainThread.PostDelayed(0, Step, deferred);
                 return;
             }
 
             reply["after"] = Read();
-            reply["ok"] = true;
-            try { done?.Invoke(); } catch { /* */ }
+            reply["framesWaited"] = frames;
+            reply["ok"] = matched;
+            if (!matched) reply["error"] = mismatch;
+            try { done(matched); } catch (Exception e) { reply["doneError"] = e.Message; }
+            reply["baseline"] = DescribeBaseline(LoadBaseline());
             deferred.SetResult(reply);
         }
 
         MainThread.PostDelayed(0, Step, deferred);
         return deferred;
+    }
+
+    /// <summary>
+    /// Whether the game had the foreground before a resolution call; when it did not and the call raised it, the
+    /// foreground goes back to the window that had it (Unity's windowed resize can activate the game's window).
+    /// </summary>
+    private sealed class Foreground
+    {
+        internal IntPtr Previous;
+        internal bool WasGame;
+        internal bool GaveBack;
+
+        internal void Check(Dictionary<string, object?>? reply)
+        {
+            if (WasGame) return;
+            if (GameWindow.GiveForegroundBack(Previous)) GaveBack = true;
+            if (reply == null) return;
+            reply["focusedBefore"] = WasGame;
+            reply["foregroundGivenBack"] = GaveBack;
+            reply["focusedNow"] = GameWindow.IsForeground();
+        }
+    }
+
+    private static Foreground KeepForeground() => new() { Previous = GameWindow.Foreground(), WasGame = GameWindow.IsForeground() };
+
+    /// <summary>A windowed baseline's top-left back on the desktop (no resize, no activation).</summary>
+    private static object RestorePosition(DisplayPlan.Baseline b)
+    {
+        if (!b.HasWindowPosition) return "not recorded";
+        if (b.Mode != (int)DisplayPlan.Mode.Windowed) return "not windowed";
+        return GameWindow.MoveTo(b.WindowX, b.WindowY) ? (object)new Dictionary<string, object?> { ["x"] = b.WindowX, ["y"] = b.WindowY } : "move failed";
+    }
+
+    /// <summary>The engine's remembered screen values in the user's registry, encoded; empty when the key is missing.</summary>
+    private static Dictionary<string, string> ReadScreenRegistry()
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(DisplayPlan.ScreenRegistryKey, writable: false);
+            if (key == null) return map;
+            foreach (var name in key.GetValueNames())
+            {
+                if (!DisplayPlan.IsScreenValue(name)) continue;
+                string kind = key.GetValueKind(name) switch
+                {
+                    Microsoft.Win32.RegistryValueKind.DWord => "dword",
+                    Microsoft.Win32.RegistryValueKind.QWord => "qword",
+                    Microsoft.Win32.RegistryValueKind.Binary => "binary",
+                    Microsoft.Win32.RegistryValueKind.String => "string",
+                    _ => "",
+                };
+                var encoded = kind.Length == 0 ? null : DisplayPlan.EncodeRegistry(kind, key.GetValue(name, null, Microsoft.Win32.RegistryValueOptions.DoNotExpandEnvironmentNames));
+                if (encoded != null) map[name] = encoded;
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Dev display: could not read the screen registry values: " + e.Message); }
+        return map;
+    }
+
+    /// <summary>Write the recorded screen values back (only those names; nothing else in the key is touched).</summary>
+    private static object WriteScreenRegistry(Dictionary<string, string>? values)
+    {
+        if (values == null || values.Count == 0) return "none recorded";
+        int written = 0;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(DisplayPlan.ScreenRegistryKey, writable: true);
+            if (key == null) return "key missing";
+            foreach (var pair in values)
+            {
+                if (!DisplayPlan.IsScreenValue(pair.Key)) continue;
+                var decoded = DisplayPlan.DecodeRegistry(pair.Value);
+                if (decoded == null) continue;
+                var kind = decoded.Value.Kind switch
+                {
+                    "dword" => Microsoft.Win32.RegistryValueKind.DWord,
+                    "qword" => Microsoft.Win32.RegistryValueKind.QWord,
+                    "binary" => Microsoft.Win32.RegistryValueKind.Binary,
+                    _ => Microsoft.Win32.RegistryValueKind.String,
+                };
+                key.SetValue(pair.Key, decoded.Value.Value, kind);
+                written++;
+            }
+        }
+        catch (Exception e) { return "error: " + e.Message; }
+        return written;
+    }
+
+    /// <summary>
+    /// Back to the baseline now: the window through the game's own call, the two saved graphics fields if they differ, and
+    /// the game's settings file saved again when a set had written it, so the file holds the baseline too.
+    /// </summary>
+    private static Dictionary<string, object?> RestoreNow(DisplayPlan.Baseline b, string why)
+    {
+        var d = new Dictionary<string, object?>(StringComparer.Ordinal);
+        ProjectM.GraphicsSettingsManager.SetResolution(b.Width, b.Height, (FullScreenMode)b.Mode);
+        d["window"] = DisplayPlan.Describe(b.Width, b.Height, b.Mode);
+        d["settingsFields"] = RestoreSettingsFields(b);
+        if (b.SettingsFileWritten || b.SettingsWritten)
+        {
+            try
+            {
+                var settings = ProjectM.SettingsManager.ClientSettings;
+                if (settings != null)
+                {
+                    settings.SaveToPath(ProjectM.ClientSettings.LocalPath, true, false);
+                    d["settingsSaved"] = true;
+                }
+            }
+            catch (Exception e) { d["settingsSaveError"] = e.Message; }
+        }
+
+        Plugin.Logger?.LogInfo("Dev display " + why + ": " + b.Width + "x" + b.Height + " " + DisplayPlan.ModeName(b.Mode)
+            + (d.ContainsKey("settingsSaved") ? "; client settings saved" : ""));
+        return d;
+    }
+
+    /// <summary>
+    /// Dev unload, which also runs on a Core swap: put a pending set back. The window change is issued here and cannot be
+    /// read back; the baseline file is removed only when the call was made, so a failure leaves it for <c>restore</c>.
+    /// </summary>
+    internal static void Shutdown()
+    {
+        try
+        {
+            var b = LoadBaseline();
+            if (b == null) return;
+            var front = KeepForeground();
+            RestoreNow(b, "restore on unload");
+            front.Check(null);
+            RestorePosition(b);
+            WriteScreenRegistry(b.Registry);
+            ForgetBaseline();
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Dev display: restore on unload failed (the baseline stays for display restore): " + e.Message); }
     }
 
     private static Dictionary<string, object?> Read()
@@ -128,9 +360,12 @@ internal static class DisplayOps
             d["mode"] = Screen.fullScreenMode.ToString();
             var cur = Screen.currentResolution;
             d["monitor"] = cur.width + "x" + cur.height;
+            d["focused"] = Application.isFocused;
         }
         catch (Exception e) { d["screenError"] = e.Message; }
 
+        // The window on the desktop now: its rect and whether it is the foreground window.
+        try { d["window"] = GameWindow.Describe(); } catch (Exception e) { d["windowError"] = e.Message; }
         ReadSettingsFields(out int w, out int h, out int mode);
         d["settingsResolution"] = w < 0 ? null : w + "x" + h;
         d["settingsWindowMode"] = mode < 0 ? null : mode;
@@ -152,19 +387,43 @@ internal static class DisplayOps
         catch { w = h = mode = -1; }
     }
 
-    /// <summary>Put the two client-settings fields back to their values before the first set, when the game changed them.</summary>
-    private static void RestoreSettingsFields()
+    /// <summary>The client settings file's size and write time, or "" when there is none (a write changes it).</summary>
+    private static string SettingsFileStamp()
     {
-        if (_baseSettingsW < 0) return;
+        try
+        {
+            string path = ProjectM.ClientSettings.LocalPath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path)) return "";
+            var info = new FileInfo(path);
+            return info.Length + "@" + info.LastWriteTimeUtc.Ticks;
+        }
+        catch { return ""; }
+    }
+
+    private static string RestoreSettingsFields(DisplayPlan.Baseline b)
+    {
+        if (b.SettingsWidth < 0) return "unreadable at the first set";
         try
         {
             var g = ProjectM.SettingsManager.ClientSettings?.GraphicSettings;
-            if (g == null) return;
+            if (g == null) return "no client settings";
+            bool changed = false;
             var res = g.Resolution;
-            if (res.x != _baseSettingsW || res.y != _baseSettingsH) g.Resolution = new Unity.Mathematics.int2(_baseSettingsW, _baseSettingsH);
-            if (g.WindowMode != (byte)_baseSettingsMode) g.WindowMode = (byte)_baseSettingsMode;
+            if (res.x != b.SettingsWidth || res.y != b.SettingsHeight)
+            {
+                g.Resolution = new Unity.Mathematics.int2(b.SettingsWidth, b.SettingsHeight);
+                changed = true;
+            }
+
+            if (g.WindowMode != (byte)b.SettingsWindowMode)
+            {
+                g.WindowMode = (byte)b.SettingsWindowMode;
+                changed = true;
+            }
+
+            return changed ? "put back" : "unchanged";
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("Dev display restore: settings fields: " + e.Message); }
+        catch (Exception e) { return "error: " + e.Message; }
     }
 
     // ---- screenshot ---------------------------------------------------------------------------------
@@ -174,10 +433,19 @@ internal static class DisplayOps
         var shot = DisplayPlan.ParseShot(args);
         if (Progenitor.Plugin.IsServerProcess) throw new InvalidOperationException(ClientOnlyMessage);
         var reply = new Dictionary<string, object?>(StringComparer.Ordinal);
-        string path = shot.Path ?? DisplayPlan.DefaultShotPath(BepInEx.Paths.BepInExRootPath, DateTime.UtcNow);
-        path = Path.GetFullPath(path);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (File.Exists(path)) File.Delete(path);
+        int windowW = Screen.width, windowH = Screen.height;
+        string? tooBig = DisplayPlan.PixelRefusal(windowW, windowH, shot.SuperSize);
+        if (tooBig != null)
+        {
+            reply["ok"] = false;
+            reply["error"] = tooBig;
+            return reply;
+        }
+
+        // Only under BepInEx/progenitor-shots, only a plain file name, and never over a file that is there.
+        string folder = Path.Combine(BepInEx.Paths.BepInExRootPath, DisplayPlan.ShotFolder);
+        Directory.CreateDirectory(folder);
+        string path = DisplayPlan.UniqueShotPath(folder, shot.Name, DateTime.UtcNow, File.Exists);
 
         // The region is read now, in window pixels, while the UI is as the caller left it.
         Dictionary<string, object?>? region = null;
@@ -201,7 +469,6 @@ internal static class DisplayOps
             hasRegion = true;
         }
 
-        int windowW = Screen.width, windowH = Screen.height;
         reply["window"] = windowW + "x" + windowH;
         reply["focused"] = Application.isFocused;
         reply["superSize"] = shot.SuperSize;
@@ -291,7 +558,7 @@ internal static class DisplayOps
             System.Runtime.InteropServices.Marshal.Copy(cut, 0, cutNative.Pointer + IntPtr.Size * 4, cut.Length);
             part.LoadRawTextureData(cutNative);
             part.Apply(false);
-            string cropPath = Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + "-region.png");
+            string cropPath = DisplayPlan.UniqueShotPath(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + "-region.png", DateTime.UtcNow, File.Exists);
             File.WriteAllBytes(cropPath, ImageConversion.EncodeToPNG(part));
             d["path"] = cropPath;
             d["x"] = c.X;

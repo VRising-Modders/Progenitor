@@ -36,16 +36,31 @@ internal static class UiInputPlan
         + "args.steps, args.keepDown (leave the button held; then action up). wheel: args.notches (-20..20, not 0; positive up). key: args.key Escape|Enter|Tab|Backspace|… "
         + "type: args.text into the focused kit field. focus: give the kit field at the target the keyboard.";
 
+    // Bounds: every action ends well inside the bridge's 30 s cap for one op. The frame bounds keep an action under
+    // MaxTimelineFrames (about 10 s at 30 fps); DeadlineMs is the wall-clock backstop when the game runs slower.
     internal const int DefaultSettleFrames = 3;
-    internal const int MaxSettleFrames = 120;
+    internal const int MaxSettleFrames = 60;
     internal const int DefaultHoldFrames = 3;
-    internal const int MaxHoldFrames = 600;
+    internal const int MaxHoldFrames = 120;
     internal const int DefaultDragSteps = 12;
-    internal const int MaxDragSteps = 600;
+    internal const int MaxDragSteps = 180;
     internal const int MaxNotches = 20;
     internal const int AfterFrames = 2;
     internal const int DefaultKeyFrames = 2;
-    internal const int MaxTypedChars = 2000;
+    internal const int MaxKeyFrames = 30;
+    internal const int MaxTypedChars = 400;
+
+    /// <summary>The most frames one pointer action's timeline may take.</summary>
+    internal const int MaxTimelineFrames = 300;
+
+    /// <summary>Frames a wheel action waits for the pump to take its notches after the last one was queued.</summary>
+    internal const int MaxNotchWaitFrames = 60;
+
+    /// <summary>Wall-clock limit of one action; the bridge's own cap for an op is 30 s.</summary>
+    internal const int DeadlineMs = 25_000;
+
+    /// <summary>Characters typed per frame: one, or enough that any allowed text is typed within 120 frames.</summary>
+    internal static int TypePerFrame(int length) => Math.Max(1, (length + 119) / 120);
 
     /// <summary>Modifier mask bits, as Core's <c>UiClickModifiers</c>.</summary>
     internal const int Shift = 1;
@@ -169,8 +184,8 @@ internal static class UiInputPlan
         }
 
         int modifiers = ParseModifiers(args);
-        if (modifiers != 0 && action is not (Action.Click or Action.Drag or Action.Move))
-            throw new ArgumentException("ui_input: args.modifiers is for click, drag and move.");
+        if (modifiers != 0 && action is not (Action.Click or Action.Drag or Action.Move or Action.Key))
+            throw new ArgumentException("ui_input: args.modifiers is for click, drag, move and key.");
 
         int button = 1;
         string? buttonText = Text(args, "button");
@@ -221,7 +236,7 @@ internal static class UiInputPlan
         {
             key = Text(args, "key");
             if (string.IsNullOrWhiteSpace(key)) throw new ArgumentException("ui_input: key needs args.key (Escape, Enter, Tab, Backspace, Delete, Left, Right, Up, Down, Home, End, Space or a letter).");
-            keyFrames = OptInt(args, "frames", 1, 120) ?? DefaultKeyFrames;
+            keyFrames = OptInt(args, "frames", 1, MaxKeyFrames) ?? DefaultKeyFrames;
         }
 
         string? text = null;
@@ -232,7 +247,7 @@ internal static class UiInputPlan
             if (text!.Length > MaxTypedChars) throw new ArgumentException("ui_input: args.text is at most " + MaxTypedChars + " characters (mods_ui paste takes more).");
         }
 
-        return new Request
+        var request = new Request
         {
             Action = action,
             At = at,
@@ -250,6 +265,11 @@ internal static class UiInputPlan
             ReleaseAfter = release,
             KeepDown = keepDown,
         };
+        int frames = Timeline(request, 0f, 0f)[^1].Frame;
+        if (frames > MaxTimelineFrames)
+            throw new ArgumentException("ui_input: this action takes " + frames + " frames; the most is " + MaxTimelineFrames
+                + " (lower settleFrames, holdFrames or steps) so it ends inside the bridge's 30 s limit.");
+        return request;
     }
 
     internal static Target ParseTarget(JsonElement el, string op)

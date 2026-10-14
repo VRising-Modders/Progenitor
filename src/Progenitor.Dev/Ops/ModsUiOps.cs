@@ -762,7 +762,7 @@ internal static class ModsUiArgs
         };
     }
 
-    /// <summary>RADIO1:<c>radio_choose {label, value, pane?}</c>: the radio list's caption and an option's value or label.</summary>
+    /// <summary>RADIO1: <c>radio_choose {label, value, pane?}</c>: the radio list's caption and an option's value or label.</summary>
     private static Request ParseRadioChoose(JsonElement args, string action)
     {
         string? pane = OptionalString(args, "pane");

@@ -823,6 +823,7 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\DisplayPlan.cs" Link="Linked\DisplayPlan.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\DisplayOps.cs" Link="Linked\DisplayOps.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiSyntheticInput.cs" Link="Linked\UiSyntheticInput.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiCaretLines.cs" Link="Linked\UiCaretLines.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\BridgeStatus.cs" Link="Linked\BridgeStatus.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeDump.cs" Link="Linked\FreezeDump.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\FreezeWindowState.cs" Link="Linked\FreezeWindowState.cs" />

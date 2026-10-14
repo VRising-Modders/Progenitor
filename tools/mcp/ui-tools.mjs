@@ -28,12 +28,11 @@ export function compact(obj) {
   return out;
 }
 
-/** The bridge timeout for one ui_input call: frames run at the game's rate, so long drags and typing need more. */
-export function uiInputTimeout(args) {
-  const frames = (args.settleFrames ?? 3) + (args.holdFrames ?? 3) + (args.steps ?? 12) + 2 * Math.abs(args.notches ?? 0);
-  const typing = (args.text?.length ?? 0) * 4;
-  return Math.min(120000, Math.max(25000, (frames + typing) * 60 + 15000));
-}
+/**
+ * The MCP wait for one ui_input call. The bridge caps every op at 30 s, and the op bounds its own frames and ends at 25 s
+ * of wall-clock time (UiInputPlan.DeadlineMs), so waiting longer than the bridge's cap would only hide a failure.
+ */
+export const UI_INPUT_TIMEOUT_MS = 30000;
 
 export function registerUiTools(server, { z, bridge, text, fail }) {
   const target = targetSchema(z);
@@ -59,15 +58,15 @@ export function registerUiTools(server, { z, bridge, text, fail }) {
       ...target,
       to: z.object(target).optional().describe("drag only: where to release (same fields as the target)."),
       button: z.enum(["left", "right", "middle"]).optional().describe("click/drag. Default left."),
-      modifiers: z.array(z.enum(["shift", "ctrl"])).optional().describe("click/drag/move: held for the action (the kit's click modifiers)."),
-      settleFrames: z.number().int().min(0).max(120).optional().describe("Frames the pointer rests on the target before a press. Default 3."),
-      holdFrames: z.number().int().min(1).max(600).optional().describe("click: frames the button stays down. Default 3."),
-      steps: z.number().int().min(1).max(600).optional().describe("drag: frames (one move each). Default 12."),
+      modifiers: z.array(z.enum(["shift", "ctrl"])).optional().describe("click/drag/move/key: held for the action (the kit's click modifiers; Shift+End selects, Ctrl+Home goes to the text's start)."),
+      settleFrames: z.number().int().min(0).max(60).optional().describe("Frames the pointer rests on the target before a press. Default 3."),
+      holdFrames: z.number().int().min(1).max(120).optional().describe("click: frames the button stays down. Default 3."),
+      steps: z.number().int().min(1).max(180).optional().describe("drag: frames (one move each). Default 12."),
       keepDown: z.boolean().optional().describe("drag: leave the button held at `to`; finish with action=up."),
       notches: z.number().int().min(-20).max(20).optional().describe("wheel: notches, positive up (toward the start of a list)."),
       key: z.string().optional().describe("key: Escape, Enter, Tab, Backspace, Delete, Left, Right, Up, Down, Home, End, Space, or a letter."),
-      frames: z.number().int().min(1).max(120).optional().describe("key: frames the key is held. Default 2."),
-      text: z.string().max(2000).optional().describe("type: the text."),
+      frames: z.number().int().min(1).max(30).optional().describe("key: frames the key is held. Default 2."),
+      text: z.string().max(400).optional().describe("type: the text (at most 400 characters; mods_ui paste takes more)."),
       leaseMs: z.number().int().min(500).max(300000).optional().describe("Lease length from this call. Default 30000."),
       release: z.boolean().optional().describe("End the lease when this action finishes (the pointer leaves: hovers end)."),
     },
@@ -76,7 +75,7 @@ export function registerUiTools(server, { z, bridge, text, fail }) {
         const a = compact(args);
         if (a.action === "hover") a.action = "move";
         if (a.to) a.to = compact(a.to);
-        return text(await bridge("client", "ui_input", a, uiInputTimeout(a)));
+        return text(await bridge("client", "ui_input", a, UI_INPUT_TIMEOUT_MS));
       } catch (e) { return fail(e); }
     });
 
@@ -118,26 +117,30 @@ export function registerUiTools(server, { z, bridge, text, fail }) {
   server.tool(
     "progenitor_display",
     "Client only. The game window's resolution and window mode through the game's own graphics path " +
-      "(GraphicsSettingsManager.SetResolution). status reads the window, the monitor and the game's saved graphics fields; " +
-      "set changes them (this can change the user's saved graphics settings); restore returns to the values before the " +
-      "first set of this Dev generation. Always restore when done. The monitor bounds what a window can show: for a 16:9 " +
-      "layout larger than the monitor, set a smaller 16:9 window and use progenitor_screenshot superSize.",
+      "(GraphicsSettingsManager.SetResolution). status reads the window, the monitor, the game's saved graphics fields and " +
+      "a pending baseline; set changes them (refused while a client world exists unless allowInWorld; reports whether the " +
+      "game wrote its settings; ok is false when the window is not what was asked); restore returns to the values before " +
+      "the first set, kept on disk, and saves the game's settings again when a set wrote them. Dev unload and Core swaps " +
+      "restore too. Exclusive full screen is not offered. The monitor bounds what a window can show: for a 16:9 layout " +
+      "larger than the monitor, set a smaller 16:9 window and use progenitor_screenshot superSize.",
     {
       action: z.enum(["status", "set", "restore"]).describe("What to do."),
       width: z.number().int().min(640).max(16384).optional().describe("set: width in pixels."),
       height: z.number().int().min(360).max(16384).optional().describe("set: height in pixels."),
-      mode: z.enum(["windowed", "fullscreenwindow", "exclusive", "maximized"]).optional().describe("set: window mode. Default windowed."),
+      mode: z.enum(["windowed", "fullscreenwindow", "maximized"]).optional().describe("set: window mode. Default windowed."),
+      allowInWorld: z.boolean().optional().describe("set: allow it while a client world exists (an authorized in-world test)."),
     },
     async (args) => { try { return text(await bridge("client", "display", compact(args), 30000)); } catch (e) { return fail(e); } });
 
   server.tool(
     "progenitor_screenshot",
-    "Client only, read only. A focus-free capture made by the game itself (ScreenCapture.CaptureScreenshot): the frame it " +
-      "renders, UI included, at the window's resolution or superSize times it. Optional region: rect {x, y, w, h} (screen " +
-      "pixels, origin bottom-left), or row (and cell) or panel, with pad; the crop is written beside the file as " +
+    "Client only. A focus-free capture made by the game itself (ScreenCapture.CaptureScreenshot): the frame it renders, " +
+      "UI included, at the window's resolution or superSize times it (at most 7680x4320 pixels). Files go only under " +
+      "BepInEx/progenitor-shots and never replace an existing file. Optional region: rect {x, y, w, h} (screen pixels, " +
+      "origin bottom-left), or row (and cell) or panel, with pad; the crop is written beside the file as " +
       "<name>-region.png. A minimized window renders nothing. Returns the path and the image size.",
     {
-      path: z.string().optional().describe("A .png path on the game machine. Default BepInEx/progenitor-shots/<utc time>.png."),
+      name: z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9._-]{0,75}\.png$/).optional().describe("A plain file name ending in .png. Default the UTC time."),
       superSize: z.number().int().min(1).max(4).optional().describe("Render at this multiple of the window size. Default 1."),
       rect: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional().describe("Region in screen pixels."),
       row: z.string().optional().describe("Region: a cell row key."),

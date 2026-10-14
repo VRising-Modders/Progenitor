@@ -70,8 +70,8 @@ const READ_ONLY_OPS = new Set([
   "ping", "logs", "ops", "status", "users", "players", "worlds", "query", "get", "components", "inspect",
   "prefab", "snapshot", "castles", "bridge_status", "bridge_users", "reload_status", "perf_status",
   "versions", "versions_journal", "versions_plan", "catalog_status", "datetime_read", "rejoin_read", "tree",
-  // BRIDGEUI1: widget readback, and a capture the game writes to a file (the game state is unchanged).
-  "ui_read", "screenshot",
+  // BRIDGEUI1: widget readback. (screenshot is not here: it writes files on the client's machine.)
+  "ui_read",
 ]);
 const READ_ONLY_ACTIONS = new Set(["status", "list", "live"]);
 /** Ops whose default action (no `action` given) is status. */

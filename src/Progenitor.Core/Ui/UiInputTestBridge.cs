@@ -45,14 +45,42 @@ internal static class UiInputTestBridge
     /// A UI-layer key tap: held for the typed-key pump for <paramref name="frames"/> frames (Escape also through the
     /// framework's Escape hook; Enter on a focused single-line field also submits it, as TMP's own Enter does).
     /// </summary>
-    public static Dictionary<string, object?> Tap(string key, int frames)
+    public static Dictionary<string, object?> Tap(string key, int frames, int modifiers)
     {
         if (!UiTextTestInput.TryParseKey(key, out var ui))
             return new Dictionary<string, object?> { ["ok"] = false, ["error"] = "unknown key '" + key + "'" };
+        if (!UiSyntheticInput.Active)
+            return new Dictionary<string, object?> { ["ok"] = false, ["error"] = "the synthetic input is not held" };
+        // Shift and Ctrl are held through the tap (the typed-key pump reads them as the left keys).
+        UiSyntheticInput.SetModifiers((UiClickModifiers)(modifiers & 3));
+        bool shift = (modifiers & 1) != 0, ctrl = (modifiers & 2) != 0;
+
+        // Up, Down, Home and End in a multi-line field move by line on the kit's owned caret; Ctrl+Home / Ctrl+End stay
+        // the pump's whole-text moves.
+        if (!ctrl)
+        {
+            var line = UnityUiRuntime.SyntheticLineKey(ui, shift);
+            if (line != null)
+            {
+                line["ok"] = true;
+                line["frames"] = 0;
+                return line;
+            }
+        }
+
         int frame;
         try { frame = UnityEngine.Time.frameCount; }
         catch { frame = 0; }
         bool ok = UiSyntheticInput.Tap(ui, frame + 1, frames);
+        // An Escape's Escape-hook half runs now, while it is known whether a panel is shown (Bootstrap forwards a
+        // physical Escape only then); the pump sees the held key from the next frame. Nothing is left pending.
+        bool forwarded = false;
+        if (ok && UiSyntheticInput.ForwardsEscape(ui, Ui.ShownPanelsSnapshot().Count))
+        {
+            Ui.PressEscapeForBridge();
+            forwarded = true;
+        }
+
         bool submitted = ok && (ui == UiKey.Enter || ui == UiKey.NumpadEnter) && UnityUiRuntime.SyntheticSubmitFocused();
         return new Dictionary<string, object?>
         {
@@ -60,12 +88,47 @@ internal static class UiInputTestBridge
             ["key"] = ui.ToString(),
             ["fromFrame"] = frame + 1,
             ["frames"] = frames,
+            ["escapeHook"] = forwarded,
             ["submitsField"] = submitted,
             ["error"] = ok ? null : "the synthetic input is not held",
         };
     }
 
     public static int HeldKeys() => UiSyntheticInput.HeldKeyCount;
+
+    /// <summary>Whether <paramref name="key"/>'s queued taps have all been released, counted in rendered frames.</summary>
+    public static bool TapDone(string key)
+    {
+        if (!UiTextTestInput.TryParseKey(key, out var ui)) return true;
+        int until = UiSyntheticInput.TapUntil(ui);
+        int frame;
+        try { frame = UnityEngine.Time.frameCount; }
+        catch { return true; }
+        return until < 0 || frame > until;
+    }
+
+    /// <summary>Drop every queued wheel notch; returns how many there were.</summary>
+    public static int DrainWheel() => UiSyntheticInput.DrainWheel();
+
+    /// <summary>How many Progenitor panels are shown (the shown-input pump runs only then).</summary>
+    public static int ShownPanels() => Ui.ShownPanelsSnapshot().Count;
+
+    /// <summary>The bridge queued text for the focused field (ui_input type): track it so it never lands elsewhere.</summary>
+    public static void NoteTextForFocused() => UnityUiRuntime.NoteBridgeTextForFocused();
+
+    /// <summary>Abandoned or failed action: every button and modifier up, queued notches and owned text dropped.</summary>
+    public static void Abandon()
+    {
+        UiSyntheticInput.SetButtons(UiSyntheticButtons.None);
+        UiSyntheticInput.SetModifiers(UiClickModifiers.None);
+        UiSyntheticInput.DrainWheel();
+        if (UiSyntheticInput.TextOwner != 0)
+        {
+            UiTextInjection.Text.Clear();
+            UiTextInjection.Keys.Clear();
+            UiSyntheticInput.ClearTextOwner();
+        }
+    }
 
     public static void Release(string reason)
     {
@@ -202,16 +265,25 @@ internal static class UiInputTestBridge
         }
 
         if (mask == UiSyntheticNav.None) throw new ArgumentException("args.button is required");
-        EnsureNavTeardown();
+        var refused = BeginForNav(ms);
+        if (refused != null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = refused };
         UiSyntheticInput.HoldNav(mask, ms);
         return new Dictionary<string, object?> { ["ok"] = true, ["held"] = mask.ToString(), ["ms"] = ms };
     }
 
     public static Dictionary<string, object?> Stick(float y, int ms)
     {
-        EnsureNavTeardown();
+        var refused = BeginForNav(ms);
+        if (refused != null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = refused };
         UiSyntheticInput.HoldStick(y, ms);
         return new Dictionary<string, object?> { ["ok"] = true, ["stick"] = UiSyntheticInput.StickHeld, ["ms"] = ms };
+    }
+
+    /// <summary>Navigation holds live inside the lease: the player's activity, a release or the Core unload ends them.</summary>
+    private static string? BeginForNav(int ms)
+    {
+        EnsureNavTeardown();
+        return Begin(Math.Max(UiSyntheticInput.DefaultLeaseMs, ms + 2_000));
     }
 
     public static void ClearNav() => UiSyntheticInput.ClearNav();
@@ -334,15 +406,62 @@ internal static class UiInputTestBridge
         var d = UiTips.Describe();
         var showing = UiTips.Showing;
         ScreenRect card = ScreenRect.Unknown, anchor = ScreenRect.Unknown;
+        string cardSource = "none", anchorSource = "none";
+        UiPanelHandle? cardPanel = null;
         try
         {
-            if (showing?.View?.Panel is UiPanelHandle cp) card = PanelRect(cp);
-            if (showing?.Anchor is UiPanelHandle ap) anchor = PanelRect(ap);
+            if (showing?.View?.Panel is UiPanelHandle cp)
+            {
+                cardPanel = cp;
+                card = PanelRect(cp);
+                cardSource = "tip view";
+            }
+
+            // Live 2026-10-14 (1440p): the card's own view gave no rect. The card is a shown panel titled as the tip.
+            if (!card.IsKnown && showing != null)
+            {
+                foreach (var p in Ui.ShownPanelsSnapshot())
+                {
+                    if (!string.Equals(SafeText(p), showing.Title ?? "", StringComparison.OrdinalIgnoreCase)) continue;
+                    var r = PanelRect(p);
+                    if (!r.IsKnown) continue;
+                    cardPanel = p;
+                    card = r;
+                    cardSource = "shown panel titled '" + SafeText(p) + "'";
+                    break;
+                }
+            }
+
+            if (showing?.Anchor is UiPanelHandle ap)
+            {
+                anchor = PanelRect(ap);
+                anchorSource = "tip anchor '" + SafeText(ap) + "'";
+            }
+
+            // No anchor of its own: the card sits beside the Mods workspace or in the corner; report the largest other
+            // shown panel (the workspace when it is open) so the placement can still be checked.
+            if (!anchor.IsKnown)
+            {
+                float best = 0f;
+                foreach (var p in Ui.ShownPanelsSnapshot())
+                {
+                    if (cardPanel != null && ReferenceEquals(p, cardPanel)) continue;
+                    var r = PanelRect(p);
+                    if (!r.IsKnown) continue;
+                    float area = (r.MaxX - r.MinX) * (r.MaxY - r.MinY);
+                    if (area <= best) continue;
+                    best = area;
+                    anchor = r;
+                    anchorSource = "largest shown panel '" + SafeText(p) + "'";
+                }
+            }
         }
-        catch { /* */ }
+        catch (Exception e) { d["readError"] = e.Message; }
 
         d["cardRect"] = UnityUiRuntime.RectDict(card);
+        d["cardSource"] = cardSource;
         d["anchorRect"] = UnityUiRuntime.RectDict(anchor);
+        d["anchorSource"] = anchorSource;
         if (card.IsKnown && anchor.IsKnown)
             d["relative"] = new Dictionary<string, object?>
             {
@@ -352,8 +471,20 @@ internal static class UiInputTestBridge
                 ["insideAnchor"] = card.MinX >= anchor.MinX && card.MaxX <= anchor.MaxX && card.MinY >= anchor.MinY && card.MaxY <= anchor.MaxY,
             };
         var (w, h) = UnityUiRuntime.ScreenSize();
+        d["screen"] = w + "x" + h;
         if (card.IsKnown && w > 0 && h > 0)
+        {
             d["cardOnScreen"] = card.MinX >= 0 && card.MinY >= 0 && card.MaxX <= w && card.MaxY <= h;
+            d["cardMargins"] = new Dictionary<string, object?>
+            {
+                ["left"] = Math.Round(card.MinX, 1),
+                ["bottom"] = Math.Round(card.MinY, 1),
+                ["right"] = Math.Round(w - card.MaxX, 1),
+                ["top"] = Math.Round(h - card.MaxY, 1),
+            };
+        }
+
+        if (showing == null) d["note"] = "no tip card is showing (Show tip, or a card waits behind a dialog: see waiting)";
         d["ok"] = true;
         return d;
     }

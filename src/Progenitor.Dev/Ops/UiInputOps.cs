@@ -132,6 +132,89 @@ internal static class UiInputOps
         if (request.ReleaseAfter) Bridge("Release", "release");
     }
 
+    /// <summary>
+    /// A multi-frame action's frame loop: <paramref name="step"/> runs once a frame until it answers true. The action ends
+    /// with <c>ok false</c> at <see cref="UiInputPlan.DeadlineMs"/> of wall-clock time (well under the bridge's 30 s cap),
+    /// and an abandoned or failed action lets go of every button and modifier, drops queued notches and owned text.
+    /// </summary>
+    private static DeferredResult RunFrames(Dictionary<string, object?> reply, int budgetFrames, Func<int, bool> step, Action<bool> complete)
+    {
+        var deferred = new DeferredResult(UiInputPlan.DeadlineMs + 2_000);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        int frame = -1;
+        int lastUnityFrame = int.MinValue;
+
+        void Done(bool ok, string? error)
+        {
+            if (deferred.Completion.Task.IsCompleted) return;
+            try
+            {
+                if (!ok) Bridge("Abandon");
+                reply["ok"] = ok;
+                if (error != null) reply["error"] = error;
+                reply["framesWaited"] = frame;
+                complete(ok);
+            }
+            catch (Exception e) { reply["readbackError"] = e.Message; }
+            deferred.SetResult(reply);
+        }
+
+        void Tick()
+        {
+            try
+            {
+                if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket))
+                {
+                    // The bridge gave up on this op: nothing it holds may stay held.
+                    try { Bridge("Abandon"); } catch { /* */ }
+                    return;
+                }
+
+                // Counted in rendered frames: the main-thread queue can drain more than once a frame, and the kit's
+                // samplers run once a frame, so a step per drain could change a state before it was sampled.
+                int unityFrame = UnityEngine.Time.frameCount;
+                if (unityFrame == lastUnityFrame)
+                {
+                    if (clock.ElapsedMilliseconds > UiInputPlan.DeadlineMs)
+                    {
+                        Done(false, "timed out: no new frame was rendered");
+                        return;
+                    }
+
+                    MainThread.PostDelayed(0, Tick, deferred);
+                    return;
+                }
+
+                lastUnityFrame = unityFrame;
+                frame++;
+                if (reply.TryGetValue("error", out var already) && already != null)
+                {
+                    Done(false, already as string);
+                    return;
+                }
+
+                if (step(frame))
+                {
+                    bool ok = !(reply.TryGetValue("error", out var e) && e != null);
+                    Done(ok, ok ? null : e as string);
+                    return;
+                }
+
+                if (clock.ElapsedMilliseconds > UiInputPlan.DeadlineMs || frame > budgetFrames)
+                {
+                    Done(false, "timed out after " + frame + " frames (" + clock.ElapsedMilliseconds + " ms); the game runs too slowly for this action's frames");
+                    return;
+                }
+
+                MainThread.PostDelayed(0, Tick, deferred);
+            }
+            catch (Exception e) { Done(false, e.Message); }
+        }
+
+        MainThread.PostDelayed(0, Tick, deferred);
+        return deferred;
+    }
+
     private static object RunPointer(UiInputPlan.Request request, Dictionary<string, object?> reply)
     {
         var at = Resolve(request.At!);
@@ -147,161 +230,100 @@ internal static class UiInputOps
             toY = ToF(to["y"]);
         }
 
+        // The wheel's notches are taken only by the shown-input pump, which runs only while a panel is shown: refuse now
+        // rather than leave notches queued for whatever panel opens next.
+        if (request.Action == UiInputPlan.Action.Wheel && Bridge("ShownPanels") is int shown && shown == 0)
+            return Fail(reply, "no Progenitor panel is shown, so nothing takes wheel notches");
+
         var timeline = UiInputPlan.Timeline(request, x, y, toX, toY);
-        int last = timeline[timeline.Count - 1].Frame;
-        var deferred = new DeferredResult(Math.Max(5_000, last * 50 + 5_000));
-        int frame = -1;
         int next = 0;
         int notchWait = 0;
         Bridge("Modifiers", request.Modifiers);
-
-        void Step()
+        return RunFrames(reply, timeline[timeline.Count - 1].Frame + UiInputPlan.MaxNotchWaitFrames + 10, frame =>
         {
-            try
+            if (Bridge("Active") is not true)
             {
-                if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
-                frame++;
-                if (Bridge("Active") is not true)
-                {
-                    reply["ended"] = Bridge("LastEnd");
-                    Complete(false, "the synthetic input ended before the action finished (" + reply["ended"] + ")");
-                    return;
-                }
+                reply["ended"] = Bridge("LastEnd");
+                reply["error"] = "the synthetic input ended before the action finished (" + reply["ended"] + ")";
+                return true;
+            }
 
-                while (next < timeline.Count && timeline[next].Frame <= frame)
+            while (next < timeline.Count && timeline[next].Frame <= frame)
+            {
+                var s = timeline[next];
+                if (s.Kind == UiInputPlan.StepKind.Done)
                 {
-                    var s = timeline[next];
-                    if (s.Kind == UiInputPlan.StepKind.Done)
+                    if (request.Action == UiInputPlan.Action.Wheel && Bridge("PendingNotches") is int left && left > 0)
                     {
-                        // Wheel: wait for the pump to take every queued notch (it samples only while a panel is shown).
-                        if (request.Action == UiInputPlan.Action.Wheel && Bridge("PendingNotches") is int left && left > 0 && notchWait++ < 120) break;
-                        if (request.Action == UiInputPlan.Action.Wheel && Bridge("PendingNotches") is int still && still > 0)
-                        {
-                            reply["notchesNotTaken"] = still;
-                            Complete(false, "the shown-input pump did not take the notches (no Progenitor panel is shown?)");
-                            return;
-                        }
-
-                        Complete(true, null);
-                        return;
+                        if (notchWait++ < UiInputPlan.MaxNotchWaitFrames) return false;
+                        reply["notchesNotTaken"] = left;
+                        reply["error"] = "the shown-input pump did not take the notches";
                     }
 
-                    switch (s.Kind)
-                    {
-                        case UiInputPlan.StepKind.Move: Bridge("Move", s.X, s.Y); break;
-                        case UiInputPlan.StepKind.Down: Bridge("Buttons", request.Button); break;
-                        case UiInputPlan.StepKind.Up: Bridge("Buttons", 0); break;
-                        case UiInputPlan.StepKind.Wheel: Bridge("Wheel", request.Notches); break;
-                    }
-
-                    next++;
+                    return true;
                 }
 
-                if (frame > 5_000)
+                switch (s.Kind)
                 {
-                    Complete(false, "timed out");
-                    return;
+                    case UiInputPlan.StepKind.Move: Bridge("Move", s.X, s.Y); break;
+                    case UiInputPlan.StepKind.Down: Bridge("Buttons", request.Button); break;
+                    case UiInputPlan.StepKind.Up: Bridge("Buttons", 0); break;
+                    case UiInputPlan.StepKind.Wheel: Bridge("Wheel", request.Notches); break;
                 }
 
-                MainThread.PostDelayed(0, Step, deferred);
+                next++;
             }
-            catch (Exception e)
-            {
-                try { Bridge("Buttons", 0); } catch { /* */ }
-                Complete(false, e.Message);
-            }
-        }
 
-        void Complete(bool ok, string? error)
+            return false;
+        }, ok =>
         {
-            if (deferred.Completion.Task.IsCompleted) return;
-            try
-            {
-                if (!request.KeepDown || !ok) Bridge("Modifiers", 0);
-                if (!ok) Bridge("Buttons", 0);
-                reply["ok"] = ok;
-                if (error != null) reply["error"] = error;
-                reply["framesWaited"] = frame;
-                reply["state"] = Bridge("State");
-                reply["tooltip"] = Bridge("Tooltip");
-                Finish(request);
-            }
-            catch (Exception e) { reply["readbackError"] = e.Message; }
-            deferred.SetResult(reply);
-        }
-
-        MainThread.PostDelayed(0, Step, deferred);
-        return deferred;
+            if (!request.KeepDown) Bridge("Modifiers", 0);
+            reply["state"] = Bridge("State");
+            reply["tooltip"] = Bridge("Tooltip");
+            Finish(request);
+        });
     }
 
     /// <summary>Let go of the buttons a <c>keepDown</c> drag left held, where the pointer is; reply a few frames later.</summary>
     private static object RunUp(UiInputPlan.Request request, Dictionary<string, object?> reply)
     {
         Bridge("Buttons", 0);
-        var deferred = new DeferredResult(5_000);
-        int frames = 0;
-
-        void Step()
+        return RunFrames(reply, 30, frame => frame >= UiInputPlan.AfterFrames + 1, ok =>
         {
-            if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
-            if (++frames < UiInputPlan.AfterFrames + 2)
-            {
-                MainThread.PostDelayed(0, Step, deferred);
-                return;
-            }
-
-            try
-            {
-                Bridge("Modifiers", 0);
-                reply["ok"] = true;
-                reply["state"] = Bridge("State");
-                Finish(request);
-            }
-            catch (Exception e) { reply["readbackError"] = e.Message; }
-            deferred.SetResult(reply);
-        }
-
-        MainThread.PostDelayed(0, Step, deferred);
-        return deferred;
+            Bridge("Modifiers", 0);
+            reply["state"] = Bridge("State");
+            Finish(request);
+        });
     }
 
     private static object RunKey(UiInputPlan.Request request, Dictionary<string, object?> reply)
     {
-        var tap = Dict(Bridge("Tap", request.Key, request.KeyFrames));
+        var tap = Dict(Bridge("Tap", request.Key, request.KeyFrames, request.Modifiers));
         reply["tap"] = tap;
-        if (tap["ok"] is not true) return Fail(reply, tap["error"] as string ?? "key refused");
-        var deferred = new DeferredResult(5_000);
-        int frames = 0;
-
-        void Step()
+        if (tap["ok"] is not true)
         {
-            if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
-            frames++;
-            if (frames < request.KeyFrames + UiInputPlan.AfterFrames + 1)
-            {
-                MainThread.PostDelayed(0, Step, deferred);
-                return;
-            }
-
-            reply["ok"] = true;
-            reply["framesWaited"] = frames;
-            try
-            {
-                reply["focus"] = Bridge("Focus");
-                reply["tooltip"] = Bridge("Tooltip");
-                Finish(request);
-            }
-            catch (Exception e) { reply["readbackError"] = e.Message; }
-            deferred.SetResult(reply);
+            Bridge("Modifiers", 0);
+            return Fail(reply, tap["error"] as string ?? "key refused");
         }
-
-        MainThread.PostDelayed(0, Step, deferred);
-        return deferred;
+        // Done once the tap is released in rendered frames (a drain is not a frame), plus the pump's sample after it.
+        int doneAt = -1;
+        return RunFrames(reply, request.KeyFrames + 120, frame =>
+        {
+            if (doneAt < 0 && Bridge("TapDone", request.Key) is true) doneAt = frame;
+            return doneAt >= 0 && frame >= doneAt + UiInputPlan.AfterFrames;
+        }, ok =>
+        {
+            Bridge("Modifiers", 0);
+            reply["focus"] = Bridge("Focus");
+            reply["tooltip"] = Bridge("Tooltip");
+            Finish(request);
+        });
     }
 
     private static object RunType(UiInputPlan.Request request, Dictionary<string, object?> reply)
     {
-        var queued = Dict(Call(TextBridgeType, "Enqueue", "os-text", request.Text, null, 1));
+        int perFrame = UiInputPlan.TypePerFrame(request.Text!.Length);
+        var queued = Dict(Call(TextBridgeType, "Enqueue", "os-text", request.Text, null, perFrame));
         reply["queued"] = queued;
         if (queued["ok"] is not true)
         {
@@ -309,39 +331,22 @@ internal static class UiInputOps
             return Fail(reply, queued["error"] as string ?? "no kit field has the keyboard (focus one first: ui_input focus or click)");
         }
 
-        var deferred = new DeferredResult(Math.Max(5_000, request.Text!.Length * 50 + 5_000));
-        int frames = 0;
-
-        void Step()
+        // Owned by this op: dropped if the field loses the keyboard before it is typed, or when the lease ends.
+        Bridge("NoteTextForFocused");
+        int budget = request.Text.Length / perFrame + 60;
+        return RunFrames(reply, budget, frame =>
         {
-            if (deferred.BoundGate != null && deferred.BoundGate.ShouldSkip(deferred.BoundTicket)) return;
-            frames++;
             bool pending = Call(TextBridgeType, "Pending") is int n && n > 0;
-            if (pending && frames < request.Text!.Length * 4 + 60)
-            {
-                MainThread.PostDelayed(0, Step, deferred);
-                return;
-            }
-
-            try
-            {
-                reply["typed"] = Call(TextBridgeType, "Finish");
-                reply["ok"] = !pending;
-                if (pending) reply["error"] = "the field stopped taking text (it lost the keyboard?)";
-                reply["focus"] = Bridge("Focus");
-                Finish(request);
-            }
-            catch (Exception e)
-            {
-                reply["ok"] = false;
-                reply["error"] = e.Message;
-            }
-
-            deferred.SetResult(reply);
-        }
-
-        MainThread.PostDelayed(0, Step, deferred);
-        return deferred;
+            if (!pending) return true;
+            if (frame < budget - 5) return false;
+            reply["error"] = "the field stopped taking text (it lost the keyboard?)";
+            return true;
+        }, ok =>
+        {
+            reply["typed"] = Call(TextBridgeType, "Finish");
+            reply["focus"] = Bridge("Focus");
+            Finish(request);
+        });
     }
 
     /// <summary>Dev unload: end the lease (buttons up, exits sent) and drop navigation holds.</summary>

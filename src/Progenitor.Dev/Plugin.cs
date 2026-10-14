@@ -172,6 +172,8 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
             Ops.NavOps.Shutdown();
             // And the synthetic UI input the ui_input op holds (buttons up, exits sent, navigation holds dropped).
             Ops.UiInputOps.Shutdown();
+            // And a display set still pending: the window and the game's graphics settings go back to the baseline.
+            Ops.DisplayOps.Shutdown();
 #if PROGENITOR_EXTRA_INSTANCE
             Ops.ExtraInstanceAuth.Shutdown();
             Ops.ExtraInstanceServerAuth.Shutdown();
