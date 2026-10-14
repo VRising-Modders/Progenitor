@@ -120,6 +120,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryEngine.cs" Link="Linked\InventoryEngine.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryWatchHub.cs" Link="Linked\InventoryWatchHub.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerId.cs" Link="Linked\ContainerId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\NetworkIdResolver.cs" Link="Linked\NetworkIdResolver.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Clans\ClanTypes.cs" Link="Linked\ClanTypes.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleContainers.cs" Link="Linked\CastleContainers.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\NameplateCodec.cs" Link="Linked\NameplateCodec.cs" />

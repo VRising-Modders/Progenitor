@@ -101,8 +101,12 @@ public sealed class UiWorldPickOptions
 /// </summary>
 public readonly struct UiWorldPickResult
 {
-    internal UiWorldPickResult(int entityIndex, int entityVersion, UiWorldPickKind kind, int menuType, string menu, int worldEpoch, bool suppressed)
+    internal UiWorldPickResult(int entityIndex, int entityVersion, UiWorldPickKind kind, int menuType, string menu, int worldEpoch, bool suppressed,
+        int networkId0 = 0, int networkId1 = 0, int networkId2 = 0)
     {
+        NetworkId0 = networkId0;
+        NetworkId1 = networkId1;
+        NetworkId2 = networkId2;
         EntityIndex = entityIndex;
         EntityVersion = entityVersion;
         Kind = kind;
@@ -133,6 +137,30 @@ public readonly struct UiWorldPickResult
     /// <summary>True when the panel was kept closed (<see cref="UiWorldPickOptions.SuppressPanel"/>).</summary>
     public bool Suppressed { get; }
 
+    /// <summary>
+    /// The picked entity's <c>NetworkId</c>, first word: <c>Normal_Index</c> for a normal id. Same
+    /// words and rules as <see cref="VanillaPanelTarget"/> (read only when the interop's
+    /// <c>NetworkId</c> is 12 bytes; all three 0 when unreadable). Send <see cref="NetworkIdIndex"/>,
+    /// <see cref="NetworkIdGeneration"/> and <see cref="NetworkId2"/> to the server and resolve them
+    /// with <c>ctx.Inventory.TryResolveNetworkId</c>. Session-local: never persist them.
+    /// </summary>
+    public int NetworkId0 { get; }
+
+    /// <summary>The second word: <c>Normal_Generation</c> (0..255, padding cleared) for a normal id.</summary>
+    public int NetworkId1 { get; }
+
+    /// <summary>The id's type (<c>NetworkIdType</c>: 0 none, 1 normal, 2 static map object).</summary>
+    public int NetworkId2 { get; }
+
+    /// <summary>The <c>NetworkId</c>'s <c>Normal_Index</c>.</summary>
+    public int NetworkIdIndex => NetworkId0;
+
+    /// <summary>The <c>NetworkId</c>'s <c>Normal_Generation</c>.</summary>
+    public int NetworkIdGeneration => NetworkId1 & 0xFF;
+
+    /// <summary>True when a <c>NetworkId</c> was read for the picked entity.</summary>
+    public bool HasNetworkId => NetworkId0 != 0 || NetworkId1 != 0 || NetworkId2 != 0;
+
     /// <summary>True when <paramref name="currentEpoch"/> is the epoch this pick happened in.</summary>
     public bool IsCurrentIn(int currentEpoch) => currentEpoch == WorldEpoch;
 
@@ -146,7 +174,9 @@ public readonly struct UiWorldPickResult
 
     /// <inheritdoc />
     public override string ToString() =>
-        Kind + " " + EntityIndex + ":" + EntityVersion + " via " + Menu + " (epoch " + WorldEpoch + (Suppressed ? ", panel kept closed" : "") + ")";
+        Kind + " " + EntityIndex + ":" + EntityVersion
+        + (HasNetworkId ? " net=" + NetworkIdIndex + ":" + NetworkIdGeneration : "")
+        + " via " + Menu + " (epoch " + WorldEpoch + (Suppressed ? ", panel kept closed" : "") + ")";
 }
 
 /// <summary>

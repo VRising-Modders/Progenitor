@@ -39,15 +39,29 @@ internal static class SampleInventory
     internal const string Area = "items";
 
     internal const string UsageReply =
-        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveall <from> <to> | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | watch <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
+        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveall <from> <to> | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
 
     /// <summary>The verbs this file handles (the grant/equip verbs stay in <see cref="SampleItems"/>).</summary>
     internal static bool Handles(string? verb) => (verb ?? "").Trim().ToLowerInvariant() switch
     {
         "chests" or "slots" or "count" or "free" or "move" or "moveall" or "add" or "remove"
-            or "name" or "id" or "watch" or "heart" or "clan" => true,
+            or "name" or "id" or "net" or "resolve" or "watch" or "heart" or "clan" => true,
         _ => false,
     };
+
+    /// <summary>
+    /// Parse the <c>.items resolve</c> words as plain integers (type defaults to 1, normal). The
+    /// range checks are <c>ctx.Inventory.TryResolveNetworkId</c>'s: it treats them as untrusted.
+    /// </summary>
+    internal static bool TryParseNetWords(string? index, string? generation, string? type, out int i, out int g, out int t)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        g = t = 0;
+        if (!int.TryParse((index ?? "").Trim(), NumberStyles.Integer, ci, out i)) return false;
+        if (!int.TryParse((generation ?? "").Trim(), NumberStyles.Integer, ci, out g)) return false;
+        if (string.IsNullOrWhiteSpace(type)) { t = 1; return true; }
+        return int.TryParse(type.Trim(), NumberStyles.Integer, ci, out t);
+    }
 
     /// <summary>How a container token names its container.</summary>
     internal enum TokenKind
@@ -225,6 +239,16 @@ internal static class SampleInventory
             case "clan":
                 Clan(ctx, plugin);
                 return;
+            case "resolve":
+            {
+                // What a request handler does with the words a client sent (VanillaPanelTarget or UiWorldPickResult).
+                if (!TryParseNetWords(a, b, c, out int ni, out int ng, out int nt)) { ctx.Reply(UsageReply); return; }
+                bool ok = inv.TryResolveNetworkId(ni, ng, nt, out var rid, out var rowner, out string rwhy);
+                string line = "resolve net=" + ni + ":" + ng + " type=" + nt + (ok ? " -> " + rowner + " id=" + rid : " refused: " + rwhy);
+                ctx.Reply(line);
+                SampleLog.Info(Area, line);
+                return;
+            }
         }
 
         if (!TryResolve(ctx, plugin, a, out var first, out string firstLabel, out string why)) { ctx.Reply(why); return; }
@@ -261,6 +285,19 @@ internal static class SampleInventory
                 var owner = first.Owner;
                 var id = inv.IdOf(owner, out string reason);
                 ctx.Reply(firstLabel + " id=" + id + " status=" + (id.IsNone ? "none (" + reason + ")" : inv.Status(id).ToString()));
+                return;
+            }
+            case "net":
+            {
+                // The reverse: the words to send to a client so it can find and Locate its own entity.
+                var id = inv.IdOf(first.Owner, out string reason);
+                string line = id.IsNone
+                    ? "net " + firstLabel + " has no id: " + reason
+                    : inv.TryGetNetworkId(id, out int ni, out int ng, out int nt, out reason)
+                        ? "net " + firstLabel + " id=" + id + " net=" + ni + ":" + ng + " type=" + nt
+                        : "net " + firstLabel + " id=" + id + " has no network id: " + reason;
+                ctx.Reply(line);
+                SampleLog.Info(Area, line);
                 return;
             }
             case "name":

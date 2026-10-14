@@ -31,6 +31,7 @@ internal static class InventoryRuntime
     private static InventoryEngine? _engine;
     private static InventoryWatchHub? _hub;
     private static ContainerIdRegistry? _book;
+    private static NetworkIdResolver? _netIds;
     private static IModStore? _store;
     private static IDisposable? _ready;
     private static bool _loaded;
@@ -56,6 +57,7 @@ internal static class InventoryRuntime
         _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line));
         _engine.Touched = c => _hub?.Poke(c);
         _book = new ContainerIdRegistry();
+        _netIds = new NetworkIdResolver(new ServerNetworkIdSource());
         _loaded = false;
         _store = ModSave.Store(StoreId);
         _ready = _store.WhenReady(store =>
@@ -87,6 +89,8 @@ internal static class InventoryRuntime
         _ready = null;
         _store = null;
         _book = null;
+        _netIds?.Clear();
+        _netIds = null;
         _hub = null;
         _engine = null;
         _backend = null;
@@ -411,6 +415,72 @@ internal static class InventoryRuntime
                 reason = "id " + id + " was never issued in this world";
                 return false;
         }
+    }
+
+    // ---- network ids --------------------------------------------------------------------------
+
+    /// <summary>
+    /// A client-reported <c>NetworkId</c> (index, generation, type) to the server entity and its
+    /// stable id. Every word is untrusted: malformed, unknown, stale and non-container ids give
+    /// false with a reason. Never throws.
+    /// </summary>
+    internal static bool TryResolveNetworkId(int index, int generation, int type, out ContainerId id, out Entity owner, out string reason)
+    {
+        id = ContainerId.None;
+        owner = Entity.Null;
+        try
+        {
+            if (!NetworkIdWords.Validate(index, generation, type, out reason)) return false;
+            if (!Ready(out _, out reason) || _netIds == null) return false;
+            if (!_netIds.TryResolve(index, generation, type, Progenitor.WorldState.WorldEpoch.Current, Environment.TickCount64,
+                    out int ei, out int ev, out reason))
+                return false;
+            var entity = new Entity { Index = ei, Version = ev };
+            var found = IdOf(entity, out string why);
+            if (found.IsNone)
+            {
+                // No server entity id in the reason: a mod may relay it to the player.
+                reason = "network id " + NetworkIdWords.Format(index, generation) + " names something with no container id: " + why;
+                return false;
+            }
+
+            id = found;
+            owner = entity;
+            reason = "";
+            return true;
+        }
+        catch (Exception e)
+        {
+            id = ContainerId.None;
+            owner = Entity.Null;
+            reason = "the network id lookup failed: " + e.Message;
+            return false;
+        }
+    }
+
+    /// <summary>The live container's <c>NetworkId</c> as the three words a client looks it up by.</summary>
+    internal static bool TryGetNetworkId(ContainerId id, out int index, out int generation, out int type, out string reason)
+    {
+        index = generation = type = 0;
+        if (!TryFind(id, out var owner, out reason)) return false;
+        var em = Worlds.Server!.EntityManager;
+        if (!ServerNetworkIdSource.Read(em, owner, out int i, out int g, out int t))
+        {
+            reason = "container " + id + " has no network id yet";
+            return false;
+        }
+
+        if (t != NetworkIdWords.TypeNormal)
+        {
+            reason = "container " + id + " has a network id of type " + t + ", not a normal one a client can look up";
+            return false;
+        }
+
+        index = i;
+        generation = g;
+        type = t;
+        reason = "";
+        return true;
     }
 
     private static bool Ready(out World world, out string reason)

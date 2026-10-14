@@ -789,12 +789,13 @@ ctx.Hud.PickInWorld(
 - The game has no world ping, so this is framework UI drawn each frame over the game camera: a gold diamond marker 1.6 m above the target with `<label> · 14 m` (the distance from the player's character), and, while the target is off screen or behind the camera, an arrow on the screen edge pointing the way to turn. It pulses for its first second and fades in and out.
 - The marker and arrow are drawn into textures (as the kit's radio circles are), not font glyphs, so no glyph can be missing. `UiLocate` places them: the edge clamp keeps a margin at every resolution and aspect (tested at 1920×1080, 2560×1440, 3840×2160, 3440×1440), and a target behind the camera flips its arrow.
 - A ping ends when its time is up (0 or less: until disposed), the entity no longer exists, the client world changes or goes away, the player's character has been missing for 3 s (a kick or a disconnect; a respawn survives), or the plugin unloads. At most 8 at once; a ninth ends the oldest. The `Entity` overload takes a client-world entity.
+- **A target the server names:** `ctx.Hud.TryFindByNetworkId(index, generation, type, out Entity entity, out string reason)` turns the network id words the server sent (`ctx.Inventory.TryGetNetworkId`, [below](#resolving-a-target-on-the-server)) into this client's entity, for `Locate`. One pass over the client's networked entities (`NetworkId`, read with the typed accessor): call it once per reply, not every frame. False with a reason on malformed words, on the server, or when no entity of the client world carries the id (destroyed, or not streamed to this client: a building far away may not be). **Experimental**, built; not verified live.
 
 ### Pick in world
 
 `PickInWorld(onPicked, onCancelled = null, options = null)` → `IUiWorldPick` (`Active`, `State`: `Idle` / `Armed` / `Picked` / `Cancelled` / `TimedOut` / `Disposed`, `Cancel()`).
 
-- **What the player does:** a band at the bottom of the screen shows the prompt (`UiWorldPickOptions.Prompt`, default `Pick a container or station`) with the game's key caps for the Interact key (the player's actual binding, read from the game) and Escape. The next interact on a matching target is captured: its panel does not open, and `onPicked` receives a `UiWorldPickResult` (`Entity`, `Kind`, `Menu`, `MenuType`, `WorldEpoch`, `IsCurrent`, `Suppressed`). Escape cancels; an interact on another kind (a door, a waygate) behaves normally and the pick stays armed.
+- **What the player does:** a band at the bottom of the screen shows the prompt (`UiWorldPickOptions.Prompt`, default `Pick a container or station`) with the game's key caps for the Interact key (the player's actual binding, read from the game) and Escape. The next interact on a matching target is captured: its panel does not open, and `onPicked` receives a `UiWorldPickResult` (`Entity`, `Kind`, `Menu`, `MenuType`, `WorldEpoch`, `IsCurrent`, `Suppressed`, and the picked entity's network id: `NetworkId0..2`, `NetworkIdIndex`, `NetworkIdGeneration`, `HasNetworkId`, the same words and 12-byte size guard as `VanillaPanelTarget`; send them to the server and resolve them with `ctx.Inventory.TryResolveNetworkId`, [as for a panel target](#resolving-a-target-on-the-server)). Escape cancels; an interact on another kind (a door, a waygate) behaves normally and the pick stays armed.
 - **Options:** `Kinds` (`UiWorldPickKinds`: `Containers`, `Stations`, `Other` — castle heart, prison, servant, trader and the like; default containers and stations), `TimeoutSeconds` (0: none), `SuppressPanel` (true; false lets the panel open and still reports the pick).
 - **One pick at a time, process-wide.** A second `PickInWorld` cancels the first (its `onCancelled` runs) before arming. `onCancelled` runs for Escape, `Cancel()`, replacement, a timeout (`TimedOut`), leaving the world (the client world or the local character it was armed with is gone: a disconnect, a kick, a world change; checked every frame), or a call with no world. `Dispose`, plugin unload and Core unload end it with no callback.
 - **Seam:** a Core-owned `Before<OpenHUDMenuSystem>` system hook, installed only while a pick is armed (and 3 s after, so a repeated open of the same interaction stays closed). It reads each `OpenMenuEvent` and its init data (`ContainerMenu.InitData.TargetContainer`, the station menus' `TargetWorkstation`) and first sends `StopInteractingWithObjectEvent` for the interaction's buff, the way the framework's other client events are sent. Only when that send went out are the two client-only menu entities destroyed, so the panel never opens, and further opens of the same interaction swallowed until the client no longer sees the interact buff (10 s at most). With no buff, or a send that failed, nothing is swallowed: the panel opens and `onPicked` gets the target with `Suppressed = false`, so a panel never pops open later unprompted. It never skips the system, adds no Harmony patch and never uses `ctx.UnsafeHarmony`. Escape comes through the framework's consumed-Escape path (the band is a kit panel), not a key read.
@@ -942,9 +943,48 @@ An anchor a site does not list gives a disabled handle and one line: `Ui: attach
 | `handle.Row(text)` / `SetRows(...)` | Rows in an edge column (under the buttons) and the tooltip line, cloned from the game's body text (the tooltip's `Description`) unchanged. Inline anchors take buttons only: a text row inside a button bar would read as a broken button. |
 | `VanillaPanelTarget` | `Kind`, `EntityIndex` / `EntityVersion` (client world), the target's `NetworkId` as `NetworkId0` (`Normal_Index`), `NetworkId1` (`Normal_Generation`, padding cleared) and `NetworkId2` (the id type: 1 for every placed container, station and heart), with `NetworkIdIndex` / `NetworkIdGeneration` as shorthands; `ItemGuid` / `ItemAmount` (tooltip); `HasEntity`, `HasNetworkId`, `ToString()` → `kind=Container entity=812:3 net=40:1`. The id is read only when the interop's `NetworkId` is the 12 bytes the read assumes. |
 
-**Mapping to the server entity.** The client entity means nothing on the server. The `NetworkId` is the identity the game itself uses for the same object on both sides: send `NetworkIdIndex` and `NetworkIdGeneration` (and the type) in your request and resolve them on the server through the game's network id lookup. It is session-local: never persist it, and never persist the client entity either; a stable container identity is a separate item (P5). A framework helper that resolves it server-side is **planned**.
+**Mapping to the server entity.** The client entity means nothing on the server. The `NetworkId` is the identity the game itself uses for the same object on both sides: send `NetworkIdIndex`, `NetworkIdGeneration` and the type (`NetworkId2`) in your request and resolve them on the server with `ctx.Inventory.TryResolveNetworkId` ([below](#resolving-a-target-on-the-server)). It is session-local: never persist it, and never persist the client entity either; persist the `ContainerId` the resolver returns (P5).
 
 **The seam.** Each site's watch is `SystemHooks.After<XMenuMapper>` with `HookOptions { OnlyWhenSystemRuns = false }`. Every one of these mappers is marked to update only while its queries match, so with the default option a watch would skip frames: a site that reads a second mapper (the station site reads the refinement mapper too; the inventory and tooltip sites read all five) would miss opens and never see a close, leaving an edge column on screen. With the option off the watch runs every frame the client updates its UI, and all five mappers are read once per frame into one shared scan however many sites and plugins ask.
+
+### Resolving a target on the server
+
+A panel target (or a `UiWorldPickResult`) reaches the server as three integers in your own request; the server turns them into the entity and its stable `ContainerId`, and can turn a `ContainerId` back into words the client finds. **Experimental**: source-checked, built and game-free tested (`NetworkIdResolverTests`, `UiWorldPickTests`); **not live-verified**.
+
+```csharp
+// Shared message types ([ModMessage] classes, see modules.md "Requests, large messages and subscriptions").
+[ModMessage("mymod.target")] sealed class TargetRequest { [Field(1)] public int Index; [Field(2)] public int Generation; [Field(3)] public int Type; }
+[ModMessage("mymod.target.ok")] sealed class TargetReply { [Field(1)] public bool Ok; [Field(2)] public string Id = ""; [Field(3)] public string Reason = "";
+                                                          [Field(4)] public int Index; [Field(5)] public int Generation; [Field(6)] public int Type; }
+
+// Server: the words are untrusted; the resolver validates them and never throws on bad input.
+ctx.Requests.Handle<TargetRequest, TargetReply>((user, r, info) =>
+{
+    if (!ctx.Inventory.TryResolveNetworkId(r.Index, r.Generation, r.Type, out var id, out var chest, out var why))
+        return new TargetReply { Reason = why };
+    // Check the user may use this container (ctx.Castles.RelationTo) before acting on it.
+    ctx.Inventory.TryGetNetworkId(id, out int i, out int g, out int t);   // words for the client, e.g. to Locate it
+    return new TargetReply { Ok = true, Id = id.ToString(), Index = i, Generation = g, Type = t };
+}, new RequestOptions { MaxRequestBytes = 64, Burst = 4, PerSecond = 1 });
+
+// Client: send the window's target, then find the server's answer in this world and ping it.
+var t = chest.Target;
+ctx.Requests.Send<TargetRequest, TargetReply>(
+    new TargetRequest { Index = t.NetworkIdIndex, Generation = t.NetworkIdGeneration, Type = t.NetworkId2 },
+    res =>
+    {
+        if (res.Ok && res.Reply!.Ok && ctx.Hud.TryFindByNetworkId(res.Reply.Index, res.Reply.Generation, res.Reply.Type, out var e, out _))
+            ctx.Hud.Locate(e, "Chest", 10);
+    });
+```
+
+| Member | Side | What |
+|---|---|---|
+| `ctx.Inventory.TryResolveNetworkId(int index, int generation, int type, out ContainerId id, out Entity owner, out string reason)` | server | The words to the server entity and the stable id of the placed container, station or castle heart it names (issuing one as `IdOf` does). False with a reason for: type 0 (empty) or 2 (a static map object) or any other type, an index not above 0, a generation outside 0..255, an id no candidate carries (destroyed, from an earlier session or world load, or naming something else), a stale generation (the index now carries another), and an entity that has no container id (a player, a servant: `IdOf`'s reason). |
+| `ctx.Inventory.TryGetNetworkId(ContainerId id, out int index, out int generation, out int type[, out string reason])` | server | The live container's network id words, to send to a client. False when the id is not live (`TryFind`'s reason) or the entity has no normal network id. |
+| `ctx.Hud.TryFindByNetworkId(int index, int generation, int type, out Entity entity, out string reason)` | client | The client world's entity with that network id ([Locate](#locate)). |
+
+How the server resolves: the game keeps its own network id map (`NetworkIdSystem.Singleton`, a native hash map from `NetworkId` to `Entity`). Reaching it from a plugin needs a new generic interop instantiation over a game value type, which this framework does not create, so the resolver builds its own map from the **same data**: the `NetworkId` component of every castle heart and every entity with `InventoryOwner`, read with the typed accessor the castle reader already uses. A hit is confirmed by reading the entity's id back (a destroyed or reused entity is never trusted from the map, and a request with a forged generation gets the stale reason without evicting the valid row); a miss or a stale row rebuilds the map, **at most once every 250 ms** however many requests miss, so a client sending made-up ids cannot make the server scan every frame (combine it with the request's own rate limit). A request that misses inside that window gets a reason saying when the lookup was refreshed; a container placed since is found on a later request. The map is dropped when the world epoch changes and at Core Uninstall. Authorization is yours: the resolver says *which* container the words name, not whether this user may touch it.
 
 ### Layout and placement rules
 
@@ -977,9 +1017,9 @@ Everything goes on dispose, `Ui.RemoveAll(owner)` and Core Uninstall, through th
 
 ### Live acceptance procedure (P6)
 
-Run by the coordinator; not run for this change. Uses `samples/Progenitor.PanelsExample` (client only; every action only logs).
+Run by the coordinator; not run for this change. Uses `samples/Progenitor.PanelsExample` (both sides: the client attaches the panels, the server only answers the `Locate` request; nothing moves an item).
 
-1. Build and deploy Core and the example to the test client (`progenitor_build`, then `progenitor_deploy` with the client side and `Progenitor.PanelsExample`), join the isolated test server, and confirm `Panels example: loaded (tooltip enabled=True)` in the client log.
+1. Build and deploy Core and the example to the test client and the isolated test server (`progenitor_build`, then `progenitor_deploy` with side both and `Progenitor.PanelsExample`), join the isolated test server, and confirm `Panels example: loaded (tooltip enabled=True)` in the client log and `Panels example: loaded (server: resolve handler)` in the server log.
 2. In a castle, open a chest, a workstation, a furnace, the castle heart and the character inventory in turn (walk up and interact; this needs the game window, so it is an authorized foreground step), closing each before the next.
 3. For each window, read the client log once (`progenitor_logs`, filter `Ui: site|Ui: attached|Ui: panel|Panels example|hidden reason|not found`) and expect, in order:
    - `Ui: site <Site> panel=<name>(x,y wxh) parent=<name> ... grid=... sort=... bar=...` once per site (the rects for the placement check);
@@ -990,6 +1030,7 @@ Run by the coordinator; not run for this change. Uses `samples/Progenitor.Panels
 5. Click each example button once (foreground step): one `Panels example: click <Site> <Anchor> '<caption>' kind=...` line each.
 6. Hover two different items in the inventory and one in the chest: the tooltip shows `Example: item <guid> x<amount>` as its last line, in the tooltip's own style, changing with the item.
 7. Close and reopen the chest: exactly one set of example buttons, still clickable (the click line appears again).
+   **Network id round trip** (the resolver, [above](#resolving-a-target-on-the-server)): with the chest open, click `Locate` beside the rename button (foreground step). Expect, in order: client `Panels example: click ContainerPanel BesideRename 'Locate' kind=Container entity=<ci>:<cv> net=<n>:<g>`; server `Panels example: resolve net=<n>:<g> -> entity=<si>:<sv> id=c-<32 hex> back=<n>:<g> type=1` (the same `n:g` back; the server entity is a different world's and need not match the client's); client `Panels example: locate c-<id> server=<si>:<sv> client=<ci>:<cv> same=True` and the Locate marker over the chest (**screenshot**). Cross-checks in chat as an admin, with `Progenitor.Sample` on the server: `.items net #k` for that chest (row from `.items chests`) prints the same `net=<n>:<g>` and id; `.items resolve <n> <g>` prints the same id; `.items resolve <n> <g+1>` is refused as `stale` or not found; `.items resolve <n> <g> 2` is refused as a static map object; `.items resolve 0 0` is refused as out of range. Destroy a spare chest whose words you noted, wait a second, and `.items resolve` them: refused (no container). Same words from a pick: with the Controls sample loaded, **Pick in world** on that chest logs the framework line `Ui: world pick #N picked Container <ci>:<cv> net=<n>:<g> via ContainerMenu …`, the same `n:g` as the panel; `.items resolve <n> <g>` gives the same id.
 8. With a controller connected, open the chest and the inventory and move focus through the window: record whether the example buttons can be focused and pressed like the game's own (the clones keep the game's button component but are not added to the window's focus groups; this is a live check, not a claim).
 9. Remove `Progenitor.PanelsExample` from the client reload folder; expect `Panels example: unloading`, `Ui: attach <Site> watch removed` for each site, no `leaked` or `retrying` line, and the next open of each window shows no example button. Disconnect and leave the client at the title screen.
 
