@@ -229,24 +229,25 @@ public sealed class ReturnedServant
     public InventoryRef Inventory { get; init; }
 
     /// <summary>
-    /// What is in the servant's inventory now, item by item. The game sends only servants with an
-    /// empty inventory, so for a hunt Progenitor saw start or a servant that carried nothing when
-    /// the hunt was recorded this is the hunt's loot (<see cref="LootIsHaul"/>).
+    /// What is in the servant's inventory when the return is published, item by item. The game
+    /// sends only servants with an empty inventory, so this is the hunt's loot unless something
+    /// wrote to the servant's inventory during the hunt or in the moment before the publish.
     /// </summary>
     public IReadOnlyList<ServantLoot> Loot { get; init; } = Array.Empty<ServantLoot>();
 
     /// <summary>
-    /// True when <see cref="Loot"/> is exactly what the hunt brought: the game only sends a servant
-    /// whose inventory is empty, and nothing but the return wrote to it in between as far as
-    /// Progenitor can tell. False when the inventory could not be read.
+    /// True when the servant came back and its inventory was read (<see cref="Loot"/> holds what it
+    /// carries); false when it died or the inventory could not be read.
     /// </summary>
     public bool LootIsHaul { get; init; }
 }
 
 /// <summary>
-/// Published on the server <see cref="Progenitor.Events.EventBus"/> after the game finished a
-/// hunt (the servants are back in the castle, the loot is in their inventories, the injuries and
-/// deaths are applied, and the row is gone from the heart's mission record). Subscribe with
+/// Published on the server <see cref="Progenitor.Events.EventBus"/> a moment after the game finished
+/// a hunt (half a second to five seconds): the servants are back in the castle, the loot is in their
+/// inventories, the injuries are applied, the row is gone from the heart's mission record, the
+/// servants that died are destroyed and the survivors' mission buff is gone, so a handler can call
+/// <c>Resend</c>. <see cref="ReturnedUtc"/> is when the return was seen. Subscribe with
 /// <c>ctx.Events.On&lt;ServantsReturned&gt;</c>; Progenitor watches for returns only while something
 /// is subscribed. Experimental: see <c>docs/modules.md</c>, Servants.
 /// </summary>
@@ -433,9 +434,10 @@ public sealed class ServantSendResult
     public IReadOnlyList<CastleId> Servants { get; init; } = Array.Empty<CastleId>();
 
     /// <summary>
-    /// True when the game accepted the mission buff for every servant (the buff's script marks the
-    /// servant as on a hunt). Progenitor checks one second later that each servant carries the buff
-    /// and logs <c>servants: send confirmed</c> or a warning naming the servant.
+    /// True when every servant carried the mission buff right after the send (the buff's script
+    /// marks the servant as on a hunt). One second later Progenitor checks again that each servant
+    /// carries the buff and reads as on a hunt, and logs <c>servants: send confirmed</c> or a
+    /// warning naming the servant.
     /// </summary>
     public bool BuffApplied { get; init; }
 

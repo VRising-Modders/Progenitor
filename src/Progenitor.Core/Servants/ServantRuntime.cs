@@ -52,9 +52,16 @@ internal static unsafe class ServantRuntime
     // Pending list swaps: user index -> request facts (Before the info system), applied After.
     private static readonly Dictionary<int, (CastleId User, CastleId Heart, byte[] Throne, IReadOnlyList<CastleId> Hearts)> PendingSwaps = new();
 
-    // Sends to confirm on a later frame: servants and the buff that should be on them.
-    private static readonly List<(int Frame, List<CastleId> Servants, int Buff, CastleId Heart, int Mission)> Confirm = new();
-    private static int _frame;
+    // Sends to confirm a second later: servants, the buff that should be on them, the row they are in.
+    private static readonly List<(long DueTicks, List<CastleId> Servants, int Buff, CastleId Heart, MissionRow Row)> Confirm = new();
+    private const long ConfirmAfterTicks = ServantLogic.TicksPerSecond;
+
+    // Returns seen after the update system ran, published once the game has finished with them: the
+    // servants that died are destroyed and the survivors' mission buffs are gone (both happen a
+    // moment after the return), or at the latest after ReturnMaxWaitTicks.
+    private static readonly List<(CastleId Heart, MissionRow Row, long SeenTicks, Dictionary<CastleId, Entity> Coffins)> PendingReturns = new();
+    private const long ReturnMinWaitTicks = ServantLogic.TicksPerSecond / 2;
+    private const long ReturnMaxWaitTicks = 5 * ServantLogic.TicksPerSecond;
 
     // Caches per world epoch.
     private static int _cacheEpoch = int.MinValue;
@@ -67,6 +74,7 @@ internal static unsafe class ServantRuntime
     {
         if (!Plugin.IsServerProcess || _installed) return;
         Lists.Log = line => Plugin.Logger?.LogInfo(line);
+        Lists.Unregistered = () => PendingSwaps.Clear(); // holds the provider's lists: never past its unregistration
         _updBefore = SystemHooks.Before<ServantMissionUpdateSystem>(BeforeUpdate);
         _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate);
         _actBefore = SystemHooks.Before<ServantMissionActionSystem>(BeforeAction);
@@ -89,10 +97,12 @@ internal static unsafe class ServantRuntime
         _updBefore = _updAfter = _actBefore = _infoBefore = _infoAfter = null;
         Lists.Clear();
         Lists.Log = null;
+        Lists.Unregistered = null;
         MissionHearts.Clear();
         Due.Clear();
         PendingSwaps.Clear();
         Confirm.Clear();
+        PendingReturns.Clear();
         _zones = null;
         _cacheEpoch = int.MinValue;
         _heartsEpoch = int.MinValue;
@@ -497,26 +507,35 @@ internal static unsafe class ServantRuntime
             };
         }
 
-        // The buff first: if the game refuses it for any servant, nothing is in the record yet and
-        // the buffs that did go on are taken off again.
+        // A servant still carrying the mission buff of its last hunt (the game removes it a moment
+        // after the return) would make the buff below a no-op: refuse until it is gone.
+        foreach (var sf in facts)
+            if (AiRuntime.FindBuff(em, sf.Servant.ToEntity(), buff) != Entity.Null)
+                return Fail(req, ServantSendRefusal.ServantBusy, "servant " + sf.Servant
+                    + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false);
+
+        // The buff first: if the game does not spawn it for every servant, nothing is in the record
+        // yet and the buffs that did go on are taken off again. The buff spawns synchronously on
+        // this path (the debug-event route spawns and plays it back in the call).
         var applied = new List<Entity>();
         foreach (var sf in facts)
         {
             var s = sf.Servant.ToEntity();
+            string? failure = null;
             try
             {
                 AiRuntime.ApplyBuff(world, s, buff);
-                applied.Add(s);
+                if (AiRuntime.FindBuff(em, s, buff) == Entity.Null) failure = "the game did not spawn the mission buff on servant " + sf.Servant;
+                else applied.Add(s);
             }
             catch (Exception e)
             {
-                foreach (var a in applied)
-                {
-                    try { AiRuntime.RemoveBuff(world, a, buff); } catch { }
-                }
-                string why = "the mission buff could not be applied to servant " + sf.Servant + " (" + e.Message + "); nothing was written";
-                Plugin.Logger?.LogWarning("servants: send failed by=" + by + " heart=" + req.Heart + ": " + why);
-                return new ServantSendResult { Ok = false, Refusal = ServantSendRefusal.WriteFailed, Reason = why, Heart = req.Heart, MissionGuid = req.MissionGuid, DataSlot = req.DataSlot };
+                failure = "the mission buff could not be applied to servant " + sf.Servant + " (" + e.Message + ")";
+            }
+            if (failure != null)
+            {
+                RemoveBuffs(world, applied, buff);
+                return Fail(req, ServantSendRefusal.WriteFailed, failure + "; nothing was written", by, log: true);
             }
         }
 
@@ -530,13 +549,8 @@ internal static unsafe class ServantRuntime
         }
         catch (Exception e)
         {
-            foreach (var a in applied)
-            {
-                try { AiRuntime.RemoveBuff(world, a, buff); } catch { }
-            }
-            string why = "the hunt record could not be written (" + e.Message + "); the mission buffs were removed";
-            Plugin.Logger?.LogWarning("servants: send failed by=" + by + " heart=" + req.Heart + ": " + why);
-            return new ServantSendResult { Ok = false, Refusal = ServantSendRefusal.WriteFailed, Reason = why, Heart = req.Heart, MissionGuid = req.MissionGuid, DataSlot = req.DataSlot };
+            RemoveBuffs(world, applied, buff);
+            return Fail(req, ServantSendRefusal.WriteFailed, "the hunt record could not be written (" + e.Message + "); the mission buffs were removed", by, log: true);
         }
 
         bool found = false;
@@ -544,14 +558,15 @@ internal static unsafe class ServantRuntime
             if (back.Key == row.Key && back.LengthSeconds == row.LengthSeconds && back.DataSlot == row.DataSlot) { found = true; break; }
         if (!found)
         {
+            RemoveBuffs(world, applied, buff);
             Plugin.Logger?.LogError("servants: the hunt record of heart " + req.Heart + " does not read back the row just added (mission "
-                + row.MissionGuid + "); the mission buffs stay on and the game finishes nothing for them. Report this.");
-            return new ServantSendResult { Ok = false, Refusal = ServantSendRefusal.WriteFailed, Reason = "the hunt record did not read back the new row", Heart = req.Heart, MissionGuid = req.MissionGuid, DataSlot = req.DataSlot };
+                + row.MissionGuid + "); the mission buffs were removed. Report this.");
+            return Fail(req, ServantSendRefusal.WriteFailed, "the hunt record did not read back the new row; the mission buffs were removed", by, log: false);
         }
 
         _heartsDirty = true;
         var sent = new List<CastleId>(row.Servants());
-        Confirm.Add((_frame + ConfirmFrames, sent, buff, req.Heart, row.MissionGuid));
+        Confirm.Add((DateTime.UtcNow.Ticks + ConfirmAfterTicks, sent, buff, req.Heart, row));
         var result = new ServantSendResult
         {
             Ok = true,
@@ -572,6 +587,22 @@ internal static unsafe class ServantRuntime
         return result;
     }
 
+    private static ServantSendResult Fail(ServantSendRequest req, ServantSendRefusal refusal, string why, string by, bool log)
+    {
+        if (log) Plugin.Logger?.LogWarning("servants: send failed by=" + by + " heart=" + req.Heart + ": " + why);
+        else Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " (" + refusal + "): " + why);
+        return new ServantSendResult { Ok = false, Refusal = refusal, Reason = why, Heart = req.Heart, MissionGuid = req.MissionGuid, DataSlot = req.DataSlot, Servants = req.Servants };
+    }
+
+    private static void RemoveBuffs(World world, List<Entity> servants, int buff)
+    {
+        foreach (var s in servants)
+        {
+            try { AiRuntime.RemoveBuff(world, s, buff); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("servants: removing the mission buff from " + CastleId.From(s) + " failed: " + e.Message); }
+        }
+    }
+
     private static Entity OwnerOf(Entity heart)
     {
         var castle = Progenitor.Castles.Castles.ForHeart(CastleId.From(heart));
@@ -589,6 +620,7 @@ internal static unsafe class ServantRuntime
         var progression = AiRuntime.ReadEntity(pm + Layout.ProgressionMapperEntityOffset + Layout.NetworkedEntityEntityOffset);
         if (progression == Entity.Null || !em.Exists(progression)) return false;
         int stride = Layout.DiscoveredMapZoneElementStride;
+        if (!em.HasComponent(progression, ComponentIndex.Of<DiscoveredMapZoneElement>(ComponentType.AccessMode.ReadOnly))) return false;
         byte* raw = AiRuntime.Buffer<DiscoveredMapZoneElement>(em, progression, stride, write: false, out int length);
         if (raw == null) return true; // readable, nothing discovered
         length = Math.Min(length, 4096);
@@ -619,16 +651,36 @@ internal static unsafe class ServantRuntime
 
     private static void Tick()
     {
-        _frame++;
-        if (Confirm.Count == 0) return;
+        if (Confirm.Count == 0 && PendingReturns.Count == 0) return;
         var world = Worlds.Server;
-        if (world == null || !world.IsCreated) { Confirm.Clear(); return; }
-        var em = world.EntityManager;
+        if (world == null || !world.IsCreated)
+        {
+            Confirm.Clear();
+            PendingReturns.Clear();
+            return;
+        }
+        long now = DateTime.UtcNow.Ticks;
+        try { ConfirmSends(world.EntityManager, now); }
+        catch (Exception e) { Confirm.Clear(); Plugin.Logger?.LogWarning("servants: send confirmation failed: " + e.Message); }
+        try { PublishReturns(world, now); }
+        catch (Exception e) { PendingReturns.Clear(); Plugin.Logger?.LogWarning("servants: publishing returns failed: " + e.Message); }
+    }
+
+    private static void ConfirmSends(EntityManager em, long now)
+    {
         for (int i = Confirm.Count - 1; i >= 0; i--)
         {
             var c = Confirm[i];
-            if (c.Frame > _frame) continue;
+            if (c.DueTicks > now) continue;
             Confirm.RemoveAt(i);
+            bool stillOut = false;
+            foreach (var r in ReadRows(em, c.Heart.ToEntity()))
+                if (r.Key == c.Row.Key) { stillOut = true; break; }
+            if (!stillOut)
+            {
+                Plugin.Logger?.LogInfo("servants: send of heart " + c.Heart + " mission " + c.Row.MissionGuid + " already returned before the check");
+                continue;
+            }
             var missing = new List<string>();
             foreach (var id in c.Servants)
             {
@@ -638,9 +690,9 @@ internal static unsafe class ServantRuntime
                 if (!buffed || !flagged) missing.Add(id + (buffed ? " (buff on, not marked on a hunt)" : " (no mission buff)"));
             }
             if (missing.Count == 0)
-                Plugin.Logger?.LogInfo("servants: send confirmed heart=" + c.Heart + " mission=" + c.Mission + " servants=" + string.Join(",", c.Servants));
+                Plugin.Logger?.LogInfo("servants: send confirmed heart=" + c.Heart + " mission=" + c.Row.MissionGuid + " servants=" + string.Join(",", c.Servants));
             else
-                Plugin.Logger?.LogWarning("servants: send of heart " + c.Heart + " mission " + c.Mission + " not confirmed for " + string.Join(", ", missing)
+                Plugin.Logger?.LogWarning("servants: send of heart " + c.Heart + " mission " + c.Row.MissionGuid + " not confirmed for " + string.Join(", ", missing)
                     + "; the hunt record row stays and the game finishes it on time");
         }
     }
@@ -713,13 +765,60 @@ internal static unsafe class ServantRuntime
         if (finished.Count == 0) return;
         _heartsDirty = true;
         long now = DateTime.UtcNow.Ticks;
-        Dictionary<CastleId, Entity>? coffinByServant = null;
-        foreach (var (heart, row) in finished)
+        try
         {
+            // Coffins are matched now, while the servants that died still exist (the game destroys
+            // them a moment later) and still name their coffin.
+            var coffinByServant = CoffinsByServant(em);
+            foreach (var (heart, row) in finished)
+            {
+                var coffins = new Dictionary<CastleId, Entity>();
+                foreach (var id in row.Servants())
+                {
+                    if (!coffinByServant.TryGetValue(id, out var coffin) && em.Exists(id.ToEntity())) coffin = CoffinOfServant(em, id.ToEntity());
+                    coffins[id] = coffin;
+                }
+                PendingReturns.Add((CastleId.From(heart), row, now, coffins));
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("servants: queuing a return failed: " + e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Publish the returns the game has finished with: every servant that died is destroyed and
+    /// every survivor's mission buff is gone (so <c>Resend</c> from a handler works), or the wait
+    /// ran out.
+    /// </summary>
+    private static void PublishReturns(World world, long now)
+    {
+        if (PendingReturns.Count == 0) return;
+        var em = world.EntityManager;
+        var ready = new List<(CastleId Heart, MissionRow Row, long SeenTicks, Dictionary<CastleId, Entity> Coffins)>();
+        for (int i = PendingReturns.Count - 1; i >= 0; i--)
+        {
+            var p = PendingReturns[i];
+            long waited = now - p.SeenTicks;
+            if (waited < ReturnMinWaitTicks) continue;
+            bool settled = true;
+            foreach (var id in p.Row.Servants())
+            {
+                var s = id.ToEntity();
+                if (!em.Exists(s) || IsDestroying(em, s)) continue;
+                if (IsOnMission(em, s, out _)) { settled = false; break; }
+            }
+            if (!settled && waited < ReturnMaxWaitTicks) continue;
+            PendingReturns.RemoveAt(i);
+            ready.Add(p);
+        }
+        for (int i = ready.Count - 1; i >= 0; i--)
+        {
+            var (heartId, row, seen, coffins) = ready[i];
             try
             {
-                coffinByServant ??= CoffinsByServant(em);
-                var ev = BuildReturn(world, em, heart, row, now, coffinByServant);
+                var ev = BuildReturn(world, em, heartId.ToEntity(), row, seen, now, coffins);
                 Plugin.Logger?.LogInfo("servants: hunt returned heart=" + ev.Heart + " mission=" + ev.MissionGuid + " zone=" + ev.Zone
                     + " slot=" + ev.DataSlot + " " + Describe(ev));
                 EventBus.Publish(ev);
@@ -730,6 +829,12 @@ internal static unsafe class ServantRuntime
             }
         }
     }
+
+    /// <summary>Dead, or destroyed and not yet removed (the game's destroy is processed a moment later).</summary>
+    private static bool IsDestroying(EntityManager em, Entity servant) =>
+        IsDead(em, servant)
+        || em.HasComponent(servant, ComponentIndex.Of<DestroyTag>(ComponentType.AccessMode.ReadOnly))
+        || em.HasComponent(servant, ComponentIndex.Of<DestroyData>(ComponentType.AccessMode.ReadOnly));
 
     private static Dictionary<CastleId, Entity> CoffinsByServant(EntityManager em)
     {
@@ -745,15 +850,16 @@ internal static unsafe class ServantRuntime
         return map;
     }
 
-    private static ServantsReturned BuildReturn(World world, EntityManager em, Entity heart, MissionRow row, long now, Dictionary<CastleId, Entity> coffins)
+    private static ServantsReturned BuildReturn(World world, EntityManager em, Entity heart, MissionRow row, long seen, long now, Dictionary<CastleId, Entity> coffins)
     {
         var servants = new List<ReturnedServant>();
         foreach (var id in row.Servants())
         {
             var s = id.ToEntity();
             bool exists = em.Exists(s);
-            bool dead = exists && IsDead(em, s);
+            bool dead = exists && IsDestroying(em, s);
             coffins.TryGetValue(id, out var coffin);
+            if (coffin != Entity.Null && !em.Exists(coffin)) coffin = Entity.Null;
             if (coffin == Entity.Null && exists) coffin = CoffinOfServant(em, s);
             int state = 0;
             long injury = 0;
@@ -799,7 +905,7 @@ internal static unsafe class ServantRuntime
             DataSlot = row.DataSlot,
             LengthSeconds = row.LengthSeconds,
             StartedUtc = ServantLogic.Utc(row.StartTicks),
-            ReturnedUtc = ServantLogic.Utc(now),
+            ReturnedUtc = ServantLogic.Utc(seen),
             Servants = servants,
             Epoch = WorldEpoch.Current,
         };
@@ -836,6 +942,9 @@ internal static unsafe class ServantRuntime
                 if (from == null || rq == null) continue;
                 var user = AiRuntime.ReadEntity(from + Layout.FromCharacterUserOffset);
                 var character = AiRuntime.ReadEntity(from + Layout.FromCharacterCharacterOffset);
+                // Copy the throne id now: the provider below may change the world and move the chunk.
+                var throne = new byte[12];
+                new ReadOnlySpan<byte>(rq + Layout.ServantInfoEventRequestThroneOffset, 12).CopyTo(throne);
                 if (user == Entity.Null || !em.Exists(user)) continue;
                 int userIndex = em.GetComponentData<User>(user).Index;
                 var castle = Progenitor.Castles.Castles.At(CastleId.From(character));
@@ -854,9 +963,7 @@ internal static unsafe class ServantRuntime
                     continue;
                 }
                 if (hearts == null) continue;
-                var throne = new byte[12];
-                new ReadOnlySpan<byte>(rq + Layout.ServantInfoEventRequestThroneOffset, 12).CopyTo(throne);
-                PendingSwaps[userIndex] = (request.User, request.Heart, throne, hearts);
+                PendingSwaps[userIndex] = (request.User, request.Heart, throne, new List<CastleId>(hearts));
             }
         }
         catch (Exception e)
@@ -923,6 +1030,8 @@ internal static unsafe class ServantRuntime
         if (!Lists.AnyShown) return;
         var world = hook.World;
         var em = world.EntityManager;
+        RefreshCaches(em); // drops the shown lists of an earlier world load
+        if (!Lists.AnyShown) return;
         List<Entity> events;
         try
         {
@@ -949,6 +1058,7 @@ internal static unsafe class ServantRuntime
         byte* p = AiRuntime.RO<SendOnMissionEvent>(em, ev, Layout.SendOnMissionEventMapZoneIdOffset + 3);
         if (from == null || p == null) return;
         var user = AiRuntime.ReadEntity(from + Layout.FromCharacterUserOffset);
+        var character = AiRuntime.ReadEntity(from + Layout.FromCharacterCharacterOffset);
         if (user == Entity.Null || !em.Exists(user)) return;
         int userIndex = em.GetComponentData<User>(user).Index;
         var shown = Lists.ShownTo(userIndex, nowUtc);
@@ -978,6 +1088,10 @@ internal static unsafe class ServantRuntime
 
         int slot = *(int*)(p + Layout.SendOnMissionEventMissionDataIdOffset);
         var zone = ServantLogic.ReadZone(new ReadOnlySpan<byte>(p + Layout.SendOnMissionEventMapZoneIdOffset, 3));
+        // The game checks that the sender can reach the throne; the routed send checks that the
+        // sender still stands in the throne's castle (the throne itself is not resolved here).
+        var here = Progenitor.Castles.Castles.At(CastleId.From(character));
+        if (!here.Enabled || here.Heart != shown.Heart) return;
         int mission = MissionFor(em, zone);
         em.DestroyEntity(ev);
         foreach (var heart in order)

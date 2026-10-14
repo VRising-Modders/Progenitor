@@ -36,6 +36,9 @@ internal sealed class ServantListRegistry
     /// <summary>Lines the registry wants logged.</summary>
     internal Action<string>? Log { get; set; }
 
+    /// <summary>Called after a provider is unregistered (the server half drops what it held of it).</summary>
+    internal Action? Unregistered { get; set; }
+
     internal IServantListProvider? Provider { get { lock (_gate) return _provider; } }
 
     internal string Owner { get { lock (_gate) return _owner; } }
@@ -78,6 +81,8 @@ internal sealed class ServantListRegistry
             _owner = "";
             _shown.Clear();
         }
+        try { Unregistered?.Invoke(); }
+        catch (Exception e) { Log?.Invoke("servants: unregister callback threw: " + e.Message); }
         Log?.Invoke("servants: list provider unregistered owner=" + owner + " (thrones list their own castle again)");
     }
 

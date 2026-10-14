@@ -392,6 +392,8 @@ public class ServantLogicTests
     public void One_provider_at_a_time_and_a_stale_handle_removes_nothing()
     {
         var reg = new ServantListRegistry();
+        int dropped = 0;
+        reg.Unregistered = () => dropped++;
         var first = reg.Register(new Fixed(), "mod.one");
         var ex = Assert.Throws<InvalidOperationException>(() => reg.Register(new Fixed(), "mod.two"));
         Assert.Contains("mod.one", ex.Message);
@@ -405,6 +407,7 @@ public class ServantLogicTests
         Assert.True(reg.RemoveOwner("mod.two"));
         Assert.False(reg.Registered);
         second.Dispose();
+        Assert.Equal(2, dropped); // once per real unregistration, never for a stale handle
     }
 
     [Fact]
