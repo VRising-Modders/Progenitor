@@ -169,6 +169,26 @@ public static class CastleReader
     }
 
     /// <summary>
+    /// One placed model as <see cref="Buildings"/> reads it: null unless it exists and its
+    /// <c>CastleHeartConnection</c> names <paramref name="heartEntity"/>. Never throws.
+    /// </summary>
+    internal static CastleBuilding? ConnectedBuilding(World world, Entity entity, Entity heartEntity)
+    {
+        if (world == null || !world.IsCreated) return null;
+        try
+        {
+            var em = world.EntityManager;
+            if (!entity.Exists(em)) return null;
+            return ReadBuilding(world, em, entity, heartEntity);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning($"CastleReader.Buildings: {Fmt(entity)} threw: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Plot that owns <paramref name="heartOrTerritory"/>: a heart entity, a territory entity,
     /// or any tile-model with <c>CastleHeartConnection</c>. Null when the entity is none of
     /// those or the matching heart was not readable.

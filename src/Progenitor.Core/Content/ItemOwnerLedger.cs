@@ -13,22 +13,173 @@ internal sealed record ItemOwnerRecord(string ItemId, int Guid, string PluginId,
 internal sealed class ItemOwnerLedger
 {
     internal const string RelativeFileName = "config/progenitor-item-owners.json";
-    private readonly List<ItemOwnerRecord> _rows = new();
-    private readonly Dictionary<int, int> _rowIndices = new();
-    private readonly HashSet<string> _removed = new(StringComparer.Ordinal);
+    private List<ItemOwnerRecord> _rows;
+    private Dictionary<int, int> _rowIndices;
+    private HashSet<string> _removed;
+    // Rows per owner, so MarkRemoved checks ownership without scanning every row (a ledger of
+    // 10,000 rows with 80 removed owners cost 800,000 comparisons per load).
+    private Dictionary<string, int> _ownerRowCounts;
+    // True while the collections above belong to the cached parse: the first change copies them.
+    private bool _shared;
+    // Owners and rows per owner; built on first use, dropped on any row change.
+    private OwnerIndex? _index;
     private string? _loadedHash;
     public bool IsValid { get; private set; } = true;
     public string Error { get; private set; } = "";
     public IReadOnlyList<ItemOwnerRecord> Rows => _rows.AsReadOnly();
 
+    private sealed class OwnerIndex
+    {
+        public readonly List<string> Owners = new();
+        public readonly Dictionary<string, List<ItemOwnerRecord>> ByOwner = new(StringComparer.Ordinal);
+    }
+
+    public ItemOwnerLedger()
+    {
+        _rows = new List<ItemOwnerRecord>();
+        _rowIndices = new Dictionary<int, int>();
+        _removed = new HashSet<string>(StringComparer.Ordinal);
+        _ownerRowCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+    }
+
+    /// <summary>A ledger reading <paramref name="source"/>'s collections until its first change.</summary>
+    private ItemOwnerLedger(ItemOwnerLedger source)
+    {
+        _rows = source._rows;
+        _rowIndices = source._rowIndices;
+        _removed = source._removed;
+        _ownerRowCounts = source._ownerRowCounts;
+        _index = source._index;
+        _shared = true;
+        _loadedHash = source._loadedHash;
+        IsValid = source.IsValid;
+        Error = source.Error;
+    }
+
+    private void BeforeChange(bool rows)
+    {
+        if (rows) _index = null;
+        if (!_shared) return;
+        _rows = new List<ItemOwnerRecord>(_rows);
+        _rowIndices = new Dictionary<int, int>(_rowIndices);
+        _removed = new HashSet<string>(_removed, StringComparer.Ordinal);
+        _ownerRowCounts = new Dictionary<string, int>(_ownerRowCounts, StringComparer.Ordinal);
+        _shared = false;
+    }
+
+    /// <summary>Each owner once, in the order of its first row (<c>Rows.Select(r => r.PluginId).Distinct()</c>).</summary>
+    internal IReadOnlyList<string> Owners => Index().Owners;
+
+    /// <summary>The owner's rows in ledger order (<c>Rows.Where(r => r.PluginId == pluginId)</c>).</summary>
+    internal IReadOnlyList<ItemOwnerRecord> RowsOf(string pluginId) =>
+        Index().ByOwner.TryGetValue(pluginId, out var rows) ? rows : Array.Empty<ItemOwnerRecord>();
+
+    private OwnerIndex Index()
+    {
+        var index = _index;
+        if (index != null) return index;
+        index = new OwnerIndex();
+        foreach (var row in _rows)
+        {
+            if (!index.ByOwner.TryGetValue(row.PluginId, out var list))
+            {
+                index.ByOwner.Add(row.PluginId, list = new List<ItemOwnerRecord>());
+                index.Owners.Add(row.PluginId);
+            }
+            list.Add(row);
+        }
+        return _index = index;
+    }
+
+    // ---- load cache ----------------------------------------------------------------------------
+    // The content-pack scan and the removal tick read the ledger several times a second, and the
+    // parse is the expensive part (10,000 rows: 30 to 60 ms and several MB of garbage, a 2.6 MB
+    // byte array on the large-object heap among it). Each Load still returns its own ledger: it
+    // reads the last parse of the same bytes and copies it on its first change. Bytes are
+    // identified by SHA-256, the identity Save's concurrency check already uses. Reading and
+    // hashing are skipped only while the file's size and write time are unchanged AND that write
+    // time was more than StatTrustAge older than the read of the cached bytes: any later write
+    // then carries a later write time, even with the file system's coarse timestamp clock.
+    internal static readonly TimeSpan StatTrustAge = TimeSpan.FromSeconds(2);
+    private static readonly object CacheGate = new();
+    private static CacheEntry? _cache;
+
+    /// <summary>Tests: the clock the stat-trust rule reads.</summary>
+    internal static Func<DateTime> UtcNow = () => DateTime.UtcNow;
+
+    /// <summary>Tests: how many times Load parsed JSON since the last reset.</summary>
+    internal static int ParseCount { get; private set; }
+
+    /// <summary>Tests: how many times Load read the file's bytes since the last reset.</summary>
+    internal static int ReadCount { get; private set; }
+
+    internal static void ResetCacheForTests()
+    {
+        lock (CacheGate) { _cache = null; ParseCount = 0; ReadCount = 0; }
+        UtcNow = () => DateTime.UtcNow;
+    }
+
+    private sealed class CacheEntry
+    {
+        public string Path = "";
+        public string Hash = "";
+        public long Length;
+        public DateTime WriteUtc;
+        public bool StatTrusted;
+        public ItemOwnerLedger Parsed = null!;
+    }
+
     public static ItemOwnerLedger Load(string path)
+    {
+        try
+        {
+            var full = Path.GetFullPath(path);
+            var before = new FileInfo(full);
+            if (!before.Exists) return new ItemOwnerLedger();
+            long length = before.Length;
+            DateTime write = before.LastWriteTimeUtc;
+            lock (CacheGate)
+            {
+                var hit = _cache;
+                if (hit != null && hit.StatTrusted && hit.Length == length && hit.WriteUtc == write
+                    && string.Equals(hit.Path, full, StringComparison.OrdinalIgnoreCase))
+                    return new ItemOwnerLedger(hit.Parsed);
+            }
+            DateTime readAt = UtcNow();
+            var bytes = File.ReadAllBytes(full);
+            var hash = Convert.ToHexString(SHA256.HashData(bytes));
+            var after = new FileInfo(full);
+            // The stat key stands for these bytes only when two identical stats of an old file bracket the read.
+            bool trusted = after.Exists && after.Length == length && after.LastWriteTimeUtc == write
+                && bytes.LongLength == length && readAt - write > StatTrustAge;
+            lock (CacheGate)
+            {
+                ReadCount++;
+                var hit = _cache;
+                if (hit != null && hit.Hash == hash && string.Equals(hit.Path, full, StringComparison.OrdinalIgnoreCase))
+                {
+                    hit.Length = length; hit.WriteUtc = write; hit.StatTrusted = trusted;
+                    return new ItemOwnerLedger(hit.Parsed);
+                }
+            }
+            var parsed = Parse(bytes, hash);
+            parsed.Index(); // shared, read-only from here on
+            lock (CacheGate)
+            {
+                ParseCount++;
+                _cache = new CacheEntry { Path = full, Hash = hash, Length = length, WriteUtc = write, StatTrusted = trusted, Parsed = parsed };
+            }
+            return new ItemOwnerLedger(parsed);
+        }
+        catch (Exception e) { return new ItemOwnerLedger { IsValid = false, Error = e.Message }; }
+    }
+
+    private static ItemOwnerLedger Parse(byte[] bytes, string hash)
     {
         var ledger = new ItemOwnerLedger();
         try
         {
-            if (!File.Exists(path)) return ledger;
-            var bytes = File.ReadAllBytes(path);
-            ledger._loadedHash = Convert.ToHexString(SHA256.HashData(bytes));
+            ledger._loadedHash = hash;
             using var doc = JsonDocument.Parse(bytes);
             var root = doc.RootElement;
             if (root.GetProperty("schema").GetInt32() != 1) throw new FormatException("Unsupported item ownership schema.");
@@ -44,7 +195,12 @@ internal sealed class ItemOwnerLedger
             foreach (var owner in root.GetProperty("removedOwners").EnumerateArray())
                 if (!ledger.MarkRemoved(owner.GetString()!)) throw new FormatException("Unknown removed owner.");
         }
-        catch (Exception e) { ledger.IsValid = false; ledger.Error = e.Message; ledger._rows.Clear(); ledger._rowIndices.Clear(); ledger._removed.Clear(); }
+        catch (Exception e)
+        {
+            ledger.IsValid = false; ledger.Error = e.Message;
+            ledger._rows.Clear(); ledger._rowIndices.Clear(); ledger._removed.Clear(); ledger._ownerRowCounts.Clear();
+            ledger._index = null;
+        }
         return ledger;
     }
 
@@ -55,15 +211,22 @@ internal sealed class ItemOwnerLedger
         var previous = _rowIndices.TryGetValue(guid, out int index) ? _rows[index] : null;
         if (previous != null && (previous.PluginId != pluginId || previous.ItemId != itemId)) return false;
         var record = new ItemOwnerRecord(itemId, guid, pluginId, path, sourceGuid);
+        BeforeChange(rows: true);
         if (previous != null) _rows[index] = record;
-        else { _rowIndices.Add(guid, _rows.Count); _rows.Add(record); }
+        else
+        {
+            _rowIndices.Add(guid, _rows.Count); _rows.Add(record);
+            _ownerRowCounts[pluginId] = _ownerRowCounts.TryGetValue(pluginId, out int n) ? n + 1 : 1;
+        }
         if (clearRemoval) _removed.Remove(pluginId);
         return true;
     }
 
     public bool MarkRemoved(string pluginId)
     {
-        if (!IsValid || !_rows.Any(r => r.PluginId == pluginId)) return false;
+        if (!IsValid || !_ownerRowCounts.ContainsKey(pluginId)) return false;
+        if (_removed.Contains(pluginId)) return true;
+        BeforeChange(rows: false);
         _removed.Add(pluginId);
         return true;
     }
@@ -94,13 +257,13 @@ internal sealed class ItemOwnerLedger
     {
         // Missing data-pack files may be a mount/deployment interruption. Only explicit
         // removal intent can authorize their inventory cleanup, even at process startup.
-        if (_rows.Any(r => r.PluginId == pluginId
-            && r.AssemblyRelativePath.StartsWith("progenitor-content/", StringComparison.OrdinalIgnoreCase)
+        var owned = RowsOf(pluginId);
+        if (owned.Any(r => r.AssemblyRelativePath.StartsWith("progenitor-content/", StringComparison.OrdinalIgnoreCase)
             && r.AssemblyRelativePath.EndsWith("/pack.json", StringComparison.OrdinalIgnoreCase)))
             confirmedStartupAbsence = false;
         if (!IsValid || !inventoryResolved || activeOwner || diskPresent || stagedReplacement
             || (!_removed.Contains(pluginId) && !confirmedStartupAbsence)) return Array.Empty<ItemOwnerRecord>();
-        return _rows.Where(r => r.PluginId == pluginId).ToArray();
+        return owned.ToArray();
     }
 
     public bool Save(string path)

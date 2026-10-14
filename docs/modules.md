@@ -1810,7 +1810,7 @@ The non-context path is `CastleReader.Plots(world)` / `Tiles(world, plot)` / `Bu
 
 `CastleLogic` is the game-free half (sort, kind, NESW bits, floor-type names, limit clamp) so tests and the live reader cannot drift.
 
-Debug bridge: `castles` op (`{what: "plots"|"tiles"|"buildings", plot?: territory index, limit}`). MCP: `progenitor_castles`.
+Debug bridge: `castles` op (`{what: "plots"|"tiles"|"buildings"|"index", plot?: territory index, limit}`; `index` returns the container index counters: `scans`, `hits`, `stampScans`, `ageScans`, `unreadableScans`, `firstScans`). MCP: `progenitor_castles`.
 
 **Verified live 2026-09-04** on TestPlayer's plot (territory 13, a blood-fountain heart and one outdoor floor): the `CastleHeart` query returns the plot, floors carry `CastleHeartConnection`, the `TilePosition.HeightLevel` getter works through the interop (11, no fall back to `CompressedHeight`), and `CastleRoomConnection.RoomEntity` resolves. Readings are in the internal research notes.
 
@@ -2203,11 +2203,14 @@ yours (for example `ctx.Castles.RelationTo`). Network ids are session-local: per
 |---|---|
 | `ICastleHandle.Containers()` | Placed models with an inventory that are not a station or the heart. |
 | `ICastleHandle.Stations()` | Models with a recipe list (`WorkstationRecipesBuffer`) or `Refinementstation`; refinement rows carry `Output`. Storage that carries `CastleWorkstation` only for room and servant bonuses is listed by `Containers()`. |
+| `ICastleHandle.StructureRevision` | A `long` that changes when a container or station on this plot is built or destroyed, or the world is loaded. Key a cache of the two lists above on it. Renames, slot counts and contents do not move it. A build and a destroy between two reads may show up to 10 s late. Valid within one process only: do not persist it. 0 on a disabled or stale handle. Game-free tested, not live-verified. |
 | `ICastleHandle.Name` | The heart's nameplate. |
 | `ICastleHandle.HeartId` | The heart's stable id. |
 | `ICastleHandle.HeartFuel()` | `Level` (`CastleHeart.Level`), `UnlockedSlots` (the `ItemSlots` of that level's row in the heart's own level table, `CastleHeart.Data`), `LevelRows`, `FuelQuantity`. |
 | `ctx.Castles.Nameplate(entity)` / `TrySetNameplate(entity, name, out reason)` | `NameableInteractable.Name`, a networked fixed string: at most 61 UTF-8 bytes, no control characters, empty clears. Written through the component overlay at the metadata offset. |
 | `ctx.Castles.RelationTo(user, castle)` | `Owner`, `ClanMember` (in the owner's clan), `Allied` (the game's `Team.IsAllies` between the user's character and the heart), or `None`. |
+
+Both lists are read live, row by row. Which models belong to the plot is kept between calls. Each call counts the server's inventory-bearing castle models, a sum of chunk counts. It lists them again only when that count changed or 10 s passed. A rescan lists those models only, a few hundred server-wide, never every castle building. The development bridge's `castles` op with `what: "index"` reports the scans and the reads served without one.
 
 Other castle inventories, from the server metadata (fields verified, behavior inferred, not
 live-checked): a horse stable carries `Stables_Shared` (the mount is referenced by

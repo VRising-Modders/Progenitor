@@ -1059,7 +1059,9 @@ public static unsafe class SystemHooks
     /// <summary>
     /// The single funnel every plugin system hook goes through, and the only place that still
     /// knows which plugin id owns the callback — which is why the Dev <c>perf</c> op times it here
-    /// (<see cref="Dev.PerfProbe"/>). With no sink installed this costs one static read.
+    /// (<see cref="Dev.PerfProbe"/>). Every call is also timed for the hitch summary
+    /// (<see cref="Progenitor.Ui.UiFrameCost.NoteOutside"/>): hooks run inside the game's systems, outside the
+    /// frame dispatch, and were otherwise invisible to it. Two timestamps per hooked call.
     /// </summary>
     private static void Invoke(Entry entry, SystemHookContext ctx)
     {
@@ -1069,7 +1071,7 @@ public static unsafe class SystemHooks
             try { sink.BeginCallback(); }
             catch { /* a profiler must never break a hook */ }
         }
-        long start = sink == null ? 0L : System.Diagnostics.Stopwatch.GetTimestamp();
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             entry.Hook(ctx);
@@ -1078,8 +1080,10 @@ public static unsafe class SystemHooks
         {
             Plugin.Logger?.LogError($"SystemHooks: {(entry.Before ? "Before" : "After")} hook for {entry.SystemName} threw: {e}");
         }
+        long ticks = System.Diagnostics.Stopwatch.GetTimestamp() - start;
+        Progenitor.Ui.UiFrameCost.NoteOutside(entry.CostName, ticks);
         if (sink == null) return;
-        try { sink.SystemHook(entry.PluginId, entry.SystemName, entry.Before, System.Diagnostics.Stopwatch.GetTimestamp() - start); }
+        try { sink.SystemHook(entry.PluginId, entry.SystemName, entry.Before, ticks); }
         catch { /* a profiler must never break a hook */ }
     }
 
@@ -1317,6 +1321,10 @@ public static unsafe class SystemHooks
         public bool Removed;
         public int Priority;
         public string PluginId = "";
+        private string? _costName;
+        /// <summary>The hitch summary's name for this hook: <c>hook:owner:System.before</c>.</summary>
+        public string CostName => _costName ??= "hook:" + (PluginId.Length == 0 ? "progenitor" : PluginId) + ":"
+            + SystemName + (Before ? ".before" : ".after");
         public string[] BeforeIds = Array.Empty<string>();
         public string[] AfterIds = Array.Empty<string>();
         public int Index;

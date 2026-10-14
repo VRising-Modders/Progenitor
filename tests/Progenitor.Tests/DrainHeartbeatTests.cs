@@ -302,4 +302,72 @@ public class UiFrameCostTests
             UiFrameCost.ResetForTests();
         }
     }
+
+    [Fact]
+    public void Outside_work_adds_up_per_name_and_joins_the_next_frame_with_its_interval()
+    {
+        UiFrameCost.ResetForTests();
+        try
+        {
+            UiFrameCost.BeginFrame();
+            long tenMs = Stopwatch.Frequency / 100;
+            // A system hook called 9 times and a seam gate once while the game's systems ran.
+            for (int i = 0; i < 9; i++) UiFrameCost.NoteOutside("hook:mod:CraftSystem.before", tenMs);
+            UiFrameCost.NoteOutside("seam:materials.countGate", 3 * tenMs);
+            Assert.Equal("", UiFrameCost.WorstName);
+            UiFrameCost.BeginFrame();
+            Assert.Equal("hook:mod:CraftSystem.before", UiFrameCost.WorstName);
+            Assert.InRange(UiFrameCost.WorstMs, 89, 91);
+            Assert.True(UiFrameCost.IsHitch(UiFrameCost.IntervalMs, UiFrameCost.WorstMs));
+            // Folded once: the following frame starts clean.
+            UiFrameCost.BeginFrame();
+            Assert.Equal("", UiFrameCost.WorstName);
+            Assert.Equal(0, UiFrameCost.WorstMs);
+        }
+        finally
+        {
+            UiFrameCost.ResetForTests();
+        }
+    }
+
+    [Fact]
+    public void Outside_work_off_the_main_thread_or_before_the_first_frame_is_ignored()
+    {
+        UiFrameCost.ResetForTests();
+        try
+        {
+            long tick = Stopwatch.Frequency;
+            UiFrameCost.NoteOutside("hook:early", tick);
+            UiFrameCost.BeginFrame();
+            Assert.Equal("", UiFrameCost.WorstName);
+            var worker = new System.Threading.Thread(() => UiFrameCost.NoteOutside("hook:worker", tick));
+            worker.Start(); worker.Join();
+            UiFrameCost.BeginFrame();
+            Assert.Equal("", UiFrameCost.WorstName);
+        }
+        finally
+        {
+            UiFrameCost.ResetForTests();
+        }
+    }
+
+    [Fact]
+    public void Outside_names_beyond_the_table_add_up_as_other()
+    {
+        UiFrameCost.ResetForTests();
+        try
+        {
+            UiFrameCost.BeginFrame();
+            long oneMs = Stopwatch.Frequency / 1000;
+            for (int i = 0; i < UiFrameCost.MaxOutsideNames; i++) UiFrameCost.NoteOutside("hook:" + i, oneMs);
+            for (int i = 0; i < 50; i++) UiFrameCost.NoteOutside("hook:extra" + i, 2 * oneMs);
+            UiFrameCost.BeginFrame();
+            Assert.Equal(UiFrameCost.OutsideOtherName, UiFrameCost.WorstName);
+            Assert.InRange(UiFrameCost.WorstMs, 99, 101);
+        }
+        finally
+        {
+            UiFrameCost.ResetForTests();
+        }
+    }
 }

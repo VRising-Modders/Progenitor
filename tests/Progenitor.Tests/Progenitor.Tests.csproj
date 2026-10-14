@@ -34,6 +34,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Content\ItemStatSyncBudget.cs" Link="Linked\ItemStatSyncBudget.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Content\DataPackManifest.cs" Link="Linked\DataPackManifest.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Content\ItemOwnerLedger.cs" Link="Linked\ItemOwnerLedger.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Content\ItemOwnerDiskPlugins.cs" Link="Linked\ItemOwnerDiskPlugins.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Models\RigReferenceSnapshot.cs" Link="Linked\RigReferenceSnapshot.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\MenuPanelLayout.cs" Link="Linked\MenuPanelLayout.cs" />
     <!-- Job KEY2: the menu-hotkey guard is game-free by construction (dump-read ints and one
@@ -129,6 +130,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Inventory\NetworkIdResolver.cs" Link="Linked\NetworkIdResolver.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Clans\ClanTypes.cs" Link="Linked\ClanTypes.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleContainers.cs" Link="Linked\CastleContainers.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\CastleInventoryIndex.cs" Link="Linked\CastleInventoryIndex.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\NameplateCodec.cs" Link="Linked\NameplateCodec.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleHeartFuel.cs" Link="Linked\CastleHeartFuel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\PlayerPresence.cs" Link="Linked\PlayerPresence.cs" />

@@ -163,6 +163,16 @@ public interface ICastleHandle
     IReadOnlyList<CastleContainerInfo> Stations();
 
     /// <summary>
+    /// A number that changes when a container or station on this plot is built or destroyed, or the
+    /// world is loaded: key a cache of <see cref="Containers"/> / <see cref="Stations"/> membership on it.
+    /// A read counts the server's inventory-bearing castle models and rescans them (a few hundred,
+    /// not every building) only when that count moved or 10 s passed. A build and a destroy between
+    /// two reads may show up to 10 s late. Names, slot counts and contents can change without it
+    /// moving. Valid within this process only: never persist it. 0 on a disabled or stale handle.
+    /// </summary>
+    long StructureRevision { get; }
+
+    /// <summary>
     /// Re-read this castle from the world through its <c>Territory.Index</c> — the key that
     /// survives a save reload. Returns a new handle, or a disabled one when the territory no
     /// longer holds a castle. The original handle keeps its old snapshot.

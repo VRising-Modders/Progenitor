@@ -67,6 +67,10 @@ internal static class UiTickTiming
 /// <item>A single frame whose Progenitor work (a named handler or phase) took
 /// <see cref="ImmediateMs"/> or more writes the full <see cref="Format"/> line at once, to the
 /// console too, at most once per <see cref="ImmediateRateLimitMs"/>.</item>
+/// <item>Progenitor work that runs inside the game's own systems rather than in the frame dispatch
+/// (system hook callbacks, material seam gates) is added up per name with <see cref="NoteOutside"/>
+/// and folded into the next frame's named phases at <see cref="BeginFrame"/>, so it is judged
+/// against the interval it ran in and a hitch it causes is no longer <c>outsideOnly</c>.</item>
 /// </list>
 /// Does not write a report: a previous recorder stalled the thread it measured.
 /// </summary>
@@ -85,6 +89,11 @@ internal static class UiFrameCost
 
     /// <summary>Names the summary lists (largest total first).</summary>
     internal const int TopNames = 4;
+
+    /// <summary>Distinct outside-dispatch names added up per interval; the rest add up under <see cref="OutsideOtherName"/>.</summary>
+    internal const int MaxOutsideNames = 32;
+
+    internal const string OutsideOtherName = "outside:other";
 
     internal static Func<long> NowMs = () => Environment.TickCount64;
 
@@ -106,6 +115,13 @@ internal static class UiFrameCost
 
     private static long _lastStart;
     private static long _lastEnd;
+
+    // ---- outside-dispatch work since the last BeginFrame (main thread only) ----
+    private static int _mainThreadId;
+    private static readonly string[] OutsideNames = new string[MaxOutsideNames];
+    private static readonly long[] OutsideTicks = new long[MaxOutsideNames];
+    private static int _outsideNames;
+    private static long _outsideOtherTicks;
     private static long _lastImmediateMs = long.MinValue;
 
     // ---- the window (reset after each summary) ----
@@ -131,6 +147,7 @@ internal static class UiFrameCost
 
     internal static void BeginFrame()
     {
+        _mainThreadId = Environment.CurrentManagedThreadId;
         long now = Stopwatch.GetTimestamp();
         IntervalMs = _lastStart == 0 ? 0 : TicksToMs(now - _lastStart);
         OutsideMs = _lastEnd == 0 ? 0 : TicksToMs(now - _lastEnd);
@@ -145,6 +162,48 @@ internal static class UiFrameCost
         WorstName = "";
         WorstHandlerMs = 0;
         WorstHandlerName = "";
+        FoldOutside();
+    }
+
+    /// <summary>
+    /// Progenitor work timed outside the frame dispatch (a system hook callback, a material seam gate).
+    /// Adds up per <paramref name="name"/> until the next <see cref="BeginFrame"/>, which makes each
+    /// total a named phase of that frame. Allocation-free; ignored off the main thread and before the
+    /// first frame. <paramref name="name"/> should be a cached string.
+    /// </summary>
+    internal static void NoteOutside(string name, long ticks)
+    {
+        if (ticks <= 0 || _mainThreadId == 0 || Environment.CurrentManagedThreadId != _mainThreadId) return;
+        for (int i = 0; i < _outsideNames; i++)
+        {
+            if (!ReferenceEquals(OutsideNames[i], name) && !string.Equals(OutsideNames[i], name, StringComparison.Ordinal)) continue;
+            OutsideTicks[i] += ticks;
+            return;
+        }
+
+        if (_outsideNames < MaxOutsideNames)
+        {
+            OutsideNames[_outsideNames] = name;
+            OutsideTicks[_outsideNames] = ticks;
+            _outsideNames++;
+            return;
+        }
+
+        _outsideOtherTicks += ticks;
+    }
+
+    private static void FoldOutside()
+    {
+        for (int i = 0; i < _outsideNames; i++)
+        {
+            NoteWorst(OutsideNames[i], TicksToMs(OutsideTicks[i]));
+            OutsideNames[i] = "";
+            OutsideTicks[i] = 0;
+        }
+
+        _outsideNames = 0;
+        if (_outsideOtherTicks > 0) NoteWorst(OutsideOtherName, TicksToMs(_outsideOtherTicks));
+        _outsideOtherTicks = 0;
     }
 
     internal static void EndFrame(long frameStartTimestamp)
@@ -306,6 +365,10 @@ internal static class UiFrameCost
         _lastStart = 0;
         _lastEnd = 0;
         _lastImmediateMs = long.MinValue;
+        _mainThreadId = 0;
+        for (int i = 0; i < _outsideNames; i++) { OutsideNames[i] = ""; OutsideTicks[i] = 0; }
+        _outsideNames = 0;
+        _outsideOtherTicks = 0;
         ResetWindow(long.MinValue);
         NowMs = () => Environment.TickCount64;
         LogSink = null;
