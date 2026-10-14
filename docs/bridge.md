@@ -154,7 +154,11 @@ To read them: open `BepInEx/LogOutput.log` (BepInEx flushes it every 2 s), use `
 ui hitch summary windowS=30 frames=2950 hitches=41 intervalMs=median:85,max:1040 outsideOnly=35 slowest=handler:JoinFlowPanel.OnFrame:211 top=[handler:JoinFlowPanel.OnFrame 420ms/3, handler:Keybinds.Pump 40ms/2]
 ```
 
-`outsideOnly` counts hitches in which no Progenitor handler or phase took 1 ms (the game's own frame); `top` totals the slowest named phase of each hitch frame. A single frame whose named Progenitor handler or phase takes 250 ms or more writes the full `ui hitch intervalMs=… worst=… handler=…` line at once, to the console too, at most once per 5 s.
+`outsideOnly` counts hitches in which no Progenitor handler or phase took 1 ms (the game's own frame); `top` totals the slowest named phase of each hitch frame. `intervalMs` describes hitch frames only: the median of the hitch intervals, not of every frame. For the average frame time, divide the window by `frames` (`windowS=30 frames=780` is 38 ms, about 26 fps). Frames that are slow but stay under 80 ms are not hitches and do not appear in `top`.
+
+Named phases include Progenitor work that runs inside the game's systems, outside the frame dispatch. Each system hook callback is timed as `hook:<plugin id>:<System>.before` or `.after` (`progenitor` for Core's own hooks). Each server material seam gate is timed as `seam:materials.countGate`, `.compose`, `.payGate` or `.pay`. Calls are added up per name between two frame ticks, so a hook that runs 40 times in one frame is reported as one total. That total is then charged to the frame interval it ran in.
+
+A single frame whose named Progenitor handler or phase takes 250 ms or more writes the full `ui hitch intervalMs=… worst=… handler=…` line at once, to the console too, at most once per 5 s.
 
 The waiter has a 30-second cap. A timeout abandons queued work but does not free the slot until that work completes, skips or is dropped; do not interpret a timeout as permission to repeat a mutation. Dev unload drops its owned work, completes pending waiters with an unload error, closes clients and stops its listener. A replacement Dev instance should accept work after it binds. The listener uses exclusive binding so two generations cannot listen on the same port.
 

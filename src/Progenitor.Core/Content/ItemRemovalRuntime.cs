@@ -43,8 +43,11 @@ internal static class ItemRemovalRuntime
         {
             var ledger = ItemOwnerLedger.Load(LedgerPath);
             if (ledger.IsValid)
-                foreach (var owner in ledger.Rows.Select(r => r.PluginId).Distinct())
-                    if (DiskAbsent(ledger, owner)) StartupAbsent.Add(owner);
+            {
+                var disk = new ItemOwnerDiskPlugins(Root);
+                foreach (var owner in ledger.Owners)
+                    if (disk.Absent(ledger, owner)) StartupAbsent.Add(owner);
+            }
         }
         _next = DateTime.UtcNow.AddSeconds(30);
         Plugin.Frame += Tick;
@@ -119,44 +122,15 @@ internal static class ItemRemovalRuntime
         return true;
     }
 
-    // Scan metadata without loading assemblies. An unreadable or staged DLL conservatively blocks cleanup.
-    private static bool DiskAbsent(ItemOwnerLedger ledger, string owner)
-    {
-        try
-        {
-            foreach (var row in ledger.Rows.Where(r => r.PluginId == owner))
-                if (File.Exists(Path.Combine(Root, row.AssemblyRelativePath))
-                    || File.Exists(Path.Combine(Root, row.AssemblyRelativePath) + ".next")) return false;
-            int count = 0;
-            foreach (var folder in new[] { "plugins", "progenitor-reload", "progenitor-pending" })
-            {
-                var path = Path.Combine(Root, folder);
-                if (!Directory.Exists(path)) continue;
-                var pending = new Stack<string>(); pending.Push(path);
-                while (pending.Count != 0)
-                {
-                    var current = pending.Pop();
-                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return false;
-                    foreach (var child in Directory.GetDirectories(current)) pending.Push(child);
-                    foreach (var file in Directory.GetFiles(current, "*.dll*"))
-                    {
-                        if (++count > 4096) return false;
-                        if (!PluginActions.PluginFileActions.TryReadPluginGuids(file, out var ids)) return false;
-                        if (ids.Contains(owner, StringComparer.Ordinal)) return false;
-                    }
-                }
-            }
-            return true;
-        }
-        catch { return false; }
-    }
-
-    private static bool Eligible(ItemOwnerLedger ledger, string owner)
+    private static bool Eligible(ItemOwnerLedger ledger, string owner, ItemOwnerDiskPlugins disk)
     {
         if (ModRegistry.TryGet(owner, out var state) && state.Outcome != ModLoadOutcome.Unloaded) return false;
-        var ownedGuids = new HashSet<int>(ledger.Rows.Where(r => r.PluginId == owner).Select(r => r.Guid));
+        var ownedGuids = new HashSet<int>(ledger.RowsOf(owner).Select(r => r.Guid));
         if (PrefabRegistry.Definitions.Any(d => ownedGuids.Contains(d.Guid.GuidHash))) return false;
-        return ledger.Eligible(owner, false, !DiskAbsent(ledger, owner), false, StartupAbsent.Contains(owner)).Count != 0;
+        bool startupAbsent = StartupAbsent.Contains(owner);
+        // A present file only ever refuses, so an owner refused even as absent skips the disk scan.
+        if (ledger.Eligible(owner, false, false, false, startupAbsent).Count == 0) return false;
+        return ledger.Eligible(owner, false, !disk.Absent(ledger, owner), false, startupAbsent).Count != 0;
     }
 
     private static void Tick()
@@ -176,18 +150,20 @@ internal static class ItemRemovalRuntime
             if (_epoch != WorldEpoch.Current) { _epoch = WorldEpoch.Current; _job = null; Completed.Clear(); RetryAfter.Clear(); }
             var ledger = ItemOwnerLedger.Load(LedgerPath);
             if (!ledger.IsValid) { Warn("ledger", "invalid ownership ledger; preserving items: " + ledger.Error); _job = null; return; }
+            // One read of the plugin folders per tick, shared by every owner checked in it.
+            var disk = new ItemOwnerDiskPlugins(Root);
             if (_job == null)
             {
-                foreach (var owner in ledger.Rows.Select(r => r.PluginId).Distinct())
+                foreach (var owner in ledger.Owners)
                 {
-                    if (Completed.Contains(owner) || (RetryAfter.TryGetValue(owner, out var retry) && DateTime.UtcNow < retry) || !Eligible(ledger, owner)) continue;
-                    _job = new Job(owner, ledger.Rows.Where(r => r.PluginId == owner).Select(r => r.Guid), world.EntityManager);
+                    if (Completed.Contains(owner) || (RetryAfter.TryGetValue(owner, out var retry) && DateTime.UtcNow < retry) || !Eligible(ledger, owner, disk)) continue;
+                    _job = new Job(owner, ledger.RowsOf(owner).Select(r => r.Guid), world.EntityManager);
                     break;
                 }
                 if (_job == null) return;
             }
             // Recheck at every mutation boundary, including a reinstall while cleanup is pending.
-            if (!Eligible(ledger, _job.Owner)) { _job = null; return; }
+            if (!Eligible(ledger, _job.Owner, disk)) { _job = null; return; }
             if (_job.Step(world.EntityManager))
             {
                 Plugin.Logger?.LogInfo($"Item removal: owner={_job.Owner} quarantined={_job.Removed} preserved={_job.Preserved}; unsupported equipment, properties and destinations are preserved in place.");
@@ -269,7 +245,7 @@ internal static class ItemRemovalRuntime
                         var row = buffer[i];
                         if (!_guids.Contains(row.ItemType.GuidHash) || row.Amount <= 0) continue;
                         if (_phase == 3) continue; // Unsupported records intentionally remain in place.
-                        var ownership = ItemOwnerLedger.Load(LedgerPath).Rows.First(r => r.Guid == row.ItemType.GuidHash && r.PluginId == Owner);
+                        var ownership = ItemOwnerLedger.Load(LedgerPath).RowsOf(Owner).First(r => r.Guid == row.ItemType.GuidHash);
                         if (ItemManagementRuntime.Quarantine(Worlds.Server!, entity, i, row, ownership, out var reason))
                             Removed += row.Amount;
                         else { Preserved++; Warn(Owner + ":" + reason, reason); }

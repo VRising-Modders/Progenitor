@@ -13,6 +13,12 @@ disabled copies, staged replacements, temporary unloads and Core swaps do not au
 Unreadable ownership data or incomplete disk scans preserve items. Older untracked items need an
 explicit migration; older ledger records without source information must be registered again.
 
+The ledger keeps every owner ever recorded, so it grows; 10,000 rows is about 2.6 MB. The server
+parses it once per change. Later reads reuse that parse, which is matched to the file's content
+hash, or to its size and write time once the file is more than 2 s old. Each removal tick reads the
+plugin folders once and reuses that read for every owner it checks. Game-free tested, not
+live-verified.
+
 Before removing a supported inventory stack, Progenitor durably records its quantity, source,
 owner and destination in the current save's `progenitor/item-quarantine.json`. Its companion
 `item-world-id.txt` identifies that recovery journal. Do not separate these files from the save.

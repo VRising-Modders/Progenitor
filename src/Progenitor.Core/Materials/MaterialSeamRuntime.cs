@@ -130,10 +130,10 @@ internal static unsafe class MaterialSeamRuntime
         {
             _world = new UnityMaterialWorld();
             _service = new MaterialService(registry, _world, line => Plugin.Logger?.LogInfo(line), e => EventBus.Publish(e));
-            _countGate = ServerCountGate;
-            _compose = ServerCompose;
-            _payGate = ServerPayGate;
-            _pay = ServerPay;
+            _countGate = TimedServerCountGate;
+            _compose = TimedServerCompose;
+            _payGate = TimedServerPayGate;
+            _pay = TimedServerPay;
         }
         else
         {
@@ -366,6 +366,41 @@ internal static unsafe class MaterialSeamRuntime
     private static Entity Ent(ulong packed) => new() { Index = (int)(packed & 0xFFFFFFFF), Version = (int)(packed >> 32) };
 
     // ---- server handlers ---------------------------------------------------------------------------
+
+    // The gates run inside the game's inventory checks and payments, outside the frame dispatch:
+    // their time goes to the hitch summary under these names (UiFrameCost.NoteOutside).
+    private const string CountGateCost = "seam:materials.countGate";
+    private const string ComposeCost = "seam:materials.compose";
+    private const string PayGateCost = "seam:materials.payGate";
+    private const string PayCost = "seam:materials.pay";
+
+    private static bool TimedServerCountGate(ulong target, ulong heart)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { return ServerCountGate(target, heart); }
+        finally { Progenitor.Ui.UiFrameCost.NoteOutside(CountGateCost, System.Diagnostics.Stopwatch.GetTimestamp() - start); }
+    }
+
+    private static int TimedServerCompose(ulong target, ulong heart, IntPtr fullRows, int fullLength, IntPtr bagRows, int bagLength, IntPtr outRows, int capacity)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { return ServerCompose(target, heart, fullRows, fullLength, bagRows, bagLength, outRows, capacity); }
+        finally { Progenitor.Ui.UiFrameCost.NoteOutside(ComposeCost, System.Diagnostics.Stopwatch.GetTimestamp() - start); }
+    }
+
+    private static bool TimedServerPayGate(ulong target, ulong heart, int item)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { return ServerPayGate(target, heart, item); }
+        finally { Progenitor.Ui.UiFrameCost.NoteOutside(PayGateCost, System.Diagnostics.Stopwatch.GetTimestamp() - start); }
+    }
+
+    private static int TimedServerPay(ulong target, ulong heart, int item, int amount, bool destroyItem, out ulong itemEntity)
+    {
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { return ServerPay(target, heart, item, amount, destroyItem, out itemEntity); }
+        finally { Progenitor.Ui.UiFrameCost.NoteOutside(PayCost, System.Diagnostics.Stopwatch.GetTimestamp() - start); }
+    }
 
     private static bool ServerCountGate(ulong target, ulong heart)
     {
