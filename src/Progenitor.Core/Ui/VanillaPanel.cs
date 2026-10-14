@@ -319,6 +319,19 @@ internal readonly struct UiRect
     private static string Fmt(float v) => v.ToString("0", CultureInfo.InvariantCulture);
 }
 
+/// <summary>Where a placed inline container went (<see cref="VanillaPanelPlacement.PlaceBeside"/>).</summary>
+internal enum BesideSlot
+{
+    /// <summary>No slot fits.</summary>
+    None = 0,
+
+    /// <summary>Right of the group's last visible member, on its row.</summary>
+    After = 1,
+
+    /// <summary>Centered above the reference control.</summary>
+    Above = 2,
+}
+
 /// <summary>Whether an attachment's container may be shown where it is.</summary>
 internal enum VanillaFit
 {
@@ -490,6 +503,65 @@ internal static class VanillaPanelPlacement
         float sp = spacing < 0 ? 0 : spacing;
         float centerY = reference.Y + reference.Height * 0.5f;
         return new UiRect(reference.XMax + sp, centerY - height * 0.5f, width, height);
+    }
+
+    /// <summary>
+    /// A placed inline container (one that never joins the vanilla group): the first of its
+    /// candidate slots that lies inside <paramref name="frame"/> and covers no obstacle.
+    /// <list type="number">
+    /// <item><description><see cref="BesideSlot.After"/>: right of the group's last visible member
+    /// (<paramref name="lastMember"/>), on its row (<see cref="PlaceAfter"/>).</description></item>
+    /// <item><description><see cref="BesideSlot.Above"/> (only with <paramref name="allowAbove"/>):
+    /// centered over <paramref name="reference"/> (the sort button), <paramref name="spacing"/> above it.</description></item>
+    /// </list>
+    /// All rects in one space (the container's parent). When no slot fits, the verdict is the first
+    /// slot's refusal, with every slot's reason joined by <c>/</c>.
+    /// </summary>
+    internal static VanillaFitResult PlaceBeside(
+        in UiRect lastMember, in UiRect reference, bool allowAbove, float spacing, float width, float height,
+        in UiRect frame, IReadOnlyList<UiObstacle>? obstacles, out BesideSlot slot)
+    {
+        float sp = spacing < 0 ? 0 : spacing;
+        var after = PlaceAfter(lastMember, sp, width, height);
+        var first = CheckPlaced(after, frame, obstacles);
+        if (first.Fit == VanillaFit.Fits)
+        {
+            slot = BesideSlot.After;
+            return first;
+        }
+
+        if (allowAbove && !reference.IsEmpty)
+        {
+            var above = new UiRect(reference.X + (reference.Width - width) * 0.5f, reference.YMax + sp, width, height);
+            var second = CheckPlaced(above, frame, obstacles);
+            if (second.Fit == VanillaFit.Fits)
+            {
+                slot = BesideSlot.Above;
+                return second;
+            }
+
+            slot = BesideSlot.None;
+            return new VanillaFitResult(VanillaFit.Blocked, first.Reason + "/" + second.Reason, after);
+        }
+
+        slot = BesideSlot.None;
+        return first;
+    }
+
+    private static VanillaFitResult CheckPlaced(in UiRect rect, in UiRect frame, IReadOnlyList<UiObstacle>? obstacles)
+    {
+        if (rect.IsEmpty) return new VanillaFitResult(VanillaFit.Fits, "empty", rect);
+        if (!frame.IsEmpty && !frame.Contains(rect)) return new VanillaFitResult(VanillaFit.Blocked, "overflow:mod", rect);
+        if (obstacles != null)
+        {
+            for (int i = 0; i < obstacles.Count; i++)
+            {
+                if (rect.Overlaps(obstacles[i].Rect))
+                    return new VanillaFitResult(VanillaFit.Blocked, "overlap:" + obstacles[i].Name, rect);
+            }
+        }
+
+        return new VanillaFitResult(VanillaFit.Fits, "ok", rect);
     }
 
     /// <summary>

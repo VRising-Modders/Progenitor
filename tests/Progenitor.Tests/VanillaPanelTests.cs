@@ -712,6 +712,57 @@ public class VanillaPanelTests : IDisposable
         rename.Dispose();
     }
 
+    [Fact]
+    public void Buttons_declared_before_any_open_are_built_on_open_and_rebuilt_on_reopen()
+    {
+        // A plugin declares its handles and buttons at load, long before a chest is opened.
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        left.Button("Deposit");
+        rename.Button("Locate");
+        Assert.Equal(0, _client.LiveButtons);
+
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(2, _client.LiveButtons);
+        foreach (var h in new[] { left, rename })
+        {
+            var d = ReadbackOf(h);
+            Assert.Equal(true, d["attached"]);
+            var b = Assert.IsType<Dictionary<string, object?>>(Assert.Single((List<object?>)d["buttons"]!));
+            Assert.Equal(true, b["built"]);
+            Assert.Equal(true, b["shown"]);
+        }
+
+        _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+        Assert.Equal(0, _client.LiveButtons);
+        Assert.Equal(false, ReadbackOf(left)["attached"]);
+
+        // A reopen builds a new container and every declared button in it again, exactly once.
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(12, Chest()));
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(12, Chest()));
+        Assert.Equal(2, _client.LiveButtons);
+        var reopened = (Dictionary<string, object?>)((List<object?>)ReadbackOf(rename)["buttons"]!)[0]!;
+        Assert.Equal(true, reopened["built"]);
+        left.Dispose();
+        rename.Dispose();
+    }
+
+    [Fact]
+    public void A_button_whose_clone_failed_on_the_build_is_asked_for_again_while_the_window_stays_open()
+    {
+        var left = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, _owner, "example.panels");
+        left.Button("Deposit");
+        _client.RefuseClones = 1;
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(0, _client.LiveButtons);
+        var first = (Dictionary<string, object?>)((List<object?>)ReadbackOf(left)["buttons"]!)[0]!;
+        Assert.Equal(false, first["built"]);
+
+        for (int i = 0; i < 40; i++) _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal(1, _client.LiveButtons);
+        left.Dispose();
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime
@@ -731,6 +782,9 @@ public class VanillaPanelTests : IDisposable
         public int FitCalls { get; private set; }
 
         public HashSet<VanillaPanelAnchor> RefuseAnchors { get; } = new();
+
+        /// <summary>The next this-many button clones fail (a donor the clone gate refuses).</summary>
+        public int RefuseClones { get; set; }
 
         public int WatchCount => _watches.Count;
 
@@ -792,6 +846,12 @@ public class VanillaPanelTests : IDisposable
         public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption)
         {
             if (container is not FakeWidget c || !c.Alive) return null;
+            if (RefuseClones > 0)
+            {
+                RefuseClones--;
+                return null;
+            }
+
             var b = new FakeWidget(caption, true) { Click = new object() };
             c.Children.Add(b);
             _buttons.Add(b);

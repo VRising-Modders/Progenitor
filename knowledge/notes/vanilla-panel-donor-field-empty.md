@@ -37,8 +37,10 @@ shipped UI prefab: the bar is `ButtonsLayoutNew`, a grid of 116x36 cells holding
 ## Verification
 
 Failed route observed live on game 1.1.13.0, client, 2026-10-14 (chest
-`TM_Castle_Container_Specialized_Minerals_T02`). The replacement anchors are built and
-game-free tested (`VanillaPanelAnchorsTests`); they are not live-verified.
+`TM_Castle_Container_Specialized_Minerals_T02`). A second live run of the first fix showed
+the containers attached and fitted (`donor: AllSortButton`, `withheld: ""`) with no
+button built, which exposed the target-graphic trap below. The current anchors and donor are
+built and game-free tested (`VanillaPanelAnchorsTests`); they are not live-verified.
 
 ## Gotchas
 
@@ -52,11 +54,22 @@ game-free tested (`VanillaPanelAnchorsTests`); they are not live-verified.
   buttons; the rename button's own parent) and log what was tried. See
   `docs/ui.md` "Anchors on game build 1.1.13.0".
 
+### A bar button can drive a sibling's image
+
+- **Symptom:** With `AllSortButton` as the donor, the containers attached and fitted
+  (live 2026-10-14) but every button read `built:false` and nothing was drawn; no warning.
+- **Cause:** On 1.1.13.0 `SortButtonNew`, `SmartTakeButton` and `SmartMergeButtonNew` have
+  `DropAllButton`'s image as their target graphic. The clone gate refuses a button whose
+  state targets lie outside its own subtree, and the refusal was silent.
+- **Fix:** Take only a clone-safe donor (`DropAllButton` on this build) and log every
+  clone refusal once with its reason.
+
 ### Joining a fixed-size group moves the game's controls
 
 - **Symptom:** (expected, not yet seen) a mod button pushes the rename button over the
   window title.
 - **Cause:** A right-aligned horizontal group that does not size its children shifts all
   of them when a wider child joins.
-- **Fix:** Ignore the group's layout for the mod container and place it after the
-  group's last member.
+- **Fix:** Put the mod container beside the group (a child of the group's parent) and place
+  it after the group's last member. The same holds for the inventory bar: it is a centered
+  grid, and one more cell would move all four game buttons.

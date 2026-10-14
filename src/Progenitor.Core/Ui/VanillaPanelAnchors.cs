@@ -61,6 +61,13 @@ internal interface IAnchorNode
     /// <summary>Carries the game's button component (<c>SimpleStunButton</c>).</summary>
     bool IsButton { get; }
 
+    /// <summary>
+    /// A button that can be cloned on its own: every graphic its state transitions drive (the
+    /// target graphic and each transition target) lies inside its own subtree. A clone of a button
+    /// whose transitions drive a sibling's graphic would keep driving that sibling.
+    /// </summary>
+    bool CloneSafe { get; }
+
     /// <summary>The rect's own size, in its parent's units (0 when unknown).</summary>
     float Width { get; }
 
@@ -127,9 +134,15 @@ internal static class VanillaPanelAnchors
     };
 
     /// <summary>
-    /// The button every P6 button is cloned from: the first named field that is a live game button
-    /// (an active one preferred), else the first button child of the bottom bar. The bar is what the
-    /// buttons are meant to match, so a donor from anywhere else is not taken.
+    /// The button every P6 button is cloned from: the first named field that is a live,
+    /// <see cref="IAnchorNode.CloneSafe"/> game button (an active one preferred), else the first such
+    /// button on the bottom bar. The bar is what the buttons are meant to match, so a donor from
+    /// anywhere else is not taken.
+    ///
+    /// <para>On 1.1.13.0 three of the four bar buttons (<c>SortButtonNew</c>, <c>SmartTakeButton</c>,
+    /// <c>SmartMergeButtonNew</c>) have the <i>drop-all</i> button's image as their target graphic, so
+    /// only <c>DropAllButton</c> is clone-safe and it is the donor. Taking <c>AllSortButton</c> left
+    /// every clone refused and no button drawn.</para>
     /// </summary>
     /// <param name="named">The values of <see cref="ButtonDonorFields"/> in that order (null when unset).</param>
     /// <param name="bar">The bottom bar (<c>BottomBarButtonsParent</c>), or null.</param>
@@ -140,7 +153,7 @@ internal static class VanillaPanelAnchors
         for (int i = 0; i < n; i++)
         {
             var node = named![i];
-            if (node == null || !node.IsButton) continue;
+            if (node == null || !node.IsButton || !node.CloneSafe) continue;
             if (node.Active) return new AnchorPick(node, ButtonDonorFields[i]);
             if (!inactive.Found) inactive = new AnchorPick(node, ButtonDonorFields[i]);
         }
@@ -150,7 +163,7 @@ internal static class VanillaPanelAnchors
         for (int i = 0; i < bar.ChildCount; i++)
         {
             var child = bar.Child(i);
-            if (child != null && child.IsButton) return new AnchorPick(child, "bar:" + child.Name);
+            if (child != null && child.IsButton && child.CloneSafe) return new AnchorPick(child, "bar:" + child.Name);
         }
 
         return AnchorPick.None;
@@ -187,15 +200,22 @@ internal static class VanillaPanelAnchors
         return AnchorPick.None;
     }
 
-    /// <summary>How an inline container joins <paramref name="group"/>.</summary>
-    internal static InlineMode PlanInline(IAnchorNode? group) => group == null
+    /// <summary>
+    /// How an inline container joins <paramref name="group"/>. <paramref name="besideSort"/> is the
+    /// inventory bar's anchor, which is always placed and never joined: on 1.1.13.0 the bar is a
+    /// centered grid, and one more cell recenters the row, moving all four game buttons by half a
+    /// cell (62 units). Game buttons never move for a mod's control.
+    /// </summary>
+    internal static InlineMode PlanInline(IAnchorNode? group, bool besideSort = false) => group == null
         ? InlineMode.None
-        : group.Layout switch
-        {
-            AnchorLayout.Grid => InlineMode.GridCell,
-            AnchorLayout.HorizontalControlled => InlineMode.Group,
-            _ => InlineMode.Positioned,
-        };
+        : besideSort
+            ? InlineMode.Positioned
+            : group.Layout switch
+            {
+                AnchorLayout.Grid => InlineMode.GridCell,
+                AnchorLayout.HorizontalControlled => InlineMode.Group,
+                _ => InlineMode.Positioned,
+            };
 
     /// <summary>The word the log line and <c>ui_read</c> use for a mode.</summary>
     internal static string ModeWord(InlineMode mode) => mode switch
@@ -205,24 +225,6 @@ internal static class VanillaPanelAnchors
         InlineMode.Positioned => "after",
         _ => "none",
     };
-
-    /// <summary>
-    /// What a positioned container is placed after: the last visible member of
-    /// <paramref name="group"/> before sibling <paramref name="ourIndex"/>, or null (then the group's
-    /// own rect). Only members before ours count, so two plugins' containers in one group chain one
-    /// after the other instead of each placing itself after the other.
-    /// </summary>
-    internal static int LastVisibleBefore(IAnchorNode group, int ourIndex)
-    {
-        int from = Math.Min(ourIndex, group.ChildCount) - 1;
-        for (int i = from; i >= 0; i--)
-        {
-            var child = group.Child(i);
-            if (child != null && child.Active) return i;
-        }
-
-        return -1;
-    }
 
     /// <summary>
     /// The height of a positioned row: the reference control's own height (the rename button's 24
@@ -248,6 +250,14 @@ internal static class VanillaPanelAnchors
         if (donorWidth <= 1f || donorHeight <= 1f) return height * 3f;
         return donorWidth * height / donorHeight;
     }
+
+    /// <summary>
+    /// The minimum width of a <see cref="VanillaPanelAnchor.BesideSort"/> button: twice its height
+    /// (72 units on the 36-unit bar), widened only as far as its caption needs. Not the bar cell's
+    /// 116: the slot right of the bar is 88 units wide on 1.1.13.0, so a cell-wide button never fits
+    /// there, while a one-word caption does.
+    /// </summary>
+    internal static float CompactWidth(float height) => Math.Max(MinPositionedHeight, height) * 2f;
 
     /// <summary>
     /// The gap a positioned container keeps from the group's last member: the group's own spacing

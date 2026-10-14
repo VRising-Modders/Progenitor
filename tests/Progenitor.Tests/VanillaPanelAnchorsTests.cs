@@ -20,8 +20,9 @@ public class VanillaPanelAnchorsTests
         private readonly List<Node> _children = new();
 
         internal Node(string name, float w = 0, float h = 0, bool button = false, bool active = true,
-            AnchorLayout layout = AnchorLayout.None)
+            AnchorLayout layout = AnchorLayout.None, bool cloneSafe = true)
         {
+            CloneSafe = cloneSafe;
             Name = name;
             Width = w;
             Height = h;
@@ -35,6 +36,8 @@ public class VanillaPanelAnchorsTests
         public bool Active { get; set; }
 
         public bool IsButton { get; }
+
+        public bool CloneSafe { get; }
 
         public float Width { get; }
 
@@ -58,15 +61,17 @@ public class VanillaPanelAnchorsTests
 
     /// <summary>
     /// <c>CharacterInventorySubMenu/MotionRoot/SharedForNowAtLeast/ButtonsLayoutNew</c>: a grid of
-    /// 116x36 cells, spacing 8, holding four icon buttons in this order.
+    /// 116x36 cells, spacing 8, holding four icon buttons in this order. With
+    /// <paramref name="asShipped"/> the three after the first are not clone-safe, as on 1.1.13.0:
+    /// their target graphic is <c>DropAllButton</c>'s image.
     /// </summary>
-    private static (Node Bar, Node DropAll, Node Sort, Node SmartTake, Node SmartMerge) Bar()
+    private static (Node Bar, Node DropAll, Node Sort, Node SmartTake, Node SmartMerge) Bar(bool asShipped = false)
     {
         var bar = new Node("ButtonsLayoutNew", 124, 36, layout: AnchorLayout.Grid);
         var dropAll = bar.Add(new Node("DropAllButton", 116, 36, button: true));
-        var sort = bar.Add(new Node("SortButtonNew", 116, 36, button: true));
-        var take = bar.Add(new Node("SmartTakeButton", 116, 36, button: true));
-        var merge = bar.Add(new Node("SmartMergeButtonNew", 116, 36, button: true));
+        var sort = bar.Add(new Node("SortButtonNew", 116, 36, button: true, cloneSafe: !asShipped));
+        var take = bar.Add(new Node("SmartTakeButton", 116, 36, button: true, cloneSafe: !asShipped));
+        var merge = bar.Add(new Node("SmartMergeButtonNew", 116, 36, button: true, cloneSafe: !asShipped));
         return (bar, dropAll, sort, take, merge);
     }
 
@@ -90,12 +95,31 @@ public class VanillaPanelAnchorsTests
     // ---------------------------------------------------------------- the button donor
 
     [Fact]
-    public void The_donor_on_this_build_is_the_bar_sort_button_because_SelfSortButton_is_empty()
+    public void With_clone_safe_bar_buttons_the_first_set_field_after_SelfSortButton_wins()
     {
         var b = Bar();
         var pick = VanillaPanelAnchors.PickButtonDonor(FieldsOf(b), b.Bar);
         Assert.Same(b.Sort, pick.Node);
         Assert.Equal("AllSortButton", pick.Source);
+    }
+
+    [Fact]
+    public void As_shipped_only_the_drop_all_button_can_be_cloned_so_it_is_the_donor()
+    {
+        // Live 1.1.13.0: with AllSortButton as the donor every clone was refused (its target graphic
+        // is the drop-all button's image) and no button drew. Only DropAllButton drives its own graphics.
+        var b = Bar(asShipped: true);
+        var pick = VanillaPanelAnchors.PickButtonDonor(FieldsOf(b), b.Bar);
+        Assert.Same(b.DropAll, pick.Node);
+        Assert.Equal("DropAllButton", pick.Source);
+
+        // The sort anchor is unaffected: it is stood beside, not cloned.
+        Assert.Same(b.Sort, VanillaPanelAnchors.SortControl(null, b.Sort, b.Bar).Node);
+
+        // No clone-safe button at all: no donor, rather than one the clone gate refuses.
+        var none = new Node("ButtonsLayoutNew", layout: AnchorLayout.Grid);
+        none.Add(new Node("SortButtonNew", 116, 36, button: true, cloneSafe: false));
+        Assert.False(VanillaPanelAnchors.PickButtonDonor(new IAnchorNode?[5], none).Found);
     }
 
     [Fact]
@@ -144,15 +168,17 @@ public class VanillaPanelAnchorsTests
     // ---------------------------------------------------------------- BesideSort
 
     [Fact]
-    public void BesideSort_on_this_build_is_one_more_grid_cell_after_the_bar_sort_button()
+    public void BesideSort_stands_beside_the_bar_sort_button_and_never_joins_the_grid()
     {
+        // One more cell would recenter the grid and move all four game buttons by 62 units.
         var b = Bar();
         var sort = VanillaPanelAnchors.SortControl(null, b.Sort, b.Bar);
         Assert.Same(b.Sort, sort.Node);
         Assert.Equal("AllSortButton", sort.Source);
         Assert.Same(b.Bar, sort.Node!.Parent);
+        Assert.Equal(InlineMode.Positioned, VanillaPanelAnchors.PlanInline(sort.Node.Parent, besideSort: true));
         Assert.Equal(InlineMode.GridCell, VanillaPanelAnchors.PlanInline(sort.Node.Parent));
-        Assert.Equal("grid", VanillaPanelAnchors.ModeWord(InlineMode.GridCell));
+        Assert.Equal(72f, VanillaPanelAnchors.CompactWidth(36));
     }
 
     [Fact]
@@ -165,28 +191,82 @@ public class VanillaPanelAnchorsTests
         Assert.False(VanillaPanelAnchors.SortControl(null, null, null).Found);
     }
 
-    [Fact]
-    public void Five_bar_cells_still_fit_the_inventory_frame_and_six_do_not()
-    {
-        // The grid centers its cells: 4 game buttons + ours = 5 cells of 116 with 8 between = 612,
-        // inside the 620-unit inventory window. A second plugin's cell makes 736: overflow, hidden.
-        var panel = new UiRect(0, 0, 620, 925);
-        var five = Cells(5, 620);
-        var verdict = VanillaPanelPlacement.CheckInline(five[4].Rect, panel, five.GetRange(0, 4));
-        Assert.Equal(VanillaFit.Fits, verdict.Fit);
+    // The character inventory beside a chest on 1.1.13.0, in the window parent's units, from the
+    // live site line (inventory (5,3 620x925), bar (223,67 124x36)) and the shipped prefab: the bar
+    // sits 30 units left of the window's center, its four 116x36 cells 8 apart are centered on it,
+    // and the item area (ParentContainerInventory: top-pivoted 442 below the body's top, 275 high,
+    // 12 in from each side of a body inset 8 per side) ends 38 units above the bar.
+    private static readonly UiRect Inventory = new(5, 3, 620, 925);
+    private static readonly UiRect DropAllCell = new(41, 67, 116, 36);
+    private static readonly UiRect SortCell = new(165, 67, 116, 36);
+    private static readonly UiRect SmartTakeCell = new(289, 67, 116, 36);
+    private static readonly UiRect SmartMergeCell = new(413, 67, 116, 36);
+    private static readonly UiRect ItemArea = new(25, 141, 580, 275);
 
-        var six = Cells(6, 620);
-        verdict = VanillaPanelPlacement.CheckInline(six[4].Rect, panel, new List<UiObstacle> { six[0], six[1], six[2], six[3], six[5] });
-        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
+    private static List<UiObstacle> BarObstacles() => new()
+    {
+        new("DropAllButton", DropAllCell), new("SortButtonNew", SortCell), new("SmartTakeButton", SmartTakeCell),
+        new("SmartMergeButtonNew", SmartMergeCell), new("ParentContainerInventory", ItemArea),
+    };
+
+    [Fact]
+    public void The_measured_bar_is_off_center_and_its_cells_are_where_the_grid_puts_them()
+    {
+        var bar = new UiRect(223, 67, 124, 36);
+        float barCenter = bar.X + bar.Width / 2f;
+        Assert.Equal(-30f, barCenter - (Inventory.X + Inventory.Width / 2f));
+        Assert.Equal(barCenter - (4 * 116f + 3 * 8f) / 2f, DropAllCell.X);
+        Assert.Equal(DropAllCell.XMax + 8f, SortCell.X);
+        Assert.Equal(SmartMergeCell.XMax, barCenter + 244f);
     }
 
-    private static List<UiObstacle> Cells(int n, float panelWidth)
+    [Fact]
+    public void A_one_word_BesideSort_button_goes_right_of_SmartMerge_inside_the_window()
     {
-        float total = n * 116f + (n - 1) * 8f;
-        float x = (panelWidth - total) / 2f;
-        var list = new List<UiObstacle>();
-        for (int i = 0; i < n; i++) list.Add(new UiObstacle("cell" + i, new UiRect(x + i * 124f, 20, 116, 36)));
-        return list;
+        // 88 units are left between SmartMerge (ends at 529) plus the 8-unit gap and the window's
+        // right edge (625): a 72-unit "Stash" fits; the old cell-wide 116 never could.
+        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 72, 36,
+            Inventory, BarObstacles(), out var slot);
+        Assert.Equal(VanillaFit.Fits, verdict.Fit);
+        Assert.Equal(BesideSlot.After, slot);
+        Assert.Equal(537f, verdict.Rect.X);
+        Assert.Equal(67f, verdict.Rect.Y);
+        Assert.True(verdict.Rect.XMax <= Inventory.XMax);
+
+        // The widest caption that still fits the slot.
+        verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 88, 36,
+            Inventory, BarObstacles(), out slot);
+        Assert.Equal(BesideSlot.After, slot);
+    }
+
+    [Fact]
+    public void A_wide_BesideSort_button_fits_neither_slot_on_this_build_and_is_hidden_with_both_reasons()
+    {
+        // Right: past the window edge. Above the sort button: the 38-unit gap under the item area
+        // cannot take a 36-unit button and an 8-unit gap, so it would cover the items by 6 units.
+        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 116, 36,
+            Inventory, BarObstacles(), out var slot);
+        Assert.Equal(VanillaFit.Blocked, verdict.Fit);
+        Assert.Equal(BesideSlot.None, slot);
+        Assert.Equal("overflow:mod/overlap:ParentContainerInventory", verdict.Reason);
+    }
+
+    [Fact]
+    public void Above_the_sort_button_is_taken_when_the_right_slot_is_full_and_the_space_above_is_free()
+    {
+        // A build with more room above the bar: the button centers over the sort button.
+        var obstacles = BarObstacles();
+        obstacles[4] = new UiObstacle("ParentContainerInventory", new UiRect(25, 160, 580, 275));
+        var verdict = VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: true, 8, 116, 36,
+            Inventory, obstacles, out var slot);
+        Assert.Equal(VanillaFit.Fits, verdict.Fit);
+        Assert.Equal(BesideSlot.Above, slot);
+        Assert.Equal(new UiRect(165, 111, 116, 36).ToString(), verdict.Rect.ToString());
+        foreach (var o in obstacles) Assert.False(verdict.Rect.Overlaps(o.Rect), o.Name);
+
+        // The rename row never tries above: one slot only.
+        VanillaPanelPlacement.PlaceBeside(SmartMergeCell, SortCell, allowAbove: false, 8, 116, 36, Inventory, obstacles, out slot);
+        Assert.Equal(BesideSlot.None, slot);
     }
 
     // ---------------------------------------------------------------- BesideRename
@@ -242,16 +322,19 @@ public class VanillaPanelAnchorsTests
     }
 
     [Fact]
-    public void Two_positioned_containers_chain_instead_of_leapfrogging()
+    public void The_rename_row_is_placed_after_the_rename_button_inside_the_title_strip()
     {
-        var row = TitleRow();
-        row.Group.Add(new Node("progenitor-attach-a"));
-        row.Group.Add(new Node("progenitor-attach-b"));
-        Assert.Equal(0, VanillaPanelAnchors.LastVisibleBefore(row.Group, 1));
-        Assert.Equal(1, VanillaPanelAnchors.LastVisibleBefore(row.Group, 2));
-
-        row.Rename.Active = false;
-        Assert.Equal(-1, VanillaPanelAnchors.LastVisibleBefore(row.Group, 1));
+        // In the window's units: window 620x240; title strip 664x80 centered on its top edge; the
+        // title text ends at 390, the rename group follows 8 later, 24x24.
+        var window = new UiRect(0, 0, 620, 240);
+        var strip = new UiRect(-22, 213, 664, 80);
+        var rename = new UiRect(398, 245, 24, 24);
+        var frame = VanillaPanelPlacement.InlineFrame(window, new List<UiRect> { new(250, 236, 140, 42), strip });
+        var verdict = VanillaPanelPlacement.PlaceBeside(rename, default, allowAbove: false, 8, 77, 24, frame,
+            new List<UiObstacle> { new("EditTagButton", rename) }, out var slot);
+        Assert.Equal(VanillaFit.Fits, verdict.Fit);
+        Assert.Equal(BesideSlot.After, slot);
+        Assert.Equal(new UiRect(430, 245, 77, 24).ToString(), verdict.Rect.ToString());
     }
 
     [Fact]

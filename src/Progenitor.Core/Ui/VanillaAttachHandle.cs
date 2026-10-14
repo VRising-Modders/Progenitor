@@ -424,7 +424,14 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             switch (decision.Action)
             {
                 case VanillaAttachAction.Keep:
-                    if (IsPanel && ShouldRefitLocked()) FitLocked(first: false);
+                    if (IsPanel && ShouldRefitLocked())
+                    {
+                        // A button whose clone failed on the build (a donor not ready that frame) is
+                        // asked for again on the refit cadence, not only on the next close and reopen.
+                        if (MissingButtonsLocked()) SyncButtonsLocked();
+                        FitLocked(first: false);
+                    }
+
                     return;
 
                 case VanillaAttachAction.Degrade:
@@ -749,6 +756,13 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         }
     }
 
+    private bool MissingButtonsLocked()
+    {
+        for (int i = 0; i < _captions.Count; i++)
+            if (i >= _buttons.Count || _buttons[i] is not { Alive: true }) return true;
+        return false;
+    }
+
     internal string CaptionAt(int index)
     {
         lock (_gate) return index >= 0 && index < _captions.Count ? _captions[index] : "";
@@ -1003,11 +1017,6 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private bool ContainerAliveLocked() => _container is { Alive: true };
 }
 
-/// <summary>
-/// One button of a P6 attachment, addressed by position like a row. It holds the Bootstrap click
-/// slot id rather than the clone: the clone is rebuilt on every close and reopen of the panel and
-/// rewired to this same id, so a handler subscribed once keeps working.
-/// </summary>
 /// <summary>One attachment's state for <c>ui_read panels</c>. Game-free; the Unity half adds the rects.</summary>
 internal sealed class VanillaAttachReadback
 {
@@ -1092,6 +1101,11 @@ internal sealed class VanillaAttachReadback
     }
 }
 
+/// <summary>
+/// One button of a P6 attachment, addressed by position like a row. It holds the Bootstrap click
+/// slot id rather than the clone: the clone is rebuilt on every close and reopen of the panel and
+/// rewired to this same id, so a handler subscribed once keeps working.
+/// </summary>
 internal sealed class VanillaAttachButton : IUiButton
 {
     private readonly VanillaAttachHandle _owner;
