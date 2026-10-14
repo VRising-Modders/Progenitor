@@ -12,9 +12,10 @@ namespace Progenitor.Sample;
 
 /// <summary>
 /// <c>.players</c>, <c>.players name &lt;text&gt;</c>, <c>.players account &lt;platformId&gt;</c> and
-/// <c>.players where</c> — <c>ctx.Players</c>, the server player directory. Online enumeration, name
-/// lookup (ambiguous names stay ambiguous), account lookup, and where each online character stands
-/// (<c>OnlinePositions</c>, one read per player per call). Session entity text is printed only beside
+/// <c>.players where</c> and <c>.players state [name]</c> — <c>ctx.Players</c>, the server player
+/// directory. Online enumeration, name lookup (ambiguous names stay ambiguous), account lookup,
+/// where each online character stands (<c>OnlinePositions</c>, one read per player per call), and
+/// <c>ctx.Players.State</c> (dead, downed, PvP combat, form; your own without a name). Session entity text is printed only beside
 /// <c>IsFresh</c>, because a stale <c>index:version</c> must not be treated as identity.
 ///
 /// <para>Read-only. Admin-gated because the reply includes platform ids. Parsing and every reply
@@ -24,7 +25,7 @@ internal static class SamplePlayerDirectory
 {
     internal const string Area = "players";
 
-    internal const string UsageReply = "Usage: .players | .players name <displayName> | .players account <platformId> | .players where";
+    internal const string UsageReply = "Usage: .players | .players name <displayName> | .players account <platformId> | .players where | .players state [displayName]";
 
     /// <summary>How many online rows one reply lists before it says how many were left out.</summary>
     internal const int MaxListed = 8;
@@ -35,6 +36,7 @@ internal static class SamplePlayerDirectory
         Name = 2,
         Account = 3,
         Where = 4,
+        State = 5,
     }
 
     /// <summary>One directory row reduced to the fields the reply prints. No entity handles.</summary>
@@ -78,6 +80,11 @@ internal static class SamplePlayerDirectory
                 kind = Kind.Account;
                 return ulong.TryParse(tail, NumberStyles.Integer, CultureInfo.InvariantCulture, out platformId)
                     && platformId != 0;
+            case "state":
+                // No name: your own state.
+                kind = Kind.State;
+                name = tail;
+                return true;
             default:
                 return false;
         }
@@ -155,6 +162,10 @@ internal static class SamplePlayerDirectory
             ? "Account " + platformId.ToString(CultureInfo.InvariantCulture) + " is " + FormatRow(row)
             : "No player with platform id " + platformId.ToString(CultureInfo.InvariantCulture) + ".";
 
+    /// <summary>The <c>.players state</c> reply: who, then the state line (<c>PlayerStateInfo.ToString</c>).</summary>
+    internal static string StateReply(string who, string state) =>
+        "State of " + (string.IsNullOrEmpty(who) ? "(no name)" : who) + ": " + state;
+
     internal static string FormatRow(Row row)
     {
         string name = row.Name.Length == 0 ? "(no name)" : row.Name;
@@ -178,6 +189,35 @@ internal static class SamplePlayerDirectory
         var players = plugin.Players;
         switch (kind)
         {
+            case Kind.State:
+            {
+                // ctx.Players.State: by name (offline players too), else the caller's own user.
+                PlayerStateInfo state;
+                string who = name;
+                if (name.Length == 0)
+                {
+                    state = players.State(ctx.UserEntity);
+                    who = "you";
+                }
+                else
+                {
+                    PlayerNameLookup lookup = players.FindByName(name, onlineOnly: false);
+                    if (lookup.Status != PlayerLookupStatus.Exact || lookup.Player == null)
+                    {
+                        ctx.Reply(NameReply(name, lookup.Status.ToString(), null, new List<Row>()));
+                        return;
+                    }
+
+                    state = players.State(lookup.Player);
+                }
+
+                ctx.Reply(StateReply(who, state.ToString()));
+                SampleLog.Info(Area, "state " + who + " status=" + state.Status + " dead=" + state.Dead + " downed=" + state.Downed
+                    + " pvp=" + state.InPvpCombat + " combat=" + state.InCombat + " form=" + state.ShapeshiftKind
+                    + " formBuff=" + state.ShapeshiftBuff + " online=" + state.Online + " disabled=" + state.CharacterDisabled
+                    + (state.Reason.Length > 0 ? " reason=" + state.Reason : ""));
+                return;
+            }
             case Kind.Name:
             {
                 PlayerNameLookup lookup = players.FindByName(name);

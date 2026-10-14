@@ -131,6 +131,82 @@ public readonly struct InventorySlot
 }
 
 /// <summary>
+/// Which <b>source</b> slots an item-based move (<c>Transfer</c>, <c>TransferAll</c>) may draw
+/// from. The default value allows every slot. A filter is slot numbers only: it applies the same
+/// way to whatever inventory is the source, so <see cref="SkipActionBar"/> means "slots 0–7" in a
+/// chest too. Use it with a player's bag, where those slots are the action bar. The target side
+/// is never filtered: where the game puts arriving items is the game's add rule. Value type;
+/// building one allocates nothing.
+/// </summary>
+public readonly struct InventorySlotFilter : IEquatable<InventorySlotFilter>
+{
+    /// <summary>
+    /// Slots on a player's action bar: bag slots 0 to 7, the keys <c>ActionBar1</c> to
+    /// <c>ActionBar8</c>. The game's own server add for a player starts stackables, jewels and
+    /// tech items at slot 8 and only falls back to slots 0–7 afterwards.
+    /// </summary>
+    public const int ActionBarSlots = 8;
+
+    private readonly int _first;
+    private readonly int _count;
+    private readonly bool _only;
+
+    private InventorySlotFilter(int first, int count, bool only)
+    {
+        _first = first;
+        _count = count;
+        _only = only;
+    }
+
+    /// <summary>Every slot (the default value).</summary>
+    public static InventorySlotFilter All => default;
+
+    /// <summary>Every slot except a player's action bar (slots 0 to <see cref="ActionBarSlots"/> - 1).</summary>
+    public static InventorySlotFilter SkipActionBar => new(0, ActionBarSlots, false);
+
+    /// <summary>
+    /// Every slot except <paramref name="count"/> slots starting at <paramref name="first"/>.
+    /// A negative start or count, or a count of 0, skips nothing.
+    /// </summary>
+    public static InventorySlotFilter SkipSlots(int first, int count) =>
+        first < 0 || count <= 0 ? default : new(first, count, false);
+
+    /// <summary>Only <paramref name="slot"/> (what <c>TransferSlot</c> uses).</summary>
+    internal static InventorySlotFilter Only(int slot) => new(slot, 1, true);
+
+    /// <summary>True when the filter allows every slot.</summary>
+    public bool IsAll => _count <= 0 && !_only;
+
+    /// <summary>First slot of the skipped (or, for a single-slot filter, the allowed) range.</summary>
+    public int First => _first;
+
+    /// <summary>How many slots the range covers; 0 for <see cref="All"/>.</summary>
+    public int Count => _count;
+
+    /// <summary>True when an item-based move may take from <paramref name="slot"/>.</summary>
+    public bool Allows(int slot)
+    {
+        bool inRange = _count > 0 && slot >= _first && slot - _first < _count;
+        return _only ? inRange : !inRange;
+    }
+
+    /// <inheritdoc />
+    public bool Equals(InventorySlotFilter other) => _first == other._first && _count == other._count && _only == other._only;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is InventorySlotFilter other && Equals(other);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(_first, _count, _only);
+
+    /// <summary><c>all</c>, <c>skip 0..7</c> or <c>only 12</c>.</summary>
+    public override string ToString() =>
+        IsAll ? "all"
+        : _only ? "only " + _first.ToString(CultureInfo.InvariantCulture)
+        : "skip " + _first.ToString(CultureInfo.InvariantCulture) + ".." + ((long)_first + _count - 1).ToString(CultureInfo.InvariantCulture);
+}
+
+/// <summary>
 /// The rule a container applies to what it accepts, from the game's <c>RestrictedInventory</c>
 /// component on the inventory entity. Both 0 means anything goes.
 /// </summary>

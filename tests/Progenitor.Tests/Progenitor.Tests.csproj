@@ -87,6 +87,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerInfo.cs" Link="Linked\PlayerInfo.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerDirectoryLogic.cs" Link="Linked\PlayerDirectoryLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerDirectoryCache.cs" Link="Linked\PlayerDirectoryCache.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Players\PlayerState.cs" Link="Linked\PlayerState.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Combat\CombatEventPolicy.cs" Link="Linked\CombatEventPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Combat\CombatMusicRepair.cs" Link="Linked\CombatMusicRepair.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Combat\CombatEvents.cs" Link="Linked\CombatEvents.cs" />

@@ -25,7 +25,10 @@ namespace Progenitor.Sample;
 /// <c>.items free &lt;c&gt; &lt;item&gt;</c>.</description></item>
 /// <item><description><c>.items move &lt;from&gt; &lt;to&gt; &lt;item&gt; &lt;amount&gt;</c>: an
 /// transfer that conserves the total of interchangeable items and stops on anything else; replies with the counts before and after in both containers.</description></item>
-/// <item><description><c>.items moveall &lt;from&gt; &lt;to&gt;</c>, <c>.items add|remove &lt;c&gt;
+/// <item><description><c>.items moveslot &lt;from&gt; &lt;slot&gt; &lt;to&gt; &lt;amount&gt;</c>: the same
+/// transfer, from one slot (<c>ctx.Inventory.TransferSlot</c>).</description></item>
+/// <item><description><c>.items moveall &lt;from&gt; &lt;to&gt; [keepbar]</c> (<c>keepbar</c> leaves
+/// bag slots 0–7, the action bar, in place), <c>.items add|remove &lt;c&gt;
 /// &lt;item&gt; &lt;amount&gt;</c>, <c>.items name &lt;c&gt; "&lt;text&gt;"</c>, <c>.items id
 /// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items heart</c>, <c>.items clan</c>.</description></item>
 /// </list>
@@ -39,12 +42,12 @@ internal static class SampleInventory
     internal const string Area = "items";
 
     internal const string UsageReply =
-        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveall <from> <to> | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
+        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
 
     /// <summary>The verbs this file handles (the grant/equip verbs stay in <see cref="SampleItems"/>).</summary>
     internal static bool Handles(string? verb) => (verb ?? "").Trim().ToLowerInvariant() switch
     {
-        "chests" or "slots" or "count" or "free" or "move" or "moveall" or "add" or "remove"
+        "chests" or "slots" or "count" or "free" or "move" or "moveslot" or "moveall" or "add" or "remove"
             or "name" or "id" or "net" or "resolve" or "watch" or "heart" or "clan" => true,
         _ => false,
     };
@@ -160,6 +163,23 @@ internal static class SampleInventory
     internal static bool TryParseAmount(string? text, out int amount) =>
         int.TryParse((text ?? "").Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out amount)
         && amount >= 1 && amount <= 1_000_000;
+
+    /// <summary>A slot index for <c>.items moveslot</c>: 0 or more (the engine checks the upper bound).</summary>
+    internal static bool TryParseSlot(string? text, out int slot) =>
+        int.TryParse((text ?? "").Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out slot) && slot >= 0;
+
+    /// <summary>
+    /// <c>.items moveall &lt;from&gt; &lt;to&gt; keepbar</c>: leave a player's action bar (bag slots
+    /// 0–7) in place, the quick-stash rule.
+    /// </summary>
+    internal static InventorySlotFilter MoveAllSlots(string? option) =>
+        string.Equals((option ?? "").Trim(), "keepbar", StringComparison.OrdinalIgnoreCase)
+            ? InventorySlotFilter.SkipActionBar
+            : InventorySlotFilter.All;
+
+    /// <summary>The <c>.items moveslot</c> reply: the move reply with the slot named.</summary>
+    internal static string MoveSlotReply(string from, int slot, string to, string item, InventoryResult r) =>
+        MoveReply(from + " slot " + slot.ToString(CultureInfo.InvariantCulture), to, item, r);
 
     /// <summary>The <c>.items move</c> reply: outcome and the counts before and after per container.</summary>
     internal static string MoveReply(string from, string to, string item, InventoryResult r) =>
@@ -307,6 +327,16 @@ internal static class SampleInventory
                 SampleLog.Info(Area, "name " + firstLabel + " ok=" + ok + (ok ? "" : " reason=" + reason));
                 return;
             }
+            case "moveslot":
+            {
+                // .items moveslot <from> <slot> <to> <amount>: whatever that one slot holds.
+                if (!TryParseSlot(b, out int slot) || !TryParseAmount(d, out int slotAmount)) { ctx.Reply(UsageReply); return; }
+                if (!TryResolve(ctx, plugin, c, out var target, out string targetLabel, out why)) { ctx.Reply(why); return; }
+                var moved = inv.TransferSlot(first, slot, target, slotAmount);
+                ctx.Reply(MoveSlotReply(firstLabel, slot, targetLabel, moved.Item == 0 ? "(empty)" : ItemName(world, moved.Item), moved));
+                SampleLog.Info(Area, "moveslot slot=" + slot + " " + MoveLog(firstLabel, targetLabel, moved.Item, moved));
+                return;
+            }
             case "watch":
             {
                 string key = first.ToString();
@@ -329,9 +359,10 @@ internal static class SampleInventory
 
         if (verb == "moveall")
         {
-            var all = inv.TransferAll(first, second);
-            ctx.Reply("Move all " + firstLabel + " -> " + secondLabel + ": " + all);
-            SampleLog.Info(Area, "moveall from=" + firstLabel + " to=" + secondLabel + " " + all);
+            var slots = MoveAllSlots(c);
+            var all = inv.TransferAll(first, second, slots);
+            ctx.Reply("Move all " + firstLabel + " -> " + secondLabel + " (slots " + slots + "): " + all);
+            SampleLog.Info(Area, "moveall from=" + firstLabel + " to=" + secondLabel + " slots=" + slots + " " + all);
             return;
         }
 

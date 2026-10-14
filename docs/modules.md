@@ -2069,6 +2069,7 @@ server item table").
 | `TryRemove` | `InventoryUtilitiesServer.RemoveItemGetRemainder` on that inventory | Never asks for more than the inventory holds. Asking for more would make the game fall back to unequipping worn gear, which this call never reaches. |
 | `Transfer` | `InventoryUtilitiesServer.TryMoveItem`, one source slot at a time, with the target instance index set | Conserves the total of interchangeable items; for any other item a step that does not conserve the total is detected and the transfer stops (`Inconsistent`) without creating or deleting a copy (below). A completed game move keeps the item's own entity (durability, stats). |
 | `TransferAll` | One `Transfer` per item type the filter accepts | Stops at the first `Inconsistent` row. |
+| `TransferSlot` | `Transfer` restricted to one source slot | The same guarantees as `Transfer` (experimental, below). |
 
 **How the transfer keeps the total.** The game's slot move adds into the target first, clears the
 source slot only when that add succeeded, and puts the part that did not fit back into the slot it
@@ -2096,6 +2097,43 @@ exactly what the target gained.
   are refused.
 - The move keeps relic and soulbound rules on (`MoveItemResult` `Failed_ItemIsSoulBound` /
   `Failed_BlockedByRelicRules` end the transfer as `Nothing` with the reason).
+
+### One slot, and skipping slots
+
+Experimental: game-free tested (`InventorySlotTransferTests`), **not live-verified**.
+
+```csharp
+// Move up to 20 of whatever bag slot 12 holds into a chest.
+InventoryResult one = ctx.Inventory.TransferSlot(ctx.Inventory.Of(character), 12, chestRef, 20);
+
+// Quick stash: everything in the bag except the action bar.
+var stash = ctx.Inventory.TransferAll(ctx.Inventory.Of(character), chestRef, InventorySlotFilter.SkipActionBar);
+```
+
+- `TransferSlot(from, slotIndex, to, amount)` moves the item in that slot (0-based, buffer order
+  as `Read` lists it) through `Transfer`'s own code, restricted to that slot. The conservation
+  check, the restore step for interchangeable items (which adds a shortfall back to the source
+  with the game's add, so it may land in another slot), the `Inconsistent` stop and the
+  `Equipped` accounting are the same. Refused: amount below 1, slot below 0 or past the last
+  slot, the same inventory on both sides, a stale reference. An empty slot is `Nothing` with
+  `Item` 0. Asking for more than the slot holds moves the slot and reports `Partial`; other slots
+  of the same item are not touched.
+- `InventorySlotFilter` limits which **source** slots `Transfer` and `TransferAll` may draw
+  from: `All` (the default), `SkipActionBar` (slots 0–7), `SkipSlots(first, count)`. The target
+  is never filtered. Counts in the result are still whole containers, so the total check is
+  unchanged; `TransferAll` makes rows only for items in allowed slots, and its `Left` is what
+  the allowed slots held minus what moved. The restore step (interchangeable items only) adds a
+  shortfall back with the game's add, which can land in **any** slot of the source, the action
+  bar included, even under `SkipActionBar`; those units are still counted in `Left`. A filter is
+  slot numbers, so `SkipActionBar` on a chest skips that chest's
+  first eight slots.
+- **The action bar.** A player's action bar is bag slots 0–7, the eight `ActionBar1` to
+  `ActionBar8` keys. The game's own server add for a player starts stackables (item type 0),
+  tech (5) and jewels (8) at slot 8 and only then falls back to slots 0–7 (server metadata and
+  the game's server add path); `InventorySlotFilter.ActionBarSlots` is 8. Plain `Transfer` and
+  `TransferAll` draw from the bar too, so a stash that should leave weapons and consumables in
+  place passes `SkipActionBar`. How many bar slots take weapons is the server setting
+  `WeaponSlots`; the filter does not read it.
 
 ### Watch
 
@@ -2199,7 +2237,8 @@ world yet).
 
 `samples/Progenitor.Sample/SampleInventory.cs`, admin only, through `.items`:
 `chests`, `slots <c>`, `count <c> <item>`, `free <c> <item>`, `move <from> <to> <item> <amount>`,
-`moveall <from> <to>`, `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `net <c>` (the
+`moveslot <from> <slot> <to> <amount>`, `moveall <from> <to> [keepbar]` (`keepbar` skips bag
+slots 0–7), `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `net <c>` (the
 container's network id words), `resolve <index> <generation> [type]` (what a request handler does
 with a client's words: the entity and id, or the refusal), `watch <c>`, `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
 `index:version` entity, `bag` or `heart`; append `/out` for a refinement station's output. Items are
@@ -2245,7 +2284,100 @@ of the save made for this test.
    destroyed`); place a new chest on the same tile (expect a new id).
 8. Optional: `.items watch #1`, move items by hand in the panel, expect `Sample items: watch #1
    Changed`; `.items heart`, `.items clan`, `.items name #1 "Ore"` (the panel shows the name).
-9. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
+9. One slot: put Iron Ore in two bag slots (`.items slots bag` lists them, say `#9 x40` and
+   `#12 x10`). `.items moveslot bag 9 #1 25`: expect `Moved 25/25 … bag slot 9: 50 -> 25`, slot 9
+   holds 15 and slot 12 still 10. `.items moveslot bag 30 #1 1` on a 30-slot bag is refused
+   (`out of range`); an empty slot replies `Moved 0/N (empty). … (Nothing; slot N of the source
+   is empty)`, which is `Ok` with nothing moved.
+10. Quick stash: put a weapon and a stack of Iron Ore on the action bar (bag slots 0–7) and more
+    Iron Ore in the bag below. `.items moveall bag #1 keepbar`: the bar keeps the weapon and its
+    stack, every other bag item moves, and the log line has `slots=skip 0..7`. The bar is never
+    drawn from; a reply with `compensated` (the restore step after a move that did not conserve
+    the total) may have put units back into a bar slot, so the bar can gain units then, and those
+    units count in `left=`. Without `keepbar` the bar stack moves too.
+11. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
+
+## Player state
+
+`ctx.Players.State(PlayerInfo)` or `State(Entity user)` → `PlayerStateInfo`: is the player dead,
+downed, in PvP combat, in a form. Server only, main thread, read-only, read live on every call.
+**Experimental**: game-free tested (`PlayerStateLogicTests`), **not live-verified**. API rows:
+[api.md, Players directory](api.md#players-directory).
+
+```csharp
+if (ctx.Players.TryGetByName("SomeName", out var who, onlineOnly: false))
+{
+    var s = ctx.Players.State(who);
+    if (!s.Ok) ctx.Log.LogInfo("no state: " + s.Status + " " + s.Reason);
+    else if (s.InPvpCombat || s.Downed || s.Dead) { /* refuse the action */ }
+    else if (s.Shapeshifted && s.ShapeshiftKind != PlayerShapeshiftKind.Bat) { /* only bat form allowed */ }
+}
+```
+
+| Field | Game fact it reads |
+|---|---|
+| `Dead` | `Health.IsDead` or the `Dead` component on the character. A dead player keeps the character entity, hidden, until they respawn. |
+| `Downed` | The character carries `Buff_General_Vampire_Wounded_Buff` and is not dead. The player character prefab is `Immortal`, so a player stays alive at 0 health and the next hit applies that buff; the downed state ends in death or recovery. |
+| `InPvpCombat` | The character carries `Buff_InCombat_PvPVampire`. The game's own PvP-combat test (used by its weapon-equip and item-move restrictions) looks for the buff named by `ServerRootPrefabCollection.VampirePvPBuffPrefabGUID` (that this is `Buff_InCombat_PvPVampire` is inferred from the names; live step 3 confirms the buff appears in PvP combat), and additionally accepts one condition on another component that this read does not evaluate. |
+| `InCombat` | `InPvpCombat`, or the PvE combat buff `Buff_InCombat`. |
+| `ShapeshiftKind` | The first buff named `AB_Shapeshift_<Form>_…Buff…` whose form is `Bat`, `Wolf`, `Bear`, `Rat`, `Toad` or `Human` (skins included: `AB_Shapeshift_Wolf_PMK_Skin02_Buff` is a wolf). Vampire powers from the same menu (`NormalForm`, `BloodMend`, `BloodHunger`, `ShareBlood`, `DominatingPresence`, `CommandingPresence`) are not forms. Otherwise `Other` when an unnamed `AB_Shapeshift_` form buff is present or the controller's `Shapeshift.IsShapeshifted` is set. |
+| `Online` / `CharacterDisabled` | `User.IsConnected` now / the ECS `Disabled` tag, which an offline player's character carries. Offline characters are read the same way, and an offline character keeps the buffs it had when the player left: `InPvpCombat`, `InCombat`, `Downed` and the form can read true while `Online` is false. Check `Online` when that matters. |
+| `Health` / `MaxHealth` | `Health.Value` / `Health.MaxHealth`. |
+
+Facts and defaults:
+
+- **Bat form.** The bat travel form puts `AB_Shapeshift_Bat_TakeFlight_Buff` on the character,
+  and the controller (the User entity, not the body) carries `Shapeshift { IsShapeshifted, Speed }`;
+  one observation read its `Speed` as 11 in bat form. There is no prefab named
+  `AB_Shapeshift_Bat_Buff`. `Shapeshift.IsShapeshifted` is read as a raw byte at its layout
+  offset.
+- **Buff ids.** The three buffs are looked up by prefab name in the game's name table on every
+  call, so a renumbered prefab still matches; the recorded hashes (Wounded -1992158531,
+  InCombat_PvPVampire 697095869, InCombat 581443919) are used only when the table cannot answer.
+- **PvP combat lasts as long as the buff's lifetime**, which fighting refreshes. That lifetime is
+  prefab data, not metadata, and has not been read for this page; the live procedure records it.
+  PvE combat (`Buff_InCombat`) does not block building; PvP combat carries buff modification
+  flags and probably does (inferred).
+- **No `CanInteract`.** Whether the game lets a player interact is a set of impair flags per
+  action (building, waygates, mounts, menus); one boolean would be wrong for most of them. Use
+  `Standing` (ok, not dead, not downed) plus the specific flags you need.
+
+Results that are not `Ok` have every flag false and a `Reason`:
+
+| `Status` | When |
+|---|---|
+| `Stale` | A `PlayerInfo` from an earlier world load, a user entity that no longer exists, or a user entity now belonging to another account. Look the player up again. |
+| `NotAPlayer` | Null `PlayerInfo`, `Entity.Null`, or an entity without `User` (passing the character instead of the user). |
+| `NoCharacter` | The user has no character, or its character entity is gone. |
+| `Unavailable` | Called on a client, the server world is not running, or the read itself failed (logged as a warning). |
+
+`Ok` with a non-empty `Reason` means health or buffs could not be read; those fields are then
+false or 0.
+
+Sample: `SamplePlayerDirectory.cs`, `.players state` (yourself) or `.players state <name>` (offline
+players too), admin only. Reply `State of <who>: online standing form=None hp=…`; log line
+`Sample players: state <who> status=Ok dead=False downed=False pvp=False combat=False form=None …`.
+
+### Live acceptance (procedure — not run)
+
+On the isolated test server with Core and `Progenitor.Sample` deployed, an admin character and a
+second player (or a headless client) for PvP:
+
+1. `.players state`: expect `online standing form=None` and full health.
+2. Bat form, then `.players state`: `form=Bat(AB_Shapeshift_Bat_TakeFlight_Buff)` or another
+   `AB_Shapeshift_Bat_…` name; record which. Wolf, bear, rat and toad likewise. Back in normal
+   form: `form=None`.
+3. Hit the second player with PvP enabled, then `.players state <their name>` and your own:
+   `pvp-combat`. Wait until it reads plain `standing`; record the seconds, and read the buff's
+   lifetime with the bridge prefab read (`prefab Buff_InCombat_PvPVampire`, component `LifeTime`)
+   to fill in the PvP combat default above.
+4. Fight a PvE mob: `combat`, not `pvp-combat`.
+5. Bring the second player to 0 health and hit once more: `downed`. Let them die: `dead` until they
+   respawn, then `standing`.
+6. Disconnect the second player, `.players state <their name>`: `offline disabled …`, no error. Disconnect them during PvP combat: expect `pvp-combat` still shown while offline (the character keeps its last buffs); record whether it clears.
+7. `.players state <a name nobody has>`: `No player named …`. After a server save reload, a
+   `PlayerInfo` kept from before gives `Stale`.
+8. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
 
 ### Vanilla sort event (client)
 
