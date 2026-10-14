@@ -455,7 +455,8 @@ internal static unsafe class WorldPickBackend
             if (plan.Suppressed) DestroyPair(em, ev, init);
             if (plan.Swallow) Swallow.Add(buffKey, now);
 
-            coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, plan.Suppressed);
+            UnityUiRuntime.ReadNetworkId(em, target, out int n0, out int n1, out int n2);
+            coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, plan.Suppressed, n0, n1, n2);
         }
     }
 

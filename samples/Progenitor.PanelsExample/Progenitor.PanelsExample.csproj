@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Progenitor.PanelsExample</AssemblyName>
     <RootNamespace>Progenitor.PanelsExample</RootNamespace>
-    <Description>Client example for the vanilla panel sites: a button on the container, station, inventory and castle heart windows, a tooltip line, and a log line for every open, close and target change.</Description>
+    <Description>Example for the vanilla panel sites: a button on the container, station, inventory and castle heart windows, a tooltip line, a log line for every open, close and target change, and a Locate button that resolves the chest's network id on the server and pings it.</Description>
     <BepInExPluginGuid>progenitor.panelsexample</BepInExPluginGuid>
     <BepInExPluginName>Progenitor Panels Example</BepInExPluginName>
     <ReferenceGame>true</ReferenceGame>

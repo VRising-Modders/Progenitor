@@ -182,6 +182,41 @@ public sealed class PluginInventory
         return InventoryRuntime.TryFind(id, out owner, out reason);
     }
 
+    // ---- network ids ---------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolve a <c>NetworkId</c> a client reported (<c>VanillaPanelTarget.NetworkIdIndex</c>,
+    /// <c>NetworkIdGeneration</c>, <c>NetworkId2</c>, or the same fields of a
+    /// <c>UiWorldPickResult</c>) to the server entity and the stable id of the placed container,
+    /// station or castle heart it names, issuing the id as <see cref="IdOf(Entity)"/> does. The
+    /// words are untrusted: an empty, static or malformed id, one no container carries, a stale
+    /// generation or anything that is not a placed container, station or heart gives false with a
+    /// reason. Never throws on bad input. <b>Experimental</b>: not live-verified.
+    /// </summary>
+    public bool TryResolveNetworkId(int index, int generation, int type, out ContainerId id, out Entity owner, out string reason)
+    {
+        Require(nameof(TryResolveNetworkId));
+        return InventoryRuntime.TryResolveNetworkId(index, generation, type, out id, out owner, out reason);
+    }
+
+    /// <summary>
+    /// The live container's <c>NetworkId</c> as the three words to send to a client, which finds
+    /// its own entity with <c>ctx.Hud.TryFindByNetworkId</c> (to <c>Locate</c> it, for example).
+    /// Session-local: never persist the words. <b>Experimental</b>: not live-verified.
+    /// </summary>
+    public bool TryGetNetworkId(ContainerId id, out int index, out int generation, out int type)
+    {
+        Require(nameof(TryGetNetworkId));
+        return InventoryRuntime.TryGetNetworkId(id, out index, out generation, out type, out _);
+    }
+
+    /// <summary><see cref="TryGetNetworkId(ContainerId, out int, out int, out int)"/> with the reason on false.</summary>
+    public bool TryGetNetworkId(ContainerId id, out int index, out int generation, out int type, out string reason)
+    {
+        Require(nameof(TryGetNetworkId));
+        return InventoryRuntime.TryGetNetworkId(id, out index, out generation, out type, out reason);
+    }
+
     private void Require(string op)
     {
         _ctx.EnsureAttached();

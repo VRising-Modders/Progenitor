@@ -97,6 +97,29 @@ public sealed class UiWorldPickTests
         Assert.True(r.Suppressed);
         Assert.True(r.IsCurrentIn(7));
         Assert.False(r.IsCurrentIn(8));
+        Assert.False(r.HasNetworkId);
+    }
+
+    [Fact]
+    public void Picked_CarriesTheNetworkIdWords_AsAPanelTargetDoes()
+    {
+        var rig = new Rig();
+        UiWorldPickResult? got = null;
+        rig.Coordinator.Arm(OwnerA, "A", r => got = r, null, null);
+
+        // Word 1 as the reader leaves it for a normal id (padding cleared); the shorthand masks again.
+        rig.Coordinator.Complete(UiWorldPickMenus.ContainerMenu, 1234, 5, rig.Epoch, true, 40, 0x101, 1);
+
+        var r = got!.Value;
+        Assert.True(r.HasNetworkId);
+        Assert.Equal(40, r.NetworkIdIndex);
+        Assert.Equal(1, r.NetworkIdGeneration);
+        Assert.Equal(1, r.NetworkId2);
+        var target = new VanillaPanelTarget(VanillaPanelKind.Container, 1234, 5, 40, 0x101, 1, 0, 0);
+        Assert.Equal(target.NetworkIdIndex, r.NetworkIdIndex);
+        Assert.Equal(target.NetworkIdGeneration, r.NetworkIdGeneration);
+        Assert.Equal(target.NetworkId2, r.NetworkId2);
+        Assert.Contains("net=40:1", r.ToString());
     }
 
     [Fact]

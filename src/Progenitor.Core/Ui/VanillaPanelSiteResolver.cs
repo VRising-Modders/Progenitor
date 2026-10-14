@@ -514,14 +514,20 @@ internal sealed partial class UnityUiRuntime
     /// <c>Normal_Index</c>, word 1 <c>Normal_Generation</c> (a static-map id keeps its own second
     /// word), word 2 the type byte. Refused when the interop's size is not the 12 bytes read.
     /// </summary>
-    private static unsafe void ReadNetworkId(World world, Entity entity, out int a, out int b, out int c)
+    private static void ReadNetworkId(World world, Entity entity, out int a, out int b, out int c) =>
+        ReadNetworkId(world.EntityManager, entity, out a, out b, out c);
+
+    /// <summary>
+    /// <see cref="ReadNetworkId(World, Entity, out int, out int, out int)"/> on an entity manager;
+    /// also what the world pick reports in <see cref="UiWorldPickResult"/>. All zero when unreadable.
+    /// </summary>
+    internal static unsafe void ReadNetworkId(EntityManager em, Entity entity, out int a, out int b, out int c)
     {
         a = b = c = 0;
         if (entity == Entity.Null) return;
         try
         {
             if (Marshal.SizeOf<NetworkId>() != NetworkIdBytes) return;
-            var em = world.EntityManager;
             if (!em.Exists(entity)) return;
             var type = ComponentIndex.Of<NetworkId>(ComponentType.AccessMode.ReadOnly);
             if (!em.HasComponent(entity, type)) return;

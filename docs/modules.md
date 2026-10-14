@@ -2087,6 +2087,20 @@ Failure modes, by design:
 Ids are not available until the world's mod save has loaded and the castles are visible after a
 load (`IdOf` returns `ContainerId.None` with the reason meanwhile).
 
+**From a client's network id** (experimental, game-free tested, not live-verified). A client names
+a container by its `NetworkId` words (`VanillaPanelTarget` and `UiWorldPickResult` carry them);
+`ctx.Inventory.TryResolveNetworkId(index, generation, type, out ContainerId id, out Entity owner,
+out string reason)` turns them into the server entity and its id (issuing one as `IdOf` does), and
+`ctx.Inventory.TryGetNetworkId(id, out index, out generation, out type)` gives the words back for a
+client (`ctx.Hud.TryFindByNetworkId` finds its own entity, for `Locate`). The words are untrusted:
+an empty or static-map id, an index not above 0, a generation outside 0..255, an id no container
+carries, a stale generation and a non-container (a player, a servant) all give false with a reason,
+never an exception. The resolver keeps its own map built from the `NetworkId` components of castle
+hearts and `InventoryOwner` entities (the game's own map is a native hash map that would need a new
+generic interop instantiation), confirms every hit by reading the entity's id back, and rebuilds at
+most every 250 ms on a miss. Network ids are session-local: persist the `ContainerId`, never the
+words. Request pattern and live procedure: [ui.md, Resolving a target on the server](ui.md#resolving-a-target-on-the-server).
+
 ### Castles: containers, stations and the heart
 
 | Member | What |
@@ -2127,8 +2141,9 @@ world yet).
 
 `samples/Progenitor.Sample/SampleInventory.cs`, admin only, through `.items`:
 `chests`, `slots <c>`, `count <c> <item>`, `free <c> <item>`, `move <from> <to> <item> <amount>`,
-`moveall <from> <to>`, `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `watch <c>`,
-`heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
+`moveall <from> <to>`, `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `net <c>` (the
+container's network id words), `resolve <index> <generation> [type]` (what a request handler does
+with a client's words: the entity and id, or the refusal), `watch <c>`, `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
 `index:version` entity, `bag` or `heart`; append `/out` for a refinement station's output. Items are
 a spawnable name or a GUID hash. Every action logs a `Sample items: …` line; the sample also logs
 `PlayerReady` and `PlayerTerritoryChanged`.
@@ -4888,7 +4903,7 @@ Checked with an internal live spike (read-only steps plus one 5 s register/remov
 
 ### Vanilla panel sites (P6, experimental)
 
-`Ui.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid)` attaches to the game's interaction windows: `ContainerPanel` (left edge, right edge, beside rename), `StationPanel` (workstations and refinement stations, both edges), `InventoryPanel` (beside sort), `CastleHeartPanel` (alias `ThronePanel`; both edges) and `InventoryTooltip` (a line in the item tooltip). The handle reports open, close and the entity shown (`OnPanel`, `Target`: client entity, its `NetworkId` for the server, the hovered item for the tooltip) and hosts `Button(caption)` clones of the game's own inventory bar button and rows in the window's own font. Inline anchors join the vanilla button group; edge columns sit outside the frame and hide, with one log line, rather than overlap another window or leave the screen. A site whose resolver fails after a game update is absent with one line; a missing piece (a donor, an anchor group) is logged once and withholds only what needs it. The refresh is `SystemHooks.After<XMenuMapper>` with `OnlyWhenSystemRuns = false`, reading every mapper once per frame; nothing is patched, no key is read, and everything is released on dispose, `Ui.RemoveAll` and Core Uninstall. Status: source-checked, built and game-free tested (`VanillaPanelTests`), **not live-verified**. Contract, placement rules and the live acceptance procedure: [ui.md](ui.md#vanilla-panel-sites-p6). Example: `samples/Progenitor.PanelsExample`.
+`Ui.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid)` attaches to the game's interaction windows: `ContainerPanel` (left edge, right edge, beside rename), `StationPanel` (workstations and refinement stations, both edges), `InventoryPanel` (beside sort), `CastleHeartPanel` (alias `ThronePanel`; both edges) and `InventoryTooltip` (a line in the item tooltip). The handle reports open, close and the entity shown (`OnPanel`, `Target`: client entity, its `NetworkId` for the server — resolved there with `ctx.Inventory.TryResolveNetworkId` — the hovered item for the tooltip) and hosts `Button(caption)` clones of the game's own inventory bar button and rows in the window's own font. Inline anchors join the vanilla button group; edge columns sit outside the frame and hide, with one log line, rather than overlap another window or leave the screen. A site whose resolver fails after a game update is absent with one line; a missing piece (a donor, an anchor group) is logged once and withholds only what needs it. The refresh is `SystemHooks.After<XMenuMapper>` with `OnlyWhenSystemRuns = false`, reading every mapper once per frame; nothing is patched, no key is read, and everything is released on dispose, `Ui.RemoveAll` and Core Uninstall. Status: source-checked, built and game-free tested (`VanillaPanelTests`), **not live-verified**. Contract, placement rules and the live acceptance procedure: [ui.md](ui.md#vanilla-panel-sites-p6). Example: `samples/Progenitor.PanelsExample`.
 
 ### Keybinds (FUI5)
 

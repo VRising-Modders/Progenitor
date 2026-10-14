@@ -136,7 +136,8 @@ internal sealed class UiWorldPickCoordinator
     /// world epoch <paramref name="epoch"/>. A pick armed in another epoch is cancelled instead (its
     /// world is gone). Returns the result delivered, or null when nothing was picked.
     /// </summary>
-    internal UiWorldPickResult? Complete(int menuType, int entityIndex, int entityVersion, int epoch, bool suppressed)
+    internal UiWorldPickResult? Complete(int menuType, int entityIndex, int entityVersion, int epoch, bool suppressed,
+        int networkId0 = 0, int networkId1 = 0, int networkId2 = 0)
     {
         var pick = _current;
         if (pick == null) return null;
@@ -148,7 +149,8 @@ internal sealed class UiWorldPickCoordinator
             return null;
         }
 
-        var result = new UiWorldPickResult(entityIndex, entityVersion, info.Kind, menuType, info.Name, epoch, suppressed);
+        var result = new UiWorldPickResult(entityIndex, entityVersion, info.Kind, menuType, info.Name, epoch, suppressed,
+            networkId0, networkId1, networkId2);
         pick.Result = result;
         _log("Ui: world pick #" + pick.Id + " picked " + result + ".");
         End(pick, UiWorldPickState.Picked, runCallback: true);

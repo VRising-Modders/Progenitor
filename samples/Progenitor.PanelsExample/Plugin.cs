@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BepInEx;
 using Progenitor.Plugins;
@@ -20,23 +21,35 @@ namespace Progenitor.PanelsExample;
 /// </list>
 ///
 /// Every open, close and target change and every click is one log line starting
-/// <c>Panels example:</c>. Nothing here moves an item or sends a message: the buttons only log.
-/// Every handle is tracked, so unload removes every button, row and frame watch.
+/// <c>Panels example:</c>. Nothing here moves an item. The container's <c>Locate</c> button is
+/// the one that sends something: the window's network id to the server, which resolves it to a
+/// stable container id and answers with the id's network id, which the client finds and pings
+/// (<see cref="Locate"/>). Every handle is tracked, so unload removes every button, row, frame
+/// watch and the server's request handler.
 /// </summary>
 [BepInPlugin("progenitor.panelsexample", "Progenitor Panels Example", "0.1.0")]
 [BepInDependency("progenitor")]
-[ProgenitorSide(Side.Client)]
+[ProgenitorSide(Side.Both)]
 public sealed class Plugin : ProgenitorPlugin<PanelsContext>
 {
     protected override void OnLoad(PanelsContext ctx)
     {
+        if (ctx.IsServer)
+        {
+            // The server half is only the Locate round trip's request handler.
+            Locate.AttachServer(ctx);
+            ctx.Log.LogInfo("Panels example: loaded (server: resolve handler)");
+            return;
+        }
+
         var container = Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, "Deposit");
         var status = container.Row("No container open");
         ctx.Track(container.OnPanel(e => status.Text = e.Change == VanillaPanelChange.Closed
             ? "No container open"
             : "Container " + e.Target.NetworkIdIndex));
         Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.RightEdge, "Output");
-        Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, "Options");
+        // Locate: the round trip through the server (Locate.cs). The only button that sends anything.
+        Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, "Locate", h => Locate.Send(ctx, h.Target));
         Attach(ctx, VanillaUiSite.StationPanel, VanillaPanelAnchor.LeftEdge, "Inputs");
         Attach(ctx, VanillaUiSite.StationPanel, VanillaPanelAnchor.RightEdge, "Outputs");
         Attach(ctx, VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, "Stash");
@@ -62,14 +75,18 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
         ctx.Log.LogInfo("Panels example: unloading, reason=" + reason);
 
     /// <summary>One attachment with one button, its open/close log and its click log, all tracked.</summary>
-    private static IVanillaAttachHandle Attach(PanelsContext ctx, VanillaUiSite site, VanillaPanelAnchor anchor, string caption)
+    private static IVanillaAttachHandle Attach(PanelsContext ctx, VanillaUiSite site, VanillaPanelAnchor anchor, string caption,
+        Action<IVanillaAttachHandle>? then = null)
     {
         var handle = UiApi.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid);
         ctx.Track(handle);
         var log = ctx.Log;
         var button = handle.Button(caption);
         ctx.Track(button.OnClick(() =>
-            log.LogInfo("Panels example: click " + site + " " + handle.Anchor + " '" + caption + "' " + handle.Target)));
+        {
+            log.LogInfo("Panels example: click " + site + " " + handle.Anchor + " '" + caption + "' " + handle.Target);
+            then?.Invoke(handle);
+        }));
         ctx.Track(handle.OnPanel(e =>
             log.LogInfo("Panels example: " + site + " " + handle.Anchor + " " + e.Change + " "
                 + (e.Change == VanillaPanelChange.Closed ? e.Previous : e.Target))));
