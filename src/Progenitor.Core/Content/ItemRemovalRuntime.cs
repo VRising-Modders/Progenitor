@@ -201,6 +201,8 @@ internal static class ItemRemovalRuntime
         internal bool Step(EntityManager em)
         {
             int budget = 128;
+            // At most one ledger read per step, and only when a stack is about to be quarantined.
+            ItemOwnerLedger? ledger = null;
             while (_index < _entities.Count && budget-- > 0)
             {
                 var entity = _entities[_index];
@@ -245,7 +247,8 @@ internal static class ItemRemovalRuntime
                         var row = buffer[i];
                         if (!_guids.Contains(row.ItemType.GuidHash) || row.Amount <= 0) continue;
                         if (_phase == 3) continue; // Unsupported records intentionally remain in place.
-                        var ownership = ItemOwnerLedger.Load(LedgerPath).RowsOf(Owner).First(r => r.Guid == row.ItemType.GuidHash);
+                        ledger ??= ItemOwnerLedger.Load(LedgerPath);
+                        var ownership = ledger.RowsOf(Owner).First(r => r.Guid == row.ItemType.GuidHash);
                         if (ItemManagementRuntime.Quarantine(Worlds.Server!, entity, i, row, ownership, out var reason))
                             Removed += row.Amount;
                         else { Preserved++; Warn(Owner + ":" + reason, reason); }
