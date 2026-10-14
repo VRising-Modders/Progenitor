@@ -418,8 +418,8 @@ public class UiControlBuildTests
         Assert.DoesNotContain("activeInHierarchy", read);
         SourcePin.AssertUncommented(read, "ScrollbarState.Unreadable");
 
-        AssertStatement(MethodBody(runtime, "private void RunLayout("), "ReadBackScrollbar(\"a re-layout\");");
-        AssertStatement(MethodBody(runtime, "public void Reposition("), "ReadBackScrollbar(\"a reposition\");");
+        AssertStatement(MethodBody(runtime, "private void RunLayout("), "ReadBackScrollbar(\"a re-layout\", endsVerdict: true);");
+        AssertStatement(MethodBody(runtime, "public void Reposition("), "ReadBackScrollbar(\"a reposition\", endsVerdict: false);");
 
         // A panel shown once and never re-laid out or repositioned would otherwise carry its
         // pending verdict away unchecked, which is the single-panel case.

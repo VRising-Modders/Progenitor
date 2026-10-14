@@ -12212,6 +12212,15 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private bool _verdictPending;
 
         /// <summary>
+        /// The frame the pending verdict was made in, and the last read-back line printed since the panel was
+        /// shown. A read in that same frame, or with the ScrollRect not live, sees the bar of an older content
+        /// (<see cref="ScrollbarVerdict.Decide"/>).
+        /// </summary>
+        private int _verdictFrame = int.MinValue;
+
+        private string? _lastReadBackLine;
+
+        /// <summary>
         /// Why the canvas rung answered or did not, on the last <see cref="MeasureHeight"/>. Job
         /// FUI32; printed as <c>canvas=</c> on the layout line so a reader can tell a canvas Unity
         /// has not sized yet (the one this panel waits for) from one that is structurally absent
@@ -13688,27 +13697,45 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </para>
         /// </summary>
         /// <summary>The read-back, for the runtime's <see cref="UnityUiRuntime.Hide"/> path.</summary>
-        public void ReadBackScrollbarNow(string when) => ReadBackScrollbar(when);
+        public void ReadBackScrollbarNow(string when)
+        {
+            ReadBackScrollbar(when, endsVerdict: true);
+            _lastReadBackLine = null; // the next show starts its own run of lines
+        }
 
-        private void ReadBackScrollbar(string when)
+        /// <param name="endsVerdict">
+        /// True when nothing later checks this verdict: a re-layout replaces it, a hide is the last moment.
+        /// </param>
+        private void ReadBackScrollbar(string when, bool endsVerdict)
         {
             // P7b: a panel with no scroll view (NoScroll) has no bar to agree or disagree, whenever the pass was armed.
-            if (!ScrollbarVerdict.ShouldReadBack(_verdictPending, NoScroll))
-            {
-                _verdictPending = false;
-                return;
-            }
+            // And only once ScrollRect has had its update over this verdict's content (2026-10-14: a build re-lays
+            // a panel out once per row in one frame, and each pass read the previous open's bar).
+            bool live;
+            try { var scroll = Scroll; live = scroll != null && scroll.isActiveAndEnabled; }
+            catch { live = false; }
+            var action = ScrollbarVerdict.Decide(_verdictPending, NoScroll, live, _verdictFrame, FrameNow(), endsVerdict);
+            if (action == ReadBackAction.Defer) return;
 
             _verdictPending = false;
-            if (_scrollbar == null) return;
+            if (action != ReadBackAction.Read || _scrollbar == null) return;
 
             ScrollbarState observed;
             try { observed = _scrollbar.activeSelf ? ScrollbarState.Shown : ScrollbarState.Hidden; }
             catch { observed = ScrollbarState.Unreadable; }
 
             // File only, agreement or not (2026-10-06: dozens per session reached the console as
-            // warnings). Grep LogOutput.log for "they disagree".
-            Plugin.Logger?.LogDiag(ScrollbarVerdict.Describe(Text, _verdictScrolls, observed, when));
+            // warnings), and only when it differs from this show's last line. Grep LogOutput.log for "they disagree".
+            string line = ScrollbarVerdict.Describe(Text, _verdictScrolls, observed, when);
+            if (!ScrollbarVerdict.ShouldLog(_lastReadBackLine, line)) return;
+            _lastReadBackLine = line;
+            Plugin.Logger?.LogDiag(line);
+        }
+
+        private static int FrameNow()
+        {
+            try { return Time.frameCount; }
+            catch { return int.MinValue; }
         }
 
         /// <summary>
@@ -13732,7 +13759,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // panel opened or an old one closed — which makes it the cheapest honest moment to
             // read the bar back. Nothing here changes the content, so the answer still belongs to
             // the verdict being checked.
-            ReadBackScrollbar("a reposition");
+            ReadBackScrollbar("a reposition", endsVerdict: false);
             try
             {
                 var rt = GameObject.GetComponent<RectTransform>();
@@ -13796,7 +13823,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
             // Before anything is re-measured: the bar still carries ScrollRect's answer to the
             // verdict this panel logged last time, and that answer is about to stop being true.
-            ReadBackScrollbar("a re-layout");
+            ReadBackScrollbar("a re-layout", endsVerdict: true);
             _laying = true;
             try
             {
@@ -14009,7 +14036,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // next pass over this panel can read the owner's answer back and say whether the
                 // two agree, rather than printing one of them as if it were both.
                 _verdictScrolls = scrolls;
-                _verdictPending = _scrollbar != null && !NoScroll; // P7b: a panel with no scroll view has nothing to read back
+                // P7b: a panel with no scroll view has nothing to read back, and neither has the workspace tab strip,
+                // whose viewport and bar ConfigureStrip switched off (its "(scrolls)" is arithmetic over no list).
+                _verdictPending = _scrollbar != null && !NoScroll && !_strip;
+                _verdictFrame = FrameNow();
 
                 // Job FUI32. Which rung answered was never the whole question: a pass measured
                 // before Unity sized the canvas is wrong whatever token it prints, so the line
