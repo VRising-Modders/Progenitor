@@ -2164,7 +2164,7 @@ yours (for example `ctx.Castles.RelationTo`). Network ids are session-local: per
 | Member | What |
 |---|---|
 | `ICastleHandle.Containers()` | Placed models with an inventory that are not a station or the heart. |
-| `ICastleHandle.Stations()` | `CastleWorkstation` or `Refinementstation` models; refinement rows carry `Output`. |
+| `ICastleHandle.Stations()` | Models with a recipe list (`WorkstationRecipesBuffer`) or `Refinementstation`; refinement rows carry `Output`. Storage that carries `CastleWorkstation` only for room and servant bonuses is listed by `Containers()`. |
 | `ICastleHandle.Name` | The heart's nameplate. |
 | `ICastleHandle.HeartId` | The heart's stable id. |
 | `ICastleHandle.HeartFuel()` | `Level` (`CastleHeart.Level`), `UnlockedSlots` (the `ItemSlots` of that level's row in the heart's own level table, `CastleHeart.Data`), `LevelRows`, `FuelQuantity`. |
@@ -2568,6 +2568,229 @@ with empty inventories, and a second castle B of the same player or clan with at
 10. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
     Sample from the test server's reload folder and confirm the clean unload (`servants: list
     provider unregistered` if the swap was left on).
+
+## Material sources
+
+`Progenitor.Materials`, `ctx.MaterialSource` (alias `ctx.Stations.MaterialSource`, the same object).
+Milestone P3, **experimental**. One provider decides which containers pay for building (B menu, the
+game's shared-inventory mode) and for workstation crafting; the totals the player sees and the
+server's payment both follow it. The game's own rules apply when nothing is registered, for
+operations the provider does not govern, for contexts it returns no candidates for, and for items it
+returns `null` for.
+
+| Part | Status |
+|---|---|
+| Registration, invalidation, `Status` readback | landed, game-free tested (`MaterialSourceRegistryTests`) |
+| Planner, per-operation transaction, scope | landed, game-free tested (`MaterialPlannerTests`, `MaterialServiceTests`, `MaterialTransactionTests`, `MaterialViewTests`) |
+| Per-player totals: refresh, resend, wire, client selection | landed, game-free tested (`MaterialViewSyncTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
+| Native availability and payment seams (Bootstrap) | **opt-in, off by default**; the earlier, unhardened build ran live on 2026-10-13 (below); this build is **not live-verified** |
+
+```csharp
+var handle = ctx.MaterialSource.Register(myProvider);     // second registration throws, naming the owner
+ctx.Log.LogInfo(ctx.MaterialSource.Status.ToString());     // materials: provider=… hooks=on wired=Build,Craft … faults=0 shortfalls=0
+ctx.Events.On<MaterialPaid>(e => ctx.Log.LogInfo("tx " + e.Transaction + ": " + e.Item + " x" + e.Paid + " from " + string.Join(",", e.Debits)));
+```
+
+Read `Status` before claiming anything changed in the game: `HooksInstalled` is false, and `Wired` is
+empty, until a Bootstrap with the material seams armed is running and Core bound its handlers.
+
+### Turning the seams on
+
+`[Materials] NativeSeams = true` in `BepInEx/config/progenitor.cfg` (Bootstrap's config), on the
+**client and the server**, then **restart both processes**: the seams are process-lifetime
+Bootstrap detours, read at process start only, so a Core swap or a config reload does not arm or disarm
+them. Default `false`. A client without the seams shows the game's own counts; the server still pays
+from the provider's containers, so the display can disagree with what is paid until the client is
+armed too. To turn them off, set `false` and restart that process; `Status` then says `hooks=off`.
+
+Start lines: Bootstrap logs `materials: native seams enabled count=armed pay=armed` (the client has no
+`pay=`; `failed (…)` or `disabled (opt-in: …)` otherwise), and Core logs
+`materials: Core seam handlers bound (server: availability + payment)` or `(client: availability)`.
+
+### Provider contract
+
+`IMaterialSourceProvider` is called on the server main thread, inside the game's own affordability
+check (one synchronous system update) or while the per-player totals are refreshed. It must be fast,
+must not move items, must not call back into `ctx.MaterialSource` and must not throw.
+
+- `Operations`: what it governs. Only `Build` and `Craft` are wired; others are logged once at
+  registration (`not-wired=…`) and stay vanilla. Re-read on `InvalidateAll`.
+- `Candidates(ctx)`: every container that may pay for any item in this context; used to find which
+  items exist for the totals. **Empty = this context is not governed**: the game's own rules apply.
+- `Sources(ctx, item)`: that item's containers in spend order (first drained first) and its pool
+  reserve (kept once across the pool). Each item has its own order. **`null` = the game's own rules
+  pay and show this item**, exactly as if no provider were registered.
+- `Revision(ctx)`: changes whenever the provider's policy does; part of the displayed-view fingerprint.
+- A provider call that throws is logged, counted in `Status.Faults`, and means **no remote sources**
+  for that context (`Candidates`) or item (`Sources`). It never falls back to the game's shared
+  storage, which could be less restrictive than the provider's rules.
+
+`MaterialContext` carries `User`, `Character` (session ids, `CastleId`), `WorldEpoch`, `Operation`,
+`StandingTerritory` (-1 = no plot, the game's own standing rule) and `Station` (the workstation's
+`ContainerId`, craft only).
+
+### One operation, one transaction
+
+The game checks affordability and pays inside **one synchronous main-thread system update**: the
+placement handler (direct build event and cast-finished path, `PlaceTileModelSystem`) checks then
+charges in one call, and the craft start (`StartCraftingSystem`) checks every ingredient against the
+merged count then removes each line in the same body. Progenitor opens a scope in a Before hook on
+either system and closes it in the After hook. Both hooks run even when another plugin skips the
+system, so they always pair; the scope records the system that opened it and only that system's After
+closes it. The governed systems never nest, so a Before while a scope is open closes the open one (its
+system threw, so its After never ran), and a scope is current only in the frame it was opened in. Only
+seam calls inside a scope are routed to the provider. Inside the scope:
+
+1. **Check.** The game's merged count for a character opens an *operation session*. The provider is
+   asked for its candidates and, per item, its sources **once**; every provider call happens before
+   any count is read. The pool's spendable amount per governed item (the *quote*) is what the game's
+   check sees; items the provider leaves to the game show the game's own shared amount. The session
+   counts as checked only once the composed rows fit the seam's buffer and went to the game.
+2. **Pay, line by line.** The game first pays from the character's bag and the workstation's own
+   inventory by its own removal with no castle heart (so its shared storage is skipped). What they did
+   not cover goes to the pool, **validated before anything is taken**: the line may draw at most what
+   is left of the item's quote, and the planner checks the containers' current counts (each physical
+   inventory once, reserve subtracted once, bag and plain station left out). A covered line is taken
+   whole or not at all.
+3. **Shortfall.** A line that cannot be paid in full (a container emptied, removed or refusing a write
+   between the check and its line) follows the game's own shortfall behavior: earlier lines keep their
+   debits, the line takes what its quote and the stock allow, and the rest stays owed to the game. One
+   `materials: shortfall at payment …` line per operation, counted in `Status.Shortfalls`. Already-paid
+   lines are never given back; only a line whose own all-or-nothing take was rolled back by a write
+   fault is restored, then taken again as far as the containers give (an `ERROR materials: pay
+   Inconsistent …` line names units the rollback could not put back).
+4. **End.** When the system's update ends, every session closes and one `MaterialPaid` per line the
+   pool paid any part of is published (same frame). Each event names its line's `Transaction`; all
+   lines of one operation share it. A scope stranded by a throwing system is closed at the next
+   governed Before or the next frame tick; its events are published then, never from inside a seam call.
+
+What this guarantees, and what it cannot:
+
+- **The provider cannot change an operation's payment.** It is never called between the check and
+  the payment; a provider that changes its answer or starts throwing after the check is not consulted.
+  A provider that throws **at** the check shows an empty pool, and the game's own check refuses the
+  action with nothing taken.
+- **Nothing that Progenitor runs can move items between the check and the payment.** Provider calls
+  happen before the quotes are read, `MaterialPaid` handlers run after the system's update, and
+  `ctx.Inventory` watches are polled, not called back.
+- **No line draws more than the check saw.** Repeated lines for one item (the game's check compares
+  each line separately) share the item's quote.
+- **The game cannot be stopped after its check passed.** Neither the craft start nor the placement
+  re-checks after paying: the game logs a short removal and completes the action, and its own shared
+  storage behaves the same way. A shortfall at payment therefore leaves part of a cost unpaid, exactly
+  as vanilla does, and a craft's queued record still lists the full requested amount, so cancelling it
+  refunds what was not paid. The binding refusal point is the check, which is why the quote is exactly
+  what the payment can draw from. With nothing in Progenitor able to move items inside the step, a
+  shortfall needs an inventory write fault or game code that moves items between the check and the
+  payment; it is logged and counted, and it can be exercised live with the development bridge's
+  [`materials inject`](bridge-ops-client.md#materials).
+- **No governed payment without a governed check.** When the availability seam kept the game's own
+  count for a call (an unexpected array shape, logged once, or composed rows that did not fit the
+  buffer), the payment of that operation also follows the game's own rules.
+- **A scope can outlive its system only when the system throws**, and then only for the rest of that
+  frame or until the next governed system starts. A seam call from another system in that window is
+  routed as the stranded operation: the hooks cannot tell which system is running.
+
+**The craft's station.** Progenitor identifies the station as the character's interaction target
+(`Interactor.Target`, when it has a recipe list). The game's own removal reaches the interaction
+inventory through the interaction itself and checks permissions; no verified seam exposes that
+source, so the two can disagree if the target is not the station whose window is open. A provider
+source that is the identified station is always dropped from the pool, so the station is never
+counted twice.
+
+Bookkeeping stays the game's: the craft start still records the requested amount and the returned
+item entity in its queued-craft rows, so cancel refunds follow the game's own rule (the station, then
+the character) with item identity intact; refunds never go back to remote chests. The pool pays only
+from slots without an item entity. The explicit local-inventory build mode
+(`BuildResourceConsumeType.LocalInventory`) uses a different removal that the seams do not touch, so
+it stays local. Nothing is ever written to a castle heart's shared aggregate.
+
+### What the player sees
+
+The server recomputes each online player's Build totals and, while the player works at a workstation,
+Craft totals every second, at once after an invalidation or a governed payment, and sends a view only
+when it changed; every 10 seconds (and after a provider registers or goes away) every player is sent
+their view again even when unchanged, and a send the transport refused is retried on the next refresh.
+A player who had a view and is no longer governed gets one cleared view (retried the same way). A
+disconnect forgets what the player was sent; sequence numbers keep rising, so a reconnecting or
+reloaded client accepts the next view. A fresh server install (a server Core swap included) does not
+know what the previous one sent: its first refresh sends every online player a cleared view for each
+operation that is not governed now, and its views carry a new publisher generation, so clients start
+their sequence over.
+
+A view (`'PrMv'`, Core's reserved range, version 2) lists **only the items the provider governs**
+(zero included, which hides the game's shared amount for that item), with world epoch, provider
+revision, the server publisher's generation, a per-player sequence, and the network ids of the castle heart at the player's standing plot
+and (Craft) of the workstation it was computed for. At most 1500 items, flagged when cut.
+
+On the client the game's merged count is replaced only when all of these hold; otherwise the game's
+own result stands:
+
+| Condition | Why |
+|---|---|
+| The count is for the local character | Another player, a servant or a station keeps the game's count. |
+| The castle heart the game resolved for this count is the view's heart | Another plot never shows this plot's pool. |
+| Build: the build menu is shown or the build-mode placement update runs | Repair, research, chests and other screens that read the same count keep the game's own result; the build menu and station windows are exclusive HUD menus. |
+| Craft (otherwise): the local character's interaction target is a workstation and is the view's station | Another station never shows this station's pool. |
+
+The replaced count is the bag rows from the game, then for each governed item the pool amount, and for
+every other item the game's own shared amount (the game's full count minus its bag-only count), so an
+item the provider leaves to the game shows exactly what the game alone would show. While a Build view is
+held, the build-mode placement update uses the game's own synchronous placement entry, which reaches
+the count seam (the optimized placement job embeds its own count); the original entry is restored
+after the update and on unload. A displayed count is never authorization: the server checks again and
+pays at action time.
+
+### Native seams (Bootstrap)
+
+Two process-lifetime detours through the native detour mechanism the receive seams use; Core binds
+four handlers into them and clears them on uninstall, so the logic is in Core and swaps with it.
+
+| Seam | Game method (castle-heart overload) | Sides | What it does when governed |
+|---|---|---|---|
+| availability | `MergedInventoriesUtility.GetCastleMergedInventoryDatas(EntityManager, Entity castleHeart, Entity target, bool, bool)` | both | Calls the game twice, with and without the castle heart; returns the bag rows plus Core's rows in a Bootstrap-owned buffer |
+| payment | `MergedInventoriesUtility.RemoveItemGetRemainder(EntityManager, Entity castleHeart, Entity target, PrefabGUID, int, out int, out Entity, bool, bool, bool)` | server | Calls the game without the castle heart (bag and station), then Core pays the remainder from the pool |
+
+Facts checked against the game's metadata and interop assemblies for this build:
+
+- The territory overloads of both methods resolve the castle heart from the target's position and call
+  the castle-heart overloads directly; the craft start, the build check and charge, and the client cost
+  display all reach these two. The remove overloads without `out Entity` have no callers.
+- Signatures: `EntityManager` (16 bytes) travels through a hidden pointer; `Entity` and `PrefabGUID` by
+  value; the 16-byte `NativeArray<InventoryBuffer>` return through a hidden first argument whose address
+  is also returned; `out` parameters are plain pointers; `bool` is one byte; a trailing method-info
+  pointer.
+- The returned array is a view over a temporary list with allocator label `None`; no caller frees it.
+  The composed array carries the same label (Bootstrap refuses to replace any other label), so no
+  caller frees Bootstrap's buffer. Bootstrap keeps one buffer per count call per frame.
+- `InventoryBuffer` rows: stride 24, `ItemType` at 0xC, `Amount` at 0x10 (`layout.txt`, checked).
+- Passing no castle heart skips the shared-storage branch in both bodies; the bag, equipment and the
+  eligible interaction inventory are unaffected.
+- The two overloads are bound by their exact interop field names, which are identical on the client
+  and the server.
+
+**Verified live on 2026-10-13, with the earlier, unhardened build** (isolated test server and client,
+a copy of a save, fixed test provider from the [Shared Resources Test](../samples/Progenitor.SharedResourcesTest/README.md)
+plugin): both seams armed and bound; a B-menu workbench placed on a resource-poor plot paid planks,
+stone and hide from remote chests in the configured order, including one item split across two chests;
+a workbench craft paid its two ingredients in the reversed per-item order; a prison cell fed one fish
+from a remote chest; the same Build totals showed on two plots; unregistering cleared both client
+views within 1.2 s. Not run on that build: a shortage, a reserve boundary, a provider fault, the
+per-item `null` fallback, and a cancelled craft. **This build (the operation transaction and its
+shortfall rule, the scope pairing, the client selection rules, the wire version 2 and the per-item
+fallback) has not run in the game**; the
+re-verification procedure is in the [test plugin's README](../samples/Progenitor.SharedResourcesTest/README.md#live-re-verification-procedure--not-run).
+
+Not proven live on any build:
+
+- That the game's shared-storage totals refresh after the pool takes from a shared chest.
+- That the craft cost display redraws when a new view arrives without reopening the station.
+- That the character's interaction target stays the workstation while its window is open, on the
+  client and the server (the Craft view and the client selection rely on it), and that the build
+  menu's shown state covers every build cost display (the Build view relies on it).
+- How the game's check treats a recipe that lists one item twice.
+
+`Repair` and `Upgrade` are not wired; they stay vanilla.
 
 ## Main thread
 

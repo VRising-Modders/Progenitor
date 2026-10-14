@@ -1,6 +1,20 @@
 # Bridge operations: input, install and session
 
-Operation reference for the [development bridge](bridge.md), part 5 of 5: keybinds, map, keyboard, mouse and gamepad input, build search, dye, local and remote installs, disconnect, quit and auto-update. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md). Part of the [development loop](dev-loop.md).
+Operation reference for the [development bridge](bridge.md), part 5 of 5: keybinds, map, keyboard, mouse and gamepad input, the `bot` interaction, build search, material sources, dye, local and remote installs, disconnect, quit and auto-update. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md). Part of the [development loop](dev-loop.md).
+
+## `bot` interaction
+
+**Experimental development tooling**, client, main thread; part of the Dev `bot` op ([tools/bots/README.md](../tools/bots/README.md), [input.md](input.md)). Not a framework API.
+
+`{"action":"interact","entity":"index:version"}` asks for one ordinary interaction with a client-world entity that has `Interactable` and a `NetworkId` (a workstation, a prison cell, a container). It closes the open HUD menu, hovers and aims at the entity through the bot's input lease, then presses the synced Interact button for 0.4 s on the third frame. It never moves the OS mouse and never brings the game to the foreground. The character must already be in interaction range.
+
+| Field of `bot` `{"action":"status"}` | Meaning |
+|---|---|
+| `interaction` | `pending: …` while the request runs; `input completed; client target=…; server confirmation required` when the local character's `Interactor.Target` became the entity; `not confirmed: …` when the entity disappeared or 3 s passed (out of range, blocked, refused); `failed to initialize interaction` when the hover or aim could not be set; `none` before any request. |
+
+Every completed, timed-out or failed request releases what it held; `{"action":"stop"}` cancels one. **The result is the client's prediction, not the server's decision:** before crafting or moving items, read the server character's `Interactor.Target` (`get` on the server, component `Interactor`) and match it to the intended server entity by `NetworkId` (use `query` on each side; entity indices differ between the client and the server). A crowded spot can make the server pick a nearer interactable than the client predicted.
+
+Observed on 2026-10-13: a workstation and a prison cell opened through `interact` and the server's `Interactor.Target` named them; a nearby container did too; in a crowded spot the server chose a nearer container than the client predicted; an out-of-range request timed out and released.
 
 ## `keybind_press`
 
@@ -147,6 +161,7 @@ Every action but `status`, `open` and `close` needs the build menu open. Refused
 | `{}` or `{"action":"status","cells":40}` | `open`, `attached`, `enabled`, `clearOnClose`, `focused`, `guard` (`build-search` while the box has the keyboard), `holdEngaged`, `exclusiveHolds`, `query`, `words`, `total`, `visible`, `hidden`, `countText`, `clearShown`, `lastError`; the all-tabs results (`allTabs`, `resultCells`, `resultsMatched`, `resultsNote`, `blobCopies`: private blob copies not yet freed); the breadcrumb (`breadcrumbs`, `crumb`, `crumbShown`, `crumbHoveredGuid`, `crumbHost`, `indexFailure`); and up to `cells` (0 to 500) cells: `index`, `active`, `hiddenBySearch`, `name` (the localized name), `searchable` (the normalized text the query is matched against). |
 | `{"action":"open"}` / `{"action":"close"}` | Opens or closes the game's build menu with no input or focus, the way the B key does: open creates the `OpenMenuEvent` {CharacterInfo, init entity} plus `CharacterMenu.InitData` {Building} the key creates; close calls `HUDMenuManager.CloseMenu` when the character menu (which hosts the build menu) is the open HUD menu, and does nothing otherwise. Unlike the key, open skips the build-menu progression requirement. The change shows on the next frame: read `status`. Live 2026-10-04, no input or focus: open showed Castle > Foundation with the box; close closed it; a second close and a second open reported "not open" / "already open"; open, search, close and reopen came back unfiltered with the blob restored. |
 | `{"action":"hover","index":0}` | Shows row cell 0's tooltip without moving the mouse: sets the cell's `GridSelectionEntry.IsHovered` (the flag the game's own pointer-enter sets) and clears it on every other cell; `-1` clears all. The real pointer clears it on its next enter or exit. Live 2026-10-04. |
+| `{"action":"select","index":0}` | Picks row cell 0 as a click does: sends the entry's own pointer-down (or pointer-click, by the entry's `SelectOnMouseDown`) with a left-button event, so the game enters placement for that piece. Refuses a disabled or hidden cell. Returns `status` plus `selected`. Used to place a piece with the [material sources](modules.md#material-sources) test without the mouse; source-checked, run on 2026-10-13. |
 | `{"action":"set","text":"wall"}` | Writes the query through the field's own edit path. The filter applies on the next mapper update. |
 | `{"action":"clear"}` | What the x button does: empties the query and keeps the keyboard in the box. |
 | `{"action":"focus"}` / `{"action":"blur"}` | Gives or takes the keyboard, as a click on the box or elsewhere does. |
@@ -156,6 +171,18 @@ From bash: `node tools/mcp/call.mjs client build_search '{"action":"status"}'`. 
 
 To test with every item unlocked, run [`unlock`](bridge-ops-player.md#unlock) with `action: all` on the isolated test server first, and
 `revert` afterwards.
+
+## `materials`
+
+Either side, main thread. The [material sources](modules.md#material-sources) seams through Core's internal `MaterialsTestBridge` (reflection). Development tooling, not a plugin API.
+
+| Args | Does |
+|---|---|
+| `{}` or `{"action":"status"}` | `side`, `status` (the `ctx.MaterialSource.Status` line), `hooksInstalled`, `hooksReason`, `wired`, `payments`, `faults`, `shortfalls`, `bootstrap` (Bootstrap's `materials: native seams …` line). Client: `views`, per operation `null` or `{sequence, territory, heart, station, totals}` (the held view the cost display uses). Server: `openOperations`, `injection`. |
+| `{"action":"inject","from":"c-…","to":"c-…","item":<hash>}` | Server. Fault injection for the transaction check: right after the **next** governed check (the next craft start or placement whose count the provider governs), moves every unit of the item from one container to the other through the inventory engine, so that operation's payment meets a container that changed between its check and its payment. One shot; logs `materials: development fault injection armed: …` and, when it runs, `materials: fault injection moved N of item … after the check of tx=…`. |
+| `{"action":"clear"}` | Server. Drops an injection that has not run. |
+
+From bash: `node tools/mcp/call.mjs server materials '{"action":"status"}'` (or `client`). There is no MCP wrapper. Source-checked and built; not run live.
 
 ## `dye`
 

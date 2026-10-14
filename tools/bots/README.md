@@ -17,7 +17,7 @@ ops only read state the player could see, or send the event a key press would se
 
 | Layer | What | Where |
 |---|---|---|
-| 1. Hands | Client op `bot`: move, walk, aim, hold/tap buttons, hover, stop, status | `Bot.drive`, `moveTo`, `aim`, `hover` in `bot.mjs` |
+| 1. Hands | Client op `bot`: move, walk, aim, hold/tap buttons, hover, interact (experimental; [bridge-ops-client.md](../../docs/bridge-ops-client.md#bot-interaction)), stop, status | `Bot.drive`, `moveTo`, `aim`, `hover` in `bot.mjs` |
 | 2. Eyes | Client op `bot_look`: the bot itself plus nearby units, resources, breakables, structures and players, nearest first; hostiles are remembered as tracks (90 s, V Blood 10 min, death spots 30 min) and weighed by one threat measure, `threatAt`, for prey, guards, training targets, food roams and flight | `Bot.look`, `Bot.self`; `threat.mjs` |
 | 3. Legs | Server op `bot_path` (the game's pathfinder) plus `goTo`/`explore`, which jump down ledges the navigation graph does not link; `reachable()` path-checks a target before a skill commits to it, and `Progress` ends approaches and chases that stop gaining | `Bot.path`, `goTo`, `explore`, `reachable` in `bot.mjs`; `reach.mjs` (Progress, blacklist, typed failures) |
 | 4. Skills | Async functions over one bot returning `{ok, ...}` or `{ok:false, reason}` | `skills.mjs` (crypt, recover, feed, fight, gather), `progression.mjs` (pickup, craft, equip, heart, journal) |
