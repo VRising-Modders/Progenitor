@@ -382,6 +382,10 @@ public class PluginContext
         }
     }
 
+    /// <summary>Server recipe stations (<see cref="Progenitor.Stations.Stations"/>): recipes, the per-recipe switch, progress. Client calls throw.</summary>
+    public Progenitor.Stations.PluginStations Stations { get { EnsureAttached(); return _stations ??= new Progenitor.Stations.PluginStations(this); } }
+    private Progenitor.Stations.PluginStations? _stations;
+
     /// <summary>
     /// Server ability control (<see cref="Progenitor.Abilities.PluginAbilities"/>): force-cast a
     /// group the character need not have on its bar, and hold a character's cooldowns at zero.

@@ -51,6 +51,10 @@
     <Compile Include="..\..\src\Progenitor.Core\Players\Forms\PlayerForms.cs" Link="Linked\PlayerForms.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Players\PlayerRespawnPolicy.cs" Link="Linked\PlayerRespawnPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Items\ItemGrantPolicy.cs" Link="Linked\ItemGrantPolicy.cs" />
+    <!-- ctx.Stations: models, craft count, status/progress math and the toggle plan are game-free. -->
+    <Compile Include="..\..\src\Progenitor.Core\Stations\StationModels.cs" Link="Linked\StationModels.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Stations\StationLogic.cs" Link="Linked\StationLogic.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleStations.cs" Link="Linked\SampleStations.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Abilities\AbilityCooldownPolicy.cs" Link="Linked\AbilityCooldownPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Abilities\AbilitySlotPolicy.cs" Link="Linked\AbilitySlotPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Units\UnitBloodPolicy.cs" Link="Linked\UnitBloodPolicy.cs" />
