@@ -28,6 +28,14 @@ public class MaterialViewRefreshTests
         public MixedProvider(List<ContainerId> all, int seed)
         {
             _all = all;
+            ChangeAnswers(seed);
+        }
+
+        /// <summary>New spend orders, reserves and items left to the game (the revision is not bumped).</summary>
+        public void ChangeAnswers(int seed)
+        {
+            var all = _all;
+            _sources.Clear();
             var rng = new Random(seed);
             for (int i = 0; i < MaterialViewRefreshBenchTests.ItemTypes; i++)
             {
@@ -42,7 +50,10 @@ public class MaterialViewRefreshTests
         public IReadOnlyCollection<MaterialOperation> Operations { get; } = new[]
             { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade };
 
-        public long Revision(in MaterialContext context) => Rev;
+        public bool ThrowOnRevision;
+
+        public long Revision(in MaterialContext context) =>
+            ThrowOnRevision ? throw new InvalidOperationException("provider bug") : Rev;
 
         public IReadOnlyList<ContainerId> Candidates(in MaterialContext context)
         {
@@ -222,6 +233,48 @@ public class MaterialViewRefreshTests
         var other = new MixedProvider(rig.World.ChestIds, 3);
         rig.Registry.Register(other, "test");
         Assert.Equal(MaterialViewOutcome.Computed, rig.Refresh(MaterialOperation.Build, out _));
+    }
+
+    [Fact]
+    public void An_invalidation_reaches_a_view_the_dirty_refresh_did_not_cover()
+    {
+        var rig = new Rig();
+        // The player had a workstation open (a Craft view is cached), then closed it.
+        rig.Refresh(MaterialOperation.Craft, out var before);
+        rig.Refresh(MaterialOperation.Build, out _);
+        // The provider changes its answer and calls Invalidate(user) without a Revision bump: the dirty
+        // refresh drops every cached view of the character, then refreshes only Build (no station open).
+        rig.Provider.ChangeAnswers(seed: 99);
+        rig.Service.ForgetViews(rig.World.Player);
+        Assert.Equal(MaterialViewOutcome.Computed, rig.Refresh(MaterialOperation.Build, out _, recompute: true));
+        // The player reopens the workstation a second later: same revision, same stock, yet recomputed.
+        Assert.Equal(MaterialViewOutcome.Computed, rig.Refresh(MaterialOperation.Craft, out var after));
+        Assert.Equal(rig.Fresh(MaterialOperation.Craft), after.Rows);
+        Assert.NotEqual(before.Rows, after.Rows);
+        Assert.Equal(MaterialViewOutcome.Reused, rig.Refresh(MaterialOperation.Craft, out _));
+    }
+
+    [Fact]
+    public void Forgetting_one_character_keeps_the_others()
+    {
+        var rig = new Rig();
+        rig.Refresh(MaterialOperation.Build, out _);
+        rig.Service.ForgetViews(new CastleId(999, 1));
+        Assert.Equal(1, rig.Service.CachedViews);
+        rig.Service.ForgetViews(rig.World.Player);
+        Assert.Equal(0, rig.Service.CachedViews);
+    }
+
+    [Fact]
+    public void A_throwing_revision_counts_one_fault_per_refresh()
+    {
+        var rig = new Rig();
+        rig.Refresh(MaterialOperation.Build, out _);
+        rig.Provider.ThrowOnRevision = true;
+        Assert.Equal(MaterialViewOutcome.Computed, rig.Refresh(MaterialOperation.Build, out _));
+        Assert.Equal(1, rig.Registry.Status().Faults);
+        Assert.Equal(MaterialViewOutcome.Computed, rig.Refresh(MaterialOperation.Build, out _));
+        Assert.Equal(2, rig.Registry.Status().Faults);
     }
 
     [Fact]

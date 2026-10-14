@@ -477,6 +477,10 @@ internal static unsafe class MaterialSeamRuntime
             bool dirty = Dirty.Contains(user);
             if (!everyone && !dirty) continue;
             var character = new CastleId(s.CharacterIndex, s.CharacterVersion);
+            // Dirty is cleared after this refresh: drop every cached view of the character now, so a
+            // view this refresh skips (Craft with no workstation open, Upgrade with no heart window)
+            // is recomputed when it is next refreshed instead of reused.
+            if (dirty) _service.ForgetViews(character);
             var userEntity = new Entity { Index = s.UserIndex, Version = s.UserVersion };
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }

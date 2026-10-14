@@ -2758,8 +2758,9 @@ must not move items, must not call back into `ctx.MaterialSource` and must not t
 - **Governed with no sources is zero, not vanilla.** For an operation the provider governs, an ingredient it returns `null` for keeps the game's own rules, but an ingredient it governs with no sources (an empty `SpendOrder`, or no container that holds it) counts as **zero** in the game's check, even when the plot's own shared storage holds it: the pool replaces the game's shared storage. Give every ingredient of every cost the provider can be asked about a source, or return `null` for it. (Live 2026-10-14: a sword repair needed a third ingredient, Gem Dust, with no bound source, and the game refused the repair at its check.)
 - `Revision(ctx)`: changes whenever the provider's policy does; part of the displayed-view fingerprint.
   The server reuses a player's displayed view while the revision is unchanged and none of the stock
-  the view read changed, **without calling `Candidates` or `Sources` again**: a new answer from either
-  must come with a new revision. Keep it stable otherwise (a counter bumped on a real change, not a
+  the view read changed, **without calling `Candidates` or `Sources` again**: when an answer from either
+  changes, bump the revision or call `Invalidate(user)` (that player's views, every operation) or
+  `InvalidateAll`; either one is enough. Keep the revision stable otherwise (a counter bumped on a real change, not a
   clock or a per-call value), or every view is recomputed every second
   ([refresh cost](#refresh-cost)). `Revision` itself is called once per player and view every second,
   so it must be cheap.
@@ -2912,7 +2913,8 @@ is open). At most 1500 items, flagged when cut.
 
 A view is recomputed (the provider asked for `Candidates` and each item's `Sources`, every total
 counted) only when it is new, the player was marked by an invalidation (`Invalidate(user)` or
-`InvalidateAll`) or a governed payment, the provider registered, went away or was replaced, or when
+`InvalidateAll`) or a governed payment (which drops every cached view of that player, so a Craft or
+Upgrade view not refreshed at that moment, its window closed, is recomputed when the window reopens), the provider registered, went away or was replaced, or when
 anything the last computation depended on differs at the next refresh:
 
 - the provider's `Revision(ctx)` for that context;
@@ -2935,9 +2937,9 @@ reads plus the provider's `Candidates` and `Sources` calls.
 
 This is the display only: a governed check and its payment never read a cached view or the refresh's
 reads. They ask the provider and count the containers live at the check, as before. Provider authors keep the
-refresh cheap by returning a stable `Revision` that changes exactly when an answer of `Candidates` or
-`Sources` would change, and by calling `ctx.MaterialSource.Invalidate(user)` rather than
-`InvalidateAll` when only one player's answer changed. `materials status` (development bridge) and
+refresh cheap by keeping `Revision` stable while their answers stay the same, and when an answer of
+`Candidates` or `Sources` changes, by bumping it or calling `ctx.MaterialSource.Invalidate(user)`
+(either is enough; prefer `Invalidate(user)` over `InvalidateAll` when only one player's answer changed). `materials status` (development bridge) and
 `Status` show `views` (packets sent), `recomputes` and `skips`.
 
 On the client the game's merged count is replaced only when all of these hold; otherwise the game's

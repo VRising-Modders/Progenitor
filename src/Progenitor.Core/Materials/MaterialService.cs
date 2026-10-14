@@ -321,6 +321,21 @@ internal sealed class MaterialService
     internal void ForgetViews() => _views.Clear();
 
     /// <summary>
+    /// Drop every cached view of <paramref name="character"/>, whatever the operation: the player was
+    /// invalidated or paid, so each of its views is recomputed the next time it is refreshed, also a
+    /// view this refresh does not cover (a Craft view while no workstation is open, an Upgrade view
+    /// while no heart window is).
+    /// </summary>
+    internal void ForgetViews(CastleId character)
+    {
+        if (_views.Count == 0) return;
+        List<(CastleId, MaterialOperation)>? drop = null;
+        foreach (var key in _views.Keys)
+            if (key.Item1.Equals(character)) (drop ??= new()).Add(key);
+        if (drop != null) foreach (var k in drop) _views.Remove(k);
+    }
+
+    /// <summary>
     /// A refresh that covers every online player starts: cached views nobody asked for since the
     /// previous such refresh (a player gone offline, a station left) are dropped.
     /// </summary>
@@ -341,12 +356,9 @@ internal sealed class MaterialService
         if (entry.NoReuse || !ReferenceEquals(entry.Provider, provider)) return false;
         if (!_world.TryContext(entry.Context.Character, operation, out var context) || !context.Equals(entry.Context)) return false;
         long revision;
+        // A throwing Revision means a recompute; the recompute asks again and counts the fault once.
         try { revision = provider.Revision(in context); }
-        catch (Exception e)
-        {
-            Fault("Revision", e);
-            return false;
-        }
+        catch { return false; }
         if (revision != entry.Revision) return false;
         if (!entry.Governed) return true;
 
