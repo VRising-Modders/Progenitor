@@ -92,11 +92,15 @@ internal sealed class HandshakeSessionMemory
 }
 
 /// <summary>
-/// RESEND1 (live 2026-10-14): what the server's handshake request said last, so a mid-session change of the required
-/// table — a server plugin hot-loaded or unloaded from <c>progenitor-reload</c> — is re-sent to every connected client.
-/// Before, the request went out only at a join or a Core generation change, so a client never learned that a server part
-/// had loaded (its needs-server-part rows stayed gray) or gone (nothing paused). A swap (unload, then load) settles for
-/// <see cref="SettleSeconds"/> and is re-sent only when the rows differ from the ones last sent. Game-free.
+/// RESEND1 (live 2026-10-14): what the server's handshake request said <b>to each user</b>, so a mid-session change of the
+/// required table — a server plugin hot-loaded or unloaded from <c>progenitor-reload</c> — is re-sent to every connected
+/// client whose handshake is ok. Before, the request went out only at a join or a Core generation change, so a client
+/// never learned that a server part had loaded (its needs-server-part rows stayed gray) or gone (nothing paused).
+/// <para>The stamp is kept per user (review M1): a join, soft re-ask or refresh inside the settle window updates only
+/// that user, never hiding the change from the others. A user mid-join when the table changed is compared again when
+/// its answer is accepted (M2). Each successful re-send counts one outstanding answer (L1), so back-to-back re-sends
+/// cannot leave a later answer judged as a join. A swap (unload, then load) settles for <see cref="SettleSeconds"/>
+/// and re-sends nothing when the rows end up as they were. Game-free.</para>
 /// </summary>
 internal sealed class HandshakeRequirementWatch
 {
@@ -104,7 +108,8 @@ internal sealed class HandshakeRequirementWatch
     internal const double SettleSeconds = 1.0;
 
     private readonly object _gate = new();
-    private string? _announced;
+    private readonly Dictionary<int, string> _sent = new();
+    private readonly Dictionary<int, int> _resends = new();
     private bool _scheduled;
 
     /// <summary>The rows as an order-free text: guid, version, level, rule and declared, one row per guid.</summary>
@@ -124,10 +129,20 @@ internal sealed class HandshakeRequirementWatch
         return string.Join("\n", parts);
     }
 
-    /// <summary>A request with these rows went out (a join's ask, a re-ask, a refresh, a re-send).</summary>
-    internal void NoteSent(string stamp)
+    /// <summary>A request with these rows reached <paramref name="userIndex"/> (a join's ask, a re-ask, a refresh, a re-send).</summary>
+    internal void NoteSent(int userIndex, string stamp)
     {
-        lock (_gate) _announced = stamp ?? "";
+        if (userIndex < 0) return;
+        lock (_gate) _sent[userIndex] = stamp ?? "";
+    }
+
+    /// <summary>
+    /// True when <paramref name="userIndex"/> was sent a request whose rows differ from <paramref name="now"/>. A user never
+    /// sent one this generation is not stale: whatever asks it next asks with the rows of then.
+    /// </summary>
+    internal bool IsStale(int userIndex, string now)
+    {
+        lock (_gate) return _sent.TryGetValue(userIndex, out var stamp) && !string.Equals(stamp, now ?? "", StringComparison.Ordinal);
     }
 
     /// <summary>The required table changed: true when a settle-then-compare should be scheduled (none is pending).</summary>
@@ -141,7 +156,7 @@ internal sealed class HandshakeRequirementWatch
         }
     }
 
-    /// <summary>The scheduled compare could not be posted: let the next change schedule one.</summary>
+    /// <summary>The compare ran (or could not be posted): the next change schedules another. Called from a finally.</summary>
     internal void Unschedule()
     {
         lock (_gate) _scheduled = false;
@@ -153,25 +168,38 @@ internal sealed class HandshakeRequirementWatch
         get { lock (_gate) return _scheduled; }
     }
 
-    /// <summary>
-    /// The settled compare: true (and <paramref name="now"/> becomes what was sent) when the rows differ from the last
-    /// request sent. Nothing sent yet this generation is not a change: whoever joins next is asked with the rows of then.
-    /// </summary>
-    internal bool Due(string now)
+    /// <summary>A requirement re-send reached <paramref name="userIndex"/>: one more answer is owed to it.</summary>
+    internal void NoteResendSent(int userIndex)
+    {
+        if (userIndex < 0) return;
+        lock (_gate) _resends[userIndex] = (_resends.TryGetValue(userIndex, out int n) ? n : 0) + 1;
+    }
+
+    /// <summary>An answer from <paramref name="userIndex"/> is being judged: true (and one fewer owed) when a re-send was owed.</summary>
+    internal bool TakeResendAnswer(int userIndex)
     {
         lock (_gate)
         {
-            _scheduled = false;
-            now ??= "";
-            if (_announced == null)
-            {
-                _announced = now;
-                return false;
-            }
-
-            if (string.Equals(_announced, now, StringComparison.Ordinal)) return false;
-            _announced = now;
+            if (!_resends.TryGetValue(userIndex, out int n) || n <= 0) return false;
+            if (n == 1) _resends.Remove(userIndex);
+            else _resends[userIndex] = n - 1;
             return true;
+        }
+    }
+
+    /// <summary>How many re-send answers <paramref name="userIndex"/> still owes.</summary>
+    internal int ResendsOwed(int userIndex)
+    {
+        lock (_gate) return _resends.TryGetValue(userIndex, out int n) ? n : 0;
+    }
+
+    /// <summary>The user disconnected: its stamp and owed answers go with the connection.</summary>
+    internal void Forget(int userIndex)
+    {
+        lock (_gate)
+        {
+            _sent.Remove(userIndex);
+            _resends.Remove(userIndex);
         }
     }
 
@@ -179,7 +207,8 @@ internal sealed class HandshakeRequirementWatch
     {
         lock (_gate)
         {
-            _announced = null;
+            _sent.Clear();
+            _resends.Clear();
             _scheduled = false;
         }
     }
@@ -246,7 +275,8 @@ internal static class HandshakeReask
     /// <summary>RESEND1: the admins' log line for a mismatch that <see cref="KeepConnectedOnMismatch"/> kept connected.</summary>
     internal static string KeptAfterRequirementChangeLine(string name, IReadOnlyList<string> problems) =>
         "Handshake: " + name + " no longer matches this server's mods after they changed mid-session ("
-        + string.Join("; ", problems) + "); they stay connected, and their next join is checked against the new list.";
+        + string.Join("; ", problems) + "); they stay connected for now. Only this answer is let pass: a later re-answer or "
+        + "soft re-ask is judged as usual, and their next join is checked against the new list.";
 
     /// <summary>The admins' log line when a soft re-ask got no answer.</summary>
     internal static string KeptConnectedLine(string name, int sends) =>

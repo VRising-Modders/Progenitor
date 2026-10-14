@@ -31,103 +31,152 @@ public sealed class LiveFindings20261014Tests : IDisposable
         Handshake.ModRecord.CreateDeclared(guid, version, level, NetworkVersionRule.Minor);
 
     /// <summary>
-    /// The compare: nothing sent yet is a baseline, not a change; the same rows in another order are no change; a row
-    /// added, removed or with another version is. What this would catch: a re-send to every client on each swap, or none
-    /// after a load.
+    /// The compare is per user (review M1): a join inside the settle window records only that user's stamp, so the users
+    /// asked before the change are still stale and get the re-send. Same rows in another order are no change; a user never
+    /// sent a request is not stale; a disconnect forgets. What this would catch: one shared "last sent" that a join resets,
+    /// hiding the change from everyone else.
     /// </summary>
     [Fact]
-    public void The_requirement_watch_resends_only_when_the_rows_differ_from_the_last_request()
+    public void The_requirement_watch_compares_each_user_against_what_that_user_was_sent()
     {
         var watch = new HandshakeRequirementWatch();
-        string a = HandshakeRequirementWatch.Stamp(new[] { Row("a.mod"), Row("b.mod") });
-        string ba = HandshakeRequirementWatch.Stamp(new[] { Row("b.mod"), Row("a.mod") });
-        Assert.Equal(a, ba);
-
-        Assert.True(watch.TrySchedule());
-        Assert.False(watch.TrySchedule(), "one compare at a time");
-        Assert.False(watch.Due(a), "nothing was sent yet: a baseline");
-        Assert.False(watch.Scheduled);
-
-        // A join was asked with [a, b]; a swap (unload, load) settles to the same rows: nothing to send.
-        watch.NoteSent(a);
-        Assert.True(watch.TrySchedule());
-        Assert.False(watch.Due(ba));
-
-        // A server plugin loaded: a third row. Then it unloaded again.
+        string ab = HandshakeRequirementWatch.Stamp(new[] { Row("a.mod"), Row("b.mod") });
+        Assert.Equal(ab, HandshakeRequirementWatch.Stamp(new[] { Row("b.mod"), Row("a.mod") }));
         string abc = HandshakeRequirementWatch.Stamp(new[] { Row("a.mod"), Row("b.mod"), Row("c.mod") });
-        Assert.True(watch.TrySchedule());
-        Assert.True(watch.Due(abc));
-        Assert.False(watch.Due(abc), "sent once");
-        Assert.True(watch.Due(a));
-        // Another version or level is a change too.
-        Assert.True(watch.Due(HandshakeRequirementWatch.Stamp(new[] { Row("a.mod", "1.1.0"), Row("b.mod") })));
-        Assert.True(watch.Due(HandshakeRequirementWatch.Stamp(new[]
-            { Row("a.mod", "1.1.0", NetworkCompatibilityLevel.ServerMustHave), Row("b.mod") })));
+
+        watch.NoteSent(0, ab);
+        watch.NoteSent(1, ab);
+        // c.mod loads; user 2 joins inside the settle window and is asked with the new rows.
+        watch.NoteSent(2, abc);
+        Assert.True(watch.IsStale(0, abc));
+        Assert.True(watch.IsStale(1, abc));
+        Assert.False(watch.IsStale(2, abc), "the joiner already has the new rows");
+        Assert.False(watch.IsStale(3, abc), "never sent a request: nothing to correct");
+        // A swap that settles back to the same rows is no change.
+        Assert.False(watch.IsStale(0, ab));
+        // Another version or level is a change.
+        Assert.True(watch.IsStale(0, HandshakeRequirementWatch.Stamp(new[] { Row("a.mod", "1.1.0"), Row("b.mod") })));
+        Assert.True(watch.IsStale(0, HandshakeRequirementWatch.Stamp(new[]
+            { Row("a.mod", "1.0.0", NetworkCompatibilityLevel.ServerMustHave), Row("b.mod") })));
+        watch.Forget(0);
+        Assert.False(watch.IsStale(0, abc));
         Assert.Equal("", HandshakeRequirementWatch.Stamp(Array.Empty<Handshake.ModRecord>()));
     }
 
     /// <summary>
-    /// A server plugin's <c>Require</c> on load and its <c>Unrequire</c> on unload schedule the compare; the request
-    /// helper every send goes through notes the rows it sent. What this would catch: the hook dropped from the table's
-    /// writers, which is the defect (the request went out only at a join or a Core swap).
+    /// Owed answers are counted (review L1): two back-to-back re-sends owe two answers, so the first answer settling one
+    /// leaves the second still treated as a re-send answer (a mismatch keeps the player connected). One schedule at a time,
+    /// cleared by <c>Unschedule</c>. What this would catch: a yes/no flag the first answer clears, letting the second kick.
     /// </summary>
     [Fact]
-    public void Require_and_Unrequire_schedule_the_compare_and_every_request_notes_its_rows()
+    public void Owed_resend_answers_are_counted_and_the_schedule_is_single()
     {
-        Handshake.Require("example.server.part", "2.0.0", NetworkCompatibilityLevel.NoNeedForSync, NetworkVersionRule.Minor);
-        Assert.True(Handshake.RequirementWatch.Scheduled);
-        Assert.False(Handshake.RequirementWatch.Due(HandshakeRequirementWatch.Stamp(Handshake.RequestRowsNow())));
+        var watch = new HandshakeRequirementWatch();
+        Assert.False(watch.TakeResendAnswer(4), "no re-send, no owed answer: judged as usual");
+        watch.NoteResendSent(4);
+        watch.NoteResendSent(4);
+        Assert.Equal(2, watch.ResendsOwed(4));
+        Assert.True(watch.TakeResendAnswer(4));
+        Assert.True(watch.TakeResendAnswer(4), "the second answer is still a re-send answer");
+        Assert.False(watch.TakeResendAnswer(4));
+        watch.NoteResendSent(4);
+        watch.Forget(4);
+        Assert.Equal(0, watch.ResendsOwed(4));
 
-        // A join is asked with the current rows (PackRequestNow notes them).
-        var packed = Handshake.PackRequestNow();
-        Assert.Contains(packed.Rows, r => r.Guid == "example.server.part");
-        Assert.False(Handshake.RequirementWatch.Due(HandshakeRequirementWatch.Stamp(Handshake.RequestRowsNow())));
-
-        // The plugin unloads mid-session: the compare is scheduled and finds a change.
-        Handshake.Unrequire("example.server.part");
-        Assert.True(Handshake.RequirementWatch.Scheduled);
-        Assert.True(Handshake.RequirementWatch.Due(HandshakeRequirementWatch.Stamp(Handshake.RequestRowsNow())));
-
-        // Loads again: a change back.
-        Handshake.Require("example.server.part", "2.0.0", NetworkCompatibilityLevel.NoNeedForSync, NetworkVersionRule.Minor);
-        Assert.True(Handshake.RequirementWatch.Scheduled);
-        Assert.True(Handshake.RequirementWatch.Due(HandshakeRequirementWatch.Stamp(Handshake.RequestRowsNow())));
+        Assert.True(watch.TrySchedule());
+        Assert.False(watch.TrySchedule(), "one compare at a time");
+        watch.Unschedule();
+        Assert.True(watch.TrySchedule());
+        watch.Reset();
+        Assert.False(watch.Scheduled);
     }
 
     /// <summary>
-    /// The live glue, source-checked (it needs the server world): every request is packed through
-    /// <c>PackRequestNow</c>; the settled compare re-sends to handshake-ok users only, with the policy's capability row,
-    /// and marks them; a mismatch in that answer keeps an already-ok user connected; disconnect and uninstall forget.
+    /// A server plugin's <c>Require</c> on load and its <c>Unrequire</c> on unload schedule the compare, and the stamp of the
+    /// request as packed now follows the table. What this would catch: the hook dropped from the table's writers, which is
+    /// the defect (the request went out only at a join or a Core swap).
     /// </summary>
     [Fact]
-    public void The_live_resend_reaches_ok_users_and_a_mismatch_in_its_answer_never_kicks()
+    public void Require_and_Unrequire_schedule_the_compare_against_the_request_as_packed_now()
+    {
+        int scheduled = 0;
+        Handshake.TestRequirementCompareScheduled = () => scheduled++;
+        string before = Handshake.RequestStampNow();
+        Handshake.RequirementWatch.NoteSent(0, before);
+
+        Handshake.Require("example.server.part", "2.0.0", NetworkCompatibilityLevel.NoNeedForSync, NetworkVersionRule.Minor);
+        Assert.Equal(1, scheduled);
+        Assert.True(Handshake.RequirementWatch.Scheduled);
+        var packed = Handshake.PackRequestNow(out string stamp);
+        Assert.Contains(packed.Rows, r => r.Guid == "example.server.part");
+        Assert.Equal(Handshake.RequestStampNow(), stamp);
+        Assert.True(Handshake.RequirementWatch.IsStale(0, stamp), "user 0 was asked before the load");
+
+        // Unload while the compare is still pending: no second schedule; the stamp is back where user 0 was.
+        Handshake.Unrequire("example.server.part");
+        Assert.Equal(1, scheduled);
+        Assert.False(Handshake.RequirementWatch.IsStale(0, Handshake.RequestStampNow()), "a swap back is no change");
+        Handshake.RequirementWatch.Unschedule();
+        Handshake.Require("example.server.part", "2.0.0", NetworkCompatibilityLevel.NoNeedForSync, NetworkVersionRule.Minor);
+        Assert.Equal(2, scheduled);
+    }
+
+    /// <summary>
+    /// The live glue, source-checked (it needs the server world): every request is packed through <c>PackRequestNow</c> and
+    /// records its stamp per user only after a successful send; the compare re-sends to ok users whose stamp differs and
+    /// clears its schedule in a finally; an accepted answer from a stale user is re-sent (M2); an answer settles one owed
+    /// re-send answer before either branch, and a mismatch then keeps an already-ok user connected.
+    /// </summary>
+    [Fact]
+    public void The_live_resend_reaches_stale_ok_users_and_a_mismatch_in_its_answer_never_kicks()
     {
         Assert.True(HandshakeReask.KeepConnectedOnMismatch(requirementResend: true, wasAlreadyOk: true));
         Assert.False(HandshakeReask.KeepConnectedOnMismatch(requirementResend: false, wasAlreadyOk: true));
         Assert.False(HandshakeReask.KeepConnectedOnMismatch(requirementResend: true, wasAlreadyOk: false));
-        Assert.Contains("stay connected", HandshakeReask.KeptAfterRequirementChangeLine("a player", new[] { "x" }), StringComparison.Ordinal);
+        string line = HandshakeReask.KeptAfterRequirementChangeLine("a player", new[] { "x" });
+        Assert.Contains("a later re-answer or soft re-ask is judged as usual", line, StringComparison.Ordinal);
 
         string handshake = Source("src/Progenitor.Core/Networking/Handshake.cs").Replace("\r\n", "\n");
-        string refresh = Source("src/Progenitor.Core/Networking/HandshakeRefresh.cs");
+        string refresh = Source("src/Progenitor.Core/Networking/HandshakeRefresh.cs").Replace("\r\n", "\n");
         Assert.DoesNotContain("Compare.PackRequest(RequestRowsNow())", handshake, StringComparison.Ordinal);
         Assert.DoesNotContain("Compare.PackRequest(RequestRowsNow())", refresh, StringComparison.Ordinal);
+        Assert.Contains("if (sent) RequirementWatch.NoteSent(index, requestStamp);", refresh);
+        Assert.Equal(2, Count(handshake, "if (sent) RequirementWatch.NoteSent(ev.UserIndex, requestStamp);"));
         Assert.Contains("Dev.MainThread.PostDelayed(HandshakeRequirementWatch.SettleSeconds, ResendRequestIfRequirementsChanged, DeadlineOwner);", handshake);
 
-        int start = handshake.IndexOf("private static void ResendRequestIfRequirementsChanged()", StringComparison.Ordinal);
-        Assert.True(start > 0);
-        int end = handshake.IndexOf("private static unsafe void OnRequest(", start, StringComparison.Ordinal);
-        string resend = handshake.Substring(start, end - start);
+        string resend = Between(handshake, "private static void ResendRequestIfRequirementsChanged()", "private static unsafe void OnRequest(");
         Assert.Contains("if (AnswerWatch.GetStatus(user.Index) != HandshakeAnswerWatch.Status.Ok) continue;", resend);
+        Assert.Contains("if (!RequirementWatch.IsStale(user.Index, now)) continue;", resend);
+        Assert.Contains("finally\n        {\n            // Review L3", resend);
+        Assert.Contains("if (!CustomEvents.SendToUser(world, entity, RequestEventId, list)) return false;\n        RequirementWatch.NoteSent(user.Index, stamp);\n        RequirementWatch.NoteResendSent(user.Index);", resend);
         Assert.Contains("PolicyAsksForReport(requestRows, user.Index, LabelOf(ev));", resend);
-        Assert.Contains("RequirementResends.Add(user.Index)", resend);
         Assert.DoesNotContain("Disconnect", resend, StringComparison.Ordinal);
         Assert.DoesNotContain("ArmAnswerDeadline", resend, StringComparison.Ordinal);
 
+        int take = handshake.IndexOf("bool requirementResend = RequirementWatch.TakeResendAnswer(user.Index);", StringComparison.Ordinal);
+        int okBranch = handshake.IndexOf("if (problems.Count == 0)", take, StringComparison.Ordinal);
         int keep = handshake.IndexOf("HandshakeReask.KeepConnectedOnMismatch(requirementResend,", StringComparison.Ordinal);
         int note = handshake.IndexOf("RefusedJoins.Note(user.Index, failedIds, server, answered, user.PlatformId);", StringComparison.Ordinal);
+        Assert.True(take > 0 && take < okBranch, "the owed answer is taken once, before either branch");
         Assert.True(keep > 0 && keep < note, "the keep-connected check comes before the refusal path");
-        Assert.Contains("lock (RequirementResends) RequirementResends.Remove(ev.User.Index);", handshake);
-        Assert.Contains("RequirementWatch.Reset();", handshake);
+        Assert.Contains("if (world != null && RequirementWatch.IsStale(user.Index, RequestStampNow()))", handshake);
+        Assert.Contains("RequirementWatch.Forget(ev.User.Index);", handshake);
+    }
+
+    private static int Count(string text, string part)
+    {
+        int n = 0;
+        for (int at = text.IndexOf(part, StringComparison.Ordinal); at >= 0; at = text.IndexOf(part, at + part.Length, StringComparison.Ordinal)) n++;
+        return n;
+    }
+
+    private static string Between(string text, string start, string end)
+    {
+        int a = text.IndexOf(start, StringComparison.Ordinal);
+        Assert.True(a >= 0, start);
+        int b = text.IndexOf(end, a, StringComparison.Ordinal);
+        Assert.True(b > a, end);
+        return text.Substring(a, b - a);
     }
 
     /// <summary>
@@ -157,7 +206,7 @@ public sealed class LiveFindings20261014Tests : IDisposable
     /// Live 2026-10-14: <c>2.0.0 Â· progenitor-reload</c> and <c>Progenitor Core 2026.10.14.5 Â· Bootstrap …</c> in a
     /// <c>mods_ui</c> status read through <c>tools/mcp/call.mjs</c> from Windows PowerShell; the screen drew both
     /// correctly. The strings are built with exactly one U+00B7 (no U+00C2), and both bridge serializers escape it to
-    /// <c>·</c> ASCII, so the wire cannot carry the double encoding; <c>call.mjs</c> keeps that on its own stdout
+    /// <c>\u00B7</c> ASCII, so the wire cannot carry the double encoding; <c>call.mjs</c> keeps that on its own stdout
     /// (<c>tools/mcp/test/call-mail.test.mjs</c>). What this would catch: a source file re-saved in another encoding, or
     /// a serializer that passes non-ASCII through.
     /// </summary>
