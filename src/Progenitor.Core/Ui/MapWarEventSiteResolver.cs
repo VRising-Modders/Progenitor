@@ -59,6 +59,21 @@ internal static class VanillaSiteRuntime
         VanillaAttachRegistry.UseHeartbeat(FrameHeartbeat.Install);
 
         if (onFrame == null || !VanillaUiSites.IsDefined(site)) return null;
+
+        // P6: the panel sites have their own resolver (VanillaPanelSiteResolver.cs) on their own
+        // mappers; the heartbeat above is shared.
+        if (VanillaUiSites.IsPanel(site))
+        {
+            try { return UnityUiRuntime.WatchPanelSite(site, onFrame); }
+            catch (Exception e)
+            {
+                // A mapper type the game no longer has fails here, once, at install.
+                if (VanillaSiteHealth.ReportMissing(site, "watch: " + e.GetType().Name))
+                    Plugin.Logger?.LogWarning(VanillaSiteHealth.Line(site, "watch: " + e.GetType().Name + ": " + e.Message));
+                return null;
+            }
+        }
+
         if (site != VanillaUiSite.MapWarEventInfo) return null;
 
         try

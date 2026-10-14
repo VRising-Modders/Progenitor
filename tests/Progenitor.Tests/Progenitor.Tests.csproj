@@ -417,6 +417,9 @@
          and all four are decidable from an instance id and three booleans. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaUiSite.cs" Link="Linked\VanillaUiSite.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachPlan.cs" Link="Linked\VanillaAttachPlan.cs" />
+    <!-- P6: panel sites. The open/close/target tracker, the placement rules and the
+         missing-site reporter are game-free; VanillaPanelSiteResolver.cs is the Unity half. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanel.cs" Link="Linked\VanillaPanel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\IVanillaAttachHandle.cs" Link="Linked\IVanillaAttachHandle.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachHandle.cs" Link="Linked\VanillaAttachHandle.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachRegistry.cs" Link="Linked\VanillaAttachRegistry.cs" />

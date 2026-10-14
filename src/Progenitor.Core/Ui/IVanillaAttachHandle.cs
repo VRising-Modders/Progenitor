@@ -89,4 +89,73 @@ public interface IVanillaAttachHandle : IDisposable
     /// row behind by forgetting one. Null entries render as empty.
     /// </summary>
     void SetRows(IReadOnlyList<string> rows);
+
+    /// <summary>
+    /// P6: where on the panel this attachment sits, after <see cref="VanillaPanelAnchor.Default"/>
+    /// was resolved to the site's default. <see cref="VanillaPanelAnchor.Default"/> for the map card.
+    /// </summary>
+    VanillaPanelAnchor Anchor => VanillaPanelAnchor.Default;
+
+    /// <summary>
+    /// P6: the panel is open right now (for the tooltip site: a tooltip is shown over an item).
+    /// Always false for the map card, which reports no open state.
+    /// </summary>
+    bool IsOpen => false;
+
+    /// <summary>P6: what the open panel shows; <see cref="VanillaPanelTarget.None"/> while closed.</summary>
+    VanillaPanelTarget Target => VanillaPanelTarget.None;
+
+    /// <summary>
+    /// P6: be told when the panel opens, closes or starts showing another target. Runs on the main
+    /// thread inside the site's frame watch, <b>before</b> this frame's rows and buttons are
+    /// synchronized, so a <see cref="SetRows"/> from the handler shows on the same frame. Subscribing
+    /// while the panel is open delivers one <see cref="VanillaPanelChange.Opened"/> straight away.
+    /// Dispose the returned lease (or the handle) to unsubscribe. A disabled handle never calls it.
+    /// </summary>
+    IDisposable OnPanel(Action<VanillaPanelEvent> handler) => NoLease.Instance;
+
+    /// <summary>
+    /// P6: add a button. On the panel sites it is a clone of the game's own inventory bar button
+    /// (its art, hover and press states), captioned in the window's own font, and sized and spaced by
+    /// the vanilla group (inline anchors) or by the column (edge anchors). Like a row it is
+    /// addressed by position and survives the panel being closed and reopened: the caption and the
+    /// click handler live on the handle, and the clone is rewired to the same Bootstrap click slot
+    /// each time it is rebuilt. On the map card and the tooltip site the button is disabled.
+    /// </summary>
+    IUiButton Button(string caption) => DisabledAttachButton.Instance;
+
+    /// <summary>How many buttons this attachment holds.</summary>
+    int ButtonCount => 0;
+}
+
+/// <summary>An inert lease for defaulted members.</summary>
+internal sealed class NoLease : IDisposable
+{
+    internal static readonly NoLease Instance = new();
+
+    public void Dispose() { }
+}
+
+/// <summary>The button a site without buttons hands back: valid, disabled, inert.</summary>
+internal sealed class DisabledAttachButton : IUiButton
+{
+    internal static readonly DisabledAttachButton Instance = new();
+
+    public string Text { get => ""; set { } }
+
+    public bool Visible { get => false; set { } }
+
+    public bool Enabled => false;
+
+    public bool IsDisposed => false;
+
+    public UiHandleState State => UiHandleState.Disabled;
+
+    public string PluginId => UiOwnership.UnownedId;
+
+    public string RootName => "";
+
+    public IDisposable OnClick(Action handler) => NoLease.Instance;
+
+    public void Dispose() { }
 }

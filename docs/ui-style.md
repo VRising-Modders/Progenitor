@@ -15,6 +15,7 @@ The reference is **Progenitor.ControlsSample** (`samples/Progenitor.ControlsSamp
 | A small window used during play | `Ui.Panel(title, ctx.Owner, ctx.Guid)`, then `panel.GameWindow()`, then the controls, then `panel.Show()` | The game's popup frame and the same grid as a Mods page; placed and tiled with other panels, not modal. Inside `namespace` code that also uses `Progenitor.Ui`, write the factory as an alias, `using UiApi = Progenitor.Ui.Ui;`, as both samples do. |
 | A question or a confirmation | `ctx.Dialogs` (`Confirm`, `Notice`, `Choose`, `Prompt`) or `panel.ConfirmButton` | The game's popup, modal, controller-ready, starts on the safe choice. |
 | HUD elements next to the game's own | Cloned vanilla widgets ([ui.md](ui.md#native-control-styling-and-lifecycle)) | Only when the element must sit inside the game's HUD. |
+| A button or line on a chest, station, inventory, castle heart or item tooltip | `Ui.AttachToVanilla(site, anchor, ...)` ([ui.md](ui.md#vanilla-panel-sites-p6)) | The game's own button and text, placed by the framework's placement rules. Prefer an inline anchor (`BesideSort`, `BesideRename`) for one or two actions; use an edge column for more. Captions are one or two words, never colored. |
 
 Prefer the first row that fits. A settings value belongs on the settings page even when the mod also has a page of its own.
 

@@ -1,0 +1,544 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+
+namespace Progenitor.Ui;
+
+/// <summary>
+/// Where on a vanilla panel an attachment sits (spec P6). Which anchors a site accepts is part of
+/// the site's catalog entry (<see cref="VanillaUiSites"/>); an anchor a site does not list gives a
+/// disabled handle and one log line, the same answer an undefined site gets.
+/// </summary>
+public enum VanillaPanelAnchor
+{
+    /// <summary>The site's own default: the first anchor its catalog entry lists.</summary>
+    Default = 0,
+
+    /// <summary>
+    /// A column of mod buttons and rows outside the panel's left frame edge, top-aligned with the
+    /// panel's item grid. Placed by Progenitor, never laid out by the game, and hidden (with one log
+    /// line) when it would leave the screen or overlap another vanilla panel.
+    /// </summary>
+    LeftEdge = 1,
+
+    /// <summary>The same column outside the panel's right frame edge.</summary>
+    RightEdge = 2,
+
+    /// <summary>
+    /// Mod buttons inside the vanilla button group that holds the panel's rename button, right after
+    /// it. The game's own layout group sizes and spaces them, which is what makes them line up with
+    /// the vanilla buttons at every resolution.
+    /// </summary>
+    BesideRename = 3,
+
+    /// <summary>
+    /// Mod buttons inside the inventory's bottom button bar, right after the sort button. The bar's
+    /// own layout group sizes and spaces them.
+    /// </summary>
+    BesideSort = 4,
+
+    /// <summary>The item tooltip's own text column, after the description (<see cref="VanillaUiSite.InventoryTooltip"/>).</summary>
+    TooltipBody = 5,
+}
+
+/// <summary>Which vanilla window an attachment's panel belongs to.</summary>
+public enum VanillaPanelKind
+{
+    /// <summary>No panel (the site is closed, or the site is not a panel).</summary>
+    None = 0,
+
+    /// <summary>A storage container (chest, stash, the castle's storage buildings).</summary>
+    Container = 1,
+
+    /// <summary>A crafting workstation (workbench, tailor, and the other recipe stations).</summary>
+    Workstation = 2,
+
+    /// <summary>A refinement station (furnace, sawmill, grinder, and the other converters).</summary>
+    RefinementStation = 3,
+
+    /// <summary>The castle heart window.</summary>
+    CastleHeart = 4,
+
+    /// <summary>The character menu's own inventory (no external target).</summary>
+    Character = 5,
+}
+
+/// <summary>
+/// What a vanilla panel is showing: the client entity it was opened on, that entity's
+/// <c>NetworkId</c>, and for the tooltip site the hovered item.
+///
+/// <para><b>Mapping to the server.</b> The client entity is only meaningful in the client world.
+/// The <c>NetworkId</c> is what the game itself uses to name the same object on both sides
+/// (<see cref="NetworkIdIndex"/> and <see cref="NetworkIdGeneration"/> are its
+/// <c>Normal_Index</c> and <c>Normal_Generation</c>); send the three raw words
+/// (<see cref="NetworkId0"/> .. <see cref="NetworkId2"/>) to the server and resolve them there.
+/// It is a session-local allocation: never persist it, and never persist <see cref="EntityIndex"/>
+/// either.</para>
+/// </summary>
+public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
+{
+    /// <summary>Create a target. Public so tests and samples can describe one.</summary>
+    public VanillaPanelTarget(
+        VanillaPanelKind kind,
+        int entityIndex,
+        int entityVersion,
+        int networkId0 = 0,
+        int networkId1 = 0,
+        int networkId2 = 0,
+        int itemGuid = 0,
+        int itemAmount = 0)
+    {
+        Kind = kind;
+        EntityIndex = entityIndex;
+        EntityVersion = entityVersion;
+        NetworkId0 = networkId0;
+        NetworkId1 = networkId1;
+        NetworkId2 = networkId2;
+        ItemGuid = itemGuid;
+        ItemAmount = itemAmount;
+    }
+
+    /// <summary>The window the panel belongs to.</summary>
+    public VanillaPanelKind Kind { get; }
+
+    /// <summary>Client-world <c>Entity.Index</c> of the container or station, 0 when there is none.</summary>
+    public int EntityIndex { get; }
+
+    /// <summary>Client-world <c>Entity.Version</c>.</summary>
+    public int EntityVersion { get; }
+
+    /// <summary>First 4 bytes of the target's <c>NetworkId</c> (<c>Normal_Index</c>).</summary>
+    public int NetworkId0 { get; }
+
+    /// <summary>Bytes 4..7 of the <c>NetworkId</c> (<c>Normal_Generation</c> in the low byte).</summary>
+    public int NetworkId1 { get; }
+
+    /// <summary>Bytes 8..11 of the <c>NetworkId</c> (its type).</summary>
+    public int NetworkId2 { get; }
+
+    /// <summary>For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered item's <c>PrefabGUID</c>, else 0.</summary>
+    public int ItemGuid { get; }
+
+    /// <summary>For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered stack's amount, else 0.</summary>
+    public int ItemAmount { get; }
+
+    /// <summary>The <c>NetworkId</c>'s <c>Normal_Index</c>.</summary>
+    public int NetworkIdIndex => NetworkId0;
+
+    /// <summary>The <c>NetworkId</c>'s <c>Normal_Generation</c>.</summary>
+    public int NetworkIdGeneration => NetworkId1 & 0xFF;
+
+    /// <summary>True when the panel is not bound to an entity (the character inventory, or nothing).</summary>
+    public bool HasEntity => EntityIndex != 0 || EntityVersion != 0;
+
+    /// <summary>True when a <c>NetworkId</c> was read for the target.</summary>
+    public bool HasNetworkId => NetworkId0 != 0 || NetworkId1 != 0 || NetworkId2 != 0;
+
+    /// <summary>The empty target: no panel.</summary>
+    public static VanillaPanelTarget None => default;
+
+    /// <inheritdoc />
+    public bool Equals(VanillaPanelTarget other) =>
+        Kind == other.Kind && EntityIndex == other.EntityIndex && EntityVersion == other.EntityVersion
+        && NetworkId0 == other.NetworkId0 && NetworkId1 == other.NetworkId1 && NetworkId2 == other.NetworkId2
+        && ItemGuid == other.ItemGuid && ItemAmount == other.ItemAmount;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => obj is VanillaPanelTarget t && Equals(t);
+
+    /// <inheritdoc />
+    public override int GetHashCode() =>
+        HashCode.Combine(Kind, EntityIndex, EntityVersion, NetworkId0, NetworkId1, NetworkId2, ItemGuid, ItemAmount);
+
+    /// <summary>Equality operator.</summary>
+    public static bool operator ==(VanillaPanelTarget a, VanillaPanelTarget b) => a.Equals(b);
+
+    /// <summary>Inequality operator.</summary>
+    public static bool operator !=(VanillaPanelTarget a, VanillaPanelTarget b) => !a.Equals(b);
+
+    /// <summary>
+    /// One grep-friendly line: <c>kind=Container entity=812:3 net=40:1</c>, plus
+    /// <c>item=&lt;guid&gt;x&lt;amount&gt;</c> for a tooltip.
+    /// </summary>
+    public override string ToString()
+    {
+        var s = "kind=" + Kind + " entity=" + EntityIndex.ToString(CultureInfo.InvariantCulture) + ":"
+            + EntityVersion.ToString(CultureInfo.InvariantCulture)
+            + " net=" + (HasNetworkId
+                ? NetworkIdIndex.ToString(CultureInfo.InvariantCulture) + ":"
+                  + NetworkIdGeneration.ToString(CultureInfo.InvariantCulture)
+                : "none");
+        if (ItemGuid != 0)
+            s += " item=" + ItemGuid.ToString(CultureInfo.InvariantCulture) + "x"
+                + ItemAmount.ToString(CultureInfo.InvariantCulture);
+        return s;
+    }
+}
+
+/// <summary>What happened to a vanilla panel.</summary>
+public enum VanillaPanelChange
+{
+    /// <summary>The panel opened. <see cref="VanillaPanelEvent.Target"/> is what it shows.</summary>
+    Opened = 1,
+
+    /// <summary>The panel is still open but shows something else (another container, another hovered item).</summary>
+    TargetChanged = 2,
+
+    /// <summary>The panel closed. <see cref="VanillaPanelEvent.Previous"/> is what it showed.</summary>
+    Closed = 3,
+}
+
+/// <summary>One open, close or target change of a vanilla panel site.</summary>
+public readonly struct VanillaPanelEvent
+{
+    /// <summary>Create an event. Public so tests can build one.</summary>
+    public VanillaPanelEvent(VanillaUiSite site, VanillaPanelChange change, VanillaPanelTarget target, VanillaPanelTarget previous)
+    {
+        Site = site;
+        Change = change;
+        Target = target;
+        Previous = previous;
+    }
+
+    /// <summary>The site that changed.</summary>
+    public VanillaUiSite Site { get; }
+
+    /// <summary>What changed.</summary>
+    public VanillaPanelChange Change { get; }
+
+    /// <summary>What the panel shows now; <see cref="VanillaPanelTarget.None"/> after a close.</summary>
+    public VanillaPanelTarget Target { get; }
+
+    /// <summary>What it showed before; <see cref="VanillaPanelTarget.None"/> on an open.</summary>
+    public VanillaPanelTarget Previous { get; }
+
+    /// <inheritdoc />
+    public override string ToString() => Site + " " + Change + " " + (Change == VanillaPanelChange.Closed ? Previous : Target);
+}
+
+/// <summary>
+/// The open/close/target edge logic of one attachment, with no Unity in it. Each frame the site's
+/// sample says "open, showing T" or "closed"; this turns that level signal into the three edges a
+/// plugin subscribes to. Game-free so the edges are tested, not assumed.
+/// </summary>
+internal sealed class VanillaPanelTracker
+{
+    internal bool IsOpen { get; private set; }
+
+    internal VanillaPanelTarget Target { get; private set; }
+
+    /// <summary>
+    /// Feed one frame. Returns the edge it produced, or null when nothing changed (the common case:
+    /// every frame the panel stays open on the same target, and every frame it stays closed).
+    /// </summary>
+    internal VanillaPanelChange? Observe(bool open, in VanillaPanelTarget target, out VanillaPanelTarget previous)
+    {
+        previous = Target;
+        if (!open)
+        {
+            if (!IsOpen) return null;
+            IsOpen = false;
+            Target = VanillaPanelTarget.None;
+            return VanillaPanelChange.Closed;
+        }
+
+        if (!IsOpen)
+        {
+            IsOpen = true;
+            Target = target;
+            previous = VanillaPanelTarget.None;
+            return VanillaPanelChange.Opened;
+        }
+
+        if (Target == target) return null;
+        Target = target;
+        return VanillaPanelChange.TargetChanged;
+    }
+
+    /// <summary>Forget everything (dispose). A later frame starts from closed.</summary>
+    internal void Reset()
+    {
+        IsOpen = false;
+        Target = VanillaPanelTarget.None;
+    }
+}
+
+/// <summary>A rectangle in one canvas's units, Y up (Unity's convention). Game-free.</summary>
+internal readonly struct UiRect
+{
+    internal UiRect(float x, float y, float width, float height)
+    {
+        X = x;
+        Y = y;
+        Width = width < 0 ? 0 : width;
+        Height = height < 0 ? 0 : height;
+    }
+
+    /// <summary>Left edge.</summary>
+    internal float X { get; }
+
+    /// <summary>Bottom edge.</summary>
+    internal float Y { get; }
+
+    internal float Width { get; }
+
+    internal float Height { get; }
+
+    internal float XMax => X + Width;
+
+    internal float YMax => Y + Height;
+
+    internal bool IsEmpty => Width <= 0 || Height <= 0;
+
+    internal static UiRect FromMinMax(float xMin, float yMin, float xMax, float yMax) =>
+        new(xMin, yMin, xMax - xMin, yMax - yMin);
+
+    /// <summary>Interiors intersect by more than <paramref name="slack"/> on both axes. Touching edges do not overlap.</summary>
+    internal bool Overlaps(in UiRect other, float slack = 0.5f) =>
+        !IsEmpty && !other.IsEmpty
+        && X < other.XMax - slack && other.X < XMax - slack
+        && Y < other.YMax - slack && other.Y < YMax - slack;
+
+    /// <summary><paramref name="inner"/> lies inside this rect, within <paramref name="slack"/>.</summary>
+    internal bool Contains(in UiRect inner, float slack = 0.5f) =>
+        inner.X >= X - slack && inner.XMax <= XMax + slack
+        && inner.Y >= Y - slack && inner.YMax <= YMax + slack;
+
+    public override string ToString() =>
+        "(" + Fmt(X) + "," + Fmt(Y) + " " + Fmt(Width) + "x" + Fmt(Height) + ")";
+
+    private static string Fmt(float v) => v.ToString("0", CultureInfo.InvariantCulture);
+}
+
+/// <summary>Whether an attachment's container may be shown where it is.</summary>
+internal enum VanillaFit
+{
+    /// <summary>The runtime cannot say (a site that does no placement, or a fake). Treated as fits.</summary>
+    Unknown = 0,
+
+    /// <summary>Placed, on screen, overlapping nothing vanilla.</summary>
+    Fits = 1,
+
+    /// <summary>Would leave the screen or cover a vanilla element: the container is hidden.</summary>
+    Blocked = 2,
+}
+
+/// <summary>A placement verdict and the one word the log line carries.</summary>
+internal readonly struct VanillaFitResult
+{
+    internal VanillaFitResult(VanillaFit fit, string reason, UiRect rect = default)
+    {
+        Fit = fit;
+        Reason = reason ?? "";
+        Rect = rect;
+    }
+
+    internal VanillaFit Fit { get; }
+
+    /// <summary><c>ok</c>, <c>offscreen</c>, <c>overlap:&lt;name&gt;</c>, <c>overflow:&lt;name&gt;</c>, <c>unlaid</c>.</summary>
+    internal string Reason { get; }
+
+    /// <summary>Where the container goes (edge columns) or is (inline), in the parent's units.</summary>
+    internal UiRect Rect { get; }
+
+    internal bool Shown => Fit != VanillaFit.Blocked;
+
+    internal static VanillaFitResult Unknown => new(VanillaFit.Unknown, "unknown");
+}
+
+/// <summary>A vanilla rect the placement must not cover, with a name for the log line.</summary>
+internal readonly struct UiObstacle
+{
+    internal UiObstacle(string name, UiRect rect)
+    {
+        Name = name ?? "?";
+        Rect = rect;
+    }
+
+    internal string Name { get; }
+
+    internal UiRect Rect { get; }
+}
+
+/// <summary>
+/// The layout rules for P6 attachments, as arithmetic with no Unity in it. The Unity half reads
+/// rects (world corners mapped into the container parent's local space) and hands them here; what
+/// comes back is either a rect to place the container at or a refusal with a reason. Tested at the
+/// canvas sizes 1920x1080, 2560x1440 and 3840x2160 produce under the game's height-matched scaler.
+///
+/// <para><b>The rules.</b></para>
+/// <list type="number">
+/// <item><description><b>Edge columns</b> sit outside the panel's frame, <see cref="EdgeGap"/>
+/// canvas units from it, their top edge on the top edge of the panel's item grid (the frame's top
+/// when the panel has no grid), one button per row at the donor button's own size, with the donor
+/// group's spacing between them.</description></item>
+/// <item><description>A column that would leave the canvas, or cover any other vanilla panel that is
+/// open at the same time (the player inventory beside a chest), is <b>not drawn</b>. There is no
+/// fallback position: a mod button floating somewhere else reads as bolted on.</description></item>
+/// <item><description><b>Inline anchors</b> are laid out by the game's own layout group. After the
+/// game has laid them out, every button in the group must still lie inside the panel's frame and
+/// ours must cover no vanilla button; otherwise ours is hidden and the group reflows back.</description></item>
+/// <item><description>The <b>tooltip line</b> goes into the tooltip's own text column only when that
+/// column is governed by a vertical layout group, so the tooltip grows around it.</description></item>
+/// </list>
+/// </summary>
+internal static class VanillaPanelPlacement
+{
+    /// <summary>Distance between a vanilla frame edge and an edge column, in canvas units.</summary>
+    internal const float EdgeGap = 8f;
+
+    /// <summary>Spacing between stacked column items when the donor group reports none.</summary>
+    internal const float DefaultSpacing = 8f;
+
+    /// <summary>Height of one text row in a column, when the runtime has no donor to measure.</summary>
+    internal const float DefaultRowHeight = 24f;
+
+    /// <summary>Size of an edge column: buttons first, then rows, one per line.</summary>
+    internal static (float Width, float Height) ColumnSize(
+        int buttons, int rows, float buttonWidth, float buttonHeight, float rowHeight, float spacing)
+    {
+        int b = buttons < 0 ? 0 : buttons;
+        int r = rows < 0 ? 0 : rows;
+        int items = b + r;
+        if (items == 0) return (0f, 0f);
+        float sp = spacing < 0 ? 0 : spacing;
+        float h = b * buttonHeight + r * rowHeight + (items - 1) * sp;
+        return (buttonWidth, h);
+    }
+
+    /// <summary>
+    /// Place an edge column beside <paramref name="panel"/>. <paramref name="gridTop"/> is the top of
+    /// the panel's item grid, or null to align with the frame's top.
+    /// </summary>
+    internal static VanillaFitResult PlaceEdge(
+        VanillaPanelAnchor anchor,
+        in UiRect panel,
+        float? gridTop,
+        float width,
+        float height,
+        in UiRect bounds,
+        IReadOnlyList<UiObstacle>? obstacles)
+    {
+        if (anchor != VanillaPanelAnchor.LeftEdge && anchor != VanillaPanelAnchor.RightEdge)
+            return new VanillaFitResult(VanillaFit.Blocked, "anchor");
+        if (panel.IsEmpty) return new VanillaFitResult(VanillaFit.Blocked, "panel");
+
+        // An empty column is nothing on screen; it fits trivially and is placed where it would go,
+        // so a first button added later lands in the right spot.
+        float top = gridTop.HasValue && gridTop.Value <= panel.YMax && gridTop.Value >= panel.Y
+            ? gridTop.Value
+            : panel.YMax;
+        float x = anchor == VanillaPanelAnchor.LeftEdge ? panel.X - EdgeGap - width : panel.XMax + EdgeGap;
+        var rect = new UiRect(x, top - height, width, height);
+        if (rect.IsEmpty) return new VanillaFitResult(VanillaFit.Fits, "empty", rect);
+
+        if (!bounds.IsEmpty && !bounds.Contains(rect))
+            return new VanillaFitResult(VanillaFit.Blocked, "offscreen", rect);
+
+        if (obstacles != null)
+        {
+            for (int i = 0; i < obstacles.Count; i++)
+            {
+                if (rect.Overlaps(obstacles[i].Rect))
+                    return new VanillaFitResult(VanillaFit.Blocked, "overlap:" + obstacles[i].Name, rect);
+            }
+        }
+
+        return new VanillaFitResult(VanillaFit.Fits, "ok", rect);
+    }
+
+    /// <summary>
+    /// Verify an inline anchor after the game's layout group placed it: every member of the group
+    /// (ours included) inside <paramref name="panel"/>, and ours covering no vanilla member.
+    /// </summary>
+    internal static VanillaFitResult CheckInline(
+        in UiRect ours, in UiRect panel, IReadOnlyList<UiObstacle>? vanillaMembers)
+    {
+        if (panel.IsEmpty) return new VanillaFitResult(VanillaFit.Blocked, "panel");
+        if (ours.IsEmpty) return new VanillaFitResult(VanillaFit.Fits, "empty", ours);
+        if (!panel.Contains(ours)) return new VanillaFitResult(VanillaFit.Blocked, "overflow:mod", ours);
+        if (vanillaMembers != null)
+        {
+            for (int i = 0; i < vanillaMembers.Count; i++)
+            {
+                var m = vanillaMembers[i];
+                if (m.Rect.IsEmpty) continue;
+                if (!panel.Contains(m.Rect)) return new VanillaFitResult(VanillaFit.Blocked, "overflow:" + m.Name, ours);
+                if (ours.Overlaps(m.Rect)) return new VanillaFitResult(VanillaFit.Blocked, "overlap:" + m.Name, ours);
+            }
+        }
+
+        return new VanillaFitResult(VanillaFit.Fits, "ok", ours);
+    }
+
+    /// <summary>The tooltip line is only placed into a column the game lays out.</summary>
+    internal static VanillaFitResult CheckTooltip(bool parentHasVerticalLayout) =>
+        parentHasVerticalLayout
+            ? new VanillaFitResult(VanillaFit.Fits, "ok")
+            : new VanillaFitResult(VanillaFit.Blocked, "unlaid");
+
+    /// <summary>
+    /// The preferred size the inline container asks the vanilla group for: <paramref name="buttons"/>
+    /// donor-sized buttons side by side with the group's spacing.
+    /// </summary>
+    internal static float InlineWidth(int buttons, float buttonWidth, float spacing)
+    {
+        if (buttons <= 0) return 0f;
+        return buttons * buttonWidth + (buttons - 1) * (spacing < 0 ? 0 : spacing);
+    }
+}
+
+/// <summary>
+/// "A site that cannot be found after a game update hides and logs one line." The one place that
+/// decides whether a missing piece has already been reported, so a per-frame resolver can call it
+/// every frame without spamming. Game-free; cleared on Core Uninstall.
+/// </summary>
+internal static class VanillaSiteHealth
+{
+    private static readonly object Gate = new();
+    private static readonly Dictionary<VanillaUiSite, string> Missing = new();
+
+    /// <summary>
+    /// Record that <paramref name="site"/> is missing <paramref name="what"/>. True exactly once per
+    /// site and generation: the caller logs on true and stays silent after.
+    /// </summary>
+    internal static bool ReportMissing(VanillaUiSite site, string what)
+    {
+        lock (Gate)
+        {
+            if (Missing.ContainsKey(site)) return false;
+            Missing[site] = what ?? "?";
+            return true;
+        }
+    }
+
+    /// <summary>Whether a site has been reported missing in this generation.</summary>
+    internal static bool IsMissing(VanillaUiSite site)
+    {
+        lock (Gate) return Missing.ContainsKey(site);
+    }
+
+    /// <summary>The line the first report produces. One format, so docs can quote it.</summary>
+    internal static string Line(VanillaUiSite site, string what) =>
+        "Ui: site " + VanillaUiSites.Key(site) + " not found (" + (what ?? "?")
+        + "); its attachments stay hidden until the game provides it.";
+
+    /// <summary><c>missing=&lt;site&gt;:&lt;what&gt;,...</c> for the pin line, or empty.</summary>
+    internal static string Describe()
+    {
+        lock (Gate)
+        {
+            if (Missing.Count == 0) return "";
+            var parts = new List<string>();
+            foreach (var kv in Missing) parts.Add(VanillaUiSites.Key(kv.Key) + ":" + kv.Value);
+            parts.Sort(StringComparer.Ordinal);
+            return "missing=" + string.Join(",", parts);
+        }
+    }
+
+    /// <summary>Core Uninstall and tests: the next generation reports afresh.</summary>
+    internal static void Clear()
+    {
+        lock (Gate) Missing.Clear();
+    }
+}

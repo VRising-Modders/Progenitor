@@ -50,7 +50,8 @@ internal readonly struct VanillaSiteSample
         bool donorPresent,
         bool parentLayoutGroup,
         string? parentName = null,
-        bool parentSizeFitter = false)
+        bool parentSizeFitter = false,
+        VanillaPanelTarget target = default)
     {
         Resolved = resolved;
         InstanceId = instanceId;
@@ -58,7 +59,15 @@ internal readonly struct VanillaSiteSample
         ParentLayoutGroup = parentLayoutGroup;
         ParentSizeFitter = parentSizeFitter;
         ParentName = parentName ?? "";
+        Target = target;
     }
+
+    /// <summary>
+    /// P6: what the panel shows this frame (the container or station entity, its <c>NetworkId</c>,
+    /// the hovered item for the tooltip). Meaningful only when <see cref="Resolved"/>; for a panel
+    /// site <see cref="Resolved"/> is "the panel is open".
+    /// </summary>
+    internal VanillaPanelTarget Target { get; }
 
     /// <summary>The site instance was found this frame (for the map card: <c>GetMapMenu()</c> was not null).</summary>
     internal bool Resolved { get; }

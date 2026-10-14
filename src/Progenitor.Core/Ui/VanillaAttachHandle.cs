@@ -100,13 +100,25 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private bool _warnedContainer;
     private int _doomedTries;
 
+    // P6: panel state, buttons and placement. Buttons are held like rows: the caption, the
+    // visibility and the Bootstrap click slot id live here, the clone is disposable.
+    private readonly VanillaPanelTracker _tracker = new();
+    private readonly List<Action<VanillaPanelEvent>> _panelHandlers = new();
+    private readonly List<string> _captions = new();
+    private readonly List<bool> _buttonShown = new();
+    private readonly List<ushort> _buttonIds = new();
+    private readonly List<IRuntimeWidget?> _buttons = new();
+    private VanillaFit _fit = VanillaFit.Unknown;
+    private string _fitReason = "";
+
     internal VanillaAttachHandle(
         VanillaUiSite site,
         string pluginId,
         string containerName,
         object? owner,
         IUiRuntime runtime,
-        bool enabled)
+        bool enabled,
+        VanillaPanelAnchor anchor = VanillaPanelAnchor.Default)
     {
         Site = site;
         PluginId = pluginId ?? UiOwnership.UnownedId;
@@ -114,9 +126,80 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         Owner = owner;
         _runtime = runtime ?? NullUiRuntime.Instance;
         Enabled = enabled;
+        Anchor = anchor;
+        IsPanel = VanillaUiSites.IsPanel(site);
     }
 
     public VanillaUiSite Site { get; }
+
+    public VanillaPanelAnchor Anchor { get; }
+
+    /// <summary>A P6 panel site: open/close tracking, buttons and placement apply.</summary>
+    internal bool IsPanel { get; }
+
+    public bool IsOpen
+    {
+        get { lock (_gate) return _tracker.IsOpen; }
+    }
+
+    public VanillaPanelTarget Target
+    {
+        get { lock (_gate) return _tracker.Target; }
+    }
+
+    public int ButtonCount
+    {
+        get { lock (_gate) return _captions.Count; }
+    }
+
+    /// <summary>The last placement verdict (diagnostics and tests).</summary>
+    internal VanillaFit Fit
+    {
+        get { lock (_gate) return _fit; }
+    }
+
+    public IDisposable OnPanel(Action<VanillaPanelEvent> handler)
+    {
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        if (!Enabled || !IsPanel || IsDisposed) return NoLease.Instance;
+        bool open;
+        VanillaPanelTarget target;
+        lock (_gate)
+        {
+            _panelHandlers.Add(handler);
+            open = _tracker.IsOpen;
+            target = _tracker.Target;
+        }
+
+        // A plugin that subscribes while the panel is already open (a hot reload with a chest open)
+        // must not have to wait for a close and reopen to learn what is shown.
+        if (open) Raise(new[] { handler }, new VanillaPanelEvent(Site, VanillaPanelChange.Opened, target, VanillaPanelTarget.None));
+
+        return new PanelLease(this, handler);
+    }
+
+    private void Unsubscribe(Action<VanillaPanelEvent> handler)
+    {
+        lock (_gate) _panelHandlers.Remove(handler);
+    }
+
+    public IUiButton Button(string caption)
+    {
+        if (!Enabled || IsDisposed || !VanillaUiSites.Info(Site).AcceptsButtons) return DisabledAttachButton.Instance;
+        int index;
+        ushort id = UiSlotTable.Alloc(Owner);
+        lock (_gate)
+        {
+            index = _captions.Count;
+            _captions.Add(caption ?? "");
+            _buttonShown.Add(true);
+            _buttonIds.Add(id);
+            _buttons.Add(null);
+            if (ContainerAliveLocked()) SyncButtonsLocked();
+        }
+
+        return new VanillaAttachButton(this, index, id);
+    }
 
     public string PluginId { get; }
 
@@ -146,7 +229,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             lock (_gate)
             {
                 _visible = value;
-                if (ContainerAliveLocked()) _container!.Visible = value;
+                if (ContainerAliveLocked()) _container!.Visible = value && _fit != VanillaFit.Blocked;
             }
         }
     }
@@ -203,6 +286,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     /// </summary>
     public void Dispose()
     {
+        ushort[] ids;
         lock (_gate)
         {
             // Read under the gate every write to it is also under, so this is the whole of the
@@ -212,12 +296,37 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             DestroyContainerLocked();
             _texts.Clear();
             _rows.Clear();
+            ids = _buttonIds.ToArray();
+            _captions.Clear();
+            _buttonShown.Clear();
+            _buttonIds.Clear();
+            _buttons.Clear();
+            _panelHandlers.Clear();
+            _tracker.Reset();
 
             // Last, and inside the gate. This is the ordering the whole finding is about.
             Volatile.Write(ref _disposed, 1);
         }
 
+        // The Bootstrap click slots go with the handle: the listener comes off whatever event it is
+        // on and the Core-side handler entry is dropped, so a click on a clone Unity has not
+        // destroyed yet reaches nothing.
+        ReleaseButtonSlots(ids);
         VanillaAttachRegistry.Settle(this);
+    }
+
+    private void ReleaseButtonSlots(ushort[] ids)
+    {
+        for (int i = 0; i < ids.Length; i++)
+        {
+            try { _runtime.Unwire(ids[i]); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button unwire threw: " + e.Message);
+            }
+
+            UiSlotTable.Release(ids[i]);
+        }
     }
 
     /// <summary>Objects whose destroy was refused and is still being retried. Diagnostics and tests.</summary>
@@ -260,6 +369,11 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             return;
         }
 
+        // P6: the open/close/target edge, raised before this frame's plan so a handler's SetRows
+        // or Button lands in the same frame's build. Raised outside the gate: a handler is plugin
+        // code and may call straight back into this handle.
+        if (IsPanel) ObservePanel(sample);
+
         bool disposedSince = false;
         lock (_gate)
         {
@@ -289,6 +403,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             switch (decision.Action)
             {
                 case VanillaAttachAction.Keep:
+                    if (IsPanel) FitLocked(first: false);
                     return;
 
                 case VanillaAttachAction.Degrade:
@@ -347,7 +462,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         IRuntimeWidget? container = null;
         try
         {
-            container = _runtime.BuildAttachContainer(Site, ContainerName, decision.Parent, decision.IgnoreLayout);
+            container = IsPanel
+                ? _runtime.BuildPanelContainer(Site, Anchor, ContainerName)
+                : _runtime.BuildAttachContainer(Site, ContainerName, decision.Parent, decision.IgnoreLayout);
         }
         catch (Exception e)
         {
@@ -373,17 +490,233 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         _container = container;
         _instanceId = sample.InstanceId;
         _warnedContainer = false;
+        // _fitReason is deliberately kept across builds: the tooltip rebuilds on every hover, and a
+        // reason already said for this handle is not said again until the container fits once.
+        _fit = VanillaFit.Unknown;
         container.Visible = _visible;
         SyncRowsLocked();
+        if (IsPanel)
+        {
+            SyncButtonsLocked();
+            FitLocked(first: true);
+        }
+
+        // The tooltip site rebuilds on every hover, so its attach line is said once per handle
+        // rather than once per build: a line per hovered item would bury the log it explains.
+        if (Site == VanillaUiSite.InventoryTooltip && _saidTooltipAttach) return;
+        if (Site == VanillaUiSite.InventoryTooltip) _saidTooltipAttach = true;
 
         Plugin.Logger?.LogInfo(
             "Ui: attached " + VanillaUiSites.Key(Site)
+            + (IsPanel ? " anchor=" + VanillaUiSites.AnchorKey(Anchor) + " fit=" + FitWord(_fit) + " buttons=" + _buttons.Count : "")
             + " parent=" + (string.IsNullOrEmpty(sample.ParentName) ? "?" : sample.ParentName)
-            + " layout=" + decision.LayoutWord
+            + " layout=" + (IsPanel ? LayoutWordFor(Anchor) : decision.LayoutWord)
             + " rows=" + _rows.Count
             + " source=" + decision.Reason
             + " instance=" + sample.InstanceId
             + " plugin=" + PluginId);
+    }
+
+    private bool _saidTooltipAttach;
+
+    /// <summary>
+    /// The <c>layout=</c> word for a panel anchor: <c>column</c> (placed by Progenitor beside the
+    /// frame), <c>group</c> (laid out by the game's own button group) or <c>tooltip</c>.
+    /// </summary>
+    internal static string LayoutWordFor(VanillaPanelAnchor anchor) =>
+        VanillaUiSites.IsEdge(anchor) ? "column"
+        : anchor == VanillaPanelAnchor.TooltipBody ? "tooltip"
+        : "group";
+
+    private static string FitWord(VanillaFit fit) =>
+        fit == VanillaFit.Fits ? "ok" : fit == VanillaFit.Blocked ? "blocked" : "unknown";
+
+    /// <summary>
+    /// Ask the runtime to place or verify the container and show it only when it fits. A change to
+    /// <see cref="VanillaFit.Blocked"/> is said once per container (one line, no spam), and so is
+    /// the recovery, because "hidden because it would overlap" is otherwise indistinguishable from
+    /// "never attached".
+    /// </summary>
+    private void FitLocked(bool first)
+    {
+        if (!ContainerAliveLocked()) return;
+        VanillaFitResult result;
+        try { result = _runtime.FitAttachContainer(Site, Anchor, _container!, _texts.Count, _captions.Count); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " fit threw: " + e.Message);
+            result = new VanillaFitResult(VanillaFit.Blocked, "threw");
+        }
+
+        _fit = result.Fit;
+        bool show = _visible && result.Shown;
+        try { if (_container!.Visible != show) _container.Visible = show; }
+        catch { /* a container Unity just destroyed is the next frame's rebuild */ }
+
+        if (result.Fit == VanillaFit.Blocked && _fitReason != result.Reason)
+        {
+            _fitReason = result.Reason;
+            Plugin.Logger?.LogInfo(
+                "Ui: attach " + VanillaUiSites.Key(Site) + " anchor=" + VanillaUiSites.AnchorKey(Anchor)
+                + " hidden reason=" + result.Reason + " rect=" + result.Rect + " plugin=" + PluginId);
+        }
+        else if (result.Fit == VanillaFit.Fits && _fitReason.Length > 0)
+        {
+            _fitReason = "";
+            Plugin.Logger?.LogInfo(
+                "Ui: attach " + VanillaUiSites.Key(Site) + " anchor=" + VanillaUiSites.AnchorKey(Anchor)
+                + " shown again rect=" + result.Rect + " plugin=" + PluginId);
+        }
+    }
+
+    /// <summary>
+    /// Feed this frame's sample to the tracker and raise the edge it produced, if any. The handler
+    /// list is copied under the gate and invoked outside it.
+    /// </summary>
+    private void ObservePanel(in VanillaSiteSample sample)
+    {
+        VanillaPanelChange? edge;
+        VanillaPanelTarget previous;
+        VanillaPanelTarget current;
+        Action<VanillaPanelEvent>[]? handlers = null;
+        lock (_gate)
+        {
+            if (IsDisposed) return;
+            edge = _tracker.Observe(sample.Resolved, sample.Target, out previous);
+            current = _tracker.Target;
+            if (edge != null && _panelHandlers.Count > 0) handlers = _panelHandlers.ToArray();
+        }
+
+        if (edge == null) return;
+        var evt = new VanillaPanelEvent(Site, edge.Value, current, previous);
+
+        // Open and close of a window are said once each; the tooltip's per-hover edges and a
+        // station's target changes are the plugin's to log if it wants them.
+        if (Site != VanillaUiSite.InventoryTooltip && edge.Value != VanillaPanelChange.TargetChanged)
+        {
+            Plugin.Logger?.LogInfo(
+                "Ui: panel " + VanillaUiSites.Key(Site) + " " + (edge.Value == VanillaPanelChange.Opened ? "opened " + current : "closed " + previous)
+                + " plugin=" + PluginId);
+        }
+
+        if (handlers != null) Raise(handlers, evt);
+    }
+
+    private void Raise(Action<VanillaPanelEvent>[] handlers, VanillaPanelEvent evt)
+    {
+        for (int i = 0; i < handlers.Length; i++)
+        {
+            try { handlers[i](evt); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning(
+                    "Ui: panel " + VanillaUiSites.Key(Site) + " handler threw (plugin=" + PluginId + "): " + e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Make the cloned buttons match <see cref="_captions"/>, and (re)wire each new clone to its
+    /// button's Bootstrap click slot. <c>TryWire</c> replaces the listener on the slot, so the old
+    /// clone's event (destroyed with the old container) is let go in the same call.
+    /// </summary>
+    private void SyncButtonsLocked()
+    {
+        if (!IsPanel || !ContainerAliveLocked()) return;
+        while (_buttons.Count < _captions.Count) _buttons.Add(null);
+        for (int i = 0; i < _captions.Count; i++)
+        {
+            if (_buttons[i] is { Alive: true } live)
+            {
+                WriteRow(live, _captions[i]);
+                if (live.Visible != _buttonShown[i]) live.Visible = _buttonShown[i];
+                continue;
+            }
+
+            IRuntimeWidget? button = null;
+            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i]); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button clone threw: " + e.Message);
+            }
+
+            if (button is not { Alive: true })
+            {
+                _buttons[i] = null;
+                continue;
+            }
+
+            bool wired = false;
+            try { wired = _runtime.TryWire(_buttonIds[i], UiSlotKind.Click, button); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button wire threw: " + e.Message);
+            }
+
+            if (!wired)
+            {
+                // A button that cannot be clicked is worse than no button: it looks like the game's
+                // and does nothing. Destroy it and say so once per build.
+                Plugin.Logger?.LogWarning(
+                    "Ui: attach " + VanillaUiSites.Key(Site) + " button '" + _captions[i] + "' could not be wired; dropped (plugin=" + PluginId + ").");
+                ReleaseLocked(button, "button");
+                _buttons[i] = null;
+                continue;
+            }
+
+            _buttons[i] = button;
+            if (!_buttonShown[i]) button.Visible = false;
+        }
+    }
+
+    internal string CaptionAt(int index)
+    {
+        lock (_gate) return index >= 0 && index < _captions.Count ? _captions[index] : "";
+    }
+
+    internal void SetCaptionAt(int index, string caption)
+    {
+        if (IsDisposed) return;
+        lock (_gate)
+        {
+            if (index < 0 || index >= _captions.Count) return;
+            _captions[index] = caption ?? "";
+            if (index < _buttons.Count && _buttons[index] is { Alive: true } w) WriteRow(w, _captions[index]);
+        }
+    }
+
+    internal bool ButtonShownAt(int index)
+    {
+        lock (_gate)
+            return index >= 0 && index < _buttons.Count && _buttons[index] is { Alive: true } w && w.Visible;
+    }
+
+    internal void SetButtonShownAt(int index, bool shown)
+    {
+        lock (_gate)
+        {
+            if (index < 0 || index >= _buttonShown.Count) return;
+            _buttonShown[index] = shown;
+            if (index < _buttons.Count && _buttons[index] is { Alive: true } w) w.Visible = shown;
+        }
+    }
+
+    private sealed class PanelLease : IDisposable
+    {
+        private VanillaAttachHandle? _owner;
+        private readonly Action<VanillaPanelEvent> _handler;
+
+        internal PanelLease(VanillaAttachHandle owner, Action<VanillaPanelEvent> handler)
+        {
+            _owner = owner;
+            _handler = handler;
+        }
+
+        public void Dispose()
+        {
+            var owner = Interlocked.Exchange(ref _owner, null);
+            owner?.Unsubscribe(_handler);
+        }
     }
 
     /// <summary>
@@ -461,6 +794,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private void DestroyContainerLocked()
     {
         for (int i = 0; i < _rows.Count; i++) _rows[i] = null;
+        for (int i = 0; i < _buttons.Count; i++) _buttons[i] = null;
         var container = _container;
         _container = null;
         _instanceId = 0;
@@ -587,6 +921,98 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     }
 
     private bool ContainerAliveLocked() => _container is { Alive: true };
+}
+
+/// <summary>
+/// One button of a P6 attachment, addressed by position like a row. It holds the Bootstrap click
+/// slot id rather than the clone: the clone is rebuilt on every close and reopen of the panel and
+/// rewired to this same id, so a handler subscribed once keeps working.
+/// </summary>
+internal sealed class VanillaAttachButton : IUiButton
+{
+    private readonly VanillaAttachHandle _owner;
+    private readonly int _index;
+    private readonly ushort _id;
+    private Action? _handler;
+
+    internal VanillaAttachButton(VanillaAttachHandle owner, int index, ushort id)
+    {
+        _owner = owner;
+        _index = index;
+        _id = id;
+    }
+
+    /// <summary>The Bootstrap click slot (tests).</summary>
+    internal ushort WidgetId => _id;
+
+    public string Text
+    {
+        get => _owner.CaptionAt(_index);
+        set => _owner.SetCaptionAt(_index, value ?? "");
+    }
+
+    /// <summary>Whether the button is drawn. Kept across rebuilds; false hides only this button.</summary>
+    public bool Visible
+    {
+        get => _owner.ButtonShownAt(_index);
+        set => _owner.SetButtonShownAt(_index, value);
+    }
+
+    public bool Enabled => _owner.Enabled && !_owner.IsDisposed;
+
+    public bool IsDisposed => _owner.IsDisposed;
+
+    public UiHandleState State =>
+        IsDisposed ? UiHandleState.Disposed
+        : !Enabled ? UiHandleState.Disabled
+        : _owner.IsAttached ? UiHandleState.Shown
+        : UiHandleState.Built;
+
+    public string PluginId => _owner.PluginId;
+
+    public string RootName => _owner.ContainerName;
+
+    public IDisposable OnClick(Action handler)
+    {
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        if (_id == 0 || IsDisposed) return NoLease.Instance;
+        _handler = handler;
+        UiSlotTable.BindClick(_id, Pressed);
+        return new ClickLease(this, handler);
+    }
+
+    private void Pressed()
+    {
+        if (IsDisposed) return;
+        _handler?.Invoke();
+    }
+
+    private void Unbind(Action handler)
+    {
+        if (!ReferenceEquals(_handler, handler)) return;
+        _handler = null;
+        UiSlotTable.BindClick(_id, null);
+    }
+
+    /// <summary>
+    /// A button goes with its attachment. Disposing one on its own would leave the caption list and
+    /// the clones disagreeing about how many there are; hide it with <see cref="Visible"/> instead.
+    /// </summary>
+    public void Dispose() { }
+
+    private sealed class ClickLease : IDisposable
+    {
+        private VanillaAttachButton? _button;
+        private readonly Action _handler;
+
+        internal ClickLease(VanillaAttachButton button, Action handler)
+        {
+            _button = button;
+            _handler = handler;
+        }
+
+        public void Dispose() => Interlocked.Exchange(ref _button, null)?.Unbind(_handler);
+    }
 }
 
 /// <summary>

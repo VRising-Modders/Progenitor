@@ -544,6 +544,34 @@ internal interface IUiRuntime
     /// in which case the implementation has already destroyed it.
     /// </summary>
     IRuntimeWidget? CloneDonorRow(VanillaUiSite site, IRuntimeWidget container, string text) => null;
+
+    /// <summary>
+    /// P6: create the mod-owned container for a panel site at <paramref name="anchor"/>, using the
+    /// panel instance the most recent sample resolved. Edge anchors parent it beside the panel
+    /// (ignored by any vanilla layout group, positioned by <see cref="FitAttachContainer"/>); inline
+    /// anchors put it inside the vanilla button group right after the anchor button; the tooltip
+    /// anchor puts it into the tooltip's text column after the description. Null when it could not
+    /// be built. Must never throw.
+    /// </summary>
+    IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName) => null;
+
+    /// <summary>
+    /// P6: clone the site's button donor into <paramref name="container"/> with
+    /// <paramref name="caption"/>. The clone keeps the game's art and its hover and press transitions,
+    /// loses every inherited persistent <c>UnityEvent</c> call and its icon, and exposes its
+    /// <c>onClick</c> as <see cref="IRuntimeWidget.ClickEvent"/> for the Bootstrap slot. Null when
+    /// no operable button came out.
+    /// </summary>
+    IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption) => null;
+
+    /// <summary>
+    /// P6: place (edge anchors) or verify (inline and tooltip anchors) the container against the
+    /// live panel, per <see cref="VanillaPanelPlacement"/>. Called after every build and every
+    /// frame while attached; a <see cref="VanillaFit.Blocked"/> answer hides the container.
+    /// </summary>
+    VanillaFitResult FitAttachContainer(
+        VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons) =>
+        VanillaFitResult.Unknown;
 }
 
 /// <summary>One cloned widget (or a fake). Handle property writes go through here.</summary>
