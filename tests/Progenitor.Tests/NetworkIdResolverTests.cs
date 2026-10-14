@@ -121,6 +121,26 @@ public class NetworkIdResolverTests
     }
 
     [Fact]
+    public void ForgedGeneration_OnAWarmCache_IsStale_AndKeepsTheRow()
+    {
+        var (src, r) = Rig();
+        Assert.True(Resolve(r, 40, 1, 1, out _, out _, out _));
+        int scans = src.Scans;
+
+        _now += 1;
+        Assert.False(Resolve(r, 40, 7, 1, out _, out _, out string reason));
+        Assert.Contains("stale", reason);
+        Assert.Contains("generation 1", reason);
+
+        // The valid lookup right after still resolves from the map: nothing was evicted or rescanned.
+        _now += 1;
+        Assert.True(Resolve(r, 40, 1, 1, out int ei, out int ev, out _));
+        Assert.Equal((812, 3), (ei, ev));
+        Assert.Equal(scans, src.Scans);
+        Assert.Equal(2, r.Count);
+    }
+
+    [Fact]
     public void DestroyedEntity_IsNotTrustedFromTheCache()
     {
         var (src, r) = Rig();

@@ -191,7 +191,9 @@ public sealed class PluginInventory
     /// station or castle heart it names, issuing the id as <see cref="IdOf(Entity)"/> does. The
     /// words are untrusted: an empty, static or malformed id, one no container carries, a stale
     /// generation or anything that is not a placed container, station or heart gives false with a
-    /// reason. Never throws on bad input. <b>Experimental</b>: not live-verified.
+    /// reason (it names no server entity id). Never throws on bad input. The resolver does not
+    /// check whether this user may touch the container: authorization is yours (for example
+    /// <c>ctx.Castles.RelationTo</c>). <b>Experimental</b>: not live-verified.
     /// </summary>
     public bool TryResolveNetworkId(int index, int generation, int type, out ContainerId id, out Entity owner, out string reason)
     {

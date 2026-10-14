@@ -51,6 +51,8 @@ internal static class Locate
                 return reply;
             }
 
+            // Authorization is the mod's: a real handler checks this user may use the container
+            // (ctx.Castles.RelationTo) before acting on it. This example only locates it.
             reply.Id = id.ToString();
             reply.Owner = owner.Index + ":" + owner.Version;
             if (!ctx.Inventory.TryGetNetworkId(id, out int index, out int generation, out int type, out reason))

@@ -166,7 +166,15 @@ internal sealed class NetworkIdResolver
 
             if (_byIndex.TryGetValue(index, out var row))
             {
-                if (Confirm(row, index, generation)) return Found(row, out entityIndex, out entityVersion, out reason);
+                // The row is judged by its own read-back, never by the request: a forged generation
+                // must not evict a valid row (legitimate lookups would miss until the next rebuild).
+                if (StillValid(row))
+                {
+                    if (row.Generation == generation) return Found(row, out entityIndex, out entityVersion, out reason);
+                    reason = Stale(net, index, row.Generation);
+                    return false;
+                }
+
                 _byIndex.Remove(index);
             }
 
@@ -181,15 +189,13 @@ internal sealed class NetworkIdResolver
             Rebuild(nowMs);
             if (_byIndex.TryGetValue(index, out row))
             {
-                if (row.Generation != generation)
+                if (StillValid(row))
                 {
-                    reason = "network id " + net + " is stale: index " + index.ToString(CultureInfo.InvariantCulture)
-                        + " now carries generation " + row.Generation.ToString(CultureInfo.InvariantCulture)
-                        + " (the object the client saw was destroyed and the id reused)";
+                    if (row.Generation == generation) return Found(row, out entityIndex, out entityVersion, out reason);
+                    reason = Stale(net, index, row.Generation);
                     return false;
                 }
 
-                if (Confirm(row, index, generation)) return Found(row, out entityIndex, out entityVersion, out reason);
                 _byIndex.Remove(index);
             }
 
@@ -204,10 +210,15 @@ internal sealed class NetworkIdResolver
         }
     }
 
-    private bool Confirm(NetworkIdEntry row, int index, int generation) =>
-        row.Generation == generation
-        && _source.TryReadBack(row.EntityIndex, row.EntityVersion, out int i, out int g, out int t)
-        && t == NetworkIdWords.TypeNormal && i == index && g == generation;
+    /// <summary>True while the row's entity still carries the row's own normal id.</summary>
+    private bool StillValid(NetworkIdEntry row) =>
+        _source.TryReadBack(row.EntityIndex, row.EntityVersion, out int i, out int g, out int t)
+        && t == NetworkIdWords.TypeNormal && i == row.Index && g == row.Generation;
+
+    private static string Stale(string net, int index, int current) =>
+        "network id " + net + " is stale: index " + index.ToString(CultureInfo.InvariantCulture)
+        + " now carries generation " + current.ToString(CultureInfo.InvariantCulture)
+        + " (the object the client saw was destroyed and the id reused)";
 
     private static bool Found(NetworkIdEntry row, out int entityIndex, out int entityVersion, out string reason)
     {

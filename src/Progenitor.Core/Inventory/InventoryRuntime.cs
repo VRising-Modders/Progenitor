@@ -439,8 +439,8 @@ internal static class InventoryRuntime
             var found = IdOf(entity, out string why);
             if (found.IsNone)
             {
-                reason = "network id " + NetworkIdWords.Format(index, generation) + " names entity " + ei + ":" + ev
-                    + ", which has no container id: " + why;
+                // No server entity id in the reason: a mod may relay it to the player.
+                reason = "network id " + NetworkIdWords.Format(index, generation) + " names something with no container id: " + why;
                 return false;
             }
 

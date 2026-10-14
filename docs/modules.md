@@ -2098,8 +2098,10 @@ carries, a stale generation and a non-container (a player, a servant) all give f
 never an exception. The resolver keeps its own map built from the `NetworkId` components of castle
 hearts and `InventoryOwner` entities (the game's own map is a native hash map that would need a new
 generic interop instantiation), confirms every hit by reading the entity's id back, and rebuilds at
-most every 250 ms on a miss. Network ids are session-local: persist the `ContainerId`, never the
-words. Request pattern and live procedure: [ui.md, Resolving a target on the server](ui.md#resolving-a-target-on-the-server).
+most every 250 ms on a miss; a forged generation gets the stale reason without evicting the valid
+row. The resolver does not check whether this user may touch the container: authorization is
+yours (for example `ctx.Castles.RelationTo`). Network ids are session-local: persist the
+`ContainerId`, never the words. Request pattern and live procedure: [ui.md, Resolving a target on the server](ui.md#resolving-a-target-on-the-server).
 
 ### Castles: containers, stations and the heart
 

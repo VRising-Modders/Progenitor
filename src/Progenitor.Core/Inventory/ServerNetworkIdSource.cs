@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
 using ProjectM;
+using ProjectM.CastleBuilding;
 using ProjectM.Network;
-using Progenitor.Castles;
 using Progenitor.Ecs;
 using Unity.Entities;
 
@@ -26,8 +26,11 @@ internal sealed class ServerNetworkIdSource : INetworkIdSource
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
         var em = world.EntityManager;
-        foreach (var plot in CastleReader.Plots(world))
-            Add(em, plot.HeartEntity, into);
+        var hearts = Query.Entities(em, includeDisabled: true, includeSystems: false,
+            ComponentIndex.Of<CastleHeart>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<NetworkId>(ComponentType.AccessMode.ReadOnly));
+        for (int i = 0; i < hearts.Count; i++)
+            Add(em, hearts[i], into);
 
         var owners = Query.Entities(em, includeDisabled: true, includeSystems: false,
             ComponentIndex.Of<InventoryOwner>(ComponentType.AccessMode.ReadOnly),
