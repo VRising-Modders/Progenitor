@@ -231,6 +231,18 @@ public static class StationLogic
         return writes;
     }
 
+    /// <summary>
+    /// Whether <paramref name="recipeGuid"/>'s row is enabled right now (false when the station does
+    /// not list it). A refused <c>SetRecipeEnabled</c> reports this, the state nothing changed.
+    /// </summary>
+    public static bool IsEnabled(IReadOnlyList<(int RecipeGuid, bool Disabled)> rows, int recipeGuid)
+    {
+        if (rows == null) throw new ArgumentNullException(nameof(rows));
+        for (int i = 0; i < rows.Count; i++)
+            if (rows[i].RecipeGuid == recipeGuid) return !rows[i].Disabled;
+        return false;
+    }
+
     /// <summary>The refusal <c>SetRecipeEnabled</c> gives for a station kind with no per-recipe switch.</summary>
     public static string NoToggleReason(StationKind kind) => kind switch
     {

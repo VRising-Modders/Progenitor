@@ -1707,7 +1707,7 @@ Three questions stay open on this module: the build-grid step and the `TileBound
 ## Stations
 
 `Progenitor.Stations`, reached as `ctx.Stations` (`PluginStations`). Server only: every member
-throws on the client. Main thread. **Landed, not live-verified**: the reads, the switch and the
+except `CraftsPossible` throws on the client (`CraftsPossible` is pure and works on either side). Main thread. **Landed, not live-verified**: the reads, the switch and the
 sample are source-checked against the game's metadata and its native code (internal research
 notes), built, and game-free tested; nothing has been run in the game yet. Inventories (what sits in
 a station's input and output) are not part of this module.
@@ -1732,7 +1732,7 @@ int crafts = ctx.Stations.CraftsPossible(recipe, new Dictionary<int, long> { [co
 | `CraftsPossible(recipe, sources)` | Whole crafts the item counts in `sources` pay for (the smallest `have / need` over the inputs, rounded down). Pure. |
 | `IsWorking(station)` | True while `Progress(station).State` is `Working`. |
 | `Progress(station)` | `StationProgress`: `State`, `RawStatus`, `RecipeGuid`, `Fraction`, `ElapsedSeconds`, `DurationSeconds`, `RemainingSeconds`, `QueueLength`. Null for a non-station. |
-| `Near(position, radius)` | `StationInfo` (entity, prefab, kind, position, distance) for recipe stations within `radius` meters. |
+| `Near(position, radius)` | `StationInfo` (entity, prefab, kind, position, distance) for recipe stations within `radius` meters. Scans every station in the world: call it on demand (a command, a panel opening), not every tick. |
 
 ### How the game stores it (source-checked)
 
@@ -1764,7 +1764,7 @@ stable station id comes with the castle containers and stations work.
 Isolated test server with a connected client, the Sample loaded, and an admin character standing at
 a powered furnace (castle heart burning blood essence) that lists the copper and sulfur recipes.
 
-1. `.stations list`. The reply lists the furnace with an `index:version` id, `refine`, and a
+1. `.stations list`. The reply lists the furnace with an `index:version@epoch` id, `refine`, and a
    distance under 20 m. The server log has a Sample line `stations: list radius=20 found=N`.
 2. `.stations recipes`. One line per recipe, for example
    `[on] CopperBar: 20 CopperOre -> 1 CopperIngot, 30 s`. Compare with the furnace window: the same
@@ -1781,7 +1781,9 @@ a powered furnace (castle heart burning blood essence) that lists the copper and
 8. At a workbench with a queued craft, `.stations status <id>` shows `Workstation: working`, the
    queued recipe and `queue N`; `.stations toggle <recipe> off <id>` is refused with
    `crafting workstations have no per-recipe switch`.
-9. Disconnect and reconnect the client; the furnace window still shows Sulfur unchecked.
+9. Disconnect and reconnect the client; the furnace window still shows Sulfur unchecked. After a
+   server save reload, `.stations status <id from step 1>` is refused with
+   `That id is from an earlier world load`.
 10. Clean up: `.stations toggle Sulfur on`, take the ore out, and remove the Sample from the reload
     folders.
 

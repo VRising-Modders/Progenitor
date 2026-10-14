@@ -35,7 +35,7 @@ public sealed class StationInfo
 
 /// <summary>
 /// Server reads and the per-recipe switch for castle recipe stations. <c>ctx.Stations</c> is the
-/// plugin-bound surface. Every member throws on the client.
+/// plugin-bound surface. Every member here throws on the client; the pure craft count (<see cref="StationLogic.CraftsPossible(StationRecipe, IReadOnlyDictionary{int, long})"/>, also on <c>ctx.Stations</c>) works anywhere.
 ///
 /// <para>Refinement stations keep their recipe list on the instance in
 /// <c>RefinementstationRecipesBuffer</c> (recipe, <c>Unlocked</c>, <c>Disabled</c>; networked, so a
@@ -56,8 +56,9 @@ public sealed class StationInfo
 /// </summary>
 public static unsafe class Stations
 {
-    /// <summary>Most recipe rows read from one station or recipe buffer.</summary>
-    public const int MaxRows = 256;
+    // Most rows read from one recipe prefab's input, output or link buffer (a sanity bound on prefab
+    // data). A station's own recipe list is read in full, so the toggle's length check never trips on it.
+    private const int MaxPrefabRows = 256;
 
     /// <summary>The recipe machinery <paramref name="station"/> runs.</summary>
     public static StationKind KindOf(World world, Entity station)
@@ -83,7 +84,7 @@ public static unsafe class Stations
         else if (kind == StationKind.Workstation)
         {
             byte* raw = AiRuntime.Buffer<WorkstationRecipesBuffer>(em, station, Layout.WorkstationRecipesBufferStride, false, out int length);
-            for (int i = 0; raw != null && i < length && i < MaxRows; i++)
+            for (int i = 0; raw != null && i < length; i++)
             {
                 int guid = *(int*)(raw + i * Layout.WorkstationRecipesBufferStride + Layout.WorkstationRecipesBufferRecipeGuidOffset);
                 if (guid == 0) continue;
@@ -110,31 +111,51 @@ public static unsafe class Stations
         var shape = new List<(int RecipeGuid, bool Disabled)>(rows.Count);
         foreach (var r in rows) shape.Add((r.Guid, r.Disabled));
         var linked = LinkedRecipes(world, em, recipeGuid);
-        var writes = StationLogic.PlanToggle(shape, recipeGuid, on, linked, out int target, out int linkedChanged, out string reason);
+        var writes = StationLogic.PlanToggle(shape, recipeGuid, on, linked, out _, out int linkedChanged, out string reason);
         if (writes == null)
             return Refuse(recipeGuid, false, reason);
         if (writes.Count == 0)
             return new StationToggleResult { Ok = true, Changed = false, Enabled = on, RecipeGuid = recipeGuid, Reason = reason };
 
+        bool enabledNow = StationLogic.IsEnabled(shape, recipeGuid);
+
+        // Every guard runs before the first byte is written, so a refusal never leaves a partial
+        // toggle: the CastleWorkstation overlay first, then the recipe buffer and its rows.
+        byte* cw = null;
+        if (em.HasComponent(station, ComponentIndex.Of<CastleWorkstation>(ComponentType.AccessMode.ReadOnly)))
+        {
+            try
+            {
+                cw = AiRuntime.RW<CastleWorkstation>(em, station, Layout.CastleWorkstationForceUpdateInStationOffset + 1);
+            }
+            catch (InvalidOperationException e)
+            {
+                return Refuse(recipeGuid, enabledNow, "the station's CastleWorkstation cannot be written (" + e.Message + "); nothing was written");
+            }
+        }
+
         int stride = Layout.RefinementstationRecipesBufferStride;
-        byte* rw = AiRuntime.Buffer<RefinementstationRecipesBuffer>(em, station, stride, true, out int length);
+        byte* rw;
+        int length;
+        try
+        {
+            rw = AiRuntime.Buffer<RefinementstationRecipesBuffer>(em, station, stride, true, out length);
+        }
+        catch (InvalidOperationException e)
+        {
+            return Refuse(recipeGuid, enabledNow, "the station's recipe list cannot be written (" + e.Message + "); nothing was written");
+        }
         if (rw == null || length != rows.Count)
-            return Refuse(recipeGuid, !on, "the station's recipe list changed while it was being written; nothing was written");
+            return Refuse(recipeGuid, enabledNow, "the station's recipe list changed while it was being written; nothing was written");
         foreach (int i in writes)
         {
             if (*(int*)(rw + i * stride + Layout.RefinementstationRecipesBufferRecipeGuidOffset) != shape[i].RecipeGuid)
-                return Refuse(recipeGuid, !on, "the station's recipe list changed while it was being written; nothing was written");
+                return Refuse(recipeGuid, enabledNow, "the station's recipe list changed while it was being written; nothing was written");
         }
         foreach (int i in writes)
             rw[i * stride + Layout.RefinementstationRecipesBufferDisabledOffset] = on ? (byte)0 : (byte)1;
-
-        if (em.HasComponent(station, ComponentIndex.Of<CastleWorkstation>(ComponentType.AccessMode.ReadOnly)))
-        {
-            byte* cw = AiRuntime.RW<CastleWorkstation>(em, station, Layout.CastleWorkstationForceUpdateInStationOffset + 1);
+        if (cw != null)
             cw[Layout.CastleWorkstationForceUpdateInStationOffset] = 1;
-        }
-
-        _ = target;
         Plugin.Logger?.LogInfo("[stations] recipe " + recipeGuid + " " + (on ? "enabled" : "disabled") + " on station "
             + station.Index + ":" + station.Version + " (" + writes.Count + " row(s), " + linkedChanged + " linked)");
         return new StationToggleResult
@@ -185,24 +206,39 @@ public static unsafe class Stations
     /// <summary>
     /// Recipe stations within <paramref name="radius"/> meters (horizontal) of
     /// <paramref name="position"/>, nearest first. Disabled entities are skipped.
+    ///
+    /// <para>Cost: this runs two queries over every station in the world and checks each one, so call
+    /// it on demand (a command, a panel opening, a scan you schedule), not every tick. Only the stations
+    /// inside the radius are allocated a result row; keep the returned entities rather than calling
+    /// it again to find the same station.</para>
     /// </summary>
     public static IReadOnlyList<StationInfo> Near(World world, float3 position, float radius)
     {
         var em = RequireServer(world);
         var found = new List<StationInfo>();
-        // Refinement stations by their own component, workstations by their recipe list; an entity
-        // that matches both is seen once.
         var translation = ComponentIndex.Of<Translation>(ComponentType.AccessMode.ReadOnly);
-        var entities = Query.Entities(em, includeDisabled: false, includeSystems: false,
-            ComponentIndex.Of<Refinementstation>(ComponentType.AccessMode.ReadOnly), translation);
-        entities.AddRange(Query.Entities(em, includeDisabled: false, includeSystems: false,
-            ComponentIndex.Of<WorkstationRecipesBuffer>(ComponentType.AccessMode.ReadOnly), translation));
-        var seen = new HashSet<(int, int)>();
+        var refinement = ComponentIndex.Of<Refinementstation>(ComponentType.AccessMode.ReadOnly);
+        // Refinement stations by their own component, then workstations by their recipe list; an
+        // entity carrying both is taken in the first pass only.
+        Collect(world, em, Query.Entities(em, includeDisabled: false, includeSystems: false, refinement, translation),
+            position, radius, skipRefinement: false, found);
+        Collect(world, em, Query.Entities(em, includeDisabled: false, includeSystems: false,
+                ComponentIndex.Of<WorkstationRecipesBuffer>(ComponentType.AccessMode.ReadOnly), translation),
+            position, radius, skipRefinement: true, found);
+        found.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+        return found;
+    }
+
+    private static void Collect(World world, EntityManager em, List<Entity> entities, float3 position, float radius,
+        bool skipRefinement, List<StationInfo> found)
+    {
+        var refinement = ComponentIndex.Of<Refinementstation>(ComponentType.AccessMode.ReadOnly);
+        float2 center = position.xz;
         foreach (var e in entities)
         {
-            if (!seen.Add((e.Index, e.Version))) continue;
+            if (skipRefinement && em.HasComponent(e, refinement)) continue;
             if (!e.TryRead<Translation>(em, out var tr)) continue;
-            float d = math.distance(tr.Value.xz, position.xz);
+            float d = math.distance(tr.Value.xz, center);
             if (d > radius) continue;
             var kind = Kind(em, e);
             if (kind == StationKind.None) continue;
@@ -210,8 +246,6 @@ public static unsafe class Stations
             PrefabLookup.TryGetName(world, new PrefabGUID(guid), out string name);
             found.Add(new StationInfo { Station = e, PrefabGuid = guid, Name = name, Kind = kind, Position = tr.Value, Distance = d });
         }
-        found.Sort((a, b) => a.Distance.CompareTo(b.Distance));
-        return found;
     }
 
     // ---- reads ------------------------------------------------------------------------------------
@@ -246,7 +280,7 @@ public static unsafe class Stations
         var rows = new List<RefinementRow>();
         int stride = Layout.RefinementstationRecipesBufferStride;
         byte* raw = AiRuntime.Buffer<RefinementstationRecipesBuffer>(em, station, stride, false, out int length);
-        for (int i = 0; raw != null && i < length && i < MaxRows; i++)
+        for (int i = 0; raw != null && i < length; i++)
         {
             byte* row = raw + i * stride;
             rows.Add(new RefinementRow(
@@ -262,7 +296,7 @@ public static unsafe class Stations
         var links = new List<int>();
         if (recipeGuid == 0 || !PrefabLookup.TryGetEntity(world, new PrefabGUID(recipeGuid), out var prefab)) return links;
         byte* raw = AiRuntime.Buffer<RecipeLinkBuffer>(em, prefab, RecipeBufferLayout.LinkStride, false, out int length);
-        for (int i = 0; raw != null && i < length && i < MaxRows; i++)
+        for (int i = 0; raw != null && i < length && i < MaxPrefabRows; i++)
         {
             RecipeBufferLayout.TryReadLink(raw, i, out int guid);
             if (guid != 0) links.Add(guid);
@@ -286,13 +320,13 @@ public static unsafe class Stations
                 hidden = data[Layout.RecipeDataHideInStationOffset] != 0;
             }
             byte* req = AiRuntime.Buffer<RecipeRequirementBuffer>(em, prefab, RecipeBufferLayout.RequirementStride, false, out int reqLength);
-            for (int i = 0; req != null && i < reqLength && i < MaxRows; i++)
+            for (int i = 0; req != null && i < reqLength && i < MaxPrefabRows; i++)
             {
                 RecipeBufferLayout.TryReadRequirement(req, i, out int g, out int a);
                 if (g != 0) inputs.Add(new StationItem(g, a));
             }
             byte* outRaw = AiRuntime.Buffer<RecipeOutputBuffer>(em, prefab, RecipeBufferLayout.OutputStride, false, out int outLength);
-            for (int i = 0; outRaw != null && i < outLength && i < MaxRows; i++)
+            for (int i = 0; outRaw != null && i < outLength && i < MaxPrefabRows; i++)
             {
                 RecipeBufferLayout.TryReadOutput(outRaw, i, out int g, out int a);
                 if (g != 0) outputs.Add(new StationItem(g, a));
@@ -344,6 +378,8 @@ public static unsafe class Stations
             throw new InvalidOperationException("ctx.Stations runs on the server side only");
         if (world == null || !world.IsCreated)
             throw new InvalidOperationException("the game world does not exist yet");
+        if (world.Name != Worlds.ServerName)
+            throw new InvalidOperationException("ctx.Stations needs the server's default world (\"" + Worlds.ServerName + "\"), not \"" + world.Name + "\"");
         return world.EntityManager;
     }
 }

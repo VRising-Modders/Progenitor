@@ -7,6 +7,7 @@ using Progenitor.Stations;
 #if !PROGENITOR_TESTS
 using Progenitor.Commands;
 using Progenitor.Ecs;
+using Progenitor.WorldState;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
@@ -16,7 +17,7 @@ namespace Progenitor.Sample;
 
 /// <summary>
 /// <c>.stations list | recipes | toggle | status</c> over <c>ctx.Stations</c> (<c>docs/api.md</c>
-/// Stations). Server only. A station is named by the <c>index:version</c> id <c>.stations list</c>
+/// Stations). Server only. A station is named by the <c>index:version@epoch</c> id <c>.stations list</c>
 /// prints, or omitted to mean the nearest recipe station within <see cref="NearestRadius"/> meters.
 ///
 /// <para>Parsing and every reply line are game-free so the test project compiles this file.
@@ -40,6 +41,10 @@ internal static class SampleStations
 
     internal const string NoStationReply = "No recipe station within 20 m. Stand next to one or pass an id from .stations list.";
 
+    internal const string NoCharacterReply = "No character entity on this user, so there is no position to search from. Pass an id from .stations list.";
+
+    internal const string StaleIdReply = "That id is from an earlier world load. Run .stations list again and use the new id.";
+
     internal enum Kind
     {
         List = 1,
@@ -57,6 +62,7 @@ internal static class SampleStations
         public bool On;
         public int StationIndex = -1;
         public int StationVersion;
+        public int StationEpoch;
         public bool HasStation => StationIndex >= 0;
     }
 
@@ -101,23 +107,39 @@ internal static class SampleStations
     private static bool OptionalStation(string token, Request request)
     {
         if (token.Length == 0) return true;
-        if (!TryParseId(token, out int index, out int version)) return false;
+        if (!TryParseId(token, out int index, out int version, out int epoch)) return false;
         request.StationIndex = index;
         request.StationVersion = version;
+        request.StationEpoch = epoch;
         return true;
     }
 
-    /// <summary>Parse an <c>index:version</c> entity id.</summary>
-    internal static bool TryParseId(string token, out int index, out int version)
+    /// <summary>
+    /// The id <c>.stations list</c> prints: <c>index:version@epoch</c>. The world epoch makes an id
+    /// from an earlier world load refusable instead of naming whatever entity reuses that slot.
+    /// </summary>
+    internal static string FormatId(int index, int version, int epoch) =>
+        index.ToString(CultureInfo.InvariantCulture) + ":" + version.ToString(CultureInfo.InvariantCulture)
+        + "@" + epoch.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>Parse an <c>index:version@epoch</c> id. The epoch is required.</summary>
+    internal static bool TryParseId(string token, out int index, out int version, out int epoch)
     {
         index = -1;
         version = 0;
+        epoch = 0;
         int colon = token.IndexOf(':');
-        if (colon <= 0 || colon == token.Length - 1) return false;
+        int at = token.IndexOf('@');
+        if (colon <= 0 || at <= colon + 1 || at == token.Length - 1) return false;
         return int.TryParse(token.Substring(0, colon), NumberStyles.Integer, CultureInfo.InvariantCulture, out index)
-            && int.TryParse(token.Substring(colon + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out version)
-            && index >= 0 && version > 0;
+            && int.TryParse(token.Substring(colon + 1, at - colon - 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out version)
+            && int.TryParse(token.Substring(at + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out epoch)
+            && index >= 0 && version > 0 && epoch > 0;
     }
+
+    /// <summary>True when the request names no id, or an id from the current world load.</summary>
+    internal static bool IsCurrent(Request request, int currentEpoch) =>
+        !request.HasStation || request.StationEpoch == currentEpoch;
 
     /// <summary>
     /// The recipe a toggle names: a signed GUID hash, or a recipe name matched case-insensitively,
@@ -244,7 +266,21 @@ internal static class SampleStations
         }
         var world = plugin.World;
         var stations = plugin.Stations;
-        var here = Position(ctx);
+        int epoch = WorldEpoch.Current;
+        if (!IsCurrent(request, epoch))
+        {
+            ctx.Reply(StaleIdReply);
+            SampleLog.Info(Area, "refused: stale id epoch=" + request.StationEpoch + " current=" + epoch);
+            return;
+        }
+
+        float3 here = default;
+        if ((request.Kind == Kind.List || !request.HasStation) && !TryPosition(ctx, out here))
+        {
+            ctx.Reply(NoCharacterReply);
+            SampleLog.Info(Area, "refused: no character");
+            return;
+        }
 
         if (request.Kind == Kind.List)
         {
@@ -313,23 +349,26 @@ internal static class SampleStations
         }
     }
 
-    private static string Id(Entity e) => e.Index.ToString(CultureInfo.InvariantCulture) + ":" + e.Version.ToString(CultureInfo.InvariantCulture);
+    private static string Id(Entity e) => FormatId(e.Index, e.Version, WorldEpoch.Current);
 
-    private static float3 Position(ICommandContext ctx)
+    /// <summary>The caller's position; false when there is no character or it cannot be read.</summary>
+    private static bool TryPosition(ICommandContext ctx, out float3 position)
     {
+        position = default;
         try
         {
             var ch = ctx.CharacterEntity;
-            if (ch == Entity.Null) return default;
+            if (ch == Entity.Null) return false;
             var em = ctx.World.EntityManager;
-            if (ch.TryRead(em, out Translation translation)) return translation.Value;
-            if (ch.TryRead(em, out LocalToWorld ltw)) return ltw.Position;
+            if (!em.Exists(ch)) return false;
+            if (ch.TryRead(em, out Translation translation)) { position = translation.Value; return true; }
+            if (ch.TryRead(em, out LocalToWorld ltw)) { position = ltw.Position; return true; }
         }
         catch (Exception e)
         {
             Plugin.Logger?.LogWarning("Sample .stations position read threw: " + e.Message);
         }
-        return default;
+        return false;
     }
 #endif
 }

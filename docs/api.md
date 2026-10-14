@@ -71,7 +71,7 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Castles` | verified live | Server castle plot / tile / building reads and handles on this plugin's world. | `SampleCastle.cs` (`.castle`) |
 | `ctx.Units` | verified live | Server unit spawn and steering. Client returns disabled handles. | `SampleUnits.cs` (`.rat`) |
 | `ctx.Items` | verified live | Server inventory grant and equip. Client throws. Defaults stack, accept a partial add, do not equip, leave durability. | `SampleItems.cs` (`.items grant`, `.items equip`); unit test `ItemGrantPolicyTests`; live `give` / `equip` on the isolated server (the wrapper sample itself is not live-verified) |
-| `ctx.Stations` (`PluginStations`) | landed, not live-verified | Server castle recipe stations: a station's recipes (inputs, outputs, duration, enabled), the refinement station's own per-recipe switch, a pure whole-craft count, and current progress. Client throws. [Stations](#stations), [modules.md](modules.md#stations). | `SampleStations.cs` (`.stations`); unit test `StationLogicTests` |
+| `ctx.Stations` (`PluginStations`) | landed, not live-verified | Server castle recipe stations: a station's recipes (inputs, outputs, duration, enabled), the refinement station's own per-recipe switch, a pure whole-craft count, and current progress. Every member except `CraftsPossible` throws on the client. [Stations](#stations), [modules.md](modules.md#stations). | `SampleStations.cs` (`.stations`); unit test `StationLogicTests` |
 | `ctx.Abilities` (`PluginAbilities`) | landed; `SetSlot` live-verified, `ForceCast`/`NoCooldowns` exercised by the necro sample | Server ability control: `ForceCast` through `ServerGameManager.ForceCastAbilityGroup` (starts groups that are not on the bar), and `NoCooldowns` holds that keep a character's abilities off cooldown with full charges, and `SetSlot`, which puts a chosen group on a bar slot. Holds are tracked. Client throws. [Abilities](#abilities), [modules.md](modules.md#abilities). | unit tests `AbilityCooldownPolicyTests`, `AbilitySlotPolicyTests`; sample `Progenitor.NecroArmyExample` |
 | `ctx.Time` (`PluginTime`) | landed, not live-verified | Server time of day: read it (`GetTimeOfDay`), move it and let it run (`SetTimeOfDay`), or freeze it (`HoldTimeOfDay`) for filming. Connected clients' lighting follows through the game's replicated day/night fields; the game clock `ServerTime` and every timer are untouched. Overrides are tracked and stack. Also world speed: `Freeze` / `SlowMotion` stop or slow the whole simulation (and the game clock) on the server and every client through the game's replicated `TimeScale`. Client throws. [Time of day](#time-of-day), [World speed](#world-speed), [modules.md](modules.md#time-of-day). | `SampleTime.cs` (`.time`), `SampleSpeed.cs` (`.speed`); unit tests `TimeOfDayMathTests`, `TimeScalePolicyTests` |
 | `ctx.Ai` (`PluginAi`) | landed, not live-verified | Server boss AI: describe/observe, cast-option edits, health gates, phase thresholds, private behavior-tree copies, factions, named variants with a persistence marker. Every mutation returns a restoring handle and is tracked. Client throws. [Ai](#ai), [ai.md](ai.md). | `samples/Progenitor.BossVariantsExample` (`.bossvariants spawn`); unit test `AiCodecTests` |
@@ -435,7 +435,7 @@ range before the call.
 
 ## Stations
 
-Server reads and the per-recipe switch for castle recipe stations. Client calls throw. A station is
+Server reads and the per-recipe switch for castle recipe stations. Every member except `CraftsPossible` (pure) throws on the client. A station is
 an `Entity` valid for the current world load; do not persist it. Narrative, game facts and the live
 acceptance procedure: [modules.md](modules.md#stations).
 
@@ -447,15 +447,15 @@ acceptance procedure: [modules.md](modules.md#stations).
 | `ctx.Stations.CraftsPossible(StationRecipe, IReadOnlyDictionary<int, long>)` / `CraftsPossible(StationRecipe, IEnumerable<StationItem>)` | landed | Whole crafts a set of item counts pays for. Pure; also `StationLogic.CraftsPossible`. | unit test `StationLogicTests` |
 | `ctx.Stations.IsWorking(Entity)` | landed, not live-verified | True while the station is converting (`StationState.Working`). | `SampleStations.cs` (`.stations status`) |
 | `ctx.Stations.Progress(Entity)` | landed, not live-verified | `StationProgress`, or null for a non-station. | `SampleStations.cs` (`.stations status`) |
-| `ctx.Stations.Near(float3, float radius)` | landed, not live-verified | `IReadOnlyList<StationInfo>` of recipe stations, nearest first. | `SampleStations.cs` (`.stations list`) |
-| `Stations` (static, takes a `World`) | landed, not live-verified | The same calls without a plugin context: `KindOf`, `Recipes`, `SetRecipeEnabled`, `Progress`, `IsWorking`, `Near`. | used by `PluginStations` |
+| `ctx.Stations.Near(float3, float radius)` | landed, not live-verified | `IReadOnlyList<StationInfo>` of recipe stations, nearest first. Scans every station in the world; call on demand, not per tick. | `SampleStations.cs` (`.stations list`) |
+| `Stations` (static, takes a `World`) | landed, not live-verified | The same calls without a plugin context: `KindOf`, `Recipes`, `SetRecipeEnabled`, `Progress`, `IsWorking`, `Near`. Throws for any world other than the server default world (`"Server"`). | used by `PluginStations` |
 | `StationRecipe` | landed | `RecipeGuid`, `Name`, `Kind`, `Inputs`, `Outputs` (`StationItem` lists, base amounts), `DurationSeconds`, `Enabled`, `CanToggle`, `Unlocked`, `HiddenInStation`. | unit test `StationLogicTests` |
 | `StationItem` | landed | `ItemGuid`, `Amount`. | unit test `StationLogicTests` |
 | `StationProgress` | landed | `Kind`, `State`, `RawStatus`, `IsWorking`, `RecipeGuid`, `Fraction`, `ElapsedSeconds`, `DurationSeconds`, `RemainingSeconds` (speed bonuses not applied), `QueueLength`. | unit test `StationLogicTests` |
 | `StationToggleResult` | landed | `Ok`, `Changed`, `Enabled`, `RecipeGuid`, `LinkedRowsChanged`, `Reason`. | unit test `StationLogicTests` |
 | `StationInfo` | landed, not live-verified | `Station`, `PrefabGuid`, `Name`, `Kind`, `Position`, `Distance`. | `SampleStations.cs` |
 | `StationKind` / `StationState` | landed | Station machinery; `Idle`, `Working`, `OutputFull`, `NotPowered`, `Damaged`, `NoOwner`, `Unknown`. | unit test `StationLogicTests` |
-| `StationLogic` | landed | Game-free half: `CraftsPossible`, `Sum`, status mapping, progress math, `PlanToggle`, `NoToggleReason`. | unit test `StationLogicTests` |
+| `StationLogic` | landed | Game-free half: `CraftsPossible`, `Sum`, status mapping, progress math, `PlanToggle`, `IsEnabled`, `NoToggleReason`. | unit test `StationLogicTests` |
 
 ## Buffs
 

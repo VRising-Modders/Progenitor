@@ -160,6 +160,15 @@ public class StationLogicTests
     }
 
     [Fact]
+    public void A_refusal_reports_the_current_state_not_the_opposite_of_the_request()
+    {
+        // Row 12 is already off; a refused "off" must still say off, and a refused "on" too.
+        Assert.False(StationLogic.IsEnabled(Rows, 12));
+        Assert.True(StationLogic.IsEnabled(Rows, 11));
+        Assert.False(StationLogic.IsEnabled(Rows, 77));
+    }
+
+    [Fact]
     public void Workstations_get_a_clear_refusal()
     {
         Assert.Contains("no per-recipe switch", StationLogic.NoToggleReason(StationKind.Workstation));
@@ -176,18 +185,38 @@ public class StationLogicTests
         Assert.True(SampleStations.TryParse("list", "50", "", "", out r));
         Assert.Equal(50f, r.Radius);
         Assert.False(SampleStations.TryParse("list", "500", "", "", out _));
-        Assert.True(SampleStations.TryParse("recipes", "1234:2", "", "", out r));
+        Assert.True(SampleStations.TryParse("recipes", "1234:2@7", "", "", out r));
         Assert.Equal(1234, r.StationIndex);
         Assert.Equal(2, r.StationVersion);
         Assert.True(SampleStations.TryParse("toggle", "Plank", "off", "", out r));
         Assert.Equal(SampleStations.Kind.Toggle, r.Kind);
         Assert.False(r.On);
         Assert.False(r.HasStation);
-        Assert.True(SampleStations.TryParse("toggle", "-7510953", "on", "5:1", out r));
+        Assert.True(SampleStations.TryParse("toggle", "-7510953", "on", "5:1@7", out r));
         Assert.True(r.On);
         Assert.False(SampleStations.TryParse("toggle", "Plank", "maybe", "", out _));
         Assert.False(SampleStations.TryParse("status", "notanid", "", "", out _));
         Assert.False(SampleStations.TryParse("explode", "", "", "", out _));
+    }
+
+    [Fact]
+    public void Sample_ids_carry_the_world_epoch_and_a_stale_one_is_refused()
+    {
+        string id = SampleStations.FormatId(1234, 2, 7);
+        Assert.Equal("1234:2@7", id);
+        Assert.True(SampleStations.TryParseId(id, out int index, out int version, out int epoch));
+        Assert.Equal((1234, 2, 7), (index, version, epoch));
+        Assert.False(SampleStations.TryParseId("1234:2", out _, out _, out _));
+        Assert.False(SampleStations.TryParseId("1234:@7", out _, out _, out _));
+        Assert.False(SampleStations.TryParseId("1234:2@", out _, out _, out _));
+        Assert.False(SampleStations.TryParseId("1234:0@7", out _, out _, out _));
+        Assert.False(SampleStations.TryParseId("1234:2@0", out _, out _, out _));
+
+        Assert.True(SampleStations.TryParse("status", "1234:2@7", "", "", out var r));
+        Assert.True(SampleStations.IsCurrent(r, 7));
+        Assert.False(SampleStations.IsCurrent(r, 8));
+        Assert.True(SampleStations.TryParse("status", "", "", "", out r));
+        Assert.True(SampleStations.IsCurrent(r, 8));
     }
 
     [Fact]

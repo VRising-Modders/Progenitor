@@ -9,8 +9,8 @@ namespace Progenitor.Stations;
 
 /// <summary>
 /// <see cref="PluginContext.Stations"/>: recipe lists, the per-recipe switch, and progress for castle
-/// refinement stations and crafting workstations (<see cref="Stations"/>). Server only; the client
-/// throws. Stations are passed as entities, valid for the current world load only. Nothing here
+/// refinement stations and crafting workstations (<see cref="Stations"/>). Every member except
+/// <c>CraftsPossible</c> (pure) throws on the client. Stations are passed as entities, valid for the current world load only. Nothing here
 /// registers anything, so unload has nothing to release.
 /// </summary>
 public sealed class PluginStations
