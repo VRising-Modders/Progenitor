@@ -12,7 +12,7 @@ namespace Progenitor.Servants;
 internal sealed class ServantListRegistry
 {
     /// <summary>How long a shown list stays valid for routing a throne send.</summary>
-    internal static readonly TimeSpan ShownTtl = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan ShownTtl = TimeSpan.FromMinutes(2);
 
     private readonly object _gate = new();
     private IServantListProvider? _provider;
@@ -138,6 +138,9 @@ internal sealed class ServantListRegistry
 
     /// <summary>Forget every shown list (world reload).</summary>
     internal void ForgetShown() { lock (_gate) _shown.Clear(); }
+
+    /// <summary>Forget the list shown to one player (disconnect).</summary>
+    internal void ForgetShown(int userIndex) { lock (_gate) _shown.Remove(userIndex); }
 
     internal void CountRouted(bool ok) { lock (_gate) { if (ok) _routed++; else _refused++; } }
 

@@ -30,7 +30,7 @@ namespace Progenitor.Sample;
 /// empty).</description></item>
 /// <item><description><c>.servants again</c>: resend the last hunt that returned to this castle.</description></item>
 /// <item><description><c>.servants swap on|off</c>: register a list provider that lists, on any
-/// throne you open, the servants of every castle you or your clan own (this castle first).</description></item>
+/// throne you open, the servants of every castle you own or your clan owns (this castle first).</description></item>
 /// <item><description><c>.servants status</c>: the list hook's counters.</description></item>
 /// </list>
 /// Parsing and reply lines are game-free so the test project compiles this file.
@@ -355,20 +355,29 @@ internal static class SampleServants
         SampleLog.Info(Area, "resend territory=" + ev.Territory + " " + result);
     }
 
-    /// <summary>The castle the throne is in first, then every castle of the player or the player's clan.</summary>
+    /// <summary>The castle the throne is in first, then every castle the player or the player's clan owns; nothing for a stranger.</summary>
     private sealed class OwnedCastlesProvider : IServantListProvider
     {
         private readonly PluginContext _plugin;
 
         internal OwnedCastlesProvider(PluginContext plugin) => _plugin = plugin;
 
+        // This method is the authorization boundary: every heart it returns becomes sendable by
+        // this player. It returns only castles the player or the player's clan owns (RelationTo confirms each).
         public IReadOnlyList<CastleId>? HeartsFor(ServantListRequest request)
         {
+            var user = request.User.ToEntity();
             var owned = new List<CastleId>();
-            foreach (var c in _plugin.Castles.AllForUser(request.User.ToEntity()))
-                if (c.Enabled) owned.Add(c.Heart);
+            foreach (var c in _plugin.Castles.AllForUser(user))
+                if (c.Enabled && _plugin.Castles.RelationTo(user, c) != CastleRelation.None) owned.Add(c.Heart);
             if (owned.Count <= 1) return null; // nothing to add: the game's own list
-            var hearts = HeartsInOrder(request.Heart, owned);
+            var here = request.Heart.IsNone ? CastleId.None : request.Heart;
+            if (!here.IsNone)
+            {
+                var castle = Progenitor.Castles.Castles.ForHeart(here);
+                if (!castle.Enabled || _plugin.Castles.RelationTo(user, castle) == CastleRelation.None) return null;
+            }
+            var hearts = HeartsInOrder(here, owned);
             SampleLog.Info(Area, "provider user=" + request.User + " territory=" + request.Territory + " hearts=" + hearts.Count);
             return hearts;
         }

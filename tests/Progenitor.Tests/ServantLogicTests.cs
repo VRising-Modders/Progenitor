@@ -107,6 +107,34 @@ public class ServantLogicTests
         Assert.Empty(ServantLogic.CapList(null, 3));
     }
 
+    [Fact]
+    public void Routed_send_needs_every_heart_still_listed_by_the_provider()
+    {
+        Assert.Null(ServantLogic.RouteRefusal(new[] { OtherHeart }, new[] { Heart, OtherHeart }));
+        Assert.Null(ServantLogic.RouteRefusal(new[] { Heart, OtherHeart }, new[] { OtherHeart, Heart }));
+        // left the clan: the provider no longer returns the clanmate's heart
+        Assert.Contains(OtherHeart.ToString(), ServantLogic.RouteRefusal(new[] { OtherHeart }, new[] { Heart })!);
+        // all or nothing: one heart no longer listed refuses the whole send
+        Assert.NotNull(ServantLogic.RouteRefusal(new[] { Heart, OtherHeart }, new[] { Heart }));
+        Assert.NotNull(ServantLogic.RouteRefusal(new[] { OtherHeart }, null));
+        Assert.NotNull(ServantLogic.RouteRefusal(new[] { OtherHeart }, Array.Empty<CastleId>()));
+    }
+
+    [Fact]
+    public void Shown_list_belongs_to_one_player_and_goes_on_disconnect()
+    {
+        var reg = new ServantListRegistry();
+        using var h = reg.Register(new Fixed(), "mod.one");
+        var t0 = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        reg.RecordShown(4, new ServantListRegistry.Shown { AtUtc = t0, User = A });
+        reg.RecordShown(5, new ServantListRegistry.Shown { AtUtc = t0, User = B });
+        Assert.Equal(A, reg.ShownTo(4, t0)!.User);
+        reg.ForgetShown(4);
+        Assert.Null(reg.ShownTo(4, t0));
+        Assert.NotNull(reg.ShownTo(5, t0));
+        Assert.Equal(TimeSpan.FromMinutes(2), ServantListRegistry.ShownTtl);
+    }
+
     // ---- timing and returns -----------------------------------------------------------------------
 
     [Fact]
@@ -420,8 +448,8 @@ public class ServantLogicTests
         var h = reg.Register(new Fixed(), "mod.one");
         reg.RecordShown(4, new ServantListRegistry.Shown { AtUtc = t0 });
         Assert.True(reg.AnyShown);
-        Assert.NotNull(reg.ShownTo(4, t0.AddMinutes(9)));
-        Assert.Null(reg.ShownTo(4, t0.AddMinutes(11)));
+        Assert.NotNull(reg.ShownTo(4, t0.AddSeconds(90)));
+        Assert.Null(reg.ShownTo(4, t0.AddMinutes(3)));
         reg.RecordShown(5, new ServantListRegistry.Shown { AtUtc = t0 });
         reg.CountRouted(true);
         reg.CountRouted(false);

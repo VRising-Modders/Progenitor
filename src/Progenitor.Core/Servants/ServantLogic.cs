@@ -166,6 +166,21 @@ internal static class ServantLogic
         return list;
     }
 
+    /// <summary>
+    /// Re-authorization of a routed throne send: every heart the send names must still be among the
+    /// hearts the provider returns for that player now. Null when allowed, else the reason.
+    /// </summary>
+    internal static string? RouteRefusal(IReadOnlyList<CastleId> targets, IReadOnlyList<CastleId>? allowedNow)
+    {
+        if (allowedNow == null)
+            return "the list provider no longer swaps this player's list";
+        var allowed = new HashSet<CastleId>(allowedNow);
+        foreach (var heart in targets)
+            if (!allowed.Contains(heart))
+                return "the list provider no longer lists castle heart " + heart + " for this player";
+        return null;
+    }
+
     // ---- hunt timing ------------------------------------------------------------------------------
 
     /// <summary>When the game finishes a hunt: start plus length, in ticks (<c>GetCompletionTicks</c>).</summary>

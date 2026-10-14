@@ -2484,10 +2484,19 @@ another castle's hunting servants as free). A send from that list naming servant
 would be refused by the game (their coffins are not the throne's), so Progenitor, before
 `ServantMissionActionSystem` updates, performs it with its own send on each servant's own heart,
 with the game's checks and the sender's discovery, and drops that client event. It does so only
-for the throne the player opened within the last ten minutes, while the player still stands in that
-throne's castle (in place of the game's reach check), and only when every servant named was on the
-list shown; otherwise the event is left to the game. Sends naming only the throne's own servants
-are left to the game. Counters: `ListStatus`.
+when the send names the throne the same player opened within the last two minutes (the shown list
+is dropped when the player disconnects), while the player still stands in the castle they stood in
+when the list was shown (in place of the game's reach check; the throne entity itself is not
+resolved), and only when every servant named was on that list; otherwise the event is left to the
+game. The provider is then asked again, and every heart the send names must still be in its answer
+(a player who left the clan cannot send from an older list). The send is all or nothing: every
+heart's send is validated first, and only then is the client event dropped and the sends written;
+if any check fails nothing is sent and the event is dropped (the game would refuse it). Sends naming
+only the throne's own servants are left to the game. Counters: `ListStatus`.
+
+**The provider is the authorization boundary.** Every heart it returns becomes sendable by that
+player, with no other ownership check. Return only castles the player may command (the sample
+returns castles the player owns or the player's clan owns, each confirmed with `ctx.Castles.RelationTo`).
 
 ### Limits and open questions
 
@@ -2501,6 +2510,9 @@ are left to the game. Counters: `ListStatus`.
   every throne send.
 - The game's servant-timers and all-progression debug settings are read from the server's
   `SyncedServerDebugSettings`; the heart-connection debug setting of the throne list is not.
+- A return seen but not yet published (the half second to five seconds `ServantsReturned` waits) is
+  lost when Core is swapped or unloaded in that window, and so is the throne list a player was
+  shown; the hunt itself is unaffected.
 - `ServantsSent` covers Progenitor's sends only. The game's own sends show up in `Missions` and, when
   they finish, in `ServantsReturned`.
 - Servant entities and coffins are session ids. Persist the heart's `ContainerId`, the territory
@@ -2512,7 +2524,7 @@ are left to the game. Counters: `ListStatus`.
 list of the castle you stand on, rows `#1..`), `hunts` (its hunt record with zones `x,y#zone`),
 `send <#n[,#n,#n]> <missionGuid|x,y#zone> <slot>`, `watch on|off|resend` (log every return; `resend`
 also resends), `again` (resend the last return of this castle), `swap on|off` (a provider that lists
-every castle of yours or your clan, this castle first) and `status`. Every action logs a
+every castle you own or your clan owns, this castle first) and `status`. Every action logs a
 `Sample servants: …` line.
 
 ### Live acceptance (procedure — not run)

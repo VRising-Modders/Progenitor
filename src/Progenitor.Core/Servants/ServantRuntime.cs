@@ -38,6 +38,7 @@ internal static unsafe class ServantRuntime
     private const int ConfirmFrames = 60;
 
     private static IDisposable? _updBefore, _updAfter, _actBefore, _infoBefore, _infoAfter;
+    private static IDisposable? _disconnected;
     private static bool _installed;
 
     // Hearts with at least one hunt, refreshed once a second or when a send happened.
@@ -80,6 +81,11 @@ internal static unsafe class ServantRuntime
         _actBefore = SystemHooks.Before<ServantMissionActionSystem>(BeforeAction);
         _infoBefore = SystemHooks.Before<ServantInfoEventSystem_Server>(BeforeInfo);
         _infoAfter = SystemHooks.After<ServantInfoEventSystem_Server>(AfterInfo);
+        _disconnected = EventBus.On<PlayerDisconnected>(e =>
+        {
+            try { Lists.ForgetShown(e.User.Index); }
+            catch (Exception ex) { Plugin.Logger?.LogWarning("servants: dropping a disconnected player's list failed: " + ex.Message); }
+        }, priority: 1900);
         Plugin.Frame += Tick;
         _installed = true;
         Plugin.Logger?.LogInfo("Servants: installed (server; returns, sends and the experimental throne list hook)");
@@ -95,6 +101,8 @@ internal static unsafe class ServantRuntime
             try { h?.Dispose(); } catch { }
         }
         _updBefore = _updAfter = _actBefore = _infoBefore = _infoAfter = null;
+        try { _disconnected?.Dispose(); } catch { }
+        _disconnected = null;
         Lists.Clear();
         Lists.Log = null;
         Lists.Unregistered = null;
@@ -411,7 +419,7 @@ internal static unsafe class ServantRuntime
     /// script marks it as on a hunt). Validated first with the game's checks; nothing is written
     /// on a refusal.
     /// </summary>
-    internal static ServantSendResult Send(World world, ServantSendRequest req, string by)
+    internal static ServantSendResult Send(World world, ServantSendRequest req, string by, bool dryRun = false)
     {
         var em = world.EntityManager;
         int epoch = WorldEpoch.Current;
@@ -513,6 +521,14 @@ internal static unsafe class ServantRuntime
             if (AiRuntime.FindBuff(em, sf.Servant.ToEntity(), buff) != Entity.Null)
                 return Fail(req, ServantSendRefusal.ServantBusy, "servant " + sf.Servant
                     + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false);
+
+        // Validation only (a routed throne send checks every heart before it writes any).
+        if (dryRun)
+            return new ServantSendResult
+            {
+                Ok = true, Heart = req.Heart, MissionGuid = plan.Row.MissionGuid, Zone = f.Zone, DataSlot = plan.Row.DataSlot,
+                LengthSeconds = plan.Row.LengthSeconds, Servants = new List<CastleId>(plan.Row.Servants()),
+            };
 
         // The buff first: if the game does not spawn it for every servant, nothing is in the record
         // yet and the buffs that did go on are taken off again. The buff spawns synchronously on
@@ -994,8 +1010,9 @@ internal static unsafe class ServantRuntime
 
                 var entries = new List<ServantLogic.ThroneEntry>();
                 var shown = new ServantListRegistry.Shown { Throne = swap.Throne, User = swap.User, Heart = swap.Heart, AtUtc = DateTime.UtcNow };
-                foreach (var heartId in swap.Hearts)
+                foreach (var heartId in ServantLogic.CapList(swap.Hearts, int.MaxValue))
                 {
+                    if (entries.Count >= ServantLogic.ResponseCapacity) break;
                     var heart = HeartOf(em, heartId.ToEntity());
                     if (heart == Entity.Null) continue;
                     foreach (var coffin in CoffinsOf(em, heart))
@@ -1048,7 +1065,12 @@ internal static unsafe class ServantRuntime
         foreach (var ev in events)
         {
             try { RouteOne(world, em, ev, nowUtc); }
-            catch (Exception e) { Plugin.Logger?.LogWarning("servants: routing a throne send failed; left to the game: " + e.Message); }
+            catch (Exception e)
+            {
+                bool gone = false;
+                try { gone = !em.Exists(ev); } catch { }
+                Plugin.Logger?.LogWarning("servants: routing a throne send failed" + (gone ? " after the client event was dropped" : "; left to the game") + ": " + e.Message);
+            }
         }
     }
 
@@ -1062,7 +1084,7 @@ internal static unsafe class ServantRuntime
         if (user == Entity.Null || !em.Exists(user)) return;
         int userIndex = em.GetComponentData<User>(user).Index;
         var shown = Lists.ShownTo(userIndex, nowUtc);
-        if (shown == null) return;
+        if (shown == null || shown.User != CastleId.From(user)) return;
         if (!ServantLogic.SameNetworkId(new ReadOnlySpan<byte>(p + Layout.SendOnMissionEventThroneOffset, 12), shown.Throne)) return;
 
         var groups = new Dictionary<CastleId, List<CastleId>>();
@@ -1088,26 +1110,73 @@ internal static unsafe class ServantRuntime
 
         int slot = *(int*)(p + Layout.SendOnMissionEventMissionDataIdOffset);
         var zone = ServantLogic.ReadZone(new ReadOnlySpan<byte>(p + Layout.SendOnMissionEventMapZoneIdOffset, 3));
-        // The game checks that the sender can reach the throne; the routed send checks that the
-        // sender still stands in the throne's castle (the throne itself is not resolved here).
+        // The game checks that the sender can reach the throne. The routed send checks instead that
+        // the sender still stands in the castle they stood in when the list was shown (the throne
+        // entity itself is not resolved here).
         var here = Progenitor.Castles.Castles.At(CastleId.From(character));
         if (!here.Enabled || here.Heart != shown.Heart) return;
-        int mission = MissionFor(em, zone);
-        em.DestroyEntity(ev);
-        foreach (var heart in order)
+
+        // Re-authorize now: the provider is the authorization boundary, and a player may have lost
+        // access (left the clan, a castle changed hands) since the list was shown.
+        var provider = Lists.Provider;
+        if (provider == null) return;
+        IReadOnlyList<CastleId>? allowed;
+        try
         {
-            var result = Send(world, new ServantSendRequest
+            allowed = provider.HeartsFor(new ServantListRequest
             {
-                Heart = heart,
-                Servants = groups[heart],
-                MissionGuid = mission,
-                DataSlot = slot,
                 User = CastleId.From(user),
-                CheckDiscovered = true,
-            }, "progenitor.throne");
+                Character = CastleId.From(character),
+                Heart = here.Heart,
+                Territory = here.Territory.Index,
+            });
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("servants: list provider '" + Lists.Owner + "' threw while re-authorizing a throne send; left to the game: " + e.Message);
+            return;
+        }
+        int mission = MissionFor(em, zone);
+        var userId = CastleId.From(user);
+        var refusal = ServantLogic.RouteRefusal(order, allowed);
+        var requests = new List<ServantSendRequest>();
+        if (refusal == null)
+        {
+            foreach (var heart in order)
+            {
+                var req = new ServantSendRequest
+                {
+                    Heart = heart,
+                    Servants = groups[heart],
+                    MissionGuid = mission,
+                    DataSlot = slot,
+                    User = userId,
+                    CheckDiscovered = true,
+                };
+                var check = Send(world, req, "progenitor.throne", dryRun: true);
+                if (!check.Ok) { refusal = "heart " + heart + ": " + check.Reason; break; }
+                requests.Add(req);
+            }
+        }
+
+        // From here the client event is gone (the game would refuse it: the servants are not this
+        // throne's), so a failure below is reported as refused, never as left to the game.
+        em.DestroyEntity(ev);
+        if (refusal != null)
+        {
+            Lists.CountRouted(false);
+            Plugin.Logger?.LogInfo("servants: routed throne send for user " + userId + " refused, nothing sent: " + refusal);
+            return;
+        }
+        foreach (var req in requests)
+        {
+            ServantSendResult result;
+            try { result = Send(world, req, "progenitor.throne"); }
+            catch (Exception e) { result = ServantSendResult.Refused(ServantSendRefusal.WriteFailed, "the send threw: " + e.Message); }
             Lists.CountRouted(result.Ok);
             if (!result.Ok)
-                Plugin.Logger?.LogInfo("servants: routed throne send for user " + CastleId.From(user) + " refused on heart " + heart + ": " + result.Reason);
+                Plugin.Logger?.LogWarning("servants: routed throne send for user " + userId + " failed on heart " + req.Heart
+                    + " after the checks passed: " + result.Reason);
         }
     }
 }

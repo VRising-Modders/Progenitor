@@ -470,7 +470,14 @@ public sealed class ServantListRequest
 
 /// <summary>
 /// Chooses, per player, whose servants a castle throne lists (<c>ctx.Servants.RegisterListProvider</c>).
-/// Experimental. Called on the server main thread each time a player opens a throne; keep it cheap.
+/// Experimental. Called on the server main thread each time a player opens a throne, and again when
+/// the player sends from the swapped list; keep it cheap.
+///
+/// <para><b>The provider is the authorization boundary.</b> Every heart it returns becomes sendable
+/// by that player: Progenitor sends those servants on the player's say-so without any other
+/// ownership check. Return only hearts the player may command (for example castles the player owns
+/// or whose owner is in the player's clan). A send from the list is re-authorized against a fresh
+/// call at send time, so a heart the provider stops returning cannot be sent from an older list.</para>
 /// </summary>
 public interface IServantListProvider
 {
