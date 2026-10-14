@@ -67,7 +67,10 @@ internal static unsafe class MaterialSeamRuntime
     private static UnityMaterialWorld? _world;
     private static readonly MaterialScopeTracker Scope = new();
     private static readonly MaterialUpgradeFilter UpgradeFilter = new();
-    private static bool _heartRequestLogged, _foreignCallLogged;
+    private static bool _heartRequestLogged, _foreignCallLogged, _traceNextCheck;
+
+    /// <summary>Development bridge: log the rows the next governed check hands to the game (one shot).</summary>
+    internal static void TraceNextCheck() => _traceNextCheck = true;
     private static ulong _repairKey, _heartKey, _repairKeyWorld, _heartKeyWorld;
     private static readonly MaterialViewPublisher Publisher = new();
     private static readonly MaterialRefreshPolicy Refresh = new();
@@ -385,6 +388,13 @@ internal static unsafe class MaterialSeamRuntime
                 new ReadOnlySpan<byte>((void*)bagRows, MaterialRows.Bytes(bagLength)), bagLength, ExtraScratch);
             // The composed rows fit and go to the game's check: only now does the payment follow the quotes.
             _service.MarkChecked(Id(target), op);
+            if (_traceNextCheck)
+            {
+                _traceNextCheck = false;
+                Plugin.Logger?.LogInfo(MaterialTrace.Describe(op, Id(target),
+                    new ReadOnlySpan<byte>((void*)bagRows, MaterialRows.Bytes(bagLength)), bagLength, ExtraScratch,
+                    new ReadOnlySpan<byte>((void*)outRows, MaterialRows.Bytes(written)), written));
+            }
             return written;
         }
         finally { _world.HeartHint = Entity.Null; }

@@ -38,7 +38,8 @@ internal static class MaterialsOps
                 Str(args, "to") ?? throw new ArgumentException("args.to (c-…) is required for inject"),
                 Int(args, "item") ?? throw new ArgumentException("args.item is required for inject")),
             "clear" => Call("ClearInjection"),
-            _ => throw new ArgumentException("args.action must be status, inject, clear or send"),
+            "trace" => Call("Trace"),
+            _ => throw new ArgumentException("args.action must be status, inject, clear, trace or send"),
         };
     }
 

@@ -58,6 +58,19 @@ internal static class MaterialsTestBridge
         return Status();
     }
 
+    /// <summary>
+    /// Server: log the rows the next governed check hands to the game (the game's own count without
+    /// shared storage, the pool lines, and the totals) as one <c>materials: trace …</c> line. One shot.
+    /// </summary>
+    public static Dictionary<string, object?> Trace()
+    {
+        if (!Plugin.IsServerProcess) throw new InvalidOperationException("materials trace runs on the server side only");
+        if (MaterialSeamRuntime.Service == null) throw new InvalidOperationException("the material seams are not bound in this process");
+        MaterialSeamRuntime.TraceNextCheck();
+        Plugin.Logger?.LogInfo("materials: trace armed for the next governed check");
+        return Status();
+    }
+
     /// <summary>Server: drop an armed injection that has not run.</summary>
     public static Dictionary<string, object?> ClearInjection()
     {

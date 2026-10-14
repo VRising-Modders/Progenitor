@@ -2928,6 +2928,12 @@ and pays from the provider's containers. **Not verified:** the equipped-item rep
 (`RepairEquippedItemEvent`); its sender sends without a check, but the input that calls it was not
 found, so whether the client refuses it on its own count is unknown (live case 16 tests it).
 
+**An Upgrade view can outlive the heart window.** The server sends it while the character's
+interaction target on the server is the heart, and the server can keep that target for some seconds
+after the window closes (observed live: more than 4 s). The view then stays held, but nothing shows it
+(the client applies it only while the local character's target is that heart), and the server checks
+and pays every upgrade itself, so a lingering view never pays anything.
+
 The heart window's claim, raid and destroy panels read the same count at the same heart. They never
 show pool totals: an Upgrade view is sent only for a heart the player or the player's clan owns, and
 the server pays those costs by the game's own rules.
