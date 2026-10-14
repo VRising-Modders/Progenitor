@@ -63,6 +63,13 @@ internal interface IInventoryBackend
     /// for more than the inventory holds, so the game's fallback to worn equipment is never reached.
     /// </summary>
     bool Remove(InventoryRef container, int item, int amount, out string detail);
+
+    /// <summary>
+    /// The entity that actually holds the slots, as one number. Two references that resolve to
+    /// the same key are the same inventory (a character and its bag entity, a station and its
+    /// input entity). False when unresolvable.
+    /// </summary>
+    bool TryInventoryKey(InventoryRef container, out long key);
 }
 
 /// <summary>
@@ -349,9 +356,17 @@ internal sealed class InventoryEngine
         for (int attempt = 0; attempt < 2 && now != 0; attempt++)
         {
             if (now > 0)
+            {
                 _backend.Add(attempt == 0 ? from : to, item, now, out _);
+            }
             else
-                _backend.Remove(attempt == 0 ? to : from, item, -now, out _);
+            {
+                // Never ask for more than that inventory holds: past its own count the game's
+                // removal falls back to the owner's worn equipment.
+                var side = attempt == 0 ? to : from;
+                int ask = Math.Min(-now, attempt == 0 ? d : s);
+                if (ask > 0) _backend.Remove(side, item, ask, out _);
+            }
             Touched?.Invoke(from);
             Touched?.Invoke(to);
             if (!ReadPair(from, to, item, out s, out d, out _)) break;
@@ -388,8 +403,17 @@ internal sealed class InventoryEngine
         return true;
     }
 
-    private static bool SameInventory(InventoryRef a, InventoryRef b) =>
-        a.OwnerIndex == b.OwnerIndex && a.OwnerVersion == b.OwnerVersion && a.Instance == b.Instance;
+    /// <summary>
+    /// Same inventory by what the references resolve to, not by how they are spelled: moving
+    /// from a character to its own bag entity would let the game's add stack onto the very slot
+    /// it then clears. An unresolvable side counts as the same, so the call refuses.
+    /// </summary>
+    private bool SameInventory(InventoryRef a, InventoryRef b)
+    {
+        if (a.OwnerIndex == b.OwnerIndex && a.OwnerVersion == b.OwnerVersion && a.Instance == b.Instance) return true;
+        if (!_backend.TryInventoryKey(a, out long ka) || !_backend.TryInventoryKey(b, out long kb)) return true;
+        return ka == kb;
+    }
 
     private static bool ValidAmount(int amount, out string reason)
     {

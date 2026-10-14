@@ -1776,7 +1776,7 @@ from. So one step neither duplicates nor destroys. Around it, the engine reads b
 after every step and checks that the source lost exactly what the target gained. If a step ever
 does not conserve the total, the compensating step restores it: units that vanished are added back
 to the source (then to the target if the source refuses them), units that appeared are removed from
-the target (then the source). If the total still differs, the transfer stops with
+the target (then the source), never more than that side holds. Two references that resolve to the same inventory entity (a character and its own bag entity) are refused. If the total still differs, the transfer stops with
 `InventoryOutcome.Inconsistent`, logs `Inventory: transfer … the total of item … changed and could
 not be restored` as an error, and reports both containers' counts. The move keeps relic and
 soulbound rules on (`MoveItemResult` `Failed_ItemIsSoulBound` / `Failed_BlockedByRelicRules` end
@@ -1817,7 +1817,7 @@ Failure modes, by design:
    the two-second sweep window before a shutdown save) inherits the old id.
 2. A world rolled back to an older autosave can bring back a container whose id was already
    retired; it gets a new id.
-3. Relocating a castle moves every anchor, so every container gets a new id.
+3. Relocating a castle rebuilds and moves every model, so every container gets a new id. (A model that is moved while the server runs and keeps its entity keeps its id; the new tile is saved with the next world save.)
 4. Player bags and servants have no id; address them through their owner.
 
 Ids are not available until the world's mod save has loaded and the castles are visible after a

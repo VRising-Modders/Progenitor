@@ -273,7 +273,7 @@ internal static class SampleInventory
             case "watch":
             {
                 string key = first.ToString();
-                if (Watches.TryGetValue(key, out var existing))
+                if (Watches.TryGetValue(key, out var existing) && existing.Active)
                 {
                     existing.Dispose();
                     Watches.Remove(key);

@@ -37,6 +37,8 @@ internal static class InventoryRuntime
     private static bool _hooked;
     private static long _nextUpkeep;
     private static bool _deferLogged;
+    private static int _emptyScans;
+    private const int EmptyScansBeforeRetire = 30;
 
     internal static bool Installed => _engine != null;
 
@@ -88,6 +90,7 @@ internal static class InventoryRuntime
         _backend = null;
         _loaded = false;
         _deferLogged = false;
+        _emptyScans = 0;
     }
 
     internal static string DescribePins() =>
@@ -158,7 +161,9 @@ internal static class InventoryRuntime
         var book = _book!;
         if (world.GetExistingSystemManaged<LoadPersistenceSystemV2>()?.Initialized != true) return false;
         var sightings = Scan(world);
-        if (sightings.Count == 0 && book.Count > 0)
+        // After the load has finished, an empty world is believed once it stays empty for about a
+        // minute of upkeep (every castle may really be gone); until then the book waits.
+        if (sightings.Count == 0 && book.Count > 0 && ++_emptyScans < EmptyScansBeforeRetire)
         {
             if (!_deferLogged)
             {
@@ -171,6 +176,7 @@ internal static class InventoryRuntime
 
         var (bound, retired) = book.Prime(epoch, sightings);
         _deferLogged = false;
+        _emptyScans = 0;
         Plugin.Logger?.LogInfo("Inventory: container ids bound after load: " + bound + " bound, " + retired
             + " retired (no container on their tile), " + sightings.Count + " containers seen");
         return true;
