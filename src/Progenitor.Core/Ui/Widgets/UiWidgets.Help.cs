@@ -39,6 +39,9 @@ public static partial class UiWidgets
             try { UiTerms.SetMarkers(pluginId, on); }
             finally { writing = false; }
         });
+        // Released with the toggle on any panel kind: the handler is pruned as soon as the toggle is disposed (a page
+        // redraw, a header rebuilt, the panel closed), and with its owner on unload (Ui.RemoveAll); a panel that offers
+        // a disposal hook also takes the lease. A ModHeaderPanel's own Dispose is a no-op, so the toggle is the anchor.
         var follow = UiTerms.OnMarkersChanged(pluginId, () =>
         {
             if (writing || toggle.IsDisposed) return;
@@ -47,7 +50,7 @@ public static partial class UiWidgets
             writing = true;
             try { toggle.Value = now; }
             finally { writing = false; }
-        });
+        }, (toggle as UiHandle)?.Owner, () => toggle.IsDisposed);
         if (panel is UiPanelHandle host) host.AttachDisposable(follow);
         return toggle;
     }

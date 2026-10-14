@@ -842,10 +842,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             var image = link.GameObject.GetComponent<Image>();
             if (image == null) return false;
-            image.sprite = sprite as Sprite;
+            var asSprite = AsSprite(sprite);
+            image.sprite = asSprite;
             var caption = FindIn<TextMeshProUGUI>(link.GameObject);
             if (caption != null) caption.gameObject.SetActive(sprite == null);
-            return sprite is Sprite;
+            return asSprite != null;
         }
         catch (Exception e)
         {
@@ -4083,11 +4084,6 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     }
 
     /// <summary>
-    /// The primary (left) mouse button's held state right now, for <see cref="Ui.WatchPointer"/>:
-    /// the EventTrigger trampoline carries no event payload, so the watch samples the button the
-    /// moment its PointerDown dispatches. False with no mouse or on any read failure.
-    /// </summary>
-    /// <summary>
     /// P7b: the Shift and Ctrl keys held now, for a click's multi-select meaning (Ctrl adds a row, Shift extends a
     /// range). Part of the UI kit's pointer sample, like <see cref="PrimaryPointerHeld"/>; it binds no action to a key.
     /// </summary>
@@ -4108,6 +4104,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         return held;
     }
 
+    /// <summary>
+    /// The primary (left) mouse button's held state right now, for <see cref="Ui.WatchPointer"/>:
+    /// the EventTrigger trampoline carries no event payload, so the watch samples the button the
+    /// moment its PointerDown dispatches. False with no mouse or on any read failure.
+    /// </summary>
     internal static bool PrimaryPointerHeld()
     {
         try
@@ -4169,7 +4170,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // while its text can move that way; at its end the notch scrolls the list.
                 // P7b: a widget that scrolls itself (the data table's body) takes the notch over its area
                 // while it can move that way (UiWheelClaims); at its end the notch goes on as below.
-                if (pointer.Kind == PointerKind.Inside && UiWheelClaims.TryTake(pointer.X, pointer.Y, deltaY))
+                if (pointer.Kind == PointerKind.Inside && TryWheelClaim(pointer, deltaY))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -4338,6 +4339,31 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// P7b: offer a wheel notch to the widget claims (<see cref="UiWheelClaims"/>) of the topmost shown panel under the
+    /// pointer only, and only inside that panel's visible viewport: a table under a dialog or another panel, and rows
+    /// clipped out of the viewport, never take the wheel.
+    /// </summary>
+    private static bool TryWheelClaim(PointerSample pointer, float deltaY)
+    {
+        if (UiWheelClaims.Count == 0) return false;
+        UnityPanel? top = null;
+        for (int i = ShownPanels.Count - 1; i >= 0; i--)
+        {
+            var panel = ShownPanels[i];
+            if (panel == null || !panel.Alive || !panel.Visible) continue;
+            var frame = ScreenRectOfPanel(panel);
+            if (frame.IsKnown && frame.Contains(pointer.X, pointer.Y))
+            {
+                top = panel;
+                break;
+            }
+        }
+
+        if (top == null) return false;
+        return UiWheelClaims.TryTake(pointer.X, pointer.Y, deltaY, top, top.ViewportScreenRect);
     }
 
     private static UnityPanel? ResolveHoveredPanel(PointerSample pointer)
@@ -17523,7 +17549,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         public void SetImage(string key, object? sprite)
         {
             if (key == null || !_cells.TryGetValue(key, out var cell) || cell.Picture == null) return;
-            var s = sprite as Sprite;
+            var s = UnityUiRuntime.AsSprite(sprite);
             try { cell.Picture.sprite = s; } catch { /* */ }
             try { cell.Picture.enabled = s != null && UnityUiRuntime.Alive(s); } catch { /* */ }
         }

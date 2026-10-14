@@ -553,7 +553,7 @@ public sealed class UiChipsTermTests : IDisposable
         UiTips.Teardown();
         UiWidgetLifetime.Uninstall();
         UiHelpStore.UseForTests(null);
-        UiTerms.Clock = () => 0;
+        UiTerms.Clock = UiTerms.DefaultClock;
         CoreUiSettings.Reset();
         UiApi.ResetForTests();
     }

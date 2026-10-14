@@ -5675,7 +5675,7 @@ The only direct readers are the framework's own input layer:
 | File | Why it reads devices |
 |---|---|
 | `src/Progenitor.Core/Ui/UnityKeyInputSource.cs` | The keybind input pump (`WasPressedThisFrame`, driven by `Keybinds.Pump`) and the key-capture picker (`TryReadPressedChord`, the Keybinds tab's press-a-key flow). |
-| `src/Progenitor.Core/Ui/UnityUiRuntime.cs` | The UI kit: typed keys for its text fields (`PumpTypedKeys`), the pointer and wheel sample behind hover, drag and scroll on mod panels, and the controller and arrow-key sample behind [panel navigation](ui.md#controller-and-keyboard-navigation-nav1) (`SampleNav`). |
+| `src/Progenitor.Core/Ui/UnityUiRuntime.cs` | The UI kit: typed keys for its text fields (`PumpTypedKeys`), the pointer and wheel sample behind hover, drag and scroll on mod panels, the Shift and Ctrl held at a click (the widgets' multi-select; no action is bound to them), and the controller and arrow-key sample behind [panel navigation](ui.md#controller-and-keyboard-navigation-nav1) (`SampleNav`). |
 | `src/Progenitor.Core/Ui/NativeModsEntry.cs` | The UI kit: the pointer hover probe for the Mods entry on the title screen. |
 | `src/Progenitor.Core/Inputs/UnityInputRuntime.cs` | `ctx.Input`'s user-activity sample, which lets an input lease yield when the player moves or clicks. It binds no action to a key. |
 | `src/Progenitor.Bootstrap/UiInputContext.cs` | Bootstrap's process-lifetime Escape/Back forwarder that closes mod panels; it must outlive Core generations. |

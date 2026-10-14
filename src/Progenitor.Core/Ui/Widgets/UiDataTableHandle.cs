@@ -71,6 +71,12 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     private readonly object?[] _images;
     private readonly bool[] _imageSet;
     private readonly bool?[] _selectedNow;
+
+    /// <summary>The row id each slot drew last (null: not a data row), to see a focused value box's row leave its slot.</summary>
+    private readonly string?[] _slotRow;
+    private readonly List<Draft> _leave = new();
+    private IReadOnlyList<UiTableLine>? _renderedLines;
+    private int _renderedTop = -1;
     private readonly bool?[] _expandedNow;
     private readonly Dictionary<string, Draft> _drafts = new(StringComparer.Ordinal);
     private readonly List<Action<IReadOnlyList<UiTableSortKey>>> _sortChanged = new();
@@ -129,6 +135,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _spinners = new Dictionary<string, IUiMarkView?>[slots];
         _spinnerNow = new Dictionary<string, UiDrawnMark>[slots];
         _selectedNow = new bool?[slots];
+        _slotRow = new string?[slots];
         _expandedNow = new bool?[slots];
         for (int i = 0; i < slots; i++)
         {
@@ -184,7 +191,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         var runtime = WidgetRuntime.Current;
         if (runtime != null)
         {
-            try { Lease(runtime.ClaimWheel(BodyRect, Wheel)); }
+            try { Lease(runtime.ClaimWheel(Panel, BodyRect, Wheel)); }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' wheel claim: " + e.Message); }
             var top = RuntimeRowOf(_slots[0]);
             var bottom = RuntimeRowOf(_slots[_slots.Count - 1]);
@@ -459,6 +466,15 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         if (!Live) return;
         var line = LineAtSlot(slot);
         if (line is not { Kind: UiTableLineKind.Row } l || l.Row == null || !_model.CanEdit(l.Row, column)) return;
+        // Only the box that holds the keyboard types (a box released when its row left the slot takes no more keys).
+        if (WidgetRuntime.Current is IWidgetCellField field && RuntimeRowOf(_slots[slot]) is { } runtimeRow)
+        {
+            bool focused;
+            try { focused = field.CellFieldFocused(runtimeRow, cellKey); }
+            catch { focused = true; }
+            if (!focused) return;
+        }
+
         string id = l.Row.Id;
         _drafts[UiDataTableModel.EditKey(id, column.Key)] = new Draft { RowId = id, Column = column.Key, Text = text, Slot = slot };
         _written[slot][cellKey] = text;
@@ -729,7 +745,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         var field = WidgetRuntime.Current as IWidgetCellField;
         if (field != null && _drafts.Count > 0)
         {
-            var leave = new List<Draft>();
+            var leave = _leave;
+            leave.Clear();
             foreach (var d in _drafts.Values)
             {
                 var line = LineAtSlot(d.Slot);
@@ -745,10 +762,12 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 if (!focused) leave.Add(d);
             }
 
-            foreach (var d in leave) CommitDraft(d.RowId, d.Column);
+            for (int i = 0; i < leave.Count; i++) CommitDraft(leave[i].RowId, leave[i].Column);
+            leave.Clear();
         }
 
-        bool dirty = _model.Expire() > 0;
+        // No timeout (EditTimeout <= 0): nothing to expire, so the check never runs; the tick only turns the spinner.
+        bool dirty = _model.Expires && _model.Expire() > 0;
         if (_model.Pending.Count > 0)
         {
             int frame = UiDataTableLayout.SpinnerFrame(_model.Now);
@@ -895,6 +914,16 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             if (moved != null)
                 foreach (var d in moved) _drafts.Remove(UiDataTableModel.EditKey(d.RowId, d.Column));
 
+            // A value box that has the keyboard while its row leaves the slot (a scroll, a sort, a refresh, grouping,
+            // folding) gives the keyboard up before the slot is rewritten, so the next key can never edit the row that
+            // moves in. Its draft (above) commits, as leaving the box does.
+            ReleaseMovedFields(lines);
+
+            // The row tooltip describes what was under the pointer; any change of the window or the body hides it.
+            if (!ReferenceEquals(lines, _renderedLines) || _viewport.Top != _renderedTop) HideTooltip();
+            _renderedLines = lines;
+            _renderedTop = _viewport.Top;
+
             bool icons = AnyIcon();
             bool expander = _model.Grouped || AnyDetail();
             RenderHeader(icons, expander);
@@ -924,6 +953,41 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             foreach (var d in moved) StartEdit(d.RowId, d.Column, d.Text);
         EnsureTick();
     }
+
+    /// <summary>Release the keyboard from a focused value box in a slot whose row is about to change.</summary>
+    private void ReleaseMovedFields(IReadOnlyList<UiTableLine> lines)
+    {
+        IWidgetCellField? field = null;
+        for (int i = 0; i < _slots.Count; i++)
+        {
+            string? was = _slotRow[i];
+            int index = _viewport.LineAt(i);
+            string? now = index >= 0 && lines[index].Kind == UiTableLineKind.Row ? lines[index].Row!.Id : null;
+            _slotRow[i] = now;
+            if (was == null || string.Equals(was, now, StringComparison.Ordinal)) continue;
+            field ??= WidgetRuntime.Current as IWidgetCellField;
+            if (field == null) continue;
+            var runtimeRow = RuntimeRowOf(_slots[i]);
+            if (runtimeRow == null) continue;
+            foreach (var col in _model.Columns)
+            {
+                if (!IsEditable(col)) continue;
+                string cell = UiDataTableLayout.EditKey(col.Key);
+                bool focused;
+                try { focused = field.CellFieldFocused(runtimeRow, cell); }
+                catch { focused = false; }
+                if (!focused) continue;
+                try { field.ReleaseCellField(runtimeRow, cell); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' release: " + e.Message); }
+                _cache[i].Remove(cell);
+                _written[i].Remove(cell);
+                FieldsReleased++;
+            }
+        }
+    }
+
+    /// <summary>Tests: how many focused value boxes were released because their row left the slot.</summary>
+    internal int FieldsReleased { get; private set; }
 
     private bool AnyIcon()
     {
@@ -1160,8 +1224,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                     if (pending != null)
                     {
                         // The spinner is drawn before the value (a texture, UiDrawnMark); the words stay the value.
-                        string shown = pending.Clear ? "inherited" : UiDataTableModel.FormatValue(pending.NewValue, col);
-                        Write(slot, view, shown, CellTone.Pending, true);
+                        // A clear waits as the value box's own gray hint word; a number waits in the pending yellow.
+                        string shown = pending.Clear ? UiDataTableLayout.InheritedHint : UiDataTableModel.FormatValue(pending.NewValue, col);
+                        Write(slot, view, shown, pending.Clear ? CellTone.Muted : CellTone.Pending, true);
                         Write(slot, edit, null, CellTone.Normal, false);
                         SpinnerMark(slot, view, UiDrawnMark.Spinner(_spinnerFrame < 0 ? 0 : _spinnerFrame));
                         return;
@@ -1205,7 +1270,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 }
                 else if (col.Subtotal != UiTableSubtotal.None)
                 {
-                    var value = UiDataTableModel.Aggregate(total ? _model.Rows : _model.RowsIn(line.Group), col);
+                    var value = _model.SubtotalOf(total ? null : line.Group, col);
                     text = UiDataTableModel.FormatValue(value, col);
                     tone = total ? CellTone.Gold : CellTone.Normal;
                 }

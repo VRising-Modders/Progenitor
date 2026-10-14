@@ -402,16 +402,19 @@ public sealed class UiMasterDetailTests : IDisposable
         md.SetDetail(Detail("a", "b", "c", "d", "e"));
         _panels.Last().Show(); // the halves take the wheel only while the panel is shown
         float dividerX = Row("md:row0").CellRects().Single(p => p.Key == L.CellDivider).Value.MinX;
+        var top = ((UiPanelHandle)_panels.Last()).RuntimePanel;
+        var view = ScreenRect.FromCorners(0f, 0f, 4000f, 4000f);
+        Assert.False(UiWheelClaims.TryTake(dividerX - 50f, 120f, -120f, new object(), view)); // another panel on top
 
-        Assert.True(UiWheelClaims.TryTake(dividerX - 50f, 120f, -120f)); // toward the end, over the master half
+        Assert.True(UiWheelClaims.TryTake(dividerX - 50f, 120f, -120f, top, view)); // toward the end, over the master half
         Assert.Equal(L.LinesPerNotch, md.MasterTop);
         Assert.Equal(0, md.DetailTop);
-        Assert.True(UiWheelClaims.TryTake(dividerX + 300f, 120f, -120f)); // over the detail half
+        Assert.True(UiWheelClaims.TryTake(dividerX + 300f, 120f, -120f, top, view)); // over the detail half
         Assert.Equal(L.LinesPerNotch, md.DetailTop);
-        Assert.True(UiWheelClaims.TryTake(dividerX + 300f, 120f, 120f)); // back toward the start
+        Assert.True(UiWheelClaims.TryTake(dividerX + 300f, 120f, 120f, top, view)); // back toward the start
         Assert.Equal(0, md.DetailTop);
         while (md.ScrollDetail(1)) { }
-        Assert.False(UiWheelClaims.TryTake(dividerX + 300f, 120f, -120f)); // at its end: the panel takes the notch
+        Assert.False(UiWheelClaims.TryTake(dividerX + 300f, 120f, -120f, top, view)); // at its end: the panel takes the notch
     }
 
     [Fact]
@@ -424,6 +427,64 @@ public sealed class UiMasterDetailTests : IDisposable
         Assert.False(md.Steer(3, NavCommand.Down)); // not the last row: the focus moves
         Assert.True(md.Steer(1, NavCommand.Up));
         Assert.Equal(0, md.MasterTop);
+    }
+
+    [Fact]
+    public void The_stick_scrolls_the_focused_half_and_hands_on_at_its_ends()
+    {
+        var md = Build(new UiMasterDetailOptions { Rows = 6 }, entries: 12); // 12 lines in 5 slots: top 0..7
+        Assert.False(md.Stick(1, 1f)); // up at the top: the panel takes the stick
+        int frames = 0;
+        while (md.MasterTop == 0 && frames++ < 20) Assert.True(md.Stick(1, -1f)); // down: taken while it can move
+        Assert.Equal(1, md.MasterTop);
+        Assert.True(md.ScrollMaster(100));
+        Assert.Equal(7, md.MasterTop);
+        Assert.False(md.Stick(1, -1f)); // down at the end: handed on
+        Assert.True(md.Stick(1, 1f)); // up again: taken
+        Assert.False(md.Stick(1, 0f));
+    }
+
+    [Fact]
+    public void A_render_filters_once_and_rewrites_only_the_cells_that_changed()
+    {
+        var md = Build(new UiMasterDetailOptions { Rows = 14 }, entries: 20);
+        md.Select("e1");
+        md.SetDetail(Detail("a", "b"));
+        var model = md.ModelForTests;
+
+        int passes = model.MatchPasses;
+        int writes = md.CellWrites;
+        md.SetTexts(0); // a render with nothing changed
+        Assert.Equal(1, model.MatchPasses - passes); // one filter pass for the whole render, not one per row
+        Assert.Equal(0, md.CellWrites - writes); // nothing rewritten
+
+        writes = md.CellWrites;
+        md.SetEntries(Entries(20).Select(e => { if (e.Id == "e3") e.Title = "Renamed"; return e; }));
+        Assert.Equal("Renamed", Cell(Row("md:row3"), L.CellMTitle).Text);
+        Assert.Equal(1, md.CellWrites - writes); // exactly the one caption
+    }
+
+    [Fact]
+    public void Scrolling_a_half_hides_the_rows_tooltip()
+    {
+        var md = Build(new UiMasterDetailOptions { Rows = 6 }, entries: 0);
+        md.SetEntries(Enumerable.Range(1, 12).Select(i => new UiMasterEntry("e" + i, "Entry " + i) { Tooltip = "Tip " + i }));
+        md.SetDetail(Detail("a", "b", "c", "d", "e"));
+        float dividerX = Row("md:row1").CellRects().Single(p => p.Key == L.CellDivider).Value.MinX;
+        _runtime.Pointer = PointerSample.At(dividerX - 100f, 120f);
+
+        md.HoverRowForTests(1, true);
+        Assert.Equal(("Entry 1", "Tip 1"), _runtime.Tooltip);
+        Assert.True(md.Steer(5, NavCommand.Down)); // a steer scrolls the list under the pointer
+        Assert.Null(_runtime.Tooltip);
+        _runtime.Tick(); // the hover tick decides afresh: the row now shows Entry 2
+        Assert.Equal(("Entry 2", "Tip 2"), _runtime.Tooltip);
+
+        Assert.True(md.ScrollDetail(1)); // the other half scrolling also drops it
+        Assert.Null(_runtime.Tooltip);
+        _runtime.Tick();
+        Assert.True(md.Stick(5, -1f) | md.Stick(5, -1f) | md.Stick(5, -1f) | md.Stick(5, -1f) | md.Stick(5, -1f) | md.Stick(5, -1f) | md.Stick(5, -1f));
+        Assert.Null(_runtime.Tooltip);
     }
 
     // ---- members ---------------------------------------------------------------------------------

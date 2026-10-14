@@ -332,7 +332,7 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
         catch { /* */ }
         if (term.Length == 0 || IsDisposed) return;
         // The chip cell's own hover is bound to HoverSlot, which forwards to the binding: no second hover watch.
-        try { _slotTerms[line, slot] = UiTerms.MarkCell(_lines[line], UiChipsLayout.ChipKey(slot), term, watchHover: false); }
+        try { _slotTerms[line, slot] = UiTerms.MarkCell(_lines[line], UiChipsLayout.ChipKey(slot), term, watchHover: false, reserveRoom: false); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: chips '" + Key + "' term '" + term + "': " + e.Message); }
     }
 

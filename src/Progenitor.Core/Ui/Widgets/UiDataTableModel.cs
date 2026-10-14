@@ -138,14 +138,41 @@ internal sealed class UiDataTableModel
         _expanded.RemoveWhere(id => !_index.ContainsKey(id) || !HasDetail(_rows[_index[id]]));
         foreach (var key in new List<string>(_rejected.Keys))
             if (!_index.ContainsKey(key.Substring(0, key.IndexOf('\u001f')))) _rejected.Remove(key);
+        // An edit of a row that left the table is dropped: no spinner, no count in the footer, and a late answer has no
+        // effect (Complete refuses an edit that is not pending).
+        List<UiTableEdit>? gone = null;
+        foreach (var e in _pending.Values)
+            if (!_index.ContainsKey(e.RowId)) (gone ??= new List<UiTableEdit>()).Add(e);
+        if (gone != null)
+        {
+            foreach (var e in gone)
+            {
+                _pending.Remove(EditKey(e.RowId, e.Column));
+                e.State = UiTableEditState.Rejected;
+                e.Reason = RowGoneReason;
+            }
+        }
+
         SelectionDroppedOnRefresh = selectionChanged;
         Invalidate();
     }
 
+    /// <summary>The reason a waiting edit is dropped with when its row leaves the table (not shown: the row is gone).</summary>
+    internal const string RowGoneReason = "The row left the table.";
+
     /// <summary>The last <see cref="SetRows"/> dropped selected ids (the table raises no event for it).</summary>
     internal bool SelectionDroppedOnRefresh { get; private set; }
 
-    internal void Invalidate() => _lines = null;
+    /// <summary>Drop the cached body lines, group members and subtotals (rows, sort, grouping, folding or a value changed).</summary>
+    internal void Invalidate()
+    {
+        _lines = null;
+        _members = null;
+        _aggregates.Clear();
+    }
+
+    private Dictionary<string, List<UiTableRow>>? _members;
+    private readonly Dictionary<string, double?> _aggregates = new(StringComparer.Ordinal);
 
     // ---- Sort --------------------------------------------------------------------------------
 
@@ -388,15 +415,7 @@ internal sealed class UiDataTableModel
         }
         else
         {
-            var members = new Dictionary<string, List<UiTableRow>>(StringComparer.Ordinal);
-            foreach (var row in sorted)
-            {
-                foreach (var g in GroupsOf(row))
-                {
-                    if (!members.TryGetValue(g, out var list)) members[g] = list = new List<UiTableRow>();
-                    list.Add(row);
-                }
-            }
+            var members = Members(sorted);
 
             var names = new List<string>(members.Keys);
             string other = OtherGroup;
@@ -513,14 +532,49 @@ internal sealed class UiDataTableModel
         };
     }
 
-    /// <summary>The rows under group <paramref name="group"/> (folded or not).</summary>
-    internal List<UiTableRow> RowsIn(string group)
+    /// <summary>The rows under group <paramref name="group"/> (folded or not), in the current sort. Cached with the lines.</summary>
+    internal IReadOnlyList<UiTableRow> RowsIn(string group)
     {
-        var list = new List<UiTableRow>();
-        foreach (var r in _rows)
-            if (GroupsOf(r).Contains(group)) list.Add(r);
-        return list;
+        var members = _members ?? Members(Sorted());
+        return members.TryGetValue(group ?? "", out var list) ? list : Array.Empty<UiTableRow>();
     }
+
+    /// <summary>Every group's rows in sort order; cached until <see cref="Invalidate"/>.</summary>
+    private Dictionary<string, List<UiTableRow>> Members(List<UiTableRow> sorted)
+    {
+        if (_members != null) return _members;
+        var members = new Dictionary<string, List<UiTableRow>>(StringComparer.Ordinal);
+        foreach (var row in sorted)
+        {
+            foreach (var g in GroupsOf(row))
+            {
+                if (!members.TryGetValue(g, out var list)) members[g] = list = new List<UiTableRow>();
+                list.Add(row);
+            }
+        }
+
+        _members = members;
+        return members;
+    }
+
+    /// <summary>
+    /// Column <paramref name="column"/>'s subtotal over group <paramref name="group"/>, or its grand total over every row
+    /// (each once) when <paramref name="group"/> is null. Cached until <see cref="Invalidate"/>, so a scroll over a
+    /// grouped table never adds a group up again.
+    /// </summary>
+    internal double? SubtotalOf(string? group, UiTableColumn column)
+    {
+        if (column.Subtotal == UiTableSubtotal.None) return null;
+        string key = (group == null ? "\u0001" : group) + "\u001f" + column.Key;
+        if (_aggregates.TryGetValue(key, out var cached)) return cached;
+        var value = Aggregate(group == null ? _rows : RowsIn(group), column);
+        _aggregates[key] = value;
+        AggregateComputations++;
+        return value;
+    }
+
+    /// <summary>Tests: how many subtotals were computed (not served from the cache).</summary>
+    internal int AggregateComputations { get; private set; }
 
     /// <summary>The value text a column draws: the cell's own text, else the value in the column's format, else the null text.</summary>
     internal static string Display(UiTableCell? cell, UiTableColumn column)
@@ -772,7 +826,9 @@ internal sealed class UiDataTableModel
                 }
 
                 row[col.Key] = cell;
+                // The value moved: its subtotals (and, when sorted by it, the order) are stale.
                 if (IsSortedBy(col.Key)) Invalidate();
+                else _aggregates.Clear();
             }
         }
         else
@@ -800,6 +856,11 @@ internal sealed class UiDataTableModel
         return t.Length > 0 ? t : row.Id;
     }
 
+    private readonly List<UiTableEdit> _late = new();
+
+    /// <summary>Whether edits time out at all (<see cref="UiDataTableOptions.EditTimeout"/> above zero).</summary>
+    internal bool Expires => Options.EditTimeout > TimeSpan.Zero;
+
     /// <summary>The text a timed-out edit is rejected with.</summary>
     internal const string TimeoutReason = "No answer from the server.";
 
@@ -809,10 +870,13 @@ internal sealed class UiDataTableModel
         var timeout = Options.EditTimeout;
         if (timeout <= TimeSpan.Zero || _pending.Count == 0) return 0;
         double now = Now;
-        var late = new List<UiTableEdit>();
+        _late.Clear();
         foreach (var e in _pending.Values)
-            if (now - e.Started >= timeout.TotalSeconds) late.Add(e);
-        foreach (var e in late) Complete(e, false, TimeoutReason);
-        return late.Count;
+            if (now - e.Started >= timeout.TotalSeconds) _late.Add(e);
+        if (_late.Count == 0) return 0;
+        int n = _late.Count;
+        foreach (var e in _late.ToArray()) Complete(e, false, TimeoutReason);
+        _late.Clear();
+        return n;
     }
 }

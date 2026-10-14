@@ -49,6 +49,10 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
         internal UiDrawnMark Mark = UiDrawnMark.None;
         internal bool Disposed;
 
+        /// <summary>The help widgets' term marker after the same text, once found (looked up again only every 30 frames).</summary>
+        internal Transform? TermMarker;
+        internal int TermLookFrame = int.MinValue;
+
         public void Set(UiDrawnMark mark, PaletteColor color)
         {
             if (Disposed) return;
@@ -156,10 +160,13 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
                 continue;
             }
 
-            // Every slot keeps being placed: a term marker beside it can appear or hide (its margin follows).
+            // Every slot keeps being placed while its text is on screen: a term marker beside it can appear or hide (its
+            // margin follows). A closed or hidden panel's slots are skipped.
             any = true;
-            if (view.Mark.IsNone) { Place(view); continue; }
-            if (view.Go.activeInHierarchy) Place(view);
+            bool onScreen;
+            try { onScreen = view.Text.gameObject.activeInHierarchy; }
+            catch { onScreen = false; }
+            if (onScreen) Place(view);
         }
 
         if (!any)
@@ -179,7 +186,7 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
             var tmp = view.Text;
             bool rightJustified = (tmp.horizontalAlignment & HorizontalAlignmentOptions.Right) != 0;
             // A term marker (the help widgets' circle-i) after the same text comes first: caption, term marker, mark.
-            float term = view.Side == UiMarkSide.After ? TermMarkerRoom(tmp) : 0f;
+            float term = view.Side == UiMarkSide.After ? TermMarkerRoom(view) : 0f;
             var margin = view.BaseMargin;
             if (view.Mark.IsNone)
             {
@@ -208,12 +215,24 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
     }
 
     /// <summary>The room a shown term marker takes after <paramref name="tmp"/>'s text (its side and gap), else 0.</summary>
-    private static float TermMarkerRoom(TextMeshProUGUI tmp)
+    private static float TermMarkerRoom(MarkView view)
     {
         try
         {
-            var marker = tmp.transform.Find(TermMarkerName);
-            if (marker == null || !marker.gameObject.activeSelf) return 0f;
+            var tmp = view.Text;
+            var marker = view.TermMarker;
+            if (marker == null || !Alive(marker))
+            {
+                // A marker can be attached after the mark (a term defined later); look again now and then, not every frame.
+                int frame = Time.frameCount;
+                if (frame - view.TermLookFrame < 30 && view.TermLookFrame != int.MinValue) return 0f;
+                view.TermLookFrame = frame;
+                marker = tmp.transform.Find(TermMarkerName);
+                view.TermMarker = marker;
+                if (marker == null) return 0f;
+            }
+
+            if (!marker.gameObject.activeSelf) return 0f;
             return UiTermMarkerArt.SizeFor(tmp.fontSize) + UiTermMarkerArt.Gap;
         }
         catch { return 0f; }

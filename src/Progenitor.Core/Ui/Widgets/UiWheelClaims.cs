@@ -6,8 +6,10 @@ namespace Progenitor.Ui;
 /// <summary>
 /// P7b: widgets that scroll themselves (the data table's virtualized body) and so take the mouse wheel over their own
 /// area instead of letting it scroll the panel. The shown-input pump (the framework's only wheel reader, docs/ui.md
-/// "The wheel") asks <see cref="TryTake"/> on every new notch before it scrolls an inner block or the panel; the newest
-/// claim whose area holds the pointer and that can move that way takes the notch. A claim that cannot move (the table
+/// "The wheel") first finds the topmost shown panel under the pointer, then asks <see cref="TryTake"/> with that panel
+/// and its visible viewport: only a claim owned by that panel, whose area holds the pointer inside the visible
+/// viewport, can take the notch (a table under a dialog or another panel, or rows clipped out of view, never do); the
+/// newest such claim that can move that way takes it. A claim that cannot move (the table
 /// is at its end) hands the notch on, so the panel scrolls as usual. Game-free; the claims are leases released with
 /// their widget, and <see cref="Reset"/> on Core unload drops every one.
 /// </summary>
@@ -17,6 +19,7 @@ internal static class UiWheelClaims
     {
         internal Func<ScreenRect> Area = () => ScreenRect.Unknown;
         internal Func<int, bool> OnNotch = _ => false;
+        internal object? Owner;
         internal bool Disposed;
 
         public void Dispose()
@@ -37,12 +40,15 @@ internal static class UiWheelClaims
     /// gets +1 for one notch toward the end (the wheel turned toward the player) and -1 toward the start, and answers
     /// whether it moved; false hands the notch to the panel.
     /// </summary>
-    internal static IDisposable Add(Func<ScreenRect> area, Func<int, bool> onNotch)
+    /// <param name="owner">The runtime panel the widget's rows are on (<c>UiPanelHandle.RuntimePanel</c>); a claim with no
+    /// owner never takes a notch.</param>
+    internal static IDisposable Add(Func<ScreenRect> area, Func<int, bool> onNotch, object? owner)
     {
         var claim = new Claim
         {
             Area = area ?? throw new ArgumentNullException(nameof(area)),
             OnNotch = onNotch ?? throw new ArgumentNullException(nameof(onNotch)),
+            Owner = owner,
         };
         Live.Add(claim);
         UiWidgetLifetime.Register("wheel-claims", Reset);
@@ -51,16 +57,20 @@ internal static class UiWheelClaims
 
     /// <summary>
     /// One wheel notch at the pointer (<paramref name="x"/>, <paramref name="y"/>, screen pixels) with the device's
-    /// <paramref name="deltaY"/> (positive: away from the player, toward the start). True when a claim took it.
+    /// <paramref name="deltaY"/> (positive: away from the player, toward the start), over <paramref name="topmost"/> (the
+    /// topmost shown panel under the pointer, null for none) whose visible viewport is <paramref name="visible"/>. True
+    /// when a claim took it.
     /// </summary>
-    internal static bool TryTake(float x, float y, float deltaY)
+    internal static bool TryTake(float x, float y, float deltaY, object? topmost, ScreenRect visible)
     {
-        if (Live.Count == 0 || deltaY == 0f || float.IsNaN(deltaY)) return false;
+        if (Live.Count == 0 || deltaY == 0f || float.IsNaN(deltaY) || topmost == null) return false;
+        if (!visible.Contains(x, y)) return false;
         int steps = deltaY > 0f ? -1 : 1;
         for (int i = Live.Count - 1; i >= 0; i--)
         {
             if (i >= Live.Count) continue;
             var claim = Live[i];
+            if (claim.Owner == null || !ReferenceEquals(claim.Owner, topmost)) continue;
             ScreenRect area;
             try { area = claim.Area(); }
             catch { continue; }

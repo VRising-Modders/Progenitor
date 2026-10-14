@@ -196,11 +196,15 @@ internal static class UiHelpStore
         return sb.ToString();
     }
 
-    /// <summary>The stored key of a plugin's term or tip: <c>plugin:name</c>, each part normalized and escaped.</summary>
-    internal static string Key(string? pluginId, string? name) => Escape(Normalize(pluginId)) + ":" + Escape(Normalize(name));
+    /// <summary>
+    /// The stored key of a plugin's term or tip: <c>plugin:name</c>, escaped. The plugin id keeps its case (it is the
+    /// plugin's GUID as written, so the cfg line reads as the mod's id); only its ends are trimmed. The name is normalized
+    /// (<see cref="Normalize"/>): a term or tip id compares without case.
+    /// </summary>
+    internal static string Key(string? pluginId, string? name) => PluginPrefix(pluginId) + Escape(Normalize(name));
 
-    /// <summary>The plugin part of a stored key (escaped form), for a per-plugin reset.</summary>
-    internal static string PluginPrefix(string? pluginId) => Escape(Normalize(pluginId)) + ":";
+    /// <summary>The plugin part of a stored key (escaped form, case kept), for a per-plugin reset.</summary>
+    internal static string PluginPrefix(string? pluginId) => Escape((pluginId ?? "").Trim()) + ":";
 
     /// <summary>Percent-escape the separators (<c>%</c> <c>,</c> <c>:</c> <c>=</c> and control characters) so any id round-trips.</summary>
     internal static string Escape(string text)

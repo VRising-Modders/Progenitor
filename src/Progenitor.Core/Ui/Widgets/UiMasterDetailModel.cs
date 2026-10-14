@@ -232,8 +232,12 @@ internal sealed class UiMasterDetailModel
     }
 
     /// <summary>The page's entries matching its query, in the caller's order.</summary>
+    /// <summary>How many times the search filter ran (tests: one pass per render).</summary>
+    internal int MatchPasses { get; private set; }
+
     internal List<UiMasterEntry> Matches(UiMasterDetailPage page)
     {
+        MatchPasses++;
         string q = UiPickerModel.Fold(page.Query);
         var list = new List<UiMasterEntry>(page.Entries.Count);
         foreach (var e in page.Entries)
@@ -251,9 +255,10 @@ internal sealed class UiMasterDetailModel
     }
 
     /// <summary>Every master line of the page: the matches, the empty state, then the new-entry line.</summary>
-    internal List<UiMasterLine> MasterLines(UiMasterDetailPage page)
+    internal List<UiMasterLine> MasterLines(UiMasterDetailPage page) => LinesFrom(page, Matches(page));
+
+    private static List<UiMasterLine> LinesFrom(UiMasterDetailPage page, List<UiMasterEntry> matches)
     {
-        var matches = Matches(page);
         var lines = new List<UiMasterLine>(matches.Count + 2);
         foreach (var e in matches) lines.Add(new UiMasterLine(UiMasterLineKind.Entry, e, e.Title));
         if (matches.Count == 0)
@@ -267,22 +272,40 @@ internal sealed class UiMasterDetailModel
     }
 
     /// <summary>The master lines drawn now: the window of <see cref="MasterSlots"/> lines from <see cref="UiMasterDetailPage.MasterTop"/>.</summary>
-    internal List<UiMasterLine> MasterWindow(UiMasterDetailPage page)
+    internal List<UiMasterLine> MasterWindow(UiMasterDetailPage page) => View(page).Window;
+
+    /// <summary>One render's view of the master half, the search filter run once: the drawn window and the status.</summary>
+    internal readonly struct MasterView
     {
-        ClampMaster(page);
-        var all = MasterLines(page);
+        internal MasterView(List<UiMasterLine> window, string status)
+        {
+            Window = window;
+            Status = status;
+        }
+
+        internal List<UiMasterLine> Window { get; }
+
+        internal string Status { get; }
+    }
+
+    /// <summary>The master window (the scroll clamped) and the search row's status, from one pass of the filter.</summary>
+    internal MasterView View(UiMasterDetailPage page)
+    {
+        var matches = Matches(page);
+        var all = LinesFrom(page, matches);
+        page.MasterTop = Clamp(page.MasterTop, 0, Math.Max(0, all.Count - MasterSlots));
         var window = new List<UiMasterLine>(MasterSlots);
         for (int i = page.MasterTop; i < all.Count && window.Count < MasterSlots; i++) window.Add(all[i]);
-        return window;
+        return new MasterView(window, StatusFrom(page, matches.Count, all.Count));
     }
 
     /// <summary>The search row's status: the match count, or the visible range while the list scrolls.</summary>
-    internal string MasterStatus(UiMasterDetailPage page)
+    internal string MasterStatus(UiMasterDetailPage page) => View(page).Status;
+
+    private string StatusFrom(UiMasterDetailPage page, int matches, int lines)
     {
         int total = page.Entries.Count;
         if (total == 0) return "";
-        int matches = Matches(page).Count;
-        int lines = MasterLines(page).Count;
         if (lines > MasterSlots)
         {
             int first = Math.Min(page.MasterTop + 1, matches);
@@ -389,6 +412,12 @@ internal sealed class UiMasterDetailModel
     internal int MasterMaxTop(UiMasterDetailPage page) => Math.Max(0, MasterLines(page).Count - MasterSlots);
 
     internal int DetailMaxTop(UiMasterDetailPage page) => Math.Max(0, DetailLines(page).Count - DetailSlots);
+
+    /// <summary>Whether the master window can move one line toward the end (<paramref name="toEnd"/>) or the start.</summary>
+    internal bool CanScrollMaster(bool toEnd) => toEnd ? Page.MasterTop < MasterMaxTop(Page) : Page.MasterTop > 0;
+
+    /// <summary>Whether the detail window can move one line toward the end (<paramref name="toEnd"/>) or the start.</summary>
+    internal bool CanScrollDetail(bool toEnd) => toEnd ? Page.DetailTop < DetailMaxTop(Page) : Page.DetailTop > 0;
 
     /// <summary>Move the master window by <paramref name="lines"/> (clamped). False when it did not move.</summary>
     internal bool ScrollMaster(int lines)

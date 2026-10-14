@@ -44,7 +44,7 @@ public sealed class UiTermsTests : IDisposable
         UiTips.Teardown();
         UiWidgetLifetime.Uninstall(); // leave no help teardown registered for the next suite
         UiHelpStore.UseForTests(null);
-        UiTerms.Clock = () => 0;
+        UiTerms.Clock = UiTerms.DefaultClock;
         CoreUiSettings.Reset();
         UiApi.ResetForTests();
     }
@@ -365,6 +365,89 @@ public sealed class UiTermsTests : IDisposable
     }
 
     [Fact]
+    public void A_tab_chip_grows_by_the_marker_room_while_it_explains_a_term()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        var panel = NewPanel();
+        var tabs = panel.Tabs("wt", new[] { "Belts", "Categories" });
+        var row = _runtime.Rows.Last(r => r.Text == "wt:tabs");
+        CellSpec Chip() => row.Cells().Single(c => c.Key == "tab0");
+        float natural = Chip().MinWidth;
+        Assert.Equal(InstallModsPane.ChipNaturalWidth("Belts"), natural);
+        tabs.SetTerm(0, "Belt");
+        Assert.Equal(natural + UiTermMarkerArt.Room(Chip().FontSize), Chip().MinWidth);
+        Assert.True(_runtime.Markers.Single().ReserveRoom); // the room sits in the caption's right margin
+        tabs.SetTerm(0, "");
+        Assert.Equal(natural, Chip().MinWidth);
+    }
+
+    [Fact]
+    public void Generic_handles_and_list_captions_reserve_the_marker_room_and_chips_keep_their_own()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        var panel = NewPanel();
+        panel.Label("Ore in").Term("Belt");
+        panel.OrderedList("rl", new[] { new UiListItem("a", "Ore in") { Term = "Belt" } });
+        Assert.All(_runtime.Markers, m => Assert.True(m.ReserveRoom));
+        panel.Chips("rc", new[] { new UiChip("ore", "Ore") { Term = "Belt" } });
+        Assert.False(_runtime.Markers.Last().ReserveRoom); // UiChipsLayout.CaptionRight already keeps it
+    }
+
+    [Fact]
+    public void The_markers_toggle_on_a_header_panel_does_not_outlive_its_toggle()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        var inner = NewPanel();
+        var header = new ModHeaderPanel(inner); // not a UiPanelHandle; its own Dispose is a no-op
+        int before = UiTerms.HandlerCount;
+        var toggle = header.TermMarkersToggle();
+        Assert.Equal(before + 1, UiTerms.HandlerCount);
+        toggle.Dispose(); // the page redraws: the header's rows go, the inner panel stays
+        UiTerms.HideMarker(PluginA, "Belt"); // any change prunes the dead handler
+        Assert.Equal(before, UiTerms.HandlerCount);
+
+        // A redraw that builds a new toggle prunes the old one at registration, without any change in between.
+        var second = header.TermMarkersToggle();
+        second.Dispose();
+        var third = header.TermMarkersToggle();
+        Assert.Equal(before + 1, UiTerms.HandlerCount);
+        Assert.False(third.Value); // follows the hidden marker
+    }
+
+    [Fact]
+    public void A_plugins_unload_releases_its_marked_controls_and_change_handlers()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        var panel = NewPanel();
+        panel.Label("Belts").Term("Belt");
+        panel.TermMarkersToggle();
+        var otherOwner = new object();
+        var other = UiApi.Panel("Other", otherOwner, PluginB);
+        _panels.Add(other);
+        UiTerms.Define(PluginB, "Cap", "y");
+        other.Label("Cap").Term("Cap");
+        Assert.Equal(2, UiTerms.Marked.Count);
+        int handlers = UiTerms.HandlerCount;
+
+        UiApi.RemoveAll(_owner);
+        Assert.Single(UiTerms.Marked);
+        Assert.Equal(PluginB, UiTerms.Marked[0].PluginKey);
+        Assert.Equal(handlers - 1, UiTerms.HandlerCount);
+        Assert.True(UiTerms.IsDefined(PluginA, "Belt")); // the glossary (text) stays for the next generation
+    }
+
+    [Fact]
+    public void Stored_keys_keep_the_plugin_ids_case()
+    {
+        UiTerms.Define("Example.Help", "Belt", "x");
+        UiTerms.HideMarker("Example.Help", "BELT");
+        Assert.Equal("Example.Help:belt", _store.Read(UiHelpSlot.HiddenTerms));
+        Assert.False(UiTerms.MarkerShown("Example.Help", "belt"));
+        UiTerms.ShowMarkers("Example.Help");
+        Assert.Equal("", _store.Read(UiHelpSlot.HiddenTerms));
+    }
+
+    [Fact]
     public void The_Core_teardown_drops_the_glossary_and_every_marker()
     {
         UiTerms.Define(PluginA, "Cap", "x");
@@ -405,9 +488,19 @@ public sealed class UiTermsTests : IDisposable
         Assert.Equal(13f, UiTermMarkerArt.SizeFor(18f));
         Assert.Equal(10f, UiTermMarkerArt.SizeFor(8f));
         Assert.Equal(22f, UiTermMarkerArt.SizeFor(60f));
-        Assert.Equal(100f + UiTermMarkerArt.Gap + 6.5f, UiTermMarkerArt.CenterX(100f, -200f, 200f, 13f));
-        Assert.Equal(200f - 6.5f, UiTermMarkerArt.CenterX(199f, -200f, 200f, 13f)); // a full caption: kept inside
-        Assert.Equal(-200f + UiTermMarkerArt.Gap + 6.5f, UiTermMarkerArt.CenterX(float.NaN, -200f, 200f, 13f)); // no text: at the left
+        Assert.Equal(100f + UiTermMarkerArt.Gap + 6.5f, UiTermMarkerArt.CenterAfter(100f, 200f, 13f));
+        // A caption that fills its rect: the marker is hidden, never pulled back onto the text.
+        Assert.True(float.IsNaN(UiTermMarkerArt.CenterAfter(199f, 200f, 13f)));
+        Assert.True(float.IsNaN(UiTermMarkerArt.CenterAfter(float.NaN, 200f, 13f))); // no text: nothing to mark
+        // Exactly the room left after the text: it fits, its left edge Gap after the text.
+        float room = UiTermMarkerArt.Room(18f);
+        Assert.Equal(13f + UiTermMarkerArt.Gap, room);
+        float x = UiTermMarkerArt.CenterAfter(200f - room, 200f, 13f);
+        Assert.Equal(200f - 6.5f, x);
+        Assert.True(x - 6.5f >= 200f - room + UiTermMarkerArt.Gap - 0.01f);
+        // The reserved margin: the widget's own plus the room while shown, the widget's own while hidden.
+        Assert.Equal(2f + room, UiTermMarkerArt.RightMargin(2f, 18f, shown: true));
+        Assert.Equal(2f, UiTermMarkerArt.RightMargin(2f, 18f, shown: false));
     }
 
     // ---- The demo --------------------------------------------------------------------------------
@@ -561,9 +654,9 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
     public string? ItemName(int prefab) => null;
 
     // IUiHelpRuntime
-    public IUiTermMarkerView? AttachTermMarker(IRuntimeWidget widget, string? cellKey)
+    public IUiTermMarkerView? AttachTermMarker(IRuntimeWidget widget, string? cellKey, bool reserveRoom = true)
     {
-        var m = new FakeMarker(widget, cellKey);
+        var m = new FakeMarker(widget, cellKey) { ReserveRoom = reserveRoom };
         Markers.Add(m);
         return m;
     }
@@ -584,6 +677,7 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
 
         public IRuntimeWidget Widget { get; }
         public string? CellKey { get; }
+        public bool ReserveRoom { get; set; }
         public bool Shown { get; set; } = true;
         public bool Disposed { get; private set; }
         public void Dispose() => Disposed = true;

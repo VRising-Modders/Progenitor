@@ -114,8 +114,8 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         {
             try
             {
-                Lease(runtime.ClaimWheel(MasterArea, n => Wheel(master: true, n)));
-                Lease(runtime.ClaimWheel(DetailArea, n => Wheel(master: false, n)));
+                Lease(runtime.ClaimWheel(Panel, MasterArea, n => Wheel(master: true, n)));
+                Lease(runtime.ClaimWheel(Panel, DetailArea, n => Wheel(master: false, n)));
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: master-detail '" + Key + "' wheel claim: " + e.Message); }
 
@@ -129,7 +129,12 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
                     if (_scrollBar != null)
                     {
                         Lease(_scrollBar);
-                        _scrollBar.OnDragged = p => { if (Live && _model.ScrollDetailTo(p)) Render(); };
+                        _scrollBar.OnDragged = p =>
+                        {
+                            if (!Live || !_model.ScrollDetailTo(p)) return;
+                            ContentMoved();
+                            Render();
+                        };
                     }
                 }
                 catch (Exception e) { Plugin.Logger?.LogWarning("Ui: master-detail '" + Key + "' scroll bar: " + e.Message); }
@@ -265,7 +270,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
     public bool ScrollMaster(int lines)
     {
         if (IsDisposed || !_model.ScrollMaster(lines)) return false;
-        HideTooltip();
+        ContentMoved();
         Render();
         return true;
     }
@@ -273,8 +278,21 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
     public bool ScrollDetail(int lines)
     {
         if (IsDisposed || _model.Page.Members.Dragging || !_model.ScrollDetail(lines)) return false;
+        ContentMoved();
         Render();
         return true;
+    }
+
+    /// <summary>
+    /// A half scrolled (the wheel, the stick, a steer, the scroll bar, the API): the rows under the pointer now show other
+    /// lines, so the tooltip (and a term's explanation) goes; the hover frame tick decides afresh what the pointer is on.
+    /// </summary>
+    private void ContentMoved()
+    {
+        HideTooltip();
+        if (_hoverRow < 0) return;
+        LeaveTerms(_hoverRow);
+        _hoverSide = -1; // re-decided on the next tick, even when the pointer stays on the same half
     }
 
     public IDisposable OnSelected(Action<string> handler) => Subscribe(_selected, handler);
@@ -329,6 +347,9 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
     }
 
     // ---- Input ---------------------------------------------------------------------------------
+
+    /// <summary>Tests: the game-free state.</summary>
+    internal UiMasterDetailModel ModelForTests => _model;
 
     /// <summary>Tests and the bridge: the row handle <paramref name="r"/>.</summary>
     internal IUiCellRow RowAt(int r) => _rows[r];
@@ -691,15 +712,26 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         catch { return false; }
     }
 
-    /// <summary>The right stick (positive up) scrolls the focused half about nine lines a second at full tilt.</summary>
-    private bool Stick(int r, float amount)
+    /// <summary>
+    /// The right stick (positive up) scrolls the focused half about nine lines a second at full tilt. At that half's end
+    /// in the stick's direction it answers false, so the panel takes the stick (as the data table does).
+    /// </summary>
+    internal bool Stick(int r, float amount)
     {
-        if (!Live) return false;
+        if (!Live || amount == 0f || float.IsNaN(amount)) return false;
+        bool toEnd = amount < 0f;
+        bool detail = FocusOnDetail(r);
+        if (detail ? !_model.CanScrollDetail(toEnd) || _model.Page.Members.Dragging : !_model.CanScrollMaster(toEnd))
+        {
+            _stick = 0f;
+            return false;
+        }
+
         _stick += -amount * 0.15f;
         if (Math.Abs(_stick) < 1f) return true;
         int lines = _stick > 0 ? 1 : -1;
         _stick -= lines;
-        if (FocusOnDetail(r)) ScrollDetail(lines);
+        if (detail) ScrollDetail(lines);
         else ScrollMaster(lines);
         return true;
     }
@@ -742,7 +774,8 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
             if (!string.IsNullOrEmpty(e.Badge)) counts = true;
         }
 
-        var masterWindow = _model.MasterWindow(page);
+        var masterView = _model.View(page); // the search filter runs once per render
+        var masterWindow = masterView.Window;
         var detailWindow = _model.DetailWindow(page);
         var runtime = WidgetRuntime.Current;
         int firstMaster = _model.Search ? 1 : 0;
@@ -756,7 +789,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
                 _masterShown[r] = null;
                 var cell = Find(row, UiMasterDetailLayout.CellMSearch);
                 if (cell != null && !string.Equals(cell.Text, page.Query, StringComparison.Ordinal)) row.SetCell(UiMasterDetailLayout.CellMSearch, page.Query);
-                Set(row, UiMasterDetailLayout.CellMNote, _model.MasterStatus(page), CellTone.Muted);
+                Set(row, UiMasterDetailLayout.CellMNote, masterView.Status, CellTone.Muted);
             }
             else
             {
@@ -961,34 +994,28 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
             }
         }
 
+        // Cells whose width follows their text: resized (and so rewritten) only when the width changes.
+        var resized = new HashSet<string>(StringComparer.Ordinal);
         for (int b = 0; b < buttons.Count; b++)
         {
             var key = UiMasterDetailLayout.CellButton(b);
-            var cell = Find(row, key);
-            if (cell != null)
-            {
-                float w = UiMasterDetailLayout.ButtonWidth(buttons[b].Caption);
-                cell.Width = CellWidth.Px(w);
-                cell.MinWidth = w;
-            }
-
+            if (Resize(row, key, UiMasterDetailLayout.ButtonWidth(buttons[b].Caption), floor: true)) resized.Add(key);
             show[key] = (buttons[b].Caption, buttons[b].Enabled ? CellTone.Normal : CellTone.Disabled);
         }
 
-        if (show.TryGetValue(UiMasterDetailLayout.CellDNote, out var noteText) && Find(row, UiMasterDetailLayout.CellDNote) is { } noteCell)
-            noteCell.Width = CellWidth.Px(UiMasterDetailLayout.DetailNoteWidth(noteText.Text));
-        if (indent > 0f && Find(row, UiMasterDetailLayout.CellIndent) is { } indentCell)
+        if (show.TryGetValue(UiMasterDetailLayout.CellDNote, out var noteText)
+            && Resize(row, UiMasterDetailLayout.CellDNote, UiMasterDetailLayout.DetailNoteWidth(noteText.Text), floor: false))
+            resized.Add(UiMasterDetailLayout.CellDNote);
+        if (indent > 0f)
         {
-            float w = Math.Max(1f, indent - CellLayout.Gap);
-            indentCell.Width = CellWidth.Px(w);
-            indentCell.MinWidth = w;
+            if (Resize(row, UiMasterDetailLayout.CellIndent, Math.Max(1f, indent - CellLayout.Gap), floor: true)) resized.Add(UiMasterDetailLayout.CellIndent);
             show[UiMasterDetailLayout.CellIndent] = ("", CellTone.Muted);
         }
 
         if (iconCell) show[UiMasterDetailLayout.CellDIcon] = ("", CellTone.Normal);
         foreach (var key in UiMasterDetailLayout.DetailKeys)
         {
-            if (show.TryGetValue(key, out var v)) Set(row, key, v.Text, v.Tone, visible: true, force: key == UiMasterDetailLayout.CellIndent || key == UiMasterDetailLayout.CellDNote || key.StartsWith("d-btn", StringComparison.Ordinal));
+            if (show.TryGetValue(key, out var v)) Set(row, key, v.Text, v.Tone, visible: true, force: resized.Contains(key));
             else Set(row, key, visible: false);
         }
 
@@ -1015,22 +1042,64 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         return false;
     }
 
-    private static CellSpec? Find(IUiCellRow row, string key)
+    /// <summary>One row's cells by key (the live specs), made once per row.</summary>
+    private readonly Dictionary<IUiCellRow, Dictionary<string, CellSpec>> _cellsByRow = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>What this widget last wrote into each cell of each row: a render rewrites only what differs.</summary>
+    private readonly Dictionary<IUiCellRow, Dictionary<string, (string Text, CellTone Tone, bool Visible)>> _written =
+        new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>Tests: how many cell rewrites the widget asked for (each re-places the row's cells).</summary>
+    internal int CellWrites { get; private set; }
+
+    private CellSpec? Find(IUiCellRow row, string key)
     {
-        foreach (var c in row.Cells)
-            if (string.Equals(c.Key, key, StringComparison.Ordinal)) return c;
-        return null;
+        if (!_cellsByRow.TryGetValue(row, out var cells))
+        {
+            cells = new Dictionary<string, CellSpec>(StringComparer.Ordinal);
+            foreach (var c in row.Cells) cells[c.Key] = c;
+            _cellsByRow[row] = cells;
+        }
+
+        return cells.TryGetValue(key, out var cell) ? cell : null;
     }
 
-    /// <summary>Rewrite a cell only when a facet changed (each rewrite re-places the row's cells).</summary>
-    private static void Set(IUiCellRow row, string key, string? text = null, CellTone? tone = null, bool? visible = null, bool force = false)
+    /// <summary>Give <paramref name="key"/> the width <paramref name="width"/> (and that floor); true when it changed.</summary>
+    private bool Resize(IUiCellRow row, string key, float width, bool floor)
     {
         var cell = Find(row, key);
-        if (cell == null) return;
-        bool changed = force
-                       || (text != null && !string.Equals(cell.Text, text, StringComparison.Ordinal))
-                       || (tone != null && cell.Tone != tone.Value)
-                       || (visible != null && cell.Visible != visible.Value);
-        if (changed) row.SetCell(key, text, tone, visible);
+        if (cell == null) return false;
+        bool same = cell.Width.Mode == CellWidthMode.Px && Math.Abs(cell.Width.Value - width) < .01f
+                    && (!floor || Math.Abs(cell.MinWidth - width) < .01f);
+        if (same) return false;
+        cell.Width = CellWidth.Px(width);
+        if (floor) cell.MinWidth = width;
+        return true;
+    }
+
+    /// <summary>
+    /// Rewrite a cell only when a facet differs from what this widget last wrote there (a cache per row and cell, seeded
+    /// from the built spec), or when its width changed (<paramref name="force"/>). Each rewrite re-places the row's cells.
+    /// </summary>
+    private void Set(IUiCellRow row, string key, string? text = null, CellTone? tone = null, bool? visible = null, bool force = false)
+    {
+        if (!_written.TryGetValue(row, out var written))
+        {
+            written = new Dictionary<string, (string, CellTone, bool)>(StringComparer.Ordinal);
+            _written[row] = written;
+        }
+
+        if (!written.TryGetValue(key, out var was))
+        {
+            var cell = Find(row, key);
+            if (cell == null) return;
+            was = (cell.Text, cell.Tone, cell.Visible);
+        }
+
+        var next = (text ?? was.Text, tone ?? was.Tone, visible ?? was.Visible);
+        written[key] = next;
+        if (!force && string.Equals(next.Item1, was.Text, StringComparison.Ordinal) && next.Item2 == was.Tone && next.Item3 == was.Visible) return;
+        CellWrites++;
+        row.SetCell(key, text, tone, visible);
     }
 }

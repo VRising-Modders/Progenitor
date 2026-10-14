@@ -13,9 +13,13 @@ internal interface IUiHelpRuntime
     /// <summary>
     /// Draw a term marker (the circle-i, <see cref="UiTermMarkerArt"/>) right after the text of <paramref name="widget"/>:
     /// its caption, or the cell <paramref name="cellKey"/>'s text when the widget is a cell row. The marker never takes
-    /// the pointer and follows the text when it changes. Null when the runtime cannot find a text to follow.
+    /// the pointer, follows the text when it changes and never overlaps it: with <paramref name="reserveRoom"/> it widens
+    /// the text's right margin by its room (<see cref="UiTermMarkerArt.Room"/>) while it shows, so a caption that fills
+    /// its rect is shortened (its ellipsis) rather than covered; a widget whose layout already keeps that room (the chips'
+    /// caption margin) passes false. Where it still does not fit inside the text's rect it is hidden, never pushed onto
+    /// the text. Null when the runtime cannot find a text to follow.
     /// </summary>
-    IUiTermMarkerView? AttachTermMarker(IRuntimeWidget widget, string? cellKey);
+    IUiTermMarkerView? AttachTermMarker(IRuntimeWidget widget, string? cellKey, bool reserveRoom = true);
 
     /// <summary>
     /// Place the shown tip card <paramref name="card"/> by <see cref="UiTipLayout.Place"/>: beside, below or above the
@@ -70,22 +74,28 @@ internal static class UiTermMarkerArt
         return s < 10f ? 10f : s > 22f ? 22f : s;
     }
 
+    /// <summary>The room a marker takes after a text of <paramref name="fontSize"/>: its side and its gap.</summary>
+    internal static float Room(float fontSize) => SizeFor(fontSize) + Gap;
+
     /// <summary>
     /// The marker's center x in the text rect's own coordinates: <see cref="Gap"/> after the text's right edge
-    /// (<paramref name="textMaxX"/>), kept inside the rect (<paramref name="rectMinX"/>..<paramref name="rectMaxX"/>) so a
-    /// caption that fills its rect does not push the marker into the next column; NaN text bounds put it at the left.
+    /// (<paramref name="textMaxX"/>). NaN (the marker is hidden) when the text has no known bounds (nothing to explain)
+    /// or when the marker would leave the rect (<paramref name="rectMaxX"/>). It is never moved onto the text: a caption
+    /// that fills its rect either has the room reserved (its right margin, so it ellipsizes first) or loses its marker.
     /// </summary>
-    internal static float CenterX(float textMaxX, float rectMinX, float rectMaxX, float size)
+    internal static float CenterAfter(float textMaxX, float rectMaxX, float size)
     {
+        if (float.IsNaN(textMaxX) || float.IsInfinity(textMaxX)) return float.NaN;
         float half = size / 2f;
-        if (float.IsNaN(textMaxX) || float.IsInfinity(textMaxX)) textMaxX = rectMinX;
         float x = textMaxX + Gap + half;
-        float hi = rectMaxX - half;
-        float lo = rectMinX + half;
-        if (x > hi) x = hi;
-        if (x < lo) x = lo;
-        return x;
+        return x + half > rectMaxX + 0.5f ? float.NaN : x;
     }
+
+    /// <summary>
+    /// The text's right margin while a marker with reserved room shows: the widget's own margin
+    /// (<paramref name="baseRight"/>) plus <see cref="Room"/>; just the widget's own while it is hidden.
+    /// </summary>
+    internal static float RightMargin(float baseRight, float fontSize, bool shown) => baseRight + (shown ? Room(fontSize) : 0f);
 
     /// <summary>
     /// Coverage (0..1) of the circle-i at texture pixel (<paramref name="x"/>, <paramref name="y"/>), y bottom-up: a ring,

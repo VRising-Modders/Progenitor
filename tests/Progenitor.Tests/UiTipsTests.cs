@@ -43,7 +43,8 @@ public sealed class UiTipsTests : IDisposable
         UiTips.Teardown();
         UiWidgetLifetime.Uninstall(); // leave no help teardown registered for the next suite
         foreach (var p in _panels) p.Dispose();
-        UiTips.ModalOpen = () => false;
+        UiTips.ModalOpen = UiTips.DefaultModalOpen;
+        UiTips.Presenter = new UiTipCardPresenter();
         UiHelpStore.UseForTests(null);
         CoreUiSettings.Reset();
         UiApi.ResetForTests();
@@ -225,6 +226,33 @@ public sealed class UiTipsTests : IDisposable
         Assert.Equal(1, custom);
         Assert.False(UiTips.ListOpen);
         Assert.Equal(UiTipState.Done, own.State);
+    }
+
+    [Fact]
+    public void The_lists_Close_button_and_Escape_forget_the_list()
+    {
+        UiTips.ShowList(_ownerA, PluginA);
+        Assert.True(UiTips.ListOpen);
+        _runtime.Click(UiTipCopy.Close);
+        Assert.False(UiTips.ListOpen);
+
+        UiTips.ShowList(_ownerA, PluginA);
+        Assert.True(UiTips.ListOpen);
+        var list = UiApi.ShownPanelsSnapshot().Last(p => p.Text == UiTipCopy.ListTitle);
+        list.Hide(); // the Escape sweep
+        Assert.False(UiTips.ListOpen);
+        Assert.Equal(false, UiTips.Describe()["listOpen"]);
+    }
+
+    [Fact]
+    public void A_plugins_unload_through_Ui_RemoveAll_drops_its_cards()
+    {
+        var shown = Tip("a");
+        var other = Tip("b", _ownerB, PluginB);
+        UiApi.RemoveAll(_ownerA);
+        Assert.Equal(UiTipState.Dropped, shown.State);
+        Assert.Equal(UiTipState.Showing, other.State);
+        Assert.False(UiTips.IsSeen(PluginA, "a"));
     }
 
     [Fact]

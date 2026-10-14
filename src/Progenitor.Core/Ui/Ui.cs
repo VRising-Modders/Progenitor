@@ -521,6 +521,11 @@ public static class Ui
         // second line behind the tracked ctx.Dialogs registration.
         try { UiDialog.DropOwner(owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll dialogs threw: " + e.Message); }
+        // P7b help: the owner's marked terms, marker change handlers and tip cards (every plugin, ctx.Hud or not).
+        try { UiTerms.DropOwner(owner); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll terms threw: " + e.Message); }
+        try { UiTips.DropOwner(owner); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll tips threw: " + e.Message); }
         UiHandle[] snapshot;
         lock (Gate)
         {

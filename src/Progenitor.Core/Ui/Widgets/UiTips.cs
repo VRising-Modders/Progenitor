@@ -83,7 +83,6 @@ internal static class UiTipCopy
     internal const string ListEmpty = "This mod has no tips.";
     internal const string ShowAgain = "Show tips again";
     internal const string Close = "Close";
-    internal const string SeenMark = "Seen";
 }
 
 /// <summary>One tip request (the <see cref="IUiTip"/> a plugin holds).</summary>
@@ -155,7 +154,14 @@ internal interface IUiTipPresenter
     IUiTipCardView? Present(UiTipRequest tip, Action gotIt, Action showAll);
 
     /// <summary>The list of a plugin's tips; disposing it closes the list.</summary>
-    IDisposable? ShowList(object owner, string pluginId, IReadOnlyList<UiTipInfo> tips, Action showAgain);
+    IUiTipListView? ShowList(object owner, string pluginId, IReadOnlyList<UiTipInfo> tips, Action showAgain);
+}
+
+/// <summary>The open tip list (<see cref="IUiTipPresenter.ShowList"/>). Disposing it closes the list.</summary>
+internal interface IUiTipListView : IDisposable
+{
+    /// <summary>The list is on screen (not closed by its Close button, not hidden by Escape, not disposed).</summary>
+    bool Open { get; }
 }
 
 /// <summary>
@@ -196,7 +202,7 @@ internal static class UiTips
     private static readonly Dictionary<string, List<Def>> Registry = new(StringComparer.Ordinal);
     private static readonly List<UiTipRequest> Queue = new();
     private static UiTipRequest? _showing;
-    private static (object Owner, IDisposable View)? _list;
+    private static (object Owner, IUiTipListView View)? _list;
     private static IDisposable? _tick;
     private static bool _pumping;
     private static bool _waitLogged;
@@ -218,7 +224,8 @@ internal static class UiTips
     /// <summary>The frame tick runs (something waits or shows).</summary>
     internal static bool Ticking => _tick != null;
 
-    private static bool DefaultModalOpen()
+    /// <summary>The production modal probe (tests restore it).</summary>
+    internal static bool DefaultModalOpen()
     {
         try { if (UiDialog.Current != null) return true; } catch { /* */ }
         try { if (UiChoiceHandle.AnyOpen) return true; } catch { /* */ }
@@ -381,7 +388,7 @@ internal static class UiTips
     internal static void ShowList(object owner, string pluginId)
     {
         CloseList();
-        IDisposable? view = null;
+        IUiTipListView? view = null;
         try { view = Presenter.ShowList(owner, pluginId, Infos(pluginId), () => ResetAll(pluginId)); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: the tip list of " + pluginId + " could not be drawn: " + e.Message); }
         if (view != null)
@@ -392,7 +399,26 @@ internal static class UiTips
     }
 
     /// <summary>The tip list is open (readback and tests).</summary>
-    internal static bool ListOpen => _list != null;
+    internal static bool ListOpen
+    {
+        get
+        {
+            if (_list is not { } list) return false;
+            bool open;
+            try { open = list.View.Open; }
+            catch { open = false; }
+            if (open) return true;
+            // Closed by its own Close button, hidden by the Escape sweep or disposed with its plugin: forget it.
+            CloseList();
+            return false;
+        }
+    }
+
+    /// <summary>The list closed itself (its Close button, the Escape sweep, its panel disposed): forget it.</summary>
+    internal static void ListClosed(IDisposable view)
+    {
+        if (_list is { } list && ReferenceEquals(list.View, view)) _list = null;
+    }
 
     private static void CloseList()
     {

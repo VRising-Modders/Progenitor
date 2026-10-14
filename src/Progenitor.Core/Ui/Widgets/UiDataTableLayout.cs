@@ -112,6 +112,9 @@ internal static class UiDataTableLayout
         return UiDrawnMark.None;
     }
 
+    /// <summary>The word a pending clear shows (sentence case, the value box's gray hint look): back to the inherited value.</summary>
+    internal const string InheritedHint = "Inherited";
+
     /// <summary>The row tooltip's words for an inherited cell: <c>Reserve 200: inherited from category Ore</c>.</summary>
     internal static string InheritedLine(UiTableColumn column, UiTableCell cell)
     {

@@ -30,16 +30,27 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
 
     private sealed class TermMarkerView : IUiTermMarkerView
     {
-        internal TermMarkerView(TextMeshProUGUI text, GameObject marker, RectTransform rt)
+        internal TermMarkerView(TextMeshProUGUI text, GameObject marker, RectTransform rt, bool reserveRoom)
         {
             Text = text;
             Marker = marker;
             Rt = rt;
+            ReserveRoom = reserveRoom;
         }
 
         internal readonly TextMeshProUGUI Text;
         internal readonly GameObject Marker;
         internal readonly RectTransform Rt;
+
+        /// <summary>The marker keeps its room in the text's right margin (see <see cref="IUiHelpRuntime.AttachTermMarker"/>).</summary>
+        internal readonly bool ReserveRoom;
+
+        /// <summary>The text's margin without the marker's room (re-read when the kit repaints the text).</summary>
+        internal Vector4 BaseMargin;
+
+        /// <summary>The margin this view last wrote, or null when it has not written one.</summary>
+        internal Vector4? Written;
+
         private bool _shown = true;
         internal bool Disposed;
 
@@ -48,9 +59,9 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
             get => _shown;
             set
             {
+                if (_shown == value) return;
                 _shown = value;
-                try { if (Alive(Marker) && Marker.activeSelf != value) Marker.SetActive(value); }
-                catch { /* */ }
+                PlaceTermMarker(this);
             }
         }
 
@@ -59,11 +70,13 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
             if (Disposed) return;
             Disposed = true;
             TermMarkers.Remove(this);
+            // Give the caption its full width back.
+            try { if (Written is { } w && Alive(Text) && Text.margin == w) Text.margin = BaseMargin; } catch { /* */ }
             if (Alive(Marker)) TryDestroyImmediate(Marker);
         }
     }
 
-    public IUiTermMarkerView? AttachTermMarker(IRuntimeWidget widget, string? cellKey)
+    public IUiTermMarkerView? AttachTermMarker(IRuntimeWidget widget, string? cellKey, bool reserveRoom = true)
     {
         try
         {
@@ -105,7 +118,8 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
             }
             catch { /* */ }
 
-            var view = new TermMarkerView(text, marker, rt);
+            var view = new TermMarkerView(text, marker, rt, reserveRoom);
+            try { view.BaseMargin = text.margin; } catch { view.BaseMargin = Vector4.zero; }
             PlaceTermMarker(view);
             TermMarkers.Add(view);
             if (!_termTeardown)
@@ -142,7 +156,8 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
                 continue;
             }
 
-            if (view.Shown && view.Marker.activeInHierarchy) PlaceTermMarker(view);
+            // The marker itself may be inactive (it did not fit last frame); its text's state decides.
+            if (view.Shown && view.Text.gameObject.activeInHierarchy) PlaceTermMarker(view);
         }
 
         if (TermMarkers.Count == 0)
@@ -154,22 +169,61 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
         }
     }
 
-    /// <summary>Size the marker from the text's font size and put it after the text's last character.</summary>
+    /// <summary>
+    /// Keep the marker's room in the text's right margin (when it reserves one and no drawn sort mark owns that margin),
+    /// size the marker from the text's font size, and put it after the text's last character; hide it when it is not
+    /// shown or does not fit inside the text's rect. It is never placed on the text.
+    /// </summary>
     private static void PlaceTermMarker(TermMarkerView view)
     {
         try
         {
+            if (view.Disposed || !Alive(view.Text) || !Alive(view.Marker)) return;
             var tmp = view.Text;
             float size = UiTermMarkerArt.SizeFor(tmp.fontSize);
-            Rect rect = tmp.rectTransform.rect;
-            Bounds bounds = tmp.textBounds;
-            bool known = bounds.size.x > 0f && !float.IsNaN(bounds.max.x);
-            float x = UiTermMarkerArt.CenterX(known ? bounds.max.x : float.NaN, rect.xMin, rect.xMax, size);
-            float y = known ? bounds.center.y : rect.center.y;
-            var want = new Vector2(x - rect.center.x, y - rect.center.y);
-            var rt = view.Rt;
-            if (Math.Abs(rt.sizeDelta.x - size) > 0.1f) rt.sizeDelta = new Vector2(size, size);
-            if ((rt.anchoredPosition - want).sqrMagnitude > 0.01f) rt.anchoredPosition = want;
+
+            // A drawn mark beside the same text (the data table's sort arrow) owns the margin and keeps this marker's
+            // room itself (UnityUiRuntime.Marks.cs, TermMarkerRoom).
+            bool owned = view.ReserveRoom && tmp.transform.Find(DrawnMarkName) == null;
+            var current = tmp.margin;
+            // The kit repainted the text (a cell's paint writes its own margin): that is the new base.
+            if (view.Written is not { } written || current != written) view.BaseMargin = current;
+            if (owned)
+            {
+                var want = view.BaseMargin;
+                want.z = UiTermMarkerArt.RightMargin(want.z, tmp.fontSize, view.Shown);
+                if (current != want)
+                {
+                    tmp.margin = want;
+                    try { tmp.ForceMeshUpdate(); } catch { /* the bounds follow next frame */ }
+                }
+
+                view.Written = want;
+            }
+            else
+            {
+                if (view.Written is { } mine && current == mine) tmp.margin = view.BaseMargin;
+                view.Written = null;
+            }
+
+            bool visible = false;
+            if (view.Shown)
+            {
+                Rect rect = tmp.rectTransform.rect;
+                Bounds bounds = tmp.textBounds;
+                bool known = bounds.size.x > 0f && !float.IsNaN(bounds.max.x);
+                float x = UiTermMarkerArt.CenterAfter(known ? bounds.max.x : float.NaN, rect.xMax, size);
+                if (!float.IsNaN(x))
+                {
+                    visible = true;
+                    var at = new Vector2(x - rect.center.x, bounds.center.y - rect.center.y);
+                    var rt = view.Rt;
+                    if (Math.Abs(rt.sizeDelta.x - size) > 0.1f) rt.sizeDelta = new Vector2(size, size);
+                    if ((rt.anchoredPosition - at).sqrMagnitude > 0.01f) rt.anchoredPosition = at;
+                }
+            }
+
+            if (view.Marker.activeSelf != visible) view.Marker.SetActive(visible);
         }
         catch { /* the marker stays where it was */ }
     }
@@ -194,6 +248,18 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
         _termTeardown = false;
     }
 
+    /// <summary>
+    /// A caller's sprite handle as a <c>Sprite</c>. C# <c>as</c> answers only for a wrapper already typed Sprite; a
+    /// handle typed as a base class (a <c>UnityEngine.Object</c> from an asset lookup) needs the IL2CPP cast.
+    /// </summary>
+    internal static Sprite? AsSprite(object? handle)
+    {
+        if (handle == null) return null;
+        if (handle is Sprite sprite) return sprite;
+        try { return (handle as Il2CppInterop.Runtime.InteropTypes.Il2CppObjectBase)?.TryCast<Sprite>(); }
+        catch { return null; }
+    }
+
     // ---- Tip card placement ------------------------------------------------------------------------
 
     public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor)
@@ -202,7 +268,9 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
         try
         {
             var rt = host.GameObject.GetComponent<RectTransform>();
-            var parent = rt == null ? null : rt.parent as RectTransform;
+            // Not `rt.parent as RectTransform`: C# `as` tests the managed wrapper (a Transform), never the IL2CPP class.
+            var parentTransform = rt == null ? null : rt.parent;
+            var parent = parentTransform == null ? null : parentTransform.GetComponent<RectTransform>();
             if (rt == null || parent == null) return false;
             Rect pr = parent.rect;
             if (pr.width <= 0f || pr.height <= 0f) return false;

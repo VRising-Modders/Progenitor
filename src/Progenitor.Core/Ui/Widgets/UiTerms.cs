@@ -47,14 +47,44 @@ public static class UiTerms
     /// <summary>Normalized plugin id → normalized term → entry, in definition order (<see cref="Order"/>).</summary>
     private static readonly Dictionary<string, Dictionary<string, Entry>> Glossaries = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, List<string>> Order = new(StringComparer.Ordinal);
-    private static readonly List<KeyValuePair<string, Action>> Changed = new();
+    /// <summary>A change handler: its plugin key, the handler, the owner that unloads it, and when it is dead.</summary>
+    private sealed class Handler
+    {
+        internal Handler(string plugin, Action action, object? owner, Func<bool>? dead)
+        {
+            Plugin = plugin;
+            Action = action;
+            Owner = owner;
+            Dead = dead;
+        }
+
+        internal readonly string Plugin;
+        internal readonly Action Action;
+        internal readonly object? Owner;
+        internal readonly Func<bool>? Dead;
+
+        internal bool IsDead
+        {
+            get
+            {
+                if (Dead == null) return false;
+                try { return Dead(); }
+                catch { return true; }
+            }
+        }
+    }
+
+    private static readonly List<Handler> Changed = new();
     private static readonly List<UiTermBinding> Bindings = new();
     private static readonly Dictionary<string, double> LastHover = new(StringComparer.Ordinal);
     private static readonly Stopwatch Watch = Stopwatch.StartNew();
     private static bool _teardownRegistered;
 
     /// <summary>Seconds on a monotonic clock (tests replace it).</summary>
-    internal static Func<double> Clock { get; set; } = () => Watch.Elapsed.TotalSeconds;
+    internal static Func<double> Clock { get; set; } = DefaultClock;
+
+    /// <summary>The production clock (tests restore it).</summary>
+    internal static double DefaultClock() => Watch.Elapsed.TotalSeconds;
 
     // ---- Glossary --------------------------------------------------------------------------------
 
@@ -233,20 +263,61 @@ public static class UiTerms
     /// After <paramref name="pluginId"/>'s glossary or marker state changed (a definition, a hide, an auto-hide, a show).
     /// Dispose the lease (or let <c>ctx.Track</c> do it) before the plugin unloads.
     /// </summary>
-    public static IDisposable OnMarkersChanged(string pluginId, Action handler)
+    public static IDisposable OnMarkersChanged(string pluginId, Action handler) => OnMarkersChanged(pluginId, handler, null, null);
+
+    /// <summary>
+    /// As the public overload, released also when <paramref name="owner"/> unloads (<see cref="DropOwner"/>, from
+    /// <c>Ui.RemoveAll</c>) and pruned as soon as <paramref name="dead"/> answers true (checked on every registration and
+    /// every change), so a handler tied to a control never outlives it by more than one redraw.
+    /// </summary>
+    internal static IDisposable OnMarkersChanged(string pluginId, Action handler, object? owner, Func<bool>? dead)
     {
         if (handler == null) throw new ArgumentNullException(nameof(handler));
-        var pair = new KeyValuePair<string, Action>(UiHelpStore.Normalize(pluginId), handler);
+        var entry = new Handler(UiHelpStore.Normalize(pluginId), handler, owner, dead);
         lock (Gate)
         {
             EnsureTeardown();
-            Changed.Add(pair);
+            Changed.RemoveAll(h => h.IsDead);
+            Changed.Add(entry);
         }
 
         return new ActionDisposable(() =>
         {
-            lock (Gate) Changed.Remove(pair);
+            lock (Gate) Changed.Remove(entry);
         });
+    }
+
+    /// <summary>The live change handlers (tests).</summary>
+    internal static int HandlerCount
+    {
+        get
+        {
+            lock (Gate) return Changed.Count;
+        }
+    }
+
+    /// <summary>
+    /// A plugin unloads (<c>Ui.RemoveAll</c>): its marked controls and its change handlers go. Its glossary (text only)
+    /// stays until it defines it again. Returns how many were released.
+    /// </summary>
+    internal static int DropOwner(object owner)
+    {
+        if (owner == null) return 0;
+        UiTermBinding[] bindings;
+        int handlers;
+        lock (Gate)
+        {
+            bindings = Bindings.FindAll(b => ReferenceEquals(b.Owner, owner)).ToArray();
+            handlers = Changed.RemoveAll(h => ReferenceEquals(h.Owner, owner));
+        }
+
+        foreach (var b in bindings)
+        {
+            try { b.Dispose(); }
+            catch { /* */ }
+        }
+
+        return bindings.Length + handlers;
     }
 
     /// <summary>Readback: <c>{plugin, autoHideAfter, markersOn, terms [{term, explanation, marker, hovers}], marked}</c>.</summary>
@@ -334,10 +405,10 @@ public static class UiTerms
     /// <paramref name="watchHover"/> false and calls <see cref="UiTermBinding.Hover"/> from its own handler instead;
     /// otherwise the later binding would replace the earlier one.</para>
     /// </summary>
-    internal static UiTermBinding MarkCell(IUiCellRow row, string cellKey, string term, bool watchHover = true)
+    internal static UiTermBinding MarkCell(IUiCellRow row, string cellKey, string term, bool watchHover = true, bool reserveRoom = true)
     {
         if (row == null) throw new ArgumentNullException(nameof(row));
-        var binding = UiTermBinding.ForCell(row, cellKey ?? "", term ?? "", watchHover);
+        var binding = UiTermBinding.ForCell(row, cellKey ?? "", term ?? "", watchHover, reserveRoom);
         Add(binding);
         return binding;
     }
@@ -380,10 +451,11 @@ public static class UiTerms
     private static void RaiseChanged(string plugin)
     {
         UiTermBinding[] bindings;
-        KeyValuePair<string, Action>[] handlers;
+        Handler[] handlers;
         lock (Gate)
         {
             Bindings.RemoveAll(b => b.Dead);
+            Changed.RemoveAll(h => h.IsDead);
             bindings = Bindings.ToArray();
             handlers = Changed.ToArray();
         }
@@ -392,8 +464,8 @@ public static class UiTerms
             if (b.PluginKey == plugin) b.Refresh();
         foreach (var h in handlers)
         {
-            if (h.Key != plugin) continue;
-            try { h.Value(); }
+            if (h.Plugin != plugin) continue;
+            try { h.Action(); }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: a term marker change handler threw: " + e.Message); }
         }
     }
@@ -443,14 +515,18 @@ internal sealed class UiTermBinding : IDisposable
     private bool _tooltipShown;
     private bool _disposed;
 
-    private UiTermBinding(string pluginId, string term, Func<ScreenRect> anchor, Func<bool> dead)
+    private UiTermBinding(string pluginId, string term, Func<ScreenRect> anchor, Func<bool> dead, object? owner)
     {
+        Owner = owner;
         _pluginId = pluginId ?? "";
         PluginKey = UiHelpStore.Normalize(pluginId);
         Term = (term ?? "").Trim();
         _anchor = anchor;
         _dead = dead;
     }
+
+    /// <summary>The owner (the plugin object its control was built for); its unload releases this binding.</summary>
+    internal object? Owner { get; }
 
     /// <summary>The normalized plugin id.</summary>
     internal string PluginKey { get; }
@@ -484,29 +560,31 @@ internal sealed class UiTermBinding : IDisposable
                 try { return Ui.CurrentRuntime().WidgetRect(kit.Runtime); }
                 catch { return ScreenRect.Unknown; }
             },
-            () => handle.IsDisposed);
+            () => handle.IsDisposed,
+            kit?.Owner);
         if (kit == null || kit.IsDisposed || !kit.Enabled || kit.Runtime == null) return binding;
         var widgets = WidgetRuntime.Current;
         try { binding._hover = widgets?.WatchHover(kit.Runtime, binding.Hover, kit.Owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: term '" + term + "' hover on '" + kit.Text + "' failed: " + e.Message); }
-        try { binding._view = UiHelpRuntime.Current?.AttachTermMarker(kit.Runtime, null); }
+        try { binding._view = UiHelpRuntime.Current?.AttachTermMarker(kit.Runtime, null, reserveRoom: true); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: term '" + term + "' marker on '" + kit.Text + "' failed: " + e.Message); }
         return binding;
     }
 
-    internal static UiTermBinding ForCell(IUiCellRow row, string cellKey, string term, bool watchHover)
+    internal static UiTermBinding ForCell(IUiCellRow row, string cellKey, string term, bool watchHover, bool reserveRoom = true)
     {
         var handle = row as UiCellRowHandle;
         var binding = new UiTermBinding(row.PluginId, term,
             () => handle == null || handle.IsDisposed ? ScreenRect.Unknown : handle.NavRect(cellKey),
-            () => row.IsDisposed);
+            () => row.IsDisposed,
+            handle?.Owner);
         if (handle == null || handle.IsDisposed || !handle.Enabled) return binding;
         try { if (watchHover) binding._hover = row.OnCellHover(cellKey, binding.Hover); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: term '" + term + "' hover on cell '" + cellKey + "' failed: " + e.Message); }
         try
         {
             if (handle.NavWidget(null) is IRuntimeCellRow runtimeRow)
-                binding._view = UiHelpRuntime.Current?.AttachTermMarker(runtimeRow, cellKey);
+                binding._view = UiHelpRuntime.Current?.AttachTermMarker(runtimeRow, cellKey, reserveRoom);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: term '" + term + "' marker on cell '" + cellKey + "' failed: " + e.Message); }
         return binding;

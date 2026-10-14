@@ -71,11 +71,13 @@ internal interface IWidgetRuntime
     UiClickModifiers ClickModifiers() => UiClickModifiers.None;
 
     /// <summary>
-    /// P7b: take wheel notches over <paramref name="area"/> (screen pixels) before the panel scrolls
-    /// (<see cref="UiWheelClaims"/>); <paramref name="onNotch"/> gets +1 toward the end, -1 toward the start, and answers
-    /// whether it moved. Disposed with the widget.
+    /// P7b: take wheel notches over <paramref name="area"/> (screen pixels) of <paramref name="panel"/> before that panel
+    /// scrolls (<see cref="UiWheelClaims"/>): only while <paramref name="panel"/> is the topmost shown panel under the
+    /// pointer and the pointer is inside its visible viewport. <paramref name="onNotch"/> gets +1 toward the end, -1
+    /// toward the start, and answers whether it moved. Disposed with the widget.
     /// </summary>
-    IDisposable ClaimWheel(Func<ScreenRect> area, Func<int, bool> onNotch) => UiWheelClaims.Add(area, onNotch);
+    IDisposable ClaimWheel(IUiPanel panel, Func<ScreenRect> area, Func<int, bool> onNotch) =>
+        UiWheelClaims.Add(area, onNotch, (panel as UiPanelHandle)?.RuntimePanel);
 
     /// <summary>
     /// P7b: a vertical scroll bar in the game's art (<c>ScrollBar_Bar</c> / <c>ScrollBar_Handle</c>, the kit's track and

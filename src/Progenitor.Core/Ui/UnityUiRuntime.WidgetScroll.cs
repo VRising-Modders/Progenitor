@@ -117,7 +117,15 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
             _bottom = bottom;
             _go = go;
             _bar = bar;
+            // Looked up once: Place runs every frame.
+            try { _topRt = top.GameObject.GetComponent<RectTransform>(); } catch { _topRt = null; }
+            try { _bottomRt = bottom.GameObject.GetComponent<RectTransform>(); } catch { _bottomRt = null; }
+            try { _rt = go.GetComponent<RectTransform>(); } catch { _rt = null; }
         }
+
+        private readonly RectTransform? _topRt;
+        private readonly RectTransform? _bottomRt;
+        private readonly RectTransform? _rt;
 
         internal IDisposable? Tick;
 
@@ -187,8 +195,8 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
             {
                 var go = _go!;
                 var parent = go.transform.parent;
-                var topRt = _top.GameObject.GetComponent<RectTransform>();
-                var bottomRt = _bottom.GameObject.GetComponent<RectTransform>();
+                var topRt = _topRt;
+                var bottomRt = _bottomRt;
                 if (parent == null || topRt == null || bottomRt == null) return false;
                 var tr = topRt.rect;
                 var br = bottomRt.rect;
@@ -198,7 +206,7 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
                 if (height < 8f) return false;
                 var at = new Vector3(topRight.x - WidgetBarPadRight, topRight.y - WidgetBarPadY, 0f);
                 var size = new Vector2(UiDataTableLayout.ScrollBarWidth, height);
-                var rt = go.GetComponent<RectTransform>();
+                var rt = _rt;
                 if (rt == null) return false;
                 if ((at - _placedAt).sqrMagnitude > 0.01f || float.IsNaN(_placedAt.x))
                 {

@@ -4739,12 +4739,12 @@ internal static partial class ModsUiOps
             var tmp = go.GetComponent<TextMeshProUGUI>() ?? go.GetComponentInChildren<TextMeshProUGUI>(true);
             if (tmp != null && tmp.textInfo != null)
                 meshCount = tmp.textInfo.characterCount;
-            else if (graphic is Image)
+            else if (graphic.TryCast<Image>() != null)
                 meshCount = 1;
         }
         catch
         {
-            if (graphic is Image) meshCount = 1;
+            try { if (graphic.TryCast<Image>() != null) meshCount = 1; } catch { /* */ }
         }
     }
 

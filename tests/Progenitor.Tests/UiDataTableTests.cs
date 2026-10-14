@@ -619,7 +619,8 @@ public sealed class UiDataTableTests : IDisposable
         var clear = table.Edit("a", "cap", "  ")!;
         Assert.True(clear.Clear);
         Assert.Null(clear.NewValue);
-        Assert.Equal("inherited", Cell(Row("t:row0"), "c:cap").Text);
+        Assert.Equal("Inherited", Cell(Row("t:row0"), "c:cap").Text); // the value box's gray hint word
+        Assert.Equal(CellTone.Muted, Cell(Row("t:row0"), "c:cap").Tone);
         Assert.Equal("spinner:0", ((UiDataTableHandle)table).SpinnerAt(0, "cap"));
         clear.Resolve("10");
         Assert.True(table.Rows[0]["cap"]!.Inherited);
@@ -767,15 +768,21 @@ public sealed class UiDataTableTests : IDisposable
         var (table, _) = NewTable(Many(30), Options(visible: 10));
         _panels[0].Show();
         Assert.Equal(1, UiWheelClaims.Count);
+        var top = ((UiPanelHandle)_panels[0]).RuntimePanel;
+        var view = ScreenRect.FromCorners(0f, 0f, 4000f, 4000f);
+        // Another panel on top, or the body clipped out of the visible viewport: the notch is not the table's.
+        Assert.False(UiWheelClaims.TryTake(10f, 120f, -120f, new object(), view));
+        Assert.False(UiWheelClaims.TryTake(10f, 120f, -120f, top, ScreenRect.FromCorners(0f, 300f, 4000f, 4000f)));
+        Assert.Equal(0, table.TopIndex);
         // The fake rows sit at y 100..140; a notch toward the player is a negative delta.
-        Assert.False(UiWheelClaims.TryTake(10f, 120f, +120f)); // at the top: the panel's
-        Assert.True(UiWheelClaims.TryTake(10f, 120f, -120f));
+        Assert.False(UiWheelClaims.TryTake(10f, 120f, +120f, top, view)); // at the top: the panel's
+        Assert.True(UiWheelClaims.TryTake(10f, 120f, -120f, top, view));
         Assert.Equal(2, table.TopIndex);
-        Assert.False(UiWheelClaims.TryTake(10f, 500f, -120f)); // outside the body
+        Assert.False(UiWheelClaims.TryTake(10f, 500f, -120f, top, view)); // outside the body
         table.TopIndex = 99;
         Assert.Equal(21, table.TopIndex); // 31 lines (30 rows and the total) in 10 slots
-        Assert.False(UiWheelClaims.TryTake(10f, 120f, -120f)); // at the end: the panel's
-        Assert.True(UiWheelClaims.TryTake(10f, 120f, +120f));
+        Assert.False(UiWheelClaims.TryTake(10f, 120f, -120f, top, view)); // at the end: the panel's
+        Assert.True(UiWheelClaims.TryTake(10f, 120f, +120f, top, view));
         Assert.Equal(19, table.TopIndex);
     }
 
@@ -1069,6 +1076,141 @@ public sealed class UiDataTableTests : IDisposable
         Assert.Equal(CellAlign.Right, cells.Single(c => c.Key == "c:total").Align);
         Assert.Equal(CellKind.Mono, cells.Single(c => c.Key == "c:total").Kind); // tabular figures
         Assert.Equal("1,234,567", UiDataTableModel.FormatValue(1234567, cols[1]));
+    }
+
+    // ---- Review round 2: focus, caches, dropped edits, tooltips ----------------------------------------
+
+    [Theory]
+    [InlineData("wheel")]
+    [InlineData("sort")]
+    [InlineData("refresh")]
+    [InlineData("group")]
+    public void A_focused_value_box_gives_up_the_keyboard_when_its_row_leaves_the_slot(string how)
+    {
+        var (table, handle) = NewTable(Many(40), Options(visible: 6));
+        var edits = new List<UiTableEdit>();
+        table.OnEdit(edits.Add);
+        var row0 = Row("t:row0");
+        _runtime.Focused = (row0, "e:cap"); // clicked into, nothing typed yet
+        switch (how)
+        {
+            case "wheel": Assert.True(handle.Wheel(+1)); break;
+            case "sort": table.SortBy("name"); table.SortBy("name"); break; // descending: r039 first
+            case "refresh": table.SetRows(Many(40).Skip(1)); break;
+            case "group": table.Grouped = true; break; // a group header takes slot 0
+        }
+
+        Assert.Null(_runtime.Focused); // released before the slot was rewritten
+        Assert.Equal(1, _runtime.Released);
+        Assert.Equal(1, handle.FieldsReleased);
+        // The next key cannot reach the row that moved into the slot.
+        Type(row0, "e:cap", "9");
+        Assert.Equal(0, handle.DraftCount);
+        Assert.Empty(edits);
+    }
+
+    [Fact]
+    public void A_draft_commits_and_its_box_is_released_when_a_sort_moves_its_row()
+    {
+        var (table, handle) = NewTable(Many(40), Options(visible: 6));
+        var edits = new List<UiTableEdit>();
+        table.OnEdit(edits.Add);
+        var row0 = Row("t:row0");
+        _runtime.Focused = (row0, "e:cap");
+        Type(row0, "e:cap", "77");
+        table.Sort = new[] { new UiTableSortKey("name", false) };
+        Assert.Equal(("r000", 77d), (Assert.Single(edits).RowId, edits[0].NewValue!.Value));
+        Assert.Null(_runtime.Focused);
+        Assert.Equal("39", Cell(row0, "e:cap").Text); // the slot shows its new row's own value
+        Type(row0, "e:cap", "1");
+        Assert.Single(edits);
+        Assert.Equal(0, handle.DraftCount);
+    }
+
+    [Fact]
+    public void Group_rows_and_subtotals_are_computed_once_per_change_not_per_render()
+    {
+        var model = Model(Many(300).Select((r, i) => { r.Groups = new[] { "G" + (i % 7) }; return r; }).ToList());
+        model.Grouped = true;
+        var total = model.Column("total")!;
+        model.Lines();
+        Assert.Equal(model.SubtotalOf("G1", total), model.SubtotalOf("G1", total));
+        int computed = model.AggregateComputations;
+        for (int i = 0; i < 50; i++) // a scroll re-renders the same lines
+        {
+            model.SubtotalOf("G1", total);
+            model.SubtotalOf(null, total);
+            Assert.Equal(43, model.RowsIn("G1").Count);
+        }
+
+        Assert.Equal(computed + 1, model.AggregateComputations); // only the grand total was new
+        double? before = model.SubtotalOf("G1", total);
+        var edit = model.Begin(model.RowsIn("G1")[0].Id, "cap", "5", (e, ok, t) => model.Complete(e, ok, t), out _)!;
+        Assert.True(model.Complete(edit, true, null));
+        model.SubtotalOf("G1", total);
+        Assert.True(model.AggregateComputations > computed + 1); // a resolved value drops the cached subtotals
+        Assert.Equal(before, model.SubtotalOf("G1", total));
+        model.ClickSort("total", add: false);
+        Assert.Equal(43, model.RowsIn("G1").Count); // recomputed under the new sort
+    }
+
+    [Fact]
+    public void A_refresh_without_the_row_drops_its_waiting_edit_and_a_late_answer_does_nothing()
+    {
+        var (table, _) = NewTable();
+        var edit = table.Edit("a", "cap", "8")!;
+        Assert.Contains("1 waiting", table.StatusText);
+        var rest = Sample().Where(r => r.Id != "a").ToList();
+        table.SetRows(rest);
+        Assert.Empty(table.PendingEdits);
+        Assert.DoesNotContain("waiting", table.StatusText);
+        Assert.Equal(UiTableEditState.Rejected, edit.State);
+        Assert.Equal(UiDataTableModel.RowGoneReason, edit.Reason);
+        Assert.Equal("", table.StatusReason); // not a refusal the player needs to read
+        Assert.False(edit.Resolve("8"));
+        table.SetRows(Sample()); // the row comes back with its own value
+        Assert.Equal(100d, table.Rows[0]["cap"]!.Value);
+        Assert.Empty(_runtime.Ticks);
+    }
+
+    [Fact]
+    public void With_no_timeout_a_waiting_edit_never_expires()
+    {
+        var options = Options();
+        options.EditTimeout = TimeSpan.Zero;
+        var (table, _) = NewTable(options: options);
+        var edit = table.Edit("a", "cap", "7")!;
+        _now = 3600;
+        _runtime.Tick();
+        Assert.Equal(UiTableEditState.Pending, edit.State);
+        Assert.Equal("", table.StatusReason);
+    }
+
+    [Theory]
+    [InlineData("stick")]
+    [InlineData("steer")]
+    [InlineData("bar")]
+    [InlineData("scrollto")]
+    [InlineData("refresh")]
+    [InlineData("sort")]
+    public void The_row_tooltip_hides_whenever_the_body_moves(string how)
+    {
+        var rows = Many(40);
+        rows[0].Tooltip = "first";
+        var (table, handle) = NewTable(rows, Options(visible: 6));
+        handle.HoverSlotForTests(0, true);
+        Assert.NotNull(_runtime.Tooltip);
+        switch (how)
+        {
+            case "stick": for (int i = 0; i < 4; i++) handle.StickSlot(-1f); break;
+            case "steer": handle.SteerSlot(5, NavCommand.Down); break;
+            case "bar": _runtime.Bar!.OnDragged!(0.5f); break;
+            case "scrollto": table.ScrollTo("r030"); break;
+            case "refresh": table.SetRows(Many(40)); break;
+            case "sort": table.SortBy("total"); break;
+        }
+
+        Assert.Null(_runtime.Tooltip);
     }
 
     // ---- Term markers on the header -------------------------------------------------------

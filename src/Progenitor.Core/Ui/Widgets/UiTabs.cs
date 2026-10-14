@@ -163,10 +163,29 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
         _terms[tab] = null;
         try { now?.Dispose(); }
         catch { /* */ }
+        // The chip grows by the marker's room while it explains a term (the marker keeps that room in the caption's right
+        // margin), so the caption is never shortened or covered.
+        WidenForTerm(tab, !string.IsNullOrWhiteSpace(term) && !IsDisposed);
         if (string.IsNullOrWhiteSpace(term) || IsDisposed) return;
         // The tab's hover slot already runs HoverTab; the binding takes its hovers from there (one handler per cell).
         try { _terms[tab] = UiTerms.MarkCell(_row, UiTabsLayout.TabKey(tab), term, watchHover: false); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: tabs '" + Key + "' term '" + term + "': " + e.Message); }
+    }
+
+    /// <summary>Tab <paramref name="tab"/>'s chip at its natural width, plus the term marker's room when <paramref name="term"/>.</summary>
+    private void WidenForTerm(int tab, bool term)
+    {
+        string key = UiTabsLayout.TabKey(tab);
+        foreach (var spec in _row.Cells)
+        {
+            if (!string.Equals(spec.Key, key, StringComparison.Ordinal)) continue;
+            float width = UiTabsLayout.ChipWidth(_captions[tab], term, spec.FontSize);
+            if (Math.Abs(spec.MinWidth - width) < 0.5f) return;
+            spec.With(width: CellWidth.Px(width), minWidth: width);
+            // A cell rewrite re-places the row's cells from their specs.
+            _row.SetCell(key, _captions[tab]);
+            return;
+        }
     }
 
     /// <summary>The term marked on tab <paramref name="tab"/>, or empty (tests and readback).</summary>
@@ -236,6 +255,10 @@ internal static class UiTabsLayout
     internal static string TabKey(int i) => "tab" + i;
 
     internal static string BadgeKey(int i) => "badge" + i;
+
+    /// <summary>A tab chip's width: the Install chip's natural width, plus the term marker's room when it explains a term.</summary>
+    internal static float ChipWidth(string caption, bool term, float fontSize) =>
+        InstallModsPane.ChipNaturalWidth(caption ?? "") + (term ? UiTermMarkerArt.Room(fontSize) : 0f);
 
     internal static List<CellSpec> Cells(IReadOnlyList<string> captions, int selected)
     {

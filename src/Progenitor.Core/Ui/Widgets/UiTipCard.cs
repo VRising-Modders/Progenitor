@@ -66,7 +66,7 @@ internal sealed class UiTipCardPresenter : IUiTipPresenter
         Footer = "",
     };
 
-    public IDisposable? ShowList(object owner, string pluginId, IReadOnlyList<UiTipInfo> tips, Action showAgain)
+    public IUiTipListView? ShowList(object owner, string pluginId, IReadOnlyList<UiTipInfo> tips, Action showAgain)
     {
         var panel = Ui.Panel(UiTipCopy.ListTitle, owner, pluginId);
         try
@@ -85,27 +85,19 @@ internal sealed class UiTipCardPresenter : IUiTipPresenter
             var again = panel.Button(UiTipCopy.ShowAgain);
             var close = panel.Button(UiTipCopy.Close);
             panel.EndInline();
-            var leases = new List<IDisposable>
+            var view = new UiTipListView(panel);
+            view.Keep(again.OnClick(() =>
             {
-                again.OnClick(() =>
-                {
-                    try { showAgain(); }
-                    catch (Exception e) { Plugin.Logger?.LogWarning("Ui: tip reset threw: " + e.Message); }
-                }),
-                close.OnClick(() => panel.Dispose()),
-            };
+                try { showAgain(); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: tip reset threw: " + e.Message); }
+            }));
+            view.Keep(close.OnClick(() =>
+            {
+                view.Dispose();
+                UiTips.ListClosed(view);
+            }));
             panel.Show();
-            return new ActionDisposable(() =>
-            {
-                foreach (var l in leases)
-                {
-                    try { l.Dispose(); }
-                    catch { /* */ }
-                }
-
-                try { panel.Dispose(); }
-                catch { /* */ }
-            });
+            return view;
         }
         catch
         {
@@ -113,6 +105,41 @@ internal sealed class UiTipCardPresenter : IUiTipPresenter
             catch { /* */ }
             throw;
         }
+    }
+}
+
+/// <summary>The open tip list's panel.</summary>
+internal sealed class UiTipListView : IUiTipListView
+{
+    private readonly IUiPanel _panel;
+    private readonly List<IDisposable> _leases = new();
+    private bool _closed;
+
+    internal UiTipListView(IUiPanel panel) => _panel = panel;
+
+    internal void Keep(IDisposable lease)
+    {
+        if (lease != null) _leases.Add(lease);
+    }
+
+    /// <summary>On screen: not closed, not disposed, not hidden (the Escape sweep hides it).</summary>
+    public bool Open => !_closed && !_panel.IsDisposed && _panel.State == UiHandleState.Shown;
+
+    internal IUiPanel Panel => _panel;
+
+    public void Dispose()
+    {
+        if (_closed) return;
+        _closed = true;
+        foreach (var l in _leases)
+        {
+            try { l.Dispose(); }
+            catch { /* */ }
+        }
+
+        _leases.Clear();
+        try { _panel.Dispose(); }
+        catch { /* */ }
     }
 }
 

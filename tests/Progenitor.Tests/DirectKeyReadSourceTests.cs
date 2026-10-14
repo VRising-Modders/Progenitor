@@ -45,6 +45,7 @@ public class DirectKeyReadSourceTests
             "The UI kit: the typed-key pump for its text fields (PumpTypedKeys) and the pointer/wheel "
             + "sample that drives hover, drag and scroll on mod panels (SamplePointer, PumpShownInputBody), "
             + "the primary-button sample Ui.WatchPointer attaches to a PointerDown (PrimaryPointerHeld), "
+            + "the Shift and Ctrl held at a click for the widgets' multi-select (HeldClickModifiers; it binds no action), "
             + "and NAV1's controller and arrow-key sample for panel navigation (SampleNav, read by UiNav.Tick).",
         ["src/Progenitor.Dev/Ops/NavOps.cs"] =
             "NAV1: the dev bridge's nav op writes input: it adds a virtual gamepad and queues its state events, "
