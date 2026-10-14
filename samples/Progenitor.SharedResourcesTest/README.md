@@ -86,7 +86,7 @@ from the bag and the workbench (record what you moved). Then, standing on P:
 | # | Case | Do | Expect |
 |---|---|---|---|
 | 1 | Baseline | `disable`, `baseline craft`, try the recipe at the bench | The game refuses; zero debit; `enable` again |
-| 2 | Craft | `begin craft`, open the bench, craft once | Client `views.Craft.station` is the bench's network id and its totals show X and Y from A and B; one `materials: paid Craft … tx=<t>` line per ingredient with the same `tx`, debits in the reversed per-item order; then one `Shared Resources Test: MaterialPaid tx=<t> …` line per ingredient; `verify` MATCH; the craft is queued |
+| 2 | Craft | `begin craft`, open the bench, craft once | Client `views.Craft.station` is the bench's network id and its totals show X and Y from A and B; one `materials: check … tx=<t>` line (more than one per craft would show the game counts more than once per operation), then one `materials: paid Craft … tx=<t>` line per ingredient with the same `tx`, debits in the reversed per-item order; then one `Shared Resources Test: MaterialPaid tx=<t> …` line per ingredient; `verify` MATCH; the craft is queued |
 | 3 | Build | `begin build`, open the build menu (`build_search open`, `select`), place the piece | Client `views.Build.heart` is P's heart; `paid Build` lines; `verify` MATCH; the piece stands |
 | 4 | Other screens | With a Build view held, open a chest and the research desk | Their counts are the game's own (no pool totals) |
 | 5 | Other station | Open a second workstation on P | Its costs are the game's own until its own Craft view arrives (its station id) |

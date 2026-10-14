@@ -201,9 +201,13 @@ public class MaterialViewSyncTests
         var rig = new Rig();
         rig.Content[MaterialOperation.Build] = Build((Cloth, 12));
         rig.Frame();
+        // The client has seen a far higher sequence from this publisher in the old world.
+        Assert.True(rig.Client.Apply(new MaterialView(MaterialOperation.Build, 3, 1, 1000, 5, false, false,
+            new[] { new MaterialLine(Cloth, 12) }, Heart, 0, rig.Publisher.Generation)));
         rig.Epoch = 4;
         rig.Content[MaterialOperation.Build] = Build((Cloth, 3));
         rig.Frame(MaterialRefreshPolicy.IntervalMs);
+        Assert.True(rig.Sent.Last().Sequence < 1000); // accepted only because the epoch changed
         Assert.Equal(3, rig.ClientShows(MaterialOperation.Build, Cloth));
     }
 

@@ -167,7 +167,7 @@ public partial class MaterialServiceTests
     [Fact]
     public void A_commit_that_cannot_give_back_is_reported_as_an_error()
     {
-        var (world, provider, registry, service, _, log) = Setup();
+        var (world, provider, registry, service, paid, log) = Setup();
         var a = world.Chest(1, (Wood, 2));
         var b = world.Chest(2, (Wood, 5));
         provider.All.AddRange(new[] { a, b });
@@ -178,8 +178,37 @@ public partial class MaterialServiceTests
         var bRef = world.Ids[b];
         world.RemoveOverride = (inv, item, amount) => inv.Equals(bRef) ? 0 : amount;
         world.AddOverride = (_, _, amount) => amount - 1;
-        PayLine(service, world.Player, MaterialOperation.Craft, Wood, 6);
-        Assert.Contains(log, l => l.StartsWith("ERROR materials: pay Inconsistent"));
+        // Commit takes 2 from a, b refuses, the give-back returns only 1 to a: 1 unit is lost and counts
+        // as paid; the retry takes the 1 left in a, b still refuses.
+        Assert.Equal(4, PayLine(service, world.Player, MaterialOperation.Craft, Wood, 6));
+        Assert.Equal(0, world.Get(a, Wood));
+        Assert.Equal(5, world.Get(b, Wood));
+        Assert.Contains(log, l => l.StartsWith("ERROR materials: pay Inconsistent") && l.Contains("1 unit(s) counted as paid"));
+        service.EndScope();
+        var e = Assert.Single(paid);
+        Assert.Equal(2, e.Paid);
+        Assert.Equal(new[] { new MaterialDebit(ContainerId.None, 1).ToString(), new MaterialDebit(a, 1).ToString() }, e.Debits.Select(d => d.ToString()));
+    }
+
+    [Fact]
+    public void A_container_that_refuses_is_passed_over_and_the_next_one_pays()
+    {
+        var (world, provider, registry, service, paid, log) = Setup();
+        var a = world.Chest(1, (Wood, 3));
+        var b = world.Chest(2, (Wood, 10));
+        provider.All.AddRange(new[] { a, b });
+        provider.Orders[Wood] = new List<ContainerId> { a, b };
+        registry.Register(provider, "test");
+        service.BeginScope(1);
+        Check(service, world.Player, MaterialOperation.Craft);
+        var aRef = world.Ids[a];
+        world.RemoveOverride = (inv, item, amount) => inv.Equals(aRef) ? 0 : amount;
+        Assert.Equal(0, PayLine(service, world.Player, MaterialOperation.Craft, Wood, 6));
+        Assert.Equal(3, world.Get(a, Wood));
+        Assert.Equal(4, world.Get(b, Wood));
+        Assert.DoesNotContain(log, l => l.Contains("shortfall"));
+        service.EndScope();
+        Assert.Equal(6, Assert.Single(paid).Paid);
     }
 
     [Fact]
@@ -343,7 +372,7 @@ public partial class MaterialServiceTests
     }
 
     [Fact]
-    public void An_injection_that_throws_leaves_the_operation_to_the_game()
+    public void An_injection_that_throws_still_pays_from_the_pool_the_check_saw()
     {
         var (world, provider, registry, service, paid, log) = Setup();
         var a = world.Chest(1, (Wood, 3));
@@ -357,9 +386,11 @@ public partial class MaterialServiceTests
         Assert.True(service.CountGate(world.Player, MaterialOperation.Craft));
         Assert.True(service.ComposeExtraRows(world.Player, MaterialOperation.Craft, new Dictionary<int, long>(), new Dictionary<int, long>(), new List<MaterialLine>()));
         service.MarkChecked(world.Player, MaterialOperation.Craft);
-        Assert.Equal(-1, PayLine(service, world.Player, MaterialOperation.Craft, Wood, 3));
         Assert.Contains(log, l => l.Contains("fault injection threw"));
-        Assert.Equal(3, world.Get(a, Wood));
+        Assert.Contains(log, l => l.StartsWith("materials: check ") && l.Contains("tx="));
+        world.RemoveOverride = null;
+        Assert.Equal(0, PayLine(service, world.Player, MaterialOperation.Craft, Wood, 3)); // never free
+        Assert.Equal(0, world.Get(a, Wood));
     }
 
     [Fact]

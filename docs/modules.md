@@ -2645,7 +2645,9 @@ seam calls inside a scope are routed to the provider. Inside the scope:
    asked for its candidates and, per item, its sources **once**; every provider call happens before
    any count is read. The pool's spendable amount per governed item (the *quote*) is what the game's
    check sees; items the provider leaves to the game show the game's own shared amount. The session
-   counts as checked only once the composed rows fit the seam's buffer and went to the game.
+   counts as checked only once the composed rows fit the seam's buffer and went to the game; each check
+   logs `materials: check … tx=<id> quoted=<n>`, so a log shows whether the game counts more than once
+   per operation.
 2. **Pay, line by line.** The game first pays from the character's bag and the workstation's own
    inventory by its own removal with no castle heart (so its shared storage is skipped). What they did
    not cover goes to the pool, **validated before anything is taken**: the line may draw at most what
@@ -2657,11 +2659,12 @@ seam calls inside a scope are routed to the provider. Inside the scope:
    debits, the line takes what its quote and the stock allow, and the rest stays owed to the game. One
    `materials: shortfall at payment …` line per operation, counted in `Status.Shortfalls`. Already-paid
    lines are never given back; only a line whose own all-or-nothing take was rolled back by a write
-   fault is restored, then taken again as far as the containers give (an `ERROR materials: pay
-   Inconsistent …` line names units the rollback could not put back).
+   fault is restored, then taken again as far as the containers give, passing over a container that
+   refuses. Units the rollback could not put back are logged (`ERROR materials: pay Inconsistent …`)
+   and count as paid (a debit with no container in `MaterialPaid`), so they are never taken twice.
 4. **End.** When the system's update ends, every session closes and one `MaterialPaid` per line the
    pool paid any part of is published (same frame). Each event names its line's `Transaction`; all
-   lines of one operation share it. A scope stranded by a throwing system is closed at the next
+   lines of one operation share it, and ids keep increasing across Core swaps in one server process. A scope stranded by a throwing system is closed at the next
    governed Before or the next frame tick; its events are published then, never from inside a seam call.
 
 What this guarantees, and what it cannot:
@@ -2738,7 +2741,8 @@ every other item the game's own shared amount (the game's full count minus its b
 item the provider leaves to the game shows exactly what the game alone would show. While a Build view is
 held, the build-mode placement update uses the game's own synchronous placement entry, which reaches
 the count seam (the optimized placement job embeds its own count); the original entry is restored
-after the update and on unload. A displayed count is never authorization: the server checks again and
+after the update and on unload. If that entry cannot be found or bound, one warning is logged and
+placement keeps the game's own count. A displayed count is never authorization: the server checks again and
 pays at action time.
 
 ### Native seams (Bootstrap)

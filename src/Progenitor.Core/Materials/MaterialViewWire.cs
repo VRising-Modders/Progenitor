@@ -180,13 +180,6 @@ internal sealed class MaterialViewBook
         }
     }
 
-    /// <summary>Forget every player's last view (world load); sequences continue.</summary>
-    internal void ForgetViews()
-    {
-        _last.Clear();
-        _retry.Clear();
-    }
-
     internal void Clear()
     {
         _retry.Clear();

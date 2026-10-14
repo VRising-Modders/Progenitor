@@ -2,7 +2,7 @@
 title: Build placement can bypass shared inventory counts
 game: V Rising
 game_build: Steam 23521359
-progenitor: PR 7
+progenitor: PR 15
 side: both
 area: inventory
 tags: materials, building, inventory, placement

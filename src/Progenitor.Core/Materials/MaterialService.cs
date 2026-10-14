@@ -112,7 +112,8 @@ internal sealed class MaterialService
     private readonly Dictionary<(CastleId, MaterialOperation), Session> _sessions = new();
     private readonly List<MaterialPaid> _pending = new();
     private long _scope;
-    private long _transactions;
+    // Seeded from the clock, so ids keep increasing across Core swaps in one process.
+    private long _transactions = DateTime.UtcNow.Ticks;
     private int _faultLines;
 
     internal MaterialService(MaterialSourceRegistry registry, IMaterialWorld world, Action<string> log, Action<MaterialPaid>? publish = null)
@@ -215,19 +216,18 @@ internal sealed class MaterialService
     /// The composed rows were handed to the game's check (they fit the seam's buffer): from now on this
     /// operation's payment follows the quotes. Not called when the seam kept the game's own count, so
     /// that operation is then paid by the game's own rules. Runs the development fault injection, if
-    /// armed; when it throws, the operation is not marked checked.
+    /// armed; the game's check has already seen the pool rows, so a throwing injection still leaves the
+    /// operation checked (paid from the pool, never free). Logs <c>materials: check tx=…</c> once per
+    /// check, so a log shows whether the game counts more than once per operation.
     /// </summary>
     internal void MarkChecked(CastleId character, MaterialOperation operation)
     {
         var s = Open(character, operation, fresh: false);
         if (!s.Governed || !s.Composed) return;
-        try { RunInjectedMove(s); }
-        catch (Exception e)
-        {
-            _log("materials: fault injection threw; the operation is paid by the game's own rules: " + e.Message);
-            return;
-        }
         s.Checked = true;
+        _log("materials: check " + s.Context + " tx=" + s.Transaction + " quoted=" + s.Quote.Count);
+        try { RunInjectedMove(s); }
+        catch (Exception e) { _log("materials: fault injection threw: " + e.Message); }
     }
 
     /// <summary>
@@ -294,6 +294,7 @@ internal sealed class MaterialService
         int allowed = Math.Max(0, Math.Min(amount, quote - spent));
         string why = allowed < amount ? "the check saw " + quote + " (already paid " + spent + ")" : "";
         var steps = new List<MaterialStep<InventoryRef>>();
+        int lost = 0;
         if (allowed == amount)
         {
             var plan = MaterialPlanner.Plan(new[] { new MaterialLine(item, amount) }, _ => spec, _world.Ledger, s.Exclusions);
@@ -304,17 +305,24 @@ internal sealed class MaterialService
                 else
                 {
                     if (commit.Outcome == MaterialCommitOutcome.Inconsistent)
-                        _log("ERROR materials: pay Inconsistent " + s.Context + " tx=" + s.Transaction + " item=" + item + " amount=" + amount + ": " + commit.Reason);
+                    {
+                        // Units the give-back could not put back already left the pool: they count as paid,
+                        // so the retry below never takes them a second time.
+                        lost = Math.Min(commit.Unrestored, allowed);
+                        _log("ERROR materials: pay Inconsistent " + s.Context + " tx=" + s.Transaction + " item=" + item + " amount=" + amount
+                            + ": " + commit.Reason + "; " + lost + " unit(s) counted as paid");
+                    }
                     why = commit.Outcome + ": " + commit.Reason;
                 }
             }
             else why = "short: " + MaterialPlanner.DescribeShort(plan);
         }
-        if (steps.Count == 0 && allowed > 0)
-            TakeWhatIsThere(item, allowed, spec, s.Exclusions, steps);
+        if (steps.Count == 0 && allowed - lost > 0)
+            TakeWhatIsThere(item, allowed - lost, spec, s.Exclusions, steps);
 
-        int paid = 0;
-        var debits = new List<MaterialDebit>(steps.Count);
+        int paid = lost;
+        var debits = new List<MaterialDebit>(steps.Count + 1);
+        if (lost > 0) debits.Add(new MaterialDebit(ContainerId.None, lost));
         foreach (var step in steps)
         {
             paid += step.Amount;
@@ -345,7 +353,8 @@ internal sealed class MaterialService
 
     /// <summary>
     /// Best effort, never given back: take up to <paramref name="amount"/> in spend order, keeping what
-    /// each container actually gave, and stop at the first container that refuses a write.
+    /// each container actually gave; a container that gives less than asked is passed over and the next
+    /// one is asked for the rest.
     /// </summary>
     private void TakeWhatIsThere(int item, int amount, MaterialPoolSpec<InventoryRef> spec, HashSet<InventoryRef> exclude,
         List<MaterialStep<InventoryRef>> steps)
@@ -364,7 +373,6 @@ internal sealed class MaterialService
                 steps.Add(new MaterialStep<InventoryRef>(source, item, got));
                 left -= got;
             }
-            if (got < want) break;
         }
     }
 

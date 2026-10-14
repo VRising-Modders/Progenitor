@@ -185,7 +185,8 @@ public sealed class MaterialPaid
 
     /// <summary>
     /// Identifies the game operation (one craft start, one placement) this line belongs to; every line
-    /// of one operation carries the same value. Unique within a server process.
+    /// of one operation carries the same value. Increasing and unique within a server process, Core swaps
+    /// included (seeded from the clock); also printed as <c>tx=</c> in the <c>materials:</c> log lines.
     /// </summary>
     public long Transaction { get; }
 
