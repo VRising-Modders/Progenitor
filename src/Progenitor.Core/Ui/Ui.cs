@@ -276,14 +276,31 @@ public static class Ui
     /// </para>
     /// </summary>
     public static IVanillaAttachHandle AttachToVanilla(
-        VanillaUiSite site, object? owner = null, string? pluginId = null)
+        VanillaUiSite site, object? owner = null, string? pluginId = null) =>
+        AttachToVanilla(site, VanillaPanelAnchor.Default, owner, pluginId);
+
+    /// <summary>
+    /// P6: attach to a vanilla panel at a chosen <paramref name="anchor"/> (see
+    /// <see cref="VanillaPanelAnchor"/>; each <see cref="VanillaUiSite"/> lists the anchors it
+    /// accepts, and <see cref="VanillaPanelAnchor.Default"/> picks the site's first). The handle
+    /// reports the panel's open and close and which entity it shows (<see cref="IVanillaAttachHandle.OnPanel"/>,
+    /// <see cref="IVanillaAttachHandle.Target"/>) and hosts buttons and rows in the game's own look.
+    /// An anchor the site does not accept gives a disabled handle and one log line, like an
+    /// undefined site. Several attachments on one site (several plugins, or several anchors) share
+    /// one frame watch.
+    /// </summary>
+    public static IVanillaAttachHandle AttachToVanilla(
+        VanillaUiSite site, VanillaPanelAnchor anchor, object? owner = null, string? pluginId = null)
     {
         string id = string.IsNullOrWhiteSpace(pluginId) ? InferPluginId(owner) : pluginId.Trim();
         string key = VanillaUiSites.Key(site);
-        string container = UiOwnership.AttachName(id, key);
+        bool anchorOk = VanillaUiSites.TryResolveAnchor(site, anchor, out var resolved);
+        string suffix = VanillaUiSites.AnchorKey(resolved);
+        string container = UiOwnership.AttachName(id, suffix.Length == 0 ? key : key + "-" + suffix);
 
         string? refusal =
             !VanillaUiSites.IsDefined(site) ? "site " + (int)site + " is not a site Core knows"
+            : !anchorOk ? "anchor " + anchor + " is not an anchor this site accepts"
             : _skipped ? "the module is skipped"
             : !CurrentRuntime().IsClient ? "it is client-only"
             : null;
@@ -293,12 +310,12 @@ public static class Ui
         {
             Plugin.Logger?.LogInfo(
                 "Ui: attach " + key + " " + refusal + "; returning a disabled handle.");
-            var off = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: false);
+            var off = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: false, resolved);
             VanillaAttachRegistry.Add(off, installWatch: null);
             return off;
         }
 
-        var handle = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: true);
+        var handle = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: true, resolved);
         VanillaAttachRegistry.Add(handle, InstallSiteWatch);
         Plugin.Logger?.LogInfo("Ui: attach " + key + " requested by " + id + " as " + container);
         return handle;
@@ -637,6 +654,7 @@ public static class Ui
         int attachments = 0;
         try { attachments = VanillaAttachRegistry.Clear(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: attachment sweep threw: " + e.Message); }
+        VanillaSiteHealth.Clear();
 
         // Pointer watches before the slot table is cleared below: each one unwires its own ids and
         // takes its rows off the game object's EventTrigger while that object still exists.
@@ -828,6 +846,8 @@ public static class Ui
         if (VanillaAttachRegistry.Count > 0 || VanillaAttachRegistry.WatchCount > 0
             || VanillaAttachRegistry.HasHeartbeat)
             holds.Add(VanillaAttachRegistry.Describe());
+        var missingSites = VanillaSiteHealth.Describe();
+        if (missingSites.Length > 0) holds.Add(missingSites);
 
         if (Keybinds.Count > 0)
             holds.Add(Keybinds.Describe());
@@ -946,6 +966,7 @@ public static class Ui
 
         UiDialog.ForgetForTests();
         VanillaAttachRegistry.ResetForTests();
+        VanillaSiteHealth.Clear();
         UiSlotTable.ClearAll();
         UiPanelSlots.Reset();
         UiHoverGate.ResetForTests();

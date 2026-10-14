@@ -55,6 +55,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Progenitor.PublishCheck", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Progenitor.ControlsSample", "samples\Progenitor.ControlsSample\Progenitor.ControlsSample.csproj", "{87903479-EAFC-4DF5-9840-46783EE71698}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Progenitor.PanelsExample", "samples\Progenitor.PanelsExample\Progenitor.PanelsExample.csproj", "{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -152,6 +154,10 @@ Global
 		{87903479-EAFC-4DF5-9840-46783EE71698}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{87903479-EAFC-4DF5-9840-46783EE71698}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{87903479-EAFC-4DF5-9840-46783EE71698}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{C0416915-6A07-4EB8-A72C-EBD68F7CA9A4} = {47176581-9DA0-420D-83FD-D31CA0AC5A06}
@@ -176,5 +182,6 @@ Global
 		{CD1D42BB-A2E7-43D3-8F45-93361B58F8CF} = {4C7E91A2-B3D8-4F16-9A5C-2E8B7D4F1C90}
 		{3DDE0D77-594C-4381-BE60-26D2BE08946D} = {3B59C840-1870-4669-B060-E0E4757A375C}
 		{87903479-EAFC-4DF5-9840-46783EE71698} = {8C2E5A91-4F3B-4D17-9A6E-1B7C8D0E2F45}
+		{C2392BD9-8CD1-4269-AA77-C4B9F74B515A} = {8C2E5A91-4F3B-4D17-9A6E-1B7C8D0E2F45}
 	EndGlobalSection
 EndGlobal

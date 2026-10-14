@@ -691,7 +691,7 @@ rifts.Dispose();                                    // or Ui.RemoveAll(this), or
 
 ### Why the site is a closed enum
 
-`VanillaUiSite` has one value today (`MapWarEventInfo`) and adding one is a Core change with a research note. A string-addressed "attach to any transform" would make Progenitor answerable for whatever any mod does to the game's HUD, in every future build, with no review. Each site carries its donor widget, its parent rule, its layout verdict and its evidence — the same discipline as an address-library entry.
+`VanillaUiSite` lists the map card (`MapWarEventInfo`) and the P6 panel sites ([below](#vanilla-panel-sites-p6)); adding one is a Core change with a research note. A string-addressed "attach to any transform" would make Progenitor answerable for whatever any mod does to the game's HUD, in every future build, with no review. Each site carries its donor widget, its parent rule, its layout verdict and its evidence — the same discipline as an address-library entry.
 
 The map card is addressed by **address, never by type**: `MapMenuMapper.GetMapMenu()?.WarEventInfo`. A second instance of the same type exists — `AlertsParent.WarEventNode`, the transient HUD popup — and is explicitly **not** a site, so a `FindObjectsOfTypeAll` sweep would be a coin flip that changes between sessions. `GetMapMenu()` is an entity query behind a method call and returning null is a normal state; every frame null-checks it.
 
@@ -723,7 +723,7 @@ Inside our container the rows are ours end to end, so a `VerticalLayoutGroup` + 
 
 ### Map close and reopen, and the teardown hole
 
-The refresh runs from the site's own managed system update, which fires only while the map is open. Each tick resolves the widget and compares its `GetInstanceID()` with last frame's: unchanged is a no-op, changed or absent-then-present rebuilds, and a container Unity destroyed under us takes the same branch. That is correct whether the game destroys the map view on close or merely deactivates and reuses it, so that unknown is not a blocker. A rebuild destroys the old container **first**; skipping that is exactly how a frozen duplicate appears beside the card on the deactivate-and-reuse branch.
+The refresh runs from the site's own managed system update, installed with `HookOptions { OnlyWhenSystemRuns = false }` (`VanillaUiSites.WatchOptions`, shared with the panel sites). `MapMenuMapper` only updates while its own queries match, so with the default option the watch skipped exactly the frames on which the map closed, and the close (and the detach) could go unseen; with the option off it runs every frame the client updates its UI and sees the map as absent when it is closed. Each tick resolves the widget and compares its `GetInstanceID()` with last frame's: unchanged is a no-op, changed or absent-then-present rebuilds, and a container Unity destroyed under us takes the same branch. That is correct whether the game destroys the map view on close or merely deactivates and reuses it, so that unknown is not a blocker. A rebuild destroys the old container **first**; skipping that is exactly how a frozen duplicate appears beside the card on the deactivate-and-reuse branch.
 
 **A destroy that did not take is not a destroy.** Because our reference is the only one in the process, the destroy of an attached container is the one in the module that must not fail quietly, and it does not (R60 finding 1): it goes through the module's shared destroy helper — warn, then fall back to a deferred `Destroy` — and it reports **which of three things** happened. `DestroyImmediate` is the one Unity destroy that throws rather than deferring, and this one is called from inside the game's own `MapMenuMapper.Update`, so the throw is the expected case and the fallback is the branch most likely to work. `UnityUiRuntime.DestroyWithVerdict` therefore answers `Destroyed` (gone now, drop the reference), `Deferred` (Unity has it and it dies at the end of this frame) or `Failed` (still here, and nothing but another try will move it); `UnityUiRuntime.TryDestroy` is the bool face of it for callers that only want to know whether the object is going, and counts `Deferred` as going. Reporting the fallback as a failure was R61 finding 7: it made the common recovery path warn "destroy did not take" and re-throw into the same call once a frame for thirty frames.
 
@@ -734,6 +734,105 @@ So the widget keeps its GameObject reference until the destroy is confirmed, and
 Rows are written into the widget **only when the string differs** from what it already shows (R60 finding 6). A plugin that pushes on a timer rather than on a change — the Sample's rift rows push four times a second against a string that moves once a second — otherwise assigns an identical string into TMP three frames in four, and whether TMP's own setter early-outs on an equal string cannot be read from the interop stubs. The guard is in `VanillaAttachHandle`, so every caller gets it rather than each sink having to remember.
 
 The container is parented into the vanilla tree, so it is **not** under `progenitor-ui-<pluginId>` and neither `DestroyRoot` (exact name) nor `DestroyByPrefix` (a DontDestroyOnLoad scan) can reach it. This is the one real hole the capability opens, and `VanillaAttachRegistry` is the whole of the fix: `Ui.RemoveAll(owner)` disposes that owner's attachments and **counts them in its return value** alongside panels, and Core Uninstall drains the table and every watch. The `SystemHooks` subscription is a Core-owned delegate and pins the collectible generation exactly the way a Harmony trampoline did, so it goes with the last attachment on its site — and whether the site still needs one is decided against the live table under the registry's own lock, so a watch built for a handle that was disposed while it was being installed is given straight back rather than filed for a site with nothing on it (R60 finding 7). A site that still owes a destroy and has **lost** its watch gets it rebuilt from the remembered factory by `VanillaAttachRegistry.RepairLostWatches`, which is driven from a `Plugin.Frame` heartbeat rather than from a site watch — the repair cannot be driven by the thing it repairs, which is what R62 finding 2 was about — and which gives up after five attempts with a line naming the site. **Five rebuilds, not five consecutive failures** (R63 finding 2): the count runs over the whole generation and is given back only where the site stopped needing a watch at all, so a site whose watch is rebuilt successfully and lost again every frame reaches the same give-up line, with one warning each way, instead of repairing and warning forever. The heartbeat itself is a pin of the same shape as the watch, so it lasts exactly as long as there is something it could repair: started by the first attachment that could need one, stopped the moment the last *enabled* attachment and the last watch are gone, restarted by the next one, and dropped at Uninstall. **Enabled, not merely tracked** (R65 finding 2): the disabled handle `Ui.AttachToVanilla` hands back for a site Core does not know, for a skipped module or off the client stays in the table until its owner disposes it, and it can never install a watch, lose one or be repaired for — so one of them used to keep the per-frame Core-owned delegate alive for the whole generation over a list that could not produce a single repair. The predicate all three decisions read is now "no watch that could drop and no enabled handle", and the pin line then says `attach=1 ... attachTick=False`, which is the true thing: something is held, nothing ticks. **Including the one interleave that used to escape it** (R64 finding 2): the tick is built outside the registry's gate, so the last handle can go while the factory is running and the stop — which only `Settle`'s remove arm can perform — then finds nothing to stop. That needs no lock held across a call into the Unity half to prevent, because the factory has already returned by the time the tick is filed: the filing lock re-asks the live table and disposes the tick instead of storing it, which is the same second-lock guard `InstallWatch` makes for a watch. All of it shows up in `pin-diag Ui` as `attach=<n> attachSites=<n> attachHooks=<n> attachTick=<bool>`, and the tick is still reported **even with nothing attached** — the way `UiSettleGate`'s pump is — because a tick with nothing to drive is the state that means an earlier teardown left one standing (R63 finding 1), and no path produces it any more, which is what makes it worth seeing.
+
+## Vanilla panel sites (P6)
+
+The same `Ui.AttachToVanilla`, pointed at the game's interaction windows: the storage container, the crafting and refinement stations, the player inventory, the castle heart and the item tooltip. Each site reports **open, close and which entity the window shows**, and hosts buttons and rows that are clones of the game's own, so a mod's controls read as part of the window. Experimental: source-checked against the game's metadata, built and game-free tested; **nothing here has run on a client yet** (see the live acceptance procedure below).
+
+```csharp
+using Progenitor.Ui;
+using UiApi = Progenitor.Ui.Ui;
+
+var chest = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.LeftEdge, ctx.Owner, ctx.Guid);
+ctx.Track(chest);
+var deposit = chest.Button("Deposit");
+ctx.Track(deposit.OnClick(() => SendDeposit(chest.Target)));          // your own request to the server
+ctx.Track(chest.OnPanel(e =>
+{
+    if (e.Change == VanillaPanelChange.Opened) ctx.Log.LogInfo("chest " + e.Target);   // kind=Container entity=812:3 net=40:1
+}));
+
+var tip = UiApi.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipBody, ctx.Owner, ctx.Guid);
+ctx.Track(tip);
+ctx.Track(tip.OnPanel(e => tip.SetRows(new[] { "In storage: " + CountInStorage(e.Target.ItemGuid) })));
+```
+
+### Sites and anchors
+
+| Site | Window (how it is found) | Anchors (default first) | Target |
+|---|---|---|---|
+| `ContainerPanel` | `ContainerMenuMapper._ContainerSubMenu`, `._Target` | `LeftEdge`, `RightEdge`, `BesideRename` | the container |
+| `StationPanel` | `WorkstationMenuMapper._WorkstationSubMenu` / `RefinementstationMenuMapper._RefinementStationSubMenu`, each `._Target` | `LeftEdge`, `RightEdge` | the station; `Kind` is `Workstation` or `RefinementStation` |
+| `InventoryPanel` | the active `_InventorySubMenu` of the container, station, castle heart or character window | `BesideSort` | the window's target beside a container or station; none (`Kind = Character`) in the character menu |
+| `CastleHeartPanel` (alias `ThronePanel`) | `CastleHeartMenuMapper._CastleHeartSubMenu`, `._Target` | `LeftEdge`, `RightEdge` | the castle heart |
+| `InventoryTooltip` | the inventory's (or the container half's) `FakeTooltip` while it is shown over a hovered `ItemGridSelectionEntry` | `TooltipBody` | `ItemGuid` and `ItemAmount` of the hovered stack; the container when the slot is in the container half |
+
+`ThronePanel` and `CastleHeartPanel` are the same value. The throne has no window of its own on this build (sitting on it is the `UseThrone` interaction); the castle list and the blood essence fuel live in the castle heart window, so both names address it.
+
+An anchor a site does not list gives a disabled handle and one line: `Ui: attach InventoryPanel anchor LeftEdge is not an anchor this site accepts; returning a disabled handle.`
+
+### API
+
+| Member | What it does |
+|---|---|
+| `Ui.AttachToVanilla(site, anchor, owner, pluginId)` → `IVanillaAttachHandle` | Never null. `VanillaPanelAnchor.Default` picks the site's first anchor. Several attachments on one site (several plugins or anchors) share one frame watch. The old three-argument overload is `anchor = Default`. |
+| `handle.OnPanel(Action<VanillaPanelEvent>)` → `IDisposable` | `Opened`, `TargetChanged`, `Closed`, with `Target` and `Previous`. Runs on the main thread inside the site's frame watch, **before** the frame's rows and buttons are synchronized, so a `SetRows` from the handler shows on the same frame. Subscribing while the window is open delivers `Opened` at once (a hot reload with a chest open). A handler that throws is logged and the frame continues. |
+| `handle.IsOpen`, `handle.Target`, `handle.Anchor` | The current state, readable any time. |
+| `handle.Visible` | The plugin's wish, kept across close and reopen. The container is drawn only while the window is open, attached and the placement fits, and then only if this is true. |
+| `handle.Button(caption)` → `IUiButton` | A clone of the game's own inventory bar button (its art and its hover and press transitions; the icon and any donor label switched off), captioned with a clone of the label of the inventory's own tab buttons (font, material, color, size) and **sized to its caption** with the game's padding (never narrower than the bar button). Addressed by position like a row and **kept across close and reopen**: the caption, `Visible` and the Bootstrap click slot live on the handle, and each rebuilt clone is rewired to the same slot. One click handler per button, as every `IUiButton`: a later `OnClick` replaces the earlier one. A clone that cannot be wired is destroyed and logged rather than shown dead. Disabled on the map card and on the tooltip site. |
+| `handle.Row(text)` / `SetRows(...)` | Rows in an edge column (under the buttons) and the tooltip line, cloned from the game's body text (the tooltip's `Description`) unchanged. Inline anchors take buttons only: a text row inside a button bar would read as a broken button. |
+| `VanillaPanelTarget` | `Kind`, `EntityIndex` / `EntityVersion` (client world), the target's `NetworkId` as `NetworkId0` (`Normal_Index`), `NetworkId1` (`Normal_Generation`, padding cleared) and `NetworkId2` (the id type: 1 for every placed container, station and heart), with `NetworkIdIndex` / `NetworkIdGeneration` as shorthands; `ItemGuid` / `ItemAmount` (tooltip); `HasEntity`, `HasNetworkId`, `ToString()` → `kind=Container entity=812:3 net=40:1`. The id is read only when the interop's `NetworkId` is the 12 bytes the read assumes. |
+
+**Mapping to the server entity.** The client entity means nothing on the server. The `NetworkId` is the identity the game itself uses for the same object on both sides: send `NetworkIdIndex` and `NetworkIdGeneration` (and the type) in your request and resolve them on the server through the game's network id lookup. It is session-local: never persist it, and never persist the client entity either; a stable container identity is a separate item (P5). A framework helper that resolves it server-side is **planned**.
+
+**The seam.** Each site's watch is `SystemHooks.After<XMenuMapper>` with `HookOptions { OnlyWhenSystemRuns = false }`. Every one of these mappers is marked to update only while its queries match, so with the default option a watch would skip frames: a site that reads a second mapper (the station site reads the refinement mapper too; the inventory and tooltip sites read all five) would miss opens and never see a close, leaving an edge column on screen. With the option off the watch runs every frame the client updates its UI, and all five mappers are read once per frame into one shared scan however many sites and plugins ask.
+
+### Layout and placement rules
+
+These are the rules the code applies (`VanillaPanelPlacement`, tested at 1920x1080, 2560x1440 and 3840x2160). The game's HUD scaler matches height to a 1920x1080 reference, so the three resolutions lay out the same canvas and the rules are written in canvas units.
+
+1. **Inline anchors join the game's own button group.** `BesideSort` puts our buttons into `InventorySubMenu.BottomBarButtonsParent` right after `SelfSortButton`; `BesideRename` into `ContainerSubMenu.OpenTagEditButtonParent` right after `OpenTagEditButton`. The vanilla layout group sizes and spaces them exactly like its own buttons, which is the only way to line up with the game at every resolution. Our container asks for its buttons' caption-fitted widths plus the group's spacing and copies the donor's flexible width. This is a deliberate exception to the map card's sibling rule: the container is a child of a vanilla group, so the group reflows when we come and when we go, and nothing vanilla needs restoring (destroying our container is the whole undo).
+2. **The check runs after the game has laid them out.** The group is rebuilt (`LayoutRebuilder.ForceRebuildLayoutImmediate`) before anything is measured; a rect that still cannot be measured is "not yet", which never hides anything and is asked again the next frame. Then every button in the group must lie inside the window's frame and ours must cover no vanilla button. A bar that does not shrink its children would push the buttons past the frame; then ours is hidden (the group reflows back) with one line, `hidden reason=overflow:<name>`, and that verdict stands until the window is closed and reopened.
+3. **Edge columns sit outside the frame.** `EdgeGap` (8 canvas units) from the window's left or right frame edge, top-aligned with the window's item grid (`EquipmentItemsParent` for a container, `RecipesParent` for a station; the frame top for the castle heart), one button per line, the column as wide as the widest caption-fitted button, with the inventory bar's spacing; rows follow the buttons. The column is ignored by any vanilla layout group (`LayoutElement.ignoreLayout`), so no vanilla element moves.
+4. **A column that does not fit is not drawn.** If it would leave the canvas, or cover another window that is open at the same time (the player inventory beside a chest is checked as an obstacle), it is hidden with `hidden reason=offscreen` or `reason=overlap:<name>`, and shown again with `shown again` when it fits. There is no fallback position: a mod button floating somewhere else reads as bolted on. Use the other edge or `BesideRename` when one side is taken.
+5. **When placement is checked.** On every build, on a change of row or button count, of the target or of `Visible`, and otherwise once every 30 frames (which follows a resolution change and an edge column's obstacle going away). Nothing is measured every frame.
+6. **The tooltip line goes into the tooltip's own text column**, as its last line, cloned from `Description` (its font, size, color and spacing) with its `LocalizedText` removed, wrapping inside the description's width so the tooltip does not get wider. It is placed only when that column has a `VerticalLayoutGroup`, so the tooltip grows around the line; otherwise it is hidden with `reason=unlaid`. The game placed the tooltip before the line existed, so after it grows the tooltip is moved back inside its own clamp rectangle (`FakeTooltip.ClampWithinRect`); the game positions it again on its next show.
+7. **Words.** Button captions are short verbs (`Deposit`, `Stash`), one or two words, as the game's own buttons. A button is as wide as its caption at the game's size plus padding; when a group squeezes it the caption shrinks to 10 units and then ends in an ellipsis, never past the frame. Never color a caption: the clone carries the game's own color.
+
+The mockups these rules were drawn from (rendered over a 1080p capture of the character inventory) are in the external research notes. Captures of the container, station and castle heart windows were not available offline; the one-shot `Ui: site <Site> panel=...` line logs the rects the rules need, so the first live run checks them.
+
+### Missing after a game update
+
+Two cases, kept apart so one plugin's missing piece never takes a site away from another:
+
+- **The resolver fails** (a member the game removed or renamed throws when it is touched): the site is **absent** for the Core generation, for every plugin, with one line. `pin-diag Ui` lists it as `missing=<Site>:<what>`.
+- **A piece is missing** (a donor, an anchor's button group): one line per site and piece, and only what needs the piece is withheld — a handle whose anchor group is gone gets no container (and says so once), while the site keeps resolving, still reports `Opened` and `Closed`, and every other anchor and plugin keeps working. A missing button donor withholds the buttons and rows for that frame, not for the session.
+
+```
+Ui: site ContainerPanel not found (anchor rename); what needs it stays hidden until the game provides it.
+```
+
+### Release
+
+Everything goes on dispose, `Ui.RemoveAll(owner)` and Core Uninstall, through the same registry as the map card: containers (with their cloned buttons and rows) are destroyed with the confirmed-destroy rule, every button's Bootstrap click slot is unwired and released, the panel handlers are dropped, and the site's frame watch goes with its last attachment. The resolver's references to vanilla windows, mappers and slot caches are cleared at Core Uninstall. No key is read anywhere in this capability; a mod that wants a key for one of these actions registers it through `ctx.Keybinds`.
+
+### Live acceptance procedure (P6)
+
+Run by the coordinator; not run for this change. Uses `samples/Progenitor.PanelsExample` (client only; every action only logs).
+
+1. Build and deploy Core and the example to the test client (`progenitor_build`, then `progenitor_deploy` with the client side and `Progenitor.PanelsExample`), join the isolated test server, and confirm `Panels example: loaded (tooltip enabled=True)` in the client log.
+2. In a castle, open a chest, a workstation, a furnace, the castle heart and the character inventory in turn (walk up and interact; this needs the game window, so it is an authorized foreground step), closing each before the next.
+3. For each window, read the client log once (`progenitor_logs`, filter `Ui: site|Ui: attached|Ui: panel|Panels example|hidden reason|not found`) and expect, in order:
+   - `Ui: site <Site> panel=<name>(x,y wxh) parent=<name> ... grid=... sort=... bar=...` once per site (the rects for the placement check);
+   - `Ui: panel <Site> opened kind=<Kind> entity=<i>:<v> net=<n>:<g> plugin=progenitor.panelsexample` and `Panels example: <Site> <Anchor> Opened kind=...` — the net index is non-zero for a placed building;
+   - `Ui: attached <Site> anchor=<left|right|rename|sort> fit=ok buttons=1 ... layout=<column|group>`; a `hidden reason=...` line instead names the rule that refused it;
+   - on close, `Ui: panel <Site> closed ...` and `Panels example: <Site> <Anchor> Closed ...`.
+4. Capture each open window with the focus-free capture tool (`progenitor_capture`) at 1920x1080, then at 2560x1440 and 3840x2160 if the client can be switched: the buttons must sit on the bar or beside the frame as described above, in the game's art, not overlapping or clipped. Compare with the mockup.
+5. Click each example button once (foreground step): one `Panels example: click <Site> <Anchor> '<caption>' kind=...` line each.
+6. Hover two different items in the inventory and one in the chest: the tooltip shows `Example: item <guid> x<amount>` as its last line, in the tooltip's own style, changing with the item.
+7. Close and reopen the chest: exactly one set of example buttons, still clickable (the click line appears again).
+8. With a controller connected, open the chest and the inventory and move focus through the window: record whether the example buttons can be focused and pressed like the game's own (the clones keep the game's button component but are not added to the window's focus groups; this is a live check, not a claim).
+9. Remove `Progenitor.PanelsExample` from the client reload folder; expect `Panels example: unloading`, `Ui: attach <Site> watch removed` for each site, no `leaked` or `retrying` line, and the next open of each window shows no example button. Disconnect and leave the client at the title screen.
 
 ## Bootstrap (restart required)
 
@@ -899,6 +998,7 @@ Several things here were confirmed on a live client today and several were not, 
 | `visibleRows` is the rendered subset | Defect **verified live** (`51`/`51` with ~14 on screen). Count is now viewport intersection, **source-checked** |
 | `TMP_InputField` has `ActivateInputField` / `isFocused` / `Select`, no `shouldActivateOnSelect`; `Keyboard.add_onTextInput(Il2CppSystem.Action<char>)` | **Source-checked** against this machine's client interop (the IL viewer) |
 | `Ui.AttachToVanilla` — the plan, the registry, the sweep and the log lines (FUI36) | Landed, **nothing live**. The game was not launched for this job. The pure half (close/reopen, rebuild, degrade, layout branch, `RemoveAll` / Uninstall sweep, pin line) is covered by tests |
+| P6 panel sites (`ContainerPanel`, `StationPanel`, `InventoryPanel`, `CastleHeartPanel` / `ThronePanel`, `InventoryTooltip`): resolution, anchors, buttons, open/close/target events, placement, missing-site line | **Experimental**, built and game-free tested (`VanillaPanelTests`: catalog, tracker, placement at three resolutions, buttons across reopen, click slot, blocked fit, missing donor, `RemoveAll`). Member names source-checked against the game's metadata and the client interop. **Nothing live**: the hierarchy under each window, its rects and whether the bars shrink their children are logged by the one-shot `Ui: site` line on the first live run |
 | The confirmed destroy, its bounded retry, the split layout fields, the write-on-change guard and the watch race (FUI37, R60 findings 1, 2, 6, 7, 8) | Landed, **nothing live**. All five are covered by tests against the fake runtime; the `retrying` / `leaked` lines have never been seen in a real client, which is the point — they only appear when Unity refuses a destroy |
 | `MapMenuMapper.GetMapMenu()?.WarEventInfo` resolves the **map** card and not the HUD popup | Inferred from the game's metadata plus a third-party mod's live docking. **Spike P2 / N4** |
 | The hierarchy under the widget, and whether a `LayoutGroup` governs its parent | **Unknowable offline** — prefab serialized data. Both branches are implemented and the one taken is named in `layout=`; the one-shot `site ...` line reports the group and the fitter as separate fields for the root, the parent and `TextGroup`, so one run answers both halves. **Spike P3** |

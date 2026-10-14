@@ -4651,6 +4651,10 @@ The mask detour resolves through the address library first (`DetourSite.Resolve`
 
 Checked with an internal live spike (read-only steps plus one 5 s register/remove round trip).
 
+### Vanilla panel sites (P6, experimental)
+
+`Ui.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid)` attaches to the game's interaction windows: `ContainerPanel` (left edge, right edge, beside rename), `StationPanel` (workstations and refinement stations, both edges), `InventoryPanel` (beside sort), `CastleHeartPanel` (alias `ThronePanel`; both edges) and `InventoryTooltip` (a line in the item tooltip). The handle reports open, close and the entity shown (`OnPanel`, `Target`: client entity, its `NetworkId` for the server, the hovered item for the tooltip) and hosts `Button(caption)` clones of the game's own inventory bar button and rows in the window's own font. Inline anchors join the vanilla button group; edge columns sit outside the frame and hide, with one log line, rather than overlap another window or leave the screen. A site whose resolver fails after a game update is absent with one line; a missing piece (a donor, an anchor group) is logged once and withholds only what needs it. The refresh is `SystemHooks.After<XMenuMapper>` with `OnlyWhenSystemRuns = false`, reading every mapper once per frame; nothing is patched, no key is read, and everything is released on dispose, `Ui.RemoveAll` and Core Uninstall. Status: source-checked, built and game-free tested (`VanillaPanelTests`), **not live-verified**. Contract, placement rules and the live acceptance procedure: [ui.md](ui.md#vanilla-panel-sites-p6). Example: `samples/Progenitor.PanelsExample`.
+
 ### Keybinds (FUI5)
 
 ```csharp

@@ -16,7 +16,10 @@ namespace Progenitor.Ui;
 /// <c>SystemBase.Update</c>, verified live for managed systems on 2026-09-02. This is not a
 /// Harmony patch of ours at all, which makes the "never patch a Burst <c>LambdaJob_*</c>" rule
 /// (learned the hard way in earlier map overlays) unbreakable by construction rather
-/// than by discipline.</para>
+/// than by discipline. Installed with <see cref="VanillaUiSites.WatchOptions"/>
+/// (<c>OnlyWhenSystemRuns = false</c>): <c>MapMenuMapper</c> only updates while its queries match,
+/// and with the default option the watch skipped exactly the frames on which the map closed, so a
+/// close could go unseen and the detach with it.</para>
 ///
 /// <para><b>The address.</b> <c>MapMenuMapper.GetMapMenu()?.WarEventInfo</c> and nothing else.
 /// There are two instances of <c>MapWarEventInfoEntry</c> in the process — the map card and the
@@ -59,6 +62,21 @@ internal static class VanillaSiteRuntime
         VanillaAttachRegistry.UseHeartbeat(FrameHeartbeat.Install);
 
         if (onFrame == null || !VanillaUiSites.IsDefined(site)) return null;
+
+        // P6: the panel sites have their own resolver (VanillaPanelSiteResolver.cs) on their own
+        // mappers; the heartbeat above is shared.
+        if (VanillaUiSites.IsPanel(site))
+        {
+            try { return UnityUiRuntime.WatchPanelSite(site, onFrame); }
+            catch (Exception e)
+            {
+                // A mapper type the game no longer has fails here, once, at install.
+                if (VanillaSiteHealth.MarkAbsent(site, "watch: " + e.GetType().Name))
+                    Plugin.Logger?.LogWarning(VanillaSiteHealth.Line(site, "watch: " + e.GetType().Name + ": " + e.Message));
+                return null;
+            }
+        }
+
         if (site != VanillaUiSite.MapWarEventInfo) return null;
 
         try
@@ -77,7 +95,7 @@ internal static class VanillaSiteRuntime
                 }
 
                 onFrame(sample);
-            });
+            }, VanillaUiSites.WatchOptions(site));
         }
         catch (Exception e)
         {

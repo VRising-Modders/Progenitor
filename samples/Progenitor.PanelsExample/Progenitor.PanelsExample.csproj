@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.PanelsExample</AssemblyName>
+    <RootNamespace>Progenitor.PanelsExample</RootNamespace>
+    <Description>Client example for the vanilla panel sites: a button on the container, station, inventory and castle heart windows, a tooltip line, and a log line for every open, close and target change.</Description>
+    <BepInExPluginGuid>progenitor.panelsexample</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Panels Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>

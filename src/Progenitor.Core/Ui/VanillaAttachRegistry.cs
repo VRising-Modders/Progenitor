@@ -334,7 +334,9 @@ internal static class VanillaAttachRegistry
         if (watch == null)
         {
             // No refresh means the container can never be built or rebuilt, so say so once
-            // rather than leaving a handle that reports Enabled and never attaches.
+            // rather than leaving a handle that reports Enabled and never attaches. A site the
+            // resolver already reported missing has said its one line (P6).
+            if (VanillaSiteHealth.IsAbsent(site)) return;
             Plugin.Logger?.LogWarning(
                 "Ui: attach " + VanillaUiSites.Key(site)
                 + " has no frame watch; rows will not appear (site="

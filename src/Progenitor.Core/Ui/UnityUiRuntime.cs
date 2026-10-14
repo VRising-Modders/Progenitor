@@ -3639,6 +3639,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: icon release: " + e.Message); }
         // C5: the Works across versions glyph's texture, after the rows that drew it.
         ReleaseLoopGlyph();
+        // P6: the resolved panel views hold references to vanilla windows; drop them with the generation.
+        ClearPanelViews();
 
         return n;
     }
@@ -3709,7 +3711,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         VanillaSiteRuntime.BuildContainer(site, containerName, parent, ignoreLayout);
 
     public IRuntimeWidget? CloneDonorRow(VanillaUiSite site, IRuntimeWidget container, string text) =>
-        VanillaSiteRuntime.CloneRow(site, container, text);
+        VanillaUiSites.IsPanel(site)
+            ? ClonePanelRow(site, container, text)
+            : VanillaSiteRuntime.CloneRow(site, container, text);
 
     /// <summary>
     /// The panel frame's rect, transformed out of the overlay canvas's units into screen pixels
