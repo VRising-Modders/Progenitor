@@ -785,3 +785,71 @@ offset BonfireIsActiveOffset                       = 0x28 : Bonfire.IsActive    
 dump client
 offset SortSingleInventoryEventInventoryOffset     = 0x0  : SortSingleInventoryEvent.Inventory   # NetworkId, 12 bytes
 offset SortAllInventoriesEventInventoryOffset      = 0x0  : SortAllInventoriesEvent.Inventory    # NetworkId, 12 bytes
+
+# ---- Servants: hunts, the throne list and the server send (src/Progenitor.Core/Servants) -----------
+# The heart's ActiveServantMission buffer, the servant and coffin fields the game's send and its
+# throne list read, the mission settings, map zones and the user's discovered zones. The send
+# appends one ActiveServantMission with the non-generic UnsafeEntityManagerUtility.AddBufferElement
+# (which reads the element size natively); every other access is a raw read at these offsets.
+dump server
+offset ActiveServantMissionMissionIdOffset           = 0x0  : ActiveServantMission.MissionID              # PrefabGUID of the zone's mission
+offset ActiveServantMissionStartTicksOffset          = 0x8  : ActiveServantMission.MissionStartTimeTicks  # long, DateTime.UtcNow.Ticks at the send
+offset ActiveServantMissionLengthOffset              = 0x10 : ActiveServantMission.MissionLengthSeconds   # float
+offset ActiveServantMissionDataIdOffset              = 0x14 : ActiveServantMission.MissiontDataId         # int, index into ServantMissionSetting
+offset ActiveServantMissionServant1Offset            = 0x18 : ActiveServantMission.Servant1               # NetworkedEntity
+offset ActiveServantMissionServant2Offset            = 0x24 : ActiveServantMission.Servant2
+offset ActiveServantMissionServant3Offset            = 0x30 : ActiveServantMission.Servant3
+offset ActiveServantMissionCountOffset               = 0x3C : ActiveServantMission.NumberOfServants       # int, last field
+size   ActiveServantMissionStride                    = 0x40 : ActiveServantMission
+offset NetworkedEntityEntityOffset                   = 0x0  : NetworkedEntity._Entity
+offset ServantDataIsOnMissionOffset                  = 0xC  : ServantData.IsOnMission                     # bool, set by the mission buff's script
+offset ServantConnectedCoffinEntityOffset            = 0x0  : ServantConnectedCoffin.CoffinEntity         # NetworkedEntity
+offset ServantCoffinstationInjuryEndTicksOffset      = 0x0  : ServantCoffinstation.InjuryEndTimeTicks     # long, DateTime ticks (UTC)
+offset ServantCoffinstationNameOffset                = 0x10 : ServantCoffinstation.ServantName            # FixedString64Bytes, 64 bytes
+offset ServantCoffinstationConnectedServantOffset    = 0x58 : ServantCoffinstation.ConnectedServant       # NetworkedEntity
+offset ServantCoffinstationInjuryOffset              = 0x64 : ServantCoffinstation.Injury                 # PrefabGUID
+offset ServantCoffinstationStateOffset               = 0x68 : ServantCoffinstation.State                  # ServantCoffinState, int
+enum   ServantCoffinStateServantAlive                = 7    : ServantCoffinState.ServantAlive
+enum   ServantCoffinStateServantRevivable            = 8    : ServantCoffinState.ServantRevivable
+enum   ServantCoffinStateReviving                    = 9    : ServantCoffinState.Reviving
+offset ServantPowerGearLevelOffset                   = 0x0  : ServantPower.GearLevel
+offset ServantPowerExpertiseOffset                   = 0x4  : ServantPower.Expertise
+size   PerksBufferStride                             = 4    : PerksBuffer                                 # PrefabGUID @0x0
+offset ServantMissionSettingsMissionBuffOffset       = 0x8  : ServantMissionSettingsSingleton.MissionBuff # PrefabGUID of the buff the send applies
+offset ServantMissionSettingMissionLengthOffset      = 0x8  : ServantMissionSetting.MissionLength         # float seconds
+size   ServantMissionSettingStride                   = 0x14 : ServantMissionSetting
+offset MissionDataServantSlotsOffset                 = 0x8  : MissionData.ServantSlots                    # int, on the mission prefab
+offset MapZoneDataZoneIndexOffset                    = 0x1  : MapZoneData.ZoneIndex                       # byte; MapZoneId.ZoneId is this + 1
+offset MapZoneDataChunkCoordinateOffset              = 0x44 : MapZoneData.ChunkCoordinate                 # TerrainChunk: sbyte X, sbyte Y
+offset MapZoneDataServantMissionAssetOffset          = 0x48 : MapZoneData.ServantMissionAsset             # PrefabGUID
+offset MapZoneIdChunkCoordinateOffset                = 0x0  : MapZoneId.ChunkCoordinate
+offset MapZoneIdZoneIdOffset                         = 0x2  : MapZoneId.ZoneId
+size   DiscoveredMapZoneElementStride                = 3    : DiscoveredMapZoneElement                    # one MapZoneId
+offset SyncedServerDebugSettingsServantTimersDisabledOffset  = 0x26 : SyncedServerDebugSettings.ServantTimersDisabled   # the send multiplies the length by 1e-5
+offset SendOnMissionEventThroneOffset                = 0x0  : SendOnMissionEvent.Throne                   # NetworkId, 12 bytes
+offset SendOnMissionEventServant1Offset              = 0xC  : SendOnMissionEvent.Servant1
+offset SendOnMissionEventServant2Offset              = 0x18 : SendOnMissionEvent.Servant2
+offset SendOnMissionEventServant3Offset              = 0x24 : SendOnMissionEvent.Servant3
+offset SendOnMissionEventMissionDataIdOffset         = 0x30 : SendOnMissionEvent.MissionDataID
+offset SendOnMissionEventMapZoneIdOffset             = 0x34 : SendOnMissionEvent.MapZoneId
+offset ServantInfoEventRequestThroneOffset           = 0x0  : ServantInfoEvent.Request.Throne             # NetworkId
+offset ServantInfoEventResponseResultOffset          = 0x0  : ServantInfoEvent.Response.Result            # FixedList4096Bytes<Entry>: ushort length, elements after the padding
+offset ServantInfoEntryNameOffset                    = 0x0  : ServantInfoEvent.Response.Entry.Name        # FixedString64Bytes
+offset ServantInfoEntryNetworkIdOffset               = 0x40 : ServantInfoEvent.Response.Entry.NetworkId   # the servant's NetworkId
+offset ServantInfoEntryInjuryEndTicksOffset          = 0x50 : ServantInfoEvent.Response.Entry.InjuryEndTimeTicks
+offset ServantInfoEntryHuntProficiencyOffset         = 0x58 : ServantInfoEvent.Response.Entry.HuntProficiency
+offset ServantInfoEntryLootFactorOffset              = 0x5C : ServantInfoEvent.Response.Entry.LootFactor
+offset ServantInfoEntryPerk0Offset                   = 0x60 : ServantInfoEvent.Response.Entry.Perk0
+offset ServantInfoEntryPerk1Offset                   = 0x64 : ServantInfoEvent.Response.Entry.Perk1
+offset ServantInfoEntryInjuryOffset                  = 0x68 : ServantInfoEvent.Response.Entry.Injury
+offset ServantInfoEntryStateOffset                   = 0x6C : ServantInfoEvent.Response.Entry.State       # ServantState, byte; last field
+size   ServantInfoEntryStride                        = 0x70 : ServantInfoEvent.Response.Entry
+enum   ServantInfoStateDead                          = 0    : ServantInfoEvent.Response.ServantState.Dead
+enum   ServantInfoStateInjured                       = 1    : ServantInfoEvent.Response.ServantState.Injured
+enum   ServantInfoStateAwayOnHunt                    = 2    : ServantInfoEvent.Response.ServantState.AwayOnHunt
+enum   ServantInfoStateHasItemInInventory            = 3    : ServantInfoEvent.Response.ServantState.HasItemInInventory
+enum   ServantInfoStateFree                          = 4    : ServantInfoEvent.Response.ServantState.Free
+offset SendEventToUserUserIndexOffset                = 0x0  : SendEventToUser.UserIndex                   # the response's recipient
+offset NetworkIdNormalIndexOffset                    = 0x0  : NetworkId.Normal_Index
+offset NetworkIdNormalGenerationOffset               = 0x4  : NetworkId.Normal_Generation                # byte
+offset NetworkIdTypeOffset                           = 0x8  : NetworkId.Type                              # last field; NetworkId is 12 bytes

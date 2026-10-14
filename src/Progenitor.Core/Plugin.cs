@@ -137,6 +137,10 @@ public sealed class Plugin
         // InventorySortUsed: client only; a Before hook on the client's event sender.
         try { Inventory.InventorySortRuntime.Install(); }
         catch (Exception e) { Logger?.LogWarning($"InventorySort.Install: {e.Message}"); }
+        // ctx.Servants: hunt returns, sends and the experimental throne list hook. Server only;
+        // SystemHooks on three servant systems and one Plugin.Frame handler.
+        try { Servants.ServantRuntime.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"Servants.Install: {e.Message}"); }
         // Death + damage EventBus publishers (UnitDied / PlayerDied / DamageDealt).
         // Kill postfix via PatchRegistry (ctx.Patches path); damage via SystemHooks.After StatChangeSystem.
         Combat.CombatHooks.Install();
@@ -439,6 +443,8 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"Units.Uninstall: {e.Message}"); }
         // Castles holds one Plugin.Frame handler and the change detector's previous snapshot;
         // both must go before the ALC unloads or they pin this Core generation.
+        try { Servants.ServantRuntime.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"Servants.Uninstall: {e.Message}"); }
         try { Castles.CastlePresenceRuntime.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"CastlePresence.Uninstall: {e.Message}"); }
         try { Inventory.InventoryRuntime.Uninstall(); }

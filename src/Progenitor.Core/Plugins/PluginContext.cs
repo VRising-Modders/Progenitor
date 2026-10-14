@@ -409,6 +409,10 @@ public class PluginContext
         get { EnsureAttached(); return _clans ??= new Progenitor.Clans.PluginClans(this); }
     }
 
+    /// <summary>Server castle servants and hunts: the throne list, the hunt record, sends, resends, the list provider (experimental). Client calls throw.</summary>
+    public Progenitor.Servants.PluginServants Servants { get { EnsureAttached(); return _servants ??= new Progenitor.Servants.PluginServants(this); } }
+    private Progenitor.Servants.PluginServants? _servants;
+
     /// <summary>
     /// Server ability control (<see cref="Progenitor.Abilities.PluginAbilities"/>): force-cast a
     /// group the character need not have on its bar, and hold a character's cooldowns at zero.
