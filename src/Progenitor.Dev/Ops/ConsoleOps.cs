@@ -47,7 +47,8 @@ internal static class ConsoleOps
         }
 
         bool? known = null;
-        try { known = handler.TryFindCommandByName(request.Command, out _); }
+        // TryCommand looks the word up lower-cased; ask the same way.
+        try { known = handler.TryFindCommandByName(request.Command.ToLowerInvariant(), out _); }
         catch (Exception e) { reply["lookupError"] = e.Message; }
         reply["known"] = known;
 
@@ -62,8 +63,13 @@ internal static class ConsoleOps
         {
             reply["ok"] = false;
             reply["error"] = "the command threw: " + e.Message;
-            reply["output"] = ui == null ? null : Output(ui, lastBefore, out _);
             Plugin.Logger?.LogWarning("Dev console: '" + request.Text + "' threw: " + e.Message);
+            if (ui != null)
+            {
+                try { reply["output"] = Output(ui, lastBefore, out _); }
+                catch (Exception oe) { reply["outputError"] = oe.Message; }
+            }
+
             return reply;
         }
 

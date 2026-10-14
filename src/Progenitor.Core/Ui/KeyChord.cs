@@ -353,6 +353,37 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         return true;
     }
 
+    /// <summary>Why an empty part of a typed chord is refused: <c>+</c> only joins keys.</summary>
+    public const string EmptyPartReason =
+        "an empty key name: '+' joins keys and is not a key itself (for the plus key use \"Equals + Shift\" or \"NumpadPlus\")";
+
+    /// <summary>
+    /// The parse for a chord a person typed (the Keybinds settings field): as <see cref="TryParse"/>, but an empty part
+    /// between, before or after a <c>+</c> (<c>Ctrl++</c>, <c>Ctrl +</c>, <c>+</c>) is refused with
+    /// <see cref="EmptyPartReason"/> instead of being skipped, which would read <c>Ctrl++</c> as an unbound key. Empty
+    /// text and <c>None</c> still mean unbound. The cfg read keeps the lenient <see cref="TryParse"/>.
+    /// </summary>
+    public static bool TryParseTyped(string? text, out KeyChord chord, out string error)
+    {
+        chord = None;
+        error = "";
+        if (!string.IsNullOrWhiteSpace(text) && text!.IndexOf('+') >= 0)
+        {
+            foreach (var part in text.Split('+'))
+            {
+                if (part.Trim().Length == 0)
+                {
+                    error = EmptyPartReason;
+                    return false;
+                }
+            }
+        }
+
+        if (TryParse(text, out chord)) return true;
+        error = "not a key chord (e.g. \"F10 + Ctrl\")";
+        return false;
+    }
+
     /// <summary>Parse, or <paramref name="fallback"/> when the text is not a chord.</summary>
     public static KeyChord Parse(string? text, KeyChord fallback) =>
         TryParse(text, out var chord) ? chord : fallback;

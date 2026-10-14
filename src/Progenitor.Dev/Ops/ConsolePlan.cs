@@ -85,7 +85,16 @@ internal static class ConsolePlan
         return text.Substring(0, i);
     }
 
-    /// <summary>One console row as plain text: rich-text tags (<c>&lt;color=…&gt;</c>, <c>&lt;/color&gt;</c>, <c>&lt;b&gt;</c>) removed.</summary>
+    /// <summary>
+    /// The rich-text tags the console's rows can carry (Unity's and TextMesh Pro's text styling). Only these are removed: a
+    /// usage hint such as <c>&lt;playerName&gt;</c> is text and stays.
+    /// </summary>
+    internal static readonly HashSet<string> RichTextTags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "color", "b", "i", "u", "size", "s", "sup", "sub", "mark", "alpha",
+    };
+
+    /// <summary>One console row as plain text: known rich-text tags (<c>&lt;color=…&gt;</c>, <c>&lt;/color&gt;</c>, <c>&lt;b&gt;</c>…) removed.</summary>
     internal static string Plain(string? row)
     {
         if (string.IsNullOrEmpty(row)) return "";
@@ -116,10 +125,13 @@ internal static class ConsolePlan
     private static bool IsTag(string s, int start, int end)
     {
         int i = start;
-        if (s[i] == '/') i++;
-        if (i >= end || !char.IsLetter(s[i])) return false;
-        while (i < end && (char.IsLetterOrDigit(s[i]) || s[i] == '-' || s[i] == '_')) i++;
-        return i == end || s[i] == '=';
+        bool closing = s[i] == '/';
+        if (closing) i++;
+        int nameStart = i;
+        while (i < end && char.IsLetter(s[i])) i++;
+        if (i == nameStart || !RichTextTags.Contains(s.Substring(nameStart, i - nameStart))) return false;
+        // "<color=#ff0000>", "<b>", "</color>"; a closing tag takes no value.
+        return i == end || (!closing && s[i] == '=');
     }
 
     /// <summary>Plain lines from rows, dropping empty ones, keeping the newest <see cref="MaxLines"/>.</summary>

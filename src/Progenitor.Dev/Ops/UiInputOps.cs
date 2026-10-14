@@ -108,10 +108,19 @@ internal static class UiInputOps
             {
                 var at = Resolve(request.At!);
                 reply["target"] = at;
-                if (at["ok"] is not true) return Fail(reply, at["error"] as string ?? "target not found");
+                if (at["ok"] is not true)
+                {
+                    Finish(request);
+                    return Fail(reply, at["error"] as string ?? "target not found");
+                }
+
                 var submit = Dict(Bridge("SubmitAt", ToF(at["x"]), ToF(at["y"])));
                 reply["submit"] = submit;
-                if (submit["ok"] is not true) return Fail(reply, submit["error"] as string ?? "the submit was not taken");
+                if (submit["ok"] is not true)
+                {
+                    Finish(request);
+                    return Fail(reply, submit["error"] as string ?? "the submit was not taken");
+                }
                 // The reply waits a few rendered frames, so a view the button opens has had its frames to show.
                 return RunFrames(reply, 30, frame => frame >= UiInputPlan.AfterFrames, ok =>
                 {

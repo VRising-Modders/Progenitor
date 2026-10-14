@@ -475,6 +475,21 @@ namespace Progenitor.Tests
         }
 
         [Fact]
+        public void The_settings_field_refuses_a_chord_with_an_empty_part()
+        {
+            RegisterMod("a.mod", "Atlas");
+            using var reg = ModsMenu.Register(_owner, "a.mod", "Atlas");
+            Keybinds.Register(_owner, "a.mod", "Open", File("a"), F9, "", () => { });
+            var keysRow = SettingsCatalog.Rows().Single(r => r.PluginId == "a.mod" && r.Kind == SettingsEditorKind.Keybind);
+
+            Assert.False(keysRow.TryWrite("Ctrl++", out string error));
+            Assert.Equal(KeyChord.EmptyPartReason, error);
+            Assert.False(keysRow.TryWrite("F8 +", out error));
+            Assert.Equal(KeyChord.EmptyPartReason, error);
+            Assert.Equal(F9, Keybinds.Snapshot().Single(b => b.PluginId == "a.mod").Chord);
+        }
+
+        [Fact]
         public void Reset_to_a_default_that_now_clashes_is_refused_everywhere()
         {
             RegisterMod("a.mod", "Atlas");

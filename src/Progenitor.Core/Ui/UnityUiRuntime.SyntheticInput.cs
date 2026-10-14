@@ -492,7 +492,14 @@ internal sealed partial class UnityUiRuntime
             }
 
             // A game menu row that holds its button in a field (the System menu's Resume / Options / Leave rows).
-            var held = HeldStunButton(t.gameObject);
+            var held = HeldStunButton(t.gameObject, out bool rowDisabled);
+            if (rowDisabled)
+            {
+                // The row itself says it is not interactable (the game greys it out): refused, never sent past it.
+                at = t.gameObject;
+                return MenuRowDisabled;
+            }
+
             if (held != null)
             {
                 at = held;
@@ -511,16 +518,41 @@ internal sealed partial class UnityUiRuntime
     /// game's <c>MenuCollection.ClickButton</c> invokes that button's click event), so the button need not be on the hit
     /// object's parent chain. A click walking up from the hit found only the row's hover handlers and stopped there.
     /// </summary>
-    private static GameObject? HeldStunButton(GameObject go)
+    private static GameObject? HeldStunButton(GameObject go, out bool rowDisabled)
     {
+        rowDisabled = false;
         try
         {
             var row = go.GetComponent<ProjectM.UI.MenuButton>();
             if (row == null) return null;
             var stun = row.StunButton;
-            return stun == null ? null : stun.gameObject;
+            if (stun == null) return null;
+            rowDisabled = !row.Interactable;
+            return stun.gameObject;
         }
         catch { return null; }
+    }
+
+    /// <summary>The click kind of a game menu row whose own <c>Interactable</c> is false: found, and refused.</summary>
+    private const string MenuRowDisabled = "menu-row-disabled";
+
+    private const string MenuRowDisabledReason = "the game's menu row is not interactable (the game has it disabled now)";
+
+    /// <summary>Whether an <c>EventTrigger</c> has an entry for the submit event (its <c>OnSubmit</c> does nothing otherwise).</summary>
+    private static bool HasSubmitEntry(EventTrigger trigger)
+    {
+        try
+        {
+            var entries = trigger.triggers;
+            if (entries == null) return false;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                if (e != null && e.eventID == EventTriggerType.Submit) return true;
+            }
+        }
+        catch { /* */ }
+        return false;
     }
 
     /// <summary>
@@ -608,7 +640,7 @@ internal sealed partial class UnityUiRuntime
                 case "event-trigger":
                 {
                     var trigger = target.GetComponent<EventTrigger>();
-                    if (trigger != null)
+                    if (trigger != null && HasSubmitEntry(trigger))
                     {
                         trigger.OnSubmit(ev);
                         taken++;
@@ -616,10 +648,13 @@ internal sealed partial class UnityUiRuntime
 
                     break;
                 }
+                case MenuRowDisabled:
+                    why = MenuRowDisabledReason;
+                    break;
             }
 
             // The game's own submit handlers on the same object (other than the ones sent to above).
-            if (kind is not ("stun-button" or "button" or "toggle"))
+            if (kind is not ("stun-button" or "button" or "toggle" or MenuRowDisabled))
             {
                 foreach (var h in OtherHandlers<ISubmitHandler>(target))
                 {
@@ -721,7 +756,12 @@ internal sealed partial class UnityUiRuntime
             {
                 bool invoked;
                 string? why = null;
-                if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger" && _synthClickKind != "game-handler")
+                if (_synthClickKind == MenuRowDisabled)
+                {
+                    invoked = false;
+                    why = MenuRowDisabledReason;
+                }
+                else if (_synthPressButton != PointerEventData.InputButton.Left && _synthClickKind != "event-trigger" && _synthClickKind != "game-handler")
                 {
                     // Buttons, toggles and the game's buttons answer the left button only; a trigger or a game handler on the
                     // same object takes any (GridSelectionEntry has its own right and middle click actions).

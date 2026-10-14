@@ -438,11 +438,7 @@ public sealed class SettingsRow
         error = "";
         if (_keybind != null)
         {
-            if (!KeyChord.TryParse(text, out var chord))
-            {
-                error = "not a key chord (e.g. \"F10 + Ctrl\")";
-                return false;
-            }
+            if (!KeyChord.TryParseTyped(text, out var chord, out error)) return false;
 
             // KEYS2: a reserved or already-used chord is refused with its reason.
             return Keybinds.TryRebind(PluginId, Key, chord, Keybinds.RebindCheck.Full, out var why)

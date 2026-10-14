@@ -54,6 +54,9 @@ public class BridgeConsoleTests
     [InlineData("> adminauth", "> adminauth")]
     [InlineData("<b>bold</b> and 1 < 2 > 0", "bold and 1 < 2 > 0")]
     [InlineData("a <not a tag> b", "a <not a tag> b")]
+    [InlineData("Usage: ClanInvite <playerName>", "Usage: ClanInvite <playerName>")]
+    [InlineData("<name> and <b>x</b> <size=12>y</size> <i>z</i>", "<name> and x y z")]
+    [InlineData("</name> stays, </color> goes", "</name> stays,  goes")]
     [InlineData("trailing   ", "trailing")]
     [InlineData(null, "")]
     public void Rows_lose_their_rich_text_tags(string? row, string expected) =>
