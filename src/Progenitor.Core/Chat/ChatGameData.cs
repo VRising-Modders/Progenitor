@@ -59,8 +59,23 @@ internal static class ChatGameData
         if (world == null || !world.IsCreated) return false;
         try
         {
-            var registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry;
-            if (registry != null && registry.TryGet<ManagedItemData>(guid, out var data) && data != null
+            return TryLocalizedItemName(world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry, guid, out name);
+        }
+        catch { name = ""; }
+        return false;
+    }
+
+    /// <summary>
+    /// <see cref="TryLocalizedItemName(World, PrefabGUID, out string)"/> with the registry already resolved,
+    /// for callers that name many items in one pass (the item catalog build).
+    /// </summary>
+    internal static bool TryLocalizedItemName(ManagedDataRegistry? registry, PrefabGUID guid, out string name)
+    {
+        name = "";
+        if (registry == null) return false;
+        try
+        {
+            if (registry.TryGet<ManagedItemData>(guid, out var data) && data != null
                 && Localization.Localization.TryGetGameString(data.Name, out var s) && !string.IsNullOrWhiteSpace(s))
             {
                 name = s.Trim();

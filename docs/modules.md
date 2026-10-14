@@ -2192,10 +2192,12 @@ var ore = ctx.Items.CatalogEntry(1332980397);   // Item_Ingredient_Mineral_IronO
 ```
 
 **Where it comes from.** A prefab-inclusive query for entities with `ItemData`, `PrefabGUID` and
-`Prefab` (so item copies sitting in inventories are not visited), then
-`GameDataSystem.ItemHashLookupMap` for the stack size, category and type, the same table
-`ctx.Inventory` and the game's own add and move code read. A prefab missing from that table is
-not listed. Prefab names come from the prefab collection's lookup map. Custom items cloned with
+`Prefab` (so item copies sitting in inventories are not visited). `GameDataSystem.ItemHashLookupMap`,
+the table `ctx.Inventory` and the game's own add and move code read, decides what is an item: a
+prefab missing from it is not listed, except a custom item applied in this process. Stack size,
+category and type are read from the prefab's own `ItemData`, because the table row can keep a
+clone-time stack size on the client after an ordered edit pass; the row is only the fallback when
+that read fails. Prefab names come from the prefab collection's lookup map. Custom items cloned with
 `DefineItem` or a data pack are included on each side once their clone is applied there
 (`IsCustom` true).
 
@@ -2205,16 +2207,19 @@ server ships no localization tables, so a vanilla item's `DisplayName` is null t
 does not load tables on the server. A custom item's `Named(...)` text is its display name on both
 sides. Show names from the client, or send GUIDs and let the client name them.
 
-**When it builds.** Lazily, on the first call after a world load; the result is cached for that
-world, its world-load epoch and the content version (bumped when a custom item is applied or
-removed on that side). Repeated calls return the same list object and allocate nothing. Before the
-world's prefabs exist (main menu, early join) the result is empty and not cached, so a later call
-builds. On the client, a call made while the join is still loading prefabs could cache a partial
-list for that world; call it once the local character exists (for example when a panel opens), or call
-`InvalidateCatalog()` first. A vanilla stack-size or category edit made after the first build in the same world load is
-picked up by `ctx.Items.InvalidateCatalog()` or the next load. Main thread only.
+**When it builds.** Lazily, on the first call after a world load. The result is cached for that
+world, its world-load epoch and an item content version that Core bumps on every write it makes to
+an item prefab's `ItemData` or lookup row: custom item apply, update and removal, `ItemData` edits
+from a plugin or the server's edit layer (including baseline restores), and keep-rule re-checks.
+Repeated calls return the same list object and allocate nothing. An empty build (main menu, early
+join) and, on the client, a build made before the local character exists are served but not
+cached, and are repeated at most once per frame. A failed build is logged once per epoch.
+`ctx.Items.InvalidateCatalog()` is only for an item write Progenitor did not make. `CatalogInfo()`
+describes the last build; once the world is gone it reports `Built` false and zero counts. Main
+thread only: the calls throw elsewhere.
 
-**Cost.** One prefab query plus one lookup-table read and one name lookup per item, once per world
+**Cost.** One prefab query plus, per item, one lookup-table read, one `ItemData` read and one name
+lookup (systems and the managed registry are resolved once per build), once per world
 load; the entry count is a few thousand. The measured count and build time (`CatalogInfo().Count`,
 `BuildMilliseconds`) are recorded by the live acceptance below; until then they are unmeasured.
 

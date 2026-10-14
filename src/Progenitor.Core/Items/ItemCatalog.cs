@@ -85,7 +85,11 @@ public readonly struct ItemCatalogInfo
         Builds = builds;
     }
 
-    /// <summary>False until a build with a world produced at least one entry.</summary>
+    /// <summary>
+    /// True when the last build produced entries for the current world. False before the first
+    /// build, after an empty or failed build, and once the world is gone (then every count is 0;
+    /// <see cref="Builds"/> keeps counting).
+    /// </summary>
     public bool Built { get; }
 
     /// <summary><c>server</c> or <c>client</c>: the world the catalog was read from.</summary>
@@ -145,11 +149,66 @@ internal interface IItemCatalogSource
     /// <summary>The world-load epoch; a change rebuilds.</summary>
     int Epoch { get; }
 
-    /// <summary>Bumped when a custom item is applied or removed; a change rebuilds.</summary>
+    /// <summary><see cref="ItemCatalogVersion.Current"/> in the game; a change rebuilds.</summary>
     int ContentVersion { get; }
+
+    /// <summary>The current frame number; uncached builds are throttled to one per frame.</summary>
+    int Frame { get; }
+
+    /// <summary>
+    /// False while a build could still be partial (a client whose local character does not exist
+    /// yet). A build made then is served but not cached.
+    /// </summary>
+    bool Ready { get; }
 
     /// <summary>Append every item prefab of the current world.</summary>
     void Collect(List<ItemCatalogRow> into);
+
+    /// <summary>Log a warning (a failed build; at most once per epoch).</summary>
+    void Warn(string message);
+}
+
+/// <summary>
+/// Bumped by every Core write that changes an item prefab's <c>ItemData</c> or its row in the item
+/// lookup table (custom item apply, update and removal, prefab edits of <c>ItemData</c> from a
+/// plugin or the server's edit layer, keep-rule re-checks). The item catalog rebuilds when it changes.
+/// </summary>
+internal static class ItemCatalogVersion
+{
+    private static int _current;
+
+    internal static int Current => System.Threading.Volatile.Read(ref _current);
+
+    internal static void Bump() => System.Threading.Interlocked.Increment(ref _current);
+}
+
+/// <summary>Stack size, category and type of one item, from one of two places.</summary>
+internal readonly struct ItemCatalogFacts
+{
+    internal ItemCatalogFacts(int maxAmount, long itemCategory, int itemType)
+    {
+        MaxAmount = maxAmount;
+        ItemCategory = itemCategory;
+        ItemType = itemType;
+    }
+
+    internal int MaxAmount { get; }
+    internal long ItemCategory { get; }
+    internal int ItemType { get; }
+
+    /// <summary>
+    /// Whether a prefab is listed and which facts it gets. Listed when the item lookup table has
+    /// it, or when it is a custom item applied in this process (the table can miss a clone on the
+    /// client after an ordered edit pass). The prefab entity's own <c>ItemData</c> wins when it was
+    /// read, because the table row can still hold the clone-time stack size; the row is the fallback.
+    /// </summary>
+    internal static bool TryPick(bool inTable, ItemCatalogFacts table, bool entityRead, ItemCatalogFacts entity, bool appliedCustom, out ItemCatalogFacts facts)
+    {
+        facts = default;
+        if (!inTable && !(appliedCustom && entityRead)) return false;
+        facts = entityRead ? entity : table;
+        return true;
+    }
 }
 
 /// <summary>
@@ -171,6 +230,8 @@ internal sealed class ItemCatalogCache
     private bool _valid;
     private ItemCatalogInfo _info;
     private int _builds;
+    private int _attemptFrame = int.MinValue;
+    private int _warnedEpoch;
 
     internal ItemCatalogCache(IItemCatalogSource source) =>
         _source = source ?? throw new ArgumentNullException(nameof(source));
@@ -204,7 +265,11 @@ internal sealed class ItemCatalogCache
     /// <summary>Drop the cached catalog; the next read rebuilds.</summary>
     internal void Invalidate()
     {
-        lock (_gate) _valid = false;
+        lock (_gate)
+        {
+            _valid = false;
+            _attemptFrame = int.MinValue;
+        }
     }
 
     private void Refresh()
@@ -212,13 +277,22 @@ internal sealed class ItemCatalogCache
         var world = _source.World;
         if (world == null)
         {
+            // No world: nothing to describe. Info says so (Built false) and keeps the build count.
             Clear();
+            _info = new ItemCatalogInfo(false, _source.Side, 0, 0, 0, 0, 0, _builds);
             return;
         }
 
         int epoch = _source.Epoch;
         int content = _source.ContentVersion;
-        if (_valid && ReferenceEquals(world, _world) && epoch == _epoch && content == _contentVersion)
+        bool sameKey = ReferenceEquals(world, _world) && epoch == _epoch && content == _contentVersion;
+        if (_valid && sameKey)
+            return;
+
+        // An uncached build (failed, empty, or made before the side was ready) is repeated at most
+        // once per frame for the same world, epoch and content; in between the last result is served.
+        int frame = _source.Frame;
+        if (sameKey && frame == _attemptFrame)
             return;
 
         var watch = Stopwatch.StartNew();
@@ -227,32 +301,34 @@ internal sealed class ItemCatalogCache
         {
             _source.Collect(_scratch);
         }
-        catch
+        catch (Exception e)
         {
             _scratch.Clear();
+            if (_warnedEpoch != epoch)
+            {
+                _warnedEpoch = epoch;
+                try { _source.Warn("Items: item catalog build failed (" + e.GetType().Name + ": " + e.Message + "); serving an empty catalog and retrying at most once per frame."); }
+                catch { /* logging must not fail the read */ }
+            }
         }
 
+        bool ready = _source.Ready;
         var entries = Normalize(_scratch, out var byGuid, out int named, out int custom);
         _scratch.Clear();
         watch.Stop();
         _builds++;
 
-        if (entries.Count == 0)
-        {
-            // The world exists but its prefabs are not loaded yet: serve empty, cache nothing,
-            // and build again on the next call.
-            Clear();
-            _info = new ItemCatalogInfo(false, _source.Side, 0, 0, 0, watch.Elapsed.TotalMilliseconds, epoch, _builds);
-            return;
-        }
-
-        _entries = entries;
-        _byGuid = byGuid;
         _world = world;
         _epoch = epoch;
         _contentVersion = content;
-        _valid = true;
-        _info = new ItemCatalogInfo(true, _source.Side, entries.Count, named, custom, watch.Elapsed.TotalMilliseconds, epoch, _builds);
+        _entries = entries.Count == 0 ? Empty : entries;
+        _byGuid = entries.Count == 0 ? new Dictionary<int, ItemCatalogEntry>() : byGuid;
+        _info = new ItemCatalogInfo(entries.Count > 0, _source.Side, entries.Count, named, custom, watch.Elapsed.TotalMilliseconds, epoch, _builds);
+
+        // Empty (prefabs not loaded yet) or not ready (a client still joining): serve it, do not
+        // keep it, and build again on a later frame.
+        _valid = entries.Count > 0 && ready;
+        _attemptFrame = _valid ? int.MinValue : frame;
     }
 
     private void Clear()
@@ -261,6 +337,7 @@ internal sealed class ItemCatalogCache
         _byGuid = new Dictionary<int, ItemCatalogEntry>();
         _world = null;
         _valid = false;
+        _attemptFrame = int.MinValue;
     }
 
     /// <summary>

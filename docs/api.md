@@ -445,17 +445,18 @@ range before the call.
 | `ItemDurability` | verified live | `Leave`, `Indestructible`. | live `Durability.LossType` None on the tier-9 set |
 | `ItemGrantResult` | verified live | `Ok`, `Action`, `Reason`, `Added`, `DidNotFit`, `Slot`, `ItemEntity`, `Equipped`, `DurabilityCleared`. | returned by `Grant` and `Equip` |
 | `ItemGrantPolicy` / `ItemPresence` / `ItemGrantStep` | landed | Game-free decisions the live call runs before it touches an inventory. | unit test `ItemGrantPolicyTests` |
-| `ctx.Items.Catalog()` → `IReadOnlyList<ItemCatalogEntry>` | landed (source-checked, built, game-free tested; not live-verified) | Every item prefab of the current world, vanilla and custom, sorted by prefab name. Both sides. Built on the first call of a world load, rebuilt on a new world-load epoch or when a custom item is applied or removed; other calls return the same list. Empty (and not cached) before the world's prefabs exist. Main thread. [Item catalog](#item-catalog). | `SampleItemCatalog.cs` (`.items catalog [filter]`); Dev op `item_catalog`; unit test `ItemCatalogTests` |
+| `ctx.Items.Catalog()` → `IReadOnlyList<ItemCatalogEntry>` | landed (source-checked, built, game-free tested; not live-verified) | Every item prefab of the current world, vanilla and custom, sorted by prefab name. Both sides. Built on the first call of a world load, rebuilt on a new world-load epoch, when a custom item is applied or removed, or when Core writes an item's `ItemData` (plugin and server edits, keep rules); other calls return the same list. Empty, and not cached, before the world's prefabs exist; on the client a build made before the local character exists is not cached either (uncached builds repeat at most once per frame). Main thread (throws elsewhere). [Item catalog](#item-catalog). | `SampleItemCatalog.cs` (`.items catalog [filter]`); Dev op `item_catalog`; unit test `ItemCatalogTests` |
 | `ctx.Items.CatalogEntry(int prefabGuid)` → `ItemCatalogEntry?` | landed (not live-verified) | Lookup by GUID hash from the same build; null when the GUID is not an item. | `SampleItemCatalog.cs` (a GUID filter); unit test `ItemCatalogTests` |
-| `ctx.Items.CatalogInfo()` → `ItemCatalogInfo` | landed (not live-verified) | `Built`, `Side` (`server` / `client`), `Count`, `WithDisplayName`, `Custom`, `BuildMilliseconds`, `Epoch`, `Builds`. Does not build. | `SampleItemCatalog.cs` (summary line) |
-| `ctx.Items.InvalidateCatalog()` | landed (not live-verified) | Drop the cache; the next call rebuilds. Only for a vanilla stack-size or category edit made in the same world load. | unit test `ItemCatalogTests` |
-| `ItemCatalogEntry` | landed (not live-verified) | `PrefabGuid` (int, as `ctx.Inventory` takes), `PrefabName`, `DisplayName` (localized; null for vanilla items on the server), `MaxAmount` (stack size from the item lookup table `ctx.Inventory` reads), `ItemCategory` (flags, long), `ItemType` (int), `IsCustom`, `Matches(string? filter)` (GUID, or case-insensitive substring of either name). | unit test `ItemCatalogTests` |
+| `ctx.Items.CatalogInfo()` → `ItemCatalogInfo` | landed (not live-verified) | `Built`, `Side` (`server` / `client`), `Count`, `WithDisplayName`, `Custom`, `BuildMilliseconds`, `Epoch`, `Builds`. Describes the last build; `Built` false with zero counts once the world is gone. Does not build. | `SampleItemCatalog.cs` (summary line) |
+| `ctx.Items.InvalidateCatalog()` | landed (not live-verified) | Drop the cache; the next call rebuilds. Only for an item write Progenitor did not make. | unit test `ItemCatalogTests` |
+| `ItemCatalogEntry` | landed (not live-verified) | `PrefabGuid` (int, as `ctx.Inventory` takes), `PrefabName`, `DisplayName` (localized; null for vanilla items on the server), `MaxAmount` (stack size from the prefab's `ItemData`; the item lookup table `ctx.Inventory` reads is the filter and the fallback), `ItemCategory` (flags, long), `ItemType` (int), `IsCustom`, `Matches(string? filter)` (GUID, or case-insensitive substring of either name). | unit test `ItemCatalogTests` |
 
 ### Item catalog
 
 `ctx.Items.Catalog()` lists item prefabs: prefab entities carrying `ItemData` whose GUID is in
-`GameDataSystem.ItemHashLookupMap`, the table the game's inventory code reads stack sizes from.
-Live item copies in inventories are not prefabs and are not listed. Custom items registered with
+`GameDataSystem.ItemHashLookupMap`, the table the game's inventory code reads stack sizes from
+(a custom item applied in this process is listed even if the table misses it). Stack size,
+category and type come from the prefab's own `ItemData`. Live item copies in inventories are not prefabs and are not listed. Custom items registered with
 `DefineItem` or a data pack appear once their clone is applied on that side. Narrative and the
 live acceptance procedure: [modules.md](modules.md#item-catalog).
 

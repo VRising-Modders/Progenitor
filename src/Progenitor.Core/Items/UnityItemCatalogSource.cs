@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using ProjectM;
+using ProjectM.Network;
 using Progenitor.Chat;
 using Progenitor.Content;
 using Progenitor.Ecs;
@@ -19,9 +20,13 @@ namespace Progenitor.Items;
 /// <item><description>Enumeration: a prefab-inclusive query over <c>ItemData</c> + <c>PrefabGUID</c>
 /// + <c>Prefab</c> through <see cref="Query.EntitiesWithOptions"/> (the non-generic builder path; the
 /// <c>Prefab</c> requirement keeps live item instances in inventories out).</description></item>
-/// <item><description>Facts: <c>GameDataSystem.ItemHashLookupMap.TryGetValue</c>, the table
-/// <c>ctx.Inventory</c> reads stack sizes from. A prefab missing from it is not listed.</description></item>
-/// <item><description>Prefab name: <see cref="PrefabLookup.TryGetName"/>.</description></item>
+/// <item><description>Filter: <c>GameDataSystem.ItemHashLookupMap.TryGetValue</c>, the table
+/// <c>ctx.Inventory</c> reads stack sizes from. A prefab missing from it is not listed, except a
+/// custom item applied in this process.</description></item>
+/// <item><description>Facts: the prefab's own <c>ItemData</c> (<c>GetComponentData&lt;ItemData&gt;</c>);
+/// the table row only when that read fails (<see cref="ItemCatalogFacts.TryPick"/>).</description></item>
+/// <item><description>Prefab name: <c>PrefabCollectionSystem._PrefabLookupMap.TryGetName</c>, the call
+/// <see cref="PrefabLookup.TryGetName"/> makes, with the system resolved once per build and no per-item log.</description></item>
 /// <item><description>Display name (client): <c>ChatGameData.TryLocalizedItemName</c>, the resolver
 /// chat item links use. Custom items fall back to their definition's <c>Named(...)</c> text on both sides.</description></item>
 /// </list>
@@ -44,15 +49,58 @@ internal sealed class UnityItemCatalogSource : IItemCatalogSource
 
     public int Epoch => Progenitor.WorldState.WorldEpoch.Current;
 
-    public int ContentVersion => PrefabApplicator.ContentVersion;
+    public int ContentVersion => ItemCatalogVersion.Current;
+
+    public int Frame
+    {
+        get
+        {
+            if (Plugin.TryDispatchFrame(out int dispatched)) return dispatched;
+            try { return UnityEngine.Time.frameCount; }
+            catch { return 0; }
+        }
+    }
+
+    /// <summary>
+    /// The server is ready once it has a world. A client is ready once its local character exists:
+    /// before that the join may still be streaming prefabs in, so a build is served but not cached.
+    /// </summary>
+    public bool Ready
+    {
+        get
+        {
+            if (Plugin.IsServerProcess) return true;
+            if (World is not World world) return false;
+            try
+            {
+                return Query.Entities(world.EntityManager, includeDisabled: false, includeSystems: false,
+                    ComponentIndex.Of<LocalCharacter>(ComponentType.AccessMode.ReadOnly)).Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public void Warn(string message) => Plugin.Logger?.LogWarning(message);
 
     public void Collect(List<ItemCatalogRow> into)
     {
         if (World is not World world) return;
         var em = world.EntityManager;
+        // Systems and the managed registry are resolved once per build, not per item.
         var gameData = world.GetExistingSystemManaged<GameDataSystem>();
         if (gameData == null) return;
+        var prefabs = world.GetExistingSystemManaged<PrefabCollectionSystem>();
         bool client = !Plugin.IsServerProcess;
+        ManagedDataRegistry? registry = null;
+        if (client)
+        {
+            try { registry = gameData.ManagedDataRegistry; }
+            catch { registry = null; }
+        }
+        int nameMisses = 0, entityMisses = 0, rowFailures = 0;
 
         var custom = new Dictionary<int, PrefabDefinition>();
         foreach (var def in PrefabRegistry.Definitions)
@@ -75,25 +123,60 @@ internal sealed class UnityItemCatalogSource : IItemCatalogSource
             try
             {
                 if (!e.TryRead(em, out PrefabGUID guid) || guid.GuidHash == 0 || !seen.Add(guid.GuidHash)) continue;
-                if (!gameData.ItemHashLookupMap.TryGetValue(guid, out var data)) continue;
 
                 custom.TryGetValue(guid.GuidHash, out var def);
                 bool isCustom = def != null && PrefabApplicator.WasClonedHere(guid);
-                string? prefabName = PrefabLookup.TryGetName(world, guid, out var n) ? n : def?.Id;
+
+                bool inTable = gameData.ItemHashLookupMap.TryGetValue(guid, out var row);
+                var tableFacts = inTable ? new ItemCatalogFacts(row.MaxAmount, (long)row.ItemCategory, (int)row.ItemType) : default;
+
+                // The prefab's own ItemData (the typed read Core's edit and status paths use): the
+                // table row can lag behind an ordered edit pass on the client.
+                bool entityRead = false;
+                ItemCatalogFacts entityFacts = default;
+                try
+                {
+                    var data = em.GetComponentData<ItemData>(e);
+                    entityFacts = new ItemCatalogFacts(data.MaxAmount, (long)data.ItemCategory, (int)data.ItemType);
+                    entityRead = true;
+                }
+                catch { entityMisses++; }
+
+                if (!ItemCatalogFacts.TryPick(inTable, tableFacts, entityRead, entityFacts, isCustom, out var facts)) continue;
+
+                string? prefabName = null;
+                if (prefabs != null)
+                {
+                    try
+                    {
+                        if (prefabs._PrefabLookupMap.TryGetName(guid, out var n) && !string.IsNullOrEmpty(n)) prefabName = n;
+                    }
+                    catch { /* counted below; no per-item error log */ }
+                }
+                if (prefabName == null)
+                {
+                    nameMisses++;
+                    prefabName = def?.Id;
+                }
+
                 string? display = null;
-                if (client && ChatGameData.TryLocalizedItemName(world, guid, out var localized))
+                if (client && ChatGameData.TryLocalizedItemName(registry, guid, out var localized))
                     display = localized;
                 if (display == null && isCustom && !string.IsNullOrWhiteSpace(def!.LocalizedName))
                     display = def.LocalizedName;
 
-                into.Add(new ItemCatalogRow(guid.GuidHash, prefabName, display, data.MaxAmount,
-                    (long)data.ItemCategory, (int)data.ItemType, isCustom));
+                into.Add(new ItemCatalogRow(guid.GuidHash, prefabName, display, facts.MaxAmount,
+                    facts.ItemCategory, facts.ItemType, isCustom));
             }
-            catch (Exception ex)
+            catch
             {
-                Plugin.Logger?.LogDiag("Items: catalog row " + e.Index + ":" + e.Version + " skipped: " + ex.Message);
+                rowFailures++;
             }
         }
+
+        if (nameMisses + entityMisses + rowFailures > 0)
+            Plugin.Logger?.LogDiag("Items: catalog build: " + into.Count + " rows; " + nameMisses + " without a prefab name, "
+                + entityMisses + " ItemData reads failed, " + rowFailures + " rows skipped.");
     }
 }
 

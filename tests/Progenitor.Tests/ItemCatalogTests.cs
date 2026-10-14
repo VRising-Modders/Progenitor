@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Progenitor.Items;
 using Progenitor.Sample;
 using Xunit;
@@ -24,9 +25,12 @@ public class ItemCatalogTests
         public string Side { get; set; } = "server";
         public int Epoch { get; set; } = 1;
         public int ContentVersion { get; set; }
+        public int Frame { get; set; } = 1;
+        public bool Ready { get; set; } = true;
         public int Collects { get; private set; }
         public bool Throw { get; set; }
         public List<ItemCatalogRow> Rows { get; } = new();
+        public List<string> Warnings { get; } = new();
 
         public void Collect(List<ItemCatalogRow> into)
         {
@@ -34,6 +38,8 @@ public class ItemCatalogTests
             if (Throw) throw new InvalidOperationException("prefab read failed");
             into.AddRange(Rows);
         }
+
+        public void Warn(string message) => Warnings.Add(message);
     }
 
     private static FakeSource ServerWorld()
@@ -215,25 +221,172 @@ public class ItemCatalogTests
         var s = new FakeSource();
         var cache = new ItemCatalogCache(s);
         Assert.Empty(cache.Entries());
+        s.Frame++;
         Assert.Empty(cache.Entries());
         Assert.Equal(2, s.Collects);
         Assert.False(cache.Info.Built);
 
         s.Rows.Add(new ItemCatalogRow(IronOre, "Item_Ingredient_Mineral_IronOre", null, 500, 0, 1, false));
+        s.Frame++;
         Assert.Single(cache.Entries());
+        s.Frame++;
         Assert.Single(cache.Entries());
         Assert.Equal(3, s.Collects);
     }
 
     [Fact]
-    public void A_throwing_source_yields_empty_and_retries()
+    public void An_empty_build_is_retried_at_most_once_per_frame()
+    {
+        var s = new FakeSource();
+        var cache = new ItemCatalogCache(s);
+        for (int i = 0; i < 20; i++)
+        {
+            Assert.Empty(cache.Entries());
+            Assert.Null(cache.Find(IronOre));
+        }
+        Assert.Equal(1, s.Collects);
+
+        s.Frame++;
+        cache.Entries();
+        Assert.Equal(2, s.Collects);
+
+        // A new epoch or content version is a new key: it builds in the same frame.
+        s.Epoch++;
+        cache.Entries();
+        Assert.Equal(3, s.Collects);
+
+        // So does an explicit invalidate.
+        cache.Invalidate();
+        cache.Entries();
+        Assert.Equal(4, s.Collects);
+    }
+
+    [Fact]
+    public void A_throwing_source_yields_empty_warns_once_per_epoch_and_retries_next_frame()
     {
         var s = ServerWorld();
         s.Throw = true;
         var cache = new ItemCatalogCache(s);
         Assert.Empty(cache.Entries());
+        Assert.Empty(cache.Entries());
+        Assert.Equal(1, s.Collects);
+        s.Frame++;
+        Assert.Empty(cache.Entries());
+        Assert.Equal(2, s.Collects);
+        Assert.Single(s.Warnings);
+        Assert.Contains("prefab read failed", s.Warnings[0]);
+
+        s.Epoch++;
+        Assert.Empty(cache.Entries());
+        Assert.Equal(2, s.Warnings.Count);
+
         s.Throw = false;
+        s.Frame++;
         Assert.Equal(3, cache.Entries().Count);
+        Assert.Equal(2, s.Warnings.Count);
+    }
+
+    [Fact]
+    public void A_build_before_the_side_is_ready_is_served_but_not_cached()
+    {
+        var s = ServerWorld();
+        s.Side = "client";
+        s.Ready = false;
+        var cache = new ItemCatalogCache(s);
+
+        Assert.Equal(3, cache.Entries().Count);
+        Assert.Equal(3, cache.Entries().Count);
+        Assert.Equal(1, s.Collects); // same frame: served from the last build
+
+        s.Rows.Add(new ItemCatalogRow(3000, "Item_Late", null, 1, 0, 0, false));
+        s.Frame++;
+        Assert.Equal(4, cache.Entries().Count); // still loading: rebuilt on a later frame
+        Assert.Equal(2, s.Collects);
+
+        s.Ready = true;
+        s.Frame++;
+        cache.Entries();
+        s.Frame++;
+        cache.Entries();
+        Assert.Equal(3, s.Collects); // cached once ready
+    }
+
+    [Fact]
+    public void Info_is_cleared_when_the_world_is_gone()
+    {
+        var s = ServerWorld();
+        var cache = new ItemCatalogCache(s);
+        cache.Entries();
+        Assert.True(cache.Info.Built);
+
+        s.World = null;
+        cache.Entries();
+        var info = cache.Info;
+        Assert.False(info.Built);
+        Assert.Equal(0, info.Count);
+        Assert.Equal(1, info.Builds);
+    }
+
+    [Fact]
+    public void Entity_item_data_wins_over_a_stale_lookup_row()
+    {
+        var table = new ItemCatalogFacts(100, 0x10, 1);
+        var entity = new ItemCatalogFacts(250, 0x30, 2);
+
+        Assert.True(ItemCatalogFacts.TryPick(true, table, true, entity, false, out var f));
+        Assert.Equal(250, f.MaxAmount);
+        Assert.Equal(0x30L, f.ItemCategory);
+        Assert.Equal(2, f.ItemType);
+
+        // Entity read failed: the table row is the fallback.
+        Assert.True(ItemCatalogFacts.TryPick(true, table, false, default, false, out f));
+        Assert.Equal(100, f.MaxAmount);
+
+        // Not in the table: a vanilla prefab is not listed, an applied custom item is.
+        Assert.False(ItemCatalogFacts.TryPick(false, default, true, entity, false, out _));
+        Assert.True(ItemCatalogFacts.TryPick(false, default, true, entity, true, out f));
+        Assert.Equal(250, f.MaxAmount);
+        Assert.False(ItemCatalogFacts.TryPick(false, default, false, default, true, out _));
+    }
+
+    [Fact]
+    public void Item_data_edits_bump_the_catalog_version()
+    {
+        int before = ItemCatalogVersion.Current;
+        ItemCatalogVersion.Bump();
+        Assert.NotEqual(before, ItemCatalogVersion.Current);
+    }
+
+    /// <summary>
+    /// Every Core write to the item lookup table sits next to an <c>ItemCatalogVersion.Bump()</c>
+    /// (within the 30 lines before or the 4 after), so a new writer cannot leave catalogs stale.
+    /// </summary>
+    [Fact]
+    public void Every_item_lookup_table_write_in_core_bumps_the_catalog_version()
+    {
+        string root = Path.Combine(SourcePin.RepoRoot(), "src", "Progenitor.Core");
+        var missing = new List<string>();
+        int writes = 0;
+        foreach (var file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            var lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string code = lines[i].TrimStart();
+                if (code.StartsWith("//", StringComparison.Ordinal)) continue;
+                if (!code.Contains("ItemHashLookupMap.Remove(", StringComparison.Ordinal)
+                    && !code.Contains("ItemHashLookupMap.TryAdd(", StringComparison.Ordinal))
+                    continue;
+                writes++;
+                bool bumped = false;
+                for (int j = Math.Max(0, i - 30); j <= Math.Min(lines.Length - 1, i + 4) && !bumped; j++)
+                    bumped = lines[j].Contains("ItemCatalogVersion.Bump()", StringComparison.Ordinal);
+                if (!bumped) missing.Add(Path.GetFileName(file) + ":" + (i + 1));
+            }
+        }
+
+        Assert.True(writes > 0, "no item lookup table writes found; the scan is looking in the wrong place");
+        Assert.True(missing.Count == 0, "item lookup table writes without a catalog version bump: " + string.Join(", ", missing));
     }
 
     [Fact]
