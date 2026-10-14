@@ -262,6 +262,25 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
 
     // ---- Tip card placement ------------------------------------------------------------------------
 
+    public void TintTipCard(IRuntimeWidget? title, IRuntimeCellRow? buttons, string goldCell)
+    {
+        var gold = ToColor(MenuPalette.ChipOnBorder);
+        try
+        {
+            var go = title == null ? null : NavObject(title);
+            var tmp = go == null ? null : go.GetComponent<TextMeshProUGUI>() ?? go.GetComponentInChildren<TextMeshProUGUI>(true);
+            if (tmp != null && tmp.color != gold) tmp.color = gold;
+        }
+        catch { /* the dialog's gray stays */ }
+
+        try
+        {
+            var caption = buttons is UnityCellRow row ? row.CellText(goldCell) : null;
+            if (caption != null && caption.color != gold) caption.color = gold;
+        }
+        catch { /* the button's light caption stays */ }
+    }
+
     public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor)
     {
         if (card is not UnityPanel host || !host.Alive) return false;

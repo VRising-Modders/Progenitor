@@ -158,11 +158,13 @@ public sealed class UiMasterDetailTests : IDisposable
                 for (int r = 0; r < md.Rows; r++)
                 {
                     var cells = Row("md:row" + r).Cells();
-                    var placed = MenuPanelLayout.CellColumns(width, cells.ToList());
+                    // The row as built: with the scroll bar's band at its right end, which no cell enters.
+                    var placed = MenuPanelLayout.CellColumns(width, new CellRowSpec("md:row" + r, cells.ToList(), rightInset: L.ScrollInset));
                     string where = "row " + r + " at " + width + (icons ? " icons" : "") + (counts ? " counts" : "");
                     foreach (var p in placed.Where(p => p.Visible))
                     {
-                        Assert.True(p.Left >= -width / 2f - .01f && p.Right <= width / 2f + .01f, p + " leaves the row, " + where);
+                        Assert.True(p.Left >= -width / 2f - .01f && p.Right <= width / 2f - L.ScrollInset + .01f,
+                            p + " leaves the row or enters the scroll bar's band, " + where);
                         Assert.True(p.Width >= CellLayout.MinWidthOf(cells[p.Index]) - .01f, p + " under its floor, " + where);
                     }
 
@@ -222,8 +224,15 @@ public sealed class UiMasterDetailTests : IDisposable
         Assert.Equal("Member a", Cell(r2, L.CellText).Text);
         foreach (var key in new[] { L.CellGrip, L.CellUp, L.CellDown, L.CellExpand, L.CellRemove }) Assert.True(Cell(r2, key).Visible, key);
         // The badge and the glyph buttons are packed from the row's right edge, in the ordered list's order.
-        var placedR2 = MenuPanelLayout.CellColumns(1108f, r2.Cells().ToList());
-        Assert.Equal(1108f / 2f, placedR2.Single(p => p.Key == L.CellRemove).Right, 1);
+        var placedR2 = MenuPanelLayout.CellColumns(1108f, new CellRowSpec("r2", r2.Cells().ToList(), rightInset: L.ScrollInset));
+        Assert.Equal(1108f / 2f - L.ScrollInset, placedR2.Single(p => p.Key == L.CellRemove).Right, 1); // clear of the scroll bar
+        // The icon buttons are drawn marks with no caption: nothing to underline, no glyph to miss.
+        foreach (var key in new[] { L.CellGrip, L.CellUp, L.CellDown, L.CellRemove }) Assert.Equal("", Cell(r2, key).Text);
+        Assert.Equal((UiDrawnMark.GripMark, true), md.MarkAt(2, L.CellGrip));
+        Assert.Equal((UiDrawnMark.UpMark, false), md.MarkAt(2, L.CellUp)); // the first member: up does nothing
+        Assert.Equal((UiDrawnMark.DownMark, true), md.MarkAt(2, L.CellDown));
+        Assert.Equal((UiDrawnMark.RemoveMark, true), md.MarkAt(2, L.CellRemove));
+        Assert.Equal(UiDrawnMark.None, md.MarkAt(0, L.CellUp).Mark); // the title line has no arrows
         Assert.True(placedR2.Single(p => p.Key == L.CellUp).Right < placedR2.Single(p => p.Key == L.CellDown).Left);
         Assert.Equal(CellTone.Faint, Cell(r2, L.CellUp).Tone);
         Assert.Equal(CellTone.Faint, Cell(r2, L.CellExpand).Tone); // a has no drawer
@@ -730,6 +739,22 @@ public sealed class UiMasterDetailTests : IDisposable
         Assert.Equal(("Ore in", "Plain."), _runtime.Tooltip);
     }
 
+    [Theory]
+    [InlineData("list entry")]
+    [InlineData("advanced")]
+    [InlineData("Hollow Keep · pull, respect list order")]
+    public void A_detail_note_gets_more_than_the_bare_estimate_and_drops_whole_when_it_does_not_fit(string note)
+    {
+        float bare = CellLayout.EstimateTextWidth(note, CellLayout.MutedFontSize);
+        float given = L.DetailNoteWidth(note);
+        Assert.True(given >= Math.Min(L.DetailNoteMax, bare * L.NoteEstimateMargin), "the note is sized from the bare estimate");
+        var md = Build(new UiMasterDetailOptions { Rows = 6 });
+        md.SetDetail(new[] { UiDetailLine.Link("u", "Rule, line 6", note) });
+        var note0 = Cell(Row("md:row0"), L.CellDNote);
+        Assert.Equal(note, note0.Text);
+        Assert.True(note0.Optional); // dropped whole at a width it does not fit, never cut
+    }
+
     // ---- the demo ----------------------------------------------------------------------------------
 
     private sealed class RepeatHud : Progenitor.ControlsSample.IWidgetsHud, Progenitor.ControlsSample.IWidgetsRepeatPickHud
@@ -756,6 +781,12 @@ public sealed class UiMasterDetailTests : IDisposable
         demo.BuildMasterDetail(panel, tabs, 1);
         var md = (UiMasterDetailHandle)demo.MasterDetail!;
         Assert.Equal(16, md.Entries.Count);
+        // The belts' notes are their real member counts, with the right word.
+        Assert.Equal("6 chests", md.Entries.Single(e => e.Id == "belt-ore").Note);
+        Assert.Equal("2 chests", md.Entries.Single(e => e.Id == "belt-line").Note);
+        Assert.Equal("0 chests", md.Entries.Single(e => e.Id == "belt-jewel").Note);
+        Assert.Equal("1 chest", md.Entries.Single(e => e.Id == "belt-4").Note);
+        Assert.Equal("1 match", Progenitor.ControlsSample.WidgetsDemo.Counted(1, "match", "matches"));
         Assert.True(UiTerms.IsDefined(panel.PluginId, Progenitor.ControlsSample.WidgetsDemo.BeltTerm));
         Assert.All(md.Entries, e => Assert.Equal(Progenitor.ControlsSample.WidgetsDemo.BeltTerm, e.Term));
         tabs.Selected = 1;

@@ -30,7 +30,11 @@ internal sealed class UiTipCardPresenter : IUiTipPresenter
             Ui.HidePaneTitle(panel);
             panel.CaptureMode = UiCaptureMode.WhenHovered;
             var dialog = UiDialogView.Build(panel, Content(title, tip.Body), chrome: false);
-            var view = new UiTipCardView(panel);
+            var view = new UiTipCardView(panel)
+            {
+                Title = (dialog.Heading as UiHandle)?.Runtime,
+                Buttons = (dialog.Buttons as UiCellRowHandle)?.NavWidget(null) as IRuntimeCellRow,
+            };
             if (dialog.Buttons != null)
             {
                 view.Keep(dialog.Buttons.OnClick(UiTipCopy.GotItKey, gotIt));
@@ -152,6 +156,12 @@ internal sealed class UiTipCardView : IUiTipCardView
 
     internal UiTipCardView(IUiPanel panel) => _panel = panel;
 
+    /// <summary>The dialog title row's runtime widget (tinted gold), or null.</summary>
+    internal IRuntimeWidget? Title { get; init; }
+
+    /// <summary>The button row's runtime row (the main answer's caption is tinted gold), or null.</summary>
+    internal IRuntimeCellRow? Buttons { get; init; }
+
     internal void Keep(IDisposable lease)
     {
         if (lease != null) _leases.Add(lease);
@@ -166,7 +176,10 @@ internal sealed class UiTipCardView : IUiTipCardView
     public void Place(ScreenRect anchor)
     {
         if (!Shown || _panel is not UiHandle { Runtime: IRuntimePanel runtime }) return;
-        UiHelpRuntime.Current?.PlaceTipCard(runtime, anchor);
+        var help = UiHelpRuntime.Current;
+        if (help == null) return;
+        help.PlaceTipCard(runtime, anchor);
+        help.TintTipCard(Title, Buttons, UiTipCopy.GotItKey);
     }
 
     public void Dispose()

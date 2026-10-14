@@ -105,10 +105,12 @@ public sealed class UiPickerMultiTests : IDisposable
         // Line 0 is the Resources heading; line 1 is Iron Ore.
         Assert.True(Row("p:line1").PointerClick()); // the row click (the controller's A on the row)
         Assert.Equal(new[] { "ore" }, picker.Selected);
-        Assert.Equal(UiWidgetLayout.CheckGlyph, Cell(Row("p:line1"), UiWidgetLayout.CellCheck).Text);
+        Assert.Equal("", Cell(Row("p:line1"), UiWidgetLayout.CellCheck).Text); // no text glyph: nothing underlined
+        Assert.Equal(UiDrawnMark.CheckMark, ((UiPickerHandle)picker).CheckMarkAt(1));
         Assert.Equal(CellTone.Gold, Cell(Row("p:line1"), UiWidgetLayout.CellCheck).Tone);
         Click(Row("p:line1"), UiWidgetLayout.CellCheck); // the check box itself flips it back
         Assert.Empty(picker.Selected);
+        Assert.Equal(UiDrawnMark.None, ((UiPickerHandle)picker).CheckMarkAt(1));
         Assert.Equal("", Cell(Row("p:line1"), UiWidgetLayout.CellCheck).Text);
         Row("p:line3").PointerClick(); // Dark Iron Ingot: grayed, refused
         Assert.Empty(picker.Selected);

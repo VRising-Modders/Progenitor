@@ -28,6 +28,13 @@ internal interface IUiHelpRuntime
     /// panels may move it). False when the card cannot be placed (it keeps the framework's placement).
     /// </summary>
     bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor);
+
+    /// <summary>
+    /// Draw the tip card's title (<paramref name="title"/>, the dialog title row) and its main answer's caption (the cell
+    /// <paramref name="goldCell"/> of <paramref name="buttons"/>) in the game's gold (<c>MenuPalette.ChipOnBorder</c>).
+    /// Asked with every placement, so a repaint of the row keeps it.
+    /// </summary>
+    void TintTipCard(IRuntimeWidget? title, IRuntimeCellRow? buttons, string goldCell) { }
 }
 
 /// <summary>One drawn term marker. Disposing it destroys the marker (it also goes with the control it follows).</summary>
@@ -130,8 +137,10 @@ internal static class UiTermMarkerArt
 ///
 /// <para>Rules: the card never covers the panel it explains when there is room. In order: right of the anchor panel
 /// (top edges aligned), left of it, under it (left edges aligned), over it; the first that fits <see cref="Margin"/>
-/// inside the canvas wins. With no anchor, or no side with room, the bottom-right corner, <see cref="Margin"/> from the
-/// edges (above the game's chat and clear of the action bar's center). Always clamped onto the canvas.</para>
+/// inside the canvas wins. With no room around the panel (the Mods workspace fills a 16:9 screen), inside the panel's
+/// bottom-right corner (<see cref="InsideInset"/> from its right edge, <see cref="InsideBottom"/> above its bottom edge),
+/// so it never covers another panel beside it (the Mods list). With no anchor, or a panel smaller than the card, the
+/// screen's bottom-right corner, <see cref="Margin"/> from the edges. Always clamped onto the canvas.</para>
 /// </summary>
 internal static class UiTipLayout
 {
@@ -148,8 +157,15 @@ internal static class UiTipLayout
         Left,
         Below,
         Above,
+        Inside,
         Corner,
     }
+
+    /// <summary>Inside the anchor (no room around it): from the anchor's right edge.</summary>
+    internal const float InsideInset = 24f;
+
+    /// <summary>Inside the anchor: from its bottom edge, clear of a panel's 24-unit version footer band.</summary>
+    internal const float InsideBottom = 40f;
 
     /// <summary>The card's bottom-left corner. <paramref name="hasAnchor"/> false ignores the anchor rect.</summary>
     internal static (float X, float Y, Side Side) Place(
@@ -169,6 +185,12 @@ internal static class UiTipLayout
             if (below >= Margin) return (Clamp(minX, Margin, xMax), below, Side.Below);
             float above = maxY + Gap;
             if (above <= yMax) return (Clamp(minX, Margin, xMax), above, Side.Above);
+
+            // No room around the panel (the Mods workspace at 16:9 fills the screen): inside it, in its bottom-right
+            // corner above its footer, the part of a page its rows reach last. Never over another panel beside it.
+            float insideX = maxX - InsideInset - width;
+            if (insideX >= minX + InsideInset && maxY - minY >= height + InsideBottom + InsideInset)
+                return (Clamp(insideX, Margin, xMax), Clamp(minY + InsideBottom, Margin, yMax), Side.Inside);
         }
 
         return (Clamp(xMax, Margin, xMax), Clamp(Margin, Margin, yMax), Side.Corner);

@@ -475,7 +475,11 @@ public sealed class UiWidgetsTests : IDisposable
 
                 for (int i = 0; i < placed.Length; i++)
                     for (int j = i + 1; j < placed.Length; j++)
+                    {
+                        // An overlay is drawn inside its own target (a tab's badge inside its chip); nothing else may overlap.
+                        if (cells[j].OverlayOf == cells[i].Key || cells[i].OverlayOf == cells[j].Key) continue;
                         Assert.False(CellLayout.Overlap(placed[i], placed[j]), placed[i] + " overlaps " + placed[j] + " at " + width);
+                    }
             }
         }
     }

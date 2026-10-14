@@ -184,6 +184,18 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
         try
         {
             var tmp = view.Text;
+            if (view.Side == UiMarkSide.Center)
+            {
+                // An icon button's face: centered in the cell's text rect, sized as an icon; the (empty) text is untouched.
+                if (view.Mark.IsNone) return;
+                float h = UiDrawnMarkArt.Height(view.Mark, tmp.fontSize);
+                float w = UiDrawnMarkArt.Width(view.Mark, tmp.fontSize);
+                var crt = view.Rt;
+                if (Math.Abs(crt.sizeDelta.x - w) > 0.1f || Math.Abs(crt.sizeDelta.y - h) > 0.1f) crt.sizeDelta = new Vector2(w, h);
+                if (crt.anchoredPosition.sqrMagnitude > 0.01f) crt.anchoredPosition = Vector2.zero;
+                return;
+            }
+
             bool rightJustified = (tmp.horizontalAlignment & HorizontalAlignmentOptions.Right) != 0;
             // A term marker (the help widgets' circle-i) after the same text comes first: caption, term marker, mark.
             float term = view.Side == UiMarkSide.After ? TermMarkerRoom(view) : 0f;

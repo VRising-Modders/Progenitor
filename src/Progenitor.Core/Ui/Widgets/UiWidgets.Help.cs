@@ -29,7 +29,7 @@ public static partial class UiWidgets
     public static IUiToggle TermMarkersToggle(this IUiPanel panel, string text = "Show help markers")
     {
         if (panel == null) throw new ArgumentNullException(nameof(panel));
-        string pluginId = panel.PluginId;
+        string pluginId = UiTerms.PluginOf(panel);
         var toggle = panel.Toggle(string.IsNullOrWhiteSpace(text) ? "Show help markers" : text, UiTerms.MarkersOn(pluginId));
         bool writing = false;
         toggle.OnChanged(on =>

@@ -228,6 +228,25 @@ public sealed class UiWorldPickRepeatTests
     /// The band's bottom edge sits above the HUD: the health readout and the buff row above the action bar reach about
     /// 180 units up on the 1080 design canvas (the mockup review found a band whose bottom was lower collided with them).
     /// </summary>
+    [Theory]
+    [InlineData(300f)]
+    [InlineData(700f)]
+    [InlineData(1200f)]
+    public void The_band_is_at_least_980_wide_and_fades_to_clear_at_both_ends(float content)
+    {
+        float w = UiWorldPickBandLook.Width(content);
+        Assert.True(w >= UiWorldPickBandLook.MinWidth);
+        Assert.True(w >= content + 2f * UiWorldPickBandLook.PadX - 1f, "the content reaches into the fade");
+        Assert.Equal(0f, UiWorldPickBandLook.Fade(0f));
+        Assert.Equal(0f, UiWorldPickBandLook.Fade(1f));
+        Assert.Equal(1f, UiWorldPickBandLook.Fade(0.5f));
+        Assert.Equal(1f, UiWorldPickBandLook.Fade(UiWorldPickBandLook.FadeShare + 0.01f));
+        Assert.Equal(UiWorldPickBandLook.Fade(0.07f), UiWorldPickBandLook.Fade(0.93f), 4); // symmetric
+        Assert.True(UiWorldPickBandLook.Fade(0.03f) < UiWorldPickBandLook.Fade(0.10f)); // rising toward the middle
+        Assert.True(UiWorldPickBandLook.FadeAlpha(0) < 0.05f && UiWorldPickBandLook.FadeAlpha(UiWorldPickBandLook.FadeTextureWidth / 2) == 1f);
+        Assert.Equal(1f, UiWorldPickBandLook.RuleHeight); // thin rules, top and bottom
+    }
+
     [Fact]
     public void The_band_is_anchored_clear_of_the_hud()
     {

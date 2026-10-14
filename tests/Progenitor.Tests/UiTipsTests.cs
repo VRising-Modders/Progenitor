@@ -395,7 +395,7 @@ public sealed class UiTipsTests : IDisposable
                 || a.MinY - UiTipLayout.Gap - cardH >= UiTipLayout.Margin
                 || a.MaxY + UiTipLayout.Gap + cardH <= h - UiTipLayout.Margin;
             if (room) Assert.False(overlaps, "card over its panel at " + w + "x" + h + " side " + p.Side);
-            else Assert.Equal(UiTipLayout.Side.Corner, p.Side);
+            else Assert.True(p.Side is UiTipLayout.Side.Inside or UiTipLayout.Side.Corner, "no room: " + p.Side); // inside a panel wide enough, else the corner
         }
 
         var corner = UiTipLayout.Place(false, 0, 0, 0, 0, cardW, cardH, w, h);
@@ -420,6 +420,64 @@ public sealed class UiTipsTests : IDisposable
         Assert.Equal(maxX + UiTipLayout.Gap, p.X);
         Assert.Equal(maxY - cardH, p.Y);
         Assert.True(p.X + cardW <= w - UiTipLayout.Margin && p.Y >= UiTipLayout.Margin);
+    }
+
+    /// <summary>
+    /// The Mods workspace's page pane from the live captures, in canvas units (bottom-left origin): at 16:9 the canvas is
+    /// the game's 1920x1080 design space whatever the resolution; at 3840x1080 it is 3840 wide and the workspace centered.
+    /// </summary>
+    public static IEnumerable<object[]> WorkspaceScreens() => new[]
+    {
+        new object[] { "1920x1080", 1920f, 1080f, 515f, 35f, 1795f, 952f, 135f },
+        new object[] { "2560x1440", 1920f, 1080f, 515f, 35f, 1795f, 952f, 135f },
+        new object[] { "3840x2160", 1920f, 1080f, 515f, 35f, 1795f, 952f, 135f },
+        new object[] { "3840x1080", 3840f, 1080f, 1475f, 35f, 2755f, 952f, 1095f },
+    };
+
+    [Theory]
+    [MemberData(nameof(WorkspaceScreens))]
+    public void With_the_workspace_filling_the_screen_the_card_sits_inside_its_page_never_over_the_list(
+        string screen, float w, float h, float minX, float minY, float maxX, float maxY, float listMinX)
+    {
+        const float cardW = 640f, cardH = 236f;
+        var p = UiTipLayout.Place(true, minX, minY, maxX, maxY, cardW, cardH, w, h);
+        if (w > 1920f)
+        {
+            Assert.Equal(UiTipLayout.Side.Right, p.Side); // an ultrawide screen has room beside the workspace
+            Assert.Equal(maxX + UiTipLayout.Gap, p.X);
+        }
+        else
+        {
+            Assert.Equal(UiTipLayout.Side.Inside, p.Side);
+            Assert.Equal(maxX - UiTipLayout.InsideInset - cardW, p.X); // inside the page's right edge
+            Assert.Equal(minY + UiTipLayout.InsideBottom, p.Y); // above its footer band
+            Assert.True(p.X >= minX + UiTipLayout.InsideInset, screen + ": the card left the page");
+            Assert.True(p.X > listMinX + 360f, screen + ": the card is over the Mods list");
+        }
+
+        Assert.True(p.X >= UiTipLayout.Margin && p.X + cardW <= w - UiTipLayout.Margin, screen + ": off the canvas");
+        Assert.True(p.Y >= UiTipLayout.Margin && p.Y + cardH <= h - UiTipLayout.Margin, screen + ": off the canvas");
+    }
+
+    [Fact]
+    public void A_panel_smaller_than_the_card_with_no_room_around_it_sends_the_card_to_the_corner()
+    {
+        var p = UiTipLayout.Place(true, 400, 200, 900, 300, 640, 236, 960, 540);
+        Assert.Equal(UiTipLayout.Side.Corner, p.Side);
+    }
+
+    [Fact]
+    public void The_cards_title_and_Got_it_caption_are_tinted_gold_on_every_placement()
+    {
+        Tip("gold");
+        var tint = _runtime.Tints.Last();
+        Assert.NotNull(tint.Title);
+        Assert.Equal("Title gold", tint.Title!.Text);
+        Assert.Equal(UiTipCopy.ButtonsRow, tint.Buttons!.Text);
+        Assert.Equal(UiTipCopy.GotItKey, tint.Cell);
+        int before = _runtime.Tints.Count;
+        _runtime.Tick();
+        Assert.True(_runtime.Tints.Count > before); // asked again with each frame's placement
     }
 
     [Fact]

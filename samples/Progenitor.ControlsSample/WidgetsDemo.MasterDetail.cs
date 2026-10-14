@@ -103,7 +103,7 @@ internal sealed partial class WidgetsDemo
             Report("md select " + (id.Length == 0 ? "(none)" : id));
             ShowDetail(md, md.Tab, id);
         });
-        md.OnSearch(q => Report("md search \"" + q + "\" = " + md.Matches.Count + " matches"));
+        md.OnSearch(q => Report("md search \"" + q + "\" = " + Counted(md.Matches.Count, "match", "matches")));
         md.OnReorder(m =>
         {
             Report("md reorder " + m.Id + " " + m.From + "->" + m.To + " = " + string.Join(",", m.Order));
@@ -113,6 +113,7 @@ internal sealed partial class WidgetsDemo
         {
             Report("md remove " + item.Id);
             if (md.SelectedId is { } sel && _mdMembers.TryGetValue(sel, out var list)) list.RemoveAll(i => i.Id == item.Id);
+            RefreshBeltNotes(md);
             if (md.SelectedId is { } s) ShowDetail(md, md.Tab, s);
         });
         md.OnAction(a =>
@@ -147,6 +148,28 @@ internal sealed partial class WidgetsDemo
 
             MasterDetail!.SetEntries(t, _mdLists[t]);
         }
+
+        RefreshBeltNotes(MasterDetail!);
+    }
+
+    /// <summary>"1 chest", "2 chests", "0 chests": a count with the right word.</summary>
+    internal static string Counted(int count, string singular, string plural) =>
+        count.ToString(CultureInfo.InvariantCulture) + " " + (count == 1 ? singular : plural);
+
+    /// <summary>Each belt's note is its member count, kept true as members are added, picked and removed.</summary>
+    private void RefreshBeltNotes(IUiMasterDetail md)
+    {
+        bool changed = false;
+        foreach (var entry in _mdLists[0])
+        {
+            int n = _mdMembers.TryGetValue(entry.Id, out var members) ? members.Count : 0;
+            string note = Counted(n, "chest", "chests");
+            if (entry.Note == note) continue;
+            entry.Note = note;
+            changed = true;
+        }
+
+        if (changed) md.SetEntries(0, _mdLists[0]);
     }
 
     private static void Reorder(List<UiListItem> list, IReadOnlyList<string> order)
@@ -166,8 +189,8 @@ internal sealed partial class WidgetsDemo
         bool belt = tab == 0;
         lines.Add(UiDetailLine.Title(entry.Title, new UiDetailButton("rename", "Rename")));
         lines.Add(UiDetailLine.Line(belt
-            ? members.Count + (members.Count == 1 ? " chest" : " chests") + " · filled in list order"
-            : entry.Note + " · " + members.Count + (members.Count == 1 ? " item" : " items")));
+            ? Counted(members.Count, "chest", "chests") + " · filled in list order"
+            : entry.Note + " · " + Counted(members.Count, "item", "items")));
         lines.Add(UiDetailLine.MemberList(members, emptyText: belt ? "No chests on this belt yet." : "No items in this category yet."));
         lines.Add(belt
             ? UiDetailLine.Actions(new UiDetailButton("add", "+ Add…"), new UiDetailButton("pick", "Pick"))
@@ -194,7 +217,7 @@ internal sealed partial class WidgetsDemo
                 string n = (_mdNext++).ToString(CultureInfo.InvariantCulture);
                 var entry = new UiMasterEntry((a.Tab == 0 ? "belt-new-" : "cat-new-") + n, (a.Tab == 0 ? "New belt " : "New category ") + n)
                 {
-                    Note = a.Tab == 0 ? "0 chests" : "Custom",
+                    Note = a.Tab == 0 ? Counted(0, "chest", "chests") : "Custom",
                     Term = a.Tab == 0 ? BeltTerm : "",
                 };
                 _mdEntries[entry.Id] = entry;
@@ -213,6 +236,7 @@ internal sealed partial class WidgetsDemo
             {
                 string n = (_mdNext++).ToString(CultureInfo.InvariantCulture);
                 members.Add(new UiListItem("added-" + n, (a.Tab == 0 ? "Storage chest " : "Item ") + n) { Note = "added" });
+                RefreshBeltNotes(md);
                 ShowDetail(md, a.Tab, id);
                 break;
             }
@@ -246,10 +270,11 @@ internal sealed partial class WidgetsDemo
             (what, count) =>
             {
                 Report("pick several " + count + " = " + what);
-                _repeatStatus?.SetText(count + " picked. Escape finishes.", LabelTone.Pending);
+                _repeatStatus?.SetText(count.ToString(CultureInfo.InvariantCulture) + " picked. Escape finishes.", LabelTone.Pending);
                 if (belt != null && _mdMembers.TryGetValue(belt, out var members))
                 {
                     members.Add(new UiListItem("picked-" + (_mdNext++).ToString(CultureInfo.InvariantCulture), what) { Note = "picked" });
+                    RefreshBeltNotes(md);
                     if (md.SelectedId == belt && md.Tab == 0) ShowDetail(md, 0, belt);
                 }
             },

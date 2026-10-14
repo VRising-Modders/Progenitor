@@ -17,6 +17,21 @@ internal enum UiMarkShape
 
     /// <summary>One of four frames of a turning spinner: a three-quarter ring.</summary>
     Spinner = 3,
+
+    /// <summary>An icon button's solid triangle pointing up (move up).</summary>
+    Up = 4,
+
+    /// <summary>An icon button's solid triangle pointing down (move down).</summary>
+    Down = 5,
+
+    /// <summary>An icon button's cross (remove).</summary>
+    Remove = 6,
+
+    /// <summary>A check mark (selected).</summary>
+    Check = 7,
+
+    /// <summary>A drag grip: three short horizontal bars.</summary>
+    Grip = 8,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -27,6 +42,9 @@ internal enum UiMarkSide
 
     /// <summary>Before the text's first character (a spinner before a waiting value).</summary>
     Before = 1,
+
+    /// <summary>Centered in the cell (an icon button whose text is empty: the mark is the button's face).</summary>
+    Center = 2,
 }
 
 /// <summary>
@@ -65,6 +83,21 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static UiDrawnMark Sort(bool ascending, int order = 0) =>
         new(ascending ? UiMarkShape.SortUp : UiMarkShape.SortDown, order is >= 1 and <= 9 ? order : 0, 0);
 
+    /// <summary>An icon button's mark: <see cref="UiMarkShape.Up"/>, <see cref="UiMarkShape.Down"/>, <see cref="UiMarkShape.Remove"/>, <see cref="UiMarkShape.Check"/> or <see cref="UiMarkShape.Grip"/>.</summary>
+    internal static UiDrawnMark Icon(UiMarkShape shape) =>
+        shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
+            ? new UiDrawnMark(shape, 0, 0)
+            : None;
+
+    internal static readonly UiDrawnMark UpMark = Icon(UiMarkShape.Up);
+    internal static readonly UiDrawnMark DownMark = Icon(UiMarkShape.Down);
+    internal static readonly UiDrawnMark RemoveMark = Icon(UiMarkShape.Remove);
+    internal static readonly UiDrawnMark CheckMark = Icon(UiMarkShape.Check);
+    internal static readonly UiDrawnMark GripMark = Icon(UiMarkShape.Grip);
+
+    /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
+    internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip;
+
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
 
@@ -74,6 +107,11 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.SortUp => Digit > 0 ? "sort-up:" + Digit.ToString(CultureInfo.InvariantCulture) : "sort-up",
         UiMarkShape.SortDown => Digit > 0 ? "sort-down:" + Digit.ToString(CultureInfo.InvariantCulture) : "sort-down",
         UiMarkShape.Spinner => "spinner:" + Frame.ToString(CultureInfo.InvariantCulture),
+        UiMarkShape.Up => "up",
+        UiMarkShape.Down => "down",
+        UiMarkShape.Remove => "remove",
+        UiMarkShape.Check => "check",
+        UiMarkShape.Grip => "grip",
         _ => "",
     };
 
@@ -101,6 +139,21 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "spinner":
                 if (arg < 0 || arg > 3) return false;
                 mark = new UiDrawnMark(UiMarkShape.Spinner, 0, arg);
+                return true;
+            case "up":
+            case "down":
+            case "remove":
+            case "check":
+            case "grip":
+                if (colon >= 0) return false;
+                mark = Icon(head switch
+                {
+                    "up" => UiMarkShape.Up,
+                    "down" => UiMarkShape.Down,
+                    "remove" => UiMarkShape.Remove,
+                    "check" => UiMarkShape.Check,
+                    _ => UiMarkShape.Grip,
+                });
                 return true;
             default:
                 return false;
@@ -138,6 +191,8 @@ internal static class UiDrawnMarkArt
     {
         UiMarkShape.SortUp or UiMarkShape.SortDown => (mark.Digit > 0 ? ArrowWidth + DigitGap + DigitWidth : ArrowWidth, TextureHeight),
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
+        UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
+        UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -149,7 +204,18 @@ internal static class UiDrawnMarkArt
     {
         if (float.IsNaN(fontSize) || fontSize <= 0f) fontSize = 16f;
         if (mark.Shape == UiMarkShape.Spinner) return Clamp((float)Math.Round(fontSize * 0.75f), 10f, 18f);
+        if (mark.IsIcon) return IconHeight(fontSize);
         return Clamp((float)Math.Round(fontSize * 0.62f), 8f, 16f);
+    }
+
+    /// <summary>
+    /// An icon button's mark height for a button caption of <paramref name="fontSize"/>: 0.72 of it, 10 to 16 units (13 at
+    /// the kit's 18-unit button text), so it fits the 28-unit glyph column with air on both sides.
+    /// </summary>
+    internal static float IconHeight(float fontSize)
+    {
+        if (float.IsNaN(fontSize) || fontSize <= 0f) fontSize = 18f;
+        return Clamp((float)Math.Round(fontSize * 0.72f), 10f, 16f);
     }
 
     /// <summary>A mark's drawn width for text of <paramref name="fontSize"/> (its texture's aspect).</summary>
@@ -170,6 +236,7 @@ internal static class UiDrawnMarkArt
     {
         float half = width / 2f;
         float x;
+        if (side == UiMarkSide.Center) return (rectMinX + rectMaxX) / 2f;
         if (side == UiMarkSide.Before)
         {
             if (float.IsNaN(textMinX) || float.IsInfinity(textMinX)) textMinX = rectMaxX;
@@ -203,6 +270,15 @@ internal static class UiDrawnMarkArt
 
             case UiMarkShape.Spinner:
                 return Clamp01(Spinner(mark.Frame, px, py));
+            case UiMarkShape.Up:
+            case UiMarkShape.Down:
+                return Clamp01(Arrow(px, py, mark.Shape == UiMarkShape.Up));
+            case UiMarkShape.Remove:
+                return Clamp01(Strokes2(px, py, 0.10f, new[] { 0.2f, 0.2f, 0.8f, 0.8f }, new[] { 0.2f, 0.8f, 0.8f, 0.2f }));
+            case UiMarkShape.Check:
+                return Clamp01(Strokes2(px, py, 0.10f, new[] { 0.14f, 0.50f, 0.40f, 0.24f, 0.88f, 0.78f }));
+            case UiMarkShape.Grip:
+                return Clamp01(Strokes2(px, py, 0.065f, new[] { 0.18f, 0.28f, 0.82f, 0.28f }, new[] { 0.18f, 0.5f, 0.82f, 0.5f }, new[] { 0.18f, 0.72f, 0.82f, 0.72f }));
             default:
                 return 0f;
         }
@@ -260,6 +336,21 @@ internal static class UiDrawnMarkArt
             for (int i = 0; i + 3 < line.Length; i += 2)
                 d = Math.Min(d, SegmentDistance(gx, gy, line[i], line[i + 1], line[i + 2], line[i + 3]));
         return Smooth((half - d) * unit);
+    }
+
+    /// <summary>
+    /// Round-ended strokes on the square texture: each polyline as x, y pairs in 0..1 (y up), <paramref name="halfWidth"/>
+    /// the stroke's half-width as a share of the texture.
+    /// </summary>
+    private static float Strokes2(float px, float py, float halfWidth, params float[][] lines)
+    {
+        float n = TextureHeight;
+        float gx = px / n, gy = py / n;
+        float d = float.MaxValue;
+        foreach (var line in lines)
+            for (int i = 0; i + 3 < line.Length; i += 2)
+                d = Math.Min(d, SegmentDistance(gx, gy, line[i], line[i + 1], line[i + 2], line[i + 3]));
+        return Smooth((halfWidth - d) * n);
     }
 
     /// <summary>A three-quarter ring; the quarter gap turns by 90 degrees each frame (clockwise).</summary>

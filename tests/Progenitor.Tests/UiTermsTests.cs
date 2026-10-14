@@ -56,11 +56,13 @@ public sealed class UiTermsTests : IDisposable
         return panel;
     }
 
-    /// <summary>One hover, a little later than the last (past the debounce).</summary>
+    /// <summary>One pointer visit (enter, then leave), a little later than the last (past the debounce).</summary>
     private void Hover(string pluginId, string term)
     {
         _now += 5;
         UiTerms.NoteHover(pluginId, term);
+        _now += 0.5;
+        UiTerms.NoteLeave(pluginId, term);
     }
 
     // ---- Glossary --------------------------------------------------------------------------------
@@ -109,7 +111,8 @@ public sealed class UiTermsTests : IDisposable
 
         Hover(PluginA, "Cap");
         _now += 0.3;
-        Assert.False(UiTerms.NoteHover(PluginA, "Cap")); // within the debounce: not counted
+        Assert.False(UiTerms.NoteHover(PluginA, "Cap")); // back within the debounce after the leave: the same visit
+        UiTerms.NoteLeave(PluginA, "Cap");
         Assert.Equal(1, UiTerms.Hovers(PluginA, "Cap"));
         Hover(PluginA, "Cap");
         Assert.True(UiTerms.MarkerShown(PluginA, "Cap"));
@@ -119,6 +122,88 @@ public sealed class UiTermsTests : IDisposable
         Assert.Equal(0, UiTerms.Hovers(PluginA, "Cap")); // the count is dropped once hidden
         Assert.Equal("example.help:cap", _store.Read(UiHelpSlot.HiddenTerms));
         Assert.Equal("Stations stop at this many.", UiTerms.Explain(PluginA, "Cap")); // the explanation stays
+    }
+
+    [Fact]
+    public void One_pointer_visit_counts_once_however_many_enter_events_it_brings()
+    {
+        UiTerms.Define(PluginA, "Belt", "x");
+        var panel = NewPanel();
+        panel.Show();
+        var list = panel.OrderedList("vl", new[] { new UiListItem("a", "Ore in") { Term = "Belt" } });
+        panel.Label("Belts").Term("Belt");
+        var widget = _runtime.Labels.Single(w => w.Text == "Belts");
+
+        // One long visit: the row's enter arrives three times (row, cell, a repeated event), seconds apart.
+        for (int i = 0; i < 3; i++)
+        {
+            _now += 3;
+            Assert.True(UiCellRowHandle.TryHover("vl:row0", true));
+        }
+
+        Assert.Equal(1, UiTerms.Hovers(PluginA, "Belt"));
+        Assert.True(UiTerms.MarkerShown(PluginA, "Belt"));
+
+        // A second control with the same term entered during the visit (overlapping rows) is the same visit.
+        _runtime.Hover(widget, true);
+        Assert.Equal(1, UiTerms.Hovers(PluginA, "Belt"));
+        _runtime.Hover(widget, false);
+        UiCellRowHandle.TryHover("vl:row0", false);
+
+        // Back within a second of the leave: the same visit; later: a new one.
+        _now += 0.4;
+        _runtime.Hover(widget, true);
+        _runtime.Hover(widget, false);
+        Assert.Equal(1, UiTerms.Hovers(PluginA, "Belt"));
+        _now += 5;
+        _runtime.Hover(widget, true);
+        _runtime.Hover(widget, false);
+        Assert.Equal(2, UiTerms.Hovers(PluginA, "Belt"));
+
+        // An enter whose leave never comes (its panel closed) stops holding the visit open after a while.
+        _now += 5;
+        _runtime.Hover(widget, true);
+        _now += UiTerms.StaleVisitSeconds + 1;
+        UiCellRowHandle.TryHover("vl:row0", true);
+        Assert.False(UiTerms.MarkerShown(PluginA, "Belt")); // the third visit hid the marker
+        GC.KeepAlive(list);
+    }
+
+    [Fact]
+    public void A_mods_page_explains_the_words_of_the_mod_whose_page_it_is()
+    {
+        IUiPanel? page = null;
+        using (var menu = ModsMenu.Register(new object(), "example.page", "Example"))
+        {
+            menu.Page("Help", p =>
+            {
+                page = p;
+                p.Label("Belts").Term("Belt");
+            });
+            UiTerms.Define("example.page", "Belt", "The page mod's belt.");
+            try
+            {
+                ModsMenu.OpenPage("example.page", "Help");
+                Assert.NotNull(page);
+                Assert.Equal("progenitor", page!.PluginId); // the workspace's pane is the framework's
+                Assert.Equal("example.page", UiTerms.PluginOf(page));
+                var binding = UiTerms.Marked.Single();
+                Assert.Equal("example.page", binding.PluginKey);
+                _now += 5;
+                _runtime.Hover(_runtime.Labels.Last(w => w.Text == "Belts"), true);
+                Assert.Equal(("Belt", "The page mod's belt."), _runtime.Tooltip);
+                Assert.Equal(1, UiTerms.Hovers("example.page", "Belt"));
+            }
+            finally
+            {
+                ModsMenu.Close();
+                ModsMenu.ResetTabBindingsForTests();
+                ModsWorkspaceFrame.ResetForTests();
+            }
+        }
+
+        // Anything not on the workspace's page keeps its own id.
+        Assert.Equal(PluginA, UiTerms.PluginOf(NewPanel()));
     }
 
     [Fact]
@@ -293,6 +378,7 @@ public sealed class UiTermsTests : IDisposable
         Assert.Equal(("Reserve", "Left untouched."), _runtime.Tooltip);
         Assert.Equal(1, UiTerms.Hovers(PluginA, "Reserve"));
 
+        Assert.True(UiCellRowHandle.TryHoverCell("help-tabs:tabs", "tab0", false));
         using var forwarded = UiTerms.MarkCell(row, "tab1", "Reserve", watchHover: false);
         _now += 5;
         forwarded.Hover(true);
@@ -373,7 +459,7 @@ public sealed class UiTermsTests : IDisposable
         var row = _runtime.Rows.Last(r => r.Text == "wt:tabs");
         CellSpec Chip() => row.Cells().Single(c => c.Key == "tab0");
         float natural = Chip().MinWidth;
-        Assert.Equal(InstallModsPane.ChipNaturalWidth("Belts"), natural);
+        Assert.Equal(UiTabsLayout.ChipWidth("Belts", false, Chip().FontSize), natural);
         tabs.SetTerm(0, "Belt");
         Assert.Equal(natural + UiTermMarkerArt.Room(Chip().FontSize), Chip().MinWidth);
         Assert.True(_runtime.Markers.Single().ReserveRoom); // the room sits in the caption's right margin
@@ -459,6 +545,51 @@ public sealed class UiTermsTests : IDisposable
         Assert.Empty(UiTerms.Marked);
         Assert.False(UiTerms.IsDefined(PluginA, "Cap"));
         Assert.True(_runtime.Markers.Single().Disposed);
+    }
+
+    // ---- Tooltip area (P7b live review) -----------------------------------------------------------
+
+    [Theory]
+    [InlineData(1920f, 1080f)]
+    [InlineData(2560f, 1440f)]
+    public void A_wide_rows_tooltip_stays_on_its_page_and_goes_under_or_over_the_row(float w, float h)
+    {
+        // The Mods workspace at this screen (screen pixels, y up): the list on the left, the page on the right.
+        float k = w / 1920f;
+        var list = ScreenRect.FromCorners(135 * k, 35 * k, 495 * k, 952 * k);
+        var page = ScreenRect.FromCorners(515 * k, 35 * k, 1795 * k, 952 * k);
+        var frame = ScreenRect.FromCorners(135 * k, 35 * k, 1800 * k, 1000 * k);
+        // A table row across the page, low on the screen (the column-chooser capture).
+        var row = ScreenRect.FromCorners(552 * k, 300 * k, 1850 * k * 0.97f, 340 * k);
+        var area = UiTooltipLayout.AreaFor(row, new[] { frame, list, page });
+        Assert.Equal(page, area); // the smallest panel holding the row: the page, not the whole workspace frame
+        var size = UiTooltipLayout.Size(150f, 20f, 300f, 40f);
+        var p = UiTooltipLayout.PlaceIn(row.MinX, row.MinY, row.MaxX, row.MaxY, size.Width, size.Height, w, h,
+            area.MinX, area.MinY, area.MaxX, area.MaxY);
+        Assert.True(p.Side is UiTooltipLayout.Side.Below or UiTooltipLayout.Side.Above, "a wide row's tooltip went " + p.Side);
+        Assert.True(p.X >= page.MinX && p.X + size.Width <= page.MaxX, "left the page");
+        Assert.True(p.X >= list.MaxX, "over the Mods list");
+        Assert.True(p.Y + size.Height <= row.MinY || p.Y >= row.MaxY, "covers the row");
+    }
+
+    [Fact]
+    public void A_narrow_controls_tooltip_goes_beside_it_inside_its_page_and_a_small_window_uses_the_canvas()
+    {
+        var page = ScreenRect.FromCorners(515, 35, 1795, 952);
+        var size = UiTooltipLayout.Size(100f, 20f, 300f, 40f);
+        // A header cell near the page's right edge: no room right inside the page, so left of it, still on the page.
+        var cell = ScreenRect.FromCorners(1600, 800, 1700, 830);
+        var p = UiTooltipLayout.PlaceIn(cell.MinX, cell.MinY, cell.MaxX, cell.MaxY, size.Width, size.Height, 1920, 1080,
+            page.MinX, page.MinY, page.MaxX, page.MaxY);
+        Assert.Equal(UiTooltipLayout.Side.Left, p.Side);
+        Assert.True(p.X >= page.MinX);
+        // A window narrower than the box: the canvas on that axis (the box may leave the window, never the screen).
+        var window = ScreenRect.FromCorners(800, 400, 1000, 700);
+        var q = UiTooltipLayout.PlaceIn(850, 500, 950, 530, size.Width, size.Height, 1920, 1080,
+            window.MinX, window.MinY, window.MaxX, window.MaxY);
+        Assert.Equal(UiTooltipLayout.Side.Right, q.Side);
+        Assert.True(q.X + size.Width <= 1920 - UiTooltipLayout.Margin);
+        Assert.False(UiTooltipLayout.AreaFor(ScreenRect.FromCorners(10, 10, 20, 20), new[] { page }).IsKnown);
     }
 
     [Fact]
@@ -666,6 +797,11 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
         Placed.Add((card, anchor));
         return true;
     }
+
+    /// <summary>The tip card tints asked for: the title widget, the button row and its gold cell.</summary>
+    public readonly List<(IRuntimeWidget? Title, IRuntimeCellRow? Buttons, string Cell)> Tints = new();
+
+    public void TintTipCard(IRuntimeWidget? title, IRuntimeCellRow? buttons, string goldCell) => Tints.Add((title, buttons, goldCell));
 
     internal sealed class FakeMarker : IUiTermMarkerView
     {

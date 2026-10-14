@@ -154,3 +154,48 @@ internal readonly struct UiWorldPickSuppression
         return sent ? new UiWorldPickSuppression(true, true) : new UiWorldPickSuppression(false, false);
     }
 }
+
+/// <summary>
+/// The pick band's look as numbers (the framework notice band: a dark band between thin gold rules, both fading to clear
+/// at the ends), game-free so the geometry and the fade are tested without a client. One-shot and repeating picks share it.
+/// </summary>
+internal static class UiWorldPickBandLook
+{
+    /// <summary>The band's least width in canvas units; it grows past it only for a very long prompt.</summary>
+    internal const float MinWidth = 980f;
+
+    internal const float Height = 52f;
+
+    /// <summary>Padding between the band's content and its ends (inside the fade).</summary>
+    internal const float PadX = 90f;
+
+    /// <summary>The top and bottom rules' thickness.</summary>
+    internal const float RuleHeight = 1f;
+
+    /// <summary>The ground's opacity in the middle (black).</summary>
+    internal const float GroundAlpha = 0.84f;
+
+    /// <summary>The share of the width, at each end, over which the ground and the rules fade to clear.</summary>
+    internal const float FadeShare = 0.16f;
+
+    /// <summary>The fade texture's width in pixels (one row, stretched; bilinear).</summary>
+    internal const int FadeTextureWidth = 256;
+
+    /// <summary>The band's width for content <paramref name="contentWidth"/> wide.</summary>
+    internal static float Width(float contentWidth) =>
+        float.IsNaN(contentWidth) || contentWidth < 0f ? MinWidth : Math.Max(MinWidth, (float)Math.Ceiling(contentWidth + 2f * PadX));
+
+    /// <summary>The opacity at <paramref name="t"/> across the band (0 the left end, 1 the right): 1 in the middle, easing to 0 at both ends.</summary>
+    internal static float Fade(float t)
+    {
+        if (float.IsNaN(t)) return 0f;
+        float edge = Math.Min(t, 1f - t);
+        if (edge <= 0f) return 0f;
+        if (edge >= FadeShare) return 1f;
+        float u = edge / FadeShare;
+        return u * u * (3f - 2f * u); // smoothstep
+    }
+
+    /// <summary>The fade texture's coverage at pixel <paramref name="x"/>.</summary>
+    internal static float FadeAlpha(int x) => Fade((x + 0.5f) / FadeTextureWidth);
+}

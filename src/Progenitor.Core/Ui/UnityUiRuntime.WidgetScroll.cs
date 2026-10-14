@@ -271,7 +271,17 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
     public void ReleaseCellField(IRuntimeCellRow row, string cellKey)
     {
         var field = CellField(row, cellKey);
-        if (field == null) return;
+        if (field != null) ReleaseWidgetField(field);
+    }
+
+    /// <summary>
+    /// P7b: a widget's value box gives up the keyboard (Escape, Enter, its row leaving the slot). The keys of the burst being
+    /// typed stay the box's until they are all released (<see cref="_keyBurstHold"/>): no menu hotkey, no keybind and no
+    /// typed text reaches anything else from a key that was meant for the box.
+    /// </summary>
+    private static void ReleaseWidgetField(TMP_InputField field)
+    {
+        _keyBurstHold = true;
         if (ReferenceEquals(_ownedFocusField, field)) NoteOwnedFocus(null);
         try { field.DeactivateInputField(); } catch { /* */ }
         try
@@ -283,6 +293,81 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
         }
         catch { /* */ }
         SyncMenuHotkeyGuard(FocusedArmedField());
+    }
+
+    /// <summary>
+    /// P7b: set while the keys of a typing burst are still held after a widget's value box released the keyboard; the
+    /// shown-input pump keeps the field guard up meanwhile and clears it once no typing key is held.
+    /// </summary>
+    private static bool _keyBurstHold;
+
+    /// <summary>P7b: the data table's value boxes: Enter commits them (they give up the keyboard; the table commits).</summary>
+    private static readonly List<TMP_InputField> EnterLeavesFields = new();
+
+    /// <summary>True for a value box Enter leaves (a data table cell); dead entries are pruned.</summary>
+    private static bool EnterLeavesField(TMP_InputField field)
+    {
+        for (int i = EnterLeavesFields.Count - 1; i >= 0; i--)
+        {
+            var f = EnterLeavesFields[i];
+            if (f == null || !Alive(f))
+            {
+                EnterLeavesFields.RemoveAt(i);
+                continue;
+            }
+
+            if (ReferenceEquals(f, field)) return true;
+        }
+
+        return false;
+    }
+
+    public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits)
+    {
+        var field = CellField(row, cellKey);
+        if (field == null) return;
+        if (rightAligned)
+        {
+            // The numbers line up on their last digit, as the column's figures do (the owned caret follows the alignment).
+            try { if (field.textComponent != null) field.textComponent.horizontalAlignment = HorizontalAlignmentOptions.Right; }
+            catch { /* */ }
+            try
+            {
+                var hint = field.transform.Find(MenuRowStyle.SearchHintName);
+                var tmp = hint == null ? null : FindIn<TextMeshProUGUI>(hint.gameObject);
+                if (tmp != null) tmp.horizontalAlignment = HorizontalAlignmentOptions.Right;
+            }
+            catch { /* */ }
+        }
+
+        if (enterCommits && !EnterLeavesField(field)) EnterLeavesFields.Add(field);
+    }
+
+    /// <summary>The colors header captions had before a sort turned them gold, to put back.</summary>
+    private static readonly Dictionary<TextMeshProUGUI, Color> CaptionColors = new();
+
+    public void SetCellTextColor(IRuntimeCellRow row, string cellKey, PaletteColor? color)
+    {
+        if (row is not UnityCellRow cells || cellKey == null) return;
+        var tmp = cells.CellText(cellKey);
+        if (tmp == null || !Alive(tmp)) return;
+        try
+        {
+            foreach (var dead in new List<TextMeshProUGUI>(CaptionColors.Keys))
+                if (dead == null || !Alive(dead)) CaptionColors.Remove(dead!);
+            if (color is { } c)
+            {
+                if (!CaptionColors.ContainsKey(tmp)) CaptionColors[tmp] = tmp.color;
+                UiWidgetLifetime.Register("caption-colors", CaptionColors.Clear);
+                tmp.color = ToColor(c);
+            }
+            else if (CaptionColors.TryGetValue(tmp, out var own))
+            {
+                tmp.color = own;
+                CaptionColors.Remove(tmp);
+            }
+        }
+        catch { /* the caption keeps its color */ }
     }
 
     private static TMP_InputField? CellField(IRuntimeCellRow row, string cellKey)

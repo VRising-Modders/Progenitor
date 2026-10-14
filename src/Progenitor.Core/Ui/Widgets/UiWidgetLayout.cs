@@ -47,7 +47,12 @@ internal static class UiWidgetLayout
     /// <summary>A drawer row's height for <paramref name="lines"/> lines.</summary>
     internal static float DrawerHeight(int lines) => Math.Max(RowHeight, UiOrderedListModel.DetailLinesFor(lines) * DrawerLineHeight + DrawerPad);
 
-    /// <summary>Glyphs, each with an ASCII fallback for a font without it.</summary>
+    /// <summary>
+    /// Glyphs, each with an ASCII fallback for a font without it. P7b: the grip, up, down, remove and check buttons of the
+    /// list, the master-detail members, the picker and the table no longer draw these: their face is a drawn mark
+    /// (<see cref="UiIconMarks"/>, <see cref="UiDrawnMark.Icon"/>), since the game's font lacks the triangles and a text glyph
+    /// on a box-less button is underlined. The constants stay for widgets that still caption with them.
+    /// </summary>
     internal const string GripGlyph = "≡";
     internal const string GripFallback = "=";
     internal const string UpGlyph = "▲";
@@ -86,7 +91,7 @@ internal static class UiWidgetLayout
                 MinWidth = GripWidth,
                 Skin = CellSkin.Quiet,
                 Hover = true,
-            }.With(text: GripGlyph, width: CellWidth.Px(GripWidth)));
+            }.With(text: "", width: CellWidth.Px(GripWidth))); // the face is a drawn mark (UiIconMarks)
         if (icon)
             cells.Add(new CellSpec(CellKind.Image, CellIcon) { MinWidth = IconSize, Skin = CellSkin.IconWell }
                 .With(width: CellWidth.Px(IconSize)));
@@ -95,14 +100,14 @@ internal static class UiWidgetLayout
         cells.Add(new CellSpec(CellKind.Badge, CellBadge).With(tone: CellTone.Client, align: CellAlign.Right, minWidth: CountBadgeMinWidth));
         if (reorder)
         {
-            cells.Add(IconButton(CellUp, UpGlyph));
-            cells.Add(IconButton(CellDown, DownGlyph));
+            cells.Add(IconButton(CellUp));
+            cells.Add(IconButton(CellDown));
         }
 
         if (expand)
             cells.Add(new CellSpec(CellKind.Button, CellExpand) { MinWidth = IconButtonWidth, Skin = CellSkin.Expander }
                 .With(text: ExpandGlyph, width: CellWidth.Px(IconButtonWidth), align: CellAlign.Right));
-        if (remove) cells.Add(IconButton(CellRemove, RemoveGlyph));
+        if (remove) cells.Add(IconButton(CellRemove));
         return cells;
     }
 
@@ -124,9 +129,13 @@ internal static class UiWidgetLayout
         return cells;
     }
 
-    internal static CellSpec IconButton(string key, string glyph) =>
+    /// <summary>
+    /// A box-less icon button 28 units wide with no caption: its face is a drawn mark (<see cref="UiIconMarks"/>), so nothing
+    /// is underlined and no glyph can be missing. Still a button cell: the click and the NAV1 stop are its own.
+    /// </summary>
+    internal static CellSpec IconButton(string key) =>
         new CellSpec(CellKind.Button, key) { MinWidth = IconButtonWidth, Skin = CellSkin.Quiet, Hover = true }
-            .With(text: glyph, width: CellWidth.Px(IconButtonWidth), align: CellAlign.Right);
+            .With(text: "", width: CellWidth.Px(IconButtonWidth), align: CellAlign.Right);
 
     /// <summary>The panel widths every widget row is checked at: the 640-unit floating window's row and the Mods pages'.</summary>
     internal static IReadOnlyList<float> CheckedRowWidths => new[] { 560f, 760f, 1108f, 1248f };

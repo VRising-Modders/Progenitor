@@ -19,6 +19,18 @@ internal interface IWidgetCellField
 
     /// <summary>Take the keyboard away from the input cell (Escape left it): it stops being focused, nothing is committed.</summary>
     void ReleaseCellField(IRuntimeCellRow row, string cellKey);
+
+    /// <summary>
+    /// Once per input cell: <paramref name="rightAligned"/> draws its value (and hint) right-justified; with
+    /// <paramref name="enterCommits"/> Enter makes the box give up the keyboard (the table then commits the draft).
+    /// </summary>
+    void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits) { }
+
+    /// <summary>
+    /// Draw the text of cell <paramref name="cellKey"/> in <paramref name="color"/>, or back in its own tone when null (a
+    /// header caption turns gold while its column sorts). A later rewrite of the cell restores its own tone; ask again.
+    /// </summary>
+    void SetCellTextColor(IRuntimeCellRow row, string cellKey, PaletteColor? color) { }
 }
 
 /// <summary>
@@ -94,7 +106,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     private bool _footerWritten;
     private string _columnsCaption = "";
     private string _reasonText = "";
-    private string _check = UiWidgetLayout.CheckGlyph;
+    /// <summary>The check cell's face: a drawn check mark, not text (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiIconMarks _checkMarks = new();
     private readonly Dictionary<string, IUiMarkView?> _headerMarks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiDrawnMark> _headerMarkNow = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IUiMarkView?>[] _spinners;
@@ -110,7 +123,6 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _viewport = new UiTableViewport(_options.VisibleRows);
         _multi = _options.MultiSelect && _options.Selectable;
         _chooser = _options.ColumnChooser && _model.ChooserColumns().Count > 0;
-        ResolveGlyphs();
 
         var cols = _model.Columns;
         _header = Part(panel.CellHeader(UiDataTableLayout.HeaderCells(cols, _multi), RowKey("header"), UiDataTableLayout.ScrollInset));
@@ -153,20 +165,30 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             _slots.Add(row);
             Lease(row.OnRowClick(() => ClickSlot(slot)));
             Lease(row.OnHover(on => HoverSlot(slot, on)));
-            if (_multi) Lease(row.OnClick(UiDataTableLayout.CellCheck, () => CheckSlot(slot)));
+            if (_multi)
+            {
+                Lease(row.OnClick(UiDataTableLayout.CellCheck, () => CheckSlot(slot)));
+                _checkMarks.Attach(row, UiDataTableLayout.CellCheck, watchHover: false);
+            }
             Lease(row.OnClick(UiDataTableLayout.CellExpand, () => ExpandSlot(slot)));
             foreach (var col in cols)
             {
                 if (!IsEditable(col)) continue;
                 var c = col;
                 Lease(row.OnChanged(UiDataTableLayout.EditKey(c.Key), text => Typed(slot, c, text)));
+                // Numbers right-justified in the box, and Enter commits (the box gives up the keyboard).
+                if (WidgetRuntime.Current is IWidgetCellField setup && RuntimeRowOf(row) is { } runtimeRow)
+                {
+                    try { setup.SetupCellField(runtimeRow, UiDataTableLayout.EditKey(c.Key), rightAligned: true, enterCommits: true); }
+                    catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' value box: " + e.Message); }
+                }
             }
 
             UiNav.Steer(row, cmd => SteerSlot(slot, cmd));
             UiNav.StickScroll(row, StickSlot);
         }
 
-        _footer = Part(panel.CellRow(new CellRowSpec(RowKey("footer"), UiDataTableLayout.FooterCells(_chooser), plain: true,
+        _footer = Part(panel.CellRow(new CellRowSpec(RowKey("footer"), UiDataTableLayout.FooterCells(_chooser, _model.ChooserColumns().Count), plain: true,
             rightInset: UiDataTableLayout.ScrollInset)));
         if (_chooser) Lease(_footer.OnClick(UiDataTableLayout.CellColumns, () => { if (Live) ChooserOpen = !ChooserOpen; }));
         _reason = Part(panel.CellRow(new CellRowSpec(RowKey("reason"), UiDataTableLayout.ReasonCells(), plain: true,
@@ -213,17 +235,6 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     }
 
     private static bool IsEditable(UiTableColumn c) => c.Editable && c.Kind == UiTableColumnKind.Number;
-
-    private void ResolveGlyphs()
-    {
-        var runtime = WidgetRuntime.Current;
-        if (runtime == null) return;
-        try
-        {
-            _check = runtime.DrawableGlyph(UiWidgetLayout.CheckGlyph, UiWidgetLayout.CheckFallback);
-        }
-        catch { /* the preferred glyphs stay */ }
-    }
 
     // ---- IUiDataTable ------------------------------------------------------------------------
 
@@ -691,7 +702,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         }
 
         // A defined term explains the caption (the term wins over a plain Tooltip, as in the tabs and the list).
-        if (term != null && UiTerms.IsDefined(PluginId, term.Term))
+        if (term != null && term.Explains)
         {
             term.Hover(true);
             return;
@@ -788,8 +799,12 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         foreach (var d in new List<Draft>(_drafts.Values)) CommitDraft(d.RowId, d.Column);
     }
 
+    /// <summary>Tests and readback: the mark drawn in slot <paramref name="slot"/>'s check cell.</summary>
+    internal UiDrawnMark CheckMarkAt(int slot) => _checkMarks.MarkOf(_slots[slot], UiDataTableLayout.CellCheck);
+
     protected override void OnDisposing()
     {
+        _checkMarks.Dispose();
         StopTick();
         _drafts.Clear();
         foreach (var t in _terms.Values)
@@ -869,6 +884,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             ["columns"] = columns,
             ["sort"] = sort,
             ["sortMarks"] = HeaderMarks(),
+            ["goldCaptions"] = GoldCaptions(),
             ["hidden"] = _model.HiddenInOrder(),
             ["grouped"] = _model.Grouped,
             ["groups"] = _model.Grouped ? new List<string>(_model.Groups) : new List<string>(),
@@ -1008,7 +1024,10 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         foreach (var col in _model.Columns)
         {
             WriteHeader(UiDataTableLayout.ViewKey(col.Key), col.Caption, !_model.IsHidden(col.Key));
-            if (col.Sortable) HeaderMark(col.Key, UiDataTableLayout.SortMark(sort, col.Key));
+            if (!col.Sortable) continue;
+            var mark = UiDataTableLayout.SortMark(sort, col.Key);
+            HeaderMark(col.Key, mark);
+            HeaderGold(col.Key, !mark.IsNone);
         }
 
         WriteHeader(UiDataTableLayout.CellIcon, "", icons);
@@ -1085,7 +1104,32 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         if (_headerCache.TryGetValue(key, out var was) && was.Text == text && was.Visible == visible) return;
         _header.SetCell(key, text, visible: visible);
         _headerCache[key] = new CellState(text, CellTone.Muted, visible);
+        _headerGoldNow.Remove(key); // a rewrite draws the caption in the header's own tone again
     }
+
+    private readonly Dictionary<string, bool> _headerGoldNow = new(StringComparer.Ordinal);
+
+    /// <summary>A sorted column's caption is drawn in the header's sorted gold, as the Install list's sorted caption.</summary>
+    private void HeaderGold(string column, bool gold)
+    {
+        string cell = UiDataTableLayout.ViewKey(column);
+        if (_headerGoldNow.TryGetValue(cell, out bool was) && was == gold) return;
+        _headerGoldNow[cell] = gold;
+        if (WidgetRuntime.Current is not IWidgetCellField field || RuntimeRowOf(_header) is not { } header) return;
+        try { field.SetCellTextColor(header, cell, gold ? MenuPalette.HeaderSorted : (PaletteColor?)null); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' sorted caption: " + e.Message); }
+    }
+
+    private List<string> GoldCaptions()
+    {
+        var list = new List<string>();
+        foreach (var c in _model.Columns) if (CaptionGold(c.Key)) list.Add(c.Key);
+        return list;
+    }
+
+    /// <summary>Tests and readback: whether a column's caption is drawn gold (sorted).</summary>
+    internal bool CaptionGold(string column) =>
+        _headerGoldNow.TryGetValue(UiDataTableLayout.ViewKey(column), out bool gold) && gold;
 
     /// <summary>Rewrite one cell of a slot when its text, tone or visibility changed; a hidden cell keeps its text.</summary>
     private void Write(int slot, string key, string? text, CellTone tone, bool visible)
@@ -1130,25 +1174,33 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         bool isRow = kind == UiTableLineKind.Row;
         bool selected = isRow && _model.IsSelected(data!.Id);
 
-        if (_multi) Write(slot, UiDataTableLayout.CellCheck, isRow && selected ? _check : "", CellTone.Gold, true);
+        if (_multi)
+        {
+            Write(slot, UiDataTableLayout.CellCheck, "", CellTone.Gold, true);
+            _checkMarks.Set(row, UiDataTableLayout.CellCheck, isRow && selected ? UiDrawnMark.CheckMark : UiDrawnMark.None);
+        }
 
-        Write(slot, UiDataTableLayout.CellIcon, "", CellTone.Normal, icons && isRow);
-        Write(slot, UiDataTableLayout.CellIconPad, "", CellTone.Muted, icons && !isRow);
+        // The item's own icon in its well; a row with no icon (none given, or the game has none for its prefab) draws
+        // no well at all, only the blank of the same width, so the columns still line up.
+        object? icon = null;
         if (icons && isRow)
         {
-            object? icon = data!.Icon;
+            icon = data!.Icon;
             if (icon == null && data.ItemPrefab != 0)
             {
                 try { icon = WidgetRuntime.Current?.ItemIcon(data.ItemPrefab); }
                 catch { icon = null; }
             }
+        }
 
-            if (!_imageSet[slot] || !ReferenceEquals(icon, _images[slot]))
-            {
-                row.SetImage(UiDataTableLayout.CellIcon, icon);
-                _images[slot] = icon;
-                _imageSet[slot] = true;
-            }
+        bool well = icon != null;
+        Write(slot, UiDataTableLayout.CellIcon, "", CellTone.Normal, icons && well);
+        Write(slot, UiDataTableLayout.CellIconPad, "", CellTone.Muted, icons && !well);
+        if (well && (!_imageSet[slot] || !ReferenceEquals(icon, _images[slot])))
+        {
+            row.SetImage(UiDataTableLayout.CellIcon, icon);
+            _images[slot] = icon;
+            _imageSet[slot] = true;
         }
 
         if (kind == UiTableLineKind.Detail)

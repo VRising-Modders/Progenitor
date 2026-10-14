@@ -208,12 +208,30 @@ internal static class UiDataTableLayout
     }
 
     /// <summary>The footer: the muted status line and the Columns button (the game's dropdown bar) at its right.</summary>
-    internal static List<CellSpec> FooterCells(bool chooser) => new()
+    internal static List<CellSpec> FooterCells(bool chooser, int hideable = 9)
     {
-        new CellSpec(CellKind.Muted, CellStatus).With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth), minWidth: UiWidgetLayout.CaptionMinWidth),
-        new CellSpec(CellKind.Button, CellColumns) { MinWidth = ColumnsButtonWidth, Visible = chooser }
-            .With(text: "Columns", width: CellWidth.Px(ColumnsButtonWidth), align: CellAlign.Right, skin: CellSkin.Dropdown),
-    };
+        float button = ColumnsButtonWidthFor(hideable);
+        return new List<CellSpec>
+        {
+            new CellSpec(CellKind.Muted, CellStatus).With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth), minWidth: UiWidgetLayout.CaptionMinWidth),
+            new CellSpec(CellKind.Button, CellColumns) { MinWidth = button, Visible = chooser }
+                .With(text: "Columns", width: CellWidth.Px(button), align: CellAlign.Right, skin: CellSkin.Dropdown),
+        };
+    }
+
+    /// <summary>The dropdown bar's arrow and its padding, right of the caption.</summary>
+    internal const float DropdownArrowRoom = 34f;
+
+    /// <summary>
+    /// The Columns button's width: its longest caption (every hideable column hidden) at the button's size, the button's
+    /// padding and the dropdown arrow, never under <see cref="ColumnsButtonWidth"/>, so no caption ever ellipsizes.
+    /// </summary>
+    internal static float ColumnsButtonWidthFor(int hideable)
+    {
+        string longest = ColumnsCaption(Math.Max(1, hideable));
+        float need = CellLayout.EstimateTextWidth(longest, MenuPanelLayout.HeaderButtonFontSize) + CellLayout.ButtonPad + DropdownArrowRoom;
+        return Math.Max(ColumnsButtonWidth, (float)Math.Ceiling(need));
+    }
 
     /// <summary>The refusal line under the footer: one orange sentence.</summary>
     internal static List<CellSpec> ReasonCells() => new()
@@ -252,5 +270,5 @@ internal static class UiDataTableLayout
     }
 
     /// <summary>The Columns button caption: how many are hidden.</summary>
-    internal static string ColumnsCaption(int hidden) => hidden <= 0 ? "Columns" : "Columns (" + hidden + " hidden)";
+    internal static string ColumnsCaption(int hidden) => hidden <= 0 ? "Columns" : "Columns · " + hidden + " hidden";
 }

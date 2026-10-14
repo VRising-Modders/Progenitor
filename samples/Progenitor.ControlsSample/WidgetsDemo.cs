@@ -52,7 +52,7 @@ internal sealed partial class WidgetsDemo
     {
         LastStatus = what;
         _log(ControlsDemo.LogPrefix + "widget " + what);
-        _status?.SetText(what, LabelTone.Ok);
+        _status?.SetText("Last event: " + what, LabelTone.Muted);
     }
 
     internal void Build(IUiPanel panel)

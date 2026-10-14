@@ -46,8 +46,14 @@ internal static class UiMasterDetailLayout
     internal const float NoteMax = 140f;
 
     internal const float MarkWidth = 16f;
-    internal const float CountWidth = 36f;
-    internal const float DividerWidth = 12f;
+    internal const float CountWidth = 32f;
+    internal const float DividerWidth = 8f;
+
+    /// <summary>
+    /// The band at every row's right end no cell enters: the widget scroll bar's (as the data table's), so a member's
+    /// remove button never sits under the bar.
+    /// </summary>
+    internal const float ScrollInset = 18f;
 
     internal const int DefaultRows = 14;
     internal const int MinRows = 6;
@@ -59,7 +65,7 @@ internal static class UiMasterDetailLayout
     /// <summary>A detail note's width bounds (estimated from its text).</summary>
     internal const float DetailNoteMin = 40f;
 
-    internal const float DetailNoteMax = 200f;
+    internal const float DetailNoteMax = 240f;
 
     /// <summary>The tile number of an entry row's master cells (its selection band) and of every row's divider (its rule).</summary>
     internal const int MasterTile = 1;
@@ -134,9 +140,9 @@ internal static class UiMasterDetailLayout
     internal static float DetailLeft(float rowWidth, float fraction, bool icons, bool counts) =>
         MasterWidth(rowWidth, fraction, icons, counts) + DividerWidth + CellLayout.Gap;
 
-    /// <summary>The detail half's width.</summary>
+    /// <summary>The detail half's width: from the divider to the scroll bar's band.</summary>
     internal static float DetailWidth(float rowWidth, float fraction, bool icons, bool counts) =>
-        Math.Max(0f, rowWidth - DetailLeft(rowWidth, fraction, icons, counts));
+        Math.Max(0f, rowWidth - ScrollInset - DetailLeft(rowWidth, fraction, icons, counts));
 
     /// <summary>A detail button's width: its caption, never under the kit's button floor.</summary>
     internal static float ButtonWidth(string caption) =>
@@ -144,7 +150,14 @@ internal static class UiMasterDetailLayout
 
     /// <summary>A detail note's width: its text, between <see cref="DetailNoteMin"/> and <see cref="DetailNoteMax"/>.</summary>
     internal static float DetailNoteWidth(string note) =>
-        Clamp(CellLayout.EstimateTextWidth(note, CellLayout.MutedFontSize) + 4f, DetailNoteMin, DetailNoteMax);
+        Clamp((float)Math.Ceiling(CellLayout.EstimateTextWidth(note, CellLayout.MutedFontSize) * NoteEstimateMargin) + 8f, DetailNoteMin, DetailNoteMax);
+
+    /// <summary>
+    /// How much wider than the kit's average-glyph estimate a detail note is given: the game's serif runs wider than the
+    /// estimate on lowercase words (live, a note sized from the bare estimate ended in an ellipsis). A note that then does
+    /// not fit its row is dropped whole (it is optional), never cut.
+    /// </summary>
+    internal const float NoteEstimateMargin = 1.25f;
 
     // ---- rows -----------------------------------------------------------------------------------
 
@@ -187,7 +200,7 @@ internal static class UiMasterDetailLayout
         // cell (text or link) takes the space between.
         cells.Add(new CellSpec(CellKind.Muted, CellIndent) { MinWidth = 1f, Visible = false }.With(text: "", width: CellWidth.Px(1f)));
         cells.Add(new CellSpec(CellKind.Button, CellGrip) { MinWidth = UiWidgetLayout.GripWidth, Skin = CellSkin.Quiet, Hover = true, Visible = false, DropOrder = 2 }
-            .With(text: UiWidgetLayout.GripGlyph, width: CellWidth.Px(UiWidgetLayout.GripWidth), optional: true));
+            .With(text: "", width: CellWidth.Px(UiWidgetLayout.GripWidth), optional: true));
         cells.Add(new CellSpec(CellKind.Image, CellDIcon) { MinWidth = UiWidgetLayout.IconSize, Skin = CellSkin.IconWell, Visible = false, DropOrder = 3 }
             .With(width: CellWidth.Px(UiWidgetLayout.IconSize), optional: true));
         cells.Add(new CellSpec(CellKind.Text, CellText) { Visible = false }
@@ -198,12 +211,12 @@ internal static class UiMasterDetailLayout
             .With(text: "", width: CellWidth.Px(DetailNoteMin), optional: true));
         cells.Add(new CellSpec(CellKind.Badge, CellDCount) { Visible = false, DropOrder = 1 }
             .With(tone: CellTone.Client, minWidth: UiWidgetLayout.CountBadgeMinWidth, optional: true));
-        cells.Add(Hidden(UiWidgetLayout.IconButton(CellUp, UiWidgetLayout.UpGlyph)));
-        cells.Add(Hidden(UiWidgetLayout.IconButton(CellDown, UiWidgetLayout.DownGlyph)));
+        cells.Add(Hidden(UiWidgetLayout.IconButton(CellUp)));
+        cells.Add(Hidden(UiWidgetLayout.IconButton(CellDown)));
         var expand = new CellSpec(CellKind.Button, CellExpand) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Expander, Visible = false, DropOrder = 4 }
             .With(text: UiWidgetLayout.ExpandGlyph, width: CellWidth.Px(UiWidgetLayout.IconButtonWidth), optional: true);
         cells.Add(expand);
-        cells.Add(Hidden(UiWidgetLayout.IconButton(CellRemove, UiWidgetLayout.RemoveGlyph)));
+        cells.Add(Hidden(UiWidgetLayout.IconButton(CellRemove)));
         for (int i = 0; i < UiDetailLine.MaxButtons; i++)
             cells.Add(new CellSpec(CellKind.Button, CellButton(i)) { Skin = CellSkin.PopupButton, Visible = false, MinWidth = CellLayout.MinButtonWidth }
                 .With(text: "", width: CellWidth.Px(CellLayout.MinButtonWidth)));

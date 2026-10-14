@@ -581,7 +581,8 @@ internal sealed class UiDataTableModel
     {
         if (cell == null) return "";
         if (cell.Text.Length > 0) return cell.Text;
-        return column.Kind == UiTableColumnKind.Number || cell.Value.HasValue ? FormatValue(cell.Value, column) : "";
+        // A text column's value only sorts (a status by severity): an empty text stays empty.
+        return column.Kind == UiTableColumnKind.Number ? FormatValue(cell.Value, column) : "";
     }
 
     internal static string FormatValue(double? value, UiTableColumn column)

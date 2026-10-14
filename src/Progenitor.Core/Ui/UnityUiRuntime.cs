@@ -4649,10 +4649,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             try
             {
                 if (dialogRoot != null && !InsideDialog(field.gameObject, dialogRoot)) return;
+                // P7b: only a field on screen takes a click: not one under a hidden tab or panel (inactive), nor one
+                // scrolled out of its viewport whose rect still lies under the pointer.
+                if (!field.gameObject.activeInHierarchy) return;
                 var rt = field.GetComponent<RectTransform>();
                 if (rt == null) return;
                 var rect = ScreenRectOf(rt);
                 if (!rect.IsKnown || !rect.Contains(x, y)) return;
+                if (!InsideClipViewport(field.transform.parent, x, y)) return;
                 float cx = (rect.MinX + rect.MaxX) * 0.5f;
                 float cy = (rect.MinY + rect.MaxY) * 0.5f;
                 float dx = x - cx;
@@ -4865,6 +4869,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         try { TypeEdges.NoteDevice(keyboard.deviceId); } catch { /* */ }
 
         SampleTypeEdges(keyboard, frame);
+        // P7b: a widget's value box released the keyboard mid-typing; its burst ends when every typing key is up.
+        if (_keyBurstHold && !AnyTypingKeyHeld(keyboard)) _keyBurstHold = false;
         long nowMs = Environment.TickCount64;
         bool escapeHeld = KeyHeld(keyboard, Key.Escape);
         bool escapeEdge = TypeKeyDown(keyboard, UiKey.Escape, frame);
@@ -4893,7 +4899,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         bool enterEdge = TypeKeyDown(keyboard, UiKey.Enter, frame) || TypeKeyDown(keyboard, UiKey.NumpadEnter, frame);
         // TEXTEXPAND1: in a read-only editor Enter has no line to start, so it is the dialog's (Close).
         // BUILDSEARCH1: Enter in an external single-line field commits and gives up focus.
-        if (enterEdge && field != null && ExternalGuardId(field) != null)
+        if (enterEdge && field != null && EnterLeavesField(field))
+        {
+            // P7b: Enter in a data table's value box commits it: the box gives up the keyboard now.
+            ReleaseWidgetField(field);
+            field = FocusedArmedField();
+        }
+        else if (enterEdge && field != null && ExternalGuardId(field) != null)
         {
             NotifyExternalSubmit(field);
             field = FocusedArmedField();
@@ -5686,6 +5698,42 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     {
         try { MenuHotkeyGuard.SetFocusedField(FocusedFieldId(field)); }
         catch { /* */ }
+        // P7b: the guard stays up while the keys of a burst typed into a released widget box are still held.
+        if (field == null && _keyBurstHold)
+        {
+            try { MenuHotkeyGuard.SetFocusedField(MenuHotkeyGuard.InstallSearch); }
+            catch { /* */ }
+        }
+    }
+
+    /// <summary>P7b: whether any typing key (the pump's sampled set, Enter included) is held now.</summary>
+    private static bool AnyTypingKeyHeld(Keyboard keyboard)
+    {
+        for (int i = 0; i < TypedSampleKeys.Length; i++)
+            if (KeyHeld(keyboard, TypedSampleKeys[i])) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// P7b: (<paramref name="x"/>, <paramref name="y"/>) is inside the nearest clipping viewport above
+    /// <paramref name="from"/> (a <c>RectMask2D</c>), or there is none.
+    /// </summary>
+    private static bool InsideClipViewport(Transform? from, float x, float y)
+    {
+        try
+        {
+            for (var t = from; t != null; t = t.parent)
+            {
+                var mask = t.GetComponent<RectMask2D>();
+                if (mask == null) continue;
+                var rt = t.GetComponent<RectTransform>();
+                if (rt == null) return true;
+                var clip = ScreenRectOf(rt);
+                return !clip.IsKnown || clip.Contains(x, y);
+            }
+        }
+        catch { /* */ }
+        return true;
     }
 
     /// <summary>
@@ -17429,6 +17477,16 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 try { cell.Tmp.fontStyle = glyph ? FontStyles.Normal : FontStyles.Underline; } catch { /* */ }
                 try { cell.Tmp.horizontalAlignment = glyph ? HorizontalAlignmentOptions.Center : HorizontalAlignmentOptions.Right; } catch { /* */ }
                 try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
+                if (glyph)
+                {
+                    // Live 2026-10-14: a chip's 20-unit remove glyph drew nothing. The button caption's 8-unit side margins
+                    // left 4 units, and the ellipsis clamp replaced the × with nothing that fit. A glyph button is drawn
+                    // whole: no side margins, no ellipsis (as a CellWrap.Glyph text cell is).
+                    try { cell.Tmp.margin = Vector4.zero; } catch { /* */ }
+                    try { cell.Tmp.overflowMode = TextOverflowModes.Overflow; } catch { /* */ }
+                    try { cell.Tmp.enableWordWrapping = false; } catch { /* */ }
+                    try { cell.Tmp.raycastTarget = false; } catch { /* the button's fill is the click target */ }
+                }
             }
 
             TintTransition(cell, cell.Tmp, 1.3f, 0.7f);

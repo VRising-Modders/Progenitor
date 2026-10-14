@@ -22,10 +22,9 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
     private readonly List<Action<UiListItem>> _remove = new();
     private readonly List<Action<KeyValuePair<UiListItem, bool>>> _expandHandlers = new();
     private IDisposable? _dragTick;
-    private string _glyphGrip = UiWidgetLayout.GripGlyph;
-    private string _glyphUp = UiWidgetLayout.UpGlyph;
-    private string _glyphDown = UiWidgetLayout.DownGlyph;
-    private string _glyphRemove = UiWidgetLayout.RemoveGlyph;
+
+    /// <summary>The grip, up, down and remove buttons' faces: drawn marks, not text (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiIconMarks _marks = new();
 
     internal UiOrderedListHandle(IUiPanel panel, string key, IEnumerable<UiListItem>? items, UiOrderedListOptions? options)
         : base(panel, key, key)
@@ -34,18 +33,23 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         _model = new UiOrderedListModel(items, _options.Capacity);
         _icons = AnyIcon(_model.Items);
         _expand = AnyDetail(_model.Items);
-        ResolveGlyphs();
-
         float indent = UiWidgetLayout.DrawerIndent(_options.Reorder, icon: true);
         float drawerHeight = UiWidgetLayout.DrawerHeight(_options.DetailLines);
         for (int i = 0; i < _model.Capacity; i++)
         {
             int slot = i;
             var cells = UiWidgetLayout.ListRowCells(_options.Reorder, _options.Remove, expand: true, icon: true);
-            foreach (var c in cells) c.Text = Glyph(c);
             var row = Part(panel.CellRow(new CellRowSpec(
                 RowKey("row" + i), cells, hover: true, skin: CellRowSkin.GameEntry, separator: true, quietHover: true)));
             _rows.Add(row);
+            if (_options.Reorder)
+            {
+                _marks.Attach(row, UiWidgetLayout.CellGrip, watchHover: false); // its pointer events are the drag's
+                _marks.Attach(row, UiWidgetLayout.CellUp, watchHover: true);
+                _marks.Attach(row, UiWidgetLayout.CellDown, watchHover: true);
+            }
+
+            if (_options.Remove) _marks.Attach(row, UiWidgetLayout.CellRemove, watchHover: true);
             var drawer = Part(panel.CellRow(new CellRowSpec(
                 RowKey("drawer" + i), UiWidgetLayout.DrawerCells(_options.Reorder), height: drawerHeight, plain: true, joinAbove: true,
                 indent: indent)));
@@ -88,28 +92,9 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         return false;
     }
 
-    private void ResolveGlyphs()
-    {
-        var runtime = WidgetRuntime.Current;
-        if (runtime == null) return;
-        try
-        {
-            _glyphGrip = runtime.DrawableGlyph(UiWidgetLayout.GripGlyph, UiWidgetLayout.GripFallback);
-            _glyphUp = runtime.DrawableGlyph(UiWidgetLayout.UpGlyph, UiWidgetLayout.UpFallback);
-            _glyphDown = runtime.DrawableGlyph(UiWidgetLayout.DownGlyph, UiWidgetLayout.DownFallback);
-            _glyphRemove = runtime.DrawableGlyph(UiWidgetLayout.RemoveGlyph, UiWidgetLayout.RemoveFallback);
-        }
-        catch { /* the preferred glyphs stay */ }
-    }
-
-    private string Glyph(CellSpec cell) => cell.Key switch
-    {
-        UiWidgetLayout.CellGrip => _glyphGrip,
-        UiWidgetLayout.CellUp => _glyphUp,
-        UiWidgetLayout.CellDown => _glyphDown,
-        UiWidgetLayout.CellRemove => _glyphRemove,
-        _ => cell.Text,
-    };
+    /// <summary>Tests and readback: the drawn mark on a row's icon button and whether it is drawn enabled.</summary>
+    internal (UiDrawnMark Mark, bool Enabled) MarkAt(int slot, string cellKey) =>
+        (_marks.MarkOf(_rows[slot], cellKey), _marks.EnabledOf(_rows[slot], cellKey));
 
     // ---- IUiOrderedList --------------------------------------------------------------------
 
@@ -237,7 +222,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         var item = ItemAt(slot);
         // P7b: a row whose caption explains a term shows the glossary line (the term binding draws the box).
         var term = slot < _slotTerms.Length ? _slotTerms[slot] : null;
-        if (term != null && item != null && UiTerms.IsDefined(PluginId, term.Term))
+        if (term != null && item != null && term.Explains)
         {
             term.Hover(on);
             return;
@@ -331,6 +316,7 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
     {
         StopDrag();
         for (int i = 0; i < _slotTerms.Length; i++) SyncTerm(i, "");
+        _marks.Dispose();
     }
 
     // ---- Terms (P7b) ---------------------------------------------------------------------------
@@ -388,8 +374,12 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
             if (_options.Reorder)
             {
                 bool still = _model.Dragging;
-                row.SetCell(UiWidgetLayout.CellUp, tone: !still && _model.CanMoveUp(realIndex) ? CellTone.Normal : CellTone.Faint);
-                row.SetCell(UiWidgetLayout.CellDown, tone: !still && _model.CanMoveDown(realIndex) ? CellTone.Normal : CellTone.Faint);
+                bool up = !still && _model.CanMoveUp(realIndex), down = !still && _model.CanMoveDown(realIndex);
+                row.SetCell(UiWidgetLayout.CellUp, tone: up ? CellTone.Normal : CellTone.Faint);
+                row.SetCell(UiWidgetLayout.CellDown, tone: down ? CellTone.Normal : CellTone.Faint);
+                _marks.Set(row, UiWidgetLayout.CellGrip, UiDrawnMark.GripMark);
+                _marks.Set(row, UiWidgetLayout.CellUp, UiDrawnMark.UpMark, up);
+                _marks.Set(row, UiWidgetLayout.CellDown, UiDrawnMark.DownMark, down);
             }
 
             bool hasDetail = UiOrderedListModel.HasDetail(item);
@@ -397,7 +387,12 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
             // A column no item needs is hidden on every row, so the columns still line up row to row.
             row.SetCell(UiWidgetLayout.CellExpand, tone: hasDetail ? CellTone.Normal : CellTone.Faint, visible: _expand);
             row.SetCell(UiWidgetLayout.CellIcon, visible: _icons);
-            if (_options.Remove) row.SetCell(UiWidgetLayout.CellRemove, tone: item.Removable && !_model.Dragging ? CellTone.Normal : CellTone.Faint);
+            if (_options.Remove)
+            {
+                bool removable = item.Removable && !_model.Dragging;
+                row.SetCell(UiWidgetLayout.CellRemove, tone: removable ? CellTone.Normal : CellTone.Faint);
+                _marks.Set(row, UiWidgetLayout.CellRemove, UiDrawnMark.RemoveMark, removable);
+            }
             if (_icons)
             {
                 object? icon = item.Icon;

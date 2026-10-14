@@ -52,7 +52,7 @@ internal sealed partial class WidgetsDemo
         new UiTableColumn("here", "Here", UiTableColumnKind.Number) { Width = 84f, Subtotal = UiTableSubtotal.Sum },
         new UiTableColumn("reserve", "Reserve", UiTableColumnKind.Number) { Width = 100f, Editable = true, Term = "Reserve" },
         new UiTableColumn("cap", "Cap", UiTableColumnKind.Number) { Width = 100f, Editable = true, Term = "Cap" },
-        new UiTableColumn("status", "Status") { Width = 130f },
+        new UiTableColumn("status", "Status") { Width = 160f }, // "Below reserve" whole
     };
 
     /// <summary>
@@ -84,7 +84,8 @@ internal sealed partial class WidgetsDemo
             {
                 Groups = groups,
                 ItemPrefab = i == 0 ? -257494203 : i == 1 ? -1562867444 : 0,
-                Detail = "Plot A: " + (total - here) + " in " + (1 + i % 3) + " chests\nPlot B: " + here + " in " + (1 + i % 2) + " chests\nMost in: Storage chest " + (1 + i % 6),
+                Detail = "Plot A: " + (total - here) + " in " + Chests(1 + i % 3) + "\nPlot B: " + here + " in " + Chests(1 + i % 2)
+                    + "\nMost in: Storage chest " + (1 + i % 6),
                 Tooltip = i % 50 == 0 ? "A popular item." : "",
             };
             row.Text("item", name)
@@ -99,6 +100,9 @@ internal sealed partial class WidgetsDemo
 
         return rows;
     }
+
+    /// <summary>"1 chest", "2 chests".</summary>
+    internal static string Chests(int n) => n.ToString(CultureInfo.InvariantCulture) + (n == 1 ? " chest" : " chests");
 
     /// <summary>The demo's answer to an edit: even accepted, over 9999 refused, odd waits, a clear returns to the default.</summary>
     internal void AnswerEdit(UiTableEdit edit)

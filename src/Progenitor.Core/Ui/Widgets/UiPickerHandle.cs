@@ -24,7 +24,8 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
     private readonly List<IUiCellRow> _slots = new();
     private readonly List<UiPickerLine> _lines = new();
     private readonly List<Action<IReadOnlyList<UiPickerEntry>>> _picked = new();
-    private string _check = UiWidgetLayout.CheckGlyph;
+    /// <summary>Multi mode: the check column's face is a drawn check mark, not text (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiIconMarks _marks = new();
 
     internal UiPickerHandle(IUiPanel panel, string key, IEnumerable<UiPickerEntry>? entries, UiPickerOptions? options)
         : base(panel, key, key)
@@ -32,8 +33,6 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         _options = options ?? new UiPickerOptions();
         _model = new UiPickerModel(entries, _options.Multi, _options.Rows, _options.Selected);
         _icons = AnyIcon(_model.Entries);
-        try { _check = WidgetRuntime.Current?.DrawableGlyph(UiWidgetLayout.CheckGlyph, UiWidgetLayout.CheckFallback) ?? _check; }
-        catch { /* the preferred glyph stays */ }
 
         _search = Part(panel.CellRow(new CellRowSpec(RowKey(CellSearch), UiPickerLayout.SearchCells(_options.Placeholder), plain: true)));
         Lease(_search.OnChanged(CellSearch, text =>
@@ -60,7 +59,11 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
             _slots.Add(row);
             Lease(row.OnRowClick(() => ClickSlot(slot)));
             Lease(row.OnHover(on => HoverSlot(slot, on)));
-            if (_options.Multi) Lease(row.OnClick(UiWidgetLayout.CellCheck, () => ClickSlot(slot)));
+            if (_options.Multi)
+            {
+                Lease(row.OnClick(UiWidgetLayout.CellCheck, () => ClickSlot(slot)));
+                _marks.Attach(row, UiWidgetLayout.CellCheck, watchHover: true);
+            }
         }
 
         Render();
@@ -212,6 +215,11 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
 
     // ---- Drawing -------------------------------------------------------------------------------
 
+    /// <summary>Tests and readback: the mark drawn in result line <paramref name="slot"/>'s check column.</summary>
+    internal UiDrawnMark CheckMarkAt(int slot) => _marks.MarkOf(_slots[slot], UiWidgetLayout.CellCheck);
+
+    protected override void OnDisposing() => _marks.Dispose();
+
     protected override void Render()
     {
         if (IsDisposed || !Visible) return;
@@ -247,7 +255,11 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
                 row.SetCell(UiWidgetLayout.CellTitle, line.Text, CellTone.Gold);
                 row.SetCell(UiWidgetLayout.CellNote, "", visible: false);
                 row.SetCell(UiWidgetLayout.CellIcon, visible: false);
-                if (_options.Multi) row.SetCell(UiWidgetLayout.CellCheck, "", visible: false);
+                if (_options.Multi)
+                {
+                    row.SetCell(UiWidgetLayout.CellCheck, "", visible: false);
+                    _marks.Set(row, UiWidgetLayout.CellCheck, UiDrawnMark.None);
+                }
                 row.SetSelected(false);
             }
             else
@@ -259,7 +271,10 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
                 string note = e.Disabled ? e.DisabledReason : e.Note;
                 row.SetCell(UiWidgetLayout.CellNote, note, e.Disabled ? CellTone.Faint : CellTone.Muted, visible: note.Length > 0);
                 if (_options.Multi)
-                    row.SetCell(UiWidgetLayout.CellCheck, on ? _check : "", e.Disabled ? CellTone.Faint : CellTone.Gold, visible: true);
+                {
+                    row.SetCell(UiWidgetLayout.CellCheck, "", e.Disabled ? CellTone.Faint : CellTone.Gold, visible: true);
+                    _marks.Set(row, UiWidgetLayout.CellCheck, on ? UiDrawnMark.CheckMark : UiDrawnMark.None, !e.Disabled);
+                }
                 row.SetCell(UiWidgetLayout.CellIcon, visible: _icons);
                 if (_icons)
                 {
@@ -324,8 +339,8 @@ internal static class UiPickerLayout
     {
         var cells = new List<CellSpec>(4);
         if (multi)
-            cells.Add(new CellSpec(CellKind.Button, UiWidgetLayout.CellCheck) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Quiet }
-                .With(width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
+            cells.Add(new CellSpec(CellKind.Button, UiWidgetLayout.CellCheck) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Quiet, Hover = true }
+                .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
         if (icon)
             cells.Add(new CellSpec(CellKind.Image, UiWidgetLayout.CellIcon) { MinWidth = UiWidgetLayout.IconSize, Skin = CellSkin.IconWell }
                 .With(width: CellWidth.Px(UiWidgetLayout.IconSize)));

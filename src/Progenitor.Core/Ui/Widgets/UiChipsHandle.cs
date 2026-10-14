@@ -15,6 +15,9 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
     internal const int MeasureEveryFrames = 20;
 
     private readonly UiChipsModel _model;
+
+    /// <summary>The remove buttons' faces: the drawn remove mark, not a font glyph (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiIconMarks _marks = new();
     private readonly UiChipsOptions _options;
     private readonly int _maxLines;
     private readonly int _perLine;
@@ -35,15 +38,12 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
         _model = new UiChipsModel(chips);
         _maxLines = UiChipsLayout.ClampLines(_options.MaxLines);
         _perLine = UiChipsLayout.ClampPerLine(_options.MaxPerLine);
-        string removeGlyph = UiWidgetLayout.RemoveGlyph;
         var runtime = WidgetRuntime.Current;
-        try { if (runtime != null) removeGlyph = runtime.DrawableGlyph(UiWidgetLayout.RemoveGlyph, UiWidgetLayout.RemoveFallback); }
-        catch { /* the preferred glyph stays */ }
 
         for (int i = 0; i < _maxLines; i++)
         {
             int line = i;
-            var cells = UiChipsLayout.LineCells(_perLine, removeGlyph);
+            var cells = UiChipsLayout.LineCells(_perLine);
             var row = Part(panel.CellRow(new CellRowSpec(RowKey("line" + i), cells, height: UiChipsLayout.LineHeight, plain: true, gapAbove: i == 0 ? -1f : UiChipsLayout.LineGap)));
             _lines.Add(row);
             for (int j = 0; j < _perLine; j++)
@@ -52,6 +52,7 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
                 Lease(row.OnClick(UiChipsLayout.ChipKey(j), () => Press(line, slot)));
                 Lease(row.OnClick(UiChipsLayout.RemoveKey(j), () => RemoveAt(line, slot)));
                 Lease(row.OnCellHover(UiChipsLayout.ChipKey(j), on => HoverSlot(line, slot, on)));
+                _marks.Attach(row, UiChipsLayout.RemoveKey(j), watchHover: true);
             }
         }
 
@@ -219,7 +220,7 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
         var placed = _pack.At(line, slot);
         if (placed == null) return;
         // P7b help: a chip whose caption explains a term shows the glossary line (the term binding draws the box).
-        if (term != null && placed.Index >= 0 && UiTerms.IsDefined(PluginId, term.Term))
+        if (term != null && placed.Index >= 0 && term.Explains)
         {
             term.Hover(true);
             return;
@@ -337,10 +338,17 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
     }
 
     /// <summary>The term marked on slot (<paramref name="line"/>, <paramref name="slot"/>)'s chip, or empty (tests and readback).</summary>
+    /// <summary>The remove mark of slot (<paramref name="line"/>, <paramref name="slot"/>) and its color (tests and readback).</summary>
+    internal (UiDrawnMark Mark, PaletteColor Color) RemoveMarkAt(int line, int slot) =>
+        line >= 0 && line < _lines.Count
+            ? (_marks.MarkOf(_lines[line], UiChipsLayout.RemoveKey(slot)), _marks.ColorOf(_lines[line], UiChipsLayout.RemoveKey(slot)))
+            : (UiDrawnMark.None, UiIconMarks.Normal);
+
     internal string TermAt(int line, int slot) => TermBinding(line, slot)?.Term ?? "";
 
     protected override void OnDisposing()
     {
+        _marks.Dispose();
         if (_slotTerms == null) return;
         for (int i = 0; i < _maxLines; i++)
             for (int j = 0; j < _perLine; j++)
@@ -361,6 +369,27 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
 
         _pack = UiChipsLayout.Pack(pieces, RowWidth(), _maxLines, _perLine, _options.Add ? (_options.AddText ?? "+") : null);
         var runtime = WidgetRuntime.Current;
+        // Lines shown or hidden in one render ask their panel for one layout, not one each.
+        UiLayoutBatch.Begin();
+        try
+        {
+            RenderLines(runtime);
+        }
+        finally { UiLayoutBatch.End(); }
+
+        // The first render packs before any caption is drawn to measure by; once one is, a row that reads a different
+        // width is packed again at once rather than a few frames later.
+        if (_repacking || _options.RowWidth > 0f) return;
+        float measured = MeasureRow();
+        if (measured <= 0f || Math.Abs(measured - _pack.RowWidth) <= 1f) return;
+        _measured = measured;
+        _repacking = true;
+        try { Render(); }
+        finally { _repacking = false; }
+    }
+
+    private void RenderLines(IWidgetRuntime? runtime)
+    {
         for (int i = 0; i < _lines.Count; i++)
         {
             var row = _lines[i];
@@ -385,6 +414,8 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
                 row.SetCell(chipKey, tone: tone, visible: p != null);
                 // The remove glyph takes the chip's tone: light cream on a selected chip's gold plate.
                 row.SetCell(UiChipsLayout.RemoveKey(j), tone: tone, visible: p != null && p.Remove);
+                _marks.Set(row, UiChipsLayout.RemoveKey(j), p != null && p.Remove ? UiDrawnMark.RemoveMark : UiDrawnMark.None,
+                    enabled: true, onPlate: tone == CellTone.ChipOn);
                 string iconKey = UiChipsLayout.IconKey(j);
                 row.SetCell(iconKey, visible: p != null && p.Icon);
                 if (p != null && p.Icon) row.SetImage(iconKey, IconOf(_model.Chips[p.Index], runtime));
@@ -394,16 +425,6 @@ internal sealed class UiChipsHandle : UiComposedHandle, IUiChips
             row.SetCell(UiChipsLayout.EmptyKey, _options.EmptyText ?? "", visible: i == 0 && _pack.Empty);
             TrySetVisible(row, true);
         }
-
-        // The first render packs before any caption is drawn to measure by; once one is, a row that reads a different
-        // width is packed again at once rather than a few frames later.
-        if (_repacking || _options.RowWidth > 0f) return;
-        float measured = MeasureRow();
-        if (measured <= 0f || Math.Abs(measured - _pack.RowWidth) <= 1f) return;
-        _measured = measured;
-        _repacking = true;
-        try { Render(); }
-        finally { _repacking = false; }
     }
 
     private CellTone ChipTone(ChipPlacement p) =>

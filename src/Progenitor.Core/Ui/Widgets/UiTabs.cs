@@ -54,7 +54,8 @@ public static class UiBadge
 
 /// <summary>
 /// P7: the tabs drawn as one kit cell row of the game's popup buttons (the Install tab's filter chips:
-/// <see cref="CellSkin.Chip"/>, the selected one on the gold plate), each followed by its badge cell.
+/// <see cref="CellSkin.Chip"/>, the selected one on the gold plate). A tab's count badge sits inside its chip, after the
+/// caption (<see cref="UiTabsLayout"/>), and each chip is as wide as its caption, badge and term marker need.
 /// </summary>
 internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
 {
@@ -63,6 +64,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     private readonly LabelTone[] _tones;
     private readonly string[] _tips;
     private readonly UiTermBinding?[] _terms;
+    private readonly bool[] _termOn;
     private readonly List<IUiHandle>[] _content;
     private readonly IUiCellRow _row;
     private readonly List<Action<int>> _changed = new();
@@ -87,6 +89,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
         }
 
         _selected = Clamp(selected);
+        _termOn = new bool[_captions.Length];
         _row = Part(panel.CellRow(new CellRowSpec(RowKey("tabs"), UiTabsLayout.Cells(_captions, _selected), plain: true)));
         for (int i = 0; i < _captions.Length; i++)
         {
@@ -165,27 +168,12 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
         catch { /* */ }
         // The chip grows by the marker's room while it explains a term (the marker keeps that room in the caption's right
         // margin), so the caption is never shortened or covered.
-        WidenForTerm(tab, !string.IsNullOrWhiteSpace(term) && !IsDisposed);
+        _termOn[tab] = !string.IsNullOrWhiteSpace(term) && !IsDisposed;
+        Render();
         if (string.IsNullOrWhiteSpace(term) || IsDisposed) return;
         // The tab's hover slot already runs HoverTab; the binding takes its hovers from there (one handler per cell).
         try { _terms[tab] = UiTerms.MarkCell(_row, UiTabsLayout.TabKey(tab), term, watchHover: false); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: tabs '" + Key + "' term '" + term + "': " + e.Message); }
-    }
-
-    /// <summary>Tab <paramref name="tab"/>'s chip at its natural width, plus the term marker's room when <paramref name="term"/>.</summary>
-    private void WidenForTerm(int tab, bool term)
-    {
-        string key = UiTabsLayout.TabKey(tab);
-        foreach (var spec in _row.Cells)
-        {
-            if (!string.Equals(spec.Key, key, StringComparison.Ordinal)) continue;
-            float width = UiTabsLayout.ChipWidth(_captions[tab], term, spec.FontSize);
-            if (Math.Abs(spec.MinWidth - width) < 0.5f) return;
-            spec.With(width: CellWidth.Px(width), minWidth: width);
-            // A cell rewrite re-places the row's cells from their specs.
-            _row.SetCell(key, _captions[tab]);
-            return;
-        }
     }
 
     /// <summary>The term marked on tab <paramref name="tab"/>, or empty (tests and readback).</summary>
@@ -204,7 +192,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     private void HoverTab(int tab, bool on)
     {
         var term = _terms[tab];
-        if (term != null && UiTerms.IsDefined(PluginId, term.Term))
+        if (term != null && term.Explains)
         {
             term.Hover(on);
             return;
@@ -229,14 +217,28 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     protected override void Render()
     {
         if (IsDisposed || !Visible) return;
-        TrySetVisible(_row, true);
-        for (int i = 0; i < _captions.Length; i++)
+        // One layout pass for the whole switch: every content handle that shows or hides asks its panel for a layout, and a
+        // tab with a list or a table holds dozens of rows (live 2026-10-14: ~40 single-row layouts per switch and scroll bar
+        // verdicts taken on half-switched pages). The batch defers those asks and lays the panel out once at the end.
+        UiLayoutBatch.Begin();
+        try
         {
-            bool on = i == _selected;
-            _row.SetCell(UiTabsLayout.TabKey(i), _captions[i], on ? CellTone.ChipOn : CellTone.ChipOff);
-            _row.SetCell(UiTabsLayout.BadgeKey(i), _badges[i], BadgeTone(_tones[i]), visible: _badges[i].Length > 0);
-            foreach (var h in _content[i]) TrySetVisible(h, on);
+            TrySetVisible(_row, true);
+            UiTabsLayout.Apply(_row.Cells, _captions, _badges, _termOn);
+            for (int i = 0; i < _captions.Length; i++)
+            {
+                bool on = i == _selected;
+                _row.SetCell(UiTabsLayout.TabKey(i), _captions[i], on ? CellTone.ChipOn : CellTone.ChipOff);
+                _row.SetCell(UiTabsLayout.BadgeKey(i), _badges[i], BadgeTone(_tones[i]), visible: _badges[i].Length > 0);
+            }
+
+            // Hide the old tab's content before showing the new one's, so the page never holds both at once.
+            for (int i = 0; i < _captions.Length; i++)
+                if (i != _selected)
+                    foreach (var h in _content[i]) TrySetVisible(h, false);
+            foreach (var h in _content[_selected]) TrySetVisible(h, true);
         }
+        finally { UiLayoutBatch.End(); }
     }
 
     /// <summary>A badge's palette: gold for a plain count, the server red for danger and warnings, green for ok.</summary>
@@ -249,16 +251,49 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     };
 }
 
-/// <summary>P7: the tab row's cells: one chip per tab (the Install filter chip) and a count badge after it.</summary>
+/// <summary>
+/// P7: the tab row's cells: one chip per tab (the Install filter chip) with its count badge inside it, after the caption.
+/// Each chip is as wide as its caption (measured per character, <see cref="UiChipsText"/>, so a capitalized word such as
+/// <c>HUD</c> is never cut), its badge and the term marker's room; the caption's right margin keeps the badge clear.
+/// Game-free: <c>UiChipsTests</c> resolves the row at the checked widths.
+/// </summary>
 internal static class UiTabsLayout
 {
     internal static string TabKey(int i) => "tab" + i;
 
     internal static string BadgeKey(int i) => "badge" + i;
 
-    /// <summary>A tab chip's width: the Install chip's natural width, plus the term marker's room when it explains a term.</summary>
-    internal static float ChipWidth(string caption, bool term, float fontSize) =>
-        InstallModsPane.ChipNaturalWidth(caption ?? "") + (term ? UiTermMarkerArt.Room(fontSize) : 0f);
+    /// <summary>A tab caption's size: the Install chip's (the kit button's).</summary>
+    internal const float CaptionFontSize = MenuPanelLayout.HeaderButtonFontSize;
+
+    /// <summary>One glyph of slack on the caption (the Install chips' rule).</summary>
+    internal const float CaptionSlack = CaptionFontSize * MenuPanelLayout.AverageGlyphEm;
+
+    /// <summary>The badge inside a chip: its text size, height, side padding, narrowest width and its inset from the chip's right edge.</summary>
+    internal const float BadgeFontSize = CellLayout.BadgeFontSize;
+    internal const float BadgeHeight = 20f;
+    internal const float BadgePad = 10f;
+    internal const float BadgeMinWidth = 22f;
+    internal const float BadgeInset = 6f;
+
+    /// <summary>Between the caption (or its term marker) and the badge.</summary>
+    internal const float BadgeGap = 4f;
+
+    /// <summary>A badge's width for <paramref name="text"/> (0 for none).</summary>
+    internal static float BadgeWidth(string? text) =>
+        string.IsNullOrEmpty(text) ? 0f : Math.Max(BadgeMinWidth, (float)Math.Ceiling(UiChipsText.Width(text, BadgeFontSize) + BadgePad));
+
+    /// <summary>The caption's right margin: half the button pad, or past the badge (its inset, width and gap) when there is one.</summary>
+    internal static float CaptionRight(string? badge) =>
+        string.IsNullOrEmpty(badge) ? CellLayout.ButtonPad * .5f : BadgeInset + BadgeWidth(badge) + BadgeGap;
+
+    /// <summary>A tab chip's width: caption, slack and pads, the badge inside it, and the term marker's room when it explains a term.</summary>
+    internal static float ChipWidth(string caption, bool term, float fontSize) => ChipWidth(caption, "", term, fontSize);
+
+    /// <inheritdoc cref="ChipWidth(string, bool, float)"/>
+    internal static float ChipWidth(string caption, string? badge, bool term, float fontSize = CaptionFontSize) =>
+        (float)Math.Ceiling(UiChipsText.Width(caption ?? "", fontSize) + fontSize * MenuPanelLayout.AverageGlyphEm
+            + CellLayout.ButtonPad * .5f + CaptionRight(badge) + (term ? UiTermMarkerArt.Room(fontSize) : 0f));
 
     internal static List<CellSpec> Cells(IReadOnlyList<string> captions, int selected)
     {
@@ -267,11 +302,55 @@ internal static class UiTabsLayout
         {
             var chip = InstallModsPane.Chip(TabKey(i), captions[i], i == selected);
             chip.Hover = true;
+            float width = ChipWidth(captions[i], "", false);
+            chip.With(width: CellWidth.Px(width), minWidth: width);
             cells.Add(chip);
-            cells.Add(new CellSpec(CellKind.Badge, BadgeKey(i)) { Visible = false }
-                .With(tone: CellTone.Client, minWidth: UiWidgetLayout.CountBadgeMinWidth));
+            // Inside the chip at its right end, over the chip art; it takes no pointer, so a press on it presses the tab.
+            cells.Add(new CellSpec(CellKind.Badge, BadgeKey(i))
+            {
+                Visible = false,
+                OverlayOf = TabKey(i),
+                OverlayInset = BadgeInset,
+                HeightOverride = BadgeHeight,
+                MinWidth = BadgeMinWidth,
+            }.With(tone: CellTone.Client, width: CellWidth.Px(BadgeMinWidth)));
         }
 
         return cells;
+    }
+
+    /// <summary>
+    /// Write every tab's chip width, caption margin and badge width into the row's live cell specs (the handle repaints
+    /// them). <paramref name="terms"/> marks the tabs whose caption explains a term (null: none).
+    /// </summary>
+    internal static void Apply(IReadOnlyList<CellSpec> cells, IReadOnlyList<string> captions, IReadOnlyList<string> badges, IReadOnlyList<bool>? terms)
+    {
+        for (int i = 0; i < captions.Count; i++)
+        {
+            string badge = i < badges.Count ? badges[i] ?? "" : "";
+            bool term = terms != null && i < terms.Count && terms[i];
+            CellSpec? chip = null, mark = null;
+            foreach (var c in cells)
+            {
+                if (string.Equals(c.Key, TabKey(i), StringComparison.Ordinal)) chip = c;
+                else if (string.Equals(c.Key, BadgeKey(i), StringComparison.Ordinal)) mark = c;
+            }
+
+            if (chip != null)
+            {
+                float width = ChipWidth(captions[i] ?? "", badge, term, chip.FontSize);
+                chip.With(width: CellWidth.Px(width), minWidth: width);
+                chip.CaptionInsetRight = badge.Length > 0 ? CaptionRight(badge) : 0f;
+            }
+
+            if (mark != null)
+            {
+                float w = Math.Max(BadgeMinWidth, BadgeWidth(badge));
+                mark.Width = CellWidth.Px(w);
+                mark.MinWidth = w;
+                mark.Text = badge;
+                mark.Visible = badge.Length > 0;
+            }
+        }
     }
 }

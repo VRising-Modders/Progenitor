@@ -76,7 +76,11 @@ public static class UiTerms
 
     private static readonly List<Handler> Changed = new();
     private static readonly List<UiTermBinding> Bindings = new();
-    private static readonly Dictionary<string, double> LastHover = new(StringComparer.Ordinal);
+    /// <summary>Per stored key: pointers inside a control marked with it now, and when one last entered or left.</summary>
+    private static readonly Dictionary<string, (int Inside, double Last)> Visits = new(StringComparer.Ordinal);
+
+    /// <summary>An enter with no leave for this long no longer holds the visit open (its control left without an exit).</summary>
+    internal const double StaleVisitSeconds = 10.0;
     private static readonly Stopwatch Watch = Stopwatch.StartNew();
     private static bool _teardownRegistered;
 
@@ -350,23 +354,30 @@ public static class UiTerms
     // ---- Hovers ----------------------------------------------------------------------------------
 
     /// <summary>
-    /// The pointer entered a control marked with <paramref name="term"/>. Counts toward the auto-hide while the marker
-    /// shows (not twice within <see cref="HoverDebounceSeconds"/>); at <see cref="AutoHideAfter"/> the marker is hidden.
-    /// Returns true when this hover hid it.
+    /// The pointer entered a control marked with <paramref name="term"/>. One pointer visit counts once toward the
+    /// auto-hide, while the marker shows: a second enter before the leave (a row and its cell, a duplicate event) is the
+    /// same visit, and an enter within <see cref="HoverDebounceSeconds"/> of the last leave continues it (a pointer
+    /// jittering on an edge). At <see cref="AutoHideAfter"/> visits the marker is hidden. Returns true when this hover hid it.
     /// </summary>
     internal static bool NoteHover(string pluginId, string term)
     {
-        if (!MarkerShown(pluginId, term)) return false;
-        int limit = AutoHideAfter;
         string key = UiHelpStore.Key(pluginId, term);
         double now;
         try { now = Clock(); }
         catch { now = 0; }
+        bool newVisit;
         lock (Gate)
         {
-            if (LastHover.TryGetValue(key, out double last) && now - last < HoverDebounceSeconds && now >= last) return false;
-            LastHover[key] = now;
+            Visits.TryGetValue(key, out var visit);
+            bool stale = visit.Inside > 0 && now - visit.Last > StaleVisitSeconds;
+            bool inside = visit.Inside > 0 && !stale;
+            bool recent = visit.Last > 0 && now >= visit.Last && now - visit.Last < HoverDebounceSeconds;
+            newVisit = !inside && !recent;
+            Visits[key] = ((stale ? 0 : visit.Inside) + 1, now);
         }
+
+        if (!newVisit || !MarkerShown(pluginId, term)) return false;
+        int limit = AutoHideAfter;
 
         if (limit <= 0) return false;
         Dictionary<string, int> counts;
@@ -391,6 +402,27 @@ public static class UiTerms
         RaiseChanged(UiHelpStore.Normalize(pluginId));
         return true;
     }
+
+    /// <summary>The pointer left a control marked with <paramref name="term"/> (ends the visit when no other one holds it).</summary>
+    internal static void NoteLeave(string pluginId, string term)
+    {
+        string key = UiHelpStore.Key(pluginId, term);
+        double now;
+        try { now = Clock(); }
+        catch { now = 0; }
+        lock (Gate)
+        {
+            Visits.TryGetValue(key, out var visit);
+            Visits[key] = (Math.Max(0, visit.Inside - 1), now);
+        }
+    }
+
+    /// <summary>
+    /// The plugin whose glossary <paramref name="handle"/>'s words come from: the mod whose page it is on when it sits on
+    /// the Mods workspace's page (that pane is the framework's, so its <see cref="IUiHandle.PluginId"/> is Progenitor's),
+    /// else the handle's own plugin id. Define a page's glossary under this id (or <c>ctx.Guid</c>, which it equals there).
+    /// </summary>
+    public static string PluginOf(IUiHandle handle) => UiHelpOwner.PluginOf(handle);
 
     // ---- Marked controls -------------------------------------------------------------------------
 
@@ -488,7 +520,7 @@ public static class UiTerms
             Changed.Clear();
             Glossaries.Clear();
             Order.Clear();
-            LastHover.Clear();
+            Visits.Clear();
             _teardownRegistered = false;
         }
 
@@ -533,6 +565,15 @@ internal sealed class UiTermBinding : IDisposable
 
     internal string Term { get; }
 
+    /// <summary>
+    /// The plugin whose glossary it reads (the mod whose Mods page the control is on, else the control's own;
+    /// <see cref="UiTerms.PluginOf"/>), as given.
+    /// </summary>
+    internal string GlossaryPlugin => _pluginId;
+
+    /// <summary>Its plugin's glossary explains the term now (a widget forwards its hover to the binding only then).</summary>
+    internal bool Explains => UiTerms.IsDefined(_pluginId, Term);
+
     /// <summary>Whether the marker should show now (defined and not hidden), whether or not a runtime draws it.</summary>
     internal bool MarkerWanted { get; private set; }
 
@@ -553,7 +594,7 @@ internal sealed class UiTermBinding : IDisposable
     internal static UiTermBinding ForHandle(IUiHandle handle, string term)
     {
         var kit = handle as UiHandle;
-        var binding = new UiTermBinding(handle.PluginId, term,
+        var binding = new UiTermBinding(UiHelpOwner.PluginOf(handle), term,
             () =>
             {
                 if (kit?.Runtime == null || kit.IsDisposed) return ScreenRect.Unknown;
@@ -574,7 +615,7 @@ internal sealed class UiTermBinding : IDisposable
     internal static UiTermBinding ForCell(IUiCellRow row, string cellKey, string term, bool watchHover, bool reserveRoom = true)
     {
         var handle = row as UiCellRowHandle;
-        var binding = new UiTermBinding(row.PluginId, term,
+        var binding = new UiTermBinding(UiHelpOwner.PluginOf(row), term,
             () => handle == null || handle.IsDisposed ? ScreenRect.Unknown : handle.NavRect(cellKey),
             () => row.IsDisposed,
             handle?.Owner);
@@ -611,8 +652,18 @@ internal sealed class UiTermBinding : IDisposable
         if (!on)
         {
             HideTooltip();
+            if (_entered)
+            {
+                _entered = false;
+                UiTerms.NoteLeave(_pluginId, Term);
+            }
+
             return;
         }
+
+        // A second enter without a leave (a row's and its cell's events, a repeated event) is the same visit.
+        bool first = !_entered;
+        _entered = true;
 
         string explanation = UiTerms.Explain(_pluginId, Term);
         if (explanation.Length == 0) return;
@@ -628,10 +679,12 @@ internal sealed class UiTermBinding : IDisposable
             catch { /* */ }
         }
 
-        UiTerms.NoteHover(_pluginId, Term);
+        if (first) UiTerms.NoteHover(_pluginId, Term);
     }
 
     private bool StillShown() => !_disposed && !Dead && _anchor().IsKnown;
+
+    private bool _entered;
 
     private void HideTooltip()
     {
@@ -646,6 +699,12 @@ internal sealed class UiTermBinding : IDisposable
         if (_disposed) return;
         _disposed = true;
         HideTooltip();
+        if (_entered)
+        {
+            _entered = false;
+            UiTerms.NoteLeave(_pluginId, Term);
+        }
+
         try { _hover?.Dispose(); }
         catch { /* */ }
         _hover = null;

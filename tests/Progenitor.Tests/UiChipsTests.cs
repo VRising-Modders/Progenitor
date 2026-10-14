@@ -60,12 +60,14 @@ public sealed class UiChipsTests : IDisposable
     [Fact]
     public void A_chip_is_one_cell_with_the_icon_and_remove_glyph_inside_its_margins()
     {
-        // "Ore" at 16: 3 glyphs x 16 x 0.55 = 26.4, one glyph of slack 8.8, the pads 8 / 8: 51.2, whole 52.
-        Assert.Equal(52f, UiChipsLayout.ChipWidth("Ore", false, false, 31f));
-        // With the remove glyph the right margin is 4 + 20 + 2 = 26: 26.4 + 8.8 + 8 + 26 = 69.2, whole 70.
-        Assert.Equal(70f, UiChipsLayout.ChipWidth("Ore", false, true, 31f));
-        // With the icon as well the left margin is 6 + 24 + 6 = 36: 97.2, whole 98.
-        Assert.Equal(98f, UiChipsLayout.ChipWidth("Ore", true, true, 36f));
+        // "Ore" at 16: O .69 + r .38 + e .50 = 1.57 em x 16 x 1.15 (the face) = 28.9, one glyph of slack 8.8, the pads
+        // 8 / 8: 53.7, whole 54.
+        Assert.Equal(28.888f, UiChipsText.Width("Ore", 16f), 2);
+        Assert.Equal(54f, UiChipsLayout.ChipWidth("Ore", false, false, 31f));
+        // With the remove glyph the right margin is 4 + 20 + 2 = 26: 71.7, whole 72.
+        Assert.Equal(72f, UiChipsLayout.ChipWidth("Ore", false, true, 31f));
+        // With the icon as well the left margin is 6 + 24 + 6 = 36: 99.7, whole 100.
+        Assert.Equal(100f, UiChipsLayout.ChipWidth("Ore", true, true, 36f));
         Assert.Equal(36f, UiChipsLayout.ChipWidth("+", false, false, 36f)); // the add chip is square
         Assert.Equal(8f, UiChipsLayout.Spacing);
         Assert.Equal("Iron Ore · 120", UiChipsLayout.Caption(new UiChip("a", "Iron Ore") { Note = "120" }));
@@ -86,7 +88,7 @@ public sealed class UiChipsTests : IDisposable
         // so the controller's focus frame (3 outside a chip) never touches the chip above or below.
         Assert.Equal(UiChipsLayout.Spacing, UiChipsLayout.LineHeight - UiChipsLayout.ItemChipHeight + UiChipsLayout.LineGap);
 
-        var cells = UiChipsLayout.LineCells(4, "×");
+        var cells = UiChipsLayout.LineCells(4);
         UiChipsLayout.Apply(cells, items, 0);
         Assert.Equal(36f, cells.Single(c => c.Key == "chip0").HeightOverride);
         Assert.Equal(36f, cells.Single(c => c.Key == "chip2").HeightOverride); // the add chip matches
@@ -137,7 +139,7 @@ public sealed class UiChipsTests : IDisposable
         Assert.Equal(0f, wide.Left);
         Assert.True(wide.Right <= 560f, wide + " leaves the row");
         // The shortened caption fits between the icon and the remove glyph.
-        Assert.True(CellLayout.EstimateTextWidth(wide.Shown, UiChipsLayout.CaptionFontSize)
+        Assert.True(UiChipsText.Width(wide.Shown, UiChipsLayout.CaptionFontSize)
                     <= wide.Width - UiChipsLayout.CaptionLeft(true) - UiChipsLayout.CaptionRight(true) - UiChipsLayout.CaptionSlack + .01f);
         Assert.Equal(2, pack.Of(2)!.Line);
         Assert.False(pack.Of(0)!.Truncated);
@@ -222,7 +224,7 @@ public sealed class UiChipsTests : IDisposable
                     var pack = UiChipsLayout.Pack(MixedSet(), width, 3, perLine, add);
                     for (int line = 0; line < Math.Max(1, pack.Lines.Count); line++)
                     {
-                        var cells = UiChipsLayout.LineCells(perLine, UiWidgetLayout.RemoveGlyph);
+                        var cells = UiChipsLayout.LineCells(perLine);
                         UiChipsLayout.Apply(cells, pack, line);
                         var placed = MenuPanelLayout.CellColumns(width, cells);
                         string at = " at " + width + " (line " + line + ", " + perLine + " per line, add " + (add ?? "none") + ")";
@@ -251,7 +253,7 @@ public sealed class UiChipsTests : IDisposable
                             Assert.Equal(-width / 2f + chip.Left, cell.Left, 2);
                             Assert.Equal(chip.Width, cell.Width, 2);
                             float captionRoom = chip.Width - UiChipsLayout.CaptionLeft(chip.Icon) - UiChipsLayout.CaptionRight(chip.Remove);
-                            Assert.True(CellLayout.EstimateTextWidth(chip.Shown, UiChipsLayout.CaptionFontSize) <= captionRoom + .01f,
+                            Assert.True(UiChipsText.Width(chip.Shown, UiChipsLayout.CaptionFontSize) <= captionRoom + .01f,
                                 chip.Shown + " does not fit between its margins" + at);
                             var icon = placed.Single(p => p.Key == UiChipsLayout.IconKey(chip.Slot));
                             var remove = placed.Single(p => p.Key == UiChipsLayout.RemoveKey(chip.Slot));
@@ -385,15 +387,22 @@ public sealed class UiChipsTests : IDisposable
     }
 
     [Fact]
-    public void A_selected_chip_draws_its_remove_glyph_on_the_plate_tone()
+    public void A_selected_chip_draws_its_remove_mark_in_the_plates_cream()
     {
         var chips = NewPanel().Chips("sel", Belts(), new UiChipsOptions { RowWidth = 1108f });
+        var handle = (UiChipsHandle)chips;
         var line = Row("sel:line0");
         Assert.Equal(CellTone.ChipOff, Cell(line, "x0").Tone);
+        Assert.Equal((UiDrawnMark.RemoveMark, UiIconMarks.Normal), handle.RemoveMarkAt(0, 0)); // the drawn cross, muted gold
+        Assert.Equal(UiDrawnMark.None, handle.RemoveMarkAt(0, 1).Mark); // Wood belt is not removable: no mark
         Assert.True(chips.SetSelected("ores", true));
         Assert.Equal(CellTone.ChipOn, Cell(line, "chip0").Tone);
         Assert.Equal(CellTone.ChipOn, Cell(line, "x0").Tone);
-        Assert.Equal(CellWrap.Glyph, Cell(line, "x0").Wrap); // drawn centered and not underlined
+        Assert.Equal((UiDrawnMark.RemoveMark, UiIconMarks.OnPlate), handle.RemoveMarkAt(0, 0)); // light cream on the plate
+        Assert.Equal(MenuPalette.ChipOnText, UiIconMarks.OnPlate);
+        Assert.True(chips.SetSelected("ores", false));
+        Assert.Equal(UiIconMarks.Normal, handle.RemoveMarkAt(0, 0).Color);
+        Assert.Equal("", Cell(line, "x0").Text); // no font glyph: the face is the drawn mark
         Assert.Equal("chip0", Cell(line, "x0").OverlayOf);    // inside the chip's art
         Assert.Equal("chip2", Cell(line, "icon2").OverlayOf);
     }
@@ -582,7 +591,7 @@ public sealed class UiChipsTermTests : IDisposable
             new(1, "Wood", false, false, term: true),
             new(2, "Gems", false, false),
         }, 760f, 3, 8, null);
-        var cells = UiChipsLayout.LineCells(4, "×");
+        var cells = UiChipsLayout.LineCells(4);
         UiChipsLayout.Apply(cells, pack, 0);
         // The caption's right margin covers the marker: past the remove glyph on an item chip, past the pad on a plain one.
         Assert.Equal(UiChipsLayout.CaptionRight(true) + reserve, cells.Single(c => c.Key == "chip0").CaptionInsetRight);
@@ -591,7 +600,7 @@ public sealed class UiChipsTermTests : IDisposable
         foreach (var p in pack.Lines[0])
         {
             float room = p.Width - UiChipsLayout.CaptionLeft(p.Icon) - UiChipsLayout.CaptionRight(p.Remove, p.Term);
-            Assert.True(CellLayout.EstimateTextWidth(p.Shown, UiChipsLayout.CaptionFontSize) <= room + .01f, p.Shown);
+            Assert.True(UiChipsText.Width(p.Shown, UiChipsLayout.CaptionFontSize) <= room + .01f, p.Shown);
         }
 
         // A long caption with a term is shortened so the marker still fits inside the row.
@@ -601,7 +610,7 @@ public sealed class UiChipsTermTests : IDisposable
         }, 560f, 3, 8, null).Of(0)!;
         Assert.True(wide.Truncated);
         Assert.True(wide.Right <= 560f);
-        Assert.True(CellLayout.EstimateTextWidth(wide.Shown, UiChipsLayout.CaptionFontSize)
+        Assert.True(UiChipsText.Width(wide.Shown, UiChipsLayout.CaptionFontSize)
                     <= wide.Width - UiChipsLayout.CaptionLeft(false) - UiChipsLayout.CaptionRight(true, true) + .01f);
     }
 
@@ -641,5 +650,210 @@ public sealed class UiChipsTermTests : IDisposable
         chips.SetChips(new[] { new UiChip("ores", "Ores belt") { Term = "Belt" } });
         chips.Dispose();
         Assert.Empty(UiTerms.Marked);
+    }
+}
+
+/// <summary>
+/// P7b live round 3: captions measured per character (no short word cut), the tab badge inside its chip with every tab
+/// sized to its caption, one layout pass per tab switch, the demo's no-prefab chip without an empty well.
+/// </summary>
+[Collection("UiStatic")]
+public sealed class UiChipsTabsRoundTests : IDisposable
+{
+    private readonly WidgetRuntimeFake _runtime = new();
+    private readonly object _owner = new();
+    private readonly List<IUiPanel> _panels = new();
+
+    public UiChipsTabsRoundTests()
+    {
+        UiApi.ResetForTests();
+        UiApi.SetRuntimeForTests(_runtime);
+        UiLayoutBatch.ResetForTests();
+    }
+
+    public void Dispose()
+    {
+        foreach (var p in _panels) p.Dispose();
+        UiLayoutBatch.ResetForTests();
+        UiApi.ResetForTests();
+    }
+
+    private IUiPanel NewPanel()
+    {
+        var panel = UiApi.Panel("Round", _owner, "example.round");
+        _panels.Add(panel);
+        return panel;
+    }
+
+    private CellRowTests.FakeCellRow Row(string key) => _runtime.Rows.Single(r => r.Text == key);
+
+    [Fact]
+    public void Captions_are_measured_per_character_so_wide_letters_and_capitals_get_their_room()
+    {
+        // The kit's mean glyph gave "Wood" and "Food" the same width and "HUD" as much as "hud"; live, "Wood" and "HUD" were
+        // cut while "Food" fit.
+        Assert.True(UiChipsText.Width("Wood", 16f) > UiChipsText.Width("Food", 16f));
+        Assert.True(UiChipsText.Width("HUD", 18f) > UiChipsText.Width("hud", 18f));
+        Assert.True(UiChipsText.Width("Wood", 16f) > CellLayout.EstimateTextWidth("Wood", 16f) * 1.2f);
+        Assert.True(UiChipsText.Width("HUD", 18f) > CellLayout.EstimateTextWidth("HUD", 18f) * 1.3f);
+        Assert.Equal("Wood", UiChipsText.Clip("Wood", UiChipsText.Width("Wood", 16f), 16f));
+        Assert.EndsWith("…", UiChipsText.Clip("Woodworking", UiChipsText.Width("Wood", 16f), 16f));
+        Assert.True(UiChipsText.Width(UiChipsText.Clip("Woodworking bench", 60f, 16f), 16f) <= 60f + .01f);
+    }
+
+    [Fact]
+    public void No_short_word_is_cut_at_any_checked_width()
+    {
+        var words = Progenitor.ControlsSample.WidgetsDemo.SampleFilters().Select(c => c.Label)
+            .Concat(new[] { "Wood", "HUD", "Ores belt", "Wood belt", "Crystal · 240", "Coarse Thread · 75", "Planks · 1,320", "+" })
+            .ToList();
+        foreach (float width in UiWidgetLayout.CheckedRowWidths)
+        {
+            var pack = UiChipsLayout.Pack(words.Select((w, i) => new UiChipsLayout.ChipPiece(i, w, i % 3 == 0, i % 2 == 0)).ToList(),
+                width, 8, 16, "+");
+            Assert.All(pack.Lines.SelectMany(l => l), p => Assert.False(p.Truncated, p.Caption + " was cut at " + width));
+        }
+    }
+
+    [Fact]
+    public void Tab_badges_sit_inside_their_chip_and_every_chip_fits_its_caption()
+    {
+        var captions = new[] { "Lists", "Input", "Table", "Layout", "HUD" };
+        var badges = new[] { "4", "1", "99+", "", "" };
+        var terms = new[] { false, false, false, false, true };
+        foreach (float width in new[] { 760f, 1108f, 1248f })
+        {
+            var cells = UiTabsLayout.Cells(captions, 0);
+            UiTabsLayout.Apply(cells, captions, badges, terms);
+            var placed = MenuPanelLayout.CellColumns(width, cells);
+            for (int i = 0; i < captions.Length; i++)
+            {
+                var chip = placed.Single(p => p.Key == UiTabsLayout.TabKey(i));
+                var badge = placed.Single(p => p.Key == UiTabsLayout.BadgeKey(i));
+                Assert.True(chip.Visible && chip.Left >= -width / 2f - .01f && chip.Right <= width / 2f + .01f, chip + " leaves the row");
+                var spec = cells.Single(c => c.Key == UiTabsLayout.TabKey(i));
+                float room = chip.Width - CellLayout.ButtonPad * .5f - UiTabsLayout.CaptionRight(badges[i])
+                             - (terms[i] ? UiTermMarkerArt.Room(spec.FontSize) : 0f);
+                Assert.True(UiChipsText.Width(captions[i], spec.FontSize) <= room + .01f, captions[i] + " does not fit its chip at " + width);
+                Assert.Equal(badges[i].Length > 0, badge.Visible);
+                if (badges[i].Length == 0) continue;
+                // Inside the chip, at its right end, clear of the caption.
+                Assert.Equal(UiTabsLayout.TabKey(i), cells.Single(c => c.Key == UiTabsLayout.BadgeKey(i)).OverlayOf);
+                Assert.Equal(chip.Right - UiTabsLayout.BadgeInset, badge.Right, 2);
+                Assert.True(badge.Left >= chip.Left + CellLayout.ButtonPad * .5f + UiChipsText.Width(captions[i], spec.FontSize) - .01f);
+                Assert.Equal(UiTabsLayout.CaptionRight(badges[i]), spec.CaptionInsetRight);
+            }
+
+            for (int i = 0; i < captions.Length; i++)
+                for (int j = i + 1; j < captions.Length; j++)
+                    Assert.False(CellLayout.Overlap(placed.Single(p => p.Key == UiTabsLayout.TabKey(i)), placed.Single(p => p.Key == UiTabsLayout.TabKey(j))));
+        }
+    }
+
+    [Fact]
+    public void A_badge_widens_its_tab_chip_and_goes_away_with_it()
+    {
+        var tabs = NewPanel().Tabs("bt", new[] { "Lists", "HUD" });
+        var row = Row("bt:tabs");
+        float plain = row.Cells().Single(c => c.Key == "tab0").MinWidth;
+        Assert.Equal(UiTabsLayout.ChipWidth("Lists", "", false), plain);
+        tabs.SetBadge(0, 120);
+        var chip = row.Cells().Single(c => c.Key == "tab0");
+        var badge = row.Cells().Single(c => c.Key == "badge0");
+        Assert.Equal("99+", badge.Text);
+        Assert.True(badge.Visible);
+        Assert.Equal(plain - CellLayout.ButtonPad * .5f + UiTabsLayout.CaptionRight("99+"), chip.MinWidth, 0);
+        tabs.SetBadge(0, 0);
+        Assert.False(row.Cells().Single(c => c.Key == "badge0").Visible);
+        Assert.Equal(plain, row.Cells().Single(c => c.Key == "tab0").MinWidth);
+    }
+
+    /// <summary>A content handle that asks for a layout on every visibility change, as a kit row does.</summary>
+    private sealed class LayoutProbe : IUiHandle
+    {
+        private readonly Counter _counter;
+        private bool _visible = true;
+
+        public LayoutProbe(Counter counter) => _counter = counter;
+
+        public string Text { get; set; } = "";
+
+        public bool Visible
+        {
+            get => _visible;
+            set
+            {
+                if (_visible == value) return;
+                _visible = value;
+                if (UiLayoutBatch.ShouldRunLayout()) _counter.Immediate++;
+            }
+        }
+
+        public bool Enabled => true;
+        public bool IsDisposed => false;
+        public UiHandleState State => UiHandleState.Shown;
+        public string PluginId => "example.round";
+        public string RootName => "progenitor-ui-example.round";
+        public void Dispose() { }
+    }
+
+    private sealed class Counter
+    {
+        public int Immediate;
+        public int Flushes;
+    }
+
+    [Fact]
+    public void A_tab_switch_lays_the_panel_out_once()
+    {
+        var counter = new Counter();
+        UiLayoutBatch.BindFlush(() => counter.Flushes++);
+        var tabs = NewPanel().Tabs("lb", new[] { "One", "Two" });
+        for (int i = 0; i < 20; i++)
+        {
+            tabs.Add(0, new LayoutProbe(counter));
+            tabs.Add(1, new LayoutProbe(counter));
+        }
+
+        counter.Immediate = 0;
+        counter.Flushes = 0;
+        tabs.Selected = 1; // 40 visibility changes
+        Assert.Equal(0, counter.Immediate);
+        Assert.Equal(1, counter.Flushes);
+        tabs.Selected = 0;
+        Assert.Equal(0, counter.Immediate);
+        Assert.Equal(2, counter.Flushes);
+    }
+
+    [Fact]
+    public void A_chip_without_an_item_id_draws_no_empty_well_and_the_remove_button_is_a_drawn_mark()
+    {
+        var chips = NewPanel().Chips("pl", Progenitor.ControlsSample.WidgetsDemo.SampleMembers(), new UiChipsOptions { RowWidth = 1108f });
+        var line = Row("pl:line0");
+        Assert.True(line.Cells().Single(c => c.Key == "icon0").Visible);  // Crystal: the game icon's well
+        Assert.True(line.Cells().Single(c => c.Key == "icon1").Visible);  // Coarse Thread
+        Assert.False(line.Cells().Single(c => c.Key == "icon2").Visible); // Planks: no id, no well
+        Assert.True(_runtime.ItemIconAsks >= 2);
+        var remove = line.Cells().Single(c => c.Key == "x0");
+        Assert.True(remove.Visible);
+        Assert.Equal("", remove.Text); // no caption: the face is the drawn remove mark (UiIconMarks)
+        Assert.True(remove.Hover);     // its own hover brightens the mark
+        Assert.Equal(UiDrawnMark.RemoveMark, ((UiChipsHandle)chips).RemoveMarkAt(0, 0).Mark);
+        Assert.Equal("chip0", remove.OverlayOf);
+        Assert.NotEqual(0, line.WiredIdOf("x0")); // a click target of its own, over the chip
+        Assert.Equal(0, chips.Overflow);
+    }
+}
+
+public sealed class UiIconMarksPlateTests
+{
+    [Fact]
+    public void A_mark_on_the_gold_plate_is_cream_unless_it_is_faint()
+    {
+        Assert.Equal(UiIconMarks.OnPlate, UiIconMarks.ColorFor(enabled: true, hovered: false, onPlate: true));
+        Assert.Equal(UiIconMarks.OnPlate, UiIconMarks.ColorFor(enabled: true, hovered: true, onPlate: true));
+        Assert.Equal(UiIconMarks.Faint, UiIconMarks.ColorFor(enabled: false, hovered: false, onPlate: true));
+        Assert.Equal(UiIconMarks.Bright, UiIconMarks.ColorFor(enabled: true, hovered: true, onPlate: false));
+        Assert.Equal(UiIconMarks.ColorFor(true, false), UiIconMarks.ColorFor(true, false, false));
     }
 }

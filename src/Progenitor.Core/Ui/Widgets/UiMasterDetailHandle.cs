@@ -43,10 +43,9 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
     private readonly UiTermBinding?[] _masterTerms;
     private readonly UiTermBinding?[] _detailTerms;
     private IDisposable? _hoverTick;
-    private string _grip = UiWidgetLayout.GripGlyph;
-    private string _up = UiWidgetLayout.UpGlyph;
-    private string _down = UiWidgetLayout.DownGlyph;
-    private string _removeGlyph = UiWidgetLayout.RemoveGlyph;
+
+    /// <summary>The member rows' grip, up, down and remove faces: drawn marks, not text (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiIconMarks _marks = new();
 
     internal UiMasterDetailHandle(IUiPanel panel, string key, UiMasterDetailOptions? options)
         : base(panel, key, key)
@@ -59,7 +58,6 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         _detailShown = new UiDetailSlot?[_model.Rows];
         _masterTerms = new UiTermBinding?[_model.Rows];
         _detailTerms = new UiTermBinding?[_model.Rows];
-        ResolveGlyphs();
 
         if (captions != null)
         {
@@ -73,16 +71,21 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
             int r = i;
             bool searchRow = _model.Search && r == 0;
             var cells = UiMasterDetailLayout.RowCells(_fraction, searchRow, _options.SearchPlaceholder);
-            foreach (var c in cells) c.Text = GlyphFor(c);
             // Plain rows (no whole-row tint): the master half's band and the divider's rule are tiles the widget sets
             // (CellRowSpec.TileStates), so only the left half lights. The first row starts the rule (no reach above it).
-            var spec = new CellRowSpec(RowKey("row" + r), cells, plain: true, hover: true, separator: true)
+            // The right inset keeps the detail's last column (a member's remove) clear of the scroll bar's band.
+            var spec = new CellRowSpec(RowKey("row" + r), cells, plain: true, hover: true, separator: true,
+                rightInset: UiMasterDetailLayout.ScrollInset)
             {
                 TileStates = true,
                 TileEdge = r == 0 ? CellSectionEdge.First : CellSectionEdge.Middle,
             };
             var row = Part(panel.CellRow(spec));
             _rows.Add(row);
+            _marks.Attach(row, UiMasterDetailLayout.CellGrip, watchHover: false); // its pointer events are the drag's
+            _marks.Attach(row, UiMasterDetailLayout.CellUp, watchHover: true);
+            _marks.Attach(row, UiMasterDetailLayout.CellDown, watchHover: true);
+            _marks.Attach(row, UiMasterDetailLayout.CellRemove, watchHover: true);
             Tile(row, UiMasterDetailLayout.DividerTile, UiTileState.Rule);
             if (searchRow) Lease(row.OnChanged(UiMasterDetailLayout.CellMSearch, Typed));
             else Lease(row.OnRowClick(() => ClickMaster(r)));
@@ -144,27 +147,17 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
         Render();
     }
 
-    private void ResolveGlyphs()
-    {
-        var runtime = WidgetRuntime.Current;
-        if (runtime == null) return;
-        try
-        {
-            _grip = runtime.DrawableGlyph(UiWidgetLayout.GripGlyph, UiWidgetLayout.GripFallback);
-            _up = runtime.DrawableGlyph(UiWidgetLayout.UpGlyph, UiWidgetLayout.UpFallback);
-            _down = runtime.DrawableGlyph(UiWidgetLayout.DownGlyph, UiWidgetLayout.DownFallback);
-            _removeGlyph = runtime.DrawableGlyph(UiWidgetLayout.RemoveGlyph, UiWidgetLayout.RemoveFallback);
-        }
-        catch { /* the preferred glyphs stay */ }
-    }
+    /// <summary>Tests and readback: the drawn mark on row <paramref name="r"/>'s icon button and whether it is drawn enabled.</summary>
+    internal (UiDrawnMark Mark, bool Enabled) MarkAt(int r, string cellKey) =>
+        (_marks.MarkOf(_rows[r], cellKey), _marks.EnabledOf(_rows[r], cellKey));
 
-    private string GlyphFor(CellSpec cell) => cell.Key switch
+    /// <summary>The member row's icon buttons and their marks.</summary>
+    private static readonly (string Key, UiDrawnMark Mark)[] IconCells =
     {
-        UiMasterDetailLayout.CellGrip => _grip,
-        UiMasterDetailLayout.CellUp => _up,
-        UiMasterDetailLayout.CellDown => _down,
-        UiMasterDetailLayout.CellRemove => _removeGlyph,
-        _ => cell.Text,
+        (UiMasterDetailLayout.CellGrip, UiDrawnMark.GripMark),
+        (UiMasterDetailLayout.CellUp, UiDrawnMark.UpMark),
+        (UiMasterDetailLayout.CellDown, UiDrawnMark.DownMark),
+        (UiMasterDetailLayout.CellRemove, UiDrawnMark.RemoveMark),
     };
 
     // ---- IUiMasterDetail -----------------------------------------------------------------------
@@ -464,7 +457,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
 
         // A caption that explains a term shows the glossary line (the binding draws the box, anchored on the caption).
         var term = side == 1 ? _masterTerms[r] : side == 2 ? _detailTerms[r] : null;
-        if (term != null && UiTerms.IsDefined(PluginId, term.Term))
+        if (term != null && term.Explains)
         {
             term.Hover(true);
             return;
@@ -747,6 +740,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
     {
         StopDrag();
         StopHover();
+        _marks.Dispose();
         for (int r = 0; r < _rows.Count; r++)
         {
             SyncTerm(_masterTerms, r, UiMasterDetailLayout.CellMTitle, "");
@@ -930,7 +924,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
                     bool dragging = members.Dragging;
                     bool held = dragging && s.MemberIndex == members.DragTarget;
                     int real = dragging ? -1 : s.MemberIndex;
-                    if (line.Reorder) show[UiMasterDetailLayout.CellGrip] = (_grip, held ? CellTone.Gold : CellTone.Normal);
+                    if (line.Reorder) show[UiMasterDetailLayout.CellGrip] = ("", held ? CellTone.Gold : CellTone.Normal);
                     if (AnyIcon(members.Items))
                     {
                         iconCell = true;
@@ -947,8 +941,8 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
                     if (item.Badge.Length > 0) show[UiMasterDetailLayout.CellDCount] = (item.Badge, CellTone.Client);
                     if (line.Reorder)
                     {
-                        show[UiMasterDetailLayout.CellUp] = (_up, !dragging && members.CanMoveUp(real) ? CellTone.Normal : CellTone.Faint);
-                        show[UiMasterDetailLayout.CellDown] = (_down, !dragging && members.CanMoveDown(real) ? CellTone.Normal : CellTone.Faint);
+                        show[UiMasterDetailLayout.CellUp] = ("", !dragging && members.CanMoveUp(real) ? CellTone.Normal : CellTone.Faint);
+                        show[UiMasterDetailLayout.CellDown] = ("", !dragging && members.CanMoveDown(real) ? CellTone.Normal : CellTone.Faint);
                     }
 
                     if (AnyDetail(members.Items))
@@ -959,7 +953,7 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
                     }
 
                     if (line.Remove)
-                        show[UiMasterDetailLayout.CellRemove] = (_removeGlyph, item.Removable && !dragging ? CellTone.Normal : CellTone.Faint);
+                        show[UiMasterDetailLayout.CellRemove] = ("", item.Removable && !dragging ? CellTone.Normal : CellTone.Faint);
                     break;
                 }
                 default:
@@ -1018,6 +1012,10 @@ internal sealed class UiMasterDetailHandle : UiComposedHandle, IUiMasterDetail
             if (show.TryGetValue(key, out var v)) Set(row, key, v.Text, v.Tone, visible: true, force: resized.Contains(key));
             else Set(row, key, visible: false);
         }
+
+        // The icon buttons' faces follow their cells: a mark while shown, faint when the button does nothing on this row.
+        foreach (var (key, mark) in IconCells)
+            _marks.Set(row, key, show.TryGetValue(key, out var face) ? mark : UiDrawnMark.None, show.TryGetValue(key, out face) && face.Tone != CellTone.Faint);
 
         if (iconCell) row.SetImage(UiMasterDetailLayout.CellDIcon, icon);
         if (row.Expanded != open) row.SetExpanded(open);

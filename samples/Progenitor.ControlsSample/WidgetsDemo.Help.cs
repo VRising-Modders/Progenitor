@@ -34,7 +34,8 @@ internal sealed partial class WidgetsDemo
     {
         if (panel == null) throw new ArgumentNullException(nameof(panel));
         if (tabs == null) throw new ArgumentNullException(nameof(tabs));
-        string pluginId = panel.PluginId;
+        // The mod whose page this is (on the Mods workspace the pane itself is the framework's).
+        string pluginId = UiTerms.PluginOf(panel);
         UiTerms.Define(pluginId, SampleGlossary());
 
         tabs.Add(tab, panel.Note("Hover a word with a small circle-i to read what it means. The marker goes away after a few hovers; the explanation stays."));

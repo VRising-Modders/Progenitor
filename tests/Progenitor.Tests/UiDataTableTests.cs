@@ -343,7 +343,7 @@ public sealed class UiDataTableTests : IDisposable
         Assert.Equal(new[] { "total" }, table.HiddenColumns);
         Assert.True(Cell(Row("t:row0"), "c:note").Visible);
         Assert.Equal(new[] { "note", "total" }, changes);
-        Assert.Equal("Columns (1 hidden)", Cell(Row("t:footer"), UiDataTableLayout.CellColumns).Text);
+        Assert.Equal("Columns · 1 hidden", Cell(Row("t:footer"), UiDataTableLayout.CellColumns).Text);
     }
 
     [Fact]
@@ -429,7 +429,8 @@ public sealed class UiDataTableTests : IDisposable
         Assert.True(Row("t:row1").Selected);
         Assert.True(Row("t:row3").Selected);
         Assert.False(Row("t:row0").Selected);
-        Assert.Equal(_runtime.Check, Cell(Row("t:row3"), UiDataTableLayout.CellCheck).Text);
+        Assert.Equal(UiDrawnMark.CheckMark, handle.CheckMarkAt(3)); // the drawn check mark, not a text glyph
+        Assert.Equal("", Cell(Row("t:row3"), UiDataTableLayout.CellCheck).Text);
         table.SetRows(Sample().Where(r => r.Id != "d"));
         Assert.Equal(new[] { "b" }, table.Selected);
         Assert.Equal(new[] { 1, 2 }, events); // the refresh raised nothing
@@ -1213,6 +1214,114 @@ public sealed class UiDataTableTests : IDisposable
         Assert.Null(_runtime.Tooltip);
     }
 
+    // ---- Live review round 3 --------------------------------------------------------------------------
+
+    [Fact]
+    public void Enter_commits_on_the_next_frame_once_the_box_gave_up_the_keyboard()
+    {
+        var (table, handle) = NewTable();
+        var edits = new List<UiTableEdit>();
+        table.OnEdit(edits.Add);
+        var row0 = Row("t:row0");
+        _runtime.Focused = (row0, "e:cap");
+        Type(row0, "e:cap", "42");
+        _runtime.Tick();
+        Assert.Empty(edits); // still typing
+        _runtime.Focused = null; // Enter: the runtime takes the keyboard from the box
+        _runtime.Tick();
+        Assert.Equal(42d, Assert.Single(edits).NewValue);
+        Assert.Equal(0, handle.DraftCount);
+    }
+
+    [Fact]
+    public void Every_value_box_is_right_aligned_and_commits_on_enter()
+    {
+        NewTable(options: Options(visible: 4));
+        Assert.Equal(4, _runtime.Setups.Count); // one editable column, four slots
+        Assert.All(_runtime.Setups, s => Assert.Equal(("e:cap", true, true), (s.Cell, s.Right, s.Enter)));
+    }
+
+    [Fact]
+    public void A_row_without_an_icon_draws_no_well_and_a_known_item_draws_its_icon()
+    {
+        var rows = Sample();
+        rows[0].ItemPrefab = 77; // the game has this icon
+        rows[1].ItemPrefab = 78; // the game has none
+        var sprite = new object();
+        _runtime.Icons[77] = sprite;
+        NewTable(rows);
+        Assert.True(Cell(Row("t:row0"), UiDataTableLayout.CellIcon).Visible);
+        Assert.Same(sprite, Row("t:row0").Images[UiDataTableLayout.CellIcon]);
+        Assert.False(Cell(Row("t:row1"), UiDataTableLayout.CellIcon).Visible); // no empty well
+        Assert.True(Cell(Row("t:row1"), UiDataTableLayout.CellIconPad).Visible); // the blank keeps the column
+        Assert.False(Cell(Row("t:row2"), UiDataTableLayout.CellIcon).Visible);
+        Assert.True(Cell(Row("t:header"), UiDataTableLayout.CellIcon).Visible);
+    }
+
+    [Fact]
+    public void An_empty_status_stays_empty_though_its_severity_sorts()
+    {
+        var cols = new List<UiTableColumn> { new("name", "Name"), new("status", "Status") { Width = 160f } };
+        var table = NewPanel().DataTable("t", cols, Options());
+        table.SetRows(new[]
+        {
+            new UiTableRow("x").Text("name", "x").Set("status", new UiTableCell("") { Value = 0 }),
+            new UiTableRow("y").Text("name", "y").Set("status", new UiTableCell("Short") { Value = 4 }),
+        });
+        Assert.Equal("", Cell(Row("t:row0"), "c:status").Text);
+        Assert.Equal("Short", Cell(Row("t:row1"), "c:status").Text);
+        table.Sort = new[] { new UiTableSortKey("status", false) };
+        Assert.Equal("Short", Cell(Row("t:row0"), "c:status").Text);
+    }
+
+    [Fact]
+    public void A_sorted_caption_turns_gold_and_back()
+    {
+        var (table, handle) = NewTable();
+        table.SortBy("total");
+        Assert.True(handle.CaptionGold("total"));
+        Assert.False(handle.CaptionGold("name"));
+        Assert.Equal(MenuPalette.HeaderSorted, _runtime.TextColors["t:header/c:total"]);
+        table.Sort = new[] { new UiTableSortKey("name", true), new UiTableSortKey("total", false) };
+        Assert.True(handle.CaptionGold("name") && handle.CaptionGold("total"));
+        table.Sort = Array.Empty<UiTableSortKey>();
+        Assert.False(handle.CaptionGold("total"));
+        Assert.Null(_runtime.TextColors["t:header/c:total"]);
+        // A caption rewritten (hidden and shown again) is gold again while it sorts.
+        table.SortBy("total");
+        table.SetColumnVisible("total", true);
+        Assert.Equal(MenuPalette.HeaderSorted, _runtime.TextColors["t:header/c:total"]);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(5)]
+    [InlineData(12)]
+    public void The_columns_button_fits_its_longest_caption(int hideable)
+    {
+        float width = UiDataTableLayout.ColumnsButtonWidthFor(hideable);
+        var button = UiDataTableLayout.FooterCells(true, hideable)[1];
+        Assert.Equal(width, button.Width.Value);
+        for (int hidden = 0; hidden <= hideable; hidden++)
+        {
+            button.Text = UiDataTableLayout.ColumnsCaption(hidden);
+            Assert.True(CellLayout.CaptionFits(button, width - UiDataTableLayout.DropdownArrowRoom), button.Text + " is clipped");
+        }
+
+        Assert.Equal("Columns · 2 hidden", UiDataTableLayout.ColumnsCaption(2));
+    }
+
+    [Fact]
+    public void The_demo_status_column_holds_its_longest_word_and_plurals_read_right()
+    {
+        var status = Progenitor.ControlsSample.WidgetsDemo.TableColumns().Single(c => c.Key == "status");
+        var cell = new CellSpec(CellKind.Text, "c:status").With(text: "Below reserve");
+        Assert.True(CellLayout.CaptionFits(cell, UiDataTableLayout.WidthOf(status, fill: false)));
+        Assert.Equal("1 chest", Progenitor.ControlsSample.WidgetsDemo.Chests(1));
+        Assert.Equal("2 chests", Progenitor.ControlsSample.WidgetsDemo.Chests(2));
+        Assert.DoesNotContain(Progenitor.ControlsSample.WidgetsDemo.TableRows(), r => r.Detail.Contains(" 1 chests", StringComparison.Ordinal));
+    }
+
     // ---- Term markers on the header -------------------------------------------------------
 
     [Fact]
@@ -1351,7 +1460,10 @@ internal sealed class TableRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunti
 
     public bool PrimaryHeld() => false;
 
-    public object? ItemIcon(int prefab) => null;
+    /// <summary>The game item icons the fake knows, by prefab (an object stands in for a sprite).</summary>
+    public readonly Dictionary<int, object> Icons = new();
+
+    public object? ItemIcon(int prefab) => Icons.TryGetValue(prefab, out var icon) ? icon : null;
 
     public string? ItemName(int prefab) => null;
 
@@ -1367,6 +1479,17 @@ internal sealed class TableRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunti
         Focused is { } f && ReferenceEquals(f.Row, row) && f.Cell == cellKey;
 
     public void SetCellHint(IRuntimeCellRow row, string cellKey, string hint) { }
+
+    /// <summary>The value boxes set up (right-aligned, Enter commits), by row key and cell.</summary>
+    public readonly List<(string Row, string Cell, bool Right, bool Enter)> Setups = new();
+
+    public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits) =>
+        Setups.Add((row.Text, cellKey, rightAligned, enterCommits));
+
+    /// <summary>The last color each header caption was asked to take (null: its own tone).</summary>
+    public readonly Dictionary<string, PaletteColor?> TextColors = new();
+
+    public void SetCellTextColor(IRuntimeCellRow row, string cellKey, PaletteColor? color) => TextColors[row.Text + "/" + cellKey] = color;
 
     public int Released;
 

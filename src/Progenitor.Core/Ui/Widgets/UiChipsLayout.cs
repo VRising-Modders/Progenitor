@@ -112,7 +112,7 @@ internal static class UiChipsLayout
     /// </summary>
     internal static float ChipWidth(string caption, bool icon, bool remove, float height, bool term = false) =>
         Math.Max(height, (float)Math.Ceiling(
-            CellLayout.EstimateTextWidth(caption ?? "", CaptionFontSize) + CaptionSlack + CaptionLeft(icon) + CaptionRight(remove, term)));
+            UiChipsText.Width(caption ?? "", CaptionFontSize) + CaptionSlack + CaptionLeft(icon) + CaptionRight(remove, term)));
 
     // ---- Cells ---------------------------------------------------------------------------------
 
@@ -130,10 +130,10 @@ internal static class UiChipsLayout
     /// <summary>
     /// The cells of one line row: <paramref name="slots"/> chip slots, every one hidden until a chip is written into it,
     /// then the muted empty text. Each slot is the chip (a button cell on the chip art), then its icon well and its remove
-    /// glyph as overlays inside it, so the controller walks a line in reading order: a chip, its remove glyph, the next
+    /// mark as overlays inside it, so the controller walks a line in reading order: a chip, its remove button, the next
     /// chip. The overlays come after the chip so they draw over its art.
     /// </summary>
-    internal static List<CellSpec> LineCells(int slots, string removeGlyph)
+    internal static List<CellSpec> LineCells(int slots)
     {
         var cells = new List<CellSpec>(slots * CellsPerSlot + 1);
         for (int j = 0; j < slots; j++)
@@ -154,15 +154,19 @@ internal static class UiChipsLayout
                 OverlayInset = IconInset,
                 HeightOverride = ChipIconSize,
             }.With(width: CellWidth.Px(ChipIconSize)));
+            // The remove button: a box-less 20-unit button with no caption (glyph mode: no margins), its face the drawn remove
+            // mark (UiIconMarks, UiDrawnMark.RemoveMark, centered), so no font glyph can be missing or underlined. The cell
+            // is the click target and the NAV1 stop; its own hover brightens the mark.
             cells.Add(new CellSpec(CellKind.Button, RemoveKey(j))
             {
                 MinWidth = RemoveWidth,
                 Skin = CellSkin.Quiet,
+                Hover = true,
                 Visible = false,
                 OverlayOf = ChipKey(j),
                 OverlayInset = RemoveInset,
                 HeightOverride = ChipIconSize,
-            }.With(text: removeGlyph, width: CellWidth.Px(RemoveWidth), wrap: CellWrap.Glyph));
+            }.With(text: "", width: CellWidth.Px(RemoveWidth), wrap: CellWrap.Glyph));
         }
 
         cells.Add(new CellSpec(CellKind.Muted, EmptyKey) { MinWidth = 1f, Visible = false }.With(width: CellWidth.Fill(1f)));
@@ -283,7 +287,7 @@ internal static class UiChipsLayout
                 // Wider than the whole row: shortened to the row, the caption clipped to the room its margins leave.
                 width = Math.Max(height, (float)Math.Floor(rowWidth));
                 float room = width - CaptionLeft(piece.Icon) - CaptionRight(piece.Remove, piece.Term) - CaptionSlack;
-                shown = MenuPanelLayout.ClipLabel(piece.Caption, Math.Max(1f, room), CaptionFontSize);
+                shown = UiChipsText.Clip(piece.Caption, Math.Max(1f, room), CaptionFontSize);
             }
 
             float left = current.Count == 0 ? 0f : cursor + Spacing;
