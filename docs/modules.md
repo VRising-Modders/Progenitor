@@ -1899,6 +1899,21 @@ of the save made for this test.
    Changed`; `.items heart`, `.items clan`, `.items name #1 "Ore"` (the panel shows the name).
 8. Clean up: remove the Sample from the test server's reload folder and confirm the clean unload.
 
+## Material sources
+
+`Progenitor.Materials`, `ctx.MaterialSource`. Milestone P3, **spike**. One provider decides which
+containers pay for building and crafting; the totals the player sees and the server's payment
+both follow it. Status: registration, invalidation and the status readback are landed and
+game-free tested. The native seams are described below; they are opt-in and not live-verified.
+
+```csharp
+var handle = ctx.MaterialSource.Register(myProvider);   // second registration throws, naming the owner
+ctx.Logger.LogInfo(ctx.MaterialSource.Status.ToString()); // materials: provider=… hooks=off (…) wired=- …
+```
+
+Read `Status` before claiming anything changed in the game: `HooksInstalled` is false, and `Wired`
+is empty, until a Bootstrap with the material seams armed is running and Core bound its handlers.
+
 ## Main thread
 
 Research notes (internal): `MainThread` ownership, collectible-ALC sweep.

@@ -118,6 +118,10 @@
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleHeartFuel.cs" Link="Linked\CastleHeartFuel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\PlayerPresence.cs" Link="Linked\PlayerPresence.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleInventory.cs" Link="Linked\SampleInventory.cs" />
+    <!-- Milestone P3 spike: ctx.MaterialSource. Game-free halves only; the Plugin*, *Runtime and
+         Unity* files are not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialTypes.cs" Link="Linked\MaterialTypes.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Materials\MaterialSourceRegistry.cs" Link="Linked\MaterialSourceRegistry.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLogic.cs" Link="Linked\ChatLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatWindowLogic.cs" Link="Linked\ChatWindowLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandLogic.cs" Link="Linked\ChatCommandLogic.cs" />
