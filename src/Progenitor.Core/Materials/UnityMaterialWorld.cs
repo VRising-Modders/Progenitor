@@ -134,7 +134,7 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     {
         if (!character.TryRead(em, out Interactor interactor)) return Entity.Null;
         var target = interactor.Target;
-        if (target == Entity.Null || !target.Exists(em) || !target.Has<CastleWorkstation>(em)) return Entity.Null;
+        if (target == Entity.Null || !target.Exists(em) || !target.Has<WorkstationRecipesBuffer>(em)) return Entity.Null;
         return target;
     }
 

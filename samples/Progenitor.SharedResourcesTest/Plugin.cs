@@ -129,6 +129,21 @@ public sealed partial class TestContext : PluginContext
 [CommandGroup("srtest")]
 public static class TestCommands
 {
+    [Command("diagnose", adminOnly: true, description: "Read inventory discovery diagnostics for the test plot.")]
+    public static void Diagnose(ICommandContext c, int territory) => Run(c, t =>
+    {
+        var castle = Progenitor.Castles.Castles.ForTerritory(territory);
+        var world = Progenitor.Worlds.Server!;
+        var heart = new Entity { Index = castle.Heart.Index, Version = castle.Heart.Version };
+        var plot = CastleReader.PlotOf(world, heart);
+        t.Report(c, $"diagnose heart={castle.Heart} enabled={castle.Enabled} plotFound={plot != null} containers={castle.Containers().Count} stations={castle.Stations().Count}");
+        if (plot == null) return;
+        foreach (var b in CastleReader.Buildings(world, plot))
+        {
+            var inv = t.Inventory.Read(t.Inventory.Of(b.Entity));
+            if (inv.Ok) t.Report(c, $"diagnose inventory={b.Entity.Index}:{b.Entity.Version} rows={inv.Slots.Count} items={string.Join(",", inv.Slots.Where(s => !s.IsEmpty).Select(s => s.Item + ":" + s.Amount))}");
+        }
+    });
     [Command("plots", adminOnly: true, description: "List eligible plots and their ordinary-container stock for one ingredient.")]
     public static void Plots(ICommandContext c, int item) => Run(c, t =>
     {
@@ -167,7 +182,11 @@ public static class TestCommands
             var test = Plugin.Active ?? throw new InvalidOperationException("Test mod not loaded.");
             test.Require(command); action(test);
         }
-        catch (Exception e) { command.Reply("Test refused: " + e.Message); }
+        catch (Exception e)
+        {
+            Plugin.Active?.Log.LogWarning("Shared Resources Test refused: " + e);
+            command.Reply("Test refused: " + e.Message);
+        }
     }
 
     [Command("status", adminOnly: true)]
