@@ -118,7 +118,9 @@ public sealed class PluginInventory
 
     /// <summary>
     /// Move up to <paramref name="amount"/> with the game's own slot move, conserving the total:
-    /// never duplicates or destroys. Partial when the target fills or the source runs out.
+    /// never duplicates or destroys. Partial when the target fills or the source runs out. Draws
+    /// from every source slot, a player's action bar included; pass an
+    /// <see cref="InventorySlotFilter"/> to skip slots.
     /// </summary>
     public InventoryResult Transfer(InventoryRef from, InventoryRef to, int item, int amount)
     {
@@ -126,11 +128,57 @@ public sealed class PluginInventory
         return InventoryRuntime.Engine.Transfer(from, to, item, amount);
     }
 
-    /// <summary>Move every item <paramref name="filter"/> accepts (all when null), one <see cref="Transfer"/> per item type.</summary>
+    /// <summary>
+    /// <see cref="Transfer(InventoryRef, InventoryRef, int, int)"/> that draws only from the source
+    /// slots <paramref name="sourceSlots"/> allows, for example
+    /// <see cref="InventorySlotFilter.SkipActionBar"/> to leave a player's action bar (bag slots
+    /// 0–7) alone. Same conservation guarantees; <see cref="InventoryResult.SourceBefore"/> and
+    /// <see cref="InventoryResult.SourceAfter"/> still count the whole source.
+    /// <b>Experimental</b>: game-free tested, not live-verified.
+    /// </summary>
+    public InventoryResult Transfer(InventoryRef from, InventoryRef to, int item, int amount, InventorySlotFilter sourceSlots)
+    {
+        Require(nameof(Transfer));
+        return InventoryRuntime.Engine.Transfer(from, to, item, amount, sourceSlots);
+    }
+
+    /// <summary>
+    /// Move up to <paramref name="amount"/> of whatever is in slot <paramref name="slotIndex"/> of
+    /// <paramref name="from"/> (0-based, buffer order as <see cref="Read"/> lists it) into
+    /// <paramref name="to"/>. The same transfer as <see cref="Transfer(InventoryRef, InventoryRef, int, int)"/>
+    /// restricted to that one slot: the same conservation check, restore step for
+    /// interchangeable items, <see cref="InventoryOutcome.Inconsistent"/> stop for anything else,
+    /// and units the target's owner equips counted as moved. Refused for an amount below 1, a
+    /// slot out of range and the same inventory on both sides; an empty slot is
+    /// <see cref="InventoryOutcome.Nothing"/> with <see cref="InventoryResult.Item"/> 0.
+    /// <b>Experimental</b>: game-free tested, not live-verified.
+    /// </summary>
+    public InventoryResult TransferSlot(InventoryRef from, int slotIndex, InventoryRef to, int amount)
+    {
+        Require(nameof(TransferSlot));
+        return InventoryRuntime.Engine.TransferSlot(from, slotIndex, to, amount);
+    }
+
+    /// <summary>Move every item <paramref name="filter"/> accepts (all when null), one <see cref="Transfer(InventoryRef, InventoryRef, int, int)"/> per item type.</summary>
     public InventoryTransferAllResult TransferAll(InventoryRef from, InventoryRef to, Func<int, bool>? filter = null)
     {
         Require(nameof(TransferAll));
         return InventoryRuntime.Engine.TransferAll(from, to, filter);
+    }
+
+    /// <summary>
+    /// <see cref="TransferAll(InventoryRef, InventoryRef, Func{int, bool})"/> over only the source
+    /// slots <paramref name="sourceSlots"/> allows: a quick stash that leaves a player's action bar
+    /// alone is <c>TransferAll(bag, chest, InventorySlotFilter.SkipActionBar)</c>. Items found
+    /// only in skipped slots get no row; <see cref="InventoryTransferAllResult.Left"/> is what the
+    /// allowed slots held minus what moved. Skipped slots are never drawn from, but the restore
+    /// step for interchangeable items puts a shortfall back with the game's add, which can land in
+    /// any slot, a skipped one included. <b>Experimental</b>: game-free tested, not live-verified.
+    /// </summary>
+    public InventoryTransferAllResult TransferAll(InventoryRef from, InventoryRef to, InventorySlotFilter sourceSlots, Func<int, bool>? filter = null)
+    {
+        Require(nameof(TransferAll));
+        return InventoryRuntime.Engine.TransferAll(from, to, filter, sourceSlots);
     }
 
     // ---- watches -------------------------------------------------------------------------------

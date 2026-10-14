@@ -129,6 +129,43 @@ public sealed class PluginPlayers
         return world;
     }
 
+    /// <summary>
+    /// The player's combat and form state now: <see cref="PlayerStateInfo.Dead"/>,
+    /// <see cref="PlayerStateInfo.Downed"/>, <see cref="PlayerStateInfo.InPvpCombat"/>,
+    /// <see cref="PlayerStateInfo.ShapeshiftKind"/> and more, read from the live character. The
+    /// <paramref name="player"/> row is checked against the world first: a row from an earlier
+    /// world load, or a user entity that now belongs to another account, gives
+    /// <see cref="PlayerStateStatus.Stale"/>. Offline players are read too (their character is
+    /// disabled). Server only, main thread; a client call returns
+    /// <see cref="PlayerStateStatus.Unavailable"/>. Never throws for a bad or stale player.
+    /// <b>Experimental</b>: game-free tested, not live-verified.
+    /// </summary>
+    public PlayerStateInfo State(PlayerInfo? player)
+    {
+        _ctx.EnsureAttached();
+        EnsureMainThread();
+        return PlayerStateReader.Read(_ctx.World, player);
+    }
+
+    /// <summary>
+    /// <see cref="State(PlayerInfo)"/> for a <c>User</c> entity (not the character). An entity
+    /// that no longer exists is <see cref="PlayerStateStatus.Stale"/>; one without a <c>User</c>
+    /// component is <see cref="PlayerStateStatus.NotAPlayer"/>.
+    /// </summary>
+    public PlayerStateInfo State(Entity user)
+    {
+        _ctx.EnsureAttached();
+        EnsureMainThread();
+        return PlayerStateReader.Read(_ctx.World, user);
+    }
+
+    private static void EnsureMainThread()
+    {
+        if (!Dev.MainThread.IsMainThread)
+            throw new InvalidOperationException(
+                "ctx.Players.State must run on the game main thread (Plugin.Frame, a command handler, EventBus, or MainThread.Post).");
+    }
+
     /// <summary>Current directory cache revision.</summary>
     public int Revision
     {

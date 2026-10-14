@@ -261,7 +261,35 @@ internal sealed class InventoryEngine
             shortfall: done < ask ? "the game removed " + done + " of " + ask : "the container held only " + before);
     }
 
-    internal InventoryResult Transfer(InventoryRef from, InventoryRef to, int item, int amount)
+    internal InventoryResult Transfer(InventoryRef from, InventoryRef to, int item, int amount) =>
+        TransferCore(from, to, item, amount, InventorySlotFilter.All);
+
+    internal InventoryResult Transfer(InventoryRef from, InventoryRef to, int item, int amount, InventorySlotFilter sourceSlots) =>
+        TransferCore(from, to, item, amount, sourceSlots);
+
+    /// <summary>
+    /// Move up to <paramref name="amount"/> from one slot of the source: the slot's item, through
+    /// the same transfer as <see cref="Transfer(InventoryRef, InventoryRef, int, int)"/> restricted
+    /// to that slot, so the conservation check, restore step and equipped accounting are the same.
+    /// </summary>
+    internal InventoryResult TransferSlot(InventoryRef from, int slot, InventoryRef to, int amount)
+    {
+        if (!ValidAmount(amount, out string why) || !Check(from, out why) || !Check(to, out why))
+            return InventoryResult.Refuse(0, amount, why);
+        if (SameInventory(from, to))
+            return InventoryResult.Refuse(0, amount, "source and target are the same inventory");
+        if (!_backend.TryRead(from, _a, out _, out why))
+            return InventoryResult.Refuse(0, amount, "source: " + why);
+        if (slot < 0 || slot >= _a.Count)
+            return InventoryResult.Refuse(0, amount, "slot " + slot.ToString(CultureInfo.InvariantCulture)
+                + " is out of range: the source has " + _a.Count.ToString(CultureInfo.InvariantCulture) + " slots");
+        var row = _a[slot];
+        if (row.IsEmpty || row.Amount <= 0)
+            return Nothing(0, amount, "slot " + slot.ToString(CultureInfo.InvariantCulture) + " of the source is empty");
+        return TransferCore(from, to, row.Item, amount, InventorySlotFilter.Only(slot));
+    }
+
+    private InventoryResult TransferCore(InventoryRef from, InventoryRef to, int item, int amount, InventorySlotFilter sourceSlots)
     {
         if (!ValidAmount(amount, out string why) || !Check(from, out why) || !Check(to, out why))
             return InventoryResult.Refuse(item, amount, why);
@@ -274,23 +302,28 @@ internal sealed class InventoryEngine
         if (!_backend.TryRead(to, _b, out var restriction, out why))
             return InventoryResult.Refuse(item, amount, "target: " + why);
 
+        // Counts are whole containers (conservation is checked on the totals); the move draws only
+        // from the slots the filter allows.
         int srcBefore = InventoryMath.Count(_a, item);
         int dstBefore = InventoryMath.Count(_b, item);
-        if (srcBefore == 0)
-            return Nothing(item, amount, "the source holds none of this item", srcBefore, srcBefore, dstBefore, dstBefore);
+        int available = TransferPlanner.CountAllowed(_a, item, sourceSlots);
+        if (available == 0)
+            return Nothing(item, amount, srcBefore == 0 ? "the source holds none of this item"
+                : "the source holds this item only in slots the filter skips (" + sourceSlots + ")",
+                srcBefore, srcBefore, dstBefore, dstBefore);
         if (!InventoryMath.IsAllowed(restriction, item, info.Category))
             return Nothing(item, amount, "the target refuses this item (" + restriction + ")", srcBefore, srcBefore, dstBefore, dstBefore);
         if (InventoryMath.FreeSpace(_b, item, info.MaxAmount, true) <= 0)
             return Nothing(item, amount, "the target is full for this item", srcBefore, srcBefore, dstBefore, dstBefore);
 
         // The source slots holding the item, captured before the first move changes the buffer.
-        var plan = TransferPlanner.SourceSlots(_a, item);
+        var plan = TransferPlanner.SourceSlots(_a, item, sourceSlots);
         // Only interchangeable units may ever be added back or taken away by the restore step.
         bool plain = TransferPlanner.IsPlain(info.ItemType, _a, _b, item);
         // The game's move equips gear onto a target owner with a free matching slot (a player, a
         // servant); those units left the inventory for the owner's equipment and count as moved.
         int eqBefore = _backend.EquippedCount(to, item);
-        int want = Math.Min(amount, srcBefore);
+        int want = Math.Min(amount, available);
         int total = srcBefore + dstBefore;
         int src = srcBefore, dst = dstBefore, equipped = 0, steps = 0, compensated = 0;
         string stop = "";
@@ -356,12 +389,16 @@ internal sealed class InventoryEngine
         int moved = (dst - dstBefore) + equipped;
         string shortfall = moved < want
             ? (stop.Length > 0 ? stop : "moved " + moved + " of " + want)
-            : "the source held only " + srcBefore;
+            : sourceSlots.IsAll ? "the source held only " + srcBefore
+            : "the allowed source slots (" + sourceSlots + ") held only " + available;
         var result = Finish(item, amount, moved, "", steps, srcBefore, src, dstBefore, dst, shortfall, compensated);
         return equipped == 0 ? result : result.WithEquipped(equipped);
     }
 
-    internal InventoryTransferAllResult TransferAll(InventoryRef from, InventoryRef to, Func<int, bool>? filter)
+    internal InventoryTransferAllResult TransferAll(InventoryRef from, InventoryRef to, Func<int, bool>? filter) =>
+        TransferAll(from, to, filter, InventorySlotFilter.All);
+
+    internal InventoryTransferAllResult TransferAll(InventoryRef from, InventoryRef to, Func<int, bool>? filter, InventorySlotFilter sourceSlots)
     {
         if (!Check(from, out string why) || !Check(to, out why))
             return new InventoryTransferAllResult { Ok = false, Reason = why };
@@ -371,7 +408,8 @@ internal sealed class InventoryEngine
             return new InventoryTransferAllResult { Ok = false, Reason = "source: " + why };
 
         // Copy first: the filter is plugin code and may itself read inventories (the shared buffer).
-        var snapshot = _a.ToArray();
+        // Only the slots the slot filter allows take part: the item list and counts come from them.
+        var snapshot = TransferPlanner.AllowedSlots(_a, sourceSlots);
         var items = InventoryMath.DistinctItems(snapshot, snapshot.Length, filter);
         var counts = new int[items.Count];
         for (int i = 0; i < items.Count; i++) counts[i] = InventoryMath.Count(snapshot, items[i]);
@@ -381,10 +419,15 @@ internal sealed class InventoryEngine
         bool ok = true;
         for (int i = 0; i < items.Count; i++)
         {
-            var r = Transfer(from, to, items[i], Math.Min(counts[i], MaxAmount));
+            var r = TransferCore(from, to, items[i], Math.Min(counts[i], MaxAmount), sourceSlots);
             rows.Add(r);
             moved += r.Done;
-            left += r.Outcome == InventoryOutcome.Refused ? counts[i] : r.SourceAfter;
+            if (r.Outcome == InventoryOutcome.Refused) left += counts[i];
+            else if (sourceSlots.IsAll) left += r.SourceAfter;
+            // Filtered: what was asked for minus what moved, counted from before the move. Units in
+            // skipped slots were never asked for; units the restore step put back may sit in any
+            // slot, a skipped one included, so a read of the allowed slots afterwards would miss them.
+            else left += Math.Max(0, counts[i] - r.Done);
             if (r.Outcome == InventoryOutcome.Inconsistent) { ok = false; break; }
         }
 
@@ -527,14 +570,39 @@ internal sealed class InventoryEngine
 internal static class TransferPlanner
 {
     /// <summary>The source slots holding <paramref name="item"/>, in buffer order.</summary>
-    public static List<InventorySlot> SourceSlots(IReadOnlyList<InventorySlot> slots, int item)
+    public static List<InventorySlot> SourceSlots(IReadOnlyList<InventorySlot> slots, int item) =>
+        SourceSlots(slots, item, InventorySlotFilter.All);
+
+    /// <summary>The source slots holding <paramref name="item"/> that <paramref name="filter"/> allows, in buffer order.</summary>
+    public static List<InventorySlot> SourceSlots(IReadOnlyList<InventorySlot> slots, int item, InventorySlotFilter filter)
     {
         var rows = new List<InventorySlot>();
         if (slots == null) return rows;
         for (int i = 0; i < slots.Count; i++)
-            if (slots[i].Item == item && slots[i].Amount > 0)
+            if (slots[i].Item == item && slots[i].Amount > 0 && filter.Allows(slots[i].Slot))
                 rows.Add(slots[i]);
         return rows;
+    }
+
+    /// <summary>Total of <paramref name="item"/> in the slots <paramref name="filter"/> allows.</summary>
+    public static int CountAllowed(IReadOnlyList<InventorySlot> slots, int item, InventorySlotFilter filter)
+    {
+        if (slots == null || item == 0) return 0;
+        long n = 0;
+        for (int i = 0; i < slots.Count; i++)
+            if (slots[i].Item == item && slots[i].Amount > 0 && filter.Allows(slots[i].Slot))
+                n += slots[i].Amount;
+        return n > int.MaxValue ? int.MaxValue : (int)n;
+    }
+
+    /// <summary>A copy of the slots <paramref name="filter"/> allows, in buffer order.</summary>
+    public static InventorySlot[] AllowedSlots(IReadOnlyList<InventorySlot> slots, InventorySlotFilter filter)
+    {
+        if (slots == null) return Array.Empty<InventorySlot>();
+        var rows = new List<InventorySlot>(slots.Count);
+        for (int i = 0; i < slots.Count; i++)
+            if (filter.Allows(slots[i].Slot)) rows.Add(slots[i]);
+        return rows.ToArray();
     }
 
     /// <summary>

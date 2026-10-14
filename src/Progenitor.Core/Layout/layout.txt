@@ -853,3 +853,9 @@ offset SendEventToUserUserIndexOffset                = 0x0  : SendEventToUser.Us
 offset NetworkIdNormalIndexOffset                    = 0x0  : NetworkId.Normal_Index
 offset NetworkIdNormalGenerationOffset               = 0x4  : NetworkId.Normal_Generation                # byte
 offset NetworkIdTypeOffset                           = 0x8  : NetworkId.Type                              # last field; NetworkId is 12 bytes
+
+# ---- Players: state read (src/Progenitor.Core/Players/PlayerStateReader.cs) -------------------
+# Shapeshift sits on the player's controller (the User entity). IsShapeshifted is a ModifiableBool
+# whose only field (_Value) is at 0x0; read the byte raw instead of calling the wrapper's getter.
+dump server
+offset ShapeshiftIsShapeshiftedOffset             = 0x0  : Shapeshift.IsShapeshifted

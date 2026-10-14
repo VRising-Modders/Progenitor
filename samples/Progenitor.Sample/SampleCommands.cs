@@ -646,7 +646,7 @@ internal static class SampleCommands
     }
 
     // adminOnly: the reply includes platform ids.
-    [Command("players", adminOnly: true, usage: ".players | .players name <displayName> | .players account <platformId> | .players where", description: "Admin only. List online players, look one up, or print where each online character stands, through ctx.Players. Ambiguous names are not picked.")]
+    [Command("players", adminOnly: true, usage: ".players | .players name <displayName> | .players account <platformId> | .players where | .players state [displayName]", description: "Admin only. List online players, look one up, print where each online character stands, or read a player's state (dead, downed, PvP combat, form), through ctx.Players. Ambiguous names are not picked.")]
     public static void Players(ICommandContext ctx, string verb = "", [Remainder] string rest = "")
     {
         try
