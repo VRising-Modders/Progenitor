@@ -705,3 +705,34 @@ enum ItemStatAdd = 3 : ModificationType.Add
 enum ItemStatMaxHealth = 4 : UnitStatType.MaxHealth
 enum ItemStatPhysicalPower = 0 : UnitStatType.PhysicalPower
 enum ItemStatSpellPower = 25 : UnitStatType.SpellPower
+
+# ---- Stations: recipes, toggles and progress (src/Progenitor.Core/Stations/Stations.cs) --------
+# ctx.Stations reads the station instance's recipe list and current work, and writes one byte per
+# recipe row (Disabled) plus CastleWorkstation.ForceUpdateInStation, the same two writes the game's
+# ToggleRefiningRecipeSystem makes. Read through GetComponentDataRawRO / GetBufferRawRO at these
+# offsets; nothing passes a whole-struct length.
+dump server
+offset RefinementstationRefiningStartTimeOffset   = 0x0  : Refinementstation.RefiningStartTime    # double, ServerTime seconds
+offset RefinementstationCurrentRecipeGuidOffset   = 0x20 : Refinementstation.CurrentRecipeGuid
+offset RefinementstationStatusOffset              = 0x24 : Refinementstation.Status               # RefinementStatus, int
+offset RefinementstationIsWorkingOffset           = 0x44 : Refinementstation.IsWorking            # bool
+offset RefinementstationRecipesBufferRecipeGuidOffset = 0 : RefinementstationRecipesBuffer.RecipeGuid
+offset RefinementstationRecipesBufferUnlockedOffset = 4  : RefinementstationRecipesBuffer.Unlocked   # bool
+offset RefinementstationRecipesBufferDisabledOffset = 5  : RefinementstationRecipesBuffer.Disabled   # bool, the station window's per-recipe checkbox
+size   RefinementstationRecipesBufferStride       = 8    : RefinementstationRecipesBuffer         # PrefabGUID @0x0 + bool @0x4 + bool @0x5, 4-aligned
+offset CastleWorkstationForceUpdateInStationOffset = 0x8 : CastleWorkstation.ForceUpdateInStation # bool
+offset QueuedWorkstationCraftActionRecipeGuidOffset = 0x8 : QueuedWorkstationCraftAction.RecipeGuid
+offset QueuedWorkstationCraftActionProgressTimeOffset = 0xC : QueuedWorkstationCraftAction.ProgressTime # float seconds toward RecipeData.CraftDuration
+offset QueuedWorkstationCraftActionStatusOffset   = 0x10 : QueuedWorkstationCraftAction.Status    # CraftingStatus, int
+size   QueuedWorkstationCraftActionStride         = 0x1C : QueuedWorkstationCraftAction           # Entity @0x0 .. int @0x18
+enum   RefinementStatusNoInput                    = 0    : RefinementStatus.NoInput
+enum   RefinementStatusProcessing                 = 1    : RefinementStatus.Processing
+enum   RefinementStatusOutputFull                 = 2    : RefinementStatus.OutputFull
+enum   RefinementStatusNotPowered                 = 3    : RefinementStatus.NotPowered
+enum   RefinementStatusDamaged                    = 4    : RefinementStatus.Damaged
+enum   RefinementStatusNoOwner                    = 5    : RefinementStatus.NoOwner
+enum   CraftingStatusNormal                       = 0    : CraftingStatus.Normal
+enum   CraftingStatusOutputFull                   = 1    : CraftingStatus.OutputFull
+enum   CraftingStatusNotPowered                   = 2    : CraftingStatus.NotPowered
+enum   CraftingStatusDamaged                      = 3    : CraftingStatus.Damaged
+enum   CraftingStatusNoOwner                      = 4    : CraftingStatus.NoOwner

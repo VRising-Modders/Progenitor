@@ -537,6 +537,29 @@ internal static class SampleCommands
         }
     }
 
+    // adminOnly: toggle changes a recipe switch on any station, including another player's.
+    [Command("stations", adminOnly: true, usage: ".stations list [radius] | recipes [id] | toggle <recipeNameOrGuid> on|off [id] | status [id]", description: "Admin only. Read castle station recipes and progress, and switch refinement recipes, through ctx.Stations.")]
+    public static void Stations(ICommandContext ctx, string verb = "", string a = "", string b = "", string c = "")
+    {
+        try
+        {
+            if (!SampleStations.TryParse(verb, a, b, c, out var request))
+            {
+                ctx.Reply(SampleStations.UsageReply);
+                return;
+            }
+
+#if !PROGENITOR_TESTS
+            SampleStations.HandleCommand(ctx, request);
+#endif
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Sample .stations threw: " + e);
+            ctx.Reply("Sample stations failed. See the server log.");
+        }
+    }
+
     // adminOnly: this applies the debug protection buff and the kill-path guard.
     [Command("protect", adminOnly: true, usage: ".protect on | alive | off", description: "Admin only. ctx.Debug Protect, KeepAlive or Release on your character. Separate from .godmode and from Core's .debug.")]
     public static void Protect(ICommandContext ctx, string what = "")

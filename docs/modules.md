@@ -1704,6 +1704,87 @@ The tile mask is **row-major** over `WorldBounds`, and that is now native rather
 
 Three questions stay open on this module: the build-grid step and the `TileBounds` margin (footprint overlap is conservative until a row of adjacent floors is placed on the test save); a `TileRotation != None` footprint (nothing on the save is rotated); and world-Y to `HeightLevel` (one sample cannot fix it, so position tests are X/Z only).
 
+## Stations
+
+`Progenitor.Stations`, reached as `ctx.Stations` (`PluginStations`). Server only: every member
+throws on the client. Main thread. **Landed, not live-verified**: the reads, the switch and the
+sample are source-checked against the game's metadata and its native code (internal research
+notes), built, and game-free tested; nothing has been run in the game yet. Inventories (what sits in
+a station's input and output) are not part of this module.
+
+```csharp
+foreach (var info in ctx.Stations.Near(position, 20f))           // recipe stations, nearest first
+{
+    foreach (var r in ctx.Stations.Recipes(info.Station))
+        ctx.Log.LogInfo($"{r.Name} on={r.Enabled} {r.DurationSeconds}s");
+    var p = ctx.Stations.Progress(info.Station);                 // State, Fraction, RemainingSeconds
+}
+var result = ctx.Stations.SetRecipeEnabled(furnace, sulfurRecipeGuid, on: false);
+if (!result.Ok) ctx.Log.LogWarning(result.Reason);
+int crafts = ctx.Stations.CraftsPossible(recipe, new Dictionary<int, long> { [copperOre] = 75 }); // 3 at 20 each
+```
+
+| Member | What it does |
+|---|---|
+| `Kind(station)` | `Refinement` (sawmill, furnace, tannery, loom, ...), `Workstation` (workbench, smithy, ...) or `None`. |
+| `Recipes(station)` | `StationRecipe` rows in the station's order: `RecipeGuid`, `Name`, `Inputs`, `Outputs`, `DurationSeconds`, `Enabled`, `CanToggle`, `Unlocked`, `HiddenInStation`. Empty for a non-station. |
+| `SetRecipeEnabled(station, recipe, on)` | Refinement only. Sets the station window's per-recipe checkbox to `on`, together with the recipes the recipe links. Returns `StationToggleResult`; `Ok` false with a `Reason` on a workstation, a non-station or a recipe the station does not list. |
+| `CraftsPossible(recipe, sources)` | Whole crafts the item counts in `sources` pay for (the smallest `have / need` over the inputs, rounded down). Pure. |
+| `IsWorking(station)` | True while `Progress(station).State` is `Working`. |
+| `Progress(station)` | `StationProgress`: `State`, `RawStatus`, `RecipeGuid`, `Fraction`, `ElapsedSeconds`, `DurationSeconds`, `RemainingSeconds`, `QueueLength`. Null for a non-station. |
+| `Near(position, radius)` | `StationInfo` (entity, prefab, kind, position, distance) for recipe stations within `radius` meters. |
+
+### How the game stores it (source-checked)
+
+| Fact | Detail |
+|---|---|
+| Refinement recipe list | `RefinementstationRecipesBuffer` on the station instance: `RecipeGuid`, `Unlocked`, `Disabled`. Networked, so every client's station window reads it. |
+| Refinement work | `Refinementstation`: `Status` (`RefinementStatus`), `CurrentRecipeGuid`, `RefiningStartTime` (server time when the batch started), `IsWorking`. There is no stored fraction. Refining picks an enabled recipe the input inventory can pay for and runs one batch at a time; a station runs only while its castle heart burns blood essence. |
+| The checkbox | The client sends `ToggleRefiningRecipeEvent`; `ToggleRefiningRecipeSystem` checks the sender is using the station, flips the row's `Disabled`, sets every row whose recipe the recipe prefab names in `RecipeLinkBuffer` to the same value, and sets `CastleWorkstation.ForceUpdateInStation` so refining re-picks a recipe. |
+| Workstation recipe list | `WorkstationRecipesBuffer` on the instance. No per-recipe switch exists; recipe unlocks are per player. |
+| Workstation work | `QueuedWorkstationCraftAction` rows; only the head row progresses. `ProgressTime` counts toward `RecipeData.CraftDuration` and is kept while the station is stopped. `Status` is `CraftingStatus`. |
+| Recipe details | The recipe prefab: `RecipeData.CraftDuration` and `HideInStation`, `RecipeRequirementBuffer` (inputs), `RecipeOutputBuffer` (outputs). |
+
+`SetRecipeEnabled` makes the same writes as the game's toggle, directly on the server, so no player
+needs the station open: the rows' `Disabled` byte, then `ForceUpdateInStation`. Unlike the checkbox
+it sets a state rather than flipping one, so repeating a call is harmless (`Changed` false). The
+plan is `StationLogic.PlanToggle`, game-free tested. Every read and write is raw at the declared
+[layout constants](#layout-constants) through the non-generic buffer and component accessors.
+
+**Limits.** `Inputs` are the recipe's base amounts: a station on its matching floor needs fewer
+(the game multiplies the cost), so `CraftsPossible` over base amounts never overcounts but can
+undercount. `DurationSeconds` and `RemainingSeconds` ignore station speed bonuses (a closed room),
+so a boosted station finishes sooner than `RemainingSeconds` says. Refinement `Fraction` is
+`(server time - RefiningStartTime) / CraftDuration` while `Working`, 1 while `OutputFull`, and 0
+otherwise. Station entities are valid for the current world load only; do not persist them. A
+stable station id comes with the castle containers and stations work.
+
+### Live test (acceptance procedure, not run)
+
+Isolated test server with a connected client, the Sample loaded, and an admin character standing at
+a powered furnace (castle heart burning blood essence) that lists the copper and sulfur recipes.
+
+1. `.stations list`. The reply lists the furnace with an `index:version` id, `refine`, and a
+   distance under 20 m. The server log has a Sample line `stations: list radius=20 found=N`.
+2. `.stations recipes`. One line per recipe, for example
+   `[on] CopperBar: 20 CopperOre -> 1 CopperIngot, 30 s`. Compare with the furnace window: the same
+   recipes and amounts, and every `[on]` row is checked.
+3. Open the furnace window and keep it open. `.stations toggle Sulfur off`. The reply says
+   `Sulfur is now off`, and the server log has `[stations] recipe <guid> disabled on station <id>`.
+   The window's Sulfur checkbox clears within a second, without reopening it.
+4. Put 40 sulfur ore and 40 copper ore in the furnace input. `.stations status` shows
+   `working, CopperBar`, and the sulfur ore stays untouched while the copper smelts.
+5. `.stations toggle Sulfur off` again. The reply ends `(no change)`.
+6. Tick the Sulfur checkbox in the window by hand, then `.stations recipes`: the row reads `[on]`.
+7. `.stations status` twice, ten seconds apart, during a batch: the percentage rises and the seconds
+   left fall by about ten. Let the heart run out of fuel: the state reads `not powered`.
+8. At a workbench with a queued craft, `.stations status <id>` shows `Workstation: working`, the
+   queued recipe and `queue N`; `.stations toggle <recipe> off <id>` is refused with
+   `crafting workstations have no per-recipe switch`.
+9. Disconnect and reconnect the client; the furnace window still shows Sulfur unchecked.
+10. Clean up: `.stations toggle Sulfur on`, take the ore out, and remove the Sample from the reload
+    folders.
+
 ## Main thread
 
 Research notes (internal): `MainThread` ownership, collectible-ALC sweep.

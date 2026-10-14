@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **782** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **792** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -71,6 +71,7 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Castles` | verified live | Server castle plot / tile / building reads and handles on this plugin's world. | `SampleCastle.cs` (`.castle`) |
 | `ctx.Units` | verified live | Server unit spawn and steering. Client returns disabled handles. | `SampleUnits.cs` (`.rat`) |
 | `ctx.Items` | verified live | Server inventory grant and equip. Client throws. Defaults stack, accept a partial add, do not equip, leave durability. | `SampleItems.cs` (`.items grant`, `.items equip`); unit test `ItemGrantPolicyTests`; live `give` / `equip` on the isolated server (the wrapper sample itself is not live-verified) |
+| `ctx.Stations` (`PluginStations`) | landed, not live-verified | Server castle recipe stations: a station's recipes (inputs, outputs, duration, enabled), the refinement station's own per-recipe switch, a pure whole-craft count, and current progress. Client throws. [Stations](#stations), [modules.md](modules.md#stations). | `SampleStations.cs` (`.stations`); unit test `StationLogicTests` |
 | `ctx.Abilities` (`PluginAbilities`) | landed; `SetSlot` live-verified, `ForceCast`/`NoCooldowns` exercised by the necro sample | Server ability control: `ForceCast` through `ServerGameManager.ForceCastAbilityGroup` (starts groups that are not on the bar), and `NoCooldowns` holds that keep a character's abilities off cooldown with full charges, and `SetSlot`, which puts a chosen group on a bar slot. Holds are tracked. Client throws. [Abilities](#abilities), [modules.md](modules.md#abilities). | unit tests `AbilityCooldownPolicyTests`, `AbilitySlotPolicyTests`; sample `Progenitor.NecroArmyExample` |
 | `ctx.Time` (`PluginTime`) | landed, not live-verified | Server time of day: read it (`GetTimeOfDay`), move it and let it run (`SetTimeOfDay`), or freeze it (`HoldTimeOfDay`) for filming. Connected clients' lighting follows through the game's replicated day/night fields; the game clock `ServerTime` and every timer are untouched. Overrides are tracked and stack. Also world speed: `Freeze` / `SlowMotion` stop or slow the whole simulation (and the game clock) on the server and every client through the game's replicated `TimeScale`. Client throws. [Time of day](#time-of-day), [World speed](#world-speed), [modules.md](modules.md#time-of-day). | `SampleTime.cs` (`.time`), `SampleSpeed.cs` (`.speed`); unit tests `TimeOfDayMathTests`, `TimeScalePolicyTests` |
 | `ctx.Ai` (`PluginAi`) | landed, not live-verified | Server boss AI: describe/observe, cast-option edits, health gates, phase thresholds, private behavior-tree copies, factions, named variants with a persistence marker. Every mutation returns a restoring handle and is tracked. Client throws. [Ai](#ai), [ai.md](ai.md). | `samples/Progenitor.BossVariantsExample` (`.bossvariants spawn`); unit test `AiCodecTests` |
@@ -431,6 +432,30 @@ range before the call.
 | `ItemDurability` | verified live | `Leave`, `Indestructible`. | live `Durability.LossType` None on the tier-9 set |
 | `ItemGrantResult` | verified live | `Ok`, `Action`, `Reason`, `Added`, `DidNotFit`, `Slot`, `ItemEntity`, `Equipped`, `DurabilityCleared`. | returned by `Grant` and `Equip` |
 | `ItemGrantPolicy` / `ItemPresence` / `ItemGrantStep` | landed | Game-free decisions the live call runs before it touches an inventory. | unit test `ItemGrantPolicyTests` |
+
+## Stations
+
+Server reads and the per-recipe switch for castle recipe stations. Client calls throw. A station is
+an `Entity` valid for the current world load; do not persist it. Narrative, game facts and the live
+acceptance procedure: [modules.md](modules.md#stations).
+
+| Member | Status | Intent | Example |
+|---|---|---|---|
+| `ctx.Stations` (`PluginStations`) `Kind(Entity)` | landed, not live-verified | `StationKind.Refinement`, `Workstation` or `None`. | `SampleStations.cs` (`.stations list`) |
+| `ctx.Stations.Recipes(Entity)` | landed, not live-verified | `IReadOnlyList<StationRecipe>` in the station's order; empty for anything that is not a recipe station. | `SampleStations.cs` (`.stations recipes`) |
+| `ctx.Stations.SetRecipeEnabled(Entity, int recipeGuid, bool on)` | landed, not live-verified | Set a refinement recipe's switch (the station window's checkbox), with its linked recipes. Explicit state, not a flip. `Ok` false with `Reason` on a workstation, a non-station or an unlisted recipe. | `SampleStations.cs` (`.stations toggle`); unit test `StationLogicTests` (the plan) |
+| `ctx.Stations.CraftsPossible(StationRecipe, IReadOnlyDictionary<int, long>)` / `CraftsPossible(StationRecipe, IEnumerable<StationItem>)` | landed | Whole crafts a set of item counts pays for. Pure; also `StationLogic.CraftsPossible`. | unit test `StationLogicTests` |
+| `ctx.Stations.IsWorking(Entity)` | landed, not live-verified | True while the station is converting (`StationState.Working`). | `SampleStations.cs` (`.stations status`) |
+| `ctx.Stations.Progress(Entity)` | landed, not live-verified | `StationProgress`, or null for a non-station. | `SampleStations.cs` (`.stations status`) |
+| `ctx.Stations.Near(float3, float radius)` | landed, not live-verified | `IReadOnlyList<StationInfo>` of recipe stations, nearest first. | `SampleStations.cs` (`.stations list`) |
+| `Stations` (static, takes a `World`) | landed, not live-verified | The same calls without a plugin context: `KindOf`, `Recipes`, `SetRecipeEnabled`, `Progress`, `IsWorking`, `Near`. | used by `PluginStations` |
+| `StationRecipe` | landed | `RecipeGuid`, `Name`, `Kind`, `Inputs`, `Outputs` (`StationItem` lists, base amounts), `DurationSeconds`, `Enabled`, `CanToggle`, `Unlocked`, `HiddenInStation`. | unit test `StationLogicTests` |
+| `StationItem` | landed | `ItemGuid`, `Amount`. | unit test `StationLogicTests` |
+| `StationProgress` | landed | `Kind`, `State`, `RawStatus`, `IsWorking`, `RecipeGuid`, `Fraction`, `ElapsedSeconds`, `DurationSeconds`, `RemainingSeconds` (speed bonuses not applied), `QueueLength`. | unit test `StationLogicTests` |
+| `StationToggleResult` | landed | `Ok`, `Changed`, `Enabled`, `RecipeGuid`, `LinkedRowsChanged`, `Reason`. | unit test `StationLogicTests` |
+| `StationInfo` | landed, not live-verified | `Station`, `PrefabGuid`, `Name`, `Kind`, `Position`, `Distance`. | `SampleStations.cs` |
+| `StationKind` / `StationState` | landed | Station machinery; `Idle`, `Working`, `OutputFull`, `NotPowered`, `Damaged`, `NoOwner`, `Unknown`. | unit test `StationLogicTests` |
+| `StationLogic` | landed | Game-free half: `CraftsPossible`, `Sum`, status mapping, progress math, `PlanToggle`, `NoToggleReason`. | unit test `StationLogicTests` |
 
 ## Buffs
 
@@ -954,7 +979,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 782 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 792 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
