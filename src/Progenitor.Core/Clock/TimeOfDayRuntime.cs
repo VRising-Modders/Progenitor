@@ -183,6 +183,11 @@ internal static unsafe class TimeOfDayRuntime
     // has both worlds, and a cached entity that stops resolving is simply looked up again.
     private static Entity _clientCycle = Entity.Null;
     private static Entity _clientSettings = Entity.Null;
+    // A missing client singleton costs two full scans to find out; remember the miss for a second.
+    private const long ClientMissRetryMs = 1000;
+    private static long _clientCycleMissUntil;
+    private static long _clientSettingsMissUntil;
+    private static ulong _clientMissWorld;
 
     /// <summary>
     /// Read the client world's clock: the client copies the server's replicated
@@ -200,8 +205,29 @@ internal static unsafe class TimeOfDayRuntime
             return null;
         }
         var em = world.EntityManager;
-        if (!TryReadCycle(em, ref _clientCycle, out var c, out why)) return null;
-        bool stopped = TryReadFlag(em, ref _clientSettings, out bool flag) && flag;
+        long now = Environment.TickCount64;
+        ulong seq = world.SequenceNumber;
+        if (seq != _clientMissWorld)
+        {
+            _clientMissWorld = seq;
+            _clientCycleMissUntil = _clientSettingsMissUntil = 0;
+        }
+        if (now < _clientCycleMissUntil)
+        {
+            why = "time-of-day refused: no DayNightCycle singleton on the client (checked within the last second).";
+            return null;
+        }
+        if (!TryReadCycle(em, ref _clientCycle, out var c, out why))
+        {
+            _clientCycleMissUntil = now + ClientMissRetryMs;
+            return null;
+        }
+        bool stopped = false;
+        if (now >= _clientSettingsMissUntil)
+        {
+            if (TryReadFlag(em, ref _clientSettings, out bool flag)) stopped = flag;
+            else _clientSettingsMissUntil = now + ClientMissRetryMs;
+        }
         why = "";
         return new TimeOfDayReading(
             TimeOfDayMath.DayOf(c.Time, c.DayLength),

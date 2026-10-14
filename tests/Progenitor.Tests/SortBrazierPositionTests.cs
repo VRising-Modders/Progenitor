@@ -221,6 +221,41 @@ public class SortBrazierPositionTests
         Assert.Throws<ArgumentNullException>(() => PlayerPositionMath.AnyWithin(null!, 0f, 0f, 1f));
     }
 
+    private static PlayerInfo Row(ulong id, bool online, int epoch, bool character = true) =>
+        new()
+        {
+            Account = new PlayerAccountId(id), DisplayName = "P" + id, IsOnline = online, WorldEpoch = epoch,
+            Session = new PlayerSessionRef(10, 1, character ? 20 : 0, character ? 3 : 0, 0),
+        };
+
+    [Fact]
+    public void A_kept_online_row_does_not_answer_after_a_disconnect()
+    {
+        var kept = Row(7, online: true, epoch: 4);
+        // The directory has no online row for the account any more: no position, whatever the kept row says.
+        Assert.Null(PlayerPositionMath.CurrentRow(kept, null, 4));
+        // The account's current row is used, not the kept one (a new character after a relog).
+        var now = Row(7, online: true, epoch: 4);
+        Assert.Same(now, PlayerPositionMath.CurrentRow(kept, now, 4));
+        // A current row that is offline, another account, without a character, or from another epoch: refused.
+        Assert.Null(PlayerPositionMath.CurrentRow(kept, Row(7, online: false, epoch: 4), 4));
+        Assert.Null(PlayerPositionMath.CurrentRow(kept, Row(8, online: true, epoch: 4), 4));
+        Assert.Null(PlayerPositionMath.CurrentRow(kept, Row(7, online: true, epoch: 4, character: false), 4));
+        Assert.Null(PlayerPositionMath.CurrentRow(kept, Row(7, online: true, epoch: 3), 4));
+        // A kept row from an earlier world load is refused even when the account is online again.
+        Assert.Null(PlayerPositionMath.CurrentRow(Row(7, online: true, epoch: 3), now, 4));
+        Assert.Null(PlayerPositionMath.CurrentRow(null, now, 4));
+    }
+
+    [Fact]
+    public void Brazier_search_radius_must_be_finite_and_positive()
+    {
+        BrazierLogic.RequireRadius(20f);
+        BrazierLogic.RequireRadius(0.001f);
+        foreach (float bad in new[] { float.NaN, 0f, -1f, float.PositiveInfinity, float.NegativeInfinity })
+            Assert.Throws<ArgumentOutOfRangeException>(() => BrazierLogic.RequireRadius(bad));
+    }
+
     [Fact]
     public void Players_sample_where_parses_and_replies()
     {

@@ -781,5 +781,7 @@ offset BonfireInputItemOffset                      = 0xC  : Bonfire.InputItem   
 offset BonfireStrengthOffset                       = 0x10 : Bonfire.Strength                     # float 0..1
 offset BonfireBurnTimeOffset                       = 0x14 : Bonfire.BurnTime                     # float seconds per fuel item
 offset BonfireIsActiveOffset                       = 0x28 : Bonfire.IsActive                     # bool, burning now
+# The sort events are read on the client, so they resolve against the client metadata.
+dump client
 offset SortSingleInventoryEventInventoryOffset     = 0x0  : SortSingleInventoryEvent.Inventory   # NetworkId, 12 bytes
 offset SortAllInventoriesEventInventoryOffset      = 0x0  : SortAllInventoriesEvent.Inventory    # NetworkId, 12 bytes

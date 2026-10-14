@@ -45,7 +45,8 @@ public sealed class BrazierInfo
 /// <c>BurnContainer</c> is a networked component: every client's window and effect follow.</para>
 ///
 /// <para><b>Burning and fuel.</b> <c>BonfireSystem_Server</c> burns while the switch is on, it is day
-/// and the structure is not damaged; it takes one fuel item (<c>Bonfire.InputItem</c>) from the
+/// and the structure's <c>EditableTileModel.CanRepair</c> flag is clear (inferred to mean "not
+/// damaged"); it takes one fuel item (<c>Bonfire.InputItem</c>) from the
 /// structure's own inventory per <c>Bonfire.BurnTime</c> seconds and never draws on castle storage.
 /// Nothing burns at night, so fuel lasts through it. Turning the switch off stops the burn at the next
 /// update; the started item's progress is kept and resumes when it is turned on again.</para>
@@ -106,10 +107,12 @@ public static unsafe class Braziers
     /// <summary>
     /// Burning structures within <paramref name="radius"/> meters (horizontal) of
     /// <paramref name="position"/>, nearest first. Scans every <c>BurnContainer</c> in the world and
-    /// counts each one's fuel; call on demand or on a slow tick, not every frame.
+    /// counts each one's fuel; call on demand or on a slow tick, not every frame. Throws
+    /// <see cref="ArgumentOutOfRangeException"/> for a radius that is not finite and positive.
     /// </summary>
     public static IReadOnlyList<BrazierInfo> Near(World world, float3 position, float radius)
     {
+        BrazierLogic.RequireRadius(radius);
         var em = RequireServer(world);
         var found = new List<BrazierInfo>();
         var entities = Query.Entities(em, includeDisabled: false, includeSystems: false,

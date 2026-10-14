@@ -63,6 +63,21 @@ public static class PlayerPositionMath
         return false;
     }
 
+    /// <summary>
+    /// The row a position may be read for: <paramref name="current"/> (the directory's row for the
+    /// account right now, online only, or null) when it is the same account as
+    /// <paramref name="requested"/>, online, from <paramref name="epoch"/>, with a character, and
+    /// <paramref name="requested"/> is from that epoch too; otherwise null. A kept row's own
+    /// <c>IsOnline</c> is never trusted.
+    /// </summary>
+    internal static PlayerInfo? CurrentRow(PlayerInfo? requested, PlayerInfo? current, int epoch)
+    {
+        if (requested == null || current == null) return null;
+        if (requested.WorldEpoch != epoch || current.WorldEpoch != epoch) return null;
+        if (!current.Account.Equals(requested.Account) || !current.IsOnline) return null;
+        return current.Session.HasCharacter ? current : null;
+    }
+
     /// <summary>The positions within <paramref name="radius"/> meters (horizontal, inclusive) of the point, nearest first.</summary>
     public static List<PlayerPosition> Within(IReadOnlyList<PlayerPosition> positions, float x, float z, float radius)
     {

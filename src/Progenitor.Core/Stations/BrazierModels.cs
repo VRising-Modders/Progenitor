@@ -26,7 +26,8 @@ public sealed class BrazierState
 
     /// <summary>
     /// Burning now (<c>Bonfire.IsActive</c>). The game burns only while <see cref="Enabled"/> is on,
-    /// during the day, and while the structure is not damaged; it takes the next fuel item from the
+    /// during the day, and while the structure's <c>EditableTileModel.CanRepair</c> flag is clear
+    /// (inferred to mean "not damaged"); it takes the next fuel item from the
     /// structure's own inventory when the current one is used up.
     /// </summary>
     public bool Burning { get; init; }
@@ -48,7 +49,9 @@ public sealed class BrazierState
 
     /// <summary>
     /// Burning seconds the fuel inside lasts: the rest of the started item plus every waiting one
-    /// (<see cref="BrazierLogic.FuelSecondsLeft"/>). Daytime seconds: nothing burns at night.
+    /// (<see cref="BrazierLogic.FuelSecondsLeft"/>). Daytime seconds: nothing burns at night. For the
+    /// one server frame after a new item is taken (progress still 0 while it already left the
+    /// inventory) this is one item short.
     /// </summary>
     public float FuelSecondsLeft => BrazierLogic.FuelSecondsLeft(Progress, FuelAmount, BurnTimeSeconds);
 
@@ -94,6 +97,16 @@ public static class BrazierLogic
     /// writes only on a difference, so two callers asking for the same state never undo each other.
     /// </summary>
     public static byte? PlanSet(bool current, bool want) => current == want ? null : want ? (byte)1 : (byte)0;
+
+    /// <summary>
+    /// Throws <see cref="ArgumentOutOfRangeException"/> unless <paramref name="radius"/> is finite and
+    /// positive (a NaN radius would otherwise pass every distance test).
+    /// </summary>
+    public static void RequireRadius(float radius)
+    {
+        if (!(radius > 0f) || float.IsInfinity(radius))
+            throw new ArgumentOutOfRangeException(nameof(radius), radius, "radius must be finite and positive");
+    }
 
     /// <summary>The one-line form <see cref="BrazierState.ToString"/> returns.</summary>
     public static string Describe(BrazierState s)

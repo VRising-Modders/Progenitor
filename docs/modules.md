@@ -1975,8 +1975,8 @@ bool someoneNear = PlayerPositionMath.AnyWithin(ctx.Players.OnlinePositions(), x
 | Fact (source-checked) | Detail |
 |---|---|
 | The switch | `BurnContainer.Enabled` (networked, persistent). The vanilla window's toggle sends `ToggleRefiningEvent`; the server's `ToggleRefiningSystem` checks the sender is using the structure and **flips** `Enabled`. `SetBrazierEnabled` writes the same byte on the server, only when it differs, and reads it back; every client's window and effect follow through replication. |
-| Burning | `BonfireSystem_Server` burns while `Enabled` is on, it is **day** (the whole day span of `DayNightCycle`), and the structure is not damaged (`EditableTileModel.CanRepair`). `Bonfire.IsActive` is the result; `Bonfire.Strength` ramps up while burning and down after. Turning the switch on at night lights it at the next sunrise. |
-| Fuel | One `Bonfire.InputItem` per `Bonfire.BurnTime` seconds, taken from the structure's **own** inventory only (castle storage is never drawn on). Nothing burns at night, so fuel lasts through it. `BurnContainer.Progress` is the progress through the started item; turning the switch off keeps it, and it resumes. `BrazierState.FuelAmount` counts the waiting items (`ctx.Inventory.Count` on instance 0); `FuelSecondsLeft` is daytime burning seconds. To refuel, move the fuel item in with `ctx.Inventory.TryAdd` or `Transfer`. |
+| Burning | `BonfireSystem_Server` burns while `Enabled` is on, it is **day** (the whole day span of `DayNightCycle`), and the structure's `EditableTileModel.CanRepair` flag is clear (inferred to mean not damaged). `Bonfire.IsActive` is the result; `Bonfire.Strength` ramps up while burning and down after. Turning the switch on at night lights it at the next sunrise. |
+| Fuel | One `Bonfire.InputItem` per `Bonfire.BurnTime` seconds, taken from the structure's **own** inventory only (castle storage is never drawn on). Nothing burns at night, so fuel lasts through it. `BurnContainer.Progress` is the progress through the started item; turning the switch off keeps it, and it resumes. `BrazierState.FuelAmount` counts the waiting items (`ctx.Inventory.Count` on instance 0); `FuelSecondsLeft` is daytime burning seconds (one item short for the single server frame after a new item is taken). To refuel, move the fuel item in with `ctx.Inventory.TryAdd` or `Transfer`. |
 | Shade | The mist brazier's effect is a cloud cookie around it whose opacity follows `Strength`; a player is shaded only while it is strong enough and only in a small area around the structure. |
 
 #### Live test (acceptance procedure, not run)
@@ -2290,8 +2290,10 @@ server, standing next to a chest.
 ### Online player positions
 
 `ctx.Players.OnlinePositions()` returns a `PlayerPosition` (directory row plus `X`, `Y`, `Z`) for
-every online player whose character is in the world, read from the character's `Translation` once
-per call; nothing runs between calls. `TryGetPosition(player, out position)` reads one.
+every online player whose character is in the world: the directory is re-read and the character's
+`Translation` read on every call, so use it on demand or on a slow tick, not per frame.
+`TryGetPosition(player, out position)` reads one; it looks the account up again, so a row kept from
+earlier never returns a disconnected player's last position.
 `PlayerPositionMath.AnyWithin` / `Within` answer "is anyone within 20 m of this brazier" without
 more reads. Server only. **Landed, not live-verified.** Live check (procedure, not run): with two
 connected characters, `.players where` lists both with coordinates; walk one 10 m and repeat: its

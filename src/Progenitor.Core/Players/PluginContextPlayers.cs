@@ -66,9 +66,11 @@ public sealed class PluginPlayers
     }
 
     /// <summary>
-    /// Where every online player's character stands now: one <c>Translation</c> read per connected
-    /// player with a live character, per call, and nothing between calls (no per-frame cost). Players
-    /// still loading in (no character yet) are left out. Server only; throws on the client. Main thread.
+    /// Where every online player's character stands now: the player directory is re-read and one
+    /// <c>Translation</c> is read per connected player with a live character, on every call; nothing
+    /// runs between calls. Meant for on-demand use or a slow tick (seconds), not per-frame polling.
+    /// Players still loading in (no character yet) are left out. Server only; throws on the client.
+    /// Main thread.
     /// </summary>
     public IReadOnlyList<PlayerPosition> OnlinePositions()
     {
@@ -82,15 +84,20 @@ public sealed class PluginPlayers
     }
 
     /// <summary>
-    /// Where <paramref name="player"/>'s character stands now. False when the row is not online, has
-    /// no character, is from an earlier world load, or the position cannot be read. Server only.
+    /// Where <paramref name="player"/>'s character stands now. The account is looked up again in
+    /// the directory, so a row kept from earlier never answers for a player who has since
+    /// disconnected or changed character: false when the account is not online now, has no
+    /// character, the row is from an earlier world load, or the position cannot be read. The
+    /// returned position carries the current row. Re-reads the directory; on-demand use. Server only.
     /// </summary>
     public bool TryGetPosition(PlayerInfo player, out PlayerPosition position)
     {
         position = default;
         var world = RequireServer(nameof(TryGetPosition));
-        if (player == null || !player.IsOnline || player.WorldEpoch != Progenitor.WorldState.WorldEpoch.Current) return false;
-        return TryRead(world.EntityManager, player, out position);
+        if (player == null) return false;
+        PlayerDirectory.TryGetByAccount(player.Account, out PlayerInfo now, onlineOnly: true, world);
+        var current = PlayerPositionMath.CurrentRow(player, now, Progenitor.WorldState.WorldEpoch.Current);
+        return current != null && TryRead(world.EntityManager, current, out position);
     }
 
     private static bool TryRead(EntityManager em, PlayerInfo player, out PlayerPosition position)
