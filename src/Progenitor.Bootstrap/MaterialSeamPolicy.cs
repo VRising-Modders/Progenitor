@@ -53,9 +53,6 @@ public static class MaterialSeamPolicy
     /// </summary>
     public const int ExpectedAllocatorLabel = 1;
 
-    /// <summary>How many replacement buffers rotate. A caller uses the array before its next count call.</summary>
-    public const int ArenaSlots = 16;
-
     /// <summary>
     /// Rows to reserve for a composed array: everything the game returned plus room for the pool rows.
     /// The compose call reports a larger need when this is not enough, and the arena grows.

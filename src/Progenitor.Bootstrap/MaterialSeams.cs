@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using BepInEx.Configuration;
@@ -71,9 +72,10 @@ internal static unsafe class MaterialSeams
     private static CountFn? _countOriginal, _countHook;
     private static RemoveFn? _removeOriginal, _removeHook;
 
-    private static readonly IntPtr[] Arena = new IntPtr[MaterialSeamPolicy.ArenaSlots];
-    private static readonly int[] ArenaRows = new int[MaterialSeamPolicy.ArenaSlots];
+    private static readonly List<IntPtr> Arena = new();
+    private static readonly List<int> ArenaRows = new();
     private static int _arenaNext;
+    private static int _arenaFrame = -1;
 
     [ThreadStatic] private static int _depth;
     private static int _countThrowLogged, _removeThrowLogged, _labelLogged;
@@ -281,8 +283,21 @@ internal static unsafe class MaterialSeams
 
     private static int NextSlot()
     {
-        int s = _arenaNext;
-        _arenaNext = (s + 1) % MaterialSeamPolicy.ArenaSlots;
+        // The original array is a view of Allocator.Temp memory. Its lifetime is this
+        // frame, not a fixed number of subsequent count calls. Never overwrite an
+        // earlier caller's rows within that frame, even with many players/recipes.
+        int frame = UnityEngine.Time.frameCount;
+        if (_arenaFrame != frame)
+        {
+            _arenaFrame = frame;
+            _arenaNext = 0;
+        }
+        int s = _arenaNext++;
+        if (s == Arena.Count)
+        {
+            Arena.Add(IntPtr.Zero);
+            ArenaRows.Add(0);
+        }
         return s;
     }
 
