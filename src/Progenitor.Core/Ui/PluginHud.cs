@@ -32,6 +32,7 @@ public sealed partial class PluginHud
         DropNotices(owner);
         DropPings(owner);
         DropPicks(owner);
+        DropTips(owner);
     }
 
     static partial void DropNotices(object owner);
@@ -39,6 +40,8 @@ public sealed partial class PluginHud
     static partial void DropPings(object owner);
 
     static partial void DropPicks(object owner);
+
+    static partial void DropTips(object owner);
 
     private bool ServerSide(string member)
     {

@@ -23,6 +23,9 @@ internal interface IUiWorldPickBackend
 
     /// <summary>No pick is armed any more (hide the prompt, release Escape; the hook may linger, see the swallow list).</summary>
     void Disarmed();
+
+    /// <summary>P7b: the repeating pick <paramref name="pick"/> delivered a target and stays armed (redraw its count).</summary>
+    void Repicked(UiWorldPickHandle pick) { }
 }
 
 /// <summary>What the coordinator answers when the game is about to open an interact panel.</summary>
@@ -47,6 +50,11 @@ internal enum UiWorldPickOffer
 /// <see cref="UiWorldPickHandle.Cancel"/>, replacement, timeout, a world change or no world at arm time,
 /// and no callback at all on Dispose, owner unload or Core unload. State changes and the backend's
 /// disarm happen before a callback runs, so a callback may arm the next pick.</para>
+///
+/// <para><b>Repeat</b> (P7b, <see cref="UiWorldPickOptions.Repeat"/>): a matching interact runs <c>onPicked</c> and the
+/// pick stays armed; it ends by the same paths as a one-shot pick except the pick itself. The same target as the previous
+/// pick within <see cref="UiWorldPickSwallowList.Ttl"/> seconds is not reported again. The timeout counts from the last
+/// pick.</para>
 /// </summary>
 internal sealed class UiWorldPickCoordinator
 {
@@ -151,9 +159,38 @@ internal sealed class UiWorldPickCoordinator
 
         var result = new UiWorldPickResult(entityIndex, entityVersion, info.Kind, menuType, info.Name, epoch, suppressed,
             networkId0, networkId1, networkId2);
+        if (pick.Options.Repeat) return Repick(pick, result);
         pick.Result = result;
+        pick.PickCount = 1;
         _log("Ui: world pick #" + pick.Id + " picked " + result + ".");
         End(pick, UiWorldPickState.Picked, runCallback: true);
+        return result;
+    }
+
+    /// <summary>
+    /// A repeating pick's interact: deliver it and stay armed, unless it is the same target as the previous pick within
+    /// the swallow window (then nothing is reported and null is returned).
+    /// </summary>
+    private UiWorldPickResult? Repick(UiWorldPickHandle pick, UiWorldPickResult result)
+    {
+        double now = _clock();
+        if (pick.Result is { } last && last.EntityIndex == result.EntityIndex && last.EntityVersion == result.EntityVersion
+            && now - pick.LastPickAt < UiWorldPickSwallowList.Ttl)
+        {
+            _log("Ui: world pick #" + pick.Id + " ignored a repeat of the same target " + result.EntityIndex + ":" + result.EntityVersion + ".");
+            pick.LastPickAt = now;
+            return null;
+        }
+
+        pick.Result = result;
+        pick.PickCount++;
+        pick.LastPickAt = now;
+        pick.TimeoutFrom = now;
+        _log("Ui: world pick #" + pick.Id + " picked " + result + " (" + pick.PickCount + " so far; repeating).");
+        try { _backend.Repicked(pick); }
+        catch (Exception e) { _log("Ui: world pick backend repick threw: " + e.Message); }
+        try { pick.OnPicked(result); }
+        catch (Exception e) { _log("Ui: world pick #" + pick.Id + " onPicked threw: " + e); }
         return result;
     }
 
@@ -162,7 +199,7 @@ internal sealed class UiWorldPickCoordinator
     {
         var pick = _current;
         if (pick == null) return false;
-        _log("Ui: world pick #" + pick.Id + " cancelled by Escape.");
+        _log("Ui: world pick #" + pick.Id + (pick.Options.Repeat ? " finished by Escape after " + pick.PickCount + " picks." : " cancelled by Escape."));
         End(pick, UiWorldPickState.Cancelled, runCallback: true);
         return true;
     }
@@ -196,7 +233,7 @@ internal sealed class UiWorldPickCoordinator
         }
 
         double timeout = pick.Options.TimeoutSeconds;
-        if (timeout > 0 && _clock() - pick.ArmedAt >= timeout)
+        if (timeout > 0 && _clock() - pick.TimeoutFrom >= timeout)
         {
             _log("Ui: world pick #" + pick.Id + " timed out after " + timeout + "s.");
             End(pick, UiWorldPickState.TimedOut, runCallback: true);
@@ -284,6 +321,8 @@ internal sealed class UiWorldPickHandle : IUiWorldPick
         Options = options;
         Epoch = epoch;
         ArmedAt = armedAt;
+        TimeoutFrom = armedAt;
+        LastPickAt = double.NegativeInfinity;
     }
 
     /// <summary>A handle that does nothing (the server, a skipped UI module).</summary>
@@ -306,7 +345,17 @@ internal sealed class UiWorldPickHandle : IUiWorldPick
 
     internal double ArmedAt { get; }
 
+    /// <summary>When the timeout started counting: the arm, or a repeating pick's last pick.</summary>
+    internal double TimeoutFrom { get; set; }
+
+    /// <summary>A repeating pick's last delivered (or ignored repeat) interact time.</summary>
+    internal double LastPickAt { get; set; }
+
+    /// <summary>The last target delivered.</summary>
     internal UiWorldPickResult? Result { get; set; }
+
+    /// <inheritdoc />
+    public int PickCount { get; internal set; }
 
     public UiWorldPickState State { get; internal set; } = UiWorldPickState.Idle;
 

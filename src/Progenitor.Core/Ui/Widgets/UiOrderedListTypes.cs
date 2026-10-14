@@ -50,6 +50,13 @@ public sealed class UiListItem
     /// <summary>A line of hover text for the row (a tooltip); empty for none.</summary>
     public string Tooltip { get; set; } = "";
 
+    /// <summary>
+    /// P7b (experimental): a term of the plugin's glossary (<see cref="UiTerms.Define(string, string, string)"/>) this row's
+    /// caption explains: hovering the row shows the term's line (in place of <see cref="Tooltip"/>), and a circle-i marker
+    /// follows the caption until the term's marker is hidden. Empty for none.
+    /// </summary>
+    public string Term { get; set; } = "";
+
     /// <inheritdoc />
     public override string ToString() => Id + ":" + Title;
 }

@@ -72,16 +72,37 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
 public sealed class ControlsContext : PluginContext { }
 
 /// <summary>
-/// The Widgets page's HUD calls on <c>ctx.Hud</c>: a notification, a pick in world, and a Locate ping on the last pick.
+/// The Widgets page's HUD calls on <c>ctx.Hud</c>: a notification, a pick in world (once or repeating), a Locate ping on the
+/// last pick, and the tip cards.
 /// The pick and the ping are this plugin's and go with it on every unload.
 /// </summary>
-internal sealed class ControlsHud : IWidgetsHud
+internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDemoHud
 {
     private readonly PluginContext _ctx;
     private UiWorldPickResult? _picked;
     private IUiLocatePing? _ping;
 
     internal ControlsHud(PluginContext ctx) => _ctx = ctx;
+
+    public void PickSeveral(Action<string, int> picked, Action<int> finished)
+    {
+        IUiWorldPick? pick = null;
+        pick = _ctx.Hud.PickInWorld(
+            result =>
+            {
+                _picked = result;
+                picked(result.Kind + " " + result.Menu + " (" + result.EntityIndex + ":" + result.EntityVersion + ")", pick?.PickCount ?? 1);
+            },
+            () => finished(pick?.PickCount ?? 0),
+            new UiWorldPickOptions { Repeat = true });
+    }
+
+    public string Tip(string id, string title, string body, IUiPanel? anchor) =>
+        _ctx.Hud.Tip(id, title, body, new UiTipOptions { Anchor = anchor }).State.ToString();
+
+    public void ShowAllTips() => _ctx.Hud.ShowAllTips();
+
+    public void ResetTips() => _ctx.Hud.ResetTips();
 
     public void Notify(string text, string detail, UiNoticeKind kind) => _ctx.Hud.Notify(text, detail, kind);
 

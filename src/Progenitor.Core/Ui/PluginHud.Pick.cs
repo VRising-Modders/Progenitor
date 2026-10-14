@@ -35,6 +35,12 @@ public sealed partial class PluginHud
     /// <see cref="UiWorldPickOptions.TimeoutSeconds"/>; both run <paramref name="onCancelled"/>.
     /// Disposing the handle, unloading the plugin or swapping Core ends it without a callback.</para>
     ///
+    /// <para><b>Repeat</b> (<see cref="UiWorldPickOptions.Repeat"/>, P7b): every matching interact runs
+    /// <paramref name="onPicked"/> and the pick stays armed, the band counting the picks, until Escape or
+    /// <see cref="IUiWorldPick.Cancel"/> (both mean "finished": <paramref name="onCancelled"/> runs, read
+    /// <see cref="IUiWorldPick.PickCount"/>), the timeout (counted from the last pick), leaving the world, a newer pick or
+    /// dispose.</para>
+    ///
     /// <para>Client only: on the server this logs once and returns a handle that stays Idle.</para>
     /// </summary>
     public IUiWorldPick PickInWorld(Action<UiWorldPickResult> onPicked, Action? onCancelled = null, UiWorldPickOptions? options = null)

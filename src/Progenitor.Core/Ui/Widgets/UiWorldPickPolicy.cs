@@ -14,6 +14,38 @@ internal static class UiWorldPickCopy
     /// <summary>The word after the Escape key cap.</summary>
     internal const string CancelWord = "Cancel";
 
+    /// <summary>P7b: the word after the Escape key cap while a repeating pick runs (Escape ends it as finished).</summary>
+    internal const string FinishWord = "Finish";
+
+    /// <summary>P7b: the word after the Interact key cap while a repeating pick runs (each interact adds a target).</summary>
+    internal const string AddWord = "Add";
+
+    /// <summary>P7b: what separates the prompt from a repeating pick's count on the band (drawn muted).</summary>
+    internal const string CountSeparator = "·";
+
+    /// <summary>
+    /// P7b: a repeating pick's count on the band, drawn in the gold after the prompt (<c>3 picked</c>); empty for a
+    /// one-shot pick or before the first pick.
+    /// </summary>
+    internal static string BandCount(bool repeat, int count) =>
+        !repeat || count <= 0 ? "" : count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " picked";
+
+    /// <summary>P7b: the word after the Interact key cap for a pick.</summary>
+    internal static string InteractWord(bool repeat) => repeat ? AddWord : PickWord;
+
+    /// <summary>P7b: the word after the Escape key cap for a pick.</summary>
+    internal static string EscapeWord(bool repeat) => repeat ? FinishWord : CancelWord;
+
+    /// <summary>
+    /// P7b: the band's bottom edge, in canvas units above the screen's bottom edge. The HUD's health readout and the buff
+    /// row above the action bar reach about 180 units up on the 1920x1080 design canvas (measured on a capture); the band
+    /// stays clear of them with its bottom at least <see cref="MinBandBottom"/> up.
+    /// </summary>
+    internal const float BandBottom = 200f;
+
+    /// <summary>P7b: the lowest the band's bottom edge may sit (the HUD clearance the mockup review found).</summary>
+    internal const float MinBandBottom = 196f;
+
     /// <summary>The Interact key cap's text when the game's binding cannot be read.</summary>
     internal const string InteractFallback = "Interact";
 

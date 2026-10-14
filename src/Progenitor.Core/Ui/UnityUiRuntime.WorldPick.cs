@@ -30,7 +30,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
     internal const string WorldPickBandName = UiOwnership.Prefix + "world-pick-band";
 
     private const float BandHeight = 50f;
-    private const float BandBottom = 190f;
+    private const float BandBottom = UiWorldPickCopy.BandBottom;
     private const float FrameBelowEdge = 8f;
     private const float BandPadX = 28f;
     private const float PromptSize = 24f;
@@ -39,12 +39,14 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
     private const float CapHeight = 30f;
     private const float CapPadX = 9f;
     private const float GapAfterPrompt = 30f;
+    private const float GapAroundSeparator = 10f;
     private const float GapCapWord = 8f;
     private const float GapBetweenKeys = 24f;
     private const float RuleHeight = 2f;
     private const float GroundAlpha = 0.82f;
 
-    public void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey)
+    public void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey, string cancelWord = UiWorldPickCopy.CancelWord,
+        string pickWord = UiWorldPickCopy.PickWord, string count = "")
     {
         if (panel is not UnityPanel host || !host.Alive) return;
         try
@@ -85,26 +87,32 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             }
 
             float x = 0f;
-            var parts = new List<(RectTransform Rt, float Width)>();
-            void Add(GameObject? go, float width)
+            // Each part with the gap that follows it, so an optional part (a repeating pick's count) needs no index table.
+            var parts = new List<(RectTransform Rt, float Width, float GapAfter)>();
+            void Add(GameObject? go, float width, float gapAfter)
             {
                 if (go == null) return;
                 var rt = go.GetComponent<RectTransform>();
                 if (rt == null) return;
-                parts.Add((rt, width));
-                x += width;
+                parts.Add((rt, width, gapAfter));
+                x += width + gapAfter;
             }
 
             var text = ToColor(MenuPalette.Text);
-            Add(BandText(band, UiRichText.Literal(prompt), PromptSize, text, UiWorldPickCopy.MaxPromptWidth, out float promptWidth), promptWidth);
-            x += GapAfterPrompt;
-            Add(BandCap(band, interactKey, out float capA), capA);
-            x += GapCapWord;
-            Add(BandText(band, UiWorldPickCopy.PickWord, WordSize, text, 0f, out float pickWidth), pickWidth);
-            x += GapBetweenKeys;
-            Add(BandCap(band, cancelKey, out float capB), capB);
-            x += GapCapWord;
-            Add(BandText(band, UiWorldPickCopy.CancelWord, WordSize, text, 0f, out float cancelWidth), cancelWidth);
+            bool counted = !string.IsNullOrEmpty(count);
+            Add(BandText(band, UiRichText.Literal(prompt), PromptSize, text, UiWorldPickCopy.MaxPromptWidth, out float promptWidth), promptWidth,
+                counted ? GapAroundSeparator : GapAfterPrompt);
+            if (counted)
+            {
+                // P7b: "Pick containers · 3 picked": the separator muted, the count in the gold.
+                Add(BandText(band, UiWorldPickCopy.CountSeparator, PromptSize, ToColor(MenuPalette.Muted), 0f, out float sepWidth), sepWidth, GapAroundSeparator);
+                Add(BandText(band, UiRichText.Literal(count), PromptSize, ToColor(MenuPalette.Gold), 0f, out float countWidth), countWidth, GapAfterPrompt);
+            }
+
+            Add(BandCap(band, interactKey, out float capA), capA, GapCapWord);
+            Add(BandText(band, string.IsNullOrEmpty(pickWord) ? UiWorldPickCopy.PickWord : pickWord, WordSize, text, 0f, out float pickWidth), pickWidth, GapBetweenKeys);
+            Add(BandCap(band, cancelKey, out float capB), capB, GapCapWord);
+            Add(BandText(band, string.IsNullOrEmpty(cancelWord) ? UiWorldPickCopy.CancelWord : cancelWord, WordSize, text, 0f, out float cancelWidth), cancelWidth, 0f);
 
             float width = Mathf.Ceil(x + 2f * BandPadX);
             bandRt.anchorMin = new Vector2(0.5f, 0f);
@@ -114,15 +122,14 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             bandRt.anchoredPosition = new Vector2(0f, BandBottom + FrameBelowEdge);
 
             float cursor = -x / 2f;
-            float[] gaps = { GapAfterPrompt, GapCapWord, GapBetweenKeys, GapCapWord, 0f };
             for (int i = 0; i < parts.Count; i++)
             {
-                var (rt, w) = parts[i];
+                var (rt, w, gap) = parts[i];
                 rt.anchorMin = new Vector2(0.5f, 0.5f);
                 rt.anchorMax = new Vector2(0.5f, 0.5f);
                 rt.pivot = new Vector2(0f, 0.5f);
                 rt.anchoredPosition = new Vector2(cursor, 0f);
-                cursor += w + (i < gaps.Length ? gaps[i] : 0f);
+                cursor += w + gap;
             }
 
             BandRule(band, width);

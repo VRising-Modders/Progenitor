@@ -643,6 +643,9 @@ internal interface IRuntimeCellRow : IRuntimeWidget
 
     void SetSelected(bool selected);
 
+    /// <summary>P7b: draw tile <paramref name="tile"/> of a <see cref="CellRowSpec.TileStates"/> row as <paramref name="state"/>. Test fakes ignore it.</summary>
+    void SetTileState(int tile, UiTileState state) { }
+
     /// <summary>Header: rewrite the captions so <paramref name="sortKey"/>'s column carries the indicator.</summary>
     void SetSorted(string? sortKey) { }
 

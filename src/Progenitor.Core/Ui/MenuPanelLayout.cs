@@ -2019,6 +2019,12 @@ internal sealed class CellSpec
     /// <summary>Floor the model never shrinks the cell below; 0 uses the kind's default.</summary>
     internal float MinWidth { get; set; }
 
+    /// <summary>
+    /// P7b: the most a <see cref="CellWidthMode.Fraction"/> or <see cref="CellWidthMode.Auto"/> cell asks for (0: no cap);
+    /// never below the cell's floor. The master-detail widget's master column is a clamped fraction of the row.
+    /// </summary>
+    internal float MaxWidth { get; set; }
+
     /// <summary>Header only: this column can be sorted by this key (click raises <c>OnSort</c>).</summary>
     internal string? SortKey { get; set; }
 
@@ -2091,6 +2097,25 @@ internal sealed class CellSpec
     /// it would be without it (<see cref="CellLayout.InlineNoteLine"/>). -1 (the default) for an ordinary overlay.
     /// </summary>
     internal int InlineAfter { get; set; } = -1;
+
+    /// <summary>
+    /// P7b chips, an ordinary overlay (<see cref="OverlayOf"/>, not inline) only: drawn at its target's left end instead of
+    /// its right (a chip's icon inside the chip art). False for every other overlay.
+    /// </summary>
+    internal bool OverlayLeft { get; set; }
+
+    /// <summary>P7b chips, an ordinary overlay only: units between the overlay and its target's edge (0: flush).</summary>
+    internal float OverlayInset { get; set; }
+
+    /// <summary>
+    /// P7b chips, a <see cref="CellSkin.Chip"/> button only: the caption's left and right margins inside the chip in place
+    /// of half the button pad each (0: the default), so a caption is centered between an icon overlay and a remove
+    /// overlay. A chip without overlays keeps the default and is centered on the whole chip art.
+    /// </summary>
+    internal float CaptionInsetLeft { get; set; }
+
+    /// <inheritdoc cref="CaptionInsetLeft"/>
+    internal float CaptionInsetRight { get; set; }
 
     /// <summary>INSTALLSIDES1: the height the runtime gives this cell in place of its kind's own (0: the kind's).</summary>
     internal float HeightOverride { get; set; }
@@ -2337,6 +2362,14 @@ internal sealed class CellRowSpec
     /// <see cref="CellSpec.Tile"/> are framed.
     /// </summary>
     internal CellSectionEdge TileEdge { get; init; }
+
+    /// <summary>
+    /// P7b: this row's tiles are not TILES1 frames but state-driven fills (<see cref="UiTileState"/>, set with
+    /// <c>UiCellRowHandle.SetTileState</c>): hidden until asked, a list entry's hover or selection band confined to the
+    /// tile's cells, or a thin rule down its center joined to the row above (unless <see cref="TileEdge"/> has
+    /// <see cref="CellSectionEdge.First"/>). The master-detail widget lights its master half with it.
+    /// </summary>
+    internal bool TileStates { get; init; }
 
     /// <summary>
     /// PENDING3 (live 2026-10-06: with nothing pending, the Pending changes label vanished): the least height a
@@ -2819,7 +2852,10 @@ internal static class CellLayout
                 continue;
             }
 
-            result[i] = new CellPlacement(spec.Key, i, result[target].Right - w * .5f, w, true, false);
+            // P7b: an overlay may sit at its target's left end, and keep an inset from that edge (inside the target).
+            float edge = Math.Max(0f, Math.Min(float.IsNaN(spec.OverlayInset) ? 0f : spec.OverlayInset, result[target].Width - w));
+            float center = spec.OverlayLeft ? result[target].Left + edge + w * .5f : result[target].Right - edge - w * .5f;
+            result[i] = new CellPlacement(spec.Key, i, center, w, true, false);
         }
 
         return result;
@@ -2950,6 +2986,8 @@ internal static class CellLayout
                     CellWidthMode.GridName => GridNameWidth(rowWidth),
                     _ => AutoWidth(spec),
                 };
+                if (spec.MaxWidth > 0f && (spec.Width.Mode == CellWidthMode.Fraction || spec.Width.Mode == CellWidthMode.Auto))
+                    ask = Math.Min(ask, spec.MaxWidth);
                 if (spec.Kind == CellKind.Spacer) ask = 0f;
                 else ask = Math.Max(MinWidthOf(spec), MenuPanelLayout.Positive(ask, MinWidthOf(spec)));
                 width[i] = ask;

@@ -40,6 +40,18 @@ internal static class CoreUiSettings
     /// <summary>Three homes: <c>[Ui] ClosedDrawers</c>, the settings drawers the player closed (<see cref="SettingsDrawers"/>).</summary>
     internal static ConfigEntry<string>? ClosedDrawers { get; set; }
 
+    /// <summary>P7b help (<see cref="UiHelpSettings"/>): <c>[Ui] HiddenTermMarkers</c>, the hidden term markers.</summary>
+    internal static ConfigEntry<string>? HiddenTermMarkers { get; set; }
+
+    /// <summary>P7b help: <c>[Ui] TermMarkerHovers</c>, hovers counted toward a marker's auto-hide.</summary>
+    internal static ConfigEntry<string>? TermMarkerHovers { get; set; }
+
+    /// <summary>P7b help: <c>[Ui] TermMarkerAutoHide</c>, hovers before a marker hides itself (default 3, 0 never).</summary>
+    internal static ConfigEntry<int>? TermMarkerAutoHide { get; set; }
+
+    /// <summary>P7b help: <c>[Ui] SeenTips</c>, the tip cards the player dismissed.</summary>
+    internal static ConfigEntry<string>? SeenTips { get; set; }
+
     /// <summary>
     /// <c>EditOtherModsSettings</c> changed (or was bound): the catalog's foreign rows follow it at once, and an open
     /// mod page or Keybinds tab is drawn again, so a foreign row becomes editable (or read-only) without a Core reload.
@@ -61,6 +73,10 @@ internal static class CoreUiSettings
         EditOtherModsSettings = null;
         MenuHistoryInnerTabs = null;
         ClosedDrawers = null;
+        HiddenTermMarkers = null;
+        TermMarkerHovers = null;
+        TermMarkerAutoHide = null;
+        SeenTips = null;
         ServerBrowserProgenitorOnly = null;
     }
 }

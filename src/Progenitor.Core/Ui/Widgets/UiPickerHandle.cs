@@ -13,6 +13,8 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
     private const string CellSearch = "search";
     private const string CellStatus = "status";
     private const string CellUse = "use";
+    internal const string CellAll = "all";
+    internal const string CellClear = "clear";
 
     private readonly UiPickerModel _model;
     private readonly UiPickerOptions _options;
@@ -41,8 +43,13 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
             Render();
         }));
 
-        _status = Part(panel.CellRow(new CellRowSpec(RowKey(CellStatus), UiPickerLayout.StatusCells(), plain: true, compact: true)));
+        _status = Part(panel.CellRow(new CellRowSpec(RowKey(CellStatus), UiPickerLayout.StatusCells(_options.Multi), plain: true, compact: true)));
         Lease(_status.OnClick(CellUse, () => { if (Live) AcceptSuggestion(); }));
+        if (_options.Multi)
+        {
+            Lease(_status.OnClick(CellAll, () => { if (Live) SelectAllMatches(); }));
+            Lease(_status.OnClick(CellClear, () => { if (Live) ClearSelection(); }));
+        }
 
         for (int i = 0; i < _model.Rows; i++)
         {
@@ -121,6 +128,16 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         Render();
         RaisePicked();
         return true;
+    }
+
+    public int SelectAllMatches()
+    {
+        if (IsDisposed) return 0;
+        int added = _model.SelectMatches();
+        if (added == 0) return 0;
+        Render();
+        RaisePicked();
+        return added;
     }
 
     public void ClearSelection()
@@ -202,8 +219,14 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         _lines.Clear();
         _lines.AddRange(lines);
         string suggestion = Suggestion;
-        _status.SetCell(CellStatus, _model.Status(hidden));
+        string selection = _model.SelectionStatus();
+        _status.SetCell(CellStatus, selection.Length == 0 ? _model.Status(hidden) : _model.Status(hidden) + " " + selection);
         _status.SetCell(CellUse, suggestion.Length == 0 ? "" : "Use “" + suggestion + "”", visible: suggestion.Length > 0);
+        if (_options.Multi)
+        {
+            _status.SetCell(CellAll, visible: _model.CanSelectMatches());
+            _status.SetCell(CellClear, visible: _model.Selected.Count > 0);
+        }
         TrySetVisible(_search, true);
         TrySetVisible(_status, true);
 
@@ -267,11 +290,34 @@ internal static class UiPickerLayout
             .With(width: CellWidth.Fill(CellLayout.MinInputWidth), placeholder: placeholder ?? "Search"),
     };
 
-    internal static List<CellSpec> StatusCells() => new()
+    internal static List<CellSpec> StatusCells(bool multi = false)
     {
-        new CellSpec(CellKind.Muted, "status").With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth)),
-        new CellSpec(CellKind.Button, "use") { Skin = CellSkin.Link, Optional = true }.With(align: CellAlign.Right, minWidth: 80f),
-    };
+        var cells = new List<CellSpec>
+        {
+            new CellSpec(CellKind.Muted, "status").With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth)),
+            new CellSpec(CellKind.Button, "use") { Skin = CellSkin.Link, Optional = true }.With(align: CellAlign.Right, minWidth: 80f),
+        };
+        if (multi)
+        {
+            // P7b: multi mode's two actions, links like the suggestion, packed right after it; hidden while they have no work.
+            cells.Add(LinkCell(UiPickerHandle.CellAll, SelectAllCaption));
+            cells.Add(LinkCell(UiPickerHandle.CellClear, ClearCaption));
+        }
+
+        return cells;
+    }
+
+    /// <summary>P7b: the multi picker's action captions (sentence case).</summary>
+    internal const string SelectAllCaption = "Select all";
+
+    internal const string ClearCaption = "Clear";
+
+    private static CellSpec LinkCell(string key, string caption)
+    {
+        float w = CellLayout.EstimateTextWidth(caption, MenuPanelLayout.HeaderButtonFontSize) + CellLayout.ButtonPad;
+        return new CellSpec(CellKind.Button, key) { Skin = CellSkin.Link, Visible = false, MinWidth = w }
+            .With(text: caption, width: CellWidth.Px(w), align: CellAlign.Right);
+    }
 
     /// <summary>One result line: [check (multi)] [icon] caption [note].</summary>
     internal static List<CellSpec> LineCells(bool multi, bool icon)

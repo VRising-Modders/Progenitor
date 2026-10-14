@@ -24,6 +24,14 @@ public interface IUiTabs : IUiHandle
     /// <summary>Hover text for tab <paramref name="tab"/>; empty for none.</summary>
     void SetTooltip(int tab, string text);
 
+    /// <summary>
+    /// P7b (experimental): tab <paramref name="tab"/>'s caption explains <paramref name="term"/> of the plugin's glossary
+    /// (<see cref="UiTerms.Define(string, string, string)"/>): hovering it shows the term's line (in place of the tab's
+    /// <see cref="SetTooltip"/> text) and a circle-i marker follows the caption until the term's marker is hidden. Empty
+    /// removes it.
+    /// </summary>
+    void SetTerm(int tab, string term);
+
     /// <summary>Make <paramref name="content"/> part of tab <paramref name="tab"/>: shown only while that tab is selected.</summary>
     T Add<T>(int tab, T content) where T : IUiHandle;
 
@@ -54,6 +62,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     private readonly string[] _badges;
     private readonly LabelTone[] _tones;
     private readonly string[] _tips;
+    private readonly UiTermBinding?[] _terms;
     private readonly List<IUiHandle>[] _content;
     private readonly IUiCellRow _row;
     private readonly List<Action<int>> _changed = new();
@@ -68,6 +77,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
         _badges = new string[_captions.Length];
         _tones = new LabelTone[_captions.Length];
         _tips = new string[_captions.Length];
+        _terms = new UiTermBinding?[_captions.Length];
         _content = new List<IUiHandle>[_captions.Length];
         for (int i = 0; i < _captions.Length; i++)
         {
@@ -146,8 +156,41 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
         return new Dictionary<string, object?> { ["kind"] = "tabs", ["key"] = Key, ["selected"] = _selected, ["tabs"] = tabs };
     }
 
+    public void SetTerm(int tab, string term)
+    {
+        if (tab < 0 || tab >= _captions.Length) return;
+        var now = _terms[tab];
+        _terms[tab] = null;
+        try { now?.Dispose(); }
+        catch { /* */ }
+        if (string.IsNullOrWhiteSpace(term) || IsDisposed) return;
+        // The tab's hover slot already runs HoverTab; the binding takes its hovers from there (one handler per cell).
+        try { _terms[tab] = UiTerms.MarkCell(_row, UiTabsLayout.TabKey(tab), term, watchHover: false); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: tabs '" + Key + "' term '" + term + "': " + e.Message); }
+    }
+
+    /// <summary>The term marked on tab <paramref name="tab"/>, or empty (tests and readback).</summary>
+    internal string TermOf(int tab) => tab >= 0 && tab < _terms.Length ? _terms[tab]?.Term ?? "" : "";
+
+    protected override void OnDisposing()
+    {
+        for (int i = 0; i < _terms.Length; i++)
+        {
+            try { _terms[i]?.Dispose(); }
+            catch { /* */ }
+            _terms[i] = null;
+        }
+    }
+
     private void HoverTab(int tab, bool on)
     {
+        var term = _terms[tab];
+        if (term != null && UiTerms.IsDefined(PluginId, term.Term))
+        {
+            term.Hover(on);
+            return;
+        }
+
         if (!on || string.IsNullOrWhiteSpace(_tips[tab]))
         {
             HideTooltip();

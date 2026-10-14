@@ -20,8 +20,12 @@ namespace Progenitor.Ui;
 /// </summary>
 internal interface IWorldPickBandRuntime
 {
-    /// <summary>Restyle the shown <paramref name="panel"/> as the bottom prompt band.</summary>
-    void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey);
+    /// <summary>
+    /// Restyle the shown <paramref name="panel"/> as the bottom prompt band. <paramref name="cancelWord"/> follows the
+    /// Escape key cap (<see cref="UiWorldPickCopy.CancelWord"/>, or <see cref="UiWorldPickCopy.FinishWord"/> while a pick repeats).
+    /// </summary>
+    void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey, string cancelWord = UiWorldPickCopy.CancelWord,
+        string pickWord = UiWorldPickCopy.PickWord, string count = "");
 }
 
 /// <summary>
@@ -93,6 +97,9 @@ internal static unsafe class WorldPickBackend
     private static bool _lifetimeRegistered;
     private static bool? _stopLayoutOk;
     private static string _prompt = UiWorldPickOptions.DefaultPrompt;
+    private static string _escapeWord = UiWorldPickCopy.CancelWord;
+    private static string _interactWord = UiWorldPickCopy.PickWord;
+    private static string _count = "";
     private static UiCaptureMode _bandMode = UiCaptureMode.Never;
     private static ulong? _armedWorldSeq;
     private static Entity _armedCharacter;
@@ -223,7 +230,17 @@ internal static unsafe class WorldPickBackend
             }
 
             _prompt = pick.Options.Prompt;
+            _count = UiWorldPickCopy.BandCount(pick.Options.Repeat, pick.PickCount);
+            _escapeWord = UiWorldPickCopy.EscapeWord(pick.Options.Repeat);
+            _interactWord = UiWorldPickCopy.InteractWord(pick.Options.Repeat);
             ShowBand();
+        }
+
+        /// <summary>P7b: a repeating pick took a target: the band shows the new count.</summary>
+        public void Repicked(UiWorldPickHandle pick)
+        {
+            _count = UiWorldPickCopy.BandCount(pick.Options.Repeat, pick.PickCount);
+            if (_band is UiPanelHandle { IsDisposed: false } handle && handle.IsShownNow) StyleBand(handle);
         }
 
         public void Disarmed()
@@ -608,7 +625,7 @@ internal static unsafe class WorldPickBackend
     private static void StyleBand(UiPanelHandle handle)
     {
         if (Ui.CurrentRuntime() is IWorldPickBandRuntime band && handle.RuntimePanel is { } runtimePanel)
-            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey);
+            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey, _escapeWord, _interactWord, _count);
     }
 
     private static void ReleaseBand()

@@ -63,6 +63,46 @@ internal interface IWidgetRuntime
 
     /// <summary>A game item's display name in the player's language for its prefab id, or null.</summary>
     string? ItemName(int prefab);
+
+    /// <summary>
+    /// P7b: the Shift and Ctrl keys held now, from the framework's input layer (read at the moment a click arrives, for
+    /// multi-select). Never a keybind: the modifiers only change what a click means.
+    /// </summary>
+    UiClickModifiers ClickModifiers() => UiClickModifiers.None;
+
+    /// <summary>
+    /// P7b: take wheel notches over <paramref name="area"/> (screen pixels) before the panel scrolls
+    /// (<see cref="UiWheelClaims"/>); <paramref name="onNotch"/> gets +1 toward the end, -1 toward the start, and answers
+    /// whether it moved. Disposed with the widget.
+    /// </summary>
+    IDisposable ClaimWheel(Func<ScreenRect> area, Func<int, bool> onNotch) => UiWheelClaims.Add(area, onNotch);
+
+    /// <summary>
+    /// P7b: a vertical scroll bar in the game's art (<c>ScrollBar_Bar</c> / <c>ScrollBar_Handle</c>, the kit's track and
+    /// handle when not borrowed) down the right edge of the rows from <paramref name="top"/> to <paramref name="bottom"/>
+    /// (both cell rows of one panel, top first), inside the rows' right inset. Null when the runtime cannot draw one
+    /// (the wheel and the controller still scroll).
+    /// </summary>
+    IWidgetScrollBar? AttachScrollBar(IRuntimeCellRow top, IRuntimeCellRow bottom, object? owner) => null;
+}
+
+/// <summary>
+/// P7b: a widget's own scroll bar (<see cref="IWidgetRuntime.AttachScrollBar"/>). The widget owns the position; the bar
+/// shows it and reports drags. Disposed with the widget.
+/// </summary>
+internal interface IWidgetScrollBar : IDisposable
+{
+    /// <summary>
+    /// Show the bar for a view of <paramref name="size"/> (the visible share, 0..1) at <paramref name="position"/> (0 the
+    /// top, 1 the bottom). A size of 1 or more hides it. Never raises <see cref="OnDragged"/>.
+    /// </summary>
+    void Set(float size, float position);
+
+    /// <summary>The bar is drawn now.</summary>
+    bool Visible { get; }
+
+    /// <summary>The player dragged the handle or clicked the track: the new position, 0 the top, 1 the bottom.</summary>
+    Action<float>? OnDragged { get; set; }
 }
 
 /// <summary>Resolves the current runtime's widget half.</summary>

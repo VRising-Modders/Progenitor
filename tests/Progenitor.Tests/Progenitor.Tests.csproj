@@ -1102,7 +1102,7 @@
          what ships in the Sample is the same code these tests pin. -->
     <Compile Include="..\..\samples\Progenitor.Sample\SampleHooks.cs" Link="Linked\SampleHooks.cs" />
     <Compile Include="..\..\samples\Progenitor.ControlsSample\ControlsDemo.cs" Link="Linked\ControlsDemo.cs" />
-    <Compile Include="..\..\samples\Progenitor.ControlsSample\WidgetsDemo.cs" Link="Linked\WidgetsDemo.cs" />
+    <Compile Include="..\..\samples\Progenitor.ControlsSample\WidgetsDemo*.cs" Link="Linked\%(Filename)%(Extension)" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleChat.cs" Link="Linked\SampleChat.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleNet.cs" Link="Linked\SampleNet.cs" />
     <!-- The map-scope keybind example: the ruler, the coordinate check and the lines are game-free;

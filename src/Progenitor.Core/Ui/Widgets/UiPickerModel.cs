@@ -171,6 +171,36 @@ internal sealed class UiPickerModel
         return Select(entry.Id, true);
     }
 
+    /// <summary>
+    /// P7b, multi mode: select every pickable match of the query that is not selected yet, in the order listed. Returns how
+    /// many were added (0 in single mode).
+    /// </summary>
+    internal int SelectMatches()
+    {
+        if (!Multi) return 0;
+        int added = 0;
+        foreach (var e in _matches)
+        {
+            if (e.Disabled || _selected.Contains(e.Id)) continue;
+            _selected.Add(e.Id);
+            added++;
+        }
+
+        return added;
+    }
+
+    /// <summary>P7b, multi mode: some pickable match is not selected (the Select all link has work to do).</summary>
+    internal bool CanSelectMatches()
+    {
+        if (!Multi) return false;
+        foreach (var e in _matches)
+            if (!e.Disabled && !_selected.Contains(e.Id)) return true;
+        return false;
+    }
+
+    /// <summary>P7b, multi mode: the selected count for the status line (<c>3 selected.</c>), empty with none or in single mode.</summary>
+    internal string SelectionStatus() => !Multi || _selected.Count == 0 ? "" : _selected.Count + " selected.";
+
     internal bool ClearSelection()
     {
         if (_selected.Count == 0) return false;

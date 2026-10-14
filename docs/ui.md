@@ -58,7 +58,8 @@ Ui.RemoveAll(this);
 | `RemoveAll(owner)` | Dispose that plugin's handles and destroy the exact DontDestroyOnLoad root `progenitor-ui-<pluginId>`. A longer GUID (`example.sample.extra`) is a different root. |
 | `panel.Dropdown` / `Number` / `SliderField` / `ColorField` / `KeyField` | The settings kit (SETTINGS1). See [Settings kit controls](#settings-kit-controls-settings1-source-checked-and-game-free-tested-not-live-verified). |
 | `panel.TextArea` / `Radio` / `MultiSelect` / `Info` / `Divider` / `ConfirmButton`, `IUiHandle.Interactable` | SETTINGS1 stage 2. See [Stage 2 controls](#stage-2-controls-settings1-source-checked-and-game-free-tested-not-live-verified). |
-| `panel.OrderedList` / `Picker` / `Tabs` / `CodeArea`, `handle.Tooltip` (`UiWidgets`); `ctx.Hud.Notify` / `Locate` / `PickInWorld` | P7, experimental. See [Widgets](#widgets-p7) and [HUD](#hud-notifications-locate-and-pick-in-world). |
+| `panel.OrderedList` / `Picker` / `Tabs` / `CodeArea`, `handle.Tooltip` (`UiWidgets`); `ctx.Hud.Notify` / `Locate` / `PickInWorld` | P7, experimental. See [Widgets](#widgets-p7-p7b) and [HUD](#hud-notifications-locate-and-pick-in-world). |
+| `panel.DataTable` / `MasterDetail` / `Chips` (`UiWidgets`); `handle.Term` / `UiTerms`; `ctx.Hud.Tip` | P7b, experimental. See [Data table](#data-table), [Master-detail](#master-detail), [Chips](#chips) and [Help](#help-explained-words-and-first-time-tips-p7b). |
 
 Keybinds are registered per plugin through `ctx.Keybinds.Register(id, defaultKey, description, onPressed, allowWhileCaptured: false)`, which binds the chord to that plugin's own cfg file. See [Keybinds](#keybinds-edges-come-from-held-state).
 
@@ -658,11 +659,11 @@ On the isolated test client (not a client someone is playing), with a candidate 
 
 Guessed sizes (set from the glyph estimate, not measured live): the 16-unit top pad, 24/17/16 px text, the 520/460/420/360 widths, the 52-unit button row, the ×1.3 + 40 button width with the 120 floor, the 6-unit text pad, the 10-option Choose cap and the 250 ms Enter grace.
 
-## Widgets (P7)
+## Widgets (P7, P7b)
 
-Composed widgets for a mod's panel or Mods page: an ordered list, an entity and item picker, tabs with count badges, tooltips, and a code text area. Each one is built from the kit's own cell rows and buttons, so it draws in the game's look, sits on the settings grid with the rows around it, and is reached by a controller like every other kit control. A widget is disposed with its panel (a close, `Ui.RemoveAll`, an unload, the Core teardown), which ends a drag and hides its tooltip. On a runtime that cannot draw (the server, a skipped module) a widget keeps its state and draws nothing, like every other handle. The HUD pieces (notifications, Locate, pick in world) are on `ctx.Hud`, [below](#hud-notifications-locate-and-pick-in-world).
+Composed widgets for a mod's panel or Mods page: an ordered list, an entity and item picker, tabs with count badges, tooltips, a code text area (P7), and a data table, a master-detail screen and chips (P7b). Each one is built from the kit's own cell rows and buttons, so it draws in the game's look, sits on the settings grid with the rows around it, and is reached by a controller like every other kit control. A widget is disposed with its panel (a close, `Ui.RemoveAll`, an unload, the Core teardown), which ends a drag and hides its tooltip. On a runtime that cannot draw (the server, a skipped module) a widget keeps its state and draws nothing, like every other handle. The HUD pieces (notifications, Locate, pick in world) are on `ctx.Hud`, [below](#hud-notifications-locate-and-pick-in-world); explained words and tip cards are under [Help](#help-explained-words-and-first-time-tips-p7b).
 
-**Status: experimental.** Source-checked, built and game-free tested (`UiWidgetsTests`, `UiCodeAreaTests`); **not verified live**. The live procedure is [Widgets acceptance procedure](#widgets-acceptance-procedure-not-run). Reference page: the Controls sample's **Widgets** page ([`WidgetsDemo.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.cs)).
+**Status: experimental.** Source-checked, built and game-free tested (P7: `UiWidgetsTests`, `UiCodeAreaTests`; P7b: `UiDataTableTests`, `UiMasterDetailTests`, `UiChipsTests`, `UiTermsTests`, `UiTipsTests`, `UiPickerMultiTests`, `UiWorldPickRepeatTests`); **not verified live**. The live procedure is [Widgets acceptance procedure](#widgets-acceptance-procedure-not-run). Reference page: the Controls sample's **Widgets** page ([`WidgetsDemo.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.cs) and its `WidgetsDemo.*.cs` parts), five tabs: **Lists** (ordered list, chips), **Input** (pickers, code area), **Table** (data table), **Layout** (master-detail), **HUD** (notifications, pick in world, Locate, explained words, tip cards).
 
 ```csharp
 using Progenitor.Ui;
@@ -699,6 +700,9 @@ ctx.Menu.Register("My mod", "…").Page("Targets", panel =>
 | Tabs | `panel.Tabs(key, captions, selected)` → `IUiTabs` | The Install tab's filter chips: the game's popup button (`SmallerButton_*`) with the gold plate on the selected one; a count badge after each caption. |
 | Tooltip | `handle.Tooltip(text, title)` (any kit control), `UiListItem.Tooltip`, `UiPickerEntry.DisabledReason` / `Tooltip`, `IUiTabs.SetTooltip` | The dropdown description box (DROPHOVER1): the game's frame sprite (`PassiveFrame_Normal`) or its dark fill, a gold title line, a light body, on its own canvas above every mod panel. |
 | Code area | `panel.CodeArea(text, initial, lines)` → `IUiCodeArea` | The settings value box's multi-line editor (TEXTEXPAND1) with the game's scroll bar (`ScrollBar_Bar` / `ScrollBar_Handle`), a line-number gutter, caller colors drawn over the field's own (transparent) glyphs, and a red marker and band on each line with an error. |
+| Data table (P7b) | `panel.DataTable(key, columns, options)` → `IUiDataTable` | The Install tab's list: the header is the Install list's `CellHeader` (sortable captions in the game's small caps at 15 px; the sort mark is a drawn gold arrow with a small order digit when there are several keys); body rows are settings-grid cell rows with the list's separator rule and the Mods list's entry-row states (a light wash under the pointer, the gold entry band with its 3-unit gold stripe when selected, NAV1's frame for the controller focus); the game's dropdown arrow (`DropDownButton_Arrow`) as the row expander; the game item icon in the kit's icon well; editable numbers in the settings value box (`SimpleBox_Normal`); the waiting spinner as a drawn three-quarter ring in the pending yellow; the Columns button as the Options dropdown bar; the column chooser as the Install filter chips (`SmallerButton_*`); the scroll bar in the game's `ScrollBar_Bar` / `ScrollBar_Handle`. |
+| Master-detail (P7b) | `panel.MasterDetail(key, options)` → `IUiMasterDetail` | The game's options menu pairing its category list with the selected category: settings-grid rows with the separator rule, the Mods list entry's band and 3-unit gold stripe behind the selected entry's half, its hover wash, NAV1's focus marker, a 1-unit divider rule in the separator color, the tab row as the Install filter chips, detail buttons as the game's popup button, links in the kit's link blue, members as the ordered list's rows. Part by part: [Master-detail](#master-detail). |
+| Chips (P7b) | `panel.Chips(key, chips, options)` → `IUiChips` | The Install tab's filter chips (`InstallModsPane.Chip`): each chip is one game popup button (`SmallerButton_*`, with the game's hover and pressed sprites) with the gold plate when selected. An item chip's icon (the kit's icon well, 24, with the game item's own inventory icon) sits inside the chip art at its left; a removable chip's box-less remove glyph (muted gold, light cream on the gold plate) inside it at its right. The controller focus is the NAV1 frame 3 units outside the chip. |
 
 ### Ordered list
 
@@ -706,7 +710,7 @@ The list changes itself and then raises the event, so a plugin never has to redr
 
 | Member | Behavior |
 |---|---|
-| `UiListItem(id, title)` | `Id` is the caller's stable key; duplicate ids are refused (`ArgumentException`, nothing changes). `Note` (muted, after the caption, the first cell a narrow row drops), `Badge` (count text), `Detail` (the drawer's text; empty means no drawer), `Icon` (a `Sprite`) or `ItemPrefab` (a game item's prefab id; the client shows that item's own inventory icon, `ManagedItemData.Icon`), `Removable`, `Tooltip`. |
+| `UiListItem(id, title)` | `Id` is the caller's stable key; duplicate ids are refused (`ArgumentException`, nothing changes). `Note` (muted, after the caption, the first cell a narrow row drops), `Badge` (count text), `Detail` (the drawer's text; empty means no drawer), `Icon` (a `Sprite`) or `ItemPrefab` (a game item's prefab id; the client shows that item's own inventory icon, `ManagedItemData.Icon`), `Removable`, `Tooltip`, `Term` (P7b: the caption explains a glossary term in place of `Tooltip`, see [Term tooltips](#term-tooltips)). |
 | `UiOrderedListOptions` | `Capacity` (rows made; 0 = the first item count, at least 8, at most 64), `Reorder` (grip and arrows, on), `Remove` (on), `DetailLines` (1–6, 2), `EmptyText`. |
 | `Items`, `Capacity`, `Overflow` | The order now; the rows the list can draw; items past the capacity (kept, not drawn; the footer says how many). |
 | `Move(id, index)`, `Remove(id)`, `SetExpanded(id, open)`, `IsExpanded(id)` | Programmatic changes; each raises its event. |
@@ -727,12 +731,15 @@ The list changes itself and then raises the event, so a plugin never has to redr
 | `Matches`, `Suggestion`, `AcceptSuggestion()` | The matching entries; the autofill completion; complete the query to it (and select it in single mode). |
 | `Selected`, `Select(id, on)`, `ClearSelection()`, `OnPicked(entries)` | The selection, in selection order; `OnPicked` after every change. |
 | `SetEntries(entries)` | Replace the entries; selected ids that remain stay selected. |
+| `SelectAllMatches()` | P7b. Multi mode: select every pickable entry matching the query (also those past the drawn lines), as the status line's **Select all** link does. One `OnPicked`; returns how many were added (0 in single mode or when all were selected). |
 
 **Matching.** Case- and accent-insensitive, on the label and the keywords. Best first: the label equals the query; starts with it; a word of the label starts with it; every query word starts some label word; the label contains it; a keyword contains it. No match, not listed. Sections keep the order of their first entry in the caller's list; within a section, rank, then pickable before grayed, then the caller's order. **Autofill:** the best pickable match whose label starts with the query is offered as a link under the field (`Use "Iron Ore"`); a click completes the query (and picks it in single mode). There is no completion key, so the field never fights the keybinds. **Lines:** headings and entries share the `Rows` slots; a heading never ends the window; what did not fit is counted in the status line ("12 matches. Keep typing to narrow them down.").
 
+**Multiple selection** (`UiPickerOptions.Multi`; P7b, `UiPickerMultiTests`). Each entry has a check column (the kit's check glyph `√`, `*` without the font's glyph, in the gold); a click on the row or on the check flips it, and so does the controller's A on the row. The status line adds the count (`12 matches. 3 selected.`) and two links after the autofill suggestion: **Select all** (shown while some pickable match is not selected) and **Clear** (shown while something is selected). Grayed entries are never selected by either. `OnPicked` runs once per change with every selected entry. The multi status row is checked at 560–1248 units (`UiPickerMultiTests.The_multi_status_row_fits_at_every_checked_width`); the two links are never dropped, only the suggestion link is optional.
+
 ### Tabs and badges
 
-`Tabs(key, captions, selected)`; `Add(tab, handle)` makes a control part of a tab (shown only while it is selected; add the controls after the tab row so they sit under it); `Selected` (setting it raises `OnChanged`); `SetBadge(tab, count)` (0 hides; over 99 reads `99+`, `UiBadge.Text`); `SetBadge(tab, text, tone)` (`Danger` / `Warn` / `Orange` draw the server red, `Ok` green, otherwise the client gold); `SetTooltip(tab, text)`.
+`Tabs(key, captions, selected)`; `Add(tab, handle)` makes a control part of a tab (shown only while it is selected; add the controls after the tab row so they sit under it); `Selected` (setting it raises `OnChanged`); `SetBadge(tab, count)` (0 hides; over 99 reads `99+`, `UiBadge.Text`); `SetBadge(tab, text, tone)` (`Danger` / `Warn` / `Orange` draw the server red, `Ok` green, otherwise the client gold); `SetTooltip(tab, text)`; `SetTerm(tab, term)` (P7b: the caption explains a glossary term, see [Term tooltips](#term-tooltips)).
 
 ### Tooltips
 
@@ -745,6 +752,227 @@ One tooltip box exists at a time, on its own overlay canvas (`progenitor-ui-core
 - `UiTextSpan(start, length, color)`: character offsets into `Value`, the color as `#RRGGBB` or `#RRGGBBAA`. Overlapping spans: the later one wins and splits the earlier. Spans are clipped to the text; empty ones and ones past the end are dropped. The text is always escaped, so a `<` the player types never becomes markup.
 - `UiLineError(line, message)`: 1-based lines; sorted, one per line (messages on one line joined), repeats dropped, lines past the end moved to the last line. The gutter shows a red dot (`MenuPalette.Red`) and a faint band across the line; hovering the dot shows the message in the tooltip; an orange summary row under the area reads `(!) Line N: message (+k more)` and keeps its height when empty so the page never jumps.
 - Line endings `\r\n` and `\r` become `\n` on every write, the player's typing and pasting included (a field that held a `\r` gets the clean text written back, with one `OnChanged`), so the field, the colors and the gutter count the same lines. Word wrap is off: a long line is clipped at the field's right edge (no sideways scroll).
+
+### Data table
+
+A sortable, virtualized table of rows the caller supplies: an inventory, a list of stations, a log. The player sorts by one or several columns, hides columns, opens a row's drawer, selects rows (several with Ctrl or Shift, or with each row's check cell), and edits numbers in place; each edit waits for the caller's answer. Rows can be grouped with subtotals. However many rows there are, the table builds `VisibleRows` body rows once and rewrites their cells as it scrolls.
+
+**Status: experimental (P7b).** Source-checked, built and game-free tested (`UiDataTableTests`); **not verified live**. Reference: the Widgets page's **Table** tab ([`WidgetsDemo.Table.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.Table.cs)).
+
+```csharp
+using Progenitor.Ui;
+
+var table = panel.DataTable("inventory", new[]
+{
+    new UiTableColumn("item", "Item") { Hideable = false },
+    new UiTableColumn("total", "Total", UiTableColumnKind.Number) { Width = 84, Hideable = false, Subtotal = UiTableSubtotal.Sum },
+    new UiTableColumn("reserve", "Reserve", UiTableColumnKind.Number) { Width = 100, Editable = true, Term = "Reserve" },
+    new UiTableColumn("cap", "Cap", UiTableColumnKind.Number) { Width = 100, Editable = true },   // empty: unlimited, sorts last
+    new UiTableColumn("status", "Status") { Width = 130 },
+}, new UiDataTableOptions { MultiSelect = true, VisibleRows = 12 });
+
+table.SetRows(items.Select(i => new UiTableRow(i.Key) { ItemPrefab = i.Prefab, Groups = i.Categories, Detail = i.PerPlot }
+    .Text("item", i.Name)
+    .Number("total", i.Total)
+    .Number("reserve", i.Reserve, inherited: !i.HasOwnReserve, source: "category " + i.Category)
+    .Number("cap", i.Cap)
+    .Set("status", new UiTableCell(i.StatusWord) { Value = i.Severity, Tone = i.StatusTone })));
+
+table.OnEdit(edit => server.SetRule(edit.RowId, edit.Column, edit.Clear ? null : edit.NewValue,
+    ok => { if (ok) edit.Resolve(); else edit.Reject("Only clan members can change this."); }));
+table.OnSortChanged(sort => prefs.Save("sort", sort));
+table.OnColumnsChanged(hidden => prefs.Save("hidden", hidden));
+```
+
+| Member | Behavior |
+|---|---|
+| `UiTableColumn(key, caption, kind)` | `Kind` `Text` or `Number`. `Width` (units; 0: the fill column, which takes the row's remainder, never under 120; with none the first text column fills), `Sortable` (on), `Hideable` (on; off: always shown and never dropped), `Hidden` (start hidden), `Editable` (number columns: a value box per cell), `Tooltip` (hover text on the caption), `Term` (a [`UiTerms`](#term-tooltips) term the caption explains: the circle-i marker after the caption, and hovering a sortable caption shows the term's explanation, which wins over `Tooltip`), `NullsLast` (on: empty cells sort after every value in both directions, "unlimited last"; off: empty is the smallest), `Format` (.NET number format, invariant, `#,0.##`), `NullText` (`—`), `Subtotal` (`None`, `Sum`, `Min`, `Max`, `Count`). A column is widened to fit its caption, its term marker and the drawn sort mark with an order digit, in that order after the caption. Number columns are packed from the right, so every figure, subtotals and totals included, lines up on its last digit in tabular figures with thousands separators. |
+| `UiTableRow(id)` | `Id` is the caller's stable key; duplicate ids are refused (`ArgumentException`, nothing changes). Cells by column key: `row[column]`, `Set(column, cell)`, `Text(column, text, tone)`, `Number(column, value, text, inherited, source)`. `Icon` (a `Sprite`) or `ItemPrefab` (the item's own inventory icon), `Groups` (a row may sit in several), `Detail` (the drawer: one body line per `\n` line), `Tooltip`, `Locked` (every editable cell of the row is plain text). |
+| `UiTableCell` | `Text` (shown; empty on a number cell: the formatted `Value`), `Value` (sorts and totals; on a text column it makes the column sort by it, e.g. a status by severity), `SortText` (sort by this text instead), `Tone` (`LabelTone`), `Inherited` (drawn muted; in an editable cell the box is empty and the value is its gray hint; the row's tooltip says it in words), `Source` (where an inherited value comes from: the tooltip reads `Reserve 200: inherited from category Ore`), `Locked`. `UiTableCell.Of(text)`, `UiTableCell.Number(value, text)`. |
+| `UiDataTableOptions` | `VisibleRows` (body rows built, 4–30, 12), `Selectable` (on), `MultiSelect` (off), `Grouped` (start grouped), `OtherGroup` (`Other`: the group of a row with no groups, listed last), `TotalRow` (on: a grand total line when a column has a subtotal), `DetailLines` (most drawer lines, 1–8, 4; more read `N more lines`), `EditTimeout` (15 s; zero or less: none), `ColumnChooser` (on), `Sort` (initial keys), `EmptyText`. |
+| `Columns`, `SetRows(rows)`, `Rows` | Replace every row (a refresh, e.g. a server delta); no event. Selection, drawers, waiting edits and refusal reasons follow the ids; ids that disappear leave the selection silently; the scroll position is kept (clamped); a draft whose row stays in its slot keeps its typed text. |
+| `Sort`, `SortBy(column, add)`, `OnSortChanged` | The keys (`UiTableSortKey {Column, Ascending}`), first first. A header click sorts by that column alone (ascending; again: flipped); **Shift**-click adds it as the next key (again: flips that key in place). The sort is stable: ties keep the caller's order. The mark is drawn after the caption in the header's sorted gold, never a font glyph: one key, the arrow alone (up ascending, down descending); two or more, the arrow and the key's order as a small digit. |
+| `HiddenColumns`, `SetColumnVisible`, `OnColumnsChanged`, `ChooserOpen` | The hidden keys (always-shown columns refuse). **Columns** at the footer's right opens the chooser: one chip per hideable column, lit while it shows; a click flips it. Persist `Sort` and `HiddenColumns` per player from the two events. |
+| `Selected`, `SetSelected(ids)`, `OnSelectionChanged` | By id. Click: that row alone. Ctrl-click (multi): add or remove it. Shift-click (multi): the rows from the last plain or Ctrl click to this one, in the order on screen, including rows scrolled out of view (Ctrl+Shift adds them). A row in two groups is lit in both. With `MultiSelect`, each row has a check cell that toggles it like Ctrl-click (the controller's way). |
+| `SetExpanded`, `IsExpanded`, `OnExpand` | A row with `Detail` gets the expander; its drawer lines follow it in the body (muted, one per detail line). |
+| `Grouped`, `Groups`, `SetGroupCollapsed`, `IsGroupCollapsed` | Rows fold under gold group header lines (`Ores (12)`; a click or the arrow folds it), each followed by its subtotal line; groups sorted by name, `OtherGroup` last, and a group stays together under its header whatever the sort (the sort applies within each group). Subtotal, total and header lines take no selection and do not sort. A folded group keeps its header and subtotal. The grand total counts each row once, however many groups it is in. |
+| `TopIndex`, `LineCount`, `VisibleRows`, `ScrollTo(id)` | The scroll window over the body lines (rows, drawer lines, group headers, subtotals, the total). |
+| `OnEdit(UiTableEdit)`, `Edit(rowId, column, text)`, `PendingEdits` | See **Inline edits**. `Edit` commits as if typed (a bulk "Set reserve…" over `Selected`, the bridge). |
+| `StatusText`, `StatusReason`, `Describe()` | The footer line (`Showing 13–24 of 600 · 3 selected · 1 waiting`); the last refusal; the readback. |
+
+**Inline edits.** An editable cell is the game's value box. Typing keeps a draft; leaving the field (Enter, a click elsewhere, the field's row scrolling out of its slot, the table hiding) commits it. **Escape** (B on a controller) in the box drops the typing, shows the value again and leaves the box without committing; the press goes no further (the panel stays; the next Escape is the panel's). This is the text field's own Escape (on by default), which the game's settings value boxes are built on; it is not verified live against them. The kit's other value boxes (a settings text row, a Prompt's field) have no Escape of their own. Empty text means *clear to the inherited value* (`UiTableEdit.Clear`); otherwise the text must be a number (`1,250.5`, or in the player's culture), else the refusal line says `"x" is not a number.` and the cell returns to its value. An unchanged value commits nothing. A commit raises `OnEdit(UiTableEdit {RowId, Column, OldValue, NewValue, Clear, Text, State, Reason})`; the cell then shows a turning spinner before the value, the new value in the pending tone, takes no typing, and the footer counts it (`· 1 waiting`). Answer once, on the main thread: `edit.Resolve(display?)` writes the new value into the row (the caller's `UiTableRow`, so a later sort sees it; `display` replaces the formatted text, which after a clear is the inherited value to show), `edit.Reject(reason)` keeps the old value and shows `Item, Column: reason` in orange under the table and in the row's tooltip. `UiTableEditState`: `Pending`, `Resolved`, `Rejected`. With no answer within `EditTimeout` the table rejects it with *No answer from the server.*; a late answer is ignored. A `SetRows` while an edit waits keeps the spinner, and the answer lands on the refreshed row. A second edit of a waiting cell is refused (*Waiting for the server to answer the last change.*); a locked cell or row is plain text.
+
+**Scrolling.** The body is `VisibleRows` slot rows made once; a scroll rewrites only the cells whose text, tone or visibility changed, so nothing is laid out again and nothing flickers. The step is a whole line: the wheel over the body moves two lines per notch through the framework's wheel claim, and at either end hands the notch to the panel. The scroll bar in the game's art sits in the rows' right inset (18 units no cell enters), spanning the body's slots; dragging it or clicking its track moves the window to the nearest whole line. With a controller, Up on the first slot and Down on the last scroll by one line instead of leaving the table; the right stick over a slot scrolls about 15 lines a second. The focus stays on the slot (the content moves under it); selection, drawers and waiting edits are by id and survive any scroll.
+
+**Inherited values.** Never by tone alone: an editable inherited cell is an empty value box whose gray hint is the inherited value (an own value is typed text in the box), and the row's tooltip names every inherited value in words (from `UiTableCell.Source`). A locked inherited cell is muted text and has the tooltip's words.
+
+**Drawn marks.** The sort arrows with their digit and the spinner are textures drawn once per Core generation, tinted, never a raycast target, children of the cell's text so they clip, hide and go with it, and released at the Core unload. A mark after right-justified text keeps its own room in the text's margin, so the caption moves left instead of under the mark.
+
+**Known limits.** Header tooltips and term explanations need a sortable column (only those captions take the pointer); a non-sortable caption with a term still shows the marker. Multi-key sorting needs Shift (a controller sorts by one key; `Sort` sets several). The Columns button is on the footer, not the header row. Drawer lines carry the separator rule like rows, and subtotal lines are 40 units like every body line.
+
+#### Data table layout rules
+
+1. Every body line is one settings-grid row (40 units, the separator rule). The header, the footer with the Columns button, the refusal line and the chooser are rows of their own around the body: only the body's slots scroll, and the scroll bar spans the body alone; the header is cell for cell as wide as the body.
+2. Columns run in the caller's order: up to and including the fill column they pack from the left, after it from the right, so numbers line up on their last digit and every column sits under its caption (a text column after the fill column reads right-justified; a fill column after a number column is not honored, an earlier text column fills instead).
+3. A row too narrow for every column drops hideable columns from the right; always-shown columns never drop.
+4. Fixed parts: the check cell and the expander are box-less 28-unit cells, the icon well 30. A column that has no icon (or no drawer) on any row is hidden on every row, and a line that does not use one draws an equal blank, so the columns line up on every line.
+5. Checked at 560, 760, 1108 and 1248 units (`UiDataTableTests`).
+
+### Master-detail
+
+`panel.MasterDetail(key, options)` → `IUiMasterDetail`. A list of entries on the left and the selected entry on the right, the way the game's options menu pairs its category list with the selected category (a Belts / Categories screen, a profile editor). An optional tab row above it switches between independent lists. The caller fills the right side when an entry is selected.
+
+**Status: experimental (P7b).** Source-checked, built and game-free tested (`UiMasterDetailTests`); **not verified live**. Reference: the Widgets page's **Layout** tab ([`WidgetsDemo.MasterDetail.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.MasterDetail.cs)).
+
+```csharp
+var md = panel.MasterDetail("belts", new UiMasterDetailOptions
+{
+    Tabs = new[] { "Belts", "Categories" },
+    NewCaption = "+ New belt",
+    EmptyText = "No belts yet.",
+    DetailEmptyText = "A belt is an ordered set of containers.\nSelect a belt, or make one with + New belt.",
+});
+md.SetTexts(1, "+ New category", "No categories yet.", "A category is a set of items.");
+md.SetEntries(0, belts.Select(b => new UiMasterEntry(b.Id, b.Name) { Note = b.Members.Count + " chests", Term = "Belt" }));
+md.OnSelected(id => md.SetDetail(id.Length == 0 ? Array.Empty<UiDetailLine>() : new[]
+{
+    UiDetailLine.Title(name, new UiDetailButton("rename", "Rename")),
+    UiDetailLine.Line("3 chests · 2 plots"),
+    UiDetailLine.MemberList(members),                       // drag, arrows, expand, remove
+    UiDetailLine.Actions(new UiDetailButton("add", "+ Add…"), new UiDetailButton("pick", "Pick")),
+    UiDetailLine.Heading("Used by", 4, term: "Used by"),
+    UiDetailLine.Link("use-1", "Input of Furnace 1", "list entry"),
+    UiDetailLine.Actions(new UiDetailButton("locate", "Locate all"), new UiDetailButton("delete", "Delete")),
+}));
+md.OnAction(a => { /* a.ActionId: "rename", "add", "pick", "open" (a link, a.LineId names it), "new" */ });
+md.OnReorder(m => SaveOrder(md.SelectedId, m.Order));
+md.OnRemove(item => RemoveMember(md.SelectedId, item.Id));
+```
+
+| Part | Vanilla counterpart and borrowed art |
+|---|---|
+| Tab row | The `Tabs` widget: the Install tab's filter chips (the game's popup button, `SmallerButton_*`, the gold plate on the selected one). |
+| Rows | Settings-grid rows 40 units tall with the settings list's separator rule; no whole-row fill, so the panel's ground shows through both halves. |
+| Search field | The game's settings value box (`SimpleBox_Normal`) with the kit's clear button, as the picker's. |
+| Selected entry | The Mods list entry's band (the gold at 0.14) with its 3-unit gold stripe at the left, behind the master half only; the caption keeps its bright text color. |
+| Hovered entry | The Mods list entry's hover wash on the master half while the pointer is left of the divider; a hovered selected entry gets the brighter selected band and keeps the stripe. The new-entry line takes the hover wash too. |
+| Controller focus | NAV1's own focus marker on the row, separate from the band, so focus, hover and selection never look alike and can combine. |
+| New-entry line | The caption in the pale link blue, as an action rather than an entry. |
+| Divider | A 1-unit rule in the settings list's separator color down the center of a 12-unit column, continuous from row to row. A drawn image, not a font glyph. |
+| Counts | A master entry's `Badge` right-aligned in tabular figures in the client gold, so the digits line up; a member's badge is the kit's count badge, packed at the row's right edge before the glyph buttons. |
+| Detail buttons | The game's popup button (`SmallerButton_*`), sized to the caption. |
+| Links | The kit's link (`#9fc7e8`, underlined), as the picker's suggestion. |
+| Member rows | The ordered list's row: box-less glyph buttons in the muted gold (grip, up, down, remove), the game's dropdown arrow as the expander, the game item icon in the kit's icon well, a count in the client gold. |
+
+| Member | Behavior |
+|---|---|
+| `UiMasterDetailOptions` | `Tabs` (captions; null: no tab row), `Rows` (6–30, 14), `MasterFraction` (0.2–0.45, 0.32), `Search` (on), `SearchPlaceholder` (`Search`), `NewCaption` (empty: no new-entry line), `EmptyText` (the master list's one line while empty), `DetailEmptyText` (the detail while nothing is shown; `\n` starts a line). |
+| `UiMasterEntry(id, title)` | `Title` (settable), `Note` (muted, after the caption; searched), `Badge` (a short count at the entry's right), `Icon` / `ItemPrefab`, `Tooltip`, `Keywords` (searched, never shown), `Term` (a [`UiTerms`](#term-tooltips) term: the caption gets the marker and hovering the entry's half shows the term's explanation, anchored on the caption, instead of `Tooltip`; an undefined term leaves the plain tooltip). Duplicate ids are refused. |
+| `Tabs`, `Tab` | The tab row (`IUiTabs`, or null) and the tab shown. Each tab keeps its own entries, selection, query, detail, member list and both scroll positions; switching restores them. |
+| `SetEntries(entries)`, `SetEntries(tab, entries)`, `Entries`, `Matches` | Replace a tab's entries (a selected id that left is unselected, no event); the entries matching the query, in the caller's order. |
+| `SelectedId`, `Select(id)`, `OnSelected(id)` | The selection (null: none). A click on an entry, the controller's A on its row, or `Select` raises `OnSelected` (empty string for none). Selecting scrolls the entry into view. |
+| `Query`, `OnSearch(text)` | The search text (typing or `Query` raise `OnSearch`). |
+| `SetDetail(lines)`, `SetDetail(tab, lines)`, `Detail` | Replace the detail (no event). The detail scrolls to its top when it now describes another entry than the last call did, and keeps its place on a refresh of the same entry. |
+| `SetTexts(tab, newCaption, emptyText, detailEmptyText)` | Per-tab texts (null keeps one). |
+| `Members`, `MoveMember(id, index)`, `RemoveMember(id)`, `SetMemberExpanded(id, open)` | The member list in its current order (it changes itself before `OnReorder` / `OnRemove`; the `UiDetailLine` the caller passed keeps the old order). |
+| `Rows`, `MasterTop`, `DetailTop`, `ScrollMaster(n)`, `ScrollDetail(n)` | The rows made and each half's first drawn line; scroll a half by lines (clamped; false when it did not move). |
+| `OnAction(UiDetailAction)` | A detail button (`ActionId` = the button's id, `LineId` = `title` or `actions`), a link (`ActionId` = `open`, `UiDetailAction.Open`; `LineId` = the link's id), or the new-entry line (`LineId` = `master`, `UiDetailAction.MasterLine`; `ActionId` = `new`, `UiDetailAction.New`). `Tab` and `EntryId` (the selection then) come with it. A disabled button raises nothing. |
+| `OnReorder(UiListReorder)`, `OnRemove(UiListItem)` | The member list's events, as the ordered list's. |
+| `Describe()` | `{kind: masterdetail, key, tab, selected, query, rows, masterTop, detailTop, master [{kind, id, text, selected}], detail [{kind, id, text}], members, drag, rowKeys}`. |
+
+**Detail lines** (`UiDetailLine` factories; `Kind` is a `UiDetailLineKind`): `Title(text, buttons…)` (the name with up to three buttons at the right), `Line(text, tone = Muted)` (one line; a longer text ends in an ellipsis), `Heading(text, count, term)` (gold; `Heading("Used by", 4)` reads `Used by (4)`; `term` marks the heading with a glossary term that explains it when the detail half of its row is hovered), `Link(id, text, note)`, `Actions(buttons…)` (up to three, from the detail's left edge), `MemberList(items, reorder, remove, emptyText)` (one per detail; a second, or duplicate member ids, throw and change nothing), `Blank()`. `UiDetailButton(id, caption) { Enabled }`.
+
+**Members.** One row per member, rewritten in place. The order, the drawers and the drag are the ordered list's own: drag a member by its grip (the slot whose center is nearest the pointer is the target; the rows show the order the drop will leave, the held member's caption in the gold; a release the grip did not see drops on the next frame), or use the arrows; the top member's up and the bottom one's down are faint. The expander opens a drawer of up to three muted lines (the item's `Detail`, one line per `\n`) under the member, indented to its caption. Remove is faint on a member that is not `Removable`. A drag reaches only the members drawn now; the detail does not scroll while one runs (use the arrows for a longer move).
+
+**Search.** The picker's matching (case- and accent-insensitive) on the title, with the note and the keywords as keywords. The list keeps the caller's order while filtering, so entries never jump as the player types. The search row's right shows the entry count, `2 of 4` while filtering, or the drawn range (`4–16 of 20`) while the list scrolls. No match reads `No match for "text".`; the new-entry line stays at the end.
+
+**Empty states.** With no entries, the master list shows `EmptyText` (keep it short: it is one line of the list) and the new-entry line; the detail shows `DetailEmptyText`, one line per `\n` (the place for the longer explanation). An empty member list shows its `emptyText`.
+
+**Terms.** Rows are reused slots, so each row keeps one term binding for its master caption and one for its detail heading, re-synced on every render (a filtered or scrolled list moves the marker with its entry; an empty slot, the search row and a non-heading line are unmarked). The row's hover goes to the binding of the half the pointer is on. A term wins over an entry's `Tooltip`.
+
+**States.** Hover, selection and controller focus are three different looks that can combine: the hover wash on the master half, the selected band with its gold stripe, the brighter selected band when both, and NAV1's focus marker on the row. Nothing is drawn as a glyph: the band, the stripe and the divider are images.
+
+**Input.** A master entry is its row's own click: the pointer anywhere on the entry's half, or the controller's A on the row. A click on the detail half of a row is not a master click, so clicking a detail line's text does nothing. Every detail action is a button cell, so Left and Right on a row move from the entry to the detail's buttons and back; A presses. Up on the first entry row or Down on the last row scrolls the half the focus is in before the focus leaves; the right stick scrolls the focused half. The mouse wheel over either half scrolls that half by two lines; at its end the notch goes to the panel. The detail gets the widget scroll bar along the rows' right edge. No key is read.
+
+**Rows and capacity.** The widget makes `Rows` rows once (one more for the tab row) and rewrites them in place; a longer list or detail scrolls inside its half. Nothing is added to or removed from the panel after it is built, so a change never lays the page out again or loses its scroll. Hiding the widget (its tab) ends a drag; disposing it (with its panel) releases its rows, the drag tick, the wheel claims and the scroll bar.
+
+#### Master-detail layout rules
+
+These are the numbers in `UiMasterDetailLayout`; `UiMasterDetailTests.Every_row_fits_and_the_divider_lines_up_at_every_checked_width` resolves every row the widget draws at 560, 760, 1108 and 1248 units, with and without master icons and counts, and fails when a cell leaves its row, two overlap, one is under its floor, the master caption drops under 120, a detail cell crosses the divider, or the divider is not at the same x on every row.
+
+1. A kit panel has no columns, so each row carries both halves: the master cells, a 12-unit divider, then the detail cells. Every row has the same master cells at the same widths (a master column is shown or hidden for all rows at once), so the divider is at one x on every row.
+2. The master half: a lead (16, room for the band's 3-unit stripe), the icon (30, only while some entry has one), the caption (0.7 of `MasterFraction` of the row, clamped to 120–300), the note (0.3 of it, clamped to 40–140), the count (36, only while some entry has one). With the default 0.32 the caption is 125 units at 560 and 280 at 1248.
+3. The detail takes the rest. Its cells are packed from the divider; a member's count badge and glyph buttons are packed from the row's right edge in the ordered list's fixed order (badge, up, down, expand, remove); the one text or link cell takes the space between, which also puts a title line's buttons at the right edge.
+4. The selection band spans from the row's left edge to the divider, the row's height, nothing in the gap between rows (one entry lit, never a block). The search row has no band.
+5. A detail row that does not fit drops, in order: the member note and count, the grip, the member icon, then the expander. On the 560-unit window with master icons and counts a member row keeps its caption, arrows and remove.
+6. The split is fixed, not draggable: a draggable divider would re-place every row's cells while dragging and has no controller equivalent. Choose `MasterFraction` per screen.
+7. Detail buttons are sized to their caption (at least 96 units). A line holds up to three; on the 560-unit window keep it to two short captions (`Locate all`, `Delete`) and give a third its own line.
+8. Rows are 40 units with the separator rule, the master entries and the detail lines on the same grid.
+9. Master counts are at most three characters (`99+`), right-aligned.
+
+### Chips
+
+A set of chips that wrap onto lines: **item chips** (a game item's icon, a caption and a remove glyph inside one chip: a category's members) and **plain chips** (a caption, optionally removable: a container's belts, combinable category filters), with an optional square **add chip** after the last one. Each line is a kit cell row; every chip and every remove glyph is a button cell, so the controller reaches them like any other cell (NAV1).
+
+**Status: experimental (P7b).** Source-checked, built and game-free tested (`UiChipsTests`); **not verified live**. Reference: the Widgets page's **Lists** tab ([`WidgetsDemo.Chips.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.Chips.cs)).
+
+```csharp
+using Progenitor.Ui;
+
+var belts = panel.Chips("belts", new[]
+{
+    new UiChip("ores", "Ores belt") { Tooltip = "Iron Ore, Copper Ore, Sulfur." },
+    new UiChip("wood", "Wood belt"),
+}, new UiChipsOptions { Add = true, AddTooltip = "Add this container to a belt.", EmptyText = "On no belt." });
+belts.OnClick(chip => OpenBelt(chip.Id));          // a press opens the belt
+belts.OnRemove(chip => LeaveBelt(chip.Id));        // the chip is already gone
+belts.OnAdd(() => PickBeltToJoin());               // then belts.SetChips(...) with the new list
+
+var members = panel.Chips("members", new[]
+{
+    new UiChip("crystal", "Crystal") { ItemPrefab = -257494203, Note = "240" },   // "Crystal · 240" with its icon
+});
+
+var filters = panel.Chips("cats", categories, new UiChipsOptions { Toggle = true, Remove = false, MaxLines = 2 });
+filters.OnClick(_ => ApplyFilter(filters.SelectedIds));   // combinable: each click flips one
+filters.OnMore(hidden => ShowAllCategories(hidden));       // the "+N more" chip
+```
+
+| Member | Behavior |
+|---|---|
+| `UiChip(id, label)` | `Id` is the caller's stable key; duplicate ids are refused (`ArgumentException`, nothing changes). `Label` (settable), `Note` (drawn after the caption as `Label · Note`: a stock count), `Icon` (a `Sprite`) or `ItemPrefab` (a game item's prefab id; the client shows that item's own inventory icon) — either makes it an item chip (`IsItem`); `Removable` (on); `Selected` (the initial state; the set keeps it from then on); `Tooltip`; `Term` (a [`UiTerms`](#term-tooltips) term: the caption gets the circle-i marker and hovering the chip shows the term's explanation in place of `Tooltip`; set one or the other). |
+| `UiChipsOptions` | `MaxLines` (1–8, 3), `MaxPerLine` (2–16, 8), `Toggle` (a click flips the chip's selection before `OnClick`; off), `Remove` (draw the remove glyph on removable chips; on), `Add` (the add chip; off), `AddText` (`+`), `AddTooltip`, `EmptyText` (`None yet.`), `RowWidth` (0 = measure the row; see below). |
+| `Chips`, `Shown`, `Overflow`, `Capacity` | Every chip in order; how many are drawn; how many are counted on the `+N more` chip; `MaxLines × MaxPerLine`. |
+| `SetChips(chips)` | Replace every chip, no event; selection from each chip's `Selected`. The way to add a chip, and to undo a removal the plugin refuses. |
+| `Remove(id)` | Remove a chip and raise `OnRemove`; false when it is not in the set. |
+| `SetSelected(id, on)`, `IsSelected(id)`, `SelectedIds` | Selection without an event (an active belt, a filter restored from settings); the ids in chip order. |
+| `OnClick(UiChip)` | A chip's caption was pressed (in `Toggle` mode after its selection flipped, so the handler reads the new state). |
+| `OnRemove(UiChip)` | After a chip was removed by its glyph or `Remove`: the set has already changed (as the ordered list). |
+| `OnAdd()` | The add chip was pressed. The set does not add anything itself. |
+| `OnMore(IReadOnlyList<UiChip>)` | The `+N more` chip was pressed: the chips it counts, in order. Its tooltip lists the first eight. |
+| `Describe()` | `{kind: chips, key, chips [{id, label, shown, selected, removable, item, term, line, slot}], shown, overflow, capacity, rowWidth, lines, toggle, add {line, slot}, more {line, slot, text}, rowKeys, cellKeys}`; a chip not drawn has line and slot -1. |
+
+**Wrapping.** Chips are packed in order onto lines, each chip on the line after the previous one if it fits beside it and the line has fewer than `MaxPerLine` chips, else at the start of the next line. When the chips need more than `MaxLines` lines, as many as fit are drawn, in order, followed by a `+N more` chip (raises `OnMore`); the add chip is always last. A single chip wider than the whole row is shortened to the row and its caption ends in an ellipsis; hovering it shows the full caption as the tooltip's title. Each line row is made once (`MaxLines` rows of `MaxPerLine` slots) and rewritten in place: a removal, `SetChips` or a resize never rebuilds the page or loses its scroll; unused lines are hidden.
+
+**Row width.** A widget is not told its row's width, so the set measures it from its first line row on screen. Until a caption has been drawn the set packs for 560 units (the narrowest checked row), packs again as soon as the row reads a different width, and checks again every 20 frames while its panel is shown (a resized window). A reading under 240 units (a row read before its first layout) is ignored. `UiChipsOptions.RowWidth` fixes the width instead and turns the measuring off.
+
+**One chip.** A chip is one button cell on the chip art, as wide as the whole chip. The icon well and the remove glyph are overlay cells inside it, at the chip's left and right ends with a 6 and a 4 unit inset, and the caption is kept between them. A chip with no icon and no glyph keeps the button's symmetric pad, so its caption is centered on the whole chip art. A press on the icon is a press on the chip; a press on the glyph removes.
+
+**States.** Selected, hover and controller focus are separate and combine: selected is the gold plate under the caption (and the glyph turns light cream); hover is the art's own hover sprite, on the plate or not; the controller focus is the NAV1 frame, a 2-unit line 3 units outside the focused chip or glyph, drawn over everything.
+
+**Controller and keyboard.** Left and Right walk a line in reading order (a chip, its remove glyph, the next chip), Up and Down move between lines, A (Space or Enter) presses. X is not used (a chip has no default to reset to); remove a chip with its glyph. The add and `+N more` chips are ordinary stops.
+
+**Terms.** A chip with a `Term` is marked like any explained control: the marker after its caption and the term's line in the tooltip box while the chip is hovered (it counts as a hover of the term). The marker follows its chip when the set re-packs; each chip slot keeps one marker binding and rewrites it on every render. A chip with a term is wider by the marker's room (16 units), which a caption shortened to the row keeps too. The add and `+N more` chips never carry a term. Every marker is released with the set.
+
+**Item icons.** An item chip's icon is the game's own inventory sprite for `ItemPrefab`, resolved on the client on every render (cached per world); on the title screen or the server the well stays empty. `Icon` wins over `ItemPrefab`.
+
+#### Chips layout rules
+
+These are the numbers in `UiChipsLayout`. `UiChipsTests.Every_line_fits_its_cells_at_every_checked_width` packs a mixed set (item chips, notes, a caption longer than any row, non-removable chips) at 560, 760, 1108 and 1248 units with 2, 5, 8 and 16 chips a line, with and without an add chip, and fails when a cell leaves the row, two chips overlap, a cell is squeezed under its floor, a chip lands anywhere but where the packer put it, an icon or a glyph is not inside its own chip at its inset, or a caption does not fit between its margins. `Chip_height_follows_the_art_slices_and_the_icon` pins the heights; `An_overlay_sits_at_either_end_of_its_target_with_its_inset` pins the overlay rule.
+
+1. A chip is one button cell: its width is the caption estimate at 16 units plus one glyph of slack, plus the margins: 8 each side for a plain chip; 36 on the left with an icon (6 inset, the 24 well, 6 gap); 26 on the right with a remove glyph (4 inset, the 20 glyph target, 2 gap). A chip with a term adds 16 to the right margin. Whole units, never narrower than the chip is tall (the add chip is square). Chips on a line are 8 apart. The column model never squeezes a chip: the packer decides the wrap, and a caption too long for the row is shortened with an ellipsis by the packer, never by the runtime.
+2. The chip art's top and bottom slices take 9 units each. Chips are 36 tall in a set with an item chip (the icon well is 24), else 31 (the Install filter chip's height); the add and `+N more` chips match the set.
+3. Lines are plain kit cell rows 40 tall with a 4-unit gap above every line after the first (no separator rule, no row hover: only the chips light); the empty text is a muted fill cell after the last slot.
 
 ### Layout rules
 
@@ -797,6 +1025,8 @@ ctx.Hud.PickInWorld(
 
 - **What the player does:** a band at the bottom of the screen shows the prompt (`UiWorldPickOptions.Prompt`, default `Pick a container or station`) with the game's key caps for the Interact key (the player's actual binding, read from the game) and Escape. The next interact on a matching target is captured: its panel does not open, and `onPicked` receives a `UiWorldPickResult` (`Entity`, `Kind`, `Menu`, `MenuType`, `WorldEpoch`, `IsCurrent`, `Suppressed`, and the picked entity's network id: `NetworkId0..2`, `NetworkIdIndex`, `NetworkIdGeneration`, `HasNetworkId`, the same words and 12-byte size guard as `VanillaPanelTarget`; send them to the server and resolve them with `ctx.Inventory.TryResolveNetworkId`, [as for a panel target](#resolving-a-target-on-the-server)). Escape cancels; an interact on another kind (a door, a waygate) behaves normally and the pick stays armed.
 - **Options:** `Kinds` (`UiWorldPickKinds`: `Containers`, `Stations`, `Other` — castle heart, prison, servant, trader and the like; default containers and stations), `TimeoutSeconds` (0: none), `SuppressPanel` (true; false lets the panel open and still reports the pick).
+- **Placement** (P7b): the band's bottom edge sits 200 units above the screen's bottom edge on the design canvas (at least 196): the HUD's health readout and the buff row above the action bar reach about 180 units up. One-shot and repeating picks share the placement.
+- **Repeat** (`UiWorldPickOptions.Repeat`, P7b, experimental, `UiWorldPickRepeatTests`): keep picking. Each matching interact runs `onPicked` and the pick stays armed (`State` stays `Armed`, the same handle) until Escape, `Cancel()`, the timeout, leaving the world, a newer pick, or dispose. `IUiWorldPick.PickCount` counts the targets delivered (0 or 1 for a one-shot pick). The band reads `<prompt> · 3 picked` once it has a count (the separator muted, the count in the gold), and the words after the key caps are `Add` and `Finish` instead of `Pick` and `Cancel`; a repeating pick that kept the default prompt shows `UiWorldPickOptions.DefaultRepeatPrompt` (`Pick containers or stations`). **Escape and `Cancel()` mean "finished"**: the pick ends as `Cancelled` and `onCancelled` runs; read `PickCount` there (a repeating pick never ends as `Picked`). The timeout counts from the last pick (an idle timeout). The same target interacted with twice in a row within ten seconds is reported once; its panel still stays closed. The Escape precedence is unchanged: a repeating pick takes Escape only when it is topmost.
 - **One pick at a time, process-wide.** A second `PickInWorld` cancels the first (its `onCancelled` runs) before arming. `onCancelled` runs for Escape, `Cancel()`, replacement, a timeout (`TimedOut`), leaving the world (the client world or the local character it was armed with is gone: a disconnect, a kick, a world change; checked every frame), or a call with no world. `Dispose`, plugin unload and Core unload end it with no callback.
 - **Seam:** a Core-owned `Before<OpenHUDMenuSystem>` system hook, installed only while a pick is armed (and 3 s after, so a repeated open of the same interaction stays closed). It reads each `OpenMenuEvent` and its init data (`ContainerMenu.InitData.TargetContainer`, the station menus' `TargetWorkstation`) and first sends `StopInteractingWithObjectEvent` for the interaction's buff, the way the framework's other client events are sent. Only when that send went out are the two client-only menu entities destroyed, so the panel never opens, and further opens of the same interaction swallowed until the client no longer sees the interact buff (10 s at most). With no buff, or a send that failed, nothing is swallowed: the panel opens and `onPicked` gets the target with `Suppressed = false`, so a panel never pops open later unprompted. It never skips the system, adds no Harmony patch and never uses `ctx.UnsafeHarmony`. Escape comes through the framework's consumed-Escape path (the band is a kit panel), not a key read.
 - **Escape precedence** (first match wins): an open dialog or dropdown list; a key capture; the game's focused chat box; any other shown Progenitor panel, the Mods workspace included; an open game menu or panel; then the pick. Escape cancels the pick only when nothing above it is open; otherwise the press closes that thing as usual and the pick stays armed (from the open Mods workspace: the first Escape closes the workspace, the second cancels the pick). The band takes the close key only while the pick is topmost, and it never blocks gameplay input or clicks (none of its graphics is a raycast target), so the player can attack and move while it shows. The caller's prompt is drawn as plain text, at most 900 units wide with an ellipsis.
@@ -804,18 +1034,179 @@ ctx.Hud.PickInWorld(
 
 ### Widgets acceptance procedure (not run)
 
-Focus-free unless marked **foreground test** (a real pointer or key, run separately). Deploy Core and `Progenitor.ControlsSample`; afterwards remove the sample from `BepInEx/progenitor-reload` on the client.
+Focus-free unless marked **foreground test** (a real pointer or key, run separately). Deploy Core and `Progenitor.ControlsSample`. The Widgets page has five tabs: `tab0` **Lists** (ordered list, chips), `tab1` **Input** (pickers, code area), `tab2` **Table**, `tab3` **Layout** (master-detail), `tab4` **HUD** (notifications, pick in world, Locate, explained words, tip cards). The last step removes the sample.
 
-1. Title screen: `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select","plugin":"progenitor.controlssample","page":"Widgets"}`, `{"action":"widget_read","pane":"content"}`. Expect the cell rows `demo-tabs:tabs` (chips `tab0` to `tab3`; `badge0` `4`; `badge2` `1` in the server red), `demo-list:row0` to `row3` (titles in the sample's order, the notes, badges `12` and `3`), `demo-list:drawer0` to `3` hidden, `demo-list:footer` hidden. **Screenshot** at 1920×1080, 2560×1440 and 3840×2160: no clipped or overlapping text; the rows line up with the settings grid.
+1. Title screen: `mods_ui {"action":"open","site":"standalone"}`, `{"action":"select","plugin":"progenitor.controlssample","page":"Widgets"}`, `{"action":"widget_read","pane":"content"}`. Expect the cell rows `demo-tabs:tabs` (chips `tab0` to `tab4` captioned `Lists`, `Input`, `Table`, `Layout`, `HUD`; `badge0` `4`; `badge1` `1` in the server red; `badge2` `99+`), `demo-list:row0` to `row3` (titles in the sample's order, the notes, badges `12` and `3`), `demo-list:drawer0` to `3` hidden, `demo-list:footer` hidden. **Screenshot** at 1920×1080, 2560×1440 and 3840×2160: no clipped or overlapping text; the rows line up with the settings grid.
 2. `widget_click {"label":"demo-list:row0/down"}`: the log has `Controls sample: widget list reorder chest-a 0->1 = furnace-a,chest-a,chest-b,sawmill-b`; `widget_read` shows `row0` titled `Furnace input`. `widget_click demo-list:row1/expand`: `drawer1` visible with the detail text. `widget_click demo-list:row3/remove` (`Sawmill output`, not removable): nothing happens. `widget_click demo-list:row2/remove`: `widget list remove chest-b`, `badge0` reads `3`.
 3. **Foreground test:** drag `row0`'s grip below the last row: the held row lights, the rows close up live, one `list reorder` line on release.
 4. `widget_click demo-tabs:tabs/tab1`: the picker rows show and the list rows hide. Focus the picker's search field and type `cr` (`field_focus`, `type`; if `field_focus` cannot address a cell-row field, this step is a **foreground test**): `demo-picker:status` shows the match count and the `use` link `Use “Crystal”`; `widget_click demo-picker:status/use`: `widget picker = crystal`. In a world, `demo-picker:line1` shows the Crystal inventory icon (**screenshot**).
 5. **Foreground test:** hover a grayed row (the second `Furnace`, *Not your clan's castle*): the tooltip box beside it with a gold title and the reason; at a window edge it flips or clamps and stays on screen.
-6. `widget_click demo-tabs:tabs/tab2`: the code area shows line numbers 1 to 10, colored keywords, strings and comments, a red dot and band on line 4, and the summary `(!) Line 4: Expected "to" before the target.` **Foreground test:** type in it; the colors follow, and fixing line 4 clears the dot and the tab badge.
-7. In a world with a castle chest: `widget_click demo-tabs:tabs/tab3`, then **Notify info** four times quickly: one `Ui: ctx.Hud.Notify shows notices on the game's announcement banner …` line, and the notices show one after another on the game's banner (**screenshot**). At the title screen the same press logs `Ui: ctx.Hud.Notify draws notices on the framework band (…)`.
+6. Still on `tab1`, under the pickers: the code area shows line numbers 1 to 10, colored keywords, strings and comments, a red dot and band on line 4, and the summary `(!) Line 4: Expected "to" before the target.` **Foreground test:** type in it; the colors follow, and fixing line 4 clears the dot and `badge1`.
+7. In a world with a castle chest: `widget_click demo-tabs:tabs/tab4`, then **Notify info** four times quickly: one `Ui: ctx.Hud.Notify shows notices on the game's announcement banner …` line, and the notices show one after another on the game's banner (**screenshot**). At the title screen the same press logs `Ui: ctx.Hud.Notify draws notices on the framework band (…)`.
 8. **Foreground test:** **Pick in world**, walk to the chest and press Interact: the chest's panel does not open; the log has `Ui: world pick #N picked …`, `Ui: world pick sent StopInteractingWithObjectEvent for buff …` and `Controls sample: widget pick = Container ContainerMenu (…)`. Interact again: the chest opens normally. Arm again and press Escape: `Ui: world pick #N cancelled by Escape.` and no pause menu.
 9. **Locate the picked target**: one `Ui: ctx.Hud.Locate draws pings as framework UI over the game camera …` line; the marker over the chest with its distance (**screenshot**). **Foreground test:** turn the camera away: the edge arrow points back; after 10 s it fades.
-10. Remove the sample: no `Ui: ctx.Hud …` warning; the tooltip, the band and the pings are gone.
+
+#### Data table acceptance
+
+1. `widget_click {"label":"demo-tabs:tabs/tab2"}`, then `widget_read {"pane":"content"}`: `demo-table:header` (cells `c:item` … `c:status`, captions in their own case), `demo-table:row0` … `row11` visible, nothing past `row11`, `demo-table:footer` `status` = `Showing 1–12 of 600`, `columns` = `Columns`, `demo-table:reason` hidden. Rows `row0`/`row1` are Crystal and Coarse Thread, with the game's own item icons in a world (empty icon wells at the title screen) (**screenshot**). **Screenshot** at 1920×1080, 2560×1440 and 3840×2160: no clipped caption or value, the numbers right-aligned under their captions, the header lined up with the rows, nothing under the scroll bar.
+2. `widget_click {"label":"demo-table:header/c:total"}`: log `Controls sample: widget table sort = total+`; `row0`'s `c:total` is the smallest; a drawn gold up arrow follows the `Total` caption (**screenshot**; `widget_read` keeps the caption `Total`). Again: `table sort = total-`, the arrow points down. **Foreground test:** Shift-click Item: `table sort = total-,item+`; `Total` carries the down arrow with a small `1`, `Item` the up arrow with a small `2`, both in the same gold (**screenshot**).
+3. `widget_click demo-table:footer/columns`: `demo-table:columns0` (and `columns1` at narrow widths) visible with chips `col:category` … `col:status` (no Item, no Total). `widget_click demo-table:columns0/col:here`: `table hidden = here`, the `c:here` cells hidden on the header and every row, `columns` reads `Columns (1 hidden)`. Click it again: shown.
+4. `widget_click demo-table:row0/check`, then `row2/check`: `table selected = 2 (…)`, both rows lit with the Mods list's gold entry band and its left stripe and a `√` (or `*`), the footer `· 2 selected`. **Foreground test:** hover a third row: a light wash, distinct from the band; with the controller focus on a row, NAV1's frame, distinct from both. **Foreground test:** click a row, then Shift-click a row ten lines down (scroll with the wheel in between): the whole range lights; Ctrl-click one off.
+5. `widget_click demo-table:row0/expand`: `table expand item-… = open`; `row1`–`row3` show the drawer lines (`Plot A: …`, `Plot B: …`, `Most in: …`) in the muted tone.
+6. **Foreground test (typing):** click `row0`'s Reserve box, type `40`, press Enter: `table edit item-… reserve 40`, `table resolved … = 40`, the cell shows 40. Type `41` + Enter: `table waiting …`, the cell shows the drawn turning ring before `41` in the pending yellow (**screenshot**), the footer `· 1 waiting`; press **Confirm pending**: `table confirmed 1`, the value box is back with 41. Type `12000` + Enter in Cap: `table rejected …: Above the cap`, the orange line `…, Cap: Above the cap` under the table, the old cap back; hover the row: the tooltip names the reason. Type `43` and wait 15 s without Confirm: the line reads `…: No answer from the server.` Clear a Reserve box + Enter: `table resolved … = inherited`, the box empty with the gray hint `10`; hovering the row reads `Reserve 10: inherited from category …`. Hover the `Reserve` and `Cap` captions: a circle-i after each caption (before the sort arrow when sorted) and the tooltip `Reserve` / `How many of an item stations leave untouched.`. Type `55` and press **Escape**: the box shows its value again, no `table edit` line, and the panel stays open; a second Escape closes the panel as usual. (If the bridge's `field_focus` / `type` can address a cell-row field, the typing is focus-free.)
+7. **Foreground test (a real mouse):** the wheel over the body moves it two lines a notch, the footer counting (`Showing 3–14 of 600`), the scroll bar handle following (the bar spans the body rows only); at the bottom the next notch scrolls the page. Drag the handle: the body follows in whole lines. Selection, the open drawer and a waiting spinner are where they were when scrolled back. Injected wheel events never reach this path; use a real mouse.
+8. Controller (focus-free with `nav`): `{"action":"press","button":"down"}` until the focus is on `row11`, then once more: `taken`, the focus still on `row11`, the footer `Showing 2–13 of 600`. `{"action":"press","button":"up"}` to `row0` and once more: back to `Showing 1–12`. `{"action":"pad","button":"a"}` on a row's check cell toggles it. Remove the pad afterwards (`pad_remove`).
+9. Toggle **Group by category**: `table grouped = on`; `row0` reads `Alchemy (…)` in gold with the arrow down, its rows, then a `Subtotal` line with the Total and Here sums; an item in two categories appears under both; the last line is `Total` (each item once). `widget_click demo-table:row0`: the group folds to its header and subtotal.
+10. **Reset table**: `table reset`.
+
+#### Master-detail, multi picker and repeat pick acceptance
+
+1. `widget_click {"label":"demo-tabs:tabs/tab3"}`, then `{"action":"widget_read","pane":"content"}`. Expect `demo-md:tabs:tabs` (chips `tab0` Belts, `tab1` Categories), `demo-md:row0` to `demo-md:row13`: `row0` with the search field `m-search` and `m-note` `16`; every row's `tileStates` has `"2": "rule"`; `row1` to `row13` with `m-title` `Ore in`, `Line 1`, `Jewel cabinets`, `Belt 4` … `Belt 13`; every row's `divider` visible; detail cells hidden except `d-text` on rows 0 and 1 (`A belt is an ordered set of containers.`, `Select a belt, or make one with + New belt.`). **Screenshot** at 1920×1080, 2560×1440 and 3840×2160: the divider is one straight thin line at one x, no clipped or overlapping text, the rows line up with the settings rows around them.
+2. `widget_click {"label":"demo-md:row1"}`: the log has `Controls sample: widget md select belt-ore`; `widget_read` shows `demo-md:row1` with `tileStates {"1": "selected", "2": "rule"}` (**screenshot**: the gold band and stripe behind the left half only, the rule unbroken from row to row). **Foreground test:** hovering the left half of another entry lights the hover wash, the detail half does not, and the selected entry under the pointer is brighter. The detail shows `Ore in` with `Rename` (`row0`), `6 chests · filled in list order` (`row1`), the members on rows 2–7, `+ Add…` / `Pick` on row 8, `Used by (3)` on row 10 and the three links on rows 11–13. The detail has 15 lines in 14 rows: `widget_read` shows `detailTop` 0, and one wheel notch over the right half (**foreground test**) or `nav press` down on `row13`'s link brings the `Locate all` / `Delete` line up.
+3. `widget_click demo-md:row2/d-down`: `widget md reorder ch-1 0->1 = ch-2,ch-1,ch-3,ch-4,ch-5,ch-6`; `row2` now `Ore chest`. `widget_click demo-md:row3/d-expand` (Iron bin): rows 4 and 5 read `Holds Iron Ore and Copper Ore.` and `31 of 40 slots used.`, indented. `widget_click demo-md:row7/d-remove` on `Storage chest 6` (not removable): nothing happens. `widget_click demo-md:row0/d-btn0`: `widget md action tab 0 belt-ore title/rename`, the entry reads `Ore in (renamed)`.
+4. `nav press` down until the focus is on `demo-md:row13`, then once more: `widget_read` shows `masterTop` 1 and `row13` reading `Belt 14`; `nav press` right from a member row moves the focus to `d-grip` / `d-up` …; `nav press` submit on `d-down` reorders (a `md reorder` line).
+5. **Foreground test:** the mouse wheel over the left half scrolls only the list (`masterTop` changes, `detailTop` does not); over the right half only the detail; at the detail's end the next notch scrolls the panel. Drag a member by its grip below the last member: the held caption turns gold, the rows close up live, one `md reorder` line on release.
+6. **Foreground test (typing):** click the search field and type `ore`: `widget md search "ore" = 1 matches` per keystroke, the list shows `Ore in` only, `m-note` reads `1 of 16`. Type `zzz`: `No match for "zzz".` and the `+ New belt` line under it.
+7. `widget_click demo-md:tabs:tabs/tab1`: `widget md tab = Categories`; the list reads `Flowers`, `Gems`, `Wood`, `+ New category`; back to `tab0`, the selection, query and detail are as they were. Scroll the list to its end (`nav` or the wheel) and click `+ New belt`: `widget md action tab 0 … master/new`, then `widget md select belt-new-N`.
+8. Terms: `widget_read` shows the marker on every Belts entry's caption and on the `Used by (3)` heading (**screenshot**: the muted gold circle-i after each caption, inside the master half). **Foreground test:** hover `Ore in`'s left half: the tooltip titled `Belt` with its explanation (not the entry's own tooltip); move right onto the `Used by` heading's half: the `Used by` explanation.
+9. **Foreground test, in a world with three castle chests:** select `Ore in`, press `Pick` (`demo-md:row8/d-btn1`): `widget md action tab 0 belt-ore actions/pick`, `widget pick several armed for belt-ore`; the band reads `Pick containers or stations`, the Interact cap then `Add`, the Esc cap then `Finish`, its bottom edge clear of the health readout and the buff row (**screenshot** at 1920×1080 and 3840×2160). Interact with chest A: no panel, `Ui: world pick #N picked … (1 so far; repeating).`, `widget pick several 1 = …`, the band reads `… · 1 picked` with `1 picked` in the gold, the member list grows by one. Interact with chest A again within ten seconds: `ignored a repeat of the same target`, no new member. Interact with chests B and C: counts 2 and 3. Press Escape with no other panel open: `Ui: world pick #N finished by Escape after 3 picks.`, `widget pick several finished = 3`, no pause menu. Repeat with the Mods workspace open: the first Escape closes the workspace, the pick stays armed; the second finishes it. (**Pick several (repeat)** under the master-detail arms the same pick.)
+10. Multi picker, `tab1` (`demo-multi`): `widget_click demo-multi:line1` (Crystal): `widget multi = crystal`, `demo-multi:status` reads `7 entries. 1 selected.` with `all` and `clear` visible. `widget_click demo-multi:status/all`: `widget multi = crystal,thread,st-furnace,ch-iron,ch-wood` (the grayed entries are not selected), `all` hidden. `widget_click demo-multi:status/clear`: `widget multi = ` and `clear` hidden. `nav press` to `demo-multi:line2` and submit: it flips.
+
+#### Chips acceptance
+
+1. `widget_click {"label":"demo-tabs:tabs/tab0"}`, then `{"action":"widget_read","pane":"content"}`. Under the ordered list expect the rows `demo-chips-items:line0` (cells `chip0` `Crystal · 240`, `chip1` `Coarse Thread · 75`, `chip2` `Planks · 1,320`; `icon0` to `icon2` visible, each rect inside its chip's rect at the left; `x0`, `x1` visible inside their chips at the right, `x2` hidden; every chip rect 36 tall at 1:1), `demo-chips-belts:line0` (and on a 560-unit row `line1`: the long belt starts its own line ending in `…`; the add chip `+` after it), `demo-chips-filters:line0` and `line1` (`chip0` `Ore` in tone `chipOn`, the rest `chipOff`; the last drawn chip on `line1` reads `+2 more`). `demo-chips-*:line2` hidden. **Screenshot** at 1920×1080, 2560×1440 and 3840×2160 (and the 640-unit floating window if the page is opened there): no chip, glyph or caption clipped or overlapping; each item chip reads as one chip (icon, caption and × inside one chip art); captions centered between the icon and the ×, and on plain chips centered on the whole chip; the selected filter on the gold plate.
+2. `widget_click demo-chips-belts:line0/x0`: log `Controls sample: widget chips belt remove belt-ores`; `widget_read`: `line0/chip0` now `Wood belt`. `widget_click` the add chip (`demo-chips-belts:line<L>/chip<S>`, from `Describe().add` or the readback's `+` cell): `widget chips belt add belt-new-1`, and a `New belt 1` chip before the `+`.
+3. `widget_click demo-chips-belts:line0/chip0`: `widget chips belt open belt-wood`. `widget_click demo-chips-items:line0/x2` (Planks, not removable): the glyph is hidden, nothing happens.
+4. `widget_click demo-chips-filters:line0/chip1`: `widget chips filter cat-ingot = on (cat-ore,cat-ingot)` and `chip1` turns `chipOn`; again: `= off`. `widget_click` the `+2 more` chip: `widget chips filter more 2 = cat-blood,cat-misc`.
+5. Controller (focus-free): `nav {"op":"press","button":"down"}` until the focus is on `demo-chips-items:line0/chip0` (`nav state`), then `right`: the focus is on `x0`; `right`: `chip1`; on the filters, `down` moves from `line0` to `line1`. `press a` on a filter chip flips it (one `widget chips filter …` line). `press x` on a chip does nothing. **Screenshot** with the focus on the selected `Ore` filter: the gold plate and the focus frame 3 units outside the chip both show.
+6. Terms: **Reset chips** first; `widget_read`: the belt chips `Ores belt` and `Wood belt` and the filter `Ore` show the circle-i after their caption (**screenshot**: the marker inside the chip art, clear of the ×). **Foreground test:** hover `Ores belt`: the tooltip box with the gold title `Belt` and the glossary line; hover `Ore`: the `Category` line. After three hovers of `Belt` (more than a second apart) the markers on both belt chips go (`Ui: term 'Belt' of progenitor.controlssample hovered 3 times; …`) and the hover still explains. Bring them back (**Show markers again** on `tab4`), then remove `Ores belt` with its ×: the marker stays with `Wood belt`, now in the first slot.
+7. **Foreground test:** hover a chip: the art's hover sprite (also on the selected chip, over its plate); hover its × only: the glyph brightens. Hover the long belt chip: the tooltip's title is the full caption, its body the chip's tooltip; hover `+2 more`: the hidden labels. In a world, the item chips show the Crystal and Coarse Thread inventory icons (**screenshot**).
+8. **Foreground test:** resize the game window (or switch resolution) with `tab0` open: within a moment the belts and filters re-wrap for the new row width; nothing leaves the row.
+9. **Reset chips**: `widget chips reset`; the three sets are back.
+
+#### Help acceptance
+
+The explained words and the tip buttons are on `tab4` under the HUD buttons.
+
+1. `widget_click {"label":"demo-tabs:tabs/tab4"}`, `widget_read {"pane":"content"}`: the heading `Belt`, the labels `Ore in: three chests beside the furnaces.`, `Reserve 20 Iron Ingot`, `Cap 500 Planks`, the button `Category: Ore`, the inner tab row `help-tabs:tabs` (`Belts`, `Categories`), the list `help-list:row0` (`Ore in`) and `row1` (`Iron bin`), the toggle `Show help markers` (on). **Screenshot** at 1920×1080, 2560×1440 and 3840×2160: a small muted gold circle-i after each of those five captions and after `Belts`, `Categories` and `Ore in`, the same gold as the list's glyph buttons, vertically centered on the text, not clipped, not overlapping the control column.
+2. **Foreground test:** hover `Belt`: the tooltip box with the gold title `Belt` and the line `A named list of chests …`. Move off and on twice more (more than a second apart): after the third hover every Belt marker on the page disappears; the log has `Ui: term 'Belt' of progenitor.controlssample hovered 3 times; its marker is hidden (the explanation still shows).`; hovering again still shows the tooltip. The toggle `Show help markers` now reads off.
+3. `widget_click {"label":"Show markers again"}`: the Belt markers are back, the toggle reads on, the log has `Controls sample: widget help markers shown`. `[Ui] HiddenTermMarkers` in `BepInEx/config/progenitor.ui.cfg` is empty again.
+4. Turn the toggle off (`widget_click` on it): every marker on the page disappears; the cfg's `HiddenTermMarkers` lists the sample's `belt`, `cap`, `category`, `reserve` and `used by` keys. Hot-reload Core: the markers stay hidden. Turn it on again.
+5. `widget_click {"label":"help-list:row0/down"}`: the marker moves with `Ore in` to the second row. **Foreground test:** hover the `Belts` tab and the `Ore in` row: the Belt line; hover `Iron bin`: its own tooltip `A single chest.`
+6. `widget_click {"label":"Show tip"}`: the log has `Ui: tip 'help-demo' of progenitor.controlssample shown.` and `Controls sample: widget help tip = Showing`. **Screenshot**: the card in the game's popup frame titled `Explained words` over the title rule, the centered body, **Show all tips** (left) and **Got it** (right, gold caption) as popup buttons with their captions centered on the whole button art, beside the Mods workspace or in the bottom-right corner, fully on screen at all three resolutions, not over a dialog.
+7. `widget_click {"label":"tip-buttons/got-it"}`: `Ui: tip 'help-demo' of progenitor.controlssample marked seen (got it).`; the card is gone. **Show tip** again: `Controls sample: widget help tip = Seen` and no card. `[Ui] SeenTips` lists `progenitor.controlssample:help-demo`.
+8. Modal: **Reset tips** (`widget help tips reset`), open a framework dialog (the Sample's **Confirm dialog**, or `ctx.Dialogs` from any page), then **Show tip** through the bridge: `widget help tip = Queued` and `Ui: 1 tip card(s) wait for a dialog, key capture or list to close.`; answer the dialog (`mods_ui dialog_choose {"choice":"no"}`): the card appears. With the card up, open the dialog again: `… steps back while a dialog, key capture or list is open.`, the card is gone while the dialog is up and returns after it.
+9. **Show all tips** on the card (`tip-buttons/show-all`): the card closes (`marked seen (show all tips)`), the `Tips` window lists `Explained words` with its body, **Show tips again** and **Close** work.
+10. Escape: **Reset tips**, **Show tip**, then press Escape (`nav press {"key":"back"}` or the framework Escape path): the card closes with `marked seen (escape)`.
+11. **Foreground test:** with the card up and the Mods workspace closed, press A and the D-pad on a controller: nothing on the card reacts (it is not a controller screen) and the game plays on; B closes it (`marked seen (escape)`). Hover it with the mouse: gameplay clicks stop only while the pointer is over the card.
+12. Unload: with a card waiting behind a dialog, hot-swap the sample: `Ui: dropped 1 tip card(s) of an unloading plugin.` and `… dropped unanswered (its plugin unloaded).`; nothing left on screen; the cfg's `SeenTips` unchanged.
+
+#### Cleanup
+
+Remove the sample from `BepInEx/progenitor-reload` on the client and confirm the clean unload in the log: no `Ui: ctx.Hud …`, `Ui: master-detail …` or term warning; the tooltip, the pick band, the pings, every marker, tip card and tip list and the table's scroll bar are gone with the page.
+
+## Help: explained words and first-time tips (P7b)
+
+Two pieces that explain a mod's own words where the player meets them: **term tooltips** (a glossary, a hover explanation on any kit control, and a small circle-i marker that goes away after a few hovers) and **tip cards** (a one-time card in the game's popup look, with **Got it** and **Show all tips**).
+
+**Status: experimental.** Source-checked, built and game-free tested (`UiTermsTests`, `UiTipsTests`); **not verified live**. The live procedure is [Help acceptance](#help-acceptance). Reference: the Widgets page's **HUD** tab ([`WidgetsDemo.Help.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.Help.cs)).
+
+```csharp
+using Progenitor.Ui;
+
+// Once, when the plugin loads: the wording lives here and nowhere else.
+UiTerms.Define(ctx.Guid, new Dictionary<string, string>
+{
+    ["Belt"] = "A named list of chests that work together.",
+    ["Cap"] = "Stations stop making an item once you hold this many.",
+});
+
+ctx.Menu.Register("My mod", "…").Page("Belts", panel =>
+{
+    panel.Heading("Belts").Term("Belt");                 // hover: the Belt line; a circle-i after "Belts"
+    panel.Label("Cap 500 Planks").Term("Cap");
+    panel.TermMarkersToggle("Show help markers");         // the "show markers again" setting
+    ctx.Hud.Tip("belts-intro", "Belts",
+        "A belt groups chests you use together. Make one, then add it to any Input or Output.",
+        new UiTipOptions { Anchor = panel });
+});
+```
+
+| Piece | Call | Vanilla counterpart and borrowed art |
+|---|---|---|
+| Glossary | `UiTerms.Define(pluginId, term, explanation)` / `Define(pluginId, glossary)` | None (the game explains its words in item tooltips); one place per plugin, read on every hover. |
+| Hover explanation | `handle.Term(term)` on any kit control | The kit tooltip (the dropdown description box's look, DROPHOVER1): the game's frame sprite, a gold title line (the term as the glossary writes it), a light body. |
+| Marker | drawn by `handle.Term(term)` | No game glyph fits: a circle-i drawn once per Core generation into a texture (as the Locate marker is), tinted the muted gold of the widgets' glyph buttons, never a raycast target. |
+| "Show markers again" | `panel.TermMarkersToggle(text)`, `UiTerms.ShowMarkers` / `SetMarkers` / `MarkersOn` / `OnMarkersChanged` | The settings grid's toggle. |
+| Tip card | `ctx.Hud.Tip(id, title, body, options)` | The game's popup (`CommonPopup`, DIALOGS2): the `Window_Box_Background` frame (no backdrop: not modal) holding a framework dialog's own rows: the centered title over the game's title rule (`Divider_Big_02`), the centered body, and the dialog button row of the game's popup buttons (`SmallerButton_*`, one width, captions centered on the whole button art). |
+| Tip list | `ctx.Hud.ShowAllTips()` (and the card's **Show all tips**) | A game-window panel: each tip's title as a heading and its body as a note, **Show tips again** and **Close**. |
+
+### Term tooltips
+
+| Member | Behavior |
+|---|---|
+| `UiTerms.Define(pluginId, term, explanation)` | Defines (or rewords) a term for a plugin. Terms compare without case and with whitespace runs as one space (`"Mass Deposit"` = `" mass  deposit "`). An empty explanation removes the term. Process-wide per plugin id; holds only text. |
+| `UiTerms.Define(pluginId, IEnumerable<KeyValuePair<string,string>>)` | Every pair of a glossary. |
+| `UiTerms.Explain(pluginId, term)` → `string` | The explanation, or empty. |
+| `UiTerms.IsDefined(pluginId, term)` → `bool` | |
+| `UiTerms.Glossary(pluginId)` → `IReadOnlyList<KeyValuePair<string,string>>` | Definition order, the term as written: for a plugin's Help page. |
+| `UiWidgets.Term(this IUiHandle, term)` → `IDisposable` | Marks the term on a kit control (label, heading, note, button, toggle…). The plugin is the control's (`IUiHandle.PluginId`). Hover shows the explanation (title = the term as written in the glossary); the marker sits after the control's text. A term defined later still works (the glossary is read on every hover; the marker appears when it is defined). The lease removes the hover watch and the marker; both also go with the control. On a runtime that cannot draw, an inert lease that keeps state. |
+| `UiTerms.AutoHideAfter` (get/set, `DefaultAutoHideAfter` 3; 0 never; at most 20) | Hovers after which a marker hides itself. Persisted for the player (`[Ui] TermMarkerAutoHide`). |
+| `UiTerms.MarkerShown(pluginId, term)` → `bool` | Defined and not hidden. |
+| `UiTerms.Hovers(pluginId, term)` → `int` | Hovers counted so far toward the auto-hide. |
+| `UiTerms.HideMarker(pluginId, term)` | Hides one marker for this player; the explanation still shows. |
+| `UiTerms.ShowMarkers(pluginId)` | Every marker of that plugin back, its hover counts restarted. Other plugins untouched. |
+| `UiTerms.MarkersOn(pluginId)` / `SetMarkers(pluginId, on)` | For a plugin's own toggle: on when none of its defined terms is hidden; writing on is `ShowMarkers`, off hides every defined term's marker. |
+| `UiTerms.OnMarkersChanged(pluginId, handler)` → `IDisposable` | After a definition, a hide, an auto-hide or a show for that plugin. Track the lease (`ctx.Track`) so it ends with the plugin. |
+| `UiWidgets.TermMarkersToggle(this IUiPanel, text = "Show help markers")` → `IUiToggle` | A toggle bound both ways to `MarkersOn` / `SetMarkers`; follows changes made elsewhere; its follow lease is released with the panel. |
+| `UiTerms.Describe(pluginId)` | Readback: `{plugin, autoHideAfter, markersOn, terms [{term, explanation, marker, hovers}], marked}`. |
+
+**Terms on composed widgets.** The composed widgets mark their own captions: the tabs (`IUiTabs.SetTerm(tab, term)`, empty removes it), the ordered list (`UiListItem.Term`), the data table (`UiTableColumn.Term`), the chips (`UiChip.Term`) and the master-detail (`UiMasterEntry.Term`, `UiDetailLine.Heading(text, count, term)`). Each widget forwards its own hover to the term, so hovering the caption shows the glossary line in place of that item's plain tooltip, and the marker follows its item when rows or chips are reordered, filtered or re-packed (reused slots re-sync their marker on every render). A tab, row or chip whose term is not defined keeps its tooltip. Every binding is released with the widget.
+
+- **Counting.** A hover is a pointer entering a marked control while the term's marker shows. A second hover of the same term within 1 s is not counted (a pointer jittering on an edge). At the limit the marker is hidden (`Ui: term '<term>' of <plugin> hovered 3 times; its marker is hidden (the explanation still shows).`) and the count is dropped. After a marker is hidden nothing is counted any more.
+- **Keying.** Every stored key is `plugin:term`, both parts normalized and percent-escaped (`%`, `,`, `:`, `=`, `;`, control characters), so two plugins' "Cap" never share a count or a hidden mark.
+- **Persistence.** Core's client `progenitor.ui.cfg`: `[Ui] HiddenTermMarkers` (sorted `plugin:term` keys, commas), `[Ui] TermMarkerHovers` (`plugin:term=n`), `[Ui] TermMarkerAutoHide` (0–20, default 3). Read on every use (never cached), so a Core reload or a restart finds them. Unbound (server, a failed bind): session memory, one warning. A write that would not change the stored text is not made. None of them is drawn on a settings page; a plugin offers its own toggle.
+- **One hover handler per control.** Do not put `Tooltip(...)` and `Term(...)` on the same control: both show the one tooltip box and the later hover wins.
+- **Unload.** The marker is a child of the control's text object, so it goes with the control and its panel. The plugin's change handlers must be tracked. The Core teardown drops the glossaries, every marked control, every handler, the marker sprite and its texture.
+
+#### Marker layout rules
+
+1. The marker's side is the text's font size × 0.72, rounded, clamped to 10–22 units (13 at the kit's 18-unit body text).
+2. It sits 4 units after the text's last character, vertically centered on the text, and is kept inside the text's own rect, so a caption that fills its rect never pushes it into the next column.
+3. It is a child of the text object: it scales with the canvas (the game's design space), is clipped by the panel's viewport and hidden with the control.
+4. One shared frame tick re-places every live marker (reads only cached objects; no scene search) and stops when none is left; a caption rewritten in place keeps its marker at its end.
+5. Header cells have no hover state in the kit, so a hovered table header shows the tooltip but no wash or underline.
+6. Art: a 48×48 coverage texture (ring, dot, stem; one-pixel smoothed edges), bilinear, aspect preserved. No font glyph: U+24D8 is not known to be in the game's body font, and the fallbacks a font surely has (`(i)`, `i`, `?`) read as debug text after a caption.
+
+### Tip cards
+
+| Member (`ctx.Hud`) | Behavior |
+|---|---|
+| `Tip(id, title, body, UiTipOptions? options = null)` → `IUiTip` | Registers the tip and shows it once: at once when the screen is free, else when it is. A tip the player already dismissed returns `State = Seen` and shows nothing. Asking again for a tip that is waiting or showing returns that request. Server: a `Dropped` tip, one log line. |
+| `DefineTip(id, title, body)` | Registers (or rewords) a tip without showing it, so the list has it. |
+| `Tips` → `IReadOnlyList<UiTipInfo>` | Registration order: `Id`, `Title`, `Body`, `Seen`. |
+| `IsTipSeen(id)` → `bool` | |
+| `ShowAllTips()` | Opens the plugin's tip list (one at a time; a second call replaces it). |
+| `ResetTips()` / `ResetTip(id)` | Every tip (or one) shows once again. Other plugins untouched. |
+| `UiTipOptions.Anchor` (`IUiPanel?`) | The panel the tip explains: the card is placed beside it; a card still waiting when it closes is dropped unshown (not marked seen); a shown card whose anchor closes is closed the same way. Null: bottom-right of the screen. |
+| `UiTipOptions.OnShowAll` (`Action?`) | What **Show all tips** runs instead of the framework's list (a plugin with its own Help page opens it). Guarded; a throw is logged. |
+| `IUiTip` | `Id`, `State` (`UiTipState`: `Seen`, `Queued`, `Showing`, `Done`, `Dropped`), `Dispose()` (takes a waiting card out or closes a shown one, without marking it seen). |
+
+- **Once.** "Seen" is per player in `[Ui] SeenTips` of Core's client `progenitor.ui.cfg` (sorted `plugin:tip` keys), read on every use.
+- **One at a time.** One queue across every plugin, first asked first shown.
+- **Never over a modal.** While a framework dialog (`ctx.Dialogs` and the framework's confirmations), a key capture or an open dropdown list is on screen, nothing new shows (`Ui: N tip card(s) wait for a dialog, key capture or list to close.`, once per wait); a card already up closes and goes back to the head of the queue (`… steps back while a dialog, key capture or list is open.`) and returns when the screen is free. The pump runs on the widget frame tick only while something waits or shows.
+- **Buttons.** The card's rows are a dialog's (DIALOGS2): **Show all tips** sits on the dismissal's side (left) and **Got it** is the main answer (right, the accent gold), both the game's popup buttons at one width, centered as a pair. Bridge: `mods_ui widget_click {"label":"tip-buttons/got-it"}` and `tip-buttons/show-all`.
+- **Answers.** **Got it** marks it seen and closes it. **Show all tips** marks it seen, closes it and opens the list (or `OnShowAll`). **Escape** (the framework's sweep of shown panels; B on a controller) counts as **Got it**: the player saw the card and sent it away.
+- **Controller focus (NAV1).** The card takes input only while hovered, so it is not a NAV1 screen and a stray A press never reaches it; the game keeps the controller. Should it become a navigated screen, the dialog rule applies: the focus starts on **Show all tips**, which only opens a list.
+- **Placement** (`UiTipLayout`, after each show and once a frame while it is up, because a re-flow of other panels may move it): right of the anchor panel, top edges aligned; else left of it; else under it (left edges aligned); else over it; the first that fits 24 units inside the canvas wins, 16 units from the panel. No anchor, or no side with room: the bottom-right corner, 24 units from the edges. Always clamped onto the canvas. Tested at 1920×1080, 2560×1440, 3840×2160 and 3440×1440 (a centered window, the leftmost and rightmost columns, a full-screen anchor). The card is a 640-unit frame (the dialog frame width) and an ordinary kit panel, so it counts in the panel flow and is then moved to its own spot.
+- **Capture.** `WhenHovered`: gameplay input is blocked only while the pointer is over the card.
+- **Unload.** `ctx.Hud` tracks it: every unload reason drops the plugin's waiting cards, closes its shown card and its list, and removes its tips from the registry (their callbacks with them), without marking anything seen (`Ui: dropped N tip card(s) of an unloading plugin.`). The card is a panel under the plugin's own root, so `Ui.RemoveAll(owner)` reaches it too. The Core teardown closes everything and stops the tick.
+
+#### Card layout rules
+
+1. The dialog layout (DIALOGS2): the pane title hidden; the title row centered, 24, 0.9 gray (the framework's dialogs are gray, after the game's `CommonPopup`), the game's title rule under it; the body centered, 17, wrapping at 460; the 52-unit button row, both buttons one width (the widest caption × 1.3 + 40, at least 120, 256 when the row holds them), centered between spacers, dismissal left, main right.
+2. Never over its anchor panel when any side has room; never off the canvas; never shown while a modal is up.
+3. The list: one heading and one note per tip, then **Show tips again** and **Close**; placed by the ordinary panel flow.
 
 ## Ownership and teardown
 
@@ -1149,6 +1540,25 @@ Ui: shown-input … notch=1 applied=both …          (pump and uGUI both wrote;
 Mods workspace: scroll-preserve … restore=0 …     (restore ran against empty bounds)
 ```
 
+Widgets, pick in world and help (P7b; expectations from source, not captured output):
+
+```
+Ui: world pick #N picked <result> (K so far; repeating).
+Ui: world pick #N ignored a repeat of the same target I:V.
+Ui: world pick #N finished by Escape after K picks.
+Ui: term '<term>' of <plugin> hovered <n> times; its marker is hidden (the explanation still shows).
+Ui: tip '<id>' of <plugin> shown.
+Ui: tip '<id>' of <plugin> marked seen (got it|show all tips|escape).
+Ui: tip '<id>' of <plugin> dropped unanswered (<reason>).
+Ui: tip '<id>' of <plugin> steps back while a dialog, key capture or list is open.
+Ui: N tip card(s) wait for a dialog, key capture or list to close.
+Ui: dropped N tip card(s) of an unloading plugin.
+Ui: tips of <plugin> reset; each shows once again.
+Ui: ctx.Hud.Tip is client only; on the server it does nothing.
+```
+
+A repeating pick logs `picked` per target and `finished by Escape` at the end; a repeat of the same target within ten seconds is `ignored`. The tip drop reasons are `disposed`, `closed`, `its panel closed`, `its panel closed before it showed`, `could not be drawn` and `its plugin unloaded`. The server line is logged once per plugin, naming the first `ctx.Hud` member called (`Tip` above). Warnings that mean something is wrong: `Ui: term marker could not be drawn: …`, `Ui: term '<term>' marker on … failed: …`, `Ui: term '<term>' hover on … failed: …`, and `Ui: [Ui] term marker and tip values could not be bound (…); hidden markers and seen tips are remembered for this session only.`
+
 ### Sample `.ui demo` (client)
 
 Chat is server-side (`.ui` is registered like `.ember` / `.fx`); the server sends custom event `0x536D5569` (`SmUi`) to that user's client.
@@ -1199,6 +1609,8 @@ Several things here were confirmed on a live client today and several were not, 
 | `TMP_InputField` has `ActivateInputField` / `isFocused` / `Select`, no `shouldActivateOnSelect`; `Keyboard.add_onTextInput(Il2CppSystem.Action<char>)` | **Source-checked** against this machine's client interop (the IL viewer) |
 | `Ui.AttachToVanilla` — the plan, the registry, the sweep and the log lines (FUI36) | Landed, **nothing live**. The game was not launched for this job. The pure half (close/reopen, rebuild, degrade, layout branch, `RemoveAll` / Uninstall sweep, pin line) is covered by tests |
 | P6 panel sites (`ContainerPanel`, `StationPanel`, `InventoryPanel`, `CastleHeartPanel` / `ThronePanel`, `InventoryTooltip`): resolution, anchors, buttons, open/close/target events, placement, missing-site line | **Experimental**, built and game-free tested (`VanillaPanelTests`: catalog, tracker, placement at three resolutions, buttons across reopen, click slot, blocked fit, missing donor, `RemoveAll`). Member names source-checked against the game's metadata and the client interop. **Nothing live**: the hierarchy under each window, its rects and whether the bars shrink their children are logged by the one-shot `Ui: site` line on the first live run |
+| Widgets and `ctx.Hud` (P7: ordered list, picker, tabs, tooltips, code area, notifications, Locate, pick in world) | **Experimental**, source-checked, built and game-free tested (`UiWidgetsTests`, `UiCodeAreaTests`, `UiNoticeTests`, `UiLocateTests`, `UiWorldPickTests`); **not verified live**. [Widgets acceptance procedure](#widgets-acceptance-procedure-not-run) not run |
+| P7b widgets and help (data table, master-detail, chips, picker multi-select links, repeating pick in world, term tooltips, tip cards) | **Experimental**, source-checked, built and game-free tested (`UiDataTableTests`, `UiMasterDetailTests`, `UiChipsTests`, `UiPickerMultiTests`, `UiWorldPickRepeatTests`, `UiTermsTests`, `UiTipsTests`); **not verified live**: nothing drawn (marks, markers, bands, cards, scroll bars) has been seen in a running game. Acceptance procedures not run |
 | The confirmed destroy, its bounded retry, the split layout fields, the write-on-change guard and the watch race (FUI37, R60 findings 1, 2, 6, 7, 8) | Landed, **nothing live**. All five are covered by tests against the fake runtime; the `retrying` / `leaked` lines have never been seen in a real client, which is the point — they only appear when Unity refuses a destroy |
 | `MapMenuMapper.GetMapMenu()?.WarEventInfo` resolves the **map** card and not the HUD popup | Inferred from the game's metadata plus a third-party mod's live docking. **Spike P2 / N4** |
 | The hierarchy under the widget, and whether a `LayoutGroup` governs its parent | **Unknowable offline** — prefab serialized data. Both branches are implemented and the one taken is named in `layout=`; the one-shot `site ...` line reports the group and the fitter as separate fields for the root, the parent and `TextGroup`, so one run answers both halves. **Spike P3** |

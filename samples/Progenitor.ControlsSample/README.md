@@ -22,11 +22,18 @@ Plugin GUID `progenitor.controlssample`; version comes from git (docs/versioning
   each change logs `Controls sample: setting <key> = <value>`.
 
 - **Mods workspace → Progenitor Controls Sample → Widgets** shows the composed widgets
-  ([WidgetsDemo.cs](WidgetsDemo.cs), docs/ui.md "Widgets") under a tab row with count badges: **List** (an
-  ordered list of four sample targets: drag by the grip, arrows, a drawer, remove, **Reset list** with a tooltip),
-  **Pickers** (a single and a multiple picker with sections, two game item icons and grayed rows),
-  **Code** (a code area with a toy highlighter and checker; line 4 starts with an error) and **HUD**
-  (`ctx.Hud.Notify` in four kinds, **Pick in world**, **Locate the picked target**). Each event logs
+  ([WidgetsDemo.cs](WidgetsDemo.cs) and its `WidgetsDemo.*.cs` parts, docs/ui.md "Widgets") under five tabs
+  with count badges: **Lists** (an ordered list of four sample targets: drag by the grip, arrows, a drawer,
+  remove, **Reset list** with a tooltip; then chips: item chips with game icons, a container's belts with an
+  add chip, combinable category filters with a `+N more` chip, **Reset chips**), **Input** (a single and a
+  multiple picker with sections, two game item icons, grayed rows and the **Select all** / **Clear** links;
+  a code area with a toy highlighter and checker, line 4 starting with an error), **Table** (a 600-row data
+  table: sorting, hidden columns, drawers, multi-select, grouping with subtotals, Reserve and Cap edited in
+  place with answers that resolve, wait for **Confirm pending**, or are refused), **Layout** (a Belts /
+  Categories master-detail screen with search, members, links and **Pick several (repeat)**) and **HUD**
+  (`ctx.Hud.Notify` in four kinds, **Pick in world**, **Locate the picked target**; explained words with
+  circle-i markers on labels, a button, inner tabs and a list, the markers toggle, and tip cards: **Show tip**,
+  **All tips**, **Reset tips**). The glossary terms are placeholders. Each event logs
   `Controls sample: widget <event>`.
 
 There is no chat command: chat commands run on the server, and this mod is client-only; opening
@@ -48,8 +55,9 @@ a client panel from chat would need a server half and a custom event (see `Proge
 | `ctx.Settings.Page` | `Section`, `Setting`, `Toggle`, `Number`, `Slider`, `Dropdown` + `OptionDescriptions`, `Radio`, `MultiSelect`, `Text` + `MaxLength`, `Text(multiline)`, `Color`, `DateTime`, `Keybind`, `Divider`, `Info`, `Button` (plain and confirmed), `HideWhenAlone` |
 | `ctx.Keybinds` / `ctx.Menu` | `Register` (the Ctrl+F7 bind), `Register(...).Page`, `OpenPage` |
 | `UiLook` | `GameStyle`, `Label(text, LabelTone)`; `IUiToneLabel.SetText` |
-| `UiWidgets` (Widgets page) | `OrderedList`, `Picker` (single and `Multi`), `Tabs` (`Add`, `SetBadge` both overloads, `SetTooltip`, `OnChanged`), `CodeArea` (`SetHighlighter`, `SetErrors`, `OnChanged`), `Tooltip` |
-| `ctx.Hud` (Widgets page, HUD tab) | `Notify` (`Info`, `Success`, `Warning`, `Error`), `PickInWorld`, `Locate(Entity, …)` |
+| `UiWidgets` (Widgets page) | `OrderedList`, `Picker` (single and `Multi`), `Tabs` (`Add`, `SetBadge` both overloads, `SetTooltip`, `SetTerm`, `OnChanged`), `CodeArea` (`SetHighlighter`, `SetErrors`, `OnChanged`), `Tooltip`, `DataTable`, `MasterDetail`, `Chips`, `Term`, `TermMarkersToggle` |
+| `UiTerms` (Widgets page, HUD tab) | `Define`, `ShowMarkers`; `UiListItem.Term`, `UiTableColumn.Term`, `UiChip.Term`, `UiMasterEntry.Term`, `UiDetailLine.Heading(…, term)` |
+| `ctx.Hud` (Widgets page, HUD and Layout tabs) | `Notify` (`Info`, `Success`, `Warning`, `Error`), `PickInWorld` (one-shot and `Repeat`), `Locate(Entity, …)`, `Tip`, `ShowAllTips`, `ResetTips` |
 
 Not demonstrated: `SettingsPageBuilder.InScope` (marks a button or info line server-wide; meaningless
 for a client-only mod). Lower-level surfaces `Ui.AttachToVanilla`, `Ui.WatchPointer` and `WorldMap` are

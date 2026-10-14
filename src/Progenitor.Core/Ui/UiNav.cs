@@ -319,6 +319,55 @@ internal static class UiNav
         Skipped.Add(h, SkipMark);
     }
 
+    private static readonly ConditionalWeakTable<UiHandle, Func<NavCommand, bool>> Steers = new();
+    private static readonly ConditionalWeakTable<UiHandle, Func<float, bool>> StickScrolls = new();
+
+    /// <summary>
+    /// P7b: a control that takes a direction itself before the focus moves (a virtualized list's first or last drawn row
+    /// scrolls the list instead of leaving it). <paramref name="steer"/> answers true when it took the command; null
+    /// removes the hook. Weak: the hook goes with the handle.
+    /// </summary>
+    internal static void Steer(IUiHandle? handle, Func<NavCommand, bool>? steer)
+    {
+        if (handle is not UiHandle h) return;
+        Steers.Remove(h);
+        if (steer != null) Steers.Add(h, steer);
+    }
+
+    /// <summary>
+    /// P7b: the right stick over this control scrolls something of its own (a virtualized list) rather than the panel:
+    /// <paramref name="scroll"/> gets the stick (-1..1 per frame, positive up) and answers true when it moved. Null
+    /// removes the hook.
+    /// </summary>
+    internal static void StickScroll(IUiHandle? handle, Func<float, bool>? scroll)
+    {
+        if (handle is not UiHandle h) return;
+        StickScrolls.Remove(h);
+        if (scroll != null) StickScrolls.Add(h, scroll);
+    }
+
+    private static bool TrySteer(NavCommand command)
+    {
+        if (_focus.IsEmpty || !Steers.TryGetValue(_focus.Handle, out var steer)) return false;
+        try { return steer(command); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: nav steer threw: " + e.Message);
+            return false;
+        }
+    }
+
+    private static bool TryStickScroll(float amount)
+    {
+        if (_focus.IsEmpty || !StickScrolls.TryGetValue(_focus.Handle, out var scroll)) return false;
+        try { return scroll(amount); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: nav stick scroll threw: " + e.Message);
+            return false;
+        }
+    }
+
     /// <summary>The role of a handle type: <see cref="NavRole.None"/> for a type that is never a stop.</summary>
     internal static NavRole RoleOf(Type type)
     {
@@ -430,7 +479,10 @@ internal static class UiNav
         if (surface != null && _marked && !_focus.IsEmpty && !sample.TextFocused
             && (sample.Scroll > ScrollDeadZone || sample.Scroll < -ScrollDeadZone))
         {
-            try { Host.Scroll(_focus, sample.Scroll); }
+            try
+            {
+                if (!TryStickScroll(sample.Scroll)) Host.Scroll(_focus, sample.Scroll);
+            }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: nav scroll threw: " + e.Message); }
         }
     }
@@ -460,6 +512,7 @@ internal static class UiNav
         }
 
         if (!_focus.IsEmpty && Within(command)) return true;
+        if (command is NavCommand.Up or NavCommand.Down or NavCommand.Left or NavCommand.Right && TrySteer(command)) return true;
 
         switch (command)
         {

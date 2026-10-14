@@ -4087,6 +4087,27 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// the EventTrigger trampoline carries no event payload, so the watch samples the button the
     /// moment its PointerDown dispatches. False with no mouse or on any read failure.
     /// </summary>
+    /// <summary>
+    /// P7b: the Shift and Ctrl keys held now, for a click's multi-select meaning (Ctrl adds a row, Shift extends a
+    /// range). Part of the UI kit's pointer sample, like <see cref="PrimaryPointerHeld"/>; it binds no action to a key.
+    /// </summary>
+    internal static UiClickModifiers HeldClickModifiers()
+    {
+        var held = UiClickModifiers.None;
+        try
+        {
+            var keyboard = Keyboard.current;
+            if (keyboard == null) return held;
+            if ((keyboard.leftShiftKey != null && keyboard.leftShiftKey.isPressed)
+                || (keyboard.rightShiftKey != null && keyboard.rightShiftKey.isPressed)) held |= UiClickModifiers.Shift;
+            if ((keyboard.leftCtrlKey != null && keyboard.leftCtrlKey.isPressed)
+                || (keyboard.rightCtrlKey != null && keyboard.rightCtrlKey.isPressed)) held |= UiClickModifiers.Ctrl;
+        }
+        catch { /* a keyboard mid-teardown: no modifiers */ }
+
+        return held;
+    }
+
     internal static bool PrimaryPointerHeld()
     {
         try
@@ -4146,7 +4167,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var scroll = hit?.Scroll;
                 // TEXTEXPAND1: a text area or the expanded editor under the pointer takes the notch
                 // while its text can move that way; at its end the notch scrolls the list.
-                if (TryScrollTextField(pointer, deltaY, hit))
+                // P7b: a widget that scrolls itself (the data table's body) takes the notch over its area
+                // while it can move that way (UiWheelClaims); at its end the notch goes on as below.
+                if (pointer.Kind == PointerKind.Inside && UiWheelClaims.TryTake(pointer.X, pointer.Y, deltaY))
+                {
+                    pumpWrote = true;
+                    scroll = null;
+                }
+                else if (TryScrollTextField(pointer, deltaY, hit))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -15204,6 +15232,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         private void BuildTiles()
         {
+            if (_spec.TileStates)
+            {
+                BuildStateTiles();
+                return;
+            }
+
             var (fill, rim) = MenuPalette.TileBand;
             bool first = (_spec.TileEdge & CellSectionEdge.First) != 0;
             bool last = (_spec.TileEdge & CellSectionEdge.Last) != 0;
@@ -15254,6 +15288,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private void PlaceTiles(CellPlacement[] placements, float rowHeight)
         {
             if (_tiles.Count == 0) return;
+            if (_spec.TileStates)
+            {
+                PlaceStateTiles(placements, rowHeight);
+                return;
+            }
+
             bool first = (_spec.TileEdge & CellSectionEdge.First) != 0;
             float reach = first ? 0f : _spec.GapAbove >= 0f ? _spec.GapAbove : PanelLayout.RowGap;
             var spans = CellTiles.Spans(placements, _spec.Cells);
@@ -15271,6 +15311,86 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     }
                     if (!pair.Value.activeSelf) pair.Value.SetActive(true);
                     PlaceTop(pair.Value, sp.Center, -reach, sp.Width, rowHeight + reach);
+                }
+                catch { /* */ }
+            }
+        }
+
+        /// <summary>P7b: each tile's last state (<see cref="CellRowSpec.TileStates"/> rows).</summary>
+        private readonly Dictionary<int, UiTileState> _tileStates = new();
+
+        /// <summary>P7b: a <see cref="CellRowSpec.TileStates"/> row's tiles: a plain image each with a gold stripe child, hidden until a state asks.</summary>
+        private void BuildStateTiles()
+        {
+            for (int i = 0; i < _spec.Cells.Count; i++)
+            {
+                int tile = _spec.Cells[i].Tile;
+                if (tile <= 0 || _tiles.ContainsKey(tile)) continue;
+                try
+                {
+                    var go = new GameObject("tile-state-" + tile);
+                    go.transform.SetParent(GameObject.transform, false);
+                    var image = TryAdd<Image>(go);
+                    if (image != null)
+                    {
+                        try { image.sprite = null; } catch { /* */ }
+                        try { image.raycastTarget = false; } catch { /* */ }
+                        try { image.maskable = true; } catch { /* */ }
+                    }
+                    var stripe = BandChild(go, "tile-stripe", new Vector2(0f, 0f), new Vector2(0f, 1f),
+                        new Vector2(0f, 0.5f), Vector2.zero, new Vector2(MenuPalette.SelectedStripeWidth, 0f));
+                    if (stripe != null) stripe.color = ToColor(MenuPalette.SelectedStripe);
+                    go.SetActive(false);
+                    _tiles[tile] = go;
+                }
+                catch { /* the cells still draw; only the band is missing */ }
+            }
+        }
+
+        public void SetTileState(int tile, UiTileState state)
+        {
+            if (_released || !_tiles.ContainsKey(tile)) return;
+            _tileStates[tile] = state;
+            // In place, at the width the layout pass last placed the row at (as ApplyCell).
+            PlaceCells(MenuPanelLayout.InPlaceCellRowWidth(_placedWidth, _host.ContentRowWidth));
+        }
+
+        /// <summary>
+        /// P7b: a band state spans its tile's cells and the row's height (no reach into the gap: one entry lit, not a
+        /// block); a rule is <see cref="UiTileLook.RuleWidth"/> wide down the tile's center and reaches up through the gap
+        /// above unless the row is its rule's first (<see cref="CellRowSpec.TileEdge"/> First), so the rules of consecutive
+        /// rows read as one line.
+        /// </summary>
+        private void PlaceStateTiles(CellPlacement[] placements, float rowHeight)
+        {
+            bool first = (_spec.TileEdge & CellSectionEdge.First) != 0;
+            float gap = _spec.GapAbove >= 0f ? _spec.GapAbove : PanelLayout.RowGap;
+            var spans = CellTiles.Spans(placements, _spec.Cells);
+            foreach (var pair in _tiles)
+            {
+                var state = _tileStates.TryGetValue(pair.Key, out var s) ? s : UiTileState.Hidden;
+                CellTiles.TileSpan? span = null;
+                foreach (var sp in spans)
+                    if (sp.Tile == pair.Key) { span = sp; break; }
+                try
+                {
+                    if (state == UiTileState.Hidden || span is not { } at || at.Width <= 1f)
+                    {
+                        if (pair.Value.activeSelf) pair.Value.SetActive(false);
+                        continue;
+                    }
+
+                    if (!pair.Value.activeSelf) pair.Value.SetActive(true);
+                    var image = pair.Value.GetComponent<Image>();
+                    if (image != null) image.color = ToColor(UiTileLook.Fill(state));
+                    var stripe = pair.Value.transform.Find("tile-stripe");
+                    if (stripe != null) stripe.gameObject.SetActive(UiTileLook.Stripe(state));
+                    if (state == UiTileState.Rule)
+                    {
+                        float reach = first ? 0f : gap;
+                        PlaceTop(pair.Value, at.Center, -reach, UiTileLook.RuleWidth, rowHeight + reach);
+                    }
+                    else PlaceTop(pair.Value, at.Center, 0f, at.Width, rowHeight);
                 }
                 catch { /* */ }
             }
@@ -16722,6 +16842,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 }
                 catch { /* */ }
                 try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
+                // P7b chips: a chip with an icon or a remove overlay keeps its caption between them; every other chip keeps
+                // the symmetric button pad, so its caption is centered on the whole chip art.
+                float half = CellLayout.ButtonPad * .5f;
+                float left = cell.Spec.CaptionInsetLeft > 0f ? cell.Spec.CaptionInsetLeft : half;
+                float right = cell.Spec.CaptionInsetRight > 0f ? cell.Spec.CaptionInsetRight : half;
+                try { cell.Tmp.margin = new Vector4(left, 0f, right, 0f); } catch { /* */ }
             }
             ApplyPopupStates(cell);
             return true;
@@ -17264,9 +17390,18 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var gold = ToColor(MenuPalette.TextColor(CellTone.Gold));
                 try { cell.Tmp.text = Escape(cell.Spec.Text ?? ""); } catch { /* */ }
                 try { cell.Tmp.fontSize = cell.Spec.FontSize; } catch { /* */ }
-                try { cell.Tmp.color = new Color(gold.r * 0.85f, gold.g * 0.85f, gold.b * 0.85f, 1f); } catch { /* */ }
-                try { cell.Tmp.fontStyle = FontStyles.Underline; } catch { /* */ }
-                try { cell.Tmp.horizontalAlignment = HorizontalAlignmentOptions.Right; } catch { /* */ }
+                // P7b chips: a single-glyph quiet button (CellWrap.Glyph, a chip's remove glyph) is drawn centered and not
+                // underlined, light cream on a selected chip's gold plate (tone ChipOn). Every other quiet button is unchanged.
+                bool glyph = cell.Spec.Wrap == CellWrap.Glyph;
+                try
+                {
+                    cell.Tmp.color = glyph && cell.Spec.Tone == CellTone.ChipOn
+                        ? ToColor(MenuPalette.ChipOnText)
+                        : new Color(gold.r * 0.85f, gold.g * 0.85f, gold.b * 0.85f, 1f);
+                }
+                catch { /* */ }
+                try { cell.Tmp.fontStyle = glyph ? FontStyles.Normal : FontStyles.Underline; } catch { /* */ }
+                try { cell.Tmp.horizontalAlignment = glyph ? HorizontalAlignmentOptions.Center : HorizontalAlignmentOptions.Right; } catch { /* */ }
                 try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
             }
 
@@ -17321,6 +17456,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         public IRuntimeWidget? CellWidget(string key) =>
             key != null && _cells.TryGetValue(key, out var cell) ? cell.Widget : null;
+
+        /// <summary>P7b help: the text of cell <paramref name="key"/> (a term marker follows it), or null.</summary>
+        internal TextMeshProUGUI? CellText(string key) =>
+            key != null && _cells.TryGetValue(key, out var cell) ? cell.Tmp : null;
 
         public void ApplyCell(CellSpec spec)
         {

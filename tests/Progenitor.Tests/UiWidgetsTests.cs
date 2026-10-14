@@ -559,7 +559,11 @@ public sealed class UiWidgetsTests : IDisposable
     [Fact]
     public void Every_widget_and_hud_call_is_demoed()
     {
-        string demo = SourcePin.ReadFile("samples", "Progenitor.ControlsSample", "WidgetsDemo.cs");
+        // P7b: the page is partial; each widget's demo may live in its own WidgetsDemo.<Name>.cs.
+        string demo = string.Concat(System.IO.Directory
+            .GetFiles(System.IO.Path.Combine(SourcePin.RepoRoot(), "samples", "Progenitor.ControlsSample"), "WidgetsDemo*.cs")
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .Select(System.IO.File.ReadAllText));
         string plugin = SourcePin.ReadFile("samples", "Progenitor.ControlsSample", "Plugin.cs");
         foreach (var m in typeof(UiWidgets).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
                      .Select(m => m.Name).Distinct())

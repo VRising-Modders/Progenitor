@@ -230,10 +230,19 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         if (!on || _model.Dragging)
         {
             HideTooltip();
+            if (slot < _slotTerms.Length) _slotTerms[slot]?.Hover(false);
             return;
         }
 
         var item = ItemAt(slot);
+        // P7b: a row whose caption explains a term shows the glossary line (the term binding draws the box).
+        var term = slot < _slotTerms.Length ? _slotTerms[slot] : null;
+        if (term != null && item != null && UiTerms.IsDefined(PluginId, term.Term))
+        {
+            term.Hover(on);
+            return;
+        }
+
         if (item == null || string.IsNullOrWhiteSpace(item.Tooltip)) return;
         var row = _rows[slot];
         ShowTooltip(RectOf(row), item.Title, item.Tooltip, () => row.Visible && RectOf(row).IsKnown);
@@ -261,32 +270,22 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
     internal void DragTick()
     {
         if (!_model.Dragging) return;
-        var runtime = WidgetRuntime.Current;
-        if (runtime == null || !Live)
+        switch (UiOrderedDrag.Step(WidgetRuntime.Current, Live, SlotCenters, out int target))
         {
-            StopDrag();
-            Render();
-            return;
+            case UiDragStep.Cancel:
+                StopDrag();
+                Render();
+                return;
+            case UiDragStep.Drop:
+                Drop();
+                return;
+            case UiDragStep.Target:
+                if (_model.DragTo(target)) Render();
+                return;
         }
-
-        bool held;
-        try { held = runtime.PrimaryHeld(); }
-        catch { held = false; }
-        if (!held)
-        {
-            Drop();
-            return;
-        }
-
-        PointerSample pointer;
-        try { pointer = runtime.ReadPointer(); }
-        catch { return; }
-        if (pointer.Kind != PointerKind.Inside) return;
-        int target = UiOrderedListModel.DropIndex(pointer.Y, SlotCenters());
-        if (_model.DragTo(target)) Render();
     }
 
-    private List<float> SlotCenters()
+    private IReadOnlyList<float> SlotCenters()
     {
         var centers = new List<float>(_model.Drawn);
         for (int i = 0; i < _model.Drawn; i++)
@@ -328,7 +327,35 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
         StopDrag();
     }
 
-    protected override void OnDisposing() => StopDrag();
+    protected override void OnDisposing()
+    {
+        StopDrag();
+        for (int i = 0; i < _slotTerms.Length; i++) SyncTerm(i, "");
+    }
+
+    // ---- Terms (P7b) ---------------------------------------------------------------------------
+
+    /// <summary>One term binding per slot, following the item drawn in it (rows are reused as items move).</summary>
+    private UiTermBinding?[] _slotTerms = Array.Empty<UiTermBinding?>();
+
+    /// <summary>Mark slot <paramref name="slot"/>'s caption with <paramref name="term"/> (empty: unmark). The row's own hover forwards to it.</summary>
+    private void SyncTerm(int slot, string term)
+    {
+        if (_slotTerms.Length < _rows.Count) Array.Resize(ref _slotTerms, _rows.Count);
+        if (slot < 0 || slot >= _slotTerms.Length) return;
+        var now = _slotTerms[slot];
+        term = (term ?? "").Trim();
+        if (now != null && UiHelpStore.Normalize(now.Term) == UiHelpStore.Normalize(term)) return;
+        _slotTerms[slot] = null;
+        try { now?.Dispose(); }
+        catch { /* */ }
+        if (term.Length == 0 || IsDisposed) return;
+        try { _slotTerms[slot] = UiTerms.MarkCell(_rows[slot], UiWidgetLayout.CellTitle, term, watchHover: false); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: ordered list '" + Key + "' term '" + term + "': " + e.Message); }
+    }
+
+    /// <summary>The term marked on slot <paramref name="slot"/>'s caption, or empty (tests and readback).</summary>
+    internal string TermAt(int slot) => slot >= 0 && slot < _slotTerms.Length ? _slotTerms[slot]?.Term ?? "" : "";
 
     // ---- Drawing -------------------------------------------------------------------------------
 
@@ -348,12 +375,14 @@ internal sealed class UiOrderedListHandle : UiComposedHandle, IUiOrderedList
             {
                 TrySetVisible(drawer, false);
                 TrySetVisible(row, false);
+                SyncTerm(i, "");
                 continue;
             }
 
             var item = display[i];
             int realIndex = _model.Dragging ? -1 : i;
             row.SetCell(UiWidgetLayout.CellTitle, item.Title);
+            SyncTerm(i, item.Term);
             row.SetCell(UiWidgetLayout.CellNote, item.Note, visible: item.Note.Length > 0);
             row.SetCell(UiWidgetLayout.CellBadge, item.Badge, visible: item.Badge.Length > 0);
             if (_options.Reorder)

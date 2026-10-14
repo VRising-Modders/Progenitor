@@ -13,13 +13,20 @@ namespace Progenitor.ControlsSample;
 /// and updates the status line, so a tester (or a bridge readback) can see each one answer. Game-free: the HUD calls go
 /// through <see cref="IWidgetsHud"/>, so the test project builds the page against a fake.
 /// </summary>
-internal sealed class WidgetsDemo
+internal sealed partial class WidgetsDemo
 {
     internal const string PageId = "Widgets";
     internal const string ListKey = "demo-list";
     internal const string PickerKey = "demo-picker";
     internal const string MultiKey = "demo-multi";
     internal const string TabsKey = "demo-tabs";
+
+    /// <summary>The Widgets page's tabs: ordered list and chips; pickers and the code area; the data table; master-detail; HUD and help.</summary>
+    internal const int TabLists = 0;
+    internal const int TabInput = 1;
+    internal const int TabTable = 2;
+    internal const int TabLayout = 3;
+    internal const int TabHud = 4;
 
     private readonly Action<string> _log;
     private readonly IWidgetsHud? _hud;
@@ -53,17 +60,23 @@ internal sealed class WidgetsDemo
         if (panel == null) throw new ArgumentNullException(nameof(panel));
         panel.ContentAlignment = "left";
         panel.Heading("Widgets");
-        panel.Note("Tabs, an ordered list, pickers, a code area and the HUD calls. Every event writes a log line.");
+        panel.Note("Lists and chips, pickers and a code area, a data table, a master-detail screen, and the HUD and help calls. Every event writes a log line.");
         _status = panel.Label("Last event: (none yet)", LabelTone.Muted);
 
-        _tabs = panel.Tabs(TabsKey, new[] { "List", "Pickers", "Code", "HUD" });
+        // Five tabs (the style guide's limit): the P7b widgets share them with the P7 ones.
+        _tabs = panel.Tabs(TabsKey, new[] { "Lists", "Input", "Table", "Layout", "HUD" });
         _tabs.SetTooltip(0, "Reorder by dragging the grip or with the arrows.");
         _tabs.OnChanged(i => Report("tab = " + _tabs.Captions[i]));
 
         BuildList(panel, _tabs);
+        BuildChips(panel, _tabs, TabLists);
         BuildPickers(panel, _tabs);
         BuildCode(panel, _tabs);
+        BuildTable(panel, _tabs, TabTable);
+        BuildMasterDetail(panel, _tabs, TabLayout);
         BuildHud(panel, _tabs);
+        HelpHud = _hud as IHelpDemoHud;
+        BuildHelp(panel, _tabs, TabHud);
     }
 
     // ---- Ordered list --------------------------------------------------------------------------
@@ -78,18 +91,18 @@ internal sealed class WidgetsDemo
 
     private void BuildList(IUiPanel panel, IUiTabs tabs)
     {
-        tabs.Add(0, panel.Note("Drag a row by its grip, or use the arrows. The first target is filled first."));
-        List = tabs.Add(0, panel.OrderedList(ListKey, SampleTargets()));
+        tabs.Add(TabLists, panel.Note("Drag a row by its grip, or use the arrows. The first target is filled first."));
+        List = tabs.Add(TabLists, panel.OrderedList(ListKey, SampleTargets()));
         List.OnReorder(m => Report("list reorder " + m.Id + " " + m.From + "->" + m.To + " = " + string.Join(",", m.Order)));
         List.OnRemove(i => Report("list remove " + i.Id));
         List.OnExpand((i, on) => Report("list expand " + i.Id + " = " + (on ? "open" : "closed")));
-        tabs.SetBadge(0, List.Items.Count);
-        List.OnRemove(_ => tabs.SetBadge(0, List.Items.Count));
-        var reset = tabs.Add(0, panel.Button("Reset list"));
+        tabs.SetBadge(TabLists, List.Items.Count);
+        List.OnRemove(_ => tabs.SetBadge(TabLists, List.Items.Count));
+        var reset = tabs.Add(TabLists, panel.Button("Reset list"));
         reset.OnClick(() =>
         {
             List.SetItems(SampleTargets());
-            tabs.SetBadge(0, List.Items.Count);
+            tabs.SetBadge(TabLists, List.Items.Count);
             Report("list reset");
         });
         reset.Tooltip("Put the four sample targets back.");
@@ -115,15 +128,14 @@ internal sealed class WidgetsDemo
 
     private void BuildPickers(IUiPanel panel, IUiTabs tabs)
     {
-        tabs.Add(1, panel.Note("Type to search. The best match is offered as a link; grayed rows say why when hovered."));
-        Picker = tabs.Add(1, panel.Picker(PickerKey, SampleEntries()));
+        tabs.Add(TabInput, panel.Note("Type to search. The best match is offered as a link; grayed rows say why when hovered."));
+        Picker = tabs.Add(TabInput, panel.Picker(PickerKey, SampleEntries()));
         Picker.OnPicked(p => Report("picker = " + string.Join(",", p.Select(e => e.Id))));
-        tabs.Add(1, panel.Note("Several at once:"));
-        var multi = tabs.Add(1, panel.Picker(MultiKey, SampleEntries(), new UiPickerOptions { Multi = true, Rows = 6 }));
+        tabs.Add(TabInput, panel.Note("Several at once:"));
+        var multi = tabs.Add(TabInput, panel.Picker(MultiKey, SampleEntries(), new UiPickerOptions { Multi = true, Rows = 6 }));
         multi.OnPicked(p =>
         {
             Report("multi = " + string.Join(",", p.Select(e => e.Id)));
-            tabs.SetBadge(1, p.Count);
         });
     }
 
@@ -204,16 +216,16 @@ internal sealed class WidgetsDemo
 
     private void BuildCode(IUiPanel panel, IUiTabs tabs)
     {
-        tabs.Add(2, panel.Note("Line numbers, colors from the mod's own highlighter, and a red marker on each line with an error."));
-        _code = tabs.Add(2, panel.CodeArea("Deposit rules", SampleScript, 10));
+        tabs.Add(TabInput, panel.Note("Line numbers, colors from the mod's own highlighter, and a red marker on each line with an error."));
+        _code = tabs.Add(TabInput, panel.CodeArea("Deposit rules", SampleScript, 10));
         _code.SetHighlighter(Highlight);
         _code.SetErrors(Check(_code.Value));
-        tabs.SetBadge(2, _code.Errors.Count.ToString(CultureInfo.InvariantCulture), LabelTone.Danger);
+        tabs.SetBadge(TabInput, _code.Errors.Count.ToString(CultureInfo.InvariantCulture), LabelTone.Danger);
         _code.OnChanged(text =>
         {
             var errors = Check(text);
             _code.SetErrors(errors);
-            tabs.SetBadge(2, errors.Count > 0 ? errors.Count.ToString(CultureInfo.InvariantCulture) : "", LabelTone.Danger);
+            tabs.SetBadge(TabInput, errors.Count > 0 ? errors.Count.ToString(CultureInfo.InvariantCulture) : "", LabelTone.Danger);
             Report("code = " + _code.LineCount + " lines, " + errors.Count + " errors");
         });
     }
@@ -222,12 +234,12 @@ internal sealed class WidgetsDemo
 
     private void BuildHud(IUiPanel panel, IUiTabs tabs)
     {
-        tabs.Add(3, panel.Note("Notifications use the game's own announcement; pick in world takes your next interact on a chest or station."));
+        tabs.Add(TabHud, panel.Note("Notifications use the game's own announcement; pick in world takes your next interact on a chest or station."));
         panel.BeginInline();
         foreach (var kind in new[] { UiNoticeKind.Info, UiNoticeKind.Success, UiNoticeKind.Warning, UiNoticeKind.Error })
         {
             var k = kind;
-            var b = tabs.Add(3, panel.Button("Notify " + kind.ToString().ToLowerInvariant()));
+            var b = tabs.Add(TabHud, panel.Button("Notify " + kind.ToString().ToLowerInvariant()));
             b.OnClick(() =>
             {
                 _hud?.Notify("Deposit list saved", k + " notification from the Controls sample", k);
@@ -237,7 +249,7 @@ internal sealed class WidgetsDemo
 
         panel.EndInline();
         panel.BeginInline();
-        var pick = tabs.Add(3, panel.Button("Pick in world"));
+        var pick = tabs.Add(TabHud, panel.Button("Pick in world"));
         pick.Tooltip("Interact with a chest or a station; Escape cancels.");
         pick.OnClick(() =>
         {
@@ -249,10 +261,10 @@ internal sealed class WidgetsDemo
                 Report("pick = " + result);
             });
         });
-        var locate = tabs.Add(3, panel.Button("Locate the picked target"));
+        var locate = tabs.Add(TabHud, panel.Button("Locate the picked target"));
         locate.OnClick(() => Report("locate = " + (_hud?.LocatePicked() ?? "no HUD")));
         panel.EndInline();
-        _pickStatus = tabs.Add(3, panel.Label("Nothing picked yet.", LabelTone.Muted));
+        _pickStatus = tabs.Add(TabHud, panel.Label("Nothing picked yet.", LabelTone.Muted));
     }
 }
 

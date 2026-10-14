@@ -306,6 +306,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
 
     public bool PrimaryHeld() => PrimaryPointerHeld();
 
+    public UiClickModifiers ClickModifiers() => HeldClickModifiers();
+
     private static readonly Dictionary<int, Sprite?> ItemIcons = new();
     private static Unity.Entities.World? _itemIconWorld;
 
