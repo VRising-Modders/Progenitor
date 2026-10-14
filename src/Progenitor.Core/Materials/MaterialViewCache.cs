@@ -200,6 +200,9 @@ internal sealed class MaterialViewEntry
     internal long Revision;
     internal bool Governed;
 
+    /// <summary>Not governed because the operation needs a standing plot and the character stood on none (the provider was not asked).</summary>
+    internal bool PlotRefused;
+
     /// <summary>A provider call threw while computing: never reused, recomputed every refresh.</summary>
     internal bool NoReuse;
 

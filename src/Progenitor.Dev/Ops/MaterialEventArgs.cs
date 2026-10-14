@@ -6,9 +6,9 @@ using System.Text.Json;
 namespace Progenitor.Dev.Ops;
 
 /// <summary>
-/// Game-free half of the <c>materials</c> op's <c>send</c> action (server): the three client-to-server
-/// events a player's client sends to repair an item at a station, repair a worn item and upgrade a castle
-/// heart, queued on the server as an event entity with the player's <c>FromCharacter</c> (the pattern
+/// Game-free half of the <c>materials</c> op's <c>send</c> action (server): the four client-to-server
+/// events a player's client sends to repair an item at a station, repair a worn item, upgrade a castle
+/// heart and craft from the Character window's Crafting tab, queued on the server as an event entity with the player's <c>FromCharacter</c> (the pattern
 /// <c>bot_repair</c> and <c>bot_use</c> use). The live send stays in <c>MaterialEventOps</c> so this
 /// file compiles in the test project without interop.
 ///
@@ -20,6 +20,7 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>RepairEquippedItemEvent</c>: <c>EquipmentType</c> (int) @0x0.</item>
 /// <item><c>CastleHeartInteractEvent</c>: <c>NetworkId CastleHeart</c> @0x0,
 /// <c>CastleHeartInteractEventType EventType</c> (byte) @0xC; Upgrade = 0.</item>
+/// <item><c>StartCharacterCraftItemEvent</c>: <c>PrefabGUID RecipeId</c> @0x0 (4 bytes).</item>
 /// </list>
 /// A <c>NetworkId</c> is 12 bytes, copied raw from the entity's own <c>NetworkId</c> component.
 /// </summary>
@@ -41,26 +42,30 @@ internal static class MaterialEventArgs
     /// <summary><c>CastleHeartInteractEventType.Upgrade</c>.</summary>
     internal const byte HeartUpgrade = 0;
 
-    /// <summary>The three events.</summary>
+    internal const int RecipeOffset = 0x0;
+    internal const int CharacterCraftBytes = 4;
+
+    /// <summary>The four events.</summary>
     internal enum Kind
     {
         RepairItem,
         RepairEquipped,
         HeartUpgrade,
+        CharacterCraft,
     }
 
     /// <summary>One parsed request. Entities are "index:version" of server entities, or "self" / "target".</summary>
-    internal sealed record Request(Kind Kind, string? Station, string Inventory, int Slot, int EquipmentType, string Heart);
+    internal sealed record Request(Kind Kind, string? Station, string Inventory, int Slot, int EquipmentType, string Heart, int Recipe = 0);
 
     /// <summary>The <c>event</c> names the op accepts.</summary>
-    internal const string Kinds = "repair_item, repair_equipped, heart_upgrade";
+    internal const string Kinds = "repair_item, repair_equipped, heart_upgrade, character_craft";
 
     /// <summary>
     /// Parse <c>{"action":"send","event":…}</c>. <c>repair_item</c>: <c>station</c> (required),
     /// <c>inventory</c> (default <c>self</c>: the character's own bag), <c>slot</c> (required, main
     /// inventory index). <c>repair_equipped</c>: <c>equipment</c> (name or <c>EquipmentType</c> int).
     /// <c>heart_upgrade</c>: <c>heart</c> (default <c>target</c>: the heart whose window the character has
-    /// open). Every kind also takes <c>user</c> or <c>platformId</c> (resolved by the op).
+    /// open). <c>character_craft</c>: <c>recipe</c> (required, the recipe's PrefabGUID hash, nonzero). Every kind also takes <c>user</c> or <c>platformId</c> (resolved by the op).
     /// </summary>
     internal static Request Parse(JsonElement args)
     {
@@ -87,6 +92,12 @@ internal static class MaterialEventArgs
             }
             case "heart_upgrade":
                 return new Request(Kind.HeartUpgrade, null, "self", -1, -1, Entity(Str(args, "heart") ?? "target", "heart", allowTarget: true));
+            case "character_craft":
+            {
+                int recipe = Int(args, "recipe") ?? throw new ArgumentException("args.recipe (the recipe's PrefabGUID hash) is required");
+                if (recipe == 0) throw new ArgumentException("args.recipe must be a nonzero PrefabGUID hash");
+                return new Request(Kind.CharacterCraft, null, "self", -1, -1, "", recipe);
+            }
             default:
                 throw new ArgumentException("unknown event '" + kind + "' (" + Kinds + ")");
         }
@@ -131,6 +142,13 @@ internal static class MaterialEventArgs
         Require(raw, HeartEventBytes, heartNet, heartNet);
         heartNet.CopyTo(raw.Slice(HeartOffset, NetworkIdSize));
         raw[HeartEventTypeOffset] = HeartUpgrade;
+    }
+
+    /// <summary>The <c>StartCharacterCraftItemEvent</c> payload: the recipe's PrefabGUID.</summary>
+    internal static void WriteCharacterCraft(Span<byte> raw, int recipe)
+    {
+        if (raw.Length < CharacterCraftBytes) throw new ArgumentException("payload buffer too small");
+        BinaryPrimitives.WriteInt32LittleEndian(raw.Slice(RecipeOffset), recipe);
     }
 
     private static void Require(Span<byte> raw, int bytes, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)

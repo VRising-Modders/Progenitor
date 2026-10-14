@@ -64,7 +64,8 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     /// The structure an operation runs at: the workstation for Craft and Repair (the character's
     /// interaction target when it is a castle workstation), the castle heart for Upgrade (the heart the
     /// game passed to this call, else the heart whose window the character has open, else the heart of
-    /// the plot it stands on), nothing for Build.
+    /// the plot it stands on), nothing for Build and CharacterCraft (the Character window's Crafting tab
+    /// has no workstation).
     /// </summary>
     private Entity StationFor(EntityManager em, Entity character, MaterialOperation operation, int territory)
     {
@@ -107,11 +108,11 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         into.Add(InventoryRef.For(ch, 0));
         var station = StationOf(em, ch);
         if (station != Entity.Null && !station.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(station, 0));
-        if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade)
+        if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade or MaterialOperation.CharacterCraft)
         {
-            // Repair and Upgrade run with any window open (a chest, the castle heart): the game's own
-            // pass without shared storage already counts and pays from an interaction inventory that is
-            // not shared storage, so the pool leaves it out, whatever kind it is.
+            // Repair, Upgrade and character crafting run with any window open (a chest, the castle heart):
+            // the game's own pass without shared storage already counts and pays from an interaction
+            // inventory that is not shared storage, so the pool leaves it out, whatever kind it is.
             var target = InteractionTarget(em, ch);
             if (target != Entity.Null && !target.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(target, 0));
         }
@@ -345,11 +346,33 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
             for (int i = 0; i < _castles.Count; i++)
                 if (_castles[i].Heart.Equals(key)) return _castles[i].Territory.Index;
         }
-        if (!character.TryRead(em, out Translation t)) return -1;
-        CastleVec3 pos = t.Value;
-        for (int i = 0; i < _castles.Count; i++)
-            if (_castles[i].IsInside(pos)) return _castles[i].Territory.Index;
-        return -1;
+        // During a view refresh, one position test per character: the refresh builds a context for every
+        // operation (Build, Craft, Upgrade, CharacterCraft) of the same player, twice when it checks reuse.
+        // A seam call always reads the position fresh.
+        if (!InRefresh) _standing.Clear();
+        else if (_standing.TryGetValue(character, out int known)) return known;
+        int found = -1;
+        if (character.TryRead(em, out Translation t))
+        {
+            CastleVec3 pos = t.Value;
+            for (int i = 0; i < _castles.Count; i++)
+                if (_castles[i].IsInside(pos)) { found = _castles[i].Territory.Index; break; }
+        }
+        if (InRefresh) _standing[character] = found;
+        return found;
+    }
+
+    private readonly Dictionary<Entity, int> _standing = new();
+    private bool _inRefresh;
+
+    /// <summary>
+    /// Set by the per-player view refresh for its duration (main thread, one frame): standing plots are
+    /// then resolved once per character. Cleared (and the memo dropped) when the refresh ends.
+    /// </summary>
+    internal bool InRefresh
+    {
+        get => _inRefresh;
+        set { _inRefresh = value; _standing.Clear(); }
     }
 
     private void RefreshCastles()

@@ -32,6 +32,7 @@ public class MaterialViewSyncTests
             [MaterialOperation.Build] = null,
             [MaterialOperation.Craft] = null,
             [MaterialOperation.Upgrade] = null,
+            [MaterialOperation.CharacterCraft] = null,
         };
         /// <summary>What the transport does with the next packets: true delivers, false fails the send, null accepts it and loses it.</summary>
         public readonly Queue<bool?> Link = new();
@@ -425,5 +426,88 @@ public class MaterialViewSyncTests
         var extra = new List<MaterialLine>();
         MaterialClientPolicy.ComposeExtra(full, bag, governed, extra);
         Assert.Equal(new[] { new MaterialLine(Cloth, 10), new MaterialLine(Wood, 7), new MaterialLine(999, 4) }, extra);
+    }
+
+    // ---- CharacterCraft: the Character window's Crafting tab ----------------------------------------
+
+    private static MaterialOverlayStore StoreWithCharacterCraft(ulong heart = Heart)
+    {
+        var store = StoreWithUpgrade();
+        store.Apply(new MaterialView(MaterialOperation.CharacterCraft, 3, 1, 4, 5, false, false, new[] { new MaterialLine(Wood, 25) }, heart));
+        return store;
+    }
+
+    [Fact]
+    public void Character_craft_totals_apply_only_in_the_character_crafting_menu_at_the_standing_plots_heart()
+    {
+        var store = StoreWithCharacterCraft();
+        var menu = MaterialClientPolicy.Call(true, Heart, false, 0, 0, characterCraft: true);
+        Assert.True(menu.CharacterCraftContext);
+        Assert.True(MaterialClientPolicy.TrySelect(store, menu, out var op, out var totals));
+        Assert.Equal(MaterialOperation.CharacterCraft, op);
+        Assert.Equal(25, totals[Wood]);
+        // Another plot's heart, off a plot (the game resolved no heart), another entity: the game's own counts.
+        Assert.False(MaterialClientPolicy.TrySelect(store, menu with { HeartNet = OtherHeart }, out _, out _));
+        Assert.False(MaterialClientPolicy.TrySelect(store, menu with { HeartNet = 0 }, out _, out _));
+        Assert.False(MaterialClientPolicy.TrySelect(store, menu with { LocalCharacter = false }, out _, out _));
+        // Without a CharacterCraft view the menu keeps the game's own counts, even with other views held.
+        Assert.False(MaterialClientPolicy.TrySelect(StoreWithUpgrade(), menu, out _, out _));
+        // A CharacterCraft view computed off a plot (no heart) never applies.
+        Assert.False(MaterialClientPolicy.TrySelect(StoreWithCharacterCraft(0), menu with { HeartNet = 0 }, out _, out _));
+    }
+
+    [Fact]
+    public void Inside_the_character_crafting_menu_no_other_view_applies_and_outside_it_the_character_craft_view_never_does()
+    {
+        var store = StoreWithCharacterCraft();
+        // The menu's count is a CharacterCraft count even when the build menu is shown or a workstation or
+        // a heart window is the interaction target.
+        var menu = MaterialClientPolicy.Call(true, Heart, true, Bench, Heart, characterCraft: true);
+        Assert.True(MaterialClientPolicy.TrySelect(store, menu, out var op, out var totals));
+        Assert.Equal(MaterialOperation.CharacterCraft, op);
+        Assert.False(totals.ContainsKey(Cloth));
+        Assert.False(totals.ContainsKey(Iron));
+        // Outside the menu every count keeps its own operation; none of them is CharacterCraft.
+        foreach (var call in new[]
+        {
+            MaterialClientPolicy.Call(true, Heart, true, 0),
+            MaterialClientPolicy.Call(true, Heart, false, Bench),
+            MaterialClientPolicy.Call(true, Heart, false, 0, Heart),
+            MaterialClientPolicy.Call(true, Heart, false, 0),
+        })
+        {
+            if (MaterialClientPolicy.TrySelect(store, call, out op, out _)) Assert.NotEqual(MaterialOperation.CharacterCraft, op);
+        }
+        Assert.False(MaterialClientPolicy.TrySelect(store, MaterialClientPolicy.Call(true, Heart, false, 0), out _, out _));
+    }
+
+    [Fact]
+    public void Character_craft_views_are_sent_without_a_station_and_round_trip()
+    {
+        Assert.Contains(MaterialOperation.CharacterCraft, MaterialClientPolicy.ViewOperations);
+        Assert.False(MaterialClientPolicy.NeedsStation(MaterialOperation.CharacterCraft));
+        var rig = new Rig();
+        rig.Content[MaterialOperation.CharacterCraft] = new MaterialViewContent(5, 1, Heart, 0, new[] { new MaterialLine(Wood, 25) });
+        Assert.Equal(1, rig.Frame());
+        Assert.Equal(25, rig.ClientShows(MaterialOperation.CharacterCraft, Wood));
+        Assert.True(rig.Client.TryGet(MaterialOperation.CharacterCraft, out MaterialView held, out _));
+        Assert.Equal(Heart, held.HeartNet);
+        Assert.Equal(0UL, held.StationNet);
+        // The character walks off the plot: the server stops governing there and clears the client's view.
+        rig.Content[MaterialOperation.CharacterCraft] = null;
+        Assert.Equal(1, rig.Frame(MaterialRefreshPolicy.IntervalMs));
+        Assert.Equal(-1, rig.ClientShows(MaterialOperation.CharacterCraft, Wood));
+    }
+
+    [Fact]
+    public void The_wire_accepts_character_craft_and_refuses_unknown_operations()
+    {
+        var view = new MaterialView(MaterialOperation.CharacterCraft, 3, 1, 4, 5, false, false, new[] { new MaterialLine(Wood, 25) }, Heart);
+        var bytes = MaterialViewWire.Encode(view);
+        Assert.True(MaterialViewWire.TryDecode(bytes, out var decoded, out _));
+        Assert.Equal(MaterialOperation.CharacterCraft, decoded!.Operation);
+        bytes[1] = (byte)MaterialOperation.CharacterCraft + 1;
+        Assert.False(MaterialViewWire.TryDecode(bytes, out _, out string reason));
+        Assert.StartsWith("operation", reason);
     }
 }
