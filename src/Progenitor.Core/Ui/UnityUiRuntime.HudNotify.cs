@@ -50,6 +50,13 @@ internal sealed partial class UnityUiRuntime
     private static Texture2D? _bandTexture;
     private static UiNoticeHandle? _bandNotice;
 
+    /// <summary>P7b: the notice the game's banner was just asked to play, and when (the banner check).</summary>
+    private static UiNoticeHandle? _bannerCheckNotice;
+    private static double _bannerCheckAskedAt;
+
+    /// <summary>P7b: the world epoch in which the game's banner did not stay on screen (notices use the band there).</summary>
+    private static int _bannerLostEpoch = int.MinValue;
+
     /// <summary>The process-wide queue (the bridge and tests read it).</summary>
     internal static UiNoticeQueue HudNotices => NoticeQueue;
 
@@ -99,6 +106,7 @@ internal sealed partial class UnityUiRuntime
             bool menuHold = UiNoticeRules.MenuHolds(GameMenuOpenNow(), WorkspaceOpenNow(), Worlds.Client != null);
             bool wait = menuHold || NoticeHostWait(now);
             NoticeQueue.Next(now, wait, PresentNotice, Progenitor.WorldState.WorldEpoch.Current, menuHold);
+            CheckBanner(now);
             UpdateBand(now);
             if (!NoticeQueue.HasWork && _bandNotice == null) StopNoticeTick();
         }
@@ -139,11 +147,19 @@ internal sealed partial class UnityUiRuntime
     {
         var parent = AnnouncementParent(HudNow(), out string why);
         if (parent == null && _hudHidden) return 0; // the player hid the HUD: never draw over that choice
+        if (parent != null && _bannerLostEpoch == Progenitor.WorldState.WorldEpoch.Current)
+        {
+            why = "the game's banner did not stay on screen in this world";
+            parent = null;
+        }
+
         if (parent != null)
         {
             double length = ShowOnBanner(parent, notice);
             if (length > 0)
             {
+                _bannerCheckNotice = notice;
+                _bannerCheckAskedAt = HudNow();
                 LogNoticePath("banner", "Ui: ctx.Hud.Notify shows notices on the game's announcement banner "
                     + "(AnnouncementHUDParent.ShowBasicAnnouncement); its animation is " + length.ToString("0.0") + " s.");
                 // On the banner the caller's seconds can only lengthen the slot: the animation is the game's.
@@ -156,6 +172,40 @@ internal sealed partial class UnityUiRuntime
         if (!ShowOnBand(notice)) return 0;
         LogNoticePath("band", "Ui: ctx.Hud.Notify draws notices on the framework band (" + why + ").");
         return UiNoticeRules.Seconds(notice.RequestedSeconds, UiNoticeRules.DefaultSeconds);
+    }
+
+    /// <summary>
+    /// P7b: a few frames after the banner was asked to play a notice, check that its object is still on screen. The
+    /// game's HUD system can switch it off again (it does on frames without a day or night announcement); then the notice
+    /// moves to the framework band for the rest of its slot and later notices in this world use the band directly.
+    /// Reads only: the banner's own object state, never a write to the game's objects.
+    /// </summary>
+    private static void CheckBanner(double now)
+    {
+        var notice = _bannerCheckNotice;
+        if (notice == null) return;
+        if (!ReferenceEquals(NoticeQueue.Showing, notice) || notice.State != UiNoticeState.Showing)
+        {
+            _bannerCheckNotice = null;
+            return;
+        }
+
+        bool active = false;
+        try
+        {
+            var motion = _announceParent == null ? null : _announceParent.AnnouncementAchievement;
+            active = motion != null && motion.gameObject.activeInHierarchy;
+        }
+        catch { active = false; }
+
+        var verdict = UiNoticeRules.CheckBanner(now, _bannerCheckAskedAt, active);
+        if (verdict == UiNoticeRules.BannerVerdict.Pending) return;
+        _bannerCheckNotice = null;
+        if (verdict == UiNoticeRules.BannerVerdict.Held) return;
+        _bannerLostEpoch = Progenitor.WorldState.WorldEpoch.Current;
+        if (ShowOnBand(notice))
+            LogNoticePath("band", "Ui: ctx.Hud.Notify draws notices on the framework band (the game's banner was switched off "
+                + UiNoticeRules.BannerCheckSeconds.ToString("0.0") + " s after it was asked to play; this world uses the band).");
     }
 
     private static void LogNoticePath(string path, string line)
@@ -503,6 +553,8 @@ internal sealed partial class UnityUiRuntime
         _hudCanvas = null;
         _hudHidden = false;
         _noticeHooked = false;
+        _bannerCheckNotice = null;
+        _bannerLostEpoch = int.MinValue;
         NoticeQueue.Clear();
         DestroyBand();
         FreeHudAsset(_bandSprite);

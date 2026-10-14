@@ -751,6 +751,15 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
     public readonly List<FakeMarker> Markers = new();
     public readonly List<Action> Ticks = new();
     public readonly List<(IRuntimePanel Card, ScreenRect Anchor, IReadOnlyList<ScreenRect> Controls)> Placed = new();
+
+    /// <summary>The text rects the last placement got.</summary>
+    public IReadOnlyList<ScreenRect>? LastTexts;
+
+    /// <summary>A label's text rect, as the runtime would read it (tests set it per caption).</summary>
+    public readonly Dictionary<string, ScreenRect> TextRects = new();
+
+    public ScreenRect TextRect(IRuntimeWidget widget) =>
+        TextRects.TryGetValue(widget.Text, out var r) ? r : ScreenRect.Unknown;
     private readonly Dictionary<IRuntimeWidget, Action<bool>> _hovers = new();
     public (string Title, string Body)? Tooltip;
 
@@ -853,8 +862,9 @@ internal sealed class HelpRuntimeFake : CellRowTests.PlainRuntime, IUiRuntime, I
         return m;
     }
 
-    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls)
+    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null)
     {
+        LastTexts = texts;
         Placed.Add((card, anchor, controls));
         return true;
     }

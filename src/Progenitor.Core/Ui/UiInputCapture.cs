@@ -237,6 +237,14 @@ internal static class UiInputCapture
     public static string RemovedLog => "Ui: input context removed order=" + Order;
 
     /// <summary>
+    /// P7b: the line after a register: the scope the context applies now, beside the recipe line, which says what it
+    /// can apply. <c>CloseKeyOnly</c> takes Back / Menu_Close and nothing else.
+    /// </summary>
+    public static string ScopeLog(UiMaskScope scope) =>
+        "Ui: input context order=" + Order + " applies scope=" + scope
+        + (scope == UiMaskScope.CloseKeyOnly ? " (the close key only; gameplay input is the game's)" : "");
+
+    /// <summary>
     /// How many frames a refused <c>Register</c> is retried before the module stops trying. A
     /// server or main-menu process must not retry forever; a client that is mid-loading-screen
     /// gets a handful of frames to bring the world up.
@@ -1589,7 +1597,10 @@ internal static class UiInputCapture
                 _chainExhaustions = 0;
                 _chainGaveUp = false;
                 DisarmPumpLocked();
+                // P7b: the recipe line says what the context CAN mask; the scope says what it masks now (a pick band's
+                // close-key hold registers with CloseKeyOnly, and the recipe alone was read as a full block).
                 Plugin.Logger?.LogInfo(plan.Wanted ? RegisteredLog(outcome.MaskLive) : RemovedLog);
+                if (plan.Wanted) Plugin.Logger?.LogInfo(ScopeLog(EffectiveScopeLocked()));
                 return false;
 
             default:

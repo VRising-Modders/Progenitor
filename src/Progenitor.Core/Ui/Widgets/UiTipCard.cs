@@ -120,19 +120,34 @@ internal sealed class UiTipCardPresenter : IUiTipPresenter
 /// </summary>
 internal static class UiTipObstacles
 {
-    internal static IReadOnlyList<ScreenRect> Of(IUiPanel? anchor, ScreenRect anchorRect)
+    internal static IReadOnlyList<ScreenRect> Of(IUiPanel? anchor, ScreenRect anchorRect) => Of(anchor, anchorRect, out _);
+
+    /// <summary>
+    /// As above; <paramref name="texts"/> gets the extent of every label's, heading's, note's and read-out's own text
+    /// (<see cref="IUiHelpRuntime.TextRect"/>), which the card keeps off where it can.
+    /// </summary>
+    internal static IReadOnlyList<ScreenRect> Of(IUiPanel? anchor, ScreenRect anchorRect, out IReadOnlyList<ScreenRect> texts)
     {
         var list = new List<ScreenRect>();
+        var words = new List<ScreenRect>();
+        texts = words;
         if (anchor is not UiPanelHandle host || host.IsDisposed || !anchorRect.IsKnown) return list;
         IUiRuntime runtime;
         try { runtime = Ui.CurrentRuntime(); }
         catch { return list; }
+        var help = UiHelpRuntime.Current;
         foreach (var child in host.ChildrenSnapshot())
         {
             if (child == null || child.IsDisposed || !child.Visible) continue;
             switch (child)
             {
                 case UiLabelHandle or UiToneLabelHandle or UiInfoHandle:
+                    if (help != null && child.Runtime is { Alive: true } textWidget)
+                    {
+                        try { Add(words, help.TextRect(textWidget), anchorRect); }
+                        catch { /* no text rect: the card may cover it */ }
+                    }
+
                     continue;
                 case UiCellRowHandle row:
                     AddRow(list, row, anchorRect);
@@ -240,12 +255,12 @@ internal sealed class UiTipCardView : IUiTipCardView
 
     public bool HiddenByOther => !_closed && !_panel.IsDisposed && _panel.State != UiHandleState.Shown;
 
-    public void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls)
+    public void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null)
     {
         if (!Shown || _panel is not UiHandle { Runtime: IRuntimePanel runtime }) return;
         var help = UiHelpRuntime.Current;
         if (help == null) return;
-        help.PlaceTipCard(runtime, anchor, controls);
+        help.PlaceTipCard(runtime, anchor, controls, texts);
         help.TintTipCard(Title, Buttons, UiTipCopy.GotItKey);
     }
 

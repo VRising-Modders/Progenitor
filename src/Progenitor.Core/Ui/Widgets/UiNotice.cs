@@ -93,6 +93,32 @@ internal static class UiNoticeRules
     internal const double MenuSettleSeconds = 0.75;
 
     /// <summary>
+    /// P7b: how long after the game's banner was asked to play a notice the framework checks that it is still on screen.
+    /// The game's own HUD system switches the banner object off on frames where it shows no day or night announcement
+    /// (seen in its update, and live 2026-10-14: the text set, the object inactive 1.5 s later); a notice whose banner
+    /// was switched off is moved to the framework band for the rest of its slot, and later notices in that world go to
+    /// the band directly.
+    /// </summary>
+    internal const double BannerCheckSeconds = 0.3;
+
+    /// <summary>The banner check's answer.</summary>
+    internal enum BannerVerdict
+    {
+        /// <summary>Too early to tell.</summary>
+        Pending,
+
+        /// <summary>The banner is on screen: keep it.</summary>
+        Held,
+
+        /// <summary>The banner object was switched off: draw the notice on the band.</summary>
+        Lost,
+    }
+
+    /// <summary>The banner check at <paramref name="now"/> for a notice asked of the banner at <paramref name="askedAt"/>.</summary>
+    internal static BannerVerdict CheckBanner(double now, double askedAt, bool bannerActive) =>
+        now - askedAt < BannerCheckSeconds ? BannerVerdict.Pending : bannerActive ? BannerVerdict.Held : BannerVerdict.Lost;
+
+    /// <summary>
     /// P7b: whether the banner is out of sight behind a menu: the game's full-screen menu is open, or (in a world, where
     /// notices go on the game's HUD banner) the Mods workspace is open over the HUD. At the title screen the workspace
     /// does not hold: notices go on the framework band, drawn above it.

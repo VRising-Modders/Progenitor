@@ -28,7 +28,13 @@ internal interface IUiHelpRuntime
     /// clamped onto the canvas. Asked after the show and once a frame while the card is up (a re-flow of the other
     /// panels may move it). False when the card cannot be placed (it keeps the framework's placement).
     /// </summary>
-    bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls);
+    bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null);
+
+    /// <summary>
+    /// The screen rect of the text a widget draws (its caption's own extent, not its row's), or unknown. The tip card uses
+    /// it to keep off a page's words where it can.
+    /// </summary>
+    ScreenRect TextRect(IRuntimeWidget widget) => ScreenRect.Unknown;
 
     /// <summary>
     /// Draw the tip card's title (<paramref name="title"/>, the dialog title row) and its main answer's caption (the cell
@@ -208,7 +214,7 @@ internal static class UiTipLayout
     /// <summary>The card's bottom-left corner. <paramref name="hasAnchor"/> false ignores the anchor rect.</summary>
     internal static (float X, float Y, Side Side) Place(
         bool hasAnchor, float minX, float minY, float maxX, float maxY, float width, float height, float canvasWidth, float canvasHeight,
-        IReadOnlyList<ScreenRect>? controls = null)
+        IReadOnlyList<ScreenRect>? controls = null, IReadOnlyList<ScreenRect>? texts = null)
     {
         width = Finite(width);
         height = Finite(height);
@@ -226,14 +232,19 @@ internal static class UiTipLayout
             if (above <= yMax) return (Clamp(minX, Margin, xMax), above, Side.Above);
 
             // No room around the panel (the Mods workspace at 16:9 fills the screen): inside it, against its right edge,
-            // at the highest spot below its title band that covers none of its controls (rows that take a click, buttons,
-            // fields, toggles, chips), searched downward to its footer; where every spot covers one, the spot that covers
-            // the least. Never over another panel beside it.
+            // searched downward from below its title band to its footer: first the highest spot that covers neither a
+            // control nor a line of its text; else the highest that covers no control (rows that take a click, buttons,
+            // fields, toggles, chips); where every spot covers one, the spot that covers the least. Never over another
+            // panel beside it.
             float insideX = maxX - InsideInset - width;
             float top = maxY - InsideTop - height, bottom = minY + InsideBottom;
             if (insideX >= minX + InsideInset && top >= bottom)
             {
                 float x = Clamp(insideX, Margin, xMax);
+                if (texts != null && texts.Count > 0)
+                    for (float y = top; y >= bottom - 0.01f; y -= InsideStep)
+                        if (Covered(x, y, width, height, controls) <= 0f && Covered(x, y, width, height, texts) <= 0f)
+                            return (x, Clamp(y, Margin, yMax), Side.Inside);
                 float bestY = bottom, bestCover = float.MaxValue;
                 for (float y = top; y >= bottom - 0.01f; y -= InsideStep)
                 {

@@ -47,6 +47,39 @@ internal interface IWidgetCellField
 /// is never laid out again for them. See <see cref="UiDataTableModel"/> for the rules and <see cref="UiDataTableLayout"/>
 /// for the geometry.
 /// </summary>
+/// <summary>What a pass of the value box's first-focus select-all does (<see cref="UiFocusSelectAll"/>).</summary>
+internal enum UiSelectAllStep
+{
+    /// <summary>Nothing pending, or the pending one ended (another field has the keyboard, or a key changed the selection).</summary>
+    Stop = 0,
+
+    /// <summary>Select the whole value (the first pass after the box took the keyboard).</summary>
+    Select = 1,
+
+    /// <summary>Push the whole-value selection to the field again (its own click and activation may have moved it).</summary>
+    Hold = 2,
+}
+
+/// <summary>
+/// P7b: the first-focus select-all of a data table value box, game-free. The box queues it when it takes the keyboard;
+/// each typed-key pass (one a frame, before any key) asks <see cref="Step"/>: the first selects the whole value, the next
+/// <see cref="HoldPasses"/> re-assert it while it is still whole (the field's own pointer handling and activation run
+/// after the click and may move its native caret), and it ends as soon as another field has the keyboard or a key changed
+/// the selection, so typing replaces the value and an arrow or a second click keeps working.
+/// </summary>
+internal static class UiFocusSelectAll
+{
+    internal const int HoldPasses = 3;
+
+    internal static UiSelectAllStep Step(int passesDone, bool sameFieldFocused, bool wholeValueSelected)
+    {
+        if (!sameFieldFocused) return UiSelectAllStep.Stop;
+        if (passesDone == 0) return UiSelectAllStep.Select;
+        if (!wholeValueSelected || passesDone > HoldPasses) return UiSelectAllStep.Stop;
+        return UiSelectAllStep.Hold;
+    }
+}
+
 internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 {
     private readonly struct CellState

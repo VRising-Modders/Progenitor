@@ -128,6 +128,9 @@ internal sealed class UiTipRequest : IUiTip
 
     internal ScreenRect? ControlsFor { get; set; }
 
+    /// <summary>The anchor's lines of text (screen rects), read with <see cref="Controls"/>.</summary>
+    internal IReadOnlyList<ScreenRect> Texts { get; set; } = Array.Empty<ScreenRect>();
+
     /// <summary>The stored seen key.</summary>
     internal string Key => UiHelpStore.Key(PluginId, Id);
 
@@ -147,7 +150,7 @@ internal interface IUiTipCardView : IDisposable
     bool HiddenByOther { get; }
 
     /// <summary>Place the card beside <paramref name="anchor"/> (screen pixels; unknown for the screen corner).</summary>
-    void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls);
+    void Place(ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null);
 
     /// <summary>The card's panel (readback), or null.</summary>
     IUiPanel? Panel { get; }
@@ -505,7 +508,7 @@ internal static class UiTips
             }
             else
             {
-                try { view!.Place(AnchorRect(s.Anchor), ControlsOf(s)); }
+                try { view!.Place(AnchorRect(s.Anchor), ControlsOf(s), s.Texts); }
                 catch { /* the framework's placement stays */ }
                 return;
             }
@@ -559,7 +562,7 @@ internal static class UiTips
             tip.View = view;
             tip.State = UiTipState.Showing;
             _showing = tip;
-            try { view.Place(AnchorRect(tip.Anchor), ControlsOf(tip)); }
+            try { view.Place(AnchorRect(tip.Anchor), ControlsOf(tip), tip.Texts); }
             catch { /* */ }
             Plugin.Logger?.LogInfo("Ui: tip '" + tip.Id + "' of " + tip.PluginId + " shown.");
             break;
@@ -623,8 +626,12 @@ internal static class UiTips
         var rect = AnchorRect(tip.Anchor);
         if (tip.ControlsFor is { } at && at.Equals(rect)) return tip.Controls;
         tip.ControlsFor = rect;
-        try { tip.Controls = UiTipObstacles.Of(tip.Anchor, rect); }
-        catch { tip.Controls = Array.Empty<ScreenRect>(); }
+        try { tip.Controls = UiTipObstacles.Of(tip.Anchor, rect, out var texts); tip.Texts = texts; }
+        catch
+        {
+            tip.Controls = Array.Empty<ScreenRect>();
+            tip.Texts = Array.Empty<ScreenRect>();
+        }
         return tip.Controls;
     }
 

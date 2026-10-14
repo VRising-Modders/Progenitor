@@ -515,6 +515,89 @@ public sealed class UiTipsTests : IDisposable
         return list;
     }
 
+    /// <summary>The Help tab's lines of text in the fourth live capture (1920x1080, y down): their own extents.</summary>
+    private static List<ScreenRect> HudTabTexts()
+    {
+        var rects = new (float L, float T, float R, float B)[]
+        {
+            (524, 276, 624, 300),    // Widgets (heading)
+            (524, 320, 1555, 340),   // the page's description, long
+            (524, 368, 800, 392),    // Last event
+            (524, 464, 1316, 484),   // Notifications use the game's own announcement...
+            (524, 608, 704, 632),    // Nothing picked yet
+            (524, 656, 1405, 676),   // Hover a word with a small circle-i ...
+            (524, 722, 574, 748),    // Belt (heading)
+            (524, 768, 884, 792),    // Ore in: three chests beside the furnaces.
+            (524, 864, 720, 888),    // Reserve 20 Iron Ingot
+            (524, 912, 666, 936),    // Cap 500 Planks
+        };
+        var list = new List<ScreenRect>();
+        foreach (var r in rects) list.Add(ScreenRect.FromCorners(r.L, 1080f - r.B, r.R, 1080f - r.T));
+        return list;
+    }
+
+    /// <summary>The HUD tab's controls in the same capture (y down).</summary>
+    private static List<ScreenRect> HudTabControls()
+    {
+        var rects = new (float L, float T, float R, float B)[]
+        {
+            (527, 212, 867, 244),    // Back to Progenitor Controls Sample
+            (524, 420, 1017, 452),   // tab row chips
+            (524, 516, 1187, 548),   // Notify buttons
+            (524, 564, 950, 596),    // Pick in world, Locate
+            (524, 820, 684, 852),    // Category: Ore
+            (524, 964, 758, 996),    // Belts / Categories tabs
+        };
+        var list = new List<ScreenRect>();
+        foreach (var r in rects) list.Add(ScreenRect.FromCorners(r.L, 1080f - r.B, r.R, 1080f - r.T));
+        return list;
+    }
+
+    [Theory]
+    [InlineData("1920x1080")]
+    [InlineData("2560x1440")]
+    [InlineData("3840x2160")]
+    public void Inside_the_page_the_card_prefers_a_spot_over_neither_controls_nor_text(string screen)
+    {
+        // The 16:9 canvas is the same design space at every one of these resolutions.
+        const float cardW = 640f, cardH = 236f;
+        var controls = HudTabControls();
+        var texts = HudTabTexts();
+        var p = UiTipLayout.Place(true, 515, 35, 1795, 952, cardW, cardH, 1920, 1080, controls, texts);
+        Assert.Equal(UiTipLayout.Side.Inside, p.Side);
+        Assert.Equal(0f, UiTipLayout.Covered(p.X, p.Y, cardW, cardH, controls));
+        Assert.Equal(0f, UiTipLayout.Covered(p.X, p.Y, cardW, cardH, texts)); // the description's end stays readable
+        // Without the text rule the card took the first spot free of controls, over the description (the live capture).
+        var old = UiTipLayout.Place(true, 515, 35, 1795, 952, cardW, cardH, 1920, 1080, controls);
+        Assert.True(UiTipLayout.Covered(old.X, old.Y, cardW, cardH, texts) > 0f, screen);
+    }
+
+    [Fact]
+    public void With_no_spot_free_of_text_the_card_still_keeps_off_the_controls()
+    {
+        const float cardW = 640f, cardH = 236f;
+        var controls = HudTabControls();
+        // Text everywhere on the right: no spot is free of words.
+        var texts = new List<ScreenRect>();
+        for (float y = 40; y < 950; y += 30) texts.Add(ScreenRect.FromCorners(1100, y, 1780, y + 20));
+        var p = UiTipLayout.Place(true, 515, 35, 1795, 952, cardW, cardH, 1920, 1080, controls, texts);
+        Assert.Equal(UiTipLayout.Side.Inside, p.Side);
+        Assert.Equal(0f, UiTipLayout.Covered(p.X, p.Y, cardW, cardH, controls));
+    }
+
+    [Fact]
+    public void The_card_reads_its_panels_text_rects_with_its_controls()
+    {
+        var anchor = ShownPanel("Help page");
+        anchor.Label("A long description of the page.");
+        anchor.Button("Notify");
+        _runtime.TextRects["A long description of the page."] = ScreenRect.FromCorners(620, 410, 1100, 430);
+        Tip("texts", anchor: anchor);
+        Assert.NotNull(_runtime.LastTexts);
+        Assert.Contains(ScreenRect.FromCorners(620, 410, 1100, 430), _runtime.LastTexts!);
+        Assert.DoesNotContain(_runtime.Placed.Last().Controls, r => r.Equals(ScreenRect.FromCorners(620, 410, 1100, 430)));
+    }
+
     [Fact]
     public void Inside_a_page_with_no_free_spot_the_card_takes_the_spot_that_covers_the_least()
     {

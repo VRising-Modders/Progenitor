@@ -295,7 +295,25 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
         catch { /* the button's light caption stays */ }
     }
 
-    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls)
+    public ScreenRect TextRect(IRuntimeWidget widget)
+    {
+        try
+        {
+            var go = NavObject(widget);
+            if (go == null || !go.activeInHierarchy) return ScreenRect.Unknown;
+            var tmp = go.GetComponentInChildren<TextMeshProUGUI>(false);
+            if (tmp == null || string.IsNullOrEmpty(tmp.text)) return ScreenRect.Unknown;
+            Bounds bounds = tmp.textBounds;
+            if (!(bounds.size.x > 0f) || !(bounds.size.y > 0f)) return ScreenRect.Unknown;
+            var rt = tmp.rectTransform;
+            var min = RectTransformUtility.WorldToScreenPoint(null, rt.TransformPoint(bounds.min));
+            var max = RectTransformUtility.WorldToScreenPoint(null, rt.TransformPoint(bounds.max));
+            return ScreenRect.FromCorners(Math.Min(min.x, max.x), Math.Min(min.y, max.y), Math.Max(min.x, max.x), Math.Max(min.y, max.y));
+        }
+        catch { return ScreenRect.Unknown; }
+    }
+
+    public bool PlaceTipCard(IRuntimePanel card, ScreenRect anchor, IReadOnlyList<ScreenRect> controls, IReadOnlyList<ScreenRect>? texts = null)
     {
         if (card is not UnityPanel host || !host.Alive) return false;
         try
@@ -320,7 +338,12 @@ internal sealed partial class UnityUiRuntime : IUiHelpRuntime
                 foreach (var c in controls)
                     if (c.IsKnown && ToCanvas(parent, c.MinX, c.MinY, out var cmin) && ToCanvas(parent, c.MaxX, c.MaxY, out var cmax))
                         canvasControls.Add(ScreenRect.FromCorners(cmin.x, cmin.y, cmax.x, cmax.y));
-            var place = UiTipLayout.Place(hasAnchor, a.x, a.y, b.x, b.y, size.x, size.y, pr.width, pr.height, canvasControls);
+            var canvasTexts = new List<ScreenRect>(texts?.Count ?? 0);
+            if (texts != null)
+                foreach (var c in texts)
+                    if (c.IsKnown && ToCanvas(parent, c.MinX, c.MinY, out var tmin) && ToCanvas(parent, c.MaxX, c.MaxY, out var tmax))
+                        canvasTexts.Add(ScreenRect.FromCorners(tmin.x, tmin.y, tmax.x, tmax.y));
+            var place = UiTipLayout.Place(hasAnchor, a.x, a.y, b.x, b.y, size.x, size.y, pr.width, pr.height, canvasControls, canvasTexts);
 
             // The card's bottom-left in the parent's bottom-left units -> its pivot -> its anchored position.
             float pivotX = pr.xMin + place.X + size.x * rt.pivot.x;

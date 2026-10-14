@@ -174,6 +174,14 @@ public sealed class UiNoticeTests
     }
 
     [Fact]
+    public void A_banner_switched_off_right_after_it_was_asked_to_play_is_reported_lost()
+    {
+        Assert.Equal(UiNoticeRules.BannerVerdict.Pending, UiNoticeRules.CheckBanner(10.1, 10.0, bannerActive: false));
+        Assert.Equal(UiNoticeRules.BannerVerdict.Lost, UiNoticeRules.CheckBanner(10.0 + UiNoticeRules.BannerCheckSeconds, 10.0, false));
+        Assert.Equal(UiNoticeRules.BannerVerdict.Held, UiNoticeRules.CheckBanner(10.0 + UiNoticeRules.BannerCheckSeconds, 10.0, true));
+    }
+
+    [Fact]
     public void A_notice_held_by_the_menu_still_expires_after_the_hold_limit_and_a_hidden_HUD_after_the_wait()
     {
         var expired = new List<UiNoticeHandle>();

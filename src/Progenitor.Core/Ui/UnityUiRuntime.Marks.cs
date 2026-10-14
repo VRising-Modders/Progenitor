@@ -244,10 +244,25 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
                 if (marker == null) return 0f;
             }
 
-            if (!marker.gameObject.activeSelf) return 0f;
-            return UiTermMarkerArt.SizeFor(tmp.fontSize) + UiTermMarkerArt.Gap;
+            // The room follows whether the marker is WANTED (its term defined and not hidden), not whether it is drawn
+            // now: the help half hides a marker that does not fit, and before this rule a hidden header (a tab not yet
+            // shown) left the marker hidden for want of room that only this margin gives, so it never appeared.
+            return UiDataTableLayout.TermRoomFor(TermMarkerWanted(tmp, marker), tmp.fontSize);
         }
         catch { return 0f; }
+    }
+
+    /// <summary>Whether the term marker <paramref name="marker"/> after <paramref name="tmp"/> is meant to show.</summary>
+    private static bool TermMarkerWanted(TextMeshProUGUI tmp, Transform marker)
+    {
+        for (int i = 0; i < TermMarkers.Count; i++)
+        {
+            var t = TermMarkers[i];
+            if (t.Disposed || !ReferenceEquals(t.Text, tmp)) continue;
+            return t.Shown;
+        }
+
+        return marker.gameObject.activeSelf;
     }
 
     private static void TeardownMarks()

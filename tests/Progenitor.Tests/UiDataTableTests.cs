@@ -1420,6 +1420,48 @@ public sealed class UiDataTableTests : IDisposable
         Assert.All(UiDataTableLayout.RowCells(Columns(), multi: true), c => Assert.NotEqual(CellKind.Mono, c.Kind));
     }
 
+    // ---- Live review round 7 --------------------------------------------------------------------------
+
+    [Fact]
+    public void A_wanted_term_marker_keeps_its_room_even_before_it_is_drawn()
+    {
+        float room = UiTermMarkerArt.SizeFor(15f) + UiTermMarkerArt.Gap;
+        Assert.Equal(room, UiDataTableLayout.TermRoomFor(wanted: true, 15f));
+        Assert.Equal(0f, UiDataTableLayout.TermRoomFor(wanted: false, 15f));
+        // The header's width already counts that room, so the reserved margin never pushes the caption into an ellipsis.
+        var cap = new UiTableColumn("cap", "Cap", UiTableColumnKind.Number) { Width = 1f, Term = "Cap" };
+        float caption = InstallColumns.HeaderCaptionWidth("Cap", false, smallCaps: true, InstallColumns.HeaderFontSize);
+        Assert.True(UiDataTableLayout.WidthOf(cap, fill: false) >= caption + room + UiDrawnMarkArt.SortRoom(InstallColumns.HeaderFontSize) - .01f);
+    }
+
+    [Fact]
+    public void A_term_bound_while_the_table_is_on_a_hidden_tab_is_wanted_when_the_tab_shows()
+    {
+        var panel = NewPanel();
+        UiTerms.Define(panel.PluginId, "Cap", "Stations stop making an item once you hold this many.");
+        var tabs = panel.Tabs("tabs", new[] { "First", "Table" });
+        var cols = Columns();
+        cols[2].Term = "Cap";
+        var table = tabs.Add(1, panel.DataTable("t", cols, Options())); // built hidden
+        Assert.False(table.Visible);
+        var binding = ((UiDataTableHandle)table).TermOf("cap")!;
+        Assert.True(binding.MarkerWanted); // wanted from the start: the runtime keeps its room, so the first show draws it
+        tabs.Selected = 1;
+        Assert.True(table.Visible);
+        Assert.True(binding.MarkerWanted);
+    }
+
+    [Theory]
+    [InlineData(0, true, false, 1)] // the pass after the click: select the whole value
+    [InlineData(1, true, true, 2)]    // the field's own click and activation may have moved it: again
+    [InlineData(3, true, true, 2)]
+    [InlineData(4, true, true, 0)]    // held long enough
+    [InlineData(1, true, false, 0)]   // a key changed the selection: typing or an arrow wins
+    [InlineData(0, false, false, 0)]  // another field took the keyboard
+    [InlineData(2, false, true, 0)]
+    public void The_first_focus_select_all_is_selected_then_held_until_a_key(int passes, bool same, bool whole, int expected) =>
+        Assert.Equal((UiSelectAllStep)expected, UiFocusSelectAll.Step(passes, same, whole));
+
     // ---- Term markers on the header -------------------------------------------------------
 
     [Fact]

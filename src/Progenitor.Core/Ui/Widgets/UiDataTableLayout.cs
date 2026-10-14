@@ -150,6 +150,15 @@ internal static class UiDataTableLayout
         return false;
     }
 
+    /// <summary>
+    /// The room a term marker keeps after a caption that also carries a drawn sort mark: its side and gap when the marker
+    /// is wanted (its term defined and not hidden by the player), whether or not it is drawn this frame. A marker is drawn
+    /// only where it fits, so making the room depend on the marker being drawn left a header built while hidden (a tab not
+    /// yet shown) with no room and no marker until a later redraw.
+    /// </summary>
+    internal static float TermRoomFor(bool wanted, float fontSize) =>
+        wanted ? UiTermMarkerArt.SizeFor(fontSize) + UiTermMarkerArt.Gap : 0f;
+
     /// <summary>The word a pending clear shows (sentence case, the value box's gray hint look): back to the inherited value.</summary>
     internal const string InheritedHint = "Inherited";
 

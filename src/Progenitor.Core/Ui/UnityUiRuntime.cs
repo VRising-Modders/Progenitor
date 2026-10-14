@@ -2292,6 +2292,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         if (panel is UnityPanel host && host.Alive) host.SelfPlaced = selfPlaced;
     }
 
+    /// <summary>P7b: this panel never scrolls. See <see cref="IUiRuntime.NoScrollPanel"/>.</summary>
+    public void NoScrollPanel(IRuntimePanel panel)
+    {
+        if (panel is UnityPanel host && host.Alive) host.TurnOffScroll();
+    }
+
     /// <summary>
     /// INSTALLUX2 item 1: the consent prompt's chrome as a kit seam — an opaque frame on the Mods
     /// palette, a raycast-blocking backdrop on this panel's own overlay canvas, centered rather than
@@ -4737,7 +4743,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         bool wasFocused = ReferenceEquals(_ownedFocusField, field);
         NoteOwnedFocus(field);
         // P7b: a data table's value box selects its whole value when it takes the keyboard, so typing replaces it.
-        if (!wasFocused && SelectsAllOnFocus(field)) _selectAllPending = field;
+        if (!wasFocused && SelectsAllOnFocus(field)) QueueSelectAll(field);
         return true;
     }
 
@@ -12185,6 +12191,28 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         public bool SelfPlaced;
 
+        /// <summary>P7b: the panel has no scroll view (<see cref="IUiRuntime.NoScrollPanel"/>); the read-back skips it.</summary>
+        public bool NoScroll;
+
+        /// <summary>P7b: switch the ScrollRect and its bar off for good and mark the panel as not scrolling.</summary>
+        internal void TurnOffScroll()
+        {
+            NoScroll = true;
+            _verdictPending = false;
+            try
+            {
+                var scroll = Scroll;
+                if (scroll == null) return;
+                scroll.enabled = false; // AutoHide lives in its update: off, it never shows the bar again
+                var bar = scroll.verticalScrollbar;
+                if (bar != null && bar.gameObject.activeSelf) bar.gameObject.SetActive(false);
+            }
+            catch { /* the read-back skips the panel all the same */ }
+
+            try { if (_scrollbar != null && _scrollbar.activeSelf) _scrollbar.SetActive(false); }
+            catch { /* */ }
+        }
+
         /// <summary>
         /// INSTALLUX2 item 1: this panel is a modal dialog. It is centered rather than flowed (a
         /// dialog is never one of a ranked set), its frame is opaque over a raycast-blocking
@@ -12348,6 +12376,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
 
         private bool _gameWindow;
+
+        /// <summary>
+        /// P7b: sized like a dialog (its top pad, its content, its footer; no title band, no 200-unit floor): a dialog, or
+        /// a game window that hid its title to draw a dialog's own rows (the tip card). Placement and capture stay its own.
+        /// </summary>
+        private bool DialogSized => _dialog || (_gameWindow && _hideTitle && !_menuPane);
 
         /// <summary>GAMEWINDOW1: drawn with the game's popup frame (readback).</summary>
         internal bool IsGameWindow => _gameWindow;
@@ -13683,7 +13717,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         : 0f;
                     refitTop = MenuPanelLayout.TopChromeHeight(topHeights) + headerChrome;
                     refitBottom = bottomChrome;
-                    refitForce = !SelfPlaced && (footerBand > 0f || _footerInset > 0f || _dialog);
+                    refitForce = !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized);
                     FitChromeInsets(refitTop, refitBottom, force: refitForce);
                     _footerInset = footerBand;
                     EnsureHeaderBand(headerChrome, MenuPanelLayout.TopChromeHeight(topHeights));
@@ -13723,7 +13757,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // DIALOGS1: a dialog is exactly as tall as its content, its top pad and its footer -
                 // no title band and no 200 px floor (the empty band above the live dialog's title).
                 float panelHeight = _menuPane ? _menuGeometry.Height
-                    : _dialog ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
+                    : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
 
                 _laidOutWith = available;
@@ -13741,7 +13775,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         rt.sizeDelta = new Vector2(0f, contentHeight);
                         float viewH = _sidebar
                             ? MenuPanelLayout.ListViewportHeight(panelHeight)
-                            : _dialog ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
+                            : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
                             : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
                         float npos = 1f;
                         float pendingOffsetY = 0f;
@@ -13833,7 +13867,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // could never report because it had no idea it was overflowing.
                 float viewport = _sidebar
                     ? MenuPanelLayout.ListViewportHeight(panelHeight)
-                    : _dialog ? DialogLayout.ViewportHeight(panelHeight, footerBand)
+                    : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand)
                     : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
                 bool scrolls = PanelLayout.Scrolls(contentHeight, viewport);
 
@@ -13843,7 +13877,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // next pass over this panel can read the owner's answer back and say whether the
                 // two agree, rather than printing one of them as if it were both.
                 _verdictScrolls = scrolls;
-                _verdictPending = _scrollbar != null;
+                _verdictPending = _scrollbar != null && !NoScroll; // P7b: a panel with no scroll view has nothing to read back
 
                 // Job FUI32. Which rung answered was never the whole question: a pass measured
                 // before Unity sized the canvas is wrong whatever token it prints, so the line

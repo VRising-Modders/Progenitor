@@ -409,14 +409,60 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
     internal static bool SelectAllPendingFor(TMP_InputField? field) =>
         field != null && _selectAllPending != null && ReferenceEquals(_selectAllPending, field);
 
-    /// <summary>Run a pending select-all on the focused field (the typed-key pass calls it before any key).</summary>
+    /// <summary>How many passes the pending select-all has run (0: not applied yet).</summary>
+    private static int _selectAllPasses;
+
+    /// <summary>Queue the select-all of a value box that just took the keyboard (from the focus path).</summary>
+    private static void QueueSelectAll(TMP_InputField field)
+    {
+        _selectAllPending = field;
+        _selectAllPasses = 0;
+    }
+
+    /// <summary>
+    /// Run a pending select-all on the focused field (the typed-key pass calls it before any key). The first pass selects
+    /// the whole value (the kit's own Ctrl+A on the owned caret, which typing reads); the next
+    /// <see cref="SelectAllHoldPasses"/> passes push that selection to the field again while it is still whole, because
+    /// the field's own pointer handling and its activation run after the click and may move its native caret and
+    /// selection. A key that changes the selection (typing, an arrow) ends it at once.
+    /// </summary>
     private static void ApplyPendingSelectAll(TMP_InputField? focused)
     {
         var pending = _selectAllPending;
         if (pending == null) return;
-        _selectAllPending = null;
-        if (focused == null || !ReferenceEquals(focused, pending) || !Alive(pending)) return;
-        ApplyShortcut(pending, 'a');
+        bool same = focused != null && ReferenceEquals(focused, pending) && Alive(pending);
+        UiTextEditState state = default;
+        bool whole = false;
+        if (same && _selectAllPasses > 0)
+        {
+            try
+            {
+                state = ReadFieldState(pending);
+                whole = state.HasSelection && state.SelStart == 0 && state.SelEnd == state.Text.Length;
+            }
+            catch { whole = false; }
+        }
+
+        switch (UiFocusSelectAll.Step(_selectAllPasses, same, whole))
+        {
+            case UiSelectAllStep.Select:
+                ApplyShortcut(pending, 'a');
+                _selectAllPasses = 1;
+                return;
+            case UiSelectAllStep.Hold:
+                try
+                {
+                    PushTmpCaret(pending, state);
+                    SyncOwnedCarets();
+                }
+                catch { /* */ }
+
+                _selectAllPasses++;
+                return;
+            default:
+                _selectAllPending = null;
+                return;
+        }
     }
 
     public void SetupCellField(IRuntimeCellRow row, string cellKey, bool rightAligned, bool enterCommits, bool selectAllOnFocus)

@@ -623,6 +623,7 @@ internal static unsafe class WorldPickBackend
             HoldCloseKey(c != null && UiWorldPickEscape.BandHoldsCloseKey(EscapeOwnerNow(c)));
             Ui.HidePaneTitle(panel);
             Ui.SelfPlacePanel(panel);
+            Ui.NoScrollPanel(panel); // before the first layout pass: no bar, no read-back
             panel.Show();
             StyleBand(handle);
         }
