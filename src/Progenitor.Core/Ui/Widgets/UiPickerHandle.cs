@@ -13,6 +13,8 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
     private const string CellSearch = "search";
     private const string CellStatus = "status";
     private const string CellUse = "use";
+    internal const string CellAll = "all";
+    internal const string CellClear = "clear";
 
     private readonly UiPickerModel _model;
     private readonly UiPickerOptions _options;
@@ -22,7 +24,8 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
     private readonly List<IUiCellRow> _slots = new();
     private readonly List<UiPickerLine> _lines = new();
     private readonly List<Action<IReadOnlyList<UiPickerEntry>>> _picked = new();
-    private string _check = UiWidgetLayout.CheckGlyph;
+    /// <summary>Multi mode: the check column's face is a drawn check mark, not text (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiIconMarks _marks = new();
 
     internal UiPickerHandle(IUiPanel panel, string key, IEnumerable<UiPickerEntry>? entries, UiPickerOptions? options)
         : base(panel, key, key)
@@ -30,8 +33,6 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         _options = options ?? new UiPickerOptions();
         _model = new UiPickerModel(entries, _options.Multi, _options.Rows, _options.Selected);
         _icons = AnyIcon(_model.Entries);
-        try { _check = WidgetRuntime.Current?.DrawableGlyph(UiWidgetLayout.CheckGlyph, UiWidgetLayout.CheckFallback) ?? _check; }
-        catch { /* the preferred glyph stays */ }
 
         _search = Part(panel.CellRow(new CellRowSpec(RowKey(CellSearch), UiPickerLayout.SearchCells(_options.Placeholder), plain: true)));
         Lease(_search.OnChanged(CellSearch, text =>
@@ -41,19 +42,29 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
             Render();
         }));
 
-        _status = Part(panel.CellRow(new CellRowSpec(RowKey(CellStatus), UiPickerLayout.StatusCells(), plain: true, compact: true)));
+        _status = Part(panel.CellRow(new CellRowSpec(RowKey(CellStatus), UiPickerLayout.StatusCells(_options.Multi), plain: true, compact: true,
+            rightInset: UiPickerLayout.RightInset)));
         Lease(_status.OnClick(CellUse, () => { if (Live) AcceptSuggestion(); }));
+        if (_options.Multi)
+        {
+            Lease(_status.OnClick(CellAll, () => { if (Live) SelectAllMatches(); }));
+            Lease(_status.OnClick(CellClear, () => { if (Live) ClearSelection(); }));
+        }
 
         for (int i = 0; i < _model.Rows; i++)
         {
             int slot = i;
             var row = Part(panel.CellRow(new CellRowSpec(
                 RowKey("line" + i), UiPickerLayout.LineCells(_options.Multi, icon: true), hover: true,
-                skin: CellRowSkin.GameEntry, separator: true, quietHover: true)));
+                skin: CellRowSkin.GameEntry, separator: true, quietHover: true, rightInset: UiPickerLayout.RightInset)));
             _slots.Add(row);
             Lease(row.OnRowClick(() => ClickSlot(slot)));
             Lease(row.OnHover(on => HoverSlot(slot, on)));
-            if (_options.Multi) Lease(row.OnClick(UiWidgetLayout.CellCheck, () => ClickSlot(slot)));
+            if (_options.Multi)
+            {
+                Lease(row.OnClick(UiWidgetLayout.CellCheck, () => ClickSlot(slot)));
+                _marks.Attach(row, UiWidgetLayout.CellCheck, watchHover: true);
+            }
         }
 
         Render();
@@ -121,6 +132,16 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         Render();
         RaisePicked();
         return true;
+    }
+
+    public int SelectAllMatches()
+    {
+        if (IsDisposed) return 0;
+        int added = _model.SelectMatches();
+        if (added == 0) return 0;
+        Render();
+        RaisePicked();
+        return added;
     }
 
     public void ClearSelection()
@@ -195,6 +216,14 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
 
     // ---- Drawing -------------------------------------------------------------------------------
 
+    /// <summary>Tests: result line <paramref name="slot"/>'s row.</summary>
+    internal IUiCellRow SlotAt(int slot) => _slots[slot];
+
+    /// <summary>Tests and readback: the mark drawn in result line <paramref name="slot"/>'s check column.</summary>
+    internal UiDrawnMark CheckMarkAt(int slot) => _marks.MarkOf(_slots[slot], UiWidgetLayout.CellCheck);
+
+    protected override void OnDisposing() => _marks.Dispose();
+
     protected override void Render()
     {
         if (IsDisposed || !Visible) return;
@@ -202,8 +231,14 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
         _lines.Clear();
         _lines.AddRange(lines);
         string suggestion = Suggestion;
-        _status.SetCell(CellStatus, _model.Status(hidden));
+        string selection = _model.SelectionStatus();
+        _status.SetCell(CellStatus, selection.Length == 0 ? _model.Status(hidden) : _model.Status(hidden) + " " + selection);
         _status.SetCell(CellUse, suggestion.Length == 0 ? "" : "Use “" + suggestion + "”", visible: suggestion.Length > 0);
+        if (_options.Multi)
+        {
+            _status.SetCell(CellAll, visible: _model.CanSelectMatches());
+            _status.SetCell(CellClear, visible: _model.Selected.Count > 0);
+        }
         TrySetVisible(_search, true);
         TrySetVisible(_status, true);
 
@@ -224,7 +259,12 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
                 row.SetCell(UiWidgetLayout.CellTitle, line.Text, CellTone.Gold);
                 row.SetCell(UiWidgetLayout.CellNote, "", visible: false);
                 row.SetCell(UiWidgetLayout.CellIcon, visible: false);
-                if (_options.Multi) row.SetCell(UiWidgetLayout.CellCheck, "", visible: false);
+                row.SetCell(UiWidgetLayout.CellIconPad, visible: false);
+                if (_options.Multi)
+                {
+                    row.SetCell(UiWidgetLayout.CellCheck, "", visible: false);
+                    _marks.Set(row, UiWidgetLayout.CellCheck, UiDrawnMark.None);
+                }
                 row.SetSelected(false);
             }
             else
@@ -236,19 +276,26 @@ internal sealed class UiPickerHandle : UiComposedHandle, IUiPicker
                 string note = e.Disabled ? e.DisabledReason : e.Note;
                 row.SetCell(UiWidgetLayout.CellNote, note, e.Disabled ? CellTone.Faint : CellTone.Muted, visible: note.Length > 0);
                 if (_options.Multi)
-                    row.SetCell(UiWidgetLayout.CellCheck, on ? _check : "", e.Disabled ? CellTone.Faint : CellTone.Gold, visible: true);
-                row.SetCell(UiWidgetLayout.CellIcon, visible: _icons);
+                {
+                    row.SetCell(UiWidgetLayout.CellCheck, "", e.Disabled ? CellTone.Faint : CellTone.Gold, visible: true);
+                    _marks.Set(row, UiWidgetLayout.CellCheck, on ? UiDrawnMark.CheckMark : UiDrawnMark.None, !e.Disabled);
+                }
+                // The well only around an icon that resolved; any other entry keeps the column with a blank pad of the
+                // same width (no empty gray box), so the captions still line up.
+                object? icon = null;
                 if (_icons)
                 {
-                    object? icon = e.Icon;
+                    icon = e.Icon;
                     if (icon == null && e.ItemPrefab != 0 && runtime != null)
                     {
                         try { icon = runtime.ItemIcon(e.ItemPrefab); }
                         catch { icon = null; }
                     }
-
-                    row.SetImage(UiWidgetLayout.CellIcon, icon);
                 }
+
+                row.SetCell(UiWidgetLayout.CellIcon, visible: icon != null);
+                row.SetCell(UiWidgetLayout.CellIconPad, visible: _icons && icon == null);
+                if (icon != null) row.SetImage(UiWidgetLayout.CellIcon, icon);
 
                 row.SetSelected(on);
             }
@@ -267,22 +314,55 @@ internal static class UiPickerLayout
             .With(width: CellWidth.Fill(CellLayout.MinInputWidth), placeholder: placeholder ?? "Search"),
     };
 
-    internal static List<CellSpec> StatusCells() => new()
+    internal static List<CellSpec> StatusCells(bool multi = false)
     {
-        new CellSpec(CellKind.Muted, "status").With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth)),
-        new CellSpec(CellKind.Button, "use") { Skin = CellSkin.Link, Optional = true }.With(align: CellAlign.Right, minWidth: 80f),
-    };
+        var cells = new List<CellSpec>
+        {
+            new CellSpec(CellKind.Muted, "status").With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth)),
+            new CellSpec(CellKind.Button, "use") { Skin = CellSkin.Link, Optional = true }.With(align: CellAlign.Right, minWidth: 80f),
+        };
+        if (multi)
+        {
+            // P7b: multi mode's two actions, links like the suggestion, packed right after it; hidden while they have no work.
+            cells.Add(LinkCell(UiPickerHandle.CellAll, SelectAllCaption));
+            cells.Add(LinkCell(UiPickerHandle.CellClear, ClearCaption));
+        }
 
-    /// <summary>One result line: [check (multi)] [icon] caption [note].</summary>
+        return cells;
+    }
+
+    /// <summary>P7b: the multi picker's action captions (sentence case).</summary>
+    internal const string SelectAllCaption = "Select all";
+
+    internal const string ClearCaption = "Clear";
+
+    private static CellSpec LinkCell(string key, string caption)
+    {
+        float w = CellLayout.EstimateTextWidth(caption, MenuPanelLayout.HeaderButtonFontSize) + CellLayout.ButtonPad;
+        return new CellSpec(CellKind.Button, key) { Skin = CellSkin.Link, Visible = false, MinWidth = w }
+            .With(text: caption, width: CellWidth.Px(w), align: CellAlign.Right);
+    }
+
+    /// <summary>
+    /// The band at a picker row's right end no cell enters: the right-aligned note and links keep the same distance from
+    /// the edge as the data table's and the master-detail's rows (their scroll bar's band), instead of touching it.
+    /// </summary>
+    internal const float RightInset = 18f;
+
+    /// <summary>One result line: [check (multi)] [icon | blank pad] caption [note].</summary>
     internal static List<CellSpec> LineCells(bool multi, bool icon)
     {
         var cells = new List<CellSpec>(4);
         if (multi)
-            cells.Add(new CellSpec(CellKind.Button, UiWidgetLayout.CellCheck) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Quiet }
-                .With(width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
+            cells.Add(new CellSpec(CellKind.Button, UiWidgetLayout.CellCheck) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Quiet, Hover = true }
+                .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
         if (icon)
+        {
             cells.Add(new CellSpec(CellKind.Image, UiWidgetLayout.CellIcon) { MinWidth = UiWidgetLayout.IconSize, Skin = CellSkin.IconWell }
                 .With(width: CellWidth.Px(UiWidgetLayout.IconSize)));
+            cells.Add(new CellSpec(CellKind.Muted, UiWidgetLayout.CellIconPad) { MinWidth = UiWidgetLayout.IconSize, Visible = false }
+                .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconSize)));
+        }
         cells.Add(new CellSpec(CellKind.Text, UiWidgetLayout.CellTitle)
             .With(width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth), minWidth: UiWidgetLayout.CaptionMinWidth));
         cells.Add(new CellSpec(CellKind.Muted, UiWidgetLayout.CellNote) { DropOrder = 1 }.With(align: CellAlign.Right, optional: true));

@@ -20,8 +20,12 @@ namespace Progenitor.Ui;
 /// </summary>
 internal interface IWorldPickBandRuntime
 {
-    /// <summary>Restyle the shown <paramref name="panel"/> as the bottom prompt band.</summary>
-    void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey);
+    /// <summary>
+    /// Restyle the shown <paramref name="panel"/> as the bottom prompt band. <paramref name="cancelWord"/> follows the
+    /// Escape key cap (<see cref="UiWorldPickCopy.CancelWord"/>, or <see cref="UiWorldPickCopy.FinishWord"/> while a pick repeats).
+    /// </summary>
+    void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey, string cancelWord = UiWorldPickCopy.CancelWord,
+        string pickWord = UiWorldPickCopy.PickWord, string count = "");
 }
 
 /// <summary>
@@ -59,14 +63,14 @@ internal interface IWorldPickBandRuntime
 /// <para><b>Escape</b> follows <see cref="UiWorldPickEscape"/>: dialog &gt; key capture &gt; focused chat
 /// &gt; other Progenitor panels &gt; an open game menu &gt; the pick. The handler is a
 /// <see cref="Ui.PushEscape"/> lease that acts (and takes the press) only when the pick is topmost; it
-/// returns false otherwise, so the press runs as if no pick were armed. The band is a shown kit panel,
-/// so Bootstrap forwards Escape; its capture mode is re-decided every frame
-/// (<see cref="UiWorldPickEscape.BandMode"/>): <see cref="UiCaptureMode.WhenHovered"/> while the pick
-/// is topmost — the registered context takes the game's Back / Menu_Close, so the system menu does not
-/// open — and <see cref="UiCaptureMode.Never"/> otherwise, so no context of ours stands between the
-/// game and its own menu's close. The band's frame rect is zero-sized below the screen edge (the
-/// visible band is a child), so the hover gate never sees the pointer over it: gameplay input is never
-/// blocked by the band, only the close key while it is topmost. When the Escape sweep hides the band
+/// returns false otherwise, so the press runs as if no pick were armed. The band is a shown kit panel
+/// with <see cref="UiCaptureMode.Never"/>, so Bootstrap forwards Escape and the pointer never routes it
+/// (it can never ask for the full mask, not even with an unreadable pointer). While the pick is topmost
+/// (<see cref="UiWorldPickEscape.BandHoldsCloseKey"/>, re-decided every frame) it holds a close-key-only
+/// context (<see cref="UiInputCapture.AcquireCloseKey"/>): the game's Back / Menu_Close are taken, so the
+/// system menu does not open, and nothing else is — the player moves, aims and zooms while picking.
+/// Otherwise it holds nothing, so no context of ours stands between the game and its own menu's close.
+/// Gameplay input is never blocked by the band, only the close key while it is topmost. When the Escape sweep hides the band
 /// together with another panel, the next frame shows it again. Plain Escape is not a rebindable mod
 /// key, so it is not registered through <c>Keybinds</c>.</para>
 /// </summary>
@@ -93,7 +97,10 @@ internal static unsafe class WorldPickBackend
     private static bool _lifetimeRegistered;
     private static bool? _stopLayoutOk;
     private static string _prompt = UiWorldPickOptions.DefaultPrompt;
-    private static UiCaptureMode _bandMode = UiCaptureMode.Never;
+    private static string _escapeWord = UiWorldPickCopy.CancelWord;
+    private static string _interactWord = UiWorldPickCopy.PickWord;
+    private static string _count = "";
+    private static bool _closeKeyHeld;
     private static ulong? _armedWorldSeq;
     private static Entity _armedCharacter;
     private static ulong? _hudWorldSeq;
@@ -223,7 +230,17 @@ internal static unsafe class WorldPickBackend
             }
 
             _prompt = pick.Options.Prompt;
+            _count = UiWorldPickCopy.BandCount(pick.Options.Repeat, pick.PickCount);
+            _escapeWord = UiWorldPickCopy.EscapeWord(pick.Options.Repeat);
+            _interactWord = UiWorldPickCopy.InteractWord(pick.Options.Repeat);
             ShowBand();
+        }
+
+        /// <summary>P7b: a repeating pick took a target: the band shows the new count.</summary>
+        public void Repicked(UiWorldPickHandle pick)
+        {
+            _count = UiWorldPickCopy.BandCount(pick.Options.Repeat, pick.PickCount);
+            if (_band is UiPanelHandle { IsDisposed: false } handle && handle.IsShownNow) StyleBand(handle);
         }
 
         public void Disarmed()
@@ -321,11 +338,20 @@ internal static unsafe class WorldPickBackend
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick prompt re-show threw: " + e.Message); }
         }
 
-        var mode = UiWorldPickEscape.BandMode(EscapeOwnerNow(c));
-        if (mode == _bandMode) return;
-        _bandMode = mode;
-        try { handle.CaptureMode = mode; }
-        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick prompt capture mode threw: " + e.Message); }
+        HoldCloseKey(UiWorldPickEscape.BandHoldsCloseKey(EscapeOwnerNow(c)));
+    }
+
+    /// <summary>Hold (or let go of) the close-key-only context: the band's whole input footprint.</summary>
+    private static void HoldCloseKey(bool want)
+    {
+        if (want == _closeKeyHeld) return;
+        _closeKeyHeld = want;
+        try
+        {
+            if (want) UiInputCapture.AcquireCloseKey();
+            else UiInputCapture.ReleaseCloseKey();
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick close-key hold threw: " + e.Message); }
     }
 
     private static void EnsureHook()
@@ -578,7 +604,7 @@ internal static unsafe class WorldPickBackend
 
     private static void ShowBand()
     {
-        ReleaseBand();
+        DisposeBandPanel(); // the close-key hold stays: a re-show is not a release
         try
         {
             var panel = Ui.Panel(UiWorldPickCopy.BandTitle, BandOwner, FrameworkVersions.CorePluginId);
@@ -588,12 +614,16 @@ internal static unsafe class WorldPickBackend
                 return;
             }
 
+            // First, before anything that lays the panel out (the footer write, the title, self-placement each re-lay it):
+            // the band has no scroll view, so no pass may arm a scroll-bar read-back.
+            Ui.NoScrollPanel(panel);
             try { panel.Footer = ""; } catch { /* */ }
             UiWorldPickCoordinator? c;
             lock (Gate) c = _coordinator;
             _band = panel;
-            _bandMode = c == null ? UiCaptureMode.Never : UiWorldPickEscape.BandMode(EscapeOwnerNow(c));
-            panel.CaptureMode = _bandMode;
+            // Never routed by the pointer, never a gameplay block; the close key is the hold's (HoldCloseKey).
+            panel.CaptureMode = UiWorldPickEscape.BandMode(UiWorldPickEscapeOwner.Pick);
+            HoldCloseKey(c != null && UiWorldPickEscape.BandHoldsCloseKey(EscapeOwnerNow(c)));
             Ui.HidePaneTitle(panel);
             Ui.SelfPlacePanel(panel);
             panel.Show();
@@ -608,10 +638,16 @@ internal static unsafe class WorldPickBackend
     private static void StyleBand(UiPanelHandle handle)
     {
         if (Ui.CurrentRuntime() is IWorldPickBandRuntime band && handle.RuntimePanel is { } runtimePanel)
-            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey);
+            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey, _escapeWord, _interactWord, _count);
     }
 
     private static void ReleaseBand()
+    {
+        HoldCloseKey(false);
+        DisposeBandPanel();
+    }
+
+    private static void DisposeBandPanel()
     {
         var band = _band;
         _band = null;

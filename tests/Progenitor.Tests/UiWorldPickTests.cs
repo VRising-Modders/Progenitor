@@ -516,7 +516,9 @@ public sealed class UiWorldPickTests
 
         var second = UiWorldPickEscape.Decide(rig.Coordinator.IsArmed, false, false, false, 0, false);
         Assert.Equal(UiWorldPickEscapeOwner.Pick, second);
-        Assert.Equal(UiCaptureMode.WhenHovered, UiWorldPickEscape.BandMode(second));
+        Assert.Equal(UiCaptureMode.Never, UiWorldPickEscape.BandMode(second)); // never a gameplay block
+        Assert.True(UiWorldPickEscape.BandHoldsCloseKey(second)); // the close key only, while the pick owns Escape
+        Assert.False(UiWorldPickEscape.BandHoldsCloseKey(first));
         Assert.True(rig.Coordinator.Escape());
         Assert.Equal(UiWorldPickState.Cancelled, pick.State);
     }
@@ -528,8 +530,11 @@ public sealed class UiWorldPickTests
     [InlineData((int)UiWorldPickEscapeOwner.Chat)]
     [InlineData((int)UiWorldPickEscapeOwner.OpenPanels)]
     [InlineData((int)UiWorldPickEscapeOwner.GameMenu)]
-    public void BandTakesNoCloseKey_UnlessThePickOwnsEscape(int owner) =>
+    public void BandTakesNoCloseKey_UnlessThePickOwnsEscape(int owner)
+    {
         Assert.Equal(UiCaptureMode.Never, UiWorldPickEscape.BandMode((UiWorldPickEscapeOwner)owner));
+        Assert.False(UiWorldPickEscape.BandHoldsCloseKey((UiWorldPickEscapeOwner)owner));
+    }
 
     [Theory]
     [InlineData(-1, false)]

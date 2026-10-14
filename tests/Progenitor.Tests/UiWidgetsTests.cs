@@ -202,11 +202,13 @@ public sealed class UiWidgetsTests : IDisposable
         _runtime.Pointer = PointerSample.At(10f, 500f);
         _runtime.Press(Row("targets:row0"), UiWidgetLayout.CellGrip, UiPointerEventKind.Down);
         Assert.Single(_runtime.Ticks);
-        Assert.True(Row("targets:row0").Selected); // the held row is lit
+        Assert.True(((UiOrderedListHandle)list).HeldAt(0)); // the held row is lit (the one held-row style, UiTileState.Held)
 
         _runtime.Pointer = PointerSample.At(10f, 0f); // below every row
         _runtime.Tick();
-        Assert.True(Row("targets:row2").Selected); // the preview put a in the last slot
+        Assert.True(((UiOrderedListHandle)list).HeldAt(2)); // the preview put a in the last slot
+        Assert.False(((UiOrderedListHandle)list).HeldAt(0));
+        Assert.Equal(CellTone.Gold, Row("targets:row2").Cells().Single(c => c.Key == UiWidgetLayout.CellTitle).Tone);
         Assert.Equal("Item a", Row("targets:row2").Cells().Single(c => c.Key == UiWidgetLayout.CellTitle).Text);
         Assert.Empty(moves);
 
@@ -475,7 +477,11 @@ public sealed class UiWidgetsTests : IDisposable
 
                 for (int i = 0; i < placed.Length; i++)
                     for (int j = i + 1; j < placed.Length; j++)
+                    {
+                        // An overlay is drawn inside its own target (a tab's badge inside its chip); nothing else may overlap.
+                        if (cells[j].OverlayOf == cells[i].Key || cells[i].OverlayOf == cells[j].Key) continue;
                         Assert.False(CellLayout.Overlap(placed[i], placed[j]), placed[i] + " overlaps " + placed[j] + " at " + width);
+                    }
             }
         }
     }
@@ -559,7 +565,11 @@ public sealed class UiWidgetsTests : IDisposable
     [Fact]
     public void Every_widget_and_hud_call_is_demoed()
     {
-        string demo = SourcePin.ReadFile("samples", "Progenitor.ControlsSample", "WidgetsDemo.cs");
+        // P7b: the page is partial; each widget's demo may live in its own WidgetsDemo.<Name>.cs.
+        string demo = string.Concat(System.IO.Directory
+            .GetFiles(System.IO.Path.Combine(SourcePin.RepoRoot(), "samples", "Progenitor.ControlsSample"), "WidgetsDemo*.cs")
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .Select(System.IO.File.ReadAllText));
         string plugin = SourcePin.ReadFile("samples", "Progenitor.ControlsSample", "Plugin.cs");
         foreach (var m in typeof(UiWidgets).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
                      .Select(m => m.Name).Distinct())

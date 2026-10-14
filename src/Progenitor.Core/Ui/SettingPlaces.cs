@@ -298,6 +298,9 @@ internal static class SettingPlaces
         yield return Cfg("Support", "IncludeServerLogs", GetHelp, UiFile);
         // Three homes: which drawers are closed (the Mods window's own memory; never drawn).
         yield return Cfg("Ui", "ClosedDrawers", CfgOnly, UiFile);
+        // P7b help: the term markers' and tip cards' memory (set by the markers, the cards and a mod's own setting; never drawn).
+        foreach (var key in new[] { "HiddenTermMarkers", "TermMarkerHovers", "TermMarkerAutoHide", "SeenTips" })
+            yield return Cfg("Ui", key, CfgOnly, UiFile);
         // Core debug tools (2026-10-06): the debug buff's map teleport. Developer values, never drawn.
         yield return Cfg("DebugMap", "HoldSeconds", CfgOnly, UiFile);
         yield return Cfg("DebugMap", "SearchRadius", CfgOnly, Shared);

@@ -5,7 +5,10 @@ namespace Progenitor.Ui;
 /// <summary>
 /// Where a world pick (<c>ctx.Hud.PickInWorld</c>) is in its life. A pick starts <see cref="Armed"/>
 /// and ends exactly once in one of the other states; it is never re-armed (call
-/// <c>PickInWorld</c> again for another pick).
+/// <c>PickInWorld</c> again for another pick). A repeating pick (<see cref="UiWorldPickOptions.Repeat"/>)
+/// stays <see cref="Armed"/> across its picks and never ends as <see cref="Picked"/>: it ends as
+/// <see cref="Cancelled"/> (Escape or <see cref="IUiWorldPick.Cancel"/>: the player finished), <see cref="TimedOut"/>
+/// or <see cref="Disposed"/>, with <see cref="IUiWorldPick.PickCount"/> saying how many it delivered.
 /// </summary>
 public enum UiWorldPickState
 {
@@ -70,14 +73,30 @@ public sealed class UiWorldPickOptions
     /// <summary>The prompt shown at the bottom of the screen while the pick is armed.</summary>
     public const string DefaultPrompt = "Pick a container or station";
 
+    /// <summary>P7b: the prompt of a repeating pick (<see cref="Repeat"/>) that kept <see cref="DefaultPrompt"/>.</summary>
+    public const string DefaultRepeatPrompt = "Pick containers or stations";
+
     /// <summary>Which targets end the pick. Interacting with anything else behaves as usual. Default containers and stations.</summary>
     public UiWorldPickKinds Kinds { get; set; } = UiWorldPickKinds.Containers | UiWorldPickKinds.Stations;
 
     /// <summary>The prompt band's text. Default <see cref="DefaultPrompt"/>.</summary>
     public string Prompt { get; set; } = DefaultPrompt;
 
-    /// <summary>Seconds until the pick ends as <see cref="UiWorldPickState.TimedOut"/>; 0 or less (the default) waits forever.</summary>
+    /// <summary>
+    /// Seconds until the pick ends as <see cref="UiWorldPickState.TimedOut"/>; 0 or less (the default) waits forever. A
+    /// repeating pick counts them from its last pick (an idle timeout).
+    /// </summary>
     public double TimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// P7b, experimental: keep picking. Each matching interact runs <c>onPicked</c> and the pick stays
+    /// <see cref="UiWorldPickState.Armed"/> (the same handle) until Escape, <see cref="IUiWorldPick.Cancel"/>, the timeout,
+    /// leaving the world, a newer pick or dispose. Escape and <c>Cancel()</c> mean "finished": they end it as
+    /// <see cref="UiWorldPickState.Cancelled"/> and run <c>onCancelled</c>; read <see cref="IUiWorldPick.PickCount"/> there.
+    /// The band counts the picks. The same target interacted with twice in a row within ten seconds is reported once (its
+    /// panel still stays closed). False (the default): the first matching interact ends the pick.
+    /// </summary>
+    public bool Repeat { get; set; }
 
     /// <summary>
     /// True (the default): the target's panel does not open and the game is told the interaction ended.
@@ -88,9 +107,12 @@ public sealed class UiWorldPickOptions
     internal UiWorldPickOptions Copy() => new()
     {
         Kinds = Kinds,
-        Prompt = string.IsNullOrWhiteSpace(Prompt) ? DefaultPrompt : Prompt.Trim(),
+        Prompt = string.IsNullOrWhiteSpace(Prompt) || (Repeat && Prompt.Trim() == DefaultPrompt)
+            ? (Repeat ? DefaultRepeatPrompt : DefaultPrompt)
+            : Prompt.Trim(),
         TimeoutSeconds = double.IsNaN(TimeoutSeconds) ? 0 : TimeoutSeconds,
         SuppressPanel = SuppressPanel,
+        Repeat = Repeat,
     };
 }
 
@@ -193,4 +215,7 @@ public interface IUiWorldPick : IDisposable
 
     /// <summary>End an armed pick as <see cref="UiWorldPickState.Cancelled"/> and run <c>onCancelled</c>. No-op once ended.</summary>
     void Cancel();
+
+    /// <summary>P7b: how many targets this pick delivered to <c>onPicked</c> (0 or 1 for a one-shot pick).</summary>
+    int PickCount { get; }
 }

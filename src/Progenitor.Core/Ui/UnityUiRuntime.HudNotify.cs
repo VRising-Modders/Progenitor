@@ -50,6 +50,18 @@ internal sealed partial class UnityUiRuntime
     private static Texture2D? _bandTexture;
     private static UiNoticeHandle? _bandNotice;
 
+    /// <summary>P7b: the accent mark before the band's header, and its art.</summary>
+    private static Image? _bandMark;
+    private static Sprite? _bandMarkSprite;
+    private static Texture2D? _bandMarkTexture;
+
+    /// <summary>P7b: the notice the game's banner was just asked to play, and when (the banner check).</summary>
+    private static UiNoticeHandle? _bannerCheckNotice;
+    private static double _bannerCheckAskedAt;
+
+    /// <summary>P7b: the world epoch in which the game's banner did not stay on screen (notices use the band there).</summary>
+    private static int _bannerLostEpoch = int.MinValue;
+
     /// <summary>The process-wide queue (the bridge and tests read it).</summary>
     internal static UiNoticeQueue HudNotices => NoticeQueue;
 
@@ -92,7 +104,14 @@ internal sealed partial class UnityUiRuntime
         try
         {
             double now = HudNow();
-            NoticeQueue.Next(now, NoticeHostWait(now), PresentNotice, Progenitor.WorldState.WorldEpoch.Current);
+            // P7b: while the game's full-screen menu is open, or the Mods workspace covers the HUD in a world, the game's
+            // banner cannot be seen (live 2026-10-14: the HUD canvas stays enabled under the menu, so "HUD hidden" read
+            // false and the banner played unseen). The notice waits for both to close (and a short settle), and that
+            // wait does not count toward its expiry (UiNoticeRules.MaxHeldSeconds bounds it).
+            bool menuHold = UiNoticeRules.MenuHolds(GameMenuOpenNow(), WorkspaceOpenNow(), Worlds.Client != null);
+            bool wait = menuHold || NoticeHostWait(now);
+            NoticeQueue.Next(now, wait, PresentNotice, Progenitor.WorldState.WorldEpoch.Current, menuHold);
+            CheckBanner(now);
             UpdateBand(now);
             if (!NoticeQueue.HasWork && _bandNotice == null) StopNoticeTick();
         }
@@ -103,6 +122,20 @@ internal sealed partial class UnityUiRuntime
             HideBand();
             StopNoticeTick();
         }
+    }
+
+    /// <summary>Whether the game's full-screen menu is open (the HUD is hidden by the menu, not by the player).</summary>
+    private static bool GameMenuOpenNow()
+    {
+        try { return GameMenuHistory.Probe.MenuOpen; }
+        catch { return false; }
+    }
+
+    /// <summary>Whether the Mods workspace is open (in a world it covers the HUD and the banner).</summary>
+    private static bool WorkspaceOpenNow()
+    {
+        try { return ModsMenu.IsOpen; }
+        catch { return false; }
     }
 
     private static void OnNoticeExpired(UiNoticeHandle notice)
@@ -119,11 +152,19 @@ internal sealed partial class UnityUiRuntime
     {
         var parent = AnnouncementParent(HudNow(), out string why);
         if (parent == null && _hudHidden) return 0; // the player hid the HUD: never draw over that choice
+        if (parent != null && _bannerLostEpoch == Progenitor.WorldState.WorldEpoch.Current)
+        {
+            why = "the game's banner did not stay on screen in this world";
+            parent = null;
+        }
+
         if (parent != null)
         {
             double length = ShowOnBanner(parent, notice);
             if (length > 0)
             {
+                _bannerCheckNotice = notice;
+                _bannerCheckAskedAt = HudNow();
                 LogNoticePath("banner", "Ui: ctx.Hud.Notify shows notices on the game's announcement banner "
                     + "(AnnouncementHUDParent.ShowBasicAnnouncement); its animation is " + length.ToString("0.0") + " s.");
                 // On the banner the caller's seconds can only lengthen the slot: the animation is the game's.
@@ -136,6 +177,40 @@ internal sealed partial class UnityUiRuntime
         if (!ShowOnBand(notice)) return 0;
         LogNoticePath("band", "Ui: ctx.Hud.Notify draws notices on the framework band (" + why + ").");
         return UiNoticeRules.Seconds(notice.RequestedSeconds, UiNoticeRules.DefaultSeconds);
+    }
+
+    /// <summary>
+    /// P7b: a few frames after the banner was asked to play a notice, check that its object is still on screen. The
+    /// game's HUD system can switch it off again (it does on frames without a day or night announcement); then the notice
+    /// moves to the framework band for the rest of its slot and later notices in this world use the band directly.
+    /// Reads only: the banner's own object state, never a write to the game's objects.
+    /// </summary>
+    private static void CheckBanner(double now)
+    {
+        var notice = _bannerCheckNotice;
+        if (notice == null) return;
+        if (!ReferenceEquals(NoticeQueue.Showing, notice) || notice.State != UiNoticeState.Showing)
+        {
+            _bannerCheckNotice = null;
+            return;
+        }
+
+        bool active = false;
+        try
+        {
+            var motion = _announceParent == null ? null : _announceParent.AnnouncementAchievement;
+            active = motion != null && motion.gameObject.activeInHierarchy;
+        }
+        catch { active = false; }
+
+        var verdict = UiNoticeRules.CheckBanner(now, _bannerCheckAskedAt, active);
+        if (verdict == UiNoticeRules.BannerVerdict.Pending) return;
+        _bannerCheckNotice = null;
+        if (verdict == UiNoticeRules.BannerVerdict.Held) return;
+        _bannerLostEpoch = Progenitor.WorldState.WorldEpoch.Current;
+        if (ShowOnBand(notice))
+            LogNoticePath("band", "Ui: ctx.Hud.Notify draws notices on the framework band (the game's banner was switched off "
+                + UiNoticeRules.BannerCheckSeconds.ToString("0.0") + " s after it was asked to play; this world uses the band).");
     }
 
     private static void LogNoticePath(string path, string line)
@@ -328,8 +403,14 @@ internal sealed partial class UnityUiRuntime
         try
         {
             var accent = ToColor(UiNoticeBand.RuleColor(notice.Kind));
-            if (_bandRuleTop != null) _bandRuleTop.color = accent;
-            if (_bandRuleBottom != null) _bandRuleBottom.color = accent;
+            float thickness = UiNoticeBand.RuleThicknessFor(notice.Kind);
+            foreach (var rule in new[] { _bandRuleTop, _bandRuleBottom })
+            {
+                if (rule == null) continue;
+                rule.color = accent;
+                var rrt = rule.rectTransform;
+                rrt.sizeDelta = new Vector2(0f, thickness);
+            }
             bool hasDetail = notice.Detail.Length > 0;
             float headerWidth = 0f, detailWidth = 0f;
             if (_bandHeader != null)
@@ -346,7 +427,23 @@ internal sealed partial class UnityUiRuntime
                     detailWidth = _bandDetail.GetPreferredValues(notice.Detail, float.PositiveInfinity, float.PositiveInfinity).x;
             }
 
-            float width = UiNoticeBand.Width(headerWidth, detailWidth);
+            // P7b: a small accent mark before the header for every kind but Info, so the kind reads at a glance.
+            bool mark = UiNoticeBand.MarkShown(notice.Kind);
+            if (_bandMark != null)
+            {
+                _bandMark.gameObject.SetActive(mark);
+                if (mark)
+                {
+                    _bandMark.color = ToColor(UiNoticeBand.Accent(notice.Kind));
+                    var mrt = _bandMark.rectTransform;
+                    mrt.sizeDelta = new Vector2(UiNoticeBand.MarkSize, UiNoticeBand.MarkSize);
+                    // The header centers in the band; with the mark the pair centers (the mark takes its room on the left).
+                    mrt.anchoredPosition = new Vector2(UiNoticeBand.MarkX(headerWidth) + UiNoticeBand.MarkRoom(notice.Kind) / 2f,
+                        -UiNoticeBand.PadY - UiNoticeBand.HeaderHeight / 2f);
+                }
+            }
+
+            float width = UiNoticeBand.Width(headerWidth + UiNoticeBand.MarkRoom(notice.Kind), detailWidth);
             float height = UiNoticeBand.Height(hasDetail);
             var rt = _band!.GetComponent<RectTransform>();
             rt.sizeDelta = new Vector2(width, height);
@@ -355,7 +452,7 @@ internal sealed partial class UnityUiRuntime
             {
                 var hr = _bandHeader.rectTransform;
                 hr.sizeDelta = new Vector2(inner, UiNoticeBand.HeaderHeight);
-                hr.anchoredPosition = new Vector2(0f, -UiNoticeBand.PadY);
+                hr.anchoredPosition = new Vector2(UiNoticeBand.MarkRoom(notice.Kind) / 2f, -UiNoticeBand.PadY);
             }
 
             if (_bandDetail != null)
@@ -431,6 +528,16 @@ internal sealed partial class UnityUiRuntime
 
             _bandRuleTop = Rule(band, "rule-top", top: true);
             _bandRuleBottom = Rule(band, "rule-bottom", top: false);
+            if (!Alive(_bandMarkSprite))
+                _bandMarkSprite = HudSprite("hud-notice-mark", 32, 32, (x, y) =>
+                {
+                    float dx = x + 0.5f - 16f, dy = y + 0.5f - 16f;
+                    float d = 15f - (float)Math.Sqrt(dx * dx + dy * dy);
+                    return d <= -0.5f ? 0f : d >= 0.5f ? 1f : d + 0.5f;
+                }, out _bandMarkTexture);
+            var markGo = HudChild(band, "mark", new Vector2(0.5f, 1f), new Vector2(0.5f, 0.5f), new Vector2(UiNoticeBand.MarkSize, UiNoticeBand.MarkSize));
+            _bandMark = HudImage(markGo, _bandMarkSprite, Color.white);
+            markGo.SetActive(false);
 
             var header = HudChild(band, "header", new Vector2(0.5f, 1f), new Vector2(0.5f, 1f), new Vector2(UiNoticeBand.MinWidth, UiNoticeBand.HeaderHeight));
             _bandHeader = HudText(header, UiNoticeBand.HeaderSize, ToColor(MenuPalette.Text));
@@ -469,6 +576,7 @@ internal sealed partial class UnityUiRuntime
         _bandCanvas = _band = null;
         _bandGroup = null;
         _bandRuleTop = _bandRuleBottom = null;
+        _bandMark = null;
         _bandHeader = _bandDetail = null;
         _bandNotice = null;
     }
@@ -483,10 +591,16 @@ internal sealed partial class UnityUiRuntime
         _hudCanvas = null;
         _hudHidden = false;
         _noticeHooked = false;
+        _bannerCheckNotice = null;
+        _bannerLostEpoch = int.MinValue;
         NoticeQueue.Clear();
         DestroyBand();
         FreeHudAsset(_bandSprite);
         FreeHudAsset(_bandTexture);
+        FreeHudAsset(_bandMarkSprite);
+        FreeHudAsset(_bandMarkTexture);
+        _bandMarkSprite = null;
+        _bandMarkTexture = null;
         _bandSprite = null;
         _bandTexture = null;
         foreach (var key in NoticeKeys)

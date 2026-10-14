@@ -101,6 +101,13 @@ public interface IUiPicker : IUiHandle
     /// <summary>Unselect everything; raises <see cref="OnPicked"/> when something was selected.</summary>
     void ClearSelection();
 
+    /// <summary>
+    /// P7b, multi mode: select every pickable entry matching <see cref="Query"/> (also those past the drawn lines), the
+    /// status line's <c>Select all</c> link. Raises <see cref="OnPicked"/> once; returns how many were added (0 in single
+    /// mode or when all were selected).
+    /// </summary>
+    int SelectAllMatches();
+
     /// <summary>After the selection changed, with the selected entries.</summary>
     IDisposable OnPicked(Action<IReadOnlyList<UiPickerEntry>> handler);
 

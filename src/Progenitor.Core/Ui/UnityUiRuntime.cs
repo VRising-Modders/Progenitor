@@ -842,10 +842,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             var image = link.GameObject.GetComponent<Image>();
             if (image == null) return false;
-            image.sprite = sprite as Sprite;
+            var asSprite = AsSprite(sprite);
+            image.sprite = asSprite;
             var caption = FindIn<TextMeshProUGUI>(link.GameObject);
             if (caption != null) caption.gameObject.SetActive(sprite == null);
-            return sprite is Sprite;
+            return asSprite != null;
         }
         catch (Exception e)
         {
@@ -2289,6 +2290,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     public void SelfPlacePanel(IRuntimePanel panel, bool selfPlaced)
     {
         if (panel is UnityPanel host && host.Alive) host.SelfPlaced = selfPlaced;
+    }
+
+    /// <summary>P7b: this panel never scrolls. See <see cref="IUiRuntime.NoScrollPanel"/>.</summary>
+    public void NoScrollPanel(IRuntimePanel panel)
+    {
+        if (panel is UnityPanel host && host.Alive) host.TurnOffScroll();
     }
 
     /// <summary>
@@ -4083,6 +4090,27 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     }
 
     /// <summary>
+    /// P7b: the Shift and Ctrl keys held now, for a click's multi-select meaning (Ctrl adds a row, Shift extends a
+    /// range). Part of the UI kit's pointer sample, like <see cref="PrimaryPointerHeld"/>; it binds no action to a key.
+    /// </summary>
+    internal static UiClickModifiers HeldClickModifiers()
+    {
+        var held = UiClickModifiers.None;
+        try
+        {
+            var keyboard = Keyboard.current;
+            if (keyboard == null) return held;
+            if ((keyboard.leftShiftKey != null && keyboard.leftShiftKey.isPressed)
+                || (keyboard.rightShiftKey != null && keyboard.rightShiftKey.isPressed)) held |= UiClickModifiers.Shift;
+            if ((keyboard.leftCtrlKey != null && keyboard.leftCtrlKey.isPressed)
+                || (keyboard.rightCtrlKey != null && keyboard.rightCtrlKey.isPressed)) held |= UiClickModifiers.Ctrl;
+        }
+        catch { /* a keyboard mid-teardown: no modifiers */ }
+
+        return held;
+    }
+
+    /// <summary>
     /// The primary (left) mouse button's held state right now, for <see cref="Ui.WatchPointer"/>:
     /// the EventTrigger trampoline carries no event payload, so the watch samples the button the
     /// moment its PointerDown dispatches. False with no mouse or on any read failure.
@@ -4146,7 +4174,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var scroll = hit?.Scroll;
                 // TEXTEXPAND1: a text area or the expanded editor under the pointer takes the notch
                 // while its text can move that way; at its end the notch scrolls the list.
-                if (TryScrollTextField(pointer, deltaY, hit))
+                // P7b: a widget that scrolls itself (the data table's body) takes the notch over its area
+                // while it can move that way (UiWheelClaims); at its end the notch goes on as below.
+                if (pointer.Kind == PointerKind.Inside && TryWheelClaim(pointer, deltaY))
+                {
+                    pumpWrote = true;
+                    scroll = null;
+                }
+                else if (TryScrollTextField(pointer, deltaY, hit))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -4312,6 +4347,31 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
     }
 
+    /// <summary>
+    /// P7b: offer a wheel notch to the widget claims (<see cref="UiWheelClaims"/>) of the topmost shown panel under the
+    /// pointer only, and only inside that panel's visible viewport: a table under a dialog or another panel, and rows
+    /// clipped out of the viewport, never take the wheel.
+    /// </summary>
+    private static bool TryWheelClaim(PointerSample pointer, float deltaY)
+    {
+        if (UiWheelClaims.Count == 0) return false;
+        UnityPanel? top = null;
+        for (int i = ShownPanels.Count - 1; i >= 0; i--)
+        {
+            var panel = ShownPanels[i];
+            if (panel == null || !panel.Alive || !panel.Visible) continue;
+            var frame = ScreenRectOfPanel(panel);
+            if (frame.IsKnown && frame.Contains(pointer.X, pointer.Y))
+            {
+                top = panel;
+                break;
+            }
+        }
+
+        if (top == null) return false;
+        return UiWheelClaims.TryTake(pointer.X, pointer.Y, deltaY, top, top.ViewportScreenRect);
+    }
+
     private static UnityPanel? ResolveHoveredPanel(PointerSample pointer)
     {
         UnityPanel? viewportHit = null;
@@ -4319,7 +4379,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         for (int i = ShownPanels.Count - 1; i >= 0; i--)
         {
             var panel = ShownPanels[i];
-            if (panel == null || !panel.Alive || !panel.Visible) continue;
+            if (panel == null || !panel.Alive || !panel.Visible || panel.WheelPassThrough) continue;
             var view = panel.ViewportScreenRect;
             if (view.IsKnown && view.Contains(pointer.X, pointer.Y))
             {
@@ -4595,10 +4655,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             try
             {
                 if (dialogRoot != null && !InsideDialog(field.gameObject, dialogRoot)) return;
+                // P7b: only a field on screen takes a click: not one under a hidden tab or panel (inactive), nor one
+                // scrolled out of its viewport whose rect still lies under the pointer.
+                if (!field.gameObject.activeInHierarchy) return;
                 var rt = field.GetComponent<RectTransform>();
                 if (rt == null) return;
                 var rect = ScreenRectOf(rt);
                 if (!rect.IsKnown || !rect.Contains(x, y)) return;
+                if (!InsideClipViewport(field.transform.parent, x, y)) return;
                 float cx = (rect.MinX + rect.MaxX) * 0.5f;
                 float cy = (rect.MinY + rect.MaxY) * 0.5f;
                 float dx = x - cx;
@@ -4676,7 +4740,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         catch { /* */ }
         try { field.Select(); } catch { /* */ }
         try { field.ActivateInputField(); } catch { /* */ }
+        bool wasFocused = ReferenceEquals(_ownedFocusField, field);
         NoteOwnedFocus(field);
+        // P7b: a data table's value box selects its whole value when it takes the keyboard, so typing replaces it.
+        if (!wasFocused && SelectsAllOnFocus(field)) QueueSelectAll(field);
         return true;
     }
 
@@ -4800,6 +4867,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         keys = 0;
         typed = '\0';
         var field = FocusedArmedField();
+        ApplyPendingSelectAll(field); // P7b: after this frame's click and caret placement, before any key
         var keyboard = Keyboard.current;
         if (keyboard == null)
         {
@@ -4811,6 +4879,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         try { TypeEdges.NoteDevice(keyboard.deviceId); } catch { /* */ }
 
         SampleTypeEdges(keyboard, frame);
+        // P7b: a widget's value box released the keyboard mid-typing; its burst ends when every typing key is up.
+        if (_keyBurstHold && !AnyTypingKeyHeld(keyboard)) _keyBurstHold = false;
         long nowMs = Environment.TickCount64;
         bool escapeHeld = KeyHeld(keyboard, Key.Escape);
         bool escapeEdge = TypeKeyDown(keyboard, UiKey.Escape, frame);
@@ -4839,7 +4909,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         bool enterEdge = TypeKeyDown(keyboard, UiKey.Enter, frame) || TypeKeyDown(keyboard, UiKey.NumpadEnter, frame);
         // TEXTEXPAND1: in a read-only editor Enter has no line to start, so it is the dialog's (Close).
         // BUILDSEARCH1: Enter in an external single-line field commits and gives up focus.
-        if (enterEdge && field != null && ExternalGuardId(field) != null)
+        if (enterEdge && field != null && EnterLeavesField(field))
+        {
+            // P7b: Enter in a data table's value box commits it: the box gives up the keyboard now.
+            ReleaseWidgetField(field);
+            field = FocusedArmedField();
+        }
+        else if (enterEdge && field != null && ExternalGuardId(field) != null)
         {
             NotifyExternalSubmit(field);
             field = FocusedArmedField();
@@ -5632,6 +5708,42 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     {
         try { MenuHotkeyGuard.SetFocusedField(FocusedFieldId(field)); }
         catch { /* */ }
+        // P7b: the guard stays up while the keys of a burst typed into a released widget box are still held.
+        if (field == null && _keyBurstHold)
+        {
+            try { MenuHotkeyGuard.SetFocusedField(MenuHotkeyGuard.InstallSearch); }
+            catch { /* */ }
+        }
+    }
+
+    /// <summary>P7b: whether any typing key (the pump's sampled set, Enter included) is held now.</summary>
+    private static bool AnyTypingKeyHeld(Keyboard keyboard)
+    {
+        for (int i = 0; i < TypedSampleKeys.Length; i++)
+            if (KeyHeld(keyboard, TypedSampleKeys[i])) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// P7b: (<paramref name="x"/>, <paramref name="y"/>) is inside the nearest clipping viewport above
+    /// <paramref name="from"/> (a <c>RectMask2D</c>), or there is none.
+    /// </summary>
+    private static bool InsideClipViewport(Transform? from, float x, float y)
+    {
+        try
+        {
+            for (var t = from; t != null; t = t.parent)
+            {
+                var mask = t.GetComponent<RectMask2D>();
+                if (mask == null) continue;
+                var rt = t.GetComponent<RectTransform>();
+                if (rt == null) return true;
+                var clip = ScreenRectOf(rt);
+                return !clip.IsKnown || clip.Contains(x, y);
+            }
+        }
+        catch { /* */ }
+        return true;
     }
 
     /// <summary>
@@ -11258,6 +11370,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private float TitleBand =>
             _dialog ? DialogLayout.FrameTopPad
+            // P7b: a game window that draws its own title row (the tip card's dialog rows) keeps only the dialog's top pad.
+            : _gameWindow && _hideTitle && !_menuPane ? DialogLayout.FrameTopPad
             : _menuPane && (MenuPaneModes.Titleless(_mode) || _hideTitle) ? 0f : PanelLayout.HeaderHeight;
 
         /// <summary>
@@ -12077,6 +12191,28 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         public bool SelfPlaced;
 
+        /// <summary>P7b: the panel has no scroll view (<see cref="IUiRuntime.NoScrollPanel"/>); the read-back skips it.</summary>
+        public bool NoScroll;
+
+        /// <summary>P7b: switch the ScrollRect and its bar off for good and mark the panel as not scrolling.</summary>
+        internal void TurnOffScroll()
+        {
+            NoScroll = true;
+            _verdictPending = false;
+            try
+            {
+                var scroll = Scroll;
+                if (scroll == null) return;
+                scroll.enabled = false; // AutoHide lives in its update: off, it never shows the bar again
+                var bar = scroll.verticalScrollbar;
+                if (bar != null && bar.gameObject.activeSelf) bar.gameObject.SetActive(false);
+            }
+            catch { /* the read-back skips the panel all the same */ }
+
+            try { if (_scrollbar != null && _scrollbar.activeSelf) _scrollbar.SetActive(false); }
+            catch { /* */ }
+        }
+
         /// <summary>
         /// INSTALLUX2 item 1: this panel is a modal dialog. It is centered rather than flowed (a
         /// dialog is never one of a ranked set), its frame is opaque over a raycast-blocking
@@ -12240,6 +12376,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
 
         private bool _gameWindow;
+
+        /// <summary>
+        /// P7b: sized like a dialog (its top pad, its content, its footer; no title band, no 200-unit floor): a dialog, or
+        /// a game window that hid its title to draw a dialog's own rows (the tip card). Placement and capture stay its own.
+        /// </summary>
+        private bool DialogSized => _dialog || (_gameWindow && _hideTitle && !_menuPane);
 
         /// <summary>GAMEWINDOW1: drawn with the game's popup frame (readback).</summary>
         internal bool IsGameWindow => _gameWindow;
@@ -13424,7 +13566,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private void ReadBackScrollbar(string when)
         {
-            if (!_verdictPending) return;
+            // P7b: a panel with no scroll view (NoScroll) has no bar to agree or disagree, whenever the pass was armed.
+            if (!ScrollbarVerdict.ShouldReadBack(_verdictPending, NoScroll))
+            {
+                _verdictPending = false;
+                return;
+            }
+
             _verdictPending = false;
             if (_scrollbar == null) return;
 
@@ -13575,7 +13723,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         : 0f;
                     refitTop = MenuPanelLayout.TopChromeHeight(topHeights) + headerChrome;
                     refitBottom = bottomChrome;
-                    refitForce = !SelfPlaced && (footerBand > 0f || _footerInset > 0f || _dialog);
+                    refitForce = !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized);
                     FitChromeInsets(refitTop, refitBottom, force: refitForce);
                     _footerInset = footerBand;
                     EnsureHeaderBand(headerChrome, MenuPanelLayout.TopChromeHeight(topHeights));
@@ -13615,7 +13763,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // DIALOGS1: a dialog is exactly as tall as its content, its top pad and its footer -
                 // no title band and no 200 px floor (the empty band above the live dialog's title).
                 float panelHeight = _menuPane ? _menuGeometry.Height
-                    : _dialog ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
+                    : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
 
                 _laidOutWith = available;
@@ -13633,7 +13781,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         rt.sizeDelta = new Vector2(0f, contentHeight);
                         float viewH = _sidebar
                             ? MenuPanelLayout.ListViewportHeight(panelHeight)
-                            : _dialog ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
+                            : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
                             : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
                         float npos = 1f;
                         float pendingOffsetY = 0f;
@@ -13725,7 +13873,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // could never report because it had no idea it was overflowing.
                 float viewport = _sidebar
                     ? MenuPanelLayout.ListViewportHeight(panelHeight)
-                    : _dialog ? DialogLayout.ViewportHeight(panelHeight, footerBand)
+                    : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand)
                     : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
                 bool scrolls = PanelLayout.Scrolls(contentHeight, viewport);
 
@@ -13735,7 +13883,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // next pass over this panel can read the owner's answer back and say whether the
                 // two agree, rather than printing one of them as if it were both.
                 _verdictScrolls = scrolls;
-                _verdictPending = _scrollbar != null;
+                _verdictPending = _scrollbar != null && !NoScroll; // P7b: a panel with no scroll view has nothing to read back
 
                 // Job FUI32. Which rung answered was never the whole question: a pass measured
                 // before Unity sized the canvas is wrong whatever token it prints, so the line
@@ -15204,6 +15352,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         private void BuildTiles()
         {
+            if (_spec.TileStates)
+            {
+                BuildStateTiles();
+                return;
+            }
+
             var (fill, rim) = MenuPalette.TileBand;
             bool first = (_spec.TileEdge & CellSectionEdge.First) != 0;
             bool last = (_spec.TileEdge & CellSectionEdge.Last) != 0;
@@ -15254,6 +15408,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private void PlaceTiles(CellPlacement[] placements, float rowHeight)
         {
             if (_tiles.Count == 0) return;
+            if (_spec.TileStates)
+            {
+                PlaceStateTiles(placements, rowHeight);
+                return;
+            }
+
             bool first = (_spec.TileEdge & CellSectionEdge.First) != 0;
             float reach = first ? 0f : _spec.GapAbove >= 0f ? _spec.GapAbove : PanelLayout.RowGap;
             var spans = CellTiles.Spans(placements, _spec.Cells);
@@ -15271,6 +15431,86 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     }
                     if (!pair.Value.activeSelf) pair.Value.SetActive(true);
                     PlaceTop(pair.Value, sp.Center, -reach, sp.Width, rowHeight + reach);
+                }
+                catch { /* */ }
+            }
+        }
+
+        /// <summary>P7b: each tile's last state (<see cref="CellRowSpec.TileStates"/> rows).</summary>
+        private readonly Dictionary<int, UiTileState> _tileStates = new();
+
+        /// <summary>P7b: a <see cref="CellRowSpec.TileStates"/> row's tiles: a plain image each with a gold stripe child, hidden until a state asks.</summary>
+        private void BuildStateTiles()
+        {
+            for (int i = 0; i < _spec.Cells.Count; i++)
+            {
+                int tile = _spec.Cells[i].Tile;
+                if (tile <= 0 || _tiles.ContainsKey(tile)) continue;
+                try
+                {
+                    var go = new GameObject("tile-state-" + tile);
+                    go.transform.SetParent(GameObject.transform, false);
+                    var image = TryAdd<Image>(go);
+                    if (image != null)
+                    {
+                        try { image.sprite = null; } catch { /* */ }
+                        try { image.raycastTarget = false; } catch { /* */ }
+                        try { image.maskable = true; } catch { /* */ }
+                    }
+                    var stripe = BandChild(go, "tile-stripe", new Vector2(0f, 0f), new Vector2(0f, 1f),
+                        new Vector2(0f, 0.5f), Vector2.zero, new Vector2(MenuPalette.SelectedStripeWidth, 0f));
+                    if (stripe != null) stripe.color = ToColor(MenuPalette.SelectedStripe);
+                    go.SetActive(false);
+                    _tiles[tile] = go;
+                }
+                catch { /* the cells still draw; only the band is missing */ }
+            }
+        }
+
+        public void SetTileState(int tile, UiTileState state)
+        {
+            if (_released || !_tiles.ContainsKey(tile)) return;
+            _tileStates[tile] = state;
+            // In place, at the width the layout pass last placed the row at (as ApplyCell).
+            PlaceCells(MenuPanelLayout.InPlaceCellRowWidth(_placedWidth, _host.ContentRowWidth));
+        }
+
+        /// <summary>
+        /// P7b: a band state spans its tile's cells and the row's height (no reach into the gap: one entry lit, not a
+        /// block); a rule is <see cref="UiTileLook.RuleWidth"/> wide down the tile's center and reaches up through the gap
+        /// above unless the row is its rule's first (<see cref="CellRowSpec.TileEdge"/> First), so the rules of consecutive
+        /// rows read as one line.
+        /// </summary>
+        private void PlaceStateTiles(CellPlacement[] placements, float rowHeight)
+        {
+            bool first = (_spec.TileEdge & CellSectionEdge.First) != 0;
+            float gap = _spec.GapAbove >= 0f ? _spec.GapAbove : PanelLayout.RowGap;
+            var spans = CellTiles.Spans(placements, _spec.Cells);
+            foreach (var pair in _tiles)
+            {
+                var state = _tileStates.TryGetValue(pair.Key, out var s) ? s : UiTileState.Hidden;
+                CellTiles.TileSpan? span = null;
+                foreach (var sp in spans)
+                    if (sp.Tile == pair.Key) { span = sp; break; }
+                try
+                {
+                    if (state == UiTileState.Hidden || span is not { } at || at.Width <= 1f)
+                    {
+                        if (pair.Value.activeSelf) pair.Value.SetActive(false);
+                        continue;
+                    }
+
+                    if (!pair.Value.activeSelf) pair.Value.SetActive(true);
+                    var image = pair.Value.GetComponent<Image>();
+                    if (image != null) image.color = ToColor(UiTileLook.Fill(state));
+                    var stripe = pair.Value.transform.Find("tile-stripe");
+                    if (stripe != null) stripe.gameObject.SetActive(UiTileLook.Stripe(state));
+                    if (state == UiTileState.Rule)
+                    {
+                        float reach = first ? 0f : gap;
+                        PlaceTop(pair.Value, at.Center, -reach, UiTileLook.RuleWidth, rowHeight + reach);
+                    }
+                    else PlaceTop(pair.Value, at.Center, 0f, at.Width, rowHeight);
                 }
                 catch { /* */ }
             }
@@ -16708,7 +16948,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 cell.Fill.color = Color.white;
             }
             catch { return false; }
-            SetPlate(cell, on ? ToColor(MenuPalette.ChipOnPlate) : (Color?)null);
+            // Live 2026-10-14: at the column overlay's 8-unit side inset the gold plate left a dark band inside the chip's
+            // rim on both sides while it met the rim top and bottom (3). A chip's plate fills the art evenly inside the rim.
+            SetPlate(cell, on ? ToColor(MenuPalette.ChipOnPlate) : (Color?)null, UiChipsLayout.PlateInset);
             try { if (cell.Rim != null) cell.Rim.effectColor = new Color(0f, 0f, 0f, 0f); } catch { /* */ }
             if (cell.Tmp != null)
             {
@@ -16722,6 +16964,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 }
                 catch { /* */ }
                 try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
+                // P7b chips: a chip with an icon or a remove overlay keeps its caption between them; every other chip keeps
+                // the symmetric button pad, so its caption is centered on the whole chip art.
+                float half = CellLayout.ButtonPad * .5f;
+                float left = cell.Spec.CaptionInsetLeft > 0f ? cell.Spec.CaptionInsetLeft : half;
+                float right = cell.Spec.CaptionInsetRight > 0f ? cell.Spec.CaptionInsetRight : half;
+                try { cell.Tmp.margin = new Vector4(left, 0f, right, 0f); } catch { /* */ }
             }
             ApplyPopupStates(cell);
             return true;
@@ -16732,7 +16980,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// <see cref="InstallColumns.ButtonTintInsetY"/> from its edges), under the caption, so the
         /// sprite's decorated ends and rim stay visible around it with their swaps. Null hides it.
         /// </summary>
-        private static void SetPlate(Cell cell, Color? color)
+        private static void SetPlate(Cell cell, Color? color, float insetX = InstallColumns.ButtonTintInsetX)
         {
             try
             {
@@ -16758,6 +17006,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 }
 
                 if (cell.Tint == null) return;
+                InsetStretch(cell.Tint.gameObject, insetX, InstallColumns.ButtonTintInsetY);
                 cell.Tint.gameObject.SetActive(true);
                 cell.Tint.sprite = null;
                 cell.Tint.type = Image.Type.Simple;
@@ -17264,10 +17513,29 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var gold = ToColor(MenuPalette.TextColor(CellTone.Gold));
                 try { cell.Tmp.text = Escape(cell.Spec.Text ?? ""); } catch { /* */ }
                 try { cell.Tmp.fontSize = cell.Spec.FontSize; } catch { /* */ }
-                try { cell.Tmp.color = new Color(gold.r * 0.85f, gold.g * 0.85f, gold.b * 0.85f, 1f); } catch { /* */ }
-                try { cell.Tmp.fontStyle = FontStyles.Underline; } catch { /* */ }
-                try { cell.Tmp.horizontalAlignment = HorizontalAlignmentOptions.Right; } catch { /* */ }
+                // P7b chips: a single-glyph quiet button (CellWrap.Glyph, a chip's remove glyph) is drawn centered and not
+                // underlined, light cream on a selected chip's gold plate (tone ChipOn). Every other quiet button is unchanged.
+                bool glyph = cell.Spec.Wrap == CellWrap.Glyph;
+                try
+                {
+                    cell.Tmp.color = glyph && cell.Spec.Tone == CellTone.ChipOn
+                        ? ToColor(MenuPalette.ChipOnText)
+                        : new Color(gold.r * 0.85f, gold.g * 0.85f, gold.b * 0.85f, 1f);
+                }
+                catch { /* */ }
+                try { cell.Tmp.fontStyle = glyph ? FontStyles.Normal : FontStyles.Underline; } catch { /* */ }
+                try { cell.Tmp.horizontalAlignment = glyph ? HorizontalAlignmentOptions.Center : HorizontalAlignmentOptions.Right; } catch { /* */ }
                 try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
+                if (glyph)
+                {
+                    // Live 2026-10-14: a chip's 20-unit remove glyph drew nothing. The button caption's 8-unit side margins
+                    // left 4 units, and the ellipsis clamp replaced the × with nothing that fit. A glyph button is drawn
+                    // whole: no side margins, no ellipsis (as a CellWrap.Glyph text cell is).
+                    try { cell.Tmp.margin = Vector4.zero; } catch { /* */ }
+                    try { cell.Tmp.overflowMode = TextOverflowModes.Overflow; } catch { /* */ }
+                    try { cell.Tmp.enableWordWrapping = false; } catch { /* */ }
+                    try { cell.Tmp.raycastTarget = false; } catch { /* the button's fill is the click target */ }
+                }
             }
 
             TintTransition(cell, cell.Tmp, 1.3f, 0.7f);
@@ -17321,6 +17589,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         public IRuntimeWidget? CellWidget(string key) =>
             key != null && _cells.TryGetValue(key, out var cell) ? cell.Widget : null;
+
+        /// <summary>P7b help: the text of cell <paramref name="key"/> (a term marker follows it), or null.</summary>
+        internal TextMeshProUGUI? CellText(string key) =>
+            key != null && _cells.TryGetValue(key, out var cell) ? cell.Tmp : null;
 
         public void ApplyCell(CellSpec spec)
         {
@@ -17384,7 +17656,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         public void SetImage(string key, object? sprite)
         {
             if (key == null || !_cells.TryGetValue(key, out var cell) || cell.Picture == null) return;
-            var s = sprite as Sprite;
+            var s = UnityUiRuntime.AsSprite(sprite);
             try { cell.Picture.sprite = s; } catch { /* */ }
             try { cell.Picture.enabled = s != null && UnityUiRuntime.Alive(s); } catch { /* */ }
         }

@@ -349,7 +349,7 @@ public sealed class InstallVanillaSweepTests : IDisposable
         SourcePin.AssertUncommented(runtime, "if (cell.Spec.Skin == CellSkin.Chip && PaintChip(cell)) return;");
         string chip = SourcePin.MethodBody(runtime, "private static bool PaintChip(Cell cell)");
         SourcePin.AssertUncommented(chip, "GameArt.SettingsArtPart.PopupButton");
-        SourcePin.AssertUncommented(chip, "SetPlate(cell, on ? ToColor(MenuPalette.ChipOnPlate) : (Color?)null);");
+        SourcePin.AssertUncommented(chip, "SetPlate(cell, on ? ToColor(MenuPalette.ChipOnPlate) : (Color?)null, UiChipsLayout.PlateInset);");
         SourcePin.AssertUncommented(chip, "ApplyPopupStates(cell);");
         SourcePin.AssertUncommented(chip, "return false;");
 

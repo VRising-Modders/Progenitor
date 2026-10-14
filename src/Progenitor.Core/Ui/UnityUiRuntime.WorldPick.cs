@@ -17,11 +17,11 @@ namespace Progenitor.Ui;
 /// gate measures the frame rect, so the pointer is never "over" the band and gameplay input is never
 /// blocked by it, and every band graphic has <c>raycastTarget = false</c>, so attack clicks pass through.</para>
 ///
-/// <para><b>Look.</b> The Mods palette's pane ground (the dialog frame color, <see cref="DialogFrameColors"/>)
-/// at reduced alpha, the game's gold category underline beneath it (the Bindings menu header rule,
-/// <see cref="KeybindArtDonors.TryRule"/>), the kit's body font, and the keys on the game's own key cap
-/// (<see cref="KeybindArtDonors.TryKeyCap"/>, the Bindings menu's key button). Either donor missing falls
-/// back to a flat palette gold rule and a bordered kit cap. The caller's prompt is escaped
+/// <para><b>Look</b> (<see cref="UiWorldPickBandLook"/>): the framework notice band, at least 980 units wide and centered:
+/// a black ground at 0.84 between 1-unit gold rules (<see cref="MenuPalette.Gold"/>) on its top and bottom edges, all three
+/// fading to clear over the outer sixth at each end (one drawn fade texture). The kit's body font, and the keys on the
+/// game's own key cap (<see cref="KeybindArtDonors.TryKeyCap"/>, the Bindings menu's key button; a bordered kit cap when
+/// it was not borrowed). The caller's prompt is escaped
 /// (<see cref="UiRichText.Literal"/>) and ends in an ellipsis past <see cref="UiWorldPickCopy.MaxPromptWidth"/>.</para>
 /// </summary>
 internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
@@ -29,22 +29,24 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
     /// <summary>Name of the band's visible child (one per band panel).</summary>
     internal const string WorldPickBandName = UiOwnership.Prefix + "world-pick-band";
 
-    private const float BandHeight = 50f;
-    private const float BandBottom = 190f;
+    private const float BandHeight = UiWorldPickBandLook.Height;
+    private const float BandBottom = UiWorldPickCopy.BandBottom;
     private const float FrameBelowEdge = 8f;
-    private const float BandPadX = 28f;
     private const float PromptSize = 24f;
     private const float WordSize = 21f;
     private const float KeySize = 18f;
     private const float CapHeight = 30f;
     private const float CapPadX = 9f;
     private const float GapAfterPrompt = 30f;
+    private const float GapAroundSeparator = 10f;
     private const float GapCapWord = 8f;
     private const float GapBetweenKeys = 24f;
-    private const float RuleHeight = 2f;
-    private const float GroundAlpha = 0.82f;
+    private static Sprite? _bandFade;
+    private static Texture2D? _bandFadeTexture;
+    private static bool _bandFadeTeardown;
 
-    public void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey)
+    public void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey, string cancelWord = UiWorldPickCopy.CancelWord,
+        string pickWord = UiWorldPickCopy.PickWord, string count = "")
     {
         if (panel is not UnityPanel host || !host.Alive) return;
         try
@@ -56,6 +58,20 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             try { KeybindArtDonors.Prepare(); } catch { /* the kit cap and a flat rule */ }
             try { host.Title?.SetActive(false); } catch { /* */ }
             try { host.ViewportObject?.SetActive(false); } catch { /* */ }
+            // The band never scrolls: its frame is zero-sized (below), so a live ScrollRect over the hidden viewport would
+            // judge the empty content as overflowing and show its bar ("SHOWN while the last verdict was (fits)"). Turn
+            // the ScrollRect off and its bar with it; the panel's read-back then finds the bar hidden, as the layout says.
+            try
+            {
+                var scroll = host.Scroll;
+                if (scroll != null)
+                {
+                    var bar = scroll.verticalScrollbar;
+                    scroll.enabled = false;
+                    if (bar != null && bar.gameObject.activeSelf) bar.gameObject.SetActive(false);
+                }
+            }
+            catch { /* the bar is a diagnostic's concern only: the band draws the same */ }
 
             // The frame: zero-sized below the screen edge, its own image off (see the class remarks).
             var frameImage = frame.GetComponent<Image>();
@@ -77,36 +93,45 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             band.transform.SetParent(frame.transform, false);
             var bandRt = band.GetComponent<RectTransform>() ?? band.AddComponent<RectTransform>();
 
+            // The notice band's look: black fading to clear at both ends (UiWorldPickBandLook).
+            var fade = BandFade();
             var ground = TryAdd<Image>(band);
             if (ground != null)
             {
-                try { ground.color = ToColor(DialogFrameColors.Frame.WithAlpha(GroundAlpha)); } catch { /* */ }
+                try { if (fade != null) ground.sprite = fade; } catch { /* */ }
+                try { ground.color = new Color(0f, 0f, 0f, UiWorldPickBandLook.GroundAlpha); } catch { /* */ }
                 try { ground.raycastTarget = false; } catch { /* */ }
             }
 
             float x = 0f;
-            var parts = new List<(RectTransform Rt, float Width)>();
-            void Add(GameObject? go, float width)
+            // Each part with the gap that follows it, so an optional part (a repeating pick's count) needs no index table.
+            var parts = new List<(RectTransform Rt, float Width, float GapAfter)>();
+            void Add(GameObject? go, float width, float gapAfter)
             {
                 if (go == null) return;
                 var rt = go.GetComponent<RectTransform>();
                 if (rt == null) return;
-                parts.Add((rt, width));
-                x += width;
+                parts.Add((rt, width, gapAfter));
+                x += width + gapAfter;
             }
 
             var text = ToColor(MenuPalette.Text);
-            Add(BandText(band, UiRichText.Literal(prompt), PromptSize, text, UiWorldPickCopy.MaxPromptWidth, out float promptWidth), promptWidth);
-            x += GapAfterPrompt;
-            Add(BandCap(band, interactKey, out float capA), capA);
-            x += GapCapWord;
-            Add(BandText(band, UiWorldPickCopy.PickWord, WordSize, text, 0f, out float pickWidth), pickWidth);
-            x += GapBetweenKeys;
-            Add(BandCap(band, cancelKey, out float capB), capB);
-            x += GapCapWord;
-            Add(BandText(band, UiWorldPickCopy.CancelWord, WordSize, text, 0f, out float cancelWidth), cancelWidth);
+            bool counted = !string.IsNullOrEmpty(count);
+            Add(BandText(band, UiRichText.Literal(prompt), PromptSize, text, UiWorldPickCopy.MaxPromptWidth, out float promptWidth), promptWidth,
+                counted ? GapAroundSeparator : GapAfterPrompt);
+            if (counted)
+            {
+                // P7b: "Pick containers · 3 picked": the separator muted, the count in the gold.
+                Add(BandText(band, UiWorldPickCopy.CountSeparator, PromptSize, ToColor(MenuPalette.Muted), 0f, out float sepWidth), sepWidth, GapAroundSeparator);
+                Add(BandText(band, UiRichText.Literal(count), PromptSize, ToColor(MenuPalette.Gold), 0f, out float countWidth), countWidth, GapAfterPrompt);
+            }
 
-            float width = Mathf.Ceil(x + 2f * BandPadX);
+            Add(BandCap(band, interactKey, out float capA), capA, GapCapWord);
+            Add(BandText(band, string.IsNullOrEmpty(pickWord) ? UiWorldPickCopy.PickWord : pickWord, WordSize, text, 0f, out float pickWidth), pickWidth, GapBetweenKeys);
+            Add(BandCap(band, cancelKey, out float capB), capB, GapCapWord);
+            Add(BandText(band, string.IsNullOrEmpty(cancelWord) ? UiWorldPickCopy.CancelWord : cancelWord, WordSize, text, 0f, out float cancelWidth), cancelWidth, 0f);
+
+            float width = UiWorldPickBandLook.Width(x);
             bandRt.anchorMin = new Vector2(0.5f, 0f);
             bandRt.anchorMax = new Vector2(0.5f, 0f);
             bandRt.pivot = new Vector2(0.5f, 0f);
@@ -114,18 +139,18 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             bandRt.anchoredPosition = new Vector2(0f, BandBottom + FrameBelowEdge);
 
             float cursor = -x / 2f;
-            float[] gaps = { GapAfterPrompt, GapCapWord, GapBetweenKeys, GapCapWord, 0f };
             for (int i = 0; i < parts.Count; i++)
             {
-                var (rt, w) = parts[i];
+                var (rt, w, gap) = parts[i];
                 rt.anchorMin = new Vector2(0.5f, 0.5f);
                 rt.anchorMax = new Vector2(0.5f, 0.5f);
                 rt.pivot = new Vector2(0f, 0.5f);
                 rt.anchoredPosition = new Vector2(cursor, 0f);
-                cursor += w + (i < gaps.Length ? gaps[i] : 0f);
+                cursor += w + gap;
             }
 
-            BandRule(band, width);
+            BandRule(band, width, top: true, fade);
+            BandRule(band, width, top: false, fade);
             Plugin.Logger?.LogDiag("Ui: world pick band " + (int)width + "x" + (int)BandHeight + " keys=" + interactKey + "/" + cancelKey);
         }
         catch (Exception e)
@@ -210,30 +235,44 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
         return cap;
     }
 
-    private static void BandRule(GameObject parent, float width)
+    /// <summary>A thin gold rule along the band's top or bottom edge, fading to clear at both ends like the ground.</summary>
+    private static void BandRule(GameObject parent, float width, bool top, Sprite? fade)
     {
-        var rule = new GameObject("rule");
+        var rule = new GameObject(top ? "rule-top" : "rule-bottom");
         rule.transform.SetParent(parent.transform, false);
         var image = TryAdd<Image>(rule);
         if (image == null) return;
-        if (KeybindArtDonors.TryRule(out var sprite, out var type, out var tint) && sprite != null)
-        {
-            try { image.sprite = sprite; } catch { /* */ }
-            try { image.type = type; } catch { /* */ }
-            try { image.color = tint; } catch { /* */ }
-        }
-        else
-        {
-            try { image.color = ToColor(MenuPalette.Gold); } catch { /* */ }
-        }
-
+        try { if (fade != null) image.sprite = fade; } catch { /* */ }
+        try { image.color = ToColor(MenuPalette.Gold); } catch { /* */ }
         try { image.raycastTarget = false; } catch { /* */ }
         var rt = rule.GetComponent<RectTransform>() ?? rule.AddComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 0f);
-        rt.anchorMax = new Vector2(0.5f, 0f);
-        rt.pivot = new Vector2(0.5f, 0f);
+        float y = top ? 1f : 0f;
+        rt.anchorMin = new Vector2(0.5f, y);
+        rt.anchorMax = new Vector2(0.5f, y);
+        rt.pivot = new Vector2(0.5f, y);
         rt.anchoredPosition = Vector2.zero;
-        rt.sizeDelta = new Vector2(width, RuleHeight);
+        rt.sizeDelta = new Vector2(width, UiWorldPickBandLook.RuleHeight);
+    }
+
+    /// <summary>The band's horizontal fade (one row of coverage, stretched), drawn once per Core generation; null when it cannot be.</summary>
+    private static Sprite? BandFade()
+    {
+        if (_bandFade != null && Alive(_bandFade)) return _bandFade;
+        _bandFade = HudSprite("world-pick-band-fade", UiWorldPickBandLook.FadeTextureWidth, 1, (x, _) => UiWorldPickBandLook.FadeAlpha(x), out _bandFadeTexture);
+        if (_bandFade != null && !_bandFadeTeardown)
+        {
+            _bandFadeTeardown = true;
+            UiWidgetLifetime.Register("world-pick-band-art", () =>
+            {
+                FreeHudAsset(_bandFade);
+                FreeHudAsset(_bandFadeTexture);
+                _bandFade = null;
+                _bandFadeTexture = null;
+                _bandFadeTeardown = false;
+            });
+        }
+
+        return _bandFade;
     }
 }
 #endif

@@ -138,6 +138,66 @@ public sealed class UiNoticeTests
     }
 
     [Fact]
+    public void A_notice_posted_while_the_games_full_screen_menu_hides_the_HUD_shows_when_the_menu_closes()
+    {
+        var expired = new List<UiNoticeHandle>();
+        _queue.Expired += expired.Add;
+        var n = _queue.Enqueue(_a, "while the menu is open", "", UiNoticeKind.Info, 0, 0);
+        // The menu stays open three times the ordinary wait: the notice waits and does not expire.
+        for (double t = 0; t <= UiNoticeRules.MaxWaitSeconds * 3; t += 1.0)
+            Assert.Null(_queue.Next(t, true, Present, 0, menuHold: true));
+        Assert.Equal(UiNoticeState.Queued, n.State);
+        Assert.Empty(expired);
+        // The menu closes: it shows.
+        Assert.Same(n, _queue.Next(UiNoticeRules.MaxWaitSeconds * 3 + 1, false, Present));
+        Assert.Equal(new[] { "while the menu is open" }, _presented);
+    }
+
+    [Fact]
+    public void The_menu_or_the_workspace_in_a_world_holds_the_banner_and_a_short_settle_follows()
+    {
+        Assert.True(UiNoticeRules.MenuHolds(gameMenuOpen: true, workspaceOpen: false, inWorld: true));
+        Assert.True(UiNoticeRules.MenuHolds(gameMenuOpen: false, workspaceOpen: true, inWorld: true));
+        Assert.False(UiNoticeRules.MenuHolds(gameMenuOpen: false, workspaceOpen: true, inWorld: false)); // title: the band
+        Assert.False(UiNoticeRules.MenuHolds(false, false, true));
+
+        var n = _queue.Enqueue(_a, "after the menu", "", UiNoticeKind.Info, 0, 0);
+        // The HUD reads visible (the live case): only the menu hold keeps the banner from playing unseen.
+        Assert.Null(_queue.Next(1.0, false, Present, 0, menuHold: true));
+        Assert.Null(_queue.Next(5.0, false, Present, 0, menuHold: true));
+        Assert.Empty(_presented);
+        // The menu closes at 5: the queue settles before it shows.
+        Assert.Null(_queue.Next(5.0 + UiNoticeRules.MenuSettleSeconds - 0.1, false, Present, 0, menuHold: false));
+        Assert.Equal(UiNoticeState.Queued, n.State);
+        Assert.Same(n, _queue.Next(5.0 + UiNoticeRules.MenuSettleSeconds + 0.05, false, Present, 0, menuHold: false));
+        Assert.Equal(new[] { "after the menu" }, _presented);
+    }
+
+    [Fact]
+    public void A_banner_switched_off_right_after_it_was_asked_to_play_is_reported_lost()
+    {
+        Assert.Equal(UiNoticeRules.BannerVerdict.Pending, UiNoticeRules.CheckBanner(10.1, 10.0, bannerActive: false));
+        Assert.Equal(UiNoticeRules.BannerVerdict.Lost, UiNoticeRules.CheckBanner(10.0 + UiNoticeRules.BannerCheckSeconds, 10.0, false));
+        Assert.Equal(UiNoticeRules.BannerVerdict.Held, UiNoticeRules.CheckBanner(10.0 + UiNoticeRules.BannerCheckSeconds, 10.0, true));
+    }
+
+    [Fact]
+    public void A_notice_held_by_the_menu_still_expires_after_the_hold_limit_and_a_hidden_HUD_after_the_wait()
+    {
+        var expired = new List<UiNoticeHandle>();
+        _queue.Expired += expired.Add;
+        var held = _queue.Enqueue(_a, "held", "", UiNoticeKind.Info, 0, 0);
+        for (double t = 0; t <= UiNoticeRules.MaxHeldSeconds + 1; t += 5.0)
+            _queue.Next(t, true, Present, 0, menuHold: true);
+        Assert.Equal(UiNoticeState.Dropped, held.State);
+        // The player's own hidden HUD (no menu): the ordinary 30 s wait.
+        var hidden = _queue.Enqueue(_b, "hidden", "", UiNoticeKind.Info, 0, 1000);
+        _queue.Next(1000 + UiNoticeRules.MaxWaitSeconds + 0.5, true, Present, 0, menuHold: false);
+        Assert.Equal(UiNoticeState.Dropped, hidden.State);
+        Assert.Equal(2, expired.Count);
+    }
+
+    [Fact]
     public void A_notice_that_waits_too_long_expires_unshown_and_is_reported()
     {
         var expired = new List<UiNoticeHandle>();
@@ -295,5 +355,34 @@ public sealed class UiNoticeTests
 
         Assert.Equal(4, colors.Count);
         Assert.Equal(UiNoticeBand.KindRuleAlpha, UiNoticeBand.RuleColor(UiNoticeKind.Error).A);
+    }
+
+    [Fact]
+    public void Every_kind_reads_apart_from_Info_on_the_band()
+    {
+        // P7b live: a Warning band looked like an Info one (the pending amber against the gold, on a 1-unit rule).
+        static float Distance(PaletteColor a, PaletteColor b) =>
+            (float)Math.Sqrt((a.R - b.R) * (a.R - b.R) + (a.G - b.G) * (a.G - b.G) + (a.B - b.B) * (a.B - b.B));
+        var kinds = (UiNoticeKind[])Enum.GetValues(typeof(UiNoticeKind));
+        foreach (var a in kinds)
+            foreach (var b in kinds)
+                if (a < b) Assert.True(Distance(UiNoticeBand.Accent(a), UiNoticeBand.Accent(b)) > 0.25f, a + " vs " + b);
+        Assert.Equal(MenuPalette.OrangeText, UiNoticeBand.Accent(UiNoticeKind.Warning));
+        Assert.Equal(MenuPalette.Gold, UiNoticeBand.Accent(UiNoticeKind.Info));
+        Assert.Equal(MenuPalette.OkText, UiNoticeBand.Accent(UiNoticeKind.Success));
+        Assert.Equal(MenuPalette.Red, UiNoticeBand.Accent(UiNoticeKind.Error));
+        // The kinds that are not Info: a thicker rule and the accent mark before the header.
+        Assert.Equal(UiNoticeBand.RuleThickness, UiNoticeBand.RuleThicknessFor(UiNoticeKind.Info));
+        Assert.False(UiNoticeBand.MarkShown(UiNoticeKind.Info));
+        Assert.Equal(0f, UiNoticeBand.MarkRoom(UiNoticeKind.Info));
+        foreach (var k in new[] { UiNoticeKind.Success, UiNoticeKind.Warning, UiNoticeKind.Error })
+        {
+            Assert.True(UiNoticeBand.RuleThicknessFor(k) >= 2f);
+            Assert.True(UiNoticeBand.MarkShown(k));
+            Assert.True(UiNoticeBand.RuleColor(k).A > UiNoticeBand.RuleColor(UiNoticeKind.Info).A);
+        }
+
+        // The mark sits left of the header with its gap, the header's width taken into account.
+        Assert.Equal(-100f - UiNoticeBand.MarkGap - UiNoticeBand.MarkSize / 2f, UiNoticeBand.MarkX(200f));
     }
 }

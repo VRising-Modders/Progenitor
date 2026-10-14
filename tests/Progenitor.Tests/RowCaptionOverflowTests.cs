@@ -114,6 +114,9 @@ public class RowCaptionOverflowTests
                 // whose height is measured and stacked inside a scrolling content rect, so it must
                 // draw every line it wraps to; the block's viewport (a RectMask2D) clips it.
                 "try { tmp.overflowMode = TextOverflowModes.Overflow; } catch { /* */ }",
+                // P7b chips, PaintQuiet: a CellWrap.Glyph quiet button (a chip's remove ×) is one glyph in a 20-unit target,
+                // not a caption; the ellipsis clamp drew nothing there (live 2026-10-14).
+                "try { cell.Tmp.overflowMode = TextOverflowModes.Overflow; } catch { /* */ }",
             },
             writes);
     }

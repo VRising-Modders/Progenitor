@@ -67,7 +67,8 @@ internal sealed partial class UnityUiRuntime
 
         // A whole list row (a Mods list entry, an Install row) takes the band; a control or a button cell, whose own face
         // would cover a band, is framed (live 2026-10-10: on the page's switch only the band's top edge showed).
-        if (target != null) DrawNavMark(target, on, frame: widget is not UnityCellRow);
+        // P7b: a row that asked for it (a data table's soft row, whose own fill covers the band) is framed too.
+        if (target != null) DrawNavMark(target, on, frame: widget is not UnityCellRow || NavFramedRow(target));
     }
 
     /// <summary>Canvas units the frame stands outside the control, and its thickness.</summary>

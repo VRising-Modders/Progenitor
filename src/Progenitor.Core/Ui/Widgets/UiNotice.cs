@@ -78,6 +78,53 @@ internal static class UiNoticeRules
     /// </summary>
     internal const double MaxWaitSeconds = 30.0;
 
+    /// <summary>
+    /// P7b: while the game's full-screen menu is open the game hides its HUD, its announcement banner included, and
+    /// shows nothing there until the menu closes. A notice posted then (from a mod's page in the Mods workspace, which
+    /// lives in that menu) waits for the menu to close: that time does not count toward <see cref="MaxWaitSeconds"/>.
+    /// A notice is still dropped once it is this old, however long the menu stayed open.
+    /// </summary>
+    internal const double MaxHeldSeconds = 600.0;
+
+    /// <summary>
+    /// P7b: after the menu or the workspace closes, the queue still waits this long before it shows a held notice, so the
+    /// game has put its HUD back (the banner's canvas and its animation) before the banner is asked to play.
+    /// </summary>
+    internal const double MenuSettleSeconds = 0.75;
+
+    /// <summary>
+    /// P7b: how long after the game's banner was asked to play a notice the framework checks that it is still on screen.
+    /// The game's own HUD system switches the banner object off on frames where it shows no day or night announcement
+    /// (seen in its update, and live 2026-10-14: the text set, the object inactive 1.5 s later); a notice whose banner
+    /// was switched off is moved to the framework band for the rest of its slot, and later notices in that world go to
+    /// the band directly.
+    /// </summary>
+    internal const double BannerCheckSeconds = 0.3;
+
+    /// <summary>The banner check's answer.</summary>
+    internal enum BannerVerdict
+    {
+        /// <summary>Too early to tell.</summary>
+        Pending,
+
+        /// <summary>The banner is on screen: keep it.</summary>
+        Held,
+
+        /// <summary>The banner object was switched off: draw the notice on the band.</summary>
+        Lost,
+    }
+
+    /// <summary>The banner check at <paramref name="now"/> for a notice asked of the banner at <paramref name="askedAt"/>.</summary>
+    internal static BannerVerdict CheckBanner(double now, double askedAt, bool bannerActive) =>
+        now - askedAt < BannerCheckSeconds ? BannerVerdict.Pending : bannerActive ? BannerVerdict.Held : BannerVerdict.Lost;
+
+    /// <summary>
+    /// P7b: whether the banner is out of sight behind a menu: the game's full-screen menu is open, or (in a world, where
+    /// notices go on the game's HUD banner) the Mods workspace is open over the HUD. At the title screen the workspace
+    /// does not hold: notices go on the framework band, drawn above it.
+    /// </summary>
+    internal static bool MenuHolds(bool gameMenuOpen, bool workspaceOpen, bool inWorld) => gameMenuOpen || (workspaceOpen && inWorld);
+
     /// <summary>Longest header and detail kept; longer text is cut with an ellipsis.</summary>
     internal const int MaxHeaderChars = 120;
 
@@ -149,6 +196,9 @@ internal sealed class UiNoticeHandle : IUiNotice
 
     internal double PostedAt { get; }
 
+    /// <summary>P7b: seconds it waited while the game's full-screen menu held the HUD (not counted toward the expiry).</summary>
+    internal double HeldSeconds { get; set; }
+
     internal long Serial { get; }
 
     /// <summary>The world epoch it was posted in; a queued notice from another epoch is dropped (<c>world-changed</c>).</summary>
@@ -193,6 +243,12 @@ internal sealed class UiNoticeQueue
     private readonly Dictionary<object, List<double>> _rate = new(ReferenceEqualityComparer.Instance);
     private UiNoticeHandle? _showing;
     private double _gapUntil = double.NegativeInfinity;
+
+    /// <summary>The time of the previous step (for <see cref="UiNoticeHandle.HeldSeconds"/>); NaN before the first.</summary>
+    private double _lastStep = double.NaN;
+
+    /// <summary>P7b: the queue holds until this time after a menu hold ends (<see cref="UiNoticeRules.MenuSettleSeconds"/>).</summary>
+    private double _settleUntil = double.NegativeInfinity;
     private long _serial;
 
     /// <summary>Raised (outside the lock) when the showing notice must be taken off screen early: disposed or its owner unloaded.</summary>
@@ -269,19 +325,30 @@ internal sealed class UiNoticeQueue
     /// the lock. Before that, queued notices posted in another world epoch than <paramref name="epoch"/> are dropped
     /// (<c>world-changed</c>) and those waiting longer than <see cref="UiNoticeRules.MaxWaitSeconds"/> are dropped
     /// (<c>expired</c>); both raise <see cref="Expired"/>. While <paramref name="hostWait"/> holds, nothing is shown.
+    /// <para>P7b: <paramref name="menuHold"/> true (the game's full-screen menu is open and hides the HUD) holds the
+    /// queue like <paramref name="hostWait"/>, and the time it holds does not count toward the expiry
+    /// (<see cref="UiNoticeRules.MaxHeldSeconds"/> still bounds it): the notice shows when the menu closes.</para>
     /// </summary>
-    internal UiNoticeHandle? Next(double now, bool hostWait, Func<UiNoticeHandle, double> present, int epoch = 0)
+    internal UiNoticeHandle? Next(double now, bool hostWait, Func<UiNoticeHandle, double> present, int epoch = 0, bool menuHold = false)
     {
         if (present == null) throw new ArgumentNullException(nameof(present));
         UiNoticeHandle? next = null;
         List<UiNoticeHandle>? lapsed = null;
         lock (Gate)
         {
+            // The hold, then the settle after it: both keep the queue (and the hold's time off the expiry).
+            if (menuHold) _settleUntil = now + UiNoticeRules.MenuSettleSeconds;
+            else if (now < _settleUntil) menuHold = true;
+            if (menuHold) hostWait = true;
+            double step = double.IsNaN(_lastStep) || now < _lastStep ? 0 : now - _lastStep;
+            _lastStep = now;
             for (int i = _queued.Count - 1; i >= 0; i--)
             {
                 var q = _queued[i];
+                if (menuHold) q.HeldSeconds += step;
+                double waited = now - q.PostedAt - q.HeldSeconds;
                 string? reason = q.Epoch != epoch ? "world-changed"
-                    : now - q.PostedAt >= UiNoticeRules.MaxWaitSeconds ? "expired" : null;
+                    : waited >= UiNoticeRules.MaxWaitSeconds || now - q.PostedAt >= UiNoticeRules.MaxHeldSeconds ? "expired" : null;
                 if (reason == null) continue;
                 _queued.RemoveAt(i);
                 Drop(q, reason);
@@ -507,14 +574,36 @@ internal static class UiNoticeBand
     /// <summary>Band height: one header line, plus a detail line when there is one.</summary>
     internal static float Height(bool hasDetail) => 2f * PadY + HeaderHeight + (hasDetail ? DetailHeight : 0f);
 
-    /// <summary>The rules' accent for <paramref name="kind"/>: gold for Info, the palette's green, amber and red otherwise.</summary>
+    /// <summary>
+    /// The accent for <paramref name="kind"/>: Info the game's gold, Success the palette's green (<c>OkText</c>), Warning
+    /// the framework's warning orange-amber (<c>OrangeText</c>; P7b live 2026-10-14: the pending amber <c>PendText</c> read
+    /// the same as the gold on a thin rule), Error the palette's red.
+    /// </summary>
     internal static PaletteColor Accent(UiNoticeKind kind) => kind switch
     {
         UiNoticeKind.Success => MenuPalette.OkText,
-        UiNoticeKind.Warning => MenuPalette.PendText,
+        UiNoticeKind.Warning => MenuPalette.OrangeText,
         UiNoticeKind.Error => MenuPalette.Red,
         _ => MenuPalette.Gold,
     };
+
+    /// <summary>The rules' thickness: Info's quiet 1-unit hairline, the other kinds a 2-unit rule that reads at a glance.</summary>
+    internal static float RuleThicknessFor(UiNoticeKind kind) => kind == UiNoticeKind.Info ? RuleThickness : KindRuleThickness;
+
+    internal const float KindRuleThickness = 2f;
+
+    /// <summary>A small accent mark before the header (every kind but Info): its side and the gap to the header.</summary>
+    internal const float MarkSize = 10f;
+
+    internal const float MarkGap = 10f;
+
+    internal static bool MarkShown(UiNoticeKind kind) => kind != UiNoticeKind.Info;
+
+    /// <summary>The header's room for the mark (0 for Info), added to the measured header width.</summary>
+    internal static float MarkRoom(UiNoticeKind kind) => MarkShown(kind) ? MarkSize + MarkGap : 0f;
+
+    /// <summary>The mark's center x from the band's center for a header <paramref name="headerWidth"/> wide.</summary>
+    internal static float MarkX(float headerWidth) => -(Finite(headerWidth) / 2f) - MarkGap - MarkSize / 2f;
 
     /// <summary>
     /// The two rules' color: Info keeps the game's quiet gold at <see cref="RuleAlpha"/>; the other kinds show their
@@ -523,7 +612,7 @@ internal static class UiNoticeBand
     internal static PaletteColor RuleColor(UiNoticeKind kind) =>
         Accent(kind).WithAlpha(kind == UiNoticeKind.Info ? RuleAlpha : KindRuleAlpha);
 
-    internal const float KindRuleAlpha = 0.7f;
+    internal const float KindRuleAlpha = 0.9f;
 
     /// <summary>Alpha (0..1) of a band shown at <paramref name="shownAt"/> that ends at <paramref name="endsAt"/>.</summary>
     internal static float Alpha(double now, double shownAt, double endsAt)

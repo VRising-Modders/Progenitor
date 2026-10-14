@@ -125,6 +125,14 @@ public static class Ui
     /// leave the size and the position alone. Asked for by the consent prompt, which is a centered
     /// modal and not one of a flowed set. See <see cref="IUiRuntime.SelfPlacePanel"/>.
     /// </summary>
+    internal static void NoScrollPanel(IUiPanel panel)
+    {
+        if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
+            || handle.Runtime is not IRuntimePanel runtimePanel) return;
+        try { CurrentRuntime().NoScrollPanel(runtimePanel); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: no-scroll panel: " + e.Message); }
+    }
+
     internal static void SelfPlacePanel(IUiPanel panel, bool selfPlaced = true)
     {
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
@@ -521,6 +529,11 @@ public static class Ui
         // second line behind the tracked ctx.Dialogs registration.
         try { UiDialog.DropOwner(owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll dialogs threw: " + e.Message); }
+        // P7b help: the owner's marked terms, marker change handlers and tip cards (every plugin, ctx.Hud or not).
+        try { UiTerms.DropOwner(owner); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll terms threw: " + e.Message); }
+        try { UiTips.DropOwner(owner); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll tips threw: " + e.Message); }
         UiHandle[] snapshot;
         lock (Gate)
         {
@@ -1180,6 +1193,11 @@ public static class Ui
         // the workspace log can carry reason=escape; other owners still read the handle.
         if (hidden > 0)
         {
+            // P7b: one physical Escape is one action. Its 27 swept the panels; the paired BackAction 17 of the same
+            // press must not reach the Escape handlers next, or a handler that stood back because a panel was over it
+            // (a world pick, while the Mods workspace was open) would take the same press once the sweep cleared the
+            // way — the workspace closed and the pick ended on one press.
+            if (keyCode == 27) _swallowBack = true;
             try { ModsMenu.NotifyHiddenByEscape(); }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: Mods escape hook threw: " + e.Message); }
             Plugin.Logger?.LogDiag("Ui: key " + keyCode + " hid " + hidden + " panel(s); owners are not told.");

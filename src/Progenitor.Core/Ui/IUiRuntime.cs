@@ -101,6 +101,13 @@ internal interface IUiRuntime
     void SelfPlacePanel(IRuntimePanel panel, bool selfPlaced) { }
 
     /// <summary>
+    /// P7b: this panel never scrolls (the pick-in-world band: a zero-sized frame whose visible band is a child). Its
+    /// ScrollRect and bar are switched off for good, and the scroll-bar read-back skips it, since PanelLayout's
+    /// fits/scrolls verdict says nothing about a panel that has no scroll view. No-op on a runtime without Unity panels.
+    /// </summary>
+    void NoScrollPanel(IRuntimePanel panel) { }
+
+    /// <summary>
     /// INSTALLUX2 item 1: make this panel a modal dialog — an opaque frame on the mods palette,
     /// a raycast-blocking backdrop behind it on the panel's own overlay canvas, content-sized and
     /// centered, no scrollbar while the content fits, and revealed only after the runtime's own
@@ -642,6 +649,9 @@ internal interface IRuntimeCellRow : IRuntimeWidget
     void SetExpanded(bool expanded);
 
     void SetSelected(bool selected);
+
+    /// <summary>P7b: draw tile <paramref name="tile"/> of a <see cref="CellRowSpec.TileStates"/> row as <paramref name="state"/>. Test fakes ignore it.</summary>
+    void SetTileState(int tile, UiTileState state) { }
 
     /// <summary>Header: rewrite the captions so <paramref name="sortKey"/>'s column carries the indicator.</summary>
     void SetSorted(string? sortKey) { }

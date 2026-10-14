@@ -1793,6 +1793,29 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         }
     }
 
+    private Dictionary<int, UiTileState>? _tileStates;
+
+    /// <summary>
+    /// P7b: draw tile <paramref name="tile"/> of a <see cref="CellRowSpec.TileStates"/> row as <paramref name="state"/>
+    /// (a selection band confined to the tile's cells, a hover wash, a rule). Repaints in place; no relayout.
+    /// </summary>
+    internal void SetTileState(int tile, UiTileState state)
+    {
+        if (IsDisposed || tile <= 0) return;
+        _tileStates ??= new Dictionary<int, UiTileState>();
+        if (_tileStates.TryGetValue(tile, out var was) && was == state) return;
+        _tileStates[tile] = state;
+        if (_row is { Alive: true })
+        {
+            try { _row.SetTileState(tile, state); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: cell row tile state: " + e.Message); }
+        }
+    }
+
+    /// <summary>P7b: the state tile <paramref name="tile"/> was last given (<see cref="UiTileState.Hidden"/> before any).</summary>
+    internal UiTileState TileStateOf(int tile) =>
+        _tileStates != null && _tileStates.TryGetValue(tile, out var s) ? s : UiTileState.Hidden;
+
     public void SetSorted(string? sortKey) => SetSorted(sortKey, ascending: false);
 
     /// <inheritdoc />
@@ -1813,6 +1836,10 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
     }
 
     /// <summary>The caption a header cell shows: uppercase, with the indicator on the sorted column.</summary>
+    /// <summary>P7b: an input cell's text as drawn: its value, or its hint (trimmed) while the value is empty.</summary>
+    internal static string InputShown(string? text, string? placeholder) =>
+        string.IsNullOrEmpty(text) ? (placeholder ?? "").Trim() : text!;
+
     internal string HeaderCaptionOf(CellSpec cell) =>
         CellLayout.HeaderCaption(
             cell.Text, _sortedKey != null && string.Equals(cell.SortKey, _sortedKey, StringComparison.Ordinal), _sortAscending, cell.SmallCaps);
@@ -1846,6 +1873,8 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
             };
             // LIST3: an input cell reads back `{kind: input, text, placeholder}` — text is its value.
             if (cell.Kind == CellKind.Input) described["placeholder"] = cell.Placeholder;
+            // P7b: what the field shows on screen: its value, or its gray hint while empty (a data table's inherited value).
+            if (cell.Kind == CellKind.Input) described["shown"] = InputShown(cell.Text, cell.Placeholder);
             // SEARCHCLEAR1: a search box says so (it draws the clear button while it has text).
             if (cell.Kind == CellKind.Input && cell.Clearable) described["clearable"] = true;
             // INSTALLCOLS1: a two-line cell's toned lead (the Install list's update note).
@@ -1930,6 +1959,12 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         }
         // TILES1: a tile row names the tile edges it draws (head row "first", note row "last").
         if (HasTiles(_spec)) row["tileEdge"] = SectionEdgeName(_spec.TileEdge);
+        if (_spec.TileStates && _tileStates != null)
+        {
+            var states = new Dictionary<string, object?>();
+            foreach (var pair in _tileStates) states[pair.Key.ToString(System.Globalization.CultureInfo.InvariantCulture)] = pair.Value.ToString().ToLowerInvariant();
+            row["tileStates"] = states;
+        }
         if (_spec.Skin != CellRowSkin.Kit) row["skin"] = _spec.Skin == CellRowSkin.GameEntry ? "game-entry" : "category-heading";
         if (_header)
         {

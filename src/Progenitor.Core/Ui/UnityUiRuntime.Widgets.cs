@@ -65,7 +65,16 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             var canvas = _tipCanvas!;
             Rect cr = canvas.rect;
             if (!ToCanvas(canvas, anchor.MinX, anchor.MinY, out var a) || !ToCanvas(canvas, anchor.MaxX, anchor.MaxY, out var b)) return;
-            var place = UiTooltipLayout.Place(a.x, a.y, b.x, b.y, size.Width, size.Height, cr.width, cr.height);
+            // P7b: kept inside the panel the hovered control is on (the workspace's page, a window) when it fits there.
+            var area = UiTooltipLayout.AreaFor(anchor, ShownPanelRects());
+            Vector2 am = new(float.NaN, float.NaN), ax = new(float.NaN, float.NaN);
+            if (area.IsKnown && (!ToCanvas(canvas, area.MinX, area.MinY, out am) || !ToCanvas(canvas, area.MaxX, area.MaxY, out ax)))
+            {
+                am = new Vector2(float.NaN, float.NaN);
+                ax = am;
+            }
+
+            var place = UiTooltipLayout.PlaceIn(a.x, a.y, b.x, b.y, size.Width, size.Height, cr.width, cr.height, am.x, am.y, ax.x, ax.y);
             var box = _tipBox!;
             box.sizeDelta = new Vector2(size.Width, size.Height);
             box.anchoredPosition = new Vector2(place.X, place.Y);
@@ -79,11 +88,37 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         }
     }
 
+    private static bool AnyPanelShown()
+    {
+        try { return Ui.ShownPanelsSnapshot().Count > 0; }
+        catch { return true; }
+    }
+
+    /// <summary>The screen rects of the shown panels (the tooltip's area candidates).</summary>
+    private List<ScreenRect> ShownPanelRects()
+    {
+        var rects = new List<ScreenRect>();
+        try
+        {
+            foreach (var panel in Ui.ShownPanelsSnapshot())
+            {
+                if (panel.IsDisposed || panel.Runtime is not { Alive: true } runtime) continue;
+                var r = WidgetRect(runtime);
+                if (r.IsKnown) rects.Add(r);
+            }
+        }
+        catch { /* the canvas is the area */ }
+
+        return rects;
+    }
+
     /// <summary>Once a frame while the box is up: hide it when its control left the screen without a pointer exit.</summary>
     private void WatchTooltip()
     {
         bool keep;
-        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && (_tipStillShown == null || _tipStillShown()); }
+        // P7b: a kit tooltip always belongs to a control on a shown panel; with none shown (Escape hid them all, the
+        // workspace closed) it goes, whatever its own liveness check says.
+        try { keep = Alive(_tipRoot) && _tipRoot!.activeSelf && AnyPanelShown() && (_tipStillShown == null || _tipStillShown()); }
         catch { keep = false; }
         if (!keep) HideTooltip();
     }
@@ -159,7 +194,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
                 try { back.raycastTarget = false; } catch { /* */ }
             }
 
-            _tipTitle = TipText(box, "tooltip-title", UiTooltipLayout.TitleFontSize, ToColor(MenuPalette.ClientText));
+            // P7b: the title in the game's gold (the gold caption accent of the game's chips and sorted headers).
+            _tipTitle = TipText(box, "tooltip-title", UiTooltipLayout.TitleFontSize, ToColor(MenuPalette.ChipOnBorder));
             _tipBody = TipText(box, "tooltip-body", UiTooltipLayout.BodyFontSize, ToColor(MenuPalette.Text));
             _tipRoot = root;
             _tipCanvas = root.GetComponent<RectTransform>();
@@ -305,6 +341,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
     }
 
     public bool PrimaryHeld() => PrimaryPointerHeld();
+
+    public UiClickModifiers ClickModifiers() => HeldClickModifiers();
 
     private static readonly Dictionary<int, Sprite?> ItemIcons = new();
     private static Unity.Entities.World? _itemIconWorld;

@@ -14,6 +14,38 @@ internal static class UiWorldPickCopy
     /// <summary>The word after the Escape key cap.</summary>
     internal const string CancelWord = "Cancel";
 
+    /// <summary>P7b: the word after the Escape key cap while a repeating pick runs (Escape ends it as finished).</summary>
+    internal const string FinishWord = "Finish";
+
+    /// <summary>P7b: the word after the Interact key cap while a repeating pick runs (each interact adds a target).</summary>
+    internal const string AddWord = "Add";
+
+    /// <summary>P7b: what separates the prompt from a repeating pick's count on the band (drawn muted).</summary>
+    internal const string CountSeparator = "·";
+
+    /// <summary>
+    /// P7b: a repeating pick's count on the band, drawn in the gold after the prompt (<c>3 picked</c>); empty for a
+    /// one-shot pick or before the first pick.
+    /// </summary>
+    internal static string BandCount(bool repeat, int count) =>
+        !repeat || count <= 0 ? "" : count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " picked";
+
+    /// <summary>P7b: the word after the Interact key cap for a pick.</summary>
+    internal static string InteractWord(bool repeat) => repeat ? AddWord : PickWord;
+
+    /// <summary>P7b: the word after the Escape key cap for a pick.</summary>
+    internal static string EscapeWord(bool repeat) => repeat ? FinishWord : CancelWord;
+
+    /// <summary>
+    /// P7b: the band's bottom edge, in canvas units above the screen's bottom edge. The HUD's health readout and the buff
+    /// row above the action bar reach about 180 units up on the 1920x1080 design canvas (measured on a capture); the band
+    /// stays clear of them with its bottom at least <see cref="MinBandBottom"/> up.
+    /// </summary>
+    internal const float BandBottom = 200f;
+
+    /// <summary>P7b: the lowest the band's bottom edge may sit (the HUD clearance the mockup review found).</summary>
+    internal const float MinBandBottom = 196f;
+
     /// <summary>The Interact key cap's text when the game's binding cannot be read.</summary>
     internal const string InteractFallback = "Interact";
 
@@ -57,12 +89,14 @@ internal enum UiWorldPickEscapeOwner
 /// &gt; the armed pick. Only when nothing above the pick is open does Escape cancel it; otherwise the
 /// press does what it would do with no pick armed and the pick stays armed.</para>
 ///
-/// <para><b>Why the band's capture mode follows it.</b> A shown panel with capture
-/// (<see cref="UiCaptureMode.WhenHovered"/>/<see cref="UiCaptureMode.WhileShown"/>) registers the input
-/// context that takes the game's Back and Menu_Close in every scope, so while it is registered a game
-/// menu could not be closed with Escape. The band therefore asks for capture only while the pick is
-/// topmost (<see cref="BandMode"/>), so its context exists exactly when Escape is the pick's. A
-/// <see cref="UiCaptureMode.Never"/> panel still keeps Bootstrap forwarding Escape to the framework.</para>
+/// <para><b>The band takes the close key and nothing else.</b> The band is a <see cref="UiCaptureMode.Never"/>
+/// panel (<see cref="BandMode"/>): the pointer never routes it, so it never asks for the full mask (a
+/// <c>WhenHovered</c> band failed closed to it with an unreadable pointer, a controller player's case). While the
+/// pick is topmost (<see cref="BandHoldsCloseKey"/>) it holds a close-key-only context
+/// (<c>UiInputCapture.AcquireCloseKey</c>): the game's Back and Menu_Close are taken, so Escape cancels the pick
+/// without opening the system menu, and movement, aim, zoom and every other key stay the game's. Otherwise it holds
+/// nothing, so no context of ours stands between the game and its own menu's close. A <see cref="UiCaptureMode.Never"/>
+/// panel still keeps Bootstrap forwarding Escape to the framework.</para>
 /// </summary>
 internal static class UiWorldPickEscape
 {
@@ -79,9 +113,14 @@ internal static class UiWorldPickEscape
         return UiWorldPickEscapeOwner.Pick;
     }
 
-    /// <summary>The band's capture mode: capture (for Escape) only while the pick owns Escape.</summary>
-    internal static UiCaptureMode BandMode(UiWorldPickEscapeOwner owner) =>
-        owner == UiWorldPickEscapeOwner.Pick ? UiCaptureMode.WhenHovered : UiCaptureMode.Never;
+    /// <summary>The band's capture mode: always <see cref="UiCaptureMode.Never"/> (it never asks for a gameplay block).</summary>
+    internal static UiCaptureMode BandMode(UiWorldPickEscapeOwner owner) => UiCaptureMode.Never;
+
+    /// <summary>Whether the band holds a close-key-only context: only while the pick owns Escape.</summary>
+    internal static bool BandHoldsCloseKey(UiWorldPickEscapeOwner owner) => owner == UiWorldPickEscapeOwner.Pick;
+
+    /// <summary>The mask the band's hold asks for: the close key only, wherever the pointer is.</summary>
+    internal static UiMaskScope BandScope => UiMaskScope.CloseKeyOnly;
 
     /// <summary>
     /// The game's open HUD menu (<c>OpenHUDMenuSystem.CurrentMenuType</c>) counts as open for any value
@@ -121,4 +160,49 @@ internal readonly struct UiWorldPickSuppression
         catch { sent = false; }
         return sent ? new UiWorldPickSuppression(true, true) : new UiWorldPickSuppression(false, false);
     }
+}
+
+/// <summary>
+/// The pick band's look as numbers (the framework notice band: a dark band between thin gold rules, both fading to clear
+/// at the ends), game-free so the geometry and the fade are tested without a client. One-shot and repeating picks share it.
+/// </summary>
+internal static class UiWorldPickBandLook
+{
+    /// <summary>The band's least width in canvas units; it grows past it only for a very long prompt.</summary>
+    internal const float MinWidth = 980f;
+
+    internal const float Height = 52f;
+
+    /// <summary>Padding between the band's content and its ends (inside the fade).</summary>
+    internal const float PadX = 90f;
+
+    /// <summary>The top and bottom rules' thickness.</summary>
+    internal const float RuleHeight = 1f;
+
+    /// <summary>The ground's opacity in the middle (black).</summary>
+    internal const float GroundAlpha = 0.84f;
+
+    /// <summary>The share of the width, at each end, over which the ground and the rules fade to clear.</summary>
+    internal const float FadeShare = 0.16f;
+
+    /// <summary>The fade texture's width in pixels (one row, stretched; bilinear).</summary>
+    internal const int FadeTextureWidth = 256;
+
+    /// <summary>The band's width for content <paramref name="contentWidth"/> wide.</summary>
+    internal static float Width(float contentWidth) =>
+        float.IsNaN(contentWidth) || contentWidth < 0f ? MinWidth : Math.Max(MinWidth, (float)Math.Ceiling(contentWidth + 2f * PadX));
+
+    /// <summary>The opacity at <paramref name="t"/> across the band (0 the left end, 1 the right): 1 in the middle, easing to 0 at both ends.</summary>
+    internal static float Fade(float t)
+    {
+        if (float.IsNaN(t)) return 0f;
+        float edge = Math.Min(t, 1f - t);
+        if (edge <= 0f) return 0f;
+        if (edge >= FadeShare) return 1f;
+        float u = edge / FadeShare;
+        return u * u * (3f - 2f * u); // smoothstep
+    }
+
+    /// <summary>The fade texture's coverage at pixel <paramref name="x"/>.</summary>
+    internal static float FadeAlpha(int x) => Fade((x + 0.5f) / FadeTextureWidth);
 }

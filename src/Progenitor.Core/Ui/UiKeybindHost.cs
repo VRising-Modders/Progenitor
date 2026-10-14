@@ -86,6 +86,7 @@ internal static class UiKeybindHost
             BindEnforceGameWins(file);
             BindMenuHistoryInnerTabs(file);
             BindClosedDrawers(file);
+            BindHelp(file);
             BindServerBrowser(file);
             var handle = Keybinds.Register(
                 owner: typeof(UiKeybindHost),
@@ -259,6 +260,28 @@ internal static class UiKeybindHost
         // Three homes: which settings drawers are closed. Read on every use, so nothing is cached across a Core reload.
         try { CoreUiSettings.ClosedDrawers = file.Bind(SettingsDrawers.Section, SettingsDrawers.Key, "", SettingsDrawers.Description); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: [Ui] " + SettingsDrawers.Key + " could not be bound (" + e.Message + "); drawers are remembered for this session only."); }
+    }
+
+    /// <summary>
+    /// P7b help: the term markers' hidden set, hover counts and auto-hide count, and the tip cards' seen set
+    /// (<see cref="UiHelpSettings"/>). Read on every use through <see cref="UiHelpStore"/>, so nothing is cached across a
+    /// Core reload; unbound, they are remembered for this session only.
+    /// </summary>
+    private static void BindHelp(ConfigFile file)
+    {
+        try
+        {
+            CoreUiSettings.HiddenTermMarkers = file.Bind(UiHelpSettings.Section, UiHelpSettings.HiddenTermsKey, "", UiHelpSettings.HiddenTermsDescription);
+            CoreUiSettings.TermMarkerHovers = file.Bind(UiHelpSettings.Section, UiHelpSettings.TermHoversKey, "", UiHelpSettings.TermHoversDescription);
+            CoreUiSettings.TermMarkerAutoHide = file.Bind(UiHelpSettings.Section, UiHelpSettings.AutoHideKey, UiHelpSettings.DefaultAutoHide,
+                new ConfigDescription(UiHelpSettings.AutoHideDescription, new AcceptableValueRange<int>(0, UiHelpSettings.MaxAutoHide)));
+            CoreUiSettings.SeenTips = file.Bind(UiHelpSettings.Section, UiHelpSettings.SeenTipsKey, "", UiHelpSettings.SeenTipsDescription);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: [Ui] term marker and tip values could not be bound (" + e.Message
+                + "); hidden markers and seen tips are remembered for this session only.");
+        }
     }
 
     private static void BindServerBrowser(ConfigFile file)

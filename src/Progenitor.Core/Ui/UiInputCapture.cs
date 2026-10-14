@@ -237,6 +237,14 @@ internal static class UiInputCapture
     public static string RemovedLog => "Ui: input context removed order=" + Order;
 
     /// <summary>
+    /// P7b: the line after a register: the scope the context applies now, beside the recipe line, which says what it
+    /// can apply. <c>CloseKeyOnly</c> takes Back / Menu_Close and nothing else.
+    /// </summary>
+    public static string ScopeLog(UiMaskScope scope) =>
+        "Ui: input context order=" + Order + " applies scope=" + scope
+        + (scope == UiMaskScope.CloseKeyOnly ? " (the close key only; gameplay input is the game's)" : "");
+
+    /// <summary>
     /// How many frames a refused <c>Register</c> is retried before the module stops trying. A
     /// server or main-menu process must not retry forever; a client that is mid-loading-screen
     /// gets a handful of frames to bring the world up.
@@ -347,6 +355,16 @@ internal static class UiInputCapture
     /// (<c>Ui.CaptureInput(false)</c> is about panels; photo mode must still keep the character still).
     /// </summary>
     private static int _exclusive;
+
+    /// <summary>
+    /// P7b: close-key holds (<see cref="AcquireCloseKey"/>): something on screen that must take the panel close key
+    /// (Escape / B, the game's Back and Menu_Close) and nothing else — the pick-in-world band while the pick is topmost.
+    /// A hold registers the context like a shown panel, but it is not a panel the pointer routes: it is never a term of
+    /// <see cref="UiMaskScope.Full"/>, so it masks <see cref="UiMaskScope.CloseKeyOnly"/> wherever the pointer is, even
+    /// with no readable pointer (a controller player). Separate from <see cref="_count"/> so the panel bookkeeping and
+    /// the pointer gate are untouched.
+    /// </summary>
+    private static int _closeKey;
 
     /// <summary>
     /// The pointer gate (job FUI19), driven by <see cref="UiHoverGate"/> when a
@@ -513,7 +531,7 @@ internal static class UiInputCapture
     /// </summary>
     public static bool IsFullyBlocking
     {
-        get { lock (Gate) return WantedLocked() && (_pointerBlock || _exclusive > 0); }
+        get { lock (Gate) return (_enabled && _count > 0 && _pointerBlock) || _exclusive > 0; }
     }
 
     /// <summary>Live exclusive holds (<see cref="AcquireExclusive"/>).</summary>
@@ -535,6 +553,48 @@ internal static class UiInputCapture
             _exclusive++;
             NudgeLocked(freshOpen: _exclusive == 1 && _count == 0 && !_inFlight);
             push = ScopeLocked();
+        }
+
+        push.Send();
+        Apply();
+    }
+
+    /// <summary>Live close-key holds (<see cref="AcquireCloseKey"/>).</summary>
+    public static int CloseKeyCount
+    {
+        get { lock (Gate) return _closeKey; }
+    }
+
+    /// <summary>
+    /// P7b: take the panel close key and nothing else: registers the context (as a shown panel would) while at least one
+    /// hold is live, masking <see cref="UiMaskScope.CloseKeyOnly"/> unless a shown panel or an exclusive hold asks for
+    /// more. Gameplay input (movement, aim, zoom, every other key) is never blocked by a hold. Pair with
+    /// <see cref="ReleaseCloseKey"/>; <see cref="Uninstall"/> drops every hold.
+    /// </summary>
+    public static void AcquireCloseKey()
+    {
+        ScopePush push;
+        lock (Gate)
+        {
+            _closeKey++;
+            NudgeLocked(freshOpen: _closeKey == 1 && _count == 0 && _exclusive == 0 && !_inFlight);
+            push = ScopeLocked();
+        }
+
+        push.Send();
+        Apply();
+    }
+
+    /// <summary>End one close-key hold. Never goes below zero. The last one removes the context unless a panel still wants it.</summary>
+    public static void ReleaseCloseKey()
+    {
+        ScopePush push;
+        lock (Gate)
+        {
+            if (_closeKey == 0) return;
+            _closeKey--;
+            push = ScopeLocked();
+            NudgeLocked();
         }
 
         push.Send();
@@ -776,9 +836,14 @@ internal static class UiInputCapture
     private static UiMaskScope EffectiveScopeLocked() =>
         _exclusive > 0 ? UiMaskScope.Exclusive : PanelScopeLocked();
 
-    /// <summary>The panels' scope: the pointer gate and the wanted state (the one ScopeFor derivation).</summary>
+    /// <summary>
+    /// The panels' scope: the pointer gate and the wanted state (the one ScopeFor derivation). Only shown panels can
+    /// ask for <see cref="UiMaskScope.Full"/>; a close-key hold (<see cref="AcquireCloseKey"/>) registers the context
+    /// but is never a term of it. Without holds this is exactly <c>ScopeFor(_pointerBlock &amp;&amp; WantedLocked())</c>
+    /// as before (the exclusive term is decided one level up).
+    /// </summary>
     private static UiMaskScope PanelScopeLocked() =>
-        InputMaskPlan.ScopeFor(_pointerBlock && WantedLocked());
+        InputMaskPlan.ScopeFor(_pointerBlock && PanelsWantedLocked());
 
     /// <summary>The push owed to the current blocker for the current state. See <see cref="ScopePush"/>.</summary>
     private static ScopePush ScopeLocked(bool force = false) =>
@@ -1033,6 +1098,7 @@ internal static class UiInputCapture
         {
             _count = 0;
             _exclusive = 0;
+            _closeKey = 0;
             _pending = false;
             _registerAttempts = 0;
             _gaveUp = false;
@@ -1387,7 +1453,10 @@ internal static class UiInputCapture
     /// anything — see <see cref="InputMaskPlan"/>.
     /// </para>
     /// </summary>
-    private static bool WantedLocked() => (_enabled && _count > 0) || _exclusive > 0;
+    private static bool WantedLocked() => PanelsWantedLocked() || (_enabled && _closeKey > 0) || _exclusive > 0;
+
+    /// <summary>P7b: shown panels want a context (the only term that can ask for <see cref="UiMaskScope.Full"/>; a close-key hold cannot).</summary>
+    private static bool PanelsWantedLocked() => _enabled && _count > 0;
 
     /// <summary>
     /// The game half. Runs with <c>Gate</c> released and <see cref="CallGate"/> held, so the
@@ -1528,7 +1597,10 @@ internal static class UiInputCapture
                 _chainExhaustions = 0;
                 _chainGaveUp = false;
                 DisarmPumpLocked();
+                // P7b: the recipe line says what the context CAN mask; the scope says what it masks now (a pick band's
+                // close-key hold registers with CloseKeyOnly, and the recipe alone was read as a full block).
                 Plugin.Logger?.LogInfo(plan.Wanted ? RegisteredLog(outcome.MaskLive) : RemovedLog);
+                if (plan.Wanted) Plugin.Logger?.LogInfo(ScopeLog(EffectiveScopeLocked()));
                 return false;
 
             default:
@@ -1718,6 +1790,7 @@ internal static class UiInputCapture
             _blocker = NullUiInputBlocker.Instance;
             _count = 0;
             _exclusive = 0;
+            _closeKey = 0;
             _enabled = true;
             push = WritePointerBlockLocked(true);
             _pending = false;
