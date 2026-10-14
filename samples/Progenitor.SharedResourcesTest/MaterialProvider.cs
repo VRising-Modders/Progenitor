@@ -45,8 +45,8 @@ public sealed partial class TestContext
         {
             var status = MaterialSource.Status;
             ProviderStatus = status.ToString();
-            if (!status.HooksInstalled || !status.Wired.Contains(MaterialOperation.Build) || !status.Wired.Contains(MaterialOperation.Craft))
-                throw new InvalidOperationException("Framework hooks not ready: " + status);
+            if (!status.HooksInstalled || FixedMaterialProvider.Governed.Any(op => !status.Wired.Contains(op)))
+                throw new InvalidOperationException("Framework hooks not ready (Build, Craft, Repair and Upgrade must be wired): " + status);
             _provider = registration;
             enabled = true;
             MaterialSource.Invalidate(Actor);
@@ -83,8 +83,11 @@ public sealed partial class TestContext
         private readonly Dictionary<int, ItemSources> _items = new();
         private readonly IReadOnlyList<ContainerId> _candidates;
         private static readonly ItemSources Empty = new(Array.Empty<ContainerId>());
-        public IReadOnlyCollection<MaterialOperation> Operations { get; } =
-            Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft });
+        /// <summary>Every operation the test covers: build, craft, repair and castle heart upgrade.</summary>
+        internal static readonly IReadOnlyList<MaterialOperation> Governed = Array.AsReadOnly(new[]
+            { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade });
+
+        public IReadOnlyCollection<MaterialOperation> Operations => Governed;
 
         internal FixedMaterialProvider(TestContext test)
         {
@@ -103,7 +106,7 @@ public sealed partial class TestContext
         private bool Applies(in MaterialContext context) => context.User.Equals(_actor)
             && context.WorldEpoch == _epoch && _test.WorldState.LoadEpoch == _epoch
             && context.StandingTerritory == _territory
-            && (context.Operation == MaterialOperation.Build || context.Operation == MaterialOperation.Craft);
+            && Governed.Contains(context.Operation);
 
         // This deliberately governs only one testing admin on one plot. It is not a sharing policy for real players.
         public long Revision(in MaterialContext context) => _revision;
@@ -120,7 +123,12 @@ public sealed partial class TestContext
             if (_test.ProviderFault == "sources" || (_test.ProviderFault == "item" && _test.ProviderFaultItem == item))
                 throw new InvalidOperationException("injected test fault (sources, item " + item + ")");
             // Items without a configured cost are governed with no remote sources (never the game's storage).
-            return _items.TryGetValue(item, out var sources) ? sources : Empty;
+            if (!_items.TryGetValue(item, out var sources)) return Empty;
+            // The structure the operation runs at (a craft or repair station, the castle heart being
+            // upgraded) is never a source; Progenitor drops it too, this shows where a provider reads it.
+            var station = context.Station;
+            if (station.IsNone || !sources.SpendOrder.Contains(station)) return sources;
+            return new ItemSources(Array.AsReadOnly(sources.SpendOrder.Where(id => id != station).ToArray()), sources.PoolReserve);
         }
     }
 }

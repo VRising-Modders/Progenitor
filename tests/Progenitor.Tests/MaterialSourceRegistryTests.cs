@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Progenitor.Castles;
 using Progenitor.Inventory;
 using Progenitor.Materials;
@@ -73,12 +74,30 @@ public class MaterialSourceRegistryTests
     public void Wired_lists_only_supported_requested_operations_when_hooks_are_on()
     {
         var r = new MaterialSourceRegistry { HookState = () => (true, "") };
-        r.Register(new StubProvider { Operations = new[] { MaterialOperation.Repair, MaterialOperation.Build, MaterialOperation.Build } }, "mod.one");
+        r.Register(new StubProvider { Operations = new[] { MaterialOperation.Research, MaterialOperation.Build, MaterialOperation.Build } }, "mod.one");
         var s = r.Status();
         Assert.Equal(new[] { MaterialOperation.Build }, s.Wired);
         Assert.True(r.Governs(MaterialOperation.Build));
-        Assert.False(r.Governs(MaterialOperation.Repair));
+        Assert.False(r.Governs(MaterialOperation.Research));
         Assert.False(r.Governs(MaterialOperation.Craft));
+    }
+
+    [Fact]
+    public void Repair_and_upgrade_are_wired_and_research_and_other_stay_vanilla()
+    {
+        Assert.Equal(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade },
+            MaterialOperations.Supported);
+        foreach (var op in MaterialOperations.Supported) Assert.True(MaterialOperations.IsSupported(op));
+        Assert.False(MaterialOperations.IsSupported(MaterialOperation.Research));
+        Assert.False(MaterialOperations.IsSupported(MaterialOperation.Other));
+
+        var r = new MaterialSourceRegistry { HookState = () => (true, "") };
+        r.Register(new StubProvider { Operations = new[] { MaterialOperation.Upgrade, MaterialOperation.Repair, MaterialOperation.Other } }, "mod.one");
+        Assert.Equal(new[] { MaterialOperation.Repair, MaterialOperation.Upgrade }, r.Status().Wired.OrderBy(o => o));
+        Assert.True(r.Governs(MaterialOperation.Repair));
+        Assert.True(r.Governs(MaterialOperation.Upgrade));
+        Assert.False(r.Governs(MaterialOperation.Other));
+        Assert.False(r.Governs(MaterialOperation.Build));
     }
 
     [Fact]
@@ -86,8 +105,8 @@ public class MaterialSourceRegistryTests
     {
         var lines = new List<string>();
         var r = new MaterialSourceRegistry { Log = lines.Add };
-        r.Register(new StubProvider { Operations = new[] { MaterialOperation.Craft, MaterialOperation.Upgrade } }, "mod.one");
-        Assert.Contains(lines, l => l.Contains("not-wired=Upgrade"));
+        r.Register(new StubProvider { Operations = new[] { MaterialOperation.Craft, MaterialOperation.Research } }, "mod.one");
+        Assert.Contains(lines, l => l.Contains("not-wired=Research"));
     }
 
     [Fact]

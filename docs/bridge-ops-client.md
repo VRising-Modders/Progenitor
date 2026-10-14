@@ -183,7 +183,7 @@ Either side, main thread. The [material sources](modules.md#material-sources) se
 
 | Args | Does |
 |---|---|
-| `{}` or `{"action":"status"}` | `side`, `status` (the `ctx.MaterialSource.Status` line), `hooksInstalled`, `hooksReason`, `wired`, `payments`, `faults`, `shortfalls`, `bootstrap` (Bootstrap's `materials: native seams …` line). Client: `views`, per operation `null` or `{sequence, territory, heart, station, totals}` (the held view the cost display uses). Server: `openOperations`, `injection`. |
+| `{}` or `{"action":"status"}` | `side`, `status` (the `ctx.MaterialSource.Status` line), `hooksInstalled`, `hooksReason`, `wired`, `payments`, `faults`, `shortfalls`, `bootstrap` (Bootstrap's `materials: native seams …` line). Client: `views`, per operation (`Build`, `Craft`, `Upgrade`) `null` or `{sequence, territory, heart, station, totals}` (the held view the cost display uses; `station` is the workstation or, for `Upgrade`, the castle heart). Server: `openOperations`, `injection`. |
 | `{"action":"inject","from":"c-…","to":"c-…","item":<hash>}` | Server. Fault injection for the transaction check: right after the **next** governed check (the next craft start or placement whose count the provider governs), moves every unit of the item from one container to the other through the inventory engine, so that operation's payment meets a container that changed between its check and its payment. One shot; logs `materials: development fault injection armed: …` and, when it runs, `materials: fault injection moved N of item … after the check of tx=…`. |
 | `{"action":"clear"}` | Server. Drops an injection that has not run. |
 

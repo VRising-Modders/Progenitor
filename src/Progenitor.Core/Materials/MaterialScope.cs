@@ -131,3 +131,73 @@ internal sealed class MaterialScopeTracker
         Closed?.Invoke();
     }
 }
+
+/// <summary>
+/// One castle heart request the game is handling in the current system update: who sent it, for which
+/// heart (packed network id), and whether it is an upgrade. Game-free.
+/// </summary>
+internal readonly struct MaterialHeartRequest
+{
+    internal ulong Character { get; }
+    internal ulong HeartNet { get; }
+    internal bool Upgrade { get; }
+
+    internal MaterialHeartRequest(ulong character, ulong heartNet, bool upgrade)
+    {
+        Character = character;
+        HeartNet = heartNet;
+        Upgrade = upgrade;
+    }
+}
+
+/// <summary>
+/// Which seam calls inside the castle heart system's scope are an <see cref="MaterialOperation.Upgrade"/>.
+/// The game's castle heart system handles upgrade, claim, raid, destroy, abandon and expose requests in
+/// one update, and the upgrade, claim, raid and destroy costs all reach the same count and removal. A
+/// call is an upgrade only when the character sent an upgrade request for that very heart in this
+/// update and no other kind of request for it; everything else (claim, raid and destroy costs, an
+/// unreadable request) keeps the game's own rules. The requests are read once per scope, on the first
+/// call that asks. Game-free.
+/// </summary>
+internal sealed class MaterialUpgradeFilter
+{
+    private long _token;
+    private readonly HashSet<(ulong, ulong)> _upgrade = new();
+    private readonly HashSet<(ulong, ulong)> _other = new();
+    private readonly List<MaterialHeartRequest> _scratch = new();
+
+    /// <summary>
+    /// True when the call for <paramref name="character"/> at <paramref name="heartNet"/> inside scope
+    /// <paramref name="token"/> is an upgrade. <paramref name="load"/> fills the requests of this
+    /// update; it runs once per scope and a throw means "no upgrade requests".
+    /// </summary>
+    internal bool IsUpgrade(long token, ulong character, ulong heartNet, Action<List<MaterialHeartRequest>> load)
+    {
+        if (token == 0 || character == 0 || heartNet == 0) return false;
+        if (token != _token)
+        {
+            _token = token;
+            _upgrade.Clear();
+            _other.Clear();
+            _scratch.Clear();
+            try { load(_scratch); }
+            catch { _scratch.Clear(); }
+            foreach (var r in _scratch)
+            {
+                if (r.Character == 0 || r.HeartNet == 0) continue;
+                (r.Upgrade ? _upgrade : _other).Add((r.Character, r.HeartNet));
+            }
+            _scratch.Clear();
+        }
+        var key = (character, heartNet);
+        return _upgrade.Contains(key) && !_other.Contains(key);
+    }
+
+    internal void Clear()
+    {
+        _token = 0;
+        _upgrade.Clear();
+        _other.Clear();
+        _scratch.Clear();
+    }
+}

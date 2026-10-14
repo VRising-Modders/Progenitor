@@ -7,8 +7,10 @@ reload folder after a test. Server only, administrator only, hot-loadable; publi
 
 It does two things:
 
-- **A fixed provider.** For one administrator on one plot (`scope`), every configured ingredient is
-  paid from bound chests in a configured order with a configured pool reserve. Unconfigured items are
+- **A fixed provider.** For one administrator on one plot (`scope`), every configured ingredient of a
+  build, a craft, a repair or a castle heart upgrade is paid from bound chests in a configured order
+  with a configured pool reserve. The structure the operation runs at (`MaterialContext.Station`: the
+  craft or repair station, the castle heart being upgraded) is dropped from the order. Unconfigured items are
   governed with no remote sources; `vanilla <item>` leaves an item to the game (`Sources` returns
   `null`); `fault …` makes the provider throw.
 - **An inventory oracle.** `begin` records every bound inventory's count of every configured
@@ -52,8 +54,8 @@ Entity indices are session values: never reuse them after a reload.
 | `cost <item> <amount> [reserve]` | The whole operation's cost of one ingredient (as the game shows it) and its pool reserve |
 | `vanilla <item>` | Toggle: the provider returns `null` for this item (the game's own rules) |
 | `fault none\|candidates\|sources\|item <hash>` | Make the provider throw in `Candidates`, in every `Sources`, or for one item |
-| `enable` / `disable` | Register or unregister the provider; `enable` refuses unless Build and Craft are wired |
-| `baseline <build\|craft>` / `begin <build\|craft>` | Arm a capture expecting zero debit (provider off) or the predicted debits (provider on) |
+| `enable` / `disable` | Register or unregister the provider; `enable` refuses unless Build, Craft, Repair and Upgrade are wired |
+| `baseline <build\|craft\|repair\|upgrade>` / `begin <…>` | Arm a capture expecting zero debit (provider off) or the predicted debits (provider on) |
 | `verify` / `end` / `clear` | Compare the capture; end it; clear everything and unregister |
 
 ## Live re-verification procedure
@@ -80,7 +82,7 @@ from the bag and the workbench (record what you moved). Then, standing on P:
    `.srtest source A …`, `.srtest source B …`.
 2. `.srtest rank X A 0`, `.srtest rank X B 10`, `.srtest rank Y A 10`, `.srtest rank Y B 0`
    (opposite orders), `.srtest cost X <n> 0`, `.srtest cost Y <m> 0` (the amounts the game shows).
-3. `.srtest enable`, `.srtest status`: `wired=Build,Craft faults=0 shortfalls=0`.
+3. `.srtest enable`, `.srtest status`: `wired=Build,Craft,Repair,Upgrade faults=0 shortfalls=0`.
 
 **Checks.** After each, `.srtest verify` and `.srtest end`; read `materials status` on both sides.
 
@@ -109,6 +111,33 @@ may log nothing while `faults` keeps growing.
 | 12 | Resend | With the provider on, reload the client's Core (`core_reload`), wait up to 10 s | `views` returns without any change on the server |
 | 13 | Unload | Hot-unload this plugin | `materials: provider unregistered owner=progenitor.sharedresourcestest`; views cleared |
 | 14 | Server Core swap | Re-enable, then swap the server's Core (`core_reload` on the server) and do not re-enable | Within about 1 s of the new Core's first refresh, both client views are `null` (a cleared view per operation) |
+
+### Repair and Upgrade cases (not yet run live)
+
+Repair and Upgrade were added after the run above: experimental, game-free tested, **not live-verified**.
+Run them with the same deployment (a Core with `wired=…,Repair,Upgrade`) and the same scope and sources.
+Each operation is its own capture: `.srtest end`, then `cost` the new ingredients (disable first, then
+`enable` again) before each `begin`.
+
+**Repair setup.** Damage one piece of gear whose repair costs an ingredient X of the plot (wear it in a
+fight, or pick a piece already below full durability), read its repair cost from the item tooltip, and
+empty X from the bag and the workstation. `.srtest cost X <the tooltip's amount> 0`. The tooltip shows the
+game's own count, not the pool (no Repair view is sent; see the module page), so it may read short.
+
+**Upgrade setup.** On P, a castle heart one level below an upgrade whose cost you can stage in A and B:
+read the costs in the heart window, empty them from the bag, and `cost` each one. The heart window's
+costs show the pool once the Upgrade view arrives (up to about 1 s after opening the window).
+
+| # | Case | Do | Expect |
+|---|---|---|---|
+| 15 | Repair baseline | `disable`, `baseline repair`, repair the piece from the character menu | The game charges nothing (it shows missing materials); zero debit; `enable` again |
+| 16 | Repair equipped | `begin repair`, repair the worn piece from the character menu | One `materials: check Repair … tx=<t>`, then one `materials: paid Repair … tx=<t>` per ingredient in the per-item order; one `Shared Resources Test: MaterialPaid tx=<t> Repair …` per line; `verify` MATCH; the piece is at full durability |
+| 17 | Repair at a station | Damage another piece, put it in the bench's inventory window or keep it in the bag, open the bench, `begin repair`, repair it there | Same lines as 16; the `check` context names the bench as `station=`; the bench's own stock is not debited by the pool (watch it with `.srtest watch bench …`); `verify` MATCH |
+| 18 | Repair shortfall | Leave one unit fewer of X across A and B, `begin repair`, repair | The game refuses at its check (missing materials); zero debit; `shortfalls` unchanged |
+| 19 | Upgrade short | Leave one unit too few of one cost across A and B, `begin upgrade`, press upgrade | The view shows the short amount; the client's own check refuses (the button does nothing) or the server's check does; zero debit; then restore the unit and `end` |
+| 20 | Upgrade | `begin upgrade`, open P's heart window, read the costs, press upgrade | Client bridge `materials`: `views.Upgrade.station` is P's heart network id while the window is open, and its costs show the pool; one `materials: check Upgrade … station=<heart id> tx=<t>`, one `paid Upgrade` line per cost line, `MaterialPaid` per line; `verify` MATCH; the heart's level rose by one |
+| 21 | Claim, raid and destroy stay vanilla | Only on a throwaway copy of a save with a second test character's decaying heart: try a claim with its cost staged only in A | The game's own rules: A is not debited (no `materials: check Upgrade` line); the heart window's claim cost shows the game's own count |
+| 22 | Other screens | With an Upgrade view held, open a chest and a workstation | Their counts are the game's own (the chest) or the Craft view (the workstation) |
 
 **Clean up.** `.srtest clear`; remove this plugin from the server's reload folder and check its
 unload line; set `NativeSeams = false` on both and restart them if the rig is handed back; restore the

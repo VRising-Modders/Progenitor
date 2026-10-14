@@ -36,13 +36,15 @@ internal static class MaterialNet
 /// Binds Core's availability and payment handlers to Bootstrap's opt-in material seams and runs the
 /// per-player totals that the client's cost display reads.
 ///
-/// <para><b>Server.</b> A scope is open while <c>StartCraftingSystem</c> (Craft) or
-/// <c>PlaceTileModelSystem</c> (Build) updates; only seam calls inside a scope are routed to the
-/// provider. Both systems check affordability and pay in the same synchronous call on the main thread,
-/// so one game operation is one <see cref="MaterialService"/> session: the provider is asked once at the
-/// check, every line is paid from that answer, and the queued <see cref="MaterialPaid"/> events are
-/// published when the system's update ends. Every second (and right after an invalidation or a governed
-/// payment) each online player's Build and Craft totals are recomputed and sent when they changed
+/// <para><b>Server.</b> A scope is open while <c>StartCraftingSystem</c> (Craft),
+/// <c>PlaceTileModelSystem</c> (Build), <c>RepairItemSystem</c> (Repair) or <c>CastleHeartEventSystem</c>
+/// (Upgrade) updates; only seam calls inside a scope are routed to the provider, and inside the castle
+/// heart system only the calls of an upgrade request (<see cref="MaterialUpgradeFilter"/>). Each system
+/// checks affordability and pays in the same synchronous call on the main thread, so one game operation
+/// is one <see cref="MaterialService"/> session: the provider is asked once at the check, every line is
+/// paid from that answer, and the queued <see cref="MaterialPaid"/> events are published when the
+/// system's update ends. Every second (and right after an invalidation or a governed payment) each
+/// online player's Build, Craft and Upgrade totals are recomputed and sent when they changed
 /// (<see cref="MaterialRefreshPolicy"/>, <see cref="MaterialViewPublisher"/>).</para>
 ///
 /// <para><b>Client.</b> A received view replaces the shared-storage rows of the game's merged count
@@ -64,6 +66,8 @@ internal static unsafe class MaterialSeamRuntime
     private static MaterialService? _service;
     private static UnityMaterialWorld? _world;
     private static readonly MaterialScopeTracker Scope = new();
+    private static readonly MaterialUpgradeFilter UpgradeFilter = new();
+    private static bool _heartRequestLogged;
     private static readonly MaterialViewPublisher Publisher = new();
     private static readonly MaterialRefreshPolicy Refresh = new();
     private static readonly MaterialOverlayStore Overlay = new();
@@ -96,7 +100,7 @@ internal static unsafe class MaterialSeamRuntime
     internal static Dictionary<string, object?> DescribeViews()
     {
         var result = new Dictionary<string, object?>();
-        foreach (var op in new[] { MaterialOperation.Build, MaterialOperation.Craft })
+        foreach (var op in MaterialClientPolicy.ViewOperations)
             result[op.ToString()] = Overlay.TryGet(op, out MaterialView view, out var totals)
                 ? new Dictionary<string, object?>
                 {
@@ -149,6 +153,13 @@ internal static unsafe class MaterialSeamRuntime
             Hooks.Add(SystemHooks.After<StartCraftingSystem>(ctx => Scope.After(ctx.SystemName), always));
             Hooks.Add(SystemHooks.Before<PlaceTileModelSystem>(ctx => Scope.Before(MaterialOperation.Build, ctx.SystemName, FrameNow()), always));
             Hooks.Add(SystemHooks.After<PlaceTileModelSystem>(ctx => Scope.After(ctx.SystemName), always));
+            // Both repair events (equipped item, item at a workstation) are paid in this system's update.
+            Hooks.Add(SystemHooks.Before<RepairItemSystem>(ctx => Scope.Before(MaterialOperation.Repair, ctx.SystemName, FrameNow()), always));
+            Hooks.Add(SystemHooks.After<RepairItemSystem>(ctx => Scope.After(ctx.SystemName), always));
+            // Heart upgrades, claims, raids and destroys are all paid in this update; UpgradeFilter keeps
+            // only the calls of an upgrade request governed.
+            Hooks.Add(SystemHooks.Before<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.Before(MaterialOperation.Upgrade, ctx.SystemName, FrameNow()), always));
+            Hooks.Add(SystemHooks.After<ProjectM.Gameplay.Systems.CastleHeartEventSystem>(ctx => Scope.After(ctx.SystemName), always));
             Publisher.ClearEveryoneOnce();
             _disconnected = EventBus.On<PlayerDisconnected>(e => { Publisher.Disconnected(CastleId.From(e.UserEntity)); });
         }
@@ -200,6 +211,7 @@ internal static unsafe class MaterialSeamRuntime
         _countGate = null; _compose = null; _payGate = null; _pay = null;
         Scope.Clear();
         Scope.Closed = null;
+        UpgradeFilter.Clear();
         Publisher.Clear();
         Overlay.Clear();
         Dirty.Clear();
@@ -227,12 +239,61 @@ internal static unsafe class MaterialSeamRuntime
         catch (Exception e) { Plugin.Logger?.LogWarning("materials: closing operations threw: " + e.Message); }
     }
 
-    private static bool TryOperation(out MaterialOperation op)
+    private static bool TryOperation(ulong target, ulong heart, out MaterialOperation op)
     {
         op = default;
         if (_service == null || !Dev.MainThread.IsMainThread || !Scope.TryCurrent(FrameNow(), out op, out long token)) return false;
+        if (op == MaterialOperation.Upgrade && !IsUpgradeCall(token, target, heart)) return false;
         _service.BeginScope(token);
         return true;
+    }
+
+    /// <summary>
+    /// Inside the castle heart system: is this count or removal the cost of an upgrade request (and not
+    /// of a claim, raid or destroy request)? The requests are read once per scope from the event
+    /// entities the system is handling; they are destroyed only after every request was processed.
+    /// </summary>
+    private static bool IsUpgradeCall(long token, ulong target, ulong heart)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated || heart == 0) return false;
+        ulong heartNet = MaterialNet.Of(world.EntityManager, Ent(heart));
+        return UpgradeFilter.IsUpgrade(token, target, heartNet, LoadHeartRequests);
+    }
+
+    private static void LoadHeartRequests(List<MaterialHeartRequest> into)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return;
+        var em = world.EntityManager;
+        var events = Query.Entities(em, includeDisabled: false, includeSystems: false,
+            ComponentIndex.Of<CastleHeartInteractEvent>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<FromCharacter>(ComponentType.AccessMode.ReadOnly));
+        foreach (var e in events)
+        {
+            CastleHeartInteractEvent request;
+            FromCharacter from;
+            try
+            {
+                if (!e.TryRead(em, out request) || !e.TryRead(em, out from)) continue;
+            }
+            catch (Exception ex)
+            {
+                // A layout mismatch: no call is classified as an upgrade, so upgrades stay vanilla.
+                if (!_heartRequestLogged)
+                {
+                    _heartRequestLogged = true;
+                    Plugin.Logger?.LogWarning("materials: castle heart requests unreadable; upgrades keep the game's own rules: " + ex.Message);
+                }
+                return;
+            }
+            var id = request.CastleHeart;
+            if (id.Type != NetworkIdType.Normal) continue;
+            ulong heartNet = ((ulong)(uint)id.Normal_Index << 32) | (uint)id.Normal_Generation;
+            if (heartNet == 0) heartNet = ulong.MaxValue; // MaterialNet.Of's packing
+            ulong character = ((ulong)(uint)from.Character.Version << 32) | (uint)from.Character.Index;
+            into.Add(new MaterialHeartRequest(character, heartNet, request.EventType == CastleHeartInteractEventType.Upgrade));
+        }
     }
 
     private static CastleId Id(ulong packed) => new((int)(packed & 0xFFFFFFFF), (int)(packed >> 32));
@@ -243,7 +304,7 @@ internal static unsafe class MaterialSeamRuntime
 
     private static bool ServerCountGate(ulong target, ulong heart)
     {
-        if (_world == null || !TryOperation(out var op)) return false;
+        if (_world == null || !TryOperation(target, heart, out var op)) return false;
         _world.HeartHint = Ent(heart);
         try { return _service!.CountGate(Id(target), op); }
         finally { _world.HeartHint = Entity.Null; }
@@ -251,7 +312,7 @@ internal static unsafe class MaterialSeamRuntime
 
     private static int ServerCompose(ulong target, ulong heart, IntPtr fullRows, int fullLength, IntPtr bagRows, int bagLength, IntPtr outRows, int capacity)
     {
-        if (_world == null || !TryOperation(out var op)) return -1;
+        if (_world == null || !TryOperation(target, heart, out var op)) return -1;
         _world.HeartHint = Ent(heart);
         try
         {
@@ -271,7 +332,7 @@ internal static unsafe class MaterialSeamRuntime
 
     private static bool ServerPayGate(ulong target, ulong heart, int item)
     {
-        if (_world == null || !TryOperation(out var op)) return false;
+        if (_world == null || !TryOperation(target, heart, out var op)) return false;
         _world.HeartHint = Ent(heart);
         try { return _service!.GovernsLine(Id(target), op, item); }
         finally { _world.HeartHint = Entity.Null; }
@@ -282,7 +343,7 @@ internal static unsafe class MaterialSeamRuntime
         // Pool payments come only from slots without an item entity, so there is never one to return;
         // the bag's own item entity (if any) was already written by the game's removal.
         itemEntity = 0;
-        if (_world == null || !TryOperation(out var op)) return amount;
+        if (_world == null || !TryOperation(target, heart, out var op)) return amount;
         _world.HeartHint = Ent(heart);
         try
         {
@@ -336,8 +397,8 @@ internal static unsafe class MaterialSeamRuntime
             int userIndex;
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
             catch { continue; }
-            Push(bootstrap, userIndex, user, character, MaterialOperation.Build, force || dirty);
-            Push(bootstrap, userIndex, user, character, MaterialOperation.Craft, force || dirty);
+            foreach (var op in MaterialClientPolicy.ViewOperations)
+                Push(bootstrap, userIndex, user, character, op, force || dirty);
         }
         return true;
     }
@@ -345,9 +406,16 @@ internal static unsafe class MaterialSeamRuntime
     private static void Push(ServerBootstrapSystem bootstrap, int userIndex, CastleId user, CastleId character, MaterialOperation op, bool force)
     {
         MaterialViewContent? content = null;
-        // A Craft view only means something at a workstation; skip the provider calls otherwise.
-        ulong stationNet = op == MaterialOperation.Craft ? _world!.StationNet(character) : 0;
-        if ((op != MaterialOperation.Craft || stationNet != 0)
+        // A Craft view only means something at a workstation and an Upgrade view only with a castle
+        // heart's window open; skip the provider calls otherwise. A Repair view is not sent (see
+        // MaterialClientPolicy.ViewOperations).
+        ulong stationNet = op switch
+        {
+            MaterialOperation.Craft => _world!.StationNet(character),
+            MaterialOperation.Upgrade => _world!.HeartTargetNet(character),
+            _ => 0,
+        };
+        if ((!MaterialClientPolicy.NeedsStation(op) || stationNet != 0)
             && _service!.TryView(character, op, TotalsScratch, out var ctx, out long revision))
         {
             var rows = new List<MaterialLine>(TotalsScratch.Count);
@@ -398,8 +466,10 @@ internal static unsafe class MaterialSeamRuntime
         var character = Ent(target);
         if (!character.Exists(em) || !character.Has<LocalCharacter>(em)) return false;
         var station = UnityMaterialWorld.StationOf(em, character);
+        var heartTarget = station == Entity.Null ? UnityMaterialWorld.HeartTargetOf(em, character) : Entity.Null;
         var call = MaterialClientPolicy.Call(true, MaterialNet.Of(em, Ent(heart)), BuildContext(world),
-            station == Entity.Null ? 0 : MaterialNet.Of(em, station));
+            station == Entity.Null ? 0 : MaterialNet.Of(em, station),
+            heartTarget == Entity.Null ? 0 : MaterialNet.Of(em, heartTarget));
         return MaterialClientPolicy.TrySelect(Overlay, call, out _, out totals);
     }
 

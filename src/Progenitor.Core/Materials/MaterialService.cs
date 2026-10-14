@@ -81,7 +81,7 @@ internal readonly struct MaterialPayResult
 /// <summary>
 /// The game-free core of the material seams.
 ///
-/// <para><b>One operation, one answer.</b> A governed game operation (one craft start, one placement)
+/// <para><b>One operation, one answer.</b> A governed game operation (one craft start, one placement, one repair, one heart upgrade)
 /// runs inside one synchronous main-thread system update: the game first checks affordability with its
 /// merged count, then removes each cost line. The first count inside a scope opens an
 /// <i>operation session</i> for that character: the provider's candidates and, per item, its

@@ -52,14 +52,40 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
 
         int territory = StandingTerritory(em, ch);
         var station = ContainerId.None;
-        if (operation == MaterialOperation.Craft)
-        {
-            var s = StationOf(em, ch);
-            if (s != Entity.Null) station = InventoryRuntime.IdOf(s, out _);
-        }
+        var s = StationFor(em, ch, operation, territory);
+        if (s != Entity.Null) station = InventoryRuntime.IdOf(s, out _);
         context = new MaterialContext(CastleId.From(user), character, Epoch, operation, territory, station);
         return true;
     }
+
+    /// <summary>
+    /// The structure an operation runs at: the workstation for Craft and Repair (the character's
+    /// interaction target when it is a castle workstation), the castle heart for Upgrade (the heart the
+    /// game passed to this call, else the heart whose window the character has open, else the heart of
+    /// the plot it stands on), nothing for Build.
+    /// </summary>
+    private Entity StationFor(EntityManager em, Entity character, MaterialOperation operation, int territory)
+    {
+        switch (operation)
+        {
+            case MaterialOperation.Craft:
+            case MaterialOperation.Repair:
+                return StationOf(em, character);
+            case MaterialOperation.Upgrade:
+                var hint = HeartHint;
+                if (hint != Entity.Null && hint.Exists(em) && hint.Has<CastleHeart>(em)) return hint;
+                var target = HeartTargetOf(em, character);
+                if (target != Entity.Null) return target;
+                var castle = CastleAt(territory);
+                return castle == null ? Entity.Null : castle.Heart.ToEntity();
+            default:
+                return Entity.Null;
+        }
+    }
+
+    private Entity StationFor(in MaterialContext context) =>
+        StationFor(Em, new Entity { Index = context.Character.Index, Version = context.Character.Version },
+            context.Operation, context.StandingTerritory);
 
     public bool TryResolve(ContainerId id, out InventoryRef inventory)
     {
@@ -74,25 +100,36 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
 
     public void VanillaCounted(in MaterialContext context, ICollection<InventoryRef> into)
     {
+        var em = Em;
         var ch = new Entity { Index = context.Character.Index, Version = context.Character.Version };
         into.Add(InventoryRef.For(ch, 0));
-        var station = StationOf(Em, ch);
-        if (station != Entity.Null && !station.Has<CastleSharedInventory>(Em)) into.Add(InventoryRef.For(station, 0));
+        var station = StationOf(em, ch);
+        if (station != Entity.Null && !station.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(station, 0));
+        if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade)
+        {
+            // Repair and Upgrade run with any window open (a chest, the castle heart): the game's own
+            // pass without shared storage already counts and pays from an interaction inventory that is
+            // not shared storage, so the pool leaves it out, whatever kind it is.
+            var target = InteractionTarget(em, ch);
+            if (target != Entity.Null && !target.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(target, 0));
+        }
     }
 
     public InventoryRef StationInventory(in MaterialContext context)
     {
-        if (context.Operation != MaterialOperation.Craft) return InventoryRef.None;
-        var station = StationOf(Em, new Entity { Index = context.Character.Index, Version = context.Character.Version });
+        if (context.Operation == MaterialOperation.Build) return InventoryRef.None;
+        var station = StationFor(in context);
         return station == Entity.Null ? InventoryRef.None : InventoryRef.For(station, 0);
     }
 
     public InventoryRef PoolFront(in MaterialContext context)
     {
-        if (context.Operation != MaterialOperation.Craft) return InventoryRef.None;
-        var ch = new Entity { Index = context.Character.Index, Version = context.Character.Version };
-        var station = StationOf(Em, ch);
-        return station != Entity.Null && station.Has<CastleSharedInventory>(Em) ? InventoryRef.For(station, 0) : InventoryRef.None;
+        // A workstation that is itself shared storage: the game reaches it only through its shared
+        // branch, so it pays first, ahead of the provider's order (Craft, and a repair at that station).
+        if (context.Operation is not (MaterialOperation.Craft or MaterialOperation.Repair)) return InventoryRef.None;
+        var em = Em;
+        var station = StationOf(em, new Entity { Index = context.Character.Index, Version = context.Character.Version });
+        return station != Entity.Null && station.Has<CastleSharedInventory>(em) ? InventoryRef.For(station, 0) : InventoryRef.None;
     }
 
     /// <summary>
@@ -126,6 +163,13 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     {
         var station = StationOf(Em, new Entity { Index = character.Index, Version = character.Version });
         return station == Entity.Null ? 0 : MaterialNet.Of(Em, station);
+    }
+
+    /// <summary>Packed network id of the castle heart whose window the character has open; 0 for none.</summary>
+    internal ulong HeartTargetNet(CastleId character)
+    {
+        var heart = HeartTargetOf(Em, new Entity { Index = character.Index, Version = character.Version });
+        return heart == Entity.Null ? 0 : MaterialNet.Of(Em, heart);
     }
 
     private ICastleHandle? CastleAt(int territory)
@@ -172,6 +216,21 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     /// workstation. Unverified live that this is the station the craft event names; the payment never
     /// relies on it beyond ordering the pool and leaving the station out of it.
     /// </summary>
+    /// <summary>The character's interaction target, whatever it is, or <see cref="Entity.Null"/>.</summary>
+    internal static Entity InteractionTarget(EntityManager em, Entity character)
+    {
+        if (!character.TryRead(em, out Interactor interactor)) return Entity.Null;
+        var target = interactor.Target;
+        return target == Entity.Null || !target.Exists(em) ? Entity.Null : target;
+    }
+
+    /// <summary>The castle heart whose window the character has open (its interaction target), or <see cref="Entity.Null"/>.</summary>
+    internal static Entity HeartTargetOf(EntityManager em, Entity character)
+    {
+        var target = InteractionTarget(em, character);
+        return target != Entity.Null && target.Has<CastleHeart>(em) ? target : Entity.Null;
+    }
+
     internal static Entity StationOf(EntityManager em, Entity character)
     {
         if (!character.TryRead(em, out Interactor interactor)) return Entity.Null;

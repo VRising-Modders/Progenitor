@@ -31,6 +31,7 @@ public class MaterialViewSyncTests
         {
             [MaterialOperation.Build] = null,
             [MaterialOperation.Craft] = null,
+            [MaterialOperation.Upgrade] = null,
         };
         /// <summary>What the transport does with the next packets: true delivers, false fails the send, null accepts it and loses it.</summary>
         public readonly Queue<bool?> Link = new();
@@ -44,7 +45,7 @@ public class MaterialViewSyncTests
             if (!Policy.Tick(Now, invalidateAll, Dirty, out bool everyone, out bool force)) return 0;
             Dirty = false;
             int count = 0;
-            foreach (var op in new[] { MaterialOperation.Build, MaterialOperation.Craft })
+            foreach (var op in MaterialClientPolicy.ViewOperations)
             {
                 var view = Publisher.Next(User, op, Epoch, Content[op], force);
                 if (view == null) continue;
@@ -301,6 +302,79 @@ public class MaterialViewSyncTests
         Assert.False(MaterialClientPolicy.TrySelect(StoreWith(), MaterialClientPolicy.Call(false, Heart, true, 0), out _, out _));
     }
 
+    private static MaterialOverlayStore StoreWithUpgrade(ulong upgradeHeart = Heart)
+    {
+        var store = StoreWith();
+        store.Apply(new MaterialView(MaterialOperation.Upgrade, 3, 1, 3, 5, false, false, new[] { new MaterialLine(Wood, 40) }, Heart, upgradeHeart));
+        return store;
+    }
+
+    [Fact]
+    public void Upgrade_totals_apply_only_with_their_hearts_window_open_and_counted_at_that_heart()
+    {
+        var store = StoreWithUpgrade();
+        var atHeart = MaterialClientPolicy.Call(true, Heart, false, 0, heartTargetNet: Heart);
+        Assert.Equal(Heart, atHeart.HeartTargetNet);
+        Assert.True(MaterialClientPolicy.TrySelect(store, atHeart, out var op, out var totals));
+        Assert.Equal(MaterialOperation.Upgrade, op);
+        Assert.Equal(40, totals[Wood]);
+        Assert.False(totals.ContainsKey(Iron)); // never the Craft view
+        // Another heart's window, a count at another heart, another entity: the game's own counts.
+        Assert.False(MaterialClientPolicy.TrySelect(store, atHeart with { HeartTargetNet = OtherHeart }, out _, out _));
+        Assert.False(MaterialClientPolicy.TrySelect(store, atHeart with { HeartNet = OtherHeart }, out _, out _));
+        Assert.False(MaterialClientPolicy.TrySelect(store, atHeart with { LocalCharacter = false }, out _, out _));
+        // No heart window: the Upgrade view never applies.
+        Assert.False(MaterialClientPolicy.TrySelect(store, MaterialClientPolicy.Call(true, Heart, false, 0), out _, out _));
+        // Without an Upgrade view the heart window keeps the game's own counts.
+        Assert.False(MaterialClientPolicy.TrySelect(StoreWith(), atHeart, out _, out _));
+        // An Upgrade view without a heart never applies.
+        Assert.False(MaterialClientPolicy.TrySelect(StoreWithUpgrade(0), atHeart with { HeartNet = 0, HeartTargetNet = 0 }, out _, out _));
+    }
+
+    [Fact]
+    public void Build_and_craft_take_precedence_over_a_held_upgrade_view()
+    {
+        var store = StoreWithUpgrade();
+        var building = MaterialClientPolicy.Call(true, Heart, true, 0, heartTargetNet: Heart);
+        Assert.True(MaterialClientPolicy.TrySelect(store, building, out var op, out _));
+        Assert.Equal(MaterialOperation.Build, op);
+        var atBench = MaterialClientPolicy.Call(true, Heart, false, Bench, heartTargetNet: Heart);
+        Assert.True(MaterialClientPolicy.TrySelect(store, atBench, out op, out _));
+        Assert.Equal(MaterialOperation.Craft, op);
+    }
+
+    [Fact]
+    public void No_repair_view_is_sent_or_selected()
+    {
+        Assert.DoesNotContain(MaterialOperation.Repair, MaterialClientPolicy.ViewOperations);
+        Assert.True(MaterialClientPolicy.NeedsStation(MaterialOperation.Craft));
+        Assert.True(MaterialClientPolicy.NeedsStation(MaterialOperation.Upgrade));
+        Assert.False(MaterialClientPolicy.NeedsStation(MaterialOperation.Build));
+        // Even a Repair view that somehow arrived is never selected: the repair tooltip keeps the game's count.
+        var store = new MaterialOverlayStore();
+        store.Apply(new MaterialView(MaterialOperation.Repair, 3, 1, 1, 5, false, false, new[] { new MaterialLine(Iron, 8) }, Heart, Bench));
+        Assert.False(MaterialClientPolicy.TrySelect(store, MaterialClientPolicy.Call(true, Heart, false, 0), out _, out _));
+        Assert.False(MaterialClientPolicy.TrySelect(store, MaterialClientPolicy.Call(true, Heart, false, Bench), out _, out _));
+        Assert.False(MaterialClientPolicy.TrySelect(store, MaterialClientPolicy.Call(true, Heart, false, 0, Heart), out _, out _));
+    }
+
+    [Fact]
+    public void Upgrade_views_round_trip_and_a_disconnect_forgets_them_too()
+    {
+        var rig = new Rig();
+        rig.Content[MaterialOperation.Upgrade] = new MaterialViewContent(5, 1, Heart, Heart, new[] { new MaterialLine(Wood, 40) });
+        Assert.Equal(1, rig.Frame());
+        Assert.Equal(40, rig.ClientShows(MaterialOperation.Upgrade, Wood));
+        Assert.True(rig.Client.TryGet(MaterialOperation.Upgrade, out MaterialView held, out _));
+        Assert.Equal(Heart, held.StationNet);
+        // The heart window closes: the server stops governing there and clears the client's view.
+        rig.Content[MaterialOperation.Upgrade] = null;
+        Assert.Equal(1, rig.Frame(MaterialRefreshPolicy.IntervalMs));
+        Assert.Equal(-1, rig.ClientShows(MaterialOperation.Upgrade, Wood));
+        rig.Publisher.Disconnected(rig.User);
+        Assert.False(rig.Publisher.Book.HasView(rig.User, MaterialOperation.Upgrade));
+    }
+
     [Fact]
     public void A_craft_view_without_a_station_never_applies()
     {
@@ -317,7 +391,7 @@ public class MaterialViewSyncTests
         var rig = new Rig();
         rig.Publisher.ClearEveryoneOnce();
         rig.Client.Apply(new MaterialView(MaterialOperation.Build, 3, 1, 40, 5, false, false, new[] { new MaterialLine(Cloth, 12) }, Heart, 0, 7));
-        Assert.Equal(2, rig.Frame()); // one cleared view per operation
+        Assert.Equal(MaterialClientPolicy.ViewOperations.Count, rig.Frame()); // one cleared view per operation
         Assert.All(rig.Sent, v => Assert.True(v.Cleared));
         Assert.Equal(-1, rig.ClientShows(MaterialOperation.Build, Cloth));
         rig.Publisher.FirstRefreshDone();
