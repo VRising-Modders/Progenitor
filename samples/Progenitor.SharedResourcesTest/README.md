@@ -56,10 +56,11 @@ Entity indices are session values: never reuse them after a reload.
 | `baseline <build\|craft>` / `begin <build\|craft>` | Arm a capture expecting zero debit (provider off) or the predicted debits (provider on) |
 | `verify` / `end` / `clear` | Compare the capture; end it; clear everything and unregister |
 
-## Live re-verification procedure — not run
+## Live re-verification procedure
 
 For the hardened build (operation transaction and shortfall rule, scope pairing, client selection rules,
-view version 2, per-item fallback). Isolated test server and test client only, a copy of a save, never the live server.
+view version 2, per-item fallback). **Run on the isolated test rig on 2026-10-14:** every case passed
+except case 4 (other screens), which was not run; case 7's shortage was produced with the pool reserve. Isolated test server and test client only, a copy of a save, never the live server.
 Restore any stock you move, and remove the plugin afterward.
 
 **Deploy.** Build the solution from one reviewed commit. Deploy Bootstrap, Core and Dev to both the
@@ -82,6 +83,15 @@ from the bag and the workbench (record what you moved). Then, standing on P:
 3. `.srtest enable`, `.srtest status`: `wired=Build,Craft faults=0 shortfalls=0`.
 
 **Checks.** After each, `.srtest verify` and `.srtest end`; read `materials status` on both sides.
+
+**Open the station window first.** The server silently drops a craft event unless the client has
+actually opened the station's window: no `materials: check` line, no queue row, no debit. An
+interaction can report its target before the window is open, so confirm the window (a capture, or the
+game UI) before reading a zero-debit refusal as evidence.
+
+**Counters and logs.** `Status` counters reset on every provider registration (`enable`). The provider
+fault log is capped at 20 lines per Core load, so after case 9's `Candidates` faults a per-item fault
+may log nothing while `faults` keeps growing.
 
 | # | Case | Do | Expect |
 |---|---|---|---|

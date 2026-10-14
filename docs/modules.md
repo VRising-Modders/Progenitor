@@ -2583,7 +2583,7 @@ returns `null` for.
 | Registration, invalidation, `Status` readback | landed, game-free tested (`MaterialSourceRegistryTests`) |
 | Planner, per-operation transaction, scope | landed, game-free tested (`MaterialPlannerTests`, `MaterialServiceTests`, `MaterialTransactionTests`, `MaterialViewTests`) |
 | Per-player totals: refresh, resend, wire, client selection | landed, game-free tested (`MaterialViewSyncTests`, `MaterialViewTests`, `MaterialSeamLayoutTests`) |
-| Native availability and payment seams (Bootstrap) | **opt-in, off by default**; the earlier, unhardened build ran live on 2026-10-13 (below); this build is **not live-verified** |
+| Native availability and payment seams (Bootstrap) | **experimental, opt-in, off by default**; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified (below) |
 
 ```csharp
 var handle = ctx.MaterialSource.Register(myProvider);     // second registration throws, naming the owner
@@ -2623,7 +2623,9 @@ must not move items, must not call back into `ctx.MaterialSource` and must not t
 - `Revision(ctx)`: changes whenever the provider's policy does; part of the displayed-view fingerprint.
 - A provider call that throws is logged, counted in `Status.Faults`, and means **no remote sources**
   for that context (`Candidates`) or item (`Sources`). It never falls back to the game's shared
-  storage, which could be less restrictive than the provider's rules.
+  storage, which could be less restrictive than the provider's rules. The fault log is capped at 20
+  lines per service lifetime (per Core load); the counter keeps counting after the cap.
+- `Status` counters (`Payments`, `Views`, `Faults`, `Shortfalls`) reset on every provider registration.
 
 `MaterialContext` carries `User`, `Character` (session ids, `CastleId`), `WorldEpoch`, `Operation`,
 `StandingTerritory` (-1 = no plot, the game's own standing rule) and `Station` (the workstation's
@@ -2773,25 +2775,37 @@ Facts checked against the game's metadata and interop assemblies for this build:
 - The two overloads are bound by their exact interop field names, which are identical on the client
   and the server.
 
-**Verified live on 2026-10-13, with the earlier, unhardened build** (isolated test server and client,
-a copy of a save, fixed test provider from the [Shared Resources Test](../samples/Progenitor.SharedResourcesTest/README.md)
-plugin): both seams armed and bound; a B-menu workbench placed on a resource-poor plot paid planks,
-stone and hide from remote chests in the configured order, including one item split across two chests;
-a workbench craft paid its two ingredients in the reversed per-item order; a prison cell fed one fish
-from a remote chest; the same Build totals showed on two plots; unregistering cleared both client
-views within 1.2 s. Not run on that build: a shortage, a reserve boundary, a provider fault, the
-per-item `null` fallback, and a cancelled craft. **This build (the operation transaction and its
-shortfall rule, the scope pairing, the client selection rules, the wire version 2 and the per-item
-fallback) has not run in the game**; the
-re-verification procedure is in the [test plugin's README](../samples/Progenitor.SharedResourcesTest/README.md#live-re-verification-procedure--not-run).
+**Verified live on the isolated test rig on 2026-10-14** (this build; test server and client with the
+seams armed and both restarted, a copy of a save, the fixed provider of the
+[Shared Resources Test](../samples/Progenitor.SharedResourcesTest/README.md) plugin, every case of its
+re-verification procedure but one):
+
+| Case | Observed |
+|---|---|
+| Craft | The workstation's Craft view carried its network id and the plot's heart; one `materials: check … tx=` per craft, then one `paid` line per ingredient in the configured per-item order and one `MaterialPaid` per line, all with that `tx`; the craft was queued; the oracle matched |
+| Build | A workbench placed from the build menu paid planks, stone and hide from three chests on two other plots, one `tx` |
+| Per-item fallback | With one ingredient left to the game, the view omitted it and the game paid it from the plot's own chest; only the governed ingredient was paid from the pool |
+| Reserve | A reserve that left one unit too few refused the craft at the game's own check with nothing taken; at the exact boundary the craft was paid |
+| Provider faults | A throwing `Candidates` and a throwing per-item `Sources` showed an empty pool; the game refused; nothing was taken; `Faults` counted |
+| Shortfall between check and pay | With the copper moved out of the pool right after the check, the copper line logged one shortfall and took nothing, the plank line was paid, one `MaterialPaid` (planks); the craft still started, as documented |
+| Disable | Both client views cleared within about 1 s; the same craft was refused again |
+| Client resend | After a client Core swap the views came back within about 4 s with no server change |
+| Unload | Removing the provider plugin unregistered it and cleared the views |
+| Server Core swap | The new server Core re-armed and bound the seams and cleared both client views at its first refresh |
+
+The game never counted more than once per operation. **Not live-verified:** other screens reading
+the same count (repair, research, a chest window), a cancelled craft, and transaction ids increasing
+across a server Core swap (no payment was made after the swap). An earlier, unhardened build also ran
+live on 2026-10-13 (a prison cell fed from a remote chest; the same Build totals on two plots).
 
 Not proven live on any build:
 
 - That the game's shared-storage totals refresh after the pool takes from a shared chest.
 - That the craft cost display redraws when a new view arrives without reopening the station.
-- That the character's interaction target stays the workstation while its window is open, on the
-  client and the server (the Craft view and the client selection rely on it), and that the build
-  menu's shown state covers every build cost display (the Build view relies on it).
+- That the build menu's shown state covers every build cost display, and that other screens reading
+  the same count keep the game's own result (the Build view relies on both). Observed: the Craft view
+  stays with a station while the server's interaction target is that station, even after the character
+  walks off, and clears when the target changes.
 - How the game's check treats a recipe that lists one item twice.
 
 `Repair` and `Upgrade` are not wired; they stay vanilla.

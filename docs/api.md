@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **890** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **901** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -70,7 +70,7 @@ call `Progenitor.Ui.Ui` statically and pass `owner` + `pluginId`.
 | `ctx.Messages` (`PluginMessages`) | verified live (2026-10-09) | Versioned, tolerant messages on Core's `'PrMs'` envelope: `On<T>`, `SendToServer`, `SendTo`, `SendToAll`, plus the hand-written `MessageWriter` / `MessageReader` overloads. Sends are gated on the peer's capability and feature table. | `samples/Progenitor.CompatTest` (test plugin) |
 | `ctx.Requests` (`PluginRequests`) / `ctx.Subscriptions` (`PluginSubscriptions`) | landed (source-checked and game-free tested, not live-verified) | Typed request and reply (`Handle`, `HandleDeferred`, `Send`, `SendAsync`) and snapshot-then-delta subscriptions to keyed server state (`Topic`, `Subscribe`), both chunked above one packet on Core's `'PrXc'`. Tracked: unload removes handlers and topics and ends requests and subscriptions. [Requests, large messages and subscriptions](modules.md#requests-large-messages-and-subscriptions). | `SampleExchange.cs` (`.request`, `.subscribe`); unit tests `ExchangeEngineTests`, `ExchangeWireTests` |
 | `ctx.Castles` | verified live | Server castle plot / tile / building reads and handles on this plugin's world. | `SampleCastle.cs` (`.castle`) |
-| `ctx.MaterialSource` (`PluginMaterialSource`; alias `ctx.Stations.MaterialSource`) | experimental | The one build and craft material provider: register, invalidate, read what is armed. The native seams are opt-in (`[Materials] NativeSeams`, client and server restart). [Material sources](#material-sources). | `samples/Progenitor.SharedResourcesTest` (test plugin); unit tests `MaterialServiceTests`, `MaterialTransactionTests`, `MaterialViewSyncTests` |
+| `ctx.MaterialSource` (`PluginMaterialSource`; alias `ctx.Stations.MaterialSource`) | experimental, opt-in; live-verified on the test rig 2026-10-14 (other screens not) | The one build and craft material provider: register, invalidate, read what is armed. The native seams are opt-in (`[Materials] NativeSeams`, client and server restart). [Material sources](#material-sources). | `samples/Progenitor.SharedResourcesTest` (test plugin); unit tests `MaterialServiceTests`, `MaterialTransactionTests`, `MaterialViewSyncTests` |
 | `ctx.Inventory` (`PluginInventory`) | landed | Server inventories of any kind: read, count, free space, add, remove, a total-conserving transfer, watches, stable container ids. Client throws. [Inventory](#inventory). | `SampleInventory.cs` (`.items chests`, `.items move`) |
 | `ctx.Clans` (`PluginClans`) | landed | Server clans: a user's clan, its members and its castles. Client throws. [Clans](#clans). | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Servants` (`PluginServants`) | experimental | Server castle servants and hunts: the throne's list, the heart's hunt record, server sends and resends with the game's checks, the `ServantsReturned` event, and a one-provider throne list swap. Client throws. [Servants](#servants). | `SampleServants.cs` (`.servants`) |
@@ -566,6 +566,27 @@ territory index, never an entity. Narrative, game facts and the live acceptance:
 | `ServantsSent` (event) | experimental | After a send Progenitor made: `Result`, `By` (plugin GUID, or `progenitor.throne` for a routed throne send). The game's own sends are not announced. | none (read by `SampleServants.cs` only through the reply) |
 | `ServantSendRequest` / `ServantSendResult` / `ServantSendRefusal` | experimental | Request: `Heart`, `Servants` (1–3), `MissionGuid`, `DataSlot`, `User` (whose discovery is checked; default the heart's owner), `CheckDiscovered`, `Epoch`. Result: `Ok`, `Refusal`, `Reason`, `Heart`, `MissionGuid`, `Zone`, `DataSlot`, `LengthSeconds`, `StartedUtc`, `Servants`, `BuffApplied`. | unit test `ServantLogicTests` |
 | `ctx.Servants.RegisterListProvider(IServantListProvider)` → `IDisposable` / `ListStatus` → `ServantListStatus` | experimental | One provider, player-scoped: `HeartsFor(ServantListRequest)` (`User`, `Character`, `Heart`, `Territory`) returns the hearts whose servants the throne lists for that player, or null for the game's list. A throne send naming servants of another heart is performed by Progenitor on their own heart. Tracked; a second provider throws naming the owner. | `SampleServants.cs` (`.servants swap on`); unit test `ServantLogicTests` (registry) |
+
+## Material sources
+
+Milestone P3, **experimental**: one provider decides which containers pay for building (B menu, the
+game's shared-inventory mode) and workstation crafting, and the totals the player sees follow the same
+provider. The native availability and payment seams are opt-in Bootstrap seams, **off by default**:
+`[Materials] NativeSeams = true` in `progenitor.cfg` on the client and the server, then restart both
+(a Bootstrap change). Without them a registration is accepted and changes nothing in the game, and
+`Status` says so. Experimental and opt-in; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified ([modules.md](modules.md#native-seams-bootstrap)).
+Narrative, guarantees, seam facts and limits: [modules.md, Material sources](modules.md#material-sources).
+
+| Member | Status | Intent | Example |
+|---|---|---|---|
+| `ctx.MaterialSource.Register(IMaterialSourceProvider)` → `IDisposable` | experimental | One provider at a time; a second registration throws `InvalidOperationException` naming the current owner. Tracked: unload releases it; dispose unregisters earlier. Server only, main thread. | `Progenitor.SharedResourcesTest` (`.srtest enable`); unit test `MaterialSourceRegistryTests` |
+| `ctx.MaterialSource.Invalidate(Entity user)` / `InvalidateAll()` | experimental | Mark one player's (or every player's) displayed totals stale; `InvalidateAll` also re-reads `Operations`. Payments never use stale data: each operation asks the provider at the game's own check. Server only. | `Progenitor.SharedResourcesTest`; unit test `MaterialSourceRegistryTests` |
+| `ctx.MaterialSource.Status` → `MaterialSourceStatus` | experimental | `Registered`, `Owner`, `HooksInstalled` + `HooksReason`, `Requested`, `Wired` (requested and supported, empty while the seams are off), `Revision`, `Payments`, `Views`, `Faults` (provider calls that threw; the log is capped at 20 lines per Core load, the counter is not), `Shortfalls` (operations a cost line of which the pool could not pay in full at payment; the game completes them as it does its own short removals). `ToString()` is one `materials:` log line. The counters reset on every provider registration. Both sides. | `.srtest status`; unit tests `MaterialSourceRegistryTests`, `MaterialTransactionTests` |
+| `IMaterialSourceProvider` (`Operations`, `Revision(in MaterialContext)`, `Candidates(in MaterialContext)`, `Sources(in MaterialContext, int item)` → `ItemSources?`) | experimental | Provider contract. `Sources` returns the item's containers in spend order (`ItemSources.SpendOrder`, `ContainerId`) and the pool reserve (`PoolReserve`, kept once across the pool). `null` = the game's own rules pay and show that item; an empty `Candidates` list = this context is not governed. Asked once per item per game operation, at the game's own check, before any count is read, never between the check and the payment. Server main thread: fast, no item moves, no throws (a throw means no remote sources, never the game's storage). | `samples/Progenitor.SharedResourcesTest/MaterialProvider.cs`; unit tests (test doubles) |
+| `ItemSources(IReadOnlyList<ContainerId> spendOrder, int poolReserve = 0)` | experimental | One item's answer. Duplicates and unknown or removed ids are ignored; a negative reserve counts as 0. | unit test `MaterialPlannerTests` |
+| `MaterialOperation` / `MaterialOperations.Supported` / `IsSupported` | experimental | `Build`, `Craft`, `Repair`, `Upgrade`, `Research`, `Other`. Wired: `Build`, `Craft`; the rest stay vanilla. | unit test `MaterialSourceRegistryTests` |
+| `MaterialContext` | experimental | `User`, `Character` (`CastleId`, session ids), `WorldEpoch`, `Operation`, `StandingTerritory` (-1 = no plot), `Station` (`ContainerId`, craft only). | unit test `MaterialServiceTests` |
+| `MaterialPaid` (event) / `MaterialDebit` | experimental | Published on the server for each cost line the pool paid any part of, after the game system finished the operation (same frame): `Context`, `Transaction` (shared by every line of one operation), `Item`, `Requested`, `Paid` (less than `Requested` after a shortfall), `Debits` (container, amount, in the order taken). | unit test `MaterialTransactionTests` |
 
 ## Buffs
 
@@ -1098,7 +1119,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 890 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 901 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API

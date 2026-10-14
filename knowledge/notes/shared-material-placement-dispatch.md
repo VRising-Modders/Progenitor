@@ -8,7 +8,7 @@ area: inventory
 tags: materials, building, inventory, placement
 route: MaterialPlacementDispatch and scoped material count/payment seams
 status: verified-live
-date: 2026-10-13
+date: 2026-10-14
 evidence: internal research notes (shared resources live checks, 2026-10-13)
 ---
 
@@ -26,7 +26,7 @@ The build-menu tooltip used the hooked inventory count, but the optimized placem
 
 ## Verification
 
-Observed live on an isolated test server with a copy of a save: a workbench placed from the build menu on a resource-poor plot; the remote plank, stone and hide debits followed the configured per-item order, including one item split across two chests. A workbench craft completed from remote materials, and a prison cell fed one fish from a remote chest. These used a fixed test provider, not a production sharing policy. A client Core swap collected the previous generation.
+Observed live on an isolated test server with a copy of a save: a workbench placed from the build menu on a resource-poor plot; the remote plank, stone and hide debits followed the configured per-item order, including one item split across two chests. A workbench craft completed from remote materials, and a prison cell fed one fish from a remote chest. These used a fixed test provider, not a production sharing policy. A client Core swap collected the previous generation. The hardened build (PR 15) placed a workbench the same way on the isolated test rig on 2026-10-14, paying from three chests on two other plots in one operation.
 
 ## Gotchas
 
