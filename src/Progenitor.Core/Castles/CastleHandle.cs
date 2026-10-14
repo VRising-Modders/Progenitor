@@ -267,6 +267,20 @@ internal sealed class CastleHandle : ICastleHandle
         catch (Exception e) { return CastleHeartFuel.Fail("heart read threw: " + e.Message); }
     }
 
+    public long StructureRevision
+    {
+        get
+        {
+            if (!Enabled || _runtime == null) return 0;
+            try { return _runtime.StructureRevision(Heart); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Castles: StructureRevision(" + Heart + ") threw: " + e.Message);
+                return 0;
+            }
+        }
+    }
+
     public IReadOnlyList<CastleContainerInfo> Containers() => InventoryRows(stations: false);
 
     public IReadOnlyList<CastleContainerInfo> Stations() => InventoryRows(stations: true);

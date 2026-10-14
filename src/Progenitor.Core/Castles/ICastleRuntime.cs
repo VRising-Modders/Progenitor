@@ -84,6 +84,9 @@ internal interface ICastleRuntime
     /// <summary>Placed models with an inventory on one castle (containers and stations), sorted like <see cref="Buildings"/>.</summary>
     IReadOnlyList<CastleInventoryRow> Inventories(CastleId heart);
 
+    /// <summary>Changes when a container or station on the castle is built or destroyed; 0 when unreadable.</summary>
+    long StructureRevision(CastleId heart);
+
     /// <summary>The heart's nameplate, empty when unnamed or unreadable.</summary>
     string HeartName(CastleId heart);
 
@@ -153,6 +156,8 @@ internal sealed class NullCastleRuntime : ICastleRuntime
     }
 
     public IReadOnlyList<CastleInventoryRow> Inventories(CastleId heart) => System.Array.Empty<CastleInventoryRow>();
+
+    public long StructureRevision(CastleId heart) => 0;
 
     public string HeartName(CastleId heart) => "";
 

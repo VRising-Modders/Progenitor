@@ -822,7 +822,7 @@ server.tool("progenitor_quit", "Request UnityEngine.Application.Quit on the give
 server.tool("progenitor_castles", "Server-oriented castle reads: plots (territory index, bounds, owner, clan, level, raided, decaying), tiles (row-major floor cells with floor type including treasury, room, wall/door bits), or buildings (prefab, footprint, rotation, kind). Block coords are skipped until a live GetBuffer probe. plot is a territory index; omit it to list every plot (tiles/buildings walk each plot up to limit).",
   {
     side,
-    what: z.enum(["plots", "tiles", "buildings"]).optional().describe("Which read. Default plots."),
+    what: z.enum(["plots", "tiles", "buildings", "index"]).optional().describe("Which read. Default plots. index: the castle container index counters (scans, hits, why each scan ran)."),
     plot: z.number().int().optional().describe("CastleTerritoryIndex. Omit to include every plot."),
     limit: z.number().int().optional().describe("Max rows returned. Default 200, hard cap 2000."),
   },

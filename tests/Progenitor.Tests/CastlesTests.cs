@@ -1640,6 +1640,10 @@ public class CastlesTests : IDisposable
         IReadOnlyList<CastleInventoryRow> ICastleRuntime.Inventories(CastleId heart) =>
             InventoryRows.TryGetValue(heart, out var rows) ? rows.ToArray() : Array.Empty<CastleInventoryRow>();
 
+        public readonly Dictionary<CastleId, long> Revisions = new();
+
+        public long StructureRevision(CastleId heart) => Revisions.TryGetValue(heart, out var r) ? r : 0;
+
         public string HeartName(CastleId heart) => HeartNames.TryGetValue(heart, out var n) ? n : "";
 
         public CastleHeartFuel HeartFuel(CastleId heart) =>

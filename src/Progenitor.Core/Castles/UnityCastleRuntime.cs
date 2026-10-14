@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using ProjectM;
 using ProjectM.CastleBuilding;
 using ProjectM.Network;
+using ProjectM.Tiles;
 using Progenitor.Ecs;
 using Stunlock.Core;
 using Unity.Entities;
@@ -353,15 +354,102 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         }
     }
 
+    // ---- inventory membership ------------------------------------------------------------------
+    // Containers()/Stations() used to list every castle building on the server for each call. The
+    // index keeps which inventory-bearing models belong to which heart and rescans only when the
+    // structure stamp below moves (see CastleInventoryIndex). Rows are still read live.
+
+    private CastleInventoryIndex? _inventoryIndex;
+
+    private CastleInventoryIndex InventoryIndex =>
+        _inventoryIndex ??= CastleInventoryIndex.Live = new CastleInventoryIndex(InventoryStamp, ScanInventoryModels);
+
+    private static ComponentType[] InventoryModelTypes(bool instances) => new[]
+    {
+        ComponentIndex.Of<TileModel>(ComponentType.AccessMode.ReadOnly),
+        ComponentIndex.Of<CastleHeartConnection>(ComponentType.AccessMode.ReadOnly),
+        instances
+            ? ComponentIndex.Of<InventoryInstanceElement>(ComponentType.AccessMode.ReadOnly)
+            : ComponentIndex.Of<InventoryBuffer>(ComponentType.AccessMode.ReadOnly),
+    };
+
+    /// <summary>
+    /// The stamp of the inventory-bearing castle models: the entity count of each query, which moves
+    /// only when such a model is created or destroyed (a sum of chunk counts, no entity list). Not the
+    /// queries' component order versions: those move on any structural change to any entity carrying
+    /// one of the types, characters and inventories included, which is nearly every frame. Null when
+    /// unreadable, which makes the index rescan.
+    /// </summary>
+    private static long? InventoryStamp()
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return null;
+        var em = world.EntityManager;
+        long stamp = 0;
+        foreach (bool instances in new[] { false, true })
+        {
+            var query = Query.Build(em, includeDisabled: true, includeSystems: false, InventoryModelTypes(instances));
+            try { stamp = (stamp << 32) | (uint)query.CalculateEntityCount(); }
+            finally { query.Dispose(); }
+        }
+        return stamp;
+    }
+
+    /// <summary>
+    /// Every placed model with an inventory and a heart connection (a few hundred server-wide, not
+    /// every castle building), with its heart through the guarded raw connection reader. Hearts are
+    /// left out, as the inventory rows leave them out.
+    /// </summary>
+    private static IEnumerable<(CastleId Model, CastleId Heart)> ScanInventoryModels()
+    {
+        var result = new List<(CastleId, CastleId)>();
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return result;
+        var em = world.EntityManager;
+        var seen = new HashSet<CastleId>();
+        foreach (bool instances in new[] { false, true })
+        {
+            foreach (var e in Query.Entities(em, includeDisabled: true, includeSystems: false, InventoryModelTypes(instances)))
+            {
+                try
+                {
+                    var id = CastleId.From(e);
+                    if (!seen.Add(id) || e.Has<CastleHeart>(em)) continue;
+                    var heart = Servants.ServantRuntime.HeartOf(em, e);
+                    if (heart != Entity.Null) result.Add((id, CastleId.From(heart)));
+                }
+                catch { /* unreadable entity: not listed */ }
+            }
+        }
+        return result;
+    }
+
+    public long StructureRevision(CastleId heart)
+    {
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated || heart.IsNone) return 0;
+        return InventoryIndex.RevisionOf(heart, Progenitor.WorldState.WorldEpoch.Current);
+    }
+
     public IReadOnlyList<CastleInventoryRow> Inventories(CastleId heart)
     {
         var world = Worlds.Server;
         if (world == null || !world.IsCreated || heart.IsNone) return Array.Empty<CastleInventoryRow>();
-        var plot = CastleReader.PlotOf(world, heart.ToEntity());
-        if (plot == null) return Array.Empty<CastleInventoryRow>();
-
         var em = world.EntityManager;
-        var buildings = CastleReader.Buildings(world, plot);
+        var heartEntity = heart.ToEntity();
+        if (!heartEntity.Exists(em) || !heartEntity.Has<CastleHeart>(em)) return Array.Empty<CastleInventoryRow>();
+
+        // The index only narrows the candidates; each is still read and its heart connection
+        // checked exactly as CastleReader.Buildings does, then sorted the same way.
+        var models = InventoryIndex.Of(heart, Progenitor.WorldState.WorldEpoch.Current);
+        var buildings = new List<CastleBuilding>(models.Count);
+        for (int i = 0; i < models.Count; i++)
+        {
+            var building = CastleReader.ConnectedBuilding(world, models[i].ToEntity(), heartEntity);
+            if (building != null) buildings.Add(building);
+        }
+        buildings.Sort((a, b) => CastleLogic.CompareNetworkIds(
+            a.NetworkIndex, a.NetworkGeneration, b.NetworkIndex, b.NetworkGeneration));
         var rows = new List<CastleInventoryRow>();
         for (int i = 0; i < buildings.Count; i++)
         {

@@ -40,7 +40,8 @@ public static class CastleOps
                 "plots" => PlotsJson(selected, plots.Count, limit, plotIndex),
                 "tiles" => TilesJson(world, selected, plots.Count, limit, plotIndex),
                 "buildings" => BuildingsJson(world, selected, plots.Count, limit, plotIndex),
-                _ => throw new ArgumentException("args.what must be 'plots', 'tiles', or 'buildings'"),
+                "index" => new { what = "index", index = CastleInventoryIndexStatus.Describe() },
+                _ => throw new ArgumentException("args.what must be 'plots', 'tiles', 'buildings' or 'index'"),
             };
         }
         catch (Exception e) when (e is not ArgumentException and not InvalidOperationException)

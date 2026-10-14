@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **931** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **932** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -313,6 +313,7 @@ missing components never throw.
 | `ICastleHandle.IsInside(CastleVec3\|CastleId)` / `IsTilePrecise` | landed | X/Z only — there is no verified world-Y → height level. Uses the `CastleTerritoryTiles` mask when its length equals the computed tile count, else `WorldBounds` with one info line per territory. | `SampleCastle.cs` (`.castle inside`) |
 | `ICastleHandle.CanPlace(prefabGuid, position, rotation=0)` → `CastlePlacementCheck` | experimental | Read-only subset: territory, tile mask, height band, occupancy. `Complete` is **always false**; `NotChecked` lists the 11 vanilla rules skipped. | `SampleCastle.cs`: `.castle canplace <prefabGuidOrName>`; prints the verdict, the resolved footprint and height level, `FootprintResolved` / `BuildableTilesRead` / `HeightAmbiguous`, `Complete=no`, and the first 3 of the 11 `NotChecked` rules with a `+8 more` tail |
 | `ICastleHandle.Containers()` / `Stations()` → `CastleContainerInfo` | landed | Placed models with an inventory: chests and storage, then crafting and refinement stations. Each row: `Building`, stable `Id` (`ContainerId`), `Nameplate`, `Nameable`, `Main` / `Output` (`InventoryRef`; `Output` only on refinement stations), `IsStation`, `IsRefinement`, `SlotCount`. | `SampleInventory.cs` (`.items chests`) |
+| `ICastleHandle.StructureRevision` | landed | Changes when a container or station on the plot is built or destroyed, or the world loads; key container caches on it. Game-free tested, not live-verified. | none |
 | `ICastleHandle.Name` / `HeartId` / `HeartFuel()` → `CastleHeartFuel` | landed | The heart's nameplate; the heart's stable id (same scheme as containers); `Level`, `UnlockedSlots` (the game's per-level `ItemSlots`, not a default), `LevelRows`, `FuelQuantity`, `Ok` / `Reason`. | `SampleInventory.cs` (`.items heart`) |
 | `ctx.Castles.RelationTo(Entity user, ICastleHandle)` → `CastleRelation` | landed | Re-reads the castle on each call (a handle's owner is a snapshot). `Owner`, `ClanMember` (the owner's clan), `Allied` (the game's team check between the user's character and the heart), `None`. | `SampleInventory.cs` (`.items clan`) |
 | `ctx.Castles.Nameplate(Entity)` / `TrySetNameplate(Entity, string, out string reason)` | landed | Read or write a chest's, station's or heart's player-set name (`NameableInteractable.Name`, networked). Null when not nameable; at most 61 UTF-8 bytes, no control characters; empty clears. | `SampleInventory.cs` (`.items name`) |
@@ -1127,7 +1128,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 931 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 932 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1442,7 +1443,7 @@ Purpose lines are the first sentence of each type's own doc comment.
 | Type | Purpose | Why public |
 |---|---|---|
 | `BuffOps` | Debug-bridge buff op: apply or remove a buff prefab on a live entity through the game's debug apply path. | Dev bridge |
-| `CastleOps` | Debug-bridge castles op: JSON snapshots of CastleReader plots, tiles, or buildings. | Dev bridge |
+| `CastleOps` | Debug-bridge castles op: JSON snapshots of CastleReader plots, tiles, or buildings, and the container index counters. | Dev bridge |
 | `ConnectAddressParser` | Splits a Direct-Connect address into an IPv4 host and port before ConnectAddress.CreateSteamIPv4. | Dev bridge |
 | `ConnectAddressParser.Parsed` | IPv4 host + TCP port ready for CreateSteamIPv4. | Dev bridge |
 | `ConnectOps` | Client-only debug-bridge ops that drive the main-menu join and host paths. | Dev bridge |
@@ -1515,6 +1516,7 @@ Purpose lines are the first sentence of each type's own doc comment.
 |---|---|---|
 | `CastleBlockCoord` | One occupied block coordinate. | Core-internal |
 | `CastleBlockReason` | Why Evaluate refused, in the order it tests. | tests |
+| `CastleInventoryIndexStatus` | Counters of the castle container index (scans, hits, why each scan ran) for the `castles` op's `index` read. | Dev bridge |
 | `CastleLogic` | Game-free castle-read helpers: row-major tile order, NetworkId building order, kind classification, NESW wall/door bit packing, and floor-type names. | tests |
 | `CastleLogic.BuildingKind` | Placed-building kind the module exposes. | tests |
 | `CastlePlacement` | The read-only half of the game's placement validation. | tests |
