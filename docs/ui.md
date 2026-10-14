@@ -1354,7 +1354,7 @@ Read from the UI prefabs the game ships, not from a live run. Two serialized fie
 
 1. **Text at full size,** when the button (caption + 14 padding a side) fits the slot: a caption up to **30 units** at the game's 16-unit size.
 2. **Text squeezed,** when it fits with the caption at no less than 0.75 of full size (12 units): a caption up to **40 units**, in a button narrowed to the slot.
-3. **A square icon button,** 36 x 36 in the bar's art (36 + the 8-unit gap = 44 of the 58). The icon is the button's `VanillaButtonIcon`: an item's own game icon (`VanillaButtonIcon.Item(prefabGuid)`) or a drawn mark (`VanillaButtonIcon.Drawn("chest")`; the default is the drawn chest). The caption is its tooltip, shown on hover. `Storage` and `Stash` both show this way. Several buttons on one handle need one icon each, 8 apart, so only one fits this slot.
+3. **A square icon button,** 36 x 36 in the bar's art (36 + the 8-unit gap = 44 of the 58). The icon is the button's `VanillaButtonIcon`: an item's own game icon (`VanillaButtonIcon.Item(prefabGuid)`) or a drawn mark (`VanillaButtonIcon.Drawn("chest")`; the default is the drawn chest). The caption is its tooltip, shown on hover above every game and mod canvas, next to the icon, for as long as the pointer stays on the button. It does not need a mod panel to be open. A tooltip that cannot be shown is one warning per site and reason (`Ui: attach InventoryPanel icon tooltip not shown: <why>.`); the first one shown is one info line (`... icon tooltip shown on hover ('Storage').`). `Storage` and `Stash` both show this way. Several buttons on one handle need one icon each, 8 apart, so only one fits this slot.
 4. **Hidden,** with `hidden reason=...`, when none of these fits. Every slot must lie inside the window and cover no game button and no part of the item area.
 
 Slots that are rejected on this build:
@@ -1486,6 +1486,7 @@ The `Ui: attached <Site> ... layout=` line says `column`, `group` (every inline 
 | `buttonFailure` | Why the site's last button clone failed (empty after a success). A declared button that failed is asked for again every 30 frames while the window stays open. |
 | `slot` | Placed containers only: `after`, `above` or `none` (no slot fits; see `fitReason`). |
 | `face` | Placed containers only: `text` or `icon` (the row fell back to icon buttons). |
+| `buttons[].face`, `buttons[].tooltip` | Each built button's face (`text` or `icon`) and, for an icon, its tooltip: `text` (the caption), `watch` (the pointer watch is attached), `hovered`, `hoverEvents` (pointer-enter events received), `shown` (the box is up for this button) and `boxTitle` (the title of whatever tooltip box is up). |
 | `buttons[]` | `index`, `caption`, `wanted` (the button's `Visible`), `built`, `shown`, `rect`. |
 | `rows[]`, `rect` | The row texts; the container's rect while it is shown. Rects are screen pixels, origin bottom-left, like the panels' rects. |
 

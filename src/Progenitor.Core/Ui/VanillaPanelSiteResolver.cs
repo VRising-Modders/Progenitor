@@ -1326,7 +1326,7 @@ internal sealed partial class UnityUiRuntime
             // BesideSort may fall back to a square icon face (PlaceBesideRow); its icon is built now,
             // hidden, so the switch is a SetActive and never a clone.
             GameObject? face = host.Anchor == VanillaPanelAnchor.BesideSort ? AddIconFace(clone, label, icon, size) : null;
-            var widget = new PanelButtonWidget(clone, label, stun.onClick, size, face, this);
+            var widget = new PanelButtonWidget(clone, label, stun.onClick, size, face, this) { Site = site };
             var element = clone.GetComponent<LayoutElement>() ?? clone.AddComponent<LayoutElement>();
             element.ignoreLayout = false;
             element.preferredHeight = size.y;
@@ -1852,6 +1852,19 @@ internal sealed partial class UnityUiRuntime
                     }
                     catch { /* */ }
                     b["rect"] = brect;
+                    if (i < rb.Buttons.Length && rb.Buttons[i] is PanelButtonWidget tipped && tipped.Alive)
+                    {
+                        b["face"] = tipped.IconMode ? "icon" : "text";
+                        b["tooltip"] = new Dictionary<string, object?>
+                        {
+                            ["text"] = tipped.IconMode ? tipped.Text : "",
+                            ["watch"] = tipped.TooltipWatch,
+                            ["hovered"] = tipped.Hovered,
+                            ["hoverEvents"] = tipped.HoverEvents,
+                            ["shown"] = tipped.TooltipUp,
+                            ["boxTitle"] = UnityUiRuntime.TooltipTitle,
+                        };
+                    }
                 }
             }
 
@@ -2164,23 +2177,64 @@ internal sealed partial class UnityUiRuntime
             if (!icon && _hovered) HideTip();
         }
 
+        /// <summary>Pointer-enter events this button received (diagnostics and <c>ui_read</c>).</summary>
+        internal int HoverEvents { get; private set; }
+
+        internal bool Hovered => _hovered;
+
+        /// <summary>The pointer watch that drives the tooltip was attached.</summary>
+        internal bool TooltipWatch => _hover != null;
+
+        /// <summary>The tooltip box is up and is this button's.</summary>
+        internal bool TooltipUp => _hovered && IconMode && UnityUiRuntime.TooltipShown;
+
+        /// <summary>The site this button is on, for its one-time lines.</summary>
+        internal VanillaUiSite Site { get; set; }
+
         private void OnHover(bool inside)
         {
             _hovered = inside;
+            if (inside) HoverEvents++;
             if (!inside || !IconMode)
             {
                 HideTip();
                 return;
             }
 
+            string why = "";
             try
             {
                 var rt = Rect;
-                if (rt == null || _runtime == null) return;
-                string caption = _caption != null ? (_caption.text ?? "") : "";
-                _runtime.ShowTooltip(ScreenRectOf(rt), caption, "", () => _hovered && IconMode && Alive);
+                if (rt == null || _runtime == null) why = "no rect or runtime";
+                else
+                {
+                    string caption = _caption != null ? (_caption.text ?? "") : "";
+                    var anchor = ScreenRectOf(rt);
+                    if (!anchor.IsKnown) why = "the button's screen rect is unknown";
+                    else
+                    {
+                        // A game window has no mod panel: the box must not need one to stay up.
+                        _runtime.ShowGameControlTooltip(anchor, caption, "", () => _hovered && IconMode && Alive && ActiveInHierarchy);
+                        if (!UnityUiRuntime.TooltipShown) why = "the tooltip box did not come up";
+                    }
+                }
             }
-            catch { /* no tooltip is a cosmetic miss */ }
+            catch (Exception e) { why = e.GetType().Name + ": " + e.Message; }
+
+            if (why.Length > 0)
+            {
+                if (VanillaSiteHealth.LogOnce(Site, "icon tooltip: " + why))
+                    Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " icon tooltip not shown: " + why + ".");
+            }
+            else if (VanillaSiteHealth.LogOnce(Site, "icon tooltip shown"))
+            {
+                Plugin.Logger?.LogInfo("Ui: attach " + VanillaUiSites.Key(Site) + " icon tooltip shown on hover ('" + UnityUiRuntime.TooltipTitle + "').");
+            }
+        }
+
+        private bool ActiveInHierarchy
+        {
+            get { try { return UnityUiRuntime.Alive(_go) && _go!.activeInHierarchy; } catch { return false; } }
         }
 
         private void HideTip()

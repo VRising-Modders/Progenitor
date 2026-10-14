@@ -907,6 +907,21 @@ public class VanillaPanelTests : IDisposable
     }
 
     [Fact]
+    public void An_icon_buttons_tooltip_stays_up_without_a_mod_panel_and_says_why_once_when_it_cannot()
+    {
+        // Source pins on the Unity half (not compiled here). Live c24906668: hovering the icon in the
+        // character window showed no tooltip and logged nothing. The kit tooltip's frame watch hid every
+        // box when no mod panel was shown, which inside a game window is always: up one frame, gone the next.
+        string widgets = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Widgets.cs");
+        Assert.Contains("(!_tipNeedsPanel || AnyPanelShown())", widgets);
+        Assert.Contains("internal void ShowGameControlTooltip(", widgets);
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("_runtime.ShowGameControlTooltip(anchor, caption", resolver);
+        Assert.Contains("icon tooltip not shown: ", resolver);
+        Assert.Contains("[\"hoverEvents\"] = tipped.HoverEvents", resolver);
+    }
+
+    [Fact]
     public void A_button_icon_is_an_item_or_a_drawn_mark_and_the_chest_by_default()
     {
         Assert.Equal("mark:chest", VanillaButtonIcon.Default.ToString());
