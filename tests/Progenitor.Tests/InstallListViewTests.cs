@@ -3074,7 +3074,10 @@ public sealed class InstallListViewTests : IDisposable
         Assert.Equal(CellTone.Disabled, PendingCell(rig.Pane, InstallModsPane.CellPendingRestart).Tone);
         Assert.StartsWith("Asking ", PendingCell(rig.Pane, InstallModsPane.CellPendingText).Text);
 
-        rig.ClickCell(InstallModsPane.PendingRowKey, InstallModsPane.CellPendingRestart);
+        // The bridge refuses the grayed button (live 2026-10-14); a press that reaches its slot anyway sends nothing.
+        Assert.False(UiCellRowHandle.TryInvoke(InstallModsPane.PendingRowKey + "/" + InstallModsPane.CellPendingRestart, out var refusedDetail));
+        Assert.NotNull(UiClickGate.RefusalOf(refusedDetail));
+        rig.DispatchCell(InstallModsPane.PendingRowKey, InstallModsPane.CellPendingRestart);
         Assert.Null(rig.Pane.StopDialog);
         Assert.Single(sent);
         // A rebuild while in flight keeps the state.
@@ -3362,6 +3365,14 @@ public sealed class InstallListViewTests : IDisposable
         {
             Assert.True(UiCellRowHandle.TryInvoke(rowKey + "/" + cellKey, out _), "no visible cell " + rowKey + "/" + cellKey);
             Download = Pane.ActiveDownload ?? Download;
+        }
+
+        /// <summary>The cell's own click slot, dispatched directly: a press that bypasses the bridge's grayed-control refusal.</summary>
+        public void DispatchCell(string rowKey, string cellKey)
+        {
+            ushort id = UiCellRowHandle.VisibleRow(rowKey)?.CellSlotId(cellKey) ?? 0;
+            Assert.NotEqual(0, id);
+            UiSlotTable.BootstrapDispatch(id, (byte)UiSlotKind.Click, 0f, false, null);
         }
 
         public void ClickHandle(IUiHandle handle)

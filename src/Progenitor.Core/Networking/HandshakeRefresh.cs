@@ -431,7 +431,7 @@ public static partial class Handshake
                     var connected = world.EntityManager.GetComponentData<User>(userEntity);
                     if (!connected.IsConnected || connected.Index != index || connected.PlatformId != platform
                         || !HandshakeReask.RefreshAllowed(AnswerWatch.GetStatus(index) == HandshakeAnswerWatch.Status.Ok, SoftReaskPending(index))) return;
-                    var packed = Compare.PackRequest(RequestRowsNow());
+                    var packed = PackRequestNow();
                     // Mod compatibility C1/C2: the client's new generation must learn again that this server reads tables.
                     var refreshRows = new List<ModRecord>(packed.Rows);
                     Compare.MergeCapabilityBits(refreshRows, ModCompatCaps.RequestBitsNow());

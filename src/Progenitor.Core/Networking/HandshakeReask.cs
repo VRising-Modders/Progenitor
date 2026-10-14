@@ -91,6 +91,100 @@ internal sealed class HandshakeSessionMemory
     }
 }
 
+/// <summary>
+/// RESEND1 (live 2026-10-14): what the server's handshake request said last, so a mid-session change of the required
+/// table — a server plugin hot-loaded or unloaded from <c>progenitor-reload</c> — is re-sent to every connected client.
+/// Before, the request went out only at a join or a Core generation change, so a client never learned that a server part
+/// had loaded (its needs-server-part rows stayed gray) or gone (nothing paused). A swap (unload, then load) settles for
+/// <see cref="SettleSeconds"/> and is re-sent only when the rows differ from the ones last sent. Game-free.
+/// </summary>
+internal sealed class HandshakeRequirementWatch
+{
+    /// <summary>How long a change settles before it is compared and re-sent (an unload and the load after it are one change).</summary>
+    internal const double SettleSeconds = 1.0;
+
+    private readonly object _gate = new();
+    private string? _announced;
+    private bool _scheduled;
+
+    /// <summary>The rows as an order-free text: guid, version, level, rule and declared, one row per guid.</summary>
+    internal static string Stamp(IReadOnlyList<Handshake.ModRecord>? rows)
+    {
+        if (rows == null || rows.Count == 0) return "";
+        var parts = new List<string>(rows.Count);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            if (string.IsNullOrEmpty(r.Guid)) continue;
+            parts.Add(r.Guid.ToLowerInvariant() + "|" + r.Version + "|" + ((int)r.Level).ToString(CultureInfo.InvariantCulture)
+                + "|" + ((int)r.VersionRule).ToString(CultureInfo.InvariantCulture) + "|" + (r.Declared ? "d" : "u"));
+        }
+
+        parts.Sort(StringComparer.Ordinal);
+        return string.Join("\n", parts);
+    }
+
+    /// <summary>A request with these rows went out (a join's ask, a re-ask, a refresh, a re-send).</summary>
+    internal void NoteSent(string stamp)
+    {
+        lock (_gate) _announced = stamp ?? "";
+    }
+
+    /// <summary>The required table changed: true when a settle-then-compare should be scheduled (none is pending).</summary>
+    internal bool TrySchedule()
+    {
+        lock (_gate)
+        {
+            if (_scheduled) return false;
+            _scheduled = true;
+            return true;
+        }
+    }
+
+    /// <summary>The scheduled compare could not be posted: let the next change schedule one.</summary>
+    internal void Unschedule()
+    {
+        lock (_gate) _scheduled = false;
+    }
+
+    /// <summary>True while a compare is waiting for its settle time.</summary>
+    internal bool Scheduled
+    {
+        get { lock (_gate) return _scheduled; }
+    }
+
+    /// <summary>
+    /// The settled compare: true (and <paramref name="now"/> becomes what was sent) when the rows differ from the last
+    /// request sent. Nothing sent yet this generation is not a change: whoever joins next is asked with the rows of then.
+    /// </summary>
+    internal bool Due(string now)
+    {
+        lock (_gate)
+        {
+            _scheduled = false;
+            now ??= "";
+            if (_announced == null)
+            {
+                _announced = now;
+                return false;
+            }
+
+            if (string.Equals(_announced, now, StringComparison.Ordinal)) return false;
+            _announced = now;
+            return true;
+        }
+    }
+
+    internal void Reset()
+    {
+        lock (_gate)
+        {
+            _announced = null;
+            _scheduled = false;
+        }
+    }
+}
+
 /// <summary>REASK1: how the server asks a connected user.</summary>
 internal enum HandshakeAskKind
 {
@@ -141,6 +235,18 @@ internal static class HandshakeReask
     /// a server mid re-ask (status pending) dropped the refresh, so the client never saw the request it had to answer.
     /// </summary>
     internal static bool RefreshAllowed(bool handshakeOk, bool softReaskPending) => handshakeOk || softReaskPending;
+
+    /// <summary>
+    /// RESEND1: the judgment of an answer to a requirement re-send (<see cref="HandshakeRequirementWatch"/>) from a user
+    /// whose handshake was already ok. A mismatch keeps them connected (a server mod loading mid-session is not their
+    /// join); the next join is judged in full.
+    /// </summary>
+    internal static bool KeepConnectedOnMismatch(bool requirementResend, bool wasAlreadyOk) => requirementResend && wasAlreadyOk;
+
+    /// <summary>RESEND1: the admins' log line for a mismatch that <see cref="KeepConnectedOnMismatch"/> kept connected.</summary>
+    internal static string KeptAfterRequirementChangeLine(string name, IReadOnlyList<string> problems) =>
+        "Handshake: " + name + " no longer matches this server's mods after they changed mid-session ("
+        + string.Join("; ", problems) + "); they stay connected, and their next join is checked against the new list.";
 
     /// <summary>The admins' log line when a soft re-ask got no answer.</summary>
     internal static string KeptConnectedLine(string name, int sends) =>

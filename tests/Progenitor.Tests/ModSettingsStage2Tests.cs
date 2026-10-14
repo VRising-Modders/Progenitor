@@ -446,6 +446,54 @@ public sealed class ModSettingsStage2Tests : IDisposable
         panel.Dispose();
     }
 
+    /// <summary>
+    /// Live 2026-10-14: <c>mods_ui widget_click</c> reported <c>invoked:1</c> on a needs-server-part button its page had
+    /// grayed (<c>enabled:false</c>). The bridge's click (<see cref="ModsMenu.ClickVisibleWidget"/>) dispatches the slot
+    /// itself, past Unity's interactable check, so it must refuse a grayed control: ok:false with the reason, tagged so the
+    /// dev bridge does not retry the caption on a cell row, and nothing runs. The same for a grayed toggle and radio. What
+    /// this would catch: a bridge check passing where a player's click does nothing.
+    /// </summary>
+    [Fact]
+    public void A_bridge_click_on_a_grayed_control_is_refused_with_the_reason()
+    {
+        var file = File("grayclick");
+        const string id = "example.stage2.grayclick";
+        var flag = file.Bind("S", "Flag", false, "");
+        var level = file.Bind("S", "Level", "Low", "");
+        int ran = 0;
+        bool on = false;
+        ModSettingsPages.Register(_owner, id, page => page
+            .Button("Open", () => ran++, needsServerPart: true, fallback: "Opens nothing here.")
+            .Toggle(flag, enableIf: () => on)
+            .Radio(level, choices: new[] { "Low", "High" }, enableIf: () => on));
+        Open(id);
+
+        var button = SettingRow(PageRows(), id + "/button/Open");
+        Assert.False(button.GetProperty("enabled").GetBoolean());
+        var refused = Assert.Throws<ArgumentException>(() => ModsMenu.ClickVisibleWidget("content", "Open", null, null));
+        Assert.Contains("'Open' is disabled (not interactable); not clicked", refused.Message, StringComparison.Ordinal);
+        // The reason is the row's own (offline here: not connected), as its help line shows it.
+        string reason = button.GetProperty("reason").GetString()!;
+        Assert.False(string.IsNullOrEmpty(reason));
+        Assert.Contains(reason, refused.Message, StringComparison.Ordinal);
+        Assert.True(refused.Data.Contains(UiClickGate.RefusedKey));
+        Assert.Equal(0, ran);
+
+        var toggle = Assert.Throws<ArgumentException>(() => ModsMenu.ClickVisibleWidget("content", "Flag", null, "true"));
+        Assert.Contains("disabled (not interactable)", toggle.Message, StringComparison.Ordinal);
+        Assert.False(flag.Value);
+        var radio = Assert.Throws<ArgumentException>(() => ModsMenu.ChooseRadio("content", "Level", "High"));
+        Assert.Contains("disabled (not interactable)", radio.Message, StringComparison.Ordinal);
+        Assert.Equal("Low", level.Value);
+
+        // Enabled: the same click and pick are not refused.
+        on = true;
+        Open(id);
+        Assert.NotNull(ModsMenu.ClickVisibleWidget("content", "Flag", null, "true"));
+        ModsMenu.ChooseRadio("content", "Level", "High");
+        Assert.Equal("High", level.Value);
+    }
+
     // ---- scope ------------------------------------------------------------------------------------
 
     /// <summary>

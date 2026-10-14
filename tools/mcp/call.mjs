@@ -10,6 +10,7 @@ import path from "node:path";
 import { requireWorkspacePath } from "../common/workspace.mjs";
 import { detectIdentity, wireWho, sharingNote } from "./identity.mjs";
 import { createQueue } from "./queue.mjs";
+import { asciiJson } from "./ascii-json.mjs";
 
 const GAME_DIR = process.env.PROGENITOR_GAME_DIR ?? "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VRising";
 // <workspace>/_testserver unless PROGENITOR_TEST_ROOT says otherwise (tools/common/workspace.mjs).
@@ -117,7 +118,10 @@ sock.on("data", (chunk) => {
     const r = msg.result;
     // A ping says what is loaded on this side: record it for the queue's LOADED NOW and history.
     if (op === "ping") try { createQueue().observe(who ?? {}, side, r); } catch { /* best effort */ }
-    console.log(typeof r === "string" ? r : JSON.stringify(r, null, 2));
+    // ASCII-only JSON (tools/mcp/ascii-json.mjs): the bridge sends non-ASCII as \uXXXX, and plain
+    // JSON.stringify would turn it back into raw UTF-8 bytes that Windows PowerShell decodes with the
+    // console code page, so "·" read back as "Â·".
+    console.log(typeof r === "string" ? r : asciiJson(r, 2));
   } else {
     console.error("bridge error: " + (msg.error ?? "unknown"));
     process.exit(1);

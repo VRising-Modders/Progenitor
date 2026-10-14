@@ -503,6 +503,64 @@ public sealed class CellRowTests : IDisposable
         Assert.Equal(1, rowClicks);
     }
 
+    /// <summary>
+    /// Live 2026-10-14: the bridge dispatched a grayed control's slot and reported it clicked. A cell drawn
+    /// <see cref="CellTone.Disabled"/> (the runtime sets its button non-interactable) and a row that is not interactable
+    /// are refused with the reason, by key, by caption and through a dialog's own row, and nothing runs. A bare caption
+    /// prefers a clickable match over a grayed one. What this would catch: a bridge click succeeding where a player's
+    /// cannot.
+    /// </summary>
+    [Fact]
+    public void Bridge_click_refuses_a_disabled_cell_or_a_row_that_is_not_interactable()
+    {
+        var panel = NewPanel();
+        var row = panel.CellRow(new CellRowSpec("dyno-ECF", MockRow()));
+        int rowClicks = 0, installClicks = 0;
+        row.OnRowClick(() => rowClicks++);
+        row.OnClick("install", () => installClicks++);
+        Assert.True(row.SetCell("install", tone: CellTone.Disabled));
+
+        Assert.False(UiCellRowHandle.TryInvoke("dyno-ECF/install", out var detail));
+        string? why = UiClickGate.RefusalOf(detail);
+        Assert.NotNull(why);
+        Assert.Contains("is disabled (not interactable); not clicked", why!, StringComparison.Ordinal);
+        Assert.Contains("'Install · restart'", why!, StringComparison.Ordinal);
+        Assert.False(UiCellRowHandle.TryInvoke("install · restart", out detail));
+        Assert.NotNull(UiClickGate.RefusalOf(detail));
+        var cellRow = (UiCellRowHandle)row;
+        Assert.False(cellRow.TryInvokeCell("install", out detail));
+        Assert.NotNull(UiClickGate.RefusalOf(detail));
+        Assert.Equal(0, installClicks);
+
+        // A second row showing the same caption, clickable: a bare caption reaches it, not the grayed one.
+        var other = panel.CellRow(new CellRowSpec("other-ECF", MockRow()));
+        int otherClicks = 0;
+        other.OnClick("install", () => otherClicks++);
+        Assert.True(UiCellRowHandle.TryInvoke("install · restart", out detail));
+        Assert.Equal("other-ECF/install", detail["label"]);
+        Assert.Equal(1, otherClicks);
+        Assert.Equal(0, installClicks);
+
+        // The tone back to normal: clickable again.
+        Assert.True(row.SetCell("install", tone: CellTone.Gold));
+        Assert.True(UiCellRowHandle.TryInvoke("dyno-ECF/install", out _));
+        Assert.Equal(1, installClicks);
+
+        // A row that is not interactable refuses its own click and its cells', with its help line as the reason.
+        cellRow.Help = "Needs the server part of this mod.";
+        row.Interactable = false;
+        Assert.False(UiCellRowHandle.TryInvoke("dyno-ECF", out detail));
+        Assert.Contains("Needs the server part of this mod.", UiClickGate.RefusalOf(detail)!, StringComparison.Ordinal);
+        Assert.False(cellRow.TryInvokeRow(out detail));
+        Assert.NotNull(UiClickGate.RefusalOf(detail));
+        Assert.False(UiCellRowHandle.TryInvoke("dyno-ECF/install", out _));
+        Assert.Equal(0, rowClicks);
+        Assert.Equal(1, installClicks);
+        row.Interactable = true;
+        Assert.True(UiCellRowHandle.TryInvoke("dyno-ECF", out _));
+        Assert.Equal(1, rowClicks);
+    }
+
     [Fact]
     public void Disposing_the_row_releases_every_slot_and_the_registry_entry()
     {

@@ -2269,6 +2269,45 @@ public static partial class Handshake
         lock (SoftReasks) return SoftReasks.Contains(userIndex);
     }
 
+    /// <summary>RESEND1: what the request said last, so a mid-session change of the required table is re-sent (<see cref="HandshakeRequirementWatch"/>).</summary>
+    internal static readonly HandshakeRequirementWatch RequirementWatch = new();
+
+    /// <summary>RESEND1: the users whose answer to a requirement re-send is still to be judged (a mismatch keeps them connected).</summary>
+    private static readonly HashSet<int> RequirementResends = new();
+
+    /// <summary>RESEND1: true while <paramref name="userIndex"/>'s answer to a requirement re-send is outstanding.</summary>
+    internal static bool RequirementResendPending(int userIndex)
+    {
+        lock (RequirementResends) return RequirementResends.Contains(userIndex);
+    }
+
+    /// <summary>
+    /// RESEND1: the required table changed (a server plugin's <c>Require</c> on load, its <c>Unrequire</c> on unload).
+    /// Schedules one settle-then-compare; the live server re-sends its request to every handshake-ok client when the rows
+    /// differ from the ones it last sent (<see cref="HandshakeRequirementWatch"/>). Never throws.
+    /// </summary>
+    internal static void NoteRequiredChanged()
+    {
+        try
+        {
+            if (!RequirementWatch.TrySchedule()) return;
+#if !PROGENITOR_TESTS
+            if (!_installed || !Plugin.IsServerProcess)
+            {
+                RequirementWatch.Unschedule();
+                return;
+            }
+
+            Dev.MainThread.PostDelayed(HandshakeRequirementWatch.SettleSeconds, ResendRequestIfRequirementsChanged, DeadlineOwner);
+#endif
+        }
+        catch (Exception e)
+        {
+            RequirementWatch.Unschedule();
+            Plugin.Logger?.LogWarning("Handshake: scheduling the requirement re-send threw: " + e.Message);
+        }
+    }
+
     private sealed class ReaskScopeHandle : IDisposable
     {
         private readonly bool _was;
@@ -2499,6 +2538,7 @@ public static partial class Handshake
             RetryDeclaredCapDropped(Required, RequiredCapDropped);
         }
         ReevaluatePendingDeadlines();
+        NoteRequiredChanged();
     }
 
     /// <summary>Client: this mod is present at this version (undeclared). No-ops on invalid input or when the table is full.</summary>
@@ -2619,7 +2659,10 @@ public static partial class Handshake
             }
         }
         if (changed && ReferenceEquals(table, Required))
+        {
             ReevaluatePendingDeadlines();
+            NoteRequiredChanged();
+        }
     }
 
     /// <summary>
@@ -2776,6 +2819,17 @@ public static partial class Handshake
     {
         var settings = VersionMatching.Current();
         lock (Required) return VersionMatchJudge.RequestRows(Required.Values, settings);
+    }
+
+    /// <summary>
+    /// The request's rows packed for the wire, noted as sent (RESEND1: <see cref="RequirementWatch"/> compares a later
+    /// change of the required table against them). Every request goes through here.
+    /// </summary>
+    internal static PackedList PackRequestNow()
+    {
+        var rows = RequestRowsNow();
+        RequirementWatch.NoteSent(HandshakeRequirementWatch.Stamp(rows));
+        return Compare.PackRequest(rows);
     }
 
     internal static ModRecord[] CopyRequired()
@@ -3040,6 +3094,8 @@ public static partial class Handshake
         ReAnswers.Clear();
         RefreshRequests.Clear();
         lock (SoftReasks) SoftReasks.Clear();
+        lock (RequirementResends) RequirementResends.Clear();
+        RequirementWatch.Reset();
         SessionMemory.Clear();
         _reaskScope = false;
         TestClock = null;
@@ -3400,6 +3456,9 @@ public static partial class Handshake
         catch (Exception e) { Plugin.Logger?.LogWarning($"Handshake.Uninstall DropOwnedBy: {e.Message}"); }
         AnswerWatch.Clear();
         InstallGrace.Clear();
+        // RESEND1: a compare posted under DeadlineOwner was just dropped; the next generation starts from its own asks.
+        RequirementWatch.Reset();
+        lock (RequirementResends) RequirementResends.Clear();
         CustomEvents.RemoveClientHandler(ResponseEventId);
         CustomEvents.RemoveClientHandler(ClientModReportWire.EventId);
         ClientPolicyUninstall();
@@ -3508,7 +3567,7 @@ public static partial class Handshake
             return;
         }
 
-        PackedList packed = Compare.PackRequest(RequestRowsNow());
+        PackedList packed = PackRequestNow();
         // CLIENTPOLICY1: with a client mod policy the request carries the capability row (last, after any metadata
         // row) asking for the client's mod report. No free slot: no ask, and the join is judged as unchecked.
         var requestRows = new List<ModRecord>(packed.Rows);
@@ -3581,7 +3640,7 @@ public static partial class Handshake
     private static void SoftReaskUser(PlayerConnected ev, int attempt)
     {
         string name = LabelOf(ev);
-        PackedList packed = Compare.PackRequest(RequestRowsNow());
+        PackedList packed = PackRequestNow();
 
         var requestRows = new List<ModRecord>(packed.Rows);
         PolicyAsksForReport(requestRows, ev.UserIndex, name);
@@ -3622,6 +3681,63 @@ public static partial class Handshake
             }
             catch (Exception e) { Plugin.Logger?.LogError($"Handshake.SoftReask: {e}"); }
         }, DeadlineOwner);
+    }
+
+    /// <summary>
+    /// RESEND1 (live 2026-10-14): the settled compare <see cref="NoteRequiredChanged"/> scheduled. When the request's rows
+    /// differ from the ones last sent (a server plugin loaded or unloaded mid-session), send the new request to every
+    /// connected user whose handshake is ok. Their client records it (the evidence the mod page's server-part cell and
+    /// needs-server-part rows read, refreshed in place), resumes or pauses its per-server mods, and answers; that answer is
+    /// judged as a re-answer, except that a mismatch keeps them connected (<see cref="HandshakeReask.KeepConnectedOnMismatch"/>).
+    /// A user mid-join is left alone: their answer is judged against the current table anyway.
+    /// </summary>
+    private static void ResendRequestIfRequirementsChanged()
+    {
+        try
+        {
+            var rowsNow = RequestRowsNow();
+            if (!RequirementWatch.Due(HandshakeRequirementWatch.Stamp(rowsNow))) return;
+            var world = Worlds.Server;
+            if (world == null || !world.IsCreated) return;
+            var em = world.EntityManager;
+            var entities = Query.Entities(
+                em,
+                includeDisabled: true,
+                includeSystems: false,
+                ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly));
+            int users = 0, sent = 0;
+            for (int i = 0; i < entities.Count; i++)
+            {
+                try
+                {
+                    var entity = entities[i];
+                    var user = em.GetComponentData<User>(entity);
+                    if (!user.IsConnected) continue;
+                    if (AnswerWatch.GetStatus(user.Index) != HandshakeAnswerWatch.Status.Ok) continue;
+                    users++;
+                    var ev = new PlayerConnected(world, entity, user);
+                    PackedList packed = PackRequestNow();
+                    var requestRows = new List<ModRecord>(packed.Rows);
+                    PolicyAsksForReport(requestRows, user.Index, LabelOf(ev));
+                    var list = new ModList();
+                    for (int r = 0; r < requestRows.Count; r++) list.Add(requestRows[r]);
+                    lock (RequirementResends) RequirementResends.Add(user.Index);
+                    if (CustomEvents.SendToUser(world, entity, RequestEventId, list)) sent++;
+                }
+                catch (Exception e)
+                {
+                    Plugin.Logger?.LogWarning("Handshake: the requirement re-send to a connected user threw: " + e.Message);
+                }
+            }
+
+            Plugin.Logger?.LogInfo("Handshake: this server's mods changed (" + rowsNow.Count.ToString(CultureInfo.InvariantCulture)
+                + " required row(s) now); re-sent the request to " + sent.ToString(CultureInfo.InvariantCulture) + " of "
+                + users.ToString(CultureInfo.InvariantCulture) + " connected user(s)");
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Handshake.ResendRequestIfRequirementsChanged: " + e);
+        }
     }
 
     private static unsafe void OnRequest(int _, byte* payload, int length)
@@ -4056,6 +4172,7 @@ public static partial class Handshake
                 try { SessionMemory.Remember(user.Index, user.PlatformId); }
                 catch { /* best effort */ }
                 lock (SoftReasks) SoftReasks.Remove(user.Index);
+                lock (RequirementResends) RequirementResends.Remove(user.Index);
                 // JOINADMIN1: an accepted answer (an install window that worked) is not a refused join.
                 RefusedJoins.Drop(user.Index);
                 Plugin.Logger?.LogInfo($"Handshake: {name} ok ({requiredCount} mod(s) match)");
@@ -4105,6 +4222,16 @@ public static partial class Handshake
             // recorded when this join is refused (now, or when its install window expires), forgotten when it
             // is accepted. Only rows this server requires are kept, once per connection; the SteamID feeds an
             // in-memory throttle and is never written.
+            // RESEND1: an answer to a mid-session requirement re-send from a user already ok is not a join: a mismatch keeps
+            // them connected (the admins read why in the log) instead of kicking them over a server mod that just loaded.
+            bool requirementResend;
+            lock (RequirementResends) requirementResend = RequirementResends.Remove(user.Index);
+            if (HandshakeReask.KeepConnectedOnMismatch(requirementResend, AnswerWatch.GetStatus(user.Index) == HandshakeAnswerWatch.Status.Ok))
+            {
+                Plugin.Logger?.LogWarning(HandshakeReask.KeptAfterRequirementChangeLine(name, problems));
+                return;
+            }
+
             RefusedJoins.Note(user.Index, failedIds, server, answered, user.PlatformId);
             if (TryDeferKick(world, userEntity, user.Index, name, problems, failedIds, server, answered, clientCaps, localFixes))
                 return;
@@ -4365,6 +4492,7 @@ public static partial class Handshake
         try { SessionMemory.Forget(ev.User.Index); }
         catch { /* best effort */ }
         lock (SoftReasks) SoftReasks.Remove(ev.User.Index);
+        lock (RequirementResends) RequirementResends.Remove(ev.User.Index);
         try { AnswerWatch.OnDisconnect(ev.User.Index); }
         catch (Exception e) { Plugin.Logger?.LogError($"Handshake.OnPlayerDisconnected: {e}"); }
         // Job FMAN18: the window and the spent-grace mark both die with the connection, so a

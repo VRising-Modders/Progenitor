@@ -920,8 +920,13 @@ public sealed class ThreeHomesMenuTests : IDisposable
         Assert.False(last.GetProperty("joinEnabled").GetBoolean());
         Assert.Equal("busy", last.GetProperty("state").GetString());
         Assert.Equal(CellTone.Disabled, _runtime.CellRow(ServerTabPane.LastServerKey)!.Cells().Single(c => c.Key == ServerTabPane.CellJoin).Tone);
-        // A press anyway (the bridge reaches a grayed button) starts nothing.
-        Assert.NotNull(ModsMenu.ClickVisibleWidget("content", "server-last/join", null, null));
+        // The bridge refuses a grayed button (live 2026-10-14), and a press that reaches its slot anyway starts nothing.
+        var refused = Assert.Throws<ArgumentException>(() => ModsMenu.ClickVisibleWidget("content", "server-last/join", null, null));
+        Assert.Contains("disabled (not interactable)", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(joined);
+        ushort joinSlot = UiCellRowHandle.VisibleRow(ServerTabPane.LastServerKey)?.CellSlotId(ServerTabPane.CellJoin) ?? 0;
+        Assert.NotEqual(0, joinSlot);
+        UiSlotTable.BootstrapDispatch(joinSlot, (byte)UiSlotKind.Click, 0f, false, null);
         Assert.Empty(joined);
         Assert.True(ModsMenu.IsOpen);
         Assert.Equal("busy", All(Read("content"), ServerTabPane.RowServerLast).Single().GetProperty("lastPress").GetString());

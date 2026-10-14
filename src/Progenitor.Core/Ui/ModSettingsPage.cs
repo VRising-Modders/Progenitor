@@ -907,9 +907,34 @@ internal static class ModSettingsPages
             }
         }
 
+        // RESEND1 (live 2026-10-14): a needs-server-part row turns on only when the joined server's handshake request names
+        // the mod, and the server part names itself only by declaring itself. Said once per load, here, where the author
+        // looks, instead of rows that stay gray with no hint why.
+        if (ServerPartUndeclared(owner, sections))
+            Plugin.Logger?.LogWarning("Ui: settings page of " + pluginId + " has needsServerPart rows, but the plugin has no "
+                + "[NetworkCompatibility]: unless its server part calls ctx.Handshake.DeclareSelf() (or RequireSelf()), the "
+                + "server's handshake request never names it and those rows stay grayed on every server.");
+
         Pages[pluginId] = registration;
         ModsMenu.NotifySettingsPageChanged(pluginId);
         return registration;
+    }
+
+    /// <summary>
+    /// RESEND1: the page marks rows <c>needsServerPart</c> but the plugin type declares no
+    /// <see cref="Progenitor.Plugins.NetworkCompatibilityAttribute"/>, so nothing makes its server part name itself in the
+    /// handshake request (the only evidence those rows read). A plugin that calls <c>DeclareSelf</c> itself is fine; this
+    /// cannot see that, so it is a warning, never a refusal.
+    /// </summary>
+    internal static bool ServerPartUndeclared(object owner, IReadOnlyList<PageSectionSpec> sections)
+    {
+        bool needs = false;
+        for (int i = 0; i < sections.Count && !needs; i++)
+            foreach (var item in sections[i].Items)
+                if (item.Options.NeedsServerPart) { needs = true; break; }
+        if (!needs) return false;
+        try { return System.Reflection.CustomAttributeExtensions.GetCustomAttribute<Progenitor.Plugins.NetworkCompatibilityAttribute>(owner.GetType(), inherit: true) == null; }
+        catch { return false; }
     }
 
     /// <summary>

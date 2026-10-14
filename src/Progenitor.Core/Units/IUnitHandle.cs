@@ -5,7 +5,7 @@ namespace Progenitor.Units;
 /// <summary>
 /// One spawned unit owned by a plugin. Core-owned so a collectible plugin never holds a
 /// game entity across unload: <see cref="IDisposable.Dispose"/> / <see cref="Despawn"/>
-/// runs <c>DestroyUtility.Destroy</c> (evidence Â§11). Double-dispose is a no-op.
+/// runs <c>DestroyUtility.Destroy</c> (evidence §11). Double-dispose is a no-op.
 /// </summary>
 public interface IUnitHandle : IDisposable
 {
@@ -65,7 +65,7 @@ public interface IUnitHandle : IDisposable
     /// (Follower.Followed Null, Idle BT, TargettingMode that ApproachEntity wrote) then
     /// posts Idle and writes the ApproachPosition set, so GoingTo is what the entity runs.
     /// A Follower this handle added (prefab had none) is removed here so FollowerSystem
-    /// does not keep iterating the unit. Never a raw PathRequest (evidence Â§11 / Â§20).
+    /// does not keep iterating the unit. Never a raw PathRequest (evidence §11 / §20).
     /// </summary>
     void GoTo(UnitVec3 position);
 
