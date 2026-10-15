@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Progenitor.Chat;
 using Progenitor.Install;
+using Progenitor.Plugins;
 
 namespace Progenitor.Ui;
 
@@ -144,8 +145,11 @@ public static partial class ModsMenu
         try { key = ResolveInstallLink(row.Id)?.Key ?? ""; }
         catch { key = ""; }
         if (!ModLinkToken.IsPackage(key)) return ("", "");
-        string installed = LedgerVersionOf(row);
-        return (key, ModLinkToken.IsVersion(installed) ? installed : "");
+        // ABOUTSRC1: without a ledger row only a package manifest beside the DLL says these files are that
+        // package; a GUID that a listing also names may be another version or another project.
+        var beside = PackageManifestBeside.TryRead(PluginFileOf(row.Id, row));
+        if (beside == null || !InstalledListingCheck.SamePackage(beside.Package, key)) return ("", "");
+        return (key, ModLinkToken.IsVersion(beside.Version) ? beside.Version : "");
     }
 
     /// <summary>The Share control of an installed mod (a Mods list row or its page).</summary>

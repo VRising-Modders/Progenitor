@@ -18,6 +18,48 @@ To publish a mod on Thunderstore (package layout, `progenitor.json`, dependencie
 
 On a matching side, loading attaches the context, loads and tracks localization files beside the DLL, then calls `OnLoad`. A localization error is logged without failing the plugin. An `OnLoad` exception reverses recorded registrations, including localization, and clears the context.
 
+### About text on the mod page
+
+Status: source-checked and game-free tested (`ModPageTests`), not live-verified. Example: [Progenitor.AboutExample](../samples/Progenitor.AboutExample/README.md) (compile-verified).
+
+A mod's page in the Mods menu shows its **About** text, rendered as Markdown by the same renderer as a Thunderstore README. Ship your own so the page describes the build the player actually loaded:
+
+1. **Embedded README (recommended).** Add the mod's README to the assembly. The page reads the resource named exactly `README.md`, else exactly `<AssemblyName>.README.md`, which is the SDK's default name for `<EmbeddedResource Include="README.md" />` when the root namespace equals the assembly name. Any other `*.README.md` (for example one a merged dependency brought in) is ignored. To be independent of the root namespace, set the name:
+
+   ```xml
+   <ItemGroup>
+     <EmbeddedResource Include="README.md" LogicalName="README.md" />
+   </ItemGroup>
+   ```
+
+2. **A file beside the DLL.** `<dll name>.README.md` or `<dll name>.md` next to the DLL. In a folder that holds only this mod (not `BepInEx/plugins` or `BepInEx/progenitor-reload` themselves), `README.md` there also counts, then the package folder's `README.md` and the `description` of its `manifest.json` (see the package-folder layouts below).
+3. **`[ModAbout]`.** A short text in source:
+
+   ```csharp
+   [BepInPlugin("example.minimap", "Minimap", "1.0.0")]
+   [BepInDependency("progenitor")]
+   [ModAbout("A minimap in the top right corner.\n\nPress **M** to zoom.")]
+   public sealed class Plugin : ProgenitorPlugin<PluginContext> { protected override void OnLoad(PluginContext ctx) { } }
+   ```
+
+Without any of these, the page shows the description passed to `ctx.Menu.Register(name, description)`, then `[assembly: AssemblyDescription]` (an SDK project's `<Description>`), then `No description available.` (`[BepInPlugin]` has no description field.)
+
+**Only a loaded assembly is read.** The embedded README, `[ModAbout]` and the assembly description come from the plugin's assembly as this process loaded it: Progenitor records them when it loads the plugin (also when the player turned it off and its `OnLoad` was skipped), and for another loader's plugin it reads them once from the loaded instance. A plugin whose assembly is not loaded in this process (a pending install, a reload-folder file that did not load, a disabled file the loader skipped, a server-only row) shows only the text beside its DLL, then the registered description if any, then `No description available.`
+
+**Plugin text is drawn as text.** Markdown is converted to plain text blocks and every `<` reaches the label escaped, so a README cannot inject TextMeshPro tags (`<size>`, `<sprite>`, `<color>`), including inside code spans and fenced blocks.
+
+**A store listing is shown only for the package it came from.** Before the plugin's own text, the page can show a Thunderstore listing's facts. The rule has two steps:
+
+| Evidence | Shown |
+|---|---|
+| This side's install ledger row, or a package `manifest.json`, names the listing's package (`Owner-Name`) and its current version | The listing's one-liner, author, release date, sides, store page and README |
+| The same evidence names the package at another version (an update is available) | The one-liner, author, release date, sides and store page; the About text is the plugin's own, because the listing's README describes the newer version |
+| Nothing names the package: the listing was found only because the plugin GUID or display name spells its package name | Nothing of the listing; it may be another project with the same name |
+
+"This side" means the ledger rows of the process's own root. A local-server ledger row never verifies a copy the client loaded itself; it counts only for a mod the client does not have, whose page describes the server's copy. The package manifest is looked for beside the DLL and one folder up, in a folder named `Owner-Name` or, extracted by hand, `Owner-Name-<version>` (`BepInEx/plugins/Owner-Name/X.dll`, `.../Owner-Name/Sub/X.dll`, `.../Owner-Name/plugins/X.dll`). A manifest in `BepInEx/plugins` itself, or in a folder whose name is not the package's, is not read. Manifest reads are cached per DLL and rechecked from the file's size and time at most every two seconds.
+
+The mod page's readback reports the decision: `page-listing {matched, key, listingVersion, verified, versionMatch, shown}` (see the `mods_ui` row in [api.md](api.md)) and `page-readme.source` (`listing`, `embedded`, `beside`, `declared`, `description` or `none`).
+
 ### Context API
 
 | Member | Purpose |

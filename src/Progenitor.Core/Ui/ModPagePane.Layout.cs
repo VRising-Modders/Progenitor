@@ -593,10 +593,15 @@ internal sealed partial class ModPagePane
         ["margin"] = ModPageSpacing.Margin,
     };
 
-    /// <summary>About: the description at the margin, wrapped at a readable width.</summary>
+    /// <summary>
+    /// About: the description at the margin, wrapped at a readable width. ABOUTSRC1: the text is
+    /// <see cref="ModPageModel.About"/> (a verified listing's README, else the plugin's own), drawn by the
+    /// same Markdown renderer whatever its source; <c>page-readme.source</c> says which it was.
+    /// </summary>
     private void BuildAbout(IUiPanel panel)
     {
-        string markdown = _model.Listing.ReadmeMarkdown;
+        string markdown = _model.About.Markdown;
+        string source = _model.About.SourceName;
         List<MarkdownBlock> blocks = markdown.Length == 0
             ? new List<MarkdownBlock>()
             : MarkdownPlain.CapBlocks(MarkdownPlain.RenderBlocks(markdown, int.MaxValue), MarkdownPlain.DefaultMaxChars);
@@ -610,7 +615,7 @@ internal sealed partial class ModPagePane
             {
                 new CellSpec(CellKind.Muted, "text").With(text: ModPageCopy.NoDescription, width: CellWidth.Px(width), vAlign: CellVAlign.Middle),
             }), height: 30f, rightInset: HeadBlockLayout.RightColumnInset, plain: true));
-            Add(none, RowReadme, new Dictionary<string, object?> { ["state"] = "unavailable", ["chars"] = 0, ["blocks"] = 0 });
+            Add(none, RowReadme, new Dictionary<string, object?> { ["state"] = "unavailable", ["chars"] = 0, ["blocks"] = 0, ["source"] = "none" });
             return;
         }
 
@@ -628,6 +633,7 @@ internal sealed partial class ModPagePane
                     ["state"] = "ready",
                     ["chars"] = MarkdownPlain.ContentLength(blocks),
                     ["blocks"] = blocks.Count,
+                    ["source"] = source,
                 });
         }
     }

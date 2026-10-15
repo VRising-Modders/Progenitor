@@ -500,7 +500,7 @@ public static partial class ModsMenu
         // Round 7: per-row costs summed into the open timing line (entry-listing, entry-facts, entry-links).
         long t = System.Diagnostics.Stopwatch.GetTimestamp();
         CatalogEntry? entry = null;
-        try { entry = row.Provenance == ModProvenance.Progenitor ? ResolveListingEntry(row.Id, row, deep: false) : null; }
+        try { entry = row.Provenance == ModProvenance.Progenitor ? VerifiedListingEntry(row.Id, row, deep: false) : null; }
         catch { entry = null; }
         var listing = entry == null ? null : ModPageListing.FromEntry(entry, null);
         string version = row.Version;

@@ -43,6 +43,8 @@ public sealed class ModPageTests : IDisposable
         ModMenuInventory.ResetForTests();
         WorldEpoch.ResetForTests();
         ResetSeams();
+        // ABOUTSRC1: these tests rewrite manifests between page opens; look at the disk every time.
+        PackageManifestBeside.RevalidateMs = 0;
         _game = Path.Combine(Path.GetTempPath(), "progenitor-modspage1-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(_game, "BepInEx"));
     }
@@ -61,6 +63,7 @@ public sealed class ModPageTests : IDisposable
         WorldEpoch.ResetForTests();
         Plugin.Logger = null;
         UiApi.ResetForTests();
+        PackageManifestBeside.RevalidateMs = 2000;
         try { Directory.Delete(_game, true); } catch { }
     }
 
@@ -71,10 +74,36 @@ public sealed class ModPageTests : IDisposable
         ModsMenu.InstalledRemover = null;
         ModsMenu.UninstallSeam = null;
         ModsMenu.ReloaderNamesProbe = null;
+        ModsMenu.PluginFileProbe = null;
+        PluginAboutStore.ResetForTests();
+        PackageManifestBeside.ForgetCache();
         ModsMenu.SetInstallCatalogForTests(null);
     }
 
     private string Bep => Path.Combine(_game, "BepInEx");
+
+    /// <summary>
+    /// ABOUTSRC1: a mod manager's install, <c>BepInEx/plugins/&lt;Owner&gt;-&lt;Name&gt;/&lt;Name&gt;.dll</c> with
+    /// the package's <c>manifest.json</c> beside it. Returns the DLL path (the file is a placeholder).
+    /// </summary>
+    private string PlaceManagedPackage(string owner, string name, string version, string description = "")
+    {
+        string dir = Path.Combine(Bep, "plugins", owner + "-" + name);
+        Directory.CreateDirectory(dir);
+        string dll = Path.Combine(dir, name + ".dll");
+        File.WriteAllBytes(dll, new byte[] { 0x4D, 0x5A });
+        File.WriteAllText(
+            Path.Combine(dir, "manifest.json"),
+            JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["name"] = name,
+                ["version_number"] = version,
+                ["website_url"] = "",
+                ["description"] = description,
+                ["dependencies"] = Array.Empty<string>(),
+            }));
+        return dll;
+    }
 
     // ---- the pure state rule ---------------------------------------------------------------
 
@@ -985,11 +1014,9 @@ public sealed class ModPageTests : IDisposable
         Assert.Equal("source", reported.GetProperty("matched").GetString());
         Assert.Equal("Corvane-CryptSnooze", reported.GetProperty("key").GetString());
         Assert.False(reported.TryGetProperty("rating", out _));
-        // A ledgered install is not a name match, so the muted note is not drawn for it.
-        Assert.DoesNotContain(
-            ModsMenu.MatchedByNameNote,
-            JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")),
-            StringComparison.Ordinal);
+        // ABOUTSRC1: the ledger names this package at this listing's version, so the listing is shown.
+        Assert.Equal("ledger", reported.GetProperty("verified").GetString());
+        Assert.True(reported.GetProperty("shown").GetBoolean());
     }
 
     /// <summary>
@@ -1162,15 +1189,17 @@ public sealed class ModPageTests : IDisposable
     }
 
     /// <summary>
-    /// Job LINK1 item 3: a mod another tool installed — the live client's BasinHoverTips, whose GUID
-    /// is <c>acme.PhialStore</c> and which no ledger, identity record or listing id names — shows
-    /// the listing's one-liner, README, store link and like count, with the muted note saying the
-    /// match was by name.
-    /// What this would catch: the page falling back to "no description available" for the five mods
-    /// another tool installed, or showing a name-matched listing as though the identity were verified.
+    /// Job LINK1 item 3, narrowed by ABOUTSRC1: a mod another tool installed — BasinHoverTips, whose GUID
+    /// is <c>acme.PhialStore</c> and which no ledger, identity record or listing id names — is still matched
+    /// to its listing by name, and the readback says so, but nothing of the listing is shown until a package
+    /// manifest beside the DLL names that package at that listing's version. Then the one-liner, README,
+    /// author and store link are shown; a manifest of another version shows nothing again.
+    /// What this would catch: a listing found by a spelling (another version, or another project with the
+    /// same name) lending its README, attribution and side claims to these files, or a verified manifest no
+    /// longer bringing the listing back.
     /// </summary>
     [Fact]
-    public void A_mod_another_tool_installed_shows_its_listing_with_a_matched_by_name_note()
+    public void A_name_matched_listing_is_shown_only_when_a_manifest_beside_the_DLL_names_that_version()
     {
         SeedBasinHoverTips();
         ModsMenu.Open();
@@ -1181,14 +1210,28 @@ public sealed class ModPageTests : IDisposable
         var listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
         Assert.Equal("name", listing.GetProperty("matched").GetString());
         Assert.Equal("ExampleTeam-BasinHoverTips", listing.GetProperty("key").GetString());
+        Assert.Equal("unverified", listing.GetProperty("verified").GetString());
+        Assert.False(listing.GetProperty("shown").GetBoolean());
+        Assert.Equal("1.0.19", listing.GetProperty("listingVersion").GetString());
         Assert.False(listing.TryGetProperty("rating", out _));
+        Assert.False(TryRow(rows, ModPagePane.RowOneLiner, out _), "an unverified listing lends no one-liner");
+        Assert.False(Row(rows, ModPagePane.RowStoreLink).GetProperty(ModPagePane.RowStoreLink).GetProperty("shown").GetBoolean(), "an unverified listing lends no store page");
+        Assert.False(TryRow(rows, ModPagePane.RowBadges, out _), "an unverified listing lends no side claim");
+        Assert.Equal("", Row(rows, ModPagePane.RowMeta).GetProperty(ModPagePane.RowMeta).GetProperty("author").GetString());
+        Assert.Equal("none", Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+        string page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+        Assert.DoesNotContain("Hover a blood item", page, StringComparison.Ordinal);
+        Assert.Contains(ModPageCopy.NoDescription, page, StringComparison.Ordinal);
 
-        Assert.Equal(
-            "BasinHoverTips", Row(rows, ModPagePane.RowTitle).GetProperty(ModPagePane.RowTitle).GetString());
+        // A mod manager's folder: BepInEx/plugins/ExampleTeam-BasinHoverTips/manifest.json at the listing's version.
+        string dll = PlaceManagedPackage("ExampleTeam", "BasinHoverTips", "1.0.19");
+        ModsMenu.PluginFileProbe = id => string.Equals(id, "acme.PhialStore", StringComparison.OrdinalIgnoreCase) ? dll : null;
+        ModsMenu.OpenMod("acme.PhialStore");
+        rows = PageRows();
+        listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+        Assert.Equal("manifest", listing.GetProperty("verified").GetString());
+        Assert.True(listing.GetProperty("shown").GetBoolean());
         var meta = Row(rows, ModPagePane.RowMeta).GetProperty(ModPagePane.RowMeta);
-        Assert.Equal("1.0.19", meta.GetProperty("version").GetString());
-        Assert.Equal("2026-08-30", meta.GetProperty("released").GetString());
-        Assert.Equal("ExampleTeam", meta.GetProperty("author").GetString());
         Assert.Equal("1.0.19 · 2026-08-30 · by ExampleTeam", meta.GetProperty("line").GetString());
         Assert.Equal(
             "by ExampleTeam · Shows the blood pool of an item you hover.",
@@ -1196,26 +1239,40 @@ public sealed class ModPageTests : IDisposable
         Assert.Equal(
             "https://thunderstore.io/c/v-rising/p/ExampleTeam/BasinHoverTips/",
             Row(rows, ModPagePane.RowStoreLink).GetProperty(ModPagePane.RowStoreLink).GetProperty("url").GetString());
+        var readme = Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme);
+        Assert.Equal("ready", readme.GetProperty("state").GetString());
+        Assert.Equal("listing", readme.GetProperty("source").GetString());
+        Assert.Contains("Hover a blood item", JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
+
+        // The same package at an older version (an update is available): the package facts stay, the README,
+        // written for 1.0.19, does not.
+        PlaceManagedPackage("ExampleTeam", "BasinHoverTips", "1.0.18");
+        ModsMenu.OpenMod("acme.PhialStore");
+        rows = PageRows();
+        listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+        Assert.Equal("manifest", listing.GetProperty("verified").GetString());
+        Assert.False(listing.GetProperty("versionMatch").GetBoolean());
         Assert.Equal(
-            "ready", Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("state").GetString());
-        Assert.False(TryRow(rows, "like", out _));
+            "by ExampleTeam · Shows the blood pool of an item you hover.",
+            Row(rows, ModPagePane.RowOneLiner).GetProperty(ModPagePane.RowOneLiner).GetString());
+        Assert.Equal("none", Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+        Assert.DoesNotContain("Hover a blood item", JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
 
-        string page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
-        Assert.Contains(ModsMenu.MatchedByNameNote, page, StringComparison.Ordinal);
-        Assert.DoesNotContain(ModPageCopy.NoDescription, page, StringComparison.Ordinal);
-        Assert.Contains("Hover a blood item", page, StringComparison.Ordinal);
+        // Another owner's manifest is another package: nothing is shown.
+        string otherDll = PlaceManagedPackage("OtherTeam", "BasinHoverTips", "1.0.19");
+        ModsMenu.PluginFileProbe = id => string.Equals(id, "acme.PhialStore", StringComparison.OrdinalIgnoreCase) ? otherDll : null;
+        ModsMenu.OpenMod("acme.PhialStore");
+        Assert.Equal(
+            "unverified",
+            Row(PageRows(), ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing).GetProperty("verified").GetString());
 
-        // A plugin the index does not name at all is unchanged: no listing, and no note claiming one.
+        // A plugin the index does not name at all is unchanged: no listing.
         using var unknown = ModsMenu.Register(new object(), "other.tool.mod", "GroundPickupGlow");
         ModsMenu.OpenMod("other.tool.mod");
-        var unknownRows = PageRows();
-        Assert.Equal(
-            "none",
-            Row(unknownRows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing)
-                .GetProperty("matched").GetString());
-        string unknownPage = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
-        Assert.DoesNotContain(ModsMenu.MatchedByNameNote, unknownPage, StringComparison.Ordinal);
-        Assert.Contains(ModPageCopy.NoDescription, unknownPage, StringComparison.Ordinal);
+        var unknownListing = Row(PageRows(), ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+        Assert.Equal("none", unknownListing.GetProperty("matched").GetString());
+        Assert.Equal("none", unknownListing.GetProperty("verified").GetString());
+        Assert.Contains(ModPageCopy.NoDescription, JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1266,6 +1323,392 @@ public sealed class ModPageTests : IDisposable
         Assert.Equal(0, seam.CancelUninstallCalls);
     }
 
+    // ---- ABOUTSRC1: where the About text comes from ------------------------------------------
+
+    /// <summary>A plugin type that declares its About text (the <c>[ModAbout]</c> path).</summary>
+    [ModAbout("Declared **about** text.")]
+    private sealed class DeclaredAboutPlugin
+    {
+    }
+
+    /// <summary>
+    /// ABOUTSRC1, the live case: a 2.0 rework hot-loaded from <c>progenitor-reload</c>, which no install
+    /// ledger names, has the GUID that a 1.x package's name spells. That listing is another version of
+    /// another project: its README (attribution, a "server-only, nothing to install on the client"
+    /// claim), one-liner, server badge and store page must not appear. The page shows the plugin's own
+    /// embedded README; without one, the README beside its DLL (<c>&lt;dll&gt;.README.md</c>; a plain
+    /// <c>README.md</c> in the shared reload folder belongs to no plugin); without that, its description.
+    /// What this would catch: the listing matched by GUID or name being shown again for a file it does
+    /// not describe, or the plugin's own text losing to it.
+    /// </summary>
+    [Fact]
+    public void A_reload_folder_mod_with_a_same_id_listing_at_another_version_shows_its_own_text()
+    {
+        string reload = Path.Combine(Bep, "progenitor-reload");
+        Directory.CreateDirectory(reload);
+        string dll = Path.Combine(reload, "Rework.dll");
+        File.WriteAllText(dll, "placeholder");
+        ReloadFolderPlugins.ResetForTests();
+        ModsMenu.ReloadFolderProbe = () => reload;
+        ModsMenu.ReloadGuidsProbe = path => string.Equals(Path.GetFileName(path), "Rework.dll", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "Rework" }
+            : Array.Empty<string>();
+        try
+        {
+            var catalog = new PageCatalog();
+            catalog.Entries.Add(Listing(
+                "OtherTeam", "Rework", "1.0.85", "Server",
+                description: "The 1.x server mod.",
+                released: "2025-01-02T00:00:00Z"));
+            catalog.Readme = "# Rework 1.x\n\nMade by OtherTeam. Server-only, nothing to install on the client.";
+            ModsMenu.SetInstallCatalogForTests(catalog);
+            PluginAboutStore.Note("Rework", new PluginAboutFacts { Embedded = "# Rework 2.0\n\nA separate rework of the idea." });
+            ModsMenu.Open();
+            using var mod = ModsMenu.Register(new object(), "Rework", "Rework", "Rework 2.0 description.");
+            ModsMenu.OpenMod("Rework");
+
+            var rows = PageRows();
+            var listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+            Assert.Equal("id", listing.GetProperty("matched").GetString());
+            Assert.Equal("OtherTeam-Rework", listing.GetProperty("key").GetString());
+            Assert.Equal("unverified", listing.GetProperty("verified").GetString());
+            Assert.False(listing.GetProperty("shown").GetBoolean());
+            Assert.Equal("embedded", Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+            Assert.False(Row(rows, ModPagePane.RowStoreLink).GetProperty(ModPagePane.RowStoreLink).GetProperty("shown").GetBoolean(), "the 1.x store page is not this mod's");
+            Assert.False(TryRow(rows, ModPagePane.RowBadges, out _), "the 1.x side claim is not this mod's");
+            Assert.Equal("", Row(rows, ModPagePane.RowMeta).GetProperty(ModPagePane.RowMeta).GetProperty("released").GetString());
+            string page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+            Assert.Contains("A separate rework of the idea.", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Made by OtherTeam", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("by OtherTeam", page.Replace("Made by OtherTeam", ""), StringComparison.Ordinal);
+            Assert.DoesNotContain("nothing to install on the client", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("The 1.x server mod.", page, StringComparison.Ordinal);
+
+            // No embedded README: a README.md in the shared reload folder is nobody's, Rework.README.md is this one's.
+            PluginAboutStore.ResetForTests();
+            File.WriteAllText(Path.Combine(reload, "README.md"), "Shared folder text.");
+            ModsMenu.OpenMod("Rework");
+            Assert.Equal("description", Row(PageRows(), ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+            Assert.Contains("Rework 2.0 description.", JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
+            File.WriteAllText(Path.Combine(reload, "Rework.README.md"), "Beside the DLL.");
+            ModsMenu.OpenMod("Rework");
+            Assert.Equal("beside", Row(PageRows(), ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+            page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+            Assert.Contains("Beside the DLL.", page, StringComparison.Ordinal);
+            Assert.DoesNotContain("Shared folder text.", page, StringComparison.Ordinal);
+        }
+        finally
+        {
+            ModsMenu.ReloadFolderProbe = null;
+            ModsMenu.ReloadGuidsProbe = null;
+            ReloadFolderPlugins.ResetForTests();
+        }
+    }
+
+    /// <summary>
+    /// ABOUTSRC1: an install the ledger records at the listing's own version shows the listing's README, ahead of
+    /// the plugin's embedded one. With an update available (the ledger names the package at an older version) the
+    /// package is still verified: author, store page, sides and the uninstall sentence that depends on the side are
+    /// unchanged, and only the README, written for the newer version, gives way to the plugin's own text.
+    /// What this would catch: a real ledgered install losing its store README, an out-of-date install losing its
+    /// package facts (badges, store page, the server-only uninstall wording), or the newer version's README being
+    /// shown for the older files.
+    /// </summary>
+    [Fact]
+    public void A_ledger_install_keeps_its_package_facts_with_an_update_and_the_README_only_at_its_version()
+    {
+        SeedCryptSnooze(readme: "# CryptSnooze\n\nSleep through the day in your coffin.");
+        PluginAboutStore.Note("example.cryptsnooze", new PluginAboutFacts { Embedded = "Embedded CryptSnooze text." });
+        ModsMenu.Open();
+        ModsMenu.OpenMod("example.cryptsnooze");
+
+        var rows = PageRows();
+        var listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+        Assert.Equal("ledger", listing.GetProperty("verified").GetString());
+        Assert.True(listing.GetProperty("versionMatch").GetBoolean());
+        Assert.Equal("listing", Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+        string page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+        Assert.Contains("Sleep through the day in your coffin.", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Embedded CryptSnooze text.", page, StringComparison.Ordinal);
+        string sameVersionUninstall = ModsMenu.ModPage!.Model.PromptBody(ModPromptKind.Uninstall);
+        var sameVersionBadges = Strings(Row(rows, ModPagePane.RowBadges).GetProperty(ModPagePane.RowBadges));
+
+        // An update is available: the ledger names the package at 2.0.3, the listing is 2.0.4.
+        ModsMenu.LedgerForTests = new[]
+        {
+            Ledgered("Corvane-CryptSnooze", "example.cryptsnooze.dll", "2.0.3", ServerInstallLedger.CategoryMod),
+        };
+        ModsMenu.OpenMod("example.cryptsnooze");
+        rows = PageRows();
+        listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+        Assert.Equal("source", listing.GetProperty("matched").GetString());
+        Assert.Equal("ledger", listing.GetProperty("verified").GetString());
+        Assert.True(listing.GetProperty("shown").GetBoolean());
+        Assert.False(listing.GetProperty("versionMatch").GetBoolean());
+        Assert.Equal("embedded", Row(rows, ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+        Assert.Equal("Corvane", Row(rows, ModPagePane.RowMeta).GetProperty(ModPagePane.RowMeta).GetProperty("author").GetString());
+        Assert.Equal("2.0.3", Row(rows, ModPagePane.RowMeta).GetProperty(ModPagePane.RowMeta).GetProperty("version").GetString());
+        Assert.Equal(
+            "https://thunderstore.io/c/v-rising/p/Corvane/CryptSnooze/",
+            Row(rows, ModPagePane.RowStoreLink).GetProperty(ModPagePane.RowStoreLink).GetProperty("url").GetString());
+        Assert.Equal(sameVersionBadges, Strings(Row(rows, ModPagePane.RowBadges).GetProperty(ModPagePane.RowBadges)));
+        Assert.Equal(sameVersionUninstall, ModsMenu.ModPage!.Model.PromptBody(ModPromptKind.Uninstall));
+        page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+        Assert.Contains("Embedded CryptSnooze text.", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sleep through the day in your coffin.", page, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ABOUTSRC1: the sidebar's server-half warning reads the same rule. A two-sided package installed by the ledger
+    /// at an older version than the listing still carries the red marker, because the package is verified.
+    /// What this would catch: an update becoming available silently dropping the missing-server-half warning.
+    /// </summary>
+    [Fact]
+    public void The_sidebar_warning_stays_on_a_verified_package_with_an_update_available()
+    {
+        var catalog = new PageCatalog();
+        catalog.Entries.Add(Verified("ExampleTeam", "HuntsAndGates", "1.1.0", "example.huntsandgates"));
+        ModsMenu.SetInstallCatalogForTests(catalog);
+        ModsMenu.LedgerForTests = new[]
+        {
+            Ledgered("ExampleTeam-HuntsAndGates", "example.huntsandgates.dll", "1.0.0", ServerInstallLedger.CategoryMod),
+        };
+        Handshake.Provide("example.huntsandgates", "1.0.0");
+        using var hunts = ModsMenu.Register(new object(), "example.huntsandgates", "HuntsAndGates");
+        ModsMenu.Open();
+        using (var doc = JsonDocument.Parse(JsonSerializer.Serialize(ModsMenu.DescribeWorkspace())))
+            Assert.True(Entry(doc.RootElement, "example.huntsandgates").GetProperty("warning").GetBoolean());
+        ModsMenu.OpenMod("example.huntsandgates");
+        Assert.Equal(ModPageCopy.WarningServerHalfMissing, Row(PageRows(), ModPagePane.RowWarning).GetProperty(ModPagePane.RowWarning).GetString());
+    }
+
+    /// <summary>
+    /// ABOUTSRC1: the check reads the copy on this side. A plugin this client loaded, whose only ledger row is the
+    /// local server's (a server-root row), is not verified by that row: the server's file is not the one loaded here.
+    /// What this would catch: the local server's install lending its listing to a hand-copied client DLL.
+    /// </summary>
+    [Fact]
+    public void A_server_root_ledger_row_does_not_verify_the_copy_this_client_loaded()
+    {
+        SeedCryptSnooze(readme: "# CryptSnooze\n\nSleep through the day in your coffin.");
+        ModsMenu.LedgerForTests = new[]
+        {
+            Ledgered("Corvane-CryptSnooze", "example.cryptsnooze.dll", "2.0.4", ServerInstallLedger.CategoryMod, InstalledState.ServerRoot),
+        };
+        using var mod = ModsMenu.Register(new object(), "example.cryptsnooze", "CryptSnooze");
+        ModsMenu.Open();
+        ModsMenu.OpenMod("example.cryptsnooze");
+        var rows = PageRows();
+        var listing = Row(rows, ModsMenu.RowPageListing).GetProperty(ModsMenu.RowPageListing);
+        Assert.Equal("unverified", listing.GetProperty("verified").GetString());
+        Assert.False(listing.GetProperty("shown").GetBoolean());
+        Assert.DoesNotContain("Sleep through the day in your coffin.", JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
+
+        // The pure rule: this side's rows when there are any; none for a copy loaded here; the other root's only
+        // for a mod this side does not have.
+        var server = Ledgered("Corvane-CryptSnooze", "x.dll", "2.0.4", ServerInstallLedger.CategoryMod, InstalledState.ServerRoot);
+        var client = Ledgered("Corvane-CryptSnooze", "x.dll", "2.0.3", ServerInstallLedger.CategoryMod);
+        Assert.Equal(new[] { client }, InstalledListingCheck.LedgerOfThisSide(new[] { server, client }, true, InstalledState.ServerRoot));
+        Assert.Empty(InstalledListingCheck.LedgerOfThisSide(new[] { server }, true, InstalledState.ServerRoot));
+        Assert.Equal(new[] { server }, InstalledListingCheck.LedgerOfThisSide(new[] { server }, false, InstalledState.ServerRoot));
+    }
+
+    /// <summary>
+    /// ABOUTSRC1, the plugin's own sources read from a real type: <see cref="PluginAboutReader.FromType"/>
+    /// takes the embedded <c>README.md</c> resource of the type's assembly (this test assembly embeds
+    /// <c>Fixtures/About/README.md</c>) and the type's <c>[ModAbout]</c>. The embedded README wins on the
+    /// page; with only <c>[ModAbout]</c> the page shows that, rendered as Markdown.
+    /// What this would catch: the resource convention (<c>README.md</c> or <c>*.README.md</c>) or the
+    /// by-name attribute read breaking, or the order between them flipping.
+    /// </summary>
+    [Fact]
+    public void The_embedded_README_and_the_ModAbout_attribute_are_the_plugins_own_About_text()
+    {
+        var facts = PluginAboutReader.FromType(typeof(DeclaredAboutPlugin));
+        Assert.Contains("ships inside the test assembly", facts.Embedded, StringComparison.Ordinal);
+        Assert.Equal("Declared **about** text.", facts.Declared);
+        Assert.Equal("", PluginAboutReader.DeclaredAbout(typeof(ModPageTests)));
+
+        ModsMenu.SetInstallCatalogForTests(new PageCatalog());
+        PluginAboutStore.NoteFromType("example.embedded", typeof(DeclaredAboutPlugin));
+        ModsMenu.Open();
+        using var embedded = ModsMenu.Register(new object(), "example.embedded", "Embedded");
+        ModsMenu.OpenMod("example.embedded");
+        Assert.Equal("embedded", Row(PageRows(), ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme).GetProperty("source").GetString());
+        Assert.Contains("ships inside the test assembly", JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
+
+        PluginAboutStore.Note("example.declared", new PluginAboutFacts { Declared = PluginAboutReader.DeclaredAbout(typeof(DeclaredAboutPlugin)) });
+        using var declared = ModsMenu.Register(new object(), "example.declared", "Declared", "Registered description.");
+        ModsMenu.OpenMod("example.declared");
+        var readme = Row(PageRows(), ModPagePane.RowReadme).GetProperty(ModPagePane.RowReadme);
+        Assert.Equal("declared", readme.GetProperty("source").GetString());
+        Assert.Equal("ready", readme.GetProperty("state").GetString());
+        string page = JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+        // The listing README renderer: emphasis markers are not drawn as characters.
+        Assert.Contains("Declared about text.", page, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ABOUTSRC1, the pure rules: which resource is the embedded README, the listing check (package, then version),
+    /// and the About order.
+    /// What this would catch: another assembly's <c>*.README.md</c> (a merged dependency) being read, an owner
+    /// mismatch passing as verified, a version mismatch losing the package or showing the README, or the order
+    /// between the sources changing.
+    /// </summary>
+    [Fact]
+    public void The_about_sources_and_the_listing_check_follow_their_rules()
+    {
+        Stream Open(string name) => new MemoryStream(System.Text.Encoding.UTF8.GetBytes("text of " + name));
+        Assert.Equal("text of README.md", PluginAboutReader.EmbeddedReadme(new[] { "My.Mod.README.md", "README.md" }, Open, "My.Mod"));
+        Assert.Equal("text of My.Mod.README.md", PluginAboutReader.EmbeddedReadme(new[] { "Dep.README.md", "My.Mod.README.md" }, Open, "My.Mod"));
+        // A merged dependency's README is never the plugin's, however short its name.
+        Assert.Equal("", PluginAboutReader.EmbeddedReadme(new[] { "A.README.md", "Dep.Lib.README.md" }, Open, "My.Mod"));
+        Assert.Equal("", PluginAboutReader.EmbeddedReadme(new[] { "My.Mod.READMEmd", "notes.md", "README.md.bak" }, Open, "My.Mod"));
+        // The read is bounded and sized to the stream, not a fixed buffer.
+        string big = new string('x', PluginAboutReader.MaxChars + 10);
+        Assert.Equal(PluginAboutReader.MaxChars, PluginAboutReader.ReadBounded(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(big))).Length);
+        Assert.Equal("short", PluginAboutReader.ReadBounded(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("short"))));
+
+        var entry = Listing("OtherTeam", "Rework", "1.0.85", "Server");
+        InstalledLedgerRow Row(string source) => new("OtherTeam-Rework", "sha", "", "Rework.dll", source, ServerInstallLedger.CategoryMod, InstalledState.ClientRoot, "");
+        void Is(ListingVerification v, bool same, ListingCheck check)
+        {
+            Assert.Equal(v, check.Verification);
+            Assert.Equal(same, check.SameVersion);
+        }
+
+        Is(ListingVerification.None, false, InstalledListingCheck.Check(null, null, null));
+        Is(ListingVerification.Unverified, false, InstalledListingCheck.Check(entry, null, null));
+        Is(ListingVerification.Ledger, true, InstalledListingCheck.Check(entry, new[] { Row("package:OtherTeam-Rework@1.0.85") }, null));
+        Is(ListingVerification.Ledger, true, InstalledListingCheck.Check(entry, new[] { Row("package:otherteam-rework@v1.0.85") }, null));
+        // An update is available: the package is verified, the README is not this version's.
+        Is(ListingVerification.Ledger, false, InstalledListingCheck.Check(entry, new[] { Row("package:OtherTeam-Rework@1.0.80") }, null));
+        Is(ListingVerification.Unverified, false, InstalledListingCheck.Check(entry, new[] { Row("package:NewTeam-Rework@1.0.85") }, null));
+
+        string good = PlaceManagedPackage("OtherTeam", "Rework", "1.0.85", "Manifest one-liner.");
+        Is(ListingVerification.Manifest, true, InstalledListingCheck.Check(entry, null, PackageManifestBeside.TryRead(good)));
+        string older = PlaceManagedPackage("OtherTeam", "Rework2", "1.0.0");
+        Is(ListingVerification.Unverified, false, InstalledListingCheck.Check(entry, null, PackageManifestBeside.TryRead(older)));
+        string otherOwner = PlaceManagedPackage("NewTeam", "Rework", "1.0.85");
+        Is(ListingVerification.Unverified, false, InstalledListingCheck.Check(entry, null, PackageManifestBeside.TryRead(otherOwner)));
+
+        var all = new PluginAboutFacts { Embedded = "e", Beside = "b", Declared = "d", Description = "s" };
+        Assert.Equal(ModAboutSource.Listing, ModAboutText.Choose(true, "l", all).Source);
+        Assert.Equal(ModAboutSource.Embedded, ModAboutText.Choose(false, "l", all).Source);
+        Assert.Equal(ModAboutSource.Beside, ModAboutText.Choose(true, " ", new PluginAboutFacts { Beside = "b", Declared = "d" }).Source);
+        Assert.Equal(ModAboutSource.Declared, ModAboutText.Choose(false, null, new PluginAboutFacts { Declared = "d", Description = "s" }).Source);
+        Assert.Equal(ModAboutSource.Description, ModAboutText.Choose(false, null, new PluginAboutFacts { Description = "s" }).Source);
+        Assert.Equal(ModAboutSource.None, ModAboutText.Choose(false, null, null).Source);
+    }
+
+    /// <summary>
+    /// ABOUTSRC1: the package manifest in the layouts mod managers write. Beside the DLL; one folder up
+    /// (<c>Owner-Name/Sub/X.dll</c>); under the mod's own subfolder named <c>plugins</c>; in an extracted
+    /// <c>Owner-Name-1.2.3</c> folder. Not in the shared <c>BepInEx/plugins</c> folder, not above it, not in a folder
+    /// whose name is not the package's, and not two folders up. A rewritten manifest is read again (the cache is
+    /// stamped by the file).
+    /// What this would catch: a mod-manager install whose DLL sits in a subfolder losing its package facts, a
+    /// manifest in a shared folder being trusted for every plugin there, or the cache serving a stale version.
+    /// </summary>
+    [Fact]
+    public void The_package_manifest_is_found_in_mod_manager_layouts_and_nowhere_else()
+    {
+        string root = Path.Combine(Bep, "plugins");
+        string Manifest(string dir, string name, string version)
+        {
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, "manifest.json"), "{\"name\":\"" + name + "\",\"version_number\":\"" + version + "\",\"description\":\"d\"}");
+            return dir;
+        }
+
+        string flat = Manifest(Path.Combine(root, "OtherTeam-Rework"), "Rework", "1.0.85");
+        Assert.Equal("OtherTeam-Rework", PackageManifestBeside.TryRead(Path.Combine(flat, "Rework.dll"))?.Package);
+        var sub = PackageManifestBeside.TryRead(Path.Combine(flat, "Sub", "Rework.dll"));
+        Assert.Equal("OtherTeam-Rework", sub?.Package);
+        Assert.Equal(flat, sub?.Folder);
+        Assert.Equal("OtherTeam-Rework", PackageManifestBeside.TryRead(Path.Combine(flat, "plugins", "Rework.dll"))?.Package);
+        Assert.Null(PackageManifestBeside.TryRead(Path.Combine(flat, "Sub", "Deeper", "Rework.dll")));
+
+        string extracted = Manifest(Path.Combine(root, "OtherTeam-Tool-1.2.3"), "Tool", "1.2.3");
+        var tool = PackageManifestBeside.TryRead(Path.Combine(extracted, "Tool.dll"));
+        Assert.Equal("OtherTeam-Tool", tool?.Package);
+        Assert.Equal("1.2.3", tool?.Version);
+        Assert.Equal("", PackageManifestBeside.OwnerFromFolder("Tool-1.2.3", "Tool", "1.2.3"));
+        Assert.Equal("OtherTeam", PackageManifestBeside.OwnerFromFolder("OtherTeam-Tool-1.2.3", "Tool", "1.2.3"));
+
+        Manifest(Path.Combine(root, "Loose"), "Rework", "1.0.85");
+        Assert.Null(PackageManifestBeside.TryRead(Path.Combine(root, "Loose", "Rework.dll")));
+        Manifest(root, "Rework", "1.0.85");
+        Assert.Null(PackageManifestBeside.TryRead(Path.Combine(root, "Rework.dll")));
+        Assert.Null(PackageManifestBeside.TryRead(Path.Combine(root, "Unnamed", "Rework.dll")));
+        Assert.True(PluginAboutReader.IsSharedFolder(root));
+        Assert.True(PluginAboutReader.IsSharedFolder(Bep));
+        Assert.False(PluginAboutReader.IsSharedFolder(Path.Combine(flat, "plugins")));
+
+        // A rewritten manifest is read again.
+        Manifest(flat, "Rework", "1.0.86");
+        Assert.Equal("1.0.86", PackageManifestBeside.TryRead(Path.Combine(flat, "Rework.dll"))?.Version);
+
+        // The package folder's README is the text beside a DLL in its subfolder.
+        File.WriteAllText(Path.Combine(flat, "README.md"), "Package folder README.");
+        Directory.CreateDirectory(Path.Combine(flat, "Sub"));
+        Directory.CreateDirectory(Path.Combine(extracted, "Sub"));
+        Assert.Equal("Package folder README.", PluginAboutReader.Beside(Path.Combine(flat, "Sub", "Rework.dll")));
+        Assert.Equal("d", PluginAboutReader.Beside(Path.Combine(extracted, "Sub", "Tool.dll")));
+    }
+
+    /// <summary>
+    /// ABOUTSRC1, security: plugin-supplied Markdown cannot inject TextMeshPro markup. The renderer keeps a code
+    /// span's and a fence's text literally (it may contain <c>&lt;size=999&gt;</c>), so the page puts it into plain
+    /// text cells, and a plain text cell is written through <see cref="UiRichText.Literal"/>, which gives every
+    /// <c>&lt;</c> its own <c>noparse</c> run.
+    /// What this would catch: an About cell becoming a linked or glyph cell whose write skips the escape, or the
+    /// escape no longer covering a tag that a README's code span carries.
+    /// </summary>
+    [Fact]
+    public void Plugin_about_text_cannot_inject_rich_text_tags()
+    {
+        ModsMenu.SetInstallCatalogForTests(new PageCatalog());
+        PluginAboutStore.Note("example.inject", new PluginAboutFacts
+        {
+            Embedded = "Try `<size=999>big</size>` now.\n\n```\n<sprite=0><color=red>x\n```\n\n<b>raw</b> text",
+        });
+        ModsMenu.Open();
+        using var mod = ModsMenu.Register(new object(), "example.inject", "Inject");
+        ModsMenu.OpenMod("example.inject");
+
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")));
+        var texts = new List<string>();
+        foreach (var row in doc.RootElement.EnumerateArray())
+        {
+            if (!row.TryGetProperty("label", out var label) || !(label.GetString() ?? "").StartsWith("page-about-", StringComparison.Ordinal)) continue;
+            var cell = Cell(row, "text");
+            Assert.Equal("text", cell.GetProperty("kind").GetString());
+            Assert.False(cell.TryGetProperty("linkify", out var linkify) && linkify.ValueKind == JsonValueKind.True, "an About cell is never a linked cell");
+            texts.Add(cell.GetProperty("text").GetString() ?? "");
+        }
+
+        Assert.NotEmpty(texts);
+        string all = string.Join("\n", texts);
+        Assert.Contains("<size=999>", all, StringComparison.Ordinal);
+        Assert.Contains("<sprite=0>", all, StringComparison.Ordinal);
+        foreach (var text in texts)
+        {
+            // Every '<' the label receives sits inside its own noparse run, so no tag can open.
+            string drawn = UiRichText.Literal(text);
+            Assert.Equal(text.Split('<').Length - 1, CountOf(drawn, "<noparse><</noparse>"));
+            Assert.DoesNotContain("<size", drawn.Replace("<noparse><</noparse>", ""), StringComparison.Ordinal);
+            Assert.DoesNotContain("<sprite", drawn.Replace("<noparse><</noparse>", ""), StringComparison.Ordinal);
+        }
+    }
+
+    private static int CountOf(string s, string part)
+    {
+        int n = 0, at = 0;
+        while ((at = s.IndexOf(part, at, StringComparison.Ordinal)) >= 0) { n++; at += part.Length; }
+        return n;
+    }
+
     // ---- MODSPOLISH1: the head's third row, and the muted provenance block -------------------
 
     /// <summary>
@@ -1300,8 +1743,11 @@ public sealed class ModPageTests : IDisposable
         // title live); its readback (page-meta above) moves to the title row.
         Assert.DoesNotContain(ModPagePane.HeadKey + "-meta", RowLabels(rows));
 
-        // A listing brings the row back, with the one-liner and the side badge on it as before.
+        // A listing brings the row back, with the one-liner and the side badge on it as before (ABOUTSRC1: a
+        // listing tied to these files, here by the package manifest beside the DLL).
         SeedBasinHoverTips();
+        string dll = PlaceManagedPackage("ExampleTeam", "BasinHoverTips", "1.0.19");
+        ModsMenu.PluginFileProbe = id => string.Equals(id, "acme.PhialStore", StringComparison.OrdinalIgnoreCase) ? dll : null;
         using var hover = ModsMenu.Register(new object(), "acme.PhialStore", "BasinHoverTips");
         ModsMenu.OpenMod("acme.PhialStore");
         var listed = PageRows();

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Progenitor.Install;
+using Progenitor.Plugins;
 
 namespace Progenitor.Ui;
 
@@ -291,10 +292,43 @@ internal sealed class ModPageModel
     internal string MatchedName => ListingMatchKinds.NameOf(Matched);
 
     /// <summary>
-    /// LINK1: a listing found only because the plugin's name spells the package name. The page shows
-    /// it with a muted note saying so; nothing removes a file or resolves a dependency from it.
+    /// ABOUTSRC1: the listing the resolution found, whether or not it is shown — the readback's
+    /// <c>page-listing.key</c>. Empty when none was found.
     /// </summary>
-    internal bool MatchedByName => Listing.Resolved && ListingMatchKinds.IsDisplayOnly(Matched);
+    internal string CandidateKey { get; init; } = "";
+
+    /// <summary>ABOUTSRC1: the found listing's version (the readback's <c>page-listing.listingVersion</c>).</summary>
+    internal string CandidateVersion { get; init; } = "";
+
+    /// <summary>ABOUTSRC1: which rule found <see cref="CandidateKey"/> (<see cref="ListingMatchKind.None"/> for none).</summary>
+    internal ListingMatchKind CandidateMatched { get; init; } = ListingMatchKind.None;
+
+    /// <summary>
+    /// ABOUTSRC1: what ties the found listing to these files (<see cref="InstalledListingCheck"/>). Only
+    /// <see cref="ListingVerification.Ledger"/> and <see cref="ListingVerification.Manifest"/> put it in
+    /// <see cref="Listing"/>; an unverified one is not shown at all.
+    /// </summary>
+    internal ListingVerification Verification { get; init; } = ListingVerification.None;
+
+    /// <summary>
+    /// ABOUTSRC1: the verifying evidence also names the listing's version, so its README (written for that version)
+    /// is shown. False for a verified package with an update available: its package facts stay, its README does not.
+    /// </summary>
+    internal bool ListingVersionMatches { get; init; }
+
+    private readonly ModAboutText _about;
+
+    /// <summary>
+    /// ABOUTSRC1: the About section's text and its source (<see cref="ModAboutText.Choose"/>). Unset, it is
+    /// <see cref="Listing"/>'s README: the model's listing is only ever one the caller verified.
+    /// </summary>
+    internal ModAboutText About
+    {
+        get => _about.Source != ModAboutSource.None
+            ? _about
+            : ModAboutText.Choose(Listing.Resolved, Listing.ReadmeMarkdown, null);
+        init => _about = value;
+    }
 
     internal string StateName => ModPageStates.Name(State);
 
