@@ -310,6 +310,12 @@ internal sealed class ModPageModel
     /// </summary>
     internal ListingVerification Verification { get; init; } = ListingVerification.None;
 
+    /// <summary>
+    /// ABOUTSRC1: the verifying evidence also names the listing's version, so its README (written for that version)
+    /// is shown. False for a verified package with an update available: its package facts stay, its README does not.
+    /// </summary>
+    internal bool ListingVersionMatches { get; init; }
+
     private readonly ModAboutText _about;
 
     /// <summary>

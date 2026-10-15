@@ -996,7 +996,7 @@
     <!-- ABOUTSRC1: a mod page's own About text ([ModAbout], the embedded README, the file beside the DLL). -->
     <Compile Include="..\..\src\Progenitor.Core\Plugins\ModAbout.cs" Link="Linked\ModAbout.cs" />
     <!-- ABOUTSRC1: the embedded-README path reads this resource out of the test assembly itself. -->
-    <EmbeddedResource Include="Fixtures\About\README.md" LogicalName="Progenitor.Tests.Fixtures.About.README.md" />
+    <EmbeddedResource Include="Fixtures\About\README.md" LogicalName="Progenitor.Tests.README.md" />
     <Compile Include="..\..\src\Progenitor.Core\Plugins\ModEnableState.cs" Link="Linked\ModEnableState.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Plugins\LegacyIds.cs" Link="Linked\LegacyIds.cs" />
     <Compile Include="..\..\src\Progenitor.Preloader\PluginFileActions.cs" Link="Linked\PluginFileActions.cs" />

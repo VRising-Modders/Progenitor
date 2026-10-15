@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.AboutExample</AssemblyName>
+    <RootNamespace>Progenitor.AboutExample</RootNamespace>
+    <Description>Minimal example of a mod page's About text: an embedded README and [ModAbout].</Description>
+    <BepInExPluginGuid>progenitor.aboutexample</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor About Example</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Progenitor.Core\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The mod page reads a resource named README.md, else <AssemblyName>.README.md. LogicalName gives this file
+         the exact name, whatever the root namespace. -->
+    <EmbeddedResource Include="ABOUT.md" LogicalName="README.md" />
+  </ItemGroup>
+</Project>

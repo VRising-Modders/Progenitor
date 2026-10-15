@@ -5855,15 +5855,21 @@ public static partial class ModsMenu
         var entry = ResolveListing(pluginId, row, deep).Entry;
         if (entry == null) return null;
         string file = deep ? PluginFileOf(pluginId, row) : "";
-        return InstalledListingCheck.IsVerified(VerifyListing(entry, row, file)) ? entry : null;
+        return VerifyListing(entry, row, file).PackageVerified ? entry : null;
     }
 
-    /// <summary>ABOUTSRC1: the ledger first; the manifest beside the DLL is read only when the ledger does not decide.</summary>
-    private static ListingVerification VerifyListing(CatalogEntry? entry, ModsSidebarRow? row, string pluginFile)
+    /// <summary>
+    /// ABOUTSRC1: this side's ledger rows first (<see cref="InstalledListingCheck.LedgerOfThisSide"/>: a server-root
+    /// row is the local server's file and never verifies the copy this client loaded); the manifest beside the DLL
+    /// is read only when the ledger does not name the package.
+    /// </summary>
+    private static ListingCheck VerifyListing(CatalogEntry? entry, ModsSidebarRow? row, string pluginFile)
     {
-        if (entry == null) return ListingVerification.None;
-        var byLedger = InstalledListingCheck.Check(entry, row?.Ledger, null);
-        if (byLedger != ListingVerification.Unverified || pluginFile.Length == 0) return byLedger;
+        if (entry == null) return new ListingCheck(ListingVerification.None, false);
+        bool loadedHere = row?.Inventory != null && ModMenuInventory.IsLocalLocation(row.Inventory.Location);
+        var ledger = InstalledListingCheck.LedgerOfThisSide(row?.Ledger, loadedHere, InstalledState.ServerRoot);
+        var byLedger = InstalledListingCheck.Check(entry, ledger, null);
+        if (byLedger.PackageVerified || pluginFile.Length == 0) return byLedger;
         return InstalledListingCheck.Check(entry, null, PackageManifestBeside.TryRead(pluginFile));
     }
 
@@ -5891,8 +5897,8 @@ public static partial class ModsMenu
                 var ledger = row.Ledger[i];
                 if (ledger.FilePath.Length == 0) continue;
                 if (string.Equals(ledger.Root, InstalledState.ServerRoot, StringComparison.OrdinalIgnoreCase)) continue;
-                try { if (File.Exists(ledger.FilePath)) return ledger.FilePath; }
-                catch { /* not this one */ }
+                // No disk check here: this runs for list rows, and every reader of the path tolerates a missing file.
+                return ledger.FilePath;
             }
         }
 
@@ -5927,6 +5933,9 @@ public static partial class ModsMenu
                     facts = PluginAboutReader.FromType(info.Instance.GetType());
             }
             catch { facts = PluginAboutFacts.Empty; }
+            // Read once: a plugin another loader holds does not change without a restart, and a Progenitor load
+            // replaces this row with its own.
+            PluginAboutStore.Note(pluginId, facts);
 #endif
         }
 
@@ -6223,10 +6232,13 @@ public static partial class ModsMenu
         // ledger row, or a package manifest beside the DLL). Anything else found it by a GUID or a name, which
         // can be another version or another project; its README, author, sides and links are not this mod's.
         string pluginFile = PluginFileOf(pluginId, row);
-        var verification = VerifyListing(entry, row, pluginFile);
-        bool listingVerified = InstalledListingCheck.IsVerified(verification);
-        var listing = listingVerified ? ModPageListing.FromEntry(entry, ReadmeFor(entry!)) : ModPageListing.None;
-        var about = ModAboutText.Choose(listingVerified, listing.ReadmeMarkdown, PluginAboutOf(pluginId, mod, pluginFile));
+        // A verified package at another version (an update is available) keeps its package facts (author, store
+        // page, sides); only the README, written for the listing's own version, waits for a version match.
+        var check = VerifyListing(entry, row, pluginFile);
+        var listing = check.PackageVerified
+            ? ModPageListing.FromEntry(entry, check.SameVersion ? ReadmeFor(entry!) : null)
+            : ModPageListing.None;
+        var about = ModAboutText.Choose(check.SameVersion, listing.ReadmeMarkdown, PluginAboutOf(pluginId, mod, pluginFile));
         bool loadedHere = row?.Inventory != null && ModMenuInventory.IsLocalLocation(row.Inventory.Location);
         // LINK1: a name match is a listing to read, not evidence about the files on disk. It never
         // decides that this copy is the reloader's, and it never reports a half.
@@ -6297,7 +6309,8 @@ public static partial class ModsMenu
             CandidateKey = entry?.Key ?? "",
             CandidateVersion = entry?.Manifest.Version ?? "",
             CandidateMatched = resolution.Kind,
-            Verification = verification,
+            Verification = check.Verification,
+            ListingVersionMatches = check.SameVersion,
             About = about,
             Uninstall = BuildUninstallPlan(pluginId, row, evidence, listing.Side, clientHalf, serverHalf, hot),
             // UNINSTREQ1: the connected server requires it: the confirmation says what happens.
@@ -6966,6 +6979,7 @@ public static partial class ModsMenu
                     ["key"] = pageModel.CandidateKey,
                     // ABOUTSRC1: whether the found listing is tied to these files, and so whether any of it is shown.
                     ["verified"] = InstalledListingCheck.NameOf(pageModel.Verification),
+                    ["versionMatch"] = pageModel.ListingVersionMatches,
                     ["shown"] = pageModel.Listing.Resolved,
                     ["listingVersion"] = pageModel.CandidateVersion,
                 };
