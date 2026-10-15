@@ -125,6 +125,8 @@ public abstract class ProgenitorPlugin<TContext> : BasePlugin
         catch { compat = null; }
         try { ModRegistry.NoteLoading(guid, meta.Name, meta.Version?.ToString() ?? "", dependencies, counterpart, compat); }
         catch { /* the registry is evidence, never a gate */ }
+        // ABOUTSRC1: the mod page's About text from the plugin itself (embedded README.md, [ModAbout]), as strings.
+        PluginAboutStore.NoteFromType(guid, GetType());
 
         if ((declared & process) == 0)
         {

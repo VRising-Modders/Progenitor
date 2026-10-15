@@ -18,6 +18,34 @@ To publish a mod on Thunderstore (package layout, `progenitor.json`, dependencie
 
 On a matching side, loading attaches the context, loads and tracks localization files beside the DLL, then calls `OnLoad`. A localization error is logged without failing the plugin. An `OnLoad` exception reverses recorded registrations, including localization, and clears the context.
 
+### About text on the mod page
+
+Status: source-checked and game-free tested (`ModPageTests`), not live-verified.
+
+A mod's page in the Mods menu shows its **About** text, rendered as Markdown by the same renderer as a Thunderstore README. Ship your own so the page describes the build the player actually loaded:
+
+1. **Embedded README (recommended).** Add the mod's `README.md` to the assembly. The page reads a resource named `README.md`, or the shortest one whose name ends in `.README.md` (the SDK default name is `<RootNamespace>.README.md`):
+
+   ```xml
+   <ItemGroup>
+     <EmbeddedResource Include="README.md" />
+   </ItemGroup>
+   ```
+
+2. **A file beside the DLL.** `<dll name>.README.md` or `<dll name>.md` next to the DLL. In a folder that holds only this mod (not `BepInEx/plugins` or `BepInEx/progenitor-reload` themselves), `README.md`, then the `description` of a package `manifest.json` there, also count.
+3. **`[ModAbout]`.** A short text in source:
+
+   ```csharp
+   [BepInPlugin("example.minimap", "Minimap", "1.0.0")]
+   [BepInDependency("progenitor")]
+   [ModAbout("A minimap in the top right corner.\n\nPress **M** to zoom.")]
+   public sealed class Plugin : ProgenitorPlugin<PluginContext> { protected override void OnLoad(PluginContext ctx) { } }
+   ```
+
+Without any of these, the page shows the description passed to `ctx.Menu.Register(name, description)`, then `[assembly: AssemblyDescription]`, then `No description available.` (`[BepInPlugin]` has no description field.)
+
+**A store listing is shown only for the install it came from.** Before the plugin's own text, the page shows the README of a Thunderstore listing, and that listing's one-liner, author, release date, sides and store page, only when the listing's package (`Owner-Name`) **and** version are the ones these files came from: the install ledger row Progenitor wrote, or a package `manifest.json` beside the DLL in a folder named `Owner-Name` (the layout a mod manager installs). A listing found any other way (the plugin GUID or display name spelling a package name) can be another version or another project with the same name, so nothing of it is shown, and the page falls back to the plugin's own text. The mod page's readback reports the decision as `page-listing {matched, key, verified: ledger|manifest|unverified|none, shown, listingVersion}` and `page-readme.source` (`listing`, `embedded`, `beside`, `declared`, `description` or `none`). A ledgered install whose version differs from the listing's current version (an update is available) is therefore also shown without the listing's facts; its update offer is unchanged.
+
 ### Context API
 
 | Member | Purpose |

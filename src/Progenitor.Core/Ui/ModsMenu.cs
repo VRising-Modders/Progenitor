@@ -1506,10 +1506,8 @@ public static partial class ModsMenu
                 ? page.AddFact(panel, key, name, cells, help, textValue)
                 : panel.CellRow(ModPagePane.FactRow(key, name, cells, ModPageSpacing.FactsWidth(MenuPanelLayout.DetailRowWidth()), textValue));
 
-        // LINK1: a listing found only because this plugin's name spells the package name says so, in
-        // the muted note tone, so nothing on the page reads as a verified identity.
-        if (model is { MatchedByName: true })
-            Fact("listing", "Store listing", new[] { ModPagePane.FactText(ModPagePane.CellFactValue, MatchedByNameNote, CellTone.Muted) }, MatchedByNameHelp);
+        // ABOUTSRC1: a listing nothing ties to these files (the LINK1 name match, a GUID that spells a package name,
+        // another version) is not shown at all, so there is no "Matched by name" note to draw for it.
 
         string requirement = "", explanation = "";
         foreach (var item in ModMenuInventory.Snapshot().Rows)
@@ -5728,15 +5726,6 @@ public static partial class ModsMenu
     internal const string OpenInInstallCaption = "Show in Install mods";
     internal const string NoListingNote = "No Install listing names this mod, so nothing was removed.";
 
-    /// <summary>
-    /// LINK1: the muted note under a page whose listing was found by name alone. It is what the page
-    /// says instead of claiming this listing is where these files came from.
-    /// </summary>
-    internal const string MatchedByNameNote = "Matched by name";
-
-    /// <summary>MODPAGE2: what the Store listing row's <c>Matched by name</c> means, in the description column.</summary>
-    internal const string MatchedByNameHelp = "This listing was found only because the plugin's name spells the package's name; nothing verified it.";
-
     private static ModsInstallLink? ResolveInstallLink(string pluginId)
     {
         if (string.IsNullOrWhiteSpace(pluginId)) return null;
@@ -5855,6 +5844,97 @@ public static partial class ModsMenu
     /// </summary>
     private static CatalogEntry? ResolveListingEntry(string pluginId, ModsSidebarRow? row, bool deep) =>
         ResolveListing(pluginId, row, deep).Entry;
+
+    /// <summary>
+    /// ABOUTSRC1: the resolved listing only when <see cref="InstalledListingCheck"/> ties it to these files
+    /// (the ledger row's package and version, or a package manifest beside the DLL). Every caller that shows
+    /// a listing's facts for an installed mod goes through this; the unverified listing is not shown.
+    /// </summary>
+    private static CatalogEntry? VerifiedListingEntry(string pluginId, ModsSidebarRow? row, bool deep)
+    {
+        var entry = ResolveListing(pluginId, row, deep).Entry;
+        if (entry == null) return null;
+        string file = deep ? PluginFileOf(pluginId, row) : "";
+        return InstalledListingCheck.IsVerified(VerifyListing(entry, row, file)) ? entry : null;
+    }
+
+    /// <summary>ABOUTSRC1: the ledger first; the manifest beside the DLL is read only when the ledger does not decide.</summary>
+    private static ListingVerification VerifyListing(CatalogEntry? entry, ModsSidebarRow? row, string pluginFile)
+    {
+        if (entry == null) return ListingVerification.None;
+        var byLedger = InstalledListingCheck.Check(entry, row?.Ledger, null);
+        if (byLedger != ListingVerification.Unverified || pluginFile.Length == 0) return byLedger;
+        return InstalledListingCheck.Check(entry, null, PackageManifestBeside.TryRead(pluginFile));
+    }
+
+    /// <summary>
+    /// ABOUTSRC1 seam: the DLL a plugin was loaded from, by plugin id. Null (production) reads the
+    /// reload-folder file, the ledger's client file, the loaded assembly's location and the chainloader.
+    /// </summary>
+    internal static Func<string, string?>? PluginFileProbe { get; set; }
+
+    /// <summary>ABOUTSRC1: the plugin's DLL on this machine, or empty when it is not known.</summary>
+    private static string PluginFileOf(string pluginId, ModsSidebarRow? row)
+    {
+        var probe = PluginFileProbe;
+        if (probe != null)
+        {
+            try { return (probe(pluginId) ?? "").Trim(); }
+            catch { return ""; }
+        }
+
+        if (row != null && row.ReloadFile.Length > 0) return row.ReloadFile;
+        if (row != null)
+        {
+            for (int i = 0; i < row.Ledger.Count; i++)
+            {
+                var ledger = row.Ledger[i];
+                if (ledger.FilePath.Length == 0) continue;
+                if (string.Equals(ledger.Root, InstalledState.ServerRoot, StringComparison.OrdinalIgnoreCase)) continue;
+                try { if (File.Exists(ledger.FilePath)) return ledger.FilePath; }
+                catch { /* not this one */ }
+            }
+        }
+
+        if (PluginAboutStore.TryGet(pluginId, out var stored) && stored.Location.Length > 0) return stored.Location;
+#if !PROGENITOR_TESTS
+        try
+        {
+            var plugins = IL2CPPChainloader.Instance?.Plugins;
+            if (plugins != null && plugins.TryGetValue(pluginId, out var info) && info != null)
+                return info.Location ?? "";
+        }
+        catch { /* not known */ }
+#endif
+        return "";
+    }
+
+    /// <summary>
+    /// ABOUTSRC1: what the plugin says about itself: the embedded README and <c>[ModAbout]</c> its load
+    /// recorded (or, for a plugin Progenitor did not load, its chainloader instance's), the text beside its
+    /// DLL, and the description it registered with <c>ctx.Menu</c>, else its assembly description.
+    /// </summary>
+    private static PluginAboutFacts PluginAboutOf(string pluginId, ModMenuRegistration? mod, string pluginFile)
+    {
+        if (!PluginAboutStore.TryGet(pluginId, out var facts))
+        {
+            facts = PluginAboutFacts.Empty;
+#if !PROGENITOR_TESTS
+            try
+            {
+                var plugins = IL2CPPChainloader.Instance?.Plugins;
+                if (plugins != null && plugins.TryGetValue(pluginId, out var info) && info?.Instance != null)
+                    facts = PluginAboutReader.FromType(info.Instance.GetType());
+            }
+            catch { facts = PluginAboutFacts.Empty; }
+#endif
+        }
+
+        string description = (mod?.Description ?? "").Trim();
+        return facts.With(
+            beside: PluginAboutReader.Beside(pluginFile.Length > 0 ? pluginFile : facts.Location),
+            description: description.Length > 0 ? description : facts.Description);
+    }
 
     /// <summary>
     /// LINK1: the same resolution, with the rule that found it. The rule matters because the weakest
@@ -6139,7 +6219,14 @@ public static partial class ModsMenu
         if (row != null && ReconcileIfPending(row)) row = CurrentSidebarModel(applySearch: false).Find(pluginId) ?? row;
         var resolution = ResolveListing(pluginId, row, deep: true);
         var entry = resolution.Entry;
-        var listing = ModPageListing.FromEntry(entry, entry == null ? null : ReadmeFor(entry));
+        // ABOUTSRC1: a listing's facts are shown only for the package and version these files came from (the
+        // ledger row, or a package manifest beside the DLL). Anything else found it by a GUID or a name, which
+        // can be another version or another project; its README, author, sides and links are not this mod's.
+        string pluginFile = PluginFileOf(pluginId, row);
+        var verification = VerifyListing(entry, row, pluginFile);
+        bool listingVerified = InstalledListingCheck.IsVerified(verification);
+        var listing = listingVerified ? ModPageListing.FromEntry(entry, ReadmeFor(entry!)) : ModPageListing.None;
+        var about = ModAboutText.Choose(listingVerified, listing.ReadmeMarkdown, PluginAboutOf(pluginId, mod, pluginFile));
         bool loadedHere = row?.Inventory != null && ModMenuInventory.IsLocalLocation(row.Inventory.Location);
         // LINK1: a name match is a listing to read, not evidence about the files on disk. It never
         // decides that this copy is the reloader's, and it never reports a half.
@@ -6207,6 +6294,11 @@ public static partial class ModsMenu
             oneLinerFallback: mod?.Description,
             matched: resolution.Kind)
         {
+            CandidateKey = entry?.Key ?? "",
+            CandidateVersion = entry?.Manifest.Version ?? "",
+            CandidateMatched = resolution.Kind,
+            Verification = verification,
+            About = about,
             Uninstall = BuildUninstallPlan(pluginId, row, evidence, listing.Side, clientHalf, serverHalf, hot),
             // UNINSTREQ1: the connected server requires it: the confirmation says what happens.
             RequiredBy = clientHalf || row?.Provenance == ModProvenance.Reload ? Networking.RequiredHereFact.ValueFor(pluginId) : "",
@@ -6368,7 +6460,8 @@ public static partial class ModsMenu
     private static void OnModsStoreLinkClick(string pluginId)
     {
         var row = CurrentSidebarModel(applySearch: false).Find(pluginId);
-        var entry = ResolveListingEntry(pluginId, row, deep: true);
+        // ABOUTSRC1: the store page of the listing these files came from, never of one a name or GUID found.
+        var entry = VerifiedListingEntry(pluginId, row, deep: true);
         string url = (entry?.ListingUrl ?? "").Trim();
         bool valid = url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
             || url.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
@@ -6417,7 +6510,7 @@ public static partial class ModsMenu
     private static bool SidebarWarningOf(ModsSidebarRow row)
     {
         if (row.Provenance != ModProvenance.Progenitor) return false;
-        var entry = ResolveListingEntry(row.Id, row, deep: false);
+        var entry = VerifiedListingEntry(row.Id, row, deep: false);
         if (entry == null) return false;
         var listing = ModPageListing.FromEntry(entry, null);
         if (!listing.RequiresBoth) return false;
@@ -6866,10 +6959,15 @@ public static partial class ModsMenu
             if ((_modPage.TitleRow ?? (IUiHandle?)_modPage.FrameworkRow) is { } titleHost && ReferenceEquals(handle, titleHost))
             {
                 sidebarExtra ??= new Dictionary<string, object?>(StringComparer.Ordinal);
+                var pageModel = _modPage.Model;
                 sidebarExtra[RowPageListing] = new Dictionary<string, object?>
                 {
-                    ["matched"] = _modPage.Model.MatchedName,
-                    ["key"] = _modPage.Model.Listing.Key,
+                    ["matched"] = ListingMatchKinds.NameOf(pageModel.CandidateMatched),
+                    ["key"] = pageModel.CandidateKey,
+                    // ABOUTSRC1: whether the found listing is tied to these files, and so whether any of it is shown.
+                    ["verified"] = InstalledListingCheck.NameOf(pageModel.Verification),
+                    ["shown"] = pageModel.Listing.Resolved,
+                    ["listingVersion"] = pageModel.CandidateVersion,
                 };
             }
         }
