@@ -65,16 +65,19 @@ internal interface ICastleRuntime
 
     /// <summary>
     /// The entity's <c>TilePosition</c>. False when it has none. Characters and units carry one
-    /// too, but the game writes theirs in a deferred pass that can lag behind a teleport, so
-    /// <see cref="IsTileModel"/> decides whether it is used for a territory test.
+    /// too (and <c>TileModel</c>), but theirs is written in a deferred pass that lags behind a
+    /// teleport and its height level can sit above the territory's band on an upper floor, so
+    /// <see cref="IsPlacedTileModel"/> decides whether it is used for a territory test.
     /// </summary>
     bool TryGetTilePosition(CastleId entity, out int tileX, out int tileY, out int heightLevel);
 
     /// <summary>
-    /// True for a placed tile model (<c>TileModel</c>): its <c>TilePosition</c> is its placed tile.
-    /// False for anything else (characters, units, items) and when unreadable.
+    /// True for a placed tile model: <c>TileModel</c> and no <c>Movement</c>, so its
+    /// <c>TilePosition</c> is the tile it was placed on. False for anything that moves (player
+    /// characters and units carry <c>TileModel</c> and <c>TilePosition</c> too, live 2026-10-14),
+    /// for anything without <c>TileModel</c>, and when unreadable.
     /// </summary>
-    bool IsTileModel(CastleId entity);
+    bool IsPlacedTileModel(CastleId entity);
 
     /// <summary>The entity's world position from <c>Translation</c>. False when it has none.</summary>
     bool TryGetPosition(CastleId entity, out CastleVec3 position);
@@ -141,7 +144,7 @@ internal sealed class NullCastleRuntime : ICastleRuntime
         return false;
     }
 
-    public bool IsTileModel(CastleId entity) => false;
+    public bool IsPlacedTileModel(CastleId entity) => false;
 
     public bool TryGetPosition(CastleId entity, out CastleVec3 position)
     {

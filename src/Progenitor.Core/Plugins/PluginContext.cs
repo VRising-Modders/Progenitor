@@ -1637,11 +1637,25 @@ public sealed partial class PluginCastles
         return Progenitor.Castles.Castles.At(position);
     }
 
-    /// <summary>The castle whose territory contains this entity, or a disabled handle.</summary>
+    /// <summary>
+    /// The castle whose territory contains this entity, or a disabled handle. For a character, the
+    /// castle of <see cref="StandingTerritory"/>: every floor counts and a teleport shows on the next read.
+    /// </summary>
     public ICastleHandle At(Entity entity)
     {
         _ctx.EnsureAttached();
         return Progenitor.Castles.Castles.At(CastleId.From(entity));
+    }
+
+    /// <summary>
+    /// Territory index of the castle plot <paramref name="character"/> stands on, or -1 (open world,
+    /// unknown entity, client). The same value <c>MaterialContext.StandingTerritory</c> carries, so a
+    /// mod's actions and its material views agree. See <see cref="Progenitor.Castles.Castles.StandingTerritory(CastleId)"/>.
+    /// </summary>
+    public int StandingTerritory(Entity character)
+    {
+        _ctx.EnsureAttached();
+        return Progenitor.Castles.Castles.StandingTerritory(CastleId.From(character));
     }
 }
 
