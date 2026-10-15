@@ -413,7 +413,7 @@ public class CastlesTests : IDisposable
     {
         // Right after a teleport onto the plot the game still has the character's old tile.
         var castle = CastlesApi.ForUser(TestPlayer);
-        _server.NotTileModels.Add(Character);
+        _server.Movers.Add(Character);
         _server.TilePositions[Character] = (0, 0, 11);
         _server.Positions[Character] = new CastleVec3(-1807.5f, 5f, -1707.5f);
         Assert.True(castle.IsInside(Character));
@@ -424,6 +424,69 @@ public class CastlesTests : IDisposable
         _server.Positions[Character] = new CastleVec3(-1847.0658f, 5f, -1363.5184f);
         Assert.False(castle.IsInside(Character));
         Assert.False(CastlesApi.At(Character).Enabled);
+        Assert.Equal(-1, CastlesApi.StandingTerritory(Character));
+
+        // And back on: the next read says so (no cache between reads).
+        _server.Positions[Character] = new CastleVec3(-1807.5f, 5f, -1707.5f);
+        Assert.Equal(TerritoryIndex, CastlesApi.StandingTerritory(Character));
+    }
+
+    [Fact]
+    public void A_character_upstairs_is_on_the_plot_although_its_TilePosition_height_is_above_the_band()
+    {
+        // Live 2026-10-14: a player upstairs in a castle (band 10-11) has TileModel, a TilePosition at
+        // height level 12 and Translation inside the plot; the game's Build view reads that plot.
+        int count = CastleGeometry.BoundsTileCount(MinX, MinY, MaxX, MaxY);
+        var mask = new bool[count];
+        mask[CastleGeometry.LocalTileIndex(2785, 2985, MinX, MinY, MaxX, MaxY)] = true;
+        _server.BuildableTiles[TerritoryEntity] = mask;
+        _server.Movers.Add(Character);
+        _server.TilePositions[Character] = (2784, 2984, 13);
+        _server.Positions[Character] = new CastleVec3(-1807.3f, 10f, -1707.4f);
+
+        var castle = CastlesApi.ForUser(TestPlayer);
+        Assert.True(castle.IsTilePrecise);
+        Assert.True(castle.IsInside(Character));
+        Assert.Equal(TerritoryIndex, CastlesApi.At(Character).Territory.Index);
+        Assert.Equal(TerritoryIndex, CastlesApi.StandingTerritory(Character));
+
+        // A placed structure on the same tile at that height level is still refused by its band.
+        _server.TilePositions[Heart] = (2785, 2985, 13);
+        Assert.False(castle.IsInside(Heart));
+    }
+
+    [Fact]
+    public void StandingTerritory_is_minus_one_off_a_plot_and_for_unknown_entities()
+    {
+        _server.Movers.Add(Character);
+        _server.Positions[Character] = new CastleVec3(-1847.0658f, 5f, -1363.5184f);   // tile 2705,3672
+        Assert.Equal(-1, CastlesApi.StandingTerritory(Character));
+        Assert.Equal(-1, CastlesApi.StandingTerritory(CastleId.None));
+        Assert.Equal(-1, CastlesApi.StandingTerritory(new CastleId(999999, 1)));     // no position
+
+        CastlesApi.SetRuntimeForTests(new FakeCastleRuntime { IsServer = false });
+        _server.Positions[Character] = new CastleVec3(-1807.5f, 5f, -1707.5f);
+        Assert.Equal(-1, CastlesApi.StandingTerritory(Character));                  // the client
+    }
+
+    [Theory]
+    [InlineData(-1807.5f, -1707.5f)]     // the heart tile
+    [InlineData(-1847.0658f, -1363.5184f)] // off the plot
+    [InlineData(-1880.5f, -1750.5f)]     // bounds minimum corner
+    [InlineData(-1784.5f, -1694.5f)]     // the exclusive maximum: just outside
+    public void StandingTerritory_At_and_the_material_rule_agree(float x, float z)
+    {
+        // UnityMaterialWorld builds MaterialContext.StandingTerritory with
+        // Castles.StandingTerritory(position, castles); the public read and At(character) must match it.
+        _server.Movers.Add(Character);
+        _server.TilePositions[Character] = (0, 0, 40);
+        var position = new CastleVec3(x, 12f, z);
+        _server.Positions[Character] = position;
+
+        int material = CastlesApi.StandingTerritory(position, CastlesApi.All);
+        Assert.Equal(material, CastlesApi.StandingTerritory(Character));
+        var at = CastlesApi.At(Character);
+        Assert.Equal(material, at.Enabled ? at.Territory.Index : -1);
     }
 
     [Fact]
@@ -1628,10 +1691,13 @@ public class CastlesTests : IDisposable
         public bool TryGetPosition(CastleId entity, out CastleVec3 position) =>
             Positions.TryGetValue(entity, out position);
 
-        /// <summary>Entities that are not tile models (characters, units); everything else is one.</summary>
-        public HashSet<CastleId> NotTileModels { get; } = new();
+        /// <summary>
+        /// Entities with <c>Movement</c> (characters, units). In the game these carry <c>TileModel</c>
+        /// and a <c>TilePosition</c> too, so only this tells them from a placed structure.
+        /// </summary>
+        public HashSet<CastleId> Movers { get; } = new();
 
-        public bool IsTileModel(CastleId entity) => !NotTileModels.Contains(entity);
+        public bool IsPlacedTileModel(CastleId entity) => !Movers.Contains(entity);
 
         public bool TryGetPrefabFootprint(int prefabGuid, out int localMinX, out int localMinY, out int localMaxX, out int localMaxY)
         {

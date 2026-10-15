@@ -273,11 +273,18 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         }
     }
 
-    public bool IsTileModel(CastleId entity)
+    public bool IsPlacedTileModel(CastleId entity)
     {
         var world = Worlds.Server;
         if (world == null || !world.IsCreated || entity.IsNone) return false;
-        try { return entity.ToEntity().Has<ProjectM.Tiles.TileModel>(world.EntityManager); }
+        try
+        {
+            var em = world.EntityManager;
+            var e = entity.ToEntity();
+            // A player character has TileModel too (and a TilePosition that lags and can name a height
+            // level above the plot's band upstairs); Movement is what placed structures lack.
+            return e.Has<ProjectM.Tiles.TileModel>(em) && !e.Has<Movement>(em);
+        }
         catch { return false; }
     }
 

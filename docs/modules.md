@@ -1830,7 +1830,8 @@ if (castle.Enabled)
         ctx.Log.LogInfo($"{row.Key} x{row.Value}");
 
     bool here = castle.IsInside(somePosition);            // X/Z; tile mask when readable, else bounds
-    bool standing = castle.IsInside(CastleId.From(characterEntity)); // tile models by TilePosition, characters by Translation
+    bool standing = castle.IsInside(CastleId.From(characterEntity)); // structures by TilePosition, characters by Translation
+    int plot = ctx.Castles.StandingTerritory(characterEntity); // -1 off every plot; same value as MaterialContext
     var check = castle.CanPlace(prefabGuidHash, somePosition);
 }
 
@@ -1843,6 +1844,7 @@ foreach (var c in ctx.Castles.All()) { }                  // ctx.Castles.AllForU
 | `ForUser(user)` / `AllForUser(user)` | Castles owned by that user **or their clan**. `ForUser` never returns null — a player with no heart gets a disabled handle. |
 | `ForTerritory(index)` | The reload-safe lookup: territory index is durable, `Entity` is not (see below). |
 | `ForHeart(heart)`, `At(position)`, `At(entity)` | By heart entity, or the castle whose territory contains a point / an entity. |
+| `StandingTerritory(character)`, `ctx.Castles.StandingTerritory(Entity)` | Territory index of the plot a character stands on, or -1. The rule `At(character)` and `MaterialContext.StandingTerritory` share, so a mod's actions and its material views agree. |
 | `ICastleHandle` | `Heart`, `Owner` (user + platform id + name + clan), `Territory` (index, entity, bounds, height band, block count, `Width`/`Depth`/`TileCount`), `Level`, `FloorCount`, `Raided`, `Decaying`, `Buildings()`, `BuildingsByPrefab()`, `Tiles()`, `IsInside`, `IsTilePrecise`, `IsStale`, `DisabledReason`, `CanPlace`, `Refresh()`. |
 
 **Entity ids are session-scoped, and a handle knows it.** Reloading the save re-assigned every entity index on the live plot while territory index, `NetworkId`, bounds and tile coordinates stayed identical. Persist `CastleTerritory.CastleTerritoryIndex` and `NetworkId`; never persist an `Entity`.
@@ -1851,7 +1853,9 @@ A handle carries **two** staleness checks, in this order. First the **world-load
 
 The signal is deliberately **not** `World.SequenceNumber`: that number is set once in the `World` constructor (server, no setter emitted) and V Rising loads a save *inside* the running server world — `TriggerNewLoad(World world, …)` and `DeserializeWorldData(…, out NativeArray<int> existingVersionsByEntityIndex, …)` both take the existing world, as a normal tick of `PersistenceGroup` — so it cannot move across the event it was meant to detect. The entity **version** does move, which is exactly what that `existingVersionsByEntityIndex` parameter is about, and `EntityManager.Exists` reads it. A runtime that cannot answer the liveness question at all (no world, the read threw) is treated as **stale**, not as "cannot be checked": an unreadable signal is a changed signal, the same rule Effects settled for its world signal. It says so once in the log, and it does not latch — the handle is readable again as soon as the signal is.
 
-**Tile grid.** `CastleGeometry` converts world to tile: `tile = floor(world / 0.5) + 6400`, both constants derived from two live tile-models and pinned by a test. There is **no** world-Y to `TilePosition.HeightLevel` mapping, so position tests are X/Z only and the height band is tested only for entities that carry their own `TilePosition`.
+**Tile grid.** `CastleGeometry` converts world to tile: `tile = floor(world / 0.5) + 6400`, both constants derived from two live tile-models and pinned by a test. There is **no** world-Y to `TilePosition.HeightLevel` mapping, so position tests are X/Z only and the height band is tested only for placed structures, by their own `TilePosition`.
+
+**Characters stand where their `Translation` is.** A player character carries `TileModel` and `TilePosition` like a structure does, but its `TilePosition` is written in a deferred pass (it names the old plot for seconds after a teleport), and upstairs its height level sits above the territory's band: live 2026-10-14, a character in an upper-floor coffin room of a band 10-11 plot read height level 12. `IsInside(entity)` therefore uses `TilePosition` only for an entity with `TileModel` and no `Movement`; characters and units go by `Translation`, X/Z only, so every floor counts. `StandingTerritory(character)` is that rule as a number.
 
 **`CanPlace` is a documented subset, not the game's answer.** The game's validator, `GetPlacementResult.GetResult(ref Operation, ref JobData)`, is not callable read-only on this build: `JobData` is a 0x10E8-byte Burst struct built only from a live `SystemState`, and reaching it means by-ref struct parameters (trap 1), ~30 `ComponentLookup<T>` instantiations (trap 2) and a guessed native convention (trap 5). So `CanPlace` reproduces territory containment, the buildable-tile mask when readable, the height band, and occupancy against the plot's own placed models — `CastlePlacementCheck.Complete` is always `false` and `.NotChecked` lists the eleven vanilla rules it skips (placement type requirements, map zones, restriction areas and roads, contests, rebuild history, teleporters, siege, terrain collision, attach/replace resolution, team rules, build cost). Footprints come from placed instances, because a prefab's own `TileBounds` reads all zeros (the local bounds live in the `TileData` blob); an unseen prefab falls back to one tile with `FootprintResolved = false`. Placement itself (writing) is still gated on the `BuildTileModelEvent` spike.
 
@@ -2779,7 +2783,8 @@ must not move items, must not call back into `ctx.MaterialSource` and must not t
   per-player view refreshes that were recomputed or reused ([refresh cost](#refresh-cost)).
 
 `MaterialContext` carries `User`, `Character` (session ids, `CastleId`), `WorldEpoch`, `Operation`,
-`StandingTerritory` (-1 = no plot, the game's own standing rule) and `Station`, the structure the
+`StandingTerritory` (-1 = no plot: inside a game call, the plot of the heart the game passed; otherwise
+`ctx.Castles.StandingTerritory(character)`, so `ctx.Castles.At(character)` names the same plot) and `Station`, the structure the
 operation runs at, so a provider can leave it out of its sources (Progenitor drops it from the pool in
 any case):
 

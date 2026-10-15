@@ -105,10 +105,13 @@ public interface ICastleHandle
     bool IsInside(CastleVec3 position);
 
     /// <summary>
-    /// True when an entity is inside this castle's territory. A placed tile model by its own
-    /// <c>TilePosition</c> (which also tests the height band); anything else, characters included,
-    /// by its <c>Translation</c> through <see cref="IsInside(CastleVec3)"/>, the position the game's
-    /// own standing-plot rule reads (a character's <c>TilePosition</c> can lag behind a teleport).
+    /// True when an entity is inside this castle's territory. A placed tile model (a structure: no
+    /// <c>Movement</c>) by its own <c>TilePosition</c>, which also tests the height band; anything
+    /// that moves, characters included, by its <c>Translation</c> through
+    /// <see cref="IsInside(CastleVec3)"/>, X/Z only, so every floor of the castle counts. That is the
+    /// rule <see cref="Castles.StandingTerritory(CastleId)"/> and <c>MaterialContext.StandingTerritory</c> use.
+    /// A character's own <c>TilePosition</c> lags behind a teleport and names a height level above the
+    /// territory's band on an upper floor, so it is never read for this.
     /// </summary>
     bool IsInside(CastleId entity);
 

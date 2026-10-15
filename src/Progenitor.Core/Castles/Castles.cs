@@ -179,7 +179,11 @@ public static class Castles
         return CastleHandle.Disabled(runtime);
     }
 
-    /// <summary>The castle whose territory contains <paramref name="entity"/>, or a disabled handle.</summary>
+    /// <summary>
+    /// The castle whose territory contains <paramref name="entity"/>, or a disabled handle. For a
+    /// character this is the castle of <see cref="StandingTerritory(CastleId)"/> (see
+    /// <see cref="ICastleHandle.IsInside(CastleId)"/>).
+    /// </summary>
     public static ICastleHandle At(CastleId entity)
     {
         EnsureMainThread(nameof(At));
@@ -196,6 +200,53 @@ public static class Castles
         }
 
         return CastleHandle.Disabled(runtime);
+    }
+
+    /// <summary>
+    /// The territory index of the castle plot <paramref name="character"/> stands on, or -1 when it
+    /// stands on none (open world, a stale or unknown entity, the client, the module skipped). The
+    /// plot whose territory contains the character's <c>Translation</c>, X/Z only: every floor of the
+    /// castle counts, and a teleport is reflected on the next read. This is the same value
+    /// <c>MaterialContext.StandingTerritory</c> carries outside a game call that names its heart, so a
+    /// mod's actions and its material views agree on where a player stands.
+    /// </summary>
+    public static int StandingTerritory(CastleId character)
+    {
+        EnsureMainThread(nameof(StandingTerritory));
+        var runtime = CurrentRuntime();
+        if (character.IsNone || !IsUsable(runtime, nameof(StandingTerritory))) return -1;
+
+        CastleVec3 position;
+        try
+        {
+            if (!runtime.TryGetPosition(character, out position)) return -1;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Castles: position of " + character + " threw: " + e.Message);
+            return -1;
+        }
+
+        var rows = SnapshotSafe(runtime);
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var handle = new CastleHandle(rows[i], runtime, enabled: true);
+            if (handle.IsInside(position)) return handle.Territory.Index;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The standing-plot rule over an already fetched castle list: the first castle whose territory
+    /// contains <paramref name="position"/> (X/Z only), else -1. Shared by
+    /// <see cref="StandingTerritory(CastleId)"/> and the material context (<c>UnityMaterialWorld</c>).
+    /// </summary>
+    internal static int StandingTerritory(CastleVec3 position, IReadOnlyList<ICastleHandle> castles)
+    {
+        for (int i = 0; i < castles.Count; i++)
+            if (castles[i].IsInside(position)) return castles[i].Territory.Index;
+        return -1;
     }
 
     /// <summary>True when the module is loaded on a server world and not skipped.</summary>

@@ -684,7 +684,9 @@ Three things to know before you build on this:
 - **`IsInside` is X/Z only.** There is no verified world-Y → `TilePosition.HeightLevel` mapping. When
   the territory's tile mask reads (its length equals the computed tile count) the answer comes from
   the mask and `castle.IsTilePrecise` is `true`; otherwise it falls back to the bounds box and the
-  territory logs one info line.
+  territory logs one info line. For a player, use `ctx.Castles.StandingTerritory(character)` or
+  `ctx.Castles.At(character)`: both read the character's `Translation`, so every floor of the castle
+  counts and a teleport shows on the next read.
 - **`CanPlace` is a documented subset, not the game's answer.** It reproduces territory containment,
   the tile mask, the height band and occupancy against the plot's own placed models.
   `CastlePlacementCheck.Complete` is **always false**, and `.NotChecked` lists the eleven vanilla

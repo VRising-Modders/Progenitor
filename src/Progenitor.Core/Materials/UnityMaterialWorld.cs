@@ -351,13 +351,10 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         // A seam call always reads the position fresh.
         if (!InRefresh) _standing.Clear();
         else if (_standing.TryGetValue(character, out int known)) return known;
+        // The rule Castles.StandingTerritory(character) applies, over the cached castle list.
         int found = -1;
         if (character.TryRead(em, out Translation t))
-        {
-            CastleVec3 pos = t.Value;
-            for (int i = 0; i < _castles.Count; i++)
-                if (_castles[i].IsInside(pos)) { found = _castles[i].Territory.Index; break; }
-        }
+            found = Castles.Castles.StandingTerritory((CastleVec3)t.Value, _castles);
         if (InRefresh) _standing[character] = found;
         return found;
     }
