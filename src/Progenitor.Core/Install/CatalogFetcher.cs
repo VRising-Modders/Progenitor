@@ -302,15 +302,17 @@ internal sealed class CatalogFetcher
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
-                    return BytesFail(InstallReasons.FetchTimeout, lastStatus);
+                    return BytesFail(InstallReasons.FetchTimeout, lastStatus, FetchFailureCause.Timeout);
                 }
                 catch (OperationCanceledException)
                 {
-                    return BytesFail(InstallReasons.FetchCancelled, lastStatus);
+                    return BytesFail(InstallReasons.FetchCancelled, lastStatus, FetchFailureCause.Cancelled);
                 }
                 catch (Exception e)
                 {
-                    return BytesFail(InstallReasons.FetchTransport + ": " + e.Message, lastStatus);
+                    // INSTALLERR1: the cause from the exception's type (a localized OS message says nothing reliable).
+                    return BytesFail(InstallReasons.FetchTransport + ": " + e.Message, lastStatus,
+                        RecordingCatalogTransport.Classify(e, cancellationToken.IsCancellationRequested));
                 }
 
                 using (response)
@@ -344,7 +346,7 @@ internal sealed class CatalogFetcher
                     if (response.StatusCode == 429)
                     {
                         if (retries >= _options.MaxRetries)
-                            return BytesFail(InstallReasons.FetchTooManyRetries, lastStatus);
+                            return BytesFail(InstallReasons.FetchTooManyRetries, lastStatus, FetchFailureCause.Http);
                         retries++;
                         await _clock.Delay(Backoff(retries, response.RetryAfter), timeout.Token).ConfigureAwait(false);
                         continue;
@@ -353,14 +355,14 @@ internal sealed class CatalogFetcher
                     if (response.StatusCode >= 500 && response.StatusCode <= 599)
                     {
                         if (retries >= _options.MaxRetries)
-                            return BytesFail(InstallReasons.FetchTooManyRetries, lastStatus);
+                            return BytesFail(InstallReasons.FetchTooManyRetries, lastStatus, FetchFailureCause.Http);
                         retries++;
                         await _clock.Delay(Backoff(retries, response.RetryAfter), timeout.Token).ConfigureAwait(false);
                         continue;
                     }
 
                     if (response.StatusCode < 200 || response.StatusCode > 299)
-                        return BytesFail(InstallReasons.HttpStatus(response.StatusCode), lastStatus);
+                        return BytesFail(InstallReasons.HttpStatus(response.StatusCode), lastStatus, FetchFailureCause.Http);
 
                     if (response.ContentLength is > 0 && response.ContentLength.Value > maxBytes)
                         return BytesFail(InstallReasons.FetchSizeCeiling, lastStatus);
@@ -392,26 +394,27 @@ internal sealed class CatalogFetcher
                     }
                     catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                     {
-                        return BytesFail(InstallReasons.FetchTimeout, lastStatus);
+                        return BytesFail(InstallReasons.FetchTimeout, lastStatus, FetchFailureCause.Timeout);
                     }
                     catch (OperationCanceledException)
                     {
-                        return BytesFail(InstallReasons.FetchCancelled, lastStatus);
+                        return BytesFail(InstallReasons.FetchCancelled, lastStatus, FetchFailureCause.Cancelled);
                     }
                     catch (Exception e)
                     {
-                        return BytesFail(InstallReasons.FetchTransport + ": " + e.Message, lastStatus);
+                        return BytesFail(InstallReasons.FetchTransport + ": " + e.Message, lastStatus,
+                            RecordingCatalogTransport.Classify(e, cancellationToken.IsCancellationRequested));
                     }
                 }
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return BytesFail(InstallReasons.FetchTimeout, lastStatus);
+            return BytesFail(InstallReasons.FetchTimeout, lastStatus, FetchFailureCause.Timeout);
         }
         catch (OperationCanceledException)
         {
-            return BytesFail(InstallReasons.FetchCancelled, lastStatus);
+            return BytesFail(InstallReasons.FetchCancelled, lastStatus, FetchFailureCause.Cancelled);
         }
     }
 
@@ -431,7 +434,7 @@ internal sealed class CatalogFetcher
                 ETag = result.ETag,
             };
         if (!result.Ok || result.Bytes == null)
-            return TextFail(result.Error ?? InstallReasons.FetchTransport, result.StatusCode);
+            return TextFail(result.Error ?? InstallReasons.FetchTransport, result.StatusCode, result.FailureCause);
         return new CatalogTextFetchResult(true, null, Encoding.UTF8.GetString(result.Bytes), result.ByteCount, result.StatusCode)
         {
             LastModified = result.LastModified,
@@ -533,11 +536,11 @@ internal sealed class CatalogFetcher
         return (output.ToArray(), total);
     }
 
-    private static CatalogTextFetchResult TextFail(string error, int status) =>
-        new(false, error, null, 0, status);
+    private static CatalogTextFetchResult TextFail(string error, int status, FetchFailureCause cause = FetchFailureCause.None) =>
+        new(false, error, null, 0, status) { FailureCause = cause };
 
-    private static CatalogBytesFetchResult BytesFail(string error, int status) =>
-        new(false, error, null, 0, status);
+    private static CatalogBytesFetchResult BytesFail(string error, int status, FetchFailureCause cause = FetchFailureCause.None) =>
+        new(false, error, null, 0, status) { FailureCause = cause };
 
     private TimeSpan Backoff(int retry, TimeSpan? retryAfter)
     {
@@ -727,6 +730,9 @@ internal sealed class CatalogBytesFetchResult
     public long WireBytes { get; init; }
 
     public string? ContentEncoding { get; init; }
+
+    /// <summary>INSTALLERR1: the transport cause of a failure, from the exception's type (never its localized text).</summary>
+    public FetchFailureCause FailureCause { get; init; }
 }
 
 /// <summary>BCL <see cref="HttpClient"/> transport. Follows no redirects itself; <see cref="CatalogFetcher"/> bounds them.</summary>

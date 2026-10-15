@@ -77,20 +77,6 @@ internal static class ThunderstoreMirror
         }
     }
 
-    private static bool LiveClear()
-    {
-        BindOnce();
-        BepInEx.Configuration.ConfigEntry<string>? url;
-        lock (Gate) url = _url;
-        if (url == null) return false;
-        url.Value = "";
-        try { url.ConfigFile.Save(); }
-        catch { /* SaveOnConfigSet already wrote it */ }
-        try { Plugin.Logger?.LogWarning("Install: [" + Section + "] " + UrlKey + " cleared from the Install tab; the mod list comes from thunderstore.io."); }
-        catch { /* */ }
-        return true;
-    }
-
     private static string? LiveUrl()
     {
         BindOnce();
@@ -116,22 +102,6 @@ internal static class ThunderstoreMirror
         return _watchCore.Value;
     }
 #endif
-
-    /// <summary>
-    /// INSTALLERR1: clears <c>[Install] DevThunderstoreUrl</c> through the shared cfg (the Install tab's <b>Use thunderstore.io</b>).
-    /// True when it was written. Tests set their own.
-    /// </summary>
-    internal static Func<bool>? ClearProbe { get; set; }
-#if !PROGENITOR_TESTS
-        = LiveClear;
-#endif
-
-    /// <summary>INSTALLERR1: clear the dev URL (see <see cref="ClearProbe"/>); false when nothing could be written.</summary>
-    public static bool ClearConfiguredUrl()
-    {
-        try { return ClearProbe?.Invoke() ?? false; }
-        catch { return false; }
-    }
 
     private static string _lastNote = "";
 
@@ -228,10 +198,65 @@ internal static class ThunderstoreMirror
             return null;
         }
 
+        if (IsFallenBack(u))
+        {
+            note = "off: " + u + " refused the connection; thunderstore.io is used for this session (the cfg is unchanged)";
+            Log(note);
+            return null;
+        }
+
         note = "on: " + u;
         Log(note);
         return u;
     }
+
+    // ---- INSTALLERR1: the session fallback ---------------------------------------------------------------------------
+
+    private static string? _fallbackFor;
+    private static readonly System.Threading.AsyncLocal<string?> TestFallbackLocal = new();
+
+    private static string? FallbackFor
+    {
+        get => TestOverride != null ? TestFallbackLocal.Value : _fallbackFor;
+        set
+        {
+            if (TestOverride != null) TestFallbackLocal.Value = value;
+            else _fallbackFor = value;
+        }
+    }
+
+    private static bool IsFallenBack(Uri u) =>
+        FallbackFor is { } fb && string.Equals(fb, u.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// INSTALLERR1 (user decision 2026-10-14): the active stand-in refused the connection, so this process uses
+    /// thunderstore.io until it ends or <c>DevThunderstoreUrl</c> names another address. The cfg is never edited. True when
+    /// the fallback started now (false: no stand-in active, or already fallen back).
+    /// </summary>
+    public static bool FallBackForSession()
+    {
+        var b = Base;
+        if (b == null) return false;
+        FallbackFor = b.ToString();
+        return true;
+    }
+
+    /// <summary>The configured stand-in is set and allowed, but this session fell back to thunderstore.io from it.</summary>
+    public static bool SessionFallbackActive
+    {
+        get
+        {
+            var test = TestOverride;
+            string? text;
+            try { text = test != null ? test.Value.Url : UrlProbe?.Invoke(); }
+            catch { text = null; }
+            var u = ParseLoopback(text, out _);
+            return u != null && IsFallenBack(u);
+        }
+    }
+
+    /// <summary>Tests: forget the fallback of this test flow.</summary>
+    internal static void ResetFallbackForTests() => FallbackFor = null;
 
     private static void Log(string note)
     {

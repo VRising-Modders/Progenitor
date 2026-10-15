@@ -2222,6 +2222,8 @@ public static partial class ModsMenu
                 BuildStrip();
                 BuildInstallPanes();
                 NoteNavigation();
+                // INSTALLERR1: opening the tab after a failed check retries at once (the ladder runs only while it is shown).
+                _installPane?.RetryNowIfFailing();
                 return;
             case ModsTab.Preferences:
                 RestoreConfigurationMemory();
@@ -3054,9 +3056,11 @@ public static partial class ModsMenu
             // INSTALLRESTART1: the pending-restart bar.
             _installPane.RestartOfferProbe = JoinFlowClient.CurrentRestartOffer;
             _installPane.RestartPress = () => JoinFlowClient.PressRestartButton();
-            // INSTALLERR1: Use thunderstore.io (offered only while the local stand-in refuses the connection).
 #if !PROGENITOR_TESTS
-            _installPane.UseThunderstorePress = UseThunderstoreFromInstallTab;
+            // INSTALLERR1: automatic retries run only while the tab is on screen; a session fallback from a refusing
+            // local test mod list is followed on the next main-thread turn (never inside the result's own call).
+            _installPane.TabShownProbe = () => InstallTabShown;
+            _installPane.SourceChangedHook = () => MainThread.Post(() => FollowIndexSource(force: true, rebuildPanes: true), Owner);
 #endif
             // DL1: a phase change (download started/landed, review, confirm) recomposes the
             // detail for the same selected entry on the next Drain; the sidebar is untouched.
@@ -3844,7 +3848,8 @@ public static partial class ModsMenu
         if (task.IsCanceled)
             return new CatalogLoadResult(false, InstallReasons.FetchCancelled, 0, null);
         string error = task.Exception?.GetBaseException().Message ?? "the package index could not be loaded";
-        return new CatalogLoadResult(false, error, 0, null);
+        var cause = task.Exception == null ? FetchFailureCause.None : RecordingCatalogTransport.Classify(task.Exception, false);
+        return new CatalogLoadResult(false, error, 0, null) { FailureCause = cause };
     }
 
     private static CatalogLoadResult CompletedIndexValue(Task<CatalogLoadResult> completed) =>

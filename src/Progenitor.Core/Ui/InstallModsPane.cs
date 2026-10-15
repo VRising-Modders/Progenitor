@@ -2394,6 +2394,8 @@ internal sealed partial class InstallModsPane
     public void NoteLoadResult(CatalogLoadResult result, string? sourceUrl, bool fromCache)
     {
         _pendingSource = null;
+        // INSTALLERR1: a second report of the same check (each joined caller's continuation) is not another failure.
+        bool outstanding = _indexRefreshing;
         _indexLoadAttempted = true;
         _indexRefreshing = false;
         // A failed refresh over a list already on show keeps that list (the error is logged, not
@@ -2401,7 +2403,7 @@ internal sealed partial class InstallModsPane
         bool keepCached = !result.Ok && _refreshOverCache && _catalog.Search(null).Count > 0;
         _refreshOverCache = false;
         _lastError = result.Ok || keepCached ? null : (result.Error ?? "the package index could not be loaded");
-        NoteIndexState(result, sourceUrl, fromCache, keepCached);
+        NoteIndexState(result, sourceUrl, fromCache, keepCached, outstanding);
     }
 
     // ---- Filters, sort and search ---------------------------------------------------
@@ -8045,7 +8047,7 @@ internal sealed partial class InstallModsPane
             return InstallPaneSurface.Loading;
         // INSTALLERR1: a list from another source than the current one (the dev URL was set or cleared) is never shown;
         // the Mods menu rebuilds the catalog for the new source.
-        if (entries > 0 && ShownFromOtherSource())
+        if (entries > 0 && !FlowActive && ShownFromOtherSource())
             return InstallPaneSurface.Loading;
         // An entry-scoped failure (a refused download, inspection or plan: EntryKey set) belongs
         // to that row's action, never to the index surface.
@@ -9177,8 +9179,8 @@ internal sealed partial class InstallModsPane
                 OnFilterClick(CellCurrent, ToggleCurrentUpdateOnly);
                 OnFilterClick(CellClear, ClearFilters);
             }
-            // INSTALLERR1: the source and age notice (the local stand-in, a cached list, a failed refresh).
-            BuildIndexNotice(panel, indexView);
+            // INSTALLERR1: the small muted source and age line (the local stand-in, the fallback, "Updated 2 hours ago").
+            BuildIndexStatus(panel, indexView);
             // INSTALLRESTART1: the pending-restart bar, above the column header (Simple and Advanced).
             BuildRestartBand(panel);
             // AUTOUPDATE1: the update list (band plus up to four rows), under the restart bar.
@@ -9459,7 +9461,7 @@ internal sealed partial class InstallModsPane
         _pendingBar.Clear();
         _pendingItems.Clear();
         _restartBand = null;
-        _indexNotice = null;
+        _indexStatus = null;
         _indexBlock.Clear();
         _readmeBlockCount = 0;
     }
@@ -11655,11 +11657,17 @@ internal sealed class InstallIndexRefresher
         }
         catch (Exception e)
         {
-            return new CatalogLoadResult(false, e.Message, 0, null);
+            return new CatalogLoadResult(false, e.Message, 0, null) { FailureCause = RecordingCatalogTransport.Classify(e, false) };
         }
 
+        // INSTALLERR1: the cause, the HTTP status and the backoff flag travel with the failure.
         if (fetched == null || !fetched.Ok || fetched.Text == null)
-            return new CatalogLoadResult(false, fetched?.Error ?? InstallReasons.FetchTransport, 0, null);
+            return new CatalogLoadResult(false, fetched?.Error ?? InstallReasons.FetchTransport, 0, null)
+            {
+                FailureCause = fetched?.FailureCause ?? FetchFailureCause.None,
+                StatusCode = fetched?.StatusCode ?? 0,
+                Paused = fetched?.Paused ?? false,
+            };
 
         DateTime now = _clock.UtcNow;
         string stamp = CatalogFetcher.FormatStamp(now);

@@ -213,16 +213,17 @@ public sealed class InstallModsPaneTests : IDisposable
         Assert.Null(panel.ButtonNamed(InstallModsCopy.CloseMods));
         Assert.Equal(0, refreshes);
         Assert.Equal(0, closes);
-        // The surfaces: an error is the game-styled block (INSTALLERR1: title, plain sentence, the raw error only in the
-        // tooltip, a centered popup-button Retry that refreshes the index, the one manual refresh left), never a raw label.
+        // The surfaces: a failure is one quiet centered line and no button (INSTALLERR1: the tab retries by itself, through
+        // the same refresh), never a raw label.
         _catalog.StatusOverride = new InstallProgress(InstallStatusKind.Failed, "boom");
         _pane.NoteLoadResult(new CatalogLoadResult(false, "boom", 0, null));
         var errored = new RecordingInstallPanel();
         _pane.Build(errored, true, false, null, () => refreshes++, () => closes++, DateTime.UtcNow);
         Assert.DoesNotContain(errored.Labels, l => l.Text == "boom");
         Assert.Empty(errored.Buttons);
-        Assert.Equal(3, _pane.IndexBlockRows.Count);
-        Assert.Equal("sent", _pane.PressIndexRetry());
+        Assert.Single(_pane.IndexBlockRows);
+        Assert.Equal(0, refreshes);
+        Assert.Equal("sent", _pane.RetryNowIfFailing());
         Assert.Equal(1, refreshes);
         Assert.Equal(0, closes);
         Assert.Empty(_pane.Rows);

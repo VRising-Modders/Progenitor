@@ -573,6 +573,12 @@ internal sealed class CatalogTextFetchResult
 
     /// <summary>TSTRAFFIC1: the body's <c>Content-Encoding</c>, or null for identity.</summary>
     public string? ContentEncoding { get; init; }
+
+    /// <summary>INSTALLERR1: the transport cause of a failure, from the exception's type (never its localized text).</summary>
+    public FetchFailureCause FailureCause { get; init; }
+
+    /// <summary>INSTALLERR1: the check was skipped by the failure backoff (<see cref="ConditionalIndexFetch"/>).</summary>
+    public bool Paused { get; init; }
 }
 
 /// <summary>Inspection of a downloaded zip. Never loads an assembly.</summary>
@@ -718,6 +724,15 @@ internal readonly struct CatalogLoadResult
     public string? Error { get; }
     public int Count { get; }
     public string? IndexStamp { get; }
+
+    /// <summary>INSTALLERR1: the transport cause of a failed fetch, from the exception's type (never its localized text).</summary>
+    public FetchFailureCause FailureCause { get; init; }
+
+    /// <summary>INSTALLERR1: the last HTTP status of a failed fetch (0: none).</summary>
+    public int StatusCode { get; init; }
+
+    /// <summary>INSTALLERR1: the check was skipped by the failure backoff (<see cref="ConditionalIndexFetch"/>).</summary>
+    public bool Paused { get; init; }
 }
 
 internal readonly struct InspectCallResult

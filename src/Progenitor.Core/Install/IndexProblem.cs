@@ -3,7 +3,7 @@ using System.Globalization;
 
 namespace Progenitor.Install;
 
-/// <summary>INSTALLERR1: why the mod list could not be loaded, in the player's terms.</summary>
+/// <summary>INSTALLERR1: why the mod list could not be loaded, in the player's terms (the log and the tooltip).</summary>
 internal enum IndexProblemCause
 {
     /// <summary>Something went wrong that none of the others names.</summary>
@@ -24,34 +24,30 @@ internal enum IndexProblemCause
     /// <summary>An answer came back but it was not a usable list (damaged, cut short, empty, too large).</summary>
     BadResponse = 5,
 
-    /// <summary>Automatic checks are paused after repeated failures (the backoff).</summary>
+    /// <summary>Automatic checks are paused after repeated failures (the closed tab's backoff).</summary>
     Paused = 6,
 }
 
 /// <summary>
-/// INSTALLERR1: one failed mod-list load as the Install tab shows it: a short title, one plain sentence by cause, and the
-/// technical detail kept for the log and the tooltip (never the headline). Game-free.
+/// INSTALLERR1: one failed mod-list check. The Install tab retries by itself and says little; this carries the cause (from
+/// the transport's classification of the exception, never its localized text) and the sentence for the tooltip and the
+/// log, with the raw error kept as <see cref="Detail"/>. Game-free.
 /// </summary>
 internal sealed class IndexProblem
 {
-    public const string TitleUnreachable = "Can't reach the mod list";
-    public const string TitleUnreadable = "Can't read the mod list";
-    public const string TitlePaused = "Mod list checks are paused";
-
-    /// <summary>The source's name in sentences: the real site, or the local stand-in.</summary>
     public const string RealSourceName = "thunderstore.io";
     public const string DevSourceName = "the local test mod list";
 
-    private IndexProblem(IndexProblemCause cause, string title, string line, string detail)
+    private IndexProblem(IndexProblemCause cause, string line, string detail)
     {
         Cause = cause;
-        Title = title;
         Line = line;
         Detail = detail;
     }
 
     public IndexProblemCause Cause { get; }
-    public string Title { get; }
+
+    /// <summary>The plain sentence for the tooltip.</summary>
     public string Line { get; }
 
     /// <summary>The raw error (exception text, HTTP status): the log and the tooltip only.</summary>
@@ -59,6 +55,9 @@ internal sealed class IndexProblem
 
     /// <summary>The cause word for the log and the bridge readback.</summary>
     public string CauseWord => Word(Cause);
+
+    /// <summary>The tooltip text: the sentence, then the raw error.</summary>
+    public string Tooltip => Detail.Length == 0 ? Line : Line + "\n\n" + Detail;
 
     internal static string Word(IndexProblemCause cause) => cause switch
     {
@@ -72,24 +71,23 @@ internal sealed class IndexProblem
     };
 
     /// <summary>
-    /// The problem for <paramref name="error"/> (the fetch or load result's error text). <paramref name="devSource"/> is
-    /// the local stand-in's <c>host:port</c> while it is the source, else null.
+    /// The problem for a failed check. The cause comes from the transport's classification of the exception
+    /// (<paramref name="transport"/>, <see cref="RecordingCatalogTransport.Classify"/>: socket error codes and exception
+    /// types, so a localized OS message changes nothing), the HTTP status and the backoff flag; only when none of them says
+    /// anything is the error text read, and then only for this pipeline's own sentences (<see cref="InstallReasons"/>).
     /// </summary>
-    public static IndexProblem From(string? error, string? devSource)
+    public static IndexProblem From(FetchFailureCause transport, int status, bool paused, string? error, string? devSource)
     {
         string detail = (error ?? "").Trim();
-        var cause = Classify(detail);
-        return new IndexProblem(cause, TitleFor(cause), LineFor(cause, devSource), detail);
+        var cause = Classify(transport, status, paused, detail);
+        return new IndexProblem(cause, LineFor(cause, devSource), detail);
     }
 
-    public static string TitleFor(IndexProblemCause cause) => cause switch
-    {
-        IndexProblemCause.BadResponse => TitleUnreadable,
-        IndexProblemCause.Paused => TitlePaused,
-        _ => TitleUnreachable,
-    };
+    /// <summary>The problem for a failed <see cref="CatalogLoadResult"/>.</summary>
+    public static IndexProblem From(CatalogLoadResult result, string? devSource) =>
+        From(result.FailureCause, result.StatusCode, result.Paused, result.Error, devSource);
 
-    /// <summary>The plain sentence under the title.</summary>
+    /// <summary>The tooltip's sentence by cause. No buttons are named: the tab keeps trying by itself.</summary>
     public static string LineFor(IndexProblemCause cause, string? devSource)
     {
         bool dev = !string.IsNullOrWhiteSpace(devSource);
@@ -97,84 +95,102 @@ internal sealed class IndexProblem
         switch (cause)
         {
             case IndexProblemCause.Refused when dev:
-                return "Nothing is answering at " + devSource!.Trim() + ". Start the local test mod list, or switch back to thunderstore.io.";
+                return "Nothing is answering at " + devSource!.Trim() + ".";
             case IndexProblemCause.Refused:
             case IndexProblemCause.Offline:
                 return dev
-                    ? "Couldn't connect to " + source + " at " + devSource!.Trim() + ". Check that it is running, then try again."
-                    : "Couldn't connect to thunderstore.io. Check your internet connection, then try again.";
+                    ? "Couldn't connect to " + source + " at " + devSource!.Trim() + "."
+                    : "Couldn't connect to thunderstore.io. Check your internet connection; the list loads by itself once it can.";
             case IndexProblemCause.Timeout:
-                return Capital(source) + " took too long to answer. It may be busy; try again in a moment.";
+                return Capital(source) + " is taking too long to answer.";
             case IndexProblemCause.ServerError:
-                return Capital(source) + " had a problem answering. This is usually brief; try again in a few minutes.";
+                return Capital(source) + " had a problem answering. This is usually brief.";
             case IndexProblemCause.BadResponse:
-                return "The list that came back was damaged or incomplete. Try again; if it keeps happening, the site may be having trouble.";
+                return "The list that came back was damaged or incomplete.";
             case IndexProblemCause.Paused:
-                return "Automatic checks are paused after several failed tries. Retry checks now.";
+                return "Checks are paused for a few minutes after several failed tries.";
             default:
-                return "Something went wrong while loading it. Try again in a moment.";
+                return "Something went wrong while loading the list.";
         }
     }
 
     private static string Capital(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s.Substring(1);
 
-    /// <summary>The cause behind an error text from <see cref="CatalogFetcher"/>, the conditional check or the catalog.</summary>
+    /// <summary>The player's cause for a transport cause, an HTTP status and the backoff flag.</summary>
+    public static IndexProblemCause Classify(FetchFailureCause transport, int status, bool paused, string? error)
+    {
+        if (paused) return IndexProblemCause.Paused;
+        switch (transport)
+        {
+            case FetchFailureCause.Refused: return IndexProblemCause.Refused;
+            case FetchFailureCause.Dns:
+            case FetchFailureCause.Network:
+            case FetchFailureCause.Tls: return IndexProblemCause.Offline;
+            case FetchFailureCause.Timeout:
+            case FetchFailureCause.Stalled: return IndexProblemCause.Timeout;
+            case FetchFailureCause.Http: return IndexProblemCause.ServerError;
+            case FetchFailureCause.Truncated: return IndexProblemCause.BadResponse;
+        }
+
+        if (status >= 400) return IndexProblemCause.ServerError;
+        return Classify(error);
+    }
+
+    /// <summary>
+    /// The cause behind one of this pipeline's own error sentences (<see cref="InstallReasons"/>, the backoff's skip line).
+    /// OS and exception messages are localized and are never matched: they are only detail.
+    /// </summary>
     public static IndexProblemCause Classify(string? error)
     {
         string e = error ?? "";
         if (e.Length == 0) return IndexProblemCause.Unknown;
         if (Has(e, "checks paused after")) return IndexProblemCause.Paused;
-        if (Has(e, "actively refused") || Has(e, "connection refused") || Has(e, "ConnectionRefused"))
-            return IndexProblemCause.Refused;
-        if (e.StartsWith(InstallReasons.FetchTimeout, StringComparison.Ordinal) || Has(e, "timed out") || Has(e, "timeout"))
-            return IndexProblemCause.Timeout;
+        if (e.StartsWith(InstallReasons.FetchTimeout, StringComparison.Ordinal)) return IndexProblemCause.Timeout;
         if (Has(e, InstallReasons.FetchServerError) || Has(e, InstallReasons.FetchRateLimited) || Has(e, InstallReasons.FetchTooManyRetries)
-            || Has(e, InstallReasons.FetchHttpError) || Has(e, "(HTTP "))
+            || Has(e, InstallReasons.FetchHttpError))
             return IndexProblemCause.ServerError;
         if (Has(e, InstallReasons.MalformedJson) || Has(e, InstallReasons.IndexNotArray) || Has(e, InstallReasons.IndexTruncated)
             || Has(e, InstallReasons.IndexEmpty) || Has(e, InstallReasons.IndexTooLarge) || Has(e, InstallReasons.FetchSizeCeiling)
             || Has(e, InstallReasons.FetchTruncated) || Has(e, InstallReasons.FetchRedirectBound) || Has(e, InstallReasons.FetchRedirectInsecure)
-            || Has(e, "HTTP 304 without") || Has(e, "unsupported Content-Encoding") || Has(e, "prematurely"))
+            || Has(e, "HTTP 304 without") || Has(e, "unsupported Content-Encoding"))
             return IndexProblemCause.BadResponse;
-        if (Has(e, "No connection could be made") || Has(e, "No such host") || Has(e, "Name or service not known")
-            || Has(e, "network is unreachable") || Has(e, "unreachable") || e.Contains("SSL") || e.Contains("TLS") || Has(e, "certificate")
-            || Has(e, "Unable to connect") || Has(e, "host is down") || Has(e, InstallReasons.FetchTransport))
-            return IndexProblemCause.Offline;
+        // A transport failure whose exception type said nothing more: no connection, in the player's terms.
+        if (e.StartsWith(InstallReasons.FetchTransport, StringComparison.Ordinal)) return IndexProblemCause.Offline;
         return IndexProblemCause.Unknown;
     }
 
     private static bool Has(string text, string part) => text.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0;
 
-    // ---- The source and age line over a list on show ------------------------------------------------------------
+    // ---- The tab's few words --------------------------------------------------------------------------------------
 
-    /// <summary>The dev source's notice (the stand-in's <c>host:port</c>).</summary>
+    /// <summary>No list yet, a check running or due.</summary>
+    public static string Connecting(bool dev) => dev ? "Connecting to the local test mod list…" : "Connecting to Thunderstore…";
+
+    /// <summary>No list yet, after <see cref="IndexAutoRetry.QuietFailures"/> failed checks in a row.</summary>
+    public static string StillTrying(bool dev) =>
+        dev ? "Can't reach the local test mod list right now; still trying" : "Can't reach Thunderstore right now; still trying";
+
+    /// <summary>The local stand-in is the source.</summary>
     public static string DevNotice(string devSource) => "Using a local test mod list (" + devSource.Trim() + ")";
 
-    /// <summary>A list from the disk cache, not refreshed yet.</summary>
-    public static string LastListFrom(string when) => "Last list from " + when;
-
-    /// <summary>A list kept on show after a failed refresh.</summary>
-    public static string StaleNotice(string when) => "Showing the last list from " + when + "; couldn't refresh";
-
-    /// <summary>The same when the list's time is unknown.</summary>
-    public const string StaleNoticeNoTime = "Showing the last list; couldn't refresh";
+    /// <summary>The local stand-in refused, and this session uses thunderstore.io instead (the cfg is untouched).</summary>
+    public const string DevFallbackNotice = "Local test mod list unavailable; using Thunderstore";
 
     /// <summary>
-    /// When a list was fetched, in the player's words: <c>today at 3:05 PM</c>, <c>yesterday at 9:12 AM</c>,
-    /// <c>Oct 12 at 3:05 PM</c>, or <c>Oct 12, 2025</c> in another year. <paramref name="zone"/> is the player's (local when null).
+    /// The list's age in the player's words: <c>Updated just now</c>, <c>Updated 5 minutes ago</c>, <c>Updated 2 hours ago</c>,
+    /// <c>Updated yesterday</c>, <c>Updated 3 days ago</c>.
     /// </summary>
-    public static string When(DateTime stampUtc, DateTime nowUtc, TimeZoneInfo? zone = null)
+    public static string UpdatedAgo(DateTime stampUtc, DateTime nowUtc)
     {
-        zone ??= TimeZoneInfo.Local;
-        var us = CultureInfo.GetCultureInfo("en-US");
-        DateTime at = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(stampUtc.ToUniversalTime(), DateTimeKind.Utc), zone);
-        DateTime now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(nowUtc.ToUniversalTime(), DateTimeKind.Utc), zone);
-        string time = at.ToString("h:mm tt", us);
-        if (at.Date == now.Date) return "today at " + time;
-        if (at.Date == now.Date.AddDays(-1)) return "yesterday at " + time;
-        if (at.Year == now.Year) return at.ToString("MMM d", us) + " at " + time;
-        return at.ToString("MMM d, yyyy", us);
+        var age = nowUtc.ToUniversalTime() - stampUtc.ToUniversalTime();
+        if (age < TimeSpan.FromMinutes(1)) return "Updated just now";
+        if (age < TimeSpan.FromHours(1)) return "Updated " + Count((int)age.TotalMinutes, "minute") + " ago";
+        if (age < TimeSpan.FromHours(24)) return "Updated " + Count((int)age.TotalHours, "hour") + " ago";
+        if (age < TimeSpan.FromHours(48)) return "Updated yesterday";
+        return "Updated " + Count((int)age.TotalDays, "day") + " ago";
     }
+
+    private static string Count(int n, string unit) => n.ToString(CultureInfo.InvariantCulture) + " " + unit + (n == 1 ? "" : "s");
 
     /// <summary>Parse an index stamp (<see cref="CatalogFetcher.FormatStamp"/>); false when unreadable.</summary>
     public static bool TryParseStamp(string? stamp, out DateTime utc)
@@ -206,54 +222,64 @@ internal sealed class IndexProblem
     }
 }
 
-/// <summary>
-/// INSTALLERR1: the player's Retry, paced. The automatic checks already back off (<see cref="ConditionalIndexFetch"/>); a
-/// Retry goes out during that pause, so repeated presses are spaced: free after the first failure, then 2 s, doubling per
-/// further failure up to 30 s. A success clears it. Game-free.
-/// </summary>
-internal sealed class IndexRetryGate
+/// <summary>INSTALLERR1: what the Mods menu does about the index source on a check.</summary>
+internal enum IndexSourceDecision
 {
-    public static readonly TimeSpan First = TimeSpan.FromSeconds(2);
-    public static readonly TimeSpan Max = TimeSpan.FromSeconds(30);
+    /// <summary>The catalog is built for the current source.</summary>
+    Same = 0,
+
+    /// <summary>The source changed, but an update, a download, a review or a write is running: switch when it ends.</summary>
+    Defer = 1,
+
+    /// <summary>Rebuild the catalog for the new source now.</summary>
+    Rebuild = 2,
+}
+
+/// <summary>INSTALLERR1: the source-change decision (<c>ModsMenu.FollowIndexSource</c>). Game-free.</summary>
+internal static class IndexSourceFollow
+{
+    public static IndexSourceDecision Decide(string? want, string? builtFor, bool updatesBusy, bool installFlowActive)
+    {
+        if (string.Equals((want ?? "").Trim(), (builtFor ?? "").Trim(), StringComparison.OrdinalIgnoreCase)) return IndexSourceDecision.Same;
+        return updatesBusy || installFlowActive ? IndexSourceDecision.Defer : IndexSourceDecision.Rebuild;
+    }
+}
+
+/// <summary>
+/// INSTALLERR1 (user decision 2026-10-14: "retry automatically, don't worry about the buttons"): while the Install tab is
+/// shown, a failed check is retried by itself after 2 s, 5 s, 10 s and 30 s, then every 60 s; a success ends it. The
+/// closed tab keeps the conditional check's own backoff (<see cref="ConditionalIndexFetch"/>). One failure per check.
+/// Game-free.
+/// </summary>
+internal sealed class IndexAutoRetry
+{
+    /// <summary>The delays after the 1st, 2nd, 3rd and 4th failure in a row; every later one waits <see cref="Steady"/>.</summary>
+    public static readonly TimeSpan[] Ladder =
+    {
+        TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30),
+    };
+
+    public static readonly TimeSpan Steady = TimeSpan.FromSeconds(60);
+
+    /// <summary>Failed checks in a row before the tab says it can't reach the list (until then it reads Connecting).</summary>
+    public const int QuietFailures = 3;
 
     private int _failures;
-    private DateTime _notBefore = DateTime.MinValue;
 
     public int Failures => _failures;
 
-    /// <summary>True when a Retry may go out now; else how long to wait.</summary>
-    public bool CanRetry(DateTime nowUtc, out TimeSpan wait)
-    {
-        wait = _notBefore > nowUtc ? _notBefore - nowUtc : TimeSpan.Zero;
-        return wait <= TimeSpan.Zero;
-    }
+    /// <summary>The tab has failed often enough to say so.</summary>
+    public bool Loud => _failures >= QuietFailures;
 
-    public void NoteFailure(DateTime nowUtc)
+    /// <summary>Note one failed check; the delay before the next automatic one.</summary>
+    public TimeSpan NoteFailure()
     {
         _failures++;
-        // The first failure leaves Retry free (the player has not retried yet); each further one spaces it.
-        if (_failures < 2)
-        {
-            _notBefore = DateTime.MinValue;
-            return;
-        }
-
-        int doublings = Math.Min(_failures - 2, 10);
-        long ticks = First.Ticks << doublings;
-        if (ticks <= 0 || ticks > Max.Ticks) ticks = Max.Ticks;
-        _notBefore = nowUtc + TimeSpan.FromTicks(ticks);
+        return DelayAfter(_failures);
     }
 
-    public void NoteSuccess()
-    {
-        _failures = 0;
-        _notBefore = DateTime.MinValue;
-    }
+    public void NoteSuccess() => _failures = 0;
 
-    /// <summary>The line under the Retry button while it waits: <c>Try again in 4 seconds.</c></summary>
-    public static string WaitLine(TimeSpan wait)
-    {
-        int s = Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds));
-        return "Try again in " + s.ToString(CultureInfo.InvariantCulture) + (s == 1 ? " second." : " seconds.");
-    }
+    public static TimeSpan DelayAfter(int failures) =>
+        failures <= 0 ? TimeSpan.Zero : failures <= Ladder.Length ? Ladder[failures - 1] : Steady;
 }

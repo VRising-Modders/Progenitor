@@ -562,7 +562,7 @@ public static partial class ModsMenu
     /// (a dev-only setting change, not a timer). Nothing changes while an update or install runs; the next tick retries.
     /// INSTALLERR1 (live 2026-10-14: a URL cleared in a world kept the stand-in's list and checked the old http base): it
     /// runs in a world too, every Install-tab build forces it (<paramref name="force"/>), and a shown Install tab is redrawn
-    /// for the new source (<paramref name="rebuildPanes"/>).
+    /// for the new source (<paramref name="rebuildPanes"/>). It also watches for the network coming back (<see cref="WatchNetworkForRetry"/>).
     /// </summary>
     internal static void FollowIndexSource() => FollowIndexSource(force: false, rebuildPanes: true);
 
@@ -573,12 +573,26 @@ public static partial class ModsMenu
         double now = System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
         if (!force && now < _sourceNextCheck) return;
         _sourceNextCheck = now + 2.0;
+        try { WatchNetworkForRetry(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Install: network watch threw: " + e.Message); }
         if (_catalog is not InstallCatalogService) return;
         string want;
         try { want = CatalogFetchOptions.Default.IndexUrl; }
         catch { return; }
-        if (string.Equals(want, _catalogIndexUrl, StringComparison.OrdinalIgnoreCase)) return;
-        if (ClientUpdates.Busy) return;
+        // INSTALLERR1: never mid-update, mid-download or mid-confirm: the switch waits until the flow ends (next tick).
+        var decision = IndexSourceFollow.Decide(want, _catalogIndexUrl, ClientUpdates.Busy, _installPane?.FlowActive == true);
+        if (decision == IndexSourceDecision.Same) return;
+        if (decision == IndexSourceDecision.Defer)
+        {
+            if (!string.Equals(_sourceDeferredFor, want, StringComparison.Ordinal))
+            {
+                _sourceDeferredFor = want;
+                Plugin.Logger?.LogInfo("Install: the index source changed to " + want + "; switching once the running install or update ends.");
+            }
+            return;
+        }
+
+        _sourceDeferredFor = "";
         string was = _catalogIndexUrl;
         Plugin.Logger?.LogInfo("Install: the index source changed (" + was + " -> " + want + "); the catalog is rebuilt for it.");
         _followingSource = true;
@@ -590,12 +604,11 @@ public static partial class ModsMenu
             {
                 EnsureBindings();
                 EnsureCatalog();
-                ServeCachedIndexNow();
-                if (ThunderstoreEnabled) QueueInstallIndexLoad();
+                ServeCachedIndexOffThreadThenCheck();
             }
             catch (Exception e) { Plugin.Logger?.LogWarning("Install: rebuilding the catalog for the new index source failed: " + e.Message); }
             RecheckUpdates("index-source");
-            if (rebuildPanes && IsOpen && _tabState != null && _tabState.Selected == ModsTab.InstallMods)
+            if (rebuildPanes && InstallTabShown)
             {
                 try { BuildInstallPanes(); }
                 catch (Exception e) { Plugin.Logger?.LogWarning("Install: redrawing the Install tab for the new index source failed: " + e.Message); }
@@ -604,20 +617,71 @@ public static partial class ModsMenu
         finally { _followingSource = false; }
     }
 
+    private static string _sourceDeferredFor = "";
+
+    private static bool InstallTabShown => IsOpen && _tabState != null && _tabState.Selected == ModsTab.InstallMods;
+
     /// <summary>
-    /// INSTALLERR1: the Install tab's <b>Use thunderstore.io</b> (offered only while the local stand-in is the source and
-    /// refused the connection): clears <c>[Install] DevThunderstoreUrl</c> through the shared cfg, then follows the new
-    /// source at once (the catalog is rebuilt for thunderstore.io and the tab redrawn). The setting stays cfg only.
+    /// INSTALLERR1: after a source change, the new source's cached index (several MB of JSON) is read and parsed off the
+    /// main thread, as the refresh's own body is; then, on the main thread, it is handed to the pane, the one check is
+    /// queued (after the cache, so an older copy never lands over a fresher answer) and a shown Install tab is redrawn.
+    /// The pane reads as loading meanwhile.
     /// </summary>
-    private static void UseThunderstoreFromInstallTab()
+    private static void ServeCachedIndexOffThreadThenCheck()
     {
-        if (!ThunderstoreMirror.ClearConfiguredUrl())
+        var refresher = _indexRefresher;
+        if (refresher == null || !ThunderstoreEnabled) return;
+        var pane = EnsureInstallPane();
+        pane.NoteLoadStarted();
+        System.Threading.Tasks.Task.Run(() =>
         {
-            Plugin.Logger?.LogWarning("Install: Use thunderstore.io could not clear [Install] DevThunderstoreUrl.");
+            if (refresher.CacheServed) return (CatalogLoadResult?)null;
+            return refresher.TryServeCache(out var cached) ? cached : (CatalogLoadResult?)null;
+        }).ContinueWith(t =>
+        {
+            CatalogLoadResult? served = t.Status == System.Threading.Tasks.TaskStatus.RanToCompletion ? t.Result : null;
+            Progenitor.Dev.MainThread.Post(() =>
+            {
+                if (!ReferenceEquals(refresher, _indexRefresher)) return; // another source change replaced it
+                if (served is { } cached && ReferenceEquals(pane, _installPane))
+                {
+                    pane.NoteLoadResult(cached, refresher.SourceUrl, fromCache: true);
+                    NoteIndexContent("index-cache-served");
+                }
+
+                if (ThunderstoreEnabled) QueueInstallIndexLoad();
+                if (InstallTabShown && ReferenceEquals(pane, _installPane))
+                {
+                    try { BuildInstallPanes(); }
+                    catch (Exception e) { Plugin.Logger?.LogWarning("Install: redrawing the Install tab after the cache was served failed: " + e.Message); }
+                }
+            }, Owner);
+        }, System.Threading.Tasks.TaskScheduler.Default);
+    }
+
+    private static bool? _networkWasUp;
+
+    /// <summary>
+    /// INSTALLERR1: the network came back (no usable interface, then one): retry a failed check at once instead of waiting
+    /// for the ladder. Read every two seconds, only while the Install tab is shown with a failed check; no event handler is
+    /// attached, so nothing is left behind on unload.
+    /// </summary>
+    private static void WatchNetworkForRetry()
+    {
+        var pane = _installPane;
+        if (pane == null || pane.IndexProblemShown == null || !InstallTabShown)
+        {
+            _networkWasUp = null;
             return;
         }
 
-        FollowIndexSource(force: true, rebuildPanes: true);
+        bool up;
+        try { up = System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(); }
+        catch { return; }
+        bool cameBack = _networkWasUp == false && up;
+        _networkWasUp = up;
+        if (!cameBack) return;
+        Plugin.Logger?.LogInfo("Install: the network is back; retrying the mod list now (" + pane.RetryNowIfFailing() + ").");
     }
 
     /// <summary>The index URL the catalog was built for (bridge readback).</summary>
