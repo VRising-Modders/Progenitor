@@ -120,6 +120,9 @@ internal sealed class ControlsDemo
         // Text.
         panel.Heading("Text");
         panel.Input("Text input", "hello").OnChanged(s => Report("Input", Quote(s)));
+        var search = panel.SearchInput("Search", "");
+        search.OnChanged(s => Report("Search", Quote(s)));
+        search.OnSubmitted(s => Report("Search submitted", Quote(s)));
         panel.TextArea("Text area", "line one\nline two", 3).OnChanged(s => Report("TextArea", Quote(s)));
 
         // Choices.

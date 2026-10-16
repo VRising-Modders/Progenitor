@@ -868,3 +868,11 @@ dump server
 size   InventoryBufferStride                       = 24   : InventoryBuffer    # NetworkedEntity ItemEntity (0x0), ItemType, Amount, MaxAmountOverride (0x14)
 offset InventoryBufferItemTypeOffset               = 0xC  : InventoryBuffer.ItemType
 offset InventoryBufferAmountOffset                 = 0x10 : InventoryBuffer.Amount
+
+# Fixed observation anchors: CommonClientData's render origin (client metadata).
+dump client
+offset ObservationLocalUserOffset = 0x0 : CommonClientData.LocalUser
+offset ObservationControlledEntityOffset = 0x14 : CommonClientData.LocalUserData.ControlledEntity
+offset ObservationControlledPositionOffset = 0x48 : CommonClientData.LocalUserData.ControlledPosition
+dump server
+offset ObservationProxyPositionOffset = 0x98 : User.ProxySyncPosition

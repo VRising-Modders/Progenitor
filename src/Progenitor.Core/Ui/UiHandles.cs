@@ -384,6 +384,10 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
         AddChild(UiSlotKind.Text, () => _panel == null ? null : OnGrid(() => _runtime.AddInput(_panel, text ?? "", initial ?? "")),
             (w, id) => new UiInputHandle(PluginId, RootName, Owner, w, w != null, id));
 
+    public IUiInput SearchInput(string text, string initial = "") =>
+        AddChild(UiSlotKind.Text, () => _panel == null ? null : OnGrid(() => _runtime.AddSearchInput(_panel, text ?? "", initial ?? "")),
+            (w, id) => new UiInputHandle(PluginId, RootName, Owner, w, w != null, id));
+
     public string ContentAlignment
     {
         get => _contentAlignment;
@@ -1400,6 +1404,34 @@ internal sealed class UiSliderHandle : UiHandle, IUiSlider
 
 internal sealed class UiInputHandle : UiHandle, IUiInput
 {
+    private ushort _submitId;
+    public void Focus(bool selectAll = true)
+    {
+        if (!IsDisposed && Runtime is { Alive: true } r) Ui.CurrentRuntime().FocusInput(r, selectAll);
+    }
+    public IDisposable OnSubmitted(Action<string> handler)
+    {
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        if (IsDisposed || Runtime is not { Alive: true } r) return Noop.Instance;
+        if (_submitId == 0)
+        {
+            _submitId = UiSlotTable.Alloc(Owner);
+            if (!Ui.CurrentRuntime().WireInputSubmit(r, _submitId))
+            { UiSlotTable.Release(_submitId); _submitId = 0; return Noop.Instance; }
+        }
+        var id = _submitId;
+        UiSlotTable.BindText(id, handler);
+        return new ActionDisposable(() => UiSlotTable.BindText(id, null));
+    }
+    protected override void OnDispose()
+    {
+        if (_submitId != 0)
+        {
+            try { Ui.CurrentRuntime().Unwire(_submitId); }
+            finally { UiSlotTable.Release(_submitId); _submitId = 0; }
+        }
+        base.OnDispose();
+    }
     internal UiInputHandle(
         string pluginId, string rootName, object? owner, IRuntimeWidget? runtime, bool enabled, ushort id,
         bool multiline = false, int lines = 1)

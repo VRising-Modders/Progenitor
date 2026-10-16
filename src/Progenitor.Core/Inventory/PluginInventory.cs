@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using Progenitor.Plugins;
+using Progenitor.Ecs;
+using ProjectM;
 using Unity.Entities;
 
 namespace Progenitor.Inventory;
@@ -57,6 +59,41 @@ public sealed class PluginInventory
     }
 
     // ---- reads ---------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Identify servant coffins and servant equipment owners by native component presence, never
+    /// furniture names. False means classification failed; inspect reason and do not assume ordinary storage.
+    /// This does not follow a coffin's ConnectedServant or filter inventory slots.
+    /// </summary>
+    public bool TryIsServantContainer(Entity owner, out bool isServantContainer, out string reason)
+    {
+        Require(nameof(TryIsServantContainer));
+        isServantContainer = false;
+        try
+        {
+            var em = Worlds.Server!.EntityManager;
+            if (owner == Entity.Null || !em.Exists(owner))
+            {
+                reason = "inventory owner does not exist";
+                return false;
+            }
+            isServantContainer = owner.Has<ServantCoffinstation>(em) || owner.Has<ServantEquipment>(em);
+            reason = "";
+            return true;
+        }
+        catch (Exception e)
+        {
+            reason = "servant container classification failed: " + e.Message;
+            return false;
+        }
+    }
+
+    /// <summary>The native RestrictedInventory rule, copied read-only. Failure is explicit and never means unrestricted.</summary>
+    public InventoryAcceptance DescribeAcceptance(InventoryRef container)
+    {
+        Require(nameof(DescribeAcceptance));
+        return InventoryRuntime.Engine.DescribeAcceptance(container);
+    }
 
     /// <summary>A copy of every slot. <see cref="InventorySnapshot.Ok"/> false (with a reason) when unreadable.</summary>
     public InventorySnapshot Read(InventoryRef container)

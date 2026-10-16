@@ -40,6 +40,12 @@ public sealed class PluginStations
     /// <summary>The station's recipes in its own order; empty for anything that is not a recipe station.</summary>
     public IReadOnlyList<StationRecipe> Recipes(Entity station) => Stations.Recipes(World(), station);
 
+    /// <summary>Copied queue and fail-closed ingredient protection. See <see cref="Stations.Demand"/>.</summary>
+    public StationDemand Demand(Entity station) => Stations.Demand(World(), station);
+
+    /// <summary>Native AutoRouteItems ownership, read-only; unknown reads suspend competing automation.</summary>
+    public StationRedistributionOwnership RedistributionOwnership(Entity station) => Stations.RedistributionOwnership(World(), station);
+
     /// <summary>
     /// Switch a refinement recipe on or off through the game's per-recipe switch (replicated to every
     /// client's station window). <c>Ok</c> false with a <c>Reason</c> on a workstation, a non-station

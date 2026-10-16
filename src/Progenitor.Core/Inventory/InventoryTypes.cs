@@ -277,6 +277,29 @@ public sealed class InventorySnapshot
     public int Count(int item) => InventoryMath.Count(Slots, item);
 }
 
+/// <summary>A read-only copy of the native inventory admission rule, independent of free space.</summary>
+public sealed class InventoryAcceptance
+{
+    /// <summary>Make a description. A failed read must carry a nonempty reason.</summary>
+    public InventoryAcceptance(InventoryRestriction restriction, string reason = "")
+    {
+        Restriction = restriction;
+        Reason = reason ?? "";
+    }
+
+    /// <summary>False when the inventory could not be read; never treat that as unrestricted.</summary>
+    public bool Ok => Reason.Length == 0;
+    /// <summary>The game's item GUID and category mask. Meaningful only when <see cref="Ok"/>.</summary>
+    public InventoryRestriction Restriction { get; }
+    /// <summary>True only for a successfully read, unrestricted inventory.</summary>
+    public bool IsOpen => Ok && Restriction.IsOpen;
+    /// <summary>Why admission is unknown; empty on success.</summary>
+    public string Reason { get; }
+    /// <summary>Test native restrictions using an item's actual ItemData category flags, not UI categories. Does not test capacity.</summary>
+    public bool Allows(int item, long itemCategory) =>
+        Ok && item != 0 && InventoryMath.IsAllowed(Restriction, item, itemCategory);
+}
+
 /// <summary>How an inventory write ended.</summary>
 public enum InventoryOutcome
 {

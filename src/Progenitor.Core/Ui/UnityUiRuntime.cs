@@ -1150,7 +1150,31 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// was correct code protecting a case that could not occur.
     /// </para>
     /// </summary>
-    public IRuntimeWidget? AddInput(IRuntimePanel panel, string text, string initial)
+    IRuntimeWidget? IUiRuntime.AddInput(IRuntimePanel panel, string text, string initial)
+        => AddInput(panel, text, initial, false);
+
+    public IRuntimeWidget? AddSearchInput(IRuntimePanel panel, string text, string initial)
+    {
+        return AddInput(panel, text, initial, true);
+    }
+
+    public bool WireInputSubmit(IRuntimeWidget input, ushort slot)
+    {
+        if (input is not UnityWidget widget || widget.GameObject == null) return false;
+        var field = FindIn<TMP_InputField>(widget.GameObject);
+        return field != null && BootstrapLink.TryWireUi(slot, (byte)UiSlotKind.Text, field.onSubmit);
+    }
+
+    public void FocusInput(IRuntimeWidget input, bool selectAll)
+    {
+        if (input is not UnityWidget widget || widget.GameObject == null || !widget.GameObject.activeInHierarchy) return;
+        var field = FindIn<TMP_InputField>(widget.GameObject);
+        if (field == null) return;
+        FocusOwnedField(field);
+        if (selectAll) { field.selectionAnchorPosition = 0; field.selectionFocusPosition = (field.text ?? "").Length; }
+    }
+
+    public IRuntimeWidget? AddInput(IRuntimePanel panel, string text, string initial, bool liveSearch = false)
     {
         if (panel is not UnityPanel host || !host.Alive) return null;
         try
@@ -1197,7 +1221,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // TryWire onto a different TMP event recycles that same UnityAction and does not
             // replace the native listener, so the live event has to be the one bound here.
             object textEvent = field.onEndEdit;
-            if (host.UsesLiveText)
+            if (host.UsesLiveText || liveSearch)
                 textEvent = LiveTextEvent(field);
             ArmTextField(go, field);
             return new UnityWidget(host, go, null, null, null, textEvent, null, null);
@@ -2224,6 +2248,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// already the right size, and <see cref="UnityPanel.Reposition"/> moves it without touching a
     /// single row.
     /// </summary>
+    public void TopPanel(IRuntimePanel panel, bool top)
+    {
+        if (panel is UnityPanel host) { host.TopAligned = top; host.Reposition(); }
+    }
+
     public void PlacePanel(IRuntimePanel panel, PanelSpot spot)
     {
         if (panel is not UnityPanel host) return;
@@ -11493,9 +11522,18 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         /// <summary>KIT1 gen 1: this pane draws its own name, so it asked for the title band to go.</summary>
         private bool _hideTitle;
+        private float _embeddedWidth, _embeddedHeight;
+        internal void Embed(float width, float height)
+        {
+            bool changed = Math.Abs(width - _embeddedWidth) > .5f || Math.Abs(height - _embeddedHeight) > .5f;
+            _embeddedWidth = width; _embeddedHeight = height; SelfPlaced = true;
+            MakeGameWindow();
+            HidePaneTitle();
+            if (changed) Relayout();
+        }
 
         private float TitleBand =>
-            _dialog ? DialogLayout.FrameTopPad
+            _embeddedWidth > 0 ? 8f : _dialog ? DialogLayout.FrameTopPad
             // P7b: a game window that draws its own title row (the tip card's dialog rows) keeps only the dialog's top pad.
             : _gameWindow && _hideTitle && !_menuPane ? DialogLayout.FrameTopPad
             : _menuPane && (MenuPaneModes.Titleless(_mode) || _hideTitle) ? 0f : PanelLayout.HeaderHeight;
@@ -11709,7 +11747,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         /// <summary>The content's row width, whatever row is being placed (MENUKIT2: the description column's ruler).</summary>
         internal float FullRowWidth =>
-            _menuPane ? _menuGeometry.RowWidth : _dialog ? DialogLayout.ContentRowWidth(FrameWidth) : RowWidth;
+            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : RowWidth;
 
         /// <summary>
         /// MENUKIT2 round D: while a row below the first settings row is placed beside the description
@@ -11719,7 +11757,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         public RowColumns Columns(bool hasControl) =>
             _grid
                 ? ModSettingsRowGrid.For(GridWidth).Columns(hasControl)
-                : _menuPane
+                : _menuPane || _embeddedWidth > 0
                     ? MenuPanelLayout.Columns(ContentRowWidth, hasControl)
                     : PanelLayout.Columns(hasControl);
 
@@ -12481,15 +12519,15 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             float w = float.IsNaN(width) || width <= PanelWidth ? 0f : width;
             if (Math.Abs(w - _dialogFrameWidth) < 0.5f) return;
             _dialogFrameWidth = w;
-            if (_dialog && !Released) Relayout();
+            if ((_dialog || _gameWindow) && !Released) Relayout();
         }
 
         /// <summary>
         /// WIDEDIALOG1: this panel's frame width: a menu pane's geometry, a wide dialog's asked width capped to the
         /// canvas (<see cref="DialogLayout.FrameWidthFor"/>), else the constant <see cref="PanelWidth"/>.
         /// </summary>
-        internal float FrameWidth => _menuPane ? _menuGeometry.Width
-            : _dialog && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
+        internal float FrameWidth => _embeddedWidth > 0 ? _embeddedWidth : _menuPane ? _menuGeometry.Width
+            : (_dialog || _gameWindow) && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
             : PanelWidth;
 
         /// <summary>
@@ -13751,6 +13789,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// already has, which is the size its own layout pass gave it.
         /// </para>
         /// </summary>
+        internal bool TopAligned;
+
         public void Reposition()
         {
             if (Released) return;
@@ -13783,8 +13823,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
                     : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
-                if (_dialog) at = PanelOffset.Centre;
+                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) at = PanelOffset.Centre;
                 rt.anchoredPosition = new Vector2(at.X, at.Y);
+                if (TopAligned) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
 
                 Plugin.Logger?.LogDiag(
                     "Ui: panel '" + Text + "' placed rank=" + Spot.Rank + "/" + Spot.Count
@@ -13876,7 +13917,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         : 0f;
                     refitTop = MenuPanelLayout.TopChromeHeight(topHeights) + headerChrome;
                     refitBottom = bottomChrome;
-                    refitForce = !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized);
+                    refitForce = _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized);
                     FitChromeInsets(refitTop, refitBottom, force: refitForce);
                     _footerInset = footerBand;
                     EnsureHeaderBand(headerChrome, MenuPanelLayout.TopChromeHeight(topHeights));
@@ -13915,9 +13956,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 RulerReading available = MeasureHeight();
                 // DIALOGS1: a dialog is exactly as tall as its content, its top pad and its footer -
                 // no title band and no 200 px floor (the empty band above the live dialog's title).
-                float panelHeight = _menuPane ? _menuGeometry.Height
+                float panelHeight = _embeddedHeight > 0 ? _embeddedHeight : _menuPane ? _menuGeometry.Height
                     : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
+                if (_gameWindow && _dialogFrameWidth > PanelWidth && !_menuPane && _embeddedHeight <= 0)
+                    panelHeight = Math.Min(panelHeight, available.Value * .70f);
 
                 _laidOutWith = available;
                 var settle = RulerSettle.StateOf(available, _settling, _settleExhausted);
@@ -14013,9 +14056,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // column beside the workspace's panes the moment they joined the shown set,
                     // which is the "flickers in from the left" CONSENT2 fixed for the consent
                     // prompt by hand.
-                    if (_dialog) placedAt = PanelOffset.Centre;
+                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) placedAt = PanelOffset.Centre;
                     if (SelfPlaced) placedAt = new PanelOffset(panelRt.anchoredPosition.x, panelRt.anchoredPosition.y);
                     else panelRt.anchoredPosition = new Vector2(placedAt.X, placedAt.Y);
+                    if (TopAligned) panelRt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - panelHeight) / 2 - 24));
                 }
 
                 if (!_strip) PlaceBottomRows(panelHeight, footerBand);
@@ -14327,6 +14371,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // released panel anyway, but the list would hold the reference until the next frame,
             // and a Core swap can happen between those two moments.
             DropSettle(this);
+            if (_embeddedWidth > 0 && GameObject != null) TryDestroy(GameObject, BootstrapLink.MayDestroyUiImmediate());
             if (OverlayWidget != null)
                 OverlayWidget.Release();
             else if (Overlay != null)

@@ -137,8 +137,8 @@ internal enum HotkeyMaskTarget
 ///
 /// <para>
 /// <b>What it is deliberately not.</b> It is not a global key swallow — only the eight menu-open
-/// actions and the four in-menu tab-cycling actions below are taken, and only while a field is
-/// focused. Movement, abilities, the close key and every other action are untouched, and with no
+/// actions, Interact, and the four in-menu tab-cycling actions below are taken, and only while a field is
+/// focused. Movement, abilities and the Escape close key are untouched, and with no
 /// field focused this contributes nothing at all. It also does not change
 /// <c>UnityKeyInputSource.TextFieldFocused</c>, which gates Progenitor's own keybinds and answers
 /// a different question. <c>Keybinds</c> reads <see cref="HotkeysBlocked"/> for one narrower rule
@@ -210,6 +210,9 @@ internal static class MenuHotkeyGuard
     /// </summary>
     private static readonly int[] MenuOpenActions =
     {
+        // ContainerMenuMapper.HandleInput closes on keyboard/mouse Interact in InputsUp.
+        // Block both action lists through the existing early focus guard, before HUD menus read it.
+        1,    // Interact (F by default; action-based so remapped keys are covered)
         18,   // VBloodMenu
         20,   // CharacterMenu
         21,   // BuildMenu

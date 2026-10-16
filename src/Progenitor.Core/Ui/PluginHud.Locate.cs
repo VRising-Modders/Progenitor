@@ -46,6 +46,15 @@ public sealed partial class PluginHud
         return UnityUiRuntime.HudLocate(_ctx.Owner, UiLocateTarget.Point(position.x, position.y, position.z), label ?? "", seconds);
     }
 
+    /// <summary>Locate with optional map/minimap markers and automatic removal within arrivalDistance meters (3D).</summary>
+    public IUiLocatePing Locate(float3 position, string label, double seconds, float arrivalDistance, bool showOnMaps)
+    {
+        if (!float.IsFinite(arrivalDistance) || arrivalDistance < 0) throw new ArgumentOutOfRangeException(nameof(arrivalDistance));
+        var ping = Locate(position, label, seconds);
+        if (ping is UiLocatePingHandle handle) { handle.ArrivalDistance = arrivalDistance; handle.ShowOnMaps = showOnMaps; }
+        return ping;
+    }
+
     static partial void DropPings(object owner)
     {
         try { UnityUiRuntime.HudDropPings(owner); }

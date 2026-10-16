@@ -10,6 +10,10 @@ An updated client Core requests a fresh handshake after its consumer plugins rel
 
 Progenitor performs the hot swap. Build/deployment tools deliver the DLL; the running framework owns unloading, cleanup, collection checks and loading. Do not write a separate assembly loader or restart a process as the normal mod-update path.
 
+Core swaps keep plugins running when neither their image nor any runtime provider references Core. Core-dependent plugins retire first. Bootstrap tracks retiring contexts with resurrection-tracking weak references: disappearance from `AssemblyLoadContext.All` means unloading started, not that collection finished. If a dependent context remains alive, the swap is refused before Core unload and plugins are restored. This avoids overlapping dependent-context retirement on older embedded .NET runtimes. Updating Bootstrap itself still requires a process restart.
+
+Consumer-defined generic helpers instantiated with Core types can create a reverse runtime dependency on the consumer. Use concrete helper signatures or call the framework's generic API directly. Dispose UI and callbacks normally; disposal cannot remove an allocator dependency already created. See the [connected reload findings](../knowledge/notes/connected-core-plugin-retirement.md).
+
 ### AI callers: use Progenitor's tools
 
 When the Progenitor MCP connection is available, call these tools with structured arguments. The names and arguments below are source-checked in [server.mjs](../tools/mcp/server.mjs); this documentation session did not call them against the game.
@@ -44,7 +48,7 @@ Do not put reloadable mods in the chainloader's `plugins` folder. Do not deploy 
 
 Plugin reloads and in-process Core swaps on server and client have historical live evidence in the internal research notes. Those are dated observations, not guarantees for every current build or plugin. Read later results when a research file begins with its original design.
 
-This documentation update performs offline checks only. The new minimal example is separately labeled compile-verified/awaiting live acceptance in its README and validation record. No new live reload success is claimed.
+Connected client/server reloads with a consumer UI have [current scoped live evidence](../knowledge/notes/connected-core-plugin-retirement.md). The minimal example remains separately labeled compile-verified/awaiting live acceptance in its README and validation record. These results do not qualify every plugin or registration.
 
 ## Build and reload one existing Sample
 

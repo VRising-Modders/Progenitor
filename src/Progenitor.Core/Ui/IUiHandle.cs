@@ -65,6 +65,8 @@ public interface IUiPanel : IUiHandle
 
     /// <summary>Clone a <c>TMP_InputField</c> / <c>SettingsEntry_TextInput</c>.</summary>
     IUiInput Input(string text, string initial = "");
+    /// <summary>A search field: OnChanged fires while typing; OnSubmitted fires on Enter.</summary>
+    IUiInput SearchInput(string text, string initial = "") => Input(text, initial);
 
     /// <summary>
     /// A finite choice: the caption on the left, a selector (previous arrow, current value, next
@@ -347,6 +349,10 @@ public interface IUiInput : IUiHandle
     string Value { get; set; }
 
     IDisposable OnChanged(Action<string> handler);
+    /// <summary>Enter in this field; blurring alone does not submit.</summary>
+    IDisposable OnSubmitted(Action<string> handler) => OnChanged(handler);
+    /// <summary>Focus a visible field, optionally selecting its existing text.</summary>
+    void Focus(bool selectAll = true) { }
 }
 
 /// <summary>
@@ -494,6 +500,16 @@ public static class UiLook
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: game window chrome: " + e.Message); }
         }
 
+        return panel;
+    }
+
+    /// <summary>Game-styled window with a requested width, capped to the available canvas.
+    /// Call before adding controls. Wider windows are centered.</summary>
+    public static IUiPanel GameWindow(this IUiPanel panel, float width)
+    {
+        panel.GameWindow();
+        if (panel is UiPanelHandle host && !host.IsDisposed && host.Runtime is IRuntimePanel runtimePanel)
+            Ui.CurrentRuntime().SetDialogWidth(runtimePanel, width);
         return panel;
     }
 

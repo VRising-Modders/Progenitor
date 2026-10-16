@@ -39,6 +39,7 @@ internal sealed partial class UnityUiRuntime
         internal RectTransform Arrow = null!;
         internal TextMeshProUGUI? Label;
         internal string LastLabel = "";
+        internal RectTransform? MapMarker, MiniMarker;
     }
 
     /// <summary>The live pings (the bridge and tests read it).</summary>
@@ -144,9 +145,12 @@ internal sealed partial class UnityUiRuntime
             return;
         }
 
+        if (ping.ArrivalDistance > 0 && Vector3.Distance(from, target) <= ping.ArrivalDistance)
+        { LocateSet.End(ping, "arrived"); return; }
         var view = ping.PresenterState as PingView ?? BuildPingView(ping);
         if (view == null) return;
 
+        if (ping.ShowOnMaps) DrawMapPings(view, target);
         double age = now - ping.StartedAt;
         var above = target + new Vector3(0f, UiLocateLook.HeightOffset, 0f);
         Vector3 sp = cam.WorldToScreenPoint(above);
@@ -312,7 +316,12 @@ internal sealed partial class UnityUiRuntime
 
     private static void OnPingEnded(UiLocatePingHandle ping)
     {
-        if (ping.PresenterState is PingView view && Alive(view.Root)) TryDestroy(view.Root, immediate: false);
+        if (ping.PresenterState is PingView view)
+        {
+            if (Alive(view.Root)) TryDestroy(view.Root, immediate: false);
+            if (view.MapMarker != null) TryDestroy(view.MapMarker.gameObject, immediate: false);
+            if (view.MiniMarker != null) TryDestroy(view.MiniMarker.gameObject, immediate: false);
+        }
         ping.PresenterState = null;
     }
 

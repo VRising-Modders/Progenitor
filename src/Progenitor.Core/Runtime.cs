@@ -17,6 +17,23 @@ namespace Progenitor;
 public static class Runtime
 {
     private static object? _host;
+    private static bool _configReleasedForCollection;
+
+    /// <summary>Release parked config entries after plugin unload, before Bootstrap waits for collection.</summary>
+    public static void PreparePluginCollection()
+    {
+        if (Plugin.IsServerProcess) return;
+        _configReleasedForCollection = true;
+        Networking.ConfigSync.RestoreLocal(finalAttempt: true);
+    }
+
+    /// <summary>Reacquire server settings if a refused swap restored plugins into this Core.</summary>
+    public static void CompletePluginCollection()
+    {
+        if (!_configReleasedForCollection) return;
+        _configReleasedForCollection = false;
+        Networking.Handshake.RequestRefreshAfterCoreSwap();
+    }
 
     /// <summary>
     /// Install Core modules and attach to Bootstrap. Safe to call once; a second call is a

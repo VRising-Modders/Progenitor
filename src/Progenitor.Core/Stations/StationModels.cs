@@ -3,6 +3,62 @@ using System.Collections.Generic;
 
 namespace Progenitor.Stations;
 
+/// <summary>Read-only native redistribution ownership. Unknown reads must suspend competing automation.</summary>
+public sealed class StationRedistributionOwnership
+{
+    /// <summary>Copy a native ownership read, with an explanation when unknown.</summary>
+    public StationRedistributionOwnership(bool known, bool autoRouteItems, string reason = "")
+    {
+        Known = known;
+        AutoRouteItems = autoRouteItems;
+        Reason = reason ?? "";
+    }
+    /// <summary>Whether the native flag (or absence of its component) was successfully read.</summary>
+    public bool Known { get; }
+    /// <summary>InventoryRouteParent.AutoRouteItems. Meaningful only when Known.</summary>
+    public bool AutoRouteItems { get; }
+    /// <summary>Why ownership is unknown; empty on a successful read.</summary>
+    public string Reason { get; }
+    /// <summary>Retain native ownership and suspend competing transfers when enabled or unknown.</summary>
+    public bool SuspendAutomation => !Known || AutoRouteItems;
+}
+
+/// <summary>One copied workstation queue row. The head is index zero; each row is one craft.</summary>
+public sealed class StationQueuedCraft
+{
+    /// <summary>Recipe prefab GUID.</summary>
+    public int RecipeGuid { get; init; }
+    /// <summary>Stored progress in seconds, including progress retained while paused.</summary>
+    public float ProgressSeconds { get; init; }
+    /// <summary>The game's CraftingStatus value; does not imply that ingredients remain in input.</summary>
+    public int RawStatus { get; init; }
+}
+
+/// <summary>Copied server queue and ingredient protection policy. Unknown demand must never release input items.</summary>
+public sealed class StationDemand
+{
+    /// <summary>Construct a defensive copy of a station demand read.</summary>
+    public StationDemand(StationKind kind, IEnumerable<StationQueuedCraft> queue, bool protectAllInputs, string reason = "")
+    {
+        Kind = kind;
+        Queue = new List<StationQueuedCraft>(queue).AsReadOnly();
+        Reason = reason ?? "";
+        ProtectAllInputs = protectAllInputs || Reason.Length != 0;
+    }
+    /// <summary>Station machinery.</summary>
+    public StationKind Kind { get; }
+    /// <summary>Workstation rows in processing order, including the current craft.</summary>
+    public IReadOnlyList<StationQueuedCraft> Queue { get; }
+    /// <summary>True when exact inventory reservations are unavailable. Leave all main-inventory items alone.</summary>
+    public bool ProtectAllInputs { get; }
+    /// <summary>True when the reservation amount is known. Currently only idle stations have known, empty demand.</summary>
+    public bool IsKnown => !ProtectAllInputs && Reason.Length == 0;
+    /// <summary>Exact reserved input amounts, usable only when IsKnown. Never substitutes base recipe costs.</summary>
+    public IReadOnlyList<StationItem> ReservedInputs => Array.Empty<StationItem>();
+    /// <summary>Why inputs must be protected or the read failed; empty for known demand.</summary>
+    public string Reason { get; }
+}
+
 /// <summary>Which recipe machinery a castle station runs. Game-free.</summary>
 public enum StationKind
 {

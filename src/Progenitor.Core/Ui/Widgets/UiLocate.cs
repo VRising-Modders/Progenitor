@@ -244,6 +244,8 @@ internal readonly struct UiLocateTarget
 /// <summary>One ping: the handle a plugin holds and the set's record.</summary>
 internal sealed class UiLocatePingHandle : IUiLocatePing
 {
+    internal float ArrivalDistance;
+    internal bool ShowOnMaps;
     private readonly UiLocateSet? _set;
     private bool _active;
 

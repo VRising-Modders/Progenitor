@@ -22,7 +22,7 @@ namespace Progenitor.Cameras;
 /// a player is never left in the free camera. The last plugin to call a shot or
 /// <see cref="SetMode"/> owns the camera. See <c>docs/modules.md</c>, "Camera".</para>
 /// </summary>
-public sealed class PluginCamera
+public sealed partial class PluginCamera
 {
     private readonly PluginContext _ctx;
     private readonly CameraDirector? _director;
@@ -30,11 +30,12 @@ public sealed class PluginCamera
     internal PluginCamera(PluginContext ctx)
     {
         _ctx = ctx ?? throw new ArgumentNullException(nameof(ctx));
+        ctx.Track(new ActionDisposable(() => { foreach (var observation in _observations.Values) observation.Dispose(); _observations.Clear(); }));
         if (!ctx.IsClient) return;
 
         _director = new CameraDirector(UnityCameraRuntime.Instance, ctx.Name);
         var director = _director;
-        ctx.Track(new ActionDisposable(director.Release));
+        ctx.Track(new ActionDisposable(() => { _preview?.End(false); director.Release(); }));
     }
 
     /// <summary>

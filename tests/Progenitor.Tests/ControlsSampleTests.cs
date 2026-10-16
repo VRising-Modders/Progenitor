@@ -322,6 +322,7 @@ public sealed class ControlsSampleTests
         }
         public IUiSlider Slider(string text, float min, float max, float initial) => Rec("Slider/4", Named(new FakeSlider(), text));
         public IUiInput Input(string text, string initial = "") => Rec("Input/2", Named(new FakeText(), text));
+        public IUiInput SearchInput(string text, string initial = "") => Rec("SearchInput/2", Named(new FakeText(), text));
         public IUiDropdown Dropdown(string text, IReadOnlyList<string> values, string value, IReadOnlyList<string>? labels = null) =>
             Rec("Dropdown/4", Named(new FakeChoice(values), text));
         public IUiDropdown Dropdown(string text, IReadOnlyList<string> values, string value, IReadOnlyList<string>? labels, IReadOnlyList<string>? descriptions) =>
