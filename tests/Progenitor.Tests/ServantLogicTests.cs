@@ -167,14 +167,199 @@ public class ServantLogicTests
         Assert.Empty(ServantLogic.Finished(new[] { r1 }, new[] { r1 }));
     }
 
+    // A survivor as the return publish reads it once the game is done: alive, carrying DestroyData
+    // like every live unit, off the hunt, buff gone, coffin alive.
+    private static ReturnFacts Home(int coffinState = 7, long injuryEnd = 0) => new()
+    {
+        Exists = true,
+        HasDestroyData = true,
+        CoffinReadable = true,
+        CoffinState = coffinState,
+        InjuryEndTicks = injuryEnd,
+    };
+
     [Theory]
-    [InlineData(false, false, 7, 0L, ServantOutcome.Dead)]
-    [InlineData(true, true, 7, 0L, ServantOutcome.Dead)]
-    [InlineData(true, false, 8, 0L, ServantOutcome.Dead)]
-    [InlineData(true, false, 7, Now + 1, ServantOutcome.Injured)]
-    [InlineData(true, false, 7, Now, ServantOutcome.Returned)]
-    public void Outcome_of_a_returned_servant(bool exists, bool dead, int coffinState, long injuryEnd, ServantOutcome expected) =>
-        Assert.Equal(expected, ServantLogic.OutcomeOf(exists, dead, coffinState, injuryEnd, Now));
+    [InlineData(false, false, false, 7, 0L, ServantOutcome.Dead)]      // entity gone
+    [InlineData(true, true, false, 7, 0L, ServantOutcome.Dead)]        // Dead component
+    [InlineData(true, false, true, 7, 0L, ServantOutcome.Dead)]        // DestroyTag
+    [InlineData(true, false, false, 8, 0L, ServantOutcome.Dead)]       // coffin revivable
+    [InlineData(true, false, false, 9, 0L, ServantOutcome.Dead)]       // coffin reviving
+    [InlineData(true, false, false, 7, Now + 1, ServantOutcome.Injured)]
+    [InlineData(true, false, false, 7, Now, ServantOutcome.Returned)]
+    public void Outcome_of_a_returned_servant(bool exists, bool dead, bool destroyTag, int coffinState, long injuryEnd, ServantOutcome expected)
+    {
+        var f = Home(coffinState, injuryEnd);
+        f.Exists = exists;
+        f.HasDead = dead;
+        f.HasDestroyTag = destroyTag;
+        Assert.Equal(expected, ServantLogic.OutcomeOf(f, Now));
+    }
+
+    [Fact]
+    public void A_live_servant_home_with_items_is_returned_although_it_carries_DestroyData()
+    {
+        // The live report (2026-10-16): both servants alive at home with loot, published as Dead
+        // because DestroyData (on every live unit) was read as a destroy.
+        var f = Home();
+        Assert.True(f.HasDestroyData);
+        Assert.False(ServantLogic.Destroying(hasDead: false, hasDestroyTag: false, hasDestroyData: true));
+        Assert.Equal(ServantOutcome.Returned, ServantLogic.OutcomeOf(f, Now));
+        Assert.True(ServantLogic.ReturnSettled(f));
+    }
+
+    [Fact]
+    public void Without_a_readable_coffin_a_live_servant_is_not_dead()
+    {
+        var f = new ReturnFacts { Exists = true, HasDestroyData = true };
+        Assert.Equal(ServantOutcome.Returned, ServantLogic.OutcomeOf(f, Now));
+    }
+
+    [Fact]
+    public void A_destroyed_entity_whose_coffin_names_another_living_servant_is_not_dead()
+    {
+        var gone = Home();
+        gone.Exists = false;
+        gone.CoffinServantAlive = true;
+        Assert.Equal(ServantOutcome.Returned, ServantLogic.OutcomeOf(gone, Now));
+        gone.InjuryEndTicks = Now + 10;
+        Assert.Equal(ServantOutcome.Injured, ServantLogic.OutcomeOf(gone, Now));
+        gone.CoffinState = 8;
+        Assert.Equal(ServantOutcome.Dead, ServantLogic.OutcomeOf(gone, Now));
+
+        var truly = Home();
+        truly.Exists = false;
+        Assert.Equal(ServantOutcome.Dead, ServantLogic.OutcomeOf(truly, Now));
+    }
+
+    [Fact]
+    public void A_return_waits_until_the_game_has_applied_it()
+    {
+        var onHunt = Home();
+        onHunt.OnMission = true;
+        onHunt.MissionBuffOn = true;
+        Assert.False(ServantLogic.ReturnSettled(onHunt));
+
+        var buffOnly = Home();
+        buffOnly.MissionBuffOn = true;
+        Assert.False(ServantLogic.ReturnSettled(buffOnly));
+
+        var flagOnly = Home();
+        flagOnly.OnMission = true;
+        Assert.False(ServantLogic.ReturnSettled(flagOnly));
+
+        Assert.True(ServantLogic.ReturnSettled(Home()));
+        Assert.True(ServantLogic.ReturnSettled(new ReturnFacts { Exists = false }));
+        Assert.True(ServantLogic.ReturnSettled(new ReturnFacts { Exists = true, HasDestroyTag = true, OnMission = true, MissionBuffOn = true }));
+        // DestroyData alone settles nothing: a survivor still on its hunt waits.
+        Assert.False(ServantLogic.ReturnSettled(new ReturnFacts { Exists = true, HasDestroyData = true, OnMission = true }));
+    }
+
+    [Fact]
+    public void A_returned_servant_carries_the_same_inventory_reference_as_the_throne_list()
+    {
+        const int epoch = 7;
+        var loot = new[] { new ServantLoot(5, 272), new ServantLoot(6, 29) };
+        var back = ServantLogic.Returned(A, A, new CastleId(90, 1), "Gideon", Home(), Now, epoch, loot, stacks: 2);
+        var listed = ServantLogic.ServantInventory(A, epoch); // what ctx.Servants.List gives as ServantInfo.Inventory
+        Assert.Equal(ServantOutcome.Returned, back.Outcome);
+        Assert.Equal(A, back.Servant);
+        Assert.Equal(listed, back.Inventory);
+        Assert.False(back.Inventory.IsNone);
+        Assert.Equal((A.Index, A.Version, 0, epoch), (back.Inventory.OwnerIndex, back.Inventory.OwnerVersion, back.Inventory.Instance, back.Inventory.Epoch));
+        Assert.False(back.Inventory.IsStaleIn(epoch));
+        Assert.True(back.LootIsHaul);
+        Assert.Equal(loot, back.Loot);
+
+        var injured = ServantLogic.Returned(A, A, CastleId.None, "", Home(injuryEnd: Now + 1), Now, epoch, loot, stacks: 2);
+        Assert.Equal(ServantOutcome.Injured, injured.Outcome);
+        Assert.Equal(listed, injured.Inventory);
+    }
+
+    [Fact]
+    public void A_relinked_servant_reports_the_living_servant_and_its_inventory()
+    {
+        var gone = Home();
+        gone.Exists = false;
+        gone.CoffinServantAlive = true;
+        var back = ServantLogic.Returned(A, B, new CastleId(90, 1), "", gone, Now, 3, Array.Empty<ServantLoot>(), stacks: 0);
+        Assert.Equal(ServantOutcome.Returned, back.Outcome);
+        Assert.Equal(B, back.Servant);
+        Assert.Equal(ServantLogic.ServantInventory(B, 3), back.Inventory);
+    }
+
+    [Fact]
+    public void A_dead_servant_has_no_inventory_and_an_unreadable_one_is_no_haul()
+    {
+        var dead = Home(coffinState: 8);
+        var back = ServantLogic.Returned(A, A, CastleId.None, "", dead, Now, 3, new[] { new ServantLoot(5, 1) }, stacks: 1);
+        Assert.Equal(ServantOutcome.Dead, back.Outcome);
+        Assert.True(back.Inventory.IsNone);
+        Assert.Empty(back.Loot);
+        Assert.False(back.LootIsHaul);
+
+        var unreadable = ServantLogic.Returned(A, A, CastleId.None, "", Home(), Now, 3, Array.Empty<ServantLoot>(), stacks: -1);
+        Assert.False(unreadable.LootIsHaul);
+        Assert.Equal(ServantLogic.ServantInventory(A, 3), unreadable.Inventory);
+
+        var again = Home();
+        again.OutAgain = true;
+        var out2 = ServantLogic.Returned(A, A, CastleId.None, "", again, Now, 3, new[] { new ServantLoot(5, 1) }, stacks: 1);
+        Assert.Empty(out2.Loot);
+        Assert.False(out2.LootIsHaul);
+        Assert.Equal(ServantLogic.ServantInventory(A, 3), out2.Inventory);
+    }
+
+    [Fact]
+    public void A_servant_sent_out_again_settles_its_earlier_return()
+    {
+        var again = Home();
+        again.OnMission = true;
+        again.MissionBuffOn = true;
+        again.OutAgain = true;
+        Assert.True(ServantLogic.ReturnSettled(again));
+        Assert.Equal(ServantOutcome.Returned, ServantLogic.OutcomeOf(again, Now));
+    }
+
+    [Fact]
+    public void A_resend_on_the_same_mission_is_its_own_row()
+    {
+        // The first hunt returned and the same servants went again on the same mission: the new row
+        // has its own start, so the old row's return does not match it and vice versa.
+        var first = new MissionRow { MissionGuid = Mission, StartTicks = Now, LengthSeconds = 7200, Servant1 = A, Servant2 = B, Count = 2 };
+        var resent = new MissionRow { MissionGuid = Mission, StartTicks = Now + 600 * ServantLogic.TicksPerSecond, LengthSeconds = 7200, Servant1 = A, Servant2 = B, Count = 2 };
+        Assert.NotEqual(first.Key, resent.Key);
+        Assert.Empty(ServantLogic.Finished(new[] { resent }, new[] { resent }));
+        var gone = ServantLogic.Finished(new[] { resent }, Array.Empty<MissionRow>());
+        Assert.Same(resent, Assert.Single(gone));
+
+        // Each decoded row carries its own servants.
+        var bytes = new byte[0x40 * 2];
+        ServantLogic.EncodeRow(first, bytes.AsSpan(0, 0x40));
+        ServantLogic.EncodeRow(new MissionRow { MissionGuid = OtherMission, StartTicks = Now + 1, LengthSeconds = 60, Servant1 = C, Count = 1 }, bytes.AsSpan(0x40, 0x40));
+        var r0 = ServantLogic.DecodeRow(bytes.AsSpan(0, 0x40));
+        var r1 = ServantLogic.DecodeRow(bytes.AsSpan(0x40, 0x40));
+        Assert.Equal(new[] { A, B }, r0.Servants());
+        Assert.Equal(new[] { C }, r1.Servants());
+    }
+
+    [Fact]
+    public void Two_finishes_in_quick_succession_are_two_returns()
+    {
+        // Finish (start backdated), return, resend, finish again: each update's snapshot finds only
+        // the row that was due then.
+        long backdated1 = Now - 7201 * ServantLogic.TicksPerSecond;
+        var first = new MissionRow { MissionGuid = Mission, StartTicks = backdated1, LengthSeconds = 7200, Servant1 = A, Servant2 = B, Count = 2 };
+        Assert.True(ServantLogic.IsDue(first, Now, 0, false));
+        Assert.Same(first, Assert.Single(ServantLogic.Finished(new[] { first }, Array.Empty<MissionRow>())));
+
+        long later = Now + 30 * ServantLogic.TicksPerSecond;
+        var resent = new MissionRow { MissionGuid = Mission, StartTicks = later, LengthSeconds = 7200, Servant1 = A, Servant2 = B, Count = 2 };
+        Assert.False(ServantLogic.IsDue(resent, later, 2 * ServantLogic.TicksPerSecond, false));
+        var backdated2 = new MissionRow { MissionGuid = Mission, StartTicks = later + 1 - 7201 * ServantLogic.TicksPerSecond, LengthSeconds = 7200, Servant1 = A, Servant2 = B, Count = 2 };
+        Assert.True(ServantLogic.IsDue(backdated2, later + 1, 0, false));
+        Assert.NotEqual(first.Key, backdated2.Key);
+        Assert.Same(backdated2, Assert.Single(ServantLogic.Finished(new[] { backdated2 }, Array.Empty<MissionRow>())));
+    }
 
     [Fact]
     public void Loot_adds_up_per_item_in_first_seen_order()
