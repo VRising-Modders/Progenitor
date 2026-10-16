@@ -2438,6 +2438,8 @@ public static partial class ModsMenu
     {
         // The strip is chrome, not a prompt: the workspace's one version footer is on its main pane.
         panel.Footer = "";
+        // WINDOWS1: never a floating panel in the window row.
+        if (panel is UiPanelHandle pane) pane.Flows = false;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { Ui.CurrentRuntime().ConfigureMenuStrip(runtimePanel); }

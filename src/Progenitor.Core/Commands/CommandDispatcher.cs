@@ -315,6 +315,9 @@ public static class CommandDispatcher
         }
 
         var winner = bound[0];
+        // WINDOWS1: the handler's own replies carry its plugin's name (ModReplyContext); the framework's lines above do not.
+        if (winner.Args.Length > 0 && winner.Args[0] is ICommandContext plain)
+            winner.Args[0] = ModReplyContext.For(plain, bundle.Owner);
         try
         {
             winner.Overload.Method.Invoke(winner.Overload.Instance, winner.Args);

@@ -84,6 +84,12 @@ internal static class GameSettingsLook
     internal const string PopupButtonPressed = "SmallerButton_Pressed";
     internal const string PopupButtonDisabled = "SmallerButton_Disabled";
 
+    /// <summary>
+    /// WINDOWS1: the ornament the game draws either side of a window title. Named in the popup prefabs' images by probe D1
+    /// (not used by the confirm itself); its size is read from the sprite, never assumed.
+    /// </summary>
+    internal const string WindowTitleOrnament = "Window_TitleSideOrnament";
+
     internal static readonly (float L, float B, float R, float T) PopupFrameBorder = (32f, 32f, 32f, 32f);
     internal static readonly (float L, float B, float R, float T) PopupButtonBorder = (40f, 0f, 70f, 0f);
 

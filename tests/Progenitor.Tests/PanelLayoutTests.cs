@@ -567,7 +567,7 @@ public class PanelLayoutTests
     public void A_panel_with_no_viewport_still_parents_its_rows_somewhere()
     {
         string runtime = UiSource("UnityUiRuntime.cs");
-        SourcePin.AssertUncommented(runtime, "_nextPin == MenuRowPin.Content ? (_content ?? GameObject) : GameObject");
+        SourcePin.AssertUncommented(runtime, "_nextPin == MenuRowPin.Content ? (_content ?? GameObject)");
         SourcePin.AssertUncommented(runtime, "TryAdd<RectMask2D>(go)");
         SourcePin.AssertUncommented(runtime, "image.raycastTarget = true");
         SourcePin.AssertUncommented(runtime, "FitChromeInsets(");

@@ -921,6 +921,13 @@ internal sealed class UiDialog : IDisposable
     internal static void CloseCurrent() => _current?.Close();
 
     /// <summary>
+    /// A dialog's owner is <paramref name="owner"/>, or a standard window that belongs to it (WINDOWS1 review: the Rename
+    /// prompt of an ownerless <see cref="Ui.Window"/> is owned by the window, which matches its plugin's unload sweep).
+    /// </summary>
+    internal static bool OwnedBy(object? dialogOwner, object owner) =>
+        ReferenceEquals(dialogOwner, owner) || (dialogOwner is UiWindowHandle window && window.BelongsTo(owner));
+
+    /// <summary>
     /// Drop every dialog of <paramref name="owner"/> — on screen and queued — without running a
     /// callback. Every unload reason reaches this. Returns how many were dropped.
     /// </summary>
@@ -934,14 +941,14 @@ internal sealed class UiDialog : IDisposable
             for (int i = Queue.Count - 1; i >= 0; i--)
             {
                 var queued = Queue[i];
-                if (!ReferenceEquals(queued.Owner, owner)) continue;
+                if (!OwnedBy(queued.Owner, owner)) continue;
                 Queue.RemoveAt(i);
                 queued.Release();
                 dropped++;
             }
 
             var open = _current;
-            if (open != null && ReferenceEquals(open.Owner, owner))
+            if (open != null && OwnedBy(open.Owner, owner))
             {
                 open.Release();
                 dropped++;

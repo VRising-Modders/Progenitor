@@ -450,6 +450,31 @@ public class UiTests : IDisposable
         public void SetPanelFooter(IRuntimePanel panel, string text) =>
             FooterAsks.Add((panel.Text, text ?? ""));
 
+        /// <summary>WINDOWS1: the standard-window frames asked for, by panel title.</summary>
+        public List<(string Title, UiWindowPreset Preset)> WindowAsks { get; } = new();
+
+        public void WindowChrome(IRuntimePanel panel, UiWindowSpec spec) => WindowAsks.Add((panel.Text, spec.Preset));
+
+        /// <summary>WINDOWS1: every workspace-dim change asked for, in order.</summary>
+        public List<bool> ShadeAsks { get; } = new();
+
+        public void WindowShade(bool on) => ShadeAsks.Add(on);
+
+        /// <summary>WINDOWS1: the panel titles the pointer is over (<see cref="IUiRuntime.PanelUnderPointer"/>).</summary>
+        public HashSet<string> Hovered { get; } = new();
+
+        public bool PanelUnderPointer(IRuntimePanel panel) => Hovered.Contains(panel.Text);
+
+        /// <summary>WINDOWS1: the game-window frames asked for, by panel title.</summary>
+        public List<string> GameWindowAsks { get; } = new();
+
+        public void GameWindowChrome(IRuntimePanel panel) => GameWindowAsks.Add(panel.Text);
+
+        /// <summary>WINDOWS1: the row pins asked for, in order, by panel title.</summary>
+        public List<(string Title, MenuRowPin Pin)> PinAsks { get; } = new();
+
+        public void PinMenuRows(IRuntimePanel panel, MenuRowPin pin) => PinAsks.Add((panel.Text, pin));
+
         /// <summary>The footer last asked for the panel titled <paramref name="title"/>, or null when none was.</summary>
         public string? FooterFor(string title)
         {

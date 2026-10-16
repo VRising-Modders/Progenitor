@@ -60,6 +60,10 @@ public static partial class Ui
     /// <summary>As above with the pane's <see cref="MenuPaneMode"/> (LIST3: the Install tab is <see cref="MenuPaneMode.FullWidth"/>).</summary>
     internal static void ConfigureMenuPanel(IUiPanel panel, bool sidebar, MenuPaneMode mode)
     {
+        // WINDOWS1 live fix: a workspace pane is never a floating panel in the window row, even after it is parked (a
+        // parked list is no longer ModsMenu's live pane but stays shown, and was counted in the row: the Header window
+        // jumped while the search was typed).
+        if (panel is UiPanelHandle pane) pane.Flows = false;
         // The Mods workspace carries one footer — the component versions, on its main pane — and
         // the sidebar none, whatever the Core-owned default put there when the pane was created.
         // KEYS3 live 2026-09-29: the Keybinds tab's description column (Aside) is a second pane too;
@@ -136,6 +140,7 @@ public static partial class Ui
     /// <summary>Keep a transient panel centered at the top of the screen, inside a 24-unit margin.</summary>
     public static void TopPanel(IUiPanel panel, bool top = true)
     {
+        if (panel is UiPanelHandle tagged) tagged.Flows = !top;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         CurrentRuntime().TopPanel(runtimePanel, top);
@@ -143,6 +148,7 @@ public static partial class Ui
 
     internal static void SelfPlacePanel(IUiPanel panel, bool selfPlaced = true)
     {
+        if (panel is UiPanelHandle tagged) tagged.Flows = !selfPlaced;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().SelfPlacePanel(runtimePanel, selfPlaced); }
@@ -156,6 +162,7 @@ public static partial class Ui
     /// </summary>
     internal static void DialogChrome(IUiPanel panel)
     {
+        if (panel is UiPanelHandle tagged) tagged.Flows = false;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().DialogChrome(runtimePanel); }
@@ -165,6 +172,8 @@ public static partial class Ui
     /// <summary>WIDEDIALOG1: ask the runtime for a wider dialog frame (<see cref="DialogLayout.FrameWidthFor"/> caps it).</summary>
     internal static void SetDialogWidth(IUiPanel panel, float frameWidth)
     {
+        // A dialog-wide frame is centered by the runtime, never flowed.
+        if (panel is UiPanelHandle tagged && frameWidth > UnityUiRuntimeMetrics.PanelWidth) tagged.Flows = false;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().SetDialogWidth(runtimePanel, frameWidth); }
@@ -239,6 +248,37 @@ public static partial class Ui
             Plugin.Logger?.LogDiag("Ui: panel '" + title + "' under " + root);
 
         return WithDefaultFooter(Track(new UiPanelHandle(id, root, owner, runtime, panel, enabled)));
+    }
+
+    /// <summary>
+    /// WINDOWS1: a standard window (<see cref="UiWindowPreset"/>): the frame art, title, version stamp, input mode and
+    /// Escape behavior fixed by the preset (docs/ui.md "Standard windows"). The stamp names the plugin from
+    /// <paramref name="owner"/>'s <c>[BepInPlugin]</c> name and version; inside a plugin prefer <c>ctx.Windows.Create</c>,
+    /// which also closes the window on unload. Disabled but valid on the server, like <see cref="Panel"/>. Throws for an
+    /// empty title, more than six tabs or toolbar buttons, or a toolbar caption longer than two short words.
+    /// </summary>
+    public static IUiWindow Window(
+        UiWindowPreset preset, string title, object? owner = null, string? pluginId = null, UiWindowOptions? options = null)
+    {
+        var (name, version) = ModMessagePrefix.PluginIdentity(owner);
+        return new UiWindowHandle(preset, title, owner, pluginId, name, version, options);
+    }
+
+    /// <summary>WINDOWS1: as <see cref="Window"/> with the stamp's mod name and version given (<c>ctx.Windows</c>).</summary>
+    internal static IUiWindow Window(
+        UiWindowPreset preset, string title, object? owner, string? pluginId, string modName, string modVersion,
+        UiWindowOptions? options) =>
+        new UiWindowHandle(preset, title, owner, pluginId, modName, modVersion, options);
+
+    /// <summary>WINDOWS1: the preset's frame on a game window (<see cref="IUiRuntime.WindowChrome"/>).</summary>
+    internal static void WindowChrome(IUiPanel panel, UiWindowSpec spec)
+    {
+        // The re-flow lays the standard windows out side by side (UiWindowLayout.Spots / Place) from their asked-for widths.
+        if (panel is UiPanelHandle owned) owned.WindowWidth = spec.FrameWidth;
+        if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
+            || handle.Runtime is not IRuntimePanel runtimePanel) return;
+        try { CurrentRuntime().WindowChrome(runtimePanel, spec); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window chrome: " + e.Message); }
     }
 
     /// <summary>
@@ -538,6 +578,9 @@ public static partial class Ui
         // second line behind the tracked ctx.Dialogs registration.
         try { UiDialog.DropOwner(owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll dialogs threw: " + e.Message); }
+        // WINDOWS1 review: after its dialogs (the match reads them), the OnRename handlers it left on ownerless windows.
+        try { UiWindowHandle.DropHandlersOf(owner); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll window handlers threw: " + e.Message); }
         // P7b help: the owner's marked terms, marker change handlers and tip cards (every plugin, ctx.Hud or not).
         try { UiTerms.DropOwner(owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll terms threw: " + e.Message); }
@@ -941,11 +984,28 @@ public static partial class Ui
                     shown.Add(panel);
             }
 
+            // WINDOWS1: the workspace is dimmed behind a window that takes the input while shown (UiWindowLayout.ShadeWorkspace).
+            bool workspaceOpen = false;
+            var modes = new List<UiCaptureMode>();
+            foreach (var p in shown)
+            {
+                if (ModsMenu.IsWorkspacePanel(p)) workspaceOpen = true;
+                else if (p.WindowWidth > 0f) modes.Add(p.CaptureMode);
+            }
+
+            bool shade = UiWindowLayout.ShadeWorkspace(workspaceOpen, modes);
+            if (shade != _windowShade)
+            {
+                _windowShade = shade;
+                try { CurrentRuntime().WindowShade(shade); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window shade threw: " + e.Message); }
+            }
+
             if (shown.Count == 0) return;
             shown.Sort(static (a, b) => a.PlacementSlot.CompareTo(b.PlacementSlot));
 
-            for (int i = 0; i < shown.Count; i++)
-                shown[i].PlaceAt(i, shown.Count);
+            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel, p => p.Flows, p => p.ShownSequence))
+                panel.PlaceAt(spot);
         }
         catch (Exception e)
         {
@@ -954,6 +1014,12 @@ public static partial class Ui
             Plugin.Logger?.LogWarning("Ui: panel re-flow threw: " + e.Message);
         }
     }
+
+    /// <summary>WINDOWS1: whether the runtime was last asked to dim the workspace behind the windows.</summary>
+    private static bool _windowShade;
+
+    /// <summary>WINDOWS1 review: a shown window's input mode changed; the dim (and nothing else) may change with it.</summary>
+    internal static void ReflowAfterModeChange() => ReflowPanels();
 
     internal static void NotifyShown(int delta)
     {
@@ -983,6 +1049,7 @@ public static partial class Ui
         {
             Live.Clear();
             _swallowBack = false;
+            _windowShade = false;
             _runtime = null;
             _installed = false;
             _skipped = false;
@@ -1107,7 +1174,9 @@ public static partial class Ui
     }
 
     /// <summary>
-    /// Escape (27) and the Bootstrap <c>BackAction</c> (17) hide every shown panel — including
+    /// Escape (27) and the Bootstrap <c>BackAction</c> (17): after a key capture, a dialog's answer, a screen's Back and a
+    /// pending Mods search clear, the topmost standard window or input-taking floating panel closes, one per press
+    /// (WINDOWS1, <see cref="TryCloseTopWindow"/>); with none of those, the sweep hides every shown panel — including
     /// panels this sweep does not own and whose module it does not know. Other modules find out
     /// that a panel left the screen by reading the handle (<see cref="OwnedPanel"/>). The Mods
     /// workspace is the exception: <see cref="ModsMenu.NotifyHiddenByEscape"/> logs
@@ -1183,6 +1252,27 @@ public static partial class Ui
             UiHandle[] snapshot;
             lock (Gate)
                 snapshot = Live.ToArray();
+
+            // WINDOWS1 live fix: one press closes one standard window, the topmost (shown last); the next press goes on to
+            // the next window and only then to the sweep below (the Mods workspace). The sweep hid every window and the
+            // workspace on one press.
+            // HOSTS1 order (capture > dialog > search > close): a pending Mods search clear (or leave) takes this press
+            // before a window closes; one Escape does exactly one thing.
+            if (HasShownWindow(snapshot) && ModsMenu.TryConsumeEscapeHide())
+            {
+                _swallowBack = keyCode == 27;
+                Plugin.Logger?.LogDiag("Ui: key " + keyCode + " cleared the Mods search; the windows stay.");
+                return;
+            }
+
+            if (TryCloseTopWindow(snapshot))
+            {
+                _swallowBack = keyCode == 27;
+                WorkspaceInputPolicy.NotePressTaken(EscapeStage.CloseWindow);
+                Plugin.Logger?.LogDiag("Ui: key " + keyCode + " closed the topmost window; nothing else hidden.");
+                return;
+            }
+
             for (int i = 0; i < snapshot.Length; i++)
             {
                 if (snapshot[i] is UiPanelHandle panel && panel.State == UiHandleState.Shown)
@@ -1213,6 +1303,57 @@ public static partial class Ui
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: Mods escape hook threw: " + e.Message); }
             Plugin.Logger?.LogDiag("Ui: key " + keyCode + " hid " + hidden + " panel(s); owners are not told.");
         }
+    }
+
+    /// <summary>
+    /// The panels Escape closes one at a time, topmost first (by show order, which is their draw order): the shown
+    /// standard windows, and the floating panels that take the input (<see cref="UiCaptureMode.WhileShown"/>, or
+    /// <see cref="UiCaptureMode.WhenHovered"/> while the pointer is over them). WINDOWS1 live round 4: a floating panel and
+    /// the Mods workspace closed together on one press. A passive panel (<see cref="UiCaptureMode.Never"/>, or not under
+    /// the pointer) is left to the sweep, so a tracker on screen never takes an Escape and a panel that shows itself again
+    /// cannot keep Escape from reaching the workspace. Workspace panes, dialogs, self-placed, top-pinned and mounted panels
+    /// are never among them; when none is shown, the press goes on to the sweep (the workspace and the rest).
+    /// </summary>
+    private static List<UiPanelHandle> ShownWindows(UiHandle[] snapshot)
+    {
+        var shown = new List<UiPanelHandle>();
+        foreach (var h in snapshot)
+        {
+            if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown || ModsMenu.IsWorkspacePanel(p)) continue;
+            if (p.WindowWidth > 0f || (p.Flows && TakesInput(p))) shown.Add(p);
+        }
+
+        return shown;
+    }
+
+    /// <summary>A floating panel that takes the input now: shown WhileShown, or WhenHovered with the pointer over it.</summary>
+    private static bool TakesInput(UiPanelHandle p)
+    {
+        var mode = p.ShownCaptureMode;
+        if (mode == UiCaptureMode.WhileShown) return true;
+        if (mode != UiCaptureMode.WhenHovered || p.Runtime is not IRuntimePanel runtime) return false;
+        try { return CurrentRuntime().PanelUnderPointer(runtime); }
+        catch { return false; }
+    }
+
+    private static bool HasShownWindow(UiHandle[] snapshot) => ShownWindows(snapshot).Count > 0;
+
+    /// <summary>
+    /// WINDOWS1: hide the topmost shown standard window (<see cref="UiWindowLayout.EscapeTarget"/>). False when none is
+    /// shown, or when the window is still shown after the hide (the press then falls through to the sweep).
+    /// </summary>
+    private static bool TryCloseTopWindow(UiHandle[] snapshot)
+    {
+        var top = UiWindowLayout.EscapeTarget(ShownWindows(snapshot), _ => true, p => p.ShownSequence);
+        if (top == null) return false;
+        try { top.ForceHide(); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: Escape window hide threw: " + e.Message);
+            return false;
+        }
+
+        return top.State != UiHandleState.Shown;
     }
 
     private static readonly List<Func<bool>> EscapeHandlers = new();

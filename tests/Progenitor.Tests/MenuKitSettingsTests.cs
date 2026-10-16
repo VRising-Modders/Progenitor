@@ -167,9 +167,9 @@ public sealed class MenuKitSettingsTests : IDisposable
             mixed[i] = new GameArtPart(GameArtSource.OwnedCopy, SettingsArtLadder.DonorOptionsPanel, SettingsArtLadder.SpriteName((SettingsArtPart)i), null, "owned");
         mixed[(int)SettingsArtPart.ScrollbarTrack] = GameArtPart.Kit;
         var art = new SettingsArt(mixed, new[] { "Checkbox_Normal" });
-        Assert.Equal("kit=1 owned-copy=24 kit:scrollbarTrack", art.Summary());
-        Assert.Equal(24, art.BorrowedCount);
-        Assert.Equal("Settings kit: art kit=1 owned-copy=24 kit:scrollbarTrack", SettingsArtLadder.Use(art));
+        Assert.Equal("kit=1 owned-copy=25 kit:scrollbarTrack", art.Summary());
+        Assert.Equal(25, art.BorrowedCount);
+        Assert.Equal("Settings kit: art kit=1 owned-copy=25 kit:scrollbarTrack", SettingsArtLadder.Use(art));
         Assert.Null(SettingsArtLadder.Use(art));
         Assert.Equal(new List<string> { "Checkbox_Normal" }, SettingsArtLadder.Describe()["donorSprites"]);
     }

@@ -32,7 +32,7 @@ internal sealed partial class UnityUiRuntime
         _ => null,
     };
 
-    public ScreenRect WidgetRect(IRuntimeWidget widget)
+    public ScreenRect WidgetDrawnRect(IRuntimeWidget widget)
     {
         try
         {
@@ -40,6 +40,25 @@ internal sealed partial class UnityUiRuntime
             if (go == null || !go.activeInHierarchy) return ScreenRect.Unknown;
             var rt = go.GetComponent<RectTransform>();
             return rt == null ? ScreenRect.Unknown : ScreenRectOf(rt);
+        }
+        catch { return ScreenRect.Unknown; }
+    }
+
+    public ScreenRect WidgetRect(IRuntimeWidget widget)
+    {
+        try
+        {
+            var go = NavObject(widget);
+            if (go == null || !go.activeInHierarchy) return ScreenRect.Unknown;
+            var rt = go.GetComponent<RectTransform>();
+            if (rt == null) return ScreenRect.Unknown;
+            var rect = ScreenRectOf(rt);
+            // WINDOWS1 live fix: a control in a scrolled info column is placed where it sits unscrolled, so the
+            // controller reaches it (Down from the tabs, Left and Right with the content) however the column is scrolled;
+            // the focus then scrolls it into view (RevealInColumn).
+            if (NavHost(widget) is { } host && host.InfoScrollPixels(go) is float shift && shift != 0f && rect.IsKnown)
+                rect = ScreenRect.FromCorners(rect.MinX, rect.MinY - shift, rect.MaxX, rect.MaxY - shift);
+            return rect;
         }
         catch { return ScreenRect.Unknown; }
     }
@@ -165,11 +184,26 @@ internal sealed partial class UnityUiRuntime
         catch { return false; }
     }
 
+    public bool RevealInColumn(IRuntimeWidget widget)
+    {
+        try
+        {
+            var go = NavObject(widget);
+            return go != null && NavHost(widget) is { } host && host.RevealInInfo(go);
+        }
+        catch { return false; }
+    }
+
     public void ScrollNear(IRuntimeWidget widget, float amount)
     {
         try
         {
             if (NavHost(widget) is not { } host) return;
+            // WINDOWS1 live fix: over a control in a window's info column, the stick scrolls that column.
+            float stickDt;
+            try { stickDt = Time.unscaledDeltaTime; } catch { stickDt = 1f / 60f; }
+            if (!(stickDt > 0f) || stickDt > 0.1f) stickDt = 1f / 60f;
+            if (host.TryScrollInfo(NavObject(widget), amount, NavScrollSpeed, stickDt)) return;
             var scroll = host.Scroll;
             if (scroll == null) return;
             RectTransform? content = null;

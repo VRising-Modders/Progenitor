@@ -50,7 +50,7 @@ public sealed class DialogsVanillaTests : IDisposable
         Assert.Equal((32f, 32f, 32f, 32f), GameSettingsLook.PopupFrameBorder);
         Assert.Equal((40f, 0f, 70f, 0f), GameSettingsLook.PopupButtonBorder);
         Assert.Equal((0f, 0f, 0f, 0.8f), GameSettingsLook.PopupBlocker);
-        Assert.Equal(25, SettingsArtLadder.PartCount);
+        Assert.Equal(26, SettingsArtLadder.PartCount); // WINDOWS1 added the window title ornament
 
         string donors = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "GameArt", "SettingsArtDonors.cs");
         string menus = SourcePin.MethodBody(donors, "private static void ReadMenus(");

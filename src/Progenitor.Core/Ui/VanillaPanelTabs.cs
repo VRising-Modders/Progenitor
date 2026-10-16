@@ -80,6 +80,9 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
 
     public void Mount(IUiPanel panel)
     {
+        // WINDOWS1 review: a panel mounted in a chest or station tab is placed by that tab, never in the window row (it
+        // pushed a window aside, and Escape could hide it and blank the tab).
+        if (panel is UiPanelHandle tagged) tagged.Flows = false;
         if (!_disposed && panel is UiPanelHandle h && h.RuntimePanel != null) { h.GridControls = true; _host?.Mount(h.RuntimePanel); }
     }
 

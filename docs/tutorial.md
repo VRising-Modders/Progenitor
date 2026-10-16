@@ -599,7 +599,7 @@ context now and keeps it off whatever mode any panel asks for. `Ui.CaptureInput(
 on; `Ui.IsCapturingInput` reports the state. The cursor unlock is never routed by the pointer — a
 locked cursor could not be moved onto the panel in the first place — so only the input block is.
 
-**Escape closes panels.** While a panel is shown, Escape hides every shown Progenitor panel and does
+**Escape closes panels.** While a panel is shown, Escape first closes an open list, dialog or key capture; then, with a standard window or a floating panel that takes the input open (`WhileShown`, or `WhenHovered` with the pointer over it), it closes the topmost of them (the one shown last), one per press; with none of those open, it hides every shown panel (the sweep), and does
 nothing else; it does not dispose them and never reaches your key handler. That half is the same in
 every mode, because it comes from Bootstrap's capture refcount, which every shown panel drives.
 

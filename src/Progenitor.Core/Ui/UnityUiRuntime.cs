@@ -87,6 +87,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// </summary>
     private static readonly List<ScrollRect> InnerScrolls = new();
 
+    /// <summary>WINDOWS1: an inner scroll block the wheel moves while the pointer is over it (the info column).</summary>
+    private static void RegisterInnerScroll(ScrollRect scroll)
+    {
+        if (scroll == null) return;
+        ForgetInnerScroll(scroll);
+        InnerScrolls.Add(scroll);
+    }
+
     private static void ForgetInnerScroll(ScrollRect? scroll)
     {
         if (scroll == null) return;
@@ -104,9 +112,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// INSTALLSIDES1: write one notch onto the scroll block under the pointer, when one is there and
     /// can move that way. False hands the notch to the list.
     /// </summary>
-    private static bool TryScrollInner(PointerSample pointer, float deltaY)
+    private static bool TryScrollInner(PointerSample pointer, float deltaY, UnityPanel? hovered)
     {
         if (pointer.Kind != PointerKind.Inside || InnerScrolls.Count == 0) return false;
+        // WINDOWS1 review: only a scroll block of the panel the wheel is over (ResolveHoveredPanel, draw order first).
+        Transform? hoveredRoot = null;
+        try { hoveredRoot = hovered?.GameObject != null ? hovered.GameObject.transform : null; }
+        catch { hoveredRoot = null; }
+        if (hoveredRoot == null) return false;
         for (int i = InnerScrolls.Count - 1; i >= 0; i--)
         {
             ScrollRect? scroll = InnerScrolls[i];
@@ -126,6 +139,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             try { viewport = scroll!.viewport; content = scroll.content; }
             catch { /* */ }
             if (viewport == null || content == null) continue;
+            bool mine;
+            try { mine = scroll!.transform.IsChildOf(hoveredRoot); }
+            catch { mine = false; }
+            if (!mine) continue;
             ScreenRect rect;
             try { rect = ScreenRectOf(viewport); }
             catch { continue; }
@@ -926,7 +943,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // other into unreadable text (evidence 163).
             if (IsRedundantPaneTitle(host, text))
                 return SkipRedundantPaneTitle(host);
-            var go = MakeLabel(host.RowParent, text, Vector2.zero, 20f, left: host.IsLeftAligned);
+            var go = MakeLabel(host.RowParent, text, Vector2.zero, UiTextStyles.BodySize, left: host.IsLeftAligned);
             if (go == null) return null;
             host.AddRow(go, go, hasControl: false, kind: "label", source: ControlSource.None);
             return new UnityWidget(host, go, null, null, null, null, null, null);
@@ -2259,6 +2276,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         try
         {
             host.Spot = spot;
+            // WINDOWS1 live fix: the row panel shown last draws on top (its canvas order from its layer).
+            host.ApplyRowLayer();
             // None is a dismiss, not a center placement. HideCore logs
             // `placed rank=-1/0` then Dispose; without this deactivation a
             // deferred Destroy left the overlay drawing over the next world.
@@ -2342,6 +2361,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     public void GameWindowChrome(IRuntimePanel panel)
     {
         if (panel is UnityPanel host && host.Alive) host.MakeGameWindow();
+    }
+
+    /// <summary>WINDOWS1: a standard window's frame (<see cref="IUiRuntime.WindowChrome"/>).</summary>
+    public void WindowChrome(IRuntimePanel panel, UiWindowSpec spec)
+    {
+        if (panel is UnityPanel host && host.Alive && spec != null) host.MakeStandardWindow(spec);
     }
 
     /// <summary>WIDEDIALOG1: the dialog frame's asked-for width; the next layout pass sizes it.</summary>
@@ -4329,7 +4354,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // while its text can move that way; at its end the notch scrolls the list.
                 // P7b: a widget that scrolls itself (the data table's body) takes the notch over its area
                 // while it can move that way (UiWheelClaims); at its end the notch goes on as below.
-                if (pointer.Kind == PointerKind.Inside && TryWheelClaim(pointer, deltaY))
+                if (pointer.Kind == PointerKind.Inside && TryWheelClaim(pointer, deltaY, hit))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -4340,7 +4365,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     scroll = null;
                 }
                 // INSTALLSIDES1: a scroll block under the pointer takes the notch while it can move.
-                else if (scroll != null && TryScrollInner(pointer, deltaY))
+                else if (scroll != null && TryScrollInner(pointer, deltaY, hit))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -4502,28 +4527,37 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// pointer only, and only inside that panel's visible viewport: a table under a dialog or another panel, and rows
     /// clipped out of the viewport, never take the wheel.
     /// </summary>
-    private static bool TryWheelClaim(PointerSample pointer, float deltaY)
+    private static bool TryWheelClaim(PointerSample pointer, float deltaY, UnityPanel? hovered)
     {
         if (UiWheelClaims.Count == 0) return false;
-        UnityPanel? top = null;
-        for (int i = ShownPanels.Count - 1; i >= 0; i--)
-        {
-            var panel = ShownPanels[i];
-            if (panel == null || !panel.Alive || !panel.Visible) continue;
-            var frame = ScreenRectOfPanel(panel);
-            if (frame.IsKnown && frame.Contains(pointer.X, pointer.Y))
-            {
-                top = panel;
-                break;
-            }
-        }
-
+        // WINDOWS1 review: the panel the wheel is over is the one ResolveHoveredPanel picked (draw order first), never
+        // the last-shown panel whose frame happens to contain the pointer (a table behind a window).
+        var top = hovered;
         if (top == null) return false;
         return UiWheelClaims.TryTake(pointer.X, pointer.Y, deltaY, top, top.ViewportScreenRect);
     }
 
     private static UnityPanel? ResolveHoveredPanel(PointerSample pointer)
     {
+        // WINDOWS1 live fix: a window or dialog (drawn above the ordinary panels and the workspace) whose frame is under the
+        // pointer takes the wheel, the topmost by canvas order. Over a window's info column (outside its viewport) the
+        // wheel went on to the gallery page behind the window.
+        UnityPanel? above = null;
+        int aboveOrder = int.MinValue;
+        for (int i = ShownPanels.Count - 1; i >= 0; i--)
+        {
+            var panel = ShownPanels[i];
+            if (panel == null || !panel.Alive || !panel.Visible || panel.WheelPassThrough) continue;
+            int order = panel.CanvasOrder;
+            if (order <= UiOwnership.OverlaySorting || order <= aboveOrder) continue;
+            var rect = ScreenRectOfPanel(panel);
+            if (!rect.IsKnown || !rect.Contains(pointer.X, pointer.Y)) continue;
+            above = panel;
+            aboveOrder = order;
+        }
+
+        if (above != null) return above;
+
         UnityPanel? viewportHit = null;
         UnityPanel? frameHit = null;
         for (int i = ShownPanels.Count - 1; i >= 0; i--)
@@ -11747,7 +11781,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         /// <summary>The content's row width, whatever row is being placed (MENUKIT2: the description column's ruler).</summary>
         internal float FullRowWidth =>
-            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : RowWidth;
+            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;
 
         /// <summary>
         /// MENUKIT2 round D: while a row below the first settings row is placed beside the description
@@ -11756,7 +11790,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private float _narrowWidth;
         public RowColumns Columns(bool hasControl) =>
             _grid
-                ? ModSettingsRowGrid.For(GridWidth).Columns(hasControl)
+                ? RowGrid.Columns(hasControl)
                 : _menuPane || _embeddedWidth > 0
                     ? MenuPanelLayout.Columns(ContentRowWidth, hasControl)
                     : PanelLayout.Columns(hasControl);
@@ -12309,7 +12343,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         public GameObject RowParent =>
             _strip
                 ? GameObject
-                : _nextPin == MenuRowPin.Content ? (_content ?? GameObject) : GameObject;
+                : _nextPin == MenuRowPin.Content ? (_content ?? GameObject)
+                : _nextPin == MenuRowPin.Side ? SideParent
+                : GameObject;
 
         public ScrollRect? Scroll
         {
@@ -12423,7 +12459,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// action row does), so the runtime leaves its insets and height alone.
         /// </summary>
         private float FooterBand =>
-            _strip || _sidebar || SelfPlaced ? 0f : PanelFooterLayout.BandFor(_footerText);
+            _strip || _sidebar || SelfPlaced ? 0f
+            // WINDOWS1: a standard window's stamp sits UiWindowLayout.StampLift above the frame's edge, and its band with it.
+            : IsStandardWindow || _dialog ? UiWindowLayout.StampBand(_footerText)
+            : PanelFooterLayout.BandFor(_footerText);
 
         /// <summary>Set or clear the version footer and lay the panel out again.</summary>
         public void SetFooter(string text)
@@ -12494,7 +12533,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 rt.anchorMin = new Vector2(0.5f, 0f);
                 rt.anchorMax = new Vector2(0.5f, 0f);
                 rt.pivot = new Vector2(0.5f, 0f);
-                rt.anchoredPosition = new Vector2(x, 0f);
+                rt.anchoredPosition = new Vector2(x, IsStandardWindow || _dialog ? UiWindowLayout.StampLift : 0f);
                 rt.sizeDelta = new Vector2(PanelFooterLayout.TextWidth(frameWidth), PanelFooterLayout.BandHeight);
                 var tmp = _versionFooter.GetComponent<TextMeshProUGUI>();
                 if (tmp != null)
@@ -12528,6 +12567,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         internal float FrameWidth => _embeddedWidth > 0 ? _embeddedWidth : _menuPane ? _menuGeometry.Width
             : (_dialog || _gameWindow) && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
+            : IsStandardWindow ? StandardFrameWidth
             : PanelWidth;
 
         /// <summary>
@@ -12563,6 +12603,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             if (Released || _dialog) return;
             _dialog = true;
+            // WINDOWS1: every dialog draws above the standard windows (UiWindowLayout.DialogSorting).
+            SetOverlaySorting(UiWindowLayout.DialogSorting);
             PaintDialogChrome();
             HideForDialogReveal();
             // DIALOGS1: the dialog draws its own title as its first row, so the pane's title band
@@ -12754,6 +12796,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             if (_inline && _inlineHost == null && (kind == "input" || kind == "toggle"))
                 _inlineHost = go;
             PlaceRow(row);
+            // WINDOWS1 live fix: a shown standard window grows to its new rows (on the next frame, once per batch).
+            RequestWindowGrow();
         }
 
         /// <summary>
@@ -12879,7 +12923,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         // DIALOGS1: one game-free decision (RowColumnRules), so the tests pin the geometry drawn here.
         private RowColumns RowColumnsFor(in PanelRow row) =>
-            RowColumnRules.For(row.Kind, row.Grid, row.HasControl, row.SearchField, _menuPane, row.Grid ? GridWidth : ContentRowWidth);
+            RowColumnRules.For(row.Kind, row.Grid, row.HasControl, row.SearchField, _menuPane, row.Grid ? GridWidth : ContentRowWidth,
+                sizedToRow: IsStandardWindow);
 
         /// <summary>
         /// DIALOGS1: a dialog title or body row is its measured text's height (plus
@@ -13042,6 +13087,16 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             // MENUKIT2 round D: a plain row (a note, a label, an inline field) below the first settings
             // row shares the rows' width while the description column is shown, so nothing runs under it.
+            // WINDOWS1: a Tabbed window's info-column row has its own column and cursor; its pinned toolbar and tab row
+            // span the frame (the info column and the content both sit under them).
+            if (PlaceSideRow(row)) return;
+            _placingTop = IsStandardWindow && row.Pin == MenuRowPin.Top;
+            try { PlaceRowBesideColumn(row); }
+            finally { _placingTop = false; }
+        }
+
+        private void PlaceRowBesideColumn(in PanelRow row)
+        {
             bool beside = BesideColumn(row);
             if (beside || row.Grid) _narrowWidth = GridWidth;
             try { PlaceRow(row, beside ? GridShiftX : 0f); }
@@ -13113,7 +13168,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             {
                 // Settings organization review: a settings-grid row keeps its name column; the field and its buttons
                 // share the control column (ModSettingsRowGrid.InlineSlots), centered on the row like every grid control.
-                var grid = ModSettingsRowGrid.For(GridWidth);
+                var grid = RowGrid;
                 float barH = ModSettingsRowGrid.BarHeight;
                 for (int i = 0; i < buttons.Count; i++)
                 {
@@ -13820,10 +13875,15 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var geometry = _menuPane
                     ? _menuGeometry
                     : MenuPanelLayout.ForCanvas(AvailableWidth(), AvailableHeight(), _sidebar, _mode);
+                // WINDOWS1: a panel in the window row hangs from its top line (UiWindowLayout.Place); one whose cap
+                // changed with the set (a cascade layer) is laid out again first, and placed from the height that
+                // re-layout gave it, never the stale one (UiWindowLayout.RepositionInRow).
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
+                    : InWindowRow ? RepositionInRow(rt, AvailableHeight())
                     : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
-                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) at = PanelOffset.Centre;
+                // A wide game window that asked for a dialog's width is centered too (a standard window is placed above).
+                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) at = PanelOffset.Centre;
                 rt.anchoredPosition = new Vector2(at.X, at.Y);
                 if (TopAligned) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
 
@@ -13917,7 +13977,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         : 0f;
                     refitTop = MenuPanelLayout.TopChromeHeight(topHeights) + headerChrome;
                     refitBottom = bottomChrome;
-                    refitForce = _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized);
+                    refitForce = _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized || IsStandardWindow);
                     FitChromeInsets(refitTop, refitBottom, force: refitForce);
                     _footerInset = footerBand;
                     EnsureHeaderBand(headerChrome, MenuPanelLayout.TopChromeHeight(topHeights));
@@ -13938,9 +13998,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 _layout.Reset();
                 if (_dialog) _dialogBodyCap = DialogBodyCap(footerBand + dialogPinned);
                 BeginGridPass();
+                // WINDOWS1: a Tabbed window's info column starts under the title band and the pinned top rows.
+                BeginSidePass(TitleBand + (refitTop > 0f ? refitTop : PanelLayout.PadTop));
                 for (int i = 0; i < _rows.Count; i++)
                     PlaceRow(_rows[i]);
                 PlaceSettingsColumn();
+                EndSidePass();
 
                 // HOSTS1: the viewport clears the pinned top rows as placed in THIS pass. Fitted
                 // before placement it read the previous pass's rects, so a toolbar that grew between
@@ -13958,9 +14021,16 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // no title band and no 200 px floor (the empty band above the live dialog's title).
                 float panelHeight = _embeddedHeight > 0 ? _embeddedHeight : _menuPane ? _menuGeometry.Height
                     : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
+                    : IsStandardWindow ? PanelLayout.PanelHeightFor(StandardBodyHeight(contentHeight, refitTop) + footerBand, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
                 if (_gameWindow && _dialogFrameWidth > PanelWidth && !_menuPane && _embeddedHeight <= 0)
                     panelHeight = Math.Min(panelHeight, available.Value * .70f);
+                // WINDOWS1: a standard window is never taller than its place leaves room for (under the workspace's tab
+                // strip, a cascade layer's offset), so its bottom stays on screen.
+                if (InWindowRow) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
+                // WINDOWS1 live fix: a standard window keeps its height across its tabs while it stays open.
+                if (IsStandardWindow && !SelfPlaced)
+                    panelHeight = StableWindowHeight(panelHeight, InWindowRow ? WindowMaxHeight(available.Value) : 0f, firstShow);
 
                 _laidOutWith = available;
                 var settle = RulerSettle.StateOf(available, _settling, _settleExhausted);
@@ -13978,7 +14048,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         float viewH = _sidebar
                             ? MenuPanelLayout.ListViewportHeight(panelHeight)
                             : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
-                            : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
+                            : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
                         float npos = 1f;
                         float pendingOffsetY = 0f;
                         bool hasPending = _sidebar && PeekSidebarScrollPreserve(out npos, out pendingOffsetY);
@@ -14051,12 +14121,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // depth >= 1 cross PanelFlow's capacity threshold and jump a whole title band
                     // onto the panel above it. The vertical ladder is a property of the canvas now.
                     placedAt = _menuPane ? new PanelOffset(_menuGeometry.X, _menuGeometry.Y)
+                        : InWindowRow ? WindowOffset(panelHeight, available.Value)
                         : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), available.Value);
                     // INSTALLUX2: a dialog is centered, never ranked. PanelFlow would give it a
                     // column beside the workspace's panes the moment they joined the shown set,
                     // which is the "flickers in from the left" CONSENT2 fixed for the consent
                     // prompt by hand.
-                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) placedAt = PanelOffset.Centre;
+                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) placedAt = PanelOffset.Centre;
                     if (SelfPlaced) placedAt = new PanelOffset(panelRt.anchoredPosition.x, panelRt.anchoredPosition.y);
                     else panelRt.anchoredPosition = new Vector2(placedAt.X, placedAt.Y);
                     if (TopAligned) panelRt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - panelHeight) / 2 - 24));
@@ -14064,6 +14135,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
                 if (!_strip) PlaceBottomRows(panelHeight, footerBand);
                 PlaceVersionFooter();
+                PlaceWindowChrome(panelHeight, footerBand);
 
                 // Say it once per show. A list that scrolls looks identical to one that does not
                 // until the player tries, and "there are rows below this" is the fact the old panel
@@ -14071,7 +14143,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 float viewport = _sidebar
                     ? MenuPanelLayout.ListViewportHeight(panelHeight)
                     : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand)
-                    : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
+                    : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
                 bool scrolls = PanelLayout.Scrolls(contentHeight, viewport);
 
                 // No SetActive here (R45 finding 22). ScrollRect's AutoHide is the single owner of
@@ -14170,7 +14242,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var rt = _viewport.GetComponent<RectTransform>();
                 if (rt != null)
                 {
-                    rt.offsetMin = new Vector2(PanelLayout.PadSide, bottomChrome);
+                    rt.offsetMin = new Vector2(PanelLayout.PadSide + SideBand, bottomChrome);
                     rt.offsetMax = new Vector2(-PanelLayout.PadSide, -top);
                 }
             }
@@ -16737,8 +16809,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // is punctuation, and inside the run it would be drawn at a figure's width.
                 string value = text;
                 string lead = HeadBlockLayout.TrySplitMetaSeparator(text, out value) ? MutedSeparator() : "";
-                body = lead + "<mspace=" + CellLayout.MonoGlyphEm.ToString("0.##", CultureInfo.InvariantCulture)
-                    + "em>" + Escape(value) + "</mspace>";
+                // WINDOWS1 live fix: only the digits are tabular; a comma or a slash keeps its own width (CellLayout.MonoMarkup).
+                body = lead + CellLayout.MonoMarkup(value);
             }
             else if (spec.Wrap == CellWrap.TwoLine)
             {

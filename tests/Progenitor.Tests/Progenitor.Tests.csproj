@@ -256,6 +256,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Commands\CommandResult.cs" Link="Linked\CommandResult.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Commands\CommandDispatcher.cs" Link="Linked\CommandDispatcher.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Commands\ReplyText.cs" Link="Linked\ReplyText.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Commands\ModReplyContext.cs" Link="Linked\ModReplyContext.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Plugins\ModMessagePrefix.cs" Link="Linked\ModMessagePrefix.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Config\ConfigHelper.cs" Link="Linked\ConfigHelper.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Config\DeferredBinds.cs" Link="Linked\DeferredBinds.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Config\LeaseTable.cs" Link="Linked\LeaseTable.cs" />
@@ -474,6 +476,9 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachHandle.cs" Link="Linked\VanillaAttachHandle.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachRegistry.cs" Link="Linked\VanillaAttachRegistry.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\Ui.cs" Link="Linked\Ui.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiWindowLayout.cs" Link="Linked\UiWindowLayout.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiWindow.cs" Link="Linked\UiWindow.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextStyles.cs" Link="Linked\UiTextStyles.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\FrameworkVersions.cs" Link="Linked\FrameworkVersions.cs" />
     <!-- P7: the composed widgets (ordered list, picker, tabs, code area, world pick, notifications). Every file
          under Ui/Widgets is game-free; the Unity halves live in UnityUiRuntime.*.cs partials. -->
@@ -1129,6 +1134,7 @@
     <Compile Include="..\..\samples\Progenitor.Sample\SampleHooks.cs" Link="Linked\SampleHooks.cs" />
     <Compile Include="..\..\samples\Progenitor.ControlsSample\ControlsDemo.cs" Link="Linked\ControlsDemo.cs" />
     <Compile Include="..\..\samples\Progenitor.ControlsSample\WidgetsDemo*.cs" Link="Linked\%(Filename)%(Extension)" />
+    <Compile Include="..\..\samples\Progenitor.ControlsSample\Gallery*.cs" Link="Linked\%(Filename)%(Extension)" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleChat.cs" Link="Linked\SampleChat.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleNet.cs" Link="Linked\SampleNet.cs" />
     <!-- The map-scope keybind example: the ruler, the coordinate check and the lines are game-free;

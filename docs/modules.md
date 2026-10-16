@@ -80,6 +80,7 @@ The mod page's readback reports the decision: `page-listing {matched, key, listi
 | `WorldState`, `Keybinds` | World-load epoch checks and tracked client keybinds; `Keybinds` is the only supported way for a plugin to act on a key (see [Keybinds](#keybinds-fui5)). |
 | `Menu`, `Settings` | The Mods-workspace registration (pages, header, groups, server-edit opt-in) and the settings page builder (`Settings.Page`, SETTINGS1 stage 2). Both tracked on every unload reason. See [mod settings](mod-settings.md). |
 | `Dialogs` | Modal dialogs in the framework's layout: `Confirm`, `Notice`, `Choose`, `Prompt`, and label/value facts (`DialogFact`, DIALOGS2). Client only; tracked on every unload reason. See [dialogs](ui.md#dialogs). |
+| `Windows` | Standard windows: `Windows.Create(UiWindowPreset.Basic \| Header \| Tabbed, title, options)` with the frame, title, version stamp, input mode and Escape behavior fixed by the preset. Client only; tracked on every unload reason. See [Standard windows](ui.md#standard-windows). |
 | `Time` | Server time of day: read, move or freeze the world clock; clients' lighting follows. See [Time of day](#time-of-day). Also world speed: freeze or slow the whole simulation for every player; see [World speed](#world-speed). |
 | `Side`, `IsServer`, `IsClient`, `World` | Process role and its current ECS world, which may be null. |
 | `Owner` | The BepInEx plugin instance; pass it to APIs that require an explicit owner, including `MainThread.Post`, `Run` and `PostDelayed`. |
@@ -89,6 +90,10 @@ The mod page's readback reports the decision: `page-listing {matched, key, listi
 `ProgenitorPlugin.WhenWorldReady(ctx, Action<World>)` invokes the callback immediately if the side's world exists, otherwise once on the matching `WorldReady`. It fires at most once. Dispose its returned handle to cancel a pending wait; plugin unload also cancels the tracked subscription.
 
 `Progenitor.Worlds` provides `Find(name)`, `Server` (`"Server"`) and `Client` (`"Client_0"`). Do not retain an entity across a save load without checking its `WorldState` epoch.
+
+### Message prefix
+
+What a mod says to the player carries its name: `ctx.Hud.Notify` (the game's banner and the framework band alike), `ctx.Chat.Broadcast` / `SendTo`, and a `ctx.Commands` handler's `ctx.Reply` show `<Mod Name>: <message>`, where the name is the plugin's BepInEx name (`ctx.Name`) with any rich-text tags removed. The rules are `ModMessagePrefix`: no prefix when the text already opens with the mod's own tag, `Name:`, `[Name]` or `(Name)` (ignoring case, leading white space and leading rich-text tags), when the text or the name is empty, or when the call opts out with `prefix: false` (`ctx.Hud.Notify(text, prefix: false)`, `ctx.Chat.Broadcast(text, prefix: false)`, `ctx.Reply(text, prefix: false)`). A text that only starts with the same word gets the prefix (`Teleport: Teleport failed` from a mod named Teleport). A text longer than one chat line (500 UTF-8 bytes with the name) is sent as several lines with the name on the first, for a command reply and a `ctx.Chat` send alike. When one command handler runs another plugin's command with its context, the replies carry the plugin whose command is running. The prefix identifies, it does not authenticate: any plugin can write any text, including another mod's name. The framework's own lines about a command (usage, `This command is admin-only.`, `Command failed.`) and Progenitor's built-in commands are not prefixed. The notice kinds keep their look. Status: game-free tested (`ModMessagePrefixTests`), not live-verified.
 
 <a id="unload-reason-fbuff2"></a>
 
@@ -5739,7 +5744,7 @@ Ui: settings toggle source=built (no live vanilla toggle was both widget-sized a
 
 ### Keep your panel in an `OwnedPanel` (FUI29)
 
-Escape hides your panel and **does not tell you**. `Ui.OnBootstrapKey` hides every shown panel it can see; it does not know which module owns any of them. `Ui.Uninstall` and `Ui.RemoveAll(owner)` dispose them the same way. So a module that keeps `private static IUiPanel? _panel` and answers `_panel != null` says "open" about a panel that left the screen — for the rest of the process. That was measured live on two of this framework's own panels, and it made the sample's toggle eat one press after every Escape.
+Escape hides your panel and **does not tell you**. `Ui.OnBootstrapKey` hides the topmost standard window or input-taking floating panel (`WhileShown`, or `WhenHovered` under the pointer), one per press, and with none of those every shown panel it can see; it does not know which module owns any of them. **Behavior change (WINDOWS1):** before the standard windows one Escape hid every shown panel at once; an input-taking floating panel now closes on its own press, ahead of the Mods workspace and the other panels, while a passive panel (`Never`, or `WhenHovered` away from the pointer) still goes with the sweep. `Ui.Uninstall` and `Ui.RemoveAll(owner)` dispose them the same way. So a module that keeps `private static IUiPanel? _panel` and answers `_panel != null` says "open" about a panel that left the screen — for the rest of the process. That was measured live on two of this framework's own panels, and it made the sample's toggle eat one press after every Escape.
 
 There is no `Hidden` event to subscribe to, deliberately: a notification is a second representation of a fact the handle already holds, and a second representation is a thing that can be missed — which is the failure itself, one layer up. Derive instead.
 

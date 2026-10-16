@@ -10,6 +10,9 @@ public interface ICommandContext
     /// <summary>Optional in tests; Sample command handlers call this.</summary>
     void Reply(string text) { }
 
+    /// <summary>WINDOWS1: as Core's: a plain context ignores the prefix choice.</summary>
+    void Reply(string text, bool prefix) => Reply(text);
+
     /// <summary>Dispatcher admin gate. Tests override as needed.</summary>
     bool IsAdmin => false;
 

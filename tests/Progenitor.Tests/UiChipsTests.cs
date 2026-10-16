@@ -876,12 +876,16 @@ public sealed class UiChipsTabsRoundTests : IDisposable
     [Fact]
     public void A_chip_without_an_item_id_draws_no_empty_well_and_the_remove_button_is_a_drawn_mark()
     {
-        var chips = NewPanel().Chips("pl", Progenitor.ControlsSample.WidgetsDemo.SampleMembers(), new UiChipsOptions { RowWidth = 1108f });
+        // The sample's members all name a game item (Planks too, since the PR #33 live check); a chip with no id is added.
+        var members = Progenitor.ControlsSample.WidgetsDemo.SampleMembers();
+        members.Add(new UiChip("plain", "Plain"));
+        var chips = NewPanel().Chips("pl", members, new UiChipsOptions { RowWidth = 1108f });
         var line = Row("pl:line0");
         Assert.True(line.Cells().Single(c => c.Key == "icon0").Visible);  // Crystal: the game icon's well
         Assert.True(line.Cells().Single(c => c.Key == "icon1").Visible);  // Coarse Thread
-        Assert.False(line.Cells().Single(c => c.Key == "icon2").Visible); // Planks: no id, no well
-        Assert.True(_runtime.ItemIconAsks >= 2);
+        Assert.True(line.Cells().Single(c => c.Key == "icon2").Visible);  // Planks
+        Assert.False(line.Cells().Single(c => c.Key == "icon3").Visible); // no id, no well
+        Assert.True(_runtime.ItemIconAsks >= 3);
         var remove = line.Cells().Single(c => c.Key == "x0");
         Assert.True(remove.Visible);
         Assert.Equal("", remove.Text); // no caption: the face is the drawn remove mark (UiIconMarks)

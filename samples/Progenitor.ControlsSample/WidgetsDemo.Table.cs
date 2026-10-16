@@ -145,7 +145,7 @@ internal sealed partial class WidgetsDemo
         return n;
     }
 
-    internal void BuildTable(IUiPanel panel, IUiTabs tabs, int tab)
+    internal void BuildTable(IUiPanel panel, IUiTabs tabs, int tab, bool badge = true)
     {
         if (panel == null) throw new ArgumentNullException(nameof(panel));
         if (tabs == null) throw new ArgumentNullException(nameof(tabs));
@@ -192,6 +192,8 @@ internal sealed partial class WidgetsDemo
             Report("table reset");
         });
         panel.EndInline();
-        tabs.SetBadge(tab, TableRowCount);
+        // The Table tab's badge is the table's row count (600 reads "99+", the badge's cap); a host page that shows the
+        // table among other entries on one tab (the Gallery's Lists tab) asks for none.
+        if (badge) tabs.SetBadge(tab, TableRowCount);
     }
 }

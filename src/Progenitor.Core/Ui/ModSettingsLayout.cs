@@ -586,13 +586,16 @@ internal readonly struct ModSettingsRowGrid
     internal static float SliderTrackWidth(float slotWidth, bool valueBoxRoom) =>
         valueBoxRoom ? Math.Max(1f, slotWidth - SliderValueBoxWidth - SliderValueGap) : Math.Max(1f, slotWidth);
 
-    private ModSettingsRowGrid(float rowWidth, float rightInset, float controlLeft, float barRight)
+    private ModSettingsRowGrid(float rowWidth, float rightInset, float controlLeft, float barRight, float compactInset = -1f)
     {
         RowWidth = rowWidth;
         RightInset = rightInset;
         ControlLeft = controlLeft;
         BarRight = barRight;
+        _compactInset = compactInset;
     }
+
+    private readonly float _compactInset;
 
     internal float RowWidth { get; }
 
@@ -608,7 +611,7 @@ internal readonly struct ModSettingsRowGrid
     internal float BarRight { get; }
 
     /// <summary>Where compact controls (checkbox, value box, swatch) end.</summary>
-    internal float CompactRight => BarRight - CompactInset;
+    internal float CompactRight => BarRight - (_compactInset >= 0f ? _compactInset : CompactInset);
 
     internal float ControlWidth => BarRight - ControlLeft;
 
@@ -643,6 +646,20 @@ internal readonly struct ModSettingsRowGrid
         }
 
         return new ModSettingsRowGrid(rowWidth, inset, controlLeft, barRight);
+    }
+
+    /// <summary>
+    /// WINDOWS1 live fix: the grid of a standard window's row. A window has no reset arrows, so the gutter the Options page
+    /// keeps for them (bars ending 96 short of the right, compact controls 16 further in) left the checkbox mid-row; here
+    /// bars and compact controls end at the row's right edge, less the scrollbar band.
+    /// </summary>
+    internal static ModSettingsRowGrid ForWindow(float rowWidth)
+    {
+        var g = For(rowWidth);
+        float barRight = g.Right;
+        float controlLeft = Math.Min(g.ControlLeft, barRight - MinControlWidth);
+        if (controlLeft - NameInset - Gap < MinNameWidth) controlLeft = g.ControlLeft;
+        return new ModSettingsRowGrid(g.RowWidth, g.RightInset, controlLeft, barRight, 0f);
     }
 
     /// <summary>The shape each drawn control takes in the game-look row.</summary>

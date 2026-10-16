@@ -198,6 +198,16 @@ internal sealed class NavSurface
 
     /// <summary>The workspace's previous (-1) or next (+1) tab, true when it moved; null when the screen has no tabs.</summary>
     internal Func<int, bool>? Tab { get; set; }
+
+    /// <summary>
+    /// WINDOWS1: a window's left column (a Tabbed window's info column): Down from <see cref="TopRows"/> enters it first
+    /// (it is the left column, on every tab), and Left or Right with nothing level beside the focus goes to the nearest
+    /// row of the other column on that side.
+    /// </summary>
+    internal ISet<UiHandle>? Column { get; set; }
+
+    /// <summary>WINDOWS1: the pinned rows above the columns (a window's toolbar and tab row).</summary>
+    internal ISet<UiHandle>? TopRows { get; set; }
 }
 
 /// <summary>NAV1: what the model needs from the game and the menus. Production: <see cref="UiNavHost"/>; tests substitute a fake.</summary>
@@ -208,6 +218,13 @@ internal interface INavHost
 
     /// <summary>The target's rect in screen pixels (y up), or <see cref="ScreenRect.Unknown"/>.</summary>
     ScreenRect Rect(NavTarget target);
+
+    /// <summary>
+    /// WINDOWS1: the target's rect where it is drawn now. <see cref="Rect"/> places a control of a scrolled window info
+    /// column where it sits unscrolled (Up and Down walk the column); Left and Right compare drawn positions, so the
+    /// column and the content beside it meet on the rows the player sees.
+    /// </summary>
+    ScreenRect DrawnRect(NavTarget target) => Rect(target);
 
     /// <summary>Draw or remove the focus marker on <paramref name="target"/>.</summary>
     void Mark(NavTarget target, bool on);
@@ -728,18 +745,42 @@ internal static class UiNav
         }
 
         if (_pane < 0 || _pane >= surface.Panes.Count) return false;
-        var from = Host.Rect(_focus);
+        bool sideways = direction is NavCommand.Left or NavCommand.Right;
+        var from = sideways ? Host.DrawnRect(_focus) : Host.Rect(_focus);
         var candidates = new List<(NavTarget Target, ScreenRect Rect)>();
         foreach (var handle in surface.Panes[_pane])
         {
             foreach (var stop in Stops(handle))
             {
                 if (stop.Equals(_focus)) continue;
-                candidates.Add((stop, Host.Rect(stop)));
+                candidates.Add((stop, sideways ? Host.DrawnRect(stop) : Host.Rect(stop)));
+            }
+        }
+
+        // WINDOWS1: a window with a left column: Down from its toolbar or tab row enters the column first, on every tab.
+        if (direction == NavCommand.Down && surface.Column != null && surface.TopRows != null && surface.TopRows.Contains(_focus.Handle))
+        {
+            int below = UiNavMath.Pick(from, candidates.FindAll(c => surface.TopRows.Contains(c.Target.Handle)), direction);
+            if (below < 0)
+            {
+                int first = UiNavMath.Topmost(candidates, c => surface.Column.Contains(c.Handle));
+                if (first >= 0)
+                {
+                    SetFocus(candidates[first].Target);
+                    return true;
+                }
             }
         }
 
         int pick = UiNavMath.Pick(from, candidates, direction);
+        // WINDOWS1: Left or Right with nothing level beside the focus crosses to the nearest row of the other column.
+        if (pick < 0 && sideways && surface.Column != null && !(surface.TopRows?.Contains(_focus.Handle) ?? false))
+        {
+            bool inColumn = surface.Column.Contains(_focus.Handle);
+            pick = UiNavMath.NearestSideways(from, candidates, direction,
+                c => surface.Column.Contains(c.Handle) != inColumn && !(surface.TopRows?.Contains(c.Handle) ?? false));
+        }
+
         if (pick < 0)
         {
             // No geometry (a runtime that does not draw): the build order.
@@ -1263,6 +1304,48 @@ internal static class UiNavMath
                 bestScore = score;
                 best = i;
             }
+        }
+
+        return best;
+    }
+
+    /// <summary>WINDOWS1: the highest candidate that <paramref name="where"/> accepts, or -1 (a column's first stop).</summary>
+    internal static int Topmost(IReadOnlyList<(NavTarget Target, ScreenRect Rect)> candidates, Func<NavTarget, bool> where)
+    {
+        int best = -1;
+        float top = float.NegativeInfinity;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var r = candidates[i].Rect;
+            if (!r.IsKnown || !where(candidates[i].Target)) continue;
+            if (r.MaxY > top) { top = r.MaxY; best = i; }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// WINDOWS1: the candidate <paramref name="where"/> accepts on the <paramref name="direction"/> side whose row is
+    /// nearest the focus's (vertical distance first, then horizontal), or -1.
+    /// </summary>
+    internal static int NearestSideways(
+        ScreenRect from, IReadOnlyList<(NavTarget Target, ScreenRect Rect)> candidates, NavCommand direction, Func<NavTarget, bool> where)
+    {
+        if (!from.IsKnown) return -1;
+        float fx = (from.MinX + from.MaxX) * 0.5f;
+        float fy = (from.MinY + from.MaxY) * 0.5f;
+        int best = -1;
+        float bestScore = float.PositiveInfinity;
+        for (int i = 0; i < candidates.Count; i++)
+        {
+            var r = candidates[i].Rect;
+            if (!r.IsKnown || !where(candidates[i].Target)) continue;
+            float cx = (r.MinX + r.MaxX) * 0.5f;
+            float gap = direction == NavCommand.Right ? cx - fx : fx - cx;
+            if (gap <= 0.5f) continue;
+            float cy = (r.MinY + r.MaxY) * 0.5f;
+            float score = Math.Abs(cy - fy) * 4f + gap;
+            if (score < bestScore) { bestScore = score; best = i; }
         }
 
         return best;

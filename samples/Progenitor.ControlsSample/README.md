@@ -36,6 +36,17 @@ Plugin GUID `progenitor.controlssample`; version comes from git (docs/versioning
   **All tips**, **Reset tips**). The glossary terms are placeholders. Each event logs
   `Controls sample: widget <event>`.
 
+- **Mods workspace → Progenitor Controls Sample → Gallery** ([GalleryDemo.cs](GalleryDemo.cs)) is the samples
+  gallery: one tab per category (**Windows**, **Input**, **Lists**, **Feedback**, **HUD**, **Game panels**) with every
+  control, widget, window and message call the kit offers, each a live example (or the button that opens where it lives)
+  and a muted "Use this when" line. The table it is built from is [GalleryCatalog.cs](GalleryCatalog.cs), the same list
+  as [docs/ui-controls.md](../../docs/ui-controls.md). Its words all use the named text styles (`panel.Text(…, UiTextStyle.X)`).
+  The Windows tab opens the three standard windows ([GalleryWindows.cs](GalleryWindows.cs), `ctx.Windows.Create`):
+  **Basic window** ("Other Gear · here": a dropdown, two inline buttons, a status line), **Header window** ("Iron
+  Chest": Sort, Locate and Rename in the toolbar, Contents / Rules / Log tabs, right-aligned counts) and **Tabbed window**
+  ("Storage network": Refresh, Overview / Belts / Settings tabs, an info column with facts and **Locate all**). Each
+  button toggles its window; each event logs `Controls sample: gallery …` or `Controls sample: window …`.
+
 There is no chat command: chat commands run on the server, and this mod is client-only; opening
 a client panel from chat would need a server half and a custom event (see `Progenitor.Sample`'s `.ui`).
 
@@ -62,6 +73,51 @@ a client panel from chat would need a server half and a custom event (see `Proge
 Not demonstrated: `SettingsPageBuilder.InScope` (marks a button or info line server-wide; meaningless
 for a client-only mod). Lower-level surfaces `Ui.AttachToVanilla`, `Ui.WatchPointer` and `WorldMap` are
 not controls and are left to `Progenitor.Sample`.
+
+## Gallery
+
+Status: built and game-free tested (`WindowPresetTests`: every catalog entry is built on its tab, the windows open with
+their contents and stamps, and the gallery sources set no raw color, size or alignment). **Not run in the game.**
+
+Live check procedure (bridge only, no OS input; acceptance procedure, not run). Needs a client that nobody is playing,
+held in the bridge queue, at the title screen, with this sample and a Core built from this branch deployed to
+`BepInEx/progenitor-reload` (a Core swap; Bootstrap is unchanged).
+
+1. `display set` 1920x1080 windowed (`allowInWorld` only if testing in a world), then `display status`.
+2. `keybind_press` `progenitor.controlssample` / `OpenControls` (opens **All controls**), then `mods_ui select` the
+   sample's **Gallery** page. Expect `ui_read widgets` to list `gallery-tabs` and `gallery-picker`.
+3. For each tab 0 to 5: `mods_ui widget_click` `gallery-tabs:tabs/tab<i>`, then `screenshot` (`name`
+   `gallery-<tab>-1080.png`, `panel` the workspace pane) and `mods_ui scroll` to the bottom and a second shot. Expect:
+   every entry's control and its muted sentence on when to use it; text left, numbers right, button captions centered; nothing
+   cut off or overlapping.
+4. On the Windows tab, `widget_click` **Basic window**, **Header window** and **Tabbed window** in turn. After each:
+   `ui_read panels` (expect the window's title, its `capture`: Basic `WhenHovered`, Header and Tabbed `WhileShown`, and
+   its `rect`: Basic and Header 640 wide, Tabbed 1040 wide, all with their top edge under the workspace's tab strip), `screenshot`
+   with `panel` = the window title (`window-basic-1080.png`, …). Expect the version stamp
+   `Progenitor Controls Sample <version> · Progenitor <version>` centered at the bottom; Header and Tabbed: the dark
+   header band, the title centered over the divider, the side ornaments (or none, if the game's
+   `Window_TitleSideOrnament` was not found: `mods_ui status` `settingsArt.parts.windowTitleOrnament` says which), the
+   toolbar then the tabs pinned above the content; Tabbed: the info column on the left on a darker ground, the content
+   on the right. Click **Rename** on the Header window: the game's prompt shows **Rename** with the title; `dialog_type`
+   a name and `dialog_choose yes`: the title changes and the log shows `Controls sample: window header renamed = …`.
+5. Escape: `ui_input` `{"action":"key","key":"Escape"}` with the prompt closed: only the window opened last hides
+   (`ui_read panels`); each further press hides the next window, and the press after the last window closes the
+   workspace. With the prompt open, the first press answers the prompt only.
+6. Controller: open the Header window, `nav pad down` a few times, `nav state`: the focus walks the toolbar, the tabs and
+   the rows. Open the Basic window by navigation (`nav pad` to **Basic window**, then A): `ui_read panels` shows it
+   `WhileShown` and `nav state` moves into it; B closes it. Opened with `widget_click` (the pointer) it stays
+   `WhenHovered` and leaves the controller to the game.
+   Then, with the Tabbed window open, open the Header and Basic windows: at 1920x1080 `ui_read panels` shows the Tabbed
+   and Header windows side by side without overlap and the Basic window one title band (72) right of and below the
+   Header (no room left in the row); none covers the workspace's tabs; the workspace behind them is dimmed. Press
+   **Add facts** in the Tabbed info column (17 facts and more): the column ends on a whole row above the version stamp,
+   never over it, past the frame or through a row; screenshot it. Facts read on one line (`Chest 12` ... `14 / 40`), the
+   values right-aligned; `3,212` has no spaces around its comma.
+7. Repeat steps 3 and 4 at 2560x1440 (`-1440.png`), then `display restore`.
+8. Feedback tab: **Info**, **Success**, **Warning**, **Error** each show `Progenitor Controls Sample: …` on the banner
+   (or the band at the title screen) in its kind's look; **No prefix** shows the text alone.
+9. Cleanup: close the windows and the workspace, remove the sample from the client's reload folder, confirm its clean
+   unload in the log (`Controls sample: unloading`), and leave the bridge queue.
 
 `tests/Progenitor.Tests/ControlsSampleTests.cs` fails when a new `IUiPanel` member, settings-row
 kind, `ctx.Dialogs` method or `UiLook` helper has no demo here, and when a controller walking the page

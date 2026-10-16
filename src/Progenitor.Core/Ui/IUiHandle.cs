@@ -508,6 +508,8 @@ public static class UiLook
     public static IUiPanel GameWindow(this IUiPanel panel, float width)
     {
         panel.GameWindow();
+        // A wider frame is centered by the runtime, never flowed beside the standard windows.
+        if (panel is UiPanelHandle tagged && width > UnityUiRuntimeMetrics.PanelWidth) tagged.Flows = false;
         if (panel is UiPanelHandle host && !host.IsDisposed && host.Runtime is IRuntimePanel runtimePanel)
             Ui.CurrentRuntime().SetDialogWidth(runtimePanel, width);
         return panel;

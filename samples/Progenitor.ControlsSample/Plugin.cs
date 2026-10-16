@@ -40,7 +40,12 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
             () => TogglePage(ctx));
 
         var hud = new ControlsHud(ctx);
+        // The gallery's three standard windows (ctx.Windows: closed on every unload reason).
+        var windows = new GalleryWindows((preset, title, options) => ctx.Windows.Create(preset, title, options), log);
+        ctx.Track(windows);
+        var gallery = new GalleryHost(ctx, windows, window, dialog, hud);
         ctx.Menu.Register(Name, "Every Progenitor UI control, each wired to a log line and a status label.")
+            .Page(GalleryDemo.PageId, panel => new GalleryDemo(log, gallery, hud).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
             .Page(ControlsDemo.PageId, panel => new ControlsDemo(log, dialog).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
             .Page(WidgetsDemo.PageId, panel => new WidgetsDemo(log, hud).Build(panel));
 
@@ -126,6 +131,43 @@ internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDem
         _ping = _ctx.Hud.Locate(picked.Entity, picked.Menu, seconds: 10);
         return "pinged " + picked.EntityIndex + ":" + picked.EntityVersion;
     }
+}
+
+/// <summary>The gallery's calls into the plugin: its windows, its pages, the dialogs and the HUD.</summary>
+internal sealed class GalleryHost : IGalleryHost
+{
+    private readonly PluginContext _ctx;
+    private readonly GalleryWindows _windows;
+    private readonly ControlsWindow _floating;
+    private readonly Action<string> _dialog;
+    private readonly ControlsHud _hud;
+
+    internal GalleryHost(PluginContext ctx, GalleryWindows windows, ControlsWindow floating, Action<string> dialog, ControlsHud hud)
+    {
+        _ctx = ctx;
+        _windows = windows;
+        _floating = floating;
+        _dialog = dialog;
+        _hud = hud;
+    }
+
+    public string ToggleWindow(UiWindowPreset preset) => _windows.Toggle(preset);
+
+    public void OpenFloating() => _floating.Open();
+
+    public void OpenPage(string page) => _ctx.Menu.OpenPage(page);
+
+    public void OpenDialog(string kind) => _dialog(kind);
+
+    public void Notify(string text, string detail, UiNoticeKind kind, bool prefix) =>
+        _ctx.Hud.Notify(text, detail, kind, prefix: prefix);
+
+    public void Pick(Action<string> done) => _hud.Pick(done);
+
+    public string LocatePicked() => _hud.LocatePicked();
+
+    public string Tip(IUiPanel anchor) =>
+        _hud.Tip("gallery", "The gallery", "Every control the kit offers, by category. Hover a button to see the call it makes.", anchor);
 }
 
 /// <summary>One <c>ctx.Dialogs</c> call per kind in <see cref="ControlsDemo.DialogKinds"/>.</summary>

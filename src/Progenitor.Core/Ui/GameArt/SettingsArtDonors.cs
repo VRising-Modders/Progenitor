@@ -230,7 +230,8 @@ internal static class SettingsArtDonors
         }
 
         bool allHeld = true;
-        for (int i = 0; i < PartCount; i++) allHeld &= Art.OwnedUsable(i) || Art.HeldUsable(i);
+        // WINDOWS1: an optional part (the window title ornament) that the game never loads does not keep the scans going.
+        for (int i = 0; i < PartCount; i++) allHeld &= SettingsArtLadder.Optional((SettingsArtPart)i) || Art.OwnedUsable(i) || Art.HeldUsable(i);
         Found? live = null;
         if (SettingsArtLadder.ShouldScanLive(allHeld, _liveScanEpoch, epoch, _liveScanFrame, frame))
         {
@@ -428,7 +429,16 @@ internal static class SettingsArtDonors
             try { Collect(found, popup.gameObject, SettingsArtLadder.DonorPopup); } catch { /* */ }
         }
 
-        found.AnyMenu = menus.Count > 0 || panels.Count > 0 || popups.Count > 0;
+        // WINDOWS1 live fix: the game's generic popup prefab (resident in a world, probe D1) is the donor of the window title
+        // ornament (Window_TitleSideOrnament, either side of its title, over its Window_Divider); the confirm popup above
+        // does not carry it, so the title ornament had no donor.
+        var generic = resident ? Loaded<global::ProjectM.UI.GenericPopup>() : Scene<global::ProjectM.UI.GenericPopup>();
+        foreach (var popup in generic)
+        {
+            try { Collect(found, popup.gameObject, SettingsArtLadder.DonorPopup); } catch { /* */ }
+        }
+
+        found.AnyMenu = menus.Count > 0 || panels.Count > 0 || popups.Count > 0 || generic.Count > 0;
         var roots = new HashSet<IntPtr>();
         foreach (var (panel, donor) in panels)
         {
@@ -570,7 +580,7 @@ internal static class SettingsArtDonors
     private static void ReadLoadedSprites(Found found)
     {
         bool want = false;
-        for (int i = 0; i < PartCount && !want; i++) want = found.Parts[i] == null;
+        for (int i = 0; i < PartCount && !want; i++) want = found.Parts[i] == null && !SettingsArtLadder.Optional((SettingsArtPart)i);
         if (!want) return;
         var type = Il2CppType.Of<Sprite>();
         if (type == null) return;

@@ -634,6 +634,8 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
             // The frozen mode moves with it, so the Hide path still detaches what is attached.
             var previous = _shownMode;
             _shownMode = value;
+            // WINDOWS1 review: a shown standard window's mode decides the workspace dim; lay the set out again.
+            if (WindowWidth > 0f && previous != value) Ui.ReflowAfterModeChange();
             try
             {
                 if (previous == UiCaptureMode.Never && value != UiCaptureMode.Never)
@@ -782,10 +784,25 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// from Hide, and one panel that refused to move must not stop the rest of the set from
     /// being laid out.
     /// </summary>
-    internal void PlaceAt(int rank, int count)
+    internal void PlaceAt(int rank, int count) => PlaceAt(new PanelSpot(rank, count));
+
+    /// <summary>WINDOWS1: a standard window's asked-for frame width, which the re-flow lays the windows out by; 0 for any other panel.</summary>
+    internal float WindowWidth { get; set; }
+
+    /// <summary>WINDOWS1: the standard window composed over this panel; null for any other panel.</summary>
+    internal UiWindowHandle? Window { get; set; }
+
+    /// <summary>
+    /// WINDOWS1 review: false for a panel the panel flow does not place (a dialog, a self-placed panel, a top-pinned
+    /// panel, a wide centered game window). The others join the standard windows' row while a window is shown
+    /// (<see cref="UiWindowLayout.Spots"/>), so a floating panel and a window never land on each other.
+    /// </summary>
+    internal bool Flows { get; set; } = true;
+
+    internal void PlaceAt(PanelSpot spot)
     {
         if (_panel == null) return;
-        try { _runtime.PlacePanel(_panel, new PanelSpot(rank, count)); }
+        try { _runtime.PlacePanel(_panel, spot); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: re-flow PlacePanel threw: " + e.Message); }
     }
 

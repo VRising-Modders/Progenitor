@@ -127,6 +127,19 @@ internal interface IUiRuntime
     void GameWindowChrome(IRuntimePanel panel) { }
 
     /// <summary>
+    /// WINDOWS1: a standard window's frame on a game window (<see cref="UiWindowLayout"/>): its width, centered or tiled,
+    /// the ornamental header band, and the info column rows pinned <see cref="MenuRowPin.Side"/> go into. Call after
+    /// <see cref="GameWindowChrome"/>. No-op on a runtime that does not host Unity panels; a test fake records the ask.
+    /// </summary>
+    void WindowChrome(IRuntimePanel panel, UiWindowSpec spec) { }
+
+    /// <summary>
+    /// WINDOWS1: dim the Mods workspace behind the standard windows (<see cref="UiWindowLayout.ShadeWorkspace"/>), or stop.
+    /// The dim draws over the workspace and under every window and dialog, and takes no clicks. No-op by default.
+    /// </summary>
+    void WindowShade(bool on) { }
+
+    /// <summary>
     /// TOKENINSERT1: insert <paramref name="text"/> into the text field <paramref name="field"/> at its caret (the end when
     /// it never had focus; a selection is replaced), whole or not at all (<see cref="UiFieldInsert"/>), through the
     /// field's own edit path (undo, change notice), and give the field the keyboard. False when the runtime cannot (a
@@ -411,6 +424,12 @@ internal interface IUiRuntime
     /// <summary>NAV1: the widget's rect in screen pixels (y up), or <see cref="ScreenRect.Unknown"/> (test fakes).</summary>
     ScreenRect WidgetRect(IRuntimeWidget widget) => ScreenRect.Unknown;
 
+    /// <summary>WINDOWS1: whether the pointer is over <paramref name="panel"/>'s frame now (a WhenHovered panel takes the input).</summary>
+    bool PanelUnderPointer(IRuntimePanel panel) => false;
+
+    /// <summary>WINDOWS1: the widget's rect where it is drawn now (<see cref="WidgetRect"/> unscrolls a window's info column).</summary>
+    ScreenRect WidgetDrawnRect(IRuntimeWidget widget) => WidgetRect(widget);
+
     /// <summary>
     /// NAV1: draw or remove the controller focus marker on <paramref name="widget"/>: the look the pointer's hover gives
     /// it (a grid row's band; a button's highlight). <paramref name="option"/> is a multi-select's option, else -1.
@@ -422,6 +441,12 @@ internal interface IUiRuntime
 
     /// <summary>NAV1: scroll the list holding <paramref name="widget"/> by a stick's deflection (-1..1 per frame, positive up).</summary>
     void ScrollNear(IRuntimeWidget widget, float amount) { }
+
+    /// <summary>
+    /// WINDOWS1: scroll a window's info column so <paramref name="widget"/> in it is wholly in view (a controller's focus
+    /// moved there); false when the widget is not in an info column.
+    /// </summary>
+    bool RevealInColumn(IRuntimeWidget widget) => false;
 
     /// <summary>
     /// INLINEAPPLY1: the art <paramref name="button"/> is drawn with now (<c>game-button</c>, <c>game-button-pending</c> or
