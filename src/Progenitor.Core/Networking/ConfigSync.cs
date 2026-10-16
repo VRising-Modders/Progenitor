@@ -299,7 +299,15 @@ public static class ConfigSync
         AttachEntryHandler(entry);
 
         if (session != null)
+        {
             ReattachSession(slot, session);
+            // PINS1: a plugin reload binds a new ConfigFile. The session lock was the last thing
+            // naming the previous generation's file, so its save hold goes now; left in SaveHolds it
+            // kept that file, its entries and their SettingChanged handlers (the old plugin's
+            // lambdas) and with them the old plugin's load context alive until Core Uninstall.
+            if (!ReferenceEquals(session.Entry.ConfigFile, watchFile))
+                DropUnreferencedHolds();
+        }
         else
         {
             bool parkNew;
@@ -516,6 +524,7 @@ public static class ConfigSync
         }
         foreach (var file in files)
             TrySaveFile(file);
+        DropUnreferencedHolds();
         if (n > 0)
             LogInfo("ConfigSync: restored " + n.ToString() + " local setting(s) after disconnect");
         return n;
@@ -1032,6 +1041,10 @@ public static class ConfigSync
             int locked = LockedCount;
             if (n > 0) holds.Add("synced=" + n.ToString());
             if (locked > 0) holds.Add("locked=" + locked.ToString());
+            var (saveHolds, sessions, leftLive) = HoldCounts();
+            if (saveHolds > 0) holds.Add("saveHolds=" + saveHolds.ToString());
+            if (sessions > 0) holds.Add("sessionLocks=" + sessions.ToString());
+            if (leftLive > 0) holds.Add("serverValueLeftLive=" + leftLive.ToString());
             if (_installed) holds.Add("configSync");
         }
         catch (Exception e)
@@ -2271,6 +2284,49 @@ public static class ConfigSync
             SaveHolds.Remove(file);
         }
         SetSaveOnConfigSet(file, hold.PreviousSaveOnConfigSet, out _);
+    }
+
+    /// <summary>
+    /// PINS1: forget the save hold and the left-live mark of every file no registration and no
+    /// session lock names any more. Such a file belongs to a plugin generation that unloaded (a
+    /// reload binds a new <see cref="ConfigFile"/>), and these tables were the only Core references
+    /// keeping it — its entries, their <c>SettingChanged</c> handlers and the plugin's load context —
+    /// alive. <c>SaveOnConfigSet</c> on such a file is left off: nothing of the plugin writes to it
+    /// any more, and a save from it could put a stale or server value into the shared cfg path.
+    /// A file a live registration still uses is never touched here; its hold is released by the
+    /// ordinary restore path. Returns how many files were forgotten.
+    /// </summary>
+    internal static int DropUnreferencedHolds()
+    {
+        var dropped = new List<ConfigFile>();
+        lock (Gate)
+        {
+            var named = new HashSet<ConfigFile>();
+            foreach (var slot in Entries.Values)
+                if (slot.Entry.ConfigFile != null) named.Add(slot.Entry.ConfigFile);
+            foreach (var session in SessionLocks.Values)
+                if (session.Entry.ConfigFile != null) named.Add(session.Entry.ConfigFile);
+            foreach (var file in SaveHolds.Keys)
+                if (!named.Contains(file)) dropped.Add(file);
+            foreach (var file in dropped)
+                SaveHolds.Remove(file);
+            ServerValueLeftLive.RemoveWhere(f => !named.Contains(f));
+        }
+        for (int i = 0; i < dropped.Count; i++)
+            LogInfo("ConfigSync: forgot the save hold on a previous generation's '" + SafePath(dropped[i]) + "'");
+        return dropped.Count;
+    }
+
+    private static string SafePath(ConfigFile file)
+    {
+        try { return file.ConfigFilePath; }
+        catch { return "?"; }
+    }
+
+    /// <summary>Table sizes for tests and the pin dump.</summary>
+    internal static (int saveHolds, int sessionLocks, int leftLive) HoldCounts()
+    {
+        lock (Gate) return (SaveHolds.Count, SessionLocks.Count, ServerValueLeftLive.Count);
     }
 
     private static void TrySaveFile(ConfigFile file)

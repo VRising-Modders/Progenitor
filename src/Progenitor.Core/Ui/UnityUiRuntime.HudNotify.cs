@@ -83,7 +83,14 @@ internal sealed partial class UnityUiRuntime
     }
 
     /// <summary>An unloading plugin's notices: queued ones dropped, its showing one ended.</summary>
-    internal static int HudDropNotices(object owner) => NoticeQueue.DropOwner(owner);
+    internal static int HudDropNotices(object owner)
+    {
+        int n = NoticeQueue.DropOwner(owner);
+        // PINS1: the banner check keeps the last presented notice until its banner is confirmed; one from this owner
+        // must not outlive the owner's unload.
+        if (_bannerCheckNotice != null && ReferenceEquals(_bannerCheckNotice.Owner, owner)) _bannerCheckNotice = null;
+        return n;
+    }
 
     private static void EnsureNoticeTick()
     {
@@ -119,7 +126,10 @@ internal sealed partial class UnityUiRuntime
         {
             Plugin.Logger?.LogWarning("Ui: ctx.Hud.Notify tick failed: " + e.Message + "; the queue is cleared.");
             NoticeQueue.Clear();
-            HideBand();
+            // PINS1: the banner check holds the last notice, and a notice holds its plugin's owner.
+            _bannerCheckNotice = null;
+            try { HideBand(); }
+            catch (Exception hide) { Plugin.Logger?.LogWarning("Ui: ctx.Hud.Notify band hide failed: " + hide.Message); }
             StopNoticeTick();
         }
     }

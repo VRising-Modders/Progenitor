@@ -480,6 +480,21 @@ public sealed class UiTermsTests : IDisposable
     }
 
     [Fact]
+    public void An_unowned_markers_handler_goes_with_the_plugin_that_declared_it()
+    {
+        // PINS1: a BCL method stands in for a plugin's handler, a BCL object for that plugin's owner.
+        int before = UiTerms.HandlerCount;
+        var lease = UiTerms.OnMarkersChanged(PluginA, new Action(GC.Collect));
+        var core = UiTerms.OnMarkersChanged(PluginA, () => { });
+        Assert.Equal(before + 2, UiTerms.HandlerCount);
+        UiTerms.DropOwner(new System.Text.StringBuilder());
+        Assert.Equal(before + 1, UiTerms.HandlerCount); // Core's own handler is not matched by assembly
+        core.Dispose();
+        lease.Dispose();
+        Assert.Equal(before, UiTerms.HandlerCount);
+    }
+
+    [Fact]
     public void The_markers_toggle_on_a_header_panel_does_not_outlive_its_toggle()
     {
         UiTerms.Define(PluginA, "Belt", "x");

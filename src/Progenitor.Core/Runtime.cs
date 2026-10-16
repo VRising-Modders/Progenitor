@@ -30,6 +30,11 @@ public static class Runtime
     /// <summary>Reacquire server settings if a refused swap restored plugins into this Core.</summary>
     public static void CompletePluginCollection()
     {
+        // Bootstrap calls this on the Core that hosts the reloaded plugins. A fresh generation has
+        // recorded nothing; the old one is called only when a refused swap put plugins back, and
+        // then every recorded context still alive outlived the collect wait: name what holds it.
+        try { Reload.PluginPinHolders.Diagnose(m => Plugin.Logger?.LogInfo(m), minAgeSeconds: 0); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("pin-diag plugin-holders: " + e.Message); }
         if (!_configReleasedForCollection) return;
         _configReleasedForCollection = false;
         Networking.Handshake.RequestRefreshAfterCoreSwap();

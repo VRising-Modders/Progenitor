@@ -38,12 +38,12 @@ internal interface IRuntimeVanillaTabs : IDisposable
 internal sealed class VanillaPanelTabs : IVanillaPanelTabs
 {
     private static readonly List<VanillaPanelTabs> Live = new();
-    private readonly object _owner;
+    private object? _owner;
     private readonly VanillaUiSite _site;
     private readonly int _count;
     private readonly VanillaPanelTracker _tracker = new();
-    private readonly IRuntimeVanillaTabs? _host;
-    private readonly IDisposable? _watch;
+    private IRuntimeVanillaTabs? _host;
+    private IDisposable? _watch;
     private bool _disposed;
     private int _selected;
     public event Action<VanillaPanelEvent>? PanelChanged;
@@ -92,16 +92,35 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
         if (change != null) PanelChanged?.Invoke(new VanillaPanelEvent(_site, change.Value, _tracker.Target, previous));
     }
 
+    /// <summary>
+    /// Leaves nothing of the plugin reachable through this handle, even when the plugin never
+    /// unsubscribed: the subscribers, the owner and the runtime host (whose click slots close over
+    /// this handle) are all dropped, so a Core reference that outlives the dispose cannot pin the
+    /// plugin's load context. Each step is guarded so a throwing host still clears the rest.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _watch?.Dispose();
-        _host?.Dispose();
         PanelChanged = null;
         SelectionChanged = null;
         Live.Remove(this);
+        var watch = _watch;
+        var host = _host;
+        _watch = null;
+        _host = null;
+        _owner = null;
+        try { watch?.Dispose(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: panel tabs watch release threw: " + e.Message); }
+        try { host?.Dispose(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: panel tabs release threw: " + e.Message); }
     }
+
+    /// <summary>Live handles (tests: the owner sweep leaves none behind).</summary>
+    internal static int LiveCount => Live.Count;
+
+    /// <summary>True while any subscriber is attached (tests: dispose clears plugin delegates).</summary>
+    internal bool HasSubscribers => PanelChanged != null || SelectionChanged != null;
 
     internal static void Drop(object? owner)
     {

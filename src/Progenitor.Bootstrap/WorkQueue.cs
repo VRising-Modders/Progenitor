@@ -426,16 +426,12 @@ internal static class WorkQueue
     /// <summary>Queued + delayed items whose context or source assembly matches Core.</summary>
     public static string DescribeOwned(string? contextName, string? assemblyFullName)
     {
-        int queued = 0;
+        // Never enumerate the ConcurrentQueue: enumeration marks its segments preserved for observation, and a preserved
+        // segment keeps every item dequeued after it (delegates of plugins long unloaded) referenced until the segment
+        // itself is dropped. Count does not. Queued work runs next frame, so the total is enough here.
+        int queuedTotal = Queue.Count;
         int delayed = 0;
         var names = new List<string>();
-        foreach (var item in Queue)
-        {
-            if (!MatchesCore(in item, contextName, assemblyFullName)) continue;
-            queued++;
-            if (names.Count < 8)
-                names.Add(item.ContextName ?? item.SourceAssemblyName ?? "?");
-        }
         lock (Delayed)
         {
             for (int i = 0; i < Delayed.Count; i++)
@@ -447,7 +443,7 @@ internal static class WorkQueue
                     names.Add(item.ContextName ?? item.SourceAssemblyName ?? "?");
             }
         }
-        return "pin-diag MainThread queued=" + queued + " delayed=" + delayed
+        return "pin-diag MainThread queuedTotal=" + queuedTotal + " delayed=" + delayed
             + (names.Count == 0 ? "" : " samples=[" + string.Join(",", names) + "]");
     }
 

@@ -460,6 +460,9 @@ public class VanillaAttachTests : IDisposable
         Assert.Equal(1, VanillaAttachRegistry.Count);
         Assert.True(VanillaAttachRegistry.HasWatch(Site));
         Assert.Contains("destroy did not take; retrying", Log());
+        // PINS1: the entry kept for the retry no longer names the plugin, so an unload is not pinned by it.
+        Assert.Null(((VanillaAttachHandle)a).Owner);
+        Assert.Equal(0, VanillaAttachRegistry.RemoveAll(_owner));
 
         _client.RefuseDestroys = false;
         _client.Fire(Site, Open(11));

@@ -660,6 +660,48 @@ public sealed class ConfigSyncTests : IDisposable
     }
 
     [Fact]
+    public void Reload_onto_a_new_ConfigFile_forgets_the_previous_generations_file()
+    {
+        // Generation A: its own ConfigFile, locked to a server value, then unloaded while joined.
+        var (oldFile, handlerTarget) = LockAndUnloadOldGeneration();
+        Assert.Equal((1, 1, 0), ConfigSync.HoldCounts());
+
+        // Generation B binds a new ConfigFile on the same path and re-attaches the session.
+        var newFile = new ConfigFile(Path.Combine(_dir, "example.mod.cfg"), saveOnInit: false);
+        var rebound = ConfigSync.Bind(newFile, "example.mod", "General", "Count", 3, "n", pluginVersion: "1.0.0");
+        Assert.Equal(9, rebound.Value);
+        Assert.True(ConfigSync.IsSaveHeldOff(newFile));
+
+        // Nothing in ConfigSync names generation A's file any more, so nothing reaches its handlers.
+        Assert.Equal((1, 0, 0), ConfigSync.HoldCounts());
+        for (int i = 0; i < 3 && (oldFile.IsAlive || handlerTarget.IsAlive); i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(handlerTarget.IsAlive);
+        Assert.False(oldFile.IsAlive);
+
+        Assert.Equal(1, ConfigSync.RestoreLocal());
+        Assert.Equal((0, 0, 0), ConfigSync.HoldCounts());
+    }
+
+    sealed class OldPluginHandler { internal int Calls; internal void On(object? s, EventArgs e) => Calls++; }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private (WeakReference file, WeakReference handler) LockAndUnloadOldGeneration()
+    {
+        var oldFile = new ConfigFile(Path.Combine(_dir, "example.mod.cfg"), saveOnInit: false);
+        var count = oldFile.Bind("General", "Count", 3);
+        var plugin = new OldPluginHandler();
+        count.SettingChanged += plugin.On; // the plugin never unsubscribes
+        var handle = ConfigSync.Register("example.mod", "1.0.0", count);
+        ConfigSync.ApplyRecords(new[] { new ConfigSyncRecord("example.mod", "General", "Count", "9") }, snapshot: true);
+        handle.Dispose();
+        return (new WeakReference(oldFile), new WeakReference(plugin));
+    }
+
+    [Fact]
     public void Core_collection_restore_releases_unregistered_session_and_file_save_hold()
     {
         var count = _file.Bind("General", "Count", 3);

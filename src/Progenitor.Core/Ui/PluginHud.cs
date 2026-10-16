@@ -43,8 +43,24 @@ public sealed partial class PluginHud
 
     static partial void DropTips(object owner);
 
+    private bool _retiredLogged;
+
+    /// <summary>
+    /// True when <paramref name="member"/> must do nothing: on the server, and (PINS1) once this plugin's context is
+    /// unloading. The owner sweep has run by then, so a notice, ping, pick or tip made now would put the plugin back
+    /// into a Core table nothing clears and pin its load context.
+    /// </summary>
     private bool ServerSide(string member)
     {
+        if (_ctx.IsRetired)
+        {
+            if (!_retiredLogged)
+            {
+                _retiredLogged = true;
+                Plugin.Logger?.LogInfo("Ui: ctx.Hud." + member + " was called while " + _ctx.Name + " unloads; ignored.");
+            }
+            return true;
+        }
         if (!_ctx.IsServer) return false;
         if (!_serverLogged)
         {

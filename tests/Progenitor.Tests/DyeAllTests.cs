@@ -760,6 +760,23 @@ public class DyeAllTests : IDisposable
     }
 
     [Fact]
+    public void An_unowned_pointer_watch_is_swept_with_the_plugin_that_declared_its_handler()
+    {
+        // PINS1: stand-ins from another assembly than Core's: a handler and an owner from the BCL.
+        UiPointerWatchRegistry.Clear();
+        var unowned = new Counted();
+        var coreHandler = new Counted();
+        UiPointerWatchRegistry.Add(null, unowned, new Action(GC.Collect));
+        UiPointerWatchRegistry.Add(null, coreHandler, new Action(() => { })); // declared in "Core": never matched by assembly
+        Assert.Null(UiPointerWatchRegistry.SourceName(new Action(() => { })));
+
+        Assert.Equal(1, UiPointerWatchRegistry.RemoveAll(new System.Text.StringBuilder()));
+        Assert.Equal(1, unowned.Disposed);
+        Assert.Equal(0, coreHandler.Disposed);
+        Assert.Equal(1, UiPointerWatchRegistry.Clear());
+    }
+
+    [Fact]
     public void Pointer_event_reports_kind_and_primary_button()
     {
         var e = new UiPointerEvent(UiPointerEventKind.Down, primaryHeld: true);

@@ -185,6 +185,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         VanillaPanelTarget target;
         lock (_gate)
         {
+            if (Owner == null) Source ??= PluginDelegateSource.Name(handler);
             _panelHandlers.Add(handler);
             open = _tracker.IsOpen;
             target = _tracker.Target;
@@ -242,7 +243,18 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         get { lock (_gate) return _texts.Count; }
     }
 
-    internal object? Owner { get; }
+    /// <summary>
+    /// The plugin that attached. Cleared by <see cref="Dispose"/> (PINS1): a disposed handle can stay in the registry
+    /// for a few frames to retry a refused destroy, and it must not keep the plugin, and with it its load context,
+    /// alive while it does.
+    /// </summary>
+    internal object? Owner { get; private set; }
+
+    /// <summary>
+    /// PINS1: for a handle attached without an owner, the assembly name of the first panel handler's declaring
+    /// assembly, so the owner sweep of the plugin that subscribed still finds it.
+    /// </summary>
+    internal string? Source { get; private set; }
 
     public bool Visible
     {
@@ -330,6 +342,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _buttons.Clear();
             _panelHandlers.Clear();
             _tracker.Reset();
+            Owner = null;
 
             // Last, and inside the gate. This is the ordering the whole finding is about.
             Volatile.Write(ref _disposed, 1);

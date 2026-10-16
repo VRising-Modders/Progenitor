@@ -440,6 +440,10 @@ internal static class UiNav
     {
         Commands.Clear();
         Repeater.Step(sample, now, Commands);
+        // PINS1: a remembered return control that was disposed (rebuilt under a dialog, or its plugin unloaded) is let
+        // go at once, since the handle holds its plugin's owner. Where it was (surface, pane, position) is kept, so the
+        // return still lands on the nearest control.
+        if (!_returnFocus.IsEmpty && _returnFocus.Handle.IsDisposed) _returnFocus = default;
         var surface = SafeActive();
         if (surface == null)
         {
@@ -1043,7 +1047,11 @@ internal static class UiNav
         _surface = "";
         _pendingPane = -1;
         _pendingStale.Clear();
+        if (!_returnFocus.IsEmpty && _returnFocus.Handle.IsDisposed) _returnFocus = default;
     }
+
+    /// <summary>The remembered return focus is set (tests).</summary>
+    internal static bool HasReturnFocus => !_returnFocus.IsEmpty;
 
     private static void ForgetReturn()
     {

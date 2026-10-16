@@ -363,6 +363,13 @@ public class ExchangeEngineTests
         c.Engine.ForgetMod(Mod);
         Assert.Equal(RequestStatus.Cancelled, Assert.Single(mine).Status);
         Assert.Equal("this mod unloaded", mine[0].Reason);
+        Assert.True(mine[0].Unloading); // PINS1: marked, so the mod can skip any player-facing failure
+
+        // A plain Cancel is not an unload.
+        var cancelled = new List<ExchangeOutcome>();
+        var p = c.Engine.Request(Mod, T<BlobGet>(), Array.Empty<byte>(), T<Blob>(), 15, cancelled.Add);
+        c.Engine.Cancel(p);
+        Assert.False(Assert.Single(cancelled).Unloading);
     }
 
     [Fact]

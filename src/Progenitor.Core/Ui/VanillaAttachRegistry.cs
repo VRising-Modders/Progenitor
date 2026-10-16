@@ -527,9 +527,13 @@ internal static class VanillaAttachRegistry
         lock (Gate)
         {
             var list = new List<VanillaAttachHandle>();
+            string? ownerName = PluginDelegateSource.OwnerName(owner);
             for (int i = 0; i < Live.Count; i++)
             {
-                if (ReferenceEquals(Live[i].Owner, owner)) list.Add(Live[i]);
+                var h = Live[i];
+                if (ReferenceEquals(h.Owner, owner)
+                    || (h.Owner == null && !h.IsDisposed && PluginDelegateSource.Matches(h.Source, ownerName)))
+                    list.Add(h);
             }
 
             mine = list.ToArray();

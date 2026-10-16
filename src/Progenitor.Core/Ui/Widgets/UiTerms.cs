@@ -56,11 +56,15 @@ public static class UiTerms
             Action = action;
             Owner = owner;
             Dead = dead;
+            Source = owner == null ? PluginDelegateSource.Name(action) : null;
         }
 
         internal readonly string Plugin;
         internal readonly Action Action;
         internal readonly object? Owner;
+
+        /// <summary>PINS1: with no owner, the declaring assembly's name, so the owner sweep still finds the handler.</summary>
+        internal readonly string? Source;
         internal readonly Func<bool>? Dead;
 
         internal bool IsDead
@@ -312,7 +316,9 @@ public static class UiTerms
         lock (Gate)
         {
             bindings = Bindings.FindAll(b => ReferenceEquals(b.Owner, owner)).ToArray();
-            handlers = Changed.RemoveAll(h => ReferenceEquals(h.Owner, owner));
+            string? ownerName = PluginDelegateSource.OwnerName(owner);
+            handlers = Changed.RemoveAll(h => ReferenceEquals(h.Owner, owner)
+                || (h.Owner == null && PluginDelegateSource.Matches(h.Source, ownerName)));
         }
 
         foreach (var b in bindings)
