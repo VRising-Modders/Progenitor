@@ -437,6 +437,12 @@ internal interface IUiRuntime
     void ScrollNear(IRuntimeWidget widget, float amount) { }
 
     /// <summary>
+    /// WINDOWS1: scroll a window's info column so <paramref name="widget"/> in it is wholly in view (a controller's focus
+    /// moved there); false when the widget is not in an info column.
+    /// </summary>
+    bool RevealInColumn(IRuntimeWidget widget) => false;
+
+    /// <summary>
     /// INLINEAPPLY1: the art <paramref name="button"/> is drawn with now (<c>game-button</c>, <c>game-button-pending</c> or
     /// <c>kit</c>), or null when the runtime cannot tell.
     /// </summary>

@@ -60,6 +60,10 @@ public static partial class Ui
     /// <summary>As above with the pane's <see cref="MenuPaneMode"/> (LIST3: the Install tab is <see cref="MenuPaneMode.FullWidth"/>).</summary>
     internal static void ConfigureMenuPanel(IUiPanel panel, bool sidebar, MenuPaneMode mode)
     {
+        // WINDOWS1 live fix: a workspace pane is never a floating panel in the window row, even after it is parked (a
+        // parked list is no longer ModsMenu's live pane but stays shown, and was counted in the row: the Header window
+        // jumped while the search was typed).
+        if (panel is UiPanelHandle pane) pane.Flows = false;
         // The Mods workspace carries one footer — the component versions, on its main pane — and
         // the sidebar none, whatever the Core-owned default put there when the pane was created.
         // KEYS3 live 2026-09-29: the Keybinds tab's description column (Aside) is a second pane too;

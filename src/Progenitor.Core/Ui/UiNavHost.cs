@@ -88,6 +88,10 @@ internal sealed class UiNavHost : INavHost
     {
         var handle = target.Handle;
         if (handle == null || handle.IsDisposed) return;
+        // WINDOWS1: a control in a window's info column is revealed by scrolling that column.
+        IRuntimeWidget? widget = handle is UiCellRowHandle cells ? cells.NavWidget(target.Part) : handle.Runtime;
+        try { if (widget is { Alive: true } && Ui.CurrentRuntime().RevealInColumn(widget)) return; }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: nav column reveal threw: " + e.Message); }
         // The panel that holds it scrolls it into view (the section jumps' reveal).
         foreach (var panel in Ui.ShownPanelsSnapshot())
         {

@@ -39,7 +39,14 @@ internal sealed partial class UnityUiRuntime
             var go = NavObject(widget);
             if (go == null || !go.activeInHierarchy) return ScreenRect.Unknown;
             var rt = go.GetComponent<RectTransform>();
-            return rt == null ? ScreenRect.Unknown : ScreenRectOf(rt);
+            if (rt == null) return ScreenRect.Unknown;
+            var rect = ScreenRectOf(rt);
+            // WINDOWS1 live fix: a control in a scrolled info column is placed where it sits unscrolled, so the
+            // controller reaches it (Down from the tabs, Left and Right with the content) however the column is scrolled;
+            // the focus then scrolls it into view (RevealInColumn).
+            if (NavHost(widget) is { } host && host.InfoScrollPixels(go) is float shift && shift != 0f && rect.IsKnown)
+                rect = ScreenRect.FromCorners(rect.MinX, rect.MinY - shift, rect.MaxX, rect.MaxY - shift);
+            return rect;
         }
         catch { return ScreenRect.Unknown; }
     }
@@ -161,6 +168,16 @@ internal sealed partial class UnityUiRuntime
             if (go == null) return false;
             var field = go.GetComponentInChildren<TMP_InputField>(false);
             return field != null && FocusOwnedField(field);
+        }
+        catch { return false; }
+    }
+
+    public bool RevealInColumn(IRuntimeWidget widget)
+    {
+        try
+        {
+            var go = NavObject(widget);
+            return go != null && NavHost(widget) is { } host && host.RevealInInfo(go);
         }
         catch { return false; }
     }

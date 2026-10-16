@@ -341,6 +341,20 @@ internal static class UiWindowLayout
         return Math.Max(0f, clipHeight);
     }
 
+    /// <summary>
+    /// The info column's scroll that brings an item wholly into view: <paramref name="itemTop"/> and
+    /// <paramref name="itemBottom"/> are its edges measured down from the clip's top at the current
+    /// <paramref name="scroll"/>, the clip <paramref name="viewHeight"/> tall. An item above moves the column up to it,
+    /// one below down to it; one in view leaves it. Clamped to 0..<paramref name="max"/>.
+    /// </summary>
+    internal static float InfoRevealScroll(float scroll, float max, float itemTop, float itemBottom, float viewHeight)
+    {
+        float y = scroll;
+        if (itemTop < 0f) y += itemTop;
+        else if (itemBottom > viewHeight) y += Math.Min(itemBottom - viewHeight, itemTop);
+        return Math.Max(0f, Math.Min(Math.Max(0f, max), y));
+    }
+
     /// <summary>How far the info column can scroll: its content past its clip; 0 when it fits.</summary>
     internal static float InfoScrollMax(float contentHeight, float clipHeight) =>
         float.IsNaN(contentHeight) || float.IsNaN(clipHeight) ? 0f : Math.Max(0f, contentHeight - clipHeight);
@@ -534,6 +548,23 @@ internal static class UiWindowLayout
         for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen, layer[w])));
         for (int o = 0; o < others.Count; o++) result.Add((shown[others[o]], new PanelSpot(o, others.Count)));
         return result;
+    }
+
+    /// <summary>
+    /// WINDOWS1 live fix: whether two row spots place a panel identically (rank, layer, the set's widths and whether the
+    /// workspace is shown). The re-flow leaves a row panel alone when its spot did not change, so a workspace re-layout
+    /// that does not change the row's membership never moves a window.
+    /// </summary>
+    internal static bool SameRowSpot(PanelSpot a, PanelSpot b)
+    {
+        if (!a.IsWindow || !b.IsWindow) return false;
+        if (a.Rank != b.Rank || a.Layer != b.Layer || a.WorkspaceOpen != b.WorkspaceOpen) return false;
+        var wa = a.WindowWidths!;
+        var wb = b.WindowWidths!;
+        if (wa.Length != wb.Length) return false;
+        for (int i = 0; i < wa.Length; i++)
+            if (Math.Abs(wa[i] - wb[i]) > 0.01f) return false;
+        return true;
     }
 
     /// <summary>The air kept between the workspace's tab strip and a window's top edge.</summary>

@@ -791,6 +791,62 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
+    public void A_workspace_pane_never_joins_the_row_and_an_unchanged_row_is_not_moved()
+    {
+        // Live: an open Header window jumped from x 640 to 972 when the workspace re-laid out after Escape cleared the
+        // search: a parked workspace pane (shown, but no longer the live pane) had been counted in the row.
+        var header = Make(UiWindowPreset.Header, "Chest");
+        header.Show();
+        var spot = _runtime.SpotFor("Chest");
+        Assert.Equal(1, spot.Count);
+
+        var parked = UiApi.Panel("Parked list", _owner, "example.mod");
+        UiApi.ConfigureMenuPanel(parked, sidebar: true);
+        Assert.False(((UiPanelHandle)parked).Flows);
+        int before = _runtime.PlaceCount;
+        parked.Show();
+        parked.Hide();
+        Assert.True(UiWindowLayout.SameRowSpot(spot, _runtime.SpotFor("Chest")));
+        Assert.Equal(1, _runtime.SpotFor("Chest").Count);
+        // The window itself was not placed again by those re-flows (only the parked pane's own show and hide placed it).
+        int windowPlacements = _runtime.PlaceCount - before;
+        parked.Show();
+        parked.Hide();
+        Assert.Equal(windowPlacements, _runtime.PlaceCount - before - windowPlacements);
+
+        // A floating panel that was closed leaves the row; the window moves back to the center.
+        var floating = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
+        floating.Show();
+        Assert.Equal(2, _runtime.SpotFor("Chest").Count);
+        floating.Hide();
+        Assert.Equal(1, _runtime.SpotFor("Chest").Count);
+
+        var a = new PanelSpot(0, new[] { Basic }, false, 0);
+        Assert.True(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, new[] { Basic }, false, 0)));
+        Assert.False(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, new[] { Basic, Basic }, false, 0)));
+        Assert.False(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, new[] { Basic }, true, 0)));
+        Assert.False(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, 1)));
+    }
+
+    [Fact]
+    public void The_controller_reaches_the_info_column_and_its_focus_scrolls_it_into_view()
+    {
+        // Live: Down from the tabs stopped there (the column's buttons were scrolled out of sight, so out of reach).
+        Assert.Equal(40f, UiWindowLayout.InfoRevealScroll(100f, 500f, -60f, -20f, 400f));   // above: up to it
+        Assert.Equal(160f, UiWindowLayout.InfoRevealScroll(100f, 500f, 380f, 460f, 400f));  // below: down to it
+        Assert.Equal(100f, UiWindowLayout.InfoRevealScroll(100f, 500f, 10f, 50f, 400f));    // in view: stays
+        Assert.Equal(0f, UiWindowLayout.InfoRevealScroll(10f, 500f, -60f, -20f, 400f));     // clamped
+        string nav = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Nav.cs");
+        Assert.Contains("host.InfoScrollPixels(go) is float shift", nav);
+        Assert.Contains("Ui.CurrentRuntime().RevealInColumn(widget)", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UiNavHost.cs"));
+        // The column's buttons are stops of the window's surface like any other control.
+        var w = Make(UiWindowPreset.Tabbed, "Net");
+        var locate = w.Info!.Button("Locate all");
+        Assert.Contains((UiHandle)locate, ((UiPanelHandle)w.Panel).ChildrenSnapshot());
+        Assert.True(UiNav.IsStop((UiHandle)locate));
+    }
+
+    [Fact]
     public void Show_hide_toggle_and_dispose_follow_the_panel()
     {
         var w = Make(UiWindowPreset.Basic);

@@ -365,6 +365,51 @@ internal sealed partial class UnityUiRuntime
             : _infoClip != null && UnityUiRuntime.Alive(_infoClip) ? _infoClip : GameObject;
 
         /// <summary>
+        /// How far (screen pixels, upward) the info column is scrolled when <paramref name="go"/> is in it; null otherwise.
+        /// </summary>
+        internal float? InfoScrollPixels(GameObject? go)
+        {
+            try
+            {
+                if (go == null || _infoContent == null || _infoClip == null || !go.transform.IsChildOf(_infoContent.transform)) return null;
+                var content = _infoContent.GetComponent<RectTransform>();
+                var view = _infoClip.GetComponent<RectTransform>();
+                if (content == null || view == null) return null;
+                var c = ScreenRectOf(content);
+                var v = ScreenRectOf(view);
+                if (!c.IsKnown || !v.IsKnown) return null;
+                return c.MaxY - v.MaxY;
+            }
+            catch { return null; }
+        }
+
+        /// <summary>Scroll the info column so <paramref name="go"/> is wholly in view; false when it is not in the column.</summary>
+        internal bool RevealInInfo(GameObject go)
+        {
+            try
+            {
+                if (go == null || _infoContent == null || _infoClip == null || !go.transform.IsChildOf(_infoContent.transform)) return false;
+                var content = _infoContent.GetComponent<RectTransform>();
+                var view = _infoClip.GetComponent<RectTransform>();
+                var item = go.GetComponent<RectTransform>();
+                if (content == null || view == null || item == null) return true;
+                var v = ScreenRectOf(view);
+                var r = ScreenRectOf(item);
+                float viewH = view.sizeDelta.y;
+                if (!v.IsKnown || !r.IsKnown || viewH <= 0f) return true;
+                float scale = (v.MaxY - v.MinY) / viewH;
+                if (!(scale > 0f)) return true;
+                float top = (v.MaxY - r.MaxY) / scale;
+                float bottom = (v.MaxY - r.MinY) / scale;
+                float max = UiWindowLayout.InfoScrollMax(content.sizeDelta.y, viewH);
+                float y = UiWindowLayout.InfoRevealScroll(content.anchoredPosition.y, max, top, bottom, viewH);
+                content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
         /// NAV1: the right stick over a control in the info column scrolls the column (<paramref name="amount"/> per
         /// frame, positive up); false when <paramref name="go"/> is not in it or it cannot move.
         /// </summary>
