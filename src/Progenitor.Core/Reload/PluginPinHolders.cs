@@ -77,18 +77,18 @@ internal static class PluginPinHolders
             if (pluginType == null) return;
             var alc = AssemblyLoadContext.GetLoadContext(pluginType.Assembly);
             if (alc == null || !alc.IsCollectible) return;
+            // The admission scan's result, or a scan now: the assembly is still loaded. Strings only.
+            // Computed before the lock (a scan takes milliseconds); the check and the add share one lock.
+            var generics = RuntimeGenericsOf(pluginType.Assembly);
+            var allocator = CrossContextGenerics.LoaderAllocatorOf(pluginType);
             lock (Gate)
             {
                 Prune();
                 for (int i = 0; i < RetiredContexts.Count; i++)
                     if (RetiredContexts[i].Context.TryGetTarget(out var known) && ReferenceEquals(known, alc)) return;
-            }
-            // The admission scan's result, or a scan now: the assembly is still loaded. Strings only.
-            var generics = RuntimeGenericsOf(pluginType.Assembly);
-            var allocator = CrossContextGenerics.LoaderAllocatorOf(pluginType);
-            lock (Gate)
                 RetiredContexts.Add(new Retired(alc, alc.Name ?? "?", pluginName ?? pluginType.FullName ?? "?", Stopwatch.GetTimestamp(),
                     generics, allocator));
+            }
         }
         catch
         {
@@ -103,9 +103,10 @@ internal static class PluginPinHolders
         catch { name = ""; }
         var findings = CrossContextGenerics.Recall(name) ?? CrossContextGenerics.ScanLoaded(assembly, out _);
         if (findings == null || findings.Count == 0) return Array.Empty<string>();
-        var members = new string[findings.Count];
-        for (int i = 0; i < members.Length; i++) members[i] = findings[i].Member;
-        return members;
+        // Possible (generic dispatch) findings are not printed as holders; the m_slots line covers them.
+        var members = new List<string>(findings.Count);
+        foreach (var f in findings) if (!f.Possible) members.Add(f.Member);
+        return members.ToArray();
     }
 
     /// <summary>Recorded contexts still alive (test and status use).</summary>

@@ -20,20 +20,40 @@ namespace Progenitor.Tests;
 /// Game-free: the images are compiled with Roslyn, and the runtime half loads them into real
 /// collectible contexts and reads the runtime's own cross-reference table.
 /// </summary>
-public sealed class CrossContextGenericsTests
+public sealed class CrossContextGenericsTests : IClassFixture<CrossContextGenericsTests.TempFolder>
 {
+    /// <summary>Deletes the class's temporary image folder after its last test (best effort: a loaded image may still be mapped).</summary>
+    public sealed class TempFolder : IDisposable
+    {
+        public void Dispose()
+        {
+            if (!Folder.IsValueCreated) return;
+            try
+            {
+                for (int i = 0; i < 3; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); }
+                Directory.Delete(Folder.Value, recursive: true);
+            }
+            catch
+            {
+                // Best effort; the OS temp folder is cleaned eventually.
+            }
+        }
+    }
+
     // ---- fixtures ------------------------------------------------------------------------------
 
     private const string CoreSource = @"
 namespace Progenitor
 {
     public interface IUiHandle { }
+    public interface IStore { T Get<T>(); }
     public interface IUiButton : IUiHandle { }
     public sealed class Button : IUiButton { }
     public static class Ui
     {
         public static IUiButton MakeButton() => new Button();
         public static T Echo<T>(T value) => value;
+        public static int Use(IStore store) => store.Get<IUiButton>() == null ? 1 : 0;
     }
     public sealed class CoreBox<T> { public T Value; }
 }";
@@ -42,7 +62,16 @@ namespace Progenitor
     /// One method per case. <c>Run(name)</c> calls it, so the JIT meets only that case's
     /// instantiation. <c>Compiled</c> is compiled but never takes the branch that calls it.
     /// </summary>
-    private const string PluginSource = @"
+    private static string DeepType(int levels)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < levels; i++) sb.Append("Deep<");
+        sb.Append("IUiButton");
+        sb.Append('>', levels);
+        return sb.ToString();
+    }
+
+    private static readonly string PluginSource = @"
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using Progenitor;
@@ -51,6 +80,8 @@ namespace FakePlugin
     public sealed class Mine { }
     public sealed class Box<T> { public T Value; }
     public sealed class Holder<T> { public static int Inner<U>() => 1; }
+    public sealed class MyStore : IStore { public T Get<T>() => default(T); }
+    public sealed class Deep<T> { }
     public static class Demo
     {
         private static T On<T>(T handle) where T : IUiHandle => handle;
@@ -79,6 +110,7 @@ namespace FakePlugin
                 case ""compiled-only"": return Compiled(false);
                 case ""method-on-own-generic-type"": return MethodOnOwnGenericType();
                 case ""open-with-core"": return Open<Mine>();
+                case ""dispatch-core"": return DispatchCore();
                 default: return 0;
             }
         }
@@ -97,6 +129,10 @@ namespace FakePlugin
         [MethodImpl(MethodImplOptions.NoInlining)] static int CoreGenericSelf() => Ui.Echo(new Mine()) != null ? 1 : 0;
         [MethodImpl(MethodImplOptions.NoInlining)] static int Compiled(bool go) { if (go) return One(Ui.MakeButton()); return 0; }
         [MethodImpl(MethodImplOptions.NoInlining)] static int MethodOnOwnGenericType() => Holder<Mine>.Inner<IUiButton>();
+        // Core calls the plugin's generic method with a Core type: no reference in this image shows it.
+        [MethodImpl(MethodImplOptions.NoInlining)] static int DispatchCore() => Ui.Use(new MyStore());
+        // Nesting past the scan's depth cap reads as open instead of recursing further.
+        static object DeepNest() => new " + DeepType(80) + @"();
     }
 }";
 
@@ -180,11 +216,36 @@ namespace FakePlugin
         expected.Add("FakePlugin.Demo.Pair Pair<?, IUiButton>");
         var actual = new SortedSet<string>(StringComparer.Ordinal);
         foreach (var h in PluginScan.Value)
-            foreach (var i in h.Instantiations) actual.Add(h.Member + " " + i);
+            if (!h.Possible && h.Member != "FakePlugin.Deep")
+                foreach (var i in h.Instantiations) actual.Add(h.Member + " " + i);
         Assert.Equal(expected, actual);
     }
 
     // Homes as letters: X fixed (never unloads), S the plugin, F Core, U an open parameter.
+    [Fact]
+    public void Deep_nesting_is_capped_and_still_reports_the_inner_levels()
+    {
+        // 80 levels: the levels under the cap are named, the rest read as open, nothing recurses unbounded.
+        var deep = Assert.Single(PluginScan.Value, h => h.Member == "FakePlugin.Deep");
+        Assert.False(deep.Possible);
+        Assert.Contains("Deep<IUiButton>", deep.Instantiations);
+        Assert.All(deep.Instantiations, i => Assert.True(i.Length <= 243, i));
+    }
+
+    [Fact]
+    public void A_generic_method_of_a_type_implementing_a_Core_interface_is_a_possible_pin()
+    {
+        var hit = Assert.Single(PluginScan.Value, h => h.Member == "FakePlugin.MyStore.Get");
+        Assert.True(hit.Possible);
+        Assert.Equal(new[] { "IStore" }, hit.Instantiations);
+        Assert.StartsWith("FakePlugin.MyStore.Get is a generic method of a type implementing IStore; ",
+            CrossContextGenerics.PossibleLine(hit.Member, hit.Instantiations), StringComparison.Ordinal);
+        // And the runtime does pin it once Core makes the call.
+        using var pair = new Pair();
+        pair.Run("dispatch-core");
+        Assert.True(pair.CoreHoldsPlugin());
+    }
+
     [Theory]
     [InlineData("S", "F", "F")]
     [InlineData("S", "SF", "F")]
@@ -295,8 +356,11 @@ namespace FakePlugin
         using var pair = new Pair();
         CrossContextGenerics.ClearRemembered();
         var warnings = new List<string>();
-        var hits = CrossContextGenerics.Admit(pair.Plugin, warnings.Add);
-        Assert.Equal(hits.Count, warnings.Count);
+        var infos = new List<string>();
+        var hits = CrossContextGenerics.Admit(pair.Plugin, warnings.Add, info: infos.Add);
+        Assert.Equal(hits.Count(h => !h.Possible), warnings.Count);
+        Assert.Equal(hits.Count(h => h.Possible), infos.Count);
+        Assert.Contains(infos, i => i.Contains("possible pin via generic dispatch", StringComparison.Ordinal));
         Assert.Contains(warnings, w => w.StartsWith(CrossContextGenerics.WarningLine("FakePlugin.Demo.On") + " Instantiations: On<IUiButton>", StringComparison.Ordinal));
         Assert.Same(hits, CrossContextGenerics.Recall("FakePlugin"));
         // An assembly that never unloads is not checked.
@@ -308,7 +372,7 @@ namespace FakePlugin
     public void The_messages_are_stable()
     {
         Assert.Equal(
-            "X.On is a generic defined in this plugin and instantiated only with Progenitor types; the runtime will keep "
+            "X.On is a generic defined in this plugin and instantiated with a Progenitor type; the runtime will keep "
             + "this plugin loaded until Progenitor Core unloads, so hot reloads of it leak and block Core swaps. Make the "
             + "helper non-generic.",
             CrossContextGenerics.WarningLine("X.On"));
@@ -326,15 +390,18 @@ namespace FakePlugin
 
     // ---- the guard over every built plugin in this repository -------------------------------------
 
-    private static string FindRepoRoot()
+    internal static string FindRepoRoot()
     {
         for (var dir = AppContext.BaseDirectory; dir != null; dir = Path.GetDirectoryName(dir))
             if (File.Exists(Path.Combine(dir, "Progenitor.sln"))) return dir;
         throw new DirectoryNotFoundException("Progenitor.sln not found from " + AppContext.BaseDirectory);
     }
 
-    /// <summary>The newest built image of every sample, template and the Dev plugin that exists on disk.</summary>
-    private static List<string> BuiltPlugins(string root)
+    /// <summary>
+    /// The newest built image of every sample, template and the Dev plugin that exists on disk, with
+    /// the newest write time of the project's own sources (csproj and .cs files outside bin and obj).
+    /// </summary>
+    internal static List<(string Image, DateTime Built, DateTime Source)> BuiltPlugins(string root)
     {
         var projects = new List<string>();
         foreach (var top in new[] { "samples", "templates" })
@@ -344,7 +411,7 @@ namespace FakePlugin
         }
         projects.Add(Path.Combine(root, "src", "Progenitor.Dev", "Progenitor.Dev.csproj"));
 
-        var images = new List<string>();
+        var images = new List<(string, DateTime, DateTime)>();
         foreach (var csproj in projects)
         {
             if (!File.Exists(csproj)) continue;
@@ -357,23 +424,33 @@ namespace FakePlugin
                 .Where(p => !p.Contains(Path.DirectorySeparatorChar + "ref" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
-            if (newest != null) images.Add(newest);
+            if (newest == null) continue;
+            var source = File.GetLastWriteTimeUtc(csproj);
+            foreach (var cs in Directory.EnumerateFiles(projectDir, "*.cs", SearchOption.AllDirectories))
+            {
+                string rel = Path.GetRelativePath(projectDir, cs);
+                if (rel.StartsWith("bin" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                    || rel.StartsWith("obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+                var t = File.GetLastWriteTimeUtc(cs);
+                if (t > source) source = t;
+            }
+            images.Add((newest, File.GetLastWriteTimeUtc(newest), source));
         }
         return images;
     }
 
-    [Fact]
+    [BuiltPluginsFact]
     public void No_built_sample_template_or_Dev_plugin_defines_a_generic_that_lives_in_Core()
     {
-        // The samples build only against an installed game; without one this has nothing to read and
-        // the Roslyn cases above carry the rule.
+        // BuiltPluginsFact skips (with the reason) when nothing is built or a build is older than its
+        // sources, so this reads only images of the current tree.
         string root = FindRepoRoot();
         var report = new StringBuilder();
-        foreach (string image in BuiltPlugins(root))
+        foreach (string image in BuiltPlugins(root).Select(b => b.Image))
         {
             var hits = CrossContextGenerics.ScanFile(image, null, out string error);
             Assert.True(error.Length == 0, image + ": " + error);
-            foreach (var hit in hits)
+            foreach (var hit in hits.Where(h => !h.Possible))
                 report.Append(Path.GetRelativePath(root, image)).Append(": ").Append(hit.Member)
                     .Append(" <- ").Append(string.Join(", ", hit.Instantiations)).AppendLine();
         }
@@ -381,5 +458,33 @@ namespace FakePlugin
             "These generics are defined in a plugin and instantiated with Progenitor types, so the runtime creates "
             + "them in Core's load context and keeps the plugin alive until Core unloads (docs/hot-reload.md, "
             + "\"Generic helpers\"). Make each helper non-generic, then rebuild:" + Environment.NewLine + report);
+    }
+}
+
+/// <summary>
+/// Skips the built-plugin guard, with the reason, when it cannot read the current tree: no sample or
+/// Dev build exists (no installed game), or a build is older than its project's sources. Same v2
+/// mechanism as <c>DumpBackedFactAttribute</c>; the constructor never throws.
+/// </summary>
+internal sealed class BuiltPluginsFactAttribute : FactAttribute
+{
+    public BuiltPluginsFactAttribute()
+    {
+        try
+        {
+            var built = CrossContextGenericsTests.BuiltPlugins(CrossContextGenericsTests.FindRepoRoot());
+            if (built.Count == 0)
+            {
+                Skip = "no built sample, template or Dev image (they build only against an installed game); build the solution to run this guard";
+                return;
+            }
+            var stale = built.Where(b => b.Built < b.Source).Select(b => Path.GetFileName(b.Image)).ToList();
+            if (stale.Count > 0)
+                Skip = "built images older than their sources, rebuild to run this guard: " + string.Join(", ", stale);
+        }
+        catch (Exception e)
+        {
+            Skip = "could not list the built plugin images: " + e.Message;
+        }
     }
 }

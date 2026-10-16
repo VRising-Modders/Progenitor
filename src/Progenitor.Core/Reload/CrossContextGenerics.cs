@@ -13,12 +13,20 @@ namespace Progenitor.Reload;
 /// <summary>One generic a plugin defines whose instantiations live in another collectible context.</summary>
 internal sealed class CrossContextGeneric
 {
-    internal CrossContextGeneric(string member, IReadOnlyList<string> instantiations, IReadOnlyList<string> holders)
+    internal CrossContextGeneric(string member, IReadOnlyList<string> instantiations, IReadOnlyList<string> holders, bool possible = false)
     {
         Member = member;
         Instantiations = instantiations;
         Holders = holders;
+        Possible = possible;
     }
+
+    /// <summary>
+    /// False: the metadata names an instantiation that lives in Core (a warning). True: a generic
+    /// method of a plugin type that implements a Core interface, which pins only if Core calls it with a
+    /// Core type (generic dispatch; information). <see cref="Instantiations"/> then lists the interfaces.
+    /// </summary>
+    internal bool Possible { get; }
 
     /// <summary>The generic method or type the plugin defines, e.g. <c>Example.Mod.Gallery.On</c>.</summary>
     internal string Member { get; }
@@ -85,9 +93,15 @@ internal static class CrossContextGenerics
 
     /// <summary>The admission warning for one offending member.</summary>
     internal static string WarningLine(string member) =>
-        member + " is a generic defined in this plugin and instantiated only with Progenitor types; the runtime "
+        member + " is a generic defined in this plugin and instantiated with a Progenitor type; the runtime "
         + "will keep this plugin loaded until Progenitor Core unloads, so hot reloads of it leak and block Core "
         + "swaps. Make the helper non-generic.";
+
+    /// <summary>The admission information line for a generic method Core may call with its own types.</summary>
+    internal static string PossibleLine(string member, IReadOnlyList<string> bases) =>
+        member + " is a generic method of a type implementing " + string.Join(", ", bases) + "; if Progenitor calls it "
+        + "with a Progenitor type, the runtime keeps this plugin loaded until Progenitor Core unloads (possible pin "
+        + "via generic dispatch).";
 
     /// <summary>The pin diagnosis line for one offending member of a retired plugin that is still alive.</summary>
     internal static string DiagnosisLine(string member) =>
@@ -155,22 +169,35 @@ internal static class CrossContextGenerics
         int methodSpecs = md.GetTableRowCount(TableIndex.MethodSpec);
         for (int row = 1; row <= methodSpecs; row++)
         {
-            try { provider.MethodSpec(md.GetMethodSpecification(MetadataTokens.MethodSpecificationHandle(row))); }
+            try
+            {
+                var spec = md.GetMethodSpecification(MetadataTokens.MethodSpecificationHandle(row));
+                if (Fits(md, spec.Signature)) provider.MethodSpec(spec);
+            }
             catch (BadImageFormatException) { /* a malformed row has no instantiation to report */ }
         }
 
         // Inline generic instantiations in signatures (fields, locals, parameters, member references)
         // are created when the type loader or the JIT meets them, without a TypeSpec row.
         foreach (var h in md.FieldDefinitions)
-            Try(() => md.GetFieldDefinition(h).DecodeSignature(provider, null));
+        {
+            var field = md.GetFieldDefinition(h);
+            Try(md, field.Signature, () => field.DecodeSignature(provider, null));
+        }
         foreach (var h in md.MethodDefinitions)
-            Try(() => md.GetMethodDefinition(h).DecodeSignature(provider, null));
+        {
+            var method = md.GetMethodDefinition(h);
+            Try(md, method.Signature, () => method.DecodeSignature(provider, null));
+        }
         foreach (var h in md.PropertyDefinitions)
-            Try(() => md.GetPropertyDefinition(h).DecodeSignature(provider, null));
+        {
+            var property = md.GetPropertyDefinition(h);
+            Try(md, property.Signature, () => property.DecodeSignature(provider, null));
+        }
         foreach (var h in md.MemberReferences)
         {
             var mr = md.GetMemberReference(h);
-            Try(() =>
+            Try(md, mr.Signature, () =>
             {
                 if (mr.GetKind() == MemberReferenceKind.Method) mr.DecodeMethodSignature(provider, null);
                 else mr.DecodeFieldSignature(provider, null);
@@ -180,18 +207,36 @@ internal static class CrossContextGenerics
         for (int row = 1; row <= sigs; row++)
         {
             var sig = md.GetStandaloneSignature(MetadataTokens.StandaloneSignatureHandle(row));
-            Try(() =>
+            Try(md, sig.Signature, () =>
             {
                 if (sig.GetKind() == StandaloneSignatureKind.LocalVariables) sig.DecodeLocalSignature(provider, null);
                 else sig.DecodeMethodSignature(provider, null);
             });
         }
 
+        provider.GenericDispatch();
         return provider.Results();
     }
 
-    private static void Try(Action read)
+    /// <summary>Nesting depth past which a type reads as open (a crafted image cannot recurse far).</summary>
+    internal const int MaxDepth = 64;
+
+    /// <summary>
+    /// Signature blobs longer than this are skipped. The metadata decoder recurses once per nested
+    /// type, and one nesting level can cost a single byte, so this bounds its stack use on Core's
+    /// load path. Real signatures are far shorter.
+    /// </summary>
+    internal const int MaxBlobBytes = 1024;
+
+    private static bool Fits(MetadataReader md, BlobHandle blob)
     {
+        try { return md.GetBlobReader(blob).Length <= MaxBlobBytes; }
+        catch (BadImageFormatException) { return false; }
+    }
+
+    private static void Try(MetadataReader md, BlobHandle blob, Action read)
+    {
+        if (!Fits(md, blob)) return;
         try { read(); }
         catch (BadImageFormatException) { /* skip a malformed blob */ }
         catch (InvalidOperationException) { /* skip a blob of an unexpected kind */ }
@@ -203,9 +248,11 @@ internal static class CrossContextGenerics
     {
         internal static readonly ImmutableArray<Node> None = ImmutableArray<Node>.Empty;
 
-        internal Node(string text, ContextHome home, string holder, string? selfMember = null, Node? definition = null, ImmutableArray<Node> args = default)
+        internal Node(string text, ContextHome home, string holder, string? selfMember = null, Node? definition = null,
+            ImmutableArray<Node> args = default, int depth = 0)
         {
-            Text = text;
+            Text = text.Length > MaxText ? text.Substring(0, MaxText) + "..." : text;
+            Depth = depth;
             Home = home;
             Holder = holder;
             SelfMember = selfMember;
@@ -221,7 +268,12 @@ internal static class CrossContextGenerics
         internal string? SelfMember { get; }
         internal Node? Definition { get; }
         internal ImmutableArray<Node> Args { get; }
+        /// <summary>Nesting depth; past <see cref="MaxDepth"/> a type reads as open.</summary>
+        internal int Depth { get; }
     }
+
+    /// <summary>Display text is clipped, so shared nested specs cannot grow it without bound.</summary>
+    private const int MaxText = 240;
 
     /// <summary>
     /// The home of a constructed generic whose definition lives in <paramref name="defHome"/>
@@ -264,6 +316,8 @@ internal static class CrossContextGenerics
         private readonly Dictionary<string, ContextHome> _homes = new(StringComparer.OrdinalIgnoreCase);
         private readonly SortedDictionary<string, (SortedSet<string> inst, SortedSet<string> holders)> _hits = new(StringComparer.Ordinal);
         private static readonly Node Open = new("?", ContextHome.Unknown, "");
+        private int _specNesting;
+        private readonly SortedDictionary<string, SortedSet<string>> _possible = new(StringComparer.Ordinal);
 
         internal Provider(MetadataReader md, Func<string, ContextHome> classify)
         {
@@ -276,7 +330,53 @@ internal static class CrossContextGenerics
             var list = new List<CrossContextGeneric>(_hits.Count);
             foreach (var kv in _hits)
                 list.Add(new CrossContextGeneric(kv.Key, new List<string>(kv.Value.inst), new List<string>(kv.Value.holders)));
+            foreach (var kv in _possible)
+                if (!_hits.ContainsKey(kv.Key))
+                    list.Add(new CrossContextGeneric(kv.Key, new List<string>(kv.Value), new[] { CoreAssemblyName }, possible: true));
             return list;
+        }
+
+        /// <summary>
+        /// Generic virtual methods of plugin types that implement a Core interface or derive from a Core
+        /// type. Core can call them with Core types (generic dispatch, e.g. a store's <c>Get&lt;T&gt;</c>),
+        /// which no reference in this image shows. Reported as possible, not certain.
+        /// </summary>
+        internal void GenericDispatch()
+        {
+            foreach (var th in _md.TypeDefinitions)
+            {
+                try
+                {
+                    var type = _md.GetTypeDefinition(th);
+                    var bases = new SortedSet<string>(StringComparer.Ordinal);
+                    foreach (var ih in type.GetInterfaceImplementations())
+                        AddIfCore(bases, _md.GetInterfaceImplementation(ih).Interface);
+                    if (!type.BaseType.IsNil) AddIfCore(bases, type.BaseType);
+                    if (bases.Count == 0) continue;
+                    foreach (var mh in type.GetMethods())
+                    {
+                        var m = _md.GetMethodDefinition(mh);
+                        if ((m.Attributes & MethodAttributes.Virtual) == 0 || m.GetGenericParameters().Count == 0) continue;
+                        string member = TypeDef(th).SelfMember + "." + _md.GetString(m.Name);
+                        if (!_possible.TryGetValue(member, out var set)) _possible[member] = set = new SortedSet<string>(StringComparer.Ordinal);
+                        set.UnionWith(bases);
+                    }
+                }
+                catch (BadImageFormatException) { /* skip a malformed type */ }
+            }
+        }
+
+        private void AddIfCore(SortedSet<string> into, EntityHandle handle)
+        {
+            Node? node = handle.Kind switch
+            {
+                HandleKind.TypeReference => GetTypeFromReference(_md, (TypeReferenceHandle)handle, 0),
+                HandleKind.TypeSpecification => GetTypeFromSpecification(_md, null, (TypeSpecificationHandle)handle, 0),
+                _ => null,
+            };
+            if (node == null) return;
+            var definition = node.Definition ?? node;
+            if (definition.Home == ContextHome.Framework) into.Add(node.Text);
         }
 
         private void Hit(string member, string instantiation, string holder)
@@ -286,7 +386,7 @@ internal static class CrossContextGenerics
                 entry = (new SortedSet<string>(StringComparer.Ordinal), new SortedSet<string>(StringComparer.Ordinal));
                 _hits[member] = entry;
             }
-            entry.inst.Add(instantiation);
+            entry.inst.Add(instantiation.Length > MaxText ? instantiation.Substring(0, MaxText) + "..." : instantiation);
             if (holder.Length > 0) entry.holders.Add(holder);
         }
 
@@ -359,11 +459,20 @@ internal static class CrossContextGenerics
 
         private string FullName(TypeDefinition def)
         {
+            // Iterative and capped: a crafted declaring-type chain cannot recurse or loop.
             string name = Short(_md.GetString(def.Name));
-            var outer = def.GetDeclaringType();
-            if (!outer.IsNil) return FullName(_md.GetTypeDefinition(outer)) + "." + name;
-            string ns = _md.GetString(def.Namespace);
-            return ns.Length > 0 ? ns + "." + name : name;
+            for (int depth = 0; depth < MaxDepth; depth++)
+            {
+                var outer = def.GetDeclaringType();
+                if (outer.IsNil)
+                {
+                    string ns = _md.GetString(def.Namespace);
+                    return ns.Length > 0 ? ns + "." + name : name;
+                }
+                def = _md.GetTypeDefinition(outer);
+                name = Short(_md.GetString(def.Name)) + "." + name;
+            }
+            return name;
         }
 
         public Node GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle, byte rawTypeKind) => TypeDef(handle);
@@ -390,15 +499,28 @@ internal static class CrossContextGenerics
         {
             if (_specs.TryGetValue(handle, out var known)) return known;
             _specs[handle] = Open; // a recursive spec (it cannot be in valid metadata) reads as open
-            Node node;
-            try { node = reader.GetTypeSpecification(handle).DecodeSignature(this, context); }
-            catch (BadImageFormatException) { node = Open; }
+            Node node = Open;
+            // Specs nest through tokens as well as inside one blob; both are bounded.
+            if (_specNesting < MaxDepth)
+            {
+                _specNesting++;
+                try
+                {
+                    var spec = reader.GetTypeSpecification(handle);
+                    if (Fits(reader, spec.Signature)) node = spec.DecodeSignature(this, context);
+                }
+                catch (BadImageFormatException) { node = Open; }
+                finally { _specNesting--; }
+            }
             _specs[handle] = node;
             return node;
         }
 
         public Node GetGenericInstantiation(Node genericType, ImmutableArray<Node> typeArguments)
         {
+            int depth = genericType.Depth;
+            foreach (var a in typeArguments) depth = Math.Max(depth, a.Depth);
+            if (++depth > MaxDepth) return Open;
             var homes = new ContextHome[typeArguments.Length];
             for (int i = 0; i < homes.Length; i++) homes[i] = typeArguments[i].Home;
             var home = Instantiate(genericType.Home, homes, out int holderIndex);
@@ -408,7 +530,7 @@ internal static class CrossContextGenerics
             string text = genericType.Text + "<" + Join(typeArguments) + ">";
             if (genericType.SelfMember != null && home == ContextHome.Framework)
                 Hit(genericType.SelfMember, text, holder);
-            return new Node(text, home, holder, definition: genericType, args: typeArguments);
+            return new Node(text, home, holder, definition: genericType, args: typeArguments, depth: depth);
         }
 
         public Node GetSZArrayType(Node elementType) => Wrap(elementType, "[]");
@@ -422,7 +544,8 @@ internal static class CrossContextGenerics
         public Node GetGenericTypeParameter(object? genericContext, int index) => Open;
         public Node GetPrimitiveType(PrimitiveTypeCode typeCode) => new(Primitive(typeCode), ContextHome.Fixed, "");
 
-        private static Node Wrap(Node element, string suffix) => new(element.Text + suffix, element.Home, element.Holder);
+        private static Node Wrap(Node element, string suffix) =>
+            element.Depth + 1 > MaxDepth ? Open : new(element.Text + suffix, element.Home, element.Holder, depth: element.Depth + 1);
     }
 
     private static string Join(ImmutableArray<Node> nodes)
@@ -498,7 +621,10 @@ internal static class CrossContextGenerics
     {
         error = "";
         if (!assembly.TryGetRawMetadata(out byte* blob, out int length)) return null;
-        return Scan(new MetadataReader(blob, length), classify);
+        var result = Scan(new MetadataReader(blob, length), classify);
+        // The blob belongs to the loaded image; keep the assembly reachable until the reader is done.
+        GC.KeepAlive(assembly);
+        return result;
     }
 #endif
 
@@ -507,7 +633,8 @@ internal static class CrossContextGenerics
     /// diagnosis and pass one <see cref="WarningLine"/> per offending member to <paramref name="warn"/>.
     /// Returns the findings (empty for an assembly that never unloads). Never throws.
     /// </summary>
-    internal static IReadOnlyList<CrossContextGeneric> Admit(Assembly? assembly, Action<string>? warn, Action<string>? debug = null)
+    internal static IReadOnlyList<CrossContextGeneric> Admit(Assembly? assembly, Action<string>? warn, Action<string>? debug = null,
+        Action<string>? info = null)
     {
         try
         {
@@ -520,7 +647,10 @@ internal static class CrossContextGenerics
             if (hits == null) return Array.Empty<CrossContextGeneric>();
             Remember(name, hits);
             foreach (var hit in hits)
-                warn?.Invoke(WarningLine(hit.Member) + " Instantiations: " + string.Join(", ", hit.Instantiations) + ".");
+            {
+                if (hit.Possible) info?.Invoke(PossibleLine(hit.Member, hit.Instantiations));
+                else warn?.Invoke(WarningLine(hit.Member) + " Instantiations: " + string.Join(", ", hit.Instantiations) + ".");
+            }
             debug?.Invoke(name + ": cross-context generic scan found "
                 + hits.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " in "
                 + clock.Elapsed.TotalMilliseconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + " ms");

@@ -225,7 +225,7 @@ Contract, detection rules and messages: [Modules: plugins that inject IL2CPP typ
 A generic method or type defined in your plugin and instantiated with a Progenitor type, such as `T On<T>(int tab, T handle) where T : IUiHandle` called as `On(tab, panel.Toggle(…))`, is created in Core's load context. Core then keeps your plugin alive until that Core generation unloads. Each reload leaks a copy, and Core swaps are refused (`refused: plugin ALC … still alive`) until a restart.
 
 - **Fix:** call Core's generic directly (`_tabs!.Add(tab, panel.Toggle(…))`), or make the helper non-generic and cast at the call site.
-- **At load:** Core logs `<member> is a generic defined in this plugin and instantiated only with Progenitor types; …` once per member.
+- **At load:** Core logs `<member> is a generic defined in this plugin and instantiated with a Progenitor type; …` once per member.
 - **At a refused swap:** `pin-diag plugin-holder runtime-generic <member> -> released when this Core generation unloads`.
 
 Exact rule, messages and verification: [Modules: generic helpers](modules.md#generic-helpers-instantiated-with-progenitor-types-pin-the-plugin).

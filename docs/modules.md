@@ -141,7 +141,7 @@ The runtime creates an instantiation of a generic in the newest *other* collecti
 private T On<T>(int tab, T handle) where T : IUiHandle => _tabs!.Add(tab, handle);
 On(tab, panel.Toggle("Toggle", true)).OnChanged(...);
 
-// Fine: IUiTabs.Add<T> is defined in Core. A generic Core defines over any type stays out of Core's context.
+// Fine: IUiTabs.Add<T> is defined in Core. A generic Core defines does not pin the plugin, whatever its type arguments.
 _tabs!.Add(tab, panel.Toggle("Toggle", true)).OnChanged(...);
 
 // Fine: a non-generic helper; cast at the call site.
@@ -158,7 +158,18 @@ The rule, as the runtime applies it:
 | A runtime-library generic that mixes Core and your types: `One<Dictionary<IUiButton, MyType>>` | No: that dictionary lives in your (newer) context. |
 | A generic Core defines, over any types: `ctx.Bind<T>`, `IUiTabs.Add<T>` | No |
 
-When a `ProgenitorPlugin` loads from a collectible context, Core scans its metadata (about 6 ms for the 1.5 MB Dev plugin, under 2 ms for the samples) and logs one warning per offending member: `<plugin>: <member> is a generic defined in this plugin and instantiated only with Progenitor types; the runtime will keep this plugin loaded until Progenitor Core unloads, so hot reloads of it leak and block Core swaps. Make the helper non-generic. Instantiations: <list>.` The scan reports references, not calls that ran, and sees only the plugin's own assembly. It is guidance; the plugin loads either way. At a Core swap, a retired plugin that is still alive gets `pin-diag plugin-holder runtime-generic <member> -> released when this Core generation unloads`, plus the slot in Core's loader handle table when the runtime exposes it. The repository test `CrossContextGenericsTests` applies the same scan to every built sample and the Dev plugin.
+When a `ProgenitorPlugin` loads from a collectible context, Core scans its metadata (about 6 ms for the 1.5 MB Dev plugin, under 2 ms for the samples) and logs one warning per offending member: `<plugin>: <member> is a generic defined in this plugin and instantiated with a Progenitor type; the runtime will keep this plugin loaded until Progenitor Core unloads, so hot reloads of it leak and block Core swaps. Make the helper non-generic. Instantiations: <list>.` It is guidance; the plugin loads either way.
+
+A generic method of a plugin type that implements a Core interface or derives from a Core type (an `IModStore`, `IUiWindow` or `IUiTabs` implementation, for example) gets an information line instead: `<member> is a generic method of a type implementing <interface>; if Progenitor calls it with a Progenitor type, the runtime keeps this plugin loaded until Progenitor Core unloads (possible pin via generic dispatch).` It pins only if Core actually makes such a call.
+
+The scan sees references in the plugin's own metadata, not calls that ran. It does not see:
+
+- instantiations made through reflection (`MakeGenericType`, `MakeGenericMethod`);
+- generic interface or virtual calls Core makes into your own implementations, beyond the information line above;
+- generics in helper DLLs the plugin ships;
+- `typeof` arguments inside attribute blobs.
+
+At a Core swap, a retired plugin that is still alive gets `pin-diag plugin-holder runtime-generic <member> -> released when this Core generation unloads` for each member the scan named. It also gets `pin-diag plugin-holder <Core LoaderAllocator>.m_slots[N] -> load context …` whenever Core's loader handle table holds it and the runtime exposes that table. That second line catches the cases the scan misses. The repository test `CrossContextGenericsTests` applies the same scan to every built sample and the Dev plugin; it is skipped when they are not built or are older than their sources.
 
 Source-checked and game-free tested: the test loads each case into real collectible contexts and checks that the runtime records a Core-to-plugin reference exactly when the scan reports one. The pin was observed live with heap analysis of a client process on 2026-10-16 (the Controls sample's `On<T>`) and reproduced on .NET 6.0.35. The admission warning and diagnosis lines are not yet observed live.
 
