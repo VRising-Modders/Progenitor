@@ -60,28 +60,32 @@ internal readonly struct PanelSpot
     {
         Rank = rank;
         Count = count;
-        CenteredWidth = 0f;
-        Tiled = 0;
+        WindowWidths = null;
+        WorkspaceOpen = false;
     }
 
     /// <summary>
-    /// WINDOWS1: a spot in a set that holds a centered wide window (a Tabbed standard window) <paramref name="centeredWidth"/>
-    /// wide. For a tiled panel <paramref name="rank"/> and <paramref name="count"/> are among the tiled panels only; for the
-    /// centered window itself they are 0 of 1 and <paramref name="tiled"/> is how many tiled panels share the screen.
+    /// WINDOWS1: a standard window's spot: the <paramref name="rank"/>th of the <paramref name="windowWidths"/>.Length shown
+    /// standard windows (in slot order, so the longest-open window keeps its place), each entry the frame width that window
+    /// asks for. <paramref name="workspaceOpen"/>: the Mods workspace is on screen, so the windows keep clear of its tab
+    /// strip. <see cref="UiWindowLayout.Place"/> lays the windows out from these alone.
     /// </summary>
-    internal PanelSpot(int rank, int count, float centeredWidth, int tiled)
+    internal PanelSpot(int rank, float[] windowWidths, bool workspaceOpen)
     {
         Rank = rank;
-        Count = count;
-        CenteredWidth = centeredWidth > 0f ? centeredWidth : 0f;
-        Tiled = tiled > 0 ? tiled : 0;
+        Count = windowWidths?.Length ?? 0;
+        WindowWidths = windowWidths;
+        WorkspaceOpen = workspaceOpen;
     }
 
-    /// <summary>WINDOWS1: the width of the centered wide window the tiled panels must stay clear of; 0 for none.</summary>
-    internal float CenteredWidth { get; }
+    /// <summary>WINDOWS1: the asked-for frame widths of every shown standard window, in order; null for an ordinary panel.</summary>
+    internal float[]? WindowWidths { get; }
 
-    /// <summary>WINDOWS1: on the centered window's own spot, how many tiled panels are shown beside it.</summary>
-    internal int Tiled { get; }
+    /// <summary>WINDOWS1: true when this is a standard window's spot.</summary>
+    internal bool IsWindow => WindowWidths != null;
+
+    /// <summary>WINDOWS1: the Mods workspace was on screen when the set was counted.</summary>
+    internal bool WorkspaceOpen { get; }
 
     /// <summary>This panel's index among the shown panels, ordered by slot.</summary>
     internal int Rank { get; }

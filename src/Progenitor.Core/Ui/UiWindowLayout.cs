@@ -13,23 +13,23 @@ public enum UiWindowPreset
 {
     /// <summary>
     /// A plain framed window: the game's popup frame, the title centered in its band, rows on the settings grid. For a
-    /// small tool used during play (a dropdown and a few buttons). Tiles with other windows; the game keeps the input
-    /// (and the controller) while the pointer is elsewhere.
+    /// small tool used during play (a dropdown and a few buttons). Opens beside the other windows; the game keeps the
+    /// input (and the controller) while the pointer is elsewhere.
     /// </summary>
     Basic = 0,
 
     /// <summary>
     /// A medium window with the game's ornamental header band: the title between the game's side ornaments and over its
     /// divider, an optional toolbar of small buttons (with an optional Rename), an optional tab row, then the content.
-    /// For one thing the player works on (a container, a station, a named set). Tiles with other windows, takes the input
-    /// while shown, and a controller navigates it.
+    /// For one thing the player works on (a container, a station, a named set). Opens beside the other windows, takes the
+    /// input while shown, and a controller navigates it.
     /// </summary>
     Header = 1,
 
     /// <summary>
     /// A large window like the game's own big menus: the header band, a tab row across the top, an info column on the
-    /// left and the main content on the right. Centered, not tiled, takes the input while shown, and a controller
-    /// navigates it.
+    /// left and the main content on the right. Opens beside the other windows (alone, it is centered), takes the input
+    /// while shown, and a controller navigates it.
     /// </summary>
     Tabbed = 2,
 }
@@ -88,12 +88,11 @@ public sealed class UiWindowOptions
 internal sealed class UiWindowSpec
 {
     internal UiWindowSpec(
-        UiWindowPreset preset, float frameWidth, bool centered, bool headerBand, bool toolbarAllowed, bool tabsAllowed,
+        UiWindowPreset preset, float frameWidth, bool headerBand, bool toolbarAllowed, bool tabsAllowed,
         float infoColumnWidth, UiCaptureMode capture)
     {
         Preset = preset;
         FrameWidth = frameWidth;
-        Centered = centered;
         HeaderBand = headerBand;
         ToolbarAllowed = toolbarAllowed;
         TabsAllowed = tabsAllowed;
@@ -105,9 +104,6 @@ internal sealed class UiWindowSpec
 
     /// <summary>The frame's width asked for (capped at 90% of the screen for a wide window).</summary>
     internal float FrameWidth { get; }
-
-    /// <summary>True: centered on screen, never tiled with other windows.</summary>
-    internal bool Centered { get; }
 
     /// <summary>True: the ornamental header band behind the title.</summary>
     internal bool HeaderBand { get; }
@@ -149,30 +145,69 @@ internal static class UiWindowLayout
     /// <summary>The ordinary window frame (the same 640 as every panel).</summary>
     internal const float BasicFrameWidth = UnityUiRuntimeMetrics.PanelWidth;
 
-    /// <summary>The large window's frame.</summary>
-    internal const float TabbedFrameWidth = 960f;
+    /// <summary>
+    /// The large window's frame. 1040 (live fix): the info column gets a 340-unit row, wide enough for a name and its
+    /// value on one line, and the content keeps a 600-unit row (the 960 frame left the column 260 and wrapped its facts).
+    /// </summary>
+    internal const float TabbedFrameWidth = 1040f;
 
-    /// <summary>The large window's info column, its gap included.</summary>
-    internal const float InfoColumnWidth = 280f;
+    /// <summary>The large window's info column, its gap included (a 340-unit row: about a third of the window's rows).</summary>
+    internal const float InfoColumnWidth = 360f;
 
     /// <summary>The air between the info column and the content.</summary>
     internal const float InfoColumnGap = 20f;
 
-    /// <summary>The ornaments either side of the title: the largest box each is fitted into (aspect kept).</summary>
-    internal const float OrnamentMaxWidth = 96f;
+    /// <summary>
+    /// The ornaments either side of the title (<c>Window_TitleSideOrnament</c>, 227x17): the game's popups draw each at
+    /// 171x17 beside the title text in a 512-unit title row (probe D1, the Forfeit popup), and so does the kit, at most.
+    /// </summary>
+    internal const float OrnamentMaxWidth = 171f;
 
-    /// <inheritdoc cref="OrnamentMaxWidth"/>
-    internal const float OrnamentMaxHeight = 24f;
+    /// <summary>The ornament's height (the sprite's own 17, as the game draws it).</summary>
+    internal const float OrnamentHeight = 17f;
+
+    /// <summary>The narrowest ornament worth drawing; a title that leaves less room is drawn without them.</summary>
+    internal const float OrnamentMinWidth = 48f;
 
     /// <summary>The air between the title text and each ornament.</summary>
-    internal const float OrnamentGap = 16f;
+    internal const float OrnamentGap = 12f;
 
     /// <summary>
-    /// Whether a title <paramref name="titleWidth"/> wide leaves the ornaments their room inside the 560-wide title rect
-    /// (at most 336); a longer title is drawn without them rather than under them.
+    /// Each ornament's width beside a title <paramref name="titleWidth"/> wide: what is left of the 560-wide title row on
+    /// that side, less the gap, at most <see cref="OrnamentMaxWidth"/>; 0 (none drawn) when that is below
+    /// <see cref="OrnamentMinWidth"/>, so a long title is never drawn over.
     /// </summary>
-    internal static bool OrnamentsFit(float titleWidth) =>
-        !float.IsNaN(titleWidth) && titleWidth * 0.5f + OrnamentGap + OrnamentMaxWidth <= UnityUiRuntimeMetrics.RowWidth * 0.5f;
+    internal static float OrnamentWidth(float titleWidth)
+    {
+        if (float.IsNaN(titleWidth) || titleWidth < 0f) return 0f;
+        float room = UnityUiRuntimeMetrics.RowWidth * 0.5f - titleWidth * 0.5f - OrnamentGap;
+        if (room < OrnamentMinWidth) return 0f;
+        return Math.Min(OrnamentMaxWidth, room);
+    }
+
+    /// <summary>Whether a title <paramref name="titleWidth"/> wide leaves the ornaments room (<see cref="OrnamentWidth"/>).</summary>
+    internal static bool OrnamentsFit(float titleWidth) => OrnamentWidth(titleWidth) > 0f;
+
+    /// <summary>
+    /// How far the version stamp sits above the frame's bottom edge in a standard window. The game's popup frame has a
+    /// thick border; on the bare band the 13-unit line sat about 4 units from the edge (live 1080 capture).
+    /// </summary>
+    internal const float StampLift = 10f;
+
+    /// <summary>The bottom band a standard window reserves for its stamp: the stamp's band and its lift; 0 without a stamp.</summary>
+    internal static float StampBand(string? stamp) =>
+        PanelFooterLayout.BandFor(stamp) > 0f ? PanelFooterLayout.BandFor(stamp) + StampLift : 0f;
+
+    /// <summary>
+    /// The style an info-column fact's value is drawn in: <see cref="UiTextStyle.Number"/> when it holds a figure (so the
+    /// figures line up), else <see cref="UiTextStyle.Body"/>.
+    /// </summary>
+    internal static UiTextStyle InfoValueStyle(string? value)
+    {
+        foreach (char c in value ?? "")
+            if (c >= '0' && c <= '9') return UiTextStyle.Number;
+        return UiTextStyle.Body;
+    }
 
     /// <summary>The title's center line from the frame top (the title band's title rect is 18..58).</summary>
     internal const float TitleCenterY = 38f;
@@ -205,15 +240,15 @@ internal static class UiWindowLayout
     internal const string RenameCaption = "Rename";
 
     private static readonly UiWindowSpec BasicSpec = new(
-        UiWindowPreset.Basic, BasicFrameWidth, centered: false, headerBand: false, toolbarAllowed: false, tabsAllowed: false,
+        UiWindowPreset.Basic, BasicFrameWidth, headerBand: false, toolbarAllowed: false, tabsAllowed: false,
         infoColumnWidth: 0f, UiCaptureMode.WhenHovered);
 
     private static readonly UiWindowSpec HeaderSpec = new(
-        UiWindowPreset.Header, BasicFrameWidth, centered: false, headerBand: true, toolbarAllowed: true, tabsAllowed: true,
+        UiWindowPreset.Header, BasicFrameWidth, headerBand: true, toolbarAllowed: true, tabsAllowed: true,
         infoColumnWidth: 0f, UiCaptureMode.WhileShown);
 
     private static readonly UiWindowSpec TabbedSpec = new(
-        UiWindowPreset.Tabbed, TabbedFrameWidth, centered: true, headerBand: true, toolbarAllowed: true, tabsAllowed: true,
+        UiWindowPreset.Tabbed, TabbedFrameWidth, headerBand: true, toolbarAllowed: true, tabsAllowed: true,
         infoColumnWidth: InfoColumnWidth, UiCaptureMode.WhileShown);
 
     /// <summary>The spec of <paramref name="preset"/>; an undefined value throws.</summary>
@@ -243,8 +278,7 @@ internal static class UiWindowLayout
     /// The frame a window of <paramref name="spec"/> is drawn at on a screen <paramref name="availableWidth"/> wide: the
     /// ordinary 640, or a wide window's wish capped at 90% of the screen and never below 640.
     /// </summary>
-    internal static float FrameWidthFor(UiWindowSpec spec, float availableWidth) =>
-        spec.FrameWidth <= BasicFrameWidth ? BasicFrameWidth : DialogLayout.FrameWidthFor(spec.FrameWidth, availableWidth);
+    internal static float FrameWidthFor(UiWindowSpec spec, float availableWidth) => FrameWidthFor(spec.FrameWidth, availableWidth);
 
     /// <summary>
     /// The info column's width in a frame drawn at <paramref name="frameWidth"/> instead of the wished width: shrunk with
@@ -270,6 +304,24 @@ internal static class UiWindowLayout
         float centerX = -frameWidth * 0.5f + PanelLayout.PadSide + width * 0.5f;
         float height = Math.Max(0f, panelHeight - top - PanelLayout.PadBottom - Math.Max(0f, footerBand));
         return (centerX, top, width, height);
+    }
+
+    /// <summary>
+    /// The info column's clip height snapped to the last row that fits whole: <paramref name="rowBottoms"/> are the rows'
+    /// bottom edges from the column's top, in order. A row the clip would cut through is masked entirely (with the rows
+    /// after it), so the column ends on a clean line above the stamp instead of half a row (live 1440 capture).
+    /// </summary>
+    internal static float SnapClip(IReadOnlyList<float> rowBottoms, float clipHeight)
+    {
+        if (rowBottoms == null || rowBottoms.Count == 0) return Math.Max(0f, clipHeight);
+        float last = 0f;
+        foreach (float b in rowBottoms)
+        {
+            if (b > clipHeight + 0.01f) return last;
+            last = b;
+        }
+
+        return Math.Max(0f, clipHeight);
     }
 
     /// <summary>How many info rows of <paramref name="heights"/> (stacked with the row gap) are wholly inside a clip <paramref name="clipHeight"/> tall.</summary>
@@ -407,78 +459,205 @@ internal static class UiWindowLayout
         spec.ControllerHandoff && navigating ? UiCaptureMode.WhileShown : spec.CaptureMode;
 
     /// <summary>
-    /// The spots of the shown panels (in slot order). Without a centered wide window this is the ordinary rank of the whole
-    /// set. With one, the centered window gets 0 of 1 and the count of tiled panels beside it, and every tiled panel is
-    /// ranked among the tiled panels only, carrying the centered window's width so its placement keeps clear of it.
-    /// Workspace panes keep their place in the whole set (they draw from their own geometry).
+    /// The spots of the shown panels (in slot order). The standard windows (<paramref name="windowWidth"/> above 0) are
+    /// ranked among themselves and each carries every window's asked-for width, so <see cref="Place"/> can lay them out
+    /// side by side; the spots also say whether the Mods workspace is on screen. Every other panel keeps the ordinary rank
+    /// among the panels that are not standard windows (workspace panes draw from their own geometry).
     /// </summary>
-    internal static List<(T Panel, PanelSpot Spot)> Spots<T>(IReadOnlyList<T> shown, Func<T, float> centeredWidth, Func<T, bool> workspace)
+    internal static List<(T Panel, PanelSpot Spot)> Spots<T>(
+        IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace)
     {
         var result = new List<(T, PanelSpot)>(shown.Count);
-        float centered = 0f;
-        var tiled = new List<T>();
-        foreach (var p in shown)
-        {
-            float w = centeredWidth(p);
-            if (w > 0f) centered = Math.Max(centered, w);
-            else if (!workspace(p)) tiled.Add(p);
-        }
-
+        var windows = new List<int>();
+        var others = new List<int>();
+        bool workspaceOpen = false;
         for (int i = 0; i < shown.Count; i++)
         {
-            var p = shown[i];
-            if (centered <= 0f || workspace(p)) result.Add((p, new PanelSpot(i, shown.Count)));
-            else if (centeredWidth(p) > 0f) result.Add((p, new PanelSpot(0, 1, centeredWidth(p), tiled.Count)));
-            else result.Add((p, new PanelSpot(tiled.IndexOf(p), tiled.Count, centered, 0)));
+            bool pane = workspace(shown[i]);
+            if (pane) workspaceOpen = true;
+            if (!pane && windowWidth(shown[i]) > 0f) windows.Add(i);
+            else others.Add(i);
         }
 
+        var widths = new float[windows.Count];
+        for (int w = 0; w < windows.Count; w++) widths[w] = windowWidth(shown[windows[w]]);
+        for (int w = 0; w < windows.Count; w++) result.Add((shown[windows[w]], new PanelSpot(w, widths, workspaceOpen)));
+        for (int o = 0; o < others.Count; o++) result.Add((shown[others[o]], new PanelSpot(o, others.Count)));
         return result;
     }
 
+    /// <summary>The air kept between the workspace's tab strip and a window's top edge.</summary>
+    internal const float StripClearance = 16f;
+
     /// <summary>
-    /// Where a panel <paramref name="panelWidth"/> wide goes on a canvas <paramref name="canvasWidth"/> x
-    /// <paramref name="canvasHeight"/>. A centered window alone is dead center. With tiled panels beside it, the centered
-    /// window and the tiled panels' columns are laid side by side as one centered group, the centered window on the left;
-    /// the tiled panels tile (and, past their columns, cascade) inside the area right of it, so none ever lands under it.
-    /// When the screen is too narrow for both, the tiled area keeps its own width at the right edge.
+    /// The top of the area windows may use while the Mods workspace is shown: the bottom edge of its tab strip (canvas
+    /// units, upward from the canvas center), from the workspace frame the panes are laid out on. A frame not read yet
+    /// (width 0) uses the frame the workspace falls back to on this canvas.
     /// </summary>
-    internal static PanelOffset Place(PanelSpot spot, float panelWidth, float canvasWidth, float canvasHeight, bool centered)
+    internal static float WorkspaceStripBottom(in ModsWorkspaceFrame frame, float canvasWidth, float canvasHeight)
+    {
+        var f = frame.Width > 1f && frame.Height > 1f ? frame : ModsWorkspaceFrame.Fallback(canvasWidth, canvasHeight);
+        var strip = MenuPanelLayout.ForStrip(f);
+        return strip.Y - strip.Height * 0.5f;
+    }
+
+    /// <summary>
+    /// The frame a window asking for <paramref name="wished"/> is drawn at on a canvas <paramref name="canvasWidth"/> wide:
+    /// the ordinary 640, or a wide window's wish capped at 90% of the canvas and never below 640.
+    /// </summary>
+    internal static float FrameWidthFor(float wished, float canvasWidth) =>
+        float.IsNaN(wished) || wished <= BasicFrameWidth ? BasicFrameWidth : DialogLayout.FrameWidthFor(wished, canvasWidth);
+
+    /// <summary>
+    /// WINDOWS1 placement rule. The windows open in a row, in the order they were opened (oldest at the left), the row
+    /// centered on the screen with <see cref="PanelFlow.ColumnGap"/> between frames, so none covers another. Every window's
+    /// top edge is on one line: just under the Mods workspace's tab strip while the workspace is shown (never over its
+    /// tabs), else where the tallest frame the screen allows would be centered; a window grows downward, so its title never
+    /// moves. The row takes as many windows as fit the screen's width less <see cref="PanelFlow.EdgeMargin"/> each side.
+    /// When space runs out, each further window cascades over a window of the row, from the right: one title band
+    /// (<see cref="PanelFlow.CascadeStep"/>) right and down per layer, so the title of the window under it stays visible,
+    /// clamped inside the screen; the step shrinks only when the screen is too short for whole bands. Every window's
+    /// height is capped so its bottom stays on screen (<see cref="WindowPlacement.MaxHeight"/>). A pure function of the
+    /// set and the canvas: using a window never moves it or the others.
+    /// </summary>
+    internal static WindowPlacement Place(PanelSpot spot, float canvasWidth, float canvasHeight, float? stripBottom = null)
     {
         float canvasW = float.IsNaN(canvasWidth) || canvasWidth <= 0f ? PanelFlow.FallbackCanvasWidth : canvasWidth;
-        if (centered)
+        float canvasH = float.IsNaN(canvasHeight) || canvasHeight <= 0f ? PanelLayout.FallbackScreenHeight : canvasHeight;
+        float margin = PanelFlow.EdgeMargin;
+        float gap = PanelFlow.ColumnGap;
+        float top = canvasH * 0.5f - margin;
+        if (spot.WorkspaceOpen && stripBottom.HasValue && !float.IsNaN(stripBottom.Value))
+            top = Math.Min(top, stripBottom.Value - StripClearance);
+        float bottom = -canvasH * 0.5f + margin;
+        float cap = Math.Max(PanelLayout.MinPanelHeight, Math.Min(top - bottom, PanelLayout.PanelHeightFor(float.MaxValue, canvasH)));
+        // The row's top: as high as the area allows, but no higher than where the tallest frame would be centered in it.
+        float rowTop = Math.Min(top, (top + bottom) * 0.5f + cap * 0.5f);
+        if (!spot.IsWindow || !spot.IsPlaced)
+            return new WindowPlacement(0f, rowTop, cap, 0);
+
+        var asked = spot.WindowWidths!;
+        int n = asked.Length;
+        var widths = new float[n];
+        float usable = Math.Max(1f, canvasW - 2f * margin);
+        for (int i = 0; i < n; i++) widths[i] = Math.Min(FrameWidthFor(asked[i], canvasW), usable);
+
+        // The row: the longest run of windows from the first that fits side by side.
+        int fit = 1;
+        float span = widths[0];
+        while (fit < n && span + gap + widths[fit] <= usable + 0.01f)
         {
-            if (spot.Tiled <= 0) return PanelOffset.Centre;
-            var g = Group(spot.CenteredWidth > 0f ? spot.CenteredWidth : panelWidth, BasicFrameWidth, spot.Tiled, canvasW);
-            return new PanelOffset(g.CenteredX, 0f);
+            span += gap + widths[fit];
+            fit++;
         }
 
-        if (spot.CenteredWidth <= 0f) return PanelFlow.Offset(spot, panelWidth, canvasW, canvasHeight);
-        var group = Group(spot.CenteredWidth, panelWidth, spot.Count, canvasW);
-        var inArea = PanelFlow.Offset(spot, panelWidth, group.AreaWidth, canvasHeight);
-        return new PanelOffset(inArea.X + group.AreaCenterX, inArea.Y);
+        var rowX = new float[fit];
+        float x = -span * 0.5f;
+        for (int i = 0; i < fit; i++)
+        {
+            rowX[i] = x + widths[i] * 0.5f;
+            x += widths[i] + gap;
+        }
+
+        int rank = spot.Rank;
+        if (rank < fit) return new WindowPlacement(rowX[rank], rowTop, cap, 0);
+
+        // Out of room: cascade over the row, the rightmost window first. Layer d is d steps right and down from the
+        // row window it covers.
+        int k = rank - fit;
+        int slot = fit - 1 - k % fit;
+        int depth = k / fit + 1;
+        int deepest = (n - fit - 1) / fit + 1;
+        float step = Math.Min(PanelFlow.CascadeStep, Math.Max(0f, (rowTop - bottom - PanelLayout.MinPanelHeight) / deepest));
+        float w = widths[rank];
+        float right = canvasW * 0.5f - margin - w * 0.5f;
+        float left = -canvasW * 0.5f + margin + w * 0.5f;
+        float cx = Math.Max(left, Math.Min(right, rowX[slot] + depth * step));
+        float t = rowTop - depth * step;
+        return new WindowPlacement(cx, t, Math.Max(PanelLayout.MinPanelHeight, Math.Min(cap, t - bottom)), depth);
     }
 
-    private static (float CenteredX, float AreaWidth, float AreaCenterX) Group(float centeredWidth, float tiledWidth, int tiled, float canvasW)
+    /// <summary>
+    /// The topmost standard window Escape (or a controller's B) closes: the one shown last of <paramref name="shown"/>
+    /// (<paramref name="isWindow"/> true, the highest <paramref name="sequence"/>); default when none is shown. One press
+    /// closes one window; the next press goes on to the next window, then to the Mods workspace.
+    /// </summary>
+    internal static T? EscapeTarget<T>(IReadOnlyList<T> shown, Func<T, bool> isWindow, Func<T, long> sequence) where T : class
     {
-        float gap = PanelFlow.ColumnGap;
-        float margin = PanelFlow.EdgeMargin;
-        // The tiled area: what is left of the canvas right of the centered window, at least one tiled frame.
-        float area = Math.Max(tiledWidth + 2f * margin, canvasW - centeredWidth - gap);
-        int columns = PanelFlow.Columns(area, tiledWidth);
-        int occupied = Math.Max(1, Math.Min(tiled, columns));
-        float tiledSpan = occupied * tiledWidth + (occupied - 1) * gap;
-        float groupWidth = centeredWidth + gap + tiledSpan;
-        float left = -groupWidth * 0.5f;
-        // Too wide for the screen: the tiled columns stay whole at the right edge, the centered window as far left as it fits.
-        float rightEdge = canvasW * 0.5f - margin;
-        if (left + groupWidth > rightEdge) left = rightEdge - groupWidth;
-        float centeredX = left + centeredWidth * 0.5f;
-        float tiledLeft = left + centeredWidth + gap;
-        // PanelFlow centers the occupied columns at 0 inside the area; shift that center onto the tiled span's center.
-        return (centeredX, area, tiledLeft + tiledSpan * 0.5f);
+        T? best = null;
+        long seq = long.MinValue;
+        foreach (var p in shown)
+        {
+            if (p == null || !isWindow(p)) continue;
+            long s = sequence(p);
+            if (best == null || s > seq)
+            {
+                best = p;
+                seq = s;
+            }
+        }
+
+        return best;
     }
+
+    /// <summary>
+    /// Whether the Mods workspace behind the shown windows is dimmed: while the workspace is on screen and at least one
+    /// shown standard window takes the input while shown (Header, Tabbed, or a Basic window opened with a controller).
+    /// The dim is the game's popup blocker color at <see cref="ShadeAlpha"/>; it only darkens, it takes no clicks, so the
+    /// workspace stays usable beside a window. A Basic window that leaves the input to the pointer does not dim it.
+    /// </summary>
+    internal static bool ShadeWorkspace(bool workspaceOpen, IEnumerable<UiCaptureMode> windowModes)
+    {
+        if (!workspaceOpen) return false;
+        foreach (var m in windowModes)
+            if (m == UiCaptureMode.WhileShown) return true;
+        return false;
+    }
+
+    /// <summary>The workspace dim's opacity under a window (the game's own popup blocker is 0.8 under a modal popup).</summary>
+    internal const float ShadeAlpha = 0.6f;
+
+    /// <summary>
+    /// The draw order, bottom to top: the Mods workspace panes (<see cref="ModsCanvasBand.Panels"/>), the ordinary panels
+    /// (<see cref="UiOwnership.OverlaySorting"/>), the workspace dim, the standard windows, then every dialog, so a prompt a
+    /// window opens is drawn over that window with its own dim over it. The notice band, open lists and tooltips stay above.
+    /// </summary>
+    internal static int ShadeSorting => UiOwnership.OverlaySorting + 1;
+
+    /// <inheritdoc cref="ShadeSorting"/>
+    internal static int WindowSorting => UiOwnership.OverlaySorting + 2;
+
+    /// <inheritdoc cref="ShadeSorting"/>
+    internal static int DialogSorting => UiOwnership.OverlaySorting + 10;
 
     /// <summary>What Escape and a controller's B do in every preset. Fixed, so every mod's windows answer alike.</summary>
     internal const string EscapeRule =
-        "Escape or B first closes an open list, dialog or key capture; with none open, it closes the window.";
+        "Escape or B first closes an open list, dialog or key capture; with none open, it closes the topmost window, one window per press, and only then the Mods workspace.";
+}
+
+/// <summary>
+/// WINDOWS1: where one standard window goes (<see cref="UiWindowLayout.Place"/>), in canvas units from the canvas center:
+/// the frame's center x, its top edge (upward positive), the tallest it may be drawn so its bottom stays on screen, and
+/// its cascade layer (0 in the row).
+/// </summary>
+internal readonly struct WindowPlacement
+{
+    internal WindowPlacement(float x, float top, float maxHeight, int depth)
+    {
+        X = x;
+        Top = top;
+        MaxHeight = maxHeight;
+        Depth = depth;
+    }
+
+    internal float X { get; }
+
+    internal float Top { get; }
+
+    internal float MaxHeight { get; }
+
+    internal int Depth { get; }
+
+    /// <summary>The frame's center offset for a frame <paramref name="height"/> tall (it hangs from <see cref="Top"/>).</summary>
+    internal PanelOffset CenterFor(float height) => new(X, Top - Math.Max(0f, height) * 0.5f);
 }

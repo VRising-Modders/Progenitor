@@ -72,7 +72,11 @@ public interface IUiWindowColumn
     /// <summary>A line in a status tone.</summary>
     IUiToneLabel Label(string text, LabelTone tone = LabelTone.Normal);
 
-    /// <summary>A name and its value.</summary>
+    /// <summary>
+    /// A name and its value on one line: the name at the left (shortened with an ellipsis when the column is too narrow),
+    /// the value right-aligned (a figure in <see cref="UiTextStyle.Number"/>, other words in <see cref="UiTextStyle.Body"/>).
+    /// Set the value later with <see cref="IUiHandle.Text"/>.
+    /// </summary>
     IUiLabel Fact(string name, string value);
 
     /// <summary>A button (the game's compact button).</summary>
@@ -276,7 +280,6 @@ internal sealed class UiWindowHandle : IUiWindow
             ["open"] = IsOpen,
             ["stamp"] = VersionStamp,
             ["frameWidth"] = _spec.FrameWidth,
-            ["centered"] = _spec.Centered,
             ["headerBand"] = _spec.HeaderBand,
             ["infoColumn"] = _spec.InfoColumnWidth,
             ["capture"] = _panel.CaptureMode.ToString(),
@@ -318,7 +321,11 @@ internal sealed class UiWindowHandle : IUiWindow
 
         public IUiToneLabel Label(string text, LabelTone tone = LabelTone.Normal) => Side(() => _panel.Label(text ?? "", tone));
 
-        public IUiLabel Fact(string name, string value) => Side(() => _panel.Fact(name ?? "", value ?? ""));
+        // WINDOWS1 live fix: a fact in the narrow column is a name-and-value cell row (the name fills and is shortened with an
+        // ellipsis, the value is sized to its text and right-aligned on one line), never the settings grid's caption and
+        // control columns, whose 560-wide ruler broke "Chests" into "Chest / s" here.
+        public IUiLabel Fact(string name, string value) =>
+            Side(() => (IUiLabel)new UiStyledCells(_panel, name ?? "", value ?? "", UiWindowLayout.InfoValueStyle(value)));
 
         public IUiButton Button(string text) => Side(() => _panel.Button(text ?? ""));
     }

@@ -670,7 +670,7 @@ internal static class RowColumnRules
     /// panel's columns.
     /// </summary>
     internal static RowColumns For(
-        string? kind, bool grid, bool hasControl, bool searchField, bool menuPane, float contentRowWidth)
+        string? kind, bool grid, bool hasControl, bool searchField, bool menuPane, float contentRowWidth, bool sizedToRow = false)
     {
         if (string.Equals(kind, DialogLayout.KindTitle, StringComparison.Ordinal))
             return new RowColumns(DialogLayout.TitleWidth(contentRowWidth), 0f, 0f, 0f);
@@ -681,9 +681,10 @@ internal static class RowColumnRules
         // the grid's width (the content less the description column when the column is shown).
         if (grid) return ModSettingsRowGrid.For(contentRowWidth).Columns(hasControl);
 
+        // WINDOWS1: a standard window's rows take their own row's width (sizedToRow), the ordinary panel the fixed 560.
         return menuPane
             ? MenuPanelLayout.Columns(contentRowWidth, hasControl)
-            : PanelLayout.Columns(hasControl);
+            : sizedToRow ? PanelLayout.Columns(hasControl, contentRowWidth) : PanelLayout.Columns(hasControl);
     }
 
     /// <summary>A grid row's caption is left-aligned on any pane; a dialog's text is centered.</summary>

@@ -429,7 +429,16 @@ internal static class SettingsArtDonors
             try { Collect(found, popup.gameObject, SettingsArtLadder.DonorPopup); } catch { /* */ }
         }
 
-        found.AnyMenu = menus.Count > 0 || panels.Count > 0 || popups.Count > 0;
+        // WINDOWS1 live fix: the game's generic popup prefab (resident in a world, probe D1) is the donor of the window title
+        // ornament (Window_TitleSideOrnament, either side of its title, over its Window_Divider); the confirm popup above
+        // does not carry it, so the title ornament had no donor.
+        var generic = resident ? Loaded<global::ProjectM.UI.GenericPopup>() : Scene<global::ProjectM.UI.GenericPopup>();
+        foreach (var popup in generic)
+        {
+            try { Collect(found, popup.gameObject, SettingsArtLadder.DonorPopup); } catch { /* */ }
+        }
+
+        found.AnyMenu = menus.Count > 0 || panels.Count > 0 || popups.Count > 0 || generic.Count > 0;
         var roots = new HashSet<IntPtr>();
         foreach (var (panel, donor) in panels)
         {

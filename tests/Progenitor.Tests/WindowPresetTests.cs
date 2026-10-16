@@ -47,7 +47,6 @@ public sealed class WindowPresetTests : IDisposable
     {
         var s = UiWindowLayout.Spec(UiWindowPreset.Basic);
         Assert.Equal(640f, s.FrameWidth);
-        Assert.False(s.Centered);
         Assert.False(s.HeaderBand);
         Assert.False(s.ToolbarAllowed);
         Assert.False(s.TabsAllowed);
@@ -63,7 +62,6 @@ public sealed class WindowPresetTests : IDisposable
     {
         var s = UiWindowLayout.Spec(UiWindowPreset.Header);
         Assert.Equal(640f, s.FrameWidth);
-        Assert.False(s.Centered);
         Assert.True(s.HeaderBand);
         Assert.True(s.ToolbarAllowed);
         Assert.True(s.TabsAllowed);
@@ -73,37 +71,46 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
-    public void Tabbed_is_a_wide_centered_frame_with_an_info_column()
+    public void Tabbed_is_a_wide_frame_with_an_info_column_a_third_of_its_rows()
     {
         var s = UiWindowLayout.Spec(UiWindowPreset.Tabbed);
-        Assert.Equal(960f, s.FrameWidth);
-        Assert.True(s.Centered);
+        Assert.Equal(1040f, s.FrameWidth);
         Assert.True(s.HeaderBand);
-        Assert.Equal(280f, s.InfoColumnWidth);
-        Assert.Equal(260f, s.InfoRowWidth);
-        Assert.Equal(600f, s.ContentRowWidth); // 960 less the 40-unit margins each side less the 280 column
+        Assert.Equal(360f, s.InfoColumnWidth);
+        Assert.Equal(340f, s.InfoRowWidth);
+        Assert.Equal(600f, s.ContentRowWidth); // 1040 less the 40-unit margins each side less the 360 column
+        // Live 1440 capture: the column was 260 beside a 600 content row and wrapped its facts. A name and its value fit
+        // on one line now: the column is more than half the content row.
+        Assert.True(s.InfoRowWidth >= s.ContentRowWidth * 0.5f);
         Assert.Equal(UiCaptureMode.WhileShown, s.CaptureMode);
 
         // 1920 wide: the wish. A 1000-wide canvas: 90% of it. Never under the ordinary frame.
-        Assert.Equal(960f, UiWindowLayout.FrameWidthFor(s, 1920f));
+        Assert.Equal(1040f, UiWindowLayout.FrameWidthFor(s, 1920f));
         Assert.Equal(900f, UiWindowLayout.FrameWidthFor(s, 1000f));
         Assert.Equal(640f, UiWindowLayout.FrameWidthFor(s, 500f));
         Assert.Equal(640f, UiWindowLayout.FrameWidthFor(UiWindowLayout.Spec(UiWindowPreset.Basic), 3840f));
 
         // The info column shrinks with the frame so the content keeps its 560 row, and goes when it would be under 160.
-        Assert.Equal(280f, UiWindowLayout.InfoColumnFor(s, 960f));
+        Assert.Equal(360f, UiWindowLayout.InfoColumnFor(s, 1040f));
         Assert.Equal(260f, UiWindowLayout.InfoColumnFor(s, 900f));
         Assert.Equal(0f, UiWindowLayout.InfoColumnFor(s, 700f));
-        Assert.Equal(0f, UiWindowLayout.InfoColumnFor(UiWindowLayout.Spec(UiWindowPreset.Header), 960f));
+        Assert.Equal(0f, UiWindowLayout.InfoColumnFor(UiWindowLayout.Spec(UiWindowPreset.Header), 1040f));
     }
 
     [Fact]
     public void Ornaments_need_room_beside_the_title_and_never_hold_the_art_scans()
     {
-        Assert.True(UiWindowLayout.OrnamentsFit(200f));
-        Assert.True(UiWindowLayout.OrnamentsFit(336f));
-        Assert.False(UiWindowLayout.OrnamentsFit(337f));
+        // The game's popup draws each ornament 171x17 beside the title in a 512 row (probe D1); the kit, at most that,
+        // shrinking with the room the title leaves in its 560 row, and none below 48.
+        Assert.Equal(171f, UiWindowLayout.OrnamentMaxWidth);
+        Assert.Equal(17f, UiWindowLayout.OrnamentHeight);
+        Assert.Equal(171f, UiWindowLayout.OrnamentWidth(100f));
+        Assert.Equal(168f, UiWindowLayout.OrnamentWidth(200f));
+        Assert.True(UiWindowLayout.OrnamentsFit(440f));
+        Assert.False(UiWindowLayout.OrnamentsFit(441f));
         Assert.False(UiWindowLayout.OrnamentsFit(float.NaN));
+        // The donor: the game's generic popup prefab carries the ornament (the confirm popup does not).
+        Assert.Contains("ProjectM.UI.GenericPopup", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "GameArt", "SettingsArtDonors.cs"));
         Assert.Equal("Window_TitleSideOrnament", SettingsArtLadder.SpriteName(SettingsArtPart.WindowTitleOrnament));
         Assert.True(SettingsArtLadder.Optional(SettingsArtPart.WindowTitleOrnament));
         Assert.Equal(1, Enumerable.Range(0, SettingsArtLadder.PartCount).Count(i => SettingsArtLadder.Optional((SettingsArtPart)i)));
@@ -145,7 +152,7 @@ public sealed class WindowPresetTests : IDisposable
         var header = UiWindowLayout.Spec(UiWindowPreset.Header);
         var tabbed = UiWindowLayout.Spec(UiWindowPreset.Tabbed);
         Assert.Equal(560f, UiWindowLayout.ToolbarRowWidth(header));
-        Assert.Equal(880f, UiWindowLayout.ToolbarRowWidth(tabbed));
+        Assert.Equal(960f, UiWindowLayout.ToolbarRowWidth(tabbed));
         var two = new[] { new UiWindowTool("Sort"), new UiWindowTool("Locate") };
         var four = new[] { new UiWindowTool("Sort"), new UiWindowTool("Locate"), new UiWindowTool("Refresh"), new UiWindowTool("Empty") };
         // Each compact button is at least 140 wide with an 8 gap: Sort, Locate and Rename take 436 of 560.
@@ -169,15 +176,26 @@ public sealed class WindowPresetTests : IDisposable
         float panel = PanelLayout.PanelHeightFor(10_000f, 1080f);
         Assert.Equal(864f, panel);
         float top = UiWindowLayout.ContentTop(toolbar: true, tabs: true);
-        var clip = UiWindowLayout.InfoClip(960f, UiWindowLayout.InfoColumnWidth, top, panel, PanelFooterLayout.BandHeight);
+        float stamp = UiWindowLayout.StampBand("stamp");
+        var clip = UiWindowLayout.InfoClip(1040f, UiWindowLayout.InfoColumnWidth, top, panel, stamp);
         Assert.Equal(top, clip.Top);
-        Assert.Equal(260f, clip.Width);
-        Assert.Equal(-460f + 130f, clip.CenterX); // from x 20 to 280 of the 960 frame
-        Assert.True(clip.Top + clip.Height <= panel - PanelFooterLayout.BandHeight - PanelLayout.PadBottom + 0.01f);
+        Assert.Equal(340f, clip.Width);
+        Assert.Equal(-520f + 20f + 170f, clip.CenterX); // from x 20 to 360 of the 1040 frame
+        Assert.True(clip.Top + clip.Height <= panel - stamp - PanelLayout.PadBottom + 0.01f);
         var facts = Enumerable.Repeat(UnityUiRuntimeMetrics.RowHeight, 20).ToList();
         int shown = UiWindowLayout.InfoRowsShown(facts, clip.Height);
         Assert.InRange(shown, 1, 19);
         Assert.Equal((int)((clip.Height + PanelLayout.RowGap) / (UnityUiRuntimeMetrics.RowHeight + PanelLayout.RowGap)), shown);
+        // Live 1440 capture: the row the clip crossed was drawn half (Chest 7). The clip ends on the last whole row's
+        // bottom edge, so the row it would cut is masked entirely.
+        var bottoms = new List<float>();
+        float y = 0f;
+        foreach (float h in facts) { bottoms.Add(y + h); y += h + PanelLayout.RowGap; }
+        float snapped = UiWindowLayout.SnapClip(bottoms, clip.Height);
+        Assert.Equal(bottoms[shown - 1], snapped);
+        Assert.True(snapped <= clip.Height);
+        Assert.Equal(500f, UiWindowLayout.SnapClip(new[] { 40f, 88f }, 500f)); // everything fits: the clip stands
+        Assert.Contains("UiWindowLayout.SnapClip(_sideRowBottoms, clip.Height)", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs"));
         // The runtime parents the column's rows under the clip, and switches the clip (not the rows) off without room.
         string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
         Assert.Contains("TryAdd<RectMask2D>(_infoClip);", runtime);
@@ -217,55 +235,247 @@ public sealed class WindowPresetTests : IDisposable
         finally { UiWindowHandle.NavigatingNow = was; }
     }
 
-    [Theory]
-    [InlineData(1920f, 1)]
-    [InlineData(1920f, 2)]
-    [InlineData(1920f, 3)]
-    [InlineData(2560f, 1)]
-    [InlineData(2560f, 2)]
-    [InlineData(2560f, 4)]
-    public void Tiled_windows_never_land_under_a_centered_Tabbed_window(float canvasWidth, int tiled)
+    // ---- placement (PR #33 live check) --------------------------------------------------------------------------------
+
+    private const float Tabbed = UiWindowLayout.TabbedFrameWidth;
+    private const float Basic = UiWindowLayout.BasicFrameWidth;
+
+    /// <summary>Every window's rect (left, right, top, bottom) on a canvas, the frame drawn at its tallest.</summary>
+    private static List<(float L, float R, float T, float B, int Depth)> Rects(float[] widths, float w, float h, bool workspace, float? strip)
     {
-        var shown = new List<string> { "tabbed" };
-        for (int i = 0; i < tiled; i++) shown.Add("basic" + i);
-        var spots = UiWindowLayout.Spots(shown, p => p == "tabbed" ? 960f : 0f, _ => false);
-        var tab = spots.Single(s => s.Panel == "tabbed").Spot;
-        Assert.Equal(tiled, tab.Tiled);
-        var tabAt = UiWindowLayout.Place(tab, 960f, canvasWidth, 1080f, centered: true);
-        float tabLeft = tabAt.X - 480f, tabRight = tabAt.X + 480f;
-        Assert.True(tabLeft >= -canvasWidth * 0.5f - 0.01f, "the Tabbed window left the screen");
-        foreach (var (panel, spot) in spots.Where(s => s.Panel != "tabbed"))
+        var rects = new List<(float, float, float, float, int)>();
+        for (int i = 0; i < widths.Length; i++)
         {
-            Assert.Equal(960f, spot.CenteredWidth);
-            Assert.Equal(tiled, spot.Count);
-            var at = UiWindowLayout.Place(spot, 640f, canvasWidth, 1080f, centered: false);
-            float left = at.X - 320f, right = at.X + 320f;
-            Assert.True(left >= tabRight || right <= tabLeft, panel + " at x " + at.X + " overlaps the Tabbed window at " + tabAt.X);
-            Assert.True(right <= canvasWidth * 0.5f + 0.01f, panel + " left the screen");
+            var p = UiWindowLayout.Place(new PanelSpot(i, widths, workspace), w, h, strip);
+            float fw = Math.Min(UiWindowLayout.FrameWidthFor(widths[i], w), w - 2f * PanelFlow.EdgeMargin);
+            rects.Add((p.X - fw * 0.5f, p.X + fw * 0.5f, p.Top, p.Top - p.MaxHeight, p.Depth));
         }
 
-        // Alone, it is dead center; without a centered window the set tiles as it always did.
-        var alone = UiWindowLayout.Spots(new[] { "tabbed" }, p => 960f, _ => false).Single().Spot;
-        Assert.Equal(PanelOffset.Centre, UiWindowLayout.Place(alone, 960f, canvasWidth, 1080f, centered: true));
-        var plain = UiWindowLayout.Spots(new[] { "a", "b" }, _ => 0f, _ => false);
-        Assert.Equal(PanelFlow.Offset(new PanelSpot(1, 2), 640f, canvasWidth, 1080f), UiWindowLayout.Place(plain[1].Spot, 640f, canvasWidth, 1080f, false));
+        return rects;
+    }
+
+    [Theory]
+    [InlineData(1920f, 1080f, false)]
+    [InlineData(1920f, 1080f, true)]
+    [InlineData(2560f, 1440f, false)]
+    [InlineData(2560f, 1440f, true)]
+    [InlineData(3840f, 1080f, false)]
+    [InlineData(3840f, 1080f, true)]
+    public void Windows_stay_on_screen_clear_of_the_tab_strip_and_never_share_a_place(float w, float h, bool workspace)
+    {
+        float strip = UiWindowLayout.WorkspaceStripBottom(default, w, h);
+        Assert.InRange(strip, 0f, h * 0.5f); // the strip's bottom is in the upper half of the screen
+        var sets = new[]
+        {
+            new[] { Tabbed, Basic, Basic },
+            new[] { Basic, Basic, Tabbed },
+            new[] { Basic, Basic, Basic, Basic, Basic },
+            new[] { Tabbed, Tabbed, Basic, Basic, Basic, Basic },
+        };
+        foreach (var widths in sets)
+        {
+            var rects = Rects(widths, w, h, workspace, strip);
+            string set = string.Join("+", widths) + " on " + w + "x" + h;
+            for (int i = 0; i < rects.Count; i++)
+            {
+                var r = rects[i];
+                Assert.True(r.L >= -w * 0.5f + PanelFlow.EdgeMargin - 0.01f && r.R <= w * 0.5f - PanelFlow.EdgeMargin + 0.01f, set + ": window " + i + " leaves the screen sideways");
+                Assert.True(r.B >= -h * 0.5f + PanelFlow.EdgeMargin - 0.01f, set + ": window " + i + " leaves the bottom");
+                Assert.True(r.T - r.B >= PanelLayout.MinPanelHeight - 0.01f, set + ": window " + i + " has no room");
+                if (workspace) Assert.True(r.T <= strip - UiWindowLayout.StripClearance + 0.01f, set + ": window " + i + " covers the tab strip");
+                for (int j = 0; j < i; j++)
+                {
+                    var o = rects[j];
+                    if (r.Depth == 0 && o.Depth == 0)
+                        Assert.True(r.L >= o.R - 0.01f || r.R <= o.L + 0.01f, set + ": row windows " + j + " and " + i + " overlap");
+                    else
+                        Assert.False(Math.Abs(r.L - o.L) < 1f && Math.Abs(r.T - o.T) < 1f, set + ": windows " + j + " and " + i + " share a place");
+                }
+            }
+        }
     }
 
     [Fact]
-    public void The_re_flow_gives_tiled_panels_spots_clear_of_a_shown_Tabbed_window()
+    public void Three_windows_at_1080_tile_the_first_two_and_cascade_the_third_a_title_band_off()
     {
+        // The live 1080 capture: Basic and Header got the same x on top of each other. Now: Tabbed and Header side by
+        // side, centered as a pair, and the Basic window (no room left) one title band right of and below the Header.
+        var widths = new[] { Tabbed, Basic, Basic };
+        var t = UiWindowLayout.Place(new PanelSpot(0, widths, false), 1920f, 1080f);
+        var hd = UiWindowLayout.Place(new PanelSpot(1, widths, false), 1920f, 1080f);
+        var b = UiWindowLayout.Place(new PanelSpot(2, widths, false), 1920f, 1080f);
+        float span = Tabbed + PanelFlow.ColumnGap + Basic;
+        Assert.Equal(-span * 0.5f + Tabbed * 0.5f, t.X, 3);
+        Assert.Equal(span * 0.5f - Basic * 0.5f, hd.X, 3);
+        Assert.Equal(t.Top, hd.Top);
+        Assert.Equal(0, hd.Depth);
+        Assert.Equal(1, b.Depth);
+        Assert.Equal(hd.X + PanelFlow.CascadeStep, b.X, 3);
+        Assert.Equal(hd.Top - PanelFlow.CascadeStep, b.Top, 3);
+        // Alone, a window is centered; its top is where the tallest frame would be centered.
+        var alone = UiWindowLayout.Place(new PanelSpot(0, new[] { Tabbed }, false), 1920f, 1080f);
+        Assert.Equal(0f, alone.X);
+        Assert.Equal(PanelLayout.PanelHeightFor(float.MaxValue, 1080f) * 0.5f, alone.Top, 3);
+        // On the ultrawide all three share the row.
+        Assert.All(new[] { 0, 1, 2 }, i => Assert.Equal(0, UiWindowLayout.Place(new PanelSpot(i, widths, false), 3840f, 1080f).Depth));
+        // A window hangs from its top: a taller frame does not move its title.
+        Assert.Equal(hd.Top, hd.CenterFor(300f).Y + 150f, 3);
+        Assert.Equal(hd.Top, hd.CenterFor(600f).Y + 300f, 3);
+    }
+
+    [Fact]
+    public void With_the_workspace_open_windows_start_under_its_tab_strip()
+    {
+        // The live 1440 capture: the Tabbed window covered the Keybinds, Preferences and Server tabs.
+        float strip = UiWindowLayout.WorkspaceStripBottom(default, 1920f, 1080f);
+        var p = UiWindowLayout.Place(new PanelSpot(0, new[] { Tabbed }, workspaceOpen: true), 1920f, 1080f, strip);
+        Assert.True(p.Top <= strip - UiWindowLayout.StripClearance + 0.01f);
+        Assert.True(p.Top - p.MaxHeight >= -540f + PanelFlow.EdgeMargin - 0.01f);
+        // Closed workspace: the strip is ignored.
+        var q = UiWindowLayout.Place(new PanelSpot(0, new[] { Tabbed }, workspaceOpen: false), 1920f, 1080f, strip);
+        Assert.True(q.Top > p.Top);
+    }
+
+    [Fact]
+    public void The_re_flow_ranks_standard_windows_among_themselves_and_ordinary_panels_as_before()
+    {
+        var plain = UiApi.Panel("Plain", _owner, "example.mod");
+        plain.Show();
         var tabbed = Make(UiWindowPreset.Tabbed, "Net");
         var basic = Make(UiWindowPreset.Basic, "Gear");
         tabbed.Show();
         basic.Show();
-        Assert.Equal(960f, ((UiPanelHandle)tabbed.Panel).CenteredWidth);
-        Assert.Equal(0f, ((UiPanelHandle)basic.Panel).CenteredWidth);
-        var gear = _runtime.SpotFor("Gear");
+        Assert.Equal(Tabbed, ((UiPanelHandle)tabbed.Panel).WindowWidth);
+        Assert.Equal(Basic, ((UiPanelHandle)basic.Panel).WindowWidth);
+        Assert.Equal(0f, ((UiPanelHandle)plain).WindowWidth);
         var net = _runtime.SpotFor("Net");
-        Assert.Equal(960f, gear.CenteredWidth);
-        Assert.Equal(new PanelSpot(0, 1).Rank, gear.Rank);
-        Assert.Equal(1, gear.Count);
-        Assert.Equal(1, net.Tiled);
+        var gear = _runtime.SpotFor("Gear");
+        Assert.True(net.IsWindow);
+        Assert.Equal(new[] { Tabbed, Basic }, net.WindowWidths);
+        Assert.Equal(0, net.Rank);
+        Assert.Equal(1, gear.Rank);
+        Assert.False(net.WorkspaceOpen);
+        var p = _runtime.SpotFor("Plain");
+        Assert.False(p.IsWindow);
+        Assert.Equal(new PanelSpot(0, 1).Rank, p.Rank);
+        Assert.Equal(1, p.Count);
+    }
+
+    // ---- Escape, draw order, dim ------------------------------------------------------------------------------------
+
+    [Fact]
+    public void One_Escape_closes_only_the_topmost_window_and_the_next_goes_on()
+    {
+        // The live check: one Escape closed every window and the Mods workspace. A plain panel stands in for the workspace.
+        var behind = UiApi.Panel("Behind", _owner, "example.mod");
+        behind.Show();
+        var tabbed = Make(UiWindowPreset.Tabbed, "Net");
+        var header = Make(UiWindowPreset.Header, "Chest");
+        var basic = Make(UiWindowPreset.Basic, "Gear");
+        tabbed.Show();
+        basic.Show();
+        header.Show(); // shown last: the topmost
+
+        void Press()
+        {
+            UiApi.PressKeyForTests(27, true);
+            UiApi.PressKeyForTests(17, true); // the paired Back of the same physical press
+        }
+
+        Press();
+        Assert.False(header.IsOpen);
+        Assert.True(basic.IsOpen);
+        Assert.True(tabbed.IsOpen);
+        Assert.Equal(UiHandleState.Shown, behind.State);
+        Press();
+        Assert.False(basic.IsOpen);
+        Assert.True(tabbed.IsOpen);
+        Press();
+        Assert.False(tabbed.IsOpen);
+        Assert.Equal(UiHandleState.Shown, behind.State);
+        Press(); // no window left: the ordinary sweep
+        Assert.NotEqual(UiHandleState.Shown, behind.State);
+
+        var target = UiWindowLayout.EscapeTarget(new[] { "a", "w1", "w2" }, x => x.StartsWith("w", StringComparison.Ordinal), x => x == "w1" ? 9 : 3);
+        Assert.Equal("w1", target);
+        Assert.Null(UiWindowLayout.EscapeTarget(new[] { "a" }, _ => false, _ => 0));
+    }
+
+    [Fact]
+    public void Dialogs_draw_above_windows_and_windows_above_the_dim_and_the_workspace()
+    {
+        // The live check: the Rename prompt drew behind the Header window (equal canvas orders), its dim under the window.
+        Assert.True(ModsCanvasBand.Panels < UiOwnership.OverlaySorting);
+        Assert.True(UiOwnership.OverlaySorting < UiWindowLayout.ShadeSorting);
+        Assert.True(UiWindowLayout.ShadeSorting < UiWindowLayout.WindowSorting);
+        Assert.True(UiWindowLayout.WindowSorting < UiWindowLayout.DialogSorting);
+        Assert.True(UiWindowLayout.DialogSorting < UiOwnership.OverlaySorting + 20); // the notice band stays above
+        string windows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
+        Assert.Contains("SetOverlaySorting(UiWindowLayout.WindowSorting);", windows);
+        Assert.Contains("CreateHudCanvas(WindowShadeName, UiWindowLayout.ShadeSorting)", windows);
+        Assert.Contains("image.raycastTarget = false;", windows);
+        Assert.Contains("SetOverlaySorting(UiWindowLayout.DialogSorting);", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
+    }
+
+    [Fact]
+    public void The_workspace_is_dimmed_only_behind_a_window_that_takes_the_input()
+    {
+        Assert.False(UiWindowLayout.ShadeWorkspace(false, new[] { UiCaptureMode.WhileShown }));
+        Assert.False(UiWindowLayout.ShadeWorkspace(true, new[] { UiCaptureMode.WhenHovered }));
+        Assert.True(UiWindowLayout.ShadeWorkspace(true, new[] { UiCaptureMode.WhenHovered, UiCaptureMode.WhileShown }));
+        Assert.False(UiWindowLayout.ShadeWorkspace(true, Array.Empty<UiCaptureMode>()));
+        // Without the workspace no dim is ever asked for.
+        var header = Make(UiWindowPreset.Header, "Chest");
+        header.Show();
+        header.Hide();
+        Assert.DoesNotContain(true, _runtime.ShadeAsks);
+    }
+
+    // ---- rows in the windows ----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void A_standard_windows_rows_take_their_own_rows_width()
+    {
+        // The live check: the info column's "Network" heading was masked away (a 560 caption centered in a 340 row) and
+        // the content's "Throughput" sat 20 units in from its rows (560 centered in 600).
+        var info = RowColumnRules.For("heading", false, false, false, false, 340f, sizedToRow: true);
+        Assert.Equal(340f, info.LabelWidth);
+        Assert.Equal(0f, info.LabelX);
+        var content = RowColumnRules.For("heading", false, false, false, false, 600f, sizedToRow: true);
+        Assert.Equal(600f, content.LabelWidth);
+        // An ordinary panel keeps the fixed 560 ruler.
+        Assert.Equal(560f, RowColumnRules.For("heading", false, false, false, false, 600f).LabelWidth);
+        var fact = PanelLayout.Columns(true, 600f);
+        Assert.Equal(600f * 0.5f - PanelLayout.ControlColumnWidth * 0.5f, fact.ControlX);
+        Assert.Contains("sizedToRow: IsStandardWindow", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
+    }
+
+    [Fact]
+    public void Info_facts_are_one_line_cells_with_the_value_right_aligned()
+    {
+        var w = Make(UiWindowPreset.Tabbed, "Net");
+        int before = _runtime.CellRows.Count;
+        var chests = w.Info!.Fact("Chests", "24");
+        var state = w.Info.Fact("State", "Online");
+        Assert.Equal(before + 2, _runtime.CellRows.Count);
+        Assert.Equal("24", chests.Text);
+        chests.Text = "25";
+        Assert.Equal("25", chests.Text);
+        Assert.Equal(UiTextStyle.Number, UiWindowLayout.InfoValueStyle("14 / 40"));
+        Assert.Equal(UiTextStyle.Body, UiWindowLayout.InfoValueStyle("Online"));
+        Assert.Equal("Online", state.Text);
+        // The runtime places a side cell row at its fixed band and lays its cells out in the column's width.
+        string windows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
+        Assert.Contains("if (cells) PlaceCellRowCells(row);", windows);
+    }
+
+    [Fact]
+    public void The_stamp_sits_clear_of_the_frames_bottom_edge()
+    {
+        Assert.Equal(PanelFooterLayout.BandHeight + UiWindowLayout.StampLift, UiWindowLayout.StampBand("Mod 1.0 · Progenitor 1.0"));
+        Assert.Equal(0f, UiWindowLayout.StampBand(""));
+        Assert.True(UiWindowLayout.StampLift >= 8f);
+        Assert.Contains("IsStandardWindow ? UiWindowLayout.StampLift : 0f", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
     }
 
     [Fact]
@@ -358,7 +568,7 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal("Tabbed", d["preset"]);
         Assert.Equal(true, d["rename"]);
         Assert.Equal(new List<string> { "Overview", "Belts" }, d["tabs"]);
-        Assert.Equal(true, d["centered"]);
+        Assert.False(d.ContainsKey("centered"));
     }
 
     [Fact]
@@ -504,6 +714,17 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal(CellKind.Text, pair[0].Kind);
         Assert.Equal(CellAlign.Left, pair[0].Align);
         Assert.Equal(CellAlign.Right, pair[1].Align);
+        // Beside a name the value is sized to its own text (never cut or wrapped); the name fills the rest.
+        Assert.Equal(CellWidthMode.Auto, pair[1].Width.Mode);
+        Assert.Equal(CellWidthMode.Fill, pair[0].Width.Mode);
+
+        // Live capture: "3,212" read "3 , 212". Only the digits are tabular; a comma or a slash keeps its own width.
+        Assert.Equal("<mspace=0.62em>3</mspace>,<mspace=0.62em>212</mspace>", CellLayout.MonoMarkup("3,212"));
+        Assert.Equal("<mspace=0.62em>14</mspace> / <mspace=0.62em>40</mspace>", CellLayout.MonoMarkup("14 / 40"));
+        Assert.Equal("v<mspace=0.62em>2</mspace>.<mspace=0.62em>1</mspace>", CellLayout.MonoMarkup("v2.1"));
+        Assert.Equal("<noparse><</noparse>b>", CellLayout.MonoMarkup("<b>"));
+        Assert.Equal("", CellLayout.MonoMarkup(null));
+        Assert.Contains("body = lead + CellLayout.MonoMarkup(value);", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
 
         var warn = UiTextStyles.Cells("Fuel", "4 min", UiTextStyle.Warning);
         Assert.Equal(CellTone.Warn, warn[1].Tone);

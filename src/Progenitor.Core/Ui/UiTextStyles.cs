@@ -206,7 +206,9 @@ public static class UiTextStyles
             : CellKind.Text;
         cells.Add(new CellSpec(kind, ValueCell).With(
             text: value,
-            width: name.Length > 0 ? CellWidth.Fraction(0.4f) : CellWidth.Fill(40f),
+            // WINDOWS1 live fix: beside a name the value is sized to its own text (Auto), so it is never cut or wrapped and
+            // the name takes the rest of the row (shortened with an ellipsis when it runs out).
+            width: name.Length > 0 ? CellWidth.Auto : CellWidth.Fill(40f),
             align: spec.Align == UiTextAlign.Left && name.Length == 0 ? CellAlign.Left : CellAlign.Right,
             tone: spec.CellTone,
             fontSize: spec.Size));

@@ -264,8 +264,8 @@ public static partial class Ui
     /// <summary>WINDOWS1: the preset's frame on a game window (<see cref="IUiRuntime.WindowChrome"/>).</summary>
     internal static void WindowChrome(IUiPanel panel, UiWindowSpec spec)
     {
-        // The re-flow keeps tiled panels clear of a centered wide window (UiWindowLayout.Spots / Place).
-        if (panel is UiPanelHandle owned) owned.CenteredWidth = spec.Centered ? spec.FrameWidth : 0f;
+        // The re-flow lays the standard windows out side by side (UiWindowLayout.Spots / Place) from their asked-for widths.
+        if (panel is UiPanelHandle owned) owned.WindowWidth = spec.FrameWidth;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().WindowChrome(runtimePanel, spec); }
@@ -957,6 +957,9 @@ public static partial class Ui
     /// holding the lock across it would put the UI module's own lock underneath every layout pass.
     /// </para>
     /// </summary>
+    /// <summary>WINDOWS1: whether the runtime was last asked to dim the workspace behind the windows.</summary>
+    private static bool _windowShade;
+
     internal static void ReflowPanels()
     {
         try
@@ -972,10 +975,27 @@ public static partial class Ui
                     shown.Add(panel);
             }
 
+            // WINDOWS1: the workspace is dimmed behind a window that takes the input while shown (UiWindowLayout.ShadeWorkspace).
+            bool workspaceOpen = false;
+            var modes = new List<UiCaptureMode>();
+            foreach (var p in shown)
+            {
+                if (ModsMenu.IsWorkspacePanel(p)) workspaceOpen = true;
+                else if (p.WindowWidth > 0f) modes.Add(p.CaptureMode);
+            }
+
+            bool shade = UiWindowLayout.ShadeWorkspace(workspaceOpen, modes);
+            if (shade != _windowShade)
+            {
+                _windowShade = shade;
+                try { CurrentRuntime().WindowShade(shade); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window shade threw: " + e.Message); }
+            }
+
             if (shown.Count == 0) return;
             shown.Sort(static (a, b) => a.PlacementSlot.CompareTo(b.PlacementSlot));
 
-            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.CenteredWidth, ModsMenu.IsWorkspacePanel))
+            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel))
                 panel.PlaceAt(spot);
         }
         catch (Exception e)
@@ -1014,6 +1034,7 @@ public static partial class Ui
         {
             Live.Clear();
             _swallowBack = false;
+            _windowShade = false;
             _runtime = null;
             _installed = false;
             _skipped = false;
@@ -1214,6 +1235,18 @@ public static partial class Ui
             UiHandle[] snapshot;
             lock (Gate)
                 snapshot = Live.ToArray();
+
+            // WINDOWS1 live fix: one press closes one standard window, the topmost (shown last); the next press goes on to
+            // the next window and only then to the sweep below (the Mods workspace). The sweep hid every window and the
+            // workspace on one press.
+            if (TryCloseTopWindow(snapshot))
+            {
+                _swallowBack = keyCode == 27;
+                WorkspaceInputPolicy.NotePressTaken(EscapeStage.CloseWindow);
+                Plugin.Logger?.LogDiag("Ui: key " + keyCode + " closed the topmost window; nothing else hidden.");
+                return;
+            }
+
             for (int i = 0; i < snapshot.Length; i++)
             {
                 if (snapshot[i] is UiPanelHandle panel && panel.State == UiHandleState.Shown)
@@ -1244,6 +1277,24 @@ public static partial class Ui
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: Mods escape hook threw: " + e.Message); }
             Plugin.Logger?.LogDiag("Ui: key " + keyCode + " hid " + hidden + " panel(s); owners are not told.");
         }
+    }
+
+    /// <summary>WINDOWS1: hide the topmost shown standard window (<see cref="UiWindowLayout.EscapeTarget"/>); false when none is shown.</summary>
+    private static bool TryCloseTopWindow(UiHandle[] snapshot)
+    {
+        var shown = new List<UiPanelHandle>();
+        foreach (var h in snapshot)
+            if (h is UiPanelHandle p && !p.IsDisposed && p.State == UiHandleState.Shown) shown.Add(p);
+        var top = UiWindowLayout.EscapeTarget(shown, p => p.WindowWidth > 0f && !ModsMenu.IsWorkspacePanel(p), p => p.ShownSequence);
+        if (top == null) return false;
+        try { top.ForceHide(); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: Escape window hide threw: " + e.Message);
+            return false;
+        }
+
+        return true;
     }
 
     private static readonly List<Func<bool>> EscapeHandlers = new();

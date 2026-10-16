@@ -134,6 +134,12 @@ internal interface IUiRuntime
     void WindowChrome(IRuntimePanel panel, UiWindowSpec spec) { }
 
     /// <summary>
+    /// WINDOWS1: dim the Mods workspace behind the standard windows (<see cref="UiWindowLayout.ShadeWorkspace"/>), or stop.
+    /// The dim draws over the workspace and under every window and dialog, and takes no clicks. No-op by default.
+    /// </summary>
+    void WindowShade(bool on) { }
+
+    /// <summary>
     /// TOKENINSERT1: insert <paramref name="text"/> into the text field <paramref name="field"/> at its caret (the end when
     /// it never had focus; a selection is replaced), whole or not at all (<see cref="UiFieldInsert"/>), through the
     /// field's own edit path (undo, change notice), and give the field the keyboard. False when the runtime cannot (a

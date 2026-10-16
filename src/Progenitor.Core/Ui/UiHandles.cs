@@ -784,8 +784,8 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// </summary>
     internal void PlaceAt(int rank, int count) => PlaceAt(new PanelSpot(rank, count));
 
-    /// <summary>WINDOWS1: a centered standard window's frame width (a Tabbed window), which the re-flow keeps tiled panels clear of; 0 otherwise.</summary>
-    internal float CenteredWidth { get; set; }
+    /// <summary>WINDOWS1: a standard window's asked-for frame width, which the re-flow lays the windows out by; 0 for any other panel.</summary>
+    internal float WindowWidth { get; set; }
 
     internal void PlaceAt(PanelSpot spot)
     {

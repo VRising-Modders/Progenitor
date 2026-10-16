@@ -24,16 +24,19 @@ internal sealed partial class WidgetsDemo
 
     private int _beltsAdded;
 
+    /// <summary><c>Item_Ingredient_Plank</c>'s prefab id.</summary>
+    internal const int PlankPrefab = -1017402979;
+
     /// <summary>
     /// A category's members: Crystal (<c>Item_Ingredient_Crystal</c>, -257494203) and Coarse Thread
-    /// (<c>Item_Ingredient_Thread_Coarse</c>, -1562867444), the same ids the picker demo pins, show the game's own
-    /// inventory icons in a world; the third has no id, so its well stays empty.
+    /// (<c>Item_Ingredient_Thread_Coarse</c>, -1562867444), the same ids the picker demo pins, and Planks
+    /// (<c>Item_Ingredient_Plank</c>, <see cref="PlankPrefab"/>) show the game's own inventory icons in a world.
     /// </summary>
     internal static List<UiChip> SampleMembers() => new()
     {
         new UiChip("crystal", "Crystal") { ItemPrefab = -257494203, Note = "240", Tooltip = "240 in chests on this island." },
         new UiChip("thread", "Coarse Thread") { ItemPrefab = -1562867444, Note = "75" },
-        new UiChip("planks", "Planks") { ItemPrefab = 0, Icon = null, Note = "1,320", Removable = false, Tooltip = "Built-in member: cannot be removed." },
+        new UiChip("planks", "Planks") { ItemPrefab = PlankPrefab, Note = "1,320", Removable = false, Tooltip = "Built-in member: cannot be removed." },
     };
 
     /// <summary>A container's belts: plain removable chips; a click opens the belt.</summary>

@@ -279,9 +279,16 @@ internal sealed class PanelLayout
     /// down to the middle of a ten-line paragraph.
     /// </para>
     /// </summary>
-    internal static RowColumns Columns(bool hasControl)
+    internal static RowColumns Columns(bool hasControl) => Columns(hasControl, UnityUiRuntimeMetrics.RowWidth);
+
+    /// <summary>
+    /// WINDOWS1 live fix: the same two columns on a row <paramref name="rowWidth"/> wide (a standard window's content or
+    /// info column). The fixed 560 ruler centered a caption in a wider row (an 18-unit indent on the Tabbed window's
+    /// headings) and pushed it out of a narrower one (the info column's heading was masked away entirely).
+    /// </summary>
+    internal static RowColumns Columns(bool hasControl, float rowWidth)
     {
-        float row = UnityUiRuntimeMetrics.RowWidth;
+        float row = float.IsNaN(rowWidth) || rowWidth < 1f ? UnityUiRuntimeMetrics.RowWidth : rowWidth;
         if (!hasControl)
         {
             // No control means no reserved column and no indent — the caption owns the row.

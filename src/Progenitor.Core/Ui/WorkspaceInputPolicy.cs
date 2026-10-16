@@ -17,6 +17,9 @@ internal enum EscapeStage
     /// <summary>The shown panels (the workspace) are hidden.</summary>
     Close = 4,
 
+    /// <summary>WINDOWS1: the topmost standard window is closed; the workspace and the other windows stay.</summary>
+    CloseWindow = 5,
+
     /// <summary>
     /// SEARCHCLEAR1: the focused search field is empty: it gives up focus; the workspace stays (ordered
     /// with <see cref="ClearSearch"/>, before <see cref="Close"/>; numbered last to keep the values).
@@ -108,7 +111,7 @@ internal static class WorkspaceInputPolicy
     /// </summary>
     internal static void NotePressTaken(EscapeStage stage)
     {
-        if (stage is not (EscapeStage.CancelCapture or EscapeStage.AnswerDialog)) return;
+        if (stage is not (EscapeStage.CancelCapture or EscapeStage.AnswerDialog or EscapeStage.CloseWindow)) return;
         lock (PressGate)
         {
             _pressTaken = true;

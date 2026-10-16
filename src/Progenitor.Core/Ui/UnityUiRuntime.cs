@@ -12431,7 +12431,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// action row does), so the runtime leaves its insets and height alone.
         /// </summary>
         private float FooterBand =>
-            _strip || _sidebar || SelfPlaced ? 0f : PanelFooterLayout.BandFor(_footerText);
+            _strip || _sidebar || SelfPlaced ? 0f
+            // WINDOWS1: a standard window's stamp sits UiWindowLayout.StampLift above the frame's edge, and its band with it.
+            : IsStandardWindow ? UiWindowLayout.StampBand(_footerText)
+            : PanelFooterLayout.BandFor(_footerText);
 
         /// <summary>Set or clear the version footer and lay the panel out again.</summary>
         public void SetFooter(string text)
@@ -12502,7 +12505,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 rt.anchorMin = new Vector2(0.5f, 0f);
                 rt.anchorMax = new Vector2(0.5f, 0f);
                 rt.pivot = new Vector2(0.5f, 0f);
-                rt.anchoredPosition = new Vector2(x, 0f);
+                rt.anchoredPosition = new Vector2(x, IsStandardWindow ? UiWindowLayout.StampLift : 0f);
                 rt.sizeDelta = new Vector2(PanelFooterLayout.TextWidth(frameWidth), PanelFooterLayout.BandHeight);
                 var tmp = _versionFooter.GetComponent<TextMeshProUGUI>();
                 if (tmp != null)
@@ -12572,6 +12575,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             if (Released || _dialog) return;
             _dialog = true;
+            // WINDOWS1: every dialog draws above the standard windows (UiWindowLayout.DialogSorting).
+            SetOverlaySorting(UiWindowLayout.DialogSorting);
             PaintDialogChrome();
             HideForDialogReveal();
             // DIALOGS1: the dialog draws its own title as its first row, so the pane's title band
@@ -12888,7 +12893,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         // DIALOGS1: one game-free decision (RowColumnRules), so the tests pin the geometry drawn here.
         private RowColumns RowColumnsFor(in PanelRow row) =>
-            RowColumnRules.For(row.Kind, row.Grid, row.HasControl, row.SearchField, _menuPane, row.Grid ? GridWidth : ContentRowWidth);
+            RowColumnRules.For(row.Kind, row.Grid, row.HasControl, row.SearchField, _menuPane, row.Grid ? GridWidth : ContentRowWidth,
+                sizedToRow: IsStandardWindow);
 
         /// <summary>
         /// DIALOGS1: a dialog title or body row is its measured text's height (plus
@@ -13839,11 +13845,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var geometry = _menuPane
                     ? _menuGeometry
                     : MenuPanelLayout.ForCanvas(AvailableWidth(), AvailableHeight(), _sidebar, _mode);
+                // WINDOWS1: a standard window hangs from its row's top line (UiWindowLayout.Place); a window whose cap
+                // changed with the set (a cascade layer) is laid out again so its height follows.
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
-                    : UiWindowLayout.Place(Spot, FrameWidth, AvailableWidth(), AvailableHeight(), WindowCentred);
+                    : IsStandardWindow ? WindowOffset(rt.sizeDelta.y, AvailableHeight(), relayoutWhenCapChanges: true)
+                    : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
-                // A wide game window that asked for a dialog's width is centered too; a standard Tabbed window is placed by
-                // UiWindowLayout.Place (centered alone, beside tiled windows otherwise).
+                // A wide game window that asked for a dialog's width is centered too (a standard window is placed above).
                 if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) at = PanelOffset.Centre;
                 rt.anchoredPosition = new Vector2(at.X, at.Y);
                 if (TopAligned) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
@@ -13986,6 +13994,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
                 if (_gameWindow && _dialogFrameWidth > PanelWidth && !_menuPane && _embeddedHeight <= 0)
                     panelHeight = Math.Min(panelHeight, available.Value * .70f);
+                // WINDOWS1: a standard window is never taller than its place leaves room for (under the workspace's tab
+                // strip, a cascade layer's offset), so its bottom stays on screen.
+                if (IsStandardWindow && !SelfPlaced) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
 
                 _laidOutWith = available;
                 var settle = RulerSettle.StateOf(available, _settling, _settleExhausted);
@@ -14076,7 +14087,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // depth >= 1 cross PanelFlow's capacity threshold and jump a whole title band
                     // onto the panel above it. The vertical ladder is a property of the canvas now.
                     placedAt = _menuPane ? new PanelOffset(_menuGeometry.X, _menuGeometry.Y)
-                        : UiWindowLayout.Place(Spot, FrameWidth, AvailableWidth(), available.Value, WindowCentred);
+                        : IsStandardWindow ? WindowOffset(panelHeight, available.Value, relayoutWhenCapChanges: false)
+                        : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), available.Value);
                     // INSTALLUX2: a dialog is centered, never ranked. PanelFlow would give it a
                     // column beside the workspace's panes the moment they joined the shown set,
                     // which is the "flickers in from the left" CONSENT2 fixed for the consent
@@ -16763,8 +16775,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // is punctuation, and inside the run it would be drawn at a figure's width.
                 string value = text;
                 string lead = HeadBlockLayout.TrySplitMetaSeparator(text, out value) ? MutedSeparator() : "";
-                body = lead + "<mspace=" + CellLayout.MonoGlyphEm.ToString("0.##", CultureInfo.InvariantCulture)
-                    + "em>" + Escape(value) + "</mspace>";
+                // WINDOWS1 live fix: only the digits are tabular; a comma or a slash keeps its own width (CellLayout.MonoMarkup).
+                body = lead + CellLayout.MonoMarkup(value);
             }
             else if (spec.Wrap == CellWrap.TwoLine)
             {

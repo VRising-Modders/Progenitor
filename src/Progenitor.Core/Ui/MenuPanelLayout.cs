@@ -2670,6 +2670,33 @@ internal static class CellLayout
     /// <summary>Mean glyph width of the monospace treatment as a fraction of the font size (TMP <c>mspace</c>).</summary>
     internal const float MonoGlyphEm = 0.62f;
 
+    /// <summary>
+    /// WINDOWS1 live fix: a mono cell's TMP markup. Only the runs of digits go inside <c>mspace</c> (tabular figures, so a
+    /// column of numbers lines up); separators, spaces and letters keep their own width. With the whole value inside the
+    /// run, the thousands comma was drawn at a figure's width and read <c>3 , 212</c>, and <c>14 / 40</c> spread out the
+    /// same way. Each run's text is escaped (<see cref="UiRichText.Literal"/>).
+    /// </summary>
+    internal static string MonoMarkup(string? value)
+    {
+        string text = value ?? "";
+        if (text.Length == 0) return "";
+        string open = "<mspace=" + MonoGlyphEm.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "em>";
+        var sb = new System.Text.StringBuilder(text.Length + 32);
+        int i = 0;
+        while (i < text.Length)
+        {
+            bool digits = text[i] >= '0' && text[i] <= '9';
+            int j = i;
+            while (j < text.Length && (text[j] >= '0' && text[j] <= '9') == digits) j++;
+            string run = UiRichText.Literal(text.Substring(i, j - i));
+            if (digits) sb.Append(open).Append(run).Append("</mspace>");
+            else sb.Append(run);
+            i = j;
+        }
+
+        return sb.ToString();
+    }
+
     /// <summary>Header caption (uppercase, 12 px letter-spaced in the mock).</summary>
     internal const float HeaderFontSize = 13f;
 

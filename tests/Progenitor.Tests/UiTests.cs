@@ -455,6 +455,11 @@ public class UiTests : IDisposable
 
         public void WindowChrome(IRuntimePanel panel, UiWindowSpec spec) => WindowAsks.Add((panel.Text, spec.Preset));
 
+        /// <summary>WINDOWS1: every workspace-dim change asked for, in order.</summary>
+        public List<bool> ShadeAsks { get; } = new();
+
+        public void WindowShade(bool on) => ShadeAsks.Add(on);
+
         /// <summary>WINDOWS1: the game-window frames asked for, by panel title.</summary>
         public List<string> GameWindowAsks { get; } = new();
 

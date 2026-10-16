@@ -116,18 +116,18 @@ window.Show();               // window.Hide() / Toggle(); Dispose() closes it fo
 
 | Preset | Use when | Looks like | Input and controller | Placement |
 |---|---|---|---|---|
-| `UiWindowPreset.Basic` | A small tool used during play: a dropdown and a few buttons ("Other Gear · here"). | The game's popup frame, the title centered in its band, rows on the settings grid. | `WhenHovered`: the game keeps the input while the pointer is elsewhere. Opened while the player navigates with a controller or the keys (A on the button that opened it), it is shown `WhileShown` instead, so the controller moves into it and B closes it. | Tiles with other panels. |
-| `UiWindowPreset.Header` | One thing the player works on: a container, a station, a named set. | Basic plus the ornamental header band (a darker ground behind the title, the game's title ornaments either side of it, the game's divider under it), an optional toolbar with an optional **Rename**, an optional tab row. | `WhileShown`: takes the input while shown; a controller navigates it. | Tiles with other panels. |
-| `UiWindowPreset.Tabbed` | A large screen like the game's own menus: several tabs of content and a column that describes the selection. | The header band, a toolbar (optional), a tab row across the top, an info column on the left (`window.Info`) and the main content on the right. | `WhileShown`; a controller navigates it. | Centered when alone. With tiled windows open it sits on the left of one centered group and the tiled windows tile in the area right of it, so none lands under it. |
+| `UiWindowPreset.Basic` | A small tool used during play: a dropdown and a few buttons ("Other Gear · here"). | The game's popup frame, the title centered in its band, rows on the settings grid. | `WhenHovered`: the game keeps the input while the pointer is elsewhere. Opened while the player navigates with a controller or the keys (A on the button that opened it), it is shown `WhileShown` instead, so the controller moves into it and B closes it. | In the window row (below). |
+| `UiWindowPreset.Header` | One thing the player works on: a container, a station, a named set. | Basic plus the ornamental header band (a darker ground behind the title, the game's title ornaments either side of it, the game's divider under it), an optional toolbar with an optional **Rename**, an optional tab row. | `WhileShown`: takes the input while shown; a controller navigates it. | In the window row (below). |
+| `UiWindowPreset.Tabbed` | A large screen like the game's own menus: several tabs of content and a column that describes the selection. | The header band, a toolbar (optional), a tab row across the top, an info column on the left (`window.Info`) and the main content on the right. | `WhileShown`; a controller navigates it. | In the window row (below). |
 
-Every preset: rows are left-aligned (`ContentAlignment = "left"`), the version stamp `<mod name> <version> · Progenitor <version>` is on by default at the bottom (`UiWindowOptions.VersionStamp = false` turns it off, `VersionText` replaces it, `window.VersionStamp` changes it later), and Escape or a controller's B first closes an open list, dialog or key capture; with none open it hides **every** shown panel, this window and any other mod's alike (the kit's [Escape sweep](#input-what-a-panel-takes-and-for-how-long), not only the top window; `window.IsOpen` reads the result, there is no close event). `UiWindowOptions.CaptureMode` overrides the input mode. Up to six tabs and six toolbar buttons (one or two words, at most 16 characters) are accepted, and the toolbar's buttons, measured as the game's compact buttons (at least 140 wide, 8 apart, Rename included), must fit the row they are drawn in (560 in Basic and Header, 880 in Tabbed); anything more throws `ArgumentException` rather than running past the frame. **Rename** opens the game's prompt with the current title; the answer becomes the title and `OnRename` handlers get it. The caption is the word Rename: the game's font has no pencil glyph.
+Every preset: rows are left-aligned (`ContentAlignment = "left"`), the version stamp `<mod name> <version> · Progenitor <version>` is on by default at the bottom (`UiWindowOptions.VersionStamp = false` turns it off, `VersionText` replaces it, `window.VersionStamp` changes it later), and Escape or a controller's B first closes an open list, dialog or key capture; with none open it closes the **topmost** standard window (the one shown last), one window per press; only when no standard window is open does the press go on to the kit's [Escape sweep](#input-what-a-panel-takes-and-for-how-long), which hides the Mods workspace and the other panels. `window.IsOpen` reads the result; there is no close event. `UiWindowOptions.CaptureMode` overrides the input mode. Up to six tabs and six toolbar buttons (one or two words, at most 16 characters) are accepted, and the toolbar's buttons, measured as the game's compact buttons (at least 140 wide, 8 apart, Rename included), must fit the row they are drawn in (560 in Basic and Header, 960 in Tabbed); anything more throws `ArgumentException` rather than running past the frame. **Rename** opens the game's prompt with the current title; the answer becomes the title and `OnRename` handlers get it. The caption is the word Rename: the game's font has no pencil glyph.
 
 | Member | What it does |
 |---|---|
 | `ctx.Windows.Create(preset, title, options = null)` → `IUiWindow`; `ctx.Windows.Open`, `ctx.Windows.VersionStamp` | A tracked window (not shown yet); the plugin's windows still open; its default stamp line. |
 | `Ui.Window(preset, title, owner = null, pluginId = null, options = null)` → `IUiWindow` | The same without a context; the caller disposes it. |
-| `IUiWindow` `Preset`, `Title` (get/set), `Panel`, `Tabs`, `Info`, `Tools`, `VersionStamp`, `IsOpen`, `IsDisposed`, `Add(tab, handle)`, `OnRename(handler)`, `Show()`, `Hide()`, `Toggle()`, `Describe()` | Rows go on `Panel` with the ordinary kit calls; `Add` puts a row on a tab (returned unchanged without a tab row). `Describe()` is the readback (`preset`, `title`, `open`, `stamp`, `frameWidth`, `centered`, `headerBand`, `infoColumn`, `capture`, `tabs`, `selectedTab`, `tools`, `rename`). |
-| `IUiWindowColumn` (`window.Info`, Tabbed only) `Heading`, `Note`, `Label(text, tone)`, `Fact(name, value)`, `Button(text)` | The info column's rows: fixed, not scrolled, on a darker ground. |
+| `IUiWindow` `Preset`, `Title` (get/set), `Panel`, `Tabs`, `Info`, `Tools`, `VersionStamp`, `IsOpen`, `IsDisposed`, `Add(tab, handle)`, `OnRename(handler)`, `Show()`, `Hide()`, `Toggle()`, `Describe()` | Rows go on `Panel` with the ordinary kit calls; `Add` puts a row on a tab (returned unchanged without a tab row). `Describe()` is the readback (`preset`, `title`, `open`, `stamp`, `frameWidth`, `headerBand`, `infoColumn`, `capture`, `tabs`, `selectedTab`, `tools`, `rename`). |
+| `IUiWindowColumn` (`window.Info`, Tabbed only) `Heading`, `Note`, `Label(text, tone)`, `Fact(name, value)`, `Button(text)` | The info column's rows: fixed, not scrolled, on a darker ground. `Fact` is one line: the name at the left (shortened with an ellipsis when it runs out of room), the value sized to its text and right-aligned (`Number` when it holds a figure, else `Body`); set the value later with `.Text`. |
 | `UiWindowOptions` `VersionStamp`, `VersionText`, `Renamable`, `Tools`, `Tabs`, `SelectedTab`, `CaptureMode`; `UiWindowTool(caption, tooltip)` | What differs from the preset. |
 | `panel.Text(text, UiTextStyle)` / `panel.Text(name, value, UiTextStyle)` → `IUiLabel`; `UiTextStyle`, `UiTextAlign` | Words in a named style ([Text styles](ui-controls.md#text-styles)). |
 
@@ -144,8 +144,8 @@ The numbers are `UiWindowLayout` (game-free, `WindowPresetTests`); the runtime d
 | Gear set                              [ Weapons       v ]  |  rows from y 80: 560 wide, 40 tall, 8 apart
 | Nothing moved yet.                                         |  Muted
 | [Stash all] [Take all]                                     |  inline buttons, captions centered
-|           Example Mod 1.2.3 · Progenitor 2026.10.16        |  stamp band 24 at the bottom, 13 pt Muted, centered
-+------------------------------------------------------------+
+|           Example Mod 1.2.3 · Progenitor 2026.10.16        |  stamp: 13 pt Muted, centered, 10 above the frame's
++------------------------------------------------------------+  bottom edge (band 24 + 10)
 ```
 
 **Header** (640 wide):
@@ -153,36 +153,40 @@ The numbers are `UiWindowLayout` (game-free, `WindowPresetTests`); the runtime d
 ```
 +------------------------------------------------------------+  y 0
 |######  <ornament>     Iron Chest      <ornament>     ######|  header band 0-72 (dark wash), title centered at y 38;
-|######  ------------------ divider ------------------  ######|  ornaments 96x24 max, 16 from the title; divider at y 64 (560x12)
+|######  ------------------ divider ------------------  ######|  ornaments 171x17 max, 12 from the title; divider y 64 (560x12)
 | [Sort] [Locate] [Rename]                                   |  toolbar, pinned at y 80 (40 tall)
 | [Contents] [Rules] [Log]                                   |  tab row, pinned at y 128 (40 tall)
 | Iron Ore                                          1,280    |  content from y 176, scrolls under the pinned rows;
 | Copper Ore                                           96    |  numbers right-aligned
-|           Example Mod 1.2.3 · Progenitor 2026.10.16        |  stamp band 24
+|           Example Mod 1.2.3 · Progenitor 2026.10.16        |  stamp band 24 + 10
 +------------------------------------------------------------+
 ```
 
-**Tabbed** (960 wide, at most 90% of the screen, centered):
+**Tabbed** (1040 wide, at most 90% of the screen):
 
 ```
 +------------------------------------------------------------------------------------------+
-|#######################  <ornament>   Storage network   <ornament>  ######################|  header band 0-72, divider y 64 (880x12)
+|#######################  <ornament>   Storage network   <ornament>  ######################|  header band 0-72, divider y 64 (960x12)
 | [Refresh]                                                                                |  toolbar y 80
 | [Overview] [Belts] [Settings]                                                            |  tab row y 128
-| +- info column (260) -+   Throughput                                                     |  info column x 20-280 from y 176,
-| | Network             |   Items moved                                          3,212     |  on a darker wash; content 600 wide
-| | Chests          24  |   Per minute                                              48     |  right of it, scrolls on its own
-| | [Locate all]        |   Two chests are full.                                           |
-| +---------------------+                                                                  |
-|                    Example Mod 1.2.3 · Progenitor 2026.10.16                             |  stamp band 24
+| +- info column (340) ---------+   Throughput                                             |  info column x 20-360 from y 176,
+| | Network                     |   Items moved                                  3,212     |  on a darker wash; content 600 wide
+| | Chests                  24  |   Per minute                                      48     |  right of it, scrolls on its own;
+| | [Locate all]                |   Two chests are full.                                   |  headings and rows share the left
+| +-----------------------------+                                                          |  edge of their column
+|                    Example Mod 1.2.3 · Progenitor 2026.10.16                             |  stamp band 24 + 10
 +------------------------------------------------------------------------------------------+
 ```
 
-On a canvas narrower than 1067 units the Tabbed frame shrinks to 90% of it and the info column shrinks with it so the content keeps its 560 row; under 160 units of room the column is switched off (never drawn over the content) and back on at the first layout with room. The frame height is the taller of the content and the info column, at most 80% of the screen; a longer column is clipped (a RectMask2D over the column) at the bottom pad above the version stamp, never drawn over it or past the frame: at 1080p a Tabbed window with a toolbar and tabs shows 13 one-line rows of the column.
+On a canvas narrower than 1156 units the Tabbed frame shrinks to 90% of it and the info column shrinks with it so the content keeps its 560 row; under 160 units of room the column is switched off (never drawn over the content) and back on at the first layout with room. The frame height is the taller of the content and the info column, at most 80% of the screen; a longer column is clipped (a RectMask2D over the column) at the last whole row above the version stamp's band, never drawn over it, past the frame, or cut through a row.
 
-**Art.** The frame is the game's popup frame (`Window_Box_Background`, the art `ctx.Dialogs` uses). The divider is the game's `Divider_Big_02` (the dialogs' title rule; a thin kit rule until it is loaded). The title ornaments are the game's `Window_TitleSideOrnament`, which the game's popup prefabs carry; they are drawn only when that sprite was found (the window paints them again on each layout until it is), at its own aspect in a 96x24 box, the right one mirrored, and left out for a title wider than 336 units rather than drawn over it. Which parts drew is in the settings art readback (`settingsArt.parts.windowTitleOrnament`).
+**Placement.** Standard windows open in one row, in the order they were opened (the oldest at the left), centered on the screen with 24 units between frames, so they never cover each other. Every window's top edge is on one line and the window grows downward, so its title does not move: while the Mods workspace is shown the line is 16 units under the workspace's tab strip (a window never covers the tabs), otherwise it is where the tallest frame the screen allows (80% of its height) would be centered. When the next window does not fit the row (16 units from each screen edge), it cascades over a window of the row, from the right: one title band (72) right and down per layer, clamped inside the screen, so the title of the window under it stays visible; on a screen too short for whole bands the step shrinks. Every window's height is capped so its bottom stays on screen. At 1920x1080 a Tabbed and a Header window share the row and a third window cascades over the Header; on 3840x1080 all three share the row. Ordinary `Ui.Panel` windows keep the panel flow beside them; dialogs stay centered.
 
-**Status: game-free tested, not live-verified.** The specs, the stamp, the composition (pins, tabs, toolbar, rename, input modes) and the gallery are tested in `WindowPresetTests`. The runtime drawing (the wide frame, centering, the header band, the ornaments, the info column) is source-checked and built only; whether `Window_TitleSideOrnament` loads, and how it looks, has not been seen in game. The live check is the procedure in the [controls sample README](../samples/Progenitor.ControlsSample/README.md#gallery).
+**Draw order and the workspace dim.** Bottom to top: the Mods workspace, ordinary panels, the workspace dim, the standard windows, then every dialog (`ctx.Dialogs`, and the Rename prompt a window opens, with its own dim over the window). While the Mods workspace is shown and a window that takes the input while shown is open (Header, Tabbed, or a Basic window opened with a controller), the workspace behind the windows is dimmed with the game's popup blocker color at 60%, so the page does not read as part of the window. The dim takes no clicks: the workspace stays usable beside a window. A Basic window that leaves the input to the pointer does not dim it.
+
+**Art.** The frame is the game's popup frame (`Window_Box_Background`, the art `ctx.Dialogs` uses). The divider is the game's `Divider_Big_02` (the dialogs' title rule; a thin kit rule until it is loaded). The title ornaments are the game's `Window_TitleSideOrnament` (227x17), borrowed from the game's generic popup prefab (`GenericPopup`, resident in a world), which draws one 171x17 either side of its title text over its divider. The kit draws them the same way: each fills the room the title leaves in the 560-wide title row, at most 171 wide and 17 tall, 12 from the words, the right one mirrored, and none when that room is under 48 (a title wider than 440 units). Until the sprite is found (the window paints again on each layout) the title stands alone over the divider, the way the game's settings pages title their sections; nothing is drawn in the ornaments' place. Which parts drew is in the settings art readback (`settingsArt.parts.windowTitleOrnament`).
+
+**Status: game-free tested, not live-verified.** The specs, the stamp, the composition (pins, tabs, toolbar, rename, input modes) and the gallery are tested in `WindowPresetTests`. The runtime drawing (the wide frame, the window row and cascade, the header band, the ornaments, the info column, the draw order and the workspace dim) is source-checked and built only; whether `Window_TitleSideOrnament` loads, and how it looks, has not been seen in game. The live check is the procedure in the [controls sample README](../samples/Progenitor.ControlsSample/README.md#gallery).
 
 ## Input: what a panel takes, and for how long
 

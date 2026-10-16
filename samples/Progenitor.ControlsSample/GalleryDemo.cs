@@ -35,7 +35,7 @@ internal interface IGalleryHost
 
 /// <summary>
 /// The Gallery page: one tab per category of <see cref="GalleryCatalog"/>, and on it every entry of that category
-/// with a live example (or the button that opens where it lives) and a muted "Use this when" line. All words go through
+/// with a live example (or the button that opens where it lives) and one muted sentence on when to use it. All words go through
 /// the named text styles (<see cref="UiTextStyles.Text(IUiPanel, string, UiTextStyle)"/>): the page sets no color, size
 /// or alignment of its own. Every event writes a <c>Controls sample: gallery …</c> line and updates the status line.
 /// Game-free: the plugin's calls go through <see cref="IGalleryHost"/>.
@@ -92,7 +92,7 @@ internal sealed class GalleryDemo
             foreach (var entry in GalleryCatalog.In(category))
             {
                 BuildEntry(panel, _tabs, t, entry, pluginId, bindId);
-                _tabs.Add(t, panel.Text("Use this when " + entry.UseWhen, UiTextStyle.Muted));
+                _tabs.Add(t, panel.Text(entry.UseWhen, UiTextStyle.Muted));
                 Built.Add(entry.Id);
             }
         }
@@ -288,7 +288,7 @@ internal sealed class GalleryDemo
             case "set-section":
             case "set-info":
             case "set-scope":
-                On(tab, panel.Text(e.Control, api, UiTextStyle.Muted));
+                CallLines(panel, tab, e.Control, api);
                 break;
 
             // ---- Lists and data ----
@@ -297,7 +297,8 @@ internal sealed class GalleryDemo
                     .OnReorder(m => Report("list reorder " + m.Id + " " + m.From + "->" + m.To));
                 break;
             case "data-table":
-                _widgets.BuildTable(panel, tabs, tab);
+                // The gallery's tab badge is not the table's: the Widgets page's Table tab carries the row count.
+                _widgets.BuildTable(panel, tabs, tab, badge: false);
                 break;
             case "master-detail":
                 _widgets.BuildMasterDetail(panel, tabs, tab);
@@ -354,7 +355,7 @@ internal sealed class GalleryDemo
                 break;
             case "chat-reply":
             case "chat-send":
-                On(tab, panel.Text(e.Control, api, UiTextStyle.Muted));
+                CallLines(panel, tab, e.Control, api);
                 break;
 
             // ---- HUD and world ----
@@ -375,12 +376,22 @@ internal sealed class GalleryDemo
             case "attach-heart":
             case "attach-tooltip":
             case "attach-map":
-                On(tab, panel.Text(e.Control, e.Sample, UiTextStyle.Muted));
+                CallLines(panel, tab, e.Control, e.Sample);
                 break;
 
             default:
                 throw new InvalidOperationException("The gallery has no example for '" + e.Id + "'.");
         }
+    }
+
+    /// <summary>
+    /// A control that lives elsewhere: its name, then the call (or the sample) on its own wrapping line, so the whole call
+    /// is readable. A name-and-value row cut the call at the row's edge.
+    /// </summary>
+    private void CallLines(IUiPanel panel, int tab, string name, string call)
+    {
+        On(tab, panel.Text(name, UiTextStyle.Body));
+        On(tab, panel.Text(call, UiTextStyle.Muted));
     }
 
     private void Notify(string text, UiNoticeKind kind, bool prefix)

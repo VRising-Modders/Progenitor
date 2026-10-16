@@ -22,6 +22,48 @@ internal sealed partial class UnityUiRuntime
     internal const string WindowDividerName = "window-header-divider";
     internal const string WindowInfoGroundName = "window-info-ground";
     internal const string WindowInfoClipName = "window-info-clip";
+    internal const string WindowShadeName = "window-shade";
+
+    private static GameObject? _windowShade;
+
+    /// <summary>
+    /// WINDOWS1: the dim over the Mods workspace behind the standard windows (<see cref="UiWindowLayout.ShadeWorkspace"/>):
+    /// one full-screen, non-interactive canvas above the workspace panes and every ordinary panel
+    /// (<see cref="UiWindowLayout.ShadeSorting"/>) and under the windows and dialogs. It darkens and takes no clicks.
+    /// </summary>
+    public void WindowShade(bool on)
+    {
+        try
+        {
+            if (!on)
+            {
+                if (Alive(_windowShade)) _windowShade!.SetActive(false);
+                return;
+            }
+
+            if (!Alive(_windowShade))
+            {
+                _windowShade = CreateHudCanvas(WindowShadeName, UiWindowLayout.ShadeSorting);
+                if (_windowShade == null) return;
+                var fill = new GameObject("fill");
+                fill.transform.SetParent(_windowShade.transform, false);
+                Stretch(fill);
+                var image = TryAdd<Image>(fill);
+                if (image != null)
+                {
+                    var c = GameSettingsLook.PopupBlocker;
+                    image.color = new Color(c.R, c.G, c.B, UiWindowLayout.ShadeAlpha);
+                    image.raycastTarget = false;
+                }
+            }
+
+            _windowShade!.SetActive(true);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: window shade: " + e.Message);
+        }
+    }
 
     private sealed partial class UnityPanel
     {
@@ -40,12 +82,18 @@ internal sealed partial class UnityUiRuntime
         /// <summary>The info column's lowest edge from the frame top after the last pass; 0 for none.</summary>
         private float _sideBottom;
 
+        /// <summary>Each placed info row's bottom edge from the column's top, this pass (<see cref="UiWindowLayout.SnapClip"/>).</summary>
+        private readonly System.Collections.Generic.List<float> _sideRowBottoms = new();
+
         /// <summary>WINDOWS1: this game window is a standard window of <paramref name="spec"/>. Idempotent per spec.</summary>
         public void MakeStandardWindow(UiWindowSpec spec)
         {
             if (Released || spec == null) return;
             if (!_gameWindow) MakeGameWindow();
             _windowSpec = spec;
+            // WINDOWS1: windows draw above the workspace's dim and the ordinary panels, and under every dialog (a prompt a
+            // window opens is drawn over it: the Rename prompt was drawn behind the Header window at an equal order).
+            SetOverlaySorting(UiWindowLayout.WindowSorting);
             if (spec.HeaderBand) BuildHeaderBand();
             if (spec.InfoColumnWidth > 0f) BuildInfoGround();
             Relayout();
@@ -54,8 +102,48 @@ internal sealed partial class UnityUiRuntime
         /// <summary>A standard window that is not a Mods pane (the only case the window geometry applies to).</summary>
         private bool IsStandardWindow => _windowSpec != null && _gameWindow && !_menuPane && !_dialog;
 
-        /// <summary>A centered standard window (Tabbed): placed like a dialog, never ranked with the tiled panels.</summary>
-        private bool WindowCentred => IsStandardWindow && _windowSpec!.Centered;
+        /// <summary>This panel's overlay canvas order (a standard window's, a dialog's); a failed write keeps the default.</summary>
+        internal void SetOverlaySorting(int order)
+        {
+            try
+            {
+                var canvas = Overlay == null ? null : Overlay.GetComponent<Canvas>();
+                if (canvas == null) return;
+                canvas.overrideSorting = true;
+                canvas.sortingOrder = order;
+            }
+            catch { /* the panel keeps the overlay order */ }
+        }
+
+        /// <summary>The tallest the window may be drawn at its place (<see cref="WindowPlacement.MaxHeight"/>).</summary>
+        private float WindowMaxHeight(float canvasHeight) => WindowPlace(canvasHeight).MaxHeight;
+
+        /// <summary>The cap this window was last laid out with, so a re-flow that changes it lays the window out again.</summary>
+        private float _windowCap = -1f;
+
+        private WindowPlacement WindowPlace(float canvasHeight)
+        {
+            float width = AvailableWidth();
+            float? strip = Spot.WorkspaceOpen ? UiWindowLayout.WorkspaceStripBottom(ModsWorkspaceFrame.Last, width, canvasHeight) : null;
+            return UiWindowLayout.Place(Spot, width, canvasHeight, strip);
+        }
+
+        /// <summary>
+        /// Where a standard window <paramref name="frameHeight"/> tall goes: hung from its row's top line. On a re-flow
+        /// (<paramref name="relayoutWhenCapChanges"/>) a changed height cap lays the window out again, which sizes and
+        /// places it in one pass.
+        /// </summary>
+        private PanelOffset WindowOffset(float frameHeight, float canvasHeight, bool relayoutWhenCapChanges)
+        {
+            var place = WindowPlace(canvasHeight);
+            if (relayoutWhenCapChanges && Math.Abs(place.MaxHeight - _windowCap) > 0.5f && _windowCap >= 0f)
+            {
+                _windowCap = place.MaxHeight;
+                Relayout();
+            }
+            else _windowCap = place.MaxHeight;
+            return place.CenterFor(Math.Min(frameHeight, place.MaxHeight));
+        }
 
         /// <summary>The frame width a standard window is drawn at on this canvas; 0 when this is not one.</summary>
         private float StandardFrameWidth => IsStandardWindow ? UiWindowLayout.FrameWidthFor(_windowSpec!, AvailableWidth()) : 0f;
@@ -116,7 +204,8 @@ internal sealed partial class UnityUiRuntime
                 image.raycastTarget = false;
                 // The kit has no stand-in for the ornament: without the game's sprite nothing is drawn.
                 bool drawn = PaintPart(image, SettingsArtPart.WindowTitleOrnament, Color.white, new Color(0f, 0f, 0f, 0f));
-                image.preserveAspect = true;
+                // As the game draws it: the 227x17 sprite stretched into its 171x17 rect (probe D1), not aspect-fitted.
+                image.preserveAspect = false;
                 if (mirrored) go.transform.localScale = new Vector3(-1f, 1f, 1f);
                 go.SetActive(drawn);
                 return go;
@@ -162,6 +251,7 @@ internal sealed partial class UnityUiRuntime
         {
             _sideTop = viewportTop;
             _sideCursor = viewportTop;
+            _sideRowBottoms.Clear();
         }
 
         /// <summary>Place one info-column row at the column's next free line; false when the row is not a side row.</summary>
@@ -179,8 +269,15 @@ internal sealed partial class UnityUiRuntime
             {
                 var columns = RowColumnsFor(row);
                 float height;
-                try { height = FitLabel(row.Label, columns, CaptionLeft(row)); }
-                catch { height = RowHeight; }
+                // A cell row (a fact: name and value) is its fixed band; every other row is its measured caption.
+                bool cells = _cellRows.TryGetValue(row.Go, out var cellRow);
+                if (cells) height = cellRow.Height;
+                else
+                {
+                    try { height = FitLabel(row.Label, columns, CaptionLeft(row)); }
+                    catch { height = RowHeight; }
+                }
+
                 height = Math.Max(InlineHostHeight(row, height), PanelLayout.MinRowHeight);
                 float extraTop = string.Equals(row.Kind, "heading", StringComparison.Ordinal) ? SettingsAlign.HeadingExtraTop : 0f;
                 float width = Math.Max(1f, band - UiWindowLayout.InfoColumnGap);
@@ -194,6 +291,8 @@ internal sealed partial class UnityUiRuntime
                 PlaceHeadingRule(row, height);
                 PlaceInlineRow(row);
                 PlacePageButtons(row, height);
+                if (cells) PlaceCellRowCells(row);
+                _sideRowBottoms.Add(_sideCursor - _sideTop + extraTop + height);
                 _sideCursor += extraTop + height + PanelLayout.RowGap;
             }
             catch { /* the row keeps its last place */ }
@@ -229,13 +328,14 @@ internal sealed partial class UnityUiRuntime
                 RepaintIfMissing(_ornamentRight, SettingsArtPart.WindowTitleOrnament, new Color(0f, 0f, 0f, 0f), keepWhenMissing: false);
 
                 float titleWidth = TitleTextWidth();
-                // A title too long to leave the ornaments their room inside the title rect drops them rather than
+                // The game's popup title: an ornament either side of the words, as wide as the row leaves (at most the
+                // game's 171), on the title's center line. A title too long to leave them room drops them rather than
                 // drawing them over the words.
-                bool room = UiWindowLayout.OrnamentsFit(titleWidth);
-                float half = titleWidth * 0.5f + UiWindowLayout.OrnamentGap + UiWindowLayout.OrnamentMaxWidth * 0.5f;
-                float y = UiWindowLayout.TitleCenterY - UiWindowLayout.OrnamentMaxHeight * 0.5f;
-                PlaceOrnament(_ornamentLeft, -half, y, room);
-                PlaceOrnament(_ornamentRight, half, y, room);
+                float ornament = UiWindowLayout.OrnamentWidth(titleWidth);
+                float half = titleWidth * 0.5f + UiWindowLayout.OrnamentGap + ornament * 0.5f;
+                float y = UiWindowLayout.TitleCenterY - UiWindowLayout.OrnamentHeight * 0.5f;
+                PlaceOrnament(_ornamentLeft, -half, y, ornament);
+                PlaceOrnament(_ornamentRight, half, y, ornament);
 
                 if (_infoGround != null)
                 {
@@ -259,21 +359,23 @@ internal sealed partial class UnityUiRuntime
                     if (on)
                     {
                         var clip = UiWindowLayout.InfoClip(frameWidth, band, _sideTop, panelHeight, footerBand);
-                        PlaceTop(_infoClip, clip.CenterX, clip.Top, clip.Width, clip.Height);
+                        // A row the clip would cut is masked whole: the column ends on a row's bottom edge, above the stamp.
+                        float clipHeight = UiWindowLayout.SnapClip(_sideRowBottoms, clip.Height);
+                        PlaceTop(_infoClip, clip.CenterX, clip.Top, clip.Width, clipHeight);
                     }
                 }
             }
             catch { /* chrome that cannot be placed leaves the window usable */ }
         }
 
-        private static void PlaceOrnament(GameObject? go, float x, float y, bool room)
+        private static void PlaceOrnament(GameObject? go, float x, float y, float width)
         {
             if (go == null) return;
             try
             {
-                bool show = room && HasSprite(go);
+                bool show = width > 0f && HasSprite(go);
                 if (go.activeSelf != show) go.SetActive(show);
-                if (show) PlaceTop(go, x, y, UiWindowLayout.OrnamentMaxWidth, UiWindowLayout.OrnamentMaxHeight);
+                if (show) PlaceTop(go, x, y, width, UiWindowLayout.OrnamentHeight);
             }
             catch { /* an ornament that cannot be placed is left out */ }
         }
@@ -287,7 +389,7 @@ internal sealed partial class UnityUiRuntime
                 var image = go.GetComponent<Image>();
                 if (image == null) return;
                 bool drawn = PaintPart(image, part, Color.white, kit);
-                if (drawn) image.preserveAspect = part == SettingsArtPart.WindowTitleOrnament;
+                if (drawn) image.preserveAspect = false;
                 if (!keepWhenMissing && !drawn && go.activeSelf) go.SetActive(false);
             }
             catch { /* the next pass tries again */ }
@@ -329,6 +431,16 @@ internal sealed partial class UnityUiRuntime
             return body;
         }
 
+        private int OverlaySortingNow()
+        {
+            try
+            {
+                var canvas = Overlay == null ? null : Overlay.GetComponent<Canvas>();
+                return canvas == null ? 0 : canvas.sortingOrder;
+            }
+            catch { return 0; }
+        }
+
         /// <summary>WINDOWS1 readback: the frame and which art parts drew.</summary>
         internal System.Collections.Generic.Dictionary<string, object?>? DescribeStandardWindow()
         {
@@ -338,10 +450,12 @@ internal sealed partial class UnityUiRuntime
                 ["preset"] = _windowSpec!.Preset.ToString(),
                 ["frameWidth"] = StandardFrameWidth,
                 ["infoColumn"] = SideBand,
-                ["centered"] = WindowCentred,
+                ["place"] = Spot.IsWindow ? Spot.Rank + "/" + Spot.Count : "none",
+                ["cap"] = _windowCap,
                 ["ornament"] = _ornamentLeft != null && HasSprite(_ornamentLeft),
                 ["divider"] = _windowDivider != null && HasSprite(_windowDivider),
                 ["infoBottom"] = _sideBottom,
+                ["sorting"] = OverlaySortingNow(),
             };
         }
     }
