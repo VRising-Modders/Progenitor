@@ -780,6 +780,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Reload\JsonCacheSweep.cs" Link="Linked\JsonCacheSweep.cs" />
     <!-- PluginPinHolders: game-free walk naming Core statics that still reach an unloaded plugin. -->
     <Compile Include="..\..\src\Progenitor.Core\Reload\PluginPinHolders.cs" Link="Linked\PluginPinHolders.cs" />
+    <!-- The cross-context generic scan: generics a plugin defines that the runtime creates in Core's context. -->
+    <Compile Include="..\..\src\Progenitor.Core\Reload\CrossContextGenerics.cs" Link="Linked\CrossContextGenerics.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Persistence\SavePaths.cs" Link="Linked\SavePaths.cs" />
     <!-- ServerSave's game-free half: the folder layout and the store set (ServerSave.cs reads the game's persistent data path). -->
     <Compile Include="..\..\src\Progenitor.Core\Persistence\ServerSavePaths.cs" Link="Linked\ServerSavePaths.cs" />

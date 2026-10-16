@@ -98,11 +98,12 @@ internal sealed class GalleryDemo
         }
     }
 
-    private T On<T>(int tab, T handle) where T : IUiHandle => _tabs!.Add(tab, handle);
-
+    // Rows go through _tabs!.Add directly. A generic wrapper here (On<T>) would be instantiated with
+    // Core types, live in Core's load context and keep this plugin loaded until Core unloads
+    // (docs/hot-reload.md "Generic helpers").
     private IUiButton Action(IUiPanel panel, int tab, string caption, string tooltip, Action act)
     {
-        var b = On(tab, panel.Button(caption));
+        var b = _tabs!.Add(tab, panel.Button(caption));
         if (tooltip.Length > 0) b.Tooltip(tooltip);
         b.OnClick(act);
         return b;
@@ -131,28 +132,28 @@ internal sealed class GalleryDemo
                 Action(panel, tab, "Open Widgets", api, () => { _host.OpenPage(WidgetsDemo.PageId); Report("page " + WidgetsDemo.PageId); });
                 break;
             case "settings-page":
-                On(tab, panel.Text("This mod's settings page opens from its entry in the Mods list.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("This mod's settings page opens from its entry in the Mods list.", UiTextStyle.Body));
                 break;
             case "text-styles":
-                On(tab, panel.Text("Title: a block's name", UiTextStyle.Title));
-                On(tab, panel.Text("Section: a group of rows", UiTextStyle.Section));
-                On(tab, panel.Text("Body: an ordinary sentence.", UiTextStyle.Body));
-                On(tab, panel.Text("Muted: a hint or a secondary detail.", UiTextStyle.Muted));
-                On(tab, panel.Text("1,280", UiTextStyle.Number));
-                On(tab, panel.Text("Warning: the chest is almost full.", UiTextStyle.Warning));
-                On(tab, panel.Text("Error: the furnace has no fuel.", UiTextStyle.Error));
-                On(tab, panel.Text("Success: 3 chests sorted.", UiTextStyle.Success));
+                _tabs!.Add(tab, panel.Text("Title: a block's name", UiTextStyle.Title));
+                _tabs!.Add(tab, panel.Text("Section: a group of rows", UiTextStyle.Section));
+                _tabs!.Add(tab, panel.Text("Body: an ordinary sentence.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("Muted: a hint or a secondary detail.", UiTextStyle.Muted));
+                _tabs!.Add(tab, panel.Text("1,280", UiTextStyle.Number));
+                _tabs!.Add(tab, panel.Text("Warning: the chest is almost full.", UiTextStyle.Warning));
+                _tabs!.Add(tab, panel.Text("Error: the furnace has no fuel.", UiTextStyle.Error));
+                _tabs!.Add(tab, panel.Text("Success: 3 chests sorted.", UiTextStyle.Success));
                 break;
             case "name-value":
-                On(tab, panel.Text("Iron Ore", "1,280", UiTextStyle.Number));
-                On(tab, panel.Text("Copper Ore", "96", UiTextStyle.Number));
-                On(tab, panel.Text("Fuel left", "4 min", UiTextStyle.Warning));
+                _tabs!.Add(tab, panel.Text("Iron Ore", "1,280", UiTextStyle.Number));
+                _tabs!.Add(tab, panel.Text("Copper Ore", "96", UiTextStyle.Number));
+                _tabs!.Add(tab, panel.Text("Fuel left", "4 min", UiTextStyle.Warning));
                 break;
             case "heading":
-                On(tab, panel.Heading("A heading"));
+                _tabs!.Add(tab, panel.Heading("A heading"));
                 break;
             case "note":
-                On(tab, panel.Note("A note: one short explanation under a heading."));
+                _tabs!.Add(tab, panel.Note("A note: one short explanation under a heading."));
                 break;
             case "tone-label":
             {
@@ -165,7 +166,7 @@ internal sealed class GalleryDemo
                     (UiTextStyle.Error, "Status: the furnace has no fuel"),
                 };
                 int at = 0;
-                var line = On(tab, panel.Label(cycle[0].Item2, UiTextStyles.ToneOf(cycle[0].Item1)));
+                var line = _tabs!.Add(tab, panel.Label(cycle[0].Item2, UiTextStyles.ToneOf(cycle[0].Item1)));
                 Action(panel, tab, "Cycle status", "Rewrites the line above in place with SetText and a style's tone.", () =>
                 {
                     at = (at + 1) % cycle.Length;
@@ -175,10 +176,10 @@ internal sealed class GalleryDemo
                 break;
             }
             case "fact":
-                On(tab, panel.Fact("Plugin", pluginId));
+                _tabs!.Add(tab, panel.Fact("Plugin", pluginId));
                 break;
             case "divider":
-                On(tab, panel.Divider());
+                _tabs!.Add(tab, panel.Divider());
                 break;
             case "inline":
                 panel.BeginInline();
@@ -187,16 +188,16 @@ internal sealed class GalleryDemo
                 panel.EndInline();
                 break;
             case "tabs":
-                On(tab, panel.Text("This page's own tab row, above, is the tabs widget.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("This page's own tab row, above, is the tabs widget.", UiTextStyle.Body));
                 break;
             case "footer":
-                On(tab, panel.Text("Each gallery window carries its version stamp at the bottom.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("Each gallery window carries its version stamp at the bottom.", UiTextStyle.Body));
                 break;
             case "scroll":
-                On(tab, panel.Text("This tab scrolls: its rows do not fit one screen.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("This tab scrolls: its rows do not fit one screen.", UiTextStyle.Body));
                 break;
             case "capture":
-                On(tab, panel.Text("Basic windows leave the input to the game until hovered; Header and Tabbed take it while shown.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("Basic windows leave the input to the game until hovered; Header and Tabbed take it while shown.", UiTextStyle.Body));
                 break;
             case "game-style":
                 Action(panel, tab, "Game button", api, () => Report("game button")).GameStyle();
@@ -212,64 +213,64 @@ internal sealed class GalleryDemo
             }
             case "confirm-button":
             {
-                var b = On(tab, panel.ConfirmButton("Confirm button", "Write a log line?"));
+                var b = _tabs!.Add(tab, panel.ConfirmButton("Confirm button", "Write a log line?"));
                 b.OnClick(() => Report("confirm button = yes"));
                 break;
             }
             case "toggle":
-                On(tab, panel.Toggle("Toggle", true)).OnChanged(v => Report("toggle = " + (v ? "on" : "off")));
+                _tabs!.Add(tab, panel.Toggle("Toggle", true)).OnChanged(v => Report("toggle = " + (v ? "on" : "off")));
                 break;
             case "slider":
-                On(tab, panel.Slider("Slider", 0f, 10f, 5f)).OnChanged(v => Report("slider = " + v.ToString("0.##", CultureInfo.InvariantCulture)));
+                _tabs!.Add(tab, panel.Slider("Slider", 0f, 10f, 5f)).OnChanged(v => Report("slider = " + v.ToString("0.##", CultureInfo.InvariantCulture)));
                 break;
             case "slider-field":
-                On(tab, panel.SliderField("Slider field", 0f, 100f, 5f, 50f)).OnChanged(v => Report("slider field = " + v.ToString("0.##", CultureInfo.InvariantCulture)));
+                _tabs!.Add(tab, panel.SliderField("Slider field", 0f, 100f, 5f, 50f)).OnChanged(v => Report("slider field = " + v.ToString("0.##", CultureInfo.InvariantCulture)));
                 break;
             case "number":
-                On(tab, panel.Number("Number", 3, 0, 99, 1, 0, "chests")).OnChanged(v => Report("number = " + v.ToString(CultureInfo.InvariantCulture)));
+                _tabs!.Add(tab, panel.Number("Number", 3, 0, 99, 1, 0, "chests")).OnChanged(v => Report("number = " + v.ToString(CultureInfo.InvariantCulture)));
                 break;
             case "dropdown":
-                On(tab, panel.Dropdown("Dropdown", new[] { "ore", "wood", "stone" }, "ore", new[] { "Ore", "Wood", "Stone" },
+                _tabs!.Add(tab, panel.Dropdown("Dropdown", new[] { "ore", "wood", "stone" }, "ore", new[] { "Ore", "Wood", "Stone" },
                     new[] { "Iron, copper and silver ore.", "Lumber and planks.", "Stone and bricks." }))
                     .OnChanged(v => Report("dropdown = " + v));
                 break;
             case "radio":
-                On(tab, panel.Radio("Radio", new[] { "near", "all" }, "near", new[] { "Nearby chests", "Every chest" },
+                _tabs!.Add(tab, panel.Radio("Radio", new[] { "near", "all" }, "near", new[] { "Nearby chests", "Every chest" },
                     new[] { "Only chests in this room.", "Every chest in the castle." }))
                     .OnChanged(v => Report("radio = " + v));
                 break;
             case "multiselect":
-                On(tab, panel.MultiSelect("Multi-select", new[] { "ore", "wood", "stone" }, new[] { "ore" }, new[] { "Ore", "Wood", "Stone" }))
+                _tabs!.Add(tab, panel.MultiSelect("Multi-select", new[] { "ore", "wood", "stone" }, new[] { "ore" }, new[] { "Ore", "Wood", "Stone" }))
                     .OnChanged(v => Report("multi-select = " + string.Join(",", v)));
                 break;
             case "input":
-                On(tab, panel.Input("Text input", "Iron chest")).OnChanged(v => Report("input = " + v));
+                _tabs!.Add(tab, panel.Input("Text input", "Iron chest")).OnChanged(v => Report("input = " + v));
                 break;
             case "textarea":
-                On(tab, panel.TextArea("Text area", "", 3)).OnChanged(v => Report("text area = " + v.Length + " chars"));
+                _tabs!.Add(tab, panel.TextArea("Text area", "", 3)).OnChanged(v => Report("text area = " + v.Length + " chars"));
                 break;
             case "color":
-                On(tab, panel.ColorField("Color", "#B03030")).OnChanged(v => Report("color = " + v));
+                _tabs!.Add(tab, panel.ColorField("Color", "#B03030")).OnChanged(v => Report("color = " + v));
                 break;
             case "datetime":
-                On(tab, panel.DateTimeField("Date and time", "")).OnChanged(v => Report("date-time = " + v));
+                _tabs!.Add(tab, panel.DateTimeField("Date and time", "")).OnChanged(v => Report("date-time = " + v));
                 break;
             case "keyfield":
-                On(tab, panel.KeyField("Key field", pluginId, bindId));
+                _tabs!.Add(tab, panel.KeyField("Key field", pluginId, bindId));
                 break;
             case "keybind":
-                On(tab, panel.Text("Ctrl+F7 (registered with ctx.Keybinds.RegisterOpener) opens and closes these pages.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("Ctrl+F7 (registered with ctx.Keybinds.RegisterOpener) opens and closes these pages.", UiTextStyle.Body));
                 break;
             case "picker":
-                On(tab, panel.Picker("gallery-picker", WidgetsDemo.SampleEntries())).OnPicked(p => Report("picker = " + p.Count));
+                _tabs!.Add(tab, panel.Picker("gallery-picker", WidgetsDemo.SampleEntries())).OnPicked(p => Report("picker = " + p.Count));
                 break;
             case "picker-multi":
-                On(tab, panel.Picker("gallery-multi", WidgetsDemo.SampleEntries(), new UiPickerOptions { Multi = true, Rows = 5 }))
+                _tabs!.Add(tab, panel.Picker("gallery-multi", WidgetsDemo.SampleEntries(), new UiPickerOptions { Multi = true, Rows = 5 }))
                     .OnPicked(p => Report("multi picker = " + p.Count));
                 break;
             case "code":
             {
-                var code = On(tab, panel.CodeArea("Code area", WidgetsDemo.SampleScript, 6));
+                var code = _tabs!.Add(tab, panel.CodeArea("Code area", WidgetsDemo.SampleScript, 6));
                 code.SetHighlighter(WidgetsDemo.Highlight);
                 code.OnChanged(t => Report("code = " + t.Length + " chars"));
                 break;
@@ -293,7 +294,7 @@ internal sealed class GalleryDemo
 
             // ---- Lists and data ----
             case "ordered-list":
-                On(tab, panel.OrderedList("gallery-list", WidgetsDemo.SampleTargets()))
+                _tabs!.Add(tab, panel.OrderedList("gallery-list", WidgetsDemo.SampleTargets()))
                     .OnReorder(m => Report("list reorder " + m.Id + " " + m.From + "->" + m.To));
                 break;
             case "data-table":
@@ -309,14 +310,14 @@ internal sealed class GalleryDemo
             case "info":
             {
                 int seconds = 0;
-                On(tab, panel.Info("Seconds open", () => (seconds++).ToString(CultureInfo.InvariantCulture), 1));
+                _tabs!.Add(tab, panel.Info("Seconds open", () => (seconds++).ToString(CultureInfo.InvariantCulture), 1));
                 break;
             }
             case "item-icons":
-                On(tab, panel.Text("The picker above (Input tab) shows Crystal and Coarse Thread with the game's own icons.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("The picker above (Input tab) shows Crystal and Coarse Thread with the game's own icons.", UiTextStyle.Body));
                 break;
             case "pending":
-                On(tab, panel.Text("Sorting: waiting for the server.", UiTextStyle.Warning));
+                _tabs!.Add(tab, panel.Text("Sorting: waiting for the server.", UiTextStyle.Warning));
                 break;
 
             // ---- Feedback and messages ----
@@ -342,13 +343,13 @@ internal sealed class GalleryDemo
                 Action(panel, tab, "Prompt", api, () => { _host.OpenDialog("Prompt"); Report("dialog Prompt"); });
                 break;
             case "tooltip":
-                On(tab, panel.Text("Hover any gallery button: its tooltip names the call.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("Hover any gallery button: its tooltip names the call.", UiTextStyle.Body));
                 break;
             case "term":
                 _widgets.BuildHelp(panel, tabs, tab);
                 break;
             case "term-markers":
-                On(tab, panel.Text("The help block above ends with its Show markers again toggle.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("The help block above ends with its Show markers again toggle.", UiTextStyle.Body));
                 break;
             case "tip":
                 Action(panel, tab, "Tip card", api, () => Report("tip = " + _host.Tip(panel)));
@@ -366,7 +367,7 @@ internal sealed class GalleryDemo
                 Action(panel, tab, "Pick in world", api, () => { Report("pick armed"); _host.Pick(r => Report("pick = " + r)); });
                 break;
             case "pick-repeat":
-                On(tab, panel.Text("Pick several (repeat) is on the Widgets page, Layout tab.", UiTextStyle.Body));
+                _tabs!.Add(tab, panel.Text("Pick several (repeat) is on the Widgets page, Layout tab.", UiTextStyle.Body));
                 break;
 
             // ---- Game panels ----
@@ -390,8 +391,8 @@ internal sealed class GalleryDemo
     /// </summary>
     private void CallLines(IUiPanel panel, int tab, string name, string call)
     {
-        On(tab, panel.Text(name, UiTextStyle.Body));
-        On(tab, panel.Text(call, UiTextStyle.Muted));
+        _tabs!.Add(tab, panel.Text(name, UiTextStyle.Body));
+        _tabs!.Add(tab, panel.Text(call, UiTextStyle.Muted));
     }
 
     private void Notify(string text, UiNoticeKind kind, bool prefix)

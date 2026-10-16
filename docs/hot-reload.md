@@ -215,9 +215,20 @@ Contract, detection rules and messages: [Modules: plugins that inject IL2CPP typ
 
 - Derive from `ProgenitorPlugin<TContext>`. Keep the context constructor empty; register in `OnLoad` through `ctx.Commands`, `ctx.Events`, `ctx.Hooks`, `ctx.Systems`, `ctx.Net` and other tracked facades.
 - Use `ctx.Patches` for supported patches. Reading `ctx.UnsafeHarmony` marks the plugin non-hot-swappable; raw Harmony patches can retain the old assembly even after unpatching.
+- Do not write generic helpers that are instantiated with Progenitor types (see [below](#generic-helpers-pin-a-plugin-to-its-core-generation)).
 - Track additional disposable resources with `ctx.Track`. Explicitly detach callbacks registered outside the tracked facades and clear references that outlive the plugin. Tracking a handle does not make unsafe native registrations unloadable.
 - Handle `OnUnload(ctx, reason)` only for extra cleanup. Context-owned registrations/resources are cleaned up on every reason. Preserve plain persisted state only when the next generation can safely rediscover it; do not preserve temporary unit/effect handles across Core replacement.
 - Rediscover world entities after reload; do not persist raw runtime entity IDs as permanent identities. See [unload contracts](modules.md#unload-reason) and [world epochs](modules.md#world).
+
+## Generic helpers pin a plugin to its Core generation
+
+A generic method or type defined in your plugin and instantiated with a Progenitor type, such as `T On<T>(int tab, T handle) where T : IUiHandle` called as `On(tab, panel.Toggle(…))`, is created in Core's load context. Core then keeps your plugin alive until that Core generation unloads. Each reload leaks a copy, and Core swaps are refused (`refused: plugin ALC … still alive`) until a restart.
+
+- **Fix:** call Core's generic directly (`_tabs!.Add(tab, panel.Toggle(…))`), or make the helper non-generic and cast at the call site.
+- **At load:** Core logs `<member> is a generic defined in this plugin and instantiated with a Progenitor type; …` once per member.
+- **At a refused swap:** `pin-diag plugin-holder runtime-generic <member> -> released when this Core generation unloads`.
+
+Exact rule, messages and verification: [Modules: generic helpers](modules.md#generic-helpers-instantiated-with-progenitor-types-pin-the-plugin).
 
 ## Per-server mod pause (unload reason `Suspend`)
 
@@ -255,7 +266,7 @@ for an update and restart. Source-checked and game-free tested (`ServerModPauseT
 | No new load after copying | Check the selected side/folder, file settling, image hash, and allowlist. Byte-identical deployments may intentionally do nothing. |
 | Swap was scheduled | Wait for completion status; do not repeatedly schedule it. |
 | Previous generation is still alive | Read the pin/refusal diagnostic. Remove the retaining registration in source; a process-lifetime pin may need an authorized restart. The `pin-diag native-pin …` list shows what the generation held before release; the `pin-release NativePinRegistry … after=0` line confirms those were released. When native pins and `pin-diag holders` are clear, the retainer is outside Progenitor's statics: take a process dump and `gcroot` the generation's `LoaderAllocator` (the procedure is in the internal research notes). |
-| `refused: plugin ALC … still alive` | Read the `pin-diag plugin-holders alive=N [plugin (context)]` block. It is logged at the swap's pin diagnosis for plugins unloaded by an earlier reload, and again when a refused swap puts plugins back. Each `pin-diag plugin-holder <path> -> <what>` line names a Core or Bootstrap static that still reaches an object, delegate, type or assembly of that plugin (for example `Networking.ConfigSync.SaveHolds…`). `found=0` means no Progenitor static holds it: look at the plugin's own threads, timers and native callbacks, or take a process dump. The walk is bounded (`timedOut=true` when it ran out of time). |
+| `refused: plugin ALC … still alive` | Read the `pin-diag plugin-holders alive=N [plugin (context)]` block. It is logged at the swap's pin diagnosis for plugins unloaded by an earlier reload, and again when a refused swap puts plugins back. Each `pin-diag plugin-holder <path> -> <what>` line names a Core or Bootstrap static that still reaches an object, delegate, type or assembly of that plugin (for example `Networking.ConfigSync.SaveHolds…`). A `pin-diag plugin-holder runtime-generic <member>` line means the plugin defines a generic instantiated with Core types: make it non-generic ([below](#generic-helpers-pin-a-plugin-to-its-core-generation)); the copy is released only when that Core generation unloads. `found=0` with no such line means no Progenitor static holds it: look at the plugin's own threads, timers and native callbacks, or take a process dump. The walk is bounded (`timedOut=true` when it ran out of time). |
 | `pin-diag Json collectible default=N` with N > 0 | This line is logged after the plugin sweeps and before Core's uninstall sweep, which drops what remains. If its samples name a plugin assembly, that plugin serialized after its `Unload` (a thread or timer it did not stop): stop that work in `OnUnload`. `modStore=` entries only hold retired plugin generations, never Core. The outgoing Core predates the JSON sweep when this line is **missing** from a refused swap. In that case one authorized restart loads a Core that can release the cache. |
 | Watcher is parked | Read `watch.parkedReason`; repeated requests are not a repair. Follow [Core reload details](bridge-ops.md#core_reload). |
 | New Core failed and old Core was restored | The intended update failed. Inspect quarantine/recovery logs and fix the build before retrying. |

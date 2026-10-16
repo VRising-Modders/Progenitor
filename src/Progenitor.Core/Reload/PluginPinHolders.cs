@@ -18,6 +18,11 @@ namespace Progenitor.Reload;
 /// Nothing runs while every recorded context has been collected, so a healthy reload pays one
 /// weak-reference check per unloaded plugin.</para>
 ///
+/// <para>A holder no field walk can see is a runtime cross-reference: a generic the plugin defines,
+/// instantiated with Core types, lives in Core's context (<see cref="CrossContextGenerics"/>). Each
+/// survivor's offending members are logged as <c>pin-diag plugin-holder runtime-generic</c>, and the
+/// slot in Core's LoaderAllocator handle table that holds it when that table is readable.</para>
+///
 /// <para>Game-free: the walk takes its roots and its target test as arguments, so it is unit-tested
 /// without a game or a second load context.</para>
 /// </summary>
@@ -41,13 +46,20 @@ internal static class PluginPinHolders
         internal readonly string Name;
         internal readonly string Plugin;
         internal readonly long RetiredAt;
+        /// <summary>Generics the plugin defines that live in Core's context (<see cref="CrossContextGenerics"/>).</summary>
+        internal readonly string[] RuntimeGenerics;
+        /// <summary>The plugin's managed LoaderAllocator, weakly, to find it in Core's handle table.</summary>
+        internal readonly WeakReference<object>? Allocator;
 
-        internal Retired(AssemblyLoadContext context, string name, string plugin, long retiredAt)
+        internal Retired(AssemblyLoadContext context, string name, string plugin, long retiredAt,
+            string[]? runtimeGenerics = null, object? allocator = null)
         {
             Context = new WeakReference<AssemblyLoadContext>(context);
             Name = name;
             Plugin = plugin;
             RetiredAt = retiredAt;
+            RuntimeGenerics = runtimeGenerics ?? Array.Empty<string>();
+            Allocator = allocator != null ? new WeakReference<object>(allocator) : null;
         }
     }
 
@@ -65,18 +77,36 @@ internal static class PluginPinHolders
             if (pluginType == null) return;
             var alc = AssemblyLoadContext.GetLoadContext(pluginType.Assembly);
             if (alc == null || !alc.IsCollectible) return;
+            // The admission scan's result, or a scan now: the assembly is still loaded. Strings only.
+            // Computed before the lock (a scan takes milliseconds); the check and the add share one lock.
+            var generics = RuntimeGenericsOf(pluginType.Assembly);
+            var allocator = CrossContextGenerics.LoaderAllocatorOf(pluginType);
             lock (Gate)
             {
                 Prune();
                 for (int i = 0; i < RetiredContexts.Count; i++)
                     if (RetiredContexts[i].Context.TryGetTarget(out var known) && ReferenceEquals(known, alc)) return;
-                RetiredContexts.Add(new Retired(alc, alc.Name ?? "?", pluginName ?? pluginType.FullName ?? "?", Stopwatch.GetTimestamp()));
+                RetiredContexts.Add(new Retired(alc, alc.Name ?? "?", pluginName ?? pluginType.FullName ?? "?", Stopwatch.GetTimestamp(),
+                    generics, allocator));
             }
         }
         catch
         {
             // Diagnostics must never break an unload.
         }
+    }
+
+    private static string[] RuntimeGenericsOf(Assembly assembly)
+    {
+        string name;
+        try { name = assembly.GetName().Name ?? ""; }
+        catch { name = ""; }
+        var findings = CrossContextGenerics.Recall(name) ?? CrossContextGenerics.ScanLoaded(assembly, out _);
+        if (findings == null || findings.Count == 0) return Array.Empty<string>();
+        // Possible (generic dispatch) findings are not printed as holders; the m_slots line covers them.
+        var members = new List<string>(findings.Count);
+        foreach (var f in findings) if (!f.Possible) members.Add(f.Member);
+        return members.ToArray();
     }
 
     /// <summary>Recorded contexts still alive (test and status use).</summary>
@@ -100,7 +130,7 @@ internal static class PluginPinHolders
     internal static void Diagnose(Action<string> log, double minAgeSeconds)
     {
         if (log == null) return;
-        List<(AssemblyLoadContext alc, string name, string plugin)> targets;
+        List<(AssemblyLoadContext alc, string name, string plugin, Retired record)> targets;
         try { targets = AliveTargets(minAgeSeconds); }
         catch (Exception e) { log("pin-diag plugin-holders: " + e.Message); return; }
         if (targets.Count == 0) return;
@@ -133,12 +163,70 @@ internal static class PluginPinHolders
 
         var inAny = IsInAny(alcs);
         Walk(roots, t => inAny(t.Assembly), inAny, log, BudgetMilliseconds, alcs, clock);
+        var records = new List<Retired>(targets.Count);
+        foreach (var t in targets) records.Add(t.record);
+        ReportRuntimeReferences(records, CrossContextGenerics.LoaderAllocatorOf(typeof(PluginPinHolders)), log);
+    }
+
+    /// <summary>
+    /// Holders no static walk can see: a generic the plugin defines, instantiated with Core types, is
+    /// created in Core's context, and the runtime records a permanent reference from Core's
+    /// LoaderAllocator to the plugin's (grep <c>runtime-generic</c>). Logs the members the metadata
+    /// scan named and, when the runtime's handle table is readable, the slot that holds the plugin.
+    /// Returns the number of lines. Never throws.
+    /// </summary>
+    private static int ReportRuntimeReferences(List<Retired> records, object? coreAllocator, Action<string> log)
+    {
+        int lines = 0;
+        foreach (var r in records)
+        {
+            try
+            {
+                foreach (var member in r.RuntimeGenerics)
+                {
+                    log(CrossContextGenerics.DiagnosisLine(member));
+                    lines++;
+                }
+                object? allocator = null;
+                if (r.Allocator != null && r.Allocator.TryGetTarget(out var a)) allocator = a;
+                int slot = CrossContextGenerics.FindReference(coreAllocator, allocator);
+                if (slot >= 0)
+                {
+                    log(SlotLine(slot, r.Name));
+                    lines++;
+                }
+            }
+            catch
+            {
+                // Diagnostics only.
+            }
+        }
+        return lines;
+    }
+
+    internal static string SlotLine(int slot, string context) =>
+        "pin-diag plugin-holder <Core LoaderAllocator>.m_slots[" + slot.ToString(CultureInfo.InvariantCulture)
+        + "] -> load context " + context + " (runtime cross-reference: a generic defined in the plugin "
+        + "instantiated with Core types; released when this Core generation unloads)";
+
+    /// <summary>
+    /// Test seam for the runtime half of the diagnosis: record <paramref name="pluginType"/> as
+    /// retired and report against <paramref name="coreType"/>'s LoaderAllocator, without the static walk.
+    /// </summary>
+    internal static int DiagnoseRuntimeReferences(Type pluginType, Type coreType, Action<string> log)
+    {
+        NoteUnloaded(pluginType, pluginType.FullName);
+        List<(AssemblyLoadContext alc, string name, string plugin, Retired record)> targets = AliveTargets(0);
+        var records = new List<Retired>();
+        var alc = AssemblyLoadContext.GetLoadContext(pluginType.Assembly);
+        foreach (var t in targets) if (ReferenceEquals(t.alc, alc)) records.Add(t.record);
+        return ReportRuntimeReferences(records, CrossContextGenerics.LoaderAllocatorOf(coreType), log);
     }
 
     /// <summary>Recorded, still alive and older than <paramref name="minAgeSeconds"/>.</summary>
-    private static List<(AssemblyLoadContext alc, string name, string plugin)> AliveTargets(double minAgeSeconds)
+    private static List<(AssemblyLoadContext alc, string name, string plugin, Retired record)> AliveTargets(double minAgeSeconds)
     {
-        var list = new List<(AssemblyLoadContext, string, string)>();
+        var list = new List<(AssemblyLoadContext, string, string, Retired)>();
         long now = Stopwatch.GetTimestamp();
         lock (Gate)
         {
@@ -148,7 +236,7 @@ internal static class PluginPinHolders
                 if (!r.Context.TryGetTarget(out var alc)) continue;
                 double age = (now - r.RetiredAt) / (double)Stopwatch.Frequency;
                 if (age < minAgeSeconds) continue;
-                list.Add((alc, r.Name, r.Plugin));
+                list.Add((alc, r.Name, r.Plugin, r));
             }
         }
         return list;
