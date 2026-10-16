@@ -330,9 +330,15 @@ internal static class KeybindArbiter
     /// <summary>The winner's install time is known and the loser's is not.</summary>
     internal const string RuleUnknownTime = "unknown-time";
 
+    /// <summary>HUB1: the loser is one of Progenitor's window keys, which give way to any mod key on their chord.</summary>
+    internal const string RuleWindowYields = "window-yields";
+
+    /// <summary>HUB1: a Progenitor window key's rank: after every mod key (known install time or not).</summary>
+    internal const int WindowYieldRank = 4;
+
     /// <summary>
     /// Plugins whose keys rank right after the game's, above every mod: Core (the Mods-menu opener, the
-    /// input release key) and the dev bridge. A mod can never take their chord.
+    /// input release key) and the dev bridge. A mod can never take their chord, except a window key's (HUB1: those yield).
     /// </summary>
     internal static readonly string[] FrameworkOwners = { "progenitor", "progenitor.dev" };
 
@@ -845,7 +851,7 @@ internal static class KeybindArbiter
         int rb = Rank(b, cache, out var tb);
         if (ra != rb)
         {
-            rule = Math.Min(ra, rb) switch { 0 => RuleGame, 1 => RuleFramework, _ => RuleUnknownTime };
+            rule = Math.Min(ra, rb) switch { 0 => RuleGame, 1 => RuleFramework, _ => Math.Max(ra, rb) == WindowYieldRank ? RuleWindowYields : RuleUnknownTime };
             return ra < rb ? -1 : 1;
         }
 
@@ -867,6 +873,9 @@ internal static class KeybindArbiter
     {
         time = ModInstallTime.Unknown;
         if (c.Source == KeybindSource.Game) return 0;
+        // HUB1: Progenitor's window keys (the tab-history keys) yield to every mod key on their chord: a mod's own key
+        // stays active everywhere, and the window key is the one reported as losing.
+        if (IsFramework(c.OwnerId) && c.Scope == KeybindScope.Window) return WindowYieldRank;
         if (IsFramework(c.OwnerId)) return 1;
         time = InstallOf(c.OwnerId, cache);
         return time.Utc != null ? 2 : 3;
@@ -916,6 +925,7 @@ internal static class KeybindArbiter
         RuleFramework => ", which is part of Progenitor and comes right after the game",
         RuleInstall => ", installed first",
         RuleUnknownTime => ", installed first (this mod's install time is unknown, so it comes after every mod whose time is known)",
+        RuleWindowYields => "; Progenitor's window tab keys always give way to a mod's key",
         _ => ", which comes first by mod id (the install times are the same or unknown)",
     };
 

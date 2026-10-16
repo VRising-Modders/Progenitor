@@ -104,6 +104,68 @@ namespace Progenitor.Tests
         }
 
         [Fact]
+        public void A_mods_gameplay_key_on_the_mouse_back_button_keeps_it_and_the_window_key_yields()
+        {
+            NavKeys();
+            int fired = 0;
+            Keybinds.Register(_owner, "a.mod", "Dodge", File("a"), MouseBack, "Dodge.", () => fired++, allowWhileCaptured: true);
+            var picture = KeybindArbiter.Current();
+            var dodge = picture.FindProgenitor("a.mod", "Dodge")!;
+            var windowBack = picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.WindowTabBackMouseId)!;
+            // The mod key stays active; the window key is the one reported as losing.
+            Assert.True(dodge.Active);
+            Assert.False(windowBack.Active);
+            Assert.Equal(KeybindArbiter.RuleWindowYields, windowBack.Rule);
+            Assert.Contains("give way to a mod's key", windowBack.Reason);
+            Assert.False(KeybindArbiter.LostToGame(SettingsPanel.PluginId, ModsMenu.WindowTabBackMouseId));
+            // The workspace's menu key on the same button is a different scope and does not touch the mod key.
+            Assert.True(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateBackId)!.Active);
+
+            var window = UiApi.Panel("Hub", _owner, "example.hub");
+            try
+            {
+                window.GameWindow();
+                var tabs = window.Tabs("hub", new[] { "A", "B" }, new UiTabsOptions());
+                window.Show();
+                tabs.Selected = 1;
+                UiTabHistoryRoute.UnderPointer = p => ReferenceEquals(p, window);
+                // Even while the window holds the input, the press is the mod's: it fires and the window does not move.
+                Keybinds.WindowHoldsInput = () => true;
+                _keys.Down(MouseBack);
+                _keys.Frame();
+                _keys.Up(UiKey.MouseBack);
+                Assert.Equal(1, fired);
+                Assert.Equal(1, tabs.Selected);
+            }
+            finally
+            {
+                window.Dispose();
+                UiTabHistoryRoute.ResetForTests();
+            }
+        }
+
+        [Fact]
+        public void The_tab_history_keys_yield_to_a_mods_key_in_every_scope_they_meet()
+        {
+            NavKeys();
+            var file = File("b");
+            Keybinds.Register(_owner, "b.mod", "Turn", file, new KeyChord(UiKey.LeftArrow, KeyModifiers.Alt), "", () => { });
+            Keybinds.RegisterScoped(_owner, "b.mod", "MapNext", file, new KeyChord(UiKey.RightArrow, KeyModifiers.Alt), "", () => { },
+                null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Map);
+            Keybinds.Register(_owner, "b.mod", "Sprint", file, MouseForward, "", () => { });
+            var picture = KeybindArbiter.Current();
+            Assert.True(picture.FindProgenitor("b.mod", "Turn")!.Active);
+            Assert.True(picture.FindProgenitor("b.mod", "MapNext")!.Active);
+            Assert.False(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateBackKeysId)!.Active);
+            Assert.False(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateForwardKeysId)!.Active);
+            Assert.False(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.WindowTabForwardMouseId)!.Active);
+            // No game key here, so Sprint keeps the forward button over the window key too.
+            Assert.True(picture.FindProgenitor("b.mod", "Sprint")!.Active);
+            // The Menu scope: the window keys never meet it, so the workspace's own menu keys and the mods are untouched.
+            Assert.True(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateForwardId)!.Active);
+        }
+
+        [Fact]
         public void The_exception_is_only_for_a_window_key_beaten_by_the_game_not_by_a_mod()
         {
             NavKeys();
