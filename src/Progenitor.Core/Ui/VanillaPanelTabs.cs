@@ -89,6 +89,9 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
     private void OnFrame(VanillaSiteSample sample)
     {
         if (_disposed) return;
+        // A station window without the game's tab row (a unit station) cannot host the strip: to
+        // the tabs it is closed, so the consumer never mounts content onto a window with no tabs.
+        if (sample.Resolved && !VanillaStationWindows.HostsTabs(_site, sample.Target.Kind)) sample = default;
         var change = _tracker.Observe(sample.Resolved, sample.Target, out var previous);
         if (change != null) { _selected = 0; _host?.Select(0); }
         _host?.Update(sample);

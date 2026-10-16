@@ -114,15 +114,15 @@ public sealed class VanillaPanelTabsTests
         Assert.Equal(0, runtime.Host.Selected);
     }
 
-    static VanillaSiteSample Open(int id) => new(true, id, true, false,
-        target: new VanillaPanelTarget(VanillaPanelKind.Container, id, 1, id, 1));
+    static VanillaSiteSample Open(int id, VanillaPanelKind kind = VanillaPanelKind.Container) => new(true, id, true, false,
+        target: new VanillaPanelTarget(kind, id, 1, id, 1));
 
     [Fact]
     public void ChangingRedistributionVisibilityRestoresNativeSelection()
     {
         var runtime = new Runtime();
         using var tabs = new VanillaPanelTabs(runtime, VanillaUiSite.StationPanel, new[] { "Production", "Input" }, new object());
-        runtime.Frame!(Open(1));
+        runtime.Frame!(Open(1, VanillaPanelKind.Workstation));
         tabs.Selected = 1;
         tabs.ShowRedistribution = true;
         Assert.Equal(0, tabs.Selected);

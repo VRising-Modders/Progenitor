@@ -63,7 +63,7 @@ public enum VanillaUiSite
     /// <item><description><b>Donors:</b> buttons clone a button of the inventory bottom bar (the
     /// first live, clone-safe one of <c>SelfSortButton</c>, <c>AllSortButton</c>, <c>SmartMergeButton</c>, <c>SmartTakeButton</c>, <c>DropAllButton</c>, then any bar child: <c>DropAllButton</c> on 1.1.13.0); captions clone the label of the inventory's own tab buttons and rows
     /// clone the tooltip's body text (<c>FakeTooltip.Description</c>).</description></item>
-    /// <item><description><b>Refresh:</b> <c>SystemHooks.After</c> on all five window mappers (any one may be the only one updating) with
+    /// <item><description><b>Refresh:</b> <c>SystemHooks.After</c> on all eight window mappers (any one may be the only one updating) with
     /// <c>OnlyWhenSystemRuns = false</c> (every panel site uses that option: the mappers only run
     /// while their queries match, and a close must be seen), reading every mapper from one shared
     /// per-frame scan.</description></item>
@@ -72,13 +72,17 @@ public enum VanillaUiSite
     ContainerPanel = 2,
 
     /// <summary>
-    /// The crafting workstation and refinement station windows: <c>WorkstationMenu</c>
-    /// (<c>WorkstationMenuMapper._WorkstationSubMenu</c>, <c>._Target</c>) and
-    /// <c>RefinementstationMenu</c> (<c>RefinementstationMenuMapper._RefinementStationSubMenu</c>,
-    /// <c>._Target</c>). <see cref="VanillaPanelTarget.Kind"/> says which.
-    /// Anchors: <see cref="VanillaPanelAnchor.LeftEdge"/> (default) and
-    /// <see cref="VanillaPanelAnchor.RightEdge"/>. Refresh: <c>SystemHooks.After&lt;WorkstationMenuMapper&gt;</c>,
-    /// which reads both mappers.
+    /// The station windows: the crafting workstation (<c>WorkstationMenuMapper._WorkstationSubMenu</c>),
+    /// the refinement station (<c>RefinementstationMenuMapper._RefinementStationSubMenu</c>), the prison
+    /// cell (<c>PrisonMenuMapper._PrisonSubMenu</c>), the salvage station
+    /// (<c>SalvagestationMenuMapper._SalvageStationSubMenu</c>) and the unit stations: tomb, vermin
+    /// nest, Nether Gate, by prefab name (<c>UnitSpawnerstationMenuMapper._UnitSpawnerstationSubMenu</c>). The target
+    /// is always that mapper's <c>_Target</c>, the station entity; <see cref="VanillaPanelTarget.Kind"/>
+    /// says which window. The list and the windows left out, with reasons, are
+    /// <see cref="VanillaStationWindows"/>. Anchors: <see cref="VanillaPanelAnchor.LeftEdge"/> (default) and
+    /// <see cref="VanillaPanelAnchor.RightEdge"/>. <c>Ui.AttachPanelTabs</c> draws only on the windows
+    /// with the game's station/redistribution tab row (all but the unit stations). Refresh: the shared
+    /// mapper scan.
     /// </summary>
     StationPanel = 3,
 
@@ -280,7 +284,7 @@ internal static class VanillaUiSites
 
     /// <summary>
     /// The options every site's frame watch is installed with: <c>OnlyWhenSystemRuns = false</c>.
-    /// Every driving mapper (<c>MapMenuMapper</c> and the five window mappers) only updates while its
+    /// Every driving mapper (<c>MapMenuMapper</c> and the eight window mappers) only updates while its
     /// own queries match, so with the default option a watch skips frames and can miss an open or
     /// never see a close. The watch has to run on exactly the frames the mapper does not. A new
     /// instance per call, because <c>HookOptions</c> is mutable.

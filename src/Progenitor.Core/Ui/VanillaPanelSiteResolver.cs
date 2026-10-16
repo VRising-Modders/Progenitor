@@ -1,6 +1,7 @@
 #if !PROGENITOR_TESTS
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Progenitor.Ecs;
 using Progenitor.Hooks;
@@ -25,16 +26,17 @@ namespace Progenitor.Ui;
 /// <c>HookOptions.OnlyWhenSystemRuns = false</c>. Every one of these mappers carries
 /// <c>[RequireMatchingQueriesForUpdate]</c>, so with the default option the hook would fire only on
 /// frames the mapper's own queries match: a site that reads a second mapper (the station site reads
-/// the refinement mapper too; the inventory sites read all five) would miss opens, and a close would
+/// the refinement mapper too; the inventory sites read all eight) would miss opens, and a close would
 /// never be seen, leaving an edge column on screen. With the option off the hook fires whenever the
 /// mapper updates, and the site reads every mapper it needs from one shared per-frame scan
 /// (<see cref="EnsureScan"/>). The mappers do not all update every frame, so every site hooks all
-/// five and has a frame watchdog for its close (<see cref="WatchPanelSite"/>). Never Harmony on a mapper, never a mapper's Burst
+/// eight and has a frame watchdog for its close (<see cref="WatchPanelSite"/>). Never Harmony on a mapper, never a mapper's Burst
 /// <c>LambdaJob_*</c>, never a method of the window (<c>FakeTooltip.SetTooltip</c> takes a dozen
 /// <c>Nullable</c> structs by value and is not a seam).</para>
 ///
 /// <para><b>The address.</b> Each mapper keeps the window it drives in a private field
-/// (<c>_ContainerSubMenu</c>, <c>_WorkstationSubMenu</c>, <c>_RefinementStationSubMenu</c>,
+/// (<c>_ContainerSubMenu</c>, <c>_WorkstationSubMenu</c>, <c>_RefinementStationSubMenu</c>, <c>_PrisonSubMenu</c>,
+/// <c>_SalvageStationSubMenu</c>, <c>_UnitSpawnerstationSubMenu</c>,
 /// <c>_CastleHeartSubMenu</c>, <c>_InventorySubMenu</c>) and the entity it was opened on in
 /// <c>_Target</c>; the interop exposes both as properties. Open is "the submenu's GameObject is
 /// active in the hierarchy" (a <c>HUDMenu</c> is shown and hidden by <c>OnEnable</c> /
@@ -288,7 +290,14 @@ internal sealed partial class UnityUiRuntime
     private static RefinementstationMenuMapper? _refinementMapper;
     private static CastleHeartMenuMapper? _heartMapper;
     private static InventoryMenuMapper? _inventoryMapper;
-    private static WindowScan _container, _workstation, _refinement, _heart, _character;
+    private static WindowScan _container, _workstation, _refinement, _heart, _character, _prison, _salvage, _unit;
+
+    /// <summary>
+    /// The station windows in <see cref="VanillaStationWindows.Covered"/> order, refreshed by every
+    /// scan; <see cref="StationStates"/> is its game-free mirror for <see cref="VanillaStationWindows.Pick"/>.
+    /// </summary>
+    private static readonly WindowScan[] StationScans = new WindowScan[VanillaStationWindows.Covered.Length];
+    private static readonly StationWindowState[] StationStates = new StationWindowState[VanillaStationWindows.Covered.Length];
 
     /// <summary>
     /// Read every mapper once per frame, however many sites and handles ask. Mapper references are
@@ -306,6 +315,9 @@ internal sealed partial class UnityUiRuntime
             _refinementMapper = Mapper<RefinementstationMenuMapper>(world);
             _heartMapper = Mapper<CastleHeartMenuMapper>(world);
             _inventoryMapper = Mapper<InventoryMenuMapper>(world);
+            Guarded(VanillaPanelKind.PrisonCell, "fetch", () => PrisonReader.Fetch(world));
+            Guarded(VanillaPanelKind.SalvageStation, "fetch", () => SalvageReader.Fetch(world));
+            Guarded(VanillaPanelKind.UnitStation, "fetch", () => UnitReader.Fetch(world));
         }
 
         _scanFrame = frame;
@@ -314,6 +326,9 @@ internal sealed partial class UnityUiRuntime
         _refinement = default;
         _heart = default;
         _character = default;
+        _prison = default;
+        _salvage = default;
+        _unit = default;
 
         if (_containerMapper != null)
             _container = Window(_containerMapper._ContainerSubMenu, _containerMapper._InventorySubMenu, _containerMapper._Target);
@@ -325,6 +340,122 @@ internal sealed partial class UnityUiRuntime
             _heart = Window(_heartMapper._CastleHeartSubMenu, _heartMapper._InventorySubMenu, _heartMapper._Target);
         if (_inventoryMapper != null)
             _character = Window(null, _inventoryMapper._InventorySubMenu, Entity.Null);
+        // The three later station windows are each read in their own non-inlined reader: a member the
+        // game renames on one of them fails only that reader (one line, then that window is dropped for
+        // the generation), never this scan and with it every other panel site.
+        Guarded(VanillaPanelKind.PrisonCell, "read", () => _prison = PrisonReader.Read());
+        Guarded(VanillaPanelKind.SalvageStation, "read", () => _salvage = SalvageReader.Read());
+        Guarded(VanillaPanelKind.UnitStation, "read", () => _unit = UnitReader.Read());
+
+        // Same order as VanillaStationWindows.Covered (a test pins that order).
+        StationScans[0] = _workstation;
+        StationScans[1] = _refinement;
+        StationScans[2] = _prison;
+        StationScans[3] = _salvage;
+        StationScans[4] = _unit;
+        for (int i = 0; i < StationScans.Length; i++)
+        {
+            var kind = VanillaStationWindows.Covered[i].Kind;
+            if (VanillaStationWindows.IsFailed(kind)) StationScans[i] = default;
+            StationStates[i] = new StationWindowState(kind, StationScans[i].SubShown, StationScans[i].Target.Index, StationScans[i].Target.Version);
+        }
+
+        if (VanillaStationWindows.IsFailed(VanillaPanelKind.PrisonCell)) _prison = default;
+        if (VanillaStationWindows.IsFailed(VanillaPanelKind.SalvageStation)) _salvage = default;
+        if (VanillaStationWindows.IsFailed(VanillaPanelKind.UnitStation)) _unit = default;
+    }
+
+    /// <summary>
+    /// Run one station window's reader. A throw (a type or member the game removed: the JIT raises it
+    /// when the reader is first compiled) drops that window for the generation with one warning; the
+    /// scan and every other site go on.
+    /// </summary>
+    private static void Guarded(VanillaPanelKind kind, string what, Action read)
+    {
+        if (VanillaStationWindows.IsFailed(kind)) return;
+        try { read(); }
+        catch (Exception e)
+        {
+            if (VanillaStationWindows.MarkFailed(kind))
+                Plugin.Logger?.LogWarning("Ui: StationPanel window " + kind + " unavailable (" + what + "): "
+                    + e.GetType().Name + ": " + e.Message + "; the other windows and sites are unaffected");
+        }
+    }
+
+    // Each reader is its own class so that its static field's type, its member reads and its hook's
+    // generic instantiation are only loaded when that reader runs, inside Guarded's try/catch.
+
+    private static class PrisonReader
+    {
+        internal static PrisonMenuMapper? M;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void Fetch(World world) => M = Mapper<PrisonMenuMapper>(world);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static WindowScan Read() => M == null ? default : Window(M._PrisonSubMenu, M._InventorySubMenu, M._Target);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static IDisposable Hook(Action<SystemHookContext> frame, HookOptions options) => SystemHooks.After<PrisonMenuMapper>(frame, options);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static RectTransform? Grid(Component sub)
+        {
+            var s = sub.TryCast<PrisonSubMenu>();
+            return s == null ? null : RectOf(s.RecipesParent);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void Clear() => M = null;
+    }
+
+    private static class SalvageReader
+    {
+        internal static SalvagestationMenuMapper? M;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void Fetch(World world) => M = Mapper<SalvagestationMenuMapper>(world);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static WindowScan Read() => M == null ? default : Window(M._SalvageStationSubMenu, M._InventorySubMenu, M._Target);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static IDisposable Hook(Action<SystemHookContext> frame, HookOptions options) => SystemHooks.After<SalvagestationMenuMapper>(frame, options);
+
+        /// <summary>No recipe grid: the input grid is the window's item grid.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static RectTransform? Grid(Component sub)
+        {
+            var s = sub.TryCast<SalvagestationSubMenu>();
+            return s == null ? null : RectOf(s.ItemInputsParent);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void Clear() => M = null;
+    }
+
+    private static class UnitReader
+    {
+        internal static UnitSpawnerstationMenuMapper? M;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void Fetch(World world) => M = Mapper<UnitSpawnerstationMenuMapper>(world);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static WindowScan Read() => M == null ? default : Window(M._UnitSpawnerstationSubMenu, M._InventorySubMenu, M._Target);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static IDisposable Hook(Action<SystemHookContext> frame, HookOptions options) => SystemHooks.After<UnitSpawnerstationMenuMapper>(frame, options);
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static RectTransform? Grid(Component sub)
+        {
+            var s = sub.TryCast<UnitSpawnerstationSubMenu>();
+            return s == null ? null : RectOf(s.RecipesParent);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void Clear() => M = null;
     }
 
     private static WindowScan Window(Component? sub, InventorySubMenu? inv, Entity target) => new()
@@ -338,7 +469,7 @@ internal sealed partial class UnityUiRuntime
 
     /// <summary>
     /// One site's watch: when it last sampled, on which world, and whether that sample was open.
-    /// The five mapper hooks and the frame watchdog share it, so a site samples once a frame.
+    /// The eight mapper hooks and the frame watchdog share it, so a site samples once a frame.
     /// </summary>
     private sealed class SiteWatch
     {
@@ -359,7 +490,7 @@ internal sealed partial class UnityUiRuntime
     /// frame: the inventory site, hooked on <c>InventoryMenuMapper</c> alone, never saw the bag
     /// beside an open chest (it first resolved when the character menu opened), and a window that
     /// closes together with the mapper that drives it may leave no frame in which its own mapper
-    /// sees it closed. So every panel site hooks <b>all five</b> window mappers and samples on the
+    /// sees it closed. So every panel site hooks <b>all eight</b> window mappers and samples on the
     /// first of them to run each frame; and while the site last read open, a frame watchdog
     /// (<c>Plugin.Frame</c>) samples it on the last world when no mapper has run for
     /// <see cref="WatchdogFrames"/> frames. A window that went inactive or was destroyed then reads
@@ -430,6 +561,10 @@ internal sealed partial class UnityUiRuntime
             Add(leases, SystemHooks.After<RefinementstationMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
             Add(leases, SystemHooks.After<CastleHeartMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
             Add(leases, SystemHooks.After<InventoryMenuMapper>(frame, VanillaUiSites.WatchOptions(site)));
+            // Each later station mapper is hooked on its own: a failed registration drops that window.
+            Guarded(VanillaPanelKind.PrisonCell, "hook", () => Add(leases, PrisonReader.Hook(frame, VanillaUiSites.WatchOptions(site))));
+            Guarded(VanillaPanelKind.SalvageStation, "hook", () => Add(leases, SalvageReader.Hook(frame, VanillaUiSites.WatchOptions(site))));
+            Guarded(VanillaPanelKind.UnitStation, "hook", () => Add(leases, UnitReader.Hook(frame, VanillaUiSites.WatchOptions(site))));
             Plugin.Frame += watchdog;
             leases.Add(new FrameLease(watchdog));
         }
@@ -465,7 +600,7 @@ internal sealed partial class UnityUiRuntime
         }
     }
 
-    /// <summary>One site watch: the five mapper hooks and the watchdog, released together.</summary>
+    /// <summary>One site watch: the eight mapper hooks and the watchdog, released together.</summary>
     private sealed class LeaseSet : IDisposable
     {
         private List<IDisposable>? _leases;
@@ -505,7 +640,13 @@ internal sealed partial class UnityUiRuntime
         _refinementMapper = null;
         _heartMapper = null;
         _inventoryMapper = null;
-        _container = _workstation = _refinement = _heart = _character = default;
+        try { PrisonReader.Clear(); } catch { /* the reader never loaded */ }
+        try { SalvageReader.Clear(); } catch { /* */ }
+        try { UnitReader.Clear(); } catch { /* */ }
+        VanillaStationWindows.ResetFailures();
+        _container = _workstation = _refinement = _heart = _character = _prison = _salvage = _unit = default;
+        Array.Clear(StationScans, 0, StationScans.Length);
+        Array.Clear(StationStates, 0, StationStates.Length);
         FitScratch.Clear();
     }
 
@@ -594,35 +735,55 @@ internal sealed partial class UnityUiRuntime
 
     private static VanillaSiteSample SampleStation(PanelView view, World world)
     {
-        if (_workstation.SubShown && _workstation.Target != Entity.Null)
+        // Which window is open is decided game-free (VanillaStationWindows.Pick); this half only
+        // reads the chosen window's grid. The target is always that mapper's _Target: the station.
+        if (!VanillaStationWindows.TryResolve(StationStates, out int pick, out var picked)) return Miss(view);
+        var window = StationScans[pick];
+        var kind = picked.Kind;
+        RectTransform? grid;
+        switch (kind)
         {
-            var sub = _workstation.Sub!.TryCast<WorkstationSubMenu>();
-            if (sub != null)
+            case VanillaPanelKind.Workstation:
             {
-                view.Reset();
-                view.Panel = sub.gameObject;
-                view.Grid = RectOf(sub.RecipesParent);
-                FromInventory(view, _workstation.Inventory);
-                view.Obstacle = _workstation.InventoryShown ? _workstation.Inventory!.gameObject : null;
-                return Finish(VanillaUiSite.StationPanel, view, world, VanillaPanelKind.Workstation, _workstation.Target);
+                var sub = window.Sub!.TryCast<WorkstationSubMenu>();
+                if (sub == null) return Miss(view);
+                grid = RectOf(sub.RecipesParent);
+                break;
             }
+            case VanillaPanelKind.RefinementStation:
+            {
+                var sub = window.Sub!.TryCast<RefinementstationSubMenu>();
+                if (sub == null) return Miss(view);
+                grid = RectOf(sub.RecipesParent);
+                break;
+            }
+            case VanillaPanelKind.PrisonCell:
+            case VanillaPanelKind.SalvageStation:
+            case VanillaPanelKind.UnitStation:
+            {
+                RectTransform? found = null;
+                bool ok = false;
+                Guarded(kind, "grid", () =>
+                {
+                    found = kind == VanillaPanelKind.PrisonCell ? PrisonReader.Grid(window.Sub!)
+                        : kind == VanillaPanelKind.SalvageStation ? SalvageReader.Grid(window.Sub!)
+                        : UnitReader.Grid(window.Sub!);
+                    ok = true;
+                });
+                if (!ok) return Miss(view);
+                grid = found;
+                break;
+            }
+            default:
+                return Miss(view);
         }
 
-        if (_refinement.SubShown && _refinement.Target != Entity.Null)
-        {
-            var sub = _refinement.Sub!.TryCast<RefinementstationSubMenu>();
-            if (sub != null)
-            {
-                view.Reset();
-                view.Panel = sub.gameObject;
-                view.Grid = RectOf(sub.RecipesParent);
-                FromInventory(view, _refinement.Inventory);
-                view.Obstacle = _refinement.InventoryShown ? _refinement.Inventory!.gameObject : null;
-                return Finish(VanillaUiSite.StationPanel, view, world, VanillaPanelKind.RefinementStation, _refinement.Target);
-            }
-        }
-
-        return Miss(view);
+        view.Reset();
+        view.Panel = window.Sub!.gameObject;
+        view.Grid = grid;
+        FromInventory(view, window.Inventory);
+        view.Obstacle = window.InventoryShown ? window.Inventory!.gameObject : null;
+        return Finish(VanillaUiSite.StationPanel, view, world, kind, window.Target);
     }
 
     private static VanillaSiteSample SampleCastleHeart(PanelView view, World world)
@@ -641,6 +802,9 @@ internal sealed partial class UnityUiRuntime
         if (_container.InventoryShown) { window = _container; kind = VanillaPanelKind.Container; return true; }
         if (_workstation.InventoryShown) { window = _workstation; kind = VanillaPanelKind.Workstation; return true; }
         if (_refinement.InventoryShown) { window = _refinement; kind = VanillaPanelKind.RefinementStation; return true; }
+        if (_prison.InventoryShown) { window = _prison; kind = VanillaPanelKind.PrisonCell; return true; }
+        if (_salvage.InventoryShown) { window = _salvage; kind = VanillaPanelKind.SalvageStation; return true; }
+        if (_unit.InventoryShown) { window = _unit; kind = VanillaPanelKind.UnitStation; return true; }
         if (_heart.InventoryShown) { window = _heart; kind = VanillaPanelKind.CastleHeart; return true; }
         if (_character.InventoryShown) { window = _character; kind = VanillaPanelKind.Character; return true; }
         window = default;

@@ -1422,12 +1422,35 @@ ctx.Track(tip.OnPanel(e => tip.SetRows(new[] { "In storage: " + CountInStorage(e
 | Site | Window (how it is found) | Anchors (default first) | Target |
 |---|---|---|---|
 | `ContainerPanel` | `ContainerMenuMapper._ContainerSubMenu`, `._Target` | `LeftEdge`, `RightEdge`, `BesideRename` | the container |
-| `StationPanel` | `WorkstationMenuMapper._WorkstationSubMenu` / `RefinementstationMenuMapper._RefinementStationSubMenu`, each `._Target` | `LeftEdge`, `RightEdge` | the station; `Kind` is `Workstation` or `RefinementStation` |
-| `InventoryPanel` | the active `_InventorySubMenu` of the container, station, castle heart or character window | `BesideSort` | the window's target beside a container or station; none (`Kind = Character`) in the character menu |
+| `StationPanel` | the open station window of the mappers in [Station windows](#station-windows), each `._XSubMenu` and `._Target` | `LeftEdge`, `RightEdge` | the station entity (the mapper's `_Target`); `Kind` is `Workstation`, `RefinementStation`, `PrisonCell`, `SalvageStation` or `UnitStation` |
+| `InventoryPanel` | the active `_InventorySubMenu` of the container, station, castle heart or character window; the station windows include the prison cell, devourer and unit stations, so `InventoryPanel` and `InventoryTooltip` also resolve beside those (source-checked; live check pending) | `BesideSort` | the window's target beside a container or station; none (`Kind = Character`) in the character menu |
 | `CastleHeartPanel` (alias `ThronePanel`) | `CastleHeartMenuMapper._CastleHeartSubMenu`, `._Target` | `LeftEdge`, `RightEdge` | the castle heart |
 | `InventoryTooltip` | the inventory's (or the container half's) `FakeTooltip` while it is shown over a hovered `ItemGridSelectionEntry` | `TooltipBody` | `ItemGuid` and `ItemAmount` of the hovered stack; the container when the slot is in the container half |
 
 `ThronePanel` and `CastleHeartPanel` are the same value. The throne has no window of its own on this build (sitting on it is the `UseThrone` interaction); the castle list and the blood essence fuel live in the castle heart window, so both names address it.
+
+### Station windows
+
+`StationPanel` covers every station window whose mapper keeps the window in `_XSubMenu` and the station in `_Target` and whose layout is a crafting or refining station's (bonuses, a recipe or input grid, outputs). The target is always the mapper's `_Target`: the station entity the player opened. `AttachPanelTabs` draws its strip in place of the game's station/redistribution tab row, so it draws only on windows that have that row. Status: **source-checked; live check pending** for the prison cell, salvage and unit station windows (member names checked against the game's metadata and the client interop; built and game-free tested in `VanillaStationWindowsTests`). The workstation and refinement rows are the ones already observed live. The prison, salvage and unit station mappers are each read and hooked on their own: if a game update renames one of their members, that window alone is dropped for the generation with one warning (`Ui: StationPanel window <Kind> unavailable ...`), and every other window and site keeps working.
+
+| Window (mapper, submenu) | Prefab examples | `Kind` | `AttachToVanilla` edges | `AttachPanelTabs` |
+|---|---|---|---|---|
+| `WorkstationMenuMapper`, `WorkstationSubMenu` | workbench, tailor, alchemy table, anvil | `Workstation` | yes | yes |
+| `RefinementstationMenuMapper`, `RefinementstationSubMenu` | furnace, sawmill, grinder, blood press, paper press | `RefinementStation` | yes | yes |
+| `PrisonMenuMapper`, `PrisonSubMenu` | `TM_SpecialStation_PrisonCell` and its variants | `PrisonCell` | yes | yes; a custom tab hides the prisoner block, the recipe grid, the cell's slots and the status line |
+| `SalvagestationMenuMapper`, `SalvagestationSubMenu` | devourer (by prefab name) | `SalvageStation` | yes (aligned with the input grid; there is no recipe grid) | yes; a custom tab hides the inputs, outputs, progress, status, the on/off toggle (`ToggleButton_Active`/`_Inactive`, `ToggleButtonText`) and the rename button |
+| `UnitSpawnerstationMenuMapper`, `UnitSpawnerstationSubMenu` | `TM_UnitStation_Tomb`, `TM_UnitStation_VerminNest`, `TM_UnitStation_NetherGate` (by prefab name) | `UnitStation` | yes | no: the window has no tab row to replace, so the tabs treat it as closed (no `PanelChanged`) |
+
+Windows read and left out of `StationPanel`:
+
+| Window | Reason |
+|---|---|
+| braziers | a container window with a burn toggle (`ContainerSubMenu.BurnContainerUI`): use `ContainerPanel` |
+| servant coffin (`ServantCoffinstationSubMenu`) | servant layout (portrait, perks, action box), no grid or tab row |
+| research tables (`ResearchstationSubMenu`), spell school passive station | tree layouts, no grid or tab row |
+| forge, fusion forge, jewelcrafting table, blood mixer, lightning rod, stable pen | own layouts without the station/redistribution row; not read in enough detail to place a column or strip |
+| arena station, inventory routing station, music player, respec station | no inventory half; the target is a differently named field |
+| traders | not a castle station |
 
 ### Anchors on game build 1.1.13.0
 
@@ -1476,9 +1499,9 @@ An anchor a site does not list gives a disabled handle and one line: `Ui: attach
 
 **Mapping to the server entity.** The client entity means nothing on the server. The `NetworkId` is the identity the game itself uses for the same object on both sides: send `NetworkIdIndex`, `NetworkIdGeneration` and the type (`NetworkId2`) in your request and resolve them on the server with `ctx.Inventory.TryResolveNetworkId` ([below](#resolving-a-target-on-the-server)). It is session-local: never persist it, and never persist the client entity either; persist the `ContainerId` the resolver returns (P5).
 
-**The seam.** Each site's watch is `SystemHooks.After<XMenuMapper>` with `HookOptions { OnlyWhenSystemRuns = false }`. Every one of these mappers is marked to update only while its queries match, so with the default option a watch would skip frames: a site that reads a second mapper (the station site reads the refinement mapper too; the inventory and tooltip sites read all five) would miss opens and never see a close, leaving an edge column on screen. With the option off the watch runs whenever its mapper updates. All five mappers are read once per frame into one shared scan, however many sites and plugins ask.
+**The seam.** Each site's watch is `SystemHooks.After<XMenuMapper>` with `HookOptions { OnlyWhenSystemRuns = false }`. Every one of these mappers is marked to update only while its queries match, so with the default option a watch would skip frames: a site that reads a second mapper (the station site reads the refinement mapper too; the inventory and tooltip sites read all eight) would miss opens and never see a close, leaving an edge column on screen. With the option off the watch runs whenever its mapper updates. All eight mappers are read once per frame into one shared scan, however many sites and plugins ask.
 
-The mappers do not all update every frame. On 1.1.13.0, a watch on `InventoryMenuMapper` alone never sampled the bag beside an open chest; it first resolved when the character menu opened. A window can also close in the same frame as the only mapper that would have seen it closed. So every panel site hooks **all five** window mappers and samples on the first of them to run each frame. While a site last read open, a frame watchdog (`Plugin.Frame`) samples it on the last world after two frames with no mapper update. A window that went inactive or was destroyed therefore reads closed on the next frame, and the tracker raises exactly one `Closed` per `Opened`, also when the chest and its bag close together (`Closing_a_chest_and_its_bag_in_one_frame_raises_exactly_one_Closed_per_open`).
+The mappers do not all update every frame. On 1.1.13.0, a watch on `InventoryMenuMapper` alone never sampled the bag beside an open chest; it first resolved when the character menu opened. A window can also close in the same frame as the only mapper that would have seen it closed. So every panel site hooks **all eight** window mappers and samples on the first of them to run each frame. While a site last read open, a frame watchdog (`Plugin.Frame`) samples it on the last world after two frames with no mapper update. A window that went inactive or was destroyed therefore reads closed on the next frame, and the tracker raises exactly one `Closed` per `Opened`, also when the chest and its bag close together (`Closing_a_chest_and_its_bag_in_one_frame_raises_exactly_one_Closed_per_open`).
 
 ### Resolving a target on the server
 
@@ -1804,7 +1827,7 @@ The [Mods workspace](mods-menu.md) is the player-facing directory: a main-menu b
 
 ## Container and station tabs
 
-`Ui.AttachPanelTabs(site, captions, owner)` supports `ContainerPanel` and `StationPanel`. The first caption represents the native inventory or production view; the remaining captions select custom content. Track the returned `IVanillaPanelTabs` with the plugin context. Subscribe to `PanelChanged` to resolve the current target, and to `SelectionChanged` to populate a panel, call `Mount(panel)`, then `Ui.Show(panel)`. Create controls after `panel.GameWindow()` to use the native settings layout.
+`Ui.AttachPanelTabs(site, captions, owner)` supports `ContainerPanel` and `StationPanel` (the station windows with the game's station/redistribution tab row: workstations, refinement stations, prison cells and the devourer; see [Station windows](#station-windows)). The first caption represents the native inventory or production view; the remaining captions select custom content. Track the returned `IVanillaPanelTabs` with the plugin context. Subscribe to `PanelChanged` to resolve the current target, and to `SelectionChanged` to populate a panel, call `Mount(panel)`, then `Ui.Show(panel)`. Create controls after `panel.GameWindow()` to use the native settings layout.
 
 `Selected = 0` restores the native view. Closing, changing target, disposing the owner, and Core reload restore native content and detach callbacks. Reject stale asynchronous replies when the target or selected tab changes. Mounted content scrolls inside the native window; it does not replace the inventory entity or its mapper.
 
@@ -1812,7 +1835,7 @@ On stations, `ShowRedistribution` optionally adds the game's redistribution view
 
 For a separate manager window, `panel.GameWindow(width)` requests a centered native frame capped to the canvas width. Call before creating controls. The parameterless overload retains ordinary panel placement. Wide manager windows reserve 15% of the canvas at the bottom; mounted tab panels cap their height above the same HUD margin and scroll excess content.
 
-Status: built and game-free lifecycle tests pass. Container and refinement tab selection, content mounting, native restoration and reload were observed on the isolated client at 1920x1080 and 3840x1080. Anvil Production/Input mounting and restricted-container content at 2560x1440 were also observed. The native font, tab height and silver divider are retained from the character-tab donor. Other station layouts, native 4K and physical controller input require their own qualification.
+Status: built and game-free lifecycle tests pass. Container and refinement tab selection, content mounting, native restoration and reload were observed on the isolated client at 1920x1080 and 3840x1080. Anvil Production/Input mounting and restricted-container content at 2560x1440 were also observed. The native font, tab height and silver divider are retained from the character-tab donor. Prison cell and devourer tabs are source-checked; live check pending. Other station layouts, native 4K and physical controller input require their own qualification.
 
 ### Search input
 
