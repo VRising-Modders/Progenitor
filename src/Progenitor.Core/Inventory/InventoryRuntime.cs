@@ -61,6 +61,38 @@ internal static class InventoryRuntime
 
     private static InventoryStamps? _stamps;
 
+    internal const string ConfigSection = "Inventory";
+    internal const string WatchStampsKey = "WatchUsesChangeStamps";
+    internal const string WatchStampsDescription =
+        "Experimental, server only. When true, ctx.Inventory.Watch skips its fingerprint while the container's change stamp "
+        + "is unchanged (every 8th check still fingerprints). Off until the change stamps are verified live. Default false.";
+
+    private static BepInEx.Configuration.ConfigEntry<bool>? _watchStamps;
+
+    /// <summary><c>[Inventory] WatchUsesChangeStamps</c>; false when unbound.</summary>
+    internal static bool WatchUsesStamps
+    {
+        get
+        {
+            try { return _watchStamps?.Value ?? false; }
+            catch { return false; }
+        }
+    }
+
+    private static void BindConfig(BepInEx.Configuration.ConfigFile file)
+    {
+        try
+        {
+            if (_watchStamps != null || file == null) return;
+            _watchStamps = Progenitor.Config.ConfigHelper.Bind(file, ConfigSection, WatchStampsKey, false, WatchStampsDescription);
+            Plugin.Logger?.LogInfo("Inventory: bound [" + ConfigSection + "] " + WatchStampsKey + " = " + _watchStamps.Value + ".");
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Inventory: binding [" + ConfigSection + "] " + WatchStampsKey + " threw (" + e.Message + "); watches keep fingerprinting.");
+        }
+    }
+
     internal static void Install()
     {
         if (!Plugin.IsServerProcess) return;
@@ -69,7 +101,11 @@ internal static class InventoryRuntime
         _stamps = new InventoryStamps(new UnityInventoryStampSource(), line => Plugin.Logger?.LogError(line));
         try { _stamps.TrySeedClock(AppDomain.CurrentDomain.GetData(ClockProcessKey) as string); }
         catch { /* no slot: the clock starts from the store's own value */ }
-        _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line), c => _stamps?.Stamp(c) ?? 0);
+        Progenitor.Config.SharedConfig.BindWhenAvailable("[" + ConfigSection + "] " + WatchStampsKey, BindConfig);
+        // Watches use the stamps only when the config says so; a watch is not a stamp user, so it
+        // never turns the audit on by itself.
+        _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line),
+            c => WatchUsesStamps && _stamps != null ? _stamps.Stamp(c, user: false) : 0);
         _engine.Touched = c => _hub?.Poke(c);
         _book = new ContainerIdRegistry();
         _netIds = new NetworkIdResolver(new ServerNetworkIdSource());
@@ -95,6 +131,7 @@ internal static class InventoryRuntime
         if (_hooked) Plugin.Frame -= Tick;
         ModSave.BeforeSave -= Flush;
         _hooked = false;
+        _watchStamps = null;
         CastleContainerRows.IdResolver = null;
         CastleContainerRows.HeartIdResolver = null;
         try { Flush(); }

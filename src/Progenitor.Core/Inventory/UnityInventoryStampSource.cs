@@ -63,22 +63,34 @@ internal sealed unsafe class UnityInventoryStampSource : IInventoryStampSource
     }
 
     public bool TryReadSlotsVersion(int index, int version, out ChunkVersionRead read) =>
-        ChunkVersions.TryRead(_binding, index, version, _slotsType.Value, out read);
+        Read(index, version, _slotsType.Value, out read);
 
     public bool TryReadInstancesVersion(int index, int version, out ChunkVersionRead read) =>
-        ChunkVersions.TryRead(_binding, index, version, _instancesType.Value, out read);
+        Read(index, version, _instancesType.Value, out read);
 
-    public void CompleteWriters(int index, int version, bool instances)
+    /// <summary>A raw read; the first one after Core loads is also checked against the interop's <c>GetChunk</c>.</summary>
+    private bool Read(int index, int version, int typeIndex, out ChunkVersionRead read)
     {
-        if (!TryWorld(out var world)) return;
+        if (!ChunkVersions.TryRead(_binding, index, version, typeIndex, out read)) return false;
+        if (ChunkVersions.SelfTested) return ChunkVersions.DisabledReason == null;
+        if (!TryWorld(out var world)) return false;
+        return ChunkVersions.SelfTest(world.EntityManager, _binding, new Entity { Index = index, Version = version }, read,
+            line => Plugin.Logger?.LogError(line));
+    }
+
+    public bool CompleteWriters(int index, int version, bool instances)
+    {
+        if (!TryWorld(out var world)) return false;
         try
         {
+            // The caller's raw read has just confirmed this entity alive with the buffer.
             world.EntityManager.GetBufferRawRO(new Entity { Index = index, Version = version }, instances ? _instancesType : _slotsType);
+            return true;
         }
         catch
         {
-            // The entity lost the buffer between the resolve and this call: the version read that
-            // follows fails its own checks and the stamp is fresh.
+            // Not completed: the stamp service treats the whole batch as unknown.
+            return false;
         }
     }
 

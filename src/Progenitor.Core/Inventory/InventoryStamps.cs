@@ -34,9 +34,11 @@ internal interface IInventoryStampSource
 
     /// <summary>
     /// Complete in-flight jobs that write <c>InventoryBuffer</c> (or <c>InventoryInstanceElement</c>
-    /// when <paramref name="instances"/>), through the entity named. Once per batch.
+    /// when <paramref name="instances"/>), through the entity named, which a raw read has just
+    /// confirmed alive with that buffer. Once per batch. False (or a throw) when the completion did
+    /// not happen; the batch's answers are then fresh.
     /// </summary>
-    void CompleteWriters(int index, int version, bool instances);
+    bool CompleteWriters(int index, int version, bool instances);
 
     /// <summary>A hash of every field of every slot row (<see cref="InventoryStamps.RowHash"/>). False when unreadable.</summary>
     bool TryContentHash(int index, int version, out ulong hash);
@@ -69,7 +71,8 @@ internal interface IInventoryStampSource
 /// the same version), when a reference's resolved identity changed at or after it, when the audit
 /// flagged it, when a read fails, or when <c>since</c> is ahead of the clock.</para>
 ///
-/// <para><b>Audit.</b> Each frame <see cref="AuditPerFrame"/> recently used references are re-read
+/// <para><b>Audit.</b> While a stamp user other than the watch hub has called lately (<see cref="HasUser"/>),
+/// each frame <see cref="AuditPerFrame"/> recently used references are re-read
 /// with a raw-row content hash. A hash that changed while the stamp did not is a miss (a write path
 /// that did not bump the version): it is counted in <see cref="Misses"/>, logged once, and folded
 /// into that reference's stamp so the consumer still sees the change.</para>
@@ -96,6 +99,7 @@ internal sealed class InventoryStamps
     private int _auditCursor;
     private long _frame;
     private int _entriesEpoch = int.MinValue;
+    private long _lastUserFrame = long.MinValue;
 
     // Clock state: the 64-bit value, the 32-bit sample it was last advanced to, the store it reads.
     private long _clock64;
@@ -107,6 +111,7 @@ internal sealed class InventoryStamps
     private bool _batchBound;
     private bool _slotsCompleted;
     private bool _instancesCompleted;
+    private bool _batchFailed;
     private bool _missLogged;
 
     internal InventoryStamps(IInventoryStampSource source, Action<string>? logError = null, ulong? freshSeed = null)
@@ -131,6 +136,15 @@ internal sealed class InventoryStamps
 
     /// <summary>Slow-path resolutions.</summary>
     internal long Resolves { get; private set; }
+
+    /// <summary>Batches whose job completion failed (their answers were fresh).</summary>
+    internal long CompletionFailures { get; private set; }
+
+    /// <summary>
+    /// Whether a stamp user other than the watch hub (a plugin or the dev bridge) called within
+    /// the last <see cref="EvictAfterFrames"/> frames; the audit runs only then.
+    /// </summary>
+    internal bool HasUser => _lastUserFrame != long.MinValue && _frame - _lastUserFrame <= EvictAfterFrames;
 
     /// <summary>Cached references.</summary>
     internal int Entries => _entries.Count;
@@ -197,6 +211,7 @@ internal sealed class InventoryStamps
         else if (store != _clockStore)
         {
             _clock64 = ChunkVersionMath.Rebase(_clock64, sample);
+            Clear(); // a new store: no cached chunk, archetype or entity of the old one means anything
         }
         else
         {
@@ -210,20 +225,20 @@ internal sealed class InventoryStamps
     // ---- stamps --------------------------------------------------------------------------------
 
     /// <summary>One stamp. Never 0.</summary>
-    internal long Stamp(InventoryRef container)
+    internal long Stamp(InventoryRef container, bool user = true)
     {
-        Begin();
+        Begin(user);
         try { return StampOne(container); }
         finally { End(); }
     }
 
     /// <summary>Stamps of <paramref name="containers"/> into <paramref name="into"/>, one batch.</summary>
-    internal void Stamps(IReadOnlyList<InventoryRef> containers, Span<long> into)
+    internal void Stamps(IReadOnlyList<InventoryRef> containers, Span<long> into, bool user = true)
     {
         if (containers == null) throw new ArgumentNullException(nameof(containers));
         if (into.Length < containers.Count)
             throw new ArgumentException("the span holds " + into.Length + " stamps; " + containers.Count + " are needed", nameof(into));
-        Begin();
+        Begin(user);
         try
         {
             for (int i = 0; i < containers.Count; i++) into[i] = StampOne(containers[i]);
@@ -232,10 +247,10 @@ internal sealed class InventoryStamps
     }
 
     /// <summary>True when any of <paramref name="containers"/> may have changed at or after <paramref name="since"/>.</summary>
-    internal bool AnyChangedSince(IReadOnlyList<InventoryRef> containers, long since)
+    internal bool AnyChangedSince(IReadOnlyList<InventoryRef> containers, long since, bool user = true)
     {
         if (containers == null) throw new ArgumentNullException(nameof(containers));
-        Begin();
+        Begin(user);
         try
         {
             bool any = !_clockSeen || since > _clock64;
@@ -267,7 +282,7 @@ internal sealed class InventoryStamps
         {
             if (!_clockSeen) return;
             Evict();
-            Audit();
+            if (HasUser) Audit();
         }
         finally { End(); }
     }
@@ -280,11 +295,13 @@ internal sealed class InventoryStamps
         _auditCursor = 0;
     }
 
-    private void Begin()
+    private void Begin(bool user = false)
     {
         _batchBound = false;
         _slotsCompleted = false;
         _instancesCompleted = false;
+        _batchFailed = false;
+        if (user) _lastUserFrame = _frame;
         SampleClock();
         int epoch = _source.CurrentEpoch;
         if (epoch != _entriesEpoch)
@@ -345,7 +362,9 @@ internal sealed class InventoryStamps
         entry.LastFrame = _frame;
         if (!TryRefresh(entry))
         {
-            Drop(entry);
+            // A failed batch (job completion did not happen) says nothing about this reference:
+            // answer fresh, keep what is cached. Any other failure means the cache is wrong.
+            if (!_batchFailed) Drop(entry);
             return null;
         }
 
@@ -358,9 +377,15 @@ internal sealed class InventoryStamps
         ChunkVersionRead instances = default;
         if (!resolve && e.External)
         {
-            CompleteOnce(e.Ref.OwnerIndex, e.Ref.OwnerVersion, instances: true);
-            if (!_source.TryReadInstancesVersion(e.Ref.OwnerIndex, e.Ref.OwnerVersion, out instances) || !instances.Equals(e.Instances))
+            if (!ReadConfirmed(e.Ref.OwnerIndex, e.Ref.OwnerVersion, instances: true, out instances))
+            {
+                if (_batchFailed) return false;
                 resolve = true;
+            }
+            else if (!instances.Equals(e.Instances))
+            {
+                resolve = true;
+            }
         }
 
         if (resolve)
@@ -368,11 +393,7 @@ internal sealed class InventoryStamps
             Resolves++;
             if (!_source.TryResolve(e.Ref, out int index, out int version)) return false;
             bool external = index != e.Ref.OwnerIndex || version != e.Ref.OwnerVersion;
-            if (external)
-            {
-                CompleteOnce(e.Ref.OwnerIndex, e.Ref.OwnerVersion, instances: true);
-                if (!_source.TryReadInstancesVersion(e.Ref.OwnerIndex, e.Ref.OwnerVersion, out instances)) return false;
-            }
+            if (external && !ReadConfirmed(e.Ref.OwnerIndex, e.Ref.OwnerVersion, instances: true, out instances)) return false;
 
             if (!e.Resolved || index != e.InventoryIndex || version != e.InventoryVersion || external != e.External
                 || (external && !instances.SamePlace(e.Instances)))
@@ -385,41 +406,68 @@ internal sealed class InventoryStamps
 
         if (e.External)
         {
+            e.InstancesV64 = KeepOrExtend(e.HasInstances, e.Instances, e.InstancesV64, instances);
             e.Instances = instances;
-            e.InstancesV64 = ChunkVersionMath.Extend(_clock64, instances.Version);
+            e.HasInstances = true;
         }
 
-        CompleteOnce(e.InventoryIndex, e.InventoryVersion, instances: false);
-        if (!_source.TryReadSlotsVersion(e.InventoryIndex, e.InventoryVersion, out var slots))
+        if (!ReadConfirmed(e.InventoryIndex, e.InventoryVersion, instances: false, out var slots))
         {
             // The cached inventory entity is gone or lost its slots: one more try from the owner.
-            if (resolve) return false;
+            if (resolve || _batchFailed) return false;
             e.Resolved = false;
             return TryRefresh(e);
         }
 
         if (e.HasSlots && !slots.SamePlace(e.Slots)) e.IdentityAt = _clock64;
+        e.SlotsV64 = KeepOrExtend(e.HasSlots, e.Slots, e.SlotsV64, slots);
         e.Slots = slots;
         e.HasSlots = true;
-        e.SlotsV64 = ChunkVersionMath.Extend(_clock64, slots.Version);
         return true;
     }
 
-    private void CompleteOnce(int index, int version, bool instances)
+    /// <summary>
+    /// The 64-bit version of a fresh read: the previous one while the 32-bit version, chunk and
+    /// archetype are unchanged (so a clock that ran 2^31 past an old, untouched version does not
+    /// flip it), else the read extended at the clock now.
+    /// </summary>
+    private long KeepOrExtend(bool had, ChunkVersionRead previous, long previous64, ChunkVersionRead read) =>
+        had && read.Equals(previous) ? previous64 : ChunkVersionMath.Extend(_clock64, read.Version);
+
+    /// <summary>
+    /// A raw version read of an entity, with the batch's job completion done on that entity the
+    /// first time: read (which confirms the entity is alive and has the buffer), complete the
+    /// in-flight writers of that type through it, then read again so the version is the one after
+    /// those writers. A completion that fails or throws marks the whole batch failed: everything it
+    /// still answers is fresh, never a version a writer may still move past.
+    /// </summary>
+    private bool ReadConfirmed(int index, int version, bool instances, out ChunkVersionRead read)
     {
-        if (instances)
+        read = default;
+        if (_batchFailed || !_batchBound) return false;
+        if (!RawRead(index, version, instances, out read)) return false;
+        if (instances ? _instancesCompleted : _slotsCompleted) return true;
+
+        bool completed;
+        try { completed = _source.CompleteWriters(index, version, instances); }
+        catch { completed = false; }
+        if (!completed)
         {
-            if (_instancesCompleted) return;
-            _instancesCompleted = true;
-        }
-        else
-        {
-            if (_slotsCompleted) return;
-            _slotsCompleted = true;
+            _batchFailed = true;
+            _batchBound = false;
+            CompletionFailures++;
+            return false;
         }
 
-        _source.CompleteWriters(index, version, instances);
+        if (instances) _instancesCompleted = true;
+        else _slotsCompleted = true;
+        return RawRead(index, version, instances, out read);
     }
+
+    private bool RawRead(int index, int version, bool instances, out ChunkVersionRead read) =>
+        instances
+            ? _source.TryReadInstancesVersion(index, version, out read)
+            : _source.TryReadSlotsVersion(index, version, out read);
 
     private void Drop(Entry e)
     {
@@ -465,7 +513,7 @@ internal sealed class InventoryStamps
         if (!_entries.TryGetValue(e.Ref, out var current) || !ReferenceEquals(current, e)) return;
         if (!TryRefresh(e))
         {
-            Drop(e);
+            if (!_batchFailed) Drop(e);
             return;
         }
 
@@ -547,6 +595,7 @@ internal sealed class InventoryStamps
         internal int InventoryVersion;
         internal bool External;
         internal bool HasSlots;
+        internal bool HasInstances;
         internal ChunkVersionRead Slots;
         internal long SlotsV64;
         internal ChunkVersionRead Instances;

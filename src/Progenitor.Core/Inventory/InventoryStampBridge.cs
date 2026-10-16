@@ -41,6 +41,18 @@ public sealed class InventoryStampReport
     /// <summary>Owner-to-inventory resolutions (cache misses).</summary>
     public long Resolves { get; internal set; }
 
+    /// <summary>Batches whose job completion failed (their answers were fresh).</summary>
+    public long CompletionFailures { get; internal set; }
+
+    /// <summary>Why the raw reads are disabled for this process (a failed self-test), or "" while they are on.</summary>
+    public string Disabled { get; internal set; } = "";
+
+    /// <summary>Whether the first raw read was compared with the interop's GetChunk yet.</summary>
+    public bool SelfTested { get; internal set; }
+
+    /// <summary>Whether the audit is running (a stamp user other than Watch called lately).</summary>
+    public bool Auditing { get; internal set; }
+
     /// <summary>References in the identity cache.</summary>
     public int Entries { get; internal set; }
 
@@ -110,6 +122,10 @@ public static class InventoryStampBridge
         report.Audits = stamps.Audits;
         report.FreshStamps = stamps.FreshStamps;
         report.Resolves = stamps.Resolves;
+        report.CompletionFailures = stamps.CompletionFailures;
+        report.Disabled = ChunkVersions.DisabledReason ?? "";
+        report.SelfTested = ChunkVersions.SelfTested;
+        report.Auditing = stamps.HasUser;
         report.Entries = stamps.Entries;
         report.TypeScans = ChunkVersions.TypeScans;
         var failures = new Dictionary<string, long>(StringComparer.Ordinal);
