@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help</title>
+<!--
+  Progenitor help page. One self-contained file: it opens from disk with no server and no network.
+  Edit only the content block between HELP-CONTENT START and HELP-CONTENT END (templates/help/README.md).
+  Everything else (style, renderer, navigation) is shared: tools/help-guide/sync.mjs copies it from
+  templates/help/index.html into docs/guide/progenitor-guide.html.
+-->
+<style>
+:root {
+  /* Colors from the game's menus and Progenitor's kit (src/Progenitor.Core/Ui/MenuPalette.cs). */
+  --bg: #0a0506;
+  --panel: #170709;
+  --panel-2: #1f090c;
+  --panel-hi: #2a0c11;
+  --rule: #3a1418;
+  --rule-soft: #2a0f13;
+  --red: #a8242a;
+  --red-hi: #c8323c;
+  --title-red: #c8323c;
+  --text: #ece8e2;
+  --body: #d2cbc4;
+  --muted: #958d8a;
+  --btn-fill: #111827;
+  --btn-fill-hi: #17213a;
+  --btn-border: #3d4f73;
+  --btn-border-hi: #7088b8;
+  --btn-text: #d6deec;
+  --gold: #e0b25a;
+  --ok: #6fd08a;
+  --pend: #e8c25a;
+  --warn: #f0955a;
+  --danger: #e0565e;
+  --code-bg: #0c0708;
+  --code-text: #cfc4b8;
+  --focus: #9fb6e6;
+  --serif: Georgia, "Times New Roman", Times, serif;
+  --sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: Consolas, "Cascadia Mono", "SFMono-Regular", Menlo, "Liberation Mono", monospace;
+  --sidebar: 280px;
+  --top: 60px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 70% 55% at 65% -5%, rgba(120, 20, 28, 0.32), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 0% 105%, rgba(90, 14, 20, 0.30), transparent 70%);
+  background-attachment: fixed;
+  color: var(--body);
+  font: 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #b9c9ea; text-decoration-color: rgba(185, 201, 234, 0.4); text-underline-offset: 3px; }
+a:hover { color: #dfe7f7; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 60; background: var(--panel); color: var(--text); padding: 8px 12px; }
+.skip:focus { left: 8px; }
+
+/* Buttons: the game's gray-blue framed button */
+.btn {
+  font: 600 14px/1 var(--sans); color: var(--btn-text);
+  background: linear-gradient(180deg, var(--btn-fill-hi), var(--btn-fill));
+  border: 1px solid var(--btn-border); border-radius: 2px;
+  padding: 9px 14px; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.btn:hover { border-color: var(--btn-border-hi); color: #fff; }
+.btn[disabled] { opacity: 0.45; cursor: default; border-color: #2a3550; color: var(--muted); }
+
+/* Layout */
+.app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: auto 1fr auto; min-height: 100vh; }
+.app.toc-closed { grid-template-columns: 0 minmax(0, 1fr); }
+.top {
+  grid-column: 1 / -1; position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 14px; min-height: var(--top); padding: 8px 20px;
+  background: linear-gradient(180deg, rgba(30, 8, 11, 0.97), rgba(14, 5, 7, 0.97));
+  border-bottom: 1px solid var(--rule);
+}
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; min-width: 0; }
+.brand img, .brand .mono { width: 38px; height: 38px; flex: none; }
+.brand .mono { display: grid; place-items: center; border: 1px solid var(--rule); background: var(--panel-hi); color: var(--title-red); font: 600 20px/1 var(--serif); border-radius: 50%; }
+.brand-title { display: block; font: 600 22px/1.1 var(--serif); color: var(--title-red); letter-spacing: 0.02em; white-space: nowrap; }
+.brand-sub { display: block; font: 13px/1.2 var(--serif); color: var(--muted); font-variant: small-caps; letter-spacing: 0.06em; }
+.spacer { flex: 1; }
+.search { position: relative; width: min(340px, 38vw); }
+.field {
+  width: 100%; font: 14px/1.2 var(--sans); color: var(--text);
+  background: #0e1220; border: 1px solid var(--btn-border); border-radius: 2px; padding: 9px 12px;
+}
+.field::placeholder { color: #7d8396; }
+.field:focus-visible { border-color: var(--btn-border-hi); outline-offset: 0; }
+.results {
+  position: absolute; right: 0; top: calc(100% + 6px); width: min(440px, 86vw); max-height: 60vh; overflow: auto;
+  margin: 0; padding: 4px 0; list-style: none; z-index: 40;
+  background: var(--panel); border: 1px solid var(--rule); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.65);
+}
+.results[hidden] { display: none; }
+.results a { display: block; padding: 8px 14px; text-decoration: none; color: var(--body); border-left: 3px solid transparent; }
+.results a:hover, .results a[aria-selected="true"] { background: var(--panel-hi); border-left-color: var(--red-hi); }
+.r-title { font: 600 15px/1.3 var(--serif); color: var(--text); }
+.r-where { font-size: 12px; color: var(--muted); margin-left: 6px; }
+.r-snip { display: block; font-size: 13px; color: var(--muted); }
+.results mark { background: rgba(200, 50, 60, 0.35); color: var(--text); }
+.r-none { padding: 10px 14px; color: var(--muted); font-size: 14px; }
+
+/* Sidebar */
+.toc {
+  position: sticky; top: var(--top); height: calc(100vh - var(--top)); overflow: auto;
+  background: linear-gradient(180deg, rgba(23, 7, 9, 0.96), rgba(11, 5, 6, 0.96));
+  border-right: 1px solid var(--rule-soft); padding: 12px 0 28px;
+}
+.app.toc-closed .toc { visibility: hidden; padding: 0; border: 0; }
+.label { font: 600 13px/1.2 var(--sans); font-variant: small-caps; letter-spacing: 0.1em; color: var(--muted); text-transform: lowercase; }
+.toc > .label { margin: 8px 20px 8px; }
+.rolebar .label { display: block; }
+.rolebar > span { min-width: 0; }
+.rolebar { margin: 2px 14px 12px; padding: 10px 12px; border: 1px solid var(--rule); background: var(--panel-2); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rolebar b { display: block; font: 600 16px/1.2 var(--serif); color: var(--text); }
+.rolebar .btn { flex: none; white-space: nowrap; padding: 7px 10px; font-size: 13px; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.chap-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-left: 3px solid transparent;
+  padding: 8px 16px 8px 18px; font: 600 15px/1.3 var(--serif); color: var(--text);
+}
+.chap-btn:hover { background: var(--panel-hi); }
+.chev { width: 10px; flex: none; color: var(--muted); transition: transform 0.15s; }
+.chap-btn[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.chap.current > .chap-btn { border-left-color: var(--red); }
+.pages { display: none; padding: 0 0 6px; }
+.chap-btn[aria-expanded="true"] + .pages { display: block; }
+.pages a { display: block; padding: 5px 16px 5px 42px; font-size: 14px; line-height: 1.35; color: var(--muted); text-decoration: none; border-left: 3px solid transparent; }
+.pages a:hover { color: var(--text); background: var(--panel-hi); }
+.pages a[aria-current="page"] { color: var(--text); border-left-color: var(--red-hi); background: linear-gradient(90deg, rgba(168, 36, 42, 0.45), rgba(168, 36, 42, 0.08)); }
+
+/* Page card */
+main { padding: 30px 36px 18px; min-width: 0; }
+.crumb { max-width: 800px; margin: 0 auto 10px; display: flex; justify-content: space-between; gap: 12px; }
+.card {
+  position: relative; max-width: 800px; margin: 0 auto; min-height: 380px; padding: 30px 40px 28px;
+  background: linear-gradient(180deg, rgba(31, 9, 12, 0.97), rgba(19, 7, 9, 0.98));
+  border: 1px solid var(--rule); border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+/* Text styles. Titles and button captions centered, body text left, numbers right (as in the game). */
+.card h1 { margin: 0 0 4px; text-align: center; font: 600 30px/1.2 var(--serif); color: var(--text); }
+.card .lede { margin: 0; text-align: center; color: var(--muted); font-size: 15px; }
+.rule { height: 1px; border: 0; margin: 14px 0 20px; background: linear-gradient(90deg, transparent, var(--red) 30%, var(--red) 70%, transparent); }
+.btn, .role, .pager .ttl { text-align: center; }
+.card .num, .card th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.card p { margin: 0 0 14px; }
+.card ul, .card ol { margin: 0 0 14px; padding-left: 1.3em; }
+.card li { margin: 0 0 7px; }
+.card li::marker { color: var(--muted); }
+.card strong { color: var(--text); }
+.card code { font: 0.9em var(--mono); color: var(--code-text); background: rgba(0, 0, 0, 0.35); border: 1px solid var(--rule-soft); border-radius: 2px; padding: 1px 5px; }
+.card table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 15px; }
+.card th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+.card td { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.card td:first-child { color: var(--text); }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
+.grid > div { padding: 11px 13px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--rule-soft); border-top: 2px solid var(--red); font-size: 14px; color: var(--muted); }
+.grid b { display: block; margin-bottom: 3px; font: 600 16px/1.3 var(--serif); color: var(--text); }
+.grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid .ok { border-top-color: var(--ok); }
+.grid .pend { border-top-color: var(--pend); }
+.grid .bad { border-top-color: var(--danger); }
+.outline { list-style: none; padding-left: 0 !important; counter-reset: o; }
+.outline li { counter-increment: o; position: relative; margin: 0 !important; padding: 8px 10px 8px 40px; border-bottom: 1px solid var(--rule-soft); }
+.outline li::before { content: counter(o); position: absolute; left: 12px; top: 8px; font: 600 15px/1.5 var(--serif); color: var(--muted); }
+.soon { display: inline-block; vertical-align: middle; margin-left: 10px; padding: 4px 8px; font: 600 12px/1 var(--sans); font-variant: small-caps; letter-spacing: 0.08em; color: var(--gold); border: 1px solid rgba(224, 178, 90, 0.45); border-radius: 2px; }
+
+/* Callout */
+.callout { margin: 4px 0 14px; padding: 11px 15px; border: 1px solid var(--rule); border-left: 3px solid var(--red); background: rgba(58, 14, 20, 0.45); font-size: 15px; }
+.callout.warn { border-left-color: var(--danger); background: rgba(80, 14, 20, 0.55); }
+.callout .label { display: block; margin-bottom: 3px; color: #e07a7f; }
+.callout p { margin: 0; }
+
+/* Code */
+.code { position: relative; margin: 2px 0 16px; background: var(--code-bg); border: 1px solid var(--rule-soft); border-radius: 2px; }
+.code .lang { position: absolute; left: 12px; top: 7px; font: 600 11px/1 var(--sans); letter-spacing: 0.12em; text-transform: uppercase; color: #6f6467; }
+.code pre { margin: 0; padding: 30px 16px 14px; overflow: auto; font: 13.5px/1.55 var(--mono); color: var(--code-text); tab-size: 4; }
+.card .code code { background: none; border: 0; padding: 0; font: inherit; color: inherit; }
+.copy { position: absolute; right: 8px; top: 6px; padding: 6px 10px; font-size: 12px; }
+.tk-c { color: #7f8b74; font-style: italic; }
+.tk-s { color: #d9b48a; }
+.tk-k { color: #e07a72; }
+.tk-t { color: #9ab8d6; }
+.tk-n { color: #c3a3d9; }
+.tk-a { color: #d9a85e; }
+
+/* Role choice */
+.roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 4px 0 16px; }
+.role {
+  cursor: pointer; padding: 16px 16px 14px; color: var(--body);
+  background: linear-gradient(180deg, rgba(42, 12, 17, 0.9), rgba(22, 7, 9, 0.9));
+  border: 1px solid var(--rule); border-top: 2px solid var(--rule); border-radius: 2px; font: 14px/1.5 var(--sans);
+}
+.role:hover { border-color: var(--btn-border-hi); }
+.role b { display: block; margin-bottom: 6px; font: 600 19px/1.2 var(--serif); color: var(--text); }
+.role[aria-pressed="true"] { border-top-color: var(--red-hi); background: linear-gradient(180deg, rgba(120, 24, 30, 0.55), rgba(30, 8, 11, 0.9)); }
+.role .go { display: block; margin-top: 10px; color: #b9c9ea; font-weight: 600; font-size: 13px; }
+
+/* Terms, tooltip and glossary */
+a.term { color: var(--text); text-decoration: underline dotted rgba(236, 232, 226, 0.55); text-decoration-thickness: 1.5px; text-underline-offset: 4px; cursor: help; }
+a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--red-hi); }
+.tip {
+  position: fixed; z-index: 50; max-width: 330px; padding: 10px 13px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--rule); border-top: 2px solid var(--red);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.7); font-size: 14px; line-height: 1.5; color: var(--body);
+}
+.tip[hidden] { display: none; }
+.tip b { display: block; margin-bottom: 2px; font: 600 15px/1.3 var(--serif); color: var(--text); }
+.tip small { display: block; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.gl-tools { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+.gl-count { white-space: nowrap; font-size: 13px; color: var(--muted); }
+.gl-list { margin: 0; max-height: 54vh; overflow: auto; padding-right: 6px; border-top: 1px solid var(--rule-soft); }
+.gl-entry { padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--rule-soft); border-left: 3px solid transparent; }
+.gl-entry dt { font: 600 17px/1.3 var(--serif); color: var(--text); }
+.gl-entry dd { margin: 3px 0 0; font-size: 15px; }
+.gl-entry.flash { border-left-color: var(--red-hi); background: var(--panel-hi); }
+.gl-entry[hidden] { display: none; }
+
+/* Pager and footer */
+.pager { max-width: 800px; margin: 16px auto 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.pager .btn { min-width: 170px; padding: 10px 16px; }
+.pager .dir { display: block; margin-bottom: 5px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #8e9ab4; }
+.pager .ttl { display: block; max-width: 230px; margin: 0 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 15px/1.25 var(--serif); }
+.mid { text-align: center; font-size: 13px; color: var(--muted); }
+.mid .big { display: block; font: 600 18px/1.2 var(--serif); color: var(--text); font-variant-numeric: tabular-nums; }
+.dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; max-width: 300px; margin-top: 6px; }
+.dots span { width: 7px; height: 7px; border-radius: 50%; background: #3a2226; }
+.dots span.on { background: var(--gold); }
+.foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; padding: 12px 22px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule-soft); background: rgba(10, 5, 6, 0.92); }
+.kbd { font: 12px var(--mono); color: var(--text); background: #141a28; border: 1px solid var(--btn-border); border-bottom-width: 2px; border-radius: 2px; padding: 0 5px; }
+
+@media (max-width: 1100px) {
+  :root { --sidebar: 240px; }
+  main { padding: 24px 20px 16px; }
+  .card { padding: 26px 26px 24px; }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: 0 minmax(0, 1fr); }
+  .toc { position: fixed; left: 0; width: 280px; z-index: 35; }
+  .brand-sub { display: none; }
+  .grid, .grid.two, .roles { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to the page</a>
+<div class="app" id="app">
+  <header class="top">
+    <button class="btn" id="tocBtn" type="button" aria-controls="toc" aria-expanded="true">&#9776; Contents</button>
+    <a class="brand" id="brand" href="#"></a>
+    <span class="spacer"></span>
+    <div class="search" role="search">
+      <label class="sr" for="search">Search this help</label>
+      <input class="field" id="search" type="search" placeholder="Search  ( / )" autocomplete="off" aria-controls="results" aria-expanded="false">
+      <ul class="results" id="results" role="listbox" aria-label="Search results" hidden></ul>
+    </div>
+  </header>
+  <nav class="toc" id="toc" aria-label="Contents"></nav>
+  <main id="main" tabindex="-1">
+    <div class="crumb"><span class="label" id="crumbLeft"></span><span class="label" id="crumbRight"></span></div>
+    <article class="card" id="card" aria-live="polite"></article>
+    <nav class="pager" aria-label="Page">
+      <button class="btn" id="prevBtn" type="button"><span class="dir">&larr; Previous</span><span class="ttl" id="prevTitle"></span></button>
+      <div class="mid"><span class="big" id="counter"></span><span id="counterSub"></span><div class="dots" id="dots" aria-hidden="true"></div></div>
+      <button class="btn" id="nextBtn" type="button"><span class="dir">Next &rarr;</span><span class="ttl" id="nextTitle"></span></button>
+    </nav>
+  </main>
+  <footer class="foot" id="foot"></footer>
+</div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+
+<!-- HELP-CONTENT START -->
+<script>
+/*
+  The Progenitor Help Guide's content. Edit only this block; the renderer around it is copied from
+  templates/help/index.html by tools/help-guide/sync.mjs. Page fields: id, title, lede, html,
+  code {lang, text}, callout {title, text, warn}, soon. [[term-id|words]] links a glossary term.
+  Limits per page: a heading plus about 60 words or 3-5 bullets, one code block, one callout.
+  Glossary definitions are one sentence. API names are checked against src/.
+*/
+window.HELP = {
+  id: "progenitor-guide",
+  title: "Progenitor",
+  subtitle: "Help Guide",
+  version: /*PROGENITOR_VERSION*/"2026.10.25"/*/PROGENITOR_VERSION*/,
+  footer: "LGPL-2.1-only. V Rising is a trademark of Stunlock Studios; Progenitor is an unofficial community project.",
+  logo: "data:image/png;base64,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",
+  roles: [
+    { id: "players", title: "Players", blurb: "Install mods, join modded servers and change settings." },
+    { id: "admins", title: "Server Admins", blurb: "Run Progenitor on a server: join rules, updates, backups." },
+    { id: "developers", title: "Mod Developers", blurb: "Build a mod on Progenitor's API, with hot reload." }
+  ],
+  chapters: [
+    {
+      id: "start", title: "Welcome", pages: [
+        { id: "welcome", title: "What Progenitor is",
+          html: `<p>Progenitor is a modding framework for V Rising, loaded through [[bepinex|BepInEx]]. It gives every mod one in-game <strong>Mods</strong> menu: settings, keybinds, installs and updates.</p>
+<p>Mods built on it can be swapped into a running game, and undo everything they added when removed.</p>`,
+          callout: { title: "Pre-release", text: "No public release yet. Feature status is in <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md\">docs/api.md</a>." } },
+        { id: "choose", title: "Choose your path", chooser: true,
+          html: `<p>Pick what you want to do. You can switch at any time from the contents.</p>` }
+      ]
+    },
+
+    /* ---------------- Players ---------------- */
+    {
+      id: "players", role: "players", title: "Getting Started", pages: [
+        { id: "install", title: "Install Progenitor",
+          html: `<ol><li>Install a [[mod-manager|mod manager]] (r2modman or the Thunderstore App) and pick <strong>V Rising</strong>.</li>
+<li>Install <strong>Progenitor</strong>. BepInExPack_V_Rising comes with it.</li>
+<li>Start the game from the mod manager.</li></ol>`,
+          callout: { title: "By hand", text: "<code>Progenitor.Bootstrap.dll</code> in <code>BepInEx/plugins</code>, <code>Progenitor.dll</code> in <code>BepInEx/progenitor-core</code>, <code>Progenitor.Preloader.dll</code> in <code>BepInEx/patchers</code>." } },
+        { id: "open", title: "Open the Mods menu",
+          html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
+<p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
+        { id: "install-mods", title: "Install mods",
+          html: `<ol><li>Open [[install-tab|Install Mods]].</li><li>Find a mod and click <strong>Install</strong>.</li><li>Some mods load at once; others ask for a restart.</li></ol>
+<p>Mods from a mod manager show <strong>Managed by</strong> that tool; update those there.</p>` },
+        { id: "join", title: "Join a modded server",
+          html: `<p>On join, the server's message shows, then <strong>Mods for &lt;server&gt;</strong>:</p>
+<ul><li><strong>Required to join</strong>: [[required-mod|mods you must have]], with <em>N of M ready</em>.</li>
+<li><strong>Recommended</strong>: [[recommended-mod|optional mods]] with the admin's reason.</li>
+<li><strong>Install N mods</strong> gets them from Thunderstore, then join or restart and rejoin.</li></ul>` },
+        { id: "mod-page", title: "Settings and keybinds",
+          html: `<ul><li>Each mod's page in <strong>Mods</strong>: on/off switch, status, version, About and settings.</li>
+<li><strong>Your settings</strong> are yours. <strong>Server settings</strong> are read-only unless you are an [[admin|admin]].</li>
+<li><strong>Keybinds</strong>: remap any mod's key; conflicts are marked.</li></ul>` },
+        { id: "updates", title: "Updates",
+          html: `<p><strong>Preferences &rsaquo; Updates</strong>:</p>
+<ul><li><strong>Update mods</strong>: Automatic (default), Notify or Off.</li><li><strong>Offer updates before joining a server</strong>: on by default.</li><li>Per mod, on its page: a different mode, or keep one version.</li></ul>` },
+        { id: "help", title: "When something goes wrong",
+          html: `<ol><li>Crashed? Start the game again; the last three sessions' logs are kept.</li>
+<li><strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong> saves a zip on your Desktop.</li>
+<li>Post it in a bug report or the V Rising Mod Community Discord.</li></ol>`,
+          callout: { title: "Before posting", text: "IDs, IPs and known player names are removed, but look through the zip first." } }
+      ]
+    },
+
+    /* ---------------- Server admins ---------------- */
+    {
+      id: "admins", role: "admins", title: "Getting Started", pages: [
+        { id: "install", title: "Install on a server",
+          html: `<ul><li>One package, <strong>Client + Server</strong>: install the same profile on the dedicated server.</li>
+<li>By hand: the same three DLLs as a client (<code>plugins</code>, <code>progenitor-core</code>, <code>patchers</code>).</li>
+<li>A private game hosted from a client loads the client's mods; no separate install.</li></ul>`,
+          callout: { title: "Never on a public server", warn: true, text: "<code>Progenitor.Dev.dll</code>, the [[dev-bridge|dev bridge]]. Release packages leave it out." } },
+        { id: "admins", title: "Who is an admin",
+          html: `<ul><li>Players on the server's admin list, or authenticated with <code>adminauth</code>.</li>
+<li>The host of a private game.</li>
+<li>All admins are equal: any admin may change any setting.</li>
+<li>To stop that, [[config-lock|lock]] groups in the server's <code>progenitor.cfg</code>: <code>[ServerSettings] LockedInGame</code>.</li></ul>` },
+        { id: "server-tab", title: "The Server tab",
+          html: `<p>Join your server, open <strong>Mods</strong>, then the [[server-tab|Server]] tab. Admins edit; everyone else reads.</p>
+<ul><li><strong>Server rules</strong>, join settings, updates and backups.</li><li>Each mod's server settings sit on its own page under <strong>Server settings</strong>.</li></ul>` },
+        { id: "join-rules", title: "Client mods for players",
+          html: `<p><strong>Progenitor's page &rsaquo; Server settings &rsaquo; When players join &rsaquo; Players joining</strong>:</p>
+<ul><li><strong>Required client mods</strong>, each with a version rule.</li><li><strong>Recommended client mods</strong>, with a reason.</li>
+<li><strong>Which client mods players may use</strong>: Any mods, or Only approved mods.</li><li>The server message players see first.</li></ul>`,
+          callout: { title: "House rules, not anti-cheat", text: "Players' games report their own mods." } },
+        { id: "remote-install", title: "Install mods on the server",
+          html: `<p>Joined as an admin, [[remote-install|Install Mods]] can also install, update and remove mods on that server. A mod that cannot load live waits for the next server start.</p>` },
+        { id: "updates", title: "Updates",
+          html: `<p><strong>Server &rsaquo; Updates</strong>:</p>
+<ul><li><strong>Update server mods</strong>: Notify (default), Automatic or Off.</li><li><strong>Check every (hours)</strong>: 6.</li>
+<li><strong>Restart when empty</strong> and <strong>Back up the world before updating</strong>: off by default.</li></ul>` },
+        { id: "backups", title: "Backups and restores",
+          html: `<p><strong>Server &rsaquo; Server rules</strong>:</p>
+<ul><li><strong>Back up the world now</strong>, or on a schedule.</li><li><strong>Restore an earlier world</strong>: a backup or a wipe archive, put back at the next start. The current world is backed up first.</li></ul>`,
+          callout: { title: "Not yet", text: "Restores in a hosted private game." } },
+        { id: "help", title: "When something goes wrong",
+          html: `<ul><li><code>.progenitor logs</code> in chat collects the server's logs.</li>
+<li>A world saved with a content mod still loads after that mod is removed (<code>[SaveSafety]</code> in <code>progenitor.cfg</code>).</li>
+<li>Bugs: a GitHub bug report or the V Rising Mod Community Discord.</li></ul>` }
+      ]
+    },
+
+    /* ---------------- Mod developers ---------------- */
+    {
+      id: "developers", role: "developers", title: "Getting Started", pages: [
+        { id: "what-you-get", title: "What you get",
+          html: `<div class="grid"><div><b>Settings</b>Player and server settings, with reset and sync.</div><div><b>Keybinds</b>Remappable, in the Keybinds tab.</div><div><b>Windows</b>Game-look windows, placed for you.</div>
+<div><b>Hot reload</b>Rebuild and swap into the running game.</div><div><b>Networking</b>Typed client-server requests.</div><div><b>Mods page</b>Status, version, About, settings.</div></div>
+<p>Everything goes through [[ctx|<code>ctx</code>]]; unload undoes it.</p>` },
+        { id: "requirements", title: "What you need",
+          html: `<ul><li>V Rising and <strong>BepInExPack_V_Rising</strong>. Start the game once to create <code>BepInEx\\interop</code>.</li>
+<li><strong>Progenitor</strong>, in the same BepInEx folder.</li><li><strong>.NET 8 SDK</strong> and an editor.</li></ul>`,
+          callout: { title: "Game elsewhere?", text: "Set <code>VRISING_GAME_DIR</code>. See the README, Building from source." } },
+        { id: "folders", title: "Where the files go",
+          html: `<table><thead><tr><th class="label">Folder</th><th class="label">Holds</th></tr></thead><tbody>
+<tr><td><code>BepInEx/plugins/</code></td><td>[[bootstrap|Bootstrap]] only</td></tr>
+<tr><td><code>BepInEx/progenitor-core/</code></td><td>[[core|Core]], <code>Progenitor.dll</code></td></tr>
+<tr><td><code>BepInEx/progenitor-reload/</code></td><td><strong>Your mod</strong> (the [[reload-folder|reload folder]])</td></tr></tbody></table>` },
+        { id: "create-mod", title: "Create your first mod",
+          html: `<p>Recommended: the starter template. It sets up the build, plugin class, a setting, a keybind and a help page.</p>{{code}}`,
+          code: { lang: "shell", text: `dotnet new progenitor-mod -n MyMod
+cd MyMod
+dotnet build` },
+          callout: { title: "Template not found?", text: "It is new. Build it by hand from the next two pages." } },
+        { id: "project-file", title: "The project file",
+          html: `<p>Inside the Progenitor repository, beside the samples:</p>{{code}}<p>Outside it, copy the game references from <code>Directory.Build.targets</code> and <code>.props</code>.</p>`,
+          code: { lang: "xml", text: `<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>MyMod</AssemblyName>
+    <BepInExPluginGuid>com.example.mymod</BepInExPluginGuid>
+    <BepInExPluginName>My Mod</BepInExPluginName>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\\..\\src\\Progenitor.Core\\Progenitor.Core.csproj" Private="false" />
+  </ItemGroup>
+</Project>` } },
+        { id: "plugin-class", title: "The plugin class",
+          code: { lang: "c#", text: `[BepInPlugin(MyPluginInfo.PLUGIN_GUID, MyPluginInfo.PLUGIN_NAME, MyPluginInfo.PLUGIN_VERSION)]
+[BepInDependency("progenitor")]
+[ProgenitorSide(Side.Both)]
+public sealed class Plugin : ProgenitorPlugin<MyContext>
+{
+    protected override void OnLoad(MyContext ctx)
+    {
+        ctx.Handshake.DeclareSelf();
+        if (ctx.IsServer)
+            ctx.Events.On<PlayerConnected>(e => ctx.Log.LogInfo("Welcome, " + e.CharacterName));
+    }
+}
+
+public sealed class MyContext : PluginContext { }` },
+          callout: { title: "Keep the context constructor empty", warn: true, text: "Facades attach after it runs. Set up in <code>OnLoad</code>." } },
+        { id: "build-reload", title: "Build and hot-reload it",
+          html: `<ol><li>Host a private game; it shares the client's BepInEx folder.</li>
+<li><code>dotnet build</code>, then copy <code>bin\\Debug\\net6.0\\MyMod.dll</code> to <code>BepInEx\\progenitor-reload\\</code>.</li>
+<li>Change, build, copy. The old version unloads; the new one loads.</li></ol>
+<p>In the repository: build, then <code>tools/deploy.ps1 -Projects MyMod -Side server -NoBuild</code>.</p>`,
+          callout: { title: "Bootstrap changes", text: "Need a restart. See the <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/hot-reload.md\">hot-reload guide</a>." } },
+        { id: "check-reload", title: "Check that it loaded",
+          html: `<ul><li><strong>Log:</strong> <code>Reload:</code> lines in <code>BepInEx\\LogOutput.log</code> name the [[unload-reason|reason]].</li>
+<li><strong>Behavior:</strong> use what you changed.</li><li><strong>Still old?</strong> Not settled yet, or refused; the log says which.</li></ul>` },
+        { id: "add-setting", title: "Add a setting",
+          code: { lang: "c#", text: `var showHints = ctx.Config.Bind("General", "ShowHints", true,
+    "Show a hint when the window opens.");
+
+ctx.Settings.Page(page => page
+    .Section("General")
+        .Toggle(showHints));` },
+          html: `{{code}}<ul><li>The row shows on your Mods page, with reset and help.</li><li><strong>Pick defaults that work</strong>; most players never open settings.</li><li>One <code>Page</code> call holds all rows.</li></ul>` },
+        { id: "server-settings", title: "Player and server settings",
+          html: `<p>Player settings change one game. Server settings apply to everyone: bind them [[synced-setting|synced]] and admins edit them in game.</p>{{code}}<p>Non-admins see server rows read-only.</p>`,
+          code: { lang: "c#", text: `var maxStack = ctx.Bind("Server", "MaxStack", 99, "Largest stack.",
+    synced: true, acceptableValues: new AcceptableValueRange<int>(1, 999));
+
+ctx.Settings.Page(page => page
+    .Section("General").Toggle(showHints)
+    .Section("Server").Slider(maxStack, scope: SettingScope.Server));` } },
+        { id: "add-keybind", title: "Add a keybind",
+          code: { lang: "c#", text: `ctx.Keybinds.RegisterOpener("ToggleWindow", new KeyChord(UiKey.F8),
+    "Open or close the My Mod window.", ToggleWindow);` },
+          html: `{{code}}<ul><li><code>RegisterOpener</code>: opens or closes your UI; works at the title screen too.</li><li><code>Register</code>: acts in the world.</li><li>Both are [[keybind|remappable]] in the Keybinds tab.</li></ul>`,
+          callout: { title: "Never read keys yourself", warn: true, text: "No <code>UnityEngine.Input</code>, <code>Keyboard.current</code> or gamepad polling." } },
+        { id: "show-window", title: "Show a window",
+          code: { lang: "c#", text: `var window = ctx.Windows.Create(UiWindowPreset.Basic, "My Mod");
+var panel = window.Panel;
+panel.Text("Status", UiTextStyle.Section);
+panel.Text("Version", ctx.Version, UiTextStyle.Number);
+panel.Button("Close").OnClick(window.Hide);
+window.Show();` },
+          html: `{{code}}<ul><li>Pick a [[window-preset|preset]]: <code>Basic</code> for a small tool, <code>Header</code> for one thing the player works on (toolbar, tabs), <code>Tabbed</code> for a large screen.</li><li>The window draws its frame, centered title and version stamp, and closes on unload.</li><li>Every line takes a [[text-style|text style]].</li></ul>` },
+        { id: "where-ui-lives", title: "Windows and pages",
+          html: `<table><thead><tr><th class="label">Need</th><th class="label">Use</th></tr></thead><tbody>
+<tr><td>Options set once</td><td><code>ctx.Settings.Page(...)</code></td></tr>
+<tr><td>A screen of its own</td><td><code>ctx.Menu.Register(name, description).Page(title, ...)</code></td></tr>
+<tr><td>A window during play</td><td>[[window-preset|<code>ctx.Windows.Create</code>]]: <code>Basic</code>, <code>Header</code> or <code>Tabbed</code></td></tr>
+<tr><td>Too much for one page</td><td>[[tabs|<code>Tabs</code>]]</td></tr>
+<tr><td>A question</td><td>[[dialog|<code>ctx.Dialogs</code>]]: <code>Confirm</code>, <code>Notice</code>, <code>Choose</code>, <code>Prompt</code></td></tr></tbody></table>
+<p>Text: <code>panel.Text(text, UiTextStyle.Body)</code> and the other styles. Layout: <code>Divider</code>, <code>Fact</code>, <code>Info</code>, <code>BeginInline()</code>/<code>EndInline()</code>. See each one live in the [[gallery|Gallery]].</p>`,
+          callout: { title: "Fonts, colors and alignment", warn: true, text: "This is where AI-built UIs usually go wrong. Give every line a named <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md#text-styles\">text style</a>; never set a color, size, font or alignment. Numbers right, text left, button captions and titles centered. Check every label in the game before calling a window done." } },
+        { id: "controls", title: "The controls, by category",
+          html: `<table><thead><tr><th class="label">Category</th><th class="label">Controls</th></tr></thead><tbody>
+<tr><td>Layout and windows</td><td>[[window-preset|<code>ctx.Windows.Create</code>]], [[text-style|<code>panel.Text</code>]], <code>Divider</code>, <code>BeginInline</code>, [[tabs|<code>Tabs</code>]]</td></tr>
+<tr><td>Input</td><td><code>Button</code>, <code>ConfirmButton</code>, <code>Toggle</code>, [[dropdown-radio|<code>Dropdown</code>, <code>Radio</code>]], <code>MultiSelect</code>, [[slider|<code>Slider</code>, <code>SliderField</code>, <code>Number</code>]], <code>Input</code>, <code>TextArea</code>, <code>ColorField</code>, <code>DateTimeField</code>, [[key-field|<code>KeyField</code>]], <code>CodeArea</code></td></tr>
+<tr><td>Lists and data</td><td>[[ordered-list|<code>OrderedList</code>]], [[picker|<code>Picker</code>]], [[data-table|<code>DataTable</code>]], [[master-detail|<code>MasterDetail</code>]], [[chips|<code>Chips</code>]]</td></tr>
+<tr><td>Feedback</td><td>[[tooltip|<code>Tooltip</code>]], [[term-tooltip|<code>Term</code>]], [[tip-card|<code>ctx.Hud.Tip</code>]], <code>ctx.Dialogs</code>, <code>ctx.Hud.Notify</code>, <code>Label(text, tone)</code></td></tr>
+<tr><td>HUD and world</td><td>[[locate|<code>ctx.Hud.Locate</code>]], [[pick-in-world|<code>ctx.Hud.PickInWorld</code>]]</td></tr>
+<tr><td>Game panels</td><td>[[vanilla-attach|<code>Ui.AttachToVanilla</code>]]</td></tr></tbody></table>
+<p>Catalog, with each control's text style: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">docs/ui-controls.md</a>. In game: the controls sample's [[gallery|Gallery]]. Choosing: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">UI style guide</a>.</p>` },
+        { id: "messages", title: "Messages to players",
+          html: `<p>Write the message alone, one sentence: the [[message-prefix|prefix]] makes it <code>&lt;Mod Name&gt;: &lt;message&gt;</code>. Client [[notice|notice]]: <code>ctx.Hud.Notify(text, detail, kind)</code>. Server chat: <code>ctx.Chat.SendTo(user, text)</code>. Command reply: <code>Reply(text)</code>.</p>
+<div class="grid two"><div><b>Info</b>Something happened (default).</div><div class="ok"><b>Success</b>An action finished.</div><div class="pend"><b>Warning</b>Worth a look.</div><div class="bad"><b>Error</b>Something failed.</div></div>`,
+          callout: { title: "Player must act?", text: "Use <code>ctx.Dialogs</code>. <code>Notify</code> is tested, not yet verified live." } },
+        { id: "mods-page", title: "Your Mods page",
+          html: `<p>About text, first found wins:</p><ol><li>the installed Thunderstore package's README;</li><li>an embedded <code>README.md</code>;</li><li>[[mod-about|<code>[ModAbout("...")]</code>]];</li><li>the <code>ctx.Menu.Register</code> description.</li></ol>
+<p>Version: from <code>[BepInPlugin]</code>, <code>1.2.0</code> form, same as <code>manifest.json</code>. Example: <code>samples/Progenitor.AboutExample</code>.</p>` },
+        { id: "help-page", title: "Your help page",
+          html: `<p>Give players a help page like this one: copy <code>templates/help/index.html</code> into your mod as <code>help/index.html</code> and edit its content block (<a href="https://github.com/VRising-Modders/Progenitor/blob/main/templates/help/README.md">how</a>). The starter template has one.</p>{{code}}<p>Your Mods page then shows a <strong>Help</strong> button that opens it (<a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-settings.md#help-button">Help button</a>).</p>`,
+          code: { lang: "xml", text: `<EmbeddedResource Include="help\\**"
+    LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />` } },
+        { id: "ai-assistant", title: "Using an AI assistant",
+          html: `<p>Start the conversation with:</p>{{code}}<ul><li>Guide: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/PROGENITOR_GUIDE.md">PROGENITOR_GUIDE.md</a>. Deeper: <code>docs/modules.md</code>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/knowledge/README.md">knowledge notes</a>.</li>
+<li>The [[dev-bridge|dev bridge]] lets it build, reload and inspect your mod in a test game.</li></ul>`,
+          code: { lang: "prompt", text: `We are making a V Rising mod with Progenitor. Follow PROGENITOR_GUIDE.md
+(repo root). The mod is: <describe it>.` } },
+        { id: "next-steps", title: "Next steps",
+          html: `<ul><li><a href="#developers/settings/overview">Settings</a>, <a href="#developers/keybinds/overview">Keybinds</a>, <a href="#developers/windows/overview">Windows and controls</a></li>
+<li><a href="#developers/networking/overview">Networking</a>, <a href="#developers/world/overview">Castles, inventory, materials</a></li>
+<li><a href="#developers/lifecycle/overview">Lifecycle</a>, <a href="#developers/performance/overview">Performance</a>, <a href="#developers/testing/overview">Testing</a></li>
+<li><a href="#developers/publishing/overview">Publishing</a>, <a href="#glossary/terms">Glossary</a></li></ul>`,
+          callout: { title: "About the snippets", text: "API names are checked against current source; the samples are the code that compiles." } }
+      ]
+    },
+    { id: "developers/settings", role: "developers", title: "Settings in depth", pages: [
+      { id: "overview", title: "Settings in depth", soon: true,
+        html: `<ol class="outline"><li>Every row type, from toggle to date and time</li><li>Show-if, enable-if, needs-restart, option descriptions</li><li>Synced settings and server values</li><li>Admin edits and gray-out reasons</li><li>Defaults that need no setup</li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-settings.md">mod-settings.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/config-sync.md">config-sync.md</a>.</p>` } ] },
+    { id: "developers/keybinds", role: "developers", title: "Keybinds", pages: [
+      { id: "overview", title: "Keybinds", soon: true,
+        html: `<ol class="outline"><li><code>Register</code>, <code>RegisterOpener</code>, hold keys</li><li>Chords and the cfg format</li><li>When a key is suppressed</li><li>Conflicts and the first-installed rule</li><li>Testing with <code>keybind_press</code></li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/input.md">input.md</a>.</p>` } ] },
+    { id: "developers/windows", role: "developers", title: "Windows and controls", pages: [
+      { id: "overview", title: "Windows and controls", soon: true,
+        html: `<ol class="outline"><li>Layout and windows: settings page, Mods pages, game windows, tabs, presets</li><li>Input: buttons, toggles, dropdowns, radios, sliders, fields, key capture</li><li>Lists and data: ordered list, picker, data table, master-detail, chips</li><li>Feedback: tooltips, term tooltips, tip cards, dialogs, notices</li><li>HUD and world: Locate, pick in world; game-panel attachments</li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">ui-controls.md</a> and the [[gallery|Gallery]], <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">ui-style.md</a>.</p>` } ] },
+    { id: "developers/networking", role: "developers", title: "Networking", pages: [
+      { id: "overview", title: "Networking", soon: true,
+        html: `<ol class="outline"><li>Server and client parts: [[network-compatibility|<code>[NetworkCompatibility]</code>]], [[counterpart|<code>[Counterpart]</code>]]</li><li>[[requests|<code>ctx.Requests</code>]]: request and reply</li><li>Permission checks on the server</li><li><code>ctx.Subscriptions</code>: live updates</li><li>Working across mod versions</li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-compatibility.md">mod-compatibility.md</a>.</p>` } ] },
+    { id: "developers/world", role: "developers", title: "Castles, Inventory, Materials", pages: [
+      { id: "overview", title: "Castles, Inventory, Materials", soon: true,
+        html: `<ol class="outline"><li><code>ctx.Castles</code>: [[territory|plots]], tiles, buildings, the [[castle-heart|castle heart]]</li><li><code>ctx.Inventory</code> and [[container-id|<code>ContainerId</code>]]</li><li>[[material-source|<code>ctx.MaterialSource</code>]]</li><li>Buttons on game panels</li><li>Entity references across world loads</li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md">api.md</a>.</p>` } ] },
+    { id: "developers/lifecycle", role: "developers", title: "Hot reload and lifecycle", pages: [
+      { id: "overview", title: "Hot reload and lifecycle", soon: true,
+        html: `<ol class="outline"><li>Bootstrap, Core and [[generation|generations]]</li><li>Unload reasons: keep or sweep</li><li><code>ctx.Track</code> and <code>ctx.Patches</code></li><li>[[world-epoch|World epochs]]</li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/hot-reload.md">hot-reload.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/dev-loop.md">dev-loop.md</a>.</p>` } ] },
+    { id: "developers/performance", role: "developers", title: "Performance budget", pages: [
+      { id: "overview", title: "Performance budget", soon: true,
+        html: `<ol class="outline"><li>Per-frame work: systems, hooks, timers</li><li>Queries: when and how often</li><li>UI that refreshes only what changed</li><li>Network traffic and rate limits</li><li>Measuring with the bridge</li></ol>` } ] },
+    { id: "developers/testing", role: "developers", title: "Testing", pages: [
+      { id: "overview", title: "Testing", soon: true,
+        html: `<ol class="outline"><li>[[game-free-test|Game-free tests]] with <code>dotnet test</code></li><li>A test server or a private game</li><li>The [[dev-bridge|dev bridge]] and MCP tools</li><li>Pressing keys and reading UI from a test</li><li>Cleaning up after a run</li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/test-rig.md">test-rig.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/bridge.md">bridge.md</a>.</p>` } ] },
+    { id: "developers/publishing", role: "developers", title: "Publishing to Thunderstore", pages: [
+      { id: "overview", title: "Publishing to Thunderstore", soon: true,
+        html: `<ol class="outline"><li>The package: <code>manifest.json</code>, README, icon, <code>progenitor.json</code></li><li>Required and recommended mods</li><li>The "Requires Progenitor" message</li><li>The optional [[stamp|Progenitor stamp]]</li><li><code>tools/publish-check.ps1</code></li></ol>
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md">publishing.md</a>.</p>` } ] },
+
+    { id: "glossary", title: "Glossary", pages: [ { id: "terms", title: "Glossary", lede: "Hover an underlined word anywhere to see its entry.", glossary: true } ] }
+  ],
+  glossary: [
+    { id: "progenitor", term: "Progenitor", def: "A V Rising modding framework that gives mods settings, keybinds, UI, networking and hot reload, and undoes their registrations on unload." },
+    { id: "mod-manager", term: "Mod manager", def: "An app such as r2modman or the Thunderstore App that installs Thunderstore packages and their dependencies." },
+    { id: "install-tab", term: "Install Mods tab", def: "The Mods menu tab that lists Thunderstore mods and installs, updates or removes them in game." },
+    { id: "server-tab", term: "Server tab", def: "The Mods menu tab for how the joined server is set up: rules, join settings, updates and backups; admins edit, everyone else reads." },
+    { id: "required-mod", term: "Required client mod", def: "A client mod a server needs every player to have before they can join." },
+    { id: "recommended-mod", term: "Recommended client mod", def: "A client mod a server suggests with a reason; players may skip it." },
+    { id: "admin", term: "Admin", def: "A player on the server's admin list or authenticated with <code>adminauth</code> (or the host of a private game); every admin may change everything." },
+    { id: "config-lock", term: "Config lock", def: "<code>[ServerSettings] LockedInGame</code> in the server's <code>progenitor.cfg</code>: groups of settings no admin can change in game." },
+    { id: "remote-install", term: "Remote install", def: "An admin installing, updating or removing mods on the joined server from their own Install Mods tab." },
+    { id: "restore-point", term: "Restore point", def: "A world backup or wipe archive an admin can put back; the restore runs at the next server start and backs up the current world first." },
+    { id: "bepinex", term: "BepInEx", def: "The plugin loader V Rising mods run on, installed as BepInExPack_V_Rising." },
+    { id: "plugin", term: "Plugin", def: "A mod's DLL and main class, which subclasses <code>ProgenitorPlugin&lt;TContext&gt;</code> and registers its work in <code>OnLoad</code>." },
+    { id: "core", term: "Core", def: "<code>Progenitor.dll</code> in <code>BepInEx/progenitor-core</code>, the framework itself, which can be swapped while the game runs." },
+    { id: "bootstrap", term: "Bootstrap", def: "<code>Progenitor.Bootstrap.dll</code> in <code>BepInEx/plugins</code>, loaded once per process to load Core; changing it needs a restart." },
+    { id: "generation", term: "Generation", def: "One loaded copy of Core or a plugin; each hot reload makes a new one, and static fields do not carry over." },
+    { id: "hot-reload", term: "Hot reload", def: "Replacing a mod or Core in the running game: the old version unloads and the new one loads, with no restart." },
+    { id: "reload-folder", term: "Reload folder", def: "<code>BepInEx/progenitor-reload/</code>, checked once a second; each DLL there is loaded, and reloaded when it changes." },
+    { id: "ctx", term: "ctx (plugin context)", def: "The object passed to <code>OnLoad</code> through which every registration goes, so unload can reverse it." },
+    { id: "unload-reason", term: "Unload reason", def: "Why a plugin unloads (<code>Swap</code>, <code>Removal</code>, <code>Shutdown</code>, <code>Unknown</code>); only <code>Removal</code> should sweep saved state." },
+    { id: "keybind", term: "Keybind", def: "A key registered with <code>ctx.Keybinds</code>, shown in the Keybinds tab, remappable and conflict-checked." },
+    { id: "mod-settings", term: "Mod settings (player and server)", def: "Player settings change one player's game; server settings belong to the server and apply to everyone on it." },
+    { id: "synced-setting", term: "Synced setting", def: "An entry bound with <code>ctx.Bind(..., synced: true)</code> whose server value is sent to clients for the session." },
+    { id: "sides", term: "Server part and client part", def: "The same mod DLL loaded on the server and on each client; <code>ctx.IsServer</code> and <code>ctx.IsClient</code> tell them apart." },
+    { id: "handshake", term: "Handshake", def: "The join-time check where client and server compare mods and versions, so a missing required mod gets a clear message." },
+    { id: "network-compatibility", term: "NetworkCompatibility", def: "A plugin attribute saying whether the other side must have the mod and how versions must match." },
+    { id: "counterpart", term: "Counterpart", def: "The other side's part of a mod; <code>[Counterpart]</code> says how much still works without it." },
+    { id: "mod-about", term: "ModAbout", def: "An attribute holding the Markdown your Mods page shows under About when there is no README." },
+    { id: "mods-page", term: "Mods page", def: "A mod's page in the in-game Mods menu: status bar, header, About text, settings, keybinds and custom pages." },
+    { id: "workspace", term: "Workspace", def: "The in-game Mods menu screen (title screen or Escape menu) with the mod list and the Install, Keybinds and Preferences tabs." },
+    { id: "window-preset", term: "Window preset", def: "<code>ctx.Windows.Create(UiWindowPreset.Basic | Header | Tabbed, title)</code>: a standard window with the game's frame, a centered title and a version stamp." },
+    { id: "text-style", term: "Text style", def: "<code>panel.Text(text, UiTextStyle.X)</code>: Title, Section, Body, Muted, Number, Warning, Error or Success; it fixes the font, size, color and alignment." },
+    { id: "gallery", term: "Gallery", def: "A page of the controls sample (Ctrl+F7, then Gallery) that shows every control, window preset and text style live." },
+    { id: "message-prefix", term: "Message prefix", def: "<code>&lt;Mod Name&gt;: </code>, added by Progenitor in front of notices, chat messages and command replies; <code>prefix: false</code> turns it off." },
+    { id: "panel", term: "Panel", def: "A floating window made with <code>Ui.Panel(...)</code> that the framework sizes and places; use a window preset unless none fits." },
+    { id: "game-window", term: "GameWindow", def: "<code>panel.GameWindow()</code>: the game's popup frame for a plain panel, when no window preset fits; call it before adding controls." },
+    { id: "widget", term: "Widget", def: "A composed UI kit control such as <code>Tabs</code>, <code>DataTable</code>, <code>Picker</code>, <code>OrderedList</code>, <code>MasterDetail</code> or <code>Chips</code>." },
+    { id: "tabs", term: "Tabs", def: "Two to five short captions that switch groups of controls: <code>panel.Tabs(key, captions)</code>." },
+    { id: "dropdown-radio", term: "Dropdown / Radio", def: "Pick one option: a radio shows two to four short ones together, a dropdown holds many or long ones." },
+    { id: "slider", term: "Slider / SliderField / Number", def: "Number controls: rough amount, range plus exact box, or a small stepped count." },
+    { id: "key-field", term: "KeyField", def: "A key-capture control for a bind registered with <code>ctx.Keybinds</code>." },
+    { id: "ordered-list", term: "OrderedList", def: "A list the player arranges, such as a priority order, by dragging or arrows." },
+    { id: "picker", term: "Picker", def: "Choose one or several of many named things (items, chests, players) with search; unpickable ones are grayed with a reason." },
+    { id: "data-table", term: "DataTable", def: "Many records the player sorts, filters, selects and edits." },
+    { id: "master-detail", term: "MasterDetail", def: "A searchable list of named sets on the left, the selected one's editor on the right." },
+    { id: "chips", term: "Chips", def: "A few short values the player adds and removes, such as members, tags or filters." },
+    { id: "tooltip", term: "Tooltip", def: "Extra detail shown on hover; the control's name must still stand alone." },
+    { id: "term-tooltip", term: "Term tooltip", def: "A mod's own word, defined with <code>UiTerms.Define</code> and marked with <code>handle.Term(term)</code>, explained on hover." },
+    { id: "tip-card", term: "Tip card", def: "A one-time explanation of a screen, shown the first time it opens: <code>ctx.Hud.Tip</code>." },
+    { id: "dialog", term: "Dialog", def: "The game's modal popup for a question: <code>ctx.Dialogs.Confirm</code>, <code>Notice</code>, <code>Choose</code>, <code>Prompt</code>." },
+    { id: "notice", term: "Notice", def: "A short banner message from <code>ctx.Hud.Notify</code>, of kind Info, Success, Warning or Error." },
+    { id: "locate", term: "Locate", def: "<code>ctx.Hud.Locate</code>: a marker and edge arrow showing where something is for a few seconds." },
+    { id: "pick-in-world", term: "Pick in world", def: "<code>ctx.Hud.PickInWorld</code>: the player chooses a chest or station by interacting with it; Escape cancels." },
+    { id: "vanilla-attach", term: "Game-panel attachment", def: "<code>Ui.AttachToVanilla(site, anchor, ...)</code>: a button or line on a game panel such as a chest, station, inventory, castle heart or item tooltip." },
+    { id: "requests", term: "Requests / Subscriptions", def: "<code>ctx.Requests</code> sends a typed client request the server answers or refuses; <code>ctx.Subscriptions</code> follows a server topic's updates." },
+    { id: "material-source", term: "MaterialSource", def: "<code>ctx.MaterialSource</code>: one experimental server provider deciding where build and craft materials come from." },
+    { id: "container-id", term: "ContainerId", def: "A stable id for a placed chest or station that survives restarts and is never reused (<code>c-</code> plus 32 hex digits)." },
+    { id: "territory", term: "Territory / plot", def: "The land a castle claims, made of tiles, read on the server through <code>ctx.Castles</code>." },
+    { id: "castle-heart", term: "Castle heart", def: "The structure that claims a territory and keeps a castle running." },
+    { id: "world-epoch", term: "World epoch", def: "A stamp of the current world load; keep it beside any held entity and check <code>ctx.WorldState.IsStale</code>." },
+    { id: "thunderstore", term: "Thunderstore", def: "The mod site mod managers use; Progenitor publishes there as <code>VRising_Modders-Progenitor</code>." },
+    { id: "stamp", term: "Progenitor stamp", def: "An optional 64 x 64 corner mark on a mod's icon showing it runs on Progenitor, not an endorsement." },
+    { id: "dev-bridge", term: "Dev bridge", def: "<code>Progenitor.Dev</code>: a local-only bridge and MCP server for building, reloading and testing in a test game; never on a public server." },
+    { id: "game-free-test", term: "Game-free test", def: "A test that runs with <code>dotnet test</code> and no game install, as CI does." }
+  ]
+};
+</script>
+<!-- HELP-CONTENT END -->
+
+<script>
+/* Renderer: shared by every Progenitor help page. Edit templates/help/index.html, then run tools/help-guide/sync.mjs. */
+(function () {
+  "use strict";
+  var H = window.HELP || { chapters: [], glossary: [] };
+  var hasRoles = !!(H.roles && H.roles.length);
+  var KEY = "progenitor-help:" + (H.id || "help");
+  function store(k, v) { try { if (v == null) localStorage.removeItem(KEY + k); else localStorage.setItem(KEY + k, v); } catch (e) { /* no storage */ } }
+  function load(k) { try { return localStorage.getItem(KEY + k); } catch (e) { return null; } }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  // ---- Model ----
+  var pages = [], byKey = {}, glossaryKey = null;
+  var chapters = (H.chapters || []).map(function (c) {
+    var ch = { id: c.id, title: c.title, role: c.role || null, pages: [] };
+    (c.pages || []).forEach(function (p) {
+      var page = { key: c.id + "/" + p.id, data: p, title: p.title, chapter: ch };
+      if (p.glossary) glossaryKey = page.key;
+      ch.pages.push(page); pages.push(page); byKey[page.key] = page;
+    });
+    return ch;
+  });
+  var gloss = {};
+  (H.glossary || []).forEach(function (g) { gloss[g.id] = g; });
+  var roleById = {};
+  (H.roles || []).forEach(function (r) { roleById[r.id] = r; });
+  var role = hasRoles ? load(":role") : null;
+  if (role && !roleById[role]) role = null;
+
+  function path() {
+    return pages.filter(function (p) { return !p.chapter.role || p.chapter.role === role; });
+  }
+  function firstPageOfRole(r) {
+    for (var i = 0; i < pages.length; i++) if (pages[i].chapter.role === r) return pages[i];
+    return pages[0];
+  }
+  function chooserPage() {
+    for (var i = 0; i < pages.length; i++) if (pages[i].data.chooser) return pages[i];
+    return null;
+  }
+
+  // ---- Rendering helpers ----
+  var KW = {};
+  ("using namespace public private protected internal sealed static readonly class struct interface enum new return if else var void bool int string double float true false null this override abstract virtual async await foreach for in is as get set out ref const typeof").split(" ").forEach(function (k) { KW[k] = 1; });
+  function tintCs(src) {
+    var re = /(\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*")|(\[[A-Z][A-Za-z]*(?=[(\]]))|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_][A-Za-z0-9_]*\b)/g, out = "", last = 0, m;
+    while ((m = re.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      var t = m[0];
+      if (m[1]) out += '<span class="tk-c">' + esc(t) + "</span>";
+      else if (m[2]) out += '<span class="tk-s">' + esc(t) + "</span>";
+      else if (m[3]) out += '[<span class="tk-a">' + esc(t.slice(1)) + "</span>";
+      else if (m[4]) out += '<span class="tk-n">' + t + "</span>";
+      else if (KW[t]) out += '<span class="tk-k">' + t + "</span>";
+      else if (/^[A-Z]/.test(t)) out += '<span class="tk-t">' + t + "</span>";
+      else out += t;
+      last = re.lastIndex;
+    }
+    return out + esc(src.slice(last));
+  }
+  function tint(lang, src) {
+    if (lang === "c#") return tintCs(src);
+    if (lang === "xml") return esc(src).replace(/(&lt;\/?)([A-Za-z.]+)/g, '$1<span class="tk-k">$2</span>').replace(/([A-Za-z]+)=(&quot;[^&]*&quot;)/g, '<span class="tk-t">$1</span>=<span class="tk-s">$2</span>');
+    if (lang === "shell") return esc(src).replace(/^(\s*)(dotnet|cd|powershell|node)\b/gm, '$1<span class="tk-k">$2</span>');
+    return esc(src);
+  }
+  function terms(html) {
+    return html.replace(/\[\[([a-z0-9-]+)\|([^\]]+)\]\]/g, function (_, id, words) {
+      if (!gloss[id]) console.warn("Help: no glossary entry for " + id);
+      return '<a class="term" data-term="' + id + '" href="#' + (glossaryKey || "") + ":" + id + '">' + words + "</a>";
+    });
+  }
+  function plain(html) { return html.replace(/\[\[[a-z0-9-]+\|([^\]]+)\]\]/g, "$1").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " "); }
+
+  function renderPage(page) {
+    var d = page.data, h = "<h1>" + esc(d.title) + (d.soon ? '<span class="soon">Coming soon</span>' : "") + "</h1>";
+    if (d.lede) h += '<p class="lede">' + esc(d.lede) + "</p>";
+    h += '<hr class="rule">';
+    var body = terms(d.html || "");
+    var code = "";
+    if (d.code) code = '<div class="code"><span class="lang" aria-hidden="true">' + esc(d.code.lang || "") + '</span><pre><code>' + tint(d.code.lang, d.code.text.replace(/^\n/, "")) + '</code></pre><button class="btn copy" type="button" aria-label="Copy this code">Copy</button></div>';
+    body = body.indexOf("{{code}}") > -1 ? body.replace("{{code}}", code) : body + code;
+    if (d.chooser && hasRoles) {
+      body += '<div class="roles">' + H.roles.map(function (r) {
+        return '<button type="button" class="role" data-role="' + r.id + '" aria-pressed="' + (r.id === role) + '"><b>' + esc(r.title) + "</b>" + esc(r.blurb || "") + '<span class="go">Start here &rarr;</span></button>';
+      }).join("") + "</div>";
+    }
+    if (d.glossary) {
+      body += '<div class="gl-tools"><label class="sr" for="glSearch">Filter the glossary</label><input class="field" id="glSearch" type="search" placeholder="Filter terms" autocomplete="off"><span class="gl-count" id="glCount"></span></div><dl class="gl-list" id="glList">' +
+        (H.glossary || []).map(function (g) {
+          return '<div class="gl-entry" id="term-' + g.id + '" data-id="' + g.id + '"><dt>' + esc(g.term) + "</dt><dd>" + g.def + "</dd></div>";
+        }).join("") + "</dl>";
+    }
+    if (d.callout) body += '<div class="callout' + (d.callout.warn ? " warn" : "") + '"><span class="label">' + esc(d.callout.title || "Tip") + "</span><p>" + terms(d.callout.text) + "</p></div>";
+    return h + body;
+  }
+
+  // ---- Header and footer ----
+  var brand = $("brand");
+  brand.innerHTML = (H.logo ? '<img alt="" src="' + H.logo + '">' : '<span class="mono" aria-hidden="true">' + esc((H.title || "?").charAt(0)) + "</span>") +
+    '<span><span class="brand-title">' + esc(H.title || "Help") + '</span><span class="brand-sub">' + esc(H.subtitle || "Help") + "</span></span>";
+  $("foot").innerHTML = "<span>" + esc(H.title || "") + (H.version ? " " + esc(H.version) : "") + ' &middot; <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> turn pages, <span class="kbd">/</span> search</span><span>' + esc(H.footer || "") + "</span>";
+
+  // ---- Sidebar ----
+  var toc = $("toc"), app = $("app"), tocBtn = $("tocBtn");
+  function renderToc(current) {
+    var h = "";
+    if (hasRoles && role) {
+      h += '<div class="rolebar"><span><span class="label">Your path</span><b>' + esc(roleById[role].title) + '</b></span><button class="btn" type="button" id="switchRole">Switch role</button></div>';
+    }
+    h += '<div class="label">Chapters</div><ol>';
+    var seen = {};
+    path().forEach(function (p) {
+      var ch = p.chapter;
+      if (seen[ch.id]) return;
+      seen[ch.id] = 1;
+      var isCur = current && current.chapter === ch;
+      h += '<li class="chap' + (isCur ? " current" : "") + '"><button type="button" class="chap-btn" data-chapter="' + esc(ch.id) + '" aria-expanded="' + isCur + '"><span class="chev" aria-hidden="true">&#9656;</span>' + esc(ch.title) + '</button><ol class="pages">' +
+        ch.pages.map(function (q, i) {
+          return '<li><a href="#' + q.key + '"' + (q === current ? ' aria-current="page"' : "") + ">" + (ch.pages.length > 1 ? (i + 1) + ". " : "") + esc(q.title) + "</a></li>";
+        }).join("") + "</ol></li>";
+    });
+    toc.innerHTML = h + "</ol>";
+    var cur = toc.querySelector('[aria-current="page"]');
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+  toc.addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    if (b.id === "switchRole") { var c = chooserPage(); if (c) go(c.key); return; }
+    if (b.classList.contains("chap-btn")) {
+      var open = b.getAttribute("aria-expanded") === "true";
+      b.setAttribute("aria-expanded", open ? "false" : "true");
+    }
+  });
+  function setToc(open) { app.classList.toggle("toc-closed", !open); tocBtn.setAttribute("aria-expanded", String(open)); }
+  if (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) setToc(false);
+  tocBtn.addEventListener("click", function () { setToc(app.classList.contains("toc-closed")); });
+
+  // ---- Navigation ----
+  var current = null, card = $("card"), prevBtn = $("prevBtn"), nextBtn = $("nextBtn");
+  function setRole(r) { role = r; store(":role", r); }
+  function show(page) {
+    if (!page) page = pages[0];
+    if (hasRoles && page.chapter.role && page.chapter.role !== role) setRole(page.chapter.role);
+    current = page;
+    card.innerHTML = renderPage(page);
+    wireCard();
+    var ch = page.chapter, list = path(), i = list.indexOf(page);
+    document.title = page.title + " · " + (H.title || "Help");
+    $("crumbLeft").textContent = (hasRoles && role && ch.role ? roleById[role].title + " · " : "") + ch.title;
+    $("crumbRight").textContent = "page " + (i + 1) + " of " + list.length;
+    var inCh = ch.pages.indexOf(page);
+    $("counter").textContent = (inCh + 1) + " / " + ch.pages.length;
+    $("counterSub").textContent = ch.title;
+    $("dots").innerHTML = ch.pages.length > 1 ? ch.pages.map(function (q) { return q === page ? '<span class="on"></span>' : "<span></span>"; }).join("") : "";
+    var prev = list[i - 1], next = list[i + 1];
+    var blocked = hasRoles && !role && page.data.chooser;
+    prevBtn.disabled = !prev; nextBtn.disabled = !next || blocked;
+    $("prevTitle").textContent = prev ? prev.title : "Start";
+    $("nextTitle").textContent = blocked ? "Choose a path" : next ? next.title : "End";
+    prevBtn.setAttribute("aria-label", prev ? "Previous page: " + prev.title : "No previous page");
+    nextBtn.setAttribute("aria-label", blocked ? "Choose a path first" : next ? "Next page: " + next.title : "No next page");
+    renderToc(page);
+    store(":page", page.key);
+    hideTip();
+    window.scrollTo(0, 0);
+  }
+  function parseHash(h) {
+    h = decodeURIComponent((h || "").replace(/^#/, ""));
+    var c = h.indexOf(":");
+    return c > -1 ? { key: h.slice(0, c), term: h.slice(c + 1) } : { key: h, term: null };
+  }
+  function go(key, term) {
+    var target = "#" + key + (term ? ":" + term : "");
+    try { if (location.hash !== target) history.pushState(null, "", target); } catch (e) { /* hash not writable */ }
+    route({ key: key, term: term || null });
+  }
+  function route(r) {
+    r = r || parseHash(location.hash);
+    var page = byKey[r.key];
+    if (!page) { var ch = chapters.filter(function (c) { return c.id === r.key; })[0]; page = ch && ch.pages[0]; }
+    show(page || pages[0]);
+    if (r.term) flashTerm(r.term);
+  }
+  prevBtn.addEventListener("click", function () { var l = path(), i = l.indexOf(current); if (l[i - 1]) go(l[i - 1].key); });
+  nextBtn.addEventListener("click", function () { var l = path(), i = l.indexOf(current); if (l[i + 1]) go(l[i + 1].key); });
+  window.addEventListener("hashchange", function () { route(); });
+  window.addEventListener("popstate", function () { route(); });
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if (a && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+      var r = parseHash(a.getAttribute("href"));
+      if (byKey[r.key]) { e.preventDefault(); closeResults(); go(r.key, r.term); return; }
+    }
+    if (!e.target.closest || !e.target.closest(".search")) closeResults();
+  });
+  document.addEventListener("keydown", function (e) {
+    var t = e.target, typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+    if (e.key === "Escape") { hideTip(); closeResults(); }
+    if (typing || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === "ArrowRight" && !nextBtn.disabled) { e.preventDefault(); nextBtn.click(); }
+    else if (e.key === "ArrowLeft" && !prevBtn.disabled) { e.preventDefault(); prevBtn.click(); }
+    else if (e.key === "/") { e.preventDefault(); search.focus(); }
+  });
+
+  // ---- Per-page wiring: copy buttons, role cards, glossary, terms ----
+  function copyText(text, done) {
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta); done(ok);
+    }
+    try { if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(function () { done(true); }, fallback); return; } } catch (e) { /* fall through */ }
+    fallback();
+  }
+  function wireCard() {
+    Array.prototype.forEach.call(card.querySelectorAll(".copy"), function (b) {
+      b.addEventListener("click", function () {
+        copyText(current.data.code.text.replace(/^\n/, ""), function (ok) {
+          b.textContent = ok ? "Copied" : "Press Ctrl+C";
+          setTimeout(function () { b.textContent = "Copy"; }, 1600);
+        });
+      });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll(".role"), function (b) {
+      b.addEventListener("click", function () { setRole(b.dataset.role); go(firstPageOfRole(b.dataset.role).key); });
+    });
+    var gs = $("glSearch");
+    if (gs) { gs.addEventListener("input", filterGlossary); filterGlossary(); }
+    Array.prototype.forEach.call(card.querySelectorAll("a.term"), function (a) {
+      a.addEventListener("mouseenter", function () { showTip(a); });
+      a.addEventListener("mouseleave", hideTip);
+      a.addEventListener("focus", function () { showTip(a); });
+      a.addEventListener("blur", hideTip);
+    });
+  }
+  function filterGlossary() {
+    var gs = $("glSearch"), q = gs.value.trim().toLowerCase(), n = 0, all = card.querySelectorAll(".gl-entry");
+    Array.prototype.forEach.call(all, function (el) { var hit = !q || el.textContent.toLowerCase().indexOf(q) > -1; el.hidden = !hit; if (hit) n++; });
+    $("glCount").textContent = q ? n + " of " + all.length + " terms" : all.length + " terms";
+  }
+  function flashTerm(id) {
+    var el = $("term-" + id), list = $("glList");
+    if (!el || !list) return;
+    el.classList.add("flash");
+    list.scrollTop = el.offsetTop - list.offsetTop - 8;
+  }
+  var tip = $("tip"), tipFor = null;
+  function showTip(a) {
+    var g = gloss[a.dataset.term];
+    if (!g) return;
+    tipFor = a;
+    tip.innerHTML = "<b>" + esc(g.term) + "</b>" + g.def + "<small>Click for the glossary.</small>";
+    tip.hidden = false;
+    var r = a.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    var y = r.bottom + 8;
+    if (y + h > window.innerHeight - 8) y = r.top - h - 8;
+    tip.style.left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8) + "px";
+    tip.style.top = Math.max(8, y) + "px";
+    a.setAttribute("aria-describedby", "tip");
+  }
+  function hideTip() { if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; tip.hidden = true; }
+  window.addEventListener("scroll", hideTip, { passive: true });
+
+  // ---- Search across every page ----
+  var search = $("search"), results = $("results"), active = -1;
+  var index = pages.map(function (p) {
+    var d = p.data, text = plain((d.lede || "") + " " + (d.html || "") + " " + (d.callout ? d.callout.title + " " + d.callout.text : "")) + " " + (d.code ? d.code.text : "");
+    if (d.glossary) text += " " + (H.glossary || []).map(function (g) { return g.term + " " + plain(g.def); }).join(" ");
+    return { page: p, text: text.replace(/\s+/g, " ").trim() };
+  });
+  function closeResults() { results.hidden = true; active = -1; search.setAttribute("aria-expanded", "false"); }
+  function mark(s, q) { var i = s.toLowerCase().indexOf(q); return i < 0 ? esc(s) : esc(s.slice(0, i)) + "<mark>" + esc(s.slice(i, i + q.length)) + "</mark>" + esc(s.slice(i + q.length)); }
+  function runSearch() {
+    var q = search.value.trim().toLowerCase();
+    if (q.length < 2) { closeResults(); return; }
+    var words = q.split(/\s+/);
+    var hits = index.map(function (row) {
+      var t = row.page.title.toLowerCase(), x = row.text.toLowerCase(), s = 0;
+      for (var i = 0; i < words.length; i++) { if (t.indexOf(words[i]) > -1) s += 10; else if (x.indexOf(words[i]) > -1) s += 1; else return null; }
+      return { row: row, s: s };
+    }).filter(Boolean).sort(function (a, b) { return b.s - a.s; }).slice(0, 12);
+    results.innerHTML = hits.length ? hits.map(function (h, i) {
+      var p = h.row.page, x = h.row.text.toLowerCase().indexOf(words[0]);
+      var snip = x > -1 ? h.row.text.slice(Math.max(0, x - 40), x + 90) : h.row.text.slice(0, 120);
+      var where = (p.chapter.role && roleById[p.chapter.role] ? roleById[p.chapter.role].title + " · " : "") + p.chapter.title;
+      return '<li><a role="option" id="res-' + i + '" href="#' + p.key + '"><span class="r-title">' + mark(p.title, words[0]) + '</span><span class="r-where">' + esc(where) + '</span><span class="r-snip">' + (x > 40 ? "…" : "") + mark(snip, words[0]) + "…</span></a></li>";
+    }).join("") : '<li class="r-none">Nothing matches.</li>';
+    results.hidden = false; active = -1; search.setAttribute("aria-expanded", "true");
+  }
+  function move(d) {
+    var links = results.querySelectorAll("a");
+    if (!links.length) return;
+    active = (active + d + links.length) % links.length;
+    Array.prototype.forEach.call(links, function (a, i) { a.setAttribute("aria-selected", String(i === active)); });
+    search.setAttribute("aria-activedescendant", links[active].id);
+    links[active].scrollIntoView({ block: "nearest" });
+  }
+  search.addEventListener("input", runSearch);
+  search.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+    else if (e.key === "Enter") {
+      var links = results.querySelectorAll("a"), a = links[active > -1 ? active : 0];
+      if (a) { e.preventDefault(); closeResults(); search.blur(); go(parseHash(a.getAttribute("href")).key); }
+    } else if (e.key === "Escape") { search.value = ""; closeResults(); }
+  });
+
+  // ---- Start: the hash wins, then the last page, then the first page ----
+  if (location.hash && location.hash.length > 1) route();
+  else {
+    var saved = load(":page"), start = byKey[saved] || pages[0];
+    if (start) {
+      try { history.replaceState(null, "", "#" + start.key); } catch (e) { /* hash not writable */ }
+      show(start);
+    }
+  }
+})();
+</script>
+</body>
+</html>

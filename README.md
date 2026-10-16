@@ -4,6 +4,8 @@ An AI-first modding framework for [V Rising](https://playvrising.com/), built as
 
 > **Status: pre-release and experimental.** There is no published release yet. APIs can change between commits, and only the features marked *verified live* in [`docs/api.md`](docs/api.md) have been observed working in the game. Read the [roadmap](docs/roadmap.md) for what is done and what is planned.
 
+**New here? Open [`docs/guide/progenitor-guide.html`](docs/guide/progenitor-guide.html)** in a browser: a short, interactive Help Guide for players, server admins and mod developers, with a glossary. It works offline from disk. Mods can ship a help page in the same look from [`templates/help`](templates/help/README.md).
+
 ## What it does
 
 For players and server operators:
