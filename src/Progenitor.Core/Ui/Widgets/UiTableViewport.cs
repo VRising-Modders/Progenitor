@@ -18,12 +18,55 @@ internal sealed class UiTableViewport
     /// <summary>Lines one wheel notch moves: the panel's own wheel step (<see cref="MenuPanelLayout.WheelRowsPerNotch"/>).</summary>
     internal static int RowsPerNotch => Math.Max(1, (int)Math.Round(MenuPanelLayout.WheelRowsPerNotch));
 
-    internal UiTableViewport(int slots) => Slots = ClampSlots(slots);
+    internal UiTableViewport(int slots)
+    {
+        Slots = ClampSlots(slots);
+        Built = Slots;
+    }
+
+    /// <summary>HUB1: <paramref name="built"/> slot rows built, <paramref name="slots"/> of them in use (<see cref="SetSlots"/> changes it).</summary>
+    internal UiTableViewport(int slots, int built)
+    {
+        Built = ClampSlots(built);
+        Slots = Math.Min(Built, ClampSlots(slots));
+    }
 
     internal static int ClampSlots(int slots) => slots < MinSlots ? MinSlots : slots > MaxSlots ? MaxSlots : slots;
 
-    /// <summary>The slot rows.</summary>
-    internal int Slots { get; }
+    /// <summary>The slot rows in use.</summary>
+    internal int Slots { get; private set; }
+
+    /// <summary>HUB1: the slot rows built (a table that fills its panel's height builds the most it may use).</summary>
+    internal int Built { get; }
+
+    /// <summary>HUB1: use <paramref name="slots"/> of the built rows (clamped); the top is clamped. True when the count changed.</summary>
+    internal bool SetSlots(int slots)
+    {
+        int next = Math.Min(Built, ClampSlots(slots));
+        if (next == Slots) return false;
+        Slots = next;
+        SetTop(Top);
+        return true;
+    }
+
+    /// <summary>
+    /// HUB1: how many slot rows fill the panel (<see cref="UiDataTableOptions.FillHeight"/>): the most whose rows, with
+    /// everything else on the panel, fit its tallest viewport <paramref name="maxViewport"/>. <paramref name="content"/> is
+    /// the panel's content height now, <paramref name="shownRows"/> the table's slot rows drawn in it, each
+    /// <paramref name="pitch"/> tall with its gap. -1 when a reading is unknown. Clamped to
+    /// <see cref="MinSlots"/>..<paramref name="built"/>.
+    /// </summary>
+    internal static int FillRows(float maxViewport, float content, int shownRows, float pitch, int built)
+    {
+        if (float.IsNaN(maxViewport) || float.IsNaN(content) || maxViewport <= 0f || content < 0f || pitch <= 0f) return -1;
+        float others = Math.Max(0f, content - Math.Max(0, shownRows) * pitch);
+        int rows = (int)Math.Floor((maxViewport - others) / pitch + 0.001f);
+        int max = Math.Min(MaxSlots, Math.Max(MinSlots, built));
+        return rows < MinSlots ? MinSlots : rows > max ? max : rows;
+    }
+
+    /// <summary>HUB1: one slot row's share of the panel's height: a kit row and the gap under it.</summary>
+    internal const float SlotPitch = UnityUiRuntimeMetrics.RowHeight + PanelLayout.RowGap;
 
     /// <summary>The body lines.</summary>
     internal int Count { get; private set; }

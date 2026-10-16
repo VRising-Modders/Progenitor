@@ -494,6 +494,8 @@ public static class UiLook
         if (panel == null) throw new ArgumentNullException(nameof(panel));
         if (panel is not UiPanelHandle host || host.IsDisposed) return panel;
         host.GridControls = true;
+        // HUB1: tabs added to a game window draw as the game's window tabs.
+        host.IsGameWindow = true;
         if (host.Enabled && host.Runtime is IRuntimePanel runtimePanel)
         {
             try { Ui.CurrentRuntime().GameWindowChrome(runtimePanel); }

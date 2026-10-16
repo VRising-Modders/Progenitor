@@ -1195,7 +1195,7 @@ public static class Keybinds
             return Not(FieldTakesKeyReason);
         if (focus == ChatFocus.Unknown && !reg.AllowWhenChatUnknown && source.IsAvailable)
             return Not("suppressed: no chat window can be read");
-        string? blocked = SafeWinnerGate(reg);
+        string? blocked = GateNow(reg);
         if (blocked != null) return Not("not-active: " + blocked);
         if (holdFrames < 0)
         {
@@ -1372,6 +1372,9 @@ public static class Keybinds
     /// <summary>KEYS4: why a menu bind did not run with the Mods workspace closed.</summary>
     internal const string MenuClosedReason = "suppressed: works only while the Mods menu is open";
 
+    /// <summary>HUB1: why a window key (<see cref="KeybindScope.Window"/>) did not fire.</summary>
+    internal const string WindowClosedReason = "suppressed: works only while a window with tabs is under the pointer or holds the input, or the Mods menu is open";
+
     internal const string PhotoInactiveReason = "suppressed: works only in photo mode";
 
     /// <summary>MAPTP1: why a map bind did not run with the world map closed.</summary>
@@ -1385,6 +1388,7 @@ public static class Keybinds
         KeybindScope.Photo => PhotoInactiveReason,
         KeybindScope.Map => MapClosedReason,
         KeybindScope.Chat => ChatClosedReason,
+        KeybindScope.Window => WindowClosedReason,
         _ => MenuClosedReason,
     };
 
@@ -1396,6 +1400,14 @@ public static class Keybinds
 
     /// <summary>KEYS7: the Mods workspace, or the game's full-screen menu on any tab (never plain gameplay).</summary>
     private static bool DefaultMenuScopeOpen() => ModsMenu.MenuContextOpen;
+
+    /// <summary>
+    /// HUB1: whether a window key (<see cref="KeybindScope.Window"/>) fires: a window with a tab history is under the
+    /// pointer or holds the input, or a menu the workspace history covers is open. A seam for tests.
+    /// </summary>
+    internal static Func<bool> WindowScopeOpen { get; set; } = DefaultWindowScopeOpen;
+
+    private static bool DefaultWindowScopeOpen() => ModsMenu.NavigationScopeOpen;
 
     /// <summary>
     /// Whether photo mode is active, for <see cref="KeybindScope.Photo"/> binds. Set by photo mode's
@@ -1429,6 +1441,7 @@ public static class Keybinds
             return scope switch
             {
                 KeybindScope.Menu => MenuScopeOpen(),
+                KeybindScope.Window => WindowScopeOpen(),
                 KeybindScope.Photo => PhotoScopeOpen(),
                 KeybindScope.Map => MapScopeOpen(),
                 KeybindScope.Chat => ChatScopeOpen(),
@@ -1440,6 +1453,39 @@ public static class Keybinds
 
     /// <summary>KEYS4: a live bind's scope (<see cref="KeybindScope.Gameplay"/> for anything else).</summary>
     internal static KeybindScope ScopeOf(IKeybindInfo? bind) => bind is Registration r ? r.Scope : KeybindScope.Gameplay;
+
+    /// <summary>
+    /// The winner rule for a press, with HUB1's one exception: a window key (<see cref="KeybindScope.Window"/>, the
+    /// tab-history keys) that lost its chord to a game key fires anyway while its target window holds the input, that is
+    /// while the native input mask applied now is <see cref="UiMaskScope.Full"/> or stronger. The game's button actions,
+    /// that game key included (Auto Run on the mouse's forward button), are blocked then (<c>GameInputBlocker</c> applies
+    /// <c>BlockAllKeys</c> for a full mask), so the press acts once. Hovered without the mask, the game's key keeps it.
+    /// The Keybinds tab still reports the clash, with a note on this rule.
+    /// </summary>
+    private static string? GateNow(Registration reg)
+    {
+        string? blocked = SafeWinnerGate(reg);
+        if (blocked == null || reg.Scope != KeybindScope.Window) return blocked;
+        try
+        {
+            if (KeybindArbiter.LostToGame(reg.PluginId, reg.Id) && WindowHoldsInput()) return null;
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window key input check threw: " + e.Message); }
+        return blocked;
+    }
+
+    /// <summary>
+    /// HUB1: a window with a tab history is the target and the game's input is blocked now: the applied native mask is
+    /// <see cref="UiMaskScope.Full"/> or <see cref="UiMaskScope.Exclusive"/> (a <see cref="UiCaptureMode.WhileShown"/>
+    /// window, or the pointer over a hovered one). A mask that could not be measured counts as not blocked. A seam for tests.
+    /// </summary>
+    internal static Func<bool> WindowHoldsInput { get; set; } = DefaultWindowHoldsInput;
+
+    private static bool DefaultWindowHoldsInput()
+    {
+        if (UiTabHistoryRoute.Target() == null) return false;
+        return UiInputCapture.IsBlocking && UiInputCapture.TryGetAppliedScope(out var scope) && scope != UiMaskScope.CloseKeyOnly;
+    }
 
     private static string? SafeWinnerGate(Registration reg)
     {
@@ -1494,6 +1540,9 @@ public static class Keybinds
         if (was != null) Raise(new RebindResult(was.Id, RebindOutcome.Cancelled));
     }
 
+    /// <summary>HUB1: the polls so far (one a frame on the client).</summary>
+    internal static int PumpFrame { get; private set; }
+
     /// <summary>
     /// One poll. Called from <c>Plugin.Frame</c> on the client; tests call it directly.
     /// Order matters: chat first (it wins over everything, including an exempt bind), then the
@@ -1501,6 +1550,8 @@ public static class Keybinds
     /// </summary>
     public static void Pump()
     {
+        // HUB1: one count per poll, so a per-frame answer (the window a tab-history key acts on) is taken once a frame.
+        unchecked { PumpFrame++; }
         // KEYS4: the key-conflict dialog's frame (it catches and logs its own failures), and the Keybinds
         // tab following a bind that came, went or changed while it is shown.
         KeybindConflictPrompt.Tick();
@@ -1723,7 +1774,7 @@ public static class Keybinds
 
             // KEYS1: the winner rule. A bind that lost its chord to the game or to a mod installed
             // first does not run — asked on the press edge only, so a quiet frame costs nothing.
-            string? blocked = SafeWinnerGate(reg);
+            string? blocked = GateNow(reg);
             if (blocked != null)
             {
                 Plugin.Logger?.LogInfo(NotFiredLog(reg.Label, blocked));
@@ -1772,7 +1823,7 @@ public static class Keybinds
             }
 
             if (!down) continue;
-            string? blocked = SafeWinnerGate(reg);
+            string? blocked = GateNow(reg);
             if (blocked != null)
             {
                 Plugin.Logger?.LogInfo(NotFiredLog(reg.Label, blocked));
@@ -2231,6 +2282,8 @@ public static class Keybinds
         RebindFinished = null;
         RebindRefused = null;
         MenuScopeOpen = DefaultMenuScopeOpen;
+        WindowScopeOpen = DefaultWindowScopeOpen;
+        WindowHoldsInput = DefaultWindowHoldsInput;
         PhotoScopeOpen = NeverOpen;
         MapScopeOpen = DefaultMapScopeOpen;
         ChatScopeOpen = DefaultChatScopeOpen;

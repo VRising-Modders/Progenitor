@@ -71,7 +71,9 @@ namespace Progenitor.Tests
             var dash = KeybindArbiter.Current().FindProgenitor("a.mod", "Dash")!;
             Assert.False(dash.Active);
             Assert.Equal(KeybindArbiter.RuleGame, dash.Rule);
-            Assert.DoesNotContain(dash.Others, o => o.OwnerId == SettingsPanel.PluginId);
+            Assert.DoesNotContain(dash.Others, o => o.OwnerId == SettingsPanel.PluginId && o.ActionId == ModsMenu.NavigateForwardId);
+            // HUB1: the window mouse key on the same button is live in play, so it is reported beside the mod key.
+            Assert.Contains(dash.Others, o => o.OwnerId == SettingsPanel.PluginId && o.ActionId == ModsMenu.WindowTabForwardMouseId);
 
             // Remapping: the menu key may take a gameplay game key's chord, never another menu key's or a game menu key's.
             Assert.True(Keybinds.TryRebind(SettingsPanel.PluginId, ModsMenu.NavigateBackId, new KeyChord(UiKey.F6), Keybinds.RebindCheck.Full, out _));

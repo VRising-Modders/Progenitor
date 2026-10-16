@@ -606,6 +606,9 @@ internal static class UiNav
                     case NavCommand.Right: return true;
                     default: return false;
                 }
+            // HUB1: a compact dropdown shares its row with others: Left and Right move to the next one, never step the value.
+            case UiChoiceHandle { Compact: true } when delta != 0:
+                return false;
             case UiChoiceHandle choice when delta != 0:
                 choice.Cycle(delta);
                 return true;

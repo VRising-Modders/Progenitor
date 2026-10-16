@@ -37,13 +37,26 @@ public static partial class UiWidgets
     }
 
     /// <summary>
-    /// A row of tabs drawn as the game's popup buttons, the selected one lit, each with an optional count badge. Add a
-    /// tab's controls with <see cref="IUiTabs.Add"/> after this call; they show only while their tab is selected.
+    /// A row of tabs drawn as the game's popup buttons, the selected one lit, each with an optional count badge, as it has
+    /// always been drawn: no tab history; a window with tabs keeps its height while it stays open. The overload with
+    /// <see cref="UiTabsOptions"/> draws the game's window tabs on a game window and keeps a tab history. Add a tab's
+    /// controls with <see cref="IUiTabs.Add"/> after this call; they show only while their tab is selected.
     /// </summary>
     public static IUiTabs Tabs(this IUiPanel panel, string key, IReadOnlyList<string> captions, int selected = 0)
     {
         if (panel == null) throw new ArgumentNullException(nameof(panel));
-        return new UiTabsHandle(panel, key, captions, selected);
+        return new UiTabsHandle(panel, key, captions, UiTabsOptions.Legacy(selected));
+    }
+
+    /// <summary>
+    /// HUB1: <see cref="Tabs(IUiPanel, string, IReadOnlyList{string}, int)"/> with options. By default (a new
+    /// <see cref="UiTabsOptions"/>): the game's window tabs on a game window (chips elsewhere), the height kept across tabs,
+    /// and a browser-style tab history.
+    /// </summary>
+    public static IUiTabs Tabs(this IUiPanel panel, string key, IReadOnlyList<string> captions, UiTabsOptions options)
+    {
+        if (panel == null) throw new ArgumentNullException(nameof(panel));
+        return new UiTabsHandle(panel, key, captions, options);
     }
 
     /// <summary>

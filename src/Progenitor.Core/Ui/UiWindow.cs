@@ -187,7 +187,8 @@ internal sealed class UiWindowHandle : IUiWindow
         if (tabs.Count > 0)
         {
             Ui.PinMenuRows(_panel, MenuRowPin.Top);
-            try { _tabs = _panel.Tabs(TabsKey, tabs, opts.SelectedTab); }
+            // HUB1: the presets keep their live-verified chip tabs and gain a tab history (the back and forward keys).
+            try { _tabs = _panel.Tabs(TabsKey, tabs, new UiTabsOptions { Selected = opts.SelectedTab, Look = UiTabsLook.Chips, History = true }); }
             finally { Ui.PinMenuRows(_panel, MenuRowPin.Content); }
         }
 
@@ -270,6 +271,8 @@ internal sealed class UiWindowHandle : IUiWindow
     {
         if (_disposed) return;
         _panel.Hide();
+        // HUB1: the tab history lasts one opening of the window.
+        (_tabs as UiTabsHandle)?.ResetHistory();
     }
 
     public void Toggle()

@@ -71,6 +71,7 @@ internal sealed partial class WidgetsDemo
         BuildList(panel, _tabs);
         BuildChips(panel, _tabs, TabLists);
         BuildPickers(panel, _tabs);
+        BuildHub(panel, _tabs, TabInput);
         BuildCode(panel, _tabs);
         BuildTable(panel, _tabs, TabTable);
         BuildMasterDetail(panel, _tabs, TabLayout);
@@ -278,6 +279,9 @@ internal interface IWidgetsHud
 
     /// <summary>Ping the last picked entity; returns what happened.</summary>
     string LocatePicked();
+
+    /// <summary>HUB1: what the sample's Open key (Ctrl+F7, <see cref="ControlsDemo.OpenBindId"/>) does: open or close the Controls Sample page.</summary>
+    void TogglePage() { }
 }
 
 /// <summary>Words the HUD adapter and the page share, so the page can tell a cancelled pick from a picked one.</summary>

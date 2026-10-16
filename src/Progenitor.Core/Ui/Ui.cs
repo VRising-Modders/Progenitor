@@ -691,6 +691,7 @@ public static partial class Ui
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog unload threw: " + e.Message); }
 
         // P7: the widget backends' process-wide state (tooltip, HUD notices, Locate pings, a world pick, a drag).
+        try { UiKeyHints.Reset(); UiBuildingIcons.Clear(); } catch { /* HUB1: the key hints and building icons go with Core */ }
         try { UiWidgetLifetime.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget teardown threw: " + e.Message); }
 
@@ -1060,6 +1061,10 @@ public static partial class Ui
         }
 
         UiDialog.ForgetForTests();
+        // HUB1: no key hint, building icon or tab-history pointer seam outlives a test.
+        UiKeyHints.Reset();
+        UiBuildingIcons.Clear();
+        UiTabHistoryRoute.ResetForTests();
         VanillaAttachRegistry.ResetForTests();
         VanillaSiteHealth.Clear();
         UiSlotTable.ClearAll();
@@ -1369,6 +1374,17 @@ public static partial class Ui
         }
 
         return list;
+    }
+
+    /// <summary>HUB1: the panels on screen now, into <paramref name="buffer"/> (cleared first); no allocation once it has grown.</summary>
+    internal static void ShownPanelsInto(List<UiPanelHandle> buffer)
+    {
+        buffer.Clear();
+        lock (Gate)
+        {
+            for (int i = 0; i < Live.Count; i++)
+                if (Live[i] is UiPanelHandle panel && !panel.IsDisposed && panel.IsShownNow) buffer.Add(panel);
+        }
     }
 
     /// <summary>NAV1: a controller's B: the Escape key's path (a dialog's answer, a screen's Back, else hide).</summary>

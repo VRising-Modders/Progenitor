@@ -110,12 +110,72 @@ public static partial class ModsMenu
     internal static IKeybindHandle[] RegisterNavigationKeys(object owner, ConfigFile file) => new[]
     {
         Keybinds.RegisterScoped(owner, SettingsPanel.PluginId, NavigateBackId, file, DefaultNavigateBack,
-            "Go back to the previous place in the Mods menu (like a browser's back button). Only while the Mods menu is open.",
+            "Go back to the previous place in the Mods menu (like a browser's back button), or to the previous tab of a window with tabs under the pointer over it. Only while the Mods menu is open.",
             () => NavigateBack(ReasonNavigate), null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Menu),
         Keybinds.RegisterScoped(owner, SettingsPanel.PluginId, NavigateForwardId, file, DefaultNavigateForward,
-            "Go forward again after going back in the Mods menu. Only while the Mods menu is open.",
+            "Go forward again after going back in the Mods menu, or in the tabs of a window under the pointer over it. Only while the Mods menu is open.",
             () => NavigateForward(ReasonNavigate), null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Menu),
+        // HUB1: the tab-history keys (a browser's Alt+Left and Alt+Right): their own Window scope, live in play too while a
+        // window with tabs is under the pointer or holds the input, so the arbiter checks them against gameplay keys.
+        Keybinds.RegisterScoped(owner, SettingsPanel.PluginId, NavigateBackKeysId, file, DefaultNavigateBackKeys,
+            "Go to the previous tab of the window with tabs under the pointer (or the one holding the input), in play too; in the Mods menu with no such window, its previous place.",
+            () => NavigateWindowOrMenu(back: true), null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Window),
+        Keybinds.RegisterScoped(owner, SettingsPanel.PluginId, NavigateForwardKeysId, file, DefaultNavigateForwardKeys,
+            "Go forward again in that window's tabs after going back; in the Mods menu with no such window, its next place.",
+            () => NavigateWindowOrMenu(back: false), null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Window),
+        // HUB1: the mouse's back and forward buttons on a window's tabs in play (Window scope). While the Mods menu or the
+        // game's menu is open the same buttons are the menu keys above, which step the window first themselves; these then
+        // do nothing, so one press never steps both a window and the workspace.
+        Keybinds.RegisterScoped(owner, SettingsPanel.PluginId, WindowTabBackMouseId, file, DefaultNavigateBack,
+            "Window tab back (mouse): the previous tab of the window with tabs under the pointer (or the one holding the input), in play. In the Mods menu, Navigate back does this.",
+            () => NavigateWindowMouse(back: true), null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Window),
+        Keybinds.RegisterScoped(owner, SettingsPanel.PluginId, WindowTabForwardMouseId, file, DefaultNavigateForward,
+            "Window tab forward (mouse): forward again in that window's tabs, in play. In the Mods menu, Navigate forward does this.",
+            () => NavigateWindowMouse(back: false), null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Window),
     };
+
+    internal const string WindowTabBackMouseId = "WindowTabBackMouse";
+    internal const string WindowTabForwardMouseId = "WindowTabForwardMouse";
+
+    /// <summary>
+    /// HUB1: a window-tab mouse key: steps the target window's tab history (<see cref="UiTabHistoryRoute"/>) only while
+    /// no menu the workspace history covers is open; then the menu key on the same button acts (window first, then the
+    /// workspace), so a press is handled once. True when a window's tabs moved.
+    /// </summary>
+    internal static bool NavigateWindowMouse(bool back)
+    {
+        string what = back ? "back" : "forward";
+        if (MenuContextOpen) return NavDone(what + " (mouse): left to the menu key");
+        if (UiDialog.Current != null) return NavDone(what + " (mouse): ignored (a dialog is open)");
+        if (Keybinds.Capturing || Keybinds.RebindingId != null) return NavDone(what + " (mouse): ignored (a key capture is waiting)");
+        return UiTabHistoryRoute.TryNavigate(back)
+            ? !NavDone(what + " (mouse): a window's tabs")
+            : NavDone(what + " (mouse): no window's tabs to move");
+    }
+
+    /// <summary>HUB1: a tab-history key: the window's tabs first (<see cref="UiTabHistoryRoute"/>), else the workspace's history.</summary>
+    internal static bool NavigateWindowOrMenu(bool back) => Navigate(back, ReasonNavigate);
+
+    internal const string NavigateBackKeysId = "NavigateBackKeys";
+    internal const string NavigateForwardKeysId = "NavigateForwardKeys";
+
+    internal static readonly KeyChord DefaultNavigateBackKeys = new(UiKey.LeftArrow, KeyModifiers.Alt);
+    internal static readonly KeyChord DefaultNavigateForwardKeys = new(UiKey.RightArrow, KeyModifiers.Alt);
+
+    /// <summary>
+    /// HUB1: the tab-history keys (<see cref="KeybindScope.Window"/>) fire while a menu the history covers is open, or a
+    /// window with a tab history is under the pointer or holds the input (<see cref="UiTabHistoryRoute"/>), in play too.
+    /// The workspace's own Navigate back and forward stay in the Menu scope (<see cref="MenuContextOpen"/>).
+    /// </summary>
+    internal static bool NavigationScopeOpen
+    {
+        get
+        {
+            if (MenuContextOpen) return true;
+            try { return UiTabHistoryRoute.Target() != null; }
+            catch { return false; }
+        }
+    }
 
     /// <summary>Back one place. False (nothing happens) at the start, while a dialog is open or a key capture waits, or when closed.</summary>
     internal static bool NavigateBack(string? reason = null) => Navigate(back: true, reason);
@@ -172,6 +232,9 @@ public static partial class ModsMenu
     private static bool Navigate(bool back, string? reason)
     {
         string what = back ? "back" : "forward";
+        // HUB1: a window with a tab history under the pointer, or holding the input, takes the press before the workspace.
+        if (UiDialog.Current == null && !Keybinds.Capturing && Keybinds.RebindingId == null && UiTabHistoryRoute.TryNavigate(back))
+            return !NavDone(what + ": a window's tabs");
         if (!MenuContextOpen) return NavDone(what + ": ignored (no menu is open)");
         if (_navRestore != null) return NavDone(what + ": ignored (the last one is still arriving)");
         if (UiDialog.Current != null) return NavDone(what + ": ignored (a dialog is open)");

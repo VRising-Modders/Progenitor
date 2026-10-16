@@ -43,7 +43,18 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         // The gallery's three standard windows (ctx.Windows: closed on every unload reason).
         var windows = new GalleryWindows((preset, title, options) => ctx.Windows.Create(preset, title, options), log);
         ctx.Track(windows);
-        var gallery = new GalleryHost(ctx, windows, window, dialog, hud);
+        // The hub window: a plain floating game window with the hub controls (tabs, compact dropdowns, Find, a filling table).
+        var hub = new GalleryHub(() => UiApi.Panel(GalleryHub.Title, ctx.Owner, ctx.Guid), BuildingPrefab, log, GalleryHub.ReturnBindId);
+        ctx.Track(hub);
+        // The keys the hub's key hints name: each does what its button does. Escape stays the framework's (it already
+        // closes the topmost window), so Return is Ctrl+Backspace; the hub takes the input while shown, so it fires then.
+        ctx.Keybinds.Register(GalleryHub.ToggleBindId, new KeyChord(UiKey.F8, KeyModifiers.Ctrl),
+            "Open or close the Controls Sample's hub window.", () => log(ControlsDemo.LogPrefix + "hub key toggle = " + hub.Toggle()),
+            allowWhileCaptured: true);
+        ctx.Keybinds.Register(GalleryHub.ReturnBindId, new KeyChord(UiKey.Backspace, KeyModifiers.Ctrl),
+            "Close the Controls Sample's hub window (its Return button).", () => log(ControlsDemo.LogPrefix + "hub key return = " + hub.Close()),
+            allowWhileCaptured: true);
+        var gallery = new GalleryHost(ctx, windows, window, dialog, hud, hub);
         ctx.Menu.Register(Name, "Every Progenitor UI control, each wired to a log line and a status label.")
             .Page(GalleryDemo.PageId, panel => new GalleryDemo(log, gallery, hud).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
             .Page(ControlsDemo.PageId, panel => new ControlsDemo(log, dialog).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
@@ -57,6 +68,15 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
     /// Ctrl+F7: <c>ctx.Menu.OpenPage</c> opens the Mods menu the way its own key does (in a world through the game's
     /// menu on its MODS tab) and then shows this mod's page; pressed again with the menu open, it closes the menu.
     /// </summary>
+    /// <summary>A building's prefab id from its prefab name in the client world (0 when not known: the row then has no icon).</summary>
+    private static int BuildingPrefab(string name)
+    {
+        var world = Progenitor.Worlds.Client;
+        return world != null && Progenitor.Ecs.PrefabLookup.TryGetGuidByName(world, name, out var guid) ? guid.GuidHash : 0;
+    }
+
+    internal static void TogglePageFor(PluginContext ctx) => TogglePage(ctx);
+
     private static void TogglePage(PluginContext ctx)
     {
         if (ModsMenu.IsOpen)
@@ -88,6 +108,9 @@ internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDem
     private IUiLocatePing? _ping;
 
     internal ControlsHud(PluginContext ctx) => _ctx = ctx;
+
+    /// <summary>What the sample's Open key (Ctrl+F7) does: open or close the Controls Sample page.</summary>
+    public void TogglePage() => Plugin.TogglePageFor(_ctx);
 
     public void PickSeveral(Action<string, int> picked, Action<int> finished)
     {
@@ -142,8 +165,11 @@ internal sealed class GalleryHost : IGalleryHost
     private readonly Action<string> _dialog;
     private readonly ControlsHud _hud;
 
-    internal GalleryHost(PluginContext ctx, GalleryWindows windows, ControlsWindow floating, Action<string> dialog, ControlsHud hud)
+    private readonly GalleryHub _hub;
+
+    internal GalleryHost(PluginContext ctx, GalleryWindows windows, ControlsWindow floating, Action<string> dialog, ControlsHud hud, GalleryHub hub)
     {
+        _hub = hub;
         _ctx = ctx;
         _windows = windows;
         _floating = floating;
@@ -152,6 +178,8 @@ internal sealed class GalleryHost : IGalleryHost
     }
 
     public string ToggleWindow(UiWindowPreset preset) => _windows.Toggle(preset);
+
+    public string ToggleHub() => _hub.Toggle();
 
     public void OpenFloating() => _floating.Open();
 

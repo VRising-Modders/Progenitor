@@ -86,6 +86,24 @@ internal interface IWidgetRuntime
     /// (the wheel and the controller still scroll).
     /// </summary>
     IWidgetScrollBar? AttachScrollBar(IRuntimeCellRow top, IRuntimeCellRow bottom, object? owner) => null;
+
+    /// <summary>
+    /// HUB1: <paramref name="panel"/>'s room from its last layout, in kit units: the tallest its scrolling viewport may
+    /// be (at the frame's height cap: the screen share, a standard window's place, a Mods pane's fixed geometry) and the
+    /// height its content takes now. False before a layout or on a runtime that does not lay panels out.
+    /// </summary>
+    bool PanelRoom(IUiPanel panel, out float maxViewport, out float content)
+    {
+        maxViewport = 0f;
+        content = 0f;
+        return false;
+    }
+
+    /// <summary>
+    /// HUB1: a castle building's icon in the game's build menu (a <c>UnityEngine.Sprite</c>) for its prefab id, or null
+    /// (<see cref="UiBuildingIcons"/>).
+    /// </summary>
+    object? BuildingIcon(int prefab) => null;
 }
 
 /// <summary>

@@ -85,6 +85,12 @@ internal abstract class UiHandle : IUiHandle
 
     internal ushort WidgetId { get; set; }
 
+    /// <summary>HUB1: the Progenitor panel this control was added to (an input's action button joins its row); null for a panel or a stand-alone handle.</summary>
+    internal UiPanelHandle? Parent { get; set; }
+
+    /// <summary>HUB1: run once when this handle is disposed (Core only: a key hint drops its cap); never a plugin delegate.</summary>
+    internal Action? Disposing { get; set; }
+
     /// <summary>
     /// INLINEAPPLY1: the button style this handle asked for: <see cref="UiSettingsGrid.GameButtonStyle"/> once
     /// <see cref="UiSettingsControls.GameButton"/> ran, else empty (the kit's). The readback's fallback when the runtime
@@ -151,6 +157,11 @@ internal abstract class UiHandle : IUiHandle
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // HUB1: Core state tied to this control (a key hint) goes with it.
+        var disposing = Disposing;
+        Disposing = null;
+        try { disposing?.Invoke(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: handle dispose hook threw: " + e.Message); }
         try { OnDispose(); }
         catch (Exception e)
         {
@@ -425,6 +436,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// </summary>
     internal bool GridControls { get; set; }
 
+    /// <summary>HUB1: <see cref="UiLook.GameWindow(IUiPanel)"/> was called on this panel (its tabs are the game's window tabs).</summary>
+    internal bool IsGameWindow { get; set; }
+
     /// <summary>DIALOGS1: called once when this shown panel is hidden or disposed (the kit dialog's liveness hook).</summary>
     internal Action? LeftScreen { get; set; }
 
@@ -478,6 +492,49 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
             (w, id) => new UiChoiceHandle(PluginId, RootName, Owner, w, w != null, id, options, value ?? ""));
         handle.Attach(_runtime);
         return handle;
+    }
+
+    /// <summary>
+    /// HUB1: a compact dropdown (<see cref="UiWidgets.CompactDropdown"/>): its caption and the game's dropdown bar sized to
+    /// the widest option (<see cref="UiCompactChoiceLayout"/>); the compact dropdowns of one inline block share a row.
+    /// Driven exactly as <see cref="Choice"/>; Left and Right move between the row's dropdowns instead of stepping the value.
+    /// </summary>
+    internal IUiDropdown CompactChoice(string text, IReadOnlyList<UiChoiceOption> options, string value)
+    {
+        float labelWidth = UiCompactChoiceLayout.LabelWidth(text);
+        var labels = new List<string>(options?.Count ?? 0);
+        if (options != null) foreach (var o in options) labels.Add(o.Label);
+        float barWidth = UiCompactChoiceLayout.BarWidth(labels);
+        var list = options ?? (IReadOnlyList<UiChoiceOption>)Array.Empty<UiChoiceOption>();
+        var handle = AddChild(UiSlotKind.Click,
+            () => _panel == null ? null : _runtime.AddCompactChoice(_panel, text ?? "", list, value ?? "", labelWidth, barWidth),
+            (w, id) => new UiChoiceHandle(PluginId, RootName, Owner, w, w != null, id, list, value ?? "") { Compact = true });
+        handle.Attach(_runtime);
+        return handle;
+    }
+
+    /// <summary>
+    /// HUB1: a button at the end of <paramref name="field"/>'s row (<see cref="UiWidgets.ActionButton"/>), the game's compact
+    /// button; a button row of its own when the runtime cannot join the field's row.
+    /// </summary>
+    internal IUiButton InlineButton(UiHandle field, string caption)
+    {
+        var button = AddChild(UiSlotKind.Click,
+            () =>
+            {
+                if (_panel == null) return null;
+                if (field.Runtime is { } fieldWidget && !field.IsDisposed)
+                {
+                    var joined = _runtime.JoinFieldRowButton(_panel, fieldWidget, caption ?? "");
+                    if (joined != null) return joined;
+                }
+
+                return GridControls ? _runtime.AddPageButton(_panel, caption ?? "") : _runtime.AddButton(_panel, caption ?? "");
+            },
+            (w, id) => new UiButtonHandle(PluginId, RootName, Owner, w, w != null, id));
+        try { button.GameButton(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: action button look: " + e.Message); }
+        return button;
     }
 
     public IUiNumeric Numeric(string text, double value, double min, double max, double step, int decimals = 0, string? units = null)
@@ -1039,6 +1096,7 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
 
         var handle = ctor(widget, id);
         handle.Align = _contentAlignment;
+        handle.Parent = this;
         lock (_children)
             _children.Add(handle);
         Ui.TrackChild(handle);
@@ -2101,6 +2159,7 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         CellSkin.Expander => "expander",
         CellSkin.Dropdown => "dropdown",
         CellSkin.LoopGlyph => "loop-glyph",
+        CellSkin.GameTab => "game-tab",
         _ => "kit",
     };
 

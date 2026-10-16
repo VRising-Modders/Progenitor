@@ -40,6 +40,10 @@ internal sealed class UiNavHost : INavHost
                 }
             }
 
+            // HUB1: the controller's tab triggers (the workspace's tab keys) step the window's tab row, as a click would.
+            var tabs = top.Window?.Tabs as UiTabsHandle ?? UiTabHistoryRoute.RowOn(top);
+            if (tabs != null) surface.Tab = tabs.Step;
+
             return surface;
         }
 
