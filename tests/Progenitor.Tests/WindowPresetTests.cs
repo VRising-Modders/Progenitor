@@ -863,6 +863,38 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
+    public void Escape_closes_a_floating_panel_before_the_workspace()
+    {
+        // Live round 4: with only a floating panel and the workspace open, one Escape closed both.
+        var pane = UiApi.Panel("Workspace pane", _owner, "example.mod");
+        UiApi.ConfigureMenuPanel(pane, sidebar: false);
+        pane.Show();
+        var floating = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
+        floating.Show();
+        UiApi.PressKeyForTests(27, true);
+        UiApi.PressKeyForTests(17, true);
+        Assert.NotEqual(UiHandleState.Shown, floating.State);
+        Assert.Equal(UiHandleState.Shown, pane.State);
+        UiApi.PressKeyForTests(27, true);
+        UiApi.PressKeyForTests(17, true);
+        Assert.NotEqual(UiHandleState.Shown, pane.State);
+    }
+
+    [Fact]
+    public void A_tabbed_windows_surface_names_its_column_and_pinned_rows()
+    {
+        var w = Make(UiWindowPreset.Tabbed, "Net", new UiWindowOptions { Tools = new[] { new UiWindowTool("Refresh") }, Tabs = new[] { "A", "B" } });
+        var locate = w.Info!.Button("Locate all");
+        var handle = (UiWindowHandle)w;
+        Assert.Contains((UiHandle)locate, handle.NavColumn());
+        var top = handle.NavTopRows();
+        Assert.Contains((UiHandle)w.Tools[0], top);
+        Assert.Equal(2, top.Count); // Refresh and the tab row
+        Assert.Same(handle, ((UiPanelHandle)w.Panel).Window);
+        Assert.Contains("surface.Column = column;", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UiNavHost.cs"));
+    }
+
+    [Fact]
     public void Show_hide_toggle_and_dispose_follow_the_panel()
     {
         var w = Make(UiWindowPreset.Basic);

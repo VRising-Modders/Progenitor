@@ -192,6 +192,20 @@ internal sealed class UiWindowHandle : IUiWindow
         }
 
         if (_spec.InfoColumnWidth > 0f) _info = new WindowColumn(_panel);
+        if (_panel is UiPanelHandle host) host.Window = this;
+    }
+
+    /// <summary>NAV1: the info column's rows (a controller's left column); empty without one.</summary>
+    internal HashSet<UiHandle> NavColumn() => _info == null ? new HashSet<UiHandle>() : new HashSet<UiHandle>(_info.Rows);
+
+    /// <summary>NAV1: the pinned rows above the columns: the toolbar's buttons, Rename and the tab row.</summary>
+    internal HashSet<UiHandle> NavTopRows()
+    {
+        var set = new HashSet<UiHandle>();
+        foreach (var t in _tools) if (t is UiHandle h) set.Add(h);
+        if (_rename is UiHandle r) set.Add(r);
+        if (_tabs is UiTabsHandle tabs && tabs.NavRow != null) set.Add(tabs.NavRow);
+        return set;
     }
 
     public UiWindowPreset Preset { get; }
@@ -386,10 +400,18 @@ internal sealed class UiWindowHandle : IUiWindow
 
         internal WindowColumn(IUiPanel panel) => _panel = panel;
 
+        /// <summary>The column's rows that are handles (its controls, for navigation).</summary>
+        internal List<UiHandle> Rows { get; } = new();
+
         private T Side<T>(Func<T> add)
         {
             Ui.PinMenuRows(_panel, MenuRowPin.Side);
-            try { return add(); }
+            try
+            {
+                var row = add();
+                if (row is UiHandle h) Rows.Add(h);
+                return row;
+            }
             finally { Ui.PinMenuRows(_panel, MenuRowPin.Content); }
         }
 

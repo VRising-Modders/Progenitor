@@ -27,7 +27,21 @@ internal sealed class UiNavHost : INavHost
         }
 
         if (top != null)
-            return new NavSurface("panel:" + RuntimeHelpers.GetHashCode(top), new IReadOnlyList<UiHandle>[] { top.ChildrenSnapshot() });
+        {
+            var surface = new NavSurface("panel:" + RuntimeHelpers.GetHashCode(top), new IReadOnlyList<UiHandle>[] { top.ChildrenSnapshot() });
+            // WINDOWS1: a Tabbed window's info column and its pinned rows (Down from the tabs enters the column).
+            if (top.Window is { } window)
+            {
+                var column = window.NavColumn();
+                if (column.Count > 0)
+                {
+                    surface.Column = column;
+                    surface.TopRows = window.NavTopRows();
+                }
+            }
+
+            return surface;
+        }
 
         return ModsMenu.NavSurface();
     }

@@ -153,6 +153,49 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void A_windows_left_column_is_entered_from_the_tabs_and_crossed_to_the_nearest_row()
+    {
+        // WINDOWS1 live round 4: on the Tabbed window's Settings tab Down from the tabs went into the content and Left from
+        // its first row stayed put, so the info column was out of reach.
+        using var panel = Panel();
+        var refresh = panel.Button("Refresh");
+        var tab = panel.Button("Tabs");
+        var sort = panel.Button("Sort on open");
+        var reach = panel.Button("Reach");
+        var locate = panel.Button("Locate all");
+        var add = panel.Button("Add facts");
+        _host.Rects[(UiHandle)refresh] = Row(700, 0, 150);
+        _host.Rects[(UiHandle)tab] = Row(650, 0, 300);
+        _host.Rects[(UiHandle)sort] = Row(600, 400, 500);
+        _host.Rects[(UiHandle)reach] = Row(550, 400, 500);
+        _host.Rects[(UiHandle)locate] = Row(450, 0, 150);
+        _host.Rects[(UiHandle)add] = Row(400, 0, 150);
+        var surface = Surface(Children(panel));
+        surface.Column = new HashSet<UiHandle> { (UiHandle)locate, (UiHandle)add };
+        surface.TopRows = new HashSet<UiHandle> { (UiHandle)refresh, (UiHandle)tab };
+
+        UiNav.Execute(NavCommand.Down);
+        Assert.Same(refresh, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Down);
+        Assert.Same(tab, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Down);   // the column first, though the content's first row is nearer
+        Assert.Same(locate, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Right);  // nothing level: the nearest row of the content
+        Assert.Same(reach, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Up);
+        Assert.Same(sort, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Left);   // back to the column's nearest row
+        Assert.Same(locate, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Down);
+        Assert.Same(add, UiNav.Focus.Handle);
+
+        // From the toolbar, Down still goes to the tab row first (a pinned row below wins over the column).
+        UiNav.FocusOn((UiHandle)refresh, "");
+        UiNav.Execute(NavCommand.Down);
+        Assert.Same(tab, UiNav.Focus.Handle);
+    }
+
+    [Fact]
     public void Directions_follow_the_controls_places_on_screen()
     {
         using var panel = Panel();

@@ -67,6 +67,9 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     private readonly bool[] _termOn;
     private readonly List<IUiHandle>[] _content;
     private readonly IUiCellRow _row;
+
+    /// <summary>WINDOWS1: the tab row's handle, the stop a controller focuses (a window routes Down from it).</summary>
+    internal UiHandle? NavRow => _row as UiHandle;
     private readonly List<Action<int>> _changed = new();
     private int _selected;
 

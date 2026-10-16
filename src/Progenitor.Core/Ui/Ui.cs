@@ -1304,22 +1304,20 @@ public static partial class Ui
     }
 
     /// <summary>
-    /// The panels of the window row Escape closes one at a time: the shown standard windows and, while one is shown, the
-    /// floating panels in their row (<see cref="UiWindowLayout.Spots"/>). Escape already closed a floating panel (the
-    /// sweep); now the row closes topmost first, by draw order, which is show order (<see cref="PanelSpot.Layer"/>).
+    /// The panels Escape closes one at a time, topmost first (by show order, which is their draw order): the shown
+    /// standard windows and floating panels (WINDOWS1 live round 4: a floating panel and the Mods workspace closed together
+    /// on one press). Workspace panes, dialogs, self-placed, top-pinned and mounted panels are not among them; when none of
+    /// these is shown, the press goes on to the sweep (the workspace and the rest).
     /// </summary>
     private static List<UiPanelHandle> ShownWindows(UiHandle[] snapshot)
     {
         var shown = new List<UiPanelHandle>();
-        bool anyWindow = false;
         foreach (var h in snapshot)
         {
             if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown || ModsMenu.IsWorkspacePanel(p)) continue;
-            if (p.WindowWidth > 0f) anyWindow = true;
             if (p.WindowWidth > 0f || p.Flows) shown.Add(p);
         }
 
-        if (!anyWindow) shown.Clear();
         return shown;
     }
 

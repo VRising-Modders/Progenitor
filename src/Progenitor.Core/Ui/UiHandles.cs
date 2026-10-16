@@ -789,6 +789,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// <summary>WINDOWS1: a standard window's asked-for frame width, which the re-flow lays the windows out by; 0 for any other panel.</summary>
     internal float WindowWidth { get; set; }
 
+    /// <summary>WINDOWS1: the standard window composed over this panel; null for any other panel.</summary>
+    internal UiWindowHandle? Window { get; set; }
+
     /// <summary>
     /// WINDOWS1 review: false for a panel the panel flow does not place (a dialog, a self-placed panel, a top-pinned
     /// panel, a wide centered game window). The others join the standard windows' row while a window is shown
