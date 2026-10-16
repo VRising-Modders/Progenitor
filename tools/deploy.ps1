@@ -530,6 +530,26 @@ function Get-AddressTables {
     Where-Object { $_.Name -like "client-*.json" -or $_.Name -like "server-*.json" })
 }
 
+function Copy-ProgenitorGuide($t) {
+  <#
+    The Mods menu's Help guide tile and Progenitor's own Help button open
+    progenitor-core/docs/guide/progenitor-guide.html (ModHelp.ProgenitorGuidePath) and stay hidden
+    when it is missing. package.ps1 ships it; a dev deploy copies it too so deployed builds match.
+  #>
+  $src = Join-Path (Split-Path $PSScriptRoot -Parent) "docs\guide\progenitor-guide.html"
+  if (-not (Test-Path -LiteralPath $src)) { return }
+  $destDir = Join-Path $t.Core "docs\guide"
+  $final = Join-Path $destDir "progenitor-guide.html"
+  if ($plan) { Add-PlanRow $t.Name "guide" $src $final "Progenitor guide"; return }
+  Invoke-DeployNewDir $destDir
+  try {
+    Copy-Item -LiteralPath $src -Destination $final -Force
+    Write-Host "[$($t.Name)] Progenitor guide -> progenitor-core/docs/guide"
+  } catch {
+    Write-Warning "[$($t.Name)] Progenitor guide not updated: $($_.Exception.Message)"
+  }
+}
+
 function Copy-AddressTables($t) {
   <#
     Bootstrap resolves its detour sites from the JSON next to Core (progenitor-core/addresslib)
@@ -1336,10 +1356,11 @@ foreach ($t in $targets) {
   }
 }
 
-# Address tables, once per target, independent of -Projects (see Copy-AddressTables).
+# Address tables and the guide, once per target, independent of -Projects (see Copy-AddressTables).
 foreach ($t in $targets) {
   if (-not (Test-Path $t.Dir)) { Write-Warning "$($t.Name) plugin dir missing: $($t.Dir)"; continue }
   Copy-AddressTables $t
+  Copy-ProgenitorGuide $t
 }
 
 # Resolve every project's built DLL up front, so this run knows BEFORE it copies anything
