@@ -2027,6 +2027,21 @@ public static partial class ModsMenu
         CloseResetAllDialog();
         try { page?.SettingsView?.Release(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: settings view release threw: " + e.Message); }
+        // PINS2: the description column's static "page drawn last" holds the settings view too (its keybind rows and
+        // server-part callback reach the plugin); it goes with the page, so a closed workspace keeps no plugin object.
+        ModPageDetails.ReleaseActive();
+    }
+
+    /// <summary>
+    /// PINS2: an unloading plugin's mod page goes even when the workspace is closed or shows another tab: the page
+    /// model, its settings view and the description column's page drawn last. Matched by plugin id.
+    /// </summary>
+    private static void ReleaseModPageFor(string pluginId)
+    {
+        if (string.IsNullOrEmpty(pluginId)) return;
+        if (_modPage != null && string.Equals(_modPage.Model.PluginId, pluginId, StringComparison.OrdinalIgnoreCase))
+            ReleaseModPage();
+        ModPageDetails.ReleaseFor(pluginId);
     }
 
     /// <summary>
@@ -4149,6 +4164,7 @@ public static partial class ModsMenu
         else
             QueueDirectoryRefresh();
         SettingsPanel.CloseForMod(mod.PluginId);
+        ReleaseModPageFor(mod.PluginId);
     }
 
     internal static void RemoveAll(object owner)
@@ -4164,6 +4180,7 @@ public static partial class ModsMenu
             if (string.Equals(_resetAllPlugin, id, StringComparison.OrdinalIgnoreCase)) CloseResetAllDialog();
             if (IsOpen && string.Equals(_selected, id, StringComparison.OrdinalIgnoreCase))
                 Close(ReasonLifecycle("plugin-unload"));
+            ReleaseModPageFor(id);
         }
 
         // SETTINGS1 stage 2: the owner's settings pages hold its predicates, actions and info
