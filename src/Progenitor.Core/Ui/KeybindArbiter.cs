@@ -48,8 +48,9 @@ internal enum KeybindScope
 
     /// <summary>
     /// HUB1: works while a window with a tab history is under the pointer or holds the input, in play too, or while the
-    /// Mods menu is open: it meets gameplay keys, menu keys and map keys, so a clash with any of them is reported. Core
-    /// only: the tab-history keys (Alt+Left, Alt+Right).
+    /// Mods menu is open: it meets gameplay and map mod keys and the game's own keys, so those clashes are reported. It
+    /// does not meet menu keys: the window mouse keys stand aside while a menu is open. Core only: the tab-history keys
+    /// (Alt+Left, Alt+Right; the mouse's back and forward buttons).
     /// </summary>
     Window = 5,
 }
@@ -427,12 +428,14 @@ internal static class KeybindArbiter
         a == b
         || (a == KeybindScope.Map && b == KeybindScope.Menu)
         || (a == KeybindScope.Menu && b == KeybindScope.Map)
-        // HUB1: a window key is live in play, in the menus and on the map, so it meets keys of all three.
+        // HUB1: a window key is live in play and on the map, so it meets keys of both (and the game's own keys).
         || (a == KeybindScope.Window && WindowMeets(b))
         || (b == KeybindScope.Window && WindowMeets(a));
 
     private static bool WindowMeets(KeybindScope other) =>
-        other is KeybindScope.Gameplay or KeybindScope.Menu or KeybindScope.Map or KeybindScope.Window;
+        // Not Menu: while a menu is open the workspace's menu keys act and a window mouse key stands aside, so Core's
+        // Navigate back and Window tab back (mouse) share the mouse's back button without clashing.
+        other is KeybindScope.Gameplay or KeybindScope.Map or KeybindScope.Window;
 
     /// <summary>KEYS4: whether <paramref name="c"/> can clash with a mod key of <paramref name="scope"/>.</summary>
     internal static bool ScopesMeet(KeybindClaim c, KeybindScope scope)

@@ -17,7 +17,7 @@ namespace Progenitor.Tests
         public void The_tab_history_keys_are_window_keybinds_on_Alt_and_the_arrows_checked_against_gameplay_keys()
         {
             var keys = NavKeys();
-            Assert.Equal(4, keys.Length);
+            Assert.Equal(6, keys.Length);
             var picture = KeybindArbiter.Current();
             var back = picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateBackKeysId)!;
             var forward = picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateForwardKeysId)!;
@@ -38,10 +38,78 @@ namespace Progenitor.Tests
         }
 
         [Fact]
-        public void A_window_scope_meets_gameplay_menu_and_map_keys()
+        public void The_window_mouse_keys_share_the_menu_keys_buttons_without_a_clash_and_meet_the_games_mouse_keys()
+        {
+            UseGame(AutoRun());
+            var keys = NavKeys();
+            Assert.Equal(6, keys.Length);
+            var picture = KeybindArbiter.Current();
+            var back = picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.WindowTabBackMouseId)!;
+            var forward = picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.WindowTabForwardMouseId)!;
+            Assert.Equal(MouseBack, back.Claim.Chord);
+            Assert.Equal(MouseForward, forward.Claim.Chord);
+            Assert.Equal(KeybindScope.Window, back.Claim.Scope);
+            // The workspace's Navigate back on the same button: both active, no clash between them.
+            Assert.True(back.Active);
+            Assert.True(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateBackId)!.Active);
+            Assert.DoesNotContain(back.Others, o => o.ActionId == ModsMenu.NavigateBackId);
+            // The game's Auto Run holds the forward button in play: the window mouse key meets it and the game wins (reported).
+            Assert.False(forward.Active);
+            Assert.Equal(KeybindArbiter.RuleGame, forward.Rule);
+            // The workspace's Navigate forward is a menu key and does not meet the gameplay Auto Run.
+            Assert.True(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateForwardId)!.Active);
+        }
+
+        [Fact]
+        public void One_press_of_the_mouse_back_button_steps_a_window_once_in_play_and_over_the_menu()
+        {
+            NavKeys();
+            RegisterMod("a.mod", "Alpha");
+            using var menu = ModsMenu.Register(_owner, "a.mod", "Alpha", "A mod.");
+            var window = UiApi.Panel("Hub", _owner, "example.hub");
+            try
+            {
+                window.GameWindow();
+                var tabs = window.Tabs("hub", new[] { "A", "B", "C" }, new UiTabsOptions());
+                window.Show();
+                tabs.Selected = 1;
+                tabs.Selected = 2;
+                UiTabHistoryRoute.UnderPointer = p => ReferenceEquals(p, window);
+
+                // In play (no menu open): the window mouse key steps the window once.
+                Assert.False(ModsMenu.MenuContextOpen);
+                _keys.Down(MouseBack);
+                _keys.Frame();
+                _keys.Up(UiKey.MouseBack);
+                Assert.Equal(1, tabs.Selected);
+
+                // The Mods menu open, the pointer over the window: the menu key steps the window, the window mouse key
+                // stands aside, so the same press moves one tab, not two, and the workspace does not move.
+                ModsMenu.Open();
+                ModsMenu.OpenMod("a.mod");
+                int index = (int)ModsMenu.NavState()["index"]!;
+                tabs.Selected = 2;
+                _keys.Frame();
+                _keys.Down(MouseBack);
+                _keys.Frame();
+                _keys.Up(UiKey.MouseBack);
+                Assert.Equal(1, tabs.Selected);
+                Assert.Equal(index, ModsMenu.NavState()["index"]);
+                Assert.False(ModsMenu.NavigateWindowMouse(back: true));
+                Assert.Equal(1, tabs.Selected);
+            }
+            finally
+            {
+                window.Dispose();
+                UiTabHistoryRoute.ResetForTests();
+            }
+        }
+
+        [Fact]
+        public void A_window_scope_meets_gameplay_and_map_keys_but_not_menu_keys()
         {
             Assert.True(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Gameplay)));
-            Assert.True(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Menu), Mod(KeybindScope.Window)));
+            Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Menu), Mod(KeybindScope.Window)));
             Assert.True(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Map)));
             Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Photo)));
             Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Menu), Mod(KeybindScope.Gameplay)));

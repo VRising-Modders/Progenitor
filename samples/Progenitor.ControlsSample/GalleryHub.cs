@@ -117,7 +117,7 @@ internal sealed class GalleryHub : IDisposable
         tabs.Add(1, p.Text("Large wooden chest", "6", UiTextStyle.Number));
         tabs.Add(1, p.Text("31 of 40 slots used.", UiTextStyle.Muted));
 
-        tabs.Add(2, p.Text("Alt+Left and Alt+Right (and the mouse's back and forward buttons over the Mods menu) step through the tabs you opened.", UiTextStyle.Body));
+        tabs.Add(2, p.Text("The mouse's back and forward buttons, or Alt+Left and Alt+Right, step through the tabs you opened.", UiTextStyle.Body));
 
         // A centered Return with its key: the plugin's own registered key (follows a remap), else Esc.
         p.BeginInline();

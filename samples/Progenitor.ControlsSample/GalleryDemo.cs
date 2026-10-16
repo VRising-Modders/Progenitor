@@ -201,7 +201,7 @@ internal sealed class GalleryDemo
                 tabs.Add(tab, panel.Text("Open the hub window's Chests tab: the window keeps the Find tab's height.", UiTextStyle.Body));
                 break;
             case "tab-history":
-                tabs.Add(tab, panel.Text("In the hub window, open a few tabs, then press Alt+Left (or the mouse's back button while the Mods menu is open).", UiTextStyle.Body));
+                tabs.Add(tab, panel.Text("In the hub window, open a few tabs, then press the mouse's back button or Alt+Left.", UiTextStyle.Body));
                 break;
             case "centered-button":
                 panel.BeginInline();

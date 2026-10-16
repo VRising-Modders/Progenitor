@@ -85,9 +85,9 @@ public sealed class UiTabsOptions
 
     /// <summary>
     /// True (the default): the row keeps a browser-style history of the tabs the player selected. While its window is
-    /// under the pointer or holds the input, the mouse's back and forward buttons (and Alt+Left, Alt+Right: the Core
-    /// keybinds Navigate back and forward, remappable in the Keybinds tab) go to the previous and next tab of it, ahead of
-    /// the Mods workspace's own history. <see cref="IUiTabs.Back"/> and <see cref="IUiTabs.Forward"/> do the same.
+    /// under the pointer or holds the input, the mouse's back and forward buttons and Alt+Left, Alt+Right (Core keybinds,
+    /// remappable in the Keybinds tab; in play too) go to the previous and next tab of it, ahead of the Mods workspace's own
+    /// history. It lasts one opening of the window. <see cref="IUiTabs.Back"/> and <see cref="IUiTabs.Forward"/> do the same.
     /// </summary>
     public bool History { get; set; } = true;
 

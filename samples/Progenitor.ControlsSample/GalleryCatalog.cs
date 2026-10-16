@@ -134,7 +134,7 @@ internal static class GalleryCatalog
             "Use this when a window's tabs differ in height, so switching tabs never resizes the window.", "Windows tab, Hub window (Chests tab)", "none (new)",
             "No text of its own."),
         E("tab-history", Windows, "Tab history", "new UiTabsOptions { History = true } (on by default); tabs.Back() / tabs.Forward()",
-            "Use this when a window has tabs, so Alt+Left and Alt+Right (and the mouse's back and forward buttons over the Mods menu) step through the tabs the player opened.", "Windows tab, Hub window", "none (new)",
+            "Use this when a window has tabs, so the mouse's back and forward buttons and Alt+Left and Alt+Right step through the tabs the player opened.", "Windows tab, Hub window", "none (new)",
             "No text of its own."),
         E("centered-button", Windows, "Centered button", "panel.Button(caption).Centered()",
             "Use this when one action closes or leaves a window, such as Return, or for a centered row of buttons.", "Windows tab, Centered button", "none (new)",
