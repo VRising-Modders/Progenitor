@@ -44,7 +44,7 @@ A world save records a mod's prefab GUID like a vanilla one, so a save written w
 
 ## Quick start (mod authors)
 
-**Start from the template and the guide.** [`PROGENITOR_GUIDE.md`](PROGENITOR_GUIDE.md) maps each need to its API and sample; [`templates/progenitor-mod`](templates/progenitor-mod) is a buildable starter mod (`dotnet new install templates/progenitor-mod`, then `dotnet new progenitor-mod -n MyMod`). Working with an AI assistant: paste the [starter prompt](docs/ai-starter-prompt.md); [`llms.txt`](llms.txt) indexes the repository for it. An interactive guide (`docs/guide/progenitor-guide.html`) is in progress.
+**Start from the template and the guide.** [`PROGENITOR_GUIDE.md`](PROGENITOR_GUIDE.md) maps each need to its API and sample; [`templates/progenitor-mod`](templates/progenitor-mod) is a buildable starter mod (`dotnet new install templates/progenitor-mod`, then `dotnet new progenitor-mod -n MyMod`). Working with an AI assistant: paste the [starter prompt](docs/ai-starter-prompt.md); [`llms.txt`](llms.txt) indexes the repository for it.
 
 1. Read the [tutorial](docs/tutorial.md): a progressive guide from a first item and command to keybinds, UI, units, patches and the hot-reload loop.
 2. Start from the [minimal reload example](samples/Progenitor.ReloadExample/README.md), then the larger [`samples/Progenitor.Sample`](samples/Progenitor.Sample).

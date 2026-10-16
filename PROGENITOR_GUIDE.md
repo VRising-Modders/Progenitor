@@ -166,5 +166,5 @@ The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a
 ## More
 
 - [Tutorial](docs/tutorial.md), [module reference](docs/modules.md), [API status](docs/api.md), [knowledge notes](knowledge/README.md) (`node tools/kb/kb.mjs search <words>`).
-- Interactive guide: `docs/guide/progenitor-guide.html` (in progress).
+- Interactive Help Guide for players, server admins and mod developers: `docs/guide/progenitor-guide.html` (open it in a browser).
 - Status labels: only features marked *verified live* in [api.md](docs/api.md) have been seen working in the game.
