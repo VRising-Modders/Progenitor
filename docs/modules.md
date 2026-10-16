@@ -60,6 +60,8 @@ Without any of these, the page shows the description passed to `ctx.Menu.Registe
 
 The mod page's readback reports the decision: `page-listing {matched, key, listingVersion, verified, versionMatch, shown}` (see the `mods_ui` row in [api.md](api.md)) and `page-readme.source` (`listing`, `embedded`, `beside`, `declared`, `description` or `none`).
 
+**A longer manual** belongs in an HTML help file: ship `help/index.html` in the mod's folder or embedded (or name another with `[ModHelp(path)]` / `ctx.Menu.Help(path)`), and the page shows a **Help** button that opens it in the browser ([Help button](mod-settings.md#help-button)).
+
 ### Context API
 
 | Member | Purpose |

@@ -64,6 +64,44 @@ internal static class CellTiles
             new CellRowSpec(noteKey, note, height: NoteHeight, plain: true, compact: true, gapAbove: 0f) { TileEdge = CellSectionEdge.Last });
     }
 
+    /// <summary>
+    /// A line with one tile in the left slot and the right slot empty: the same cells as <see cref="Pair"/> with
+    /// <paramref name="slotOf"/> laid out (untiled, so nothing is drawn) in the right slot, so the tile is exactly as wide
+    /// and as far left as the left tile of a pair line above it. <paramref name="slotOf"/> is a tile of that line whose
+    /// caption sets the link slot, so this line's link slot matches it when it is the wider ask.
+    /// </summary>
+    internal static (CellRowSpec Head, CellRowSpec Note) Single(
+        string headKey, string noteKey, TileSpec tile, TileSpec slotOf, int tileNumber, float gapAbove = -1f)
+    {
+        float w = Math.Max(CaptionWidth(tile), CaptionWidth(slotOf));
+        var head = new List<CellSpec>
+        {
+            Spacer(tile.Cell + "-pad", tileNumber),
+            new CellSpec(CellKind.Button, tile.Cell).With(text: tile.Caption, width: CellWidth.Px(w), minWidth: w,
+                align: CellAlign.Left, fontSize: CaptionFontSize, skin: tile.Button ? CellSkin.KeyCap : CellSkin.Link, vAlign: CellVAlign.Bottom).InTile(tileNumber),
+            new CellSpec(CellKind.Muted, tile.Cell + "-fill").With(text: "", width: CellWidth.Fill(0f), minWidth: 0f).InTile(tileNumber),
+            Spacer(EmptySlot + "-pad", 0),
+            new CellSpec(CellKind.Muted, EmptySlot).With(text: "", width: CellWidth.Px(w), minWidth: w),
+            new CellSpec(CellKind.Muted, EmptySlot + "-fill").With(text: "", width: CellWidth.Fill(0f), minWidth: 0f),
+        };
+        var note = new List<CellSpec>
+        {
+            Spacer(tile.NoteCell + "-pad", tileNumber),
+            new CellSpec(CellKind.Muted, tile.NoteCell).With(text: tile.Note, width: CellWidth.Fill(0f), minWidth: 0f,
+                wrap: CellWrap.Ellipsis, vAlign: CellVAlign.Top).InTile(tileNumber),
+            Spacer(tile.NoteCell + "-trail", tileNumber),
+            Spacer(EmptySlot + "-note-pad", 0),
+            new CellSpec(CellKind.Muted, EmptySlot + "-note").With(text: "", width: CellWidth.Fill(0f), minWidth: 0f),
+            Spacer(EmptySlot + "-note-trail", 0),
+        };
+        return (
+            new CellRowSpec(headKey, head, height: HeadHeight, plain: true, gapAbove: gapAbove >= 0f ? gapAbove : LineGap) { TileEdge = CellSectionEdge.First },
+            new CellRowSpec(noteKey, note, height: NoteHeight, plain: true, compact: true, gapAbove: 0f) { TileEdge = CellSectionEdge.Last });
+    }
+
+    /// <summary>The cell-key prefix of a <see cref="Single"/> line's empty right slot.</summary>
+    internal const string EmptySlot = "empty-slot";
+
     /// <summary>A link's (or a key cap's) asked width for its caption.</summary>
     internal static float CaptionWidth(TileSpec t) =>
         CellLayout.EstimateTextWidth(t.Caption, CaptionFontSize) + (t.Button ? 36f : 12f);

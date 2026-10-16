@@ -326,6 +326,18 @@ if ($tables) {
   Write-Warning "no address tables under tools/addresslib; the package resolves detours by prefix scan only"
 }
 
+# The Progenitor guide, when the repository has it: BepInEx/progenitor-core/docs/guide/progenitor-guide.html is the
+# file the Mods menu's Help guide tile and Progenitor's Help button open (ModHelp.ProgenitorGuidePath). The guide is one
+# self-contained HTML file; nothing else in docs/guide is copied.
+$guideSrc = Join-Path $repo "docs\guide\progenitor-guide.html"
+if (Test-Path -LiteralPath $guideSrc) {
+  $guideDir = Join-Path $coreDir "docs\guide"
+  New-Item -ItemType Directory -Force -Path $guideDir | Out-Null
+  Copy-Item -LiteralPath $guideSrc -Destination (Join-Path $guideDir "progenitor-guide.html") -Force
+} else {
+  Write-Warning "no docs/guide/progenitor-guide.html; the package has no Help guide"
+}
+
 if ($IncludeDev) {
   $reloadDir = Join-Path $stage "BepInEx\progenitor-reload"
   New-Item -ItemType Directory -Force -Path $reloadDir | Out-Null

@@ -127,6 +127,8 @@ public abstract class ProgenitorPlugin<TContext> : BasePlugin
         catch { /* the registry is evidence, never a gate */ }
         // ABOUTSRC1: the mod page's About text from the plugin itself (embedded README.md, [ModAbout]), as strings.
         PluginAboutStore.NoteFromType(guid, GetType());
+        // The mod page's Help button: [ModHelp] and the embedded help files' names (client only; read on press).
+        ModHelpStore.NoteFromType(guid, GetType(), meta.Version?.ToString() ?? "", Plugin.IsServerProcess);
 
         if ((declared & process) == 0)
         {

@@ -6,7 +6,8 @@ namespace Progenitor.Ui;
 /// <summary>
 /// The Mods tab's landing page (user-approved mockup, 2026-10-10): the title, one subtitle line with the local and server
 /// summaries, what Progenitor is (a centered block of points), a 2×2 grid of bordered tiles (Your settings, Server settings,
-/// Preferences, Collect logs with the Last bundle line as its note; CellTiles), and the footer. Every text and row key is here so the page and its tests read the same
+/// Preferences, Collect logs with the Last bundle line as its note; CellTiles), a third line with the Help guide tile while
+/// Progenitor's guide is installed, and the footer. Every text and row key is here so the page and its tests read the same
 /// words. Game-free; <see cref="ModsMenu.Open"/> draws it.
 /// </summary>
 internal static class ModsLanding
@@ -211,6 +212,25 @@ internal static class ModsLanding
         new TileSpec(CellPreferences, PreferencesCaption, CellPreferencesNote, PreferencesNote, Button: true),
         new TileSpec(CellCollect, CollectCaption, CellCollectNote, string.IsNullOrEmpty(note) ? CollectDescription : note, Button: true),
         firstTile: 3, firstLine: false);
+
+    internal const string RowHelp = "landing-tiles-help";
+    internal const string RowHelpNotes = "landing-tiles-help-notes";
+    internal const string CellHelpGuide = "help-guide";
+    internal const string CellHelpGuideNote = "help-guide-note";
+    internal const string HelpGuideCaption = "Help guide";
+    internal const string HelpGuideNote = "Guides for players, server admins and mod developers";
+
+    /// <summary>The Help guide tile's target in the readback (it opens the guide in the browser).</summary>
+    internal const string TargetHelpGuide = "help-guide";
+
+    /// <summary>
+    /// The third line, drawn only when Progenitor's guide is installed: Help guide in the left slot, the right slot empty,
+    /// so the tile lines up with and is as wide as Preferences above it (a 2×3 grid with one empty slot).
+    /// </summary>
+    internal static (CellRowSpec Head, CellRowSpec Note) HelpRow() => CellTiles.Single(RowHelp, RowHelpNotes,
+        new TileSpec(CellHelpGuide, HelpGuideCaption, CellHelpGuideNote, HelpGuideNote, Button: true),
+        new TileSpec(CellPreferences, PreferencesCaption, CellPreferencesNote, PreferencesNote, Button: true),
+        tileNumber: 5);
 
     /// <summary>
     /// The footer as a centered one-line row with <see cref="BlockGap"/> above it (a label row cannot ask for its gap;

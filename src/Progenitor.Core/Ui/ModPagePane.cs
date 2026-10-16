@@ -25,6 +25,15 @@ internal sealed class ModPageActions
     /// </summary>
     internal Action? Share { get; set; }
 
+    /// <summary>
+    /// <b>Help</b> in the actions bar, before the action button: open the mod's own HTML help file in the browser. Bound only
+    /// when <see cref="HelpTarget"/> found one; null draws no button.
+    /// </summary>
+    internal Action? Help { get; set; }
+
+    /// <summary>The help file the button opens (the readback's <c>page-help</c>); <see cref="ModHelpTarget.None"/> for none.</summary>
+    internal Progenitor.Plugins.ModHelpTarget HelpTarget { get; set; } = Progenitor.Plugins.ModHelpTarget.None;
+
     /// <summary>SETTINGS1 stage 3: the on/off switch was pressed (bound only while it can act).</summary>
     internal Action? Switch { get; set; }
 
