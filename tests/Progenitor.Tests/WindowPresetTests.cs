@@ -337,28 +337,75 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
-    public void The_re_flow_ranks_standard_windows_among_themselves_and_ordinary_panels_as_before()
+    public void A_floating_panel_shares_the_window_row_and_never_lands_under_a_window()
     {
-        var plain = UiApi.Panel("Plain", _owner, "example.mod");
+        // Review: the Gallery's floating panel (a GameWindow panel) and a Basic window both centered at x 0.
+        var plain = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
         plain.Show();
-        var tabbed = Make(UiWindowPreset.Tabbed, "Net");
         var basic = Make(UiWindowPreset.Basic, "Gear");
-        tabbed.Show();
         basic.Show();
-        Assert.Equal(Tabbed, ((UiPanelHandle)tabbed.Panel).WindowWidth);
-        Assert.Equal(Basic, ((UiPanelHandle)basic.Panel).WindowWidth);
-        Assert.Equal(0f, ((UiPanelHandle)plain).WindowWidth);
-        var net = _runtime.SpotFor("Net");
-        var gear = _runtime.SpotFor("Gear");
-        Assert.True(net.IsWindow);
-        Assert.Equal(new[] { Tabbed, Basic }, net.WindowWidths);
-        Assert.Equal(0, net.Rank);
-        Assert.Equal(1, gear.Rank);
-        Assert.False(net.WorkspaceOpen);
-        var p = _runtime.SpotFor("Plain");
-        Assert.False(p.IsWindow);
-        Assert.Equal(new PanelSpot(0, 1).Rank, p.Rank);
-        Assert.Equal(1, p.Count);
+        var f = _runtime.SpotFor("Float");
+        var g = _runtime.SpotFor("Gear");
+        Assert.True(f.IsWindow);
+        Assert.True(g.IsWindow);
+        Assert.Equal(new[] { Basic, Basic }, g.WindowWidths); // slot order: the panel was shown first
+        Assert.Equal(0, f.Rank);
+        Assert.Equal(1, g.Rank);
+        foreach (float w in new[] { 1920f, 2560f, 3840f })
+        {
+            var a = UiWindowLayout.Place(f, w, 1080f);
+            var b = UiWindowLayout.Place(g, w, 1080f);
+            Assert.True(Math.Abs(a.X - b.X) >= Basic + PanelFlow.ColumnGap - 0.01f, "the panel and the window overlap at " + w);
+        }
+
+        // With a Tabbed window too: three frames in one set, the row then the cascade, none sharing a place.
+        var tabbed = Make(UiWindowPreset.Tabbed, "Net");
+        tabbed.Show();
+        var spots = new[] { "Float", "Gear", "Net" }.Select(_runtime.SpotFor).ToList();
+        Assert.All(spots, s => Assert.Equal(3, s.Count));
+        var places = spots.Select(s => UiWindowLayout.Place(s, 1920f, 1080f)).ToList();
+        Assert.Equal(3, places.Select(p => (Math.Round(p.X), Math.Round(p.Top))).Distinct().Count());
+
+        // A dialog, a self-placed panel and a top-pinned panel never join the row; without a window the flow is as before.
+        var self = UiApi.Panel("Self", _owner, "example.mod");
+        UiApi.SelfPlacePanel(self);
+        Assert.False(((UiPanelHandle)self).Flows);
+        var top = UiApi.Panel("Top", _owner, "example.mod");
+        UiApi.TopPanel(top);
+        Assert.False(((UiPanelHandle)top).Flows);
+        var wide = UiApi.Panel("Wide", _owner, "example.mod").GameWindow(900f);
+        Assert.False(((UiPanelHandle)wide).Flows);
+        var alone = UiWindowLayout.Spots(new[] { "a", "b" }, _ => 0f, _ => false, _ => true);
+        Assert.All(alone, s => Assert.False(s.Spot.IsWindow));
+        Assert.Equal(new[] { 0, 1 }, alone.Select(s => s.Spot.Rank));
+        var mixed = UiWindowLayout.Spots(new[] { "pane", "dialog", "w", "plain" },
+            p => p == "w" ? Basic : 0f, p => p == "pane", p => p != "dialog");
+        Assert.True(mixed.Single(s => s.Panel == "plain").Spot.IsWindow);
+        Assert.False(mixed.Single(s => s.Panel == "dialog").Spot.IsWindow);
+        Assert.False(mixed.Single(s => s.Panel == "pane").Spot.IsWindow);
+        Assert.True(mixed.Single(s => s.Panel == "w").Spot.WorkspaceOpen);
+    }
+
+    [Fact]
+    public void A_re_flow_that_changes_the_cap_places_from_the_height_after_the_re_layout()
+    {
+        // Review: three tall windows, the third cascaded; close the first. The third's cap grows, the re-layout makes it
+        // taller, and the placement must use that height (it read the old one and ended half the growth too high).
+        var widths = new[] { Basic, Basic, Basic, Basic, Basic };
+        var deep = UiWindowLayout.Place(new PanelSpot(4, widths, false), 1920f, 1080f);
+        var row = UiWindowLayout.Place(new PanelSpot(1, new[] { Basic, Basic }, false), 1920f, 1080f);
+        Assert.True(row.MaxHeight > deep.MaxHeight);
+        float height = deep.MaxHeight;
+        int relayouts = 0;
+        var at = UiWindowLayout.RepositionInRow(row, deep.MaxHeight, () => height, () => { relayouts++; height = row.MaxHeight; }, out float cap);
+        Assert.Equal(1, relayouts);
+        Assert.Equal(row.MaxHeight, cap);
+        Assert.Equal(row.Top, at.Y + row.MaxHeight * 0.5f, 3); // hung from the row's top line at its new height
+        // An unchanged cap lays nothing out again.
+        UiWindowLayout.RepositionInRow(row, row.MaxHeight, () => height, () => relayouts++, out _);
+        Assert.Equal(1, relayouts);
+        Assert.Contains("UiWindowLayout.RepositionInRow(place, _windowCap, () => rt.sizeDelta.y, Relayout, out float cap)",
+            SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs"));
     }
 
     // ---- Escape, draw order, dim ------------------------------------------------------------------------------------
@@ -395,6 +442,13 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal(UiHandleState.Shown, behind.State);
         Press(); // no window left: the ordinary sweep
         Assert.NotEqual(UiHandleState.Shown, behind.State);
+
+        // A pending Mods search clear takes the press before a window closes (capture > dialog > search > close).
+        string ui = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "Ui.cs");
+        int search = ui.IndexOf("HasShownWindow(snapshot) && ModsMenu.TryConsumeEscapeHide()", StringComparison.Ordinal);
+        int close = ui.IndexOf("if (TryCloseTopWindow(snapshot))", StringComparison.Ordinal);
+        Assert.True(search > 0 && search < close);
+        Assert.Contains("return top.State != UiHandleState.Shown;", ui);
 
         var target = UiWindowLayout.EscapeTarget(new[] { "a", "w1", "w2" }, x => x.StartsWith("w", StringComparison.Ordinal), x => x == "w1" ? 9 : 3);
         Assert.Equal("w1", target);
@@ -463,6 +517,10 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal("25", chests.Text);
         Assert.Equal(UiTextStyle.Number, UiWindowLayout.InfoValueStyle("14 / 40"));
         Assert.Equal(UiTextStyle.Body, UiWindowLayout.InfoValueStyle("Online"));
+        foreach (string figure in new[] { "24", "3,212", "14 / 40", "12:04", "-5", "48%", "x3", "1.5" })
+            Assert.True(UiWindowLayout.LooksNumeric(figure), figure);
+        foreach (string words in new[] { "Level 3", "4 min", "Chest 7", "", "-", "v2" })
+            Assert.False(UiWindowLayout.LooksNumeric(words), words);
         Assert.Equal("Online", state.Text);
         // The runtime places a side cell row at its fixed band and lays its cells out in the column's width.
         string windows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
@@ -585,6 +643,29 @@ public sealed class WindowPresetTests : IDisposable
         lease.Dispose();
         w.Rename("Third");
         Assert.Single(heard);
+    }
+
+    [Fact]
+    public void A_windows_rename_prompt_goes_with_its_plugin()
+    {
+        var owned = Make(UiWindowPreset.Header, "Owned", new UiWindowOptions { Renamable = true });
+        var handle = (UiWindowHandle)owned;
+        Assert.True(handle.BelongsTo(_owner));
+        Assert.False(handle.BelongsTo(new object()));
+        handle.AskRename();
+        Assert.Equal(1, UiDialog.DropOwner(_owner));
+
+        // Ownerless: the prompt is the window's; the plugin is known by the assembly of its OnRename handler, matched only
+        // inside that plugin's unload sweep (a collectible plugin context; this test assembly is not one).
+        var bare = (UiWindowHandle)UiApi.Window(UiWindowPreset.Header, "Bare", options: new UiWindowOptions { Renamable = true });
+        // A handler declared outside Core (this test project compiles Core's sources, so a lambda here reads as Core's).
+        bare.OnRename(new Action<string>(Console.WriteLine));
+        Assert.Equal(new[] { typeof(Console).Assembly.FullName }, bare.HandlerSources);
+        Assert.False(bare.BelongsTo(_owner));
+        Assert.True(UiDialog.OwnedBy(bare, new object()) == false);
+        Assert.Contains("dialogOwner is UiWindowHandle window && window.BelongsTo(owner)", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UiDialog.cs"));
+        // A mode change on a shown window lays the set out again, so the workspace dim follows it.
+        Assert.Contains("if (WindowWidth > 0f && previous != value) Ui.ReflowAfterModeChange();", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UiHandles.cs"));
     }
 
     [Fact]

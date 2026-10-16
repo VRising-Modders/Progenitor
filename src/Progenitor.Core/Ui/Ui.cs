@@ -136,6 +136,7 @@ public static partial class Ui
     /// <summary>Keep a transient panel centered at the top of the screen, inside a 24-unit margin.</summary>
     public static void TopPanel(IUiPanel panel, bool top = true)
     {
+        if (panel is UiPanelHandle tagged) tagged.Flows = !top;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         CurrentRuntime().TopPanel(runtimePanel, top);
@@ -143,6 +144,7 @@ public static partial class Ui
 
     internal static void SelfPlacePanel(IUiPanel panel, bool selfPlaced = true)
     {
+        if (panel is UiPanelHandle tagged) tagged.Flows = !selfPlaced;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().SelfPlacePanel(runtimePanel, selfPlaced); }
@@ -156,6 +158,7 @@ public static partial class Ui
     /// </summary>
     internal static void DialogChrome(IUiPanel panel)
     {
+        if (panel is UiPanelHandle tagged) tagged.Flows = false;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().DialogChrome(runtimePanel); }
@@ -165,6 +168,8 @@ public static partial class Ui
     /// <summary>WIDEDIALOG1: ask the runtime for a wider dialog frame (<see cref="DialogLayout.FrameWidthFor"/> caps it).</summary>
     internal static void SetDialogWidth(IUiPanel panel, float frameWidth)
     {
+        // A dialog-wide frame is centered by the runtime, never flowed.
+        if (panel is UiPanelHandle tagged && frameWidth > UnityUiRuntimeMetrics.PanelWidth) tagged.Flows = false;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().SetDialogWidth(runtimePanel, frameWidth); }
@@ -957,9 +962,6 @@ public static partial class Ui
     /// holding the lock across it would put the UI module's own lock underneath every layout pass.
     /// </para>
     /// </summary>
-    /// <summary>WINDOWS1: whether the runtime was last asked to dim the workspace behind the windows.</summary>
-    private static bool _windowShade;
-
     internal static void ReflowPanels()
     {
         try
@@ -995,7 +997,7 @@ public static partial class Ui
             if (shown.Count == 0) return;
             shown.Sort(static (a, b) => a.PlacementSlot.CompareTo(b.PlacementSlot));
 
-            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel))
+            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel, p => p.Flows))
                 panel.PlaceAt(spot);
         }
         catch (Exception e)
@@ -1005,6 +1007,12 @@ public static partial class Ui
             Plugin.Logger?.LogWarning("Ui: panel re-flow threw: " + e.Message);
         }
     }
+
+    /// <summary>WINDOWS1: whether the runtime was last asked to dim the workspace behind the windows.</summary>
+    private static bool _windowShade;
+
+    /// <summary>WINDOWS1 review: a shown window's input mode changed; the dim (and nothing else) may change with it.</summary>
+    internal static void ReflowAfterModeChange() => ReflowPanels();
 
     internal static void NotifyShown(int delta)
     {
@@ -1239,6 +1247,15 @@ public static partial class Ui
             // WINDOWS1 live fix: one press closes one standard window, the topmost (shown last); the next press goes on to
             // the next window and only then to the sweep below (the Mods workspace). The sweep hid every window and the
             // workspace on one press.
+            // HOSTS1 order (capture > dialog > search > close): a pending Mods search clear (or leave) takes this press
+            // before a window closes; one Escape does exactly one thing.
+            if (HasShownWindow(snapshot) && ModsMenu.TryConsumeEscapeHide())
+            {
+                _swallowBack = keyCode == 27;
+                Plugin.Logger?.LogDiag("Ui: key " + keyCode + " cleared the Mods search; the windows stay.");
+                return;
+            }
+
             if (TryCloseTopWindow(snapshot))
             {
                 _swallowBack = keyCode == 27;
@@ -1279,13 +1296,24 @@ public static partial class Ui
         }
     }
 
-    /// <summary>WINDOWS1: hide the topmost shown standard window (<see cref="UiWindowLayout.EscapeTarget"/>); false when none is shown.</summary>
-    private static bool TryCloseTopWindow(UiHandle[] snapshot)
+    private static List<UiPanelHandle> ShownWindows(UiHandle[] snapshot)
     {
         var shown = new List<UiPanelHandle>();
         foreach (var h in snapshot)
-            if (h is UiPanelHandle p && !p.IsDisposed && p.State == UiHandleState.Shown) shown.Add(p);
-        var top = UiWindowLayout.EscapeTarget(shown, p => p.WindowWidth > 0f && !ModsMenu.IsWorkspacePanel(p), p => p.ShownSequence);
+            if (h is UiPanelHandle p && !p.IsDisposed && p.State == UiHandleState.Shown && p.WindowWidth > 0f && !ModsMenu.IsWorkspacePanel(p))
+                shown.Add(p);
+        return shown;
+    }
+
+    private static bool HasShownWindow(UiHandle[] snapshot) => ShownWindows(snapshot).Count > 0;
+
+    /// <summary>
+    /// WINDOWS1: hide the topmost shown standard window (<see cref="UiWindowLayout.EscapeTarget"/>). False when none is
+    /// shown, or when the window is still shown after the hide (the press then falls through to the sweep).
+    /// </summary>
+    private static bool TryCloseTopWindow(UiHandle[] snapshot)
+    {
+        var top = UiWindowLayout.EscapeTarget(ShownWindows(snapshot), _ => true, p => p.ShownSequence);
         if (top == null) return false;
         try { top.ForceHide(); }
         catch (Exception e)
@@ -1294,7 +1322,7 @@ public static partial class Ui
             return false;
         }
 
-        return true;
+        return top.State != UiHandleState.Shown;
     }
 
     private static readonly List<Func<bool>> EscapeHandlers = new();

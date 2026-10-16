@@ -89,6 +89,15 @@ internal sealed class UiWindowHandle : IUiWindow
     internal const string TabsKey = "window-tabs";
 
     private readonly object _owner;
+
+    /// <summary>The owner the window was made with; null for an ownerless <see cref="Ui.Window"/>.</summary>
+    private readonly object? _ownerGiven;
+
+    /// <summary>
+    /// The assembly names (strings, never assemblies) of the plugins whose <see cref="OnRename"/> handlers this window
+    /// holds, so an ownerless window's Rename prompt is still dropped by that plugin's unload sweep (<see cref="BelongsTo"/>).
+    /// </summary>
+    private readonly List<string> _handlerSources = new();
     private readonly string _pluginId;
     private readonly string _stampFooter;
     private readonly IUiPanel _panel;
@@ -115,6 +124,7 @@ internal sealed class UiWindowHandle : IUiWindow
         if (refused != null) throw new ArgumentException(refused, nameof(options));
 
         Preset = preset;
+        _ownerGiven = owner;
         _owner = owner ?? this;
         _panel = Ui.Panel(title.Trim(), owner, pluginId);
         _pluginId = _panel.PluginId;
@@ -212,6 +222,8 @@ internal sealed class UiWindowHandle : IUiWindow
     {
         if (handler == null) throw new ArgumentNullException(nameof(handler));
         _renamed.Add(handler);
+        string? source = PluginDelegateSource.Name(handler);
+        if (source != null && !_handlerSources.Contains(source)) _handlerSources.Add(source);
         return new ActionDisposable(() => _renamed.Remove(handler));
     }
 
@@ -242,6 +254,25 @@ internal sealed class UiWindowHandle : IUiWindow
         if (IsOpen) Hide();
         else Show();
     }
+
+    /// <summary>
+    /// Whether this window (the owner of its Rename prompt) belongs to <paramref name="owner"/>, which is unloading: the
+    /// owner it was made with, or for an ownerless window a plugin whose OnRename handler it holds, matched by assembly
+    /// inside that plugin's unload sweep only (<see cref="PluginDelegateSource"/>, as PINS1 matches unowned watches).
+    /// <see cref="UiDialog.DropOwner"/> asks this for a dialog a window owns.
+    /// </summary>
+    internal bool BelongsTo(object? owner)
+    {
+        if (owner == null) return false;
+        if (_ownerGiven != null) return ReferenceEquals(_ownerGiven, owner);
+        string? name = PluginDelegateSource.OwnerName(owner);
+        foreach (var source in _handlerSources)
+            if (PluginDelegateSource.Matches(source, name)) return true;
+        return false;
+    }
+
+    /// <summary>The plugins whose handlers this window holds (readback for tests).</summary>
+    internal IReadOnlyList<string> HandlerSources => _handlerSources;
 
     /// <summary>The Rename button's click (tests press it here).</summary>
     internal void AskRename()

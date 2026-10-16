@@ -129,20 +129,26 @@ internal sealed partial class UnityUiRuntime
         }
 
         /// <summary>
-        /// Where a standard window <paramref name="frameHeight"/> tall goes: hung from its row's top line. On a re-flow
-        /// (<paramref name="relayoutWhenCapChanges"/>) a changed height cap lays the window out again, which sizes and
-        /// places it in one pass.
+        /// WINDOWS1: placed by the window row (<see cref="UiWindowLayout.Place"/>): a standard window, or (review) a
+        /// floating panel that shares the screen with one. Dialogs, self-placed and top-pinned panels never are.
         /// </summary>
-        private PanelOffset WindowOffset(float frameHeight, float canvasHeight, bool relayoutWhenCapChanges)
+        private bool InWindowRow => Spot.IsWindow && !_menuPane && !_dialog && !SelfPlaced && !TopAligned;
+
+        /// <summary>Where a row panel <paramref name="frameHeight"/> tall goes in the layout pass: hung from its row's top line.</summary>
+        private PanelOffset WindowOffset(float frameHeight, float canvasHeight)
         {
             var place = WindowPlace(canvasHeight);
-            if (relayoutWhenCapChanges && Math.Abs(place.MaxHeight - _windowCap) > 0.5f && _windowCap >= 0f)
-            {
-                _windowCap = place.MaxHeight;
-                Relayout();
-            }
-            else _windowCap = place.MaxHeight;
+            _windowCap = place.MaxHeight;
             return place.CenterFor(Math.Min(frameHeight, place.MaxHeight));
+        }
+
+        /// <summary>The re-flow's placement: a changed cap lays the panel out again, then the height is read afresh.</summary>
+        private PanelOffset RepositionInRow(RectTransform rt, float canvasHeight)
+        {
+            var place = WindowPlace(canvasHeight);
+            var at = UiWindowLayout.RepositionInRow(place, _windowCap, () => rt.sizeDelta.y, Relayout, out float cap);
+            _windowCap = cap;
+            return at;
         }
 
         /// <summary>The frame width a standard window is drawn at on this canvas; 0 when this is not one.</summary>

@@ -13845,10 +13845,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var geometry = _menuPane
                     ? _menuGeometry
                     : MenuPanelLayout.ForCanvas(AvailableWidth(), AvailableHeight(), _sidebar, _mode);
-                // WINDOWS1: a standard window hangs from its row's top line (UiWindowLayout.Place); a window whose cap
-                // changed with the set (a cascade layer) is laid out again so its height follows.
+                // WINDOWS1: a panel in the window row hangs from its top line (UiWindowLayout.Place); one whose cap
+                // changed with the set (a cascade layer) is laid out again first, and placed from the height that
+                // re-layout gave it, never the stale one (UiWindowLayout.RepositionInRow).
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
-                    : IsStandardWindow ? WindowOffset(rt.sizeDelta.y, AvailableHeight(), relayoutWhenCapChanges: true)
+                    : InWindowRow ? RepositionInRow(rt, AvailableHeight())
                     : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
                 // A wide game window that asked for a dialog's width is centered too (a standard window is placed above).
@@ -13996,7 +13997,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     panelHeight = Math.Min(panelHeight, available.Value * .70f);
                 // WINDOWS1: a standard window is never taller than its place leaves room for (under the workspace's tab
                 // strip, a cascade layer's offset), so its bottom stays on screen.
-                if (IsStandardWindow && !SelfPlaced) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
+                if (InWindowRow) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
 
                 _laidOutWith = available;
                 var settle = RulerSettle.StateOf(available, _settling, _settleExhausted);
@@ -14087,7 +14088,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // depth >= 1 cross PanelFlow's capacity threshold and jump a whole title band
                     // onto the panel above it. The vertical ladder is a property of the canvas now.
                     placedAt = _menuPane ? new PanelOffset(_menuGeometry.X, _menuGeometry.Y)
-                        : IsStandardWindow ? WindowOffset(panelHeight, available.Value, relayoutWhenCapChanges: false)
+                        : InWindowRow ? WindowOffset(panelHeight, available.Value)
                         : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), available.Value);
                     // INSTALLUX2: a dialog is centered, never ranked. PanelFlow would give it a
                     // column beside the workspace's panes the moment they joined the shown set,

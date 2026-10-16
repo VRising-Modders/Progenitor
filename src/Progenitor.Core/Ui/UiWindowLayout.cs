@@ -202,11 +202,28 @@ internal static class UiWindowLayout
     /// The style an info-column fact's value is drawn in: <see cref="UiTextStyle.Number"/> when it holds a figure (so the
     /// figures line up), else <see cref="UiTextStyle.Body"/>.
     /// </summary>
-    internal static UiTextStyle InfoValueStyle(string? value)
+    internal static UiTextStyle InfoValueStyle(string? value) => LooksNumeric(value) ? UiTextStyle.Number : UiTextStyle.Body;
+
+    /// <summary>
+    /// A value that reads as figures: at least one digit, and otherwise only separators, signs and a unit sign
+    /// (<c>3,212</c>, <c>14 / 40</c>, <c>12:04</c>, <c>-5</c>, <c>48%</c>, <c>x3</c>). Words with a figure in them
+    /// (<c>Level 3</c>, <c>4 min</c>) are text.
+    /// </summary>
+    internal static bool LooksNumeric(string? value)
     {
-        foreach (char c in value ?? "")
-            if (c >= '0' && c <= '9') return UiTextStyle.Number;
-        return UiTextStyle.Body;
+        string v = (value ?? "").Trim();
+        bool digit = false;
+        for (int i = 0; i < v.Length; i++)
+        {
+            char c = v[i];
+            if (c >= '0' && c <= '9') { digit = true; continue; }
+            if (" ,./:+-%\u2212\u00D7".IndexOf(c) >= 0) continue;
+            // A multiplier sign before or after the figures (x3, 3x), never a word.
+            if ((c == 'x' || c == 'X') && (i == 0 || i == v.Length - 1)) continue;
+            return false;
+        }
+
+        return digit;
     }
 
     /// <summary>The title's center line from the frame top (the title band's title rect is 18..58).</summary>
@@ -459,29 +476,46 @@ internal static class UiWindowLayout
         spec.ControllerHandoff && navigating ? UiCaptureMode.WhileShown : spec.CaptureMode;
 
     /// <summary>
-    /// The spots of the shown panels (in slot order). The standard windows (<paramref name="windowWidth"/> above 0) are
-    /// ranked among themselves and each carries every window's asked-for width, so <see cref="Place"/> can lay them out
-    /// side by side; the spots also say whether the Mods workspace is on screen. Every other panel keeps the ordinary rank
-    /// among the panels that are not standard windows (workspace panes draw from their own geometry).
+    /// The spots of the shown panels (in slot order). While a standard window (<paramref name="windowWidth"/> above 0) is
+    /// shown, the windows and every ordinary floating panel that flows (<paramref name="flows"/>: not a dialog, not
+    /// self-placed, not pinned to the top, not a wide centered game window) are ranked in <b>one</b> set, in slot order, a
+    /// floating panel counting as an ordinary 640 frame, so <see cref="Place"/> lays them out side by side and none covers
+    /// another (the review's case: the Gallery's floating panel and a Basic window both centered at x 0). The spots also
+    /// say whether the Mods workspace is on screen. With no standard window shown, every panel keeps the ordinary rank of
+    /// the panel flow, exactly as before the presets existed. Workspace panes, dialogs and self-placed panels never join
+    /// the row (they draw from their own geometry or stay centered).
     /// </summary>
     internal static List<(T Panel, PanelSpot Spot)> Spots<T>(
-        IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace)
+        IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace, Func<T, bool>? flows = null)
     {
         var result = new List<(T, PanelSpot)>(shown.Count);
-        var windows = new List<int>();
-        var others = new List<int>();
         bool workspaceOpen = false;
+        bool anyWindow = false;
         for (int i = 0; i < shown.Count; i++)
         {
             bool pane = workspace(shown[i]);
             if (pane) workspaceOpen = true;
-            if (!pane && windowWidth(shown[i]) > 0f) windows.Add(i);
+            else if (windowWidth(shown[i]) > 0f) anyWindow = true;
+        }
+
+        var row = new List<int>();
+        var others = new List<int>();
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var p = shown[i];
+            bool inRow = !workspace(p) && (windowWidth(p) > 0f || (anyWindow && (flows?.Invoke(p) ?? false)));
+            if (inRow) row.Add(i);
             else others.Add(i);
         }
 
-        var widths = new float[windows.Count];
-        for (int w = 0; w < windows.Count; w++) widths[w] = windowWidth(shown[windows[w]]);
-        for (int w = 0; w < windows.Count; w++) result.Add((shown[windows[w]], new PanelSpot(w, widths, workspaceOpen)));
+        var widths = new float[row.Count];
+        for (int w = 0; w < row.Count; w++)
+        {
+            float asked = windowWidth(shown[row[w]]);
+            widths[w] = asked > 0f ? asked : BasicFrameWidth;
+        }
+
+        for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen)));
         for (int o = 0; o < others.Count; o++) result.Add((shown[others[o]], new PanelSpot(o, others.Count)));
         return result;
     }
@@ -575,6 +609,21 @@ internal static class UiWindowLayout
         float cx = Math.Max(left, Math.Min(right, rowX[slot] + depth * step));
         float t = rowTop - depth * step;
         return new WindowPlacement(cx, t, Math.Max(PanelLayout.MinPanelHeight, Math.Min(cap, t - bottom)), depth);
+    }
+
+    /// <summary>
+    /// The re-flow's placement of a panel in the window row. When the set changed its height cap (<paramref name="place"/>
+    /// against <paramref name="lastCap"/>, a negative one meaning never laid out), <paramref name="relayout"/> lays it out
+    /// again first (sizing it to the new cap), and the frame's height is read <i>after</i> that, so the panel hangs from
+    /// its top line at the height it now has. Reading the height before the re-layout left a frame whose cap grew
+    /// (the windows in front of it closed) half the growth too high, over the workspace's tab strip.
+    /// </summary>
+    internal static PanelOffset RepositionInRow(
+        WindowPlacement place, float lastCap, Func<float> frameHeight, Action relayout, out float cap)
+    {
+        cap = place.MaxHeight;
+        if (lastCap >= 0f && Math.Abs(place.MaxHeight - lastCap) > 0.5f) relayout();
+        return place.CenterFor(Math.Min(frameHeight(), place.MaxHeight));
     }
 
     /// <summary>
