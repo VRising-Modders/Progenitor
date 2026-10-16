@@ -120,7 +120,7 @@ A mod that ships an HTML help file gets a **Help** button in the page's actions 
 
 **What is opened.** Only a file under the mod's own folder or its cache folder: a path that would leave it, an absolute path, another drive and a remote URL are refused, and an embedded resource whose name would leave the cache folder is skipped. The URI is built from the full path with every segment percent-encoded, so spaces, `#`, `%` and non-ASCII folder names reach the browser intact. A file that cannot be opened is logged once per mod, and the page's last-action line says so.
 
-**Progenitor's own entry** opens `BepInEx/progenitor-core/docs/guide/progenitor-guide.html` (else `BepInEx/progenitor-core/help/index.html`) when the package ships it.
+**Progenitor's own entry** opens `BepInEx/progenitor-core/docs/guide/progenitor-guide.html` (else `BepInEx/progenitor-core/help/index.html`) when the package ships it. The same guide is the Mods tab overview's **Help guide** tile, drawn only while it is installed ([mods-menu.md](mods-menu.md)).
 
 **Readback.** `page-help {kind: "button", caption: "Help", tooltip, cell: "help", shown, source: folder|embedded|declared|guide|none, file}` on the actions bar (`page-framework`); `file` is the path under the mod's folder or the cache folder. A bridge test presses it with `{"action":"widget_click","label":"page-framework/help"}`, which opens the browser (a user-visible focus change).
 

@@ -8,6 +8,7 @@ using Progenitor.Config;
 using Progenitor.Dev.Ops;
 using Progenitor.Install;
 using Progenitor.Networking;
+using Progenitor.Plugins;
 using Progenitor.Ui;
 using Progenitor.WorldState;
 using Xunit;
@@ -1011,6 +1012,83 @@ public sealed class ThreeHomesMenuTests : IDisposable
         Assert.NotNull(ModsMenu.ClickVisibleWidget("content", ModsLanding.PreferencesCaption, null, null));
         ModsMenu.TickNavigation();
         Assert.Equal(ModsTab.Preferences, ModsMenu.SelectedTabForTests);
+    }
+
+    /// <summary>
+    /// The overview's Help guide tile is drawn only while Progenitor's guide is installed, reads back its target and file,
+    /// and opens the guide's <c>file://</c> URI when pressed.
+    /// What this would catch: a Help guide tile that opens nothing, or one drawn on a package without the guide.
+    /// </summary>
+    [Fact]
+    public void The_landing_page_offers_the_help_guide_only_when_it_is_installed()
+    {
+        string bep = Path.Combine(Path.GetTempPath(), "progenitor-landing-help-" + Guid.NewGuid().ToString("N"), "BepInEx");
+        Directory.CreateDirectory(bep);
+        var opened = new List<string>();
+        try
+        {
+            ModsMenu.HelpBepInExRootProbe = () => bep;
+            ModsMenu.HelpOpener = opened.Add;
+            ModsMenu.Open();
+            string content = System.Text.Json.JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+            Assert.DoesNotContain("\"" + ModsLanding.RowHelp + "\"", content, StringComparison.Ordinal);
+            Assert.DoesNotContain(ModsLanding.HelpGuideCaption, content, StringComparison.Ordinal);
+            ModsMenu.Close();
+
+            string guide = Path.Combine(bep, "progenitor-core", "docs", "guide", "progenitor-guide.html");
+            Directory.CreateDirectory(Path.GetDirectoryName(guide)!);
+            File.WriteAllText(guide, "<html>guide</html>");
+            ModsMenu.Open();
+            content = System.Text.Json.JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content"));
+            foreach (string key in new[] { ModsLanding.RowHelp, ModsLanding.RowHelpNotes })
+                Assert.Contains("\"" + key + "\"", content, StringComparison.Ordinal);
+            Assert.Contains(ModsLanding.HelpGuideNote, content, StringComparison.Ordinal);
+            Assert.Contains("\"target\":\"" + ModsLanding.TargetHelpGuide + "\"", content, StringComparison.Ordinal);
+            Assert.Contains("\"file\":\"docs/guide/progenitor-guide.html\"", content, StringComparison.Ordinal);
+            // The footer still closes the page, after the third line.
+            Assert.True(content.IndexOf("\"" + ModsLanding.RowHelpNotes + "\"", StringComparison.Ordinal)
+                < content.IndexOf("\"" + ModsLanding.RowFooter + "\"", StringComparison.Ordinal));
+
+            Assert.Empty(opened);
+            Assert.NotNull(ModsMenu.ClickVisibleWidget("content", ModsLanding.HelpGuideCaption, null, null));
+            Assert.Equal(new[] { ModHelp.FileUri(guide) }, opened.ToArray());
+        }
+        finally
+        {
+            ModsMenu.HelpBepInExRootProbe = null;
+            ModsMenu.HelpOpener = null;
+            try { Directory.Delete(Path.GetDirectoryName(bep)!, recursive: true); }
+            catch { /* temp */ }
+        }
+    }
+
+    /// <summary>
+    /// The Help guide line is a 2×3 grid's last line: its one tile spans exactly the left tile of the pair line above (same
+    /// left, same width), the empty right slot draws nothing, and the head and note rows' spans match.
+    /// What this would catch: a lone tile stretched across the whole row, or one narrower than the tiles above it.
+    /// </summary>
+    [Theory]
+    [InlineData(700f)]
+    [InlineData(1100f)]
+    public void The_help_guide_tile_lines_up_with_the_left_tile_above_it(float width)
+    {
+        var (pairHead, pairNote) = ModsLanding.BottomRow();
+        var (head, note) = ModsLanding.HelpRow();
+        var pair = CellTiles.Spans(CellLayout.Resolve(width, pairHead.Cells, pairHead.RightInset), pairHead.Cells);
+        var single = CellTiles.Spans(CellLayout.Resolve(width, head.Cells, head.RightInset), head.Cells);
+        var singleNote = CellTiles.Spans(CellLayout.Resolve(width, note.Cells, note.RightInset), note.Cells);
+        Assert.Equal(2, pair.Count);
+        var tile = Assert.Single(single);
+        Assert.Equal(5, tile.Tile);
+        Assert.Equal(pair[0].Left, tile.Left, 1);
+        Assert.Equal(pair[0].Width, tile.Width, 1);
+        var noteTile = Assert.Single(singleNote);
+        Assert.Equal(tile.Left, noteTile.Left, 1);
+        Assert.Equal(tile.Width, noteTile.Width, 1);
+        Assert.Equal(CellSectionEdge.First, head.TileEdge);
+        Assert.Equal(CellSectionEdge.Last, note.TileEdge);
+        Assert.Equal(pairHead.Height, head.Height);
+        Assert.Equal(pairNote.Height, note.Height);
     }
 
     [Theory]

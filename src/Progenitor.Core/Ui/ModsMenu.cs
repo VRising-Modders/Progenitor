@@ -638,6 +638,25 @@ public static partial class ModsMenu
         _landingNotesRow = notes;
         Landing(notes, ModsLanding.RowLastBundle, (Func<object?>)(() => LandingCollectNote()));
         StartLandingRefresh(notes);
+        // The Help guide tile: a third line, left slot, only while the Progenitor guide is installed.
+        var guide = ProgenitorGuideTarget();
+        if (guide.Found)
+        {
+            var (helpSpec, helpNotesSpec) = ModsLanding.HelpRow();
+            var help = panel.CellRow(helpSpec);
+            Landing(help, ModsLanding.RowHelp, new Dictionary<string, object?>
+            {
+                ["tiles"] = new List<object?>
+                {
+                    ModsLanding.TileReadback(ModsLanding.CellHelpGuide, ModsLanding.HelpGuideCaption, ModsLanding.TargetHelpGuide),
+                },
+                ["file"] = guide.Relative,
+            });
+            Landing(panel.CellRow(helpNotesSpec), ModsLanding.RowHelpNotes, null);
+            // Resolved again on the press: the guide may have been removed since the page was drawn.
+            help.OnClick(ModsLanding.CellHelpGuide, () => OpenHelpTarget(SettingsPanel.PluginId, ProgenitorGuideTarget()));
+        }
+
         Landing(panel.CellRow(ModsLanding.FooterRow()), ModsLanding.RowFooter, null);
     }
 
@@ -6588,10 +6607,12 @@ public static partial class ModsMenu
     /// embedded, and opened in the browser as a <c>file://</c> URI. Only the button calls this. A failure is logged once
     /// per mod and the page says so.
     /// </summary>
-    private static void OnModsHelpClick(string pluginId)
+    /// <summary>
+    /// Extract (when embedded) and open one help target in the browser as a <c>file://</c> URI. False, logged once per
+    /// <paramref name="pluginId"/>, when it could not be opened. Only a user's button press calls this.
+    /// </summary>
+    private static bool OpenHelpTarget(string pluginId, ModHelpTarget target)
     {
-        var row = CurrentSidebarModel(applySearch: false).Find(pluginId);
-        var target = HelpTargetOf(pluginId, row);
         string error = "";
         string? file = target.Found ? ModHelp.Materialize(target, out error) : null;
         string? uri = file == null ? null : ModHelp.FileUri(file);
@@ -6605,7 +6626,7 @@ public static partial class ModsMenu
                 else Application.OpenURL(uri);
 #endif
                 LastHelpUri = uri;
-                return;
+                return true;
             }
             catch (Exception e) { error = e.Message; }
         }
@@ -6613,6 +6634,32 @@ public static partial class ModsMenu
 
         if (HelpFailureLogged.Add(pluginId))
             Plugin.Logger?.LogWarning("Mods: could not open the help of " + pluginId + ": " + error);
+        return false;
+    }
+
+    /// <summary>
+    /// The Progenitor guide only (<see cref="ModHelp.ProgenitorGuidePath"/>, else <c>help/index.html</c>, under
+    /// <c>BepInEx/progenitor-core</c>), for the overview's Help guide tile; <see cref="ModHelpTarget.None"/> when the
+    /// package does not ship it.
+    /// </summary>
+    internal static ModHelpTarget ProgenitorGuideTarget()
+    {
+        try
+        {
+            string bep = HelpBepInExRoot();
+            if (bep.Length == 0) return ModHelpTarget.None;
+            string core = Path.Combine(bep, Progenitor.Compat.CompatRewriteHost.CoreFolderName);
+            var target = ModHelp.Resolve(SettingsPanel.PluginId, null, null, null, null,
+                new List<(string, string)> { (core, ModHelp.ProgenitorGuidePath), (core, ModHelp.IndexPath) });
+            return target.Source == ModHelpSource.Guide ? target : ModHelpTarget.None;
+        }
+        catch { return ModHelpTarget.None; }
+    }
+
+    private static void OnModsHelpClick(string pluginId)
+    {
+        var row = CurrentSidebarModel(applySearch: false).Find(pluginId);
+        if (OpenHelpTarget(pluginId, HelpTargetOf(pluginId, row))) return;
         _modsActionPlugin = pluginId;
         _modsActionNote = ModPageCopy.HelpOpenFailed;
         if (IsOpen) OpenMod(pluginId, ReasonUserButton);
