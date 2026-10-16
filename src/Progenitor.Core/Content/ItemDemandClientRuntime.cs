@@ -132,7 +132,7 @@ internal sealed class ItemDemandClientRuntime : IDisposable
     private static int ScanBag(EntityManager em, Entity bag, GameDataSystem data,
         PrefabCollectionSystem prefabs, List<int> missing)
     {
-        var rows = em.GetBuffer<InventoryBuffer>(bag);
+        var rows = em.GetBuffer<InventoryBuffer>(bag, true);
         if (rows.Length < 1 || rows.Length > 1024) return 0;
         int pending = 0;
         var seen = new HashSet<int>(missing);

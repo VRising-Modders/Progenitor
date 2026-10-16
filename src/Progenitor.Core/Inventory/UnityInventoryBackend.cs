@@ -60,7 +60,7 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
         try
         {
             if (!TryInventoryEntity(em, container.Owner, container.Instance, out var inv, out reason)) return false;
-            var buffer = em.GetBuffer<InventoryBuffer>(inv);
+            var buffer = em.GetBuffer<InventoryBuffer>(inv, true);
             for (int i = 0; i < buffer.Length; i++)
             {
                 var row = buffer[i];
@@ -245,7 +245,7 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
             // Exclude worn entities that are also rows of the target inventory.
             if (TryInventoryEntity(em, container.Owner, container.Instance, out var inv, out _))
             {
-                var buffer = em.GetBuffer<InventoryBuffer>(inv);
+                var buffer = em.GetBuffer<InventoryBuffer>(inv, true);
                 for (int i = 0; i < buffer.Length && _worn.Count > 0; i++)
                 {
                     var row = buffer[i];
@@ -297,7 +297,7 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
         try
         {
             if (!TryInventoryEntity(em, container.Owner, container.Instance, out var inv, out _)) return false;
-            var buffer = em.GetBuffer<InventoryBuffer>(inv);
+            var buffer = em.GetBuffer<InventoryBuffer>(inv, true);
             _fingerprintScratch.Clear();
             for (int i = 0; i < buffer.Length; i++)
             {
@@ -356,7 +356,7 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
     {
         try
         {
-            return TryInventoryEntity(em, owner, instance, out var inv, out _) ? em.GetBuffer<InventoryBuffer>(inv).Length : 0;
+            return TryInventoryEntity(em, owner, instance, out var inv, out _) ? em.GetBuffer<InventoryBuffer>(inv, true).Length : 0;
         }
         catch
         {

@@ -143,7 +143,7 @@ internal static unsafe class AbilitySlots
         instance = Entity.Null;
         Dying.RemoveWhere(e => !em.Exists(e));
         if (!em.HasComponent(character, ComponentIndex.Of<BuffBuffer>(ComponentType.AccessMode.ReadOnly))) return false;
-        var buffer = em.GetBuffer<BuffBuffer>(character);
+        var buffer = em.GetBuffer<BuffBuffer>(character, true);
         for (int i = 0; i < buffer.Length; i++)
         {
             if (buffer[i].PrefabGuid._Value != clone.GuidHash) continue;

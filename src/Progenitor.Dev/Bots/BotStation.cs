@@ -89,7 +89,7 @@ internal static class BotStation
         int slots = 0;
         if (em.HasComponent(inv, ComponentIndex.Of<InventoryBuffer>(ComponentType.AccessMode.ReadOnly)))
         {
-            var buffer = em.GetBuffer<InventoryBuffer>(inv);
+            var buffer = em.GetBuffer<InventoryBuffer>(inv, true);
             slots = buffer.Length;
             var totals = new Dictionary<int, int>();
             for (int i = 0; i < buffer.Length; i++)

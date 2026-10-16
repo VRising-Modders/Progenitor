@@ -39,7 +39,7 @@ internal static class BotInventory
         int slots = 0, used = 0;
         foreach (var bag in Bags(em, character))
         {
-            var buffer = em.GetBuffer<InventoryBuffer>(bag);
+            var buffer = em.GetBuffer<InventoryBuffer>(bag, true);
             for (int i = 0; i < buffer.Length; i++)
             {
                 slots++;
@@ -190,7 +190,7 @@ internal static class BotInventory
         int index = slot;
         foreach (var bag in Bags(em, character))
         {
-            var buffer = em.GetBuffer<InventoryBuffer>(bag);
+            var buffer = em.GetBuffer<InventoryBuffer>(bag, true);
             if (index < buffer.Length) return buffer[index].ItemType.GuidHash != 0 && buffer[index].Amount > 0;
             index -= buffer.Length;
         }

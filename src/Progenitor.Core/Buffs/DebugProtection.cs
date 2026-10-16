@@ -360,7 +360,7 @@ public static class DebugProtection
         {
             var type = ComponentIndex.Of<BuffBuffer>(ComponentType.AccessMode.ReadOnly);
             if (!em.HasComponent(character, type)) return false;
-            var buffer = em.GetBuffer<BuffBuffer>(character);
+            var buffer = em.GetBuffer<BuffBuffer>(character, true);
             int hash = guid._Value;
             for (int i = 0; i < buffer.Length; i++)
             {
