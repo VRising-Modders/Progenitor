@@ -55,12 +55,20 @@ public sealed class PluginMenu
     /// folder, or embedded). <paramref name="path"/> is relative to the mod's own folder, forward slashes, or the name of an
     /// embedded resource; the mod's page then shows a <b>Help</b> button that opens it in the player's browser. Wins over
     /// <see cref="ModHelpAttribute"/>; the conventional files win over both. Tracked: unload clears it.
-    /// Throws <see cref="ArgumentException"/> for an absolute path, a URL or a path that leaves the folder.
+    /// Throws <see cref="ArgumentException"/> for an absolute path, a URL or a path that leaves the folder. A path that is
+    /// not an <c>.html</c> or <c>.htm</c> page is refused with a log line: nothing is declared and the returned handle
+    /// does nothing.
     /// </summary>
     public IDisposable Help(string path)
     {
         if (ModHelp.SafeRelative(path) == null)
             throw new ArgumentException("A help path is relative to the mod's own folder, with no '..', drive or URL: " + path, nameof(path));
+        if (!ModHelp.IsHtml(path))
+        {
+            _ctx.Log.LogWarning("Ui: ctx.Menu.Help('" + path.Trim() + "') refused: the help file must be an .html or .htm page.");
+            return new ActionDisposable(() => { });
+        }
+
         var lease = ModHelpStore.Declare(_ctx.Guid, path.Trim());
         _ctx.Track(lease);
         return lease;

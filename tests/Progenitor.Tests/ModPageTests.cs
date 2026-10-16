@@ -866,7 +866,7 @@ public sealed class ModPageTests : IDisposable
     }
 
     /// <summary>
-    /// An embedded help page is extracted to <c>BepInEx/cache/progenitor-help/&lt;guid&gt;/&lt;version&gt;/</c> when the button
+    /// An embedded help page is extracted to <c>BepInEx/progenitor-cache/help/&lt;guid&gt;-&lt;hash&gt;/&lt;version&gt;/</c> when the button
     /// is pressed, not when the page is drawn; a failure to open is logged once and said on the page.
     /// What this would catch: writing to disk on every page build, or a silent failure.
     /// </summary>
@@ -887,7 +887,7 @@ public sealed class ModPageTests : IDisposable
         var help = Row(PageRows(), ModPagePane.RowHelp).GetProperty(ModPagePane.RowHelp);
         Assert.True(help.GetProperty("shown").GetBoolean());
         Assert.Equal("embedded", help.GetProperty("source").GetString());
-        string folder = Path.Combine(Bep, "cache", ModHelp.CacheFolderName, "example.cryptsnooze", "2.0.4");
+        string folder = ModHelp.CacheFolder(Path.Combine(Bep, "progenitor-cache"), "example.cryptsnooze", "2.0.4");
         Assert.False(Directory.Exists(folder));
 
         Assert.True(UiCellRowHandle.TryInvoke(ModPagePane.FrameworkKey + "/" + ModPagePane.CellHelp, out _));

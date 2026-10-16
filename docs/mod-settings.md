@@ -96,7 +96,7 @@ A mod that ships an HTML help file gets a **Help** button in the page's actions 
    BepInEx/plugins/Owner-MyMod/help/style.css
    ```
 
-   For a DLL one folder down in a mod-manager package (`Owner-MyMod/plugins/MyMod.dll`), the package folder's `help/index.html` counts too. `help/index.html` directly in a shared folder (`BepInEx/plugins` or `BepInEx/progenitor-reload` itself) belongs to no mod and is not used; a DLL there uses the plugin-local folder `<shared folder>/<AssemblyName>/help/index.html` instead (the same folder its localization and assets use). `<dll name>.help.html` beside the DLL also counts, in any folder.
+   This works only when the mod's DLL is the only plugin DLL in that folder (a helper library beside it does not count); a folder with two plugins belongs to neither, and each uses its embedded help. For a DLL one folder down in a mod-manager package (`Owner-MyMod/plugins/MyMod.dll`), the package folder's `help/index.html` counts too, under the same rule. `help/index.html` directly in a shared folder (`BepInEx/plugins` or `BepInEx/progenitor-reload` itself) belongs to no mod and is not used; a DLL there uses the plugin-local folder `<shared folder>/<AssemblyName>/help/index.html` instead (the same folder its localization and assets use). `<dll name>.help.html` beside the DLL also counts, in any folder.
 2. **Embedded in the assembly.** Embed the folder with its paths as resource names, so the stylesheet and images come along:
 
    ```xml
@@ -105,7 +105,7 @@ A mod that ships an HTML help file gets a **Help** button in the page's actions 
    </ItemGroup>
    ```
 
-   The page uses the resource `help/index.html` (or the SDK's default name `<AssemblyName>.help.index.html`; that spelling turns subfolders into dots, so `help/img/logo.png` would land as `help/img.logo.png`: use the `LogicalName` above), else a single `Help.html` (or `<AssemblyName>.Help.html`). When the button is pressed they are written to `BepInEx/cache/progenitor-help/<guid>/<version>/`, keeping their paths, and that copy is opened; a new version gets its own folder. Up to 512 files and 16 MiB are read per assembly.
+   The page uses the resource `help/index.html` (or the SDK's default name `<AssemblyName>.help.index.html`; that spelling turns subfolders into dots, so `help/img/logo.png` would land as `help/img.logo.png`: use the `LogicalName` above), else a single `Help.html` (or `<AssemblyName>.Help.html`). Only the names are recorded when the mod loads, and only on the client. When the button is pressed the files are read from the assembly and written to `BepInEx/progenitor-cache/help/<guid>-<hash>/<version>/` (`<hash>`: 8 hex digits of the GUID's SHA-256, so two GUIDs that clean to the same folder name never share one), keeping their paths, and that copy is opened. Files in that folder that are no longer in the assembly, and the mod's other version folders, are deleted then. Up to 512 files and 16 MiB are read per assembly.
 3. **A path you name.** When the file is elsewhere in the mod's folder, name it relative to that folder, in source or at load:
 
    ```csharp
@@ -116,9 +116,9 @@ A mod that ships an HTML help file gets a **Help** button in the page's actions 
    ctx.Menu.Help("docs/manual.html");
    ```
 
-   The path may also name an embedded resource, which is extracted with the resources in its folder. `ctx.Menu.Help` throws `ArgumentException` for an absolute path, a URL or a `..` segment.
+   The path must be an `.html` or `.htm` page. It may also name an embedded resource, which is extracted with the resources in its folder (its stylesheet and images are written, but only the page is opened). `ctx.Menu.Help` throws `ArgumentException` for an absolute path, a URL or a `..` segment; for any other file type it logs a warning and declares nothing, and a `[ModHelp]` path of another type is skipped with one log line.
 
-**What is opened.** Only a file under the mod's own folder or its cache folder: a path that would leave it, an absolute path, another drive and a remote URL are refused, and an embedded resource whose name would leave the cache folder is skipped. The URI is built from the full path with every segment percent-encoded, so spaces, `#`, `%` and non-ASCII folder names reach the browser intact. A file that cannot be opened is logged once per mod, and the page's last-action line says so.
+**What is opened.** Only an `.html` or `.htm` file under the mod's own folder or its cache folder (never a shortcut, script or program, which the system would run): a path that would leave it, an absolute path, another drive and a remote URL are refused, and an embedded resource whose name would leave the cache folder is skipped. The URI is built from the full path with every segment percent-encoded, so spaces, `#`, `%` and non-ASCII folder names reach the browser intact. A file that cannot be opened is logged once per mod, and the page's last-action line says so.
 
 **Progenitor's own entry** opens `BepInEx/progenitor-core/docs/guide/progenitor-guide.html` (else `BepInEx/progenitor-core/help/index.html`) when the package ships it. The same guide is the Mods tab overview's **Help guide** tile, drawn only while it is installed ([mods-menu.md](mods-menu.md)).
 

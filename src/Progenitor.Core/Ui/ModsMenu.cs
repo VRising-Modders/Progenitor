@@ -6574,7 +6574,7 @@ public static partial class ModsMenu
         try
         {
             string bep = HelpBepInExRoot();
-            string cache = bep.Length > 0 ? Path.Combine(bep, "cache") : "";
+            string cache = bep.Length > 0 ? Path.Combine(bep, IndexDiskCache.CacheFolderName) : "";
             if (!ModHelpStore.TryGet(pluginId, out var facts))
             {
 #if !PROGENITOR_TESTS
@@ -6603,12 +6603,8 @@ public static partial class ModsMenu
     }
 
     /// <summary>
-    /// The Help button: the help file resolved again (it may have changed since the page was drawn), extracted when it is
-    /// embedded, and opened in the browser as a <c>file://</c> URI. Only the button calls this. A failure is logged once
-    /// per mod and the page says so.
-    /// </summary>
-    /// <summary>
-    /// Extract (when embedded) and open one help target in the browser as a <c>file://</c> URI. False, logged once per
+    /// Extract (when embedded; the bytes are read from the assembly now) and open one help target in the browser as a
+    /// <c>file://</c> URI. Only an <c>.html</c> / <c>.htm</c> file is opened. False, logged once per
     /// <paramref name="pluginId"/>, when it could not be opened. Only a user's button press calls this.
     /// </summary>
     private static bool OpenHelpTarget(string pluginId, ModHelpTarget target)

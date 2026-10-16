@@ -35,7 +35,7 @@ public sealed class ModHelpTests : IDisposable
         catch { /* temp */ }
     }
 
-    private string Cache => Path.Combine(_root, "cache");
+    private string Cache => Path.Combine(_root, "progenitor-cache");
 
     private string Dll(params string[] parts)
     {
@@ -127,7 +127,7 @@ public sealed class ModHelpTests : IDisposable
     }
 
     /// <summary>
-    /// Embedded help is extracted, with its sibling files, into <c>cache/progenitor-help/&lt;guid&gt;/&lt;version&gt;/</c>, so a
+    /// Embedded help is extracted, with its sibling files, into <c>progenitor-cache/help/&lt;guid&gt;-&lt;hash&gt;/&lt;version&gt;/</c>, so a
     /// new version never opens the old one's page.
     /// What this would catch: extracting into a shared or unversioned folder, or leaving the stylesheet behind.
     /// </summary>
@@ -142,7 +142,7 @@ public sealed class ModHelpTests : IDisposable
         };
         var target = ModHelp.Resolve("example.minimap", dll, facts, null, Cache);
         Assert.Equal(ModHelpSource.Embedded, target.Source);
-        string folder = Path.Combine(Cache, ModHelp.CacheFolderName, "example.minimap", "1.2.0");
+        string folder = Path.Combine(Cache, ModHelp.CacheFolderName, ModHelp.PluginFolderName("example.minimap"), "1.2.0");
         Assert.Equal(Path.GetFullPath(folder), Path.GetFullPath(target.Root));
         Assert.False(File.Exists(target.File)); // nothing is written until the button is pressed
 
@@ -157,7 +157,8 @@ public sealed class ModHelpTests : IDisposable
         string? nextFile = ModHelp.Materialize(next, out _);
         Assert.Contains(Path.DirectorySeparatorChar + "1.3.0" + Path.DirectorySeparatorChar, nextFile, StringComparison.Ordinal);
         Assert.Equal("v1.3", File.ReadAllText(nextFile!));
-        Assert.Equal("<link href=\"style.css\">v1.2", File.ReadAllText(file!));
+        // The plugin's older version folder is removed when the new one is extracted.
+        Assert.False(Directory.Exists(folder));
 
         // A single-file Help.html is the fallback name.
         var single = ModHelp.Resolve("example.single", dll, new ModHelpFacts { Version = "1", Embedded = new[] { Res("Help.html", "x") } }, null, Cache);
@@ -179,12 +180,12 @@ public sealed class ModHelpTests : IDisposable
             "Minimap.help.index.html", "Minimap.help.style.css", "help\\img\\logo.png", "Minimap.README.md",
             "Other.help.index.html", "help/../../evil.html", "Minimap.Help.html", "docs/manual.html", "docs/manual.css", "docs2/x.css",
         };
-        var opened = new List<string>();
-        var found = ModHelp.EmbeddedHelp(names, n => { opened.Add(n); return new MemoryStream(Encoding.UTF8.GetBytes(n)); }, "Minimap", "docs/manual.html");
+        var found = ModHelp.EmbeddedHelp(names, "Minimap", "docs/manual.html");
         var paths = found.Select(r => r.Path).ToArray();
         Assert.Equal(new[] { "help/index.html", "help/style.css", "help/img/logo.png", "Help.html", "docs/manual.html", "docs/manual.css" }, paths);
-        Assert.DoesNotContain("help/../../evil.html", opened);
-        Assert.Equal("Minimap.help.index.html", Encoding.UTF8.GetString(found[0].Bytes));
+        Assert.DoesNotContain(found, r => r.ResourceName == "help/../../evil.html");
+        Assert.Equal("Minimap.help.index.html", found[0].ResourceName);
+        Assert.All(found, r => Assert.Null(r.Bytes)); // names only: nothing is read until the button is pressed
         Assert.Null(ModHelp.HelpPathOfResource("help/../x.html", "Minimap"));
     }
 
@@ -221,11 +222,12 @@ public sealed class ModHelpTests : IDisposable
         Assert.Null(ModHelp.Materialize(escape, out string error));
         Assert.NotEmpty(error);
 
-        var cache = Path.Combine(Cache, ModHelp.CacheFolderName, "x", "1");
+        var cache = ModHelp.CacheFolder(Cache, "x", "1");
         var write = new ModHelpTarget(ModHelpSource.Embedded, cache, "help/index.html", Path.Combine(cache, "help", "index.html"),
             new[] { Res("help/index.html", "ok"), Res("../../escaped.html", "no") });
         Assert.NotNull(ModHelp.Materialize(write, out _));
         Assert.False(File.Exists(Path.Combine(Cache, ModHelp.CacheFolderName, "escaped.html")));
+        Assert.False(File.Exists(Path.Combine(Cache, ModHelp.CacheFolderName, ModHelp.PluginFolderName("x"), "escaped.html")));
         Assert.False(ModHelp.IsUnder(root, root));
         Assert.True(ModHelp.IsUnder(root, Path.Combine(root, "a", "b.html")));
         Assert.False(ModHelp.IsUnder(root, root + "-evil" + Path.DirectorySeparatorChar + "b.html"));
@@ -361,5 +363,172 @@ public sealed class ModHelpTests : IDisposable
         Assert.Equal("0", ModHelp.FolderName("", "0"));
         string folder = ModHelp.CacheFolder(Cache, "../evil", "1.0.0/../..");
         Assert.True(ModHelp.IsUnder(Path.Combine(Cache, ModHelp.CacheFolderName), folder));
+    }
+
+    /// <summary>
+    /// Two GUIDs that clean to the same folder name get different cache folders.
+    /// What this would catch: <c>a/b</c> and <c>a_b</c> extracting into, and opening, each other's help.
+    /// </summary>
+    [Fact]
+    public void Plugin_cache_folders_carry_a_hash_of_the_raw_guid()
+    {
+        Assert.Equal(ModHelp.FolderName("a/b", "x"), ModHelp.FolderName("a_b", "x"));
+        Assert.NotEqual(ModHelp.PluginFolderName("a/b"), ModHelp.PluginFolderName("a_b"));
+        Assert.Equal(ModHelp.PluginFolderName("example.minimap"), ModHelp.PluginFolderName(" example.minimap "));
+        Assert.Matches("^example\\.minimap-[0-9a-f]{8}$", ModHelp.PluginFolderName("example.minimap"));
+    }
+
+    /// <summary>
+    /// A declared help target that is not an HTML page (a shortcut, a script, an executable) is never resolved or opened,
+    /// on disk or embedded; its linked assets may be extracted, but only the page is opened.
+    /// What this would catch: <c>[ModHelp("run.bat")]</c> or a <c>.url</c> / <c>.lnk</c> reaching the shell through the browser opener.
+    /// </summary>
+    [Theory]
+    [InlineData("help.url")]
+    [InlineData("help.lnk")]
+    [InlineData("run.bat")]
+    [InlineData("tool.exe")]
+    [InlineData("docs/style.css")]
+    [InlineData("readme")]
+    public void A_declared_target_that_is_not_html_is_refused(string declared)
+    {
+        string dll = Dll("plugins", "Corvane-Minimap", "Minimap.dll");
+        Write(Path.Combine(Path.GetDirectoryName(dll)!, declared.Replace('/', Path.DirectorySeparatorChar)), "x");
+        var facts = new ModHelpFacts { Version = "1", Declared = declared, Embedded = new[] { Res(declared, "x") } };
+        Assert.False(ModHelp.Resolve("example.minimap", dll, facts, declared, Cache).Found);
+        Assert.False(ModHelp.Resolve("example.minimap", dll, facts, null, Cache).Found);
+
+        // A crafted target is refused by Materialize too.
+        string root = ModHelp.CacheFolder(Cache, "example.minimap", "1");
+        var crafted = new ModHelpTarget(ModHelpSource.Declared, root, declared, Path.Combine(root, declared), new[] { Res(declared, "x") });
+        Assert.Null(ModHelp.Materialize(crafted, out string error));
+        Assert.Contains("html", error, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, declared)));
+    }
+
+    [Theory]
+    [InlineData("docs/manual.html", true)]
+    [InlineData("docs/manual.HTM", true)]
+    [InlineData("docs/manual.html.url", false)]
+    [InlineData("docs/manual", false)]
+    public void Only_html_and_htm_count_as_help_pages(string path, bool html) => Assert.Equal(html, ModHelp.IsHtml(path));
+
+    /// <summary>
+    /// The facts recorded at load hold resource names and a weak reference only; the bytes are read when the button is
+    /// pressed. What this would catch: up to 16 MiB of help bytes read and kept for every plugin at load.
+    /// </summary>
+    [Fact]
+    public void Embedded_help_bytes_are_read_on_press_not_at_load()
+    {
+        var facts = ModHelp.FromType(typeof(DeclaredHelpPlugin), "2.0.0");
+        Assert.All(facts.Embedded, r => Assert.Null(r.Bytes));
+
+        var opened = new List<string>();
+        var lazy = new ModHelpFacts
+        {
+            Version = "1.0.0",
+            Embedded = ModHelp.EmbeddedHelp(new[] { "Minimap.help.index.html", "Minimap.help.style.css" }, "Minimap"),
+            OpenForTests = name => { opened.Add(name); return new MemoryStream(Encoding.UTF8.GetBytes("<" + name + ">")); },
+        };
+        string dll = Dll("progenitor-reload", "Minimap.dll");
+        var target = ModHelp.Resolve("example.minimap", dll, lazy, null, Cache);
+        Assert.Equal(ModHelpSource.Embedded, target.Source);
+        Assert.Empty(opened);
+
+        string? file = ModHelp.Materialize(target, out string error);
+        Assert.Equal("", error);
+        Assert.Equal(new[] { "Minimap.help.index.html", "Minimap.help.style.css" }, opened);
+        Assert.Equal("<Minimap.help.index.html>", File.ReadAllText(file!));
+
+        // An unloaded assembly (the weak reference is gone) fails the press with a reason; nothing is opened.
+        var gone = new ModHelpFacts { Version = "1.0.0", Embedded = lazy.Embedded };
+        var stale = ModHelp.Resolve("example.gone", dll, gone, null, Cache);
+        Assert.Null(ModHelp.Materialize(stale, out error));
+        Assert.Contains("no longer loaded", error, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Server processes record nothing: the server draws no Mods page.
+    /// What this would catch: help facts recorded, and kept, on a dedicated server.
+    /// </summary>
+    [Fact]
+    public void Help_facts_are_not_recorded_on_the_server()
+    {
+        ModHelpStore.NoteFromType("example.server", typeof(DeclaredHelpPlugin), "1.0.0", isServer: true);
+        Assert.False(ModHelpStore.TryGet("example.server", out _));
+        ModHelpStore.NoteFromType("example.client", typeof(DeclaredHelpPlugin), "1.0.0", isServer: false);
+        Assert.True(ModHelpStore.TryGet("example.client", out var facts));
+        Assert.Equal("docs/manual.html", facts.Declared);
+    }
+
+    /// <summary>
+    /// Extraction leaves only the current version's files: stale files in the version folder and the plugin's other
+    /// version folders are deleted; another plugin's folder is not touched.
+    /// What this would catch: the cache growing with every update, or a removed asset still served from the cache.
+    /// </summary>
+    [Fact]
+    public void Extraction_removes_stale_files_and_other_versions()
+    {
+        string dll = Dll("progenitor-reload", "Minimap.dll");
+        string v1 = ModHelp.CacheFolder(Cache, "example.minimap", "1.0.0");
+        string v2 = ModHelp.CacheFolder(Cache, "example.minimap", "2.0.0");
+        string other = ModHelp.CacheFolder(Cache, "example.other", "1.0.0");
+        Write(Path.Combine(v1, "help", "index.html"), "old");
+        Write(Path.Combine(v2, "help", "removed.png"), "gone");
+        Write(Path.Combine(other, "help", "index.html"), "keep");
+
+        var facts = new ModHelpFacts { Version = "2.0.0", Embedded = new[] { Res("help/index.html", "new"), Res("help/style.css", "css") } };
+        string? file = ModHelp.Materialize(ModHelp.Resolve("example.minimap", dll, facts, null, Cache), out _);
+        Assert.Equal("new", File.ReadAllText(file!));
+        Assert.True(File.Exists(Path.Combine(v2, "help", "style.css")));
+        Assert.False(File.Exists(Path.Combine(v2, "help", "removed.png")));
+        Assert.False(Directory.Exists(v1));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(other, "help", "index.html")));
+    }
+
+    /// <summary>
+    /// A folder holding two plugin DLLs is shared: its loose <c>help/index.html</c> is not either plugin's, so each falls
+    /// back to its embedded help (a helper library beside one plugin does not count). A declared path still names the
+    /// mod's own file. What this would catch: two mods in one folder both opening the same help page.
+    /// </summary>
+    [Fact]
+    public void A_folder_with_two_plugins_uses_embedded_help_only()
+    {
+        string dir = Path.Combine(_root, "plugins", "Bundle");
+        Directory.CreateDirectory(dir);
+        string a = Path.Combine(dir, "Alpha.dll");
+        File.WriteAllBytes(a, CompilePlugin("Alpha"));
+        File.WriteAllBytes(Path.Combine(dir, "Helper.dll"), CompileLibrary("Helper"));
+        Write(Path.Combine(dir, "help", "index.html"), "shared");
+        Assert.Equal(ModHelpSource.Folder, ModHelp.Resolve("example.alpha", a, null, null, Cache).Source);
+
+        File.WriteAllBytes(Path.Combine(dir, "Beta.dll"), CompilePlugin("Beta"));
+        Assert.False(ModHelp.Resolve("example.alpha", a, null, null, Cache).Found);
+        var facts = new ModHelpFacts { Version = "1", Embedded = new[] { Res("help/index.html", "alpha") } };
+        Assert.Equal(ModHelpSource.Embedded, ModHelp.Resolve("example.alpha", a, facts, null, Cache).Source);
+
+        string manual = Write(Path.Combine(dir, "alpha-manual.html"));
+        var declared = ModHelp.Resolve("example.alpha", a, null, "alpha-manual.html", Cache);
+        Assert.Equal(ModHelpSource.Declared, declared.Source);
+        Assert.Equal(Path.GetFullPath(manual), Path.GetFullPath(declared.File));
+    }
+
+    private static byte[] CompilePlugin(string name) => Compile(name, @"
+namespace BepInEx { [System.AttributeUsage(System.AttributeTargets.Class)] public sealed class BepInPlugin : System.Attribute { public BepInPlugin(string g, string n, string v) { } } }
+namespace " + name + @" { [BepInEx.BepInPlugin(""example." + name.ToLowerInvariant() + @""", """ + name + @""", ""1.0.0"")] public sealed class Plugin { } }");
+
+    private static byte[] CompileLibrary(string name) => Compile(name, "namespace " + name + " { public static class Util { public static int One() => 1; } }");
+
+    private static byte[] Compile(string name, string source)
+    {
+        var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
+            name,
+            new[] { Microsoft.CodeAnalysis.CSharp.CSharpSyntaxTree.ParseText(source) },
+            new[] { Microsoft.CodeAnalysis.MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(Microsoft.CodeAnalysis.OutputKind.DynamicallyLinkedLibrary));
+        using var ms = new MemoryStream();
+        var emit = compilation.Emit(ms);
+        Assert.True(emit.Success, string.Join(Environment.NewLine, emit.Diagnostics));
+        return ms.ToArray();
     }
 }
