@@ -240,6 +240,19 @@ internal static class ServantLogic
         return "no discovered zone without a hunt has " + Math.Max(1, servantCount) + " servant slot(s) (" + free + " free zone(s))";
     }
 
+    /// <summary>A servant <c>servants empty</c> empties by default: home and alive (free, carrying items or injured).</summary>
+    internal static bool IsHome(ServantState state) =>
+        state is ServantState.Free or ServantState.HasItems or ServantState.Injured;
+
+    /// <summary>Units across the slots (empty slots and nonpositive amounts count 0).</summary>
+    internal static int Units(IReadOnlyList<Progenitor.Inventory.InventorySlot> slots)
+    {
+        int n = 0;
+        foreach (var s in slots)
+            if (s.Item != 0 && s.Amount > 0) n += s.Amount;
+        return n;
+    }
+
     /// <summary>The length the game writes for a hunt: the setting's length, times 1e-5 with timers off.</summary>
     internal static float HuntLength(float settingLength, bool timersDisabled) =>
         settingLength * (timersDisabled ? TimersDisabledFactor : 1f);

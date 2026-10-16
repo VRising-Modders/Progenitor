@@ -21,10 +21,11 @@ internal static class ServantArgs
         Send,
         Finish,
         Timers,
+        Empty,
     }
 
     /// <summary>The actions the op accepts.</summary>
-    internal const string Actions = "list, zones, send, finish, timers";
+    internal const string Actions = "list, zones, send, finish, timers, empty";
 
     /// <summary>One parsed request.</summary>
     internal sealed record Request(
@@ -39,7 +40,9 @@ internal static class ServantArgs
         bool ViaTimers,
         bool All,
         CastleId User,
-        bool CheckDiscovered);
+        bool CheckDiscovered,
+        CastleId To = default,
+        bool Discard = false);
 
     /// <summary>
     /// Parse the op's args. <c>action</c> (default <c>list</c>). Every action except
@@ -50,7 +53,9 @@ internal static class ServantArgs
     /// (<c>x,y#zone</c>), at most one (neither: a zone is picked), <c>slot</c> (default 0),
     /// <c>user</c> (whose discovery is checked), <c>checkDiscovered</c> (default true).
     /// <c>finish</c>: <c>mission</c> (optional), <c>method</c> <c>timers</c> (default) or <c>row</c>.
-    /// <c>timers</c>: <c>off</c> (bool; omitted reads only).
+    /// <c>timers</c>: <c>off</c> (bool; omitted reads only). <c>empty</c>: <c>servants</c> (as for
+    /// <c>send</c>; omitted: every servant at home), <c>to</c> (a container's <c>index:version</c>;
+    /// omitted: the castle's ordinary containers), <c>discard</c> (test only: remove what did not fit).
     /// </summary>
     internal static Request Parse(JsonElement args)
     {
@@ -65,6 +70,7 @@ internal static class ServantArgs
             "send" => Action.Send,
             "finish" => Action.Finish,
             "timers" => Action.Timers,
+            "empty" => Action.Empty,
             _ => throw new ArgumentException("unknown action '" + name + "' (" + Actions + ")"),
         };
 
@@ -109,6 +115,16 @@ internal static class ServantArgs
                     _ => throw new ArgumentException("args.method must be 'timers' or 'row'"),
                 };
                 return new Request(action, heart, territory, null, mission, null, 0, null, viaTimers, false, user, true);
+            }
+            case Action.Empty:
+            {
+                if (mission != 0 || zone != null) throw new ArgumentException("empty takes no mission or zone");
+                var servants = ServantList(args, hunt: false);
+                var to = CastleId.None;
+                string? toText = Str(args, "to");
+                if (toText != null) to = ParseId(toText) ?? throw new ArgumentException("args.to must be the container's index:version");
+                bool discard = Bool(args, "discard") ?? false;
+                return new Request(action, heart, territory, servants, 0, null, 0, null, true, false, user, true, to, discard);
             }
             case Action.Zones:
                 return new Request(action, heart, territory, null, 0, null, 0, null, true, Bool(args, "all") ?? false, user, true);
@@ -227,7 +243,10 @@ internal static class ServantArgs
         return ids;
     }
 
-    private static IReadOnlyList<string>? ServantList(JsonElement args)
+    /// <summary>Most servants one <c>empty</c> names (the throne lists at most 36).</summary>
+    internal const int MaxNamed = 36;
+
+    private static IReadOnlyList<string>? ServantList(JsonElement args, bool hunt = true)
     {
         if (!args.TryGetProperty("servants", out var v) || v.ValueKind == JsonValueKind.Null) return null;
         var list = new List<string>();
@@ -246,8 +265,9 @@ internal static class ServantArgs
             }
         }
         else throw new ArgumentException("args.servants must be an array of strings or a comma list");
-        if (list.Count == 0) throw new ArgumentException("args.servants is empty; omit it to send the free servants");
-        if (list.Count > ServantLogicLimits.MaxServantsPerHunt) throw new ArgumentException("args.servants names " + list.Count + " servants; a hunt takes at most 3");
+        if (list.Count == 0) throw new ArgumentException("args.servants is empty; omit it to use the default servants");
+        if (list.Count > MaxNamed) throw new ArgumentException("args.servants names " + list.Count + " servants; at most " + MaxNamed);
+        if (hunt && list.Count > ServantLogicLimits.MaxServantsPerHunt) throw new ArgumentException("args.servants names " + list.Count + " servants; a hunt takes at most 3");
         return list;
     }
 

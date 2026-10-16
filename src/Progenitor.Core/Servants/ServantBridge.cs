@@ -80,6 +80,23 @@ public static class ServantBridge
         return ServantRuntime.Finish(world, h, missionGuid, viaTimers);
     }
 
+    /// <summary>
+    /// Move servants' inventories into the castle's containers through the inventory engine's
+    /// <c>TransferAll</c> (conserving: never duplicates or destroys). <paramref name="servants"/>
+    /// null: every servant at home (free, carrying items or injured). <paramref name="to"/>: one
+    /// container of this castle; none: every ordinary open castle container in the castle's order.
+    /// What does not fit stays on the servant and is reported as no room, unless
+    /// <paramref name="discard"/> (test only) removes it, logged as a warning.
+    /// </summary>
+    public static ServantEmptyResult Empty(CastleId heart, IReadOnlyList<CastleId>? servants, CastleId to, bool discard)
+    {
+        var world = ServantRuntime.RequireWorld("Empty");
+        var h = ServantRuntime.HeartOf(world.EntityManager, heart.ToEntity());
+        if (h == Unity.Entities.Entity.Null)
+            return new ServantEmptyResult { Ok = false, Reason = "entity " + heart + " is not a castle heart or connected to one" };
+        return ServantRuntime.Empty(world, h, servants, to, discard);
+    }
+
     /// <summary>The game's servant-timers debug setting and whether a finish restore is pending.</summary>
     public static ServantTimersStatus Timers() => ServantRuntime.TimersStatus(ServantRuntime.RequireWorld("Timers"));
 
@@ -170,4 +187,51 @@ public sealed class ServantTimersStatus
 
     /// <summary>This set cancelled a pending finish restore.</summary>
     public bool CancelledRestore { get; init; }
+}
+
+/// <summary>What <see cref="ServantBridge.Empty"/> did.</summary>
+public sealed class ServantEmptyResult
+{
+    /// <summary>False when the call was refused, or a servant could not be read or a transfer stopped. No room is not a failure.</summary>
+    public bool Ok { get; init; }
+
+    /// <summary>Why the call was refused, or "".</summary>
+    public string Reason { get; init; } = "";
+
+    /// <summary>One row per servant.</summary>
+    public IReadOnlyList<ServantEmptyRow> Servants { get; init; } = Array.Empty<ServantEmptyRow>();
+
+    /// <summary>The containers tried, in order.</summary>
+    public IReadOnlyList<string> Targets { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>One servant of a <see cref="ServantBridge.Empty"/>.</summary>
+public sealed class ServantEmptyRow
+{
+    /// <summary>The servant.</summary>
+    public CastleId Servant { get; init; }
+
+    /// <summary>The coffin's servant name, or "".</summary>
+    public string Name { get; init; } = "";
+
+    /// <summary>Units the servant carried before.</summary>
+    public int Before { get; init; }
+
+    /// <summary>Units moved into containers.</summary>
+    public int Moved { get; init; }
+
+    /// <summary>Units still on the servant.</summary>
+    public int Left { get; init; }
+
+    /// <summary>Units removed by <c>discard</c> (test only), 0 otherwise.</summary>
+    public int Discarded { get; init; }
+
+    /// <summary>Where the units went: <c>container xN</c>.</summary>
+    public IReadOnlyList<string> Into { get; init; } = Array.Empty<string>();
+
+    /// <summary>What <c>discard</c> removed: <c>amount x item</c>.</summary>
+    public IReadOnlyList<string> DiscardedItems { get; init; } = Array.Empty<string>();
+
+    /// <summary>"" when everything moved; otherwise why not (no room, on a hunt, unreadable).</summary>
+    public string Reason { get; init; } = "";
 }

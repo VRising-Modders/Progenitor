@@ -54,6 +54,8 @@ internal static class ServantOps
             }
             case ServantArgs.Action.Send:
                 return Send(req, heart, territory);
+            case ServantArgs.Action.Empty:
+                return Empty(req, heart, territory);
             default:
             {
                 var r = ServantBridge.Finish(heart, req.Mission, req.ViaTimers);
@@ -136,6 +138,40 @@ internal static class ServantOps
             startedUtc = result.Ok ? Utc(result.StartedUtc) : null,
             servants = sent,
             buffApplied = result.Ok ? result.BuffApplied : (bool?)null,
+        };
+    }
+
+    private static object Empty(ServantArgs.Request req, CastleId heart, int territory)
+    {
+        List<CastleId>? servants = null;
+        if (req.Servants != null)
+            servants = ServantArgs.Resolve(ServantBridge.List(heart), req.Servants, out string error) ?? throw new ArgumentException(error);
+        var r = ServantBridge.Empty(heart, servants, req.To, req.Discard);
+        var rows = new List<object>();
+        foreach (var s in r.Servants)
+            rows.Add(new
+            {
+                servant = s.Servant.ToString(),
+                name = s.Name,
+                before = s.Before,
+                moved = s.Moved,
+                left = s.Left,
+                discarded = req.Discard ? s.Discarded : (int?)null,
+                into = s.Into,
+                discardedItems = req.Discard ? s.DiscardedItems : null,
+                reason = s.Reason.Length > 0 ? s.Reason : null,
+            });
+        return new
+        {
+            action = "empty",
+            ok = r.Ok,
+            reason = r.Reason.Length > 0 ? r.Reason : null,
+            heart = heart.ToString(),
+            territory,
+            to = req.To.IsNone ? null : req.To.ToString(),
+            discard = req.Discard,
+            targets = r.Targets,
+            servants = rows,
         };
     }
 

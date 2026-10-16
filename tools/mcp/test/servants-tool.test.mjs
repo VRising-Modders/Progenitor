@@ -36,6 +36,8 @@ test('servants tool sends every action to the server bridge op', async () => {
   assert.equal(calls[2][2].method, 'row');
   await tool.handler(tool.schema.parse({ action: 'timers', off: false }));
   assert.equal(calls[3][2].off, false);
+  await tool.handler(tool.schema.parse({ action: 'empty', territory: 4, to: '88:2', discard: true }));
+  assert.deepEqual(calls[4], ['server', 'servants', { action: 'empty', territory: 4, to: '88:2', discard: true }]);
 });
 
 test('servants tool schema rejects unknown actions and methods', () => {

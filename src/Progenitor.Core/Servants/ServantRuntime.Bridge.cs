@@ -8,6 +8,7 @@ using ProjectM.Terrain;
 using Progenitor.Ai;
 using Progenitor.Castles;
 using Progenitor.Ecs;
+using Progenitor.Inventory;
 using Progenitor.WorldState;
 using Stunlock.Core;
 using Unity.Entities;
@@ -326,6 +327,153 @@ internal static unsafe partial class ServantRuntime
         {
             Ok = true, Method = method, Hunts = before, Finished = after,
             Reason = "the hunts' start was moved back so they are due now; the game returns them on its next update with its own roll",
+        };
+    }
+
+    // ---- empty ------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Move each servant's inventory into the castle's containers with the inventory engine's
+    /// TransferAll (conserving: never duplicates or destroys). Targets: <paramref name="to"/>, or
+    /// every ordinary open castle container in the castle's order. What does not fit stays on the
+    /// servant ("no room") unless <paramref name="discard"/> (test only) removes it, logged as a warning.
+    /// </summary>
+    internal static ServantEmptyResult Empty(World world, Entity heart, IReadOnlyList<CastleId>? servants, CastleId to, bool discard)
+    {
+        var em = world.EntityManager;
+        if (!InventoryRuntime.Installed)
+            return new ServantEmptyResult { Ok = false, Reason = "the inventory engine is not installed on this server" };
+        var engine = InventoryRuntime.Engine;
+        var list = List(world, heart);
+        var chosen = new List<(CastleId Id, string Name, ServantState? State)>();
+        if (servants == null)
+        {
+            foreach (var s in list)
+                if (ServantLogic.IsHome(s.State) && !s.Servant.IsNone) chosen.Add((s.Servant, s.Name, s.State));
+        }
+        else
+        {
+            foreach (var id in servants)
+            {
+                ServantInfo? info = null;
+                foreach (var s in list) if (s.Servant == id) { info = s; break; }
+                chosen.Add((id, info?.Name ?? "", info?.State));
+            }
+        }
+
+        // Targets: the named container, or every ordinary open castle container.
+        var targets = new List<(InventoryRef Ref, string Label)>();
+        if (!to.IsNone)
+        {
+            var e = to.ToEntity();
+            if (!em.Exists(e)) return new ServantEmptyResult { Ok = false, Reason = "container " + to + " does not exist" };
+            if (HeartOf(em, e) != heart) return new ServantEmptyResult { Ok = false, Reason = "container " + to + " is not connected to this castle's heart" };
+            var r = InventoryRef.For(e);
+            var snap = engine.Read(r);
+            if (!snap.Ok) return new ServantEmptyResult { Ok = false, Reason = "container " + to + " has no readable inventory" + (snap.Reason.Length > 0 ? " (" + snap.Reason + ")" : "") };
+            targets.Add((r, to.ToString()));
+        }
+        else
+        {
+            var castle = Progenitor.Castles.Castles.ForHeart(CastleId.From(heart));
+            if (castle.Enabled)
+                foreach (var c in castle.Containers())
+                {
+                    if (c.IsStation || c.Main.IsNone) continue;
+                    var ce = c.Entity.ToEntity();
+                    if (em.HasComponent(ce, ComponentIndex.Of<ServantCoffinstation>(ComponentType.AccessMode.ReadOnly))) continue;
+                    var snap = engine.Read(c.Main);
+                    if (!snap.Ok || !snap.Restriction.IsOpen) continue;
+                    string label = c.Entity.ToString();
+                    if (c.Nameplate.Length > 0) label += " \"" + c.Nameplate + "\"";
+                    if (c.Building.PrefabName.Length > 0) label += " " + c.Building.PrefabName;
+                    targets.Add((c.Main, label));
+                }
+        }
+
+        var rows = new List<ServantEmptyRow>();
+        bool allOk = true;
+        foreach (var (id, name, state) in chosen)
+        {
+            var s = id.ToEntity();
+            if (!em.Exists(s))
+            {
+                rows.Add(new ServantEmptyRow { Servant = id, Name = name, Reason = "servant does not exist (dead or an id of an earlier world load)" });
+                allOk = false;
+                continue;
+            }
+            if (state == ServantState.AwayOnHunt || IsOnMission(em, s, out _))
+            {
+                rows.Add(new ServantEmptyRow { Servant = id, Name = name, Reason = "servant is on a hunt; nothing moved" });
+                allOk = false;
+                continue;
+            }
+            var inv = InventoryRef.For(s);
+            var before = engine.Read(inv);
+            if (!before.Ok)
+            {
+                rows.Add(new ServantEmptyRow { Servant = id, Name = name, Reason = "servant inventory unreadable" + (before.Reason.Length > 0 ? " (" + before.Reason + ")" : "") });
+                allOk = false;
+                continue;
+            }
+            int had = ServantLogic.Units(before.Slots);
+            int moved = 0;
+            var into = new List<string>();
+            string trouble = "";
+            foreach (var (target, label) in targets)
+            {
+                if (had - moved <= 0) break;
+                var r = engine.TransferAll(inv, target, null);
+                if (r.Moved > 0) { moved += r.Moved; into.Add(label + " x" + r.Moved); }
+                if (!r.Ok)
+                {
+                    trouble = "transfer into " + label + " stopped: " + (r.Reason.Length > 0 ? r.Reason : r.ToString());
+                    break;
+                }
+            }
+            var after = engine.Read(inv);
+            int left = after.Ok ? ServantLogic.Units(after.Slots) : had - moved;
+            int discarded = 0;
+            var discardedItems = new List<string>();
+            if (left > 0 && discard && trouble.Length == 0 && after.Ok)
+            {
+                foreach (var slot in after.Slots)
+                {
+                    if (slot.Item == 0 || slot.Amount <= 0) continue;
+                    var rr = engine.TryRemove(inv, slot.Item, slot.Amount);
+                    if (rr.Done > 0)
+                    {
+                        discarded += rr.Done;
+                        discardedItems.Add(rr.Done + " x " + slot.Item);
+                    }
+                }
+                Plugin.Logger?.LogWarning("servants: EMPTY DISCARD (test only) by the Dev bridge: destroyed " + discarded + " unit(s) from servant " + id
+                    + (name.Length > 0 ? " \"" + name + "\"" : "") + " of heart " + CastleId.From(heart) + " that did not fit: " + string.Join(", ", discardedItems));
+                var again = engine.Read(inv);
+                left = again.Ok ? ServantLogic.Units(again.Slots) : Math.Max(0, left - discarded);
+            }
+            string reason = trouble.Length > 0 ? trouble
+                : left > 0 ? (targets.Count == 0 ? "no room: the castle has no ordinary open container" : "no room: " + left + " unit(s) did not fit and stay on the servant")
+                : "";
+            if (trouble.Length > 0) allOk = false;
+            rows.Add(new ServantEmptyRow
+            {
+                Servant = id, Name = name, Before = had, Moved = moved, Left = left, Discarded = discarded,
+                Into = into, DiscardedItems = discardedItems, Reason = reason,
+            });
+        }
+        int totalMoved = 0, totalLeft = 0;
+        foreach (var r in rows) { totalMoved += r.Moved; totalLeft += r.Left; }
+        Plugin.Logger?.LogInfo("servants: empty by the Dev bridge: heart " + CastleId.From(heart) + " servants=" + rows.Count
+            + " moved=" + totalMoved + " left=" + totalLeft + " targets=" + targets.Count);
+        var labels = new List<string>();
+        foreach (var t in targets) labels.Add(t.Label);
+        return new ServantEmptyResult
+        {
+            Ok = allOk,
+            Reason = chosen.Count == 0 ? "no servant at home to empty" : "",
+            Servants = rows,
+            Targets = labels,
         };
     }
 }

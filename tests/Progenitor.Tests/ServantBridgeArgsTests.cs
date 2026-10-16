@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using Progenitor.Castles;
 using Progenitor.Dev.Ops;
+using Progenitor.Inventory;
 using Progenitor.Servants;
 using Xunit;
 
@@ -124,6 +125,43 @@ public class ServantBridgeArgsTests
         Assert.True(ServantArgs.Parse(Args("{\"action\":\"timers\",\"off\":true}")).TimersOff);
         Assert.False(ServantArgs.Parse(Args("{\"action\":\"timers\",\"off\":false}")).TimersOff);
         Assert.Throws<ArgumentException>(() => ServantArgs.Parse(Args("{\"action\":\"timers\",\"off\":\"yes\"}")));
+    }
+
+    [Fact]
+    public void Empty_reads_servants_target_and_discard()
+    {
+        var r = ServantArgs.Parse(Args("{\"action\":\"empty\",\"territory\":3}"));
+        Assert.Equal(ServantArgs.Action.Empty, r.Action);
+        Assert.Null(r.Servants);
+        Assert.True(r.To.IsNone);
+        Assert.False(r.Discard);
+
+        r = ServantArgs.Parse(Args("{\"action\":\"empty\",\"heart\":\"5:1\",\"servants\":[\"Alda\",\"#2\",\"#3\",\"#4\"],\"to\":\"88:2\",\"discard\":true}"));
+        Assert.Equal(4, r.Servants!.Count); // more than one hunt's three: empty is not a hunt
+        Assert.Equal(new CastleId(88, 2), r.To);
+        Assert.True(r.Discard);
+    }
+
+    [Theory]
+    [InlineData("{\"action\":\"empty\"}")]
+    [InlineData("{\"action\":\"empty\",\"territory\":3,\"to\":\"chest\"}")]
+    [InlineData("{\"action\":\"empty\",\"territory\":3,\"discard\":1}")]
+    [InlineData("{\"action\":\"empty\",\"territory\":3,\"mission\":5}")]
+    [InlineData("{\"action\":\"empty\",\"territory\":3,\"zone\":\"1,1#1\"}")]
+    [InlineData("{\"action\":\"empty\",\"territory\":3,\"servants\":[]}")]
+    public void Empty_arguments_are_checked(string json) =>
+        Assert.Throws<ArgumentException>(() => ServantArgs.Parse(Args(json)));
+
+    [Fact]
+    public void Empty_defaults_to_servants_at_home_and_counts_units()
+    {
+        Assert.True(ServantLogic.IsHome(ServantState.Free));
+        Assert.True(ServantLogic.IsHome(ServantState.HasItems));
+        Assert.True(ServantLogic.IsHome(ServantState.Injured));
+        Assert.False(ServantLogic.IsHome(ServantState.AwayOnHunt));
+        Assert.False(ServantLogic.IsHome(ServantState.Dead));
+        var slots = new[] { new InventorySlot(0, 101, 5, 100, 0, false), new InventorySlot(1, 0, 0, 0, 0, false), new InventorySlot(2, 102, 7, 100, 0, false) };
+        Assert.Equal(12, ServantLogic.Units(slots));
     }
 
     [Fact]
