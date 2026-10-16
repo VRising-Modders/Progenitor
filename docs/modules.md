@@ -2636,17 +2636,22 @@ from an earlier world load is refused.
 `ServantsReturned` is published a moment after the game finished a hunt: servants back in their
 coffins, loot in their inventories, injuries applied, the row gone. The game destroys the servants
 that died and removes the survivors' mission buff a moment after the return, so the event waits
-until both have happened (at least half a second, at most five), which is what lets a handler call
-`Resend` directly. Progenitor watches only while something is subscribed: before
+until every servant of the hunt is gone or being destroyed, sent out again, or no longer marked on a
+hunt with its mission buff removed (at least half a second, at most five), which is what lets a
+handler call `Resend` directly. Progenitor watches only while something is subscribed: before
 `ServantMissionUpdateSystem` updates, it snapshots the
 record of every heart with a hunt due within two seconds (the list of hearts with hunts is re-read
 once a second, after every send Progenitor makes, and on every update while the game's servant
 timers are off); after the update, the rows that are gone are the hunts that
-returned. Each servant's `Outcome` is `Dead` (destroyed or being destroyed, or its coffin is
-revivable), `Injured` (an injury running) or `Returned`; `Loot` is what its inventory holds at the
-publish, which is the hunt's haul because the game sends only empty servants (`LootIsHaul` is false
-for a dead servant or an inventory that could not be read). An aborted hunt (the throne's abort) is
-not reported as a return.
+returned. Each servant's `Outcome` is `Dead` only on positive evidence: its entity is gone or
+carries the game's `Dead` or `DestroyTag` and its coffin names no other living servant, or its
+coffin is revivable or reviving. `DestroyData` is not evidence: every live unit carries it. A
+servant whose entity is gone while its coffin names another living servant is reported under that
+servant's id. Otherwise `Injured` (an injury running) or `Returned`. `Loot` is what its inventory
+holds at the publish, which is the hunt's haul because the game sends only empty servants
+(`LootIsHaul` is false for a dead servant, an inventory that could not be read, or a servant that
+was already sent out again before the publish, whose `Loot` is then empty). An aborted hunt (the
+throne's abort) is not reported as a return.
 
 ### Throne list for one player (experimental)
 

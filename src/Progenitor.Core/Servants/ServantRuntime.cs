@@ -804,28 +804,32 @@ internal static unsafe class ServantRuntime
     }
 
     /// <summary>
-    /// Publish the returns the game has finished with: every servant that died is destroyed and
-    /// every survivor's mission buff is gone (so <c>Resend</c> from a handler works), or the wait
-    /// ran out.
+    /// Publish the returns the game has finished with: every servant of the row is gone or being
+    /// destroyed, sent out again, or off the hunt with its mission buff removed (so <c>Resend</c>
+    /// from a handler works), or the wait ran out. Never before half a second after the return.
     /// </summary>
     private static void PublishReturns(World world, long now)
     {
         if (PendingReturns.Count == 0) return;
         var em = world.EntityManager;
+        int buff = MissionBuff(em);
         var ready = new List<(CastleId Heart, MissionRow Row, long SeenTicks, Dictionary<CastleId, Entity> Coffins)>();
         for (int i = PendingReturns.Count - 1; i >= 0; i--)
         {
             var p = PendingReturns[i];
             long waited = now - p.SeenTicks;
             if (waited < ReturnMinWaitTicks) continue;
+            var current = CurrentRows(em, p.Heart.ToEntity());
             bool settled = true;
             foreach (var id in p.Row.Servants())
             {
-                var s = id.ToEntity();
-                if (!em.Exists(s) || IsDestroying(em, s)) continue;
-                if (IsOnMission(em, s, out _)) { settled = false; break; }
+                p.Coffins.TryGetValue(id, out var coffin);
+                if (!ServantLogic.ReturnSettled(ReadReturnFacts(em, id, coffin, buff, current, out _))) { settled = false; break; }
             }
             if (!settled && waited < ReturnMaxWaitTicks) continue;
+            if (!settled)
+                Plugin.Logger?.LogWarning("servants: the return of heart " + p.Heart + " mission " + p.Row.MissionGuid
+                    + " had not settled after 5 s (a survivor still marked on a hunt or carrying the mission buff); published as read now");
             PendingReturns.RemoveAt(i);
             ready.Add(p);
         }
@@ -834,7 +838,7 @@ internal static unsafe class ServantRuntime
             var (heartId, row, seen, coffins) = ready[i];
             try
             {
-                var ev = BuildReturn(world, em, heartId.ToEntity(), row, seen, now, coffins);
+                var ev = BuildReturn(world, em, heartId.ToEntity(), row, seen, now, coffins, buff);
                 Plugin.Logger?.LogInfo("servants: hunt returned heart=" + ev.Heart + " mission=" + ev.MissionGuid + " zone=" + ev.Zone
                     + " slot=" + ev.DataSlot + " " + Describe(ev));
                 EventBus.Publish(ev);
@@ -846,11 +850,64 @@ internal static unsafe class ServantRuntime
         }
     }
 
-    /// <summary>Dead, or destroyed and not yet removed (the game's destroy is processed a moment later).</summary>
+    /// <summary>The mission buff prefab of the game's servant mission settings; 0 when unreadable.</summary>
+    private static int MissionBuff(EntityManager em)
+    {
+        var settings = Singleton<ServantMissionSettingsSingleton>(em, ref _missionSettings);
+        if (settings == Entity.Null) return 0;
+        byte* sp = AiRuntime.RO<ServantMissionSettingsSingleton>(em, settings, Layout.ServantMissionSettingsMissionBuffOffset + 4);
+        return sp == null ? 0 : *(int*)(sp + Layout.ServantMissionSettingsMissionBuffOffset);
+    }
+
+    private static List<MissionRow> CurrentRows(EntityManager em, Entity heart) =>
+        HasMissionRecord(em, heart) ? ReadRows(em, heart) : new List<MissionRow>();
+
+    /// <summary>
+    /// Positive evidence of a destroy: the game's <c>Dead</c> or <c>DestroyTag</c> (the destroy is
+    /// processed a moment later). Not <c>DestroyData</c>: every live unit carries it.
+    /// </summary>
     private static bool IsDestroying(EntityManager em, Entity servant) =>
-        IsDead(em, servant)
-        || em.HasComponent(servant, ComponentIndex.Of<DestroyTag>(ComponentType.AccessMode.ReadOnly))
-        || em.HasComponent(servant, ComponentIndex.Of<DestroyData>(ComponentType.AccessMode.ReadOnly));
+        ServantLogic.Destroying(IsDead(em, servant),
+            em.HasComponent(servant, ComponentIndex.Of<DestroyTag>(ComponentType.AccessMode.ReadOnly)));
+
+    /// <summary>
+    /// What the return publish needs about one servant of a finished row, read now. The coffin is
+    /// the one matched at the return (or, when that one is gone, the servant's own link). When the
+    /// row's entity is gone or being destroyed but the coffin names another living servant,
+    /// <paramref name="resolved"/> is that servant; otherwise the row's entity.
+    /// </summary>
+    private static ReturnFacts ReadReturnFacts(EntityManager em, CastleId id, Entity coffin, int buff, List<MissionRow> current, out Entity resolved)
+    {
+        var s = id.ToEntity();
+        resolved = s;
+        var f = new ReturnFacts { Exists = !id.IsNone && em.Exists(s) };
+        if (f.Exists)
+        {
+            f.HasDead = IsDead(em, s);
+            f.HasDestroyTag = em.HasComponent(s, ComponentIndex.Of<DestroyTag>(ComponentType.AccessMode.ReadOnly));
+            f.HasDestroyData = em.HasComponent(s, ComponentIndex.Of<DestroyData>(ComponentType.AccessMode.ReadOnly));
+            f.OnMission = IsOnMission(em, s, out _);
+            f.MissionBuffOn = buff != 0 && AiRuntime.FindBuff(em, s, buff) != Entity.Null;
+        }
+        foreach (var r in current)
+            if (r.Names(id)) { f.OutAgain = true; break; }
+        if (coffin != Entity.Null && !em.Exists(coffin)) coffin = Entity.Null;
+        if (coffin == Entity.Null && f.Exists) coffin = CoffinOfServant(em, s);
+        byte* c = coffin == Entity.Null ? null : AiRuntime.RO<ServantCoffinstation>(em, coffin, CoffinNeed);
+        if (c != null)
+        {
+            f.CoffinReadable = true;
+            f.CoffinState = *(int*)(c + Layout.ServantCoffinstationStateOffset);
+            f.InjuryEndTicks = *(long*)(c + Layout.ServantCoffinstationInjuryEndTicksOffset);
+            var linked = ServantOfCoffin(c);
+            if (linked != Entity.Null && linked != s && em.Exists(linked) && !IsDestroying(em, linked))
+            {
+                f.CoffinServantAlive = true;
+                if (!f.Exists || ServantLogic.Destroying(f.HasDead, f.HasDestroyTag)) resolved = linked;
+            }
+        }
+        return f;
+    }
 
     private static Dictionary<CastleId, Entity> CoffinsByServant(EntityManager em)
     {
@@ -866,43 +923,37 @@ internal static unsafe class ServantRuntime
         return map;
     }
 
-    private static ServantsReturned BuildReturn(World world, EntityManager em, Entity heart, MissionRow row, long seen, long now, Dictionary<CastleId, Entity> coffins)
+    private static ServantsReturned BuildReturn(World world, EntityManager em, Entity heart, MissionRow row, long seen, long now, Dictionary<CastleId, Entity> coffins, int buff)
     {
         var servants = new List<ReturnedServant>();
+        var current = CurrentRows(em, heart);
         foreach (var id in row.Servants())
         {
-            var s = id.ToEntity();
-            bool exists = em.Exists(s);
-            bool dead = exists && IsDestroying(em, s);
             coffins.TryGetValue(id, out var coffin);
             if (coffin != Entity.Null && !em.Exists(coffin)) coffin = Entity.Null;
-            if (coffin == Entity.Null && exists) coffin = CoffinOfServant(em, s);
-            int state = 0;
-            long injury = 0;
-            string name = "";
+            if (coffin == Entity.Null && em.Exists(id.ToEntity())) coffin = CoffinOfServant(em, id.ToEntity());
+            var f = ReadReturnFacts(em, id, coffin, buff, current, out var s);
             byte* c = coffin == Entity.Null ? null : AiRuntime.RO<ServantCoffinstation>(em, coffin, CoffinNeed);
-            if (c != null)
-            {
-                state = *(int*)(c + Layout.ServantCoffinstationStateOffset);
-                injury = *(long*)(c + Layout.ServantCoffinstationInjuryEndTicksOffset);
-                name = CoffinName(c);
-            }
-            var outcome = ServantLogic.OutcomeOf(exists, dead, state, injury, now);
+            string name = c == null ? "" : CoffinName(c);
+            var outcome = ServantLogic.OutcomeOf(f, now);
             var loot = new List<ServantLoot>();
             var inventory = InventoryRef.None;
             bool haul = false;
             if (outcome != ServantOutcome.Dead)
             {
                 int stacks = ItemStacks(s, out inventory, out loot);
-                haul = stacks >= 0;
+                // Sent out again before this publish: its loot was moved for that send, so what it
+                // carries now is not this hunt's haul.
+                haul = stacks >= 0 && !f.OutAgain;
+                if (f.OutAgain) loot = new List<ServantLoot>();
             }
             servants.Add(new ReturnedServant
             {
-                Servant = id,
+                Servant = outcome == ServantOutcome.Dead ? id : CastleId.From(s),
                 Coffin = CastleId.From(coffin),
                 Name = name,
                 Outcome = outcome,
-                InjuryEndsUtc = outcome == ServantOutcome.Injured ? ServantLogic.Utc(injury) : null,
+                InjuryEndsUtc = outcome == ServantOutcome.Injured ? ServantLogic.Utc(f.InjuryEndTicks) : null,
                 Inventory = inventory,
                 Loot = loot,
                 LootIsHaul = haul,

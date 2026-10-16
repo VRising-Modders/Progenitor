@@ -21,6 +21,33 @@ internal sealed class ServantFacts
     public string Name = "";
 }
 
+/// <summary>One servant of a finished hunt as the return publish sees it (read on the server, judged here).</summary>
+internal sealed class ReturnFacts
+{
+    /// <summary>The servant entity named in the hunt row still exists.</summary>
+    public bool Exists;
+    /// <summary>It carries the game's <c>Dead</c> component.</summary>
+    public bool HasDead;
+    /// <summary>It carries <c>DestroyTag</c> (destroyed, removal pending).</summary>
+    public bool HasDestroyTag;
+    /// <summary>It carries <c>DestroyData</c>: every live unit does; never evidence of a death.</summary>
+    public bool HasDestroyData;
+    /// <summary><c>ServantData.IsOnMission</c>.</summary>
+    public bool OnMission;
+    /// <summary>The hunt's mission buff is still on it.</summary>
+    public bool MissionBuffOn;
+    /// <summary>A current row of the heart names it again (it was sent out after this return).</summary>
+    public bool OutAgain;
+    /// <summary>Its coffin was found and read.</summary>
+    public bool CoffinReadable;
+    /// <summary>The coffin's <c>State</c> (7 alive, 8 revivable, 9 reviving).</summary>
+    public int CoffinState;
+    /// <summary>The coffin's <c>InjuryEndTimeTicks</c>.</summary>
+    public long InjuryEndTicks;
+    /// <summary>The coffin names a living servant other than the row's entity (the servant was re-linked).</summary>
+    public bool CoffinServantAlive;
+}
+
 /// <summary>One <c>ActiveServantMission</c> row, decoded or about to be encoded.</summary>
 internal sealed class MissionRow
 {
@@ -217,13 +244,40 @@ internal static class ServantLogic
         return gone;
     }
 
-    /// <summary>A servant's outcome after a return: gone or revivable is dead, an injury running is injured.</summary>
-    internal static ServantOutcome OutcomeOf(bool exists, bool deadOrDestroyed, int coffinState, long injuryEndTicks, long nowTicks)
+    /// <summary>
+    /// True when the servant is positively being destroyed: the game's <c>Dead</c> component or
+    /// <c>DestroyTag</c>. <paramref name="hasDestroyData"/> is ignored on purpose: <c>DestroyData</c>
+    /// and <c>DestroyState</c> are ordinary components every live unit carries (the destroy
+    /// reason slot), so they are no evidence of a destroy.
+    /// </summary>
+    internal static bool Destroying(bool hasDead, bool hasDestroyTag, bool hasDestroyData = false) => hasDead || hasDestroyTag;
+
+    /// <summary>
+    /// True when the game is done with this servant's return, so the outcome and loot can be read:
+    /// it is gone or being destroyed, it was sent out again (a send needs the old mission buff gone),
+    /// or it is no longer marked on a hunt and carries no mission buff.
+    /// </summary>
+    internal static bool ReturnSettled(ReturnFacts f)
     {
-        if (!exists || deadOrDestroyed) return ServantOutcome.Dead;
-        if (coffinState == Layout.ServantCoffinStateServantRevivable || coffinState == Layout.ServantCoffinStateReviving)
-            return ServantOutcome.Dead;
-        return injuryEndTicks > nowTicks ? ServantOutcome.Injured : ServantOutcome.Returned;
+        if (f.OutAgain) return true;
+        if (!f.Exists || Destroying(f.HasDead, f.HasDestroyTag, f.HasDestroyData)) return true;
+        return !f.OnMission && !f.MissionBuffOn;
+    }
+
+    /// <summary>
+    /// A servant's outcome after a return, Dead only on positive evidence: its entity is gone or
+    /// being destroyed (and its coffin names no other living servant), or its coffin is in the
+    /// game's dead state (revivable or reviving). An injury running is injured; otherwise returned.
+    /// </summary>
+    internal static ServantOutcome OutcomeOf(ReturnFacts f, long nowTicks)
+    {
+        bool coffinDead = f.CoffinReadable
+            && (f.CoffinState == Layout.ServantCoffinStateServantRevivable || f.CoffinState == Layout.ServantCoffinStateReviving);
+        if (coffinDead) return ServantOutcome.Dead;
+        bool alive = f.Exists && !Destroying(f.HasDead, f.HasDestroyTag, f.HasDestroyData);
+        if (!alive && !f.CoffinServantAlive) return ServantOutcome.Dead;
+        long injury = f.CoffinReadable ? f.InjuryEndTicks : 0;
+        return injury > nowTicks ? ServantOutcome.Injured : ServantOutcome.Returned;
     }
 
     /// <summary>Add up inventory slots (item, amount) into loot rows, in first-seen order.</summary>

@@ -210,7 +210,11 @@ public readonly struct ServantLoot
 /// <summary>One servant of a finished hunt.</summary>
 public sealed class ReturnedServant
 {
-    /// <summary>The servant unit (destroyed when <see cref="Outcome"/> is <see cref="ServantOutcome.Dead"/>).</summary>
+    /// <summary>
+    /// The servant unit (destroyed when <see cref="Outcome"/> is <see cref="ServantOutcome.Dead"/>).
+    /// Normally the entity the hunt row named; when that entity is gone but its coffin names another
+    /// living servant, that servant.
+    /// </summary>
     public CastleId Servant { get; init; }
 
     /// <summary>The servant's coffin; none when it could not be found.</summary>
@@ -237,7 +241,8 @@ public sealed class ReturnedServant
 
     /// <summary>
     /// True when the servant came back and its inventory was read (<see cref="Loot"/> holds what it
-    /// carries); false when it died or the inventory could not be read.
+    /// carries); false when it died, the inventory could not be read, or it was already sent out
+    /// again before the publish (<see cref="Loot"/> is then empty).
     /// </summary>
     public bool LootIsHaul { get; init; }
 }
