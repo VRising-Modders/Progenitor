@@ -153,7 +153,127 @@ public class InventoryStampTests
         Assert.NotEqual(s1.Stamp(InventoryRef.None), s2.Stamp(InventoryRef.None));
     }
 
+    // ---- job completion ----------------------------------------------------------------------------
+
+    [Fact]
+    public void A_completion_that_throws_makes_the_whole_batch_fresh_and_the_next_batch_retries()
+    {
+        var w = new FakeStampWorld();
+        var a = w.Chest(10, 3, Arch1, 100);
+        var b = w.Chest(11, 4, Arch1, 100);
+        var s = w.Stamps();
+        var refs = new[] { a, b };
+        var known = new long[2];
+        s.Stamps(refs, known);
+        w.Clock = 1100;
+        long since = s.Clock;
+        Assert.False(s.AnyChangedSince(refs, since));
+
+        w.CompletionThrows = true;
+        var fresh = new long[2];
+        s.Stamps(refs, fresh);
+        Assert.NotEqual(known[0], fresh[0]);
+        Assert.NotEqual(known[1], fresh[1]);               // the second container is not trusted either
+        Assert.True(s.AnyChangedSince(refs, since));
+        Assert.True(s.CompletionFailures >= 2);
+
+        w.CompletionThrows = false;
+        var again = new long[2];
+        s.Stamps(refs, again);
+        Assert.Equal(known, again);                        // unchanged content reads equal again
+        Assert.False(s.AnyChangedSince(refs, since));
+    }
+
+    [Fact]
+    public void Completion_runs_on_an_entity_the_raw_read_just_confirmed_and_the_version_is_read_after_it()
+    {
+        var w = new FakeStampWorld { Clock = 1000 };
+        var gone = w.Chest(10, 3, Arch1, 100);
+        var live = w.Chest(11, 4, Arch1, 100);
+        var refs = new[] { gone, live };
+        var s = w.Stamps();
+        s.AnyChangedSince(refs, 0);
+        w.Clock = 1100;
+        long since = s.Clock;
+        long before = s.Stamp(live);
+
+        // The first cached entity is destroyed; a writer job on the second is still running.
+        w.Entities.Remove((10, 1));
+        w.Owners.Remove((10, 1, 0));
+        w.CompletedOn.Clear();
+        w.PendingWrite = (11, 1150);
+        w.Clock = 1200;
+        Assert.True(s.AnyChangedSince(refs, since));
+        Assert.Equal((11, false), Assert.Single(w.CompletedOn)); // never on the destroyed entity
+        Assert.NotEqual(before, s.Stamp(live));                  // the post-completion version is the one read
+        Assert.True(s.AnyChangedSince(new[] { live }, since));
+    }
+
     // ---- 64-bit extension ------------------------------------------------------------------------
+
+    [Fact]
+    public void An_untouched_version_keeps_its_64_bit_value_however_far_the_clock_runs()
+    {
+        var w = new FakeStampWorld { Clock = 1000 };
+        var chest = w.Chest(10, 3, Arch1, 900);
+        var s = w.Stamps();
+        long a = s.Stamp(chest);
+        // Step the clock past 2^31 beyond the version in frames short enough for the extension.
+        for (uint step = 0; step < 6; step++)
+        {
+            w.Clock = unchecked(w.Clock + 0x20000000u);
+            s.Tick();
+        }
+        Assert.True(s.Clock > 1000 + (1L << 31));
+        Assert.Equal(a, s.Stamp(chest));                   // without keeping, 900 would now extend "ahead"
+        long since = s.Clock;
+        Assert.False(s.AnyChangedSince(new[] { chest }, since));
+        w.Bump(10, w.Clock);
+        Assert.NotEqual(a, s.Stamp(chest));
+        Assert.True(s.AnyChangedSince(new[] { chest }, since));
+    }
+
+    [Fact]
+    public void A_new_store_drops_every_cached_reference()
+    {
+        var w = new FakeStampWorld();
+        var chest = w.Chest(10, 3, Arch1, 100);
+        var s = w.Stamps();
+        s.Stamp(chest);
+        Assert.Equal(1, w.Resolves);
+        w.Store = 2;
+        s.Stamp(chest);
+        Assert.Equal(2, w.Resolves);
+    }
+
+    [Fact]
+    public void The_audit_runs_only_while_a_stamp_user_other_than_watch_exists()
+    {
+        var w = new FakeStampWorld();
+        var chest = w.Chest(10, 3, Arch1, 100);
+        var s = w.Stamps();
+        s.Stamp(chest, user: false);                       // the watch hub's path
+        s.Tick();
+        Assert.False(s.HasUser);
+        Assert.Equal(0, s.Audits);
+        s.Stamp(chest);                                    // a plugin
+        s.Tick();
+        Assert.True(s.HasUser);
+        Assert.Equal(1, s.Audits);
+        for (int i = 0; i < InventoryStamps.EvictAfterFrames + 2; i++) s.Tick();
+        Assert.False(s.HasUser);
+    }
+
+    [Fact]
+    public void The_self_test_names_what_differs_from_GetChunk()
+    {
+        Assert.Null(ChunkVersionMath.SelfTestMismatch(3, 0x1000, 0x5000, 3, 0x1000, 0x5000));
+        Assert.Contains("chunk 3 vs 4", ChunkVersionMath.SelfTestMismatch(3, 0x1000, 0x5000, 4, 0x1000, 0x5000));
+        Assert.Contains("archetype 0x1000 vs 0x2000", ChunkVersionMath.SelfTestMismatch(3, 0x1000, 0x5000, 3, 0x2000, 0x5000));
+        Assert.Contains("store", ChunkVersionMath.SelfTestMismatch(3, 0x1000, 0x5000, 3, 0x1000, 0x6000));
+    }
+
+    // ---- 64-bit extension (math) -------------------------------------------------------------
 
     [Fact]
     public void Extension_maps_behind_exactly_and_ahead_or_very_old_as_newer()
@@ -622,9 +742,26 @@ internal sealed class FakeStampWorld : IInventoryStampSource
         return true;
     }
 
-    public void CompleteWriters(int index, int version, bool instances)
+    /// <summary>Entities completion ran through, in order.</summary>
+    internal readonly List<(int Index, bool Instances)> CompletedOn = new();
+
+    /// <summary>When set, CompleteWriters throws (the game's GetBufferRawRO refusing the entity).</summary>
+    internal bool CompletionThrows;
+
+    /// <summary>A writer job still running: its version lands on the slots of this entity when completion runs.</summary>
+    internal (int Index, uint Version)? PendingWrite;
+
+    public bool CompleteWriters(int index, int version, bool instances)
     {
+        if (CompletionThrows) throw new InvalidOperationException("entity does not have the buffer");
+        CompletedOn.Add((index, instances));
         if (!instances) CompletedSlots[0]++;
+        if (!instances && PendingWrite is { } p)
+        {
+            Bump(p.Index, p.Version);
+            PendingWrite = null;
+        }
+        return true;
     }
 
     public bool TryContentHash(int index, int version, out ulong hash)

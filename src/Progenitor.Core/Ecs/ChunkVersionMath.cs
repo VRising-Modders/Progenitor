@@ -66,6 +66,19 @@ internal static class ChunkVersionMath
         indexInChunk >= 0 && indexInChunk < entityCount;
 
     /// <summary>
+    /// The self-test's verdict: null when the raw read names the same chunk, archetype and store as
+    /// the interop's <c>EntityManager.GetChunk</c>, else what differs.
+    /// </summary>
+    internal static string? SelfTestMismatch(int rawChunk, long rawArchetype, long rawStore, int chunk, long archetype, long store)
+    {
+        var parts = new List<string>(3);
+        if (rawChunk != chunk) parts.Add("chunk " + rawChunk + " vs " + chunk);
+        if (rawArchetype != archetype) parts.Add("archetype 0x" + rawArchetype.ToString("X") + " vs 0x" + archetype.ToString("X"));
+        if (rawStore != store) parts.Add("store 0x" + rawStore.ToString("X") + " vs 0x" + store.ToString("X"));
+        return parts.Count == 0 ? null : string.Join(", ", parts);
+    }
+
+    /// <summary>
     /// Byte offset of the change version of the type at <paramref name="typePosition"/> for the
     /// chunk at <paramref name="listIndex"/>, from the start of <c>ArchetypeChunkData.m_Data</c>:
     /// the data starts with <c>ChunkIndex[Capacity]</c>, then one <c>uint[Capacity]</c> per type,

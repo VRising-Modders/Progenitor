@@ -253,7 +253,8 @@ public sealed class PluginInventory
 
     /// <summary>
     /// The server's change clock now, a 64-bit count that only grows (across Core reloads too). Take
-    /// it before reading containers and pass it to <see cref="AnyChangedSince"/> later.
+    /// it before reading containers and pass it to <see cref="AnyChangedSince"/> later. Reading it
+    /// completes no jobs and reads no container.
     /// </summary>
     public long Clock
     {
@@ -285,7 +286,8 @@ public sealed class PluginInventory
     /// Call <paramref name="handler"/> on the main thread when the contents change, or once with
     /// <see cref="InventoryChangeKind.Gone"/> when the inventory goes away. Checked every
     /// <paramref name="interval"/> (default 500 ms, minimum 100 ms) by fingerprint, and on the
-    /// next frame after a <c>ctx.Inventory</c> write touches it. A check whose
+    /// next frame after a <c>ctx.Inventory</c> write touches it. With the experimental server
+    /// setting <c>[Inventory] WatchUsesChangeStamps</c> (default false), a check whose
     /// <see cref="ChangeStamp"/> is unchanged skips the fingerprint, except every 8th, which
     /// fingerprints anyway. Tracked: unload stops it.
     /// </summary>

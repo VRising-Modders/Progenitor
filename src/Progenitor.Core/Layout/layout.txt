@@ -34,6 +34,12 @@
 #     --dump-server <server metadata file> \
 #     --build <build id>
 #
+# --build is the commit the generate ran on: pass `--build $(git rev-parse --short HEAD)` (the
+# parent of the commit that will carry the regenerated file, so the header never names the commit
+# it is in). The header's `build:` line is provenance only: `--check` ignores it and compares the
+# declarations hash and the game identity. Verify before committing with
+# `dotnet run --project tools/layoutgen -- --declarations ... --out ... --dump-server ... --game-assembly server=... --check`.
+#
 # The metadata file comes from PROGENITOR_METADATA_DIR (default <workspace>\_tools\interop-dump,
 # one folder per side); tools/deploy.ps1 finds it there. The server metadata is the authority for
 # every line below. Each of these types is a ProjectM / Stunlock / Unity component present in both
@@ -921,6 +927,12 @@ offset EntityComponentStoreVersionByEntityOffset       = 0x0   : EntityComponent
 offset EntityComponentStoreEntityInChunkByEntityOffset = 0x8   : EntityComponentStore.m_EntityInChunkByEntity # EntityInChunk*
 offset EntityComponentStoreGlobalSystemVersionOffset   = 0x198 : EntityComponentStore.m_GlobalSystemVersion   # uint
 offset EntityComponentStoreEntitiesCapacityOffset      = 0x19C : EntityComponentStore.m_EntitiesCapacity      # int
+offset EntityComponentStoreArchetypesOffset            = 0x78  : EntityComponentStore.m_Archetypes            # UnsafePtrList<Archetype>, embedded; next field at 0x90
+# UnsafePtrList<T> is an open generic in the metadata (every field reads 0x0). UntypedUnsafeList is
+# Unity's non-generic layout twin of UnsafeList / UnsafePtrList (same fields, same order), and the
+# 0x18 between m_Archetypes and m_ArchetypeActive matches its extent; its offsets are the ones read.
+offset UntypedUnsafeListPtrOffset                      = 0x0   : UntypedUnsafeList.Ptr                         # Archetype**
+offset UntypedUnsafeListLengthOffset                   = 0x8   : UntypedUnsafeList.m_length
 size   EntityInChunkStride                             = 8     : EntityInChunk
 offset EntityInChunkChunkOffset                        = 0x0   : EntityInChunk.Chunk                          # ChunkIndex, one int
 offset EntityInChunkIndexInChunkOffset                 = 0x4   : EntityInChunk.IndexInChunk

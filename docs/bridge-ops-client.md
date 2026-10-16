@@ -295,7 +295,7 @@ plugin API). Refused on the client. MCP: `progenitor_inventory_stamp`.
 
 | Args | Does |
 |---|---|
-| `{"containers":["123:1","456:2#1"]}` (array or comma list) | Owner ids `index:version` of this world load: a chest, station, heart, player character or servant; `#1` or `/out` for a refinement station's output. Returns `clock`, `stamps` (per container: `container`, `inventory` (the entity that holds the slots, `""` when it did not resolve), `stamp` as hex text), `batchMicroseconds`, and the counters `misses`, `audits`, `freshStamps`, `resolves`, `entries`, `typeScans`, `failures` (raw reads that reported unknown, by the check that failed: `EntityVersion`, `ChunkSlot`, `Type`, ...). |
+| `{"containers":["123:1","456:2#1"]}` (array or comma list) | Owner ids `index:version` of this world load: a chest, station, heart, player character or servant; `#1` or `/out` for a refinement station's output. Returns `clock`, `stamps` (per container: `container`, `inventory` (the entity that holds the slots, `""` when it did not resolve), `stamp` as hex text), `batchMicroseconds`, and the counters `misses`, `audits`, `freshStamps`, `resolves`, `entries`, `typeScans`, `failures` (raw reads that reported unknown, by the check that failed: `EntityVersion`, `UnknownArchetype`, `ChunkSlot`, `Type`, ...), `completionFailures` (batches whose job completion failed; their answers were fresh), `selfTested` and `disabled` (the first-read comparison with `EntityManager.GetChunk`; a non-empty `disabled` means the raw reads are off for the process), `auditing` (the audit runs only after a non-Watch stamp user called). |
 | `{"containers":[...],"since":<clock>}` | Also `changedSince`: `AnyChangedSince(containers, since)`, asked before the stamps. Pass the `clock` of an earlier reply. |
 
 Equal stamps mean the slots did not change; unequal means they may have. `misses` counts audit
@@ -305,7 +305,8 @@ Live check (acceptance procedure, not run). On the isolated test server, with a 
 a refinement station and a heart you know (bridge `castles` lists the entities):
 
 1. `{"containers":[<chest>,<station>,<station>#1,<heart>,<player character>]}`. Expect every
-   `inventory` resolved, no stamp repeated between containers, `failures` empty. Repeat twice in a
+   `inventory` resolved, no stamp repeated between containers, `failures` empty, `selfTested` true
+   and `disabled` empty (else the server log names the self-test mismatch). Repeat twice in a
    row with nothing happening: the same stamps, `freshStamps` unchanged, `resolves` not growing.
 2. Pass the reply's `clock` back as `since` a few seconds later with nothing moving: `changedSince`
    false (a stamp that moves while idle is a false positive; note which container and how often).

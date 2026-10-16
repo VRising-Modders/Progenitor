@@ -2262,8 +2262,11 @@ The game does create `InventoryChangedEvent` entities on its add, remove and mov
 system consumes them and whether every inventory writer creates one is not established, so the
 watch does not depend on them.
 
-A due check whose [change stamp](#change-stamps) equals the one taken with the last fingerprint
-skips the fingerprint; every 8th due check fingerprints anyway, and a poke always does.
+With `[Inventory] WatchUsesChangeStamps = true` in `BepInEx/config/progenitor.cfg` (server,
+default `false` until the stamps are verified live), a due check whose
+[change stamp](#change-stamps) equals the one taken with the last fingerprint skips the
+fingerprint; every 8th due check fingerprints anyway, and a poke always does. A watch alone never
+turns the stamp audit on.
 
 ### Change stamps
 
@@ -2286,7 +2289,7 @@ lastLook = now;
 |---|---|
 | `long ChangeStamp(InventoryRef)` | Compare for **equality only**. Equal: the slots did not change. Unequal: they **may** have. Never 0. |
 | `void ChangeStamps(IReadOnlyList<InventoryRef>, Span<long>)` | The same, as one batch. Throws `ArgumentException` when the span is shorter than the list. |
-| `long Clock` | A 64-bit count that only grows, also across Core reloads and world loads. |
+| `long Clock` | A 64-bit count that only grows, also across Core reloads and world loads. Reading it completes no jobs and reads no container. |
 | `bool AnyChangedSince(IReadOnlyList<InventoryRef>, long since)` | True when any container may have changed at or after `since` (a `Clock` value). Every container in the list is refreshed, so one call caches them all. |
 
 - **False positives only.** The stamp is the game's change version of `InventoryBuffer` on the
@@ -2302,16 +2305,24 @@ lastLook = now;
 - **Server, main thread, never from inside a native inventory hook** (a Harmony patch on an
   inventory system or utility): the store may be mid-change there. On the client every member
   throws `InvalidOperationException`, like the rest of `ctx.Inventory`.
-- **In-flight jobs.** Each batch first completes the jobs writing `InventoryBuffer` (and
-  `InventoryInstanceElement`) through `EntityManager.GetBufferRawRO` on the first container, so a
-  version read is never ahead of a write still running.
-- **Audit.** Every frame the server re-hashes the raw rows of four recently stamped containers.
-  Content that changed under an unchanged stamp is a miss: logged once as
+- **In-flight jobs.** Each batch completes the jobs writing `InventoryBuffer` (and, when a
+  container's slots live on a separate entity, `InventoryInstanceElement`) through
+  `EntityManager.GetBufferRawRO` on the first entity a raw read has just confirmed alive with that
+  buffer, then reads the version again. A completion that fails makes the whole batch's answers
+  fresh ("changed").
+- **Self-test.** The first raw read after Core loads is compared with the interop's
+  `EntityManager.GetChunk` (chunk, archetype, store). A mismatch disables the raw reads for the
+  process with one `ChunkVersions: raw change-version reads DISABLED` error line; every stamp is
+  then fresh.
+- **Audit.** While a stamp user other than `Watch` (a plugin, the dev bridge) has called in the
+  last 3600 frames, the server re-hashes the raw rows of four recently stamped containers every
+  frame. Content that changed under an unchanged stamp is a miss: logged once as
   `Inventory: CHANGE STAMP MISS`, counted, and folded into that container's stamp so a poller
   still sees it. The dev bridge `inventory_stamp` op reports the count.
-- **Cost.** After the first call for a reference: about twenty raw reads, no game call. The first
-  call resolves the owner's inventory with the same lookups `Read` uses; the result is cached
-  while the raw reads agree with it.
+- **Cost.** Per batch: one or two `GetBufferRawRO` calls (the job completion above). Per
+  reference after its first call: about twenty raw reads and no other game call. The first call
+  resolves the owner's inventory with the same lookups `Read` uses; the result is cached while the
+  raw reads agree with it. While the audit runs it also forces that job completion every frame.
 
 Progenitor's own inventory reads take the buffer read-only (`GetBuffer<InventoryBuffer>(e, true)`),
 so `ctx.Inventory.Read` does not change stamps (`ReadOnlyBufferReadsTests` pins every such call).
