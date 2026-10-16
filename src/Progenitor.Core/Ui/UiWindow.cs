@@ -105,7 +105,9 @@ internal sealed class UiWindowHandle : IUiWindow
         _spec = UiWindowLayout.Spec(preset);
         var opts = options ?? new UiWindowOptions();
         var tabs = UiWindowLayout.TabsFor(preset, title, opts);
-        string? refused = UiWindowLayout.RefuseTabs(tabs) ?? UiWindowLayout.RefuseTools(_spec.ToolbarAllowed ? opts.Tools : null);
+        string? refused = UiWindowLayout.RefuseTabs(tabs) ?? (_spec.ToolbarAllowed
+            ? UiWindowLayout.RefuseTools(opts.Tools, opts.Renamable, UiWindowLayout.ToolbarRowWidth(_spec))
+            : null);
         if (refused != null) throw new ArgumentException(refused, nameof(options));
 
         Preset = preset;
@@ -129,6 +131,7 @@ internal sealed class UiWindowHandle : IUiWindow
         // Text is left-aligned in every standard window (titles center themselves; numbers align right).
         _panel.ContentAlignment = SettingsAlign.Left;
         Ui.WindowChrome(_panel, _spec);
+        _captureFixed = opts.CaptureMode.HasValue;
         _panel.CaptureMode = opts.CaptureMode ?? _spec.CaptureMode;
         _panel.Footer = !opts.VersionStamp ? "" : opts.VersionText.Trim().Length > 0 ? opts.VersionText.Trim() : _stampFooter;
 
@@ -211,8 +214,18 @@ internal sealed class UiWindowHandle : IUiWindow
     public void Show()
     {
         if (_disposed) return;
+        // A Basic window leaves the input to the game, except for a player who is navigating with a controller or the
+        // keyboard when it opens (they pressed A on the button that opened it): it then takes the input while shown, so the
+        // controller moves into it (NAV1 navigates only WhileShown windows) and B closes it.
+        if (_spec.ControllerHandoff && !_captureFixed && !IsOpen)
+            _panel.CaptureMode = UiWindowLayout.CaptureOnShow(_spec, NavigatingNow());
         _panel.Show();
     }
+
+    /// <summary>Whether the player is navigating with a controller or keys now (<see cref="UiNav.Marked"/>); tests replace it.</summary>
+    internal static Func<bool> NavigatingNow { get; set; } = () => UiNav.Marked;
+
+    private bool _captureFixed;
 
     public void Hide()
     {

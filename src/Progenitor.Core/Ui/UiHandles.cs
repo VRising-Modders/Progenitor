@@ -782,10 +782,15 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// from Hide, and one panel that refused to move must not stop the rest of the set from
     /// being laid out.
     /// </summary>
-    internal void PlaceAt(int rank, int count)
+    internal void PlaceAt(int rank, int count) => PlaceAt(new PanelSpot(rank, count));
+
+    /// <summary>WINDOWS1: a centered standard window's frame width (a Tabbed window), which the re-flow keeps tiled panels clear of; 0 otherwise.</summary>
+    internal float CenteredWidth { get; set; }
+
+    internal void PlaceAt(PanelSpot spot)
     {
         if (_panel == null) return;
-        try { _runtime.PlacePanel(_panel, new PanelSpot(rank, count)); }
+        try { _runtime.PlacePanel(_panel, spot); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: re-flow PlacePanel threw: " + e.Message); }
     }
 

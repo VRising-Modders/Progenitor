@@ -108,6 +108,13 @@ internal sealed class GalleryWindows : IDisposable
         info.Fact("Belts", "6");
         info.Note("Chests in every room of this castle.");
         info.Button("Locate all").OnClick(() => Say("tabbed locate all"));
+        // The clip check: 15 more facts make the column longer than the frame; they stop above the version stamp.
+        int added = 0;
+        info.Button("Add facts").OnClick(() =>
+        {
+            for (int i = 0; i < 15; i++, added++) info.Fact("Chest " + (added + 1), (added * 7 % 40) + " / 40");
+            Say("tabbed facts = " + (added + 2));
+        });
 
         var p = w.Panel;
         w.Add(0, p.Text("Throughput", UiTextStyle.Section));

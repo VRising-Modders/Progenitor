@@ -156,15 +156,21 @@ internal sealed class GalleryDemo
                 break;
             case "tone-label":
             {
-                var line = On(tab, panel.Label("Status: idle", LabelTone.Muted));
-                Action(panel, tab, "Cycle status", "Rewrites the line above in place with SetText and a tone.", () =>
+                // A status line in place: the named styles' tones (UiTextStyles.ToneOf), never a raw tone or color.
+                var cycle = new[]
                 {
-                    var next = line.Tone == LabelTone.Muted ? (LabelTone.Pending, "Status: sorting (waiting for the server)")
-                        : line.Tone == LabelTone.Pending ? (LabelTone.Ok, "Status: sorted 3 chests")
-                        : line.Tone == LabelTone.Ok ? (LabelTone.Danger, "Status: the furnace has no fuel")
-                        : (LabelTone.Muted, "Status: idle");
-                    line.SetText(next.Item2, next.Item1);
-                    Report("status = " + next.Item1);
+                    (UiTextStyle.Muted, "Status: idle"),
+                    (UiTextStyle.Warning, "Status: sorting (waiting for the server)"),
+                    (UiTextStyle.Success, "Status: sorted 3 chests"),
+                    (UiTextStyle.Error, "Status: the furnace has no fuel"),
+                };
+                int at = 0;
+                var line = On(tab, panel.Label(cycle[0].Item2, UiTextStyles.ToneOf(cycle[0].Item1)));
+                Action(panel, tab, "Cycle status", "Rewrites the line above in place with SetText and a style's tone.", () =>
+                {
+                    at = (at + 1) % cycle.Length;
+                    line.SetText(cycle[at].Item2, UiTextStyles.ToneOf(cycle[at].Item1));
+                    Report("status = " + cycle[at].Item1);
                 });
                 break;
             }

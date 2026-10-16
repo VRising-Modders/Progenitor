@@ -60,7 +60,28 @@ internal readonly struct PanelSpot
     {
         Rank = rank;
         Count = count;
+        CenteredWidth = 0f;
+        Tiled = 0;
     }
+
+    /// <summary>
+    /// WINDOWS1: a spot in a set that holds a centered wide window (a Tabbed standard window) <paramref name="centeredWidth"/>
+    /// wide. For a tiled panel <paramref name="rank"/> and <paramref name="count"/> are among the tiled panels only; for the
+    /// centered window itself they are 0 of 1 and <paramref name="tiled"/> is how many tiled panels share the screen.
+    /// </summary>
+    internal PanelSpot(int rank, int count, float centeredWidth, int tiled)
+    {
+        Rank = rank;
+        Count = count;
+        CenteredWidth = centeredWidth > 0f ? centeredWidth : 0f;
+        Tiled = tiled > 0 ? tiled : 0;
+    }
+
+    /// <summary>WINDOWS1: the width of the centered wide window the tiled panels must stay clear of; 0 for none.</summary>
+    internal float CenteredWidth { get; }
+
+    /// <summary>WINDOWS1: on the centered window's own spot, how many tiled panels are shown beside it.</summary>
+    internal int Tiled { get; }
 
     /// <summary>This panel's index among the shown panels, ordered by slot.</summary>
     internal int Rank { get; }

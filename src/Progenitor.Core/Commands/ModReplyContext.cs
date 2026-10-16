@@ -30,9 +30,15 @@ internal sealed class ModReplyContext : ICommandContext
     /// </summary>
     internal static ICommandContext For(ICommandContext ctx, object? owner)
     {
-        if (ctx == null || ctx is ModReplyContext) return ctx!;
-        string name = ModMessagePrefix.PluginIdentity(owner).Name;
-        return name.Length == 0 ? ctx : new ModReplyContext(ctx, name);
+        if (ctx == null) return ctx!;
+        // A nested dispatch (a handler running another command with the context it was given) re-wraps the dispatcher's
+        // plain context with the plugin being dispatched now, never stacking two names or keeping the outer one.
+        var plain = ctx is ModReplyContext wrapped ? wrapped._inner : ctx;
+        string name = ModMessagePrefix.CleanName(ModMessagePrefix.PluginIdentity(owner).Name);
+        if (name.Length == 0) return plain;
+        return ctx is ModReplyContext same && string.Equals(same.ModName, name, System.StringComparison.Ordinal)
+            ? same
+            : new ModReplyContext(plain, name);
     }
 
 #if !PROGENITOR_TESTS
@@ -55,8 +61,8 @@ internal sealed class ModReplyContext : ICommandContext
 
     public void Reply(string text, bool prefix)
     {
-        string message = ModMessagePrefix.Apply(ModName, text, prefix);
-        if (message.Length == 0) return;
-        _inner.Reply(message);
+        // The shipped split: the prefix on the first chat line only, each line within the 500-byte reply limit.
+        foreach (string line in ModMessagePrefix.ReplyChunks(ModName, text, prefix))
+            _inner.Reply(line);
     }
 }

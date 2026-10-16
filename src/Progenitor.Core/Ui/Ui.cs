@@ -264,6 +264,8 @@ public static partial class Ui
     /// <summary>WINDOWS1: the preset's frame on a game window (<see cref="IUiRuntime.WindowChrome"/>).</summary>
     internal static void WindowChrome(IUiPanel panel, UiWindowSpec spec)
     {
+        // The re-flow keeps tiled panels clear of a centered wide window (UiWindowLayout.Spots / Place).
+        if (panel is UiPanelHandle owned) owned.CenteredWidth = spec.Centered ? spec.FrameWidth : 0f;
         if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().WindowChrome(runtimePanel, spec); }
@@ -973,8 +975,8 @@ public static partial class Ui
             if (shown.Count == 0) return;
             shown.Sort(static (a, b) => a.PlacementSlot.CompareTo(b.PlacementSlot));
 
-            for (int i = 0; i < shown.Count; i++)
-                shown[i].PlaceAt(i, shown.Count);
+            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.CenteredWidth, ModsMenu.IsWorkspacePanel))
+                panel.PlaceAt(spot);
         }
         catch (Exception e)
         {

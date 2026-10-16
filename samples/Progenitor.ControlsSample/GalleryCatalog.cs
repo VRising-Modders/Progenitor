@@ -112,7 +112,7 @@ internal static class GalleryCatalog
         E("note", Windows, "Note", "panel.Note(text)",
             "a topic needs one short explanation under its heading.", "every entry's line under its control", ControlsPage,
             "Muted, left-aligned."),
-        E("tone-label", Windows, "Status line", "panel.Label(text, LabelTone)",
+        E("tone-label", Windows, "Status line", "panel.Label(text, UiTextStyles.ToneOf(UiTextStyle.X)), then SetText(text, tone)",
             "a status that changes in place (SetText with a tone).", "Windows tab, Status line", ControlsPage + " (status line)",
             "Body, Muted, Success, Warning or Error by tone; left-aligned."),
         E("fact", Windows, "Fact", "panel.Fact(name, value)",

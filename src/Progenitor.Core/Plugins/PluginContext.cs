@@ -1697,7 +1697,7 @@ public sealed class PluginChat
     public int Broadcast(string text, ChatMessageType type = ChatMessageType.System)
     {
         var world = _ctx.World;
-        return world == null ? 0 : Progenitor.Chat.Chat.Broadcast(world, ModMessagePrefix.Apply(_ctx.Name, text), type);
+        return world == null ? 0 : Broadcast(text, prefix: true, type);
     }
 
     /// <summary>
@@ -1708,25 +1708,46 @@ public sealed class PluginChat
     public bool SendTo(Entity user, string text, ChatMessageType type = ChatMessageType.System)
     {
         var world = _ctx.World;
-        return world != null && Progenitor.Chat.Chat.SendTo(world, user, ModMessagePrefix.Apply(_ctx.Name, text), type);
+        return world != null && SendTo(user, text, prefix: true, type);
     }
 
     /// <summary>
     /// WINDOWS1: <see cref="Broadcast(string, ChatMessageType)"/> choosing whether the mod's name goes in front.
     /// Both forms put <c>&lt;Mod Name&gt;: </c> in front of the text by default (not twice: a text that already starts
-    /// with the name is sent as it is); <paramref name="prefix"/> false sends the text exactly as given.
+    /// with the name is sent as it is); <paramref name="prefix"/> false sends the text exactly as given. A text longer
+    /// than one chat line (500 UTF-8 bytes with the name) is sent as several lines, the name on the first, as a command
+    /// reply is, instead of being cut. Returns the recipients of the first line.
     /// </summary>
     public int Broadcast(string text, bool prefix, ChatMessageType type = ChatMessageType.System)
     {
         var world = _ctx.World;
-        return world == null ? 0 : Progenitor.Chat.Chat.Broadcast(world, ModMessagePrefix.Apply(_ctx.Name, text, prefix), type);
+        if (world == null) return 0;
+        int first = -1;
+        foreach (string line in ModMessagePrefix.ReplyChunks(_ctx.Name, text, prefix))
+        {
+            int n = Progenitor.Chat.Chat.Broadcast(world, line, type);
+            if (first < 0) first = n;
+        }
+
+        return first < 0 ? 0 : first;
     }
 
-    /// <summary>WINDOWS1: <see cref="SendTo(Entity, string, ChatMessageType)"/> choosing whether the mod's name goes in front.</summary>
+    /// <summary>
+    /// WINDOWS1: <see cref="SendTo(Entity, string, ChatMessageType)"/> choosing whether the mod's name goes in front; a long
+    /// text goes as several lines, as with <see cref="Broadcast(string, bool, ChatMessageType)"/>. True when every line was sent.
+    /// </summary>
     public bool SendTo(Entity user, string text, bool prefix, ChatMessageType type = ChatMessageType.System)
     {
         var world = _ctx.World;
-        return world != null && Progenitor.Chat.Chat.SendTo(world, user, ModMessagePrefix.Apply(_ctx.Name, text, prefix), type);
+        if (world == null) return false;
+        bool all = true, any = false;
+        foreach (string line in ModMessagePrefix.ReplyChunks(_ctx.Name, text, prefix))
+        {
+            any = true;
+            all &= Progenitor.Chat.Chat.SendTo(world, user, line, type);
+        }
+
+        return any && all;
     }
 }
 

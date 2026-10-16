@@ -127,6 +127,12 @@ internal sealed class UiWindowSpec
     /// <summary>A controller navigates the window by default (NAV1 navigates only windows that take the input while shown).</summary>
     internal bool ControllerNavigates => CaptureMode == UiCaptureMode.WhileShown;
 
+    /// <summary>
+    /// Basic: a window opened while the player navigates with a controller or keys takes the input while shown, so the
+    /// controller reaches it (<see cref="UiWindowLayout.CaptureOnShow"/>).
+    /// </summary>
+    internal bool ControllerHandoff => CaptureMode == UiCaptureMode.WhenHovered;
+
     /// <summary>The title band at the top of the frame.</summary>
     internal float TitleBand => PanelLayout.HeaderHeight;
 
@@ -253,6 +259,35 @@ internal static class UiWindowLayout
     }
 
     /// <summary>
+    /// The info column's clip rect, from the frame's top-center: the column's x and width, from <paramref name="top"/> (under
+    /// the pinned rows) down to the frame's bottom pad above the stamp band. Rows below its bottom are cut, never drawn over
+    /// the stamp or past the frame.
+    /// </summary>
+    internal static (float CenterX, float Top, float Width, float Height) InfoClip(
+        float frameWidth, float band, float top, float panelHeight, float footerBand)
+    {
+        float width = Math.Max(1f, band - InfoColumnGap);
+        float centerX = -frameWidth * 0.5f + PanelLayout.PadSide + width * 0.5f;
+        float height = Math.Max(0f, panelHeight - top - PanelLayout.PadBottom - Math.Max(0f, footerBand));
+        return (centerX, top, width, height);
+    }
+
+    /// <summary>How many info rows of <paramref name="heights"/> (stacked with the row gap) are wholly inside a clip <paramref name="clipHeight"/> tall.</summary>
+    internal static int InfoRowsShown(IReadOnlyList<float> heights, float clipHeight)
+    {
+        float y = 0f;
+        int shown = 0;
+        foreach (float h in heights)
+        {
+            if (y + h > clipHeight + 0.01f) break;
+            shown++;
+            y += h + PanelLayout.RowGap;
+        }
+
+        return shown;
+    }
+
+    /// <summary>
     /// The version stamp line: <c>&lt;mod name&gt; &lt;version&gt; · Progenitor &lt;version&gt;</c> (the line a mod's
     /// dialogs carry); the mod's name is shortened with an ellipsis before either version when the line is too wide.
     /// <paramref name="enabled"/> false: empty (no stamp). No name and no version: the framework's line alone.
@@ -274,21 +309,53 @@ internal static class UiWindowLayout
         return null;
     }
 
-    /// <summary>Why <paramref name="tools"/> cannot be a window's toolbar, or null when they can.</summary>
-    internal static string? RefuseTools(IReadOnlyList<UiWindowTool>? tools)
+    /// <summary>
+    /// Why <paramref name="tools"/> (and Rename when <paramref name="renamable"/>) cannot be a window's toolbar, or null when
+    /// they can: at most <see cref="MaxTools"/> captions of at most <see cref="MaxToolCaption"/> characters, and their buttons'
+    /// measured widths (the game's compact button, <see cref="PageButtonLayout.Width"/>, and the gaps between them) within
+    /// <paramref name="rowWidth"/>, so the toolbar never runs past the frame. <paramref name="rowWidth"/> 0 or less checks
+    /// only the counts and captions.
+    /// </summary>
+    internal static string? RefuseTools(IReadOnlyList<UiWindowTool>? tools, bool renamable = false, float rowWidth = 0f)
     {
-        if (tools == null || tools.Count == 0) return null;
-        if (tools.Count > MaxTools) return "A window takes at most " + MaxTools + " toolbar buttons; " + tools.Count + " were given.";
-        for (int i = 0; i < tools.Count; i++)
+        int count = tools?.Count ?? 0;
+        if (count == 0 && !renamable) return null;
+        if (count > MaxTools) return "A window takes at most " + MaxTools + " toolbar buttons; " + count + " were given.";
+        for (int i = 0; i < count; i++)
         {
-            string caption = tools[i]?.Caption ?? "";
+            string caption = tools![i]?.Caption ?? "";
             if (string.IsNullOrWhiteSpace(caption)) return "Toolbar button " + i + " has no caption.";
             if (caption.Trim().Length > MaxToolCaption)
                 return "Toolbar button " + i + " is too long: one or two short words, at most " + MaxToolCaption + " characters.";
         }
 
+        if (rowWidth > 0f)
+        {
+            float width = ToolbarWidth(tools, renamable);
+            if (width > rowWidth + 0.5f)
+                return "The toolbar's buttons need " + Math.Round(width).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + " units and the window's row is " + Math.Round(rowWidth).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    + ": use fewer or shorter captions" + (renamable ? " (Rename counts)" : "") + ".";
+        }
+
         return null;
     }
+
+    /// <summary>The toolbar's measured width: each button's compact width side by side with the inline gap, Rename last.</summary>
+    internal static float ToolbarWidth(IReadOnlyList<UiWindowTool>? tools, bool renamable)
+    {
+        var widths = new List<float>();
+        if (tools != null)
+            foreach (var t in tools) widths.Add(PageButtonLayout.Width((t?.Caption ?? "").Trim()));
+        if (renamable) widths.Add(PageButtonLayout.Width(RenameCaption));
+        if (widths.Count == 0) return 0f;
+        float sum = (widths.Count - 1) * PageButtonLayout.Gap;
+        foreach (float w in widths) sum += w;
+        return sum;
+    }
+
+    /// <summary>The width the toolbar row is drawn at: the frame's content row without the info column (it spans the frame).</summary>
+    internal static float ToolbarRowWidth(UiWindowSpec spec) => ContentRowWidth(spec.FrameWidth);
 
     /// <summary>The tab captions a window draws: none where the preset has no tab row; a Tabbed window always one or more.</summary>
     internal static IReadOnlyList<string> TabsFor(UiWindowPreset preset, string title, UiWindowOptions? options)
@@ -329,6 +396,86 @@ internal static class UiWindowLayout
     {
         int pinned = (toolbar ? 1 : 0) + (tabs ? 1 : 0);
         return PanelLayout.HeaderHeight + PanelLayout.PadTop + pinned * (UnityUiRuntimeMetrics.RowHeight + PanelLayout.RowGap);
+    }
+
+    /// <summary>
+    /// The input mode a window of <paramref name="spec"/> is shown with: the preset's, except that a Basic window opened
+    /// while the player is navigating (<paramref name="navigating"/>: the last input was the controller or the navigation
+    /// keys) is shown <see cref="UiCaptureMode.WhileShown"/>, so the controller moves into it.
+    /// </summary>
+    internal static UiCaptureMode CaptureOnShow(UiWindowSpec spec, bool navigating) =>
+        spec.ControllerHandoff && navigating ? UiCaptureMode.WhileShown : spec.CaptureMode;
+
+    /// <summary>
+    /// The spots of the shown panels (in slot order). Without a centered wide window this is the ordinary rank of the whole
+    /// set. With one, the centered window gets 0 of 1 and the count of tiled panels beside it, and every tiled panel is
+    /// ranked among the tiled panels only, carrying the centered window's width so its placement keeps clear of it.
+    /// Workspace panes keep their place in the whole set (they draw from their own geometry).
+    /// </summary>
+    internal static List<(T Panel, PanelSpot Spot)> Spots<T>(IReadOnlyList<T> shown, Func<T, float> centeredWidth, Func<T, bool> workspace)
+    {
+        var result = new List<(T, PanelSpot)>(shown.Count);
+        float centered = 0f;
+        var tiled = new List<T>();
+        foreach (var p in shown)
+        {
+            float w = centeredWidth(p);
+            if (w > 0f) centered = Math.Max(centered, w);
+            else if (!workspace(p)) tiled.Add(p);
+        }
+
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var p = shown[i];
+            if (centered <= 0f || workspace(p)) result.Add((p, new PanelSpot(i, shown.Count)));
+            else if (centeredWidth(p) > 0f) result.Add((p, new PanelSpot(0, 1, centeredWidth(p), tiled.Count)));
+            else result.Add((p, new PanelSpot(tiled.IndexOf(p), tiled.Count, centered, 0)));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Where a panel <paramref name="panelWidth"/> wide goes on a canvas <paramref name="canvasWidth"/> x
+    /// <paramref name="canvasHeight"/>. A centered window alone is dead center. With tiled panels beside it, the centered
+    /// window and the tiled panels' columns are laid side by side as one centered group, the centered window on the left;
+    /// the tiled panels tile (and, past their columns, cascade) inside the area right of it, so none ever lands under it.
+    /// When the screen is too narrow for both, the tiled area keeps its own width at the right edge.
+    /// </summary>
+    internal static PanelOffset Place(PanelSpot spot, float panelWidth, float canvasWidth, float canvasHeight, bool centered)
+    {
+        float canvasW = float.IsNaN(canvasWidth) || canvasWidth <= 0f ? PanelFlow.FallbackCanvasWidth : canvasWidth;
+        if (centered)
+        {
+            if (spot.Tiled <= 0) return PanelOffset.Centre;
+            var g = Group(spot.CenteredWidth > 0f ? spot.CenteredWidth : panelWidth, BasicFrameWidth, spot.Tiled, canvasW);
+            return new PanelOffset(g.CenteredX, 0f);
+        }
+
+        if (spot.CenteredWidth <= 0f) return PanelFlow.Offset(spot, panelWidth, canvasW, canvasHeight);
+        var group = Group(spot.CenteredWidth, panelWidth, spot.Count, canvasW);
+        var inArea = PanelFlow.Offset(spot, panelWidth, group.AreaWidth, canvasHeight);
+        return new PanelOffset(inArea.X + group.AreaCenterX, inArea.Y);
+    }
+
+    private static (float CenteredX, float AreaWidth, float AreaCenterX) Group(float centeredWidth, float tiledWidth, int tiled, float canvasW)
+    {
+        float gap = PanelFlow.ColumnGap;
+        float margin = PanelFlow.EdgeMargin;
+        // The tiled area: what is left of the canvas right of the centered window, at least one tiled frame.
+        float area = Math.Max(tiledWidth + 2f * margin, canvasW - centeredWidth - gap);
+        int columns = PanelFlow.Columns(area, tiledWidth);
+        int occupied = Math.Max(1, Math.Min(tiled, columns));
+        float tiledSpan = occupied * tiledWidth + (occupied - 1) * gap;
+        float groupWidth = centeredWidth + gap + tiledSpan;
+        float left = -groupWidth * 0.5f;
+        // Too wide for the screen: the tiled columns stay whole at the right edge, the centered window as far left as it fits.
+        float rightEdge = canvasW * 0.5f - margin;
+        if (left + groupWidth > rightEdge) left = rightEdge - groupWidth;
+        float centeredX = left + centeredWidth * 0.5f;
+        float tiledLeft = left + centeredWidth + gap;
+        // PanelFlow centers the occupied columns at 0 inside the area; shift that center onto the tiled span's center.
+        return (centeredX, area, tiledLeft + tiledSpan * 0.5f);
     }
 
     /// <summary>What Escape and a controller's B do in every preset. Fixed, so every mod's windows answer alike.</summary>

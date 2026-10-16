@@ -10,28 +10,28 @@ namespace Progenitor.Ui;
 /// </summary>
 public enum UiTextStyle
 {
-    /// <summary>Ordinary text: the game's body font, 18, the caption color, left-aligned.</summary>
+    /// <summary>Ordinary text: the body font, 20, the caption color, left-aligned.</summary>
     Body = 0,
 
-    /// <summary>A block's title inside a window: the game's title font, 24, bright, centered, with the game's rule under it.</summary>
+    /// <summary>A block's title inside a window: the body font, 24, the game's popup gray, centered, with the game's rule under it.</summary>
     Title = 1,
 
-    /// <summary>A section label above a group of rows: the game's title font, 24, the heading color, left-aligned, with the section rule.</summary>
+    /// <summary>A section label above a group of rows: the body font, bold, 24, white, left-aligned, with the section rule.</summary>
     Section = 2,
 
-    /// <summary>Secondary text, a hint, a value that does not apply now: the body font, 18, muted, left-aligned.</summary>
+    /// <summary>Secondary text, a hint, a value that does not apply now: the body font, 20, muted, left-aligned.</summary>
     Muted = 3,
 
-    /// <summary>A count, an amount or a time: the body font's tabular figures, 18, the caption color, right-aligned.</summary>
+    /// <summary>A count, an amount or a time: the body font's tabular figures, 20, the caption color, right-aligned.</summary>
     Number = 4,
 
-    /// <summary>Something the player should look at: the body font, 18, amber, left-aligned.</summary>
+    /// <summary>Something the player should look at: the body font, 20, amber, left-aligned.</summary>
     Warning = 5,
 
-    /// <summary>A failure or a blocking problem: the body font, 18, red, left-aligned.</summary>
+    /// <summary>A failure or a blocking problem: the body font, 20, red, left-aligned.</summary>
     Error = 6,
 
-    /// <summary>Done, running, enabled: the body font, 18, green, left-aligned.</summary>
+    /// <summary>Done, running, enabled: the body font, 20, green, left-aligned.</summary>
     Success = 7,
 }
 
@@ -48,27 +48,38 @@ public enum UiTextAlign
     Right = 2,
 }
 
-/// <summary>WINDOWS1: what one style draws. Game-free and tested; the kit's controls draw from the same numbers.</summary>
+/// <summary>
+/// WINDOWS1: what one style draws. This table is the single source: the kit's label rows draw at <see cref="UiTextStyles.BodySize"/>,
+/// <see cref="UiTextStyles.Text(IUiPanel, string, UiTextStyle)"/> writes each cell's size, tone and alignment from it, and the
+/// tests pin the label, heading and dialog-title rows to the same numbers.
+/// </summary>
 internal sealed class UiTextStyleSpec
 {
-    internal UiTextStyleSpec(UiTextStyle style, string font, float size, PaletteColor color, UiTextAlign align, LabelTone tone, string useWhen)
+    internal UiTextStyleSpec(
+        UiTextStyle style, string font, bool bold, float size, PaletteColor color, UiTextAlign align, LabelTone tone, CellTone cellTone,
+        string useWhen)
     {
         Style = style;
         Font = font;
+        Bold = bold;
         Size = size;
         Color = color;
         Align = align;
         Tone = tone;
+        CellTone = cellTone;
         UseWhen = useWhen;
     }
 
     internal UiTextStyle Style { get; }
 
-    /// <summary><c>title</c> (the game's display font with its drop shadow) or <c>body</c> (Nocturne Serif Regular).</summary>
+    /// <summary><c>body</c>: the kit's body font, the game's Nocturne Serif Regular (the one every kit label uses).</summary>
     internal string Font { get; }
+
+    internal bool Bold { get; }
 
     internal float Size { get; }
 
+    /// <summary>The color drawn: <see cref="MenuPalette.LabelColor"/> of <see cref="Tone"/> and <see cref="MenuPalette.TextColor"/> of <see cref="CellTone"/> (Title and Section: their rows' own colors).</summary>
     internal PaletteColor Color { get; }
 
     internal UiTextAlign Align { get; }
@@ -76,37 +87,51 @@ internal sealed class UiTextStyleSpec
     /// <summary>The <see cref="LabelTone"/> the style draws with on a label.</summary>
     internal LabelTone Tone { get; }
 
+    /// <summary>The <see cref="CellTone"/> the style draws with in a cell (a number, a name-and-value row).</summary>
+    internal CellTone CellTone { get; }
+
     internal string UseWhen { get; }
 }
 
 /// <summary>WINDOWS1: the style table and the calls that draw a style.</summary>
 public static class UiTextStyles
 {
-    /// <summary>The body text size every kit label uses.</summary>
-    internal const float BodySize = 18f;
+    /// <summary>The body text size: every kit label row is drawn at it (<c>AddLabel</c>), and every styled cell.</summary>
+    internal const float BodySize = 20f;
 
-    internal const string TitleFont = "title";
     internal const string BodyFont = "body";
+
+    /// <summary>The dialog title row's color (the game's popup text, 0.9 gray).</summary>
+    internal static readonly PaletteColor TitleColor = new(DialogLayout.TextGrey, DialogLayout.TextGrey, DialogLayout.TextGrey);
+
+    /// <summary>The heading row's color (a plain kit label, white, bold).</summary>
+    internal static readonly PaletteColor SectionColor = new(1f, 1f, 1f);
 
     private static readonly UiTextStyleSpec[] Specs =
     {
-        new(UiTextStyle.Body, BodyFont, BodySize, MenuPalette.Text, UiTextAlign.Left, LabelTone.Normal,
+        new(UiTextStyle.Body, BodyFont, false, BodySize, MenuPalette.Text, UiTextAlign.Left, LabelTone.Normal, CellTone.Normal,
             "Ordinary sentences and values."),
-        new(UiTextStyle.Title, TitleFont, DialogLayout.TitleFontSize, MenuPalette.Text, UiTextAlign.Center, LabelTone.Normal,
+        new(UiTextStyle.Title, BodyFont, false, DialogLayout.TitleFontSize, TitleColor, UiTextAlign.Center, LabelTone.Normal, CellTone.Normal,
             "The name of a block inside a window (the window's own title is drawn by the window)."),
-        new(UiTextStyle.Section, TitleFont, SettingsAlign.HeadingFontSize, MenuPalette.Text, UiTextAlign.Left, LabelTone.Normal,
+        new(UiTextStyle.Section, BodyFont, true, SettingsAlign.HeadingFontSize, SectionColor, UiTextAlign.Left, LabelTone.Normal, CellTone.Normal,
             "The label above a group of rows; a page has a few."),
-        new(UiTextStyle.Muted, BodyFont, BodySize, MenuPalette.Muted, UiTextAlign.Left, LabelTone.Muted,
+        new(UiTextStyle.Muted, BodyFont, false, BodySize, MenuPalette.Muted, UiTextAlign.Left, LabelTone.Muted, CellTone.Muted,
             "A hint, a secondary detail, a value that does not apply now."),
-        new(UiTextStyle.Number, BodyFont, BodySize, MenuPalette.Text, UiTextAlign.Right, LabelTone.Normal,
+        new(UiTextStyle.Number, BodyFont, false, BodySize, MenuPalette.Text, UiTextAlign.Right, LabelTone.Normal, CellTone.Normal,
             "A count, an amount, a time or a version, so figures line up."),
-        new(UiTextStyle.Warning, BodyFont, BodySize, MenuPalette.Warn, UiTextAlign.Left, LabelTone.Warn,
+        new(UiTextStyle.Warning, BodyFont, false, BodySize, MenuPalette.Warn, UiTextAlign.Left, LabelTone.Warn, CellTone.Warn,
             "Something the player should look at, not yet a failure."),
-        new(UiTextStyle.Error, BodyFont, BodySize, MenuPalette.Red, UiTextAlign.Left, LabelTone.Danger,
+        new(UiTextStyle.Error, BodyFont, false, BodySize, MenuPalette.Red, UiTextAlign.Left, LabelTone.Danger, CellTone.Danger,
             "A failure or a blocking problem; say what to do next."),
-        new(UiTextStyle.Success, BodyFont, BodySize, MenuPalette.OkText, UiTextAlign.Left, LabelTone.Ok,
+        new(UiTextStyle.Success, BodyFont, false, BodySize, MenuPalette.OkText, UiTextAlign.Left, LabelTone.Ok, CellTone.OkBright,
             "Done, running, enabled."),
     };
+
+    /// <summary>
+    /// The label tone a style draws with, for a status line that changes in place (<c>panel.Label(text, ToneOf(style))</c>,
+    /// then <c>SetText(text, ToneOf(style))</c>): Body is Normal, Muted Muted, Warning Warn, Error Danger, Success Ok.
+    /// </summary>
+    public static LabelTone ToneOf(UiTextStyle style) => Spec(style).Tone;
 
     /// <summary>The spec of <paramref name="style"/>; an undefined value is Body.</summary>
     internal static UiTextStyleSpec Spec(UiTextStyle style)
@@ -171,9 +196,11 @@ public static class UiTextStyles
         var spec = Spec(valueStyle);
         var cells = new List<CellSpec>(2);
         if (name.Length > 0)
-            cells.Add(new CellSpec(CellKind.Text, NameCell).With(text: name, width: CellWidth.Fill(40f), align: CellAlign.Left, tone: CellTone.Normal));
+            cells.Add(new CellSpec(CellKind.Text, NameCell).With(text: name, width: CellWidth.Fill(40f), align: CellAlign.Left,
+                tone: Spec(UiTextStyle.Body).CellTone, fontSize: Spec(UiTextStyle.Body).Size));
         else
             cells.Add(new CellSpec(CellKind.Spacer, "lead").With(width: CellWidth.Fill(0f)));
+        // Mono for figures (tabular); every other style is a text cell drawn in its own tone and size.
         var kind = valueStyle == UiTextStyle.Number ? CellKind.Mono
             : valueStyle == UiTextStyle.Muted ? CellKind.Muted
             : CellKind.Text;
@@ -181,7 +208,8 @@ public static class UiTextStyles
             text: value,
             width: name.Length > 0 ? CellWidth.Fraction(0.4f) : CellWidth.Fill(40f),
             align: spec.Align == UiTextAlign.Left && name.Length == 0 ? CellAlign.Left : CellAlign.Right,
-            tone: LabelTones.ToCellTone(spec.Tone)));
+            tone: spec.CellTone,
+            fontSize: spec.Size));
         return cells;
     }
 }

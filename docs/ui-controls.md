@@ -8,20 +8,24 @@ The **gallery** is the controls sample's **Gallery** page (`samples/Progenitor.C
 
 Words on a page or a window take a named style, `panel.Text(text, UiTextStyle.X)` (or a control that fixes its own). The style fixes the game font, the size, the color and the alignment, so a mod never sets them. Raw colors, sizes and alignment are the exception: a color the player picks (`ColorField`) and a code area's highlighter (`CodeArea`) are the only places the kit takes a color from a mod.
 
-| Style | Font | Size | Color | Alignment | Use when |
-|---|---|---|---|---|---|
-| `Title` | The game's title font (drop-shadow variant) | 24 | Caption cream `#ECE4D8`, with the game's rule under it | Centered | The name of a block inside a window. A window's own title is drawn by the window, centered in its frame. |
-| `Section` | The game's title font | 24 | Caption cream, with the section rule | Left | The label above a group of rows; a page has a few. Same as `panel.Heading`. |
-| `Body` | The game's body font (Nocturne Serif Regular) | 18 | Caption cream `#ECE4D8` | Left | Ordinary sentences and values. |
-| `Muted` | Body font | 18 | Muted `#A3959A` | Left | A hint, a secondary detail, a value that does not apply now. Same color as `panel.Note`. |
-| `Number` | Body font, tabular figures | 18 | Caption cream | Right | A count, an amount, a time or a version, so figures line up down a column. `panel.Text(name, value, UiTextStyle.Number)` puts the name left and the figure right. |
-| `Warning` | Body font | 18 | Amber `#C07A3A` | Left | Something the player should look at, not yet a failure. Also how a pending state reads. |
-| `Error` | Body font | 18 | Red `#C8323C` | Left | A failure or a blocking problem; say what to do next. |
-| `Success` | Body font | 18 | Green `#6FD08A` | Left | Done, running, enabled. |
+`panel.Text(...)` is an extension method that adds a row; `handle.Text` (the property every handle has) reads or rewrites a row's words. They share the name on purpose: `var line = panel.Text("Idle", UiTextStyle.Muted); line.Text = "Done";`.
 
-Alignment rules the kit applies without being asked: text left; numbers right; captions centered on buttons, tabs and chips; titles centered in the frame (and in a dialog). Every standard window sets its rows left (`ContentAlignment = "left"`). A status that changes in place is a tone label, `panel.Label(text, LabelTone)`: `Normal` is Body, `Muted` is Muted, `Ok` is Success, `Pending`, `Orange` and `Warn` read as Warning, `Danger` is Error.
+The table is one source (`UiTextStyles`): the kit's label rows are drawn at its body size, its cells take their size, tone and alignment from it, and `WindowPresetTests` pins the heading and dialog-title rows to it. Every style uses the kit's body font, the game's Nocturne Serif Regular.
 
-Status: the style table is game-free tested (`WindowPresetTests`); the drawn fonts and colors are the kit's existing label, note, heading and dialog-title rows, verified live in their own rows of [ui.md](ui.md); `panel.Text` itself is **not live-verified**.
+| Style | Font | Size | Color | Alignment | Drawn as | Use when |
+|---|---|---|---|---|---|---|
+| `Title` | Body font, regular | 24 | The game's popup gray (0.9), with the game's rule under it | Centered | A dialog title row | The name of a block inside a window. A window's own title is drawn by the window, centered in its frame. |
+| `Section` | Body font, bold | 24 | White, with the section rule | Left | `panel.Heading` | The label above a group of rows; a page has a few. |
+| `Body` | Body font | 20 | Caption cream `#ECE4D8` | Left | A tone label (`Normal`) | Ordinary sentences and values. |
+| `Muted` | Body font | 20 | Muted `#A3959A` | Left | A tone label (`Muted`) | A hint, a secondary detail, a value that does not apply now. |
+| `Number` | Body font, tabular figures | 20 | Caption cream `#ECE4D8` | Right | A right-aligned figure cell | A count, an amount, a time or a version, so figures line up down a column. `panel.Text(name, value, UiTextStyle.Number)` puts the name (Body, 20, left) at the left and the figure at the right. |
+| `Warning` | Body font | 20 | Amber `#C07A3A` | Left | A tone label (`Warn`) | Something the player should look at, not yet a failure. Also how a pending state reads. |
+| `Error` | Body font | 20 | Red `#C8323C` | Left | A tone label (`Danger`) | A failure or a blocking problem; say what to do next. |
+| `Success` | Body font | 20 | Green `#6FD08A` | Left | A tone label (`Ok`) | Done, running, enabled. |
+
+Alignment rules the kit applies without being asked: text left; numbers right; captions centered on buttons, tabs and chips; titles centered in the frame (and in a dialog). Every standard window sets its rows left (`ContentAlignment = "left"`). A status that changes in place is a tone label in a style's tone: `panel.Label(text, UiTextStyles.ToneOf(UiTextStyle.Muted))`, then `line.SetText(text, UiTextStyles.ToneOf(UiTextStyle.Success))`.
+
+Status: the style table and the rows it drives are game-free tested (`WindowPresetTests`); `panel.Text` is **not live-verified**.
 
 ## The catalog
 
@@ -43,7 +47,7 @@ Gallery tab: **Windows**.
 | Name and value | `panel.Text(name, value, UiTextStyle.Number)` | A figure the player compares down a column (counts, amounts, times). | Windows tab, Text styles | none (new) | Name Body left; value Number, right-aligned. |
 | Heading | `panel.Heading(text)` | A topic starts; a page has a few. | every tab, the headings | Controls sample, All controls page | Section, left-aligned, with the section rule. |
 | Note | `panel.Note(text)` | A topic needs one short explanation under its heading. | every entry's line under its control | Controls sample, All controls page | Muted, left-aligned. |
-| Status line | `panel.Label(text, LabelTone)` | A status that changes in place (SetText with a tone). | Windows tab, Status line | Controls sample, All controls page (status line) | Body, Muted, Success, Warning or Error by tone; left-aligned. |
+| Status line | `panel.Label(text, UiTextStyles.ToneOf(UiTextStyle.X)), then SetText(text, tone)` | A status that changes in place (SetText with a tone). | Windows tab, Status line | Controls sample, All controls page (status line) | Body, Muted, Success, Warning or Error by tone; left-aligned. |
 | Fact | `panel.Fact(name, value)` | A value that does not change while the page is open. | Windows tab, Fact | Controls sample, All controls page (Plugin) | Name Body left; value Body in the control column. |
 | Divider | `panel.Divider()` | An action block needs separating from what precedes it. | Windows tab, Divider | Controls sample, All controls page | No text. |
 | Inline row | `panel.BeginInline() ... panel.EndInline()` | Related buttons (or a field and its button) belong side by side. | Windows tab, Inline row | Controls sample, All controls page (Inline A / Inline B) | Captions centered on their buttons. |

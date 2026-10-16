@@ -140,6 +140,135 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
+    public void A_toolbar_is_refused_when_its_measured_buttons_do_not_fit_the_row()
+    {
+        var header = UiWindowLayout.Spec(UiWindowPreset.Header);
+        var tabbed = UiWindowLayout.Spec(UiWindowPreset.Tabbed);
+        Assert.Equal(560f, UiWindowLayout.ToolbarRowWidth(header));
+        Assert.Equal(880f, UiWindowLayout.ToolbarRowWidth(tabbed));
+        var two = new[] { new UiWindowTool("Sort"), new UiWindowTool("Locate") };
+        var four = new[] { new UiWindowTool("Sort"), new UiWindowTool("Locate"), new UiWindowTool("Refresh"), new UiWindowTool("Empty") };
+        // Each compact button is at least 140 wide with an 8 gap: Sort, Locate and Rename take 436 of 560.
+        Assert.Equal(3 * PageButtonLayout.MinWidth + 2 * PageButtonLayout.Gap, UiWindowLayout.ToolbarWidth(two, renamable: true));
+        Assert.Null(UiWindowLayout.RefuseTools(two, renamable: true, UiWindowLayout.ToolbarRowWidth(header)));
+        Assert.NotNull(UiWindowLayout.RefuseTools(four, renamable: true, UiWindowLayout.ToolbarRowWidth(header)));
+        Assert.Null(UiWindowLayout.RefuseTools(four, renamable: true, UiWindowLayout.ToolbarRowWidth(tabbed)));
+        // Long captions are measured, not counted: three 16-character captions overflow a Header row.
+        var wide = new[] { new UiWindowTool("Deposit overflow"), new UiWindowTool("Withdraw overflo"), new UiWindowTool("Sort by category") };
+        Assert.True(UiWindowLayout.ToolbarWidth(wide, false) > 560f);
+        Assert.NotNull(UiWindowLayout.RefuseTools(wide, false, 560f));
+        Assert.Throws<ArgumentException>(() => Make(UiWindowPreset.Header, options: new UiWindowOptions { Tools = four, Renamable = true }));
+        Assert.NotNull(Make(UiWindowPreset.Tabbed, "Wide", new UiWindowOptions { Tools = four, Renamable = true }));
+    }
+
+    [Fact]
+    public void A_long_info_column_is_clipped_above_the_stamp_inside_the_frame()
+    {
+        // 20 Facts in a Tabbed window at 1080p: the frame is capped at 80% of 1080 = 864, the column starts under the
+        // toolbar and the tab row (y 176), and the clip ends at the bottom pad above the 24-unit stamp band.
+        float panel = PanelLayout.PanelHeightFor(10_000f, 1080f);
+        Assert.Equal(864f, panel);
+        float top = UiWindowLayout.ContentTop(toolbar: true, tabs: true);
+        var clip = UiWindowLayout.InfoClip(960f, UiWindowLayout.InfoColumnWidth, top, panel, PanelFooterLayout.BandHeight);
+        Assert.Equal(top, clip.Top);
+        Assert.Equal(260f, clip.Width);
+        Assert.Equal(-460f + 130f, clip.CenterX); // from x 20 to 280 of the 960 frame
+        Assert.True(clip.Top + clip.Height <= panel - PanelFooterLayout.BandHeight - PanelLayout.PadBottom + 0.01f);
+        var facts = Enumerable.Repeat(UnityUiRuntimeMetrics.RowHeight, 20).ToList();
+        int shown = UiWindowLayout.InfoRowsShown(facts, clip.Height);
+        Assert.InRange(shown, 1, 19);
+        Assert.Equal((int)((clip.Height + PanelLayout.RowGap) / (UnityUiRuntimeMetrics.RowHeight + PanelLayout.RowGap)), shown);
+        // The runtime parents the column's rows under the clip, and switches the clip (not the rows) off without room.
+        string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
+        Assert.Contains("TryAdd<RectMask2D>(_infoClip);", runtime);
+        Assert.Contains("if (_infoClip.activeSelf != on) _infoClip.SetActive(on);", runtime);
+        Assert.DoesNotContain("row.Go.SetActive(false)", runtime);
+        Assert.Contains(": _nextPin == MenuRowPin.Side ? SideParent", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
+    }
+
+    [Fact]
+    public void A_Basic_window_opened_while_navigating_takes_the_controller()
+    {
+        var was = UiWindowHandle.NavigatingNow;
+        try
+        {
+            var basic = UiWindowLayout.Spec(UiWindowPreset.Basic);
+            Assert.True(basic.ControllerHandoff);
+            Assert.False(UiWindowLayout.Spec(UiWindowPreset.Header).ControllerHandoff);
+            Assert.Equal(UiCaptureMode.WhileShown, UiWindowLayout.CaptureOnShow(basic, navigating: true));
+            Assert.Equal(UiCaptureMode.WhenHovered, UiWindowLayout.CaptureOnShow(basic, navigating: false));
+
+            UiWindowHandle.NavigatingNow = () => true;
+            var pad = Make(UiWindowPreset.Basic, "Pad");
+            pad.Show();
+            Assert.Equal(UiCaptureMode.WhileShown, pad.Panel.CaptureMode);
+            pad.Hide();
+
+            UiWindowHandle.NavigatingNow = () => false;
+            pad.Show();
+            Assert.Equal(UiCaptureMode.WhenHovered, pad.Panel.CaptureMode);
+
+            // The mod's own choice wins.
+            UiWindowHandle.NavigatingNow = () => true;
+            var fixedMode = Make(UiWindowPreset.Basic, "Fixed", new UiWindowOptions { CaptureMode = UiCaptureMode.Never });
+            fixedMode.Show();
+            Assert.Equal(UiCaptureMode.Never, fixedMode.Panel.CaptureMode);
+        }
+        finally { UiWindowHandle.NavigatingNow = was; }
+    }
+
+    [Theory]
+    [InlineData(1920f, 1)]
+    [InlineData(1920f, 2)]
+    [InlineData(1920f, 3)]
+    [InlineData(2560f, 1)]
+    [InlineData(2560f, 2)]
+    [InlineData(2560f, 4)]
+    public void Tiled_windows_never_land_under_a_centered_Tabbed_window(float canvasWidth, int tiled)
+    {
+        var shown = new List<string> { "tabbed" };
+        for (int i = 0; i < tiled; i++) shown.Add("basic" + i);
+        var spots = UiWindowLayout.Spots(shown, p => p == "tabbed" ? 960f : 0f, _ => false);
+        var tab = spots.Single(s => s.Panel == "tabbed").Spot;
+        Assert.Equal(tiled, tab.Tiled);
+        var tabAt = UiWindowLayout.Place(tab, 960f, canvasWidth, 1080f, centered: true);
+        float tabLeft = tabAt.X - 480f, tabRight = tabAt.X + 480f;
+        Assert.True(tabLeft >= -canvasWidth * 0.5f - 0.01f, "the Tabbed window left the screen");
+        foreach (var (panel, spot) in spots.Where(s => s.Panel != "tabbed"))
+        {
+            Assert.Equal(960f, spot.CenteredWidth);
+            Assert.Equal(tiled, spot.Count);
+            var at = UiWindowLayout.Place(spot, 640f, canvasWidth, 1080f, centered: false);
+            float left = at.X - 320f, right = at.X + 320f;
+            Assert.True(left >= tabRight || right <= tabLeft, panel + " at x " + at.X + " overlaps the Tabbed window at " + tabAt.X);
+            Assert.True(right <= canvasWidth * 0.5f + 0.01f, panel + " left the screen");
+        }
+
+        // Alone, it is dead center; without a centered window the set tiles as it always did.
+        var alone = UiWindowLayout.Spots(new[] { "tabbed" }, p => 960f, _ => false).Single().Spot;
+        Assert.Equal(PanelOffset.Centre, UiWindowLayout.Place(alone, 960f, canvasWidth, 1080f, centered: true));
+        var plain = UiWindowLayout.Spots(new[] { "a", "b" }, _ => 0f, _ => false);
+        Assert.Equal(PanelFlow.Offset(new PanelSpot(1, 2), 640f, canvasWidth, 1080f), UiWindowLayout.Place(plain[1].Spot, 640f, canvasWidth, 1080f, false));
+    }
+
+    [Fact]
+    public void The_re_flow_gives_tiled_panels_spots_clear_of_a_shown_Tabbed_window()
+    {
+        var tabbed = Make(UiWindowPreset.Tabbed, "Net");
+        var basic = Make(UiWindowPreset.Basic, "Gear");
+        tabbed.Show();
+        basic.Show();
+        Assert.Equal(960f, ((UiPanelHandle)tabbed.Panel).CenteredWidth);
+        Assert.Equal(0f, ((UiPanelHandle)basic.Panel).CenteredWidth);
+        var gear = _runtime.SpotFor("Gear");
+        var net = _runtime.SpotFor("Net");
+        Assert.Equal(960f, gear.CenteredWidth);
+        Assert.Equal(new PanelSpot(0, 1).Rank, gear.Rank);
+        Assert.Equal(1, gear.Count);
+        Assert.Equal(1, net.Tiled);
+    }
+
+    [Fact]
     public void Tabbed_always_has_a_tab_and_Basic_never_has_one()
     {
         Assert.Equal(new[] { "Network" }, UiWindowLayout.TabsFor(UiWindowPreset.Tabbed, "Network", null));
@@ -306,10 +435,23 @@ public sealed class WindowPresetTests : IDisposable
         {
             var s = UiTextStyles.Spec(style);
             Assert.Equal(style, s.Style);
-            Assert.Contains(s.Font, new[] { UiTextStyles.TitleFont, UiTextStyles.BodyFont });
+            Assert.Equal(UiTextStyles.BodyFont, s.Font);
             Assert.True(s.Size >= 16f, style + " is too small to read");
             Assert.False(string.IsNullOrWhiteSpace(s.UseWhen));
+            Assert.Equal(s.Tone, UiTextStyles.ToneOf(style));
+            // One source: the color a label draws (its tone) and the color a cell draws (its cell tone) are the table's.
+            if (style is not UiTextStyle.Title and not UiTextStyle.Section)
+            {
+                Assert.Equal(s.Color, MenuPalette.LabelColor(s.Tone));
+                Assert.Equal(s.Color, MenuPalette.TextColor(s.CellTone));
+                Assert.Equal(UiTextStyles.BodySize, s.Size);
+            }
         }
+
+        Assert.Equal(DialogLayout.TitleFontSize, UiTextStyles.Spec(UiTextStyle.Title).Size);
+        Assert.Equal(SettingsAlign.HeadingFontSize, UiTextStyles.Spec(UiTextStyle.Section).Size);
+        Assert.True(UiTextStyles.Spec(UiTextStyle.Section).Bold);
+        Assert.Equal(new PaletteColor(DialogLayout.TextGrey, DialogLayout.TextGrey, DialogLayout.TextGrey), UiTextStyles.Spec(UiTextStyle.Title).Color);
 
         Assert.Equal(UiTextAlign.Center, UiTextStyles.Spec(UiTextStyle.Title).Align);
         Assert.Equal(UiTextAlign.Right, UiTextStyles.Spec(UiTextStyle.Number).Align);
@@ -321,6 +463,33 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal(MenuPalette.Warn, UiTextStyles.Spec(UiTextStyle.Warning).Color);
         Assert.Equal(LabelTone.Danger, UiTextStyles.Spec(UiTextStyle.Error).Tone);
         Assert.Equal(UiTextStyle.Warning, UiTextStyles.StyleOf(LabelTone.Pending));
+    }
+
+    /// <summary>The kit's own rows draw the table's numbers: label size, heading size and weight, dialog title size and color.</summary>
+    [Fact]
+    public void The_kit_rows_draw_from_the_style_table()
+    {
+        string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs");
+        string addLabel = SourcePin.MethodBody(runtime, "public IRuntimeWidget? AddLabel(");
+        Assert.Contains("MakeLabel(host.RowParent, text, Vector2.zero, UiTextStyles.BodySize, left: host.IsLeftAligned)", addLabel);
+        string toned = SourcePin.MethodBody(runtime, "public IRuntimeWidget? AddTonedLabel(");
+        Assert.Contains("AddLabel(panel, text)", toned);
+        Assert.Contains("tmp.color = ToColor(MenuPalette.LabelColor(tone))", SourcePin.MethodBody(runtime, "public void StyleLabel("));
+        string heading = SourcePin.MethodBody(runtime, "public IRuntimeWidget? AddHeading(");
+        Assert.Contains("SettingsAlign.HeadingFontSize", heading);
+        Assert.Contains("FontStyles.Bold", heading);
+        string dialogText = SourcePin.MethodBody(runtime, "private IRuntimeWidget? AddDialogTextRow(");
+        Assert.Contains("title ? DialogLayout.TitleFontSize", dialogText);
+        Assert.Contains("DialogLayout.TextGrey", dialogText);
+
+        // Cells take the table's size and tone, not the cell kind's own.
+        foreach (UiTextStyle style in Enum.GetValues(typeof(UiTextStyle)))
+        {
+            var cells = UiTextStyles.Cells("Name", "1", style);
+            Assert.Equal(UiTextStyles.Spec(UiTextStyle.Body).Size, cells[0].FontSize);
+            Assert.Equal(UiTextStyles.Spec(style).Size, cells[1].FontSize);
+            Assert.Equal(UiTextStyles.Spec(style).CellTone, cells[1].Tone);
+        }
     }
 
     [Fact]
@@ -460,20 +629,71 @@ public sealed class WindowPresetTests : IDisposable
     [Fact]
     public void Gallery_sources_use_named_styles_and_no_raw_colors_or_sizes()
     {
-        foreach (string file in new[] { "GalleryDemo.cs", "GalleryWindows.cs" })
+        foreach (string file in new[] { "GalleryDemo.cs", "GalleryWindows.cs", "GalleryCatalog.cs", "Plugin.cs" })
         {
             string src = SourcePin.ReadFile("samples", "Progenitor.ControlsSample", file);
-            foreach (string raw in new[] { "new Color", "PaletteColor", "fontSize", "FontSize", "<color", "<size", "<b>", "\"centre\"", "horizontalAlignment" })
-                Assert.DoesNotContain(raw, src, StringComparison.Ordinal);
+            var (code, strings) = SplitSource(src);
+            // Code: no raw tone, color, size or alignment, and no label without a style (a literal or a variable alike).
+            foreach (string raw in new[] { "LabelTone.", "new Color", "PaletteColor", "fontSize", "FontSize", "horizontalAlignment", "TextAlignmentOptions", "SetTone(" })
+                Assert.False(code.Contains(raw, StringComparison.Ordinal), file + " sets a raw style in code: " + raw);
+            Assert.DoesNotMatch(new Regex(@"\.Label\(\s*[^,()]*\)"), code);
             // The only alignment a gallery file sets is the kit's left default for a page.
             foreach (Match m in Regex.Matches(src, @"Alignment\s*=\s*[^;]+;"))
                 Assert.Equal("Alignment = \"left\";", m.Value);
-            // The one hex color is the color field's own value, not a text color.
-            var hex = Regex.Matches(src, "#[0-9A-Fa-f]{6}").Select(m => m.Value).Distinct().ToList();
+            // Strings: no rich-text styling, and the one hex color is the color field's own value, not a text color.
+            foreach (string raw in new[] { "<color", "<size", "<b>", "<i>", "<font", "<align" })
+                Assert.False(strings.Contains(raw, StringComparison.OrdinalIgnoreCase), file + " styles text with " + raw);
+            var hex = Regex.Matches(strings, "#[0-9A-Fa-f]{6}").Select(m => m.Value.ToUpperInvariant()).Distinct().ToList();
             Assert.True(hex.Count == 0 || hex.SequenceEqual(new[] { "#B03030" }), file + " has a raw color: " + string.Join(",", hex));
-            // Text goes through panel.Text(..., UiTextStyle.X) or a tone label; a bare panel.Label("...") has no style.
-            Assert.DoesNotMatch(new Regex(@"\.Label\(""[^""]*""\)"), src);
         }
+    }
+
+    /// <summary>A C# source's code (comments and string literals removed) and its string literals' contents, joined.</summary>
+    private static (string Code, string Strings) SplitSource(string src)
+    {
+        var code = new System.Text.StringBuilder(src.Length);
+        var strings = new System.Text.StringBuilder();
+        int i = 0;
+        while (i < src.Length)
+        {
+            if (src[i] == '/' && i + 1 < src.Length && src[i + 1] == '/')
+            {
+                while (i < src.Length && src[i] != '\n') i++;
+                continue;
+            }
+
+            if (src[i] == '/' && i + 1 < src.Length && src[i + 1] == '*')
+            {
+                int end = src.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? src.Length : end + 2;
+                continue;
+            }
+
+            if (src[i] == '"')
+            {
+                i++;
+                while (i < src.Length && src[i] != '"')
+                {
+                    if (src[i] == '\\' && i + 1 < src.Length) { strings.Append(src[i + 1]); i += 2; continue; }
+                    strings.Append(src[i++]);
+                }
+
+                strings.Append('\n');
+                code.Append("\"\"");
+                i++;
+                continue;
+            }
+
+            if (src[i] == '\'' && i + 2 < src.Length)
+            {
+                int end = src.IndexOf('\'', src[i + 1] == '\\' ? i + 3 : i + 2);
+                if (end > i) { code.Append("' '"); i = end + 1; continue; }
+            }
+
+            code.Append(src[i++]);
+        }
+
+        return (code.ToString(), strings.ToString());
     }
 
     private sealed class FakeGalleryHost : IGalleryHost
@@ -496,16 +716,23 @@ public sealed class ModMessagePrefixTests
     [Theory]
     [InlineData("Sortmancer", "Sorted 3 chests.", true, "Sortmancer: Sorted 3 chests.")]
     [InlineData("Sortmancer", "Sortmancer: sorted.", true, "Sortmancer: sorted.")]
-    [InlineData("Sortmancer", "sortmancer sorted 3 chests", true, "sortmancer sorted 3 chests")]
+    [InlineData("Sortmancer", "sortmancer sorted 3 chests", true, "Sortmancer: sortmancer sorted 3 chests")]
+    [InlineData("Teleport", "Teleport failed: no waypoint.", true, "Teleport: Teleport failed: no waypoint.")]
+    [InlineData("Teleport", "teleport: done", true, "teleport: done")]
+    [InlineData("Sortmancer", "(Sortmancer) sorted", true, "(Sortmancer) sorted")]
+    [InlineData("Sortmancer", "[Sortmancer sorted", true, "Sortmancer: [Sortmancer sorted")]
+    [InlineData("<color=#f00>Sortmancer</color>", "sorted", true, "Sortmancer: sorted")]
+    [InlineData("<b>Sortmancer</b>", "Sortmancer: sorted", true, "Sortmancer: sorted")]
     [InlineData("Sortmancer", "[Sortmancer] sorted", true, "[Sortmancer] sorted")]
-    [InlineData("Sortmancer", "<color=#fff>Sortmancer</color> sorted", true, "<color=#fff>Sortmancer</color> sorted")]
+    [InlineData("Sortmancer", "<color=#fff>Sortmancer</color>: sorted", true, "<color=#fff>Sortmancer</color>: sorted")]
+    [InlineData("Sortmancer", "<color=#fff>Sortmancer</color> sorted", true, "Sortmancer: <color=#fff>Sortmancer</color> sorted")]
     [InlineData("Sortmancer", "Sortmancer2 is a different mod", true, "Sortmancer: Sortmancer2 is a different mod")]
     [InlineData("Sortmancer", "Sorted 3 chests.", false, "Sorted 3 chests.")]
     [InlineData("", "Sorted.", true, "Sorted.")]
     [InlineData("  ", "Sorted.", true, "Sorted.")]
     [InlineData("Sortmancer", "", true, "")]
     [InlineData("Sortmancer", "   ", true, "   ")]
-    [InlineData("Sortmancer", "Sortmancer", true, "Sortmancer")]
+    [InlineData("Sortmancer", "Sortmancer", true, "Sortmancer: Sortmancer")]
     [InlineData(" Sortmancer ", "ok", true, "Sortmancer: ok")]
     public void Prefix_rules(string name, string text, bool prefix, string expected) =>
         Assert.Equal(expected, ModMessagePrefix.Apply(name, text, prefix));
@@ -559,6 +786,46 @@ public sealed class ModMessagePrefixTests
         // The framework's own lines (usage, denials) never carry a plugin name either.
         Assert.Same(ctx, ModReplyContext.For(ctx, new object()));
     }
+
+    [Fact]
+    public void A_long_command_reply_goes_out_split_with_the_prefix_on_the_first_line()
+    {
+        using var reg = CommandRegistry.RegisterType(typeof(LongReplyCommands), new ReplyOwner(), "reply.mod");
+        var ctx = new RecordingCtx();
+        Assert.Equal(CommandResult.Executed, CommandDispatcher.TryDispatch(ctx, ".wp_long"));
+        Assert.True(ctx.Replies.Count >= 3);
+        Assert.StartsWith("Reply Mod: ", ctx.Replies[0]);
+        Assert.All(ctx.Replies.Skip(1), r => Assert.DoesNotContain("Reply Mod", r));
+        Assert.All(ctx.Replies, r => Assert.True(System.Text.Encoding.UTF8.GetByteCount(r) <= ReplyText.MaxUtf8Bytes));
+        Assert.Equal("Reply Mod: " + LongReplyCommands.Text, string.Concat(ctx.Replies));
+        Assert.Equal(ModMessagePrefix.ReplyChunks("Reply Mod", LongReplyCommands.Text), ctx.Replies);
+    }
+
+    [Fact]
+    public void A_nested_dispatch_takes_the_dispatching_plugins_name_and_never_stacks_two()
+    {
+        var plain = new RecordingCtx();
+        var outer = ModReplyContext.For(plain, new ReplyOwner());
+        var inner = ModReplyContext.For(outer, new OtherOwner());
+        Assert.IsType<ModReplyContext>(inner);
+        Assert.Equal("Other Mod", ((ModReplyContext)inner).ModName);
+        inner.Reply("hi");
+        Assert.Equal(new[] { "Other Mod: hi" }, plain.Replies);
+        // The same plugin again keeps its wrapper; a built-in (no plugin) gets the plain context back.
+        Assert.Same(outer, ModReplyContext.For(outer, new ReplyOwner()));
+        Assert.Same(plain, ModReplyContext.For(outer, new object()));
+    }
+
+    private static class LongReplyCommands
+    {
+        internal static readonly string Text = string.Concat(Enumerable.Repeat("sorted the iron chest. ", 60));
+
+        [Command("wp_long")]
+        public static void Run(ICommandContext ctx) => ctx.Reply(Text);
+    }
+
+    [@BepInPlugin("other.mod", "<color=#0f0>Other Mod</color>", "1.0.0")]
+    private sealed class OtherOwner { }
 
     private sealed class RecordingCtx : ICommandContext
     {

@@ -102,7 +102,12 @@ held in the bridge queue, at the title screen, with this sample and a Core built
    a name and `dialog_choose yes`: the title changes and the log shows `Controls sample: window header renamed = …`.
 5. Escape: `ui_input` `{"action":"key","key":"Escape"}` with the prompt closed: the windows hide (`ui_read panels`).
 6. Controller: open the Header window, `nav pad down` a few times, `nav state`: the focus walks the toolbar, the tabs and
-   the rows. Open the Basic window alone: `nav state` does not move into it (it leaves the controller to the game).
+   the rows. Open the Basic window by navigation (`nav pad` to **Basic window**, then A): `ui_read panels` shows it
+   `WhileShown` and `nav state` moves into it; B closes it. Opened with `widget_click` (the pointer) it stays
+   `WhenHovered` and leaves the controller to the game.
+   Then, with the Tabbed window open, open the Basic and Header windows: `ui_read panels` rects do not overlap (the Tabbed
+   window moves to the left of the group, the others tile right of it). Press **Add facts** in the Tabbed info column
+   (17 facts and more): the column is cut above the version stamp, never over it or past the frame; screenshot it.
 7. Repeat steps 3 and 4 at 2560x1440 (`-1440.png`), then `display restore`.
 8. Feedback tab: **Info**, **Success**, **Warning**, **Error** each show `Progenitor Controls Sample: …` on the banner
    (or the band at the title screen) in its kind's look; **No prefix** shows the text alone.

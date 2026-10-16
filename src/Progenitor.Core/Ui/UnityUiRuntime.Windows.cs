@@ -21,6 +21,7 @@ internal sealed partial class UnityUiRuntime
     internal const string WindowOrnamentRightName = "window-title-ornament-right";
     internal const string WindowDividerName = "window-header-divider";
     internal const string WindowInfoGroundName = "window-info-ground";
+    internal const string WindowInfoClipName = "window-info-clip";
 
     private sealed partial class UnityPanel
     {
@@ -137,12 +138,24 @@ internal sealed partial class UnityUiRuntime
                     ground.color = Rgba(UiWindowLayout.InfoColumnColor);
                     ground.raycastTarget = false;
                 }
+
+                // The info rows' parent: a rectangular clip (RectMask2D, as the viewport) over the column's area, so a
+                // column longer than the frame is cut at the frame's bottom pad, never drawn over the stamp or past the frame.
+                _infoClip = new GameObject(WindowInfoClipName);
+                _infoClip.transform.SetParent(GameObject.transform, false);
+                TryAdd<RectTransform>(_infoClip);
+                TryAdd<RectMask2D>(_infoClip);
             }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: window info column: " + e.Message);
             }
         }
+
+        private GameObject? _infoClip;
+
+        /// <summary>Where a row pinned to the info column is parented: the column's clip, or the frame without one.</summary>
+        internal GameObject SideParent => _infoClip != null && UnityUiRuntime.Alive(_infoClip) ? _infoClip : GameObject;
 
         /// <summary>Start of a layout pass: the info column starts under the pinned top rows.</summary>
         private void BeginSidePass(float viewportTop)
@@ -157,12 +170,9 @@ internal sealed partial class UnityUiRuntime
             if (row.Pin != MenuRowPin.Side) return false;
             float band = SideBand;
             if (row.Go == null) return true;
-            if (band <= 0f || !RowActive(row))
-            {
-                // A frame too narrow for the column (a small screen): its rows are not drawn rather than drawn over the content.
-                try { if (band <= 0f && row.Go.activeSelf) row.Go.SetActive(false); } catch { /* */ }
-                return true;
-            }
+            // A frame too narrow for the column (a small screen): the whole clip is switched off rather than drawn over the
+            // content, and on again on the first layout with room (PlaceWindowChrome). The rows' own state (a tab's) is not touched.
+            if (band <= 0f || !RowActive(row)) return true;
 
             _placingSide = true;
             try
@@ -174,9 +184,12 @@ internal sealed partial class UnityUiRuntime
                 height = Math.Max(InlineHostHeight(row, height), PanelLayout.MinRowHeight);
                 float extraTop = string.Equals(row.Kind, "heading", StringComparison.Ordinal) ? SettingsAlign.HeadingExtraTop : 0f;
                 float width = Math.Max(1f, band - UiWindowLayout.InfoColumnGap);
-                float frameWidth = StandardFrameWidth;
-                float x = -frameWidth * 0.5f + PanelLayout.PadSide + width * 0.5f;
-                PlaceTop(row.Go, x, _sideCursor + extraTop, width, height);
+                bool clipped = _infoClip != null && row.Go.transform.parent != null
+                    && row.Go.transform.parent.Pointer == _infoClip.transform.Pointer;
+                // In the clip: from its top-center. On the frame (no clip): from the frame's top-center at the column's x.
+                float x = clipped ? 0f : -StandardFrameWidth * 0.5f + PanelLayout.PadSide + width * 0.5f;
+                float y = clipped ? _sideCursor - _sideTop : _sideCursor;
+                PlaceTop(row.Go, x, y + extraTop, width, height);
                 PlaceRowControl(row, columns);
                 PlaceHeadingRule(row, height);
                 PlaceInlineRow(row);
@@ -235,6 +248,18 @@ internal sealed partial class UnityUiRuntime
                         float top = _sideTop - PanelLayout.RowGap;
                         float height = Math.Max(1f, panelHeight - top - PanelLayout.PadBottom - footerBand);
                         PlaceTop(_infoGround, -frameWidth * 0.5f + PanelLayout.PadSide * 0.5f + width * 0.5f, top, width, height);
+                    }
+                }
+
+                if (_infoClip != null)
+                {
+                    float band = SideBand;
+                    bool on = band > 0f;
+                    if (_infoClip.activeSelf != on) _infoClip.SetActive(on);
+                    if (on)
+                    {
+                        var clip = UiWindowLayout.InfoClip(frameWidth, band, _sideTop, panelHeight, footerBand);
+                        PlaceTop(_infoClip, clip.CenterX, clip.Top, clip.Width, clip.Height);
                     }
                 }
             }

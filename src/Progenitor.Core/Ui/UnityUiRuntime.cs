@@ -926,7 +926,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             // other into unreadable text (evidence 163).
             if (IsRedundantPaneTitle(host, text))
                 return SkipRedundantPaneTitle(host);
-            var go = MakeLabel(host.RowParent, text, Vector2.zero, 20f, left: host.IsLeftAligned);
+            var go = MakeLabel(host.RowParent, text, Vector2.zero, UiTextStyles.BodySize, left: host.IsLeftAligned);
             if (go == null) return null;
             host.AddRow(go, go, hasControl: false, kind: "label", source: ControlSource.None);
             return new UnityWidget(host, go, null, null, null, null, null, null);
@@ -12315,7 +12315,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         public GameObject RowParent =>
             _strip
                 ? GameObject
-                : _nextPin == MenuRowPin.Content ? (_content ?? GameObject) : GameObject;
+                : _nextPin == MenuRowPin.Content ? (_content ?? GameObject)
+                : _nextPin == MenuRowPin.Side ? SideParent
+                : GameObject;
 
         public ScrollRect? Scroll
         {
@@ -13838,9 +13840,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     ? _menuGeometry
                     : MenuPanelLayout.ForCanvas(AvailableWidth(), AvailableHeight(), _sidebar, _mode);
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
-                    : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
+                    : UiWindowLayout.Place(Spot, FrameWidth, AvailableWidth(), AvailableHeight(), WindowCentred);
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
-                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth) || WindowCentred) at = PanelOffset.Centre;
+                // A wide game window that asked for a dialog's width is centered too; a standard Tabbed window is placed by
+                // UiWindowLayout.Place (centered alone, beside tiled windows otherwise).
+                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) at = PanelOffset.Centre;
                 rt.anchoredPosition = new Vector2(at.X, at.Y);
                 if (TopAligned) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
 
@@ -14072,12 +14076,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // depth >= 1 cross PanelFlow's capacity threshold and jump a whole title band
                     // onto the panel above it. The vertical ladder is a property of the canvas now.
                     placedAt = _menuPane ? new PanelOffset(_menuGeometry.X, _menuGeometry.Y)
-                        : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), available.Value);
+                        : UiWindowLayout.Place(Spot, FrameWidth, AvailableWidth(), available.Value, WindowCentred);
                     // INSTALLUX2: a dialog is centered, never ranked. PanelFlow would give it a
                     // column beside the workspace's panes the moment they joined the shown set,
                     // which is the "flickers in from the left" CONSENT2 fixed for the consent
                     // prompt by hand.
-                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth) || WindowCentred) placedAt = PanelOffset.Centre;
+                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) placedAt = PanelOffset.Centre;
                     if (SelfPlaced) placedAt = new PanelOffset(panelRt.anchoredPosition.x, panelRt.anchoredPosition.y);
                     else panelRt.anchoredPosition = new Vector2(placedAt.X, placedAt.Y);
                     if (TopAligned) panelRt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - panelHeight) / 2 - 24));
