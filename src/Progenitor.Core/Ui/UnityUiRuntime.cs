@@ -15213,6 +15213,13 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             public Image? Tint;
 
             /// <summary>
+            /// Live 2026-10-14: the button was last painted with borrowed game art (a popup button, chip or key cap
+            /// sprite). <see cref="PlaceCells"/> repaints it when that sprite is gone, so a released or replaced
+            /// sprite never leaves a flat white quad under the button's tint.
+            /// </summary>
+            public bool PaintedArt;
+
+            /// <summary>
             /// C5, a two-line cell with an inline overlay (<see cref="CellSpec.InlineAfter"/>): the second line's text before
             /// the overlay's room as last written, and whether the room was kept (the overlay is drawn only then).
             /// </summary>
@@ -16933,6 +16940,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private static void PaintButton(Cell cell)
         {
+            cell.PaintedArt = false;
             if (cell.Spec.Skin == CellSkin.KeyCap)
             {
                 if (PaintKeyCap(cell)) return;
@@ -17005,6 +17013,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 cell.Fill.type = type;
                 cell.Fill.color = color;
                 try { cell.Fill.pixelsPerUnitMultiplier = ppu; } catch { /* */ }
+                cell.PaintedArt = true;
             }
             catch { return false; }
             try { if (cell.Rim != null) cell.Rim.effectColor = new Color(0f, 0f, 0f, 0f); } catch { /* */ }
@@ -17041,6 +17050,20 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// pressed and disabled sprites by the Button (the game's SpriteSwap), a light caption (red for a
         /// destructive one). False when the art is not ready: the caller draws the kit button.
         /// </summary>
+        /// <summary>
+        /// Live 2026-10-14: a button painted with borrowed art whose sprite (or its texture) is no longer alive is
+        /// painted again from the current art, or the kit look when there is none. A destroyed sprite draws as a
+        /// plain white quad multiplied by the button's tint: the Install tab's column buttons went pale.
+        /// </summary>
+        private static void RepaintIfArtGone(Cell cell)
+        {
+            Sprite? drawn = null;
+            try { drawn = cell.Fill != null ? cell.Fill.sprite : null; } catch { drawn = null; }
+            if (!GameArt.GameArtLadder.NeedsRepaint(cell.PaintedArt, GameArt.GameArtUnity.AliveSprite(drawn))) return;
+            try { PaintButton(cell); }
+            catch { /* the next layout pass tries again */ }
+        }
+
         private static bool PaintPopupButton(Cell cell)
         {
             if (cell.Fill == null
@@ -17059,6 +17082,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 if (column != CellColumn.None && cell.Spec.Tone == CellTone.Disabled)
                     tint = new Color(tint.r * 0.6f, tint.g * 0.6f, tint.b * 0.6f, 0.75f);
                 cell.Fill.color = tint;
+                cell.PaintedArt = true;
                 PaintColumnOverlay(cell, sprite, type, ppu);
             }
             catch { return false; }
@@ -17147,6 +17171,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 cell.Fill.type = type;
                 try { cell.Fill.pixelsPerUnitMultiplier = ppu; } catch { /* */ }
                 cell.Fill.color = Color.white;
+                cell.PaintedArt = true;
             }
             catch { return false; }
             // Live 2026-10-14: at the column overlay's 8-unit side inset the gold plate left a dark band inside the chip's
@@ -18014,6 +18039,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     continue;
                 }
                 try { if (!cell.Go.activeSelf) cell.Go.SetActive(true); } catch { /* */ }
+                if (cell.PaintedArt && cell.Spec.Kind == CellKind.Button) RepaintIfArtGone(cell);
                 float h;
                 switch (cell.Spec.Kind)
                 {

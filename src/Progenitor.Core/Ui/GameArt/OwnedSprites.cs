@@ -1,5 +1,6 @@
 #if !PROGENITOR_TESTS
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using static Progenitor.Ui.GameArt.GameArtUnity;
@@ -18,6 +19,14 @@ namespace Progenitor.Ui.GameArt;
 /// <para><b>Owned copy.</b> Live 2026-09-29 (K8): the holder kept the Sprite object but its texture was
 /// still released on world load. So the sprite's pixels are also copied on the GPU into a texture and
 /// sprite Progenitor owns (<see cref="CopySprite"/>), once per donor sprite, never per frame.</para>
+///
+/// <para><b>Replaced copies are retired, not destroyed</b> (live 2026-10-14). An Image painted with an owned
+/// copy keeps a reference to that sprite; nothing repaints a row whose spec did not change. Destroying a
+/// replaced copy (an adopted kept copy giving way to a live donor's, a new donor sprite) left every such
+/// Image drawing a flat white quad under its tint: the Install tab's column buttons went pale blue and pale
+/// pink. A replacement now waits until the new copy exists, and the old copy stays alive until
+/// <see cref="Release"/>. Replacements happen only when a part's donor sprite changes name, so the retired
+/// list stays a handful of small sprites per Core generation.</para>
 ///
 /// <para>Everything is destroyed by <see cref="Release"/> on Core unload; the holder's and the copies'
 /// names carry <see cref="UiOwnership.Prefix"/>, so the unload sweep also removes a leftover.</para>
@@ -42,6 +51,7 @@ internal sealed class OwnedSprites
     private readonly bool[] _textureKept;
     private readonly bool[] _keepSliced;
     private readonly Color[] _keepTint;
+    private readonly List<Object> _retired = new();
     private GameObject? _holder;
 
     /// <param name="holderName">The holder GameObject's name (must be owned: <see cref="UiOwnership.Prefix"/>).</param>
@@ -138,9 +148,13 @@ internal sealed class OwnedSprites
         }
         catch { /* not held: the next build finds it again or falls back */ }
 
+        // A copy of another sprite keeps drawing until CopyPending makes the replacement (the rows already
+        // painted with it must not lose their art in the meantime).
         if (copyNow) EnsureCopy(i, sprite);
-        else if (!IsCopyOf(i, sprite)) DropOwnedCopy(i);
     }
+
+    /// <summary>Copies retired by a replacement and still alive (they are destroyed by <see cref="Release"/>).</summary>
+    internal int RetiredCount => _retired.Count;
 
     /// <summary>The owned copy of part <paramref name="i"/> is of <paramref name="sprite"/> and still alive.</summary>
     private bool IsCopyOf(int i, Sprite? sprite) =>
@@ -164,17 +178,18 @@ internal sealed class OwnedSprites
     {
         // Our own copy of the pixels, made once per sprite (a different donor sprite replaces it).
         if (OwnedUsable(i) && string.Equals(SafeName(_owned[i]!), OwnedName(sprite), StringComparison.Ordinal)) return;
-        DropOwnedCopy(i);
         if (sprite == null) return;
         var copy = CopySprite(sprite, OwnedName(sprite), out var texture, out string why, keepReadable: true);
         if (copy == null)
         {
             _copyNote[i] = why;
             Plugin.Logger?.LogInfo(_logPrefix + _partNames[i] + " no owned copy of " + SafeName(sprite) + ": " + why
-                + "; the borrowed sprite is used while it stays loaded.");
+                + (OwnedUsable(i) ? "; the earlier copy keeps drawing." : "; the borrowed sprite is used while it stays loaded."));
             return;
         }
 
+        // Live 2026-10-14: the copy being replaced may be on screen. Retire it; never destroy it here.
+        RetireOwnedCopy(i);
         _owned[i] = copy;
         _ownedTexture[i] = texture;
         _textureKept[i] = false;
@@ -239,7 +254,7 @@ internal sealed class OwnedSprites
         Texture2D? texture;
         try { texture = kept.texture; }
         catch { return false; }
-        DropOwnedCopy(i);
+        RetireOwnedCopy(i);
         string name = GameArtLadder.OwnedAssetName(_assetTag, GameArtKept.DonorKept + "-" + entry.Sprite);
         if (!TryOver(i, texture, entry.Border, entry.Ppu, name)) return false;
         _keepSliced[i] = entry.Sliced;
@@ -280,6 +295,23 @@ internal sealed class OwnedSprites
             _copyNote[i] = "";
             _held[i] = null;
         }
+
+        foreach (var retired in _retired) DestroyAsset(retired);
+        _retired.Clear();
+    }
+
+    /// <summary>
+    /// Take part <paramref name="i"/>'s copy out of use without destroying it: Images painted with it keep
+    /// drawing it until they are repainted or the Core unloads (<see cref="Release"/>). A kept texture is
+    /// Bootstrap's and is never listed.
+    /// </summary>
+    private void RetireOwnedCopy(int i)
+    {
+        if (AliveObject(_owned[i])) _retired.Add(_owned[i]!);
+        if (!_textureKept[i] && AliveObject(_ownedTexture[i])) _retired.Add(_ownedTexture[i]!);
+        _owned[i] = null;
+        _ownedTexture[i] = null;
+        _textureKept[i] = false;
     }
 
     private void DropOwnedCopy(int i)

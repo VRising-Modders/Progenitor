@@ -93,6 +93,12 @@ internal static class GameArtLadder
     /// <summary>A kept sprite is used only while it and its texture are still loaded.</summary>
     internal static bool CachedUsable(bool spriteAlive, bool textureAlive) => spriteAlive && textureAlive;
 
+    /// <summary>
+    /// Live 2026-10-14: a control painted with borrowed art is painted again when the sprite it draws is gone
+    /// (destroyed, or its texture released). A control on the kit look never is: it draws no sprite.
+    /// </summary>
+    internal static bool NeedsRepaint(bool paintedWithArt, bool drawnSpriteAlive) => paintedWithArt && !drawnSpriteAlive;
+
     /// <summary>One resident scan per build frame, at most <paramref name="maxScans"/> per world.</summary>
     internal static bool MayScanResident(int attempts, int lastScanFrame, int frame, int maxScans) =>
         attempts >= 0 && attempts < maxScans && lastScanFrame != frame;
