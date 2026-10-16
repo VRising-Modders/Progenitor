@@ -13,6 +13,26 @@ internal sealed partial class UnityUiRuntime
     public IRuntimeVanillaTabs? CreateVanillaTabs(VanillaUiSite site, string[] captions, Action<int> selected)
         => new NativePanelTabs(this, site, captions, selected);
 
+    /// <summary>The live panel tab hosts, for <see cref="DescribeVanillaTabs"/>. Main thread.</summary>
+    private static readonly List<NativePanelTabs> LiveVanillaTabs = new();
+
+    /// <summary>
+    /// <c>ui_read panels</c> → <c>tabs</c>: each <c>Ui.AttachPanelTabs</c> strip with its window kind,
+    /// screen rect, tab height (and whether it came from the donor tab), its placement and the
+    /// self-check state (<c>ok</c>, <c>degenerate</c>, <c>clipped</c> or <c>covered</c>). Main thread.
+    /// </summary>
+    internal static List<object?> DescribeVanillaTabs()
+    {
+        var list = new List<object?>();
+        foreach (var tabs in LiveVanillaTabs.ToArray())
+        {
+            try { list.Add(tabs.Describe()); }
+            catch (Exception e) { list.Add(new Dictionary<string, object?> { ["error"] = e.Message }); }
+        }
+
+        return list;
+    }
+
     private sealed class NativePanelTabs : IRuntimeVanillaTabs
     {
         readonly UnityUiRuntime _runtime;
@@ -34,9 +54,21 @@ internal sealed partial class UnityUiRuntime
         RectTransform? _bonusAnchor;
         readonly Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3> _corners = new(4);
         bool _redistribution;
+        VanillaPanelKind _kind;
+        float _anchorTop;
+        RectTransform? _tabDonorRect;
+        float _captionHeight, _tabHeight;
+        bool _heightFromDonor;
+        VanillaTabStripPlacement _placement;
+        readonly List<(string name, Behaviour mask, RectTransform rect)> _masks = new();
+        VanillaTabStripCheck _check = new("unchecked", "", 0f);
+        int _checkFrame = -1000;
+        bool _checkLogged;
+        string _pendingState = "";
+        Canvas? _ownCanvas;
 
         internal NativePanelTabs(UnityUiRuntime runtime, VanillaUiSite site, string[] captions, Action<int> changed)
-        { _runtime = runtime; _site = site; _captions = captions; _changed = changed; }
+        { _runtime = runtime; _site = site; _captions = captions; _changed = changed; LiveVanillaTabs.Add(this); }
 
         public bool ShowRedistribution
         {
@@ -68,7 +100,8 @@ internal sealed partial class UnityUiRuntime
                 _bonusAnchor = bench != null ? RectOf(bench.BonusesParent)
                     : refiner != null ? RectOf(refiner.BonusesParent) : specialBonus;
                 anchor.GetWorldCorners(_corners);
-                _top = _root.InverseTransformPoint(_corners[1]).y;
+                _top = _anchorTop = _root.InverseTransformPoint(_corners[1]).y;
+                _kind = sample.Target.Kind;
                 _flow = chest != null;
                 _layoutParent = _flow ? view.Grid.transform.parent : _root;
                 if (_layoutParent == null) { Release(); return; }
@@ -112,7 +145,15 @@ internal sealed partial class UnityUiRuntime
                 if (view.Inventory != null && view.Inventory.TabButtons != null)
                     foreach (var tab in view.Inventory.TabButtons)
                         if (Alive(tab)) { tabDonor = tab.gameObject; break; }
-                float tabHeight = tabDonor != null ? tabDonor.GetComponent<RectTransform>().rect.height : 49f;
+                // The donor's height is read again every frame (RefreshTabHeight): a tab read before its
+                // layout ran is zero tall, and a zero-height strip shows only the lower half of each
+                // caption under its own baseline trim (the prison cell window, 1.1.13).
+                _tabDonorRect = tabDonor != null ? tabDonor.GetComponent<RectTransform>() : null;
+                var donorCaption = tabDonor != null ? tabDonor.GetComponentInChildren<TextMeshProUGUI>(true) : null;
+                _captionHeight = donorCaption != null ? donorCaption.fontSize * 1.25f : 0f;
+                float tabHeight = VanillaTabStripLayout.TabHeight(
+                    _tabDonorRect != null ? _tabDonorRect.rect.height : float.NaN, _captionHeight, out _heightFromDonor);
+                _tabHeight = tabHeight;
                 stripRect.sizeDelta = new Vector2(stripRect.sizeDelta.x, tabHeight);
                 if (layout != null) { layout.preferredHeight = tabHeight; layout.minHeight = tabHeight; }
                 if (tabDonor != null)
@@ -179,17 +220,225 @@ internal sealed partial class UnityUiRuntime
                     if (child.name.StartsWith("TabGradient") || child.name.StartsWith("TabDivider")) trims.Add(child);
                 }
                 foreach (var trim in trims) trim.SetAsLastSibling();
+                CollectMasks();
+                _check = new VanillaTabStripCheck("unchecked", "", 0f);
+                _checkFrame = -1000;
+                _checkLogged = false;
             }
-            if (!_flow && _bonusAnchor != null && _root != null && _strip != null)
-            {
-                _bonusAnchor.GetWorldCorners(_corners);
-                _top = _root.InverseTransformPoint(_corners[0]).y - 20;
-                var stripRect = _strip.GetComponent<RectTransform>();
-                stripRect.anchoredPosition = new Vector2(_root.rect.center.x, _top);
-            }
+            bool moved = RefreshTabHeight();
+            if (!_flow && _root != null && _strip != null) moved |= PlaceStrip();
             foreach (var item in _nativeTabs) item.Hide();
             ApplySelection();
             PlacePanel();
+            if (moved || Time.frameCount - _checkFrame >= 30) SelfCheck();
+        }
+
+        /// <summary>
+        /// Re-read the donor tab's height and resize the strip and its tabs when the usable height
+        /// changed (<see cref="VanillaTabStripLayout.TabHeight"/>). True when it changed.
+        /// </summary>
+        bool RefreshTabHeight()
+        {
+            if (_strip == null) return false;
+            float measured = Alive(_tabDonorRect) ? _tabDonorRect!.rect.height : float.NaN;
+            float height = VanillaTabStripLayout.TabHeight(measured, _captionHeight, out bool fromDonor);
+            _heightFromDonor = fromDonor;
+            if (Math.Abs(height - _tabHeight) < .5f) return false;
+            _tabHeight = height;
+            var stripRect = _strip.GetComponent<RectTransform>();
+            stripRect.sizeDelta = new Vector2(stripRect.sizeDelta.x, height);
+            var layout = _strip.GetComponent<LayoutElement>();
+            if (layout != null) { layout.preferredHeight = height; layout.minHeight = height; }
+            foreach (var (go, _) in _buttons)
+            {
+                if (!Alive(go)) continue;
+                var rt = go.GetComponent<RectTransform>();
+                if (rt != null) rt.sizeDelta = new Vector2(rt.sizeDelta.x, height);
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Place a station strip (absolute, not in a layout): under the bonus row, never above the
+        /// tightest parent mask, and drawn after every sibling. True when its top moved.
+        /// </summary>
+        bool PlaceStrip()
+        {
+            float? bonusBottom = null;
+            if (Alive(_bonusAnchor))
+            {
+                _bonusAnchor!.GetWorldCorners(_corners);
+                bonusBottom = _root!.InverseTransformPoint(_corners[0]).y;
+            }
+
+            var placement = VanillaTabStripLayout.Place(_anchorTop, bonusBottom, VisibleTop(), _tabHeight);
+            bool moved = Math.Abs(placement.Top - _placement.Top) > .5f || Math.Abs(placement.Height - _placement.Height) > .5f;
+            _placement = placement;
+            _top = placement.Top;
+            var stripRect = _strip!.GetComponent<RectTransform>();
+            stripRect.anchoredPosition = new Vector2(_root!.rect.center.x, _top);
+            // Drawn after every sibling of the window body, so no panel of the window covers it.
+            if (_layoutParent != null && _strip.transform.GetSiblingIndex() != _layoutParent.childCount - 1)
+                _strip.transform.SetAsLastSibling();
+            return moved;
+        }
+
+        /// <summary>The enabled masks (RectMask2D, Mask) on the strip's parent chain, cached once per strip.</summary>
+        void CollectMasks()
+        {
+            _masks.Clear();
+            for (var t = _strip != null ? _strip.transform.parent : null; t != null; t = t.parent)
+            {
+                var soft = t.GetComponent<RectMask2D>();
+                if (soft != null) _masks.Add(("RectMask2D " + t.name, soft, soft.rectTransform));
+                var stencil = t.GetComponent<Mask>();
+                if (stencil != null) _masks.Add(("Mask " + t.name, stencil, stencil.rectTransform));
+            }
+        }
+
+        /// <summary>The lowest top edge of the enabled parent masks, in the root's local units; null without a mask.</summary>
+        float? VisibleTop()
+        {
+            float? top = null;
+            foreach (var (_, mask, rect) in _masks)
+            {
+                if (!Alive(mask) || !mask.isActiveAndEnabled || !Alive(rect)) continue;
+                rect.GetWorldCorners(_corners);
+                float y = _root!.InverseTransformPoint(_corners[1]).y;
+                if (top == null || y < top) top = y;
+            }
+
+            return top;
+        }
+
+        /// <summary>
+        /// The runtime self-check (<see cref="VanillaTabStripLayout.Check"/>): is the strip tall enough,
+        /// inside every parent mask, and not under a later sibling or an override-sorted canvas? A
+        /// covered strip gets its own override-sorted canvas above the coverer; anything left is
+        /// logged once per strip. Read back by <c>ui_read panels</c> (<c>tabs</c>).
+        /// </summary>
+        void SelfCheck()
+        {
+            _checkFrame = Time.frameCount;
+            if (_strip == null || _root == null || !_strip.activeInHierarchy) return;
+            var stripRect = _strip.GetComponent<RectTransform>();
+            var strip = ScreenRectOf(stripRect);
+            var masks = new List<(string Name, ScreenRect Rect)>();
+            foreach (var (name, mask, rect) in _masks)
+                if (Alive(mask) && mask.isActiveAndEnabled && Alive(rect)) masks.Add((name, ScreenRectOf(rect)));
+
+            var above = new List<(string Name, ScreenRect Rect)>();
+            int coverOrder = int.MinValue;
+            if (!_flow && _layoutParent != null)
+            {
+                for (int i = _strip.transform.GetSiblingIndex() + 1; i < _layoutParent.childCount; i++)
+                {
+                    var sibling = _layoutParent.GetChild(i);
+                    if (Shows(sibling)) above.Add(("sibling " + sibling.name, ScreenRectOf(sibling.GetComponent<RectTransform>())));
+                }
+            }
+
+            var stripCanvas = _strip.GetComponentInParent<Canvas>();
+            int stripOrder = stripCanvas != null ? stripCanvas.sortingOrder : 0;
+            foreach (var canvas in _root.GetComponentsInChildren<Canvas>(false))
+            {
+                if (canvas == null || !canvas.overrideSorting || !canvas.isActiveAndEnabled) continue;
+                if (stripCanvas != null && canvas.Pointer == stripCanvas.Pointer) continue;
+                if (canvas.transform.IsChildOf(_strip.transform) || _strip.transform.IsChildOf(canvas.transform)) continue;
+                if (canvas.sortingOrder < stripOrder || !Shows(canvas.transform)) continue;
+                var rect = ScreenRectOf(canvas.GetComponent<RectTransform>());
+                if (!VanillaTabStripLayout.Overlaps(strip, rect)) continue;
+                above.Add(("canvas " + canvas.name + " order " + canvas.sortingOrder, rect));
+                coverOrder = Math.Max(coverOrder, canvas.sortingOrder);
+            }
+
+            float minHeight = Math.Max(1f, VanillaTabStripLayout.MinTabHeight * .5f * CanvasScale(stripRect));
+            var check = VanillaTabStripLayout.Check(strip, masks, above, minHeight);
+            if (check.State == "covered" && coverOrder != int.MinValue && _ownCanvas == null && RaiseStrip(coverOrder + 1))
+            {
+                Plugin.Logger?.LogInfo("Ui: panel tabs on " + _kind + " were under " + check.By + "; drawn above it on their own canvas");
+                check = VanillaTabStripLayout.Check(ScreenRectOf(stripRect), masks, Array.Empty<(string, ScreenRect)>(), minHeight);
+            }
+
+            _check = check;
+            // Log a state only when two checks in a row agree: the first frames of a window are
+            // laid out by the game after the strip is built.
+            string state = check.State + "|" + check.By;
+            bool repeated = state == _pendingState;
+            _pendingState = check.Ok ? "" : state;
+            if (check.Ok || _checkLogged || !repeated) return;
+            _checkLogged = true;
+            Plugin.Logger?.LogWarning("Ui: panel tabs on " + _kind + " " + check.State + " (" + check.By + "), visible "
+                + Math.Round(check.Visible * 100) + "%, strip " + RectText(strip) + ", tab height " + Math.Round(_tabHeight, 1)
+                + (_heightFromDonor ? " (donor)" : " (fallback)"));
+        }
+
+        /// <summary>The strip's canvas scale (screen pixels per canvas unit); 1 when unreadable.</summary>
+        static float CanvasScale(RectTransform rt)
+        {
+            var r = ScreenRectOf(rt);
+            float h = rt.rect.height;
+            return r.IsKnown && h > .01f ? Math.Max(.01f, (r.MaxY - r.MinY) / h) : 1f;
+        }
+
+        /// <summary>Drawn: active, and no CanvasGroup up to the window root hides it.</summary>
+        bool Shows(Transform t)
+        {
+            if (t == null || !t.gameObject.activeInHierarchy) return false;
+            for (var p = t; p != null; p = p.parent)
+            {
+                var group = p.GetComponent<CanvasGroup>();
+                if (group != null && group.alpha <= .01f) return false;
+                if (_root != null && p.Pointer == _root.transform.Pointer) break;
+            }
+
+            return true;
+        }
+
+        /// <summary>Give the strip its own canvas, sorted at <paramref name="order"/>, with a raycaster so its tabs still take clicks.</summary>
+        bool RaiseStrip(int order)
+        {
+            if (_strip == null) return false;
+            var canvas = _strip.GetComponent<Canvas>() ?? TryAdd<Canvas>(_strip);
+            if (canvas == null) return false;
+            try
+            {
+                canvas.overrideSorting = true;
+                canvas.sortingOrder = order;
+            }
+            catch { return false; }
+            if (_strip.GetComponent<GraphicRaycaster>() == null) TryAdd<GraphicRaycaster>(_strip);
+            _ownCanvas = canvas;
+            return true;
+        }
+
+        static string RectText(ScreenRect r) => !r.IsKnown ? "unknown"
+            : Math.Round(r.MinX) + "," + Math.Round(r.MinY) + " " + Math.Round(r.MaxX - r.MinX) + "x" + Math.Round(r.MaxY - r.MinY);
+
+        internal Dictionary<string, object?> Describe()
+        {
+            bool shown = Alive(_strip) && _strip!.activeInHierarchy;
+            return new Dictionary<string, object?>
+            {
+                ["site"] = _site.ToString(),
+                ["kind"] = _kind.ToString(),
+                ["shown"] = shown,
+                ["captions"] = _captions.Length,
+                ["selected"] = _selected,
+                ["layout"] = _flow ? "flow" : "placed",
+                ["rect"] = shown ? RectDict(ScreenRectOf(_strip!.GetComponent<RectTransform>())) : null,
+                ["tabHeight"] = Math.Round(_tabHeight, 1),
+                ["tabHeightSource"] = _heightFromDonor ? "donor" : "fallback",
+                ["top"] = _flow ? null : Math.Round(_placement.Top, 1),
+                ["panelTop"] = _flow ? null : Math.Round(_placement.PanelTop, 1),
+                ["clamped"] = !_flow && _placement.Clamped,
+                ["masks"] = _masks.Count,
+                ["clip"] = _check.State,
+                ["clipBy"] = _check.By,
+                ["visible"] = Math.Round(_check.Visible, 3),
+                ["ownCanvas"] = Alive(_ownCanvas) ? _ownCanvas!.sortingOrder : null,
+            };
         }
 
         /// <summary>
@@ -318,7 +567,7 @@ internal sealed partial class UnityUiRuntime
             {
                 rect.anchorMin = rect.anchorMax = _root.pivot;
                 rect.pivot = new Vector2(.5f, 1);
-                rect.anchoredPosition = new Vector2(_root.rect.center.x, _top - _strip!.GetComponent<RectTransform>().rect.height - 6);
+                rect.anchoredPosition = new Vector2(_root.rect.center.x, _placement.PanelTop);
                 _strip!.transform.SetAsLastSibling();
             }
         }
@@ -344,9 +593,15 @@ internal sealed partial class UnityUiRuntime
             _buttons.Clear();
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
+            _ownCanvas = null; _tabDonorRect = null; _bonusAnchor = null; _masks.Clear();
+            _placement = default; _tabHeight = 0f; _pendingState = "";
         }
 
-        public void Dispose() => Release();
+        public void Dispose()
+        {
+            Release();
+            LiveVanillaTabs.Remove(this);
+        }
 
         // Keep the native content live for its mapper, but remove its drawing and hit testing.
         // Restore the exact original CanvasGroup state, including on unload or target change.

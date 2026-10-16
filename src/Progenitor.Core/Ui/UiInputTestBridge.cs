@@ -396,9 +396,14 @@ internal static class UiInputTestBridge
         List<object?> attached;
         try { attached = UnityUiRuntime.DescribeAttachments(); }
         catch (Exception e) { attached = new List<object?> { new Dictionary<string, object?> { ["error"] = e.Message } }; }
+
+        // Ui.AttachPanelTabs strips: their rect, tab height and the self-check (ok, degenerate, clipped, covered).
+        List<object?> tabs;
+        try { tabs = UnityUiRuntime.DescribeVanillaTabs(); }
+        catch (Exception e) { tabs = new List<object?> { new Dictionary<string, object?> { ["error"] = e.Message } }; }
         return new Dictionary<string, object?>
         {
-            ["ok"] = true, ["screenWidth"] = w, ["screenHeight"] = h, ["panels"] = list, ["attached"] = attached,
+            ["ok"] = true, ["screenWidth"] = w, ["screenHeight"] = h, ["panels"] = list, ["attached"] = attached, ["tabs"] = tabs,
         };
     }
 
