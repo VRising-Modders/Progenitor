@@ -44,6 +44,8 @@ A world save records a mod's prefab GUID like a vanilla one, so a save written w
 
 ## Quick start (mod authors)
 
+**Start from the template and the guide.** [`PROGENITOR_GUIDE.md`](PROGENITOR_GUIDE.md) maps each need to its API and sample; [`templates/progenitor-mod`](templates/progenitor-mod) is a buildable starter mod (`dotnet new install templates/progenitor-mod`, then `dotnet new progenitor-mod -n MyMod`). Working with an AI assistant: paste the [starter prompt](docs/ai-starter-prompt.md); [`llms.txt`](llms.txt) indexes the repository for it.
+
 1. Read the [tutorial](docs/tutorial.md): a progressive guide from a first item and command to keybinds, UI, units, patches and the hot-reload loop.
 2. Start from the [minimal reload example](samples/Progenitor.ReloadExample/README.md), then the larger [`samples/Progenitor.Sample`](samples/Progenitor.Sample).
 3. Look up each facade in the [module reference](docs/modules.md) and its status in [`docs/api.md`](docs/api.md).
@@ -146,7 +148,7 @@ To test a plugin on both sides, host a private game from the client, or stage a 
 
 | Topic | Pages |
 |---|---|
-| Getting started | [Tutorial](docs/tutorial.md), [hot reload](docs/hot-reload.md), [glossary](docs/glossary.md), [basic authoring roadmap](docs/basic-mod-authoring.md) |
+| Getting started | [Mod authoring guide](PROGENITOR_GUIDE.md), [mod template](templates/progenitor-mod), [AI starter prompt](docs/ai-starter-prompt.md), [llms.txt](llms.txt), [Tutorial](docs/tutorial.md), [hot reload](docs/hot-reload.md), [glossary](docs/glossary.md), [basic authoring roadmap](docs/basic-mod-authoring.md) |
 | API reference | [API status](docs/api.md), [module reference](docs/modules.md), [commands](docs/commands.md), [config sync](docs/config-sync.md), [hook ordering](docs/hooks-ordering.md), [input](docs/input.md) |
 | Content | [Recipes](docs/recipes.md), [buffs](docs/buffs.md), [content files](docs/content-files.md), [content packs](docs/content-packs.md), [item removal](docs/item-removal.md), [edits on the wire](docs/edits-on-the-wire.md), [key table](docs/key-table.md), [boss AI](docs/ai.md) |
 | Visuals and UI | [UI style guide](docs/ui-style.md), [UI toolkit](docs/ui.md), [effects](docs/effects.md), [wearables](docs/wearables.md), [character sheet](docs/character-sheet.md), [chat](docs/chat.md), [asset acquisition](docs/assets-acquisition.md), [player animation import](docs/player-animation-import.md), [player forms](docs/player-forms.md) |

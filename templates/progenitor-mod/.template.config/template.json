@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Progenitor contributors",
+  "classifications": [
+    "V Rising",
+    "BepInEx",
+    "Mod",
+    "Progenitor"
+  ],
+  "identity": "Progenitor.Templates.Mod",
+  "groupIdentity": "Progenitor.Templates.Mod",
+  "name": "Progenitor mod (V Rising)",
+  "description": "A V Rising mod built on Progenitor: settings, a keybind, a standard window, a notice, a client-server request, About text, a help page, compatibility declarations and a game-free test project.",
+  "shortName": "progenitor-mod",
+  "tags": {
+    "language": "C#",
+    "type": "solution"
+  },
+  "sourceName": "ProgenitorMod",
+  "preferNameDirectory": true,
+  "symbols": {
+    "team": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "YourTeam",
+      "description": "Your Thunderstore team name. Lower-cased, it is the first part of the plugin id (yourteam.mymod).",
+      "replaces": "YourTeam"
+    },
+    "authorLower": {
+      "type": "generated",
+      "generator": "casing",
+      "parameters": {
+        "source": "team",
+        "toLower": true
+      },
+      "replaces": "yourteam"
+    },
+    "displayName": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "",
+      "description": "The name players see (Mods menu, notices). Defaults to the project name."
+    },
+    "displayNameOrName": {
+      "type": "generated",
+      "generator": "coalesce",
+      "parameters": {
+        "sourceVariableName": "displayName",
+        "fallbackVariableName": "name"
+      },
+      "replaces": "Progenitor Mod Display Name"
+    },
+    "license": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "MIT",
+      "description": "The SPDX license identifier written into every source header (MIT, Apache-2.0, LGPL-2.1-only, GPL-3.0-only, ...)."
+    },
+    "spdxHeader": {
+      "type": "generated",
+      "generator": "join",
+      "parameters": {
+        "symbols": [
+          {
+            "type": "const",
+            "value": "SPDX-License-Identifier: "
+          },
+          {
+            "type": "ref",
+            "value": "license"
+          }
+        ],
+        "separator": ""
+      },
+      "replaces": "SPDX-License-Identifier: MIT"
+    },
+    "progenitorRepo": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "progenitor-repo-auto",
+      "description": "Path to a Progenitor checkout (it supplies Progenitor.Core and Progenitor.Testing). Default: /p:ProgenitorRepo, PROGENITOR_REPO, a checkout above the mod folder, or ..Progenitor.",
+      "replaces": "progenitor-repo-auto"
+    }
+  },
+  "sources": [
+    {
+      "exclude": [
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        "**/.vs/**",
+        "**/*.user",
+        ".template.config/**",
+        "**/Directory.Build.local.props"
+      ]
+    }
+  ],
+  "postActions": []
+}

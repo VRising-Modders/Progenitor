@@ -39,6 +39,10 @@ jobs:
       - name: Test Progenitor.Testing
         run: dotnet test tests/Progenitor.Testing.Tests --configuration Release --logger trx
 
+      # The dotnet new template: instantiate it into a temp folder and run its game-free test project (no game here).
+      - name: Mod template instantiates and its tests pass
+        run: node tools/template-check.mjs --game-free
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

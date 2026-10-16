@@ -1,0 +1,8 @@
+bin/
+obj/
+.vs/
+*.user
+# machine paths (game folder, Progenitor checkout)
+Directory.Build.local.props
+# never commit the dev bridge's token
+*.token

@@ -14,7 +14,7 @@ This zip does **not** include `Progenitor.Dev.dll`. That debug bridge is for dev
 
 ## Mod authors
 
-Subclass `ProgenitorPlugin<TContext>`, register work on `ctx` (`Content`, `Commands`, `Events`, `Net`, `Handshake`, `Save`, …), and ship your plugin next to this one. API: the repository's `docs/modules.md`. Sample: `samples/Progenitor.Sample`.
+Subclass `ProgenitorPlugin<TContext>`, register work on `ctx` (`Content`, `Commands`, `Events`, `Net`, `Handshake`, `Save`, …), and ship your plugin next to this one. Start with `PROGENITOR_GUIDE.md` (included in this package) and the repository's `dotnet new progenitor-mod` template (`templates/progenitor-mod`). API: the repository's `docs/modules.md`. Sample: `samples/Progenitor.Sample`.
 
 ## Status (0.1.0)
 
