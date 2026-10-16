@@ -933,6 +933,7 @@ offset EntityComponentStoreArchetypesOffset            = 0x78  : EntityComponent
 # 0x18 between m_Archetypes and m_ArchetypeActive matches its extent; its offsets are the ones read.
 offset UntypedUnsafeListPtrOffset                      = 0x0   : UntypedUnsafeList.Ptr                         # Archetype**
 offset UntypedUnsafeListLengthOffset                   = 0x8   : UntypedUnsafeList.m_length
+offset UntypedUnsafeListCapacityOffset                 = 0xC   : UntypedUnsafeList.m_capacity
 size   EntityInChunkStride                             = 8     : EntityInChunk
 offset EntityInChunkChunkOffset                        = 0x0   : EntityInChunk.Chunk                          # ChunkIndex, one int
 offset EntityInChunkIndexInChunkOffset                 = 0x4   : EntityInChunk.IndexInChunk

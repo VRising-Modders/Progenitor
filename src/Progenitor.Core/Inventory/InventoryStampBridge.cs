@@ -50,6 +50,9 @@ public sealed class InventoryStampReport
     /// <summary>Whether the first raw read was compared with the interop's GetChunk yet.</summary>
     public bool SelfTested { get; internal set; }
 
+    /// <summary>Times the clock resumed with a rebase (idle window, Core reload, new store): every stamp read as changed once.</summary>
+    public long Resumes { get; internal set; }
+
     /// <summary>Whether the audit is running (a stamp user other than Watch called lately).</summary>
     public bool Auditing { get; internal set; }
 
@@ -126,6 +129,7 @@ public static class InventoryStampBridge
         report.Disabled = ChunkVersions.DisabledReason ?? "";
         report.SelfTested = ChunkVersions.SelfTested;
         report.Auditing = stamps.HasUser;
+        report.Resumes = stamps.Resumes;
         report.Entries = stamps.Entries;
         report.TypeScans = ChunkVersions.TypeScans;
         var failures = new Dictionary<string, long>(StringComparer.Ordinal);

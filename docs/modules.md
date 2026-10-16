@@ -2311,9 +2311,13 @@ lastLook = now;
   buffer, then reads the version again. A completion that fails makes the whole batch's answers
   fresh ("changed").
 - **Self-test.** The first raw read after Core loads is compared with the interop's
-  `EntityManager.GetChunk` (chunk, archetype, store). A mismatch disables the raw reads for the
-  process with one `ChunkVersions: raw change-version reads DISABLED` error line; every stamp is
-  then fresh.
+  `EntityManager.GetChunk` (chunk, archetype, store). A mismatch, or `GetChunk` throwing three
+  times in a row, disables the raw reads for the process with one
+  `ChunkVersions: raw change-version reads DISABLED` error line; every stamp is then fresh.
+- **Idle.** Until something stamps or reads `Clock` (a plugin, the dev bridge, or `Watch` with the
+  setting on), the server does no raw read at all. After 3600 frames with no such call it stops
+  again and forgets its cache; the next call resumes the clock with a jump, so every container
+  reads as changed once (a false positive).
 - **Audit.** While a stamp user other than `Watch` (a plugin, the dev bridge) has called in the
   last 3600 frames, the server re-hashes the raw rows of four recently stamped containers every
   frame. Content that changed under an unchanged stamp is a miss: logged once as

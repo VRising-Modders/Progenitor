@@ -265,6 +265,63 @@ public class InventoryStampTests
     }
 
     [Fact]
+    public void With_no_stamp_user_the_frame_tick_reads_nothing()
+    {
+        var w = new FakeStampWorld();
+        var s = w.Stamps();
+        for (int i = 0; i < 500; i++) s.Tick();
+        Assert.Equal(0, w.Binds);
+        Assert.Equal(0, w.ClockReads);
+        Assert.False(s.Active);
+    }
+
+    [Fact]
+    public void After_the_idle_window_the_tick_stops_and_the_next_call_resumes_with_everything_changed()
+    {
+        var w = new FakeStampWorld { Clock = 1000 };
+        var chest = w.Chest(10, 3, Arch1, 900);
+        var refs = new[] { chest };
+        var s = w.Stamps();
+        long a = s.Stamp(chest);
+        long since = s.Clock;
+        for (int i = 0; i < 10; i++) s.Tick();
+        Assert.True(w.ClockReads > 10);                // sampled while in use
+
+        for (int i = 0; i < InventoryStamps.EvictAfterFrames + 5; i++) s.Tick();
+        Assert.False(s.Active);
+        Assert.Equal(0, s.Entries);
+        int reads = w.ClockReads;
+        for (int i = 0; i < 1000; i++) s.Tick();
+        Assert.Equal(reads, w.ClockReads);             // idle: no raw read at all
+
+        // Meanwhile the clock ran unsampled (any distance, a 32-bit wrap included); the chest is untouched.
+        w.Clock = 2000;
+        long resumes = s.Resumes;
+        Assert.True(s.AnyChangedSince(refs, since));   // resumed: everything reads as changed once
+        Assert.Equal(resumes + 1, s.Resumes);
+        Assert.True(s.Clock > since + uint.MaxValue);  // never behind a since handed out earlier
+        Assert.NotEqual(a, s.Stamp(chest));            // a false positive, never a false negative
+        long now = s.Clock;
+        w.Clock = 2100;
+        long later = s.Clock;
+        Assert.False(s.AnyChangedSince(refs, later));  // back to normal once resumed
+        Assert.True(later > now);
+    }
+
+    [Fact]
+    public void The_archetype_list_is_walked_only_with_a_sane_length_and_capacity()
+    {
+        Assert.True(ChunkVersionMath.ArchetypeListOk(true, 10, 16, 1 << 20));
+        Assert.True(ChunkVersionMath.ArchetypeListOk(true, 16, 16, 1 << 20));
+        Assert.False(ChunkVersionMath.ArchetypeListOk(false, 10, 16, 1 << 20));
+        Assert.False(ChunkVersionMath.ArchetypeListOk(true, 0, 16, 1 << 20));
+        Assert.False(ChunkVersionMath.ArchetypeListOk(true, 17, 16, 1 << 20)); // length past capacity
+        Assert.False(ChunkVersionMath.ArchetypeListOk(true, -1, 16, 1 << 20));
+        Assert.False(ChunkVersionMath.ArchetypeListOk(true, 10, (1 << 20) + 1, 1 << 20));
+        Assert.Equal(3, ChunkVersionMath.SelfTestThrowLimit);
+    }
+
+    [Fact]
     public void The_self_test_names_what_differs_from_GetChunk()
     {
         Assert.Null(ChunkVersionMath.SelfTestMismatch(3, 0x1000, 0x5000, 3, 0x1000, 0x5000));
@@ -342,7 +399,9 @@ public class InventoryStampTests
         w.Clock = 900;
         var s2 = w.Stamps();
         Assert.True(s2.TrySeedClock(slot));
-        Assert.Equal(c1 + 400, s2.Clock);
+        long c2 = s2.Clock;
+        Assert.True(c2 > c1 + uint.MaxValue); // a reload resumes with a rebase: never behind, every since reads as changed
+        Assert.Equal(900u, (uint)c2);
         Assert.False(w.Stamps().TrySeedClock("garbage"));
         Assert.Equal("", new InventoryStamps(new FakeStampWorld { Bound = false }).EncodeClock());
     }
@@ -707,10 +766,18 @@ internal sealed class FakeStampWorld : IInventoryStampSource
 
     public int CurrentEpoch => Epoch;
 
-    public bool BeginBatch() => Bound;
+    internal int Binds;
+    internal int ClockReads;
+
+    public bool BeginBatch()
+    {
+        Binds++;
+        return Bound;
+    }
 
     public bool TryReadClock(out uint clock, out long store)
     {
+        ClockReads++;
         clock = Clock;
         store = Store;
         return Bound;
