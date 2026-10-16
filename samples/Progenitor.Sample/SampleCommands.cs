@@ -515,7 +515,7 @@ internal static class SampleCommands
     }
 
     // adminOnly: this puts items into an inventory.
-    [Command("items", adminOnly: true, usage: ".items grant <prefabNameOrGuid> [amount] | equip <slot> | catalog [filter] | chests | slots <c> | move <from> <to> <item> <amount> | moveall <from> <to> | count|free <c> <item> | add|remove <c> <item> <n> | name <c> \"text\" | id <c> | watch <c> | heart | clan", description: "Admin only. ctx.Items grant/equip and the item catalog, and ctx.Inventory / ctx.Clans: list castle containers, read slots, move items with a total-conserving transfer, rename, stable ids.")]
+    [Command("items", adminOnly: true, usage: ".items grant <prefabNameOrGuid> [amount] | equip <slot> | catalog [filter] | chests | slots <c> | move <from> <to> <item> <amount> | moveall <from> <to> | count|free <c> <item> | add|remove <c> <item> <n> | name <c> \"text\" | id <c> | watch <c> | stamp <c> | heart | clan", description: "Admin only. ctx.Items grant/equip and the item catalog, and ctx.Inventory / ctx.Clans: list castle containers, read slots, move items with a total-conserving transfer, rename, stable ids.")]
     public static void Items(ICommandContext ctx, string verb = "", string token = "", string extra = "", string third = "", string fourth = "")
     {
         try

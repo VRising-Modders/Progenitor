@@ -18,10 +18,19 @@ namespace Progenitor.Inventory;
 /// through <c>ctx.Inventory</c> poke the watches on the containers they touched, so those are
 /// reported on the next frame without waiting for the interval.</para>
 ///
+/// <para><b>Change stamps.</b> Given a stamp function (<see cref="InventoryStamps"/> on the
+/// server), a due check whose stamp equals the one taken at the last fingerprint skips the
+/// fingerprint: equal stamps mean the slots did not change. Every
+/// <see cref="FingerprintEvery"/>th due check fingerprints anyway, so even a write path the stamp
+/// missed is reported within that many intervals. A poke always fingerprints.</para>
+///
 /// <para>Main thread only.</para>
 /// </summary>
 internal sealed class InventoryWatchHub
 {
+    /// <summary>A due check fingerprints at least this often, whatever the stamp says.</summary>
+    internal const int FingerprintEvery = 8;
+
     /// <summary>Default check interval.</summary>
     internal const int DefaultIntervalMs = 500;
 
@@ -34,12 +43,13 @@ internal sealed class InventoryWatchHub
     private readonly IInventoryBackend _backend;
     private readonly Action<string>? _logWarning;
     private readonly List<Watch> _watches = new();
+    private readonly Func<InventoryRef, long>? _stamp;
 
-
-    internal InventoryWatchHub(IInventoryBackend backend, Action<string>? logWarning = null)
+    internal InventoryWatchHub(IInventoryBackend backend, Action<string>? logWarning = null, Func<InventoryRef, long>? stamp = null)
     {
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         _logWarning = logWarning;
+        _stamp = stamp;
     }
 
     /// <summary>Active watch count.</summary>
@@ -47,6 +57,9 @@ internal sealed class InventoryWatchHub
 
     /// <summary>Checks performed (diagnostics and tests).</summary>
     internal long Checks { get; private set; }
+
+    /// <summary>Due checks answered by an unchanged stamp, without a fingerprint.</summary>
+    internal long Skipped { get; private set; }
 
     /// <summary>
     /// Start watching. The first fingerprint is taken now, so the first event is a real change.
@@ -77,7 +90,7 @@ internal sealed class InventoryWatchHub
             var w = _watches[i];
             if (w.Container.OwnerIndex == container.OwnerIndex && w.Container.OwnerVersion == container.OwnerVersion
                 && w.Container.Instance == container.Instance)
-                w.NextMs = long.MinValue;
+                w.Poke();
         }
     }
 
@@ -93,6 +106,16 @@ internal sealed class InventoryWatchHub
             w.NextMs = nowMs + w.IntervalMs;
             Checks++;
 
+            long stamp = StampOf(w.Container);
+            if (stamp != 0 && stamp == w.Stamp && w.SkippedInRow < FingerprintEvery - 1)
+            {
+                w.SkippedInRow++;
+                Skipped++;
+                continue;
+            }
+
+            w.SkippedInRow = 0;
+            w.Stamp = stamp;
             InventoryChange? change = null;
             if (!TryFingerprint(w.Container, out ulong fp))
             {
@@ -122,6 +145,14 @@ internal sealed class InventoryWatchHub
         _watches.Clear();
     }
 
+    /// <summary>The container's change stamp, or 0 (no stamp: fingerprint) without a stamp function or on a throw.</summary>
+    private long StampOf(InventoryRef container)
+    {
+        if (_stamp == null) return 0;
+        try { return _stamp(container); }
+        catch { return 0; }
+    }
+
     private bool TryFingerprint(InventoryRef container, out ulong fingerprint)
     {
         fingerprint = 0;
@@ -146,11 +177,20 @@ internal sealed class InventoryWatchHub
         internal int IntervalMs { get; }
         internal long NextMs { get; set; }
         internal ulong Fingerprint { get; set; }
+
+        /// <summary>The stamp taken with the last fingerprint; 0 forces the next due check to fingerprint.</summary>
+        internal long Stamp { get; set; }
+
+        /// <summary>Due checks skipped since the last fingerprint.</summary>
+        internal int SkippedInRow { get; set; }
+
         public bool Active { get; internal set; } = true;
 
         public void Poke()
         {
-            if (Active) NextMs = long.MinValue;
+            if (!Active) return;
+            NextMs = long.MinValue;
+            Stamp = 0;
         }
 
         public void Dispose() => Active = false;
