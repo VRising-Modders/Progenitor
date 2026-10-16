@@ -802,6 +802,7 @@
          decide whether a write happens are covered without a V Rising install. -->
     <Compile Include="..\..\src\Progenitor.Dev\Ops\TeleportArgs.cs" Link="Linked\TeleportArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\MaterialEventArgs.cs" Link="Linked\MaterialEventArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ServantArgs.cs" Link="Linked\ServantArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\BridgeJson.cs" Link="Linked\BridgeJson.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\GiveArgs.cs" Link="Linked\GiveArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\UnlockArgs.cs" Link="Linked\UnlockArgs.cs" />

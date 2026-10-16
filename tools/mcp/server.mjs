@@ -835,6 +835,23 @@ server.tool("progenitor_time", "Server world speed over the game's replicated Ti
   },
   async (args) => { try { return text(await bridge("server", "time", args)); } catch (e) { return fail(e); } });
 
+server.tool("progenitor_servants", "Server only. Castle servants and hunts (ctx.Servants through the Dev bridge). Name the castle by territory (index) or heart (index:version). list: the throne's servants (row #n, name, state, injury end, proficiency, perks, item stacks) and the heart's hunts (mission, zone x,y#z, length slot, start/end, servants). zones: zones with a servant mission the owner (or user) discovered (all:true also undiscovered), with active (a hunt of this castle is out there), servantSlots, and the hunt length slots. send: servants (names, #n rows or index:version; omitted = the free servants) on mission (GUID) or zone (x,y#z); neither picks the first discovered zone with no hunt and room; slot default 0. Returns the send or the refusal reason. finish: make the castle's hunts (or one mission) end now so the game returns them on its next update and rolls each servant's success there (servants can die or come back injured). method timers (default): turns the game's ServantTimersDisabled debug setting on until those hunts are gone, then off again (server-wide: every hunt on the server returns); method row: moves only those rows' start time back. timers: read, or off:true|false to set ServantTimersDisabled (server-wide; new sends last 1e-5 of their length; the game saves it with the world). Built, not run live.",
+  {
+    action: z.enum(["list", "zones", "send", "finish", "timers"]).optional().describe("Default list."),
+    territory: z.number().int().optional().describe("Castle territory index (or give heart)."),
+    heart: z.string().optional().describe("Castle heart (or anything connected to it) as index:version."),
+    servants: z.union([z.array(z.string()), z.string()]).optional().describe("send: up to 3 servants: names, #n rows of list, or index:version; omitted = the castle's free servants."),
+    mission: z.number().int().optional().describe("send/finish: mission prefab GUID hash. finish without it ends every hunt of the castle."),
+    zone: z.string().optional().describe("send: map zone x,y#zone as list/zones print it."),
+    slot: z.number().int().optional().describe("send: hunt length choice (zones lists durationSlots). Default 0."),
+    user: z.string().optional().describe("zones/send: user entity index:version whose map discovery is checked. Default the heart's owner."),
+    checkDiscovered: z.boolean().optional().describe("send: check discovery (default true)."),
+    all: z.boolean().optional().describe("zones: also list undiscovered zones."),
+    method: z.enum(["timers", "row"]).optional().describe("finish: timers (default; the game's debug setting, server-wide) or row (rewrite only the matching rows' start)."),
+    off: z.boolean().optional().describe("timers: true disables servant timers, false enables them; omit to read."),
+  },
+  async (args) => { try { return text(await bridge("server", "servants", args)); } catch (e) { return fail(e); } });
+
 server.tool("progenitor_photo", "Photo mode (built-in, off by default): fly camera, HUD hide, admin-only world pause. on/off run on the client: on enters photo mode (enable:true first turns [PhotoMode] Enabled on in Core's ui cfg), off leaves it and resumes any pause it asked for. status (either side): enabled, active, paused, hudHidden, pose, speed, fov, holdsInput; on the server, serverPauses (users holding a pause). The pause itself is the P keybind (keybind_press PhotoModePause) and shows up in progenitor_time status as a 'photo mode: <name>' lease. Takes the camera and holds the character while active.",
   {
     side: z.enum(["client", "server"]).optional().describe("Default client. Use server only for status."),

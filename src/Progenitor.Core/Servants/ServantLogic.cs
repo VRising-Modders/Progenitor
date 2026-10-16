@@ -195,6 +195,51 @@ internal static class ServantLogic
     internal static bool IsDue(MissionRow row, long nowTicks, long slackTicks, bool timersDisabled) =>
         timersDisabled || CompletionTicks(row.StartTicks, row.LengthSeconds) <= nowTicks + slackTicks;
 
+    /// <summary>
+    /// The start ticks that make a hunt of <paramref name="lengthSeconds"/> due one second before
+    /// <paramref name="nowTicks"/>: written into a row's <c>MissionStartTimeTicks</c>, the game finishes
+    /// the hunt on its next update. Never later than the original start (a hunt is never extended).
+    /// </summary>
+    internal static long FinishNowStartTicks(long originalStartTicks, float lengthSeconds, long nowTicks)
+    {
+        double len = double.IsNaN(lengthSeconds) || lengthSeconds < 0 ? 0 : lengthSeconds;
+        long start = nowTicks - (long)Math.Ceiling(len * 1e7) - TicksPerSecond;
+        return Math.Min(start, originalStartTicks);
+    }
+
+    /// <summary>
+    /// The zone a send picks when none is named: the first zone in order that has a mission, is
+    /// discovered (true, not unknown), has no hunt of this castle on it, and has at least
+    /// <paramref name="servantCount"/> servant slots. Null when none qualifies.
+    /// </summary>
+    internal static ServantZoneInfo? PickZone(IReadOnlyList<ServantZoneInfo> zones, int servantCount)
+    {
+        int need = Math.Max(1, servantCount);
+        foreach (var z in zones)
+            if (z.MissionGuid != 0 && z.Discovered == true && !z.Active && z.ServantSlots >= need)
+                return z;
+        return null;
+    }
+
+    /// <summary>Why <see cref="PickZone"/> found nothing, in one sentence naming the counts.</summary>
+    internal static string NoZoneReason(IReadOnlyList<ServantZoneInfo> zones, int servantCount)
+    {
+        int discovered = 0, free = 0, unknown = 0;
+        foreach (var z in zones)
+        {
+            if (z.MissionGuid == 0) continue;
+            if (z.Discovered == null) unknown++;
+            if (z.Discovered != true) continue;
+            discovered++;
+            if (!z.Active) free++;
+        }
+        if (unknown > 0 && discovered == 0)
+            return "the user's map discovery could not be read; name a mission or zone";
+        if (discovered == 0) return "the user has discovered no zone with a servant mission";
+        if (free == 0) return "every discovered zone (" + discovered + ") already has a hunt of this castle";
+        return "no discovered zone without a hunt has " + Math.Max(1, servantCount) + " servant slot(s) (" + free + " free zone(s))";
+    }
+
     /// <summary>The length the game writes for a hunt: the setting's length, times 1e-5 with timers off.</summary>
     internal static float HuntLength(float settingLength, bool timersDisabled) =>
         settingLength * (timersDisabled ? TimersDisabledFactor : 1f);

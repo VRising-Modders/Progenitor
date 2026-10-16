@@ -29,7 +29,7 @@ namespace Progenitor.Servants;
 /// swap). No game method is patched or called with a by-ref struct; the success-chance methods
 /// are never touched.</para>
 /// </summary>
-internal static unsafe class ServantRuntime
+internal static unsafe partial class ServantRuntime
 {
     internal static readonly ServantListRegistry Lists = new();
 
@@ -111,6 +111,7 @@ internal static unsafe class ServantRuntime
         PendingSwaps.Clear();
         Confirm.Clear();
         PendingReturns.Clear();
+        RestoreTimersOnUninstall();
         _zones = null;
         _cacheEpoch = int.MinValue;
         _heartsEpoch = int.MinValue;
@@ -667,6 +668,7 @@ internal static unsafe class ServantRuntime
 
     private static void Tick()
     {
+        if (_timerRestore != null) TickTimerRestore();
         if (Confirm.Count == 0 && PendingReturns.Count == 0) return;
         var world = Worlds.Server;
         if (world == null || !world.IsCreated)

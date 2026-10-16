@@ -514,3 +514,33 @@ public sealed class ServantListStatus
         "servant list: provider=" + (Registered ? Owner : "none") + " swaps=" + Swaps
         + " routed=" + RoutedSends + " refused=" + RoutedRefusals;
 }
+
+/// <summary>
+/// One map zone with a servant mission, as the Dev bridge's <c>servants zones</c> lists it for a
+/// castle: the zone, its mission, whether the user discovered it, whether the castle already has
+/// a hunt there, and the mission's servant slots. Not a plugin API (read through
+/// <c>ServantBridge</c>).
+/// </summary>
+public sealed class ServantZoneInfo
+{
+    /// <summary>The map zone.</summary>
+    public MissionZone Zone { get; init; }
+
+    /// <summary>The zone's mission prefab GUID hash.</summary>
+    public int MissionGuid { get; init; }
+
+    /// <summary>The mission prefab's name, or "".</summary>
+    public string MissionName { get; init; } = "";
+
+    /// <summary>
+    /// True when the user discovered the zone (or the game's "all progression unlocked" debug
+    /// setting is on), false when not, null when the user's progression could not be read.
+    /// </summary>
+    public bool? Discovered { get; init; }
+
+    /// <summary>True when the castle already has a hunt on this mission (the game allows one per zone and castle).</summary>
+    public bool Active { get; init; }
+
+    /// <summary><c>MissionData.ServantSlots</c> of the mission; -1 when unreadable.</summary>
+    public int ServantSlots { get; init; } = -1;
+}

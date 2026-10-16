@@ -2708,6 +2708,9 @@ also resends), `again` (resend the last return of this castle), `swap on|off` (a
 every castle you own or your clan owns, this castle first) and `status`. Every action logs a
 `Sample servants: …` line.
 
+The server Dev bridge has the same reads and the send without a sample, plus a way to end a hunt now:
+[`servants`](bridge-ops-client.md#servants) (MCP `progenitor_servants`; built, not run live).
+
 ### Live acceptance (procedure — not run)
 
 On the isolated test server with a copy of the test save, a connected admin client, Core and

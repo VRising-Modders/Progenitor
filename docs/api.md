@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **940** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **946** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -1097,6 +1097,7 @@ surface.
 | `unlock` | Server, isolated test server only (refused under `C:\VRisingServer`). TEST SETUP: `status` (read only: unlock buffer counts, blueprint/recipe prefab totals, still-locked lists), `all` (every `BlueprintData` and `RecipeData` prefab), `prefabs` (listed names or hashes), `lock`, `revert` (removes the GUIDs recorded in `BepInEx/config/progenitor-unlock-<user>.json`), `dryRun`. Adds GUIDs to `UnlockedProgressionElement` and raises the game's `UnlockProgressionDebugEvent` so its handler rebuilds the derived buffers. Source-checked and unit-tested (`DevUnlockArgsTests`). `all` and `status` ran live on 2026-10-04: a connected client sees the bulk part after it rejoins. `lock` and `revert` not run. The record names the Progenitor mod that registered each GUID it lists (`owners`), and `status` lists `dangling` progression rows whose prefab is gone. | [bridge-ops-player.md](bridge-ops-player.md#unlock) |
 | `build_search` | Client, main thread. The [build menu search](modules.md#build-menu-search) box through Core's internal `BuildSearchTestBridge` (reflection): `status` (open, focus, query, counts, each cell's names and whether the search hid it), `open` / `close` (the build menu itself, as the B key does, no input or focus), `hover` (a cell's tooltip without the mouse), `select` (a cell picked as a click does), `set`, `clear` (the x button), `focus`, `blur`, `type` (queued text and chords through the typed-key pump). Needs the build menu open for every action but `status`. Live 2026-10-04 on the Steam client. | [bridge-ops-client.md](bridge-ops-client.md#build_search) |
 | `materials` | Either side, main thread. [Material sources](modules.md#material-sources) through Core's internal `MaterialsTestBridge` (reflection): `status` (the status line, hooks, payments, faults, shortfalls, views sent, recomputes, skips; client views; server open operations and cached views) and, on the server, `inject` (one-shot fault: move an item out of a container right after the next governed check) and `clear`. Reports `shortfalls`. Source-checked and built, not live-verified. | [bridge-ops-client.md](bridge-ops-client.md#materials) |
+| `servants` | Server, main thread. A castle's servants and hunts through Core's public `ServantBridge` (the `ctx.Servants` code; not a plugin API), castle by `territory` or `heart`: `list` (servants and hunts), `zones` (discovered zones with a servant mission, active hunts, slots, hunt lengths), `send` (`ctx.Servants.Send` as `progenitor.dev bridge`; picks a zone when none is named), `finish` (make hunts end now: method `timers`, the game's `ServantTimersDisabled` setting until they return, server-wide; or `row`, moves the rows' start back), `timers` (read or set that setting). Refused on the client. Built and game-free tested, **not run live**. | [bridge-ops-client.md](bridge-ops-client.md#servants) |
 | `dye` | Client, main thread, read only. [Dye all](modules.md#dye-all) through Core's internal `DyeAllTestBridge` (reflection): the last scan step and its inputs (menu type, world, on, standing down), every known `TransmogContainer` with its HUD menu and whether it is active, the cells listed and watched, the hint, the hold phase and the last hold; `{"cells":true}` adds the shown cells' screen centers. See [bridge-ops-client.md](bridge-ops-client.md#dye). |
 | `map` | Client, main thread. The world map, focus-free: `status`, `open` (idempotent; raises the full-screen menu with `HUDMenuManager.GoToMenu` and selects the map with `FullscreenMenuMapper.SetState(Map)`), `close` (`HUDMenuManager.CloseMenu`, only when the map is shown). Replies after Core's `WorldMap.IsOpen` agrees for 4 frames. Refuses with no world, with the Mods workspace open, over another HUD menu or a full-screen game view. Source-checked and built, not live-verified. | [bridge-ops-client.md](bridge-ops-client.md#map) |
 | `key` | Client, main thread. Focus-free key input: `tap` / `hold` / `down` / `up` / `release` (`keys` such as `M` or `Ctrl+R`, `ms`) queue whole-keyboard state events through `InputSystem.QueueEvent`; `type` queues text events; `status`. Every press is released (deadline, `up`/`release`, unload). Reports focus, `backgroundBehavior` and whether the keyboard applied each key; `background:true` opts in to `IgnoreFocus` for the op. Source-checked and built, not live-verified. | [bridge-ops-client.md](bridge-ops-client.md#key) |
@@ -1137,7 +1138,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 940 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 946 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1191,8 +1192,8 @@ to contract rows is an open docs item, not a decision this appendix makes.
 
 ### The types
 
-342 declarations — 313 distinct names, a few of them mirrored into Bootstrap — in 322 rows across
-26 namespaces, one table per namespace, alphabetical inside each. Bootstrap's 21 `HarmonySlots`
+348 declarations — 319 distinct names, a few of them mirrored into Bootstrap — in 328 rows across
+27 namespaces, one table per namespace, alphabetical inside each. Bootstrap's 21 `HarmonySlots`
 delegates share a row because they are one mechanism. The compatibility-rewriter types appear twice
 on purpose, once under `Progenitor.Compat` and once under `Progenitor.Bootstrap`: Bootstrap holds
 its own copy because a type that must survive a Core swap cannot live in the collectible assembly.
@@ -1760,6 +1761,17 @@ Track every non-null handle with `ctx.Track(handle)`, even if `TryBegin` returns
 | Type | Purpose | Why public |
 |---|---|---|
 | `CombatHooks` | Core install for `UnitDied` / `PlayerDied` / `DamageDealt` publishers (Kill postfix + StatChangeSystem After). | Core-internal |
+
+#### `Progenitor.Servants`
+
+| Type | Purpose | Why public |
+|---|---|---|
+| `ServantBridge` | The Dev bridge's `servants` op over the `ctx.Servants` code: list, zones, send, finish a hunt now, the servant-timers setting. Not a plugin API; plugins use `ctx.Servants`. | Dev bridge |
+| `ServantDurationSlot` | One hunt length choice of the game's mission settings, as `servants zones` reports it. | Dev bridge |
+| `ServantFinishResult` | What `servants finish` did: method, reason, the hunts before and after, a pending timers restore. | Dev bridge |
+| `ServantTimersStatus` | The game's servant-timers debug setting as `servants timers` reads or sets it. | Dev bridge |
+| `ServantZoneInfo` | One map zone with a servant mission for a castle: discovered, active hunt, servant slots. | tests |
+| `ServantZonesReport` | What `servants zones` found for a castle. | Dev bridge |
 
 
 
