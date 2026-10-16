@@ -4,22 +4,22 @@ using Progenitor.Dev;
 using Progenitor.Networking;
 using Progenitor.Plugins;
 using Progenitor.Ui;
-using UiApi = Progenitor.Ui.Ui;
 
 namespace ProgenitorMod;
 
 /// <summary>
-/// The client window: the game's popup frame (<c>GameWindow</c>) with the Mods page's grid. Other layouts and every
-/// control: docs/ui.md and docs/ui-controls.md in the Progenitor repository.
-/// Text uses kit styles only (<c>Heading</c>, <c>Note</c>, <c>Label</c> with a <c>LabelTone</c>): never raw colors,
-/// sizes or fonts. The grid aligns text left and numbers right; do not position controls yourself.
+/// The client window: a standard Basic window (<c>ctx.Windows.Create</c>), the preset for a small tool the player opens
+/// during play. Header (a toolbar and tabs for one thing the player works on) and Tabbed (a large screen with an info
+/// column) are the other presets; docs/ui-controls.md in the Progenitor repository lists every control and the Gallery
+/// shows each one live.
+/// Fonts, colors and alignment: every line takes a named style (<c>panel.Text(text, UiTextStyle.X)</c>) or a control
+/// that fixes its own. Never set a color, a size, a font or an alignment yourself; the window lays its rows out.
 /// </summary>
 internal sealed class ModWindow : IDisposable
 {
     private readonly PluginContext _ctx;
     private readonly ModSettings _settings;
-    // Escape hides a panel without telling you; OwnedPanel reads the real state.
-    private readonly OwnedPanel _owned = new();
+    private IUiWindow? _window;
     private IUiToneLabel? _status;
     private RequestHandle? _request;
     private bool _disposed;
@@ -30,33 +30,36 @@ internal sealed class ModWindow : IDisposable
         _settings = settings;
     }
 
+    // IsOpen reads the window's real state, so a window the player closed with Escape reads closed.
     internal void Toggle()
     {
-        if (_owned.IsOpen) Close();
+        if (_window is { IsOpen: true }) Close();
         else Open();
     }
 
     private void Open()
     {
         Close();
-        var panel = UiApi.Panel(MyPluginInfo.PLUGIN_NAME, _ctx.Owner, _ctx.Guid);
-        panel.GameWindow();
-        panel.Footer = MyPluginInfo.PLUGIN_NAME + " " + MyPluginInfo.PLUGIN_VERSION;
+        // The window draws the title, the frame and the version stamp (mod name, version, Progenitor version).
+        var window = _ctx.Windows.Create(UiWindowPreset.Basic, MyPluginInfo.PLUGIN_NAME);
+        var panel = window.Panel;
 
-        panel.Heading("Server greeting");
-        panel.Note("The server's admins set the greeting on this mod's settings page.");
-        _status = panel.Label("Asking the server…", LabelTone.Pending);
+        panel.Text("Server greeting", UiTextStyle.Section);
+        panel.Text("The server's admins set the greeting on this mod's settings page.", UiTextStyle.Muted);
+        // A status that changes in place: a tone label in a style's tone, rewritten with SetText.
+        _status = panel.Label("Asking the server…", UiTextStyles.ToneOf(UiTextStyle.Warning));
         panel.BeginInline();
         panel.Button("Ask again").OnClick(() => Ask(1));
         panel.Button("Close").OnClick(Close);
         panel.EndInline();
 
-        panel.Heading("This mod");
-        panel.Fact("Version", MyPluginInfo.PLUGIN_VERSION);
+        panel.Text("This mod", UiTextStyle.Section);
+        // Numbers (a version, a count, a time) use the Number style, so they line up on the right.
+        panel.Text("Version", MyPluginInfo.PLUGIN_VERSION, UiTextStyle.Number);
         panel.Info("Server part", ServerPartText, 1);
 
-        _owned.Adopt(panel)?.Dispose();
-        UiApi.Show(panel);
+        _window = window;
+        window.Show();
         Ask(1);
     }
 
@@ -65,7 +68,8 @@ internal sealed class ModWindow : IDisposable
         _request?.Cancel();
         _request = null;
         _status = null;
-        _owned.Take()?.Dispose();
+        _window?.Dispose();
+        _window = null;
     }
 
     private void Ask(int attempt)
@@ -79,12 +83,14 @@ internal sealed class ModWindow : IDisposable
 
     private void Answered(RequestResult<GreetingReply> result, int attempt)
     {
-        if (_disposed || !_owned.IsOpen) return;
+        if (_disposed || _window is not { IsOpen: true }) return;
         if (result.Ok && result.Reply is { } reply)
         {
-            _status?.SetText(reply.Text, LabelTone.Ok);
+            _status?.SetText(reply.Text, UiTextStyles.ToneOf(UiTextStyle.Success));
+            // Progenitor puts "<Mod Name>: " in front of every notice, chat message and command reply: pass the
+            // message alone.
             if (_settings.ShowNotices.Value)
-                _ctx.Hud.Notify(ModRules.Notice(MyPluginInfo.PLUGIN_NAME, reply.Text), kind: UiNoticeKind.Success);
+                _ctx.Hud.Notify(reply.Text, kind: UiNoticeKind.Success);
             return;
         }
 
@@ -93,12 +99,12 @@ internal sealed class ModWindow : IDisposable
         {
             MainThread.PostDelayed(ModRules.RetryDelaySeconds(attempt), () =>
             {
-                if (!_disposed && _owned.IsOpen) Ask(attempt + 1);
+                if (!_disposed && _window is { IsOpen: true }) Ask(attempt + 1);
             }, _ctx.Owner);
             return;
         }
 
-        _status?.SetText(ModRules.Describe(result.Status, result.Reason), LabelTone.Muted);
+        _status?.SetText(ModRules.Describe(result.Status, result.Reason), UiTextStyles.ToneOf(UiTextStyle.Muted));
     }
 
     private string ServerPartText() => _ctx.Handshake.ServerPart switch

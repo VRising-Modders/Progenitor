@@ -19,8 +19,9 @@
   <ItemGroup>
     <!-- The Mods page's About text. LogicalName gives the resource the exact name the page looks for. -->
     <EmbeddedResource Include="..\README.md" LogicalName="README.md" />
-    <!-- The mod's help page, opened by the Help button on its settings page: embedded and copied beside the DLL. -->
-    <EmbeddedResource Include="..\help\index.html" LogicalName="help/index.html" />
-    <None Include="..\help\index.html" Link="help\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The mod's help: the Help button on its page in the Mods menu opens help/index.html. Everything under help/ is
+         embedded with its path as the resource name (help/index.html, help/img/logo.png), so images and stylesheets
+         come along; Progenitor extracts them when the button is pressed. -->
+    <EmbeddedResource Include="..\help\**" LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

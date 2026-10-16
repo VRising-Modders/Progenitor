@@ -2,7 +2,7 @@
 
 > A V Rising modding framework (BepInEx plugin, LGPL-2.1-only). Mods subclass ProgenitorPlugin<TContext> and register settings, keybinds, UI, networking and content through ctx, so hot reload, the in-game Mods menu and compatibility checks work automatically.
 
-Building a mod: follow PROGENITOR_GUIDE.md first, start from the dotnet new template, and copy from the samples before writing anything custom.
+Building a mod: follow PROGENITOR_GUIDE.md first, start from the dotnet new template, and copy from the samples before writing anything custom. Windows use a standard preset (`ctx.Windows.Create(UiWindowPreset.Basic | Header | Tabbed, title)`), text uses a named style (`panel.Text(text, UiTextStyle.X)`), and notices, chat and command replies get the "<Mod Name>: " prefix from Progenitor. Fonts, colors and text alignment need special attention: they come only from the text styles, never from the mod.
 
 ## Start here
 
@@ -15,6 +15,7 @@ Building a mod: follow PROGENITOR_GUIDE.md first, start from the dotnet new temp
 - [Tutorial](docs/tutorial.md): a first plugin through UI, networking and hot reload
 - [Module reference](docs/modules.md): every ctx facade
 - [API status](docs/api.md): what is verified live
+- [UI controls catalog](docs/ui-controls.md): every control, window preset and text style, and where the controls sample's Gallery shows it
 - [UI style guide](docs/ui-style.md) and [UI toolkit](docs/ui.md)
 - [Mod settings](docs/mod-settings.md)
 - [Publishing on Thunderstore](docs/publishing.md)
@@ -24,7 +25,7 @@ Building a mod: follow PROGENITOR_GUIDE.md first, start from the dotnet new temp
 
 ## Samples
 
-- [ControlsSample](samples/Progenitor.ControlsSample): every UI control and widget
+- [ControlsSample](samples/Progenitor.ControlsSample): every UI control and widget; its Gallery page shows each control, the three window presets and the text styles
 - [Sample](samples/Progenitor.Sample): the broad API sample (window, castles, inventory, servants, requests)
 - [PanelsExample](samples/Progenitor.PanelsExample): buttons on the game's own panels
 - [SampleServerLed](samples/Progenitor.SampleServerLed) and [SampleClientLed](samples/Progenitor.SampleClientLed): client and server parts

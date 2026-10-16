@@ -8,8 +8,8 @@ namespace ProgenitorMod.Tests;
 public class ModRulesTests
 {
     [Fact]
-    public void Notices_start_with_the_mod_name() =>
-        Assert.Equal("My Mod: Saved.", ModRules.Notice(" My Mod ", "Saved. "));
+    public void A_refusal_reads_as_one_sentence_with_its_reason() =>
+        Assert.Equal("The server said no: busy.", ModRules.Describe(RequestStatus.Refused, " busy "));
 
     [Fact]
     public void The_greeting_types_are_a_valid_request_pair() =>

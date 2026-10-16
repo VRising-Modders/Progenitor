@@ -1,39 +1,665 @@
 <!doctype html>
-<!-- SPDX-License-Identifier: MIT -->
-<!-- Placeholder: to be replaced by the standard Progenitor help page (templates/help/index.html). Edit the content block. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Progenitor Mod Display Name help</title>
+<title>Help</title>
+<!--
+  Progenitor help page. One self-contained file: it opens from disk with no server and no network.
+  Edit only the content block between HELP-CONTENT START and HELP-CONTENT END (templates/help/README.md).
+  Everything else (style, renderer, navigation) is shared: tools/help-guide/sync.mjs copies it from
+  templates/help/index.html into docs/guide/progenitor-guide.html.
+-->
 <style>
-  :root { --bg: #14100e; --fg: #e8dccb; --muted: #a8998a; --accent: #c8a45a; --rule: #3a2e26; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 Georgia, "Times New Roman", serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { color: var(--accent); font-weight: normal; border-bottom: 1px solid var(--rule); padding-bottom: 8px; }
-  h2 { color: var(--accent); font-weight: normal; margin-top: 28px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--rule); }
-  th { color: var(--muted); font-weight: normal; }
-  kbd { border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
+:root {
+  /* Colors from the game's menus and Progenitor's kit (src/Progenitor.Core/Ui/MenuPalette.cs). */
+  --bg: #0a0506;
+  --panel: #170709;
+  --panel-2: #1f090c;
+  --panel-hi: #2a0c11;
+  --rule: #3a1418;
+  --rule-soft: #2a0f13;
+  --red: #a8242a;
+  --red-hi: #c8323c;
+  --title-red: #c8323c;
+  --text: #ece8e2;
+  --body: #d2cbc4;
+  --muted: #958d8a;
+  --btn-fill: #111827;
+  --btn-fill-hi: #17213a;
+  --btn-border: #3d4f73;
+  --btn-border-hi: #7088b8;
+  --btn-text: #d6deec;
+  --gold: #e0b25a;
+  --ok: #6fd08a;
+  --pend: #e8c25a;
+  --warn: #f0955a;
+  --danger: #e0565e;
+  --code-bg: #0c0708;
+  --code-text: #cfc4b8;
+  --focus: #9fb6e6;
+  --serif: Georgia, "Times New Roman", Times, serif;
+  --sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: Consolas, "Cascadia Mono", "SFMono-Regular", Menlo, "Liberation Mono", monospace;
+  --sidebar: 280px;
+  --top: 60px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  background-image:
+    radial-gradient(ellipse 70% 55% at 65% -5%, rgba(120, 20, 28, 0.32), transparent 70%),
+    radial-gradient(ellipse 55% 45% at 0% 105%, rgba(90, 14, 20, 0.30), transparent 70%);
+  background-attachment: fixed;
+  color: var(--body);
+  font: 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #b9c9ea; text-decoration-color: rgba(185, 201, 234, 0.4); text-underline-offset: 3px; }
+a:hover { color: #dfe7f7; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.skip { position: absolute; left: -9999px; top: 8px; z-index: 60; background: var(--panel); color: var(--text); padding: 8px 12px; }
+.skip:focus { left: 8px; }
+
+/* Buttons: the game's gray-blue framed button */
+.btn {
+  font: 600 14px/1 var(--sans); color: var(--btn-text);
+  background: linear-gradient(180deg, var(--btn-fill-hi), var(--btn-fill));
+  border: 1px solid var(--btn-border); border-radius: 2px;
+  padding: 9px 14px; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.btn:hover { border-color: var(--btn-border-hi); color: #fff; }
+.btn[disabled] { opacity: 0.45; cursor: default; border-color: #2a3550; color: var(--muted); }
+
+/* Layout */
+.app { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: auto 1fr auto; min-height: 100vh; }
+.app.toc-closed { grid-template-columns: 0 minmax(0, 1fr); }
+.top {
+  grid-column: 1 / -1; position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 14px; min-height: var(--top); padding: 8px 20px;
+  background: linear-gradient(180deg, rgba(30, 8, 11, 0.97), rgba(14, 5, 7, 0.97));
+  border-bottom: 1px solid var(--rule);
+}
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; min-width: 0; }
+.brand img, .brand .mono { width: 38px; height: 38px; flex: none; }
+.brand .mono { display: grid; place-items: center; border: 1px solid var(--rule); background: var(--panel-hi); color: var(--title-red); font: 600 20px/1 var(--serif); border-radius: 50%; }
+.brand-title { display: block; font: 600 22px/1.1 var(--serif); color: var(--title-red); letter-spacing: 0.02em; white-space: nowrap; }
+.brand-sub { display: block; font: 13px/1.2 var(--serif); color: var(--muted); font-variant: small-caps; letter-spacing: 0.06em; }
+.spacer { flex: 1; }
+.search { position: relative; width: min(340px, 38vw); }
+.field {
+  width: 100%; font: 14px/1.2 var(--sans); color: var(--text);
+  background: #0e1220; border: 1px solid var(--btn-border); border-radius: 2px; padding: 9px 12px;
+}
+.field::placeholder { color: #7d8396; }
+.field:focus-visible { border-color: var(--btn-border-hi); outline-offset: 0; }
+.results {
+  position: absolute; right: 0; top: calc(100% + 6px); width: min(440px, 86vw); max-height: 60vh; overflow: auto;
+  margin: 0; padding: 4px 0; list-style: none; z-index: 40;
+  background: var(--panel); border: 1px solid var(--rule); box-shadow: 0 14px 30px rgba(0, 0, 0, 0.65);
+}
+.results[hidden] { display: none; }
+.results a { display: block; padding: 8px 14px; text-decoration: none; color: var(--body); border-left: 3px solid transparent; }
+.results a:hover, .results a[aria-selected="true"] { background: var(--panel-hi); border-left-color: var(--red-hi); }
+.r-title { font: 600 15px/1.3 var(--serif); color: var(--text); }
+.r-where { font-size: 12px; color: var(--muted); margin-left: 6px; }
+.r-snip { display: block; font-size: 13px; color: var(--muted); }
+.results mark { background: rgba(200, 50, 60, 0.35); color: var(--text); }
+.r-none { padding: 10px 14px; color: var(--muted); font-size: 14px; }
+
+/* Sidebar */
+.toc {
+  position: sticky; top: var(--top); height: calc(100vh - var(--top)); overflow: auto;
+  background: linear-gradient(180deg, rgba(23, 7, 9, 0.96), rgba(11, 5, 6, 0.96));
+  border-right: 1px solid var(--rule-soft); padding: 12px 0 28px;
+}
+.app.toc-closed .toc { visibility: hidden; padding: 0; border: 0; }
+.label { font: 600 13px/1.2 var(--sans); font-variant: small-caps; letter-spacing: 0.1em; color: var(--muted); text-transform: lowercase; }
+.toc > .label { margin: 8px 20px 8px; }
+.rolebar .label { display: block; }
+.rolebar > span { min-width: 0; }
+.rolebar { margin: 2px 14px 12px; padding: 10px 12px; border: 1px solid var(--rule); background: var(--panel-2); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rolebar b { display: block; font: 600 16px/1.2 var(--serif); color: var(--text); }
+.rolebar .btn { flex: none; white-space: nowrap; padding: 7px 10px; font-size: 13px; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.chap-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-left: 3px solid transparent;
+  padding: 8px 16px 8px 18px; font: 600 15px/1.3 var(--serif); color: var(--text);
+}
+.chap-btn:hover { background: var(--panel-hi); }
+.chev { width: 10px; flex: none; color: var(--muted); transition: transform 0.15s; }
+.chap-btn[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.chap.current > .chap-btn { border-left-color: var(--red); }
+.pages { display: none; padding: 0 0 6px; }
+.chap-btn[aria-expanded="true"] + .pages { display: block; }
+.pages a { display: block; padding: 5px 16px 5px 42px; font-size: 14px; line-height: 1.35; color: var(--muted); text-decoration: none; border-left: 3px solid transparent; }
+.pages a:hover { color: var(--text); background: var(--panel-hi); }
+.pages a[aria-current="page"] { color: var(--text); border-left-color: var(--red-hi); background: linear-gradient(90deg, rgba(168, 36, 42, 0.45), rgba(168, 36, 42, 0.08)); }
+
+/* Page card */
+main { padding: 30px 36px 18px; min-width: 0; }
+.crumb { max-width: 800px; margin: 0 auto 10px; display: flex; justify-content: space-between; gap: 12px; }
+.card {
+  position: relative; max-width: 800px; margin: 0 auto; min-height: 380px; padding: 30px 40px 28px;
+  background: linear-gradient(180deg, rgba(31, 9, 12, 0.97), rgba(19, 7, 9, 0.98));
+  border: 1px solid var(--rule); border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 18px 40px rgba(0, 0, 0, 0.55);
+}
+/* Text styles. Titles and button captions centered, body text left, numbers right (as in the game). */
+.card h1 { margin: 0 0 4px; text-align: center; font: 600 30px/1.2 var(--serif); color: var(--text); }
+.card .lede { margin: 0; text-align: center; color: var(--muted); font-size: 15px; }
+.rule { height: 1px; border: 0; margin: 14px 0 20px; background: linear-gradient(90deg, transparent, var(--red) 30%, var(--red) 70%, transparent); }
+.btn, .role, .pager .ttl { text-align: center; }
+.card .num, .card th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.card p { margin: 0 0 14px; }
+.card ul, .card ol { margin: 0 0 14px; padding-left: 1.3em; }
+.card li { margin: 0 0 7px; }
+.card li::marker { color: var(--muted); }
+.card strong { color: var(--text); }
+.card code { font: 0.9em var(--mono); color: var(--code-text); background: rgba(0, 0, 0, 0.35); border: 1px solid var(--rule-soft); border-radius: 2px; padding: 1px 5px; }
+.card table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 15px; }
+.card th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+.card td { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.card td:first-child { color: var(--text); }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0 0 16px; }
+.grid > div { padding: 11px 13px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--rule-soft); border-top: 2px solid var(--red); font-size: 14px; color: var(--muted); }
+.grid b { display: block; margin-bottom: 3px; font: 600 16px/1.3 var(--serif); color: var(--text); }
+.grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid .ok { border-top-color: var(--ok); }
+.grid .pend { border-top-color: var(--pend); }
+.grid .bad { border-top-color: var(--danger); }
+.outline { list-style: none; padding-left: 0 !important; counter-reset: o; }
+.outline li { counter-increment: o; position: relative; margin: 0 !important; padding: 8px 10px 8px 40px; border-bottom: 1px solid var(--rule-soft); }
+.outline li::before { content: counter(o); position: absolute; left: 12px; top: 8px; font: 600 15px/1.5 var(--serif); color: var(--muted); }
+.soon { display: inline-block; vertical-align: middle; margin-left: 10px; padding: 4px 8px; font: 600 12px/1 var(--sans); font-variant: small-caps; letter-spacing: 0.08em; color: var(--gold); border: 1px solid rgba(224, 178, 90, 0.45); border-radius: 2px; }
+
+/* Callout */
+.callout { margin: 4px 0 14px; padding: 11px 15px; border: 1px solid var(--rule); border-left: 3px solid var(--red); background: rgba(58, 14, 20, 0.45); font-size: 15px; }
+.callout.warn { border-left-color: var(--danger); background: rgba(80, 14, 20, 0.55); }
+.callout .label { display: block; margin-bottom: 3px; color: #e07a7f; }
+.callout p { margin: 0; }
+
+/* Code */
+.code { position: relative; margin: 2px 0 16px; background: var(--code-bg); border: 1px solid var(--rule-soft); border-radius: 2px; }
+.code .lang { position: absolute; left: 12px; top: 7px; font: 600 11px/1 var(--sans); letter-spacing: 0.12em; text-transform: uppercase; color: #6f6467; }
+.code pre { margin: 0; padding: 30px 16px 14px; overflow: auto; font: 13.5px/1.55 var(--mono); color: var(--code-text); tab-size: 4; }
+.card .code code { background: none; border: 0; padding: 0; font: inherit; color: inherit; }
+.copy { position: absolute; right: 8px; top: 6px; padding: 6px 10px; font-size: 12px; }
+.tk-c { color: #7f8b74; font-style: italic; }
+.tk-s { color: #d9b48a; }
+.tk-k { color: #e07a72; }
+.tk-t { color: #9ab8d6; }
+.tk-n { color: #c3a3d9; }
+.tk-a { color: #d9a85e; }
+
+/* Role choice */
+.roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 4px 0 16px; }
+.role {
+  cursor: pointer; padding: 16px 16px 14px; color: var(--body);
+  background: linear-gradient(180deg, rgba(42, 12, 17, 0.9), rgba(22, 7, 9, 0.9));
+  border: 1px solid var(--rule); border-top: 2px solid var(--rule); border-radius: 2px; font: 14px/1.5 var(--sans);
+}
+.role:hover { border-color: var(--btn-border-hi); }
+.role b { display: block; margin-bottom: 6px; font: 600 19px/1.2 var(--serif); color: var(--text); }
+.role[aria-pressed="true"] { border-top-color: var(--red-hi); background: linear-gradient(180deg, rgba(120, 24, 30, 0.55), rgba(30, 8, 11, 0.9)); }
+.role .go { display: block; margin-top: 10px; color: #b9c9ea; font-weight: 600; font-size: 13px; }
+
+/* Terms, tooltip and glossary */
+a.term { color: var(--text); text-decoration: underline dotted rgba(236, 232, 226, 0.55); text-decoration-thickness: 1.5px; text-underline-offset: 4px; cursor: help; }
+a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--red-hi); }
+.tip {
+  position: fixed; z-index: 50; max-width: 330px; padding: 10px 13px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--rule); border-top: 2px solid var(--red);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.7); font-size: 14px; line-height: 1.5; color: var(--body);
+}
+.tip[hidden] { display: none; }
+.tip b { display: block; margin-bottom: 2px; font: 600 15px/1.3 var(--serif); color: var(--text); }
+.tip small { display: block; margin-top: 5px; font-size: 12px; color: var(--muted); }
+.gl-tools { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; }
+.gl-count { white-space: nowrap; font-size: 13px; color: var(--muted); }
+.gl-list { margin: 0; max-height: 54vh; overflow: auto; padding-right: 6px; border-top: 1px solid var(--rule-soft); }
+.gl-entry { padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--rule-soft); border-left: 3px solid transparent; }
+.gl-entry dt { font: 600 17px/1.3 var(--serif); color: var(--text); }
+.gl-entry dd { margin: 3px 0 0; font-size: 15px; }
+.gl-entry.flash { border-left-color: var(--red-hi); background: var(--panel-hi); }
+.gl-entry[hidden] { display: none; }
+
+/* Pager and footer */
+.pager { max-width: 800px; margin: 16px auto 0; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.pager .btn { min-width: 170px; padding: 10px 16px; }
+.pager .dir { display: block; margin-bottom: 5px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #8e9ab4; }
+.pager .ttl { display: block; max-width: 230px; margin: 0 auto; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 600 15px/1.25 var(--serif); }
+.mid { text-align: center; font-size: 13px; color: var(--muted); }
+.mid .big { display: block; font: 600 18px/1.2 var(--serif); color: var(--text); font-variant-numeric: tabular-nums; }
+.dots { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; max-width: 300px; margin-top: 6px; }
+.dots span { width: 7px; height: 7px; border-radius: 50%; background: #3a2226; }
+.dots span.on { background: var(--gold); }
+.foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; padding: 12px 22px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--rule-soft); background: rgba(10, 5, 6, 0.92); }
+.kbd { font: 12px var(--mono); color: var(--text); background: #141a28; border: 1px solid var(--btn-border); border-bottom-width: 2px; border-radius: 2px; padding: 0 5px; }
+
+@media (max-width: 1100px) {
+  :root { --sidebar: 240px; }
+  main { padding: 24px 20px 16px; }
+  .card { padding: 26px 26px 24px; }
+}
+@media (max-width: 760px) {
+  .app { grid-template-columns: 0 minmax(0, 1fr); }
+  .toc { position: fixed; left: 0; width: 280px; z-index: 35; }
+  .brand-sub { display: none; }
+  .grid, .grid.two, .roles { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
-<main>
-<!-- Content: edit from here. -->
-<h1>Progenitor Mod Display Name</h1>
-<p>Asks the server for its greeting and shows it in a window and a notice.</p>
+<a class="skip" href="#main">Skip to the page</a>
+<div class="app" id="app">
+  <header class="top">
+    <button class="btn" id="tocBtn" type="button" aria-controls="toc" aria-expanded="true">&#9776; Contents</button>
+    <a class="brand" id="brand" href="#"></a>
+    <span class="spacer"></span>
+    <div class="search" role="search">
+      <label class="sr" for="search">Search this help</label>
+      <input class="field" id="search" type="search" placeholder="Search  ( / )" autocomplete="off" aria-controls="results" aria-expanded="false">
+      <ul class="results" id="results" role="listbox" aria-label="Search results" hidden></ul>
+    </div>
+  </header>
+  <nav class="toc" id="toc" aria-label="Contents"></nav>
+  <main id="main" tabindex="-1">
+    <div class="crumb"><span class="label" id="crumbLeft"></span><span class="label" id="crumbRight"></span></div>
+    <article class="card" id="card" aria-live="polite"></article>
+    <nav class="pager" aria-label="Page">
+      <button class="btn" id="prevBtn" type="button"><span class="dir">&larr; Previous</span><span class="ttl" id="prevTitle"></span></button>
+      <div class="mid"><span class="big" id="counter"></span><span id="counterSub"></span><div class="dots" id="dots" aria-hidden="true"></div></div>
+      <button class="btn" id="nextBtn" type="button"><span class="dir">Next &rarr;</span><span class="ttl" id="nextTitle"></span></button>
+    </nav>
+  </main>
+  <footer class="foot" id="foot"></footer>
+</div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
 
-<h2>Use it</h2>
-<p>Press <kbd>Ctrl</kbd>+<kbd>F8</kbd> to open or close the window. Remap the key in <b>Mods → Keybinds</b>.</p>
+<!-- HELP-CONTENT START -->
+<!-- SPDX-License-Identifier: MIT -->
+<script>
+/*
+  This mod's help page: the Help button on its page in the Mods menu opens it. Edit only this block; the style and
+  script around it are the standard Progenitor help page (templates/help in the Progenitor repository).
+  Page fields: id, title, lede (optional), html, code (optional {lang, text}), callout (optional
+  {title, text, warn}). In html, [[term-id|words]] links a glossary term. Keep a page to a heading
+  plus about 60 words or 3-5 bullets, one code block and one callout at most.
+*/
+window.HELP = {
+  id: "yourteam.progenitormod",
+  title: "Progenitor Mod Display Name",
+  subtitle: "Help",
+  version: "1.0.0",
+  footer: "Progenitor Mod Display Name is built on Progenitor.",
+  logo: "",
+  chapters: [
+    {
+      id: "start", title: "Getting started", pages: [
+        { id: "welcome", title: "What it does",
+          html: `<p>Asks the server for its greeting and shows it in a window and a notice.</p>
+<ul><li>Install it on the client and the [[server-part|server]].</li><li>On a server without it, the window says so and the rest keeps working.</li></ul>` },
+        { id: "first-use", title: "First use",
+          html: `<p>Join a world and press <span class="kbd">Ctrl</span>+<span class="kbd">F8</span>. The window shows the server's greeting.</p>` }
+      ]
+    },
+    {
+      id: "settings", title: "Settings", pages: [
+        { id: "options", title: "Settings",
+          html: `<table><thead><tr><th class="label">Setting</th><th class="label">Who decides</th><th class="label">What it does</th></tr></thead><tbody>
+<tr><td>Show notices</td><td>Each player</td><td>Show this mod's notices at the top of the screen.</td></tr>
+<tr><td>Greeting</td><td>The server's admins</td><td>What the server answers when a player asks. A [[server-setting|server setting]].</td></tr></tbody></table>
+<p>Change them on the mod's page in <strong>Mods</strong>.</p>` },
+        { id: "keys", title: "Keybinds",
+          html: `<table><thead><tr><th class="label">Key</th><th class="label">Action</th></tr></thead><tbody>
+<tr><td><span class="kbd">Ctrl</span>+<span class="kbd">F8</span></td><td>Open or close the window.</td></tr></tbody></table>
+<p>Remap it in <strong>Mods &rsaquo; Keybinds</strong>.</p>` }
+      ]
+    },
+    {
+      id: "glossary", title: "Glossary", pages: [ { id: "terms", title: "Glossary", glossary: true } ]
+    }
+  ],
+  glossary: [
+    { id: "server-part", term: "Server part", def: "The same mod installed on the server, which answers the client." },
+    { id: "server-setting", term: "Server setting", def: "A setting the server owns, which applies to every player on it." }
+  ]
+};
+</script>
+<!-- HELP-CONTENT END -->
 
-<h2>Settings</h2>
-<table>
-  <tr><th>Setting</th><th>Who decides</th><th>What it does</th></tr>
-  <tr><td>Show notices</td><td>Each player</td><td>Show this mod's notices at the top of the screen.</td></tr>
-  <tr><td>Greeting</td><td>The server's admins</td><td>What the server answers when a player asks.</td></tr>
-</table>
-<!-- Content: edit up to here. -->
-</main>
+<script>
+/* Renderer: shared by every Progenitor help page. Edit templates/help/index.html, then run tools/help-guide/sync.mjs. */
+(function () {
+  "use strict";
+  var H = window.HELP || { chapters: [], glossary: [] };
+  var hasRoles = !!(H.roles && H.roles.length);
+  var KEY = "progenitor-help:" + (H.id || "help");
+  function store(k, v) { try { if (v == null) localStorage.removeItem(KEY + k); else localStorage.setItem(KEY + k, v); } catch (e) { /* no storage */ } }
+  function load(k) { try { return localStorage.getItem(KEY + k); } catch (e) { return null; } }
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+  // ---- Model ----
+  var pages = [], byKey = {}, glossaryKey = null;
+  var chapters = (H.chapters || []).map(function (c) {
+    var ch = { id: c.id, title: c.title, role: c.role || null, pages: [] };
+    (c.pages || []).forEach(function (p) {
+      var page = { key: c.id + "/" + p.id, data: p, title: p.title, chapter: ch };
+      if (p.glossary) glossaryKey = page.key;
+      ch.pages.push(page); pages.push(page); byKey[page.key] = page;
+    });
+    return ch;
+  });
+  var gloss = {};
+  (H.glossary || []).forEach(function (g) { gloss[g.id] = g; });
+  var roleById = {};
+  (H.roles || []).forEach(function (r) { roleById[r.id] = r; });
+  var role = hasRoles ? load(":role") : null;
+  if (role && !roleById[role]) role = null;
+
+  function path() {
+    return pages.filter(function (p) { return !p.chapter.role || p.chapter.role === role; });
+  }
+  function firstPageOfRole(r) {
+    for (var i = 0; i < pages.length; i++) if (pages[i].chapter.role === r) return pages[i];
+    return pages[0];
+  }
+  function chooserPage() {
+    for (var i = 0; i < pages.length; i++) if (pages[i].data.chooser) return pages[i];
+    return null;
+  }
+
+  // ---- Rendering helpers ----
+  var KW = {};
+  ("using namespace public private protected internal sealed static readonly class struct interface enum new return if else var void bool int string double float true false null this override abstract virtual async await foreach for in is as get set out ref const typeof").split(" ").forEach(function (k) { KW[k] = 1; });
+  function tintCs(src) {
+    var re = /(\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*")|(\[[A-Z][A-Za-z]*(?=[(\]]))|(\b\d+(?:\.\d+)?\b)|(\b[A-Za-z_][A-Za-z0-9_]*\b)/g, out = "", last = 0, m;
+    while ((m = re.exec(src))) {
+      out += esc(src.slice(last, m.index));
+      var t = m[0];
+      if (m[1]) out += '<span class="tk-c">' + esc(t) + "</span>";
+      else if (m[2]) out += '<span class="tk-s">' + esc(t) + "</span>";
+      else if (m[3]) out += '[<span class="tk-a">' + esc(t.slice(1)) + "</span>";
+      else if (m[4]) out += '<span class="tk-n">' + t + "</span>";
+      else if (KW[t]) out += '<span class="tk-k">' + t + "</span>";
+      else if (/^[A-Z]/.test(t)) out += '<span class="tk-t">' + t + "</span>";
+      else out += t;
+      last = re.lastIndex;
+    }
+    return out + esc(src.slice(last));
+  }
+  function tint(lang, src) {
+    if (lang === "c#") return tintCs(src);
+    if (lang === "xml") return esc(src).replace(/(&lt;\/?)([A-Za-z.]+)/g, '$1<span class="tk-k">$2</span>').replace(/([A-Za-z]+)=(&quot;[^&]*&quot;)/g, '<span class="tk-t">$1</span>=<span class="tk-s">$2</span>');
+    if (lang === "shell") return esc(src).replace(/^(\s*)(dotnet|cd|powershell|node)\b/gm, '$1<span class="tk-k">$2</span>');
+    return esc(src);
+  }
+  function terms(html) {
+    return html.replace(/\[\[([a-z0-9-]+)\|([^\]]+)\]\]/g, function (_, id, words) {
+      if (!gloss[id]) console.warn("Help: no glossary entry for " + id);
+      return '<a class="term" data-term="' + id + '" href="#' + (glossaryKey || "") + ":" + id + '">' + words + "</a>";
+    });
+  }
+  function plain(html) { return html.replace(/\[\[[a-z0-9-]+\|([^\]]+)\]\]/g, "$1").replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " "); }
+
+  function renderPage(page) {
+    var d = page.data, h = "<h1>" + esc(d.title) + (d.soon ? '<span class="soon">Coming soon</span>' : "") + "</h1>";
+    if (d.lede) h += '<p class="lede">' + esc(d.lede) + "</p>";
+    h += '<hr class="rule">';
+    var body = terms(d.html || "");
+    var code = "";
+    if (d.code) code = '<div class="code"><span class="lang" aria-hidden="true">' + esc(d.code.lang || "") + '</span><pre><code>' + tint(d.code.lang, d.code.text.replace(/^\n/, "")) + '</code></pre><button class="btn copy" type="button" aria-label="Copy this code">Copy</button></div>';
+    body = body.indexOf("{{code}}") > -1 ? body.replace("{{code}}", code) : body + code;
+    if (d.chooser && hasRoles) {
+      body += '<div class="roles">' + H.roles.map(function (r) {
+        return '<button type="button" class="role" data-role="' + r.id + '" aria-pressed="' + (r.id === role) + '"><b>' + esc(r.title) + "</b>" + esc(r.blurb || "") + '<span class="go">Start here &rarr;</span></button>';
+      }).join("") + "</div>";
+    }
+    if (d.glossary) {
+      body += '<div class="gl-tools"><label class="sr" for="glSearch">Filter the glossary</label><input class="field" id="glSearch" type="search" placeholder="Filter terms" autocomplete="off"><span class="gl-count" id="glCount"></span></div><dl class="gl-list" id="glList">' +
+        (H.glossary || []).map(function (g) {
+          return '<div class="gl-entry" id="term-' + g.id + '" data-id="' + g.id + '"><dt>' + esc(g.term) + "</dt><dd>" + g.def + "</dd></div>";
+        }).join("") + "</dl>";
+    }
+    if (d.callout) body += '<div class="callout' + (d.callout.warn ? " warn" : "") + '"><span class="label">' + esc(d.callout.title || "Tip") + "</span><p>" + terms(d.callout.text) + "</p></div>";
+    return h + body;
+  }
+
+  // ---- Header and footer ----
+  var brand = $("brand");
+  brand.innerHTML = (H.logo ? '<img alt="" src="' + H.logo + '">' : '<span class="mono" aria-hidden="true">' + esc((H.title || "?").charAt(0)) + "</span>") +
+    '<span><span class="brand-title">' + esc(H.title || "Help") + '</span><span class="brand-sub">' + esc(H.subtitle || "Help") + "</span></span>";
+  $("foot").innerHTML = "<span>" + esc(H.title || "") + (H.version ? " " + esc(H.version) : "") + ' &middot; <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> turn pages, <span class="kbd">/</span> search</span><span>' + esc(H.footer || "") + "</span>";
+
+  // ---- Sidebar ----
+  var toc = $("toc"), app = $("app"), tocBtn = $("tocBtn");
+  function renderToc(current) {
+    var h = "";
+    if (hasRoles && role) {
+      h += '<div class="rolebar"><span><span class="label">Your path</span><b>' + esc(roleById[role].title) + '</b></span><button class="btn" type="button" id="switchRole">Switch role</button></div>';
+    }
+    h += '<div class="label">Chapters</div><ol>';
+    var seen = {};
+    path().forEach(function (p) {
+      var ch = p.chapter;
+      if (seen[ch.id]) return;
+      seen[ch.id] = 1;
+      var isCur = current && current.chapter === ch;
+      h += '<li class="chap' + (isCur ? " current" : "") + '"><button type="button" class="chap-btn" data-chapter="' + esc(ch.id) + '" aria-expanded="' + isCur + '"><span class="chev" aria-hidden="true">&#9656;</span>' + esc(ch.title) + '</button><ol class="pages">' +
+        ch.pages.map(function (q, i) {
+          return '<li><a href="#' + q.key + '"' + (q === current ? ' aria-current="page"' : "") + ">" + (ch.pages.length > 1 ? (i + 1) + ". " : "") + esc(q.title) + "</a></li>";
+        }).join("") + "</ol></li>";
+    });
+    toc.innerHTML = h + "</ol>";
+    var cur = toc.querySelector('[aria-current="page"]');
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+  toc.addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    if (b.id === "switchRole") { var c = chooserPage(); if (c) go(c.key); return; }
+    if (b.classList.contains("chap-btn")) {
+      var open = b.getAttribute("aria-expanded") === "true";
+      b.setAttribute("aria-expanded", open ? "false" : "true");
+    }
+  });
+  function setToc(open) { app.classList.toggle("toc-closed", !open); tocBtn.setAttribute("aria-expanded", String(open)); }
+  if (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) setToc(false);
+  tocBtn.addEventListener("click", function () { setToc(app.classList.contains("toc-closed")); });
+
+  // ---- Navigation ----
+  var current = null, card = $("card"), prevBtn = $("prevBtn"), nextBtn = $("nextBtn");
+  function setRole(r) { role = r; store(":role", r); }
+  function show(page) {
+    if (!page) page = pages[0];
+    if (hasRoles && page.chapter.role && page.chapter.role !== role) setRole(page.chapter.role);
+    current = page;
+    card.innerHTML = renderPage(page);
+    wireCard();
+    var ch = page.chapter, list = path(), i = list.indexOf(page);
+    document.title = page.title + " · " + (H.title || "Help");
+    $("crumbLeft").textContent = (hasRoles && role && ch.role ? roleById[role].title + " · " : "") + ch.title;
+    $("crumbRight").textContent = "page " + (i + 1) + " of " + list.length;
+    var inCh = ch.pages.indexOf(page);
+    $("counter").textContent = (inCh + 1) + " / " + ch.pages.length;
+    $("counterSub").textContent = ch.title;
+    $("dots").innerHTML = ch.pages.length > 1 ? ch.pages.map(function (q) { return q === page ? '<span class="on"></span>' : "<span></span>"; }).join("") : "";
+    var prev = list[i - 1], next = list[i + 1];
+    var blocked = hasRoles && !role && page.data.chooser;
+    prevBtn.disabled = !prev; nextBtn.disabled = !next || blocked;
+    $("prevTitle").textContent = prev ? prev.title : "Start";
+    $("nextTitle").textContent = blocked ? "Choose a path" : next ? next.title : "End";
+    prevBtn.setAttribute("aria-label", prev ? "Previous page: " + prev.title : "No previous page");
+    nextBtn.setAttribute("aria-label", blocked ? "Choose a path first" : next ? "Next page: " + next.title : "No next page");
+    renderToc(page);
+    store(":page", page.key);
+    hideTip();
+    window.scrollTo(0, 0);
+  }
+  function parseHash(h) {
+    h = decodeURIComponent((h || "").replace(/^#/, ""));
+    var c = h.indexOf(":");
+    return c > -1 ? { key: h.slice(0, c), term: h.slice(c + 1) } : { key: h, term: null };
+  }
+  function go(key, term) {
+    var target = "#" + key + (term ? ":" + term : "");
+    try { if (location.hash !== target) history.pushState(null, "", target); } catch (e) { /* hash not writable */ }
+    route({ key: key, term: term || null });
+  }
+  function route(r) {
+    r = r || parseHash(location.hash);
+    var page = byKey[r.key];
+    if (!page) { var ch = chapters.filter(function (c) { return c.id === r.key; })[0]; page = ch && ch.pages[0]; }
+    show(page || pages[0]);
+    if (r.term) flashTerm(r.term);
+  }
+  prevBtn.addEventListener("click", function () { var l = path(), i = l.indexOf(current); if (l[i - 1]) go(l[i - 1].key); });
+  nextBtn.addEventListener("click", function () { var l = path(), i = l.indexOf(current); if (l[i + 1]) go(l[i + 1].key); });
+  window.addEventListener("hashchange", function () { route(); });
+  window.addEventListener("popstate", function () { route(); });
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if (a && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+      var r = parseHash(a.getAttribute("href"));
+      if (byKey[r.key]) { e.preventDefault(); closeResults(); go(r.key, r.term); return; }
+    }
+    if (!e.target.closest || !e.target.closest(".search")) closeResults();
+  });
+  document.addEventListener("keydown", function (e) {
+    var t = e.target, typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+    if (e.key === "Escape") { hideTip(); closeResults(); }
+    if (typing || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.key === "ArrowRight" && !nextBtn.disabled) { e.preventDefault(); nextBtn.click(); }
+    else if (e.key === "ArrowLeft" && !prevBtn.disabled) { e.preventDefault(); prevBtn.click(); }
+    else if (e.key === "/") { e.preventDefault(); search.focus(); }
+  });
+
+  // ---- Per-page wiring: copy buttons, role cards, glossary, terms ----
+  function copyText(text, done) {
+    function fallback() {
+      var ta = document.createElement("textarea"); ta.value = text; ta.setAttribute("readonly", "");
+      ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+      document.body.removeChild(ta); done(ok);
+    }
+    try { if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(function () { done(true); }, fallback); return; } } catch (e) { /* fall through */ }
+    fallback();
+  }
+  function wireCard() {
+    Array.prototype.forEach.call(card.querySelectorAll(".copy"), function (b) {
+      b.addEventListener("click", function () {
+        copyText(current.data.code.text.replace(/^\n/, ""), function (ok) {
+          b.textContent = ok ? "Copied" : "Press Ctrl+C";
+          setTimeout(function () { b.textContent = "Copy"; }, 1600);
+        });
+      });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll(".role"), function (b) {
+      b.addEventListener("click", function () { setRole(b.dataset.role); go(firstPageOfRole(b.dataset.role).key); });
+    });
+    var gs = $("glSearch");
+    if (gs) { gs.addEventListener("input", filterGlossary); filterGlossary(); }
+    Array.prototype.forEach.call(card.querySelectorAll("a.term"), function (a) {
+      a.addEventListener("mouseenter", function () { showTip(a); });
+      a.addEventListener("mouseleave", hideTip);
+      a.addEventListener("focus", function () { showTip(a); });
+      a.addEventListener("blur", hideTip);
+    });
+  }
+  function filterGlossary() {
+    var gs = $("glSearch"), q = gs.value.trim().toLowerCase(), n = 0, all = card.querySelectorAll(".gl-entry");
+    Array.prototype.forEach.call(all, function (el) { var hit = !q || el.textContent.toLowerCase().indexOf(q) > -1; el.hidden = !hit; if (hit) n++; });
+    $("glCount").textContent = q ? n + " of " + all.length + " terms" : all.length + " terms";
+  }
+  function flashTerm(id) {
+    var el = $("term-" + id), list = $("glList");
+    if (!el || !list) return;
+    el.classList.add("flash");
+    list.scrollTop = el.offsetTop - list.offsetTop - 8;
+  }
+  var tip = $("tip"), tipFor = null;
+  function showTip(a) {
+    var g = gloss[a.dataset.term];
+    if (!g) return;
+    tipFor = a;
+    tip.innerHTML = "<b>" + esc(g.term) + "</b>" + g.def + "<small>Click for the glossary.</small>";
+    tip.hidden = false;
+    var r = a.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    var y = r.bottom + 8;
+    if (y + h > window.innerHeight - 8) y = r.top - h - 8;
+    tip.style.left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8) + "px";
+    tip.style.top = Math.max(8, y) + "px";
+    a.setAttribute("aria-describedby", "tip");
+  }
+  function hideTip() { if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; tip.hidden = true; }
+  window.addEventListener("scroll", hideTip, { passive: true });
+
+  // ---- Search across every page ----
+  var search = $("search"), results = $("results"), active = -1;
+  var index = pages.map(function (p) {
+    var d = p.data, text = plain((d.lede || "") + " " + (d.html || "") + " " + (d.callout ? d.callout.title + " " + d.callout.text : "")) + " " + (d.code ? d.code.text : "");
+    if (d.glossary) text += " " + (H.glossary || []).map(function (g) { return g.term + " " + plain(g.def); }).join(" ");
+    return { page: p, text: text.replace(/\s+/g, " ").trim() };
+  });
+  function closeResults() { results.hidden = true; active = -1; search.setAttribute("aria-expanded", "false"); }
+  function mark(s, q) { var i = s.toLowerCase().indexOf(q); return i < 0 ? esc(s) : esc(s.slice(0, i)) + "<mark>" + esc(s.slice(i, i + q.length)) + "</mark>" + esc(s.slice(i + q.length)); }
+  function runSearch() {
+    var q = search.value.trim().toLowerCase();
+    if (q.length < 2) { closeResults(); return; }
+    var words = q.split(/\s+/);
+    var hits = index.map(function (row) {
+      var t = row.page.title.toLowerCase(), x = row.text.toLowerCase(), s = 0;
+      for (var i = 0; i < words.length; i++) { if (t.indexOf(words[i]) > -1) s += 10; else if (x.indexOf(words[i]) > -1) s += 1; else return null; }
+      return { row: row, s: s };
+    }).filter(Boolean).sort(function (a, b) { return b.s - a.s; }).slice(0, 12);
+    results.innerHTML = hits.length ? hits.map(function (h, i) {
+      var p = h.row.page, x = h.row.text.toLowerCase().indexOf(words[0]);
+      var snip = x > -1 ? h.row.text.slice(Math.max(0, x - 40), x + 90) : h.row.text.slice(0, 120);
+      var where = (p.chapter.role && roleById[p.chapter.role] ? roleById[p.chapter.role].title + " · " : "") + p.chapter.title;
+      return '<li><a role="option" id="res-' + i + '" href="#' + p.key + '"><span class="r-title">' + mark(p.title, words[0]) + '</span><span class="r-where">' + esc(where) + '</span><span class="r-snip">' + (x > 40 ? "…" : "") + mark(snip, words[0]) + "…</span></a></li>";
+    }).join("") : '<li class="r-none">Nothing matches.</li>';
+    results.hidden = false; active = -1; search.setAttribute("aria-expanded", "true");
+  }
+  function move(d) {
+    var links = results.querySelectorAll("a");
+    if (!links.length) return;
+    active = (active + d + links.length) % links.length;
+    Array.prototype.forEach.call(links, function (a, i) { a.setAttribute("aria-selected", String(i === active)); });
+    search.setAttribute("aria-activedescendant", links[active].id);
+    links[active].scrollIntoView({ block: "nearest" });
+  }
+  search.addEventListener("input", runSearch);
+  search.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+    else if (e.key === "Enter") {
+      var links = results.querySelectorAll("a"), a = links[active > -1 ? active : 0];
+      if (a) { e.preventDefault(); closeResults(); search.blur(); go(parseHash(a.getAttribute("href")).key); }
+    } else if (e.key === "Escape") { search.value = ""; closeResults(); }
+  });
+
+  // ---- Start: the hash wins, then the last page, then the first page ----
+  if (location.hash && location.hash.length > 1) route();
+  else {
+    var saved = load(":page"), start = byKey[saved] || pages[0];
+    if (start) {
+      try { history.replaceState(null, "", "#" + start.key); } catch (e) { /* hash not writable */ }
+      show(start);
+    }
+  }
+})();
+</script>
 </body>
 </html>

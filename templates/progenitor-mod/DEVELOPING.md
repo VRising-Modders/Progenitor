@@ -22,10 +22,10 @@ Copy `ProgenitorMod/bin/Debug/net6.0/ProgenitorMod.dll` to `BepInEx/progenitor-r
 | File | What it is |
 |---|---|
 | `ProgenitorMod/Plugin.cs` | Attributes, `OnLoad`, settings, keybind, server request handler. |
-| `ProgenitorMod/ModWindow.cs` | The client window and the notice. |
+| `ProgenitorMod/ModWindow.cs` | The client window (a Basic window preset, text in named styles) and the notice. |
 | `ProgenitorMod/ModRules.cs` | Game-free messages and rules, linked into the tests. |
 | `README.md` | The Thunderstore listing and the Mods page's About text (embedded). |
-| `help/index.html` | The page the Help button on the mod's settings page opens (embedded, and copied beside the DLL). Edit the content block. Placeholder until the standard Progenitor help page lands. |
+| `help/index.html` | The page the Help button on the mod's page opens. Edit only the block between `HELP-CONTENT START` and `HELP-CONTENT END`; keep a page to about 60 words. Everything under `help/` is embedded, so images and stylesheets can sit beside it. |
 | `thunderstore/manifest.json`, `CHANGELOG.md` | Package files. Add a 256x256 `icon.png` and a `LICENSE`. |
 
 ## Publish

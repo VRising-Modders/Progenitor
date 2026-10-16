@@ -4,7 +4,7 @@ Build V Rising mods from Progenitor's standard pieces. Use the API and sample in
 
 Starter prompt ([docs/ai-starter-prompt.md](docs/ai-starter-prompt.md)):
 
-> We are making a V Rising mod with Progenitor. Follow PROGENITOR_GUIDE.md while building a mod that does the following: <your mod description>. Start from `dotnet new progenitor-mod`, use Progenitor's standard settings, keybinds, windows, notices and samples before writing anything custom, and keep the game's look.
+> We are making a V Rising mod with Progenitor. Follow PROGENITOR_GUIDE.md while building a mod that does the following: <your mod description>. Start from `dotnet new progenitor-mod`, use Progenitor's standard settings, keybinds, window presets, text styles, notices and samples before writing anything custom (docs/ui-controls.md lists every control), and keep the game's look. Fonts, colors and text alignment come only from the named text styles: never set them yourself.
 
 ## Need X → use this → copy this
 
@@ -14,11 +14,12 @@ Starter prompt ([docs/ai-starter-prompt.md](docs/ai-starter-prompt.md)):
 | A player setting | `ctx.Bind(section, key, default, description)` + `ctx.Settings.Page` | [mod-settings](docs/mod-settings.md#the-settings-page-builder-stage-2) | [ControlsSample `ControlsSettings`](samples/Progenitor.ControlsSample/Plugin.cs) |
 | A server setting (admins edit, locked for players) | `ctx.Bind(..., synced: true)`, page row with `scope: SettingScope.ServerWide` | [settings scopes](docs/mod-settings.md#settings-scopes-on-the-page-step-4) | [template `ModSettings`](templates/progenitor-mod/ProgenitorMod/Plugin.cs), [SampleServerLed](samples/Progenitor.SampleServerLed/ServerLedSettings.cs) |
 | A key | `ctx.Keybinds.Register`; a key that opens UI: `RegisterOpener` | [keybinds](docs/modules.md#keybinds-fui5) | [ControlsSample](samples/Progenitor.ControlsSample/Plugin.cs) |
-| Any UI control | The control catalog | [ui-controls](docs/ui-controls.md) (in progress), [ui-style §3](docs/ui-style.md#3-pick-the-control-for-the-value) | [ControlsSample](samples/Progenitor.ControlsSample/README.md) |
-| A floating window | `Ui.Panel` → `GameWindow()` → controls → `Ui.Show`, held in an `OwnedPanel` | [ui-style §1](docs/ui-style.md#1-pick-where-the-ui-lives), [ui.md](docs/ui.md#api) | [template `ModWindow`](templates/progenitor-mod/ProgenitorMod/ModWindow.cs), [Sample F9 window](samples/Progenitor.Sample/SampleUi.cs) |
+| Any UI control | The control catalog; each control live in the controls sample's **Gallery** | [ui-controls](docs/ui-controls.md), [ui-style §3](docs/ui-style.md#3-pick-the-control-for-the-value) | [Gallery](samples/Progenitor.ControlsSample/GalleryDemo.cs) |
+| A window | `ctx.Windows.Create(UiWindowPreset.Basic \| Header \| Tabbed, title, options)`: Basic for a small tool, Header for one thing the player works on (toolbar, tabs), Tabbed for a large screen | [ui-controls: windows](docs/ui-controls.md#layout-and-windows), [ui.md](docs/ui.md#standard-windows) | [template `ModWindow`](templates/progenitor-mod/ProgenitorMod/ModWindow.cs) (Basic), [Gallery windows](samples/Progenitor.ControlsSample/GalleryWindows.cs) |
+| Text | `panel.Text(text, UiTextStyle.Body \| Title \| Section \| Muted \| Number \| Warning \| Error \| Success)`; a figure: `panel.Text(name, value, UiTextStyle.Number)` | [text styles](docs/ui-controls.md#text-styles) | [template `ModWindow`](templates/progenitor-mod/ProgenitorMod/ModWindow.cs) |
 | A page in the Mods menu | `ctx.Menu.Register(name, description).Page(title, build)` | [ui-style §1](docs/ui-style.md#1-pick-where-the-ui-lives) | [ControlsSample](samples/Progenitor.ControlsSample/Plugin.cs) |
 | A question or confirmation | `ctx.Dialogs.Confirm` / `Notice` / `Choose` / `Prompt`, `panel.ConfirmButton` | [dialogs](docs/ui.md#dialogs) | [ControlsSample `ControlsDialogs`](samples/Progenitor.ControlsSample/Plugin.cs) |
-| A player notice | `ctx.Hud.Notify("<Mod Name>: <message>", kind: …)` | [notifications](docs/ui.md#notifications) | [template](templates/progenitor-mod/ProgenitorMod/ModWindow.cs) |
+| A player notice | `ctx.Hud.Notify(message, kind: …)`; Progenitor adds `<Mod Name>: ` | [notifications](docs/ui.md#notifications), [message prefix](docs/modules.md#message-prefix) | [template](templates/progenitor-mod/ProgenitorMod/ModWindow.cs) |
 | A button or line on a chest, station, inventory, heart or tooltip | `Ui.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid)` | [vanilla panel sites](docs/ui.md#vanilla-panel-sites-p6) | [PanelsExample](samples/Progenitor.PanelsExample/Plugin.cs) |
 | Client asks server, server answers | `ctx.Requests.Handle` / `Send` | [requests](docs/modules.md#requests-large-messages-and-subscriptions) | [template](templates/progenitor-mod/ProgenitorMod/Plugin.cs), [SampleExchange](samples/Progenitor.Sample/SampleExchange.cs) |
 | Live server state in an open panel | `ctx.Subscriptions.Topic` / `Subscribe` | [subscriptions](docs/modules.md#requests-large-messages-and-subscriptions) | [SampleExchange](samples/Progenitor.Sample/SampleExchange.cs) |
@@ -32,7 +33,7 @@ Starter prompt ([docs/ai-starter-prompt.md](docs/ai-starter-prompt.md)):
 | Items, buffs, recipes | `ctx.Content.DefineItem` / `DefineBuff` / `Edit` | [content](docs/modules.md#content), [recipes](docs/recipes.md) | [SampleContent](samples/Progenitor.Sample/SampleContent.cs) |
 | Per-save data | `ctx.Save` (with the `ctx.WorldState` epoch) | [persistence](docs/modules.md#persistence), [where data goes](docs/modules.md#where-should-my-data-go) | [SampleStore](samples/Progenitor.Sample/SampleStore.cs) |
 | Mods page About text | Embedded `README.md` (`LogicalName="README.md"`), fallback `[ModAbout]` | [About text](docs/modules.md#about-text-on-the-mod-page) | [AboutExample](samples/Progenitor.AboutExample/README.md) |
-| Mod help | Edit `help/index.html`; the Help button appears automatically | [template DEVELOPING.md](templates/progenitor-mod/DEVELOPING.md) | [template help](templates/progenitor-mod/help/index.html) |
+| Mod help | Edit the content block of `help/index.html`; everything under `help/` is embedded (`LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)"`) and the mod page's Help button opens it | [template DEVELOPING.md](templates/progenitor-mod/DEVELOPING.md) | [template help](templates/progenitor-mod/help/index.html) |
 | Client and server parts that must agree | `[NetworkCompatibility]` + `[Counterpart]` | [counterparts](docs/mod-settings.md#counterparts), [ranges](docs/modules.md#compatibility-ranges-and-version-matching-mod-compatibility-c3) | [SampleServerLed](samples/Progenitor.SampleServerLed/Plugin.cs), [SampleClientLed](samples/Progenitor.SampleClientLed) |
 | Hot reload | `ProgenitorPlugin<TContext>`, register through `ctx`, `ctx.Track` | [hot reload](docs/hot-reload.md), [unload rules](docs/modules.md#ownership-and-pin-constraints) | [ReloadExample](samples/Progenitor.ReloadExample/README.md) |
 | Work every frame or tick | `ctx.Systems.Add` / `ctx.Hooks` (cached, change-driven) | [systems](docs/modules.md#systems), [refresh cost](docs/modules.md#refresh-cost) | [SampleSystems](samples/Progenitor.Sample/SampleSystems.cs) |
@@ -45,14 +46,14 @@ Starter prompt ([docs/ai-starter-prompt.md](docs/ai-starter-prompt.md)):
 
 ## UI control categories
 
-All public kit controls, by category. Full catalog with gallery locations: [docs/ui-controls.md](docs/ui-controls.md) (being written); until then [ui-style §3](docs/ui-style.md#3-pick-the-control-for-the-value) and [ui.md](docs/ui.md).
+All public kit controls, by category. Full catalog, with each control's text style and where the **Gallery** (controls sample, Ctrl+F7, then **Gallery**) shows it live: [docs/ui-controls.md](docs/ui-controls.md).
 
 | Category | Controls |
 |---|---|
-| Layout and windows | `ctx.Settings.Page`, `ctx.Menu.Register(...).Page`, `Ui.Panel` + `GameWindow`, `OwnedPanel`, `Heading`, `Note`, `Divider`, `BeginInline`/`EndInline`, `Footer`, `Tabs`, `MasterDetail` |
+| Layout and windows | `ctx.Windows.Create` (Basic, Header, Tabbed), `panel.Text` + `UiTextStyle`, `ctx.Settings.Page`, `ctx.Menu.Register(...).Page`, `Ui.Panel` + `GameWindow` (only when no preset fits), `Heading`, `Note`, `Divider`, `BeginInline`/`EndInline`, `Tabs`, `MasterDetail` |
 | Input | `Button`, `ConfirmButton`, `Toggle`, `Slider`, `SliderField`, `Number`, `Radio`, `Dropdown`, `MultiSelect`, `Input`, `TextArea`, `ColorField`, `DateTimeField`, `KeyField`, `CodeArea` |
 | Lists and data | `DataTable`, `OrderedList`, `Picker`, `Chips` |
-| Feedback and messages | `Label(text, LabelTone)`, `Fact`, `Info`, `Tooltip`, `Term` + `UiTerms`, `ctx.Hud.Tip`, `ctx.Dialogs`, `ctx.Hud.Notify` |
+| Feedback and messages | `Label(text, UiTextStyles.ToneOf(style))`, `Fact`, `Info`, `Tooltip`, `Term` + `UiTerms`, `ctx.Hud.Tip`, `ctx.Dialogs`, `ctx.Hud.Notify`, `ctx.Chat`, `ICommandContext.Reply` |
 | HUD and world | `ctx.Hud.Notify`, `ctx.Hud.Locate`, `ctx.Hud.PickInWorld` |
 | Game-panel attachments | `Ui.AttachToVanilla` (container, station, inventory, castle heart, item tooltip) |
 
@@ -68,7 +69,7 @@ dotnet test MyMod.Tests
 
 Or install the pack: `dotnet pack templates/Progenitor.Templates.csproj -o out`, then `dotnet new install out/Progenitor.Templates.<version>.nupkg`. Options: `--team`, `--display-name`, `--license` (SPDX id, default `MIT`), `--progenitor-repo` (path to the checkout; found automatically when the mod is inside it or next to it). Needs the .NET 8 SDK and V Rising started once with BepInEx. Template check: `node tools/template-check.mjs`.
 
-The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a player and a server setting, a `Ctrl+F8` opener, a `GameWindow` window, a notice, a request with quiet retries, an embedded README and help page, `[ModAbout]`, `[NetworkCompatibility]`, `[Counterpart]`, SPDX headers, Thunderstore files and a game-free test project.
+The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a player and a server setting, a `Ctrl+F8` opener, a Basic window, a notice, a request with quiet retries, an embedded README and help page, `[ModAbout]`, `[NetworkCompatibility]`, `[Counterpart]`, SPDX headers, Thunderstore files and a game-free test project.
 
 ## Rules
 
@@ -97,19 +98,19 @@ The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a
 
 ### UI
 
-- Use kit controls only; no custom colors, fonts or sprites ([ui-style §5](docs/ui-style.md#5-color-and-art)).
-- Use the kit's named text styles (Title, Section label, Body, Muted, Number, Warning/Error/Success; listed in [ui-controls](docs/ui-controls.md), in progress). Until they land: `Heading`, `Note`, `Label(text, LabelTone)`. Never raw colors, sizes or fonts.
-- Align numbers right, text left, button captions centered, window titles centered.
-- Before calling UI done: check font, color and alignment on every new label, and take a live screenshot at 1080p and 1440p.
-- Floating windows: `GameWindow()` first, then controls, held in an `OwnedPanel`.
+- Use kit controls only; no custom colors, fonts or sprites ([ui-style §5](docs/ui-style.md#5-color-and-art)). Find the control in [ui-controls](docs/ui-controls.md) and look at it in the Gallery first.
+- **Fonts, colors and alignment need special attention.** Every line of text takes a named style: `panel.Text(text, UiTextStyle.X)` (Title, Section, Body, Muted, Number, Warning, Error, Success) or a control that fixes its own. The style sets the game font, size, color and alignment; never set any of them yourself.
+- Alignment: text left, numbers right (`UiTextStyle.Number`), button and tab captions centered, window titles centered. The presets and the kit do this; do not position text yourself.
+- Before calling UI done: check font, color and alignment on every new line against its control's **Text style** column in [ui-controls](docs/ui-controls.md), and take a live screenshot at 1080p and 1440p.
+- Windows: a standard preset, `ctx.Windows.Create(UiWindowPreset.Basic | Header | Tabbed, title, options)`; it draws the frame, the centered title and the version stamp. `Ui.Panel` + `GameWindow()` only when no preset fits.
 - US English, sentence case, two-to-four-word control names, verb captions.
-- Status in words, never color alone: `Label(text, LabelTone)`, `SetText(text, tone)`.
+- Status in words, never color alone: `panel.Label(text, UiTextStyles.ToneOf(style))`, then `SetText(text, tone)`.
 - Irreversible actions use `ConfirmButton` or `ctx.Dialogs.Confirm(..., danger: true)`.
 - Check at 1920x1080, 2560x1440 and 3840x2160; nothing cut off or overlapping.
 
 ### Notices and messages
 
-- Text is `<Mod Name>: <message>` (`ModRules.Notice` in the template).
+- Write the message alone. `ctx.Hud.Notify`, `ctx.Chat` and `ICommandContext.Reply` show it as `<Mod Name>: <message>` ([message prefix](docs/modules.md#message-prefix)); never type the mod's name in front. `prefix: false` only when the text already names the mod.
 - Kinds: `Info`, `Success`, `Warning`, `Error`.
 - Notices are for events; a problem the player must act on is a dialog.
 - One sentence: what happened, what to do. No exception text.

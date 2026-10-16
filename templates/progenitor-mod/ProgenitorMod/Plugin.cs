@@ -44,12 +44,13 @@ public sealed class Plugin : ProgenitorPlugin<ProgenitorModContext>
                 "Open or close the " + MyPluginInfo.PLUGIN_NAME + " window.", window.Toggle);
         }
 
-        ctx.Log.LogInfo(ModRules.Notice(MyPluginInfo.PLUGIN_NAME, "loaded " + MyPluginInfo.PLUGIN_VERSION + (ctx.IsServer ? " (server)" : " (client)")));
+        // The log already names the mod; notices, chat and command replies get "<Mod Name>: " from Progenitor.
+        ctx.Log.LogInfo("loaded " + MyPluginInfo.PLUGIN_VERSION + (ctx.IsServer ? " (server)" : " (client)"));
     }
 
     // Everything registered through ctx is released on every unload reason. Release anything else here.
     protected override void OnUnload(ProgenitorModContext ctx, PluginUnloadReason reason) =>
-        ctx.Log.LogInfo(ModRules.Notice(MyPluginInfo.PLUGIN_NAME, "unloading, reason=" + reason));
+        ctx.Log.LogInfo("unloading, reason=" + reason);
 }
 
 /// <summary>Keep the context empty: state lives in tracked objects, so a hot reload starts clean.</summary>

@@ -10,7 +10,7 @@
   "identity": "Progenitor.Templates.Mod",
   "groupIdentity": "Progenitor.Templates.Mod",
   "name": "Progenitor mod (V Rising)",
-  "description": "A V Rising mod built on Progenitor: settings, a keybind, a game-look window, a notice, a client-server request, About text, compatibility declarations and a game-free test project.",
+  "description": "A V Rising mod built on Progenitor: settings, a keybind, a standard window, a notice, a client-server request, About text, a help page, compatibility declarations and a game-free test project.",
   "shortName": "progenitor-mod",
   "tags": {
     "language": "C#",

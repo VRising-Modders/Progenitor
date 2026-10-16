@@ -31,10 +31,6 @@ internal static class ModRules
 
     internal const int MaxRetries = 3;
 
-    /// <summary>The standard notice and chat form: <c>&lt;Mod Name&gt;: &lt;message&gt;</c>.</summary>
-    internal static string Notice(string modName, string message) =>
-        (modName ?? "").Trim() + ": " + (message ?? "").Trim();
-
     /// <summary>The server's answer. Throw <see cref="RequestRefusedException"/> to refuse with a reason.</summary>
     internal static GreetingReply Answer(GreetingRequest request, string greeting, string serverVersion)
     {
