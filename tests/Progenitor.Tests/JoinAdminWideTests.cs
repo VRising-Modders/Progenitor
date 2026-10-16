@@ -34,7 +34,7 @@ public sealed class JoinAdminWideTests
         Assert.Contains("if (content.FrameWidth > DialogLayout.FrameWidth) Ui.SetDialogWidth(panel, content.FrameWidth);", dialog);
         string runtime = Source("Ui", "UnityUiRuntime.cs");
         Assert.Contains("panelRt.sizeDelta = new Vector2(FrameWidth, panelHeight);", runtime);
-        Assert.Contains("(_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : RowWidth;", runtime);
+        Assert.Contains("(_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;", runtime);
     }
 
     [Theory]

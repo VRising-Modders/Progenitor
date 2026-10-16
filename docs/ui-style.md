@@ -12,7 +12,8 @@ The reference is **Progenitor.ControlsSample** (`samples/Progenitor.ControlsSamp
 |---|---|---|
 | Options the player sets once and forgets | `ctx.Settings.Page(...)` ([mod-settings.md](mod-settings.md)) | Search, reset, server scopes, sync and the description column come with it. No layout code. |
 | A screen of its own: tools, lists, actions | `ctx.Menu.Register(name, description).Page(title, panel => ...)` | A page in the Mods menu, drawn on the settings grid in the game's look. `ctx.Menu.OpenPage(title)` opens it from a key or a button, in a world or at the title screen. |
-| A small window used during play | `Ui.Panel(title, ctx.Owner, ctx.Guid)`, then `panel.GameWindow()`, then the controls, then `panel.Show()` | The game's popup frame and the same grid as a Mods page; placed and tiled with other panels, not modal. Inside `namespace` code that also uses `Progenitor.Ui`, write the factory as an alias, `using UiApi = Progenitor.Ui.Ui;`, as both samples do. |
+| A window of its own: a small tool, one thing the player works on, or a large tabbed screen | `ctx.Windows.Create(UiWindowPreset.Basic \| Header \| Tabbed, title, options)` ([Standard windows](ui.md#standard-windows)) | The frame, title, version stamp, input mode, controller and Escape come from the preset, the same in every mod. Start here; the catalog of every control is [ui-controls.md](ui-controls.md). |
+| A floating window laid out by hand, when no preset fits | `Ui.Panel(title, ctx.Owner, ctx.Guid)`, then `panel.GameWindow()`, then the controls, then `panel.Show()` | The game's popup frame and the same grid as a Mods page; placed and tiled with other panels, not modal. Inside `namespace` code that also uses `Progenitor.Ui`, write the factory as an alias, `using UiApi = Progenitor.Ui.Ui;`, as both samples do. |
 | A question or a confirmation | `ctx.Dialogs` (`Confirm`, `Notice`, `Choose`, `Prompt`) or `panel.ConfirmButton` | The game's popup, modal, controller-ready, starts on the safe choice. |
 | HUD elements next to the game's own | Cloned vanilla widgets ([ui.md](ui.md#native-control-styling-and-lifecycle)) | Only when the element must sit inside the game's HUD. |
 | A button or line on a chest, station, inventory, castle heart or item tooltip | `Ui.AttachToVanilla(site, anchor, ...)` ([ui.md](ui.md#vanilla-panel-sites-p6)) | The game's own button and text, placed by the framework's placement rules. Prefer an inline anchor for one short action (`BesideSort` is one button beside the inventory bar, shown as an icon with its caption as tooltip when the caption is longer than about 40 units; give it a `VanillaButtonIcon`; `BesideRename` is a title-row button after the rename button); use an edge column for more or longer captions. Captions are one or two words, never colored. |
@@ -74,7 +75,7 @@ On a Mods page and a `GameWindow` the framework places every control: the name i
 
 ## 5. Color and art
 
-Use the framework's tones and the game's art; do not set colors, fonts or sprites on kit controls.
+Use the framework's tones and the game's art; do not set colors, fonts or sprites on kit controls. Words take a named text style, `panel.Text(text, UiTextStyle.Body | Title | Section | Muted | Number | Warning | Error | Success)`, which fixes the font, size, color and alignment (text left, numbers right, button captions and titles centered): see [Text styles](ui-controls.md#text-styles).
 
 | Tone (`LabelTone`) | Meaning |
 |---|---|

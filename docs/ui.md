@@ -59,6 +59,7 @@ Ui.RemoveAll(this);
 | `panel.Dropdown` / `Number` / `SliderField` / `ColorField` / `KeyField` | The settings kit (SETTINGS1). See [Settings kit controls](#settings-kit-controls-settings1-source-checked-and-game-free-tested-not-live-verified). |
 | `panel.TextArea` / `Radio` / `MultiSelect` / `Info` / `Divider` / `ConfirmButton`, `IUiHandle.Interactable` | SETTINGS1 stage 2. See [Stage 2 controls](#stage-2-controls-settings1-source-checked-and-game-free-tested-not-live-verified). |
 | `panel.OrderedList` / `Picker` / `Tabs` / `CodeArea`, `handle.Tooltip` (`UiWidgets`); `ctx.Hud.Notify` / `Locate` / `PickInWorld` | P7, experimental. See [Widgets](#widgets-p7-p7b) and [HUD](#hud-notifications-locate-and-pick-in-world). |
+| `ctx.Windows.Create` / `Ui.Window` (`UiWindowPreset`), `panel.Text(…, UiTextStyle)` | WINDOWS1. See [Standard windows](#standard-windows) and the [controls catalog](ui-controls.md). |
 | `panel.DataTable` / `MasterDetail` / `Chips` (`UiWidgets`); `handle.Term` / `UiTerms`; `ctx.Hud.Tip` | P7b, experimental. See [Data table](#data-table), [Master-detail](#master-detail), [Chips](#chips) and [Help](#help-explained-words-and-first-time-tips-p7b). |
 
 Keybinds are registered per plugin through `ctx.Keybinds.Register(id, defaultKey, description, onPressed, allowWhileCaptured: false)`, which binds the chord to that plugin's own cfg file. See [Keybinds](#keybinds-edges-come-from-held-state).
@@ -94,6 +95,94 @@ Who gets it by default:
 Layout: the line is a direct child of the panel frame (never a scrolling row), `PanelFooterLayout.FontSize` 13 against a note's 16 and a body label's 18, in the kit's muted note color, anchored bottom-center in a `PanelFooterLayout.BandHeight` (24) band. For a runtime-sized panel or dialog the band is added to the height the frame is sized for (`PanelHeightFor(content + band)`) and the viewport is inset above it, so a panel whose rows fit without a footer still fits and the last button stays above the line; bottom-pinned rows are raised by the band. A self-placed panel reserves the band itself (the consent prompt did, until it was removed 2026-10-05). On a workspace detail pane the line is shifted to the workspace frame's center, clamped to stay inside the pane (`PanelFooterLayout.CentredOffset`). The sidebar and strip never reserve a band. Readback: `mods_ui status.footer` and `status.dialog.footer`.
 
 **Source-checked and game-free tested** (`PanelFooterTests`: version formatting, which panels carry a footer, the Mods footer (Core and Bootstrap, never Dev), the readback keys; the consent band's tests went with the consent prompt on 2026-10-05), **not live-verified**: the drawn position, size and color have not been seen in game.
+
+## Standard windows
+
+A mod's own window starts from one of three presets, so every mod's windows share the game's frame, title, spacing, version stamp, input rules and Escape behavior. Use `ctx.Windows.Create` inside a plugin; it names the plugin in the stamp and closes the window on every unload reason. `Ui.Window(preset, title, owner, pluginId, options)` is the same outside a context (the stamp is read from the owner's `[BepInPlugin]`). Every control and widget, and which one fits a value, is in the [controls catalog](ui-controls.md); the named text styles are its [Text styles](ui-controls.md#text-styles) section.
+
+```csharp
+var window = ctx.Windows.Create(UiWindowPreset.Header, "Iron Chest", new UiWindowOptions
+{
+    Renamable = true,
+    Tools = new[] { new UiWindowTool("Sort", "Sort this chest by item type.") },
+    Tabs = new[] { "Contents", "Rules" },
+});
+window.Tools[0].OnClick(SortChest);
+window.OnRename(name => SaveName(name));
+window.Add(0, window.Panel.Text("Iron Ore", "1,280", UiTextStyle.Number));
+window.Add(1, window.Panel.Toggle("Accept overflow", true));
+window.Show();               // window.Hide() / Toggle(); Dispose() closes it for good
+```
+
+| Preset | Use when | Looks like | Input and controller | Placement |
+|---|---|---|---|---|
+| `UiWindowPreset.Basic` | A small tool used during play: a dropdown and a few buttons ("Other Gear · here"). | The game's popup frame, the title centered in its band, rows on the settings grid. | `WhenHovered`: the game keeps the input (and the controller) while the pointer is elsewhere. | Tiles with other panels. |
+| `UiWindowPreset.Header` | One thing the player works on: a container, a station, a named set. | Basic plus the ornamental header band (a darker ground behind the title, the game's title ornaments either side of it, the game's divider under it), an optional toolbar with an optional **Rename**, an optional tab row. | `WhileShown`: takes the input while shown; a controller navigates it. | Tiles with other panels. |
+| `UiWindowPreset.Tabbed` | A large screen like the game's own menus: several tabs of content and a column that describes the selection. | The header band, a toolbar (optional), a tab row across the top, an info column on the left (`window.Info`) and the main content on the right. | `WhileShown`; a controller navigates it. | Centered on screen, never tiled. |
+
+Every preset: rows are left-aligned (`ContentAlignment = "left"`), the version stamp `<mod name> <version> · Progenitor <version>` is on by default at the bottom (`UiWindowOptions.VersionStamp = false` turns it off, `VersionText` replaces it, `window.VersionStamp` changes it later), and Escape or a controller's B closes an open list, dialog or key capture first and the window when nothing else is open (the [Escape sweep](#input-what-a-panel-takes-and-for-how-long); `window.IsOpen` reads the result, there is no close event). `UiWindowOptions.CaptureMode` overrides the input mode. Up to six tabs and six toolbar buttons (one or two words, at most 16 characters) are accepted; more throw `ArgumentException`. **Rename** opens the game's prompt with the current title; the answer becomes the title and `OnRename` handlers get it. The caption is the word Rename: the game's font has no pencil glyph.
+
+| Member | What it does |
+|---|---|
+| `ctx.Windows.Create(preset, title, options = null)` → `IUiWindow`; `ctx.Windows.Open`, `ctx.Windows.VersionStamp` | A tracked window (not shown yet); the plugin's windows still open; its default stamp line. |
+| `Ui.Window(preset, title, owner = null, pluginId = null, options = null)` → `IUiWindow` | The same without a context; the caller disposes it. |
+| `IUiWindow` `Preset`, `Title` (get/set), `Panel`, `Tabs`, `Info`, `Tools`, `VersionStamp`, `IsOpen`, `IsDisposed`, `Add(tab, handle)`, `OnRename(handler)`, `Show()`, `Hide()`, `Toggle()`, `Describe()` | Rows go on `Panel` with the ordinary kit calls; `Add` puts a row on a tab (returned unchanged without a tab row). `Describe()` is the readback (`preset`, `title`, `open`, `stamp`, `frameWidth`, `centered`, `headerBand`, `infoColumn`, `capture`, `tabs`, `selectedTab`, `tools`, `rename`). |
+| `IUiWindowColumn` (`window.Info`, Tabbed only) `Heading`, `Note`, `Label(text, tone)`, `Fact(name, value)`, `Button(text)` | The info column's rows: fixed, not scrolled, on a darker ground. |
+| `UiWindowOptions` `VersionStamp`, `VersionText`, `Renamable`, `Tools`, `Tabs`, `SelectedTab`, `CaptureMode`; `UiWindowTool(caption, tooltip)` | What differs from the preset. |
+| `panel.Text(text, UiTextStyle)` / `panel.Text(name, value, UiTextStyle)` → `IUiLabel`; `UiTextStyle`, `UiTextAlign` | Words in a named style ([Text styles](ui-controls.md#text-styles)). |
+
+### Layout spec (panel units, 1920x1080 design space)
+
+The numbers are `UiWindowLayout` (game-free, `WindowPresetTests`); the runtime draws from them.
+
+**Basic** (640 wide; height = rows, at least 200, at most 80% of the screen, then the content scrolls):
+
+```
++------------------------------------------------------------+  y 0
+|                    Other Gear · here                       |  title band 0-72, title 18-58, centered
+|------------------------------------------------------------|
+| Gear set                              [ Weapons       v ]  |  rows from y 80: 560 wide, 40 tall, 8 apart
+| Nothing moved yet.                                         |  Muted
+| [Stash all] [Take all]                                     |  inline buttons, captions centered
+|           Example Mod 1.2.3 · Progenitor 2026.10.16        |  stamp band 24 at the bottom, 13 pt Muted, centered
++------------------------------------------------------------+
+```
+
+**Header** (640 wide):
+
+```
++------------------------------------------------------------+  y 0
+|######  <ornament>     Iron Chest      <ornament>     ######|  header band 0-72 (dark wash), title centered at y 38;
+|######  ------------------ divider ------------------  ######|  ornaments 96x24 max, 16 from the title; divider at y 64 (560x12)
+| [Sort] [Locate] [Rename]                                   |  toolbar, pinned at y 80 (40 tall)
+| [Contents] [Rules] [Log]                                   |  tab row, pinned at y 128 (40 tall)
+| Iron Ore                                          1,280    |  content from y 176, scrolls under the pinned rows;
+| Copper Ore                                           96    |  numbers right-aligned
+|           Example Mod 1.2.3 · Progenitor 2026.10.16        |  stamp band 24
++------------------------------------------------------------+
+```
+
+**Tabbed** (960 wide, at most 90% of the screen, centered):
+
+```
++------------------------------------------------------------------------------------------+
+|#######################  <ornament>   Storage network   <ornament>  ######################|  header band 0-72, divider y 64 (880x12)
+| [Refresh]                                                                                |  toolbar y 80
+| [Overview] [Belts] [Settings]                                                            |  tab row y 128
+| +- info column (260) -+   Throughput                                                     |  info column x 20-280 from y 176,
+| | Network             |   Items moved                                          3,212     |  on a darker wash; content 600 wide
+| | Chests          24  |   Per minute                                              48     |  right of it, scrolls on its own
+| | [Locate all]        |   Two chests are full.                                           |
+| +---------------------+                                                                  |
+|                    Example Mod 1.2.3 · Progenitor 2026.10.16                             |  stamp band 24
++------------------------------------------------------------------------------------------+
+```
+
+On a canvas narrower than 1067 units the Tabbed frame shrinks to 90% of it and the info column shrinks with it so the content keeps its 560 row; under 160 units of room the column's rows are not drawn (never drawn over the content). The frame height is the taller of the content and the info column.
+
+**Art.** The frame is the game's popup frame (`Window_Box_Background`, the art `ctx.Dialogs` uses). The divider is the game's `Divider_Big_02` (the dialogs' title rule; a thin kit rule until it is loaded). The title ornaments are the game's `Window_TitleSideOrnament`, which the game's popup prefabs carry; they are drawn only when that sprite was found, at its own aspect in a 96x24 box, the right one mirrored. Which parts drew is in the settings art readback (`settingsArt.parts.windowTitleOrnament`).
+
+**Status: game-free tested, not live-verified.** The specs, the stamp, the composition (pins, tabs, toolbar, rename, input modes) and the gallery are tested in `WindowPresetTests`. The runtime drawing (the wide frame, centering, the header band, the ornaments, the info column) is source-checked and built only; whether `Window_TitleSideOrnament` loads, and how it looks, has not been seen in game. The live check is the procedure in the [controls sample README](../samples/Progenitor.ControlsSample/README.md#gallery).
 
 ## Input: what a panel takes, and for how long
 
@@ -1009,7 +1098,7 @@ ctx.Hud.PickInWorld(
 
 ### Notifications
 
-`Notify(text, detail = "", kind = Info, seconds = 0)` → `IUiNotice` (`State`: `Queued`, `Showing`, `Done`, `Dropped`; `Dispose` takes a queued notice out). `UiNoticeKind`: `Info`, `Success`, `Warning`, `Error`.
+`Notify(text, detail = "", kind = Info, seconds = 0, prefix = true)` → `IUiNotice` (`State`: `Queued`, `Showing`, `Done`, `Dropped`; `Dispose` takes a queued notice out). `UiNoticeKind`: `Info`, `Success`, `Warning`, `Error`. The text is shown as `<Mod Name>: text` (the [message prefix](modules.md#message-prefix); not twice, and not with `prefix: false`). The four-argument form plugins were built against before the prefix still loads and prefixes.
 
 - **Vanilla counterpart:** the game's own center announcement banner (the one achievements use), through `AnnouncementHUDParent.ShowBasicAnnouncement(header, subHeader)`, an ordinary instance method taking two `LocalizationKey`s by value. The texts are registered as mod strings; an empty detail hides the banner's second line. The banner shows every kind the same.
 - **The game's banner has no queue** (a second call restarts its animation and overwrites the text), so the framework queues: one notice at a time across all plugins, first posted first shown; the same text within 4 s is dropped; a plugin may post 6 per 10 s; at most 8 wait (the oldest is dropped). A notice never overwrites a banner the game is playing: it waits while the banner is busy or the player has hidden the HUD (nothing is drawn while the HUD is hidden, not even the band), and one still unshown 30 s after it was posted is dropped. **While the game's full-screen menu is open, or the Mods workspace is open in a world**, the banner is out of sight behind it; a notice posted then (a mod's page button in the workspace) follows the game: it waits, and the game's banner is not asked to play until both have closed and a 0.75 s settle has passed (`UiNoticeRules.MenuHolds`, `MenuSettleSeconds`), so it plays where the player sees it. The menu is read from the game's menu state, not from the HUD canvas (live 2026-10-14: the HUD canvas stays enabled under the menu, and a banner played unseen). The time the menu stays open does not count toward the 30 s (the notice is still dropped 10 minutes after it was posted; `UiNoticeRules.MaxHeldSeconds`). Game-free tests: `UiNoticeTests.A_notice_posted_while_the_games_full_screen_menu_hides_the_HUD_shows_when_the_menu_closes`, `The_menu_or_the_workspace_in_a_world_holds_the_banner_and_a_short_settle_follows`. At the title screen there is no banner and no game menu: the framework band shows the notice over the workspace at once. A queued notice from an earlier world is dropped when the world changes; one already on screen finishes. Each drop logs `Ui: ctx.Hud.Notify dropped a notice unshown (<reason>): "<text>".` `seconds` 0 is the banner's own animation length; a longer value holds the slot longer. A vanilla achievement that fires during a notice still replaces it on the banner.

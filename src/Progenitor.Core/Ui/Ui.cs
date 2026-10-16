@@ -242,6 +242,35 @@ public static partial class Ui
     }
 
     /// <summary>
+    /// WINDOWS1: a standard window (<see cref="UiWindowPreset"/>): the frame art, title, version stamp, input mode and
+    /// Escape behavior fixed by the preset (docs/ui.md "Standard windows"). The stamp names the plugin from
+    /// <paramref name="owner"/>'s <c>[BepInPlugin]</c> name and version; inside a plugin prefer <c>ctx.Windows.Create</c>,
+    /// which also closes the window on unload. Disabled but valid on the server, like <see cref="Panel"/>. Throws for an
+    /// empty title, more than six tabs or toolbar buttons, or a toolbar caption longer than two short words.
+    /// </summary>
+    public static IUiWindow Window(
+        UiWindowPreset preset, string title, object? owner = null, string? pluginId = null, UiWindowOptions? options = null)
+    {
+        var (name, version) = ModMessagePrefix.PluginIdentity(owner);
+        return new UiWindowHandle(preset, title, owner, pluginId, name, version, options);
+    }
+
+    /// <summary>WINDOWS1: as <see cref="Window"/> with the stamp's mod name and version given (<c>ctx.Windows</c>).</summary>
+    internal static IUiWindow Window(
+        UiWindowPreset preset, string title, object? owner, string? pluginId, string modName, string modVersion,
+        UiWindowOptions? options) =>
+        new UiWindowHandle(preset, title, owner, pluginId, modName, modVersion, options);
+
+    /// <summary>WINDOWS1: the preset's frame on a game window (<see cref="IUiRuntime.WindowChrome"/>).</summary>
+    internal static void WindowChrome(IUiPanel panel, UiWindowSpec spec)
+    {
+        if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
+            || handle.Runtime is not IRuntimePanel runtimePanel) return;
+        try { CurrentRuntime().WindowChrome(runtimePanel, spec); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window chrome: " + e.Message); }
+    }
+
+    /// <summary>
     /// The running Progenitor Core's version as docs/versioning.md defines it — three numbers for a
     /// release (<c>2026.9.58</c>), four for an unmerged build (<c>2026.9.58.3</c>) — read from the
     /// Core assembly's informational version with its <c>+&lt;commit&gt;</c> metadata removed.

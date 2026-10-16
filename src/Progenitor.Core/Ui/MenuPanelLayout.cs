@@ -3728,6 +3728,12 @@ internal enum MenuRowPin
     /// facts, action on the right). Not the workspace tab strip.
     /// </summary>
     Header = 3,
+
+    /// <summary>
+    /// WINDOWS1: a standard Tabbed window's info column: a fixed column at the frame's left under the pinned top rows,
+    /// outside the scrolling content (<see cref="UiWindowLayout.InfoColumnWidth"/>).
+    /// </summary>
+    Side = 4,
 }
 
 /// <summary>

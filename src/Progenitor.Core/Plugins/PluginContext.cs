@@ -88,6 +88,15 @@ public class PluginContext
     /// Client only; tracked on every unload reason. See <c>docs/ui.md</c> "HUD: notifications, locate and pick in world".
     /// </summary>
     public Progenitor.Ui.PluginHud Hud { get { EnsureAttached(); return _hud ??= new Progenitor.Ui.PluginHud(this); } }
+
+    private Progenitor.Ui.PluginWindows? _windows;
+
+    /// <summary>
+    /// WINDOWS1: this plugin's standard windows — <c>ctx.Windows.Create(UiWindowPreset.Basic | Header | Tabbed, title,
+    /// options)</c> — with the frame, title, version stamp, input mode and Escape behavior fixed by the preset. Client only;
+    /// tracked on every unload reason. See <c>docs/ui.md</c> "Standard windows".
+    /// </summary>
+    public Progenitor.Ui.PluginWindows Windows { get { EnsureAttached(); return _windows ??= new Progenitor.Ui.PluginWindows(this); } }
     private IModStore? _save;
     private IModStore? _serverSave;
     private Harmony? _harmony;
@@ -1681,25 +1690,43 @@ public sealed class PluginChat
     internal PluginChat(PluginContext ctx) => _ctx = ctx;
 
     /// <summary>
-    /// Server: send <paramref name="text"/> to every <c>ConnectedUser</c> on this plugin's
+    /// Server: send <paramref name="text"/> (as <c>&lt;Mod Name&gt;: text</c>, WINDOWS1) to every <c>ConnectedUser</c> on this plugin's
     /// world, including the speaker. Returns 0 when the world is not ready or this is the
     /// client process.
     /// </summary>
     public int Broadcast(string text, ChatMessageType type = ChatMessageType.System)
     {
         var world = _ctx.World;
-        return world == null ? 0 : Progenitor.Chat.Chat.Broadcast(world, text, type);
+        return world == null ? 0 : Progenitor.Chat.Chat.Broadcast(world, ModMessagePrefix.Apply(_ctx.Name, text), type);
     }
 
     /// <summary>
-    /// Server: send <paramref name="text"/> to one user entity that carries
+    /// Server: send <paramref name="text"/> (as <c>&lt;Mod Name&gt;: text</c>, WINDOWS1) to one user entity that carries
     /// <c>ConnectedUser</c>. Returns false when the world is not ready or the entity has no
     /// connected-user slot.
     /// </summary>
     public bool SendTo(Entity user, string text, ChatMessageType type = ChatMessageType.System)
     {
         var world = _ctx.World;
-        return world != null && Progenitor.Chat.Chat.SendTo(world, user, text, type);
+        return world != null && Progenitor.Chat.Chat.SendTo(world, user, ModMessagePrefix.Apply(_ctx.Name, text), type);
+    }
+
+    /// <summary>
+    /// WINDOWS1: <see cref="Broadcast(string, ChatMessageType)"/> choosing whether the mod's name goes in front.
+    /// Both forms put <c>&lt;Mod Name&gt;: </c> in front of the text by default (not twice: a text that already starts
+    /// with the name is sent as it is); <paramref name="prefix"/> false sends the text exactly as given.
+    /// </summary>
+    public int Broadcast(string text, bool prefix, ChatMessageType type = ChatMessageType.System)
+    {
+        var world = _ctx.World;
+        return world == null ? 0 : Progenitor.Chat.Chat.Broadcast(world, ModMessagePrefix.Apply(_ctx.Name, text, prefix), type);
+    }
+
+    /// <summary>WINDOWS1: <see cref="SendTo(Entity, string, ChatMessageType)"/> choosing whether the mod's name goes in front.</summary>
+    public bool SendTo(Entity user, string text, bool prefix, ChatMessageType type = ChatMessageType.System)
+    {
+        var world = _ctx.World;
+        return world != null && Progenitor.Chat.Chat.SendTo(world, user, ModMessagePrefix.Apply(_ctx.Name, text, prefix), type);
     }
 }
 

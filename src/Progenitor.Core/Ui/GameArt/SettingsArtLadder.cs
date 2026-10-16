@@ -35,6 +35,9 @@ internal enum SettingsArtPart
     PopupButtonHover = 22,
     PopupButtonPressed = 23,
     PopupButtonDisabled = 24,
+
+    /// <summary>WINDOWS1: the ornament either side of a standard window's title (<c>Window_TitleSideOrnament</c>, carried by the game's popup prefabs).</summary>
+    WindowTitleOrnament = 25,
 }
 
 /// <summary>One borrowed part as read back: its rung, donor, sprite name and owned-copy note. Game-free.</summary>
@@ -145,7 +148,7 @@ internal sealed class SettingsArt
 /// </summary>
 internal static class SettingsArtLadder
 {
-    internal const int PartCount = 25;
+    internal const int PartCount = 26;
 
     internal const int MaxResidentScans = 3;
 
@@ -193,6 +196,7 @@ internal static class SettingsArtLadder
         SettingsArtPart.PopupButtonHover => GameSettingsLook.PopupButtonHover,
         SettingsArtPart.PopupButtonPressed => GameSettingsLook.PopupButtonPressed,
         SettingsArtPart.PopupButtonDisabled => GameSettingsLook.PopupButtonDisabled,
+        SettingsArtPart.WindowTitleOrnament => GameSettingsLook.WindowTitleOrnament,
         _ => "",
     };
 

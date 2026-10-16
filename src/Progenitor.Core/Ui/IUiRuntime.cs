@@ -127,6 +127,13 @@ internal interface IUiRuntime
     void GameWindowChrome(IRuntimePanel panel) { }
 
     /// <summary>
+    /// WINDOWS1: a standard window's frame on a game window (<see cref="UiWindowLayout"/>): its width, centered or tiled,
+    /// the ornamental header band, and the info column rows pinned <see cref="MenuRowPin.Side"/> go into. Call after
+    /// <see cref="GameWindowChrome"/>. No-op on a runtime that does not host Unity panels; a test fake records the ask.
+    /// </summary>
+    void WindowChrome(IRuntimePanel panel, UiWindowSpec spec) { }
+
+    /// <summary>
     /// TOKENINSERT1: insert <paramref name="text"/> into the text field <paramref name="field"/> at its caret (the end when
     /// it never had focus; a selection is replaced), whole or not at all (<see cref="UiFieldInsert"/>), through the
     /// field's own edit path (undo, change notice), and give the field the keyboard. False when the runtime cannot (a

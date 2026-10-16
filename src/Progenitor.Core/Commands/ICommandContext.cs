@@ -39,6 +39,13 @@ public interface ICommandContext
     /// the spike used 500 as a safe ceiling).
     /// </summary>
     void Reply(string text);
+
+    /// <summary>
+    /// WINDOWS1: a plugin's command replies carry its name in front (<c>&lt;Mod Name&gt;: text</c>) by default, and not
+    /// twice when the text already starts with it. <paramref name="prefix"/> false sends <paramref name="text"/> as given,
+    /// for a reply that names itself another way. On a context with no plugin behind it this is <see cref="Reply(string)"/>.
+    /// </summary>
+    void Reply(string text, bool prefix) => Reply(text);
 }
 
 /// <summary>Concrete context built by the dispatcher. Not part of the public surface.</summary>

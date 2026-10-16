@@ -2344,6 +2344,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         if (panel is UnityPanel host && host.Alive) host.MakeGameWindow();
     }
 
+    /// <summary>WINDOWS1: a standard window's frame (<see cref="IUiRuntime.WindowChrome"/>).</summary>
+    public void WindowChrome(IRuntimePanel panel, UiWindowSpec spec)
+    {
+        if (panel is UnityPanel host && host.Alive && spec != null) host.MakeStandardWindow(spec);
+    }
+
     /// <summary>WIDEDIALOG1: the dialog frame's asked-for width; the next layout pass sizes it.</summary>
     public void SetDialogWidth(IRuntimePanel panel, float frameWidth)
     {
@@ -11747,7 +11753,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         /// <summary>The content's row width, whatever row is being placed (MENUKIT2: the description column's ruler).</summary>
         internal float FullRowWidth =>
-            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : RowWidth;
+            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;
 
         /// <summary>
         /// MENUKIT2 round D: while a row below the first settings row is placed beside the description
@@ -12528,6 +12534,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// </summary>
         internal float FrameWidth => _embeddedWidth > 0 ? _embeddedWidth : _menuPane ? _menuGeometry.Width
             : (_dialog || _gameWindow) && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
+            : IsStandardWindow ? StandardFrameWidth
             : PanelWidth;
 
         /// <summary>
@@ -13823,7 +13830,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
                     : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
-                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) at = PanelOffset.Centre;
+                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth) || WindowCentred) at = PanelOffset.Centre;
                 rt.anchoredPosition = new Vector2(at.X, at.Y);
                 if (TopAligned) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
 
@@ -13917,7 +13924,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         : 0f;
                     refitTop = MenuPanelLayout.TopChromeHeight(topHeights) + headerChrome;
                     refitBottom = bottomChrome;
-                    refitForce = _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized);
+                    refitForce = _embeddedWidth > 0 || !SelfPlaced && (footerBand > 0f || _footerInset > 0f || DialogSized || IsStandardWindow);
                     FitChromeInsets(refitTop, refitBottom, force: refitForce);
                     _footerInset = footerBand;
                     EnsureHeaderBand(headerChrome, MenuPanelLayout.TopChromeHeight(topHeights));
@@ -13938,9 +13945,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 _layout.Reset();
                 if (_dialog) _dialogBodyCap = DialogBodyCap(footerBand + dialogPinned);
                 BeginGridPass();
+                // WINDOWS1: a Tabbed window's info column starts under the title band and the pinned top rows.
+                BeginSidePass(TitleBand + (refitTop > 0f ? refitTop : PanelLayout.PadTop));
                 for (int i = 0; i < _rows.Count; i++)
                     PlaceRow(_rows[i]);
                 PlaceSettingsColumn();
+                EndSidePass();
 
                 // HOSTS1: the viewport clears the pinned top rows as placed in THIS pass. Fitted
                 // before placement it read the previous pass's rects, so a toolbar that grew between
@@ -13958,6 +13968,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // no title band and no 200 px floor (the empty band above the live dialog's title).
                 float panelHeight = _embeddedHeight > 0 ? _embeddedHeight : _menuPane ? _menuGeometry.Height
                     : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
+                    : IsStandardWindow ? PanelLayout.PanelHeightFor(StandardBodyHeight(contentHeight, refitTop) + footerBand, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
                 if (_gameWindow && _dialogFrameWidth > PanelWidth && !_menuPane && _embeddedHeight <= 0)
                     panelHeight = Math.Min(panelHeight, available.Value * .70f);
@@ -13978,7 +13989,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         float viewH = _sidebar
                             ? MenuPanelLayout.ListViewportHeight(panelHeight)
                             : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
-                            : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
+                            : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
                         float npos = 1f;
                         float pendingOffsetY = 0f;
                         bool hasPending = _sidebar && PeekSidebarScrollPreserve(out npos, out pendingOffsetY);
@@ -14056,7 +14067,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // column beside the workspace's panes the moment they joined the shown set,
                     // which is the "flickers in from the left" CONSENT2 fixed for the consent
                     // prompt by hand.
-                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) placedAt = PanelOffset.Centre;
+                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth) || WindowCentred) placedAt = PanelOffset.Centre;
                     if (SelfPlaced) placedAt = new PanelOffset(panelRt.anchoredPosition.x, panelRt.anchoredPosition.y);
                     else panelRt.anchoredPosition = new Vector2(placedAt.X, placedAt.Y);
                     if (TopAligned) panelRt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - panelHeight) / 2 - 24));
@@ -14064,6 +14075,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
                 if (!_strip) PlaceBottomRows(panelHeight, footerBand);
                 PlaceVersionFooter();
+                PlaceWindowChrome(panelHeight, footerBand);
 
                 // Say it once per show. A list that scrolls looks identical to one that does not
                 // until the player tries, and "there are rows below this" is the fact the old panel
@@ -14071,7 +14083,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 float viewport = _sidebar
                     ? MenuPanelLayout.ListViewportHeight(panelHeight)
                     : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand)
-                    : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand);
+                    : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
                 bool scrolls = PanelLayout.Scrolls(contentHeight, viewport);
 
                 // No SetActive here (R45 finding 22). ScrollRect's AutoHide is the single owner of
@@ -14170,7 +14182,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var rt = _viewport.GetComponent<RectTransform>();
                 if (rt != null)
                 {
-                    rt.offsetMin = new Vector2(PanelLayout.PadSide, bottomChrome);
+                    rt.offsetMin = new Vector2(PanelLayout.PadSide + SideBand, bottomChrome);
                     rt.offsetMax = new Vector2(-PanelLayout.PadSide, -top);
                 }
             }

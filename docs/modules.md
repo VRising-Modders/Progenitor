@@ -80,6 +80,7 @@ The mod page's readback reports the decision: `page-listing {matched, key, listi
 | `WorldState`, `Keybinds` | World-load epoch checks and tracked client keybinds; `Keybinds` is the only supported way for a plugin to act on a key (see [Keybinds](#keybinds-fui5)). |
 | `Menu`, `Settings` | The Mods-workspace registration (pages, header, groups, server-edit opt-in) and the settings page builder (`Settings.Page`, SETTINGS1 stage 2). Both tracked on every unload reason. See [mod settings](mod-settings.md). |
 | `Dialogs` | Modal dialogs in the framework's layout: `Confirm`, `Notice`, `Choose`, `Prompt`, and label/value facts (`DialogFact`, DIALOGS2). Client only; tracked on every unload reason. See [dialogs](ui.md#dialogs). |
+| `Windows` | Standard windows: `Windows.Create(UiWindowPreset.Basic \| Header \| Tabbed, title, options)` with the frame, title, version stamp, input mode and Escape behavior fixed by the preset. Client only; tracked on every unload reason. See [Standard windows](ui.md#standard-windows). |
 | `Time` | Server time of day: read, move or freeze the world clock; clients' lighting follows. See [Time of day](#time-of-day). Also world speed: freeze or slow the whole simulation for every player; see [World speed](#world-speed). |
 | `Side`, `IsServer`, `IsClient`, `World` | Process role and its current ECS world, which may be null. |
 | `Owner` | The BepInEx plugin instance; pass it to APIs that require an explicit owner, including `MainThread.Post`, `Run` and `PostDelayed`. |
@@ -89,6 +90,10 @@ The mod page's readback reports the decision: `page-listing {matched, key, listi
 `ProgenitorPlugin.WhenWorldReady(ctx, Action<World>)` invokes the callback immediately if the side's world exists, otherwise once on the matching `WorldReady`. It fires at most once. Dispose its returned handle to cancel a pending wait; plugin unload also cancels the tracked subscription.
 
 `Progenitor.Worlds` provides `Find(name)`, `Server` (`"Server"`) and `Client` (`"Client_0"`). Do not retain an entity across a save load without checking its `WorldState` epoch.
+
+### Message prefix
+
+What a mod says to the player carries its name: `ctx.Hud.Notify` (the game's banner and the framework band alike), `ctx.Chat.Broadcast` / `SendTo`, and a `ctx.Commands` handler's `ctx.Reply` show `<Mod Name>: <message>`, where the name is the plugin's BepInEx name (`ctx.Name`). The rules are `ModMessagePrefix`: no prefix when the text already starts with the name as a whole word (ignoring case, leading rich-text tags and a `[` or `(`), when the text or the name is empty, or when the call opts out with `prefix: false` (`ctx.Hud.Notify(text, prefix: false)`, `ctx.Chat.Broadcast(text, prefix: false)`, `ctx.Reply(text, prefix: false)`). A long command reply carries it on its first chat line only. The framework's own lines about a command (usage, `This command is admin-only.`, `Command failed.`) and Progenitor's built-in commands are not prefixed. The notice kinds keep their look. Status: game-free tested (`ModMessagePrefixTests`), not live-verified.
 
 <a id="unload-reason-fbuff2"></a>
 
