@@ -286,6 +286,40 @@ Either way the game rolls each servant's success at the return, as for any hunt:
 
 From bash: `node tools/mcp/call.mjs server servants '{"action":"list","territory":5}'`.
 
+## `inventory_stamp`
+
+Server only, main thread, read only. **Source-checked, built and game-free tested
+(`InventoryStampTests`); not run live.** The [`ctx.Inventory.ChangeStamp`](modules.md#change-stamps) of
+each named container in one `ChangeStamps` batch, through Core's public `InventoryStampBridge` (not a
+plugin API). Refused on the client. MCP: `progenitor_inventory_stamp`.
+
+| Args | Does |
+|---|---|
+| `{"containers":["123:1","456:2#1"]}` (array or comma list) | Owner ids `index:version` of this world load: a chest, station, heart, player character or servant; `#1` or `/out` for a refinement station's output. Returns `clock`, `stamps` (per container: `container`, `inventory` (the entity that holds the slots, `""` when it did not resolve), `stamp` as hex text), `batchMicroseconds`, and the counters `misses`, `audits`, `freshStamps`, `resolves`, `entries`, `typeScans`, `failures` (raw reads that reported unknown, by the check that failed: `EntityVersion`, `ChunkSlot`, `Type`, ...). |
+| `{"containers":[...],"since":<clock>}` | Also `changedSince`: `AnyChangedSince(containers, since)`, asked before the stamps. Pass the `clock` of an earlier reply. |
+
+Equal stamps mean the slots did not change; unequal means they may have. `misses` counts audit
+checks where the raw rows changed under an unchanged stamp, and must stay 0.
+
+Live check (acceptance procedure, not run). On the isolated test server, with a castle whose chests,
+a refinement station and a heart you know (bridge `castles` lists the entities):
+
+1. `{"containers":[<chest>,<station>,<station>#1,<heart>,<player character>]}`. Expect every
+   `inventory` resolved, no stamp repeated between containers, `failures` empty. Repeat twice in a
+   row with nothing happening: the same stamps, `freshStamps` unchanged, `resolves` not growing.
+2. Pass the reply's `clock` back as `since` a few seconds later with nothing moving: `changedSince`
+   false (a stamp that moves while idle is a false positive; note which container and how often).
+3. Change each container one way at a time, then stamp again: drag-drop and shift-click in the
+   panel, sort, take-all, `.items add`/`.items move`, a station finishing a craft with no player
+   near, a servant hunt returning into the coffin. Every changed container's stamp differs and
+   `changedSince` is true.
+4. `.items slots <c>` (a read) between two stamps leaves the stamp equal.
+5. Over the whole session `misses` stays 0 and the server log has no
+   `Inventory: CHANGE STAMP MISS` line; `batchMicroseconds` for the list is in the tens of
+   microseconds after the first call.
+
+From bash: `node tools/mcp/call.mjs server inventory_stamp '{"containers":["123:1"]}'`.
+
 ## `dye`
 
 Client, main thread, read only. Reads Core's [Dye all](modules.md#dye-all) through Core's `Progenitor.Dye.DyeAllTestBridge`

@@ -49,12 +49,27 @@ internal static class InventoryRuntime
     internal static InventoryWatchHub Hub =>
         _hub ?? throw new InvalidOperationException("ctx.Inventory runs on the server side only.");
 
+    internal static InventoryStamps Stamps =>
+        _stamps ?? throw new InvalidOperationException("ctx.Inventory runs on the server side only.");
+
+    /// <summary>
+    /// Process slot that carries the stamp clock across Core reloads, so a <c>since</c> a plugin took
+    /// from the previous generation's <c>Clock</c> is never ahead of this one's (a plain string; nothing
+    /// collectible is stored).
+    /// </summary>
+    private const string ClockProcessKey = "progenitor.inventory.stamp-clock";
+
+    private static InventoryStamps? _stamps;
+
     internal static void Install()
     {
         if (!Plugin.IsServerProcess) return;
         _backend = new UnityInventoryBackend();
         _engine = new InventoryEngine(_backend, line => Plugin.Logger?.LogError(line));
-        _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line));
+        _stamps = new InventoryStamps(new UnityInventoryStampSource(), line => Plugin.Logger?.LogError(line));
+        try { _stamps.TrySeedClock(AppDomain.CurrentDomain.GetData(ClockProcessKey) as string); }
+        catch { /* no slot: the clock starts from the store's own value */ }
+        _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line), c => _stamps?.Stamp(c) ?? 0);
         _engine.Touched = c => _hub?.Poke(c);
         _book = new ContainerIdRegistry();
         _netIds = new NetworkIdResolver(new ServerNetworkIdSource());
@@ -85,6 +100,14 @@ internal static class InventoryRuntime
         try { Flush(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Inventory: saving container ids on unload threw: " + e.Message); }
         _hub?.Clear();
+        if (_stamps != null)
+        {
+            try { AppDomain.CurrentDomain.SetData(ClockProcessKey, _stamps.EncodeClock()); }
+            catch { /* best effort: the next generation then starts from the store's value and old `since`s read as changed */ }
+            _stamps.Clear();
+            _stamps = null;
+        }
+        ChunkVersions.Reset();
         _ready?.Dispose();
         _ready = null;
         _store = null;
@@ -101,13 +124,14 @@ internal static class InventoryRuntime
     }
 
     internal static string DescribePins() =>
-        _engine == null ? "" : "inventory watches=" + (_hub?.Count ?? 0) + " ids=" + (_book?.Count ?? 0);
+        _engine == null ? "" : "inventory watches=" + (_hub?.Count ?? 0) + " ids=" + (_book?.Count ?? 0) + " stamps=" + (_stamps?.Entries ?? 0);
 
     private static void Tick()
     {
         try
         {
             long now = Environment.TickCount64;
+            _stamps?.Tick();
             _hub?.Tick(now);
             if (_book is { Dirty: true }) Flush();
             if (now < _nextUpkeep) return;
