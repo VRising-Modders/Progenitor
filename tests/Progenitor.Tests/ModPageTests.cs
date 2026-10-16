@@ -76,6 +76,9 @@ public sealed class ModPageTests : IDisposable
         ModsMenu.ReloaderNamesProbe = null;
         ModsMenu.PluginFileProbe = null;
         PluginAboutStore.ResetForTests();
+        ModHelpStore.ResetForTests();
+        ModsMenu.HelpOpener = null;
+        ModsMenu.HelpBepInExRootProbe = null;
         PackageManifestBeside.ForgetCache();
         ModsMenu.SetInstallCatalogForTests(null);
     }
@@ -807,6 +810,101 @@ public sealed class ModPageTests : IDisposable
             Assert.False(string.IsNullOrWhiteSpace(row.GetProperty(ModPagePane.RowFact).GetProperty("description").GetString()));
         }
     }
+
+    /// <summary>
+    /// The Help button sits in the actions bar only while the mod ships a help file; pressing it opens that file's
+    /// <c>file://</c> URI, pointing at it shows the tooltip and the description column, and the readback says where the
+    /// file came from.
+    /// What this would catch: a Help button drawn for a mod with no help, a click that opens a different file, or a
+    /// readback that disagrees with the bar.
+    /// </summary>
+    [Fact]
+    public void The_help_button_shows_only_with_help_and_opens_the_mods_file()
+    {
+        SeedCryptSnooze();
+        string dll = PlaceManagedPackage("Corvane", "CryptSnooze", "2.0.4");
+        ModsMenu.PluginFileProbe = id => string.Equals(id, "example.cryptsnooze", StringComparison.OrdinalIgnoreCase) ? dll : null;
+        ModsMenu.HelpBepInExRootProbe = () => Bep;
+        var opened = new List<string>();
+        ModsMenu.HelpOpener = opened.Add;
+        ModsMenu.Open();
+        ModsMenu.OpenMod("example.cryptsnooze");
+        var help = Row(PageRows(), ModPagePane.RowHelp).GetProperty(ModPagePane.RowHelp);
+        Assert.False(help.GetProperty("shown").GetBoolean());
+        Assert.Equal("none", help.GetProperty("source").GetString());
+        Assert.DoesNotContain(ModPagePane.HelpButton().Key, Cells(RowLabelled(PageRows(), ModPagePane.FrameworkKey)));
+
+        string index = Path.Combine(Path.GetDirectoryName(dll)!, "help", "index.html");
+        Directory.CreateDirectory(Path.GetDirectoryName(index)!);
+        File.WriteAllText(index, "<html>help</html>");
+        ModsMenu.OpenMod("example.cryptsnooze");
+        var rows = PageRows();
+        help = Row(rows, ModPagePane.RowHelp).GetProperty(ModPagePane.RowHelp);
+        Assert.True(help.GetProperty("shown").GetBoolean());
+        Assert.Equal("folder", help.GetProperty("source").GetString());
+        Assert.Equal("help/index.html", help.GetProperty("file").GetString());
+        Assert.Equal("Help", help.GetProperty("caption").GetString());
+        Assert.Equal("Open CryptSnooze help in your browser", help.GetProperty("tooltip").GetString());
+        var bar = RowLabelled(rows, ModPagePane.FrameworkKey);
+        var button = Cell(bar, ModPagePane.CellHelp);
+        Assert.Equal("button", button.GetProperty("kind").GetString());
+        Assert.Equal("Help", button.GetProperty("text").GetString());
+        // Help sits left of the action button, both at the bar's right end.
+        var cells = Cells(bar);
+        Assert.True(cells.IndexOf(ModPagePane.CellHelp) < cells.IndexOf(ModFrameworkLine.CellAction));
+
+        Assert.True(UiCellRowHandle.TryHoverCell(ModPagePane.FrameworkKey, ModPagePane.CellHelp, true));
+        Assert.True(ModsMenu.ModPage!.HelpTooltipShown);
+        Assert.Equal(ModPageCopy.HelpCaption, ModsMenu.ModPage.Details!.Shown.Heading);
+        Assert.True(UiCellRowHandle.TryHoverCell(ModPagePane.FrameworkKey, ModPagePane.CellHelp, false));
+        Assert.False(ModsMenu.ModPage.HelpTooltipShown);
+
+        Assert.Empty(opened);
+        Assert.True(UiCellRowHandle.TryInvoke(ModPagePane.FrameworkKey + "/" + ModPagePane.CellHelp, out _));
+        Assert.Equal(new[] { ModHelp.FileUri(index) }, opened.ToArray());
+        Assert.Equal(ModHelp.FileUri(index), ModsMenu.LastHelpUri);
+    }
+
+    /// <summary>
+    /// An embedded help page is extracted to <c>BepInEx/cache/progenitor-help/&lt;guid&gt;/&lt;version&gt;/</c> when the button
+    /// is pressed, not when the page is drawn; a failure to open is logged once and said on the page.
+    /// What this would catch: writing to disk on every page build, or a silent failure.
+    /// </summary>
+    [Fact]
+    public void Embedded_help_is_extracted_when_the_button_is_pressed()
+    {
+        SeedCryptSnooze();
+        ModsMenu.HelpBepInExRootProbe = () => Bep;
+        var opened = new List<string>();
+        ModsMenu.HelpOpener = opened.Add;
+        ModHelpStore.Note("example.cryptsnooze", new ModHelpFacts
+        {
+            Version = "2.0.4",
+            Embedded = new[] { new ModHelpResource("help/index.html", System.Text.Encoding.UTF8.GetBytes("<html>e</html>")), new ModHelpResource("help/style.css", new byte[] { 1 }) },
+        });
+        ModsMenu.Open();
+        ModsMenu.OpenMod("example.cryptsnooze");
+        var help = Row(PageRows(), ModPagePane.RowHelp).GetProperty(ModPagePane.RowHelp);
+        Assert.True(help.GetProperty("shown").GetBoolean());
+        Assert.Equal("embedded", help.GetProperty("source").GetString());
+        string folder = Path.Combine(Bep, "cache", ModHelp.CacheFolderName, "example.cryptsnooze", "2.0.4");
+        Assert.False(Directory.Exists(folder));
+
+        Assert.True(UiCellRowHandle.TryInvoke(ModPagePane.FrameworkKey + "/" + ModPagePane.CellHelp, out _));
+        Assert.True(File.Exists(Path.Combine(folder, "help", "index.html")));
+        Assert.True(File.Exists(Path.Combine(folder, "help", "style.css")));
+        Assert.Equal(ModHelp.FileUri(Path.Combine(folder, "help", "index.html")), Assert.Single(opened));
+
+        // The opener throws: logged once, the page says so, and nothing is opened.
+        ModsMenu.HelpOpener = _ => throw new InvalidOperationException("no browser");
+        Assert.True(UiCellRowHandle.TryInvoke(ModPagePane.FrameworkKey + "/" + ModPagePane.CellHelp, out _));
+        Assert.True(UiCellRowHandle.TryInvoke(ModPagePane.FrameworkKey + "/" + ModPagePane.CellHelp, out _));
+        Assert.Single(_log.Warnings, w => w.Contains("could not open the help of example.cryptsnooze", StringComparison.Ordinal));
+        Assert.Contains(ModPageCopy.HelpOpenFailed, JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")), StringComparison.Ordinal);
+    }
+
+    private static List<string> Cells(JsonElement row) =>
+        row.GetProperty("cells").EnumerateArray().Select(c => c.GetProperty("key").GetString() ?? "").ToList();
 
     /// <summary>
     /// The store link opens the listing's own package page and nothing else; a plugin with no listing

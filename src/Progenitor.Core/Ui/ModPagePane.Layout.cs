@@ -339,8 +339,26 @@ internal sealed partial class ModPagePane
         height: ModPageSpacing.HeadingHeight, rightInset: HeadBlockLayout.RightColumnInset, plain: true,
         skin: CellRowSkin.CategoryHeading, gapAbove: ModPageSpacing.HeadingGapAbove);
 
-    /// <summary>The actions bar: the switch, status word and version at the left; the action at the right, one margin in.</summary>
-    internal static CellRowSpec ActionsBar(ModFrameworkLine line)
+    /// <summary>The Help button's cell key in the actions bar.</summary>
+    internal const string CellHelp = "help";
+
+    /// <summary>Readback key of the Help button: <c>page-help {kind, caption, tooltip, cell, shown, source, file}</c>.</summary>
+    internal const string RowHelp = "page-help";
+
+    /// <summary>The Help button: a normal kit button sized to its caption, reporting the pointer for its tooltip.</summary>
+    internal static CellSpec HelpButton()
+    {
+        var b = new CellSpec(CellKind.Button, CellHelp).With(text: ModPageCopy.HelpCaption, align: CellAlign.Right);
+        b.Width = CellWidth.Px(Math.Max(CellLayout.AutoWidth(b), HeadBlockLayout.ButtonWidth(ModPageCopy.HelpCaption)));
+        b.Hover = true;
+        return b;
+    }
+
+    /// <summary>
+    /// The actions bar: the switch, status word and version at the left; at the right, one margin in, <b>Help</b> when the
+    /// mod ships a help file (<paramref name="help"/>) and then the action.
+    /// </summary>
+    internal static CellRowSpec ActionsBar(ModFrameworkLine line, bool help = false)
     {
         var bar = new List<CellSpec>(8) { ModPageSpacing.Lead() };
         if (line.SwitchVisible)
@@ -366,6 +384,7 @@ internal sealed partial class ModPagePane
         }
 
         bar.Add(new CellSpec(CellKind.Spacer, ModFrameworkLine.CellGap));
+        if (help) bar.Add(HelpButton());
         if (line.ActionCaption is { Length: > 0 } action)
             bar.Add(new CellSpec(CellKind.Button, ModFrameworkLine.CellAction).With(
                 text: action, align: CellAlign.Right,
@@ -450,8 +469,27 @@ internal sealed partial class ModPagePane
     private void BuildActionsBar(IUiPanel panel, ModPageActions actions)
     {
         var line = Framework;
-        var row = panel.CellRow(ActionsBar(line));
+        bool help = actions.Help != null && actions.HelpTarget.Found;
+        var row = panel.CellRow(ActionsBar(line, help));
         FrameworkRow = row;
+        if (help)
+        {
+            row.OnClick(CellHelp, actions.Help!);
+            string tip = ModPageCopy.HelpTooltip(_model.Name);
+            row.OnCellHover(CellHelp, entered => HelpHover(row, entered, tip));
+        }
+
+        var helpTarget = actions.HelpTarget;
+        Add(row, RowHelp, new Dictionary<string, object?>
+        {
+            ["kind"] = "button",
+            ["caption"] = ModPageCopy.HelpCaption,
+            ["tooltip"] = ModPageCopy.HelpTooltip(_model.Name),
+            ["cell"] = CellHelp,
+            ["shown"] = help,
+            ["source"] = help ? helpTarget.SourceName : "none",
+            ["file"] = help ? helpTarget.Relative : "",
+        });
         // SRVUNINST1: a disabled action takes no click; the page says why under the header.
         if (actions.Action != null && line.ActionCaption != null && line.ActionEnabled) row.OnClick(ModFrameworkLine.CellAction, actions.Action);
         // Stage 3: the switch takes the click only while it can act.
@@ -493,6 +531,37 @@ internal sealed partial class ModPagePane
             ["author"] = _model.MetaAuthor,
             ["line"] = _model.MetaLine,
         });
+    }
+
+    /// <summary>The Help button's tooltip is showing (tests and the readback).</summary>
+    internal bool HelpTooltipShown { get; private set; }
+
+    /// <summary>
+    /// The pointer entered or left the Help button: the kit tooltip beside it says what it opens, and the description
+    /// column says the same, so the words are there with a controller too.
+    /// </summary>
+    private void HelpHover(IUiCellRow row, bool entered, string tip)
+    {
+        if (entered) Details?.Show(ModPageCopy.HelpCaption, tip + ".");
+        else Details?.ShowRest();
+        var runtime = WidgetRuntime.Current;
+        if (runtime == null) { HelpTooltipShown = entered; return; }
+        try
+        {
+            if (!entered)
+            {
+                if (HelpTooltipShown) runtime.HideTooltip();
+                HelpTooltipShown = false;
+                return;
+            }
+
+            var rect = row is UiCellRowHandle handle ? handle.NavRect(CellHelp) : ScreenRect.Unknown;
+            if (!rect.IsKnown) return;
+            runtime.ShowTooltip(rect, ModPageCopy.HelpCaption, tip,
+                () => !row.IsDisposed && row.Visible && (row is UiCellRowHandle h && h.NavRect(CellHelp).IsKnown));
+            HelpTooltipShown = true;
+        }
+        catch { /* a tooltip is optional */ }
     }
 
     /// <summary>The attention banner under the bar, at the margin, wrapped inside the content.</summary>

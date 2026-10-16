@@ -1439,8 +1439,12 @@ public static partial class ModsMenu
             string pageVersion = framework.Facts.Version.Length > 0 ? framework.Facts.Version : model.Version;
             string pagePeers = DeclaredPeersOf(pluginId, sidebarRow, pageVersion);
 
+            // The mod's own HTML help: the Help button shows only when there is a file to open.
+            var helpTarget = HelpTargetOf(pluginId, sidebarRow);
             pane.Build(panel, new ModPageActions
             {
+                Help = helpTarget.Found ? () => OnModsHelpClick(pluginId) : null,
+                HelpTarget = helpTarget,
                 AcrossVersionsRange = ModAcrossVersions.Applies(pagePeers, pageVersion) ? pagePeers.Trim() : "",
                 Developer = DevFactsOf(pluginId),
                 DeveloperExpanded = DevDetailsExpanded(pluginId),
@@ -4232,6 +4236,10 @@ public static partial class ModsMenu
         LastReloadRemoval = null;
         ResetServerUninstall();
         LastStoreUrl = null;
+        LastHelpUri = null;
+        HelpOpener = null;
+        HelpBepInExRootProbe = null;
+        HelpFailureLogged.Clear();
         _closeCalls = 0;
         _lastStripRows = Array.Empty<(string Caption, MenuRowTone Tone)>();
         UninstallLifecycleWatch();
@@ -6510,6 +6518,104 @@ public static partial class ModsMenu
         try { Application.OpenURL(url); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Mods: could not open the store page: " + e.Message); }
 #endif
+    }
+
+    /// <summary>Seam: the BepInEx folder the help resolver reads (the cache and Progenitor's own folder). Null reads <c>Paths.BepInExRootPath</c>.</summary>
+    internal static Func<string>? HelpBepInExRootProbe { get; set; }
+
+    /// <summary>Seam: opens a <c>file://</c> URI. Null opens it through the OS browser (<c>Application.OpenURL</c>).</summary>
+    internal static Action<string>? HelpOpener { get; set; }
+
+    /// <summary>The last help URI the Help button opened. Readback and tests.</summary>
+    internal static string? LastHelpUri { get; private set; }
+
+    private static readonly HashSet<string> HelpFailureLogged = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string HelpBepInExRoot()
+    {
+        var probe = HelpBepInExRootProbe;
+        try
+        {
+            if (probe != null) return (probe() ?? "").Trim();
+#if !PROGENITOR_TESTS
+            return Paths.BepInExRootPath ?? "";
+#else
+            return "";
+#endif
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>
+    /// The help file one mod's page offers (<see cref="ModHelp.Resolve"/>): for the Progenitor entry, the Progenitor guide
+    /// under <c>BepInEx/progenitor-core</c>; otherwise the mod's own folder, its embedded help, then its declared path.
+    /// </summary>
+    private static ModHelpTarget HelpTargetOf(string pluginId, ModsSidebarRow? row)
+    {
+        try
+        {
+            string bep = HelpBepInExRoot();
+            string cache = bep.Length > 0 ? Path.Combine(bep, "cache") : "";
+            if (!ModHelpStore.TryGet(pluginId, out var facts))
+            {
+#if !PROGENITOR_TESTS
+                // Another loader's plugin: read once from its loaded instance, as the About text is.
+                try
+                {
+                    var plugins = IL2CPPChainloader.Instance?.Plugins;
+                    if (plugins != null && plugins.TryGetValue(pluginId, out var info) && info?.Instance != null)
+                        facts = ModHelp.FromType(info.Instance.GetType(), info.Metadata?.Version?.ToString());
+                }
+                catch { facts = ModHelpFacts.Empty; }
+                ModHelpStore.Note(pluginId, facts);
+#endif
+            }
+
+            List<(string, string)>? guides = null;
+            if (string.Equals(pluginId, SettingsPanel.PluginId, StringComparison.OrdinalIgnoreCase) && bep.Length > 0)
+            {
+                string core = Path.Combine(bep, Progenitor.Compat.CompatRewriteHost.CoreFolderName);
+                guides = new List<(string, string)> { (core, ModHelp.ProgenitorGuidePath), (core, ModHelp.IndexPath) };
+            }
+
+            return ModHelp.Resolve(pluginId, PluginFileOf(pluginId, row), facts, ModHelpStore.DeclaredPath(pluginId), cache, guides);
+        }
+        catch { return ModHelpTarget.None; }
+    }
+
+    /// <summary>
+    /// The Help button: the help file resolved again (it may have changed since the page was drawn), extracted when it is
+    /// embedded, and opened in the browser as a <c>file://</c> URI. Only the button calls this. A failure is logged once
+    /// per mod and the page says so.
+    /// </summary>
+    private static void OnModsHelpClick(string pluginId)
+    {
+        var row = CurrentSidebarModel(applySearch: false).Find(pluginId);
+        var target = HelpTargetOf(pluginId, row);
+        string error = "";
+        string? file = target.Found ? ModHelp.Materialize(target, out error) : null;
+        string? uri = file == null ? null : ModHelp.FileUri(file);
+        if (uri != null)
+        {
+            try
+            {
+                var opener = HelpOpener;
+                if (opener != null) opener(uri);
+#if !PROGENITOR_TESTS
+                else Application.OpenURL(uri);
+#endif
+                LastHelpUri = uri;
+                return;
+            }
+            catch (Exception e) { error = e.Message; }
+        }
+        else if (error.Length == 0) error = target.Found ? "the help file's path cannot be opened" : "no help file";
+
+        if (HelpFailureLogged.Add(pluginId))
+            Plugin.Logger?.LogWarning("Mods: could not open the help of " + pluginId + ": " + error);
+        _modsActionPlugin = pluginId;
+        _modsActionNote = ModPageCopy.HelpOpenFailed;
+        if (IsOpen) OpenMod(pluginId, ReasonUserButton);
     }
 
     /// <summary>

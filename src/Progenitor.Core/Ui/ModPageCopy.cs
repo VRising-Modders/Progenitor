@@ -214,6 +214,16 @@ internal static class ModPageCopy
 
     internal const string StoreLinkTooltip = "Open the store page";
 
+    /// <summary>The Help button's caption, in the actions bar beside the action button, drawn only when the mod ships help.</summary>
+    internal const string HelpCaption = "Help";
+
+    /// <summary>The Help button's tooltip: what pressing it does.</summary>
+    internal static string HelpTooltip(string? modName) =>
+        "Open " + (string.IsNullOrWhiteSpace(modName) ? "this mod's" : modName!.Trim()) + " help in your browser";
+
+    /// <summary>The page's note when the help file could not be opened (the reason is in the log).</summary>
+    internal const string HelpOpenFailed = "The help file could not be opened. The log says why.";
+
     internal const string NoProgenitorSettings =
         "This mod does not expose Progenitor settings."
         + " Configure it the way its author describes on the store page.";

@@ -75,9 +75,54 @@ An empty header button row (no custom page, store link or release date) is hidde
 | Sides | `Client and server` for a manifest that requires the server half or a listing that derives both; `Server only` / `Client only` from the listing; else the plugin's own declaration (`ClientOnly` → client, `ServerMustHave` → both). Unknown draws nothing. | `ModFrameworkLine.DecideSides` |
 | Server part | Two-sided mods only: `Server part running` when the server's handshake request named the mod; `Server part not on this server` when the mod is paused for this server, or (stage 3) when it declares a [counterpart](#counterparts) and the server's full handshake request did not name it — then `Server part not on this server · limited`. The `limited` words show whenever the readback's `limited` is true, even if the sides read client only, and are never the cell dropped for width. Anything else is unknown and omitted. A declared counterpart makes a mod two-sided. | `ModFrameworkLine.DecideServerPart` |
 | Conflicts | Stage 3: a warn-toned chip after the sides, `1 conflict` / `2 conflicts`, when the mod has keybind or command [conflicts](#mod-problems). | `ModProblems.ConflictChip` |
+| Help | **Help**, left of the action, only when the mod ships an HTML help file ([Help button](#help-button)). | `ModPagePane.HelpButton` |
 | Action | **Uninstall** / **Cancel uninstall** / **Cancel install** for a Progenitor-installed mod, at the far right, with the confirmation dialogs described in [mods-menu.md](mods-menu.md). Stage 3: **Uninstall** / **Cancel uninstall** for an [ordinary plugin](#ordinary-bepinex-plugins) whose files are known. | `ModPagePane.BuildFramework` |
 
 Status words and tones: `Enabled` green, `Failed to load` danger, `Loaded with problems` and `Paused …` warn, `Pending restart · to load`, `· settings changed`, `Turns off at next start` and `Turns on at next start` yellow, `… to uninstall` and `Removed at next start` orange, `Disabled` / `Not on this client` muted. Every word has one source (`ModFrameworkLine.WordOf`, `ModSwitchWords`), which the Mods list and the dialogs read too. Colors come from the existing kit tones (`LabelTone`, `MenuPalette`); SETTINGS1 adds no palette entries.
+
+## Help button
+
+Status: game-free tested (`ModHelpTests`, `ModPageTests`), not live-verified.
+
+A mod that ships an HTML help file gets a **Help** button in the page's actions bar, left of the action button. Pressing it opens the file in the player's default browser (`Application.OpenURL` with a `file://` URI); pointing at it shows the tooltip `Open <Mod Name> help in your browser`, and the description column says the same. Without a help file the button is not drawn. Opening the browser takes the player's focus, so only the button opens it.
+
+**Ship the help one of these ways.** The first that exists wins:
+
+1. **A file in the mod's own folder.** `help/index.html` next to the DLL, with its stylesheet and images beside it under `help/`:
+
+   ```
+   BepInEx/plugins/Owner-MyMod/MyMod.dll
+   BepInEx/plugins/Owner-MyMod/help/index.html
+   BepInEx/plugins/Owner-MyMod/help/style.css
+   ```
+
+   For a DLL one folder down in a mod-manager package (`Owner-MyMod/plugins/MyMod.dll`), the package folder's `help/index.html` counts too. `help/index.html` directly in a shared folder (`BepInEx/plugins` or `BepInEx/progenitor-reload` itself) belongs to no mod and is not used; a DLL there uses the plugin-local folder `<shared folder>/<AssemblyName>/help/index.html` instead (the same folder its localization and assets use). `<dll name>.help.html` beside the DLL also counts, in any folder.
+2. **Embedded in the assembly.** Embed the folder with its paths as resource names, so the stylesheet and images come along:
+
+   ```xml
+   <ItemGroup>
+     <EmbeddedResource Include="help\**" LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />
+   </ItemGroup>
+   ```
+
+   The page uses the resource `help/index.html` (or the SDK's default name `<AssemblyName>.help.index.html`; that spelling turns subfolders into dots, so `help/img/logo.png` would land as `help/img.logo.png`: use the `LogicalName` above), else a single `Help.html` (or `<AssemblyName>.Help.html`). When the button is pressed they are written to `BepInEx/cache/progenitor-help/<guid>/<version>/`, keeping their paths, and that copy is opened; a new version gets its own folder. Up to 512 files and 16 MiB are read per assembly.
+3. **A path you name.** When the file is elsewhere in the mod's folder, name it relative to that folder, in source or at load:
+
+   ```csharp
+   [ModHelp("docs/manual.html")]
+   public sealed class Plugin : ProgenitorPlugin<PluginContext> { ... }
+
+   // or, in OnLoad (tracked; wins over [ModHelp]):
+   ctx.Menu.Help("docs/manual.html");
+   ```
+
+   The path may also name an embedded resource, which is extracted with the resources in its folder. `ctx.Menu.Help` throws `ArgumentException` for an absolute path, a URL or a `..` segment.
+
+**What is opened.** Only a file under the mod's own folder or its cache folder: a path that would leave it, an absolute path, another drive and a remote URL are refused, and an embedded resource whose name would leave the cache folder is skipped. The URI is built from the full path with every segment percent-encoded, so spaces, `#`, `%` and non-ASCII folder names reach the browser intact. A file that cannot be opened is logged once per mod, and the page's last-action line says so.
+
+**Progenitor's own entry** opens `BepInEx/progenitor-core/docs/guide/progenitor-guide.html` (else `BepInEx/progenitor-core/help/index.html`) when the package ships it.
+
+**Readback.** `page-help {kind: "button", caption: "Help", tooltip, cell: "help", shown, source: folder|embedded|declared|guide|none, file}` on the actions bar (`page-framework`); `file` is the path under the mod's folder or the cache folder. A bridge test presses it with `{"action":"widget_click","label":"page-framework/help"}`, which opens the browser (a user-visible focus change).
 
 ## The mod's header area
 
