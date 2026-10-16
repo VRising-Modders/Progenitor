@@ -27,6 +27,20 @@ internal sealed partial class UnityUiRuntime
 
     private static GameObject? _windowShade;
 
+    /// <summary>WINDOWS1 (<see cref="IUiRuntime.PanelUnderPointer"/>): the pointer is over this panel's frame.</summary>
+    public bool PanelUnderPointer(IRuntimePanel panel)
+    {
+        try
+        {
+            if (panel is not UnityPanel host || !host.Alive) return false;
+            var pointer = SamplePointer();
+            if (pointer.Kind != PointerKind.Inside) return false;
+            var rect = ScreenRectOfPanel(host);
+            return rect.IsKnown && rect.Contains(pointer.X, pointer.Y);
+        }
+        catch { return false; }
+    }
+
     /// <summary>
     /// WINDOWS1: the dim over the Mods workspace behind the standard windows (<see cref="UiWindowLayout.ShadeWorkspace"/>):
     /// one full-screen, non-interactive canvas above the workspace panes and every ordinary panel

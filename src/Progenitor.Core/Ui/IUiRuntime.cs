@@ -424,6 +424,9 @@ internal interface IUiRuntime
     /// <summary>NAV1: the widget's rect in screen pixels (y up), or <see cref="ScreenRect.Unknown"/> (test fakes).</summary>
     ScreenRect WidgetRect(IRuntimeWidget widget) => ScreenRect.Unknown;
 
+    /// <summary>WINDOWS1: whether the pointer is over <paramref name="panel"/>'s frame now (a WhenHovered panel takes the input).</summary>
+    bool PanelUnderPointer(IRuntimePanel panel) => false;
+
     /// <summary>WINDOWS1: the widget's rect where it is drawn now (<see cref="WidgetRect"/> unscrolls a window's info column).</summary>
     ScreenRect WidgetDrawnRect(IRuntimeWidget widget) => WidgetRect(widget);
 

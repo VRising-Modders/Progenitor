@@ -770,6 +770,7 @@ public sealed class WindowPresetTests : IDisposable
         var header = Make(UiWindowPreset.Header, "Chest");
         header.Show();
         var floating = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
+        floating.CaptureMode = UiCaptureMode.WhileShown;
         floating.Show();
         UiApi.PressKeyForTests(27, true);
         UiApi.PressKeyForTests(17, true);
@@ -870,7 +871,8 @@ public sealed class WindowPresetTests : IDisposable
         UiApi.ConfigureMenuPanel(pane, sidebar: false);
         pane.Show();
         var floating = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
-        floating.Show();
+        floating.Show(); // WhenHovered, the default
+        _runtime.Hovered.Add("Float");
         UiApi.PressKeyForTests(27, true);
         UiApi.PressKeyForTests(17, true);
         Assert.NotEqual(UiHandleState.Shown, floating.State);
@@ -878,6 +880,36 @@ public sealed class WindowPresetTests : IDisposable
         UiApi.PressKeyForTests(27, true);
         UiApi.PressKeyForTests(17, true);
         Assert.NotEqual(UiHandleState.Shown, pane.State);
+    }
+
+    [Fact]
+    public void A_passive_panel_never_takes_an_Escape_from_the_workspace()
+    {
+        // Review: a tracker on screen (input mode Never, or WhenHovered away from the pointer) is left to the sweep, so
+        // one Escape closes it with the workspace; a panel that shows itself again cannot keep Escape from the workspace.
+        var pane = UiApi.Panel("Workspace pane", _owner, "example.mod");
+        UiApi.ConfigureMenuPanel(pane, sidebar: false);
+        var tracker = UiApi.Panel("Tracker", _owner, "example.mod");
+        tracker.CaptureMode = UiCaptureMode.Never;
+        var away = UiApi.Panel("Away", _owner, "example.mod"); // WhenHovered, the pointer elsewhere
+        pane.Show();
+        tracker.Show();
+        away.Show();
+        UiApi.PressKeyForTests(27, true);
+        UiApi.PressKeyForTests(17, true);
+        Assert.NotEqual(UiHandleState.Shown, pane.State);
+        Assert.NotEqual(UiHandleState.Shown, tracker.State);
+        Assert.NotEqual(UiHandleState.Shown, away.State);
+
+        // A tracker that comes straight back after every hide: each press still reaches the workspace.
+        for (int i = 0; i < 2; i++)
+        {
+            pane.Show();
+            tracker.Show();
+            UiApi.PressKeyForTests(27, true);
+            UiApi.PressKeyForTests(17, true);
+            Assert.NotEqual(UiHandleState.Shown, pane.State);
+        }
     }
 
     [Fact]

@@ -1174,7 +1174,9 @@ public static partial class Ui
     }
 
     /// <summary>
-    /// Escape (27) and the Bootstrap <c>BackAction</c> (17) hide every shown panel — including
+    /// Escape (27) and the Bootstrap <c>BackAction</c> (17): after a key capture, a dialog's answer, a screen's Back and a
+    /// pending Mods search clear, the topmost standard window or input-taking floating panel closes, one per press
+    /// (WINDOWS1, <see cref="TryCloseTopWindow"/>); with none of those, the sweep hides every shown panel — including
     /// panels this sweep does not own and whose module it does not know. Other modules find out
     /// that a panel left the screen by reading the handle (<see cref="OwnedPanel"/>). The Mods
     /// workspace is the exception: <see cref="ModsMenu.NotifyHiddenByEscape"/> logs
@@ -1305,9 +1307,12 @@ public static partial class Ui
 
     /// <summary>
     /// The panels Escape closes one at a time, topmost first (by show order, which is their draw order): the shown
-    /// standard windows and floating panels (WINDOWS1 live round 4: a floating panel and the Mods workspace closed together
-    /// on one press). Workspace panes, dialogs, self-placed, top-pinned and mounted panels are not among them; when none of
-    /// these is shown, the press goes on to the sweep (the workspace and the rest).
+    /// standard windows, and the floating panels that take the input (<see cref="UiCaptureMode.WhileShown"/>, or
+    /// <see cref="UiCaptureMode.WhenHovered"/> while the pointer is over them). WINDOWS1 live round 4: a floating panel and
+    /// the Mods workspace closed together on one press. A passive panel (<see cref="UiCaptureMode.Never"/>, or not under
+    /// the pointer) is left to the sweep, so a tracker on screen never takes an Escape and a panel that shows itself again
+    /// cannot keep Escape from reaching the workspace. Workspace panes, dialogs, self-placed, top-pinned and mounted panels
+    /// are never among them; when none is shown, the press goes on to the sweep (the workspace and the rest).
     /// </summary>
     private static List<UiPanelHandle> ShownWindows(UiHandle[] snapshot)
     {
@@ -1315,10 +1320,20 @@ public static partial class Ui
         foreach (var h in snapshot)
         {
             if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown || ModsMenu.IsWorkspacePanel(p)) continue;
-            if (p.WindowWidth > 0f || p.Flows) shown.Add(p);
+            if (p.WindowWidth > 0f || (p.Flows && TakesInput(p))) shown.Add(p);
         }
 
         return shown;
+    }
+
+    /// <summary>A floating panel that takes the input now: shown WhileShown, or WhenHovered with the pointer over it.</summary>
+    private static bool TakesInput(UiPanelHandle p)
+    {
+        var mode = p.ShownCaptureMode;
+        if (mode == UiCaptureMode.WhileShown) return true;
+        if (mode != UiCaptureMode.WhenHovered || p.Runtime is not IRuntimePanel runtime) return false;
+        try { return CurrentRuntime().PanelUnderPointer(runtime); }
+        catch { return false; }
     }
 
     private static bool HasShownWindow(UiHandle[] snapshot) => ShownWindows(snapshot).Count > 0;
