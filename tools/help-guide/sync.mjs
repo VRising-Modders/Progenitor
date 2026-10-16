@@ -36,5 +36,21 @@ for (const file of targets) {
   if (check) console.error(`${file}: renderer differs from templates/help/index.html; run node tools/help-guide/sync.mjs`);
   else { writeFileSync(file, next); console.log(`updated ${file}`); }
 }
-if (check && stale) process.exit(1);
-if (check) console.log("help pages are in sync");
+// A help page ships on its own (the guide inside the game package, a mod's help/index.html), so a
+// relative link leaving the file points at nothing there. Links must be in-page (#...) or absolute.
+// A value starting with a quote is the renderer building markup in script ('...src="' + H.logo + '"').
+const ALLOWED = /^(#|https?:|mailto:|data:|')/;
+let relative = 0;
+for (const file of [templatePath, ...targets]) {
+  const text = readFileSync(file, "utf8");
+  for (const m of text.matchAll(/\b(?:href|src)=\\?"([^"\\]*)/g)) {
+    if (ALLOWED.test(m[1])) continue;
+    relative++;
+    const line = text.slice(0, m.index).split("\n").length;
+    console.error(`${file}:${line}: relative link "${m[1]}"; use an absolute URL (https://github.com/VRising-Modders/Progenitor/blob/main/<path>) or an in-page #link`);
+  }
+}
+
+if (check && (stale || relative)) process.exit(1);
+if (relative) process.exit(1);
+if (check) console.log("help pages are in sync and have no relative links");

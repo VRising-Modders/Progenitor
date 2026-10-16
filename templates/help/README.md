@@ -36,7 +36,7 @@ window.HELP = {
 
 - `html` is HTML. `[[term-id|words]]` underlines the words and shows that glossary entry on hover; a click opens the glossary.
 - `{{code}}` places the page's code block; without it the block goes after the text. The code is plain text, not HTML.
-- Links to other pages: `<a href="#chapter-id/page-id">`.
+- Links to other pages: `<a href="#chapter-id/page-id">`. Anything outside the page needs a full `https://` URL: the file ships on its own, so a relative link points at nothing.
 - Optional paths: add `roles: [{ id, title, blurb }]`, give chapters a `role`, and add a page with `chooser: true`. Readers then pick a path, and Previous and Next stay on it. Chapters without a `role` are shared.
 
 ## Keep it short
@@ -45,4 +45,4 @@ One idea per page: a title and about 60 words, or three to five bullets. At most
 
 ## For Progenitor maintainers
 
-This file holds the shared renderer. After changing anything outside its content block, run `node tools/help-guide/sync.mjs` to copy it into `docs/guide/progenitor-guide.html`; `--check` fails when the two differ.
+This file holds the shared renderer. After changing anything outside its content block, run `node tools/help-guide/sync.mjs` to copy it into `docs/guide/progenitor-guide.html`; `--check` fails when the two differ or when either has a relative link, and CI runs it.

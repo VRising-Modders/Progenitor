@@ -87,6 +87,9 @@ jobs:
       - name: Knowledge tool tests
         run: node --test "tools/kb/test/*.test.mjs"
 
+      - name: Help pages share the renderer and link nothing relative
+        run: node tools/help-guide/sync.mjs --check
+
       - name: MCP tool tests (knowledge, identity, bridge queue)
         working-directory: tools/mcp
         run: |

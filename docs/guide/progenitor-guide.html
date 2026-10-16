@@ -314,7 +314,7 @@ window.HELP = {
         { id: "welcome", title: "What Progenitor is",
           html: `<p>Progenitor is a modding framework for V Rising, loaded through [[bepinex|BepInEx]]. It gives every mod one in-game <strong>Mods</strong> menu: settings, keybinds, installs and updates.</p>
 <p>Mods built on it can be swapped into a running game, and undo everything they added when removed.</p>`,
-          callout: { title: "Pre-release", text: "No public release yet. Feature status is in <a href=\"../api.md\">docs/api.md</a>." } },
+          callout: { title: "Pre-release", text: "No public release yet. Feature status is in <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md\">docs/api.md</a>." } },
         { id: "choose", title: "Choose your path", chooser: true,
           html: `<p>Pick what you want to do. You can switch at any time from the contents.</p>` }
       ]
@@ -448,7 +448,7 @@ public sealed class MyContext : PluginContext { }` },
 <li><code>dotnet build</code>, then copy <code>bin\\Debug\\net6.0\\MyMod.dll</code> to <code>BepInEx\\progenitor-reload\\</code>.</li>
 <li>Change, build, copy. The old version unloads; the new one loads.</li></ol>
 <p>In the repository: build, then <code>tools/deploy.ps1 -Projects MyMod -Side server -NoBuild</code>.</p>`,
-          callout: { title: "Bootstrap changes", text: "Need a restart. See the <a href=\"../hot-reload.md\">hot-reload guide</a>." } },
+          callout: { title: "Bootstrap changes", text: "Need a restart. See the <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/hot-reload.md\">hot-reload guide</a>." } },
         { id: "check-reload", title: "Check that it loaded",
           html: `<ul><li><strong>Log:</strong> <code>Reload:</code> lines in <code>BepInEx\\LogOutput.log</code> name the [[unload-reason|reason]].</li>
 <li><strong>Behavior:</strong> use what you changed.</li><li><strong>Still old?</strong> Not settled yet, or refused; the log says which.</li></ul>` },
@@ -492,7 +492,7 @@ panel.Show();` },
 <tr><td>Too much for one page</td><td>[[tabs|<code>Tabs</code>]]</td></tr>
 <tr><td>A question</td><td>[[dialog|<code>ctx.Dialogs</code>]]: <code>Confirm</code>, <code>Notice</code>, <code>Choose</code>, <code>Prompt</code></td></tr></tbody></table>
 <p>Lay out with <code>Heading</code>, <code>Note</code>, <code>Divider</code>, <code>Fact</code>, <code>Info</code> and <code>BeginInline()</code>/<code>EndInline()</code>. Window presets and a samples gallery are coming.</p>`,
-          callout: { title: "Fonts, colors and alignment", warn: true, text: "This is where AI-built UIs usually go wrong. Use the kit's named <a href=\"../ui-controls.md#text-styles\">text styles</a>, never raw colors or sizes. Numbers right, text left, button captions and titles centered. Check every label before calling a window done." } },
+          callout: { title: "Fonts, colors and alignment", warn: true, text: "This is where AI-built UIs usually go wrong. Use the kit's named <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md#text-styles\">text styles</a>, never raw colors or sizes. Numbers right, text left, button captions and titles centered. Check every label before calling a window done." } },
         { id: "controls", title: "The controls, by category",
           html: `<table><thead><tr><th class="label">Category</th><th class="label">Controls</th></tr></thead><tbody>
 <tr><td>Input</td><td><code>Button</code>, <code>ConfirmButton</code>, <code>Toggle</code>, [[dropdown-radio|<code>Dropdown</code>, <code>Radio</code>]], <code>MultiSelect</code>, [[slider|<code>Slider</code>, <code>SliderField</code>, <code>Number</code>]], <code>Input</code>, <code>TextArea</code>, <code>ColorField</code>, <code>DateTimeField</code>, [[key-field|<code>KeyField</code>]], <code>CodeArea</code></td></tr>
@@ -500,7 +500,7 @@ panel.Show();` },
 <tr><td>Feedback</td><td>[[tooltip|<code>Tooltip</code>]], [[term-tooltip|<code>Term</code>]], [[tip-card|<code>ctx.Hud.Tip</code>]], <code>ctx.Dialogs</code>, <code>ctx.Hud.Notify</code>, <code>Label(text, tone)</code></td></tr>
 <tr><td>HUD and world</td><td>[[locate|<code>ctx.Hud.Locate</code>]], [[pick-in-world|<code>ctx.Hud.PickInWorld</code>]]</td></tr>
 <tr><td>Game panels</td><td>[[vanilla-attach|<code>Ui.AttachToVanilla</code>]]</td></tr></tbody></table>
-<p>Catalog: <a href="../ui-controls.md">docs/ui-controls.md</a>. In game: <code>samples/Progenitor.ControlsSample</code>. Choosing: <a href="../ui-style.md">UI style guide</a>.</p>` },
+<p>Catalog: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">docs/ui-controls.md</a>. In game: <code>samples/Progenitor.ControlsSample</code>. Choosing: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">UI style guide</a>.</p>` },
         { id: "messages", title: "Messages to players",
           html: `<p>Format: <code>&lt;Mod Name&gt;: &lt;message&gt;</code>, one sentence. Client [[notice|notice]]: <code>ctx.Hud.Notify(text, detail, kind)</code>. Server chat: <code>ctx.Chat.SendTo(user, text)</code>.</p>
 <div class="grid two"><div><b>Info</b>Something happened (default).</div><div class="ok"><b>Success</b>An action finished.</div><div class="pend"><b>Warning</b>Worth a look.</div><div class="bad"><b>Error</b>Something failed.</div></div>`,
@@ -509,10 +509,10 @@ panel.Show();` },
           html: `<p>About text, first found wins:</p><ol><li>the installed Thunderstore package's README;</li><li>an embedded <code>README.md</code>;</li><li>[[mod-about|<code>[ModAbout("...")]</code>]];</li><li>the <code>ctx.Menu.Register</code> description.</li></ol>
 <p>Version: from <code>[BepInPlugin]</code>, <code>1.2.0</code> form, same as <code>manifest.json</code>. Example: <code>samples/Progenitor.AboutExample</code>.</p>` },
         { id: "help-page", title: "Your help page",
-          html: `<p>Give players a help page like this one: copy <code>templates/help/index.html</code> into your mod as <code>help/index.html</code> and edit its content block. See <a href="../../templates/help/README.md">templates/help/README.md</a>.</p>`,
+          html: `<p>Give players a help page like this one: copy <code>templates/help/index.html</code> into your mod as <code>help/index.html</code> and edit its content block. See <a href="https://github.com/VRising-Modders/Progenitor/blob/main/templates/help/README.md">templates/help/README.md</a>.</p>`,
           callout: { title: "Coming soon", text: "A Help button on your mod's settings page that opens it." } },
         { id: "ai-assistant", title: "Using an AI assistant",
-          html: `<p>Start the conversation with:</p>{{code}}<ul><li>Guide: <a href="../../PROGENITOR_GUIDE.md">PROGENITOR_GUIDE.md</a>. Deeper: <code>docs/modules.md</code>, <a href="../../knowledge/README.md">knowledge notes</a>.</li>
+          html: `<p>Start the conversation with:</p>{{code}}<ul><li>Guide: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/PROGENITOR_GUIDE.md">PROGENITOR_GUIDE.md</a>. Deeper: <code>docs/modules.md</code>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/knowledge/README.md">knowledge notes</a>.</li>
 <li>The [[dev-bridge|dev bridge]] lets it build, reload and inspect your mod in a test game.</li></ul>`,
           code: { lang: "prompt", text: `We are making a V Rising mod with Progenitor. Follow PROGENITOR_GUIDE.md
 (repo root). The mod is: <describe it>.` } },
@@ -527,38 +527,38 @@ panel.Show();` },
     { id: "developers/settings", role: "developers", title: "Settings in depth", pages: [
       { id: "overview", title: "Settings in depth", soon: true,
         html: `<ol class="outline"><li>Every row type, from toggle to date and time</li><li>Show-if, enable-if, needs-restart, option descriptions</li><li>Synced settings and server values</li><li>Admin edits and gray-out reasons</li><li>Defaults that need no setup</li></ol>
-<p>Now: <a href="../mod-settings.md">mod-settings.md</a>, <a href="../config-sync.md">config-sync.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-settings.md">mod-settings.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/config-sync.md">config-sync.md</a>.</p>` } ] },
     { id: "developers/keybinds", role: "developers", title: "Keybinds", pages: [
       { id: "overview", title: "Keybinds", soon: true,
         html: `<ol class="outline"><li><code>Register</code>, <code>RegisterOpener</code>, hold keys</li><li>Chords and the cfg format</li><li>When a key is suppressed</li><li>Conflicts and the first-installed rule</li><li>Testing with <code>keybind_press</code></li></ol>
-<p>Now: <a href="../input.md">input.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/input.md">input.md</a>.</p>` } ] },
     { id: "developers/windows", role: "developers", title: "Windows and controls", pages: [
       { id: "overview", title: "Windows and controls", soon: true,
         html: `<ol class="outline"><li>Layout and windows: settings page, Mods pages, game windows, tabs, presets</li><li>Input: buttons, toggles, dropdowns, radios, sliders, fields, key capture</li><li>Lists and data: ordered list, picker, data table, master-detail, chips</li><li>Feedback: tooltips, term tooltips, tip cards, dialogs, notices</li><li>HUD and world: Locate, pick in world; game-panel attachments</li></ol>
-<p>Now: <a href="../ui-controls.md">ui-controls.md</a>, <a href="../ui-style.md">ui-style.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">ui-controls.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">ui-style.md</a>.</p>` } ] },
     { id: "developers/networking", role: "developers", title: "Networking", pages: [
       { id: "overview", title: "Networking", soon: true,
         html: `<ol class="outline"><li>Server and client parts: [[network-compatibility|<code>[NetworkCompatibility]</code>]], [[counterpart|<code>[Counterpart]</code>]]</li><li>[[requests|<code>ctx.Requests</code>]]: request and reply</li><li>Permission checks on the server</li><li><code>ctx.Subscriptions</code>: live updates</li><li>Working across mod versions</li></ol>
-<p>Now: <a href="../mod-compatibility.md">mod-compatibility.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-compatibility.md">mod-compatibility.md</a>.</p>` } ] },
     { id: "developers/world", role: "developers", title: "Castles, Inventory, Materials", pages: [
       { id: "overview", title: "Castles, Inventory, Materials", soon: true,
         html: `<ol class="outline"><li><code>ctx.Castles</code>: [[territory|plots]], tiles, buildings, the [[castle-heart|castle heart]]</li><li><code>ctx.Inventory</code> and [[container-id|<code>ContainerId</code>]]</li><li>[[material-source|<code>ctx.MaterialSource</code>]]</li><li>Buttons on game panels</li><li>Entity references across world loads</li></ol>
-<p>Now: <a href="../api.md">api.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/api.md">api.md</a>.</p>` } ] },
     { id: "developers/lifecycle", role: "developers", title: "Hot reload and lifecycle", pages: [
       { id: "overview", title: "Hot reload and lifecycle", soon: true,
         html: `<ol class="outline"><li>Bootstrap, Core and [[generation|generations]]</li><li>Unload reasons: keep or sweep</li><li><code>ctx.Track</code> and <code>ctx.Patches</code></li><li>[[world-epoch|World epochs]]</li></ol>
-<p>Now: <a href="../hot-reload.md">hot-reload.md</a>, <a href="../dev-loop.md">dev-loop.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/hot-reload.md">hot-reload.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/dev-loop.md">dev-loop.md</a>.</p>` } ] },
     { id: "developers/performance", role: "developers", title: "Performance budget", pages: [
       { id: "overview", title: "Performance budget", soon: true,
         html: `<ol class="outline"><li>Per-frame work: systems, hooks, timers</li><li>Queries: when and how often</li><li>UI that refreshes only what changed</li><li>Network traffic and rate limits</li><li>Measuring with the bridge</li></ol>` } ] },
     { id: "developers/testing", role: "developers", title: "Testing", pages: [
       { id: "overview", title: "Testing", soon: true,
         html: `<ol class="outline"><li>[[game-free-test|Game-free tests]] with <code>dotnet test</code></li><li>A test server or a private game</li><li>The [[dev-bridge|dev bridge]] and MCP tools</li><li>Pressing keys and reading UI from a test</li><li>Cleaning up after a run</li></ol>
-<p>Now: <a href="../test-rig.md">test-rig.md</a>, <a href="../bridge.md">bridge.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/test-rig.md">test-rig.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/bridge.md">bridge.md</a>.</p>` } ] },
     { id: "developers/publishing", role: "developers", title: "Publishing to Thunderstore", pages: [
       { id: "overview", title: "Publishing to Thunderstore", soon: true,
         html: `<ol class="outline"><li>The package: <code>manifest.json</code>, README, icon, <code>progenitor.json</code></li><li>Required and recommended mods</li><li>The "Requires Progenitor" message</li><li>The optional [[stamp|Progenitor stamp]]</li><li><code>tools/publish-check.ps1</code></li></ol>
-<p>Now: <a href="../publishing.md">publishing.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md">publishing.md</a>.</p>` } ] },
 
     { id: "glossary", title: "Glossary", pages: [ { id: "terms", title: "Glossary", lede: "Hover an underlined word anywhere to see its entry.", glossary: true } ] }
   ],
