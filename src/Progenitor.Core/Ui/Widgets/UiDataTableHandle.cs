@@ -135,7 +135,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     private readonly List<Action<IReadOnlyList<string>>> _selectionChanged = new();
     private readonly List<Action<KeyValuePair<string, bool>>> _expandHandlers = new();
     private readonly List<Action<UiTableEdit>> _editHandlers = new();
-    private readonly IWidgetScrollBar? _bar;
+    private IWidgetScrollBar? _bar;
     private readonly Dictionary<string, UiTermBinding> _terms = new(StringComparer.Ordinal);
     private IDisposable? _tick;
     private bool _chooserOpen;
@@ -159,7 +159,10 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _options = options ?? new UiDataTableOptions();
         _model = new UiDataTableModel(columns, _options);
         _model.SetRows(rows); // a duplicate id throws here, before a row is built
-        _viewport = new UiTableViewport(_options.VisibleRows);
+        // HUB1: a table that fills its panel builds the most rows it may use and uses as many as fit.
+        _viewport = _options.FillHeight
+            ? new UiTableViewport(_options.VisibleRows, UiTableViewport.MaxSlots)
+            : new UiTableViewport(_options.VisibleRows);
         _multi = _options.MultiSelect && _options.Selectable;
         _chooser = _options.ColumnChooser && _model.ChooserColumns().Count > 0;
 
@@ -177,7 +180,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
         WatchHeaderTooltips();
 
-        int slots = _viewport.Slots;
+        int slots = _viewport.Built;
         _cache = new Dictionary<string, CellState>[slots];
         _written = new Dictionary<string, string>[slots];
         _hints = new Dictionary<string, string>[slots];
@@ -254,17 +257,11 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         {
             try { Lease(runtime.ClaimWheel(Panel, BodyRect, Wheel)); }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' wheel claim: " + e.Message); }
-            var top = RuntimeRowOf(_slots[0]);
-            var bottom = RuntimeRowOf(_slots[_slots.Count - 1]);
-            if (top != null && bottom != null)
+            AttachBar(runtime);
+            if (_options.FillHeight)
             {
-                try { _bar = runtime.AttachScrollBar(top, bottom, panel); }
-                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' scroll bar: " + e.Message); }
-                if (_bar != null)
-                {
-                    _bar.OnDragged = DragBar;
-                    Lease(_bar);
-                }
+                try { _fillTick = runtime.EveryFrame(FillTick); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' fill height: " + e.Message); }
             }
         }
 
@@ -870,10 +867,76 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     /// <summary>Tests and readback: the mark drawn in slot <paramref name="slot"/>'s check cell.</summary>
     internal UiDrawnMark CheckMarkAt(int slot) => _checkMarks.MarkOf(_slots[slot], UiDataTableLayout.CellCheck);
 
+    /// <summary>The scroll bar down the slot rows in use (from the first to the last one the viewport uses).</summary>
+    private void AttachBar(IWidgetRuntime runtime)
+    {
+        var old = _bar;
+        _bar = null;
+        try { old?.Dispose(); }
+        catch { /* */ }
+        var top = RuntimeRowOf(_slots[0]);
+        var bottom = RuntimeRowOf(_slots[Math.Max(0, Math.Min(_slots.Count, _viewport.Slots) - 1)]);
+        if (top == null || bottom == null) return;
+        try { _bar = runtime.AttachScrollBar(top, bottom, Panel); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' scroll bar: " + e.Message); }
+        if (_bar != null) _bar.OnDragged = DragBar;
+    }
+
+    // ---- HUB1: fill the panel's height --------------------------------------------------------------------------------
+
+    private IDisposable? _fillTick;
+    private int _fillFrames;
+
+    /// <summary>Frames between two readings of the panel's room.</summary>
+    internal const int FillEveryFrames = 10;
+
+    /// <summary>
+    /// HUB1: one frame of a <see cref="UiDataTableOptions.FillHeight"/> table: every <see cref="FillEveryFrames"/> frames
+    /// while it is shown, read the panel's tallest viewport and its content, and use as many slot rows as fit.
+    /// </summary>
+    internal void FillTick()
+    {
+        if (IsDisposed || !Visible || ++_fillFrames < FillEveryFrames) return;
+        _fillFrames = 0;
+        if (Panel.State != UiHandleState.Shown || WidgetRuntime.Current is not { } runtime) return;
+        float maxViewport, content;
+        try
+        {
+            if (!runtime.PanelRoom(Panel, out maxViewport, out content)) return;
+        }
+        catch { return; }
+
+        ApplyFill(UiTableViewport.FillRows(maxViewport, content, ShownSlots(), UiTableViewport.SlotPitch, _viewport.Built));
+    }
+
+    /// <summary>Use <paramref name="rows"/> slot rows (a <see cref="UiTableViewport.FillRows"/> answer; -1 changes nothing).</summary>
+    internal bool ApplyFill(int rows)
+    {
+        if (rows < 0 || IsDisposed || !_viewport.SetSlots(rows)) return false;
+        if (WidgetRuntime.Current is { } runtime) AttachBar(runtime);
+        Render();
+        return true;
+    }
+
+    /// <summary>The slot rows drawn now (those showing a line).</summary>
+    private int ShownSlots()
+    {
+        int shown = 0;
+        foreach (var slot in _slots)
+            if (slot.Visible) shown++;
+        return shown;
+    }
+
     protected override void OnDisposing()
     {
         _checkMarks.Dispose();
         StopTick();
+        try { _fillTick?.Dispose(); }
+        catch { /* */ }
+        _fillTick = null;
+        try { _bar?.Dispose(); }
+        catch { /* */ }
+        _bar = null;
         _drafts.Clear();
         foreach (var t in _terms.Values)
         {
@@ -961,6 +1024,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             ["lines"] = lines.Count,
             ["rows"] = _model.Rows.Count,
             ["visibleRows"] = _viewport.Slots,
+            ["fillHeight"] = _options.FillHeight,
+            ["builtRows"] = _viewport.Built,
             ["slots"] = slots,
             ["selected"] = new List<string>(_model.Selected),
             ["expanded"] = new List<string>(_model.Expanded),
@@ -1075,7 +1140,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
     private bool AnyIcon()
     {
-        foreach (var r in _model.Rows) if (r.Icon != null || r.ItemPrefab != 0) return true;
+        foreach (var r in _model.Rows) if (r.Icon != null || r.ItemPrefab != 0 || r.BuildingPrefab != 0) return true;
         return false;
     }
 
@@ -1259,6 +1324,13 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             if (icon == null && data.ItemPrefab != 0)
             {
                 try { icon = WidgetRuntime.Current?.ItemIcon(data.ItemPrefab); }
+                catch { icon = null; }
+            }
+
+            // HUB1: a castle building's build-menu icon; none yet (the game has not drawn it) keeps the aligned blank.
+            if (icon == null && data.BuildingPrefab != 0)
+            {
+                try { icon = WidgetRuntime.Current?.BuildingIcon(data.BuildingPrefab); }
                 catch { icon = null; }
             }
         }

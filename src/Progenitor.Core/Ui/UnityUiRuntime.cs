@@ -11626,12 +11626,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             _inline = true;
             _inlineHost = null;
             _pageButtonRow = null;
+            CloseCompactRow();
         }
 
         public void EndInline()
         {
             _inline = false;
             _pageButtonRow = null;
+            CloseCompactRow();
             Relayout();
         }
 
@@ -11714,8 +11716,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
             var widths = new List<float>(shown.Count);
             // The caption the button shows now (review 2026-10-11: a renamed button kept its first width and squeezed its text).
-            foreach (var b in shown) widths.Add(PageButtonLayout.Width(ShownCaption(b.Button, b.Caption), ContentRowWidth));
-            var lefts = PageButtonLayout.Lefts(widths);
+            // HUB1: a button with a key hint is wider by the cap's room; a centered row's group is centered on the row.
+            foreach (var b in shown) widths.Add(Math.Min(ContentRowWidth, PageButtonLayout.Width(ShownCaption(b.Button, b.Caption), ContentRowWidth) + HintRoomOf(b.Button)));
+            var lefts = PageButtonLayout.Lefts(widths, RowWidthOf(row.Go), IsCenteredPageRow(row.Go));
             for (int i = 0; i < shown.Count; i++)
             {
                 try
@@ -11730,6 +11733,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 }
                 catch { /* the button keeps its placement */ }
                 FitInlineButtonCaption(shown[i].Button);
+                KeepHintRoom(shown[i].Button);
             }
         }
 
@@ -11755,9 +11759,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// measures under <see cref="RowHeight"/> and its chips would overlap the row beneath.
         /// </summary>
         private float InlineHostHeight(in PanelRow row, float measured) =>
-            row.Go != null && _inlineButtons.TryGetValue(row.Go, out var items) && items.Count > 0
+            // HUB1: a row of compact dropdowns is as tall as its lines.
+            CompactRowHeight(row, row.Go != null && _inlineButtons.TryGetValue(row.Go, out var items) && items.Count > 0
                 ? Math.Max(measured, RowHeight)
-                : measured;
+                : measured);
 
         private MenuRowPin _nextPin;
         private MenuRowTone _nextTone;
@@ -13162,6 +13167,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private void PlaceInlineRow(in PanelRow row)
         {
+            PlaceCompactChoices(row);
             if (row.Go == null || !_inlineButtons.TryGetValue(row.Go, out var buttons) || buttons.Count == 0)
                 return;
             if (row.Grid)
@@ -13176,6 +13182,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     if (i == 0 && row.Control != null) PlaceGridCentered(row.Control, grid, slots.FieldLeft, slots.FieldWidth, barH);
                     PlaceGridCentered(buttons[i], grid, slots.ButtonLeft, slots.ButtonWidth, barH);
                     FitInlineButtonCaption(buttons[i]);
+                    KeepHintRoom(buttons[i]);
                 }
 
                 return;
@@ -13192,6 +13199,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 try { PlaceTop(buttons[i], geo.ButtonX(i), 0f, geo.ButtonWidth, RowHeight); }
                 catch { /* */ }
                 FitInlineButtonCaption(buttons[i]);
+                KeepHintRoom(buttons[i]);
             }
         }
 
@@ -14023,13 +14031,19 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     : DialogSized ? DialogLayout.FrameHeight(contentHeight, footerBand + dialogPinned, available.Value)
                     : IsStandardWindow ? PanelLayout.PanelHeightFor(StandardBodyHeight(contentHeight, refitTop) + footerBand, available.Value)
                     : PanelLayout.PanelHeightFor(contentHeight + footerBand, available.Value);
+                // HUB1: a window with tabs may ask a least content height (UiTabsOptions.MinContentHeight), capped like the rest.
+                if (_minContentHeight > contentHeight && _embeddedHeight <= 0 && !_menuPane && !DialogSized)
+                    panelHeight = Math.Max(panelHeight, IsStandardWindow
+                        ? PanelLayout.PanelHeightFor(StandardBodyHeight(_minContentHeight, refitTop) + footerBand, available.Value)
+                        : PanelLayout.PanelHeightFor(_minContentHeight + footerBand, available.Value));
                 if (_gameWindow && _dialogFrameWidth > PanelWidth && !_menuPane && _embeddedHeight <= 0)
                     panelHeight = Math.Min(panelHeight, available.Value * .70f);
                 // WINDOWS1: a standard window is never taller than its place leaves room for (under the workspace's tab
                 // strip, a cascade layer's offset), so its bottom stays on screen.
                 if (InWindowRow) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
                 // WINDOWS1 live fix: a standard window keeps its height across its tabs while it stays open.
-                if (IsStandardWindow && !SelfPlaced)
+                // HUB1: a floating panel with tabs keeps it too (SetHeightRule), whoever placed it.
+                if (IsStandardWindow && !SelfPlaced || KeepsHeightRule)
                     panelHeight = StableWindowHeight(panelHeight, InWindowRow ? WindowMaxHeight(available.Value) : 0f, firstShow);
 
                 _laidOutWith = available;
@@ -14049,6 +14063,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                             ? MenuPanelLayout.ListViewportHeight(panelHeight)
                             : DialogSized ? DialogLayout.ViewportHeight(panelHeight, footerBand + dialogPinned)
                             : Math.Max(0f, PanelLayout.ViewportHeightFor(panelHeight) - footerBand - (IsStandardWindow && refitTop > 0f ? refitTop : 0f));
+                        // HUB1: the room a table that fills the panel reads (its tallest viewport, the content now).
+                        NoteRoom(viewH, available.Value, footerBand, refitTop, contentHeight);
                         float npos = 1f;
                         float pendingOffsetY = 0f;
                         bool hasPending = _sidebar && PeekSidebarScrollPreserve(out npos, out pendingOffsetY);
@@ -16097,13 +16113,18 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 }
                 case CellKind.Button:
                 {
-                    var go = BuildButton(GameObject);
+                    // HUB1: a game tab cell is a clone of the game's own window tab (the kit button when no donor is reachable).
+                    GameObject? caption = null;
+                    var go = spec.Skin == CellSkin.GameTab ? BuildGameTabCell(GameObject, spec.Text, out caption) : null;
+                    bool gameTab = go != null;
+                    go ??= BuildButton(GameObject);
                     if (go == null) return;
-                    go.name = "cell-button";
-                    var caption = SetButtonText(go, spec.Text);
+                    go.name = gameTab ? "cell-game-tab" : "cell-button";
+                    if (!gameTab) caption = SetButtonText(go, spec.Text);
                     cell.Tmp = caption?.GetComponent<TextMeshProUGUI>();
-                    cell.Fill = go.GetComponent<Image>();
-                    cell.Rim = AddRim(go, MenuPalette.ButtonBorder);
+                    // A game tab keeps the clone's own art and states: no kit fill or rim is painted over it.
+                    cell.Fill = gameTab ? null : go.GetComponent<Image>();
+                    cell.Rim = gameTab ? null : AddRim(go, MenuPalette.ButtonBorder);
                     Activate(go);
                     FitInlineButtonCaption(go);
                     if (cell.Tmp != null)
@@ -17005,6 +17026,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         private static void PaintButton(Cell cell)
         {
+            // HUB1: the game's window tab keeps its own art and state machine; without a donor it is the chip.
+            if (cell.Spec.Skin == CellSkin.GameTab && (PaintGameTabCell(cell.Go, cell.Tmp, cell.Spec) || PaintChip(cell))) return;
             if (cell.Spec.Skin == CellSkin.KeyCap)
             {
                 if (PaintKeyCap(cell)) return;

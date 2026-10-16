@@ -620,6 +620,9 @@ internal sealed class UiChoiceHandle : UiHandle, IUiChoice, IUiDropdown, IUiOpti
 
     public UiCommitPolicy Commit => UiChoiceState.Commit;
 
+    /// <summary>HUB1: a compact dropdown (<see cref="UiWidgets.CompactDropdown"/>): Left and Right move between the row's dropdowns.</summary>
+    internal bool Compact { get; set; }
+
     public IReadOnlyList<UiChoiceOption> Options => _state.Options;
 
     public IReadOnlyList<string> Values

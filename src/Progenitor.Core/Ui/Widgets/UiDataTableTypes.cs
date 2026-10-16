@@ -232,6 +232,13 @@ public sealed class UiTableRow
     public int ItemPrefab { get; set; }
 
     /// <summary>
+    /// HUB1: a castle building's prefab id (a chest, a station, a prison cell) whose icon from the game's build menu the row
+    /// shows when <see cref="Icon"/> is null and <see cref="ItemPrefab"/> is 0; 0 for none. Until the game has drawn that
+    /// building in its build menu this session, the row keeps an empty, aligned icon place (<see cref="UiBuildingIcons"/>).
+    /// </summary>
+    public int BuildingPrefab { get; set; }
+
+    /// <summary>
     /// The groups the row sits under when the table is grouped (<see cref="IUiDataTable.Grouped"/>). A row in several groups
     /// appears under each; the grand total counts it once. Empty: the table's "other" group.
     /// </summary>
@@ -368,6 +375,15 @@ public sealed class UiDataTableOptions
 {
     /// <summary>The slot rows the body draws (4 to 30; 12 by default). More rows scroll; only these rows are ever built.</summary>
     public int VisibleRows { get; set; } = 12;
+
+    /// <summary>
+    /// HUB1: the table takes all the height its panel has left: its body draws as many rows (4 to 30) as fit the panel's
+    /// tallest frame with every other row on it, so the window grows to its height cap and stops there, and the table
+    /// scrolls inside it (the panel itself never scrolls for it). The count follows the panel (a tab that shows more
+    /// rows above the table, a resized screen). <see cref="VisibleRows"/> is the count until the first layout is read.
+    /// Off by default.
+    /// </summary>
+    public bool FillHeight { get; set; }
 
     /// <summary>Rows can be selected (click). On by default.</summary>
     public bool Selectable { get; set; } = true;

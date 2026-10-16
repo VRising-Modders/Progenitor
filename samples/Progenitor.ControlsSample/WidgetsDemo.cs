@@ -71,6 +71,7 @@ internal sealed partial class WidgetsDemo
         BuildList(panel, _tabs);
         BuildChips(panel, _tabs, TabLists);
         BuildPickers(panel, _tabs);
+        BuildHub(panel, _tabs, TabInput);
         BuildCode(panel, _tabs);
         BuildTable(panel, _tabs, TabTable);
         BuildMasterDetail(panel, _tabs, TabLayout);

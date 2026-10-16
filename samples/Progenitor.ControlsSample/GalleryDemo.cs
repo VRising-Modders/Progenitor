@@ -14,6 +14,9 @@ internal interface IGalleryHost
     /// <summary>Open the plugin's floating panel (the All controls window).</summary>
     void OpenFloating();
 
+    /// <summary>Open (or close) the hub window (<see cref="GalleryHub"/>); returns what happened.</summary>
+    string ToggleHub() => "no hub window here";
+
     /// <summary>Open the plugin's Mods page <paramref name="page"/>.</summary>
     void OpenPage(string page);
 
@@ -190,6 +193,21 @@ internal sealed class GalleryDemo
             case "tabs":
                 _tabs!.Add(tab, panel.Text("This page's own tab row, above, is the tabs widget.", UiTextStyle.Body));
                 break;
+            case "game-tabs":
+                Action(panel, tab, "Hub window", api, () => Report("hub window = " + _host.ToggleHub()));
+                tabs.Add(tab, panel.Text("The hub window's tabs are the game's window tabs; so are the Header and Tabbed windows' tabs.", UiTextStyle.Body));
+                break;
+            case "tab-height":
+                tabs.Add(tab, panel.Text("Open the hub window's Chests tab: the window keeps the Find tab's height.", UiTextStyle.Body));
+                break;
+            case "tab-history":
+                tabs.Add(tab, panel.Text("In the hub window, open a few tabs, then press the mouse's back button or Alt+Left.", UiTextStyle.Body));
+                break;
+            case "centered-button":
+                panel.BeginInline();
+                Action(panel, tab, "Return", api, () => Report("centered return")).Centered().KeyHint(bindId);
+                panel.EndInline();
+                break;
             case "footer":
                 _tabs!.Add(tab, panel.Text("Each gallery window carries its version stamp at the bottom.", UiTextStyle.Body));
                 break;
@@ -246,6 +264,28 @@ internal sealed class GalleryDemo
             case "input":
                 _tabs!.Add(tab, panel.Input("Text input", "Iron chest")).OnChanged(v => Report("input = " + v));
                 break;
+            case "compact-dropdown":
+            {
+                panel.BeginInline();
+                var scope = tabs.Add(tab, panel.CompactDropdown("Scope", new[] { "castle", "all" }, "castle", new[] { "Castle", "All" }));
+                var match = tabs.Add(tab, panel.CompactDropdown("Match", new[] { "any", "all" }, "any", new[] { "Any word", "All words" }));
+                var show = tabs.Add(tab, panel.CompactDropdown("Show", new[] { "all", "full" }, "all", new[] { "Everything", "Full only" }));
+                panel.EndInline();
+                scope.OnChanged(v => Report("compact scope = " + v));
+                match.OnChanged(v => Report("compact match = " + v));
+                show.OnChanged(v => Report("compact show = " + v));
+                break;
+            }
+            case "input-action":
+            {
+                var search = tabs.Add(tab, panel.SearchInput("Search", ""));
+                tabs.Add(tab, search.Action("Find", text => Report("find \"" + text + "\"")));
+                break;
+            }
+            case "key-hint":
+                Action(panel, tab, "Close", api, () => Report("key hint close")).KeyHint("Esc");
+                Action(panel, tab, "Open this page", api, () => Report("key hint open")).KeyHint(bindId);
+                break;
             case "textarea":
                 _tabs!.Add(tab, panel.TextArea("Text area", "", 3)).OnChanged(v => Report("text area = " + v.Length + " chars"));
                 break;
@@ -300,6 +340,14 @@ internal sealed class GalleryDemo
             case "data-table":
                 // The gallery's tab badge is not the table's: the Widgets page's Table tab carries the row count.
                 _widgets.BuildTable(panel, tabs, tab, badge: false);
+                break;
+            case "fill-height":
+                Action(panel, tab, "Hub window", api, () => Report("hub window = " + _host.ToggleHub()));
+                tabs.Add(tab, panel.Text("Its Find tab's table takes all the height the window has left.", UiTextStyle.Body));
+                break;
+            case "building-icons":
+                tabs.Add(tab, panel.Text("The hub window's table shows a chest, the Smithy and a prison cell with their build-menu icons.", UiTextStyle.Body));
+                tabs.Add(tab, panel.Text("Open the game's build menu once this session, then reopen the hub: the icons appear.", UiTextStyle.Muted));
                 break;
             case "master-detail":
                 _widgets.BuildMasterDetail(panel, tabs, tab);

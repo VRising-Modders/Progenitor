@@ -691,6 +691,7 @@ public static partial class Ui
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog unload threw: " + e.Message); }
 
         // P7: the widget backends' process-wide state (tooltip, HUD notices, Locate pings, a world pick, a drag).
+        try { UiKeyHints.Reset(); UiBuildingIcons.Clear(); } catch { /* HUB1: the key hints and building icons go with Core */ }
         try { UiWidgetLifetime.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget teardown threw: " + e.Message); }
 
@@ -1060,6 +1061,10 @@ public static partial class Ui
         }
 
         UiDialog.ForgetForTests();
+        // HUB1: no key hint, building icon or tab-history pointer seam outlives a test.
+        UiKeyHints.Reset();
+        UiBuildingIcons.Clear();
+        UiTabHistoryRoute.ResetForTests();
         VanillaAttachRegistry.ResetForTests();
         VanillaSiteHealth.Clear();
         UiSlotTable.ClearAll();

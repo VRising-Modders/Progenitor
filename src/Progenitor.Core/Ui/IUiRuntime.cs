@@ -140,6 +140,39 @@ internal interface IUiRuntime
     void WindowShade(bool on) { }
 
     /// <summary>
+    /// HUB1: a floating panel's height rule (<see cref="UiTabsOptions"/>): with <paramref name="keep"/> it never gets
+    /// shorter while it stays open (switching to a shorter tab keeps its height), and its rows are never laid out shorter
+    /// than <paramref name="minContentHeight"/> (0: no floor). Both stay capped to the screen. No-op by default and on a
+    /// Mods workspace pane or a dialog.
+    /// </summary>
+    void SetHeightRule(IRuntimePanel panel, bool keep, float minContentHeight) { }
+
+    /// <summary>
+    /// HUB1: a compact dropdown (<see cref="UiWidgets.CompactDropdown"/>): its caption <paramref name="labelWidth"/> wide
+    /// (0: none), then the game's dropdown bar <paramref name="barWidth"/> wide. Inside an inline block every compact
+    /// dropdown joins one row (<see cref="UiCompactChoiceLayout"/>). The widget is driven as <see cref="AddChoice"/>'s.
+    /// Default: an ordinary choice row.
+    /// </summary>
+    IRuntimeWidget? AddCompactChoice(
+        IRuntimePanel panel, string text, IReadOnlyList<UiChoiceOption> options, string value, float labelWidth, float barWidth) =>
+        AddChoice(panel, text, options, value);
+
+    /// <summary>
+    /// HUB1: a button at the end of <paramref name="field"/>'s row (an input row of this panel), as an inline block's
+    /// button beside its field; null when the row cannot take one (the caller adds an ordinary button). Default null.
+    /// </summary>
+    IRuntimeWidget? JoinFieldRowButton(IRuntimePanel panel, IRuntimeWidget field, string text) => null;
+
+    /// <summary>HUB1: center the button row holding <paramref name="button"/> on its panel; false when it is not a row of compact buttons. Default false.</summary>
+    bool CenterButtonRow(IRuntimePanel panel, IRuntimeWidget button) => false;
+
+    /// <summary>
+    /// HUB1: draw a key cap with <paramref name="text"/> at the right end of <paramref name="button"/>, the button's caption
+    /// kept clear of it; null when the runtime cannot draw one. Disposing removes the cap.
+    /// </summary>
+    IRuntimeKeyHint? AttachKeyHint(IRuntimeWidget button, string text) => null;
+
+    /// <summary>
     /// TOKENINSERT1: insert <paramref name="text"/> into the text field <paramref name="field"/> at its caret (the end when
     /// it never had focus; a selection is replaced), whole or not at all (<see cref="UiFieldInsert"/>), through the
     /// field's own edit path (undo, change notice), and give the field the keyboard. False when the runtime cannot (a
@@ -663,6 +696,13 @@ internal interface IRuntimeWidget
 /// <see cref="IRuntimeWidget.ClickEvent"/> is the whole-row click. Button cells are their own
 /// widgets (<see cref="CellWidget"/>) with their own click event.
 /// </summary>
+/// <summary>HUB1: a drawn key cap on a button (<see cref="IUiRuntime.AttachKeyHint"/>). Disposing removes it.</summary>
+internal interface IRuntimeKeyHint : IDisposable
+{
+    /// <summary>Rewrite the cap's key (a remap); empty hides it.</summary>
+    void SetText(string text);
+}
+
 internal interface IRuntimeCellRow : IRuntimeWidget
 {
     /// <summary>The button cell <paramref name="key"/>'s widget (its click event), or null for a non-button cell.</summary>

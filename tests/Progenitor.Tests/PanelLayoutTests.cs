@@ -383,7 +383,8 @@ public class PanelLayoutTests
     public void Every_row_builder_registers_its_row_through_the_measured_path()
     {
         string contract = UiSource("IUiRuntime.cs");
-        string runtime = UiSource("UnityUiRuntime.cs");
+        // HUB1: the hub row builders (a compact dropdown, a field's action button) live in the runtime's Hub partial.
+        string runtime = UiSource("UnityUiRuntime.cs") + "\n" + UiSource("UnityUiRuntime.Hub.cs");
 
         var builders = new List<string>();
         foreach (Match m in Regex.Matches(contract, @"IRuntimeWidget\?\s+(Add\w+)\(IRuntimePanel panel"))

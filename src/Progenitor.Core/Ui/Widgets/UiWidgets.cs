@@ -37,13 +37,25 @@ public static partial class UiWidgets
     }
 
     /// <summary>
-    /// A row of tabs drawn as the game's popup buttons, the selected one lit, each with an optional count badge. Add a
-    /// tab's controls with <see cref="IUiTabs.Add"/> after this call; they show only while their tab is selected.
+    /// A row of tabs, the selected one lit, each with an optional count badge. On a game window (<see cref="UiLook.GameWindow(IUiPanel)"/>,
+    /// every standard window) they are the game's own window tabs; elsewhere the game's popup buttons as chips. A window
+    /// with tabs keeps its height while it stays open (<see cref="UiTabsOptions.KeepHeight"/>). Add a tab's controls with
+    /// <see cref="IUiTabs.Add"/> after this call; they show only while their tab is selected.
     /// </summary>
     public static IUiTabs Tabs(this IUiPanel panel, string key, IReadOnlyList<string> captions, int selected = 0)
     {
         if (panel == null) throw new ArgumentNullException(nameof(panel));
-        return new UiTabsHandle(panel, key, captions, selected);
+        return new UiTabsHandle(panel, key, captions, new UiTabsOptions { Selected = selected });
+    }
+
+    /// <summary>
+    /// HUB1: <see cref="Tabs(IUiPanel, string, IReadOnlyList{string}, int)"/> with options: the look
+    /// (<see cref="UiTabsLook"/>), whether the window keeps its height across tabs, and a least content height.
+    /// </summary>
+    public static IUiTabs Tabs(this IUiPanel panel, string key, IReadOnlyList<string> captions, UiTabsOptions options)
+    {
+        if (panel == null) throw new ArgumentNullException(nameof(panel));
+        return new UiTabsHandle(panel, key, captions, options);
     }
 
     /// <summary>

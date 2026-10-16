@@ -1394,8 +1394,8 @@ public static class Keybinds
     /// </summary>
     internal static Func<bool> MenuScopeOpen { get; set; } = DefaultMenuScopeOpen;
 
-    /// <summary>KEYS7: the Mods workspace, or the game's full-screen menu on any tab (never plain gameplay).</summary>
-    private static bool DefaultMenuScopeOpen() => ModsMenu.MenuContextOpen;
+    /// <summary>KEYS7: the Mods workspace, or the game's full-screen menu on any tab; HUB1: or a window with a tab history under the pointer or holding the input.</summary>
+    private static bool DefaultMenuScopeOpen() => ModsMenu.NavigationScopeOpen;
 
     /// <summary>
     /// Whether photo mode is active, for <see cref="KeybindScope.Photo"/> binds. Set by photo mode's

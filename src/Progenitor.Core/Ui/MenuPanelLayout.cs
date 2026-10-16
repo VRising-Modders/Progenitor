@@ -1935,6 +1935,14 @@ internal enum CellSkin
     /// vertically, so the room to its left is the space after the word before it (<see cref="CellSpec.InlineAfter"/>).
     /// </summary>
     LoopGlyph = 12,
+
+    /// <summary>
+    /// HUB1: a button cell drawn as the game's own window tab: a clone of the full-screen menu's inner tab (the Mods
+    /// workspace tab strip's donor ladder, <see cref="WorkspaceTabLadder"/>), selected while its tone is
+    /// <see cref="CellTone.ChipOn"/>, the caption centered in the donor's font. The <see cref="Chip"/> look when no
+    /// donor is reachable.
+    /// </summary>
+    GameTab = 13,
 }
 
 /// <summary>KEYS3: how a cell row draws its selected state (<see cref="CellRowSpec.Skin"/>).</summary>
@@ -5065,5 +5073,27 @@ internal static class PageButtonLayout
         }
 
         return lefts;
+    }
+
+    /// <summary>
+    /// HUB1: the same buttons centered as a group on a row <paramref name="rowWidth"/> wide (a centered Return, or a
+    /// centered row); a group wider than the row starts at its left edge, as <see cref="Lefts(IReadOnlyList{float})"/> does.
+    /// </summary>
+    internal static float[] Lefts(IReadOnlyList<float> widths, float rowWidth, bool centered)
+    {
+        var lefts = Lefts(widths);
+        if (!centered || widths.Count == 0 || float.IsNaN(rowWidth) || rowWidth <= 0f) return lefts;
+        float total = GroupWidth(widths);
+        float shift = Math.Max(0f, (rowWidth - total) * 0.5f);
+        for (int i = 0; i < lefts.Length; i++) lefts[i] += shift;
+        return lefts;
+    }
+
+    /// <summary>HUB1: the buttons' width side by side, the gaps between them included.</summary>
+    internal static float GroupWidth(IReadOnlyList<float> widths)
+    {
+        float total = 0f;
+        for (int i = 0; i < widths.Count; i++) total += widths[i] + (i > 0 ? Gap : 0f);
+        return total;
     }
 }

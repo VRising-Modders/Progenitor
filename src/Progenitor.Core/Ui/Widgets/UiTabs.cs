@@ -38,8 +38,58 @@ public interface IUiTabs : IUiHandle
     /// <summary>After the selected tab changed (a click, a controller press, or <see cref="Selected"/>).</summary>
     IDisposable OnChanged(Action<int> handler);
 
+    /// <summary>HUB1: go to the previous tab of the row's history (<see cref="UiTabsOptions.History"/>); false at its start or with history off.</summary>
+    bool Back() => false;
+
+    /// <summary>HUB1: go to the next tab of the row's history after a <see cref="Back"/>; false at its end or with history off.</summary>
+    bool Forward() => false;
+
     /// <summary>Readback: <c>{kind: tabs, key, selected, tabs [{caption, badge, tone}]}</c>.</summary>
     Dictionary<string, object?> Describe();
+}
+
+/// <summary>HUB1: how a tab row is drawn (<see cref="UiTabsOptions.Look"/>).</summary>
+public enum UiTabsLook
+{
+    /// <summary>The game's window tabs on a game window (<see cref="UiLook.GameWindow(IUiPanel)"/> and every standard window); chips elsewhere.</summary>
+    Auto = 0,
+
+    /// <summary>The game's own window tabs (the full-screen menu's inner tab, the art the Character menu's tabs use), wherever the row is.</summary>
+    Game = 1,
+
+    /// <summary>The game's popup buttons as filter chips, the selected one on the gold plate (the look before HUB1).</summary>
+    Chips = 2,
+}
+
+/// <summary>HUB1: what differs from a default tab row (<see cref="UiWidgets.Tabs(IUiPanel, string, IReadOnlyList{string}, UiTabsOptions)"/>).</summary>
+public sealed class UiTabsOptions
+{
+    /// <summary>The tab selected first.</summary>
+    public int Selected { get; set; }
+
+    /// <summary>How the tabs are drawn; <see cref="UiTabsLook.Auto"/> by default.</summary>
+    public UiTabsLook Look { get; set; } = UiTabsLook.Auto;
+
+    /// <summary>
+    /// True (the default): while the window stays open, switching to a shorter tab never makes it shorter, as the
+    /// standard windows keep their height. It opens next time at the selected tab's height. Applies to a floating window
+    /// (a game window or a plain panel); a Mods page is laid out by the workspace.
+    /// </summary>
+    public bool KeepHeight { get; set; } = true;
+
+    /// <summary>
+    /// The least height of the window's rows (without the title band and the version stamp), in kit units; 0 for none.
+    /// Give the tallest tab's height to open at it on every tab. Capped to the screen like every window.
+    /// </summary>
+    public float MinContentHeight { get; set; }
+
+    /// <summary>
+    /// True (the default): the row keeps a browser-style history of the tabs the player selected. While its window is
+    /// under the pointer or holds the input, the mouse's back and forward buttons (and Alt+Left, Alt+Right: the Core
+    /// keybinds Navigate back and forward, remappable in the Keybinds tab) go to the previous and next tab of it, ahead of
+    /// the Mods workspace's own history. <see cref="IUiTabs.Back"/> and <see cref="IUiTabs.Forward"/> do the same.
+    /// </summary>
+    public bool History { get; set; } = true;
 }
 
 /// <summary>P7: the count-badge rule the tabs, the ordered list and the picker share.</summary>
@@ -73,9 +123,28 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     private readonly List<Action<int>> _changed = new();
     private int _selected;
 
+    /// <summary>HUB1: true when the row draws the game's window tabs.</summary>
+    internal bool GameTabs { get; }
+
+    /// <summary>HUB1: the window keeps its tallest height while open (<see cref="UiTabsOptions.KeepHeight"/>).</summary>
+    internal bool KeepsHeight { get; }
+
+    /// <summary>HUB1: the window's least content height (<see cref="UiTabsOptions.MinContentHeight"/>), 0 for none.</summary>
+    internal float MinContentHeight { get; }
+
     internal UiTabsHandle(IUiPanel panel, string key, IReadOnlyList<string> captions, int selected)
+        : this(panel, key, captions, new UiTabsOptions { Selected = selected })
+    {
+    }
+
+    internal UiTabsHandle(IUiPanel panel, string key, IReadOnlyList<string> captions, UiTabsOptions? options)
         : base(panel, key, key)
     {
+        var opts = options ?? new UiTabsOptions();
+        int selected = opts.Selected;
+        GameTabs = UiTabsLayout.UsesGameTabs(opts.Look, panel is UiPanelHandle gameHost && gameHost.IsGameWindow);
+        KeepsHeight = opts.KeepHeight;
+        MinContentHeight = UiTabsLayout.MinHeight(opts.MinContentHeight);
         if (captions == null || captions.Count == 0) throw new ArgumentException("Tabs need at least one caption.", nameof(captions));
         _captions = new string[captions.Count];
         for (int i = 0; i < _captions.Length; i++) _captions[i] = captions[i] ?? "";
@@ -93,12 +162,22 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
 
         _selected = Clamp(selected);
         _termOn = new bool[_captions.Length];
-        _row = Part(panel.CellRow(new CellRowSpec(RowKey("tabs"), UiTabsLayout.Cells(_captions, _selected), plain: true)));
+        _row = Part(panel.CellRow(new CellRowSpec(RowKey("tabs"), UiTabsLayout.Cells(_captions, _selected, GameTabs), plain: true)));
         for (int i = 0; i < _captions.Length; i++)
         {
             int tab = i;
             Lease(_row.OnClick(UiTabsLayout.TabKey(i), () => { if (Live) Selected = tab; }));
             Lease(_row.OnCellHover(UiTabsLayout.TabKey(i), on => HoverTab(tab, on)));
+        }
+
+        if (opts.History) _history = new UiTabHistory(_selected);
+        UiTabHistoryRoute.Register(this);
+
+        // HUB1: a window with tabs keeps its height across them (the standard windows' rule), and may open at a least height.
+        if ((KeepsHeight || MinContentHeight > 0f) && panel is UiPanelHandle owner && owner.Enabled && owner.Runtime is IRuntimePanel runtimePanel)
+        {
+            try { Ui.CurrentRuntime().SetHeightRule(runtimePanel, KeepsHeight, MinContentHeight); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: tabs '" + key + "' height rule: " + e.Message); }
         }
 
         Render();
@@ -116,6 +195,9 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
             int next = Clamp(value);
             if (IsDisposed || next == _selected) return;
             _selected = next;
+            // HUB1: a selection the player made (a click, a controller press, Selected) goes on the history and drops its
+            // forward part; a step back or forward through the history moves along it instead.
+            if (!_walking) _history?.Push(next);
             // The handlers run inside the switch's layout batch too: a handler that rewrites a label or shows a control
             // (the sample's status line) would otherwise lay the page out a second time right after the switch's own pass.
             UiLayoutBatch.Begin();
@@ -126,6 +208,51 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
             }
             finally { UiLayoutBatch.End(); }
         }
+    }
+
+    // ---- HUB1: browser-style history ---------------------------------------------------------------------------------
+
+    private readonly UiTabHistory? _history;
+    private bool _walking;
+
+    /// <summary>HUB1: the row keeps a history (<see cref="UiTabsOptions.History"/>).</summary>
+    internal bool HistoryOn => _history != null && !IsDisposed;
+
+    /// <summary>HUB1: the history (tests and readback); null when off.</summary>
+    internal UiTabHistory? History => _history;
+
+    /// <summary>HUB1: the panel the row is on (the back and forward route asks it).</summary>
+    internal IUiPanel HostPanel => Panel;
+
+    /// <summary>HUB1: the previous tab of the history; OnChanged fires as for a click. False at the start.</summary>
+    public bool Back() => Walk(back: true);
+
+    /// <summary>HUB1: the next tab of the history after a <see cref="Back"/>. False at the end.</summary>
+    public bool Forward() => Walk(back: false);
+
+    internal bool HistoryBack() => Walk(back: true);
+
+    internal bool HistoryForward() => Walk(back: false);
+
+    private bool Walk(bool back)
+    {
+        if (_history == null || IsDisposed) return false;
+        int tab = back ? _history.Back() : _history.Forward();
+        if (tab < 0) return false;
+        _walking = true;
+        try { Selected = tab; }
+        finally { _walking = false; }
+        return true;
+    }
+
+    /// <summary>HUB1: the controller's tab triggers on a window: the previous (-1) or next (+1) tab, as a click; false at either end.</summary>
+    internal bool Step(int delta)
+    {
+        if (IsDisposed || delta == 0) return false;
+        int next = Clamp(_selected + Math.Sign(delta));
+        if (next == _selected) return false;
+        Selected = next;
+        return true;
     }
 
     public void SetBadge(int tab, int count) => SetBadge(tab, UiBadge.Text(count), LabelTone.Normal);
@@ -166,7 +293,16 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
                 ["tone"] = LabelTones.Name(_tones[i]),
                 ["content"] = _content[i].Count,
             });
-        return new Dictionary<string, object?> { ["kind"] = "tabs", ["key"] = Key, ["selected"] = _selected, ["tabs"] = tabs };
+        return new Dictionary<string, object?>
+        {
+            ["kind"] = "tabs",
+            ["key"] = Key,
+            ["selected"] = _selected,
+            ["tabs"] = tabs,
+            ["look"] = GameTabs ? "game" : "chips",
+            ["keepHeight"] = KeepsHeight,
+            ["minContentHeight"] = MinContentHeight,
+        };
     }
 
     public void SetTerm(int tab, string term)
@@ -305,7 +441,34 @@ internal static class UiTabsLayout
         (float)Math.Ceiling(UiChipsText.Width(caption ?? "", fontSize) + fontSize * MenuPanelLayout.AverageGlyphEm
             + CellLayout.ButtonPad * .5f + CaptionRight(badge) + (term ? UiTermMarkerArt.Room(fontSize) : 0f));
 
-    internal static List<CellSpec> Cells(IReadOnlyList<string> captions, int selected)
+    /// <summary>HUB1: a game window tab's caption size (the Mods workspace tab strip's, drawn on the same tab art).</summary>
+    internal const float GameTabFontSize = 22f;
+
+    /// <summary>HUB1: the narrowest game tab, so a one-word caption still reads as a tab.</summary>
+    internal const float GameTabMinWidth = 140f;
+
+    /// <summary>HUB1: the pad either side of a game tab's caption, together.</summary>
+    internal const float GameTabPad = 48f;
+
+    /// <summary>HUB1: the most a least content height may ask for.</summary>
+    internal const float MaxMinHeight = 2000f;
+
+    /// <summary>HUB1: whether a row of <paramref name="look"/> on a panel that is (<paramref name="gameWindow"/>) a game window draws game tabs.</summary>
+    internal static bool UsesGameTabs(UiTabsLook look, bool gameWindow) =>
+        look == UiTabsLook.Game || (look == UiTabsLook.Auto && gameWindow);
+
+    /// <summary>HUB1: a least content height clamped to 0..<see cref="MaxMinHeight"/> (NaN and negatives are 0).</summary>
+    internal static float MinHeight(float asked) =>
+        float.IsNaN(asked) || asked <= 0f ? 0f : Math.Min(MaxMinHeight, asked);
+
+    /// <summary>HUB1: a game tab's width: its caption at <see cref="GameTabFontSize"/> and the pads, the badge, the term marker's room.</summary>
+    internal static float GameTabWidth(string caption, string? badge, bool term) =>
+        Math.Max(GameTabMinWidth, (float)Math.Ceiling(UiChipsText.Width(caption ?? "", GameTabFontSize) + GameTabPad
+            + (string.IsNullOrEmpty(badge) ? 0f : BadgeWidth(badge) + BadgeGap) + (term ? UiTermMarkerArt.Room(GameTabFontSize) : 0f)));
+
+    internal static List<CellSpec> Cells(IReadOnlyList<string> captions, int selected) => Cells(captions, selected, false);
+
+    internal static List<CellSpec> Cells(IReadOnlyList<string> captions, int selected, bool gameTabs)
     {
         var cells = new List<CellSpec>(captions.Count * 2);
         for (int i = 0; i < captions.Count; i++)
@@ -313,6 +476,17 @@ internal static class UiTabsLayout
             var chip = InstallModsPane.Chip(TabKey(i), captions[i], i == selected);
             chip.Hover = true;
             float width = ChipWidth(captions[i], "", false);
+            if (gameTabs)
+            {
+                // HUB1: the game's window tab (the full-screen menu's inner tab), its caption centered at the strip's size.
+                chip.Skin = CellSkin.GameTab;
+                chip.FontSizeOverride = GameTabFontSize;
+                chip.Align = CellAlign.Center;
+                // The tab art spans the whole row, as the game's tabs fill their strip.
+                chip.HeightOverride = UnityUiRuntimeMetrics.RowHeight;
+                width = GameTabWidth(captions[i], "", false);
+            }
+
             chip.With(width: CellWidth.Px(width), minWidth: width);
             cells.Add(chip);
             // Inside the chip at its right end, over the chip art; it takes no pointer, so a press on it presses the tab.
@@ -348,7 +522,9 @@ internal static class UiTabsLayout
 
             if (chip != null)
             {
-                float width = ChipWidth(captions[i] ?? "", badge, term, chip.FontSize);
+                float width = chip.Skin == CellSkin.GameTab
+                    ? GameTabWidth(captions[i] ?? "", badge, term)
+                    : ChipWidth(captions[i] ?? "", badge, term, chip.FontSize);
                 chip.With(width: CellWidth.Px(width), minWidth: width);
                 chip.CaptionInsetRight = badge.Length > 0 ? CaptionRight(badge) : 0f;
             }
