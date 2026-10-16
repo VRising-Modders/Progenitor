@@ -56,16 +56,15 @@ internal sealed partial class UnityUiRuntime
         bool _redistribution;
         VanillaPanelKind _kind;
         float _anchorTop;
-        RectTransform? _tabDonorRect;
-        float _captionHeight, _tabHeight;
-        bool _heightFromDonor;
+        RectTransform? _tabDonorRect, _stripRect;
+        VanillaTabStripHeight? _height;
+        float _tabHeight;
         VanillaTabStripPlacement _placement;
         readonly List<(string name, Behaviour mask, RectTransform rect)> _masks = new();
+        readonly List<(string Name, ScreenRect Rect)> _maskRects = new(), _above = new();
         VanillaTabStripCheck _check = new("unchecked", "", 0f);
         int _checkFrame = -1000;
-        bool _checkLogged;
-        string _pendingState = "";
-        Canvas? _ownCanvas;
+        readonly VanillaTabStripLogGate _logGate = new();
 
         internal NativePanelTabs(UnityUiRuntime runtime, VanillaUiSite site, string[] captions, Action<int> changed)
         { _runtime = runtime; _site = site; _captions = captions; _changed = changed; LiveVanillaTabs.Add(this); }
@@ -145,15 +144,14 @@ internal sealed partial class UnityUiRuntime
                 if (view.Inventory != null && view.Inventory.TabButtons != null)
                     foreach (var tab in view.Inventory.TabButtons)
                         if (Alive(tab)) { tabDonor = tab.gameObject; break; }
-                // The donor's height is read again every frame (RefreshTabHeight): a tab read before its
-                // layout ran is zero tall, and a zero-height strip shows only the lower half of each
-                // caption under its own baseline trim (the prison cell window, 1.1.13).
+                // The donor's height is read again until it is usable (RefreshTabHeight). A tab read
+                // before its layout ran is zero tall; the clipped prison cell captions fit a
+                // zero-height strip (inferred from screenshots; confirm with tabHeightSource).
                 _tabDonorRect = tabDonor != null ? tabDonor.GetComponent<RectTransform>() : null;
                 var donorCaption = tabDonor != null ? tabDonor.GetComponentInChildren<TextMeshProUGUI>(true) : null;
-                _captionHeight = donorCaption != null ? donorCaption.fontSize * 1.25f : 0f;
-                float tabHeight = VanillaTabStripLayout.TabHeight(
-                    _tabDonorRect != null ? _tabDonorRect.rect.height : float.NaN, _captionHeight, out _heightFromDonor);
-                _tabHeight = tabHeight;
+                _height = new VanillaTabStripHeight(_tabDonorRect != null ? _tabDonorRect.rect.height : float.NaN,
+                    donorCaption != null ? donorCaption.fontSize * 1.25f : 0f, Time.frameCount);
+                float tabHeight = _tabHeight = _height.Height;
                 stripRect.sizeDelta = new Vector2(stripRect.sizeDelta.x, tabHeight);
                 if (layout != null) { layout.preferredHeight = tabHeight; layout.minHeight = tabHeight; }
                 if (tabDonor != null)
@@ -220,17 +218,18 @@ internal sealed partial class UnityUiRuntime
                     if (child.name.StartsWith("TabGradient") || child.name.StartsWith("TabDivider")) trims.Add(child);
                 }
                 foreach (var trim in trims) trim.SetAsLastSibling();
+                _stripRect = stripRect;
                 CollectMasks();
                 _check = new VanillaTabStripCheck("unchecked", "", 0f);
                 _checkFrame = -1000;
-                _checkLogged = false;
+                _logGate.Reset();
             }
             bool moved = RefreshTabHeight();
             if (!_flow && _root != null && _strip != null) moved |= PlaceStrip();
             foreach (var item in _nativeTabs) item.Hide();
             ApplySelection();
             PlacePanel();
-            if (moved || Time.frameCount - _checkFrame >= 30) SelfCheck();
+            if (VanillaTabStripLayout.CheckDue(moved, Time.frameCount, _checkFrame)) SelfCheck();
         }
 
         /// <summary>
@@ -239,14 +238,13 @@ internal sealed partial class UnityUiRuntime
         /// </summary>
         bool RefreshTabHeight()
         {
-            if (_strip == null) return false;
+            if (_strip == null || _stripRect == null || _height == null) return false;
+            int frame = Time.frameCount;
+            if (!_height.Due(frame)) return false;
             float measured = Alive(_tabDonorRect) ? _tabDonorRect!.rect.height : float.NaN;
-            float height = VanillaTabStripLayout.TabHeight(measured, _captionHeight, out bool fromDonor);
-            _heightFromDonor = fromDonor;
-            if (Math.Abs(height - _tabHeight) < .5f) return false;
-            _tabHeight = height;
-            var stripRect = _strip.GetComponent<RectTransform>();
-            stripRect.sizeDelta = new Vector2(stripRect.sizeDelta.x, height);
+            if (!_height.Read(measured, frame)) return false;
+            float height = _tabHeight = _height.Height;
+            _stripRect.sizeDelta = new Vector2(_stripRect.sizeDelta.x, height);
             var layout = _strip.GetComponent<LayoutElement>();
             if (layout != null) { layout.preferredHeight = height; layout.minHeight = height; }
             foreach (var (go, _) in _buttons)
@@ -276,10 +274,9 @@ internal sealed partial class UnityUiRuntime
             bool moved = Math.Abs(placement.Top - _placement.Top) > .5f || Math.Abs(placement.Height - _placement.Height) > .5f;
             _placement = placement;
             _top = placement.Top;
-            var stripRect = _strip!.GetComponent<RectTransform>();
-            stripRect.anchoredPosition = new Vector2(_root!.rect.center.x, _top);
+            _stripRect!.anchoredPosition = new Vector2(_root!.rect.center.x, _top);
             // Drawn after every sibling of the window body, so no panel of the window covers it.
-            if (_layoutParent != null && _strip.transform.GetSiblingIndex() != _layoutParent.childCount - 1)
+            if (_layoutParent != null && _strip!.transform.GetSiblingIndex() != _layoutParent.childCount - 1)
                 _strip.transform.SetAsLastSibling();
             return moved;
         }
@@ -314,28 +311,27 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>
         /// The runtime self-check (<see cref="VanillaTabStripLayout.Check"/>): is the strip tall enough,
-        /// inside every parent mask, and not under a later sibling or an override-sorted canvas? A
-        /// covered strip gets its own override-sorted canvas above the coverer; anything left is
-        /// logged once per strip. Read back by <c>ui_read panels</c> (<c>tabs</c>).
+        /// inside every parent mask, and not under a later sibling or an override-sorted canvas? It
+        /// only reports (logged once per strip, read back by <c>ui_read panels</c>, <c>tabs</c>); it
+        /// never re-sorts the strip, since a coverer can be a transient popup or list.
         /// </summary>
         void SelfCheck()
         {
             _checkFrame = Time.frameCount;
-            if (_strip == null || _root == null || !_strip.activeInHierarchy) return;
-            var stripRect = _strip.GetComponent<RectTransform>();
-            var strip = ScreenRectOf(stripRect);
-            var masks = new List<(string Name, ScreenRect Rect)>();
+            if (_strip == null || _stripRect == null || _root == null || !_strip.activeInHierarchy) return;
+            var strip = ScreenRectOf(_stripRect);
+            _maskRects.Clear();
             foreach (var (name, mask, rect) in _masks)
-                if (Alive(mask) && mask.isActiveAndEnabled && Alive(rect)) masks.Add((name, ScreenRectOf(rect)));
+                if (Alive(mask) && mask.isActiveAndEnabled && Alive(rect)) _maskRects.Add((name, ScreenRectOf(rect)));
 
-            var above = new List<(string Name, ScreenRect Rect)>();
-            int coverOrder = int.MinValue;
+            _above.Clear();
             if (!_flow && _layoutParent != null)
             {
                 for (int i = _strip.transform.GetSiblingIndex() + 1; i < _layoutParent.childCount; i++)
                 {
                     var sibling = _layoutParent.GetChild(i);
-                    if (Shows(sibling)) above.Add(("sibling " + sibling.name, ScreenRectOf(sibling.GetComponent<RectTransform>())));
+                    var siblingRect = sibling != null ? sibling.GetComponent<RectTransform>() : null;
+                    if (siblingRect != null && Shows(sibling!)) _above.Add(("sibling " + sibling!.name, ScreenRectOf(siblingRect)));
                 }
             }
 
@@ -347,31 +343,17 @@ internal sealed partial class UnityUiRuntime
                 if (stripCanvas != null && canvas.Pointer == stripCanvas.Pointer) continue;
                 if (canvas.transform.IsChildOf(_strip.transform) || _strip.transform.IsChildOf(canvas.transform)) continue;
                 if (canvas.sortingOrder < stripOrder || !Shows(canvas.transform)) continue;
-                var rect = ScreenRectOf(canvas.GetComponent<RectTransform>());
-                if (!VanillaTabStripLayout.Overlaps(strip, rect)) continue;
-                above.Add(("canvas " + canvas.name + " order " + canvas.sortingOrder, rect));
-                coverOrder = Math.Max(coverOrder, canvas.sortingOrder);
+                var canvasRect = canvas.GetComponent<RectTransform>();
+                if (canvasRect == null) continue;
+                _above.Add(("canvas " + canvas.name + " order " + canvas.sortingOrder, ScreenRectOf(canvasRect)));
             }
 
-            float minHeight = Math.Max(1f, VanillaTabStripLayout.MinTabHeight * .5f * CanvasScale(stripRect));
-            var check = VanillaTabStripLayout.Check(strip, masks, above, minHeight);
-            if (check.State == "covered" && coverOrder != int.MinValue && _ownCanvas == null && RaiseStrip(coverOrder + 1))
-            {
-                Plugin.Logger?.LogInfo("Ui: panel tabs on " + _kind + " were under " + check.By + "; drawn above it on their own canvas");
-                check = VanillaTabStripLayout.Check(ScreenRectOf(stripRect), masks, Array.Empty<(string, ScreenRect)>(), minHeight);
-            }
-
-            _check = check;
-            // Log a state only when two checks in a row agree: the first frames of a window are
-            // laid out by the game after the strip is built.
-            string state = check.State + "|" + check.By;
-            bool repeated = state == _pendingState;
-            _pendingState = check.Ok ? "" : state;
-            if (check.Ok || _checkLogged || !repeated) return;
-            _checkLogged = true;
+            float minHeight = Math.Max(1f, VanillaTabStripLayout.MinTabHeight * .5f * CanvasScale(_stripRect));
+            var check = _check = VanillaTabStripLayout.Check(strip, _maskRects, _above, minHeight);
+            if (!_logGate.ShouldLog(check)) return;
             Plugin.Logger?.LogWarning("Ui: panel tabs on " + _kind + " " + check.State + " (" + check.By + "), visible "
                 + Math.Round(check.Visible * 100) + "%, strip " + RectText(strip) + ", tab height " + Math.Round(_tabHeight, 1)
-                + (_heightFromDonor ? " (donor)" : " (fallback)"));
+                + (_height != null && _height.FromDonor ? " (donor)" : " (fallback)"));
         }
 
         /// <summary>The strip's canvas scale (screen pixels per canvas unit); 1 when unreadable.</summary>
@@ -396,23 +378,6 @@ internal sealed partial class UnityUiRuntime
             return true;
         }
 
-        /// <summary>Give the strip its own canvas, sorted at <paramref name="order"/>, with a raycaster so its tabs still take clicks.</summary>
-        bool RaiseStrip(int order)
-        {
-            if (_strip == null) return false;
-            var canvas = _strip.GetComponent<Canvas>() ?? TryAdd<Canvas>(_strip);
-            if (canvas == null) return false;
-            try
-            {
-                canvas.overrideSorting = true;
-                canvas.sortingOrder = order;
-            }
-            catch { return false; }
-            if (_strip.GetComponent<GraphicRaycaster>() == null) TryAdd<GraphicRaycaster>(_strip);
-            _ownCanvas = canvas;
-            return true;
-        }
-
         static string RectText(ScreenRect r) => !r.IsKnown ? "unknown"
             : Math.Round(r.MinX) + "," + Math.Round(r.MinY) + " " + Math.Round(r.MaxX - r.MinX) + "x" + Math.Round(r.MaxY - r.MinY);
 
@@ -427,9 +392,9 @@ internal sealed partial class UnityUiRuntime
                 ["captions"] = _captions.Length,
                 ["selected"] = _selected,
                 ["layout"] = _flow ? "flow" : "placed",
-                ["rect"] = shown ? RectDict(ScreenRectOf(_strip!.GetComponent<RectTransform>())) : null,
+                ["rect"] = shown && _stripRect != null ? RectDict(ScreenRectOf(_stripRect)) : null,
                 ["tabHeight"] = Math.Round(_tabHeight, 1),
-                ["tabHeightSource"] = _heightFromDonor ? "donor" : "fallback",
+                ["tabHeightSource"] = _height != null && _height.FromDonor ? "donor" : "fallback",
                 ["top"] = _flow ? null : Math.Round(_placement.Top, 1),
                 ["panelTop"] = _flow ? null : Math.Round(_placement.PanelTop, 1),
                 ["clamped"] = !_flow && _placement.Clamped,
@@ -437,7 +402,6 @@ internal sealed partial class UnityUiRuntime
                 ["clip"] = _check.State,
                 ["clipBy"] = _check.By,
                 ["visible"] = Math.Round(_check.Visible, 3),
-                ["ownCanvas"] = Alive(_ownCanvas) ? _ownCanvas!.sortingOrder : null,
             };
         }
 
@@ -543,11 +507,11 @@ internal sealed partial class UnityUiRuntime
 
         void PlacePanel()
         {
-            if (_panel == null || _root == null || !_panel.Alive) return;
+            if (_panel == null || _root == null || _stripRect == null || !_panel.Alive) return;
             float height = Math.Min(680, _root.rect.height - 220);
             // Keep custom content clear of the lower HUD. Measure after native layout settles,
             // converting screen clearance back to the tab row's canvas units.
-            var stripRect = _strip!.GetComponent<RectTransform>();
+            var stripRect = _stripRect;
             stripRect.GetWorldCorners(_corners);
             float scale = Math.Abs(_corners[1].y - _corners[0].y) / Math.Max(1f, stripRect.rect.height);
             if (scale > .01f)
@@ -593,8 +557,8 @@ internal sealed partial class UnityUiRuntime
             _buttons.Clear();
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
-            _ownCanvas = null; _tabDonorRect = null; _bonusAnchor = null; _masks.Clear();
-            _placement = default; _tabHeight = 0f; _pendingState = "";
+            _tabDonorRect = null; _stripRect = null; _height = null; _bonusAnchor = null; _masks.Clear();
+            _placement = default; _tabHeight = 0f; _logGate.Reset();
         }
 
         public void Dispose()

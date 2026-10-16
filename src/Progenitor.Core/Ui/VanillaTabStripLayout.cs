@@ -76,30 +76,45 @@ internal static class VanillaTabStripLayout
     /// <summary>The tallest tab accepted from the donor (a stretched or mis-read rect is rejected).</summary>
     internal const float MaxTabHeight = 96f;
 
-    /// <summary>The tab height used while the donor has no usable height (the character window's row is about this tall at the 1080 reference).</summary>
-    internal const float FallbackTabHeight = 40f;
+    /// <summary>The tab height used while the donor has no usable height (the strip's no-donor default since it was added).</summary>
+    internal const float FallbackTabHeight = 49f;
+
+    /// <summary>Frames between donor height reads once the height came from the donor.</summary>
+    internal const int HeightReadInterval = 30;
+
+    /// <summary>Frames between self-checks while the strip stays put.</summary>
+    internal const int CheckInterval = 30;
+
+    /// <summary>The shortest gap between two self-checks triggered by the strip moving.</summary>
+    internal const int MovedCheckInterval = 5;
 
     /// <summary>A rect edge within this many pixels of a mask edge still counts as inside.</summary>
     internal const float Tolerance = 1f;
 
     /// <summary>
-    /// The tab height to draw: the donor's <paramref name="measured"/> height when it is finite,
-    /// at least <see cref="MinTabHeight"/>, tall enough for the caption and at most
-    /// <see cref="MaxTabHeight"/>; otherwise a fallback that fits the caption.
+    /// The tab height to draw: the donor's <paramref name="measured"/> height when it is finite and
+    /// within [<see cref="MinTabHeight"/>, <see cref="MaxTabHeight"/>]; otherwise
+    /// <see cref="FallbackTabHeight"/>, raised to fit the caption.
     /// </summary>
     internal static float TabHeight(float measured, float captionHeight, out bool fromDonor)
     {
-        if (!Finite(captionHeight) || captionHeight < 0f) captionHeight = 0f;
-        float floor = Math.Max(MinTabHeight, captionHeight + 2f * CaptionPadding);
-        if (Finite(measured) && measured >= floor && measured <= MaxTabHeight)
+        if (Finite(measured) && measured >= MinTabHeight && measured <= MaxTabHeight)
         {
             fromDonor = true;
             return measured;
         }
 
+        if (!Finite(captionHeight) || captionHeight < 0f) captionHeight = 0f;
         fromDonor = false;
-        return Math.Min(MaxTabHeight, Math.Max(FallbackTabHeight, floor));
+        return Math.Min(MaxTabHeight, Math.Max(FallbackTabHeight, captionHeight + 2f * CaptionPadding));
     }
+
+    /// <summary>
+    /// Whether a self-check is due at <paramref name="frame"/>: every <see cref="CheckInterval"/>
+    /// frames, or after <see cref="MovedCheckInterval"/> frames when the strip moved.
+    /// </summary>
+    internal static bool CheckDue(bool moved, int frame, int lastCheck)
+        => frame - lastCheck >= (moved ? MovedCheckInterval : CheckInterval);
 
     /// <summary>
     /// Place the strip in the window root's local units (y up). The preferred top is
@@ -176,4 +191,67 @@ internal static class VanillaTabStripLayout
     }
 
     private static bool Finite(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
+}
+
+/// <summary>
+/// The strip's tab height over time: read from the donor every frame while it is a fallback (a
+/// donor read before its layout ran is zero tall), then every <see cref="VanillaTabStripLayout.HeightReadInterval"/> frames.
+/// </summary>
+internal sealed class VanillaTabStripHeight
+{
+    private int _lastRead = int.MinValue / 2;
+
+    internal VanillaTabStripHeight(float measured, float captionHeight, int frame)
+    {
+        CaptionHeight = captionHeight;
+        Height = VanillaTabStripLayout.TabHeight(measured, captionHeight, out bool fromDonor);
+        FromDonor = fromDonor;
+        _lastRead = frame;
+    }
+
+    internal float Height { get; private set; }
+
+    internal bool FromDonor { get; private set; }
+
+    internal float CaptionHeight { get; }
+
+    /// <summary>A read is due: always while on the fallback, otherwise at the read interval.</summary>
+    internal bool Due(int frame) => !FromDonor || frame - _lastRead >= VanillaTabStripLayout.HeightReadInterval;
+
+    /// <summary>Take a donor reading; true when the height to draw changed by half a unit or more.</summary>
+    internal bool Read(float measured, int frame)
+    {
+        _lastRead = frame;
+        float height = VanillaTabStripLayout.TabHeight(measured, CaptionHeight, out bool fromDonor);
+        FromDonor = fromDonor;
+        if (Math.Abs(height - Height) < .5f) return false;
+        Height = height;
+        return true;
+    }
+}
+
+/// <summary>
+/// Logs a strip's failed self-check once: only when two checks in a row agree (the game lays a
+/// window out over its first frames), and only the first such state per strip.
+/// </summary>
+internal sealed class VanillaTabStripLogGate
+{
+    private string _pending = "";
+    private bool _logged;
+
+    internal bool ShouldLog(VanillaTabStripCheck check)
+    {
+        string state = check.State + "|" + check.By;
+        bool repeated = state == _pending;
+        _pending = check.Ok ? "" : state;
+        if (check.Ok || _logged || !repeated) return false;
+        _logged = true;
+        return true;
+    }
+
+    internal void Reset()
+    {
+        _pending = "";
+        _logged = false;
+    }
 }

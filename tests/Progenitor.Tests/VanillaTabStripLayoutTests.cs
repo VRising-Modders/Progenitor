@@ -18,7 +18,7 @@ public sealed class VanillaTabStripLayoutTests
 
     [Theory]
     [InlineData(0f)]        // the donor tab read before its layout ran (the prison cell window)
-    [InlineData(13f)]       // shorter than the caption
+    [InlineData(13f)]       // shorter than MinTabHeight
     [InlineData(float.NaN)] // no donor
     [InlineData(400f)]      // a stretched rect
     public void UnusableDonorHeightFallsBackToOneThatFitsTheCaption(float measured)
@@ -28,6 +28,82 @@ public sealed class VanillaTabStripLayoutTests
         Assert.True(h >= 22.5f + 2 * VanillaTabStripLayout.CaptionPadding);
         Assert.True(h >= VanillaTabStripLayout.FallbackTabHeight);
         Assert.True(h <= VanillaTabStripLayout.MaxTabHeight);
+    }
+
+    [Fact]
+    public void ADonorHeightInRangeIsAcceptedEvenUnderTheCaptionFloor()
+    {
+        // The caption floor applies to the fallback only: a real 26-unit tab with a 20-unit caption is kept.
+        Assert.Equal(26f, VanillaTabStripLayout.TabHeight(26f, 20f, out bool fromDonor));
+        Assert.True(fromDonor);
+    }
+
+    [Fact]
+    public void FallbackIsTheOldNoDonorDefault()
+    {
+        Assert.Equal(49f, VanillaTabStripLayout.TabHeight(float.NaN, 0f, out _));
+        Assert.Equal(49f, VanillaTabStripLayout.TabHeight(0f, 22.5f, out _));
+    }
+
+    [Fact]
+    public void HeightMovesFromFallbackToTheDonorOnceItIsLaidOut()
+    {
+        // Frame 100: the donor tab is read before its layout ran (zero tall).
+        var height = new VanillaTabStripHeight(0f, 22.5f, 100);
+        Assert.False(height.FromDonor);
+        Assert.Equal(49f, height.Height);
+
+        // While on the fallback the donor is read every frame.
+        Assert.True(height.Due(101));
+        Assert.False(height.Read(0f, 101));
+        Assert.True(height.Due(102));
+
+        // Frame 102: the game laid the tab out at 38 units; the strip resizes once.
+        Assert.True(height.Read(38f, 102));
+        Assert.True(height.FromDonor);
+        Assert.Equal(38f, height.Height);
+
+        // From the donor, reads are throttled.
+        Assert.False(height.Due(103));
+        Assert.False(height.Due(102 + VanillaTabStripLayout.HeightReadInterval - 1));
+        Assert.True(height.Due(102 + VanillaTabStripLayout.HeightReadInterval));
+        Assert.False(height.Read(38.2f, 132));
+
+        // A later collapse to zero returns to the fallback and to per-frame reads.
+        Assert.True(height.Read(0f, 162));
+        Assert.False(height.FromDonor);
+        Assert.True(height.Due(163));
+    }
+
+    [Fact]
+    public void ChecksAreThrottledAndMovedChecksRateLimited()
+    {
+        Assert.False(VanillaTabStripLayout.CheckDue(false, 129, 100));
+        Assert.True(VanillaTabStripLayout.CheckDue(false, 130, 100));
+        Assert.False(VanillaTabStripLayout.CheckDue(true, 104, 100));
+        Assert.True(VanillaTabStripLayout.CheckDue(true, 105, 100));
+    }
+
+    [Fact]
+    public void LogGateLogsOnlyWhenTwoChecksInARowAgreeAndOnlyOnce()
+    {
+        var gate = new VanillaTabStripLogGate();
+        var ok = new VanillaTabStripCheck("ok", "", 1f);
+        var covered = new VanillaTabStripCheck("covered", "canvas list order 5040", 1f);
+        var clipped = new VanillaTabStripCheck("clipped", "RectMask2D body", .5f);
+
+        Assert.False(gate.ShouldLog(covered)); // first sighting: a window still laying out
+        Assert.False(gate.ShouldLog(ok));      // gone again: a transient cover is never logged
+        Assert.False(gate.ShouldLog(covered));
+        Assert.False(gate.ShouldLog(clipped)); // a different state does not count as a repeat
+        Assert.True(gate.ShouldLog(clipped));  // two in a row
+        Assert.False(gate.ShouldLog(clipped)); // once per strip
+        Assert.False(gate.ShouldLog(covered));
+        Assert.False(gate.ShouldLog(covered));
+
+        gate.Reset();                           // a new strip
+        Assert.False(gate.ShouldLog(covered));
+        Assert.True(gate.ShouldLog(covered));
     }
 
     [Fact]
