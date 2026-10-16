@@ -474,43 +474,42 @@ ctx.Settings.Page(page => page
           html: `{{code}}<ul><li><code>RegisterOpener</code>: opens or closes your UI; works at the title screen too.</li><li><code>Register</code>: acts in the world.</li><li>Both are [[keybind|remappable]] in the Keybinds tab.</li></ul>`,
           callout: { title: "Never read keys yourself", warn: true, text: "No <code>UnityEngine.Input</code>, <code>Keyboard.current</code> or gamepad polling." } },
         { id: "show-window", title: "Show a window",
-          code: { lang: "c#", text: `using UiApi = Progenitor.Ui.Ui;
-
-var panel = UiApi.Panel("My Mod", ctx.Owner, ctx.Guid);
-if (!panel.Enabled) return;   // server, or UI not up yet
-panel.GameWindow();
-panel.Heading("Status");
-panel.Fact("Version", ctx.Version);
-panel.Button("Close").OnClick(() => panel.Dispose());
-panel.Show();` },
-          html: `{{code}}<p>[[game-window|<code>GameWindow()</code>]] gives the game's frame and grid; you never size or place it. Close it on unload, or <code>UiApi.RemoveAll(ctx.Owner)</code>.</p>` },
+          code: { lang: "c#", text: `var window = ctx.Windows.Create(UiWindowPreset.Basic, "My Mod");
+var panel = window.Panel;
+panel.Text("Status", UiTextStyle.Section);
+panel.Text("Version", ctx.Version, UiTextStyle.Number);
+panel.Button("Close").OnClick(window.Hide);
+window.Show();` },
+          html: `{{code}}<ul><li>Pick a [[window-preset|preset]]: <code>Basic</code> for a small tool, <code>Header</code> for one thing the player works on (toolbar, tabs), <code>Tabbed</code> for a large screen.</li><li>The window draws its frame, centered title and version stamp, and closes on unload.</li><li>Every line takes a [[text-style|text style]].</li></ul>` },
         { id: "where-ui-lives", title: "Windows and pages",
           html: `<table><thead><tr><th class="label">Need</th><th class="label">Use</th></tr></thead><tbody>
 <tr><td>Options set once</td><td><code>ctx.Settings.Page(...)</code></td></tr>
 <tr><td>A screen of its own</td><td><code>ctx.Menu.Register(name, description).Page(title, ...)</code></td></tr>
-<tr><td>A tool during play</td><td><code>Ui.Panel</code> + <code>GameWindow()</code></td></tr>
+<tr><td>A window during play</td><td>[[window-preset|<code>ctx.Windows.Create</code>]]: <code>Basic</code>, <code>Header</code> or <code>Tabbed</code></td></tr>
 <tr><td>Too much for one page</td><td>[[tabs|<code>Tabs</code>]]</td></tr>
 <tr><td>A question</td><td>[[dialog|<code>ctx.Dialogs</code>]]: <code>Confirm</code>, <code>Notice</code>, <code>Choose</code>, <code>Prompt</code></td></tr></tbody></table>
-<p>Lay out with <code>Heading</code>, <code>Note</code>, <code>Divider</code>, <code>Fact</code>, <code>Info</code> and <code>BeginInline()</code>/<code>EndInline()</code>. Window presets and a samples gallery are coming.</p>`,
-          callout: { title: "Fonts, colors and alignment", warn: true, text: "This is where AI-built UIs usually go wrong. Use the kit's named <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md#text-styles\">text styles</a>, never raw colors or sizes. Numbers right, text left, button captions and titles centered. Check every label before calling a window done." } },
+<p>Text: <code>panel.Text(text, UiTextStyle.Body)</code> and the other styles. Layout: <code>Divider</code>, <code>Fact</code>, <code>Info</code>, <code>BeginInline()</code>/<code>EndInline()</code>. See each one live in the [[gallery|Gallery]].</p>`,
+          callout: { title: "Fonts, colors and alignment", warn: true, text: "This is where AI-built UIs usually go wrong. Give every line a named <a href=\"https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md#text-styles\">text style</a>; never set a color, size, font or alignment. Numbers right, text left, button captions and titles centered. Check every label in the game before calling a window done." } },
         { id: "controls", title: "The controls, by category",
           html: `<table><thead><tr><th class="label">Category</th><th class="label">Controls</th></tr></thead><tbody>
+<tr><td>Layout and windows</td><td>[[window-preset|<code>ctx.Windows.Create</code>]], [[text-style|<code>panel.Text</code>]], <code>Divider</code>, <code>BeginInline</code>, [[tabs|<code>Tabs</code>]]</td></tr>
 <tr><td>Input</td><td><code>Button</code>, <code>ConfirmButton</code>, <code>Toggle</code>, [[dropdown-radio|<code>Dropdown</code>, <code>Radio</code>]], <code>MultiSelect</code>, [[slider|<code>Slider</code>, <code>SliderField</code>, <code>Number</code>]], <code>Input</code>, <code>TextArea</code>, <code>ColorField</code>, <code>DateTimeField</code>, [[key-field|<code>KeyField</code>]], <code>CodeArea</code></td></tr>
 <tr><td>Lists and data</td><td>[[ordered-list|<code>OrderedList</code>]], [[picker|<code>Picker</code>]], [[data-table|<code>DataTable</code>]], [[master-detail|<code>MasterDetail</code>]], [[chips|<code>Chips</code>]]</td></tr>
 <tr><td>Feedback</td><td>[[tooltip|<code>Tooltip</code>]], [[term-tooltip|<code>Term</code>]], [[tip-card|<code>ctx.Hud.Tip</code>]], <code>ctx.Dialogs</code>, <code>ctx.Hud.Notify</code>, <code>Label(text, tone)</code></td></tr>
 <tr><td>HUD and world</td><td>[[locate|<code>ctx.Hud.Locate</code>]], [[pick-in-world|<code>ctx.Hud.PickInWorld</code>]]</td></tr>
 <tr><td>Game panels</td><td>[[vanilla-attach|<code>Ui.AttachToVanilla</code>]]</td></tr></tbody></table>
-<p>Catalog: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">docs/ui-controls.md</a>. In game: <code>samples/Progenitor.ControlsSample</code>. Choosing: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">UI style guide</a>.</p>` },
+<p>Catalog, with each control's text style: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">docs/ui-controls.md</a>. In game: the controls sample's [[gallery|Gallery]]. Choosing: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">UI style guide</a>.</p>` },
         { id: "messages", title: "Messages to players",
-          html: `<p>Format: <code>&lt;Mod Name&gt;: &lt;message&gt;</code>, one sentence. Client [[notice|notice]]: <code>ctx.Hud.Notify(text, detail, kind)</code>. Server chat: <code>ctx.Chat.SendTo(user, text)</code>.</p>
+          html: `<p>Write the message alone, one sentence: the [[message-prefix|prefix]] makes it <code>&lt;Mod Name&gt;: &lt;message&gt;</code>. Client [[notice|notice]]: <code>ctx.Hud.Notify(text, detail, kind)</code>. Server chat: <code>ctx.Chat.SendTo(user, text)</code>. Command reply: <code>Reply(text)</code>.</p>
 <div class="grid two"><div><b>Info</b>Something happened (default).</div><div class="ok"><b>Success</b>An action finished.</div><div class="pend"><b>Warning</b>Worth a look.</div><div class="bad"><b>Error</b>Something failed.</div></div>`,
           callout: { title: "Player must act?", text: "Use <code>ctx.Dialogs</code>. <code>Notify</code> is tested, not yet verified live." } },
         { id: "mods-page", title: "Your Mods page",
           html: `<p>About text, first found wins:</p><ol><li>the installed Thunderstore package's README;</li><li>an embedded <code>README.md</code>;</li><li>[[mod-about|<code>[ModAbout("...")]</code>]];</li><li>the <code>ctx.Menu.Register</code> description.</li></ol>
 <p>Version: from <code>[BepInPlugin]</code>, <code>1.2.0</code> form, same as <code>manifest.json</code>. Example: <code>samples/Progenitor.AboutExample</code>.</p>` },
         { id: "help-page", title: "Your help page",
-          html: `<p>Give players a help page like this one: copy <code>templates/help/index.html</code> into your mod as <code>help/index.html</code> and edit its content block. See <a href="https://github.com/VRising-Modders/Progenitor/blob/main/templates/help/README.md">templates/help/README.md</a>.</p>`,
-          callout: { title: "Coming soon", text: "A Help button on your mod's settings page that opens it." } },
+          html: `<p>Give players a help page like this one: copy <code>templates/help/index.html</code> into your mod as <code>help/index.html</code> and edit its content block (<a href="https://github.com/VRising-Modders/Progenitor/blob/main/templates/help/README.md">how</a>). The starter template has one.</p>{{code}}<p>Your Mods page then shows a <strong>Help</strong> button that opens it (<a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/mod-settings.md#help-button">Help button</a>).</p>`,
+          code: { lang: "xml", text: `<EmbeddedResource Include="help\\**"
+    LogicalName="help/%(RecursiveDir)%(Filename)%(Extension)" />` } },
         { id: "ai-assistant", title: "Using an AI assistant",
           html: `<p>Start the conversation with:</p>{{code}}<ul><li>Guide: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/PROGENITOR_GUIDE.md">PROGENITOR_GUIDE.md</a>. Deeper: <code>docs/modules.md</code>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/knowledge/README.md">knowledge notes</a>.</li>
 <li>The [[dev-bridge|dev bridge]] lets it build, reload and inspect your mod in a test game.</li></ul>`,
@@ -535,7 +534,7 @@ panel.Show();` },
     { id: "developers/windows", role: "developers", title: "Windows and controls", pages: [
       { id: "overview", title: "Windows and controls", soon: true,
         html: `<ol class="outline"><li>Layout and windows: settings page, Mods pages, game windows, tabs, presets</li><li>Input: buttons, toggles, dropdowns, radios, sliders, fields, key capture</li><li>Lists and data: ordered list, picker, data table, master-detail, chips</li><li>Feedback: tooltips, term tooltips, tip cards, dialogs, notices</li><li>HUD and world: Locate, pick in world; game-panel attachments</li></ol>
-<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">ui-controls.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">ui-style.md</a>.</p>` } ] },
+<p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">ui-controls.md</a> and the [[gallery|Gallery]], <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">ui-style.md</a>.</p>` } ] },
     { id: "developers/networking", role: "developers", title: "Networking", pages: [
       { id: "overview", title: "Networking", soon: true,
         html: `<ol class="outline"><li>Server and client parts: [[network-compatibility|<code>[NetworkCompatibility]</code>]], [[counterpart|<code>[Counterpart]</code>]]</li><li>[[requests|<code>ctx.Requests</code>]]: request and reply</li><li>Permission checks on the server</li><li><code>ctx.Subscriptions</code>: live updates</li><li>Working across mod versions</li></ol>
@@ -592,8 +591,12 @@ panel.Show();` },
     { id: "mod-about", term: "ModAbout", def: "An attribute holding the Markdown your Mods page shows under About when there is no README." },
     { id: "mods-page", term: "Mods page", def: "A mod's page in the in-game Mods menu: status bar, header, About text, settings, keybinds and custom pages." },
     { id: "workspace", term: "Workspace", def: "The in-game Mods menu screen (title screen or Escape menu) with the mod list and the Install, Keybinds and Preferences tabs." },
-    { id: "panel", term: "Panel / window", def: "A floating window made with <code>Ui.Panel(...)</code> that the framework sizes and places." },
-    { id: "game-window", term: "GameWindow", def: "<code>panel.GameWindow()</code>: the game's popup frame with controls on the Mods-page grid; call it before adding controls." },
+    { id: "window-preset", term: "Window preset", def: "<code>ctx.Windows.Create(UiWindowPreset.Basic | Header | Tabbed, title)</code>: a standard window with the game's frame, a centered title and a version stamp." },
+    { id: "text-style", term: "Text style", def: "<code>panel.Text(text, UiTextStyle.X)</code>: Title, Section, Body, Muted, Number, Warning, Error or Success; it fixes the font, size, color and alignment." },
+    { id: "gallery", term: "Gallery", def: "A page of the controls sample (Ctrl+F7, then Gallery) that shows every control, window preset and text style live." },
+    { id: "message-prefix", term: "Message prefix", def: "<code>&lt;Mod Name&gt;: </code>, added by Progenitor in front of notices, chat messages and command replies; <code>prefix: false</code> turns it off." },
+    { id: "panel", term: "Panel", def: "A floating window made with <code>Ui.Panel(...)</code> that the framework sizes and places; use a window preset unless none fits." },
+    { id: "game-window", term: "GameWindow", def: "<code>panel.GameWindow()</code>: the game's popup frame for a plain panel, when no window preset fits; call it before adding controls." },
     { id: "widget", term: "Widget", def: "A composed UI kit control such as <code>Tabs</code>, <code>DataTable</code>, <code>Picker</code>, <code>OrderedList</code>, <code>MasterDetail</code> or <code>Chips</code>." },
     { id: "tabs", term: "Tabs", def: "Two to five short captions that switch groups of controls: <code>panel.Tabs(key, captions)</code>." },
     { id: "dropdown-radio", term: "Dropdown / Radio", def: "Pick one option: a radio shows two to four short ones together, a dropdown holds many or long ones." },

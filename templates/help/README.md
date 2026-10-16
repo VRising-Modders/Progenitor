@@ -45,4 +45,4 @@ One idea per page: a title and about 60 words, or three to five bullets. At most
 
 ## For Progenitor maintainers
 
-This file holds the shared renderer. After changing anything outside its content block, run `node tools/help-guide/sync.mjs` to copy it into `docs/guide/progenitor-guide.html`; `--check` fails when the two differ or when either has a relative link, and CI runs it.
+This file holds the shared renderer. After changing anything outside its content block, run `node tools/help-guide/sync.mjs` to copy it into `docs/guide/progenitor-guide.html` and the mod template's `templates/progenitor-mod/help/index.html`; `--check` fails when the two differ or when either has a relative link, and CI runs it.

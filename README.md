@@ -4,6 +4,8 @@ An AI-first modding framework for [V Rising](https://playvrising.com/), built as
 
 > **Status: pre-release and experimental.** There is no published release yet. APIs can change between commits, and only the features marked *verified live* in [`docs/api.md`](docs/api.md) have been observed working in the game. Read the [roadmap](docs/roadmap.md) for what is done and what is planned.
 
+**New here? Open [`docs/guide/progenitor-guide.html`](docs/guide/progenitor-guide.html)** in a browser: a short, interactive Help Guide for players, server admins and mod developers, with a glossary. It works offline from disk. Mods can ship a help page in the same look from [`templates/help`](templates/help/README.md).
+
 ## What it does
 
 For players and server operators:
@@ -43,8 +45,6 @@ The bundle holds BepInEx's log, the game's `Player.log`, a list of your mods and
 A world save records a mod's prefab GUID like a vanilla one, so a save written while a content mod was loaded normally cannot be loaded once that mod is removed, and the next autosave overwrites the good save. Progenitor's Bootstrap guards against that: on load it drops root entities whose prefab the current game cannot resolve, within a cap (`SaveSafety.MaxDropEntities` 5000, `MaxDropPercent` 0.5) that falls back to the vanilla failure rather than deleting a world. The switches are under `[SaveSafety]` in `BepInEx/config/progenitor.cfg`; `FailLoadInstead` restores the vanilla behavior.
 
 ## Quick start (mod authors)
-
-**New here? Open [`docs/guide/progenitor-guide.html`](docs/guide/progenitor-guide.html)** in a browser: a short, interactive Help Guide for players, server admins and mod developers, with a glossary. It works offline from disk. Mods can ship a help page in the same look from [`templates/help`](templates/help/README.md).
 
 1. Read the [tutorial](docs/tutorial.md): a progressive guide from a first item and command to keybinds, UI, units, patches and the hot-reload loop.
 2. Start from the [minimal reload example](samples/Progenitor.ReloadExample/README.md), then the larger [`samples/Progenitor.Sample`](samples/Progenitor.Sample).

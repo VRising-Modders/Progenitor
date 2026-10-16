@@ -1,10 +1,10 @@
 // Copies the shared help-page renderer (style, layout, script) from templates/help/index.html into
 // other help pages, keeping each page's own content block (HELP-CONTENT START ... HELP-CONTENT END).
 //
-//   node tools/help-guide/sync.mjs           update docs/guide/progenitor-guide.html
+//   node tools/help-guide/sync.mjs           update docs/guide/progenitor-guide.html and the mod template's help page
 //   node tools/help-guide/sync.mjs --check   exit 1 when it is out of date
 //   node tools/help-guide/sync.mjs <file>... update these pages instead
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -22,7 +22,12 @@ function split(text, file) {
 const args = process.argv.slice(2);
 const check = args.includes("--check");
 const targets = args.filter((a) => a !== "--check");
-if (targets.length === 0) targets.push(join(root, "docs", "guide", "progenitor-guide.html"));
+if (targets.length === 0) {
+  targets.push(join(root, "docs", "guide", "progenitor-guide.html"));
+  // The dotnet new template's help page (templates/progenitor-mod), when the repository has it.
+  const modHelp = join(root, "templates", "progenitor-mod", "help", "index.html");
+  if (existsSync(modHelp)) targets.push(modHelp);
+}
 
 const templatePath = join(root, "templates", "help", "index.html");
 const template = split(readFileSync(templatePath, "utf8"), templatePath);
