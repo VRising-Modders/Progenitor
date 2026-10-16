@@ -93,7 +93,9 @@ internal static class ModPageSpacing
 /// MODPAGE2: the description column beside the mod page's details grid. A details row describes itself while the pointer
 /// is on it, the Updates dropdown's options describe themselves while hovered (OPTIONHOVER1), and the column falls back to
 /// the page's own line (or the settings view's, when the page has settings). One per drawn page; the previous page's hover
-/// subscriptions are released when the next one is drawn.
+/// subscriptions are released when the next one is drawn, and the page drawn last is let go when the page itself is
+/// dropped (a workspace close, a switch away) or its plugin unloads, so its settings view (the plugin's keybind rows and
+/// callbacks) cannot keep an unloaded plugin's load context alive.
 /// </summary>
 internal sealed class ModPageDetails
 {
@@ -104,11 +106,15 @@ internal sealed class ModPageDetails
     private readonly string _heading;
     private readonly List<IDisposable> _leases = new();
 
-    private ModPageDetails(IUiPanel panel, string heading)
+    private ModPageDetails(IUiPanel panel, string heading, string pluginId)
     {
         _panel = panel;
         _heading = heading ?? "";
+        PluginId = pluginId ?? "";
     }
+
+    /// <summary>The plugin whose page this is (an id only, so the unload sweep can match it).</summary>
+    internal string PluginId { get; }
 
     /// <summary>The page drawn last (its rows' hover writes the column).</summary>
     internal static ModPageDetails? Active => _active;
@@ -119,14 +125,30 @@ internal sealed class ModPageDetails
     /// <summary>What the column says now (heading, body), for the readback.</summary>
     internal (string Heading, string Body) Shown { get; private set; }
 
-    internal static ModPageDetails Begin(IUiPanel panel, string heading)
+    internal static ModPageDetails Begin(IUiPanel panel, string heading, string pluginId = "")
+    {
+        ReleaseActive();
+        var details = new ModPageDetails(panel, heading, pluginId);
+        _active = details;
+        return details;
+    }
+
+    /// <summary>Let go of the page drawn last: its hover subscriptions and its settings view. Idempotent.</summary>
+    internal static void ReleaseActive()
     {
         var old = _active;
         _active = null;
         old?.Release();
-        var details = new ModPageDetails(panel, heading);
-        _active = details;
-        return details;
+    }
+
+    /// <summary>The unload sweep: let go of the page drawn last when it is <paramref name="pluginId"/>'s. True when it was.</summary>
+    internal static bool ReleaseFor(string pluginId)
+    {
+        var active = _active;
+        if (active == null || string.IsNullOrEmpty(pluginId)
+            || !string.Equals(active.PluginId, pluginId, StringComparison.OrdinalIgnoreCase)) return false;
+        ReleaseActive();
+        return true;
     }
 
     internal void Release()
@@ -138,6 +160,8 @@ internal sealed class ModPageDetails
         }
 
         _leases.Clear();
+        // The view's rows hold the plugin's keybind entries and its server-part callback.
+        View = null;
     }
 
     /// <summary>The column at rest: the settings view's own description, else the page's line.</summary>
@@ -497,7 +521,7 @@ internal sealed partial class ModPagePane
     private void BuildDetails(IUiPanel panel, ModPageActions actions)
     {
         var line = Framework;
-        Details = ModPageDetails.Begin(panel, _model.Name);
+        Details = ModPageDetails.Begin(panel, _model.Name, _model.PluginId);
         panel.SettingsDescriptionMode(true);
         panel.SettingsGrid(true);
         try
