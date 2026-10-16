@@ -30,4 +30,4 @@ Copy `ProgenitorMod/bin/Debug/net6.0/ProgenitorMod.dll` to `BepInEx/progenitor-r
 
 ## Publish
 
-Bump `<Version>` in `ProgenitorMod.csproj`, `thunderstore/manifest.json` and `Peers` together, add a `CHANGELOG.md` section, then follow the Progenitor repository's [publishing guide](https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md) and run its `tools/publish-check.ps1`.
+Bump the version in `<Version>` in `ProgenitorMod.csproj`, `thunderstore/manifest.json` and the help page (`version:` in `help/index.html`) together; a test fails when the help page and `<Version>` differ. Change `Peers` only when wire compatibility changes (a removed or retyped field: a new major range). Add a `CHANGELOG.md` section, then follow the Progenitor repository's [publishing guide](https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md) and run its `tools/publish-check.ps1`.

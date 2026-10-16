@@ -55,7 +55,7 @@ internal static class ModRules
         RequestStatus.Refused => "The server said no: " + (string.IsNullOrWhiteSpace(reason) ? "no reason given" : reason.Trim()) + ".",
         RequestStatus.NotSent or RequestStatus.NoHandler => "This server does not run the server part of this mod.",
         RequestStatus.Disconnected => "Join a server to ask it.",
-        RequestStatus.Cancelled => "Cancelled.",
+        RequestStatus.Cancelled => "Canceled.",
         RequestStatus.Unsupported => "This server runs a version of the mod that cannot answer this one.",
         _ => "The server did not answer. Open the window again to retry.",
     };

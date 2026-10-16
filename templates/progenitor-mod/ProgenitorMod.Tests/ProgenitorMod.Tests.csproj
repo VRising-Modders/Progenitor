@@ -21,6 +21,9 @@
 
   <ItemGroup>
     <Compile Include="..\ProgenitorMod\ModRules.cs" Link="Linked\ModRules.cs" />
+    <!-- Read by The_help_page_shows_the_mod_version: the help page's version must match <Version>. -->
+    <None Include="..\ProgenitorMod\ProgenitorMod.csproj" Link="Linked\ProgenitorMod.csproj" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\help\index.html" Link="Linked\help-index.html" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="ForbidGameReferences" AfterTargets="ResolveAssemblyReferences">

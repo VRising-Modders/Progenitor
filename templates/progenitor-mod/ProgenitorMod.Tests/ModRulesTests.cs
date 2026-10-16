@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
 using Progenitor.Networking;
 using Progenitor.Testing;
 using Xunit;
@@ -37,6 +40,18 @@ public class ModRulesTests
     [Fact]
     public void A_newer_peer_s_extra_fields_are_skipped() =>
         MessageCompat.AssertSkipsUnknownFields(new GreetingReply { Text = "Hi", ServerVersion = "1.1.0" });
+
+    [Fact]
+    public void The_help_page_shows_the_mod_version()
+    {
+        // Both files are copied beside the tests (ProgenitorMod.Tests.csproj, "Linked").
+        string linked = Path.Combine(AppContext.BaseDirectory, "Linked");
+        string csproj = File.ReadAllText(Path.Combine(linked, "ProgenitorMod.csproj"));
+        string help = File.ReadAllText(Path.Combine(linked, "help-index.html"));
+        string version = Regex.Match(csproj, "<Version>([^<]+)</Version>").Groups[1].Value.Trim();
+        Assert.NotEqual("", version);
+        Assert.Equal(version, Regex.Match(help, "version: \"([^\"]*)\"").Groups[1].Value);
+    }
 
     [Fact]
     public void Long_greetings_are_cut_to_the_limit() =>
