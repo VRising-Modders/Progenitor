@@ -341,6 +341,10 @@ internal static class UiWindowLayout
         return Math.Max(0f, clipHeight);
     }
 
+    /// <summary>How far the info column can scroll: its content past its clip; 0 when it fits.</summary>
+    internal static float InfoScrollMax(float contentHeight, float clipHeight) =>
+        float.IsNaN(contentHeight) || float.IsNaN(clipHeight) ? 0f : Math.Max(0f, contentHeight - clipHeight);
+
     /// <summary>How many info rows of <paramref name="heights"/> (stacked with the row gap) are wholly inside a clip <paramref name="clipHeight"/> tall.</summary>
     internal static int InfoRowsShown(IReadOnlyList<float> heights, float clipHeight)
     {
@@ -486,7 +490,8 @@ internal static class UiWindowLayout
     /// the row (they draw from their own geometry or stay centered).
     /// </summary>
     internal static List<(T Panel, PanelSpot Spot)> Spots<T>(
-        IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace, Func<T, bool>? flows = null)
+        IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace, Func<T, bool>? flows = null,
+        Func<T, long>? shownSequence = null)
     {
         var result = new List<(T, PanelSpot)>(shown.Count);
         bool workspaceOpen = false;
@@ -515,7 +520,18 @@ internal static class UiWindowLayout
             widths[w] = asked > 0f ? asked : BasicFrameWidth;
         }
 
-        for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen)));
+        // Draw layers: by the order the row's panels were shown, the last on top (and the first Escape closes).
+        var byShow = new List<int>(row.Count);
+        for (int w = 0; w < row.Count; w++) byShow.Add(w);
+        if (shownSequence != null)
+            byShow.Sort((a, b) =>
+            {
+                int c = shownSequence(shown[row[a]]).CompareTo(shownSequence(shown[row[b]]));
+                return c != 0 ? c : a.CompareTo(b);
+            });
+        var layer = new int[row.Count];
+        for (int l = 0; l < byShow.Count; l++) layer[byShow[l]] = l;
+        for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen, layer[w])));
         for (int o = 0; o < others.Count; o++) result.Add((shown[others[o]], new PanelSpot(o, others.Count)));
         return result;
     }
@@ -676,8 +692,28 @@ internal static class UiWindowLayout
     /// <inheritdoc cref="ShadeSorting"/>
     internal static int WindowSorting => UiOwnership.OverlaySorting + 2;
 
+    /// <summary>The highest order a window layer takes (<see cref="LayerSorting"/>); further layers share it.</summary>
+    internal static int WindowSortingMax => UiOwnership.OverlaySorting + 15;
+
     /// <inheritdoc cref="ShadeSorting"/>
-    internal static int DialogSorting => UiOwnership.OverlaySorting + 10;
+    internal static int DialogSorting => UiOwnership.OverlaySorting + 16;
+
+    /// <summary>
+    /// WINDOWS1 live fix: the canvas order of a row panel on draw layer <paramref name="layer"/> (0: shown longest ago).
+    /// Every window had the same order, so which one drew on top was left to Unity: the first-created window of a fresh
+    /// set drew under the others although it was shown last. Now the panel shown last draws on top.
+    /// </summary>
+    internal static int LayerSorting(int layer) => Math.Min(WindowSortingMax, WindowSorting + Math.Max(0, layer));
+
+    /// <summary>
+    /// WINDOWS1 live fix: a standard window's height while it stays open: never lower than it has been since it was
+    /// shown (switching to a shorter tab does not shrink it), never above <paramref name="cap"/>.
+    /// </summary>
+    internal static float StableHeight(float tallestSoFar, float wanted, float cap)
+    {
+        float h = Math.Max(float.IsNaN(tallestSoFar) ? 0f : tallestSoFar, wanted);
+        return cap > 0f ? Math.Min(cap, h) : h;
+    }
 
     /// <summary>What Escape and a controller's B do in every preset. Fixed, so every mod's windows answer alike.</summary>
     internal const string EscapeRule =

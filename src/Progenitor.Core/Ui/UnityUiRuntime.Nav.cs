@@ -170,6 +170,11 @@ internal sealed partial class UnityUiRuntime
         try
         {
             if (NavHost(widget) is not { } host) return;
+            // WINDOWS1 live fix: over a control in a window's info column, the stick scrolls that column.
+            float stickDt;
+            try { stickDt = Time.unscaledDeltaTime; } catch { stickDt = 1f / 60f; }
+            if (!(stickDt > 0f) || stickDt > 0.1f) stickDt = 1f / 60f;
+            if (host.TryScrollInfo(NavObject(widget), amount, NavScrollSpeed, stickDt)) return;
             var scroll = host.Scroll;
             if (scroll == null) return;
             RectTransform? content = null;

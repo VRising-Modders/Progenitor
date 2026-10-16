@@ -456,6 +456,85 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
+    public void The_row_panel_shown_last_draws_on_top_whatever_order_they_were_created_in()
+    {
+        // Live 1080: Basic, Header, then Tabbed created and shown fresh; Tabbed (shown last, closed first by Escape) drew
+        // under the others because every window had one canvas order.
+        var basic = Make(UiWindowPreset.Basic, "Gear");
+        var header = Make(UiWindowPreset.Header, "Chest");
+        var tabbed = Make(UiWindowPreset.Tabbed, "Net");
+        basic.Show();
+        header.Show();
+        tabbed.Show();
+        Assert.Equal(new[] { 0, 1, 2 }, new[] { "Gear", "Chest", "Net" }.Select(t => _runtime.SpotFor(t).Layer));
+        basic.Hide();
+        basic.Show(); // shown again: now on top, though its slot keeps it at the left of the row
+        Assert.Equal(2, _runtime.SpotFor("Gear").Layer);
+        Assert.Equal(0, _runtime.SpotFor("Gear").Rank);
+        Assert.Equal(0, _runtime.SpotFor("Chest").Layer);
+
+        // Each layer is its own canvas order, above the dim and below every dialog, however many windows are open.
+        for (int l = 0; l < 30; l++)
+        {
+            Assert.True(UiWindowLayout.LayerSorting(l) > UiWindowLayout.ShadeSorting);
+            Assert.True(UiWindowLayout.LayerSorting(l) < UiWindowLayout.DialogSorting);
+            if (l > 0 && UiWindowLayout.LayerSorting(l - 1) < UiWindowLayout.WindowSortingMax)
+                Assert.True(UiWindowLayout.LayerSorting(l) > UiWindowLayout.LayerSorting(l - 1));
+        }
+
+        var runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs");
+        Assert.Contains("host.ApplyRowLayer();", runtime);
+        // A window or dialog frame under the pointer takes the wheel before the page behind it.
+        Assert.Contains("if (order <= UiOwnership.OverlaySorting || order <= aboveOrder) continue;", runtime);
+    }
+
+    [Fact]
+    public void A_shown_window_grows_to_new_rows_and_its_info_column_scrolls()
+    {
+        // Live: Add facts on an open Tabbed window kept its height and clipped the new rows until it was reopened, and
+        // the wheel over the column scrolled the page behind the window.
+        Assert.Equal(0f, UiWindowLayout.InfoScrollMax(300f, 400f));
+        Assert.Equal(220f, UiWindowLayout.InfoScrollMax(620f, 400f));
+        string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs");
+        Assert.Contains("RequestWindowGrow();", runtime);
+        string windows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs");
+        Assert.Contains("RegisterInnerScroll(scroll);", windows);
+        Assert.Contains("catcher.raycastTarget = true;", windows);
+        Assert.Contains("_infoContent != null && UnityUiRuntime.Alive(_infoContent) ? _infoContent", windows);
+        Assert.Contains("host.TryScrollInfo(NavObject(widget), amount, NavScrollSpeed, stickDt)",
+            SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Nav.cs"));
+    }
+
+    [Fact]
+    public void A_window_keeps_its_height_across_tabs_while_it_stays_open()
+    {
+        // Live: the Header window got shorter on its Log tab.
+        float h = UiWindowLayout.StableHeight(0f, 300f, 800f);
+        Assert.Equal(300f, h);
+        h = UiWindowLayout.StableHeight(h, 220f, 800f); // a shorter tab
+        Assert.Equal(300f, h);
+        h = UiWindowLayout.StableHeight(h, 900f, 800f); // a taller one, capped
+        Assert.Equal(800f, h);
+        Assert.Equal(500f, UiWindowLayout.StableHeight(800f, 200f, 500f)); // a smaller cap (a cascade layer) wins
+    }
+
+    [Fact]
+    public void A_windows_checkbox_and_bars_end_at_the_rows_right_edge()
+    {
+        // Live: on the Header window's Rules tab the toggle sat mid-row (the Options page's reset gutter).
+        var page = ModSettingsRowGrid.For(560f);
+        var window = ModSettingsRowGrid.ForWindow(560f);
+        Assert.True(page.CompactRight < page.Right - 50f);
+        Assert.Equal(window.Right, window.CompactRight);
+        Assert.Equal(window.Right, window.BarRight);
+        Assert.True(window.ControlWidth >= ModSettingsRowGrid.MinControlWidth);
+        Assert.True(window.NameWidth >= ModSettingsRowGrid.MinNameWidth);
+        Assert.Contains("ModSettingsRowGrid.ForWindow(contentRowWidth)", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "DialogLayout.cs"));
+        // The prompt a window opens (every dialog) lifts its stamp off the frame's edge as the windows do.
+        Assert.Contains(": IsStandardWindow || _dialog ? UiWindowLayout.StampBand(_footerText)", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
+    }
+
+    [Fact]
     public void Dialogs_draw_above_windows_and_windows_above_the_dim_and_the_workspace()
     {
         // The live check: the Rename prompt drew behind the Header window (equal canvas orders), its dim under the window.
@@ -533,7 +612,7 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal(PanelFooterLayout.BandHeight + UiWindowLayout.StampLift, UiWindowLayout.StampBand("Mod 1.0 · Progenitor 1.0"));
         Assert.Equal(0f, UiWindowLayout.StampBand(""));
         Assert.True(UiWindowLayout.StampLift >= 8f);
-        Assert.Contains("IsStandardWindow ? UiWindowLayout.StampLift : 0f", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
+        Assert.Contains("IsStandardWindow || _dialog ? UiWindowLayout.StampLift : 0f", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs"));
     }
 
     [Fact]

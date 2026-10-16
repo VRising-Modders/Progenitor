@@ -1699,7 +1699,7 @@ internal sealed partial class UnityUiRuntime
         private void PlaceGridRowParts(in PanelRow row, in RowColumns columns, float total)
         {
             if (row.Go == null) return;
-            var grid = ModSettingsRowGrid.For(GridWidth);
+            var grid = RowGrid;
             if (string.Equals(row.Kind, "divider", StringComparison.Ordinal))
             {
                 try
@@ -1851,7 +1851,7 @@ internal sealed partial class UnityUiRuntime
         /// <summary>A grid control in its slot (<see cref="ModSettingsRowGrid.ControlSlot"/>), centered on the row.</summary>
         private void PlaceGameGridControl(in PanelRow row, RectTransform controlRt)
         {
-            var grid = ModSettingsRowGrid.For(GridWidth);
+            var grid = RowGrid;
             var shape = ModSettingsRowGrid.ShapeOfKind(row.Kind);
             float tall = 0f;
             try { tall = controlRt.rect.height; } catch { /* */ }

@@ -997,7 +997,7 @@ public static partial class Ui
             if (shown.Count == 0) return;
             shown.Sort(static (a, b) => a.PlacementSlot.CompareTo(b.PlacementSlot));
 
-            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel, p => p.Flows))
+            foreach (var (panel, spot) in UiWindowLayout.Spots(shown, p => p.WindowWidth, ModsMenu.IsWorkspacePanel, p => p.Flows, p => p.ShownSequence))
                 panel.PlaceAt(spot);
         }
         catch (Exception e)

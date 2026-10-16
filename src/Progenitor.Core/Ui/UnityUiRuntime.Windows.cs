@@ -23,6 +23,7 @@ internal sealed partial class UnityUiRuntime
     internal const string WindowInfoGroundName = "window-info-ground";
     internal const string WindowInfoClipName = "window-info-clip";
     internal const string WindowShadeName = "window-shade";
+    internal const string WindowInfoContentName = "window-info-content";
 
     private static GameObject? _windowShade;
 
@@ -134,6 +135,73 @@ internal sealed partial class UnityUiRuntime
         /// </summary>
         private bool InWindowRow => Spot.IsWindow && !_menuPane && !_dialog && !SelfPlaced && !TopAligned;
 
+        /// <summary>The settings grid this panel's rows use (a standard window's has no reset gutter).</summary>
+        internal ModSettingsRowGrid RowGrid => IsStandardWindow ? ModSettingsRowGrid.ForWindow(GridWidth) : ModSettingsRowGrid.For(GridWidth);
+
+        /// <summary>True after a row-layer order was written, so leaving the row gives the panel its own order back.</summary>
+        private bool _rowLayered;
+
+        /// <summary>
+        /// WINDOWS1 live fix: a row panel's canvas order from its draw layer (the panel shown last on top); out of the row,
+        /// a standard window's own order or an ordinary panel's.
+        /// </summary>
+        internal void ApplyRowLayer()
+        {
+            if (Released || _menuPane || _dialog) return;
+            if (InWindowRow)
+            {
+                SetOverlaySorting(UiWindowLayout.LayerSorting(Spot.Layer));
+                _rowLayered = true;
+            }
+            else if (_rowLayered || IsStandardWindow)
+            {
+                SetOverlaySorting(IsStandardWindow ? UiWindowLayout.WindowSorting : UiOwnership.OverlaySorting);
+                _rowLayered = false;
+            }
+        }
+
+        /// <summary>WINDOWS1 live fix: this panel's canvas order (windows and dialogs above the rest take the wheel first).</summary>
+        internal int CanvasOrder => OverlaySortingNow();
+
+        /// <summary>The tallest this standard window has been since it was shown (<see cref="UiWindowLayout.StableHeight"/>).</summary>
+        private float _tallestShown;
+
+        /// <summary>Called by the layout pass: a standard window keeps its height across tabs while it stays open.</summary>
+        private float StableWindowHeight(float wanted, float cap, bool firstShow)
+        {
+            if (firstShow) _tallestShown = 0f;
+            float h = UiWindowLayout.StableHeight(_tallestShown, wanted, cap);
+            _tallestShown = h;
+            return h;
+        }
+
+        private bool _growPending;
+
+        /// <summary>
+        /// WINDOWS1 live fix: a row added to a shown standard window (Add facts) lays the window out again on the next
+        /// frame, once for the whole batch, so it grows (up to its cap) and the new rows are placed; they were clipped
+        /// until the window was reopened.
+        /// </summary>
+        private void RequestWindowGrow()
+        {
+            if (_growPending || Released || !IsStandardWindow) return;
+            bool shown;
+            try { shown = GameObject != null && GameObject.activeInHierarchy; }
+            catch { shown = false; }
+            if (!shown) return;
+            _growPending = true;
+            Plugin.Frame += WindowGrowTick;
+        }
+
+        private void WindowGrowTick()
+        {
+            Plugin.Frame -= WindowGrowTick;
+            _growPending = false;
+            if (Released || !Alive) return;
+            try { Relayout(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window grow: " + e.Message); }
+        }
+
         /// <summary>Where a row panel <paramref name="frameHeight"/> tall goes in the layout pass: hung from its row's top line.</summary>
         private PanelOffset WindowOffset(float frameHeight, float canvasHeight)
         {
@@ -240,6 +308,41 @@ internal sealed partial class UnityUiRuntime
                 _infoClip.transform.SetParent(GameObject.transform, false);
                 TryAdd<RectTransform>(_infoClip);
                 TryAdd<RectMask2D>(_infoClip);
+                // WINDOWS1 live fix: the column scrolls when it is longer than its clip. Its rows live in a content rect
+                // the wheel (an inner scroll, as the Install page's side blocks) and the right stick move; a clear image
+                // takes the pointer so the wheel over the column scrolls it, not the page behind the window.
+                var catcher = TryAdd<Image>(_infoClip);
+                if (catcher != null)
+                {
+                    catcher.color = new Color(0f, 0f, 0f, 0f);
+                    catcher.raycastTarget = true;
+                }
+
+                _infoContent = new GameObject(WindowInfoContentName);
+                _infoContent.transform.SetParent(_infoClip.transform, false);
+                var crt = TryAdd<RectTransform>(_infoContent);
+                if (crt != null)
+                {
+                    crt.anchorMin = new Vector2(0f, 1f);
+                    crt.anchorMax = new Vector2(1f, 1f);
+                    crt.pivot = new Vector2(0.5f, 1f);
+                    crt.anchoredPosition = Vector2.zero;
+                    crt.sizeDelta = new Vector2(0f, 1f);
+                }
+
+                var scroll = TryAdd<ScrollRect>(_infoClip);
+                if (scroll != null && crt != null)
+                {
+                    scroll.viewport = _infoClip.GetComponent<RectTransform>();
+                    scroll.content = crt;
+                    scroll.horizontal = false;
+                    scroll.vertical = true;
+                    scroll.movementType = ScrollRect.MovementType.Clamped;
+                    scroll.inertia = false;
+                    // The shown-input pump moves it (TryScrollInner), as every kit list; uGUI adds nothing.
+                    scroll.scrollSensitivity = MenuPanelLayout.UguiScrollSensitivity;
+                    RegisterInnerScroll(scroll);
+                }
             }
             catch (Exception e)
             {
@@ -248,9 +351,33 @@ internal sealed partial class UnityUiRuntime
         }
 
         private GameObject? _infoClip;
+        private GameObject? _infoContent;
 
-        /// <summary>Where a row pinned to the info column is parented: the column's clip, or the frame without one.</summary>
-        internal GameObject SideParent => _infoClip != null && UnityUiRuntime.Alive(_infoClip) ? _infoClip : GameObject;
+        /// <summary>Where a row pinned to the info column is parented: the column's scrolling content, or the frame without one.</summary>
+        internal GameObject SideParent =>
+            _infoContent != null && UnityUiRuntime.Alive(_infoContent) ? _infoContent
+            : _infoClip != null && UnityUiRuntime.Alive(_infoClip) ? _infoClip : GameObject;
+
+        /// <summary>
+        /// NAV1: the right stick over a control in the info column scrolls the column (<paramref name="amount"/> per
+        /// frame, positive up); false when <paramref name="go"/> is not in it or it cannot move.
+        /// </summary>
+        internal bool TryScrollInfo(GameObject? go, float amount, float speed, float dt)
+        {
+            try
+            {
+                if (go == null || _infoContent == null || _infoClip == null || !go.transform.IsChildOf(_infoContent.transform)) return false;
+                var content = _infoContent.GetComponent<RectTransform>();
+                var view = _infoClip.GetComponent<RectTransform>();
+                if (content == null || view == null) return false;
+                float max = UiWindowLayout.InfoScrollMax(content.sizeDelta.y, view.sizeDelta.y);
+                if (max <= 0f) return false;
+                float y = Math.Max(0f, Math.Min(max, content.anchoredPosition.y - amount * speed * dt));
+                content.anchoredPosition = new Vector2(content.anchoredPosition.x, y);
+                return true;
+            }
+            catch { return false; }
+        }
 
         /// <summary>Start of a layout pass: the info column starts under the pinned top rows.</summary>
         private void BeginSidePass(float viewportTop)
@@ -287,8 +414,10 @@ internal sealed partial class UnityUiRuntime
                 height = Math.Max(InlineHostHeight(row, height), PanelLayout.MinRowHeight);
                 float extraTop = string.Equals(row.Kind, "heading", StringComparison.Ordinal) ? SettingsAlign.HeadingExtraTop : 0f;
                 float width = Math.Max(1f, band - UiWindowLayout.InfoColumnGap);
-                bool clipped = _infoClip != null && row.Go.transform.parent != null
-                    && row.Go.transform.parent.Pointer == _infoClip.transform.Pointer;
+                var parent = row.Go.transform.parent;
+                bool clipped = parent != null
+                    && ((_infoContent != null && parent.Pointer == _infoContent.transform.Pointer)
+                        || (_infoClip != null && parent.Pointer == _infoClip.transform.Pointer));
                 // In the clip: from its top-center. On the frame (no clip): from the frame's top-center at the column's x.
                 float x = clipped ? 0f : -StandardFrameWidth * 0.5f + PanelLayout.PadSide + width * 0.5f;
                 float y = clipped ? _sideCursor - _sideTop : _sideCursor;
@@ -368,6 +497,16 @@ internal sealed partial class UnityUiRuntime
                         // A row the clip would cut is masked whole: the column ends on a row's bottom edge, above the stamp.
                         float clipHeight = UiWindowLayout.SnapClip(_sideRowBottoms, clip.Height);
                         PlaceTop(_infoClip, clip.CenterX, clip.Top, clip.Width, clipHeight);
+                        // The content is the whole column; it scrolls inside the clip, kept in range as rows come and go.
+                        var crt = _infoContent == null ? null : _infoContent.GetComponent<RectTransform>();
+                        if (crt != null)
+                        {
+                            float total = _sideBottom > _sideTop ? _sideBottom - _sideTop : 0f;
+                            crt.sizeDelta = new Vector2(0f, Math.Max(1f, total));
+                            float max = UiWindowLayout.InfoScrollMax(total, clipHeight);
+                            float scrollY = Math.Max(0f, Math.Min(max, crt.anchoredPosition.y));
+                            crt.anchoredPosition = new Vector2(0f, scrollY);
+                        }
                     }
                 }
             }

@@ -62,6 +62,7 @@ internal readonly struct PanelSpot
         Count = count;
         WindowWidths = null;
         WorkspaceOpen = false;
+        Layer = 0;
     }
 
     /// <summary>
@@ -70,13 +71,20 @@ internal readonly struct PanelSpot
     /// asks for. <paramref name="workspaceOpen"/>: the Mods workspace is on screen, so the windows keep clear of its tab
     /// strip. <see cref="UiWindowLayout.Place"/> lays the windows out from these alone.
     /// </summary>
-    internal PanelSpot(int rank, float[] windowWidths, bool workspaceOpen)
+    internal PanelSpot(int rank, float[] windowWidths, bool workspaceOpen, int layer = -1)
     {
         Rank = rank;
         Count = windowWidths?.Length ?? 0;
         WindowWidths = windowWidths;
         WorkspaceOpen = workspaceOpen;
+        Layer = layer >= 0 ? layer : rank;
     }
+
+    /// <summary>
+    /// WINDOWS1 live fix: this row panel's draw layer, 0 for the one shown longest ago: the last one shown draws on top
+    /// (<see cref="UiWindowLayout.LayerSorting"/>), the same one Escape closes first.
+    /// </summary>
+    internal int Layer { get; }
 
     /// <summary>WINDOWS1: the asked-for frame widths of every shown standard window, in order; null for an ordinary panel.</summary>
     internal float[]? WindowWidths { get; }

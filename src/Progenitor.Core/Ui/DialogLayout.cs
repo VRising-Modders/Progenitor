@@ -679,7 +679,7 @@ internal static class RowColumnRules
         if (searchField) return MenuPanelLayout.SearchFieldColumns(contentRowWidth);
         // MENUKIT2: a settings-grid row is the game's Options row (ModSettingsRowGrid); the caller passes
         // the grid's width (the content less the description column when the column is shown).
-        if (grid) return ModSettingsRowGrid.For(contentRowWidth).Columns(hasControl);
+        if (grid) return (sizedToRow ? ModSettingsRowGrid.ForWindow(contentRowWidth) : ModSettingsRowGrid.For(contentRowWidth)).Columns(hasControl);
 
         // WINDOWS1: a standard window's rows take their own row's width (sizedToRow), the ordinary panel the fixed 560.
         return menuPane

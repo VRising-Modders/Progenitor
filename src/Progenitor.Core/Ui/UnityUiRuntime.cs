@@ -87,6 +87,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// </summary>
     private static readonly List<ScrollRect> InnerScrolls = new();
 
+    /// <summary>WINDOWS1: an inner scroll block the wheel moves while the pointer is over it (the info column).</summary>
+    private static void RegisterInnerScroll(ScrollRect scroll)
+    {
+        if (scroll == null) return;
+        ForgetInnerScroll(scroll);
+        InnerScrolls.Add(scroll);
+    }
+
     private static void ForgetInnerScroll(ScrollRect? scroll)
     {
         if (scroll == null) return;
@@ -2259,6 +2267,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         try
         {
             host.Spot = spot;
+            // WINDOWS1 live fix: the row panel shown last draws on top (its canvas order from its layer).
+            host.ApplyRowLayer();
             // None is a dismiss, not a center placement. HideCore logs
             // `placed rank=-1/0` then Dispose; without this deactivation a
             // deferred Destroy left the overlay drawing over the next world.
@@ -4530,6 +4540,25 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
     private static UnityPanel? ResolveHoveredPanel(PointerSample pointer)
     {
+        // WINDOWS1 live fix: a window or dialog (drawn above the ordinary panels and the workspace) whose frame is under the
+        // pointer takes the wheel, the topmost by canvas order. Over a window's info column (outside its viewport) the
+        // wheel went on to the gallery page behind the window.
+        UnityPanel? above = null;
+        int aboveOrder = int.MinValue;
+        for (int i = ShownPanels.Count - 1; i >= 0; i--)
+        {
+            var panel = ShownPanels[i];
+            if (panel == null || !panel.Alive || !panel.Visible || panel.WheelPassThrough) continue;
+            int order = panel.CanvasOrder;
+            if (order <= UiOwnership.OverlaySorting || order <= aboveOrder) continue;
+            var rect = ScreenRectOfPanel(panel);
+            if (!rect.IsKnown || !rect.Contains(pointer.X, pointer.Y)) continue;
+            above = panel;
+            aboveOrder = order;
+        }
+
+        if (above != null) return above;
+
         UnityPanel? viewportHit = null;
         UnityPanel? frameHit = null;
         for (int i = ShownPanels.Count - 1; i >= 0; i--)
@@ -11762,7 +11791,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private float _narrowWidth;
         public RowColumns Columns(bool hasControl) =>
             _grid
-                ? ModSettingsRowGrid.For(GridWidth).Columns(hasControl)
+                ? RowGrid.Columns(hasControl)
                 : _menuPane || _embeddedWidth > 0
                     ? MenuPanelLayout.Columns(ContentRowWidth, hasControl)
                     : PanelLayout.Columns(hasControl);
@@ -12433,7 +12462,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private float FooterBand =>
             _strip || _sidebar || SelfPlaced ? 0f
             // WINDOWS1: a standard window's stamp sits UiWindowLayout.StampLift above the frame's edge, and its band with it.
-            : IsStandardWindow ? UiWindowLayout.StampBand(_footerText)
+            : IsStandardWindow || _dialog ? UiWindowLayout.StampBand(_footerText)
             : PanelFooterLayout.BandFor(_footerText);
 
         /// <summary>Set or clear the version footer and lay the panel out again.</summary>
@@ -12505,7 +12534,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 rt.anchorMin = new Vector2(0.5f, 0f);
                 rt.anchorMax = new Vector2(0.5f, 0f);
                 rt.pivot = new Vector2(0.5f, 0f);
-                rt.anchoredPosition = new Vector2(x, IsStandardWindow ? UiWindowLayout.StampLift : 0f);
+                rt.anchoredPosition = new Vector2(x, IsStandardWindow || _dialog ? UiWindowLayout.StampLift : 0f);
                 rt.sizeDelta = new Vector2(PanelFooterLayout.TextWidth(frameWidth), PanelFooterLayout.BandHeight);
                 var tmp = _versionFooter.GetComponent<TextMeshProUGUI>();
                 if (tmp != null)
@@ -12768,6 +12797,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             if (_inline && _inlineHost == null && (kind == "input" || kind == "toggle"))
                 _inlineHost = go;
             PlaceRow(row);
+            // WINDOWS1 live fix: a shown standard window grows to its new rows (on the next frame, once per batch).
+            RequestWindowGrow();
         }
 
         /// <summary>
@@ -13138,7 +13169,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             {
                 // Settings organization review: a settings-grid row keeps its name column; the field and its buttons
                 // share the control column (ModSettingsRowGrid.InlineSlots), centered on the row like every grid control.
-                var grid = ModSettingsRowGrid.For(GridWidth);
+                var grid = RowGrid;
                 float barH = ModSettingsRowGrid.BarHeight;
                 for (int i = 0; i < buttons.Count; i++)
                 {
@@ -13998,6 +14029,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // WINDOWS1: a standard window is never taller than its place leaves room for (under the workspace's tab
                 // strip, a cascade layer's offset), so its bottom stays on screen.
                 if (InWindowRow) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
+                // WINDOWS1 live fix: a standard window keeps its height across its tabs while it stays open.
+                if (IsStandardWindow && !SelfPlaced)
+                    panelHeight = StableWindowHeight(panelHeight, InWindowRow ? WindowMaxHeight(available.Value) : 0f, firstShow);
 
                 _laidOutWith = available;
                 var settle = RulerSettle.StateOf(available, _settling, _settleExhausted);
