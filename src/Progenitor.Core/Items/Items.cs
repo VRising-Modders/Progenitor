@@ -378,7 +378,7 @@ public static class Items
         {
             if (!Has<InventoryBuffer>(em, bag))
                 return false;
-            buffer = em.GetBuffer<InventoryBuffer>(bag);
+            buffer = em.GetBuffer<InventoryBuffer>(bag, true);
             return true;
         }
         catch

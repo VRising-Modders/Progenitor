@@ -164,7 +164,7 @@ internal sealed class ItemDefinitionRelevance
         int count = CopyBags(em, owner);
         for (int b = 0; b < count; b++)
         {
-            var buffer = em.GetBuffer<InventoryBuffer>(_bags[b]);
+            var buffer = em.GetBuffer<InventoryBuffer>(_bags[b], true);
             int length = Math.Min(buffer.Length, SlotLimit);
             for (int i = 0; i < length; i++)
             {

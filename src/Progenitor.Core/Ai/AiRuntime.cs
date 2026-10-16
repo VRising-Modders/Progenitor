@@ -807,7 +807,7 @@ internal static unsafe class AiRuntime
         try
         {
             if (!unit.Has<BuffBuffer>(em)) return list;
-            var buffer = em.GetBuffer<BuffBuffer>(unit);
+            var buffer = em.GetBuffer<BuffBuffer>(unit, true);
             for (int i = 0; i < buffer.Length; i++) list.Add(buffer[i].PrefabGuid.GuidHash);
         }
         catch { }
@@ -819,7 +819,7 @@ internal static unsafe class AiRuntime
         try
         {
             if (!unit.Has<BuffBuffer>(em)) return Entity.Null;
-            var buffer = em.GetBuffer<BuffBuffer>(unit);
+            var buffer = em.GetBuffer<BuffBuffer>(unit, true);
             for (int i = 0; i < buffer.Length; i++)
                 if (buffer[i].PrefabGuid.GuidHash == guid) return buffer[i].Entity;
         }

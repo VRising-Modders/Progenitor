@@ -150,7 +150,7 @@ public static unsafe class HealOps
     {
         if (!em.HasComponent<BuffBuffer>(character))
             return Entity.Null;
-        var buffer = em.GetBuffer<BuffBuffer>(character);
+        var buffer = em.GetBuffer<BuffBuffer>(character, true);
         for (int i = 0; i < buffer.Length; i++)
         {
             var buff = buffer[i].Entity;

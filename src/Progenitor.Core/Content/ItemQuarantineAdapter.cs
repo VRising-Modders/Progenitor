@@ -216,7 +216,7 @@ internal static class ItemQuarantineAdapter
     {
         rows = default;
         if (!Has<InventoryBuffer>(em, entity)) return false;
-        rows = em.GetBuffer<InventoryBuffer>(entity);
+        rows = em.GetBuffer<InventoryBuffer>(entity, true);
         return rows.Length > 0 && rows.Length <= 1024;
     }
 

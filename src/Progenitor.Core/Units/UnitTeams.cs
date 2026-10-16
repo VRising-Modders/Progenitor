@@ -65,7 +65,7 @@ internal static unsafe class UnitTeams
         try
         {
             if (!unit.Has<BuffBuffer>(em)) return false;
-            var buffer = em.GetBuffer<BuffBuffer>(unit);
+            var buffer = em.GetBuffer<BuffBuffer>(unit, true);
             for (int i = 0; i < buffer.Length; i++)
             {
                 var buff = buffer[i].Entity;

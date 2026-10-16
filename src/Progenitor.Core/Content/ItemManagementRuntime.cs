@@ -73,7 +73,7 @@ internal static class ItemManagementRuntime
         var em = world.EntityManager;
         if (!InventoryUtilitiesServer.TryRemoveItemAtIndex(em, inventory, row.ItemType, row.Amount, slot, true))
             throw new InvalidOperationException("Removal refused; recovery record retained for reconciliation.");
-        var buffer = em.GetBuffer<InventoryBuffer>(inventory);
+        var buffer = em.GetBuffer<InventoryBuffer>(inventory, true);
         if (slot < buffer.Length && buffer[slot].ItemType == row.ItemType && buffer[slot].Amount > 0)
             throw new InvalidOperationException("Removal readback was ambiguous; automatic restoration is blocked.");
         // Readback proves this running world's removal, not a completed game save. Restoration

@@ -236,13 +236,13 @@ internal static class ItemRemovalRuntime
                 else
                 {
                     if (!em.HasComponent(entity, ComponentIndex.Of<InventoryBuffer>(ComponentType.AccessMode.ReadWrite))) { _index++; _slot = -1; continue; }
-                    int length = em.GetBuffer<InventoryBuffer>(entity).Length;
+                    int length = em.GetBuffer<InventoryBuffer>(entity, true).Length;
                     if (length > 1024) throw new InvalidOperationException("Inventory exceeds cleanup bounds.");
                     if (_slot < 0) _slot = length - 1;
                     while (_slot >= 0 && budget-- > 0)
                     {
                         int i = _slot--;
-                        var buffer = em.GetBuffer<InventoryBuffer>(entity);
+                        var buffer = em.GetBuffer<InventoryBuffer>(entity, true);
                         if (i >= buffer.Length) continue;
                         var row = buffer[i];
                         if (!_guids.Contains(row.ItemType.GuidHash) || row.Amount <= 0) continue;

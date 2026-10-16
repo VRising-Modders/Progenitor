@@ -223,7 +223,7 @@ internal sealed class UnityBuffRuntime : IBuffRuntime
             if (!em.HasComponent(entity, ComponentIndex.Of<BuffBuffer>(ComponentType.AccessMode.ReadOnly)))
                 return false;
 
-            var buffer = em.GetBuffer<BuffBuffer>(entity);
+            var buffer = em.GetBuffer<BuffBuffer>(entity, true);
             for (int i = 0; i < buffer.Length; i++)
             {
                 if (buffer[i].PrefabGuid.GuidHash != prefabGuid) continue;

@@ -134,7 +134,7 @@ public static class BuffOps
             var bufferType = ComponentIndex.Of<BuffBuffer>(ComponentType.AccessMode.ReadOnly);
             if (!em.Exists(target) || !em.HasComponent(target, bufferType))
                 return false;
-            var buffer = em.GetBuffer<BuffBuffer>(target);
+            var buffer = em.GetBuffer<BuffBuffer>(target, true);
             int hash = guid._Value;
             for (int i = 0; i < buffer.Length; i++)
             {

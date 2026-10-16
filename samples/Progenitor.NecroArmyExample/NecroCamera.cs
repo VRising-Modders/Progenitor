@@ -567,7 +567,7 @@ internal sealed class ArenaPillars : IDisposable
             {
                 if (Array.IndexOf(PillarGuids, em.GetComponentData<PrefabGUID>(pillar).GuidHash) < 0) continue;
                 count++;
-                var group = em.GetBuffer<LinkedEntityGroup>(pillar);
+                var group = em.GetBuffer<LinkedEntityGroup>(pillar, true);
                 var members = new System.Collections.Generic.List<Entity>();
                 for (int i = 0; i < group.Length; i++) members.Add(group[i].Value);
                 foreach (var m in members)

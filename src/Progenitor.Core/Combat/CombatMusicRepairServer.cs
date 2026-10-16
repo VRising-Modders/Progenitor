@@ -103,7 +103,7 @@ internal static class CombatMusicRepairServer
     {
         Targeting.Clear();
         if (!em.HasComponent(player, ComponentIndex.Of<InverseAggroBufferElement>(ComponentType.AccessMode.ReadOnly))) return;
-        var buffer = em.GetBuffer<InverseAggroBufferElement>(player);
+        var buffer = em.GetBuffer<InverseAggroBufferElement>(player, true);
         for (int i = 0; i < buffer.Length; i++)
         {
             var unit = buffer[i].Entity;
