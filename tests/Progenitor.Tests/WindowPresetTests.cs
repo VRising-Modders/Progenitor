@@ -803,16 +803,16 @@ public sealed class WindowPresetTests : IDisposable
         var parked = UiApi.Panel("Parked list", _owner, "example.mod");
         UiApi.ConfigureMenuPanel(parked, sidebar: true);
         Assert.False(((UiPanelHandle)parked).Flows);
-        int before = _runtime.PlaceCount;
+        var placedAt = UiWindowLayout.Place(spot, 1920f, 1080f, 412f);
         parked.Show();
         parked.Hide();
-        Assert.True(UiWindowLayout.SameRowSpot(spot, _runtime.SpotFor("Chest")));
-        Assert.Equal(1, _runtime.SpotFor("Chest").Count);
-        // The window itself was not placed again by those re-flows (only the parked pane's own show and hide placed it).
-        int windowPlacements = _runtime.PlaceCount - before;
-        parked.Show();
-        parked.Hide();
-        Assert.Equal(windowPlacements, _runtime.PlaceCount - before - windowPlacements);
+        var after = _runtime.SpotFor("Chest");
+        Assert.Equal(1, after.Count);
+        Assert.Equal(spot.Rank, after.Rank);
+        // The placement is a pure function of the spot, the canvas and the tab strip: an unchanged set lands the window
+        // where it was; a different canvas or strip is a different input and may move it.
+        var again = UiWindowLayout.Place(after, 1920f, 1080f, 412f);
+        Assert.Equal((placedAt.X, placedAt.Top, placedAt.MaxHeight), (again.X, again.Top, again.MaxHeight));
 
         // A floating panel that was closed leaves the row; the window moves back to the center.
         var floating = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
@@ -821,11 +821,18 @@ public sealed class WindowPresetTests : IDisposable
         floating.Hide();
         Assert.Equal(1, _runtime.SpotFor("Chest").Count);
 
-        var a = new PanelSpot(0, new[] { Basic }, false, 0);
-        Assert.True(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, new[] { Basic }, false, 0)));
-        Assert.False(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, new[] { Basic, Basic }, false, 0)));
-        Assert.False(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, new[] { Basic }, true, 0)));
-        Assert.False(UiWindowLayout.SameRowSpot(a, new PanelSpot(0, 1)));
+        // A panel mounted in a chest or station tab is placed by the tab: never in the row, never closed by Escape.
+        using var tabs = new VanillaPanelTabs(_runtime, VanillaUiSite.ContainerPanel, new[] { "Inventory", "Input" }, _owner);
+        var mounted = UiApi.Panel("Mounted", _owner, "example.mod");
+        tabs.Mount(mounted);
+        Assert.False(((UiPanelHandle)mounted).Flows);
+        mounted.Show();
+        Assert.False(_runtime.SpotFor("Mounted").IsWindow);
+        Assert.Equal(1, _runtime.SpotFor("Chest").Count);
+        UiApi.PressKeyForTests(27, true);
+        UiApi.PressKeyForTests(17, true);
+        Assert.False(header.IsOpen);
+        Assert.Equal(UiHandleState.Shown, mounted.State); // the window went first; the tab's panel stayed
     }
 
     [Fact]
@@ -844,6 +851,15 @@ public sealed class WindowPresetTests : IDisposable
         var locate = w.Info!.Button("Locate all");
         Assert.Contains((UiHandle)locate, ((UiPanelHandle)w.Panel).ChildrenSnapshot());
         Assert.True(UiNav.IsStop((UiHandle)locate));
+    }
+
+    [Fact]
+    public void Left_and_right_compare_drawn_positions_up_and_down_unscrolled_ones()
+    {
+        string nav = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UiNav.cs");
+        Assert.Contains("var from = sideways ? Host.DrawnRect(_focus) : Host.Rect(_focus);", nav);
+        Assert.Contains("candidates.Add((stop, sideways ? Host.DrawnRect(stop) : Host.Rect(stop)));", nav);
+        Assert.Contains("public ScreenRect WidgetDrawnRect(IRuntimeWidget widget)", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Nav.cs"));
     }
 
     [Fact]

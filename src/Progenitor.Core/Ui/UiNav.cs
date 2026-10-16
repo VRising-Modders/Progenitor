@@ -209,6 +209,13 @@ internal interface INavHost
     /// <summary>The target's rect in screen pixels (y up), or <see cref="ScreenRect.Unknown"/>.</summary>
     ScreenRect Rect(NavTarget target);
 
+    /// <summary>
+    /// WINDOWS1: the target's rect where it is drawn now. <see cref="Rect"/> places a control of a scrolled window info
+    /// column where it sits unscrolled (Up and Down walk the column); Left and Right compare drawn positions, so the
+    /// column and the content beside it meet on the rows the player sees.
+    /// </summary>
+    ScreenRect DrawnRect(NavTarget target) => Rect(target);
+
     /// <summary>Draw or remove the focus marker on <paramref name="target"/>.</summary>
     void Mark(NavTarget target, bool on);
 
@@ -728,14 +735,15 @@ internal static class UiNav
         }
 
         if (_pane < 0 || _pane >= surface.Panes.Count) return false;
-        var from = Host.Rect(_focus);
+        bool sideways = direction is NavCommand.Left or NavCommand.Right;
+        var from = sideways ? Host.DrawnRect(_focus) : Host.Rect(_focus);
         var candidates = new List<(NavTarget Target, ScreenRect Rect)>();
         foreach (var handle in surface.Panes[_pane])
         {
             foreach (var stop in Stops(handle))
             {
                 if (stop.Equals(_focus)) continue;
-                candidates.Add((stop, Host.Rect(stop)));
+                candidates.Add((stop, sideways ? Host.DrawnRect(stop) : Host.Rect(stop)));
             }
         }
 

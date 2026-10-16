@@ -74,6 +74,16 @@ internal sealed class UiNavHost : INavHost
         catch { return ScreenRect.Unknown; }
     }
 
+    public ScreenRect DrawnRect(NavTarget target)
+    {
+        var handle = target.Handle;
+        if (handle == null || handle.IsDisposed) return ScreenRect.Unknown;
+        if (handle is UiCellRowHandle row) return row.NavRect(target.Part);
+        if (handle.Runtime is not { Alive: true } widget) return ScreenRect.Unknown;
+        try { return Ui.CurrentRuntime().WidgetDrawnRect(widget); }
+        catch { return ScreenRect.Unknown; }
+    }
+
     public void Mark(NavTarget target, bool on)
     {
         var handle = target.Handle;

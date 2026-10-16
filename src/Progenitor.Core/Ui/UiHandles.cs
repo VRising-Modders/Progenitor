@@ -759,7 +759,6 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
             Plugin.Logger?.LogWarning("Ui: panel rank threw: " + e.Message);
         }
 
-        _rowSpot = null;
         try { _runtime.PlacePanel(_panel!, spot); }
         catch (Exception e)
         {
@@ -797,15 +796,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// </summary>
     internal bool Flows { get; set; } = true;
 
-    /// <summary>WINDOWS1: the row spot this panel was last placed at by the re-flow; null after it left the row or was hidden.</summary>
-    private PanelSpot? _rowSpot;
-
     internal void PlaceAt(PanelSpot spot)
     {
         if (_panel == null) return;
-        // WINDOWS1 live fix: a row panel whose spot did not change is not moved (a workspace re-layout re-flows the set).
-        if (_rowSpot.HasValue && UiWindowLayout.SameRowSpot(_rowSpot.Value, spot)) return;
-        _rowSpot = spot.IsWindow ? spot : null;
         try { _runtime.PlacePanel(_panel, spot); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: re-flow PlacePanel threw: " + e.Message); }
     }
@@ -824,7 +817,6 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
 
         // Tell the runtime the panel is no longer one of the set, so a panel shown again while the
         // set has a different size is not drawn at a stale offset.
-        _rowSpot = null;
         try { if (_panel != null) _runtime.PlacePanel(_panel, PanelSpot.None); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: PlacePanel(none) threw: " + e.Message); }
     }

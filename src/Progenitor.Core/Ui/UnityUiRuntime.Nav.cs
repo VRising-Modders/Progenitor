@@ -32,6 +32,18 @@ internal sealed partial class UnityUiRuntime
         _ => null,
     };
 
+    public ScreenRect WidgetDrawnRect(IRuntimeWidget widget)
+    {
+        try
+        {
+            var go = NavObject(widget);
+            if (go == null || !go.activeInHierarchy) return ScreenRect.Unknown;
+            var rt = go.GetComponent<RectTransform>();
+            return rt == null ? ScreenRect.Unknown : ScreenRectOf(rt);
+        }
+        catch { return ScreenRect.Unknown; }
+    }
+
     public ScreenRect WidgetRect(IRuntimeWidget widget)
     {
         try

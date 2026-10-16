@@ -550,23 +550,6 @@ internal static class UiWindowLayout
         return result;
     }
 
-    /// <summary>
-    /// WINDOWS1 live fix: whether two row spots place a panel identically (rank, layer, the set's widths and whether the
-    /// workspace is shown). The re-flow leaves a row panel alone when its spot did not change, so a workspace re-layout
-    /// that does not change the row's membership never moves a window.
-    /// </summary>
-    internal static bool SameRowSpot(PanelSpot a, PanelSpot b)
-    {
-        if (!a.IsWindow || !b.IsWindow) return false;
-        if (a.Rank != b.Rank || a.Layer != b.Layer || a.WorkspaceOpen != b.WorkspaceOpen) return false;
-        var wa = a.WindowWidths!;
-        var wb = b.WindowWidths!;
-        if (wa.Length != wb.Length) return false;
-        for (int i = 0; i < wa.Length; i++)
-            if (Math.Abs(wa[i] - wb[i]) > 0.01f) return false;
-        return true;
-    }
-
     /// <summary>The air kept between the workspace's tab strip and a window's top edge.</summary>
     internal const float StripClearance = 16f;
 

@@ -424,6 +424,9 @@ internal interface IUiRuntime
     /// <summary>NAV1: the widget's rect in screen pixels (y up), or <see cref="ScreenRect.Unknown"/> (test fakes).</summary>
     ScreenRect WidgetRect(IRuntimeWidget widget) => ScreenRect.Unknown;
 
+    /// <summary>WINDOWS1: the widget's rect where it is drawn now (<see cref="WidgetRect"/> unscrolls a window's info column).</summary>
+    ScreenRect WidgetDrawnRect(IRuntimeWidget widget) => WidgetRect(widget);
+
     /// <summary>
     /// NAV1: draw or remove the controller focus marker on <paramref name="widget"/>: the look the pointer's hover gives
     /// it (a grid row's band; a button's highlight). <paramref name="option"/> is a multi-select's option, else -1.
