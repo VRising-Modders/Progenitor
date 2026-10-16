@@ -44,6 +44,8 @@ A world save records a mod's prefab GUID like a vanilla one, so a save written w
 
 ## Quick start (mod authors)
 
+**New here? Open [`docs/guide/progenitor-guide.html`](docs/guide/progenitor-guide.html)** in a browser: a short, interactive Help Guide for players, server admins and mod developers, with a glossary. It works offline from disk. Mods can ship a help page in the same look from [`templates/help`](templates/help/README.md).
+
 1. Read the [tutorial](docs/tutorial.md): a progressive guide from a first item and command to keybinds, UI, units, patches and the hot-reload loop.
 2. Start from the [minimal reload example](samples/Progenitor.ReloadExample/README.md), then the larger [`samples/Progenitor.Sample`](samples/Progenitor.Sample).
 3. Look up each facade in the [module reference](docs/modules.md) and its status in [`docs/api.md`](docs/api.md).
