@@ -574,6 +574,9 @@ public static partial class Ui
         // second line behind the tracked ctx.Dialogs registration.
         try { UiDialog.DropOwner(owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll dialogs threw: " + e.Message); }
+        // WINDOWS1 review: after its dialogs (the match reads them), the OnRename handlers it left on ownerless windows.
+        try { UiWindowHandle.DropHandlersOf(owner); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll window handlers threw: " + e.Message); }
         // P7b help: the owner's marked terms, marker change handlers and tip cards (every plugin, ctx.Hud or not).
         try { UiTerms.DropOwner(owner); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: RemoveAll terms threw: " + e.Message); }
@@ -1296,12 +1299,23 @@ public static partial class Ui
         }
     }
 
+    /// <summary>
+    /// The panels of the window row Escape closes one at a time: the shown standard windows and, while one is shown, the
+    /// floating panels in their row (<see cref="UiWindowLayout.Spots"/>). Escape already closed a floating panel (the
+    /// sweep); now the row closes topmost first, by draw order, which is show order (<see cref="PanelSpot.Layer"/>).
+    /// </summary>
     private static List<UiPanelHandle> ShownWindows(UiHandle[] snapshot)
     {
         var shown = new List<UiPanelHandle>();
+        bool anyWindow = false;
         foreach (var h in snapshot)
-            if (h is UiPanelHandle p && !p.IsDisposed && p.State == UiHandleState.Shown && p.WindowWidth > 0f && !ModsMenu.IsWorkspacePanel(p))
-                shown.Add(p);
+        {
+            if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown || ModsMenu.IsWorkspacePanel(p)) continue;
+            if (p.WindowWidth > 0f) anyWindow = true;
+            if (p.WindowWidth > 0f || p.Flows) shown.Add(p);
+        }
+
+        if (!anyWindow) shown.Clear();
         return shown;
     }
 

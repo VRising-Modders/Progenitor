@@ -59,7 +59,7 @@ public interface IUiWindow : IDisposable
 
 /// <summary>
 /// WINDOWS1: a Tabbed window's info column (<see cref="IUiWindow.Info"/>): a narrow column of text and buttons on the left
-/// that does not scroll. Put a row on one tab with <see cref="IUiWindow.Add{T}"/>, as for content.
+/// that scrolls on its own when it is longer than its clip (the wheel, the right stick). Put a row on one tab with <see cref="IUiWindow.Add{T}"/>, as for content.
 /// </summary>
 public interface IUiWindowColumn
 {
@@ -94,10 +94,10 @@ internal sealed class UiWindowHandle : IUiWindow
     private readonly object? _ownerGiven;
 
     /// <summary>
-    /// The assembly names (strings, never assemblies) of the plugins whose <see cref="OnRename"/> handlers this window
-    /// holds, so an ownerless window's Rename prompt is still dropped by that plugin's unload sweep (<see cref="BelongsTo"/>).
+    /// Ownerless windows (<see cref="Ui.Window"/> without an owner), weakly: a plugin's unload sweep drops the OnRename
+    /// handlers it left on them (<see cref="DropHandlersOf"/>).
     /// </summary>
-    private readonly List<string> _handlerSources = new();
+    private static readonly List<WeakReference<UiWindowHandle>> Ownerless = new();
     private readonly string _pluginId;
     private readonly string _stampFooter;
     private readonly IUiPanel _panel;
@@ -105,7 +105,11 @@ internal sealed class UiWindowHandle : IUiWindow
     private WindowColumn? _info;
     private readonly List<IUiButton> _tools = new();
     private IUiButton? _rename;
-    private readonly List<Action<string>> _renamed = new();
+    /// <summary>
+    /// The OnRename handlers, each with the name (a string, never the assembly) of the plugin assembly that declared it,
+    /// so an ownerless window's Rename prompt and handlers still go with that plugin's unload sweep (<see cref="BelongsTo"/>).
+    /// </summary>
+    private readonly List<(Action<string> Handler, string? Source)> _renamed = new();
     private readonly UiWindowSpec _spec;
     private IDisposable? _renameDialog;
     private bool _disposed;
@@ -126,6 +130,12 @@ internal sealed class UiWindowHandle : IUiWindow
         Preset = preset;
         _ownerGiven = owner;
         _owner = owner ?? this;
+        if (owner == null)
+            lock (Ownerless)
+            {
+                Ownerless.RemoveAll(w => !w.TryGetTarget(out _));
+                Ownerless.Add(new WeakReference<UiWindowHandle>(this));
+            }
         _panel = Ui.Panel(title.Trim(), owner, pluginId);
         _pluginId = _panel.PluginId;
         _stampFooter = UiWindowLayout.StampText(modName, modVersion, Ui.FrameworkFooter, frameWidth: _spec.FrameWidth);
@@ -221,10 +231,9 @@ internal sealed class UiWindowHandle : IUiWindow
     public IDisposable OnRename(Action<string> handler)
     {
         if (handler == null) throw new ArgumentNullException(nameof(handler));
-        _renamed.Add(handler);
-        string? source = PluginDelegateSource.Name(handler);
-        if (source != null && !_handlerSources.Contains(source)) _handlerSources.Add(source);
-        return new ActionDisposable(() => _renamed.Remove(handler));
+        var entry = (handler, PluginDelegateSource.Name(handler));
+        _renamed.Add(entry);
+        return new ActionDisposable(() => _renamed.Remove(entry));
     }
 
     public void Show()
@@ -266,13 +275,49 @@ internal sealed class UiWindowHandle : IUiWindow
         if (owner == null) return false;
         if (_ownerGiven != null) return ReferenceEquals(_ownerGiven, owner);
         string? name = PluginDelegateSource.OwnerName(owner);
-        foreach (var source in _handlerSources)
-            if (PluginDelegateSource.Matches(source, name)) return true;
+        foreach (var entry in _renamed)
+            if (PluginDelegateSource.Matches(entry.Source, name)) return true;
         return false;
     }
 
-    /// <summary>The plugins whose handlers this window holds (readback for tests).</summary>
-    internal IReadOnlyList<string> HandlerSources => _handlerSources;
+    /// <summary>The plugins whose handlers this window holds, each once (readback for tests).</summary>
+    internal IReadOnlyList<string> HandlerSources
+    {
+        get
+        {
+            var list = new List<string>();
+            foreach (var entry in _renamed)
+                if (entry.Source != null && !list.Contains(entry.Source)) list.Add(entry.Source);
+            return list;
+        }
+    }
+
+    /// <summary>Drop this window's OnRename handlers declared in the assembly named <paramref name="assemblyName"/>; how many.</summary>
+    internal int DropHandlersFrom(string? assemblyName)
+    {
+        if (assemblyName == null) return 0;
+        return _renamed.RemoveAll(e => PluginDelegateSource.Matches(e.Source, assemblyName));
+    }
+
+    /// <summary>
+    /// WINDOWS1 review: inside <paramref name="owner"/>'s unload sweep (<c>Ui.RemoveAll</c>), drop the OnRename handlers
+    /// that plugin left on ownerless windows, so they do not keep its delegates (and its load context) alive. Matches by
+    /// the handler's assembly only inside the sweep (<see cref="PluginDelegateSource.OwnerName"/>); otherwise nothing.
+    /// </summary>
+    internal static int DropHandlersOf(object owner)
+    {
+        string? name = PluginDelegateSource.OwnerName(owner);
+        if (name == null) return 0;
+        int dropped = 0;
+        lock (Ownerless)
+        {
+            Ownerless.RemoveAll(w => !w.TryGetTarget(out _));
+            foreach (var weak in Ownerless)
+                if (weak.TryGetTarget(out var window)) dropped += window.DropHandlersFrom(name);
+        }
+
+        return dropped;
+    }
 
     /// <summary>The Rename button's click (tests press it here).</summary>
     internal void AskRename()
@@ -290,9 +335,9 @@ internal sealed class UiWindowHandle : IUiWindow
     {
         if (_disposed || string.IsNullOrWhiteSpace(title)) return;
         Title = title;
-        foreach (var handler in _renamed.ToArray())
+        foreach (var entry in _renamed.ToArray())
         {
-            try { handler(Title); }
+            try { entry.Handler(Title); }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window rename handler threw: " + e.Message); }
         }
     }
@@ -326,6 +371,8 @@ internal sealed class UiWindowHandle : IUiWindow
         if (_disposed) return;
         _disposed = true;
         _renamed.Clear();
+        if (_ownerGiven == null)
+            lock (Ownerless) Ownerless.RemoveAll(w => !w.TryGetTarget(out var t) || ReferenceEquals(t, this));
         try { _renameDialog?.Dispose(); } catch { /* the dialog goes with the plugin anyway */ }
         _renameDialog = null;
         try { _panel.Hide(); } catch { /* already gone */ }

@@ -703,6 +703,7 @@ internal static class UiWindowLayout
     /// Every window had the same order, so which one drew on top was left to Unity: the first-created window of a fresh
     /// set drew under the others although it was shown last. Now the panel shown last draws on top.
     /// </summary>
+    /// <remarks>Layers past <c>WindowSortingMax - WindowSorting</c> (14 row panels at once) share the top order; deliberately left so.</remarks>
     internal static int LayerSorting(int layer) => Math.Min(WindowSortingMax, WindowSorting + Math.Max(0, layer));
 
     /// <summary>

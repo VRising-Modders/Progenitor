@@ -112,9 +112,13 @@ internal sealed partial class UnityUiRuntime
                 if (canvas == null) return;
                 canvas.overrideSorting = true;
                 canvas.sortingOrder = order;
+                _canvasOrder = order;
             }
             catch { /* the panel keeps the overlay order */ }
         }
+
+        /// <summary>The order <see cref="SetOverlaySorting"/> last wrote (the overlay's default until then): read per frame by the wheel.</summary>
+        private int _canvasOrder = UiOwnership.OverlaySorting;
 
         /// <summary>The tallest the window may be drawn at its place (<see cref="WindowPlacement.MaxHeight"/>).</summary>
         private float WindowMaxHeight(float canvasHeight) => WindowPlace(canvasHeight).MaxHeight;
@@ -150,6 +154,8 @@ internal sealed partial class UnityUiRuntime
             if (Released || _menuPane || _dialog) return;
             if (InWindowRow)
             {
+                // Past 14 row panels the layers share the top order (LayerSorting clamps at WindowSortingMax); the ones
+                // sharing it are left to Unity's order, which is fine for a set that large.
                 SetOverlaySorting(UiWindowLayout.LayerSorting(Spot.Layer));
                 _rowLayered = true;
             }
@@ -161,7 +167,7 @@ internal sealed partial class UnityUiRuntime
         }
 
         /// <summary>WINDOWS1 live fix: this panel's canvas order (windows and dialogs above the rest take the wheel first).</summary>
-        internal int CanvasOrder => OverlaySortingNow();
+        internal int CanvasOrder => _canvasOrder;
 
         /// <summary>The tallest this standard window has been since it was shown (<see cref="UiWindowLayout.StableHeight"/>).</summary>
         private float _tallestShown;

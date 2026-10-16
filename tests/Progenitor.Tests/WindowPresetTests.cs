@@ -748,6 +748,49 @@ public sealed class WindowPresetTests : IDisposable
     }
 
     [Fact]
+    public void An_unloading_plugins_rename_handlers_leave_an_ownerless_window()
+    {
+        var bare = (UiWindowHandle)UiApi.Window(UiWindowPreset.Header, "Bare", options: new UiWindowOptions { Renamable = true });
+        var sub = bare.OnRename(new Action<string>(Console.WriteLine));
+        bare.OnRename(new Action<string>(Console.Write));
+        string console = typeof(Console).Assembly.FullName!;
+        Assert.Equal(new[] { console }, bare.HandlerSources);
+        sub.Dispose(); // a disposed subscription takes its handler (and, with the last one, its source) along
+        Assert.Equal(new[] { console }, bare.HandlerSources);
+        Assert.Equal(1, bare.DropHandlersFrom(console)); // what the unload sweep does for that plugin's assembly
+        Assert.Empty(bare.HandlerSources);
+        Assert.Equal(0, UiWindowHandle.DropHandlersOf(new object())); // outside a sweep nothing matches
+        Assert.Contains("UiWindowHandle.DropHandlersOf(owner);", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "Ui.cs"));
+    }
+
+    [Fact]
+    public void Escape_closes_the_row_topmost_first_a_floating_panel_included()
+    {
+        // Review: a floating panel shown after a window draws on top of it, so Escape closes it first.
+        var header = Make(UiWindowPreset.Header, "Chest");
+        header.Show();
+        var floating = UiApi.Panel("Float", _owner, "example.mod").GameWindow();
+        floating.Show();
+        UiApi.PressKeyForTests(27, true);
+        UiApi.PressKeyForTests(17, true);
+        Assert.NotEqual(UiHandleState.Shown, floating.State);
+        Assert.True(header.IsOpen);
+        UiApi.PressKeyForTests(27, true);
+        UiApi.PressKeyForTests(17, true);
+        Assert.False(header.IsOpen);
+    }
+
+    [Fact]
+    public void The_wheel_paths_follow_the_hovered_panel_and_the_cached_draw_order()
+    {
+        string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs");
+        Assert.Contains("TryWheelClaim(pointer, deltaY, hit)", runtime);
+        Assert.Contains("TryScrollInner(pointer, deltaY, hit)", runtime);
+        Assert.Contains("mine = scroll!.transform.IsChildOf(hoveredRoot);", runtime);
+        Assert.Contains("internal int CanvasOrder => _canvasOrder;", SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.Windows.cs"));
+    }
+
+    [Fact]
     public void Show_hide_toggle_and_dispose_follow_the_panel()
     {
         var w = Make(UiWindowPreset.Basic);

@@ -112,9 +112,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// INSTALLSIDES1: write one notch onto the scroll block under the pointer, when one is there and
     /// can move that way. False hands the notch to the list.
     /// </summary>
-    private static bool TryScrollInner(PointerSample pointer, float deltaY)
+    private static bool TryScrollInner(PointerSample pointer, float deltaY, UnityPanel? hovered)
     {
         if (pointer.Kind != PointerKind.Inside || InnerScrolls.Count == 0) return false;
+        // WINDOWS1 review: only a scroll block of the panel the wheel is over (ResolveHoveredPanel, draw order first).
+        Transform? hoveredRoot = null;
+        try { hoveredRoot = hovered?.GameObject != null ? hovered.GameObject.transform : null; }
+        catch { hoveredRoot = null; }
+        if (hoveredRoot == null) return false;
         for (int i = InnerScrolls.Count - 1; i >= 0; i--)
         {
             ScrollRect? scroll = InnerScrolls[i];
@@ -134,6 +139,10 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             try { viewport = scroll!.viewport; content = scroll.content; }
             catch { /* */ }
             if (viewport == null || content == null) continue;
+            bool mine;
+            try { mine = scroll!.transform.IsChildOf(hoveredRoot); }
+            catch { mine = false; }
+            if (!mine) continue;
             ScreenRect rect;
             try { rect = ScreenRectOf(viewport); }
             catch { continue; }
@@ -4345,7 +4354,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // while its text can move that way; at its end the notch scrolls the list.
                 // P7b: a widget that scrolls itself (the data table's body) takes the notch over its area
                 // while it can move that way (UiWheelClaims); at its end the notch goes on as below.
-                if (pointer.Kind == PointerKind.Inside && TryWheelClaim(pointer, deltaY))
+                if (pointer.Kind == PointerKind.Inside && TryWheelClaim(pointer, deltaY, hit))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -4356,7 +4365,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     scroll = null;
                 }
                 // INSTALLSIDES1: a scroll block under the pointer takes the notch while it can move.
-                else if (scroll != null && TryScrollInner(pointer, deltaY))
+                else if (scroll != null && TryScrollInner(pointer, deltaY, hit))
                 {
                     pumpWrote = true;
                     scroll = null;
@@ -4518,22 +4527,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// pointer only, and only inside that panel's visible viewport: a table under a dialog or another panel, and rows
     /// clipped out of the viewport, never take the wheel.
     /// </summary>
-    private static bool TryWheelClaim(PointerSample pointer, float deltaY)
+    private static bool TryWheelClaim(PointerSample pointer, float deltaY, UnityPanel? hovered)
     {
         if (UiWheelClaims.Count == 0) return false;
-        UnityPanel? top = null;
-        for (int i = ShownPanels.Count - 1; i >= 0; i--)
-        {
-            var panel = ShownPanels[i];
-            if (panel == null || !panel.Alive || !panel.Visible) continue;
-            var frame = ScreenRectOfPanel(panel);
-            if (frame.IsKnown && frame.Contains(pointer.X, pointer.Y))
-            {
-                top = panel;
-                break;
-            }
-        }
-
+        // WINDOWS1 review: the panel the wheel is over is the one ResolveHoveredPanel picked (draw order first), never
+        // the last-shown panel whose frame happens to contain the pointer (a table behind a window).
+        var top = hovered;
         if (top == null) return false;
         return UiWheelClaims.TryTake(pointer.X, pointer.Y, deltaY, top, top.ViewportScreenRect);
     }
