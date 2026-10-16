@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Progenitor.Ui;
 
 /// <summary>
@@ -102,13 +104,13 @@ internal static class VanillaStationWindows
         new(VanillaPanelKind.PrisonCell, "PrisonMenuMapper", "PrisonSubMenu",
             "TM_SpecialStation_PrisonCell and its variants",
             routingTabs: true, hostsTabs: true,
-            note: "station/redistribution tab row like a workstation; the prisoner block and the cell's slots are hidden under a custom tab"),
+            note: "station/redistribution tab row like a workstation; the prisoner block, recipe grid and the cell's slots are hidden under a custom tab"),
         new(VanillaPanelKind.SalvageStation, "SalvagestationMenuMapper", "SalvagestationSubMenu",
-            "devourer (salvage station)",
+            "devourer (salvage station; by prefab name)",
             routingTabs: true, hostsTabs: true,
             note: "station/redistribution tab row; no recipe grid, the input grid is the anchor"),
         new(VanillaPanelKind.UnitStation, "UnitSpawnerstationMenuMapper", "UnitSpawnerstationSubMenu",
-            "TM_UnitStation_Tomb, TM_UnitStation_VerminNest, TM_UnitStation_NetherGate",
+            "TM_UnitStation_Tomb, TM_UnitStation_VerminNest, TM_UnitStation_NetherGate (by prefab name)",
             routingTabs: false, hostsTabs: false,
             note: "edge attachments only: the window has no station/redistribution tab row to replace"),
     };
@@ -147,6 +149,28 @@ internal static class VanillaStationWindows
         new(VanillaPanelKind.None, "TraderMenuMapper", "TraderSubMenu", "traders",
             false, false, "an NPC, not a castle station"),
     };
+
+    private static readonly HashSet<VanillaPanelKind> Failed = new();
+
+    /// <summary>
+    /// Drop one window for the generation: its reader threw (a type or member the game renamed).
+    /// True the first time, so the caller logs once. The other windows and sites are unaffected.
+    /// </summary>
+    internal static bool MarkFailed(VanillaPanelKind kind)
+    {
+        lock (Failed) return Failed.Add(kind);
+    }
+
+    internal static bool IsFailed(VanillaPanelKind kind)
+    {
+        lock (Failed) return Failed.Count != 0 && Failed.Contains(kind);
+    }
+
+    /// <summary>Core Uninstall (a new generation reads every window again).</summary>
+    internal static void ResetFailures()
+    {
+        lock (Failed) Failed.Clear();
+    }
 
     /// <summary>The kind a covered window reports, by its submenu type name; <c>None</c> for anything else.</summary>
     internal static VanillaPanelKind KindOfSubMenu(string? subMenu)
@@ -187,7 +211,8 @@ internal static class VanillaStationWindows
 
     /// <summary>
     /// The station window the site shows this frame: the first of <paramref name="states"/> whose
-    /// window is shown and whose mapper has a target. -1 when none is open. A shown window without a
+    /// window is shown and whose mapper has a target, skipping a window dropped by
+    /// <see cref="MarkFailed"/>. -1 when none is open. A shown window without a
     /// target (the frame the game is still filling it, or the frame after the station died) is closed.
     /// </summary>
     internal static int Pick(StationWindowState[] states)
@@ -196,7 +221,7 @@ internal static class VanillaStationWindows
         for (int i = 0; i < states.Length; i++)
         {
             var s = states[i];
-            if (s.Shown && s.HasTarget && IsStation(s.Kind)) return i;
+            if (s.Shown && s.HasTarget && IsStation(s.Kind) && !IsFailed(s.Kind)) return i;
         }
 
         return -1;

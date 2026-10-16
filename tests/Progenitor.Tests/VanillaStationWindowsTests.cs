@@ -139,6 +139,44 @@ public sealed class VanillaStationWindowsTests
         Assert.Equal(-1, VanillaStationWindows.Pick(null!));
     }
 
+    [Fact]
+    public void AFailedWindowIsDroppedAloneAndTheOthersStillResolve()
+    {
+        VanillaStationWindows.ResetFailures();
+        try
+        {
+            Assert.True(VanillaStationWindows.MarkFailed(VanillaPanelKind.PrisonCell));
+            Assert.False(VanillaStationWindows.MarkFailed(VanillaPanelKind.PrisonCell)); // logged once
+
+            var states = Closed();
+            states[2] = new StationWindowState(VanillaPanelKind.PrisonCell, true, 4711, 3);
+            Assert.False(VanillaStationWindows.TryResolve(states, out _, out _));
+
+            // A workstation, a devourer and a tomb are unaffected by the prison reader's failure.
+            states[0] = new StationWindowState(VanillaPanelKind.Workstation, true, 10, 1);
+            Assert.True(VanillaStationWindows.TryResolve(states, out int index, out var target));
+            Assert.Equal(0, index);
+            Assert.Equal(VanillaPanelKind.Workstation, target.Kind);
+
+            states = Closed();
+            states[3] = new StationWindowState(VanillaPanelKind.SalvageStation, true, 77, 2);
+            Assert.Equal(3, VanillaStationWindows.Pick(states));
+            states[3] = new StationWindowState(VanillaPanelKind.SalvageStation, false, 0, 0);
+            states[4] = new StationWindowState(VanillaPanelKind.UnitStation, true, 812, 1);
+            Assert.Equal(4, VanillaStationWindows.Pick(states));
+            Assert.False(VanillaStationWindows.IsFailed(VanillaPanelKind.SalvageStation));
+        }
+        finally
+        {
+            VanillaStationWindows.ResetFailures();
+        }
+
+        // A new generation reads the window again.
+        var again = Closed();
+        again[2] = new StationWindowState(VanillaPanelKind.PrisonCell, true, 4711, 3);
+        Assert.Equal(2, VanillaStationWindows.Pick(again));
+    }
+
     [Theory]
     [InlineData(VanillaUiSite.StationPanel, VanillaPanelKind.Workstation, true)]
     [InlineData(VanillaUiSite.StationPanel, VanillaPanelKind.RefinementStation, true)]

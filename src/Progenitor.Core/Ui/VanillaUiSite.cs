@@ -76,7 +76,7 @@ public enum VanillaUiSite
     /// the refinement station (<c>RefinementstationMenuMapper._RefinementStationSubMenu</c>), the prison
     /// cell (<c>PrisonMenuMapper._PrisonSubMenu</c>), the salvage station
     /// (<c>SalvagestationMenuMapper._SalvageStationSubMenu</c>) and the unit stations: tomb, vermin
-    /// nest, Nether Gate (<c>UnitSpawnerstationMenuMapper._UnitSpawnerstationSubMenu</c>). The target
+    /// nest, Nether Gate, by prefab name (<c>UnitSpawnerstationMenuMapper._UnitSpawnerstationSubMenu</c>). The target
     /// is always that mapper's <c>_Target</c>, the station entity; <see cref="VanillaPanelTarget.Kind"/>
     /// says which window. The list and the windows left out, with reasons, are
     /// <see cref="VanillaStationWindows"/>. Anchors: <see cref="VanillaPanelAnchor.LeftEdge"/> (default) and

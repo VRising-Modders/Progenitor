@@ -107,10 +107,10 @@ public enum VanillaPanelKind
     /// <summary>A prison cell (<c>PrisonSubMenu</c>); the target is the cell's station entity.</summary>
     PrisonCell = 6,
 
-    /// <summary>A salvage station, the devourer (<c>SalvagestationSubMenu</c>).</summary>
+    /// <summary>A salvage station, the devourer by prefab name (<c>SalvagestationSubMenu</c>).</summary>
     SalvageStation = 7,
 
-    /// <summary>A unit station: tomb, vermin nest, Nether Gate (<c>UnitSpawnerstationSubMenu</c>).</summary>
+    /// <summary>A unit station: tomb, vermin nest, Nether Gate, by prefab name (<c>UnitSpawnerstationSubMenu</c>).</summary>
     UnitStation = 8,
 }
 

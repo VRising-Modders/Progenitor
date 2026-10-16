@@ -57,21 +57,16 @@ internal sealed partial class UnityUiRuntime
                 var chest = view.Panel.GetComponent<ContainerSubMenu>();
                 var bench = view.Panel.GetComponent<WorkstationSubMenu>();
                 var refiner = view.Panel.GetComponent<RefinementstationSubMenu>();
-                var prison = view.Panel.GetComponent<PrisonSubMenu>();
-                var salvage = view.Panel.GetComponent<SalvagestationSubMenu>();
-                _routing = bench != null ? bench.InventoryRoutingParent
-                    : refiner != null ? refiner.InventoryRoutingParent
-                    : prison != null ? prison.InventoryRoutingParent
-                    : salvage != null ? salvage.InventoryRoutingParent : null;
-                // A station window draws the strip only in place of its own station/redistribution
+                _routing = bench != null ? bench.InventoryRoutingParent : refiner != null ? refiner.InventoryRoutingParent : null;
+                // Any other station window draws the strip only in place of its own station/redistribution
                 // row (VanillaStationWindows.HostsTabs); never over a window that has none.
-                if (chest == null && bench == null && refiner == null && _routing == null) { Release(); return; }
+                RectTransform? specialBonus = null;
+                if (chest == null && bench == null && refiner == null && !SpecialStation(sample.Target.Kind, view.Panel, _content, out _routing, out specialBonus))
+                { Release(); return; }
                 var anchor = _routing != null && _routing.StationTabButton != null
                     ? _routing.StationTabButton.GetComponent<RectTransform>() : view.Grid;
                 _bonusAnchor = bench != null ? RectOf(bench.BonusesParent)
-                    : refiner != null ? RectOf(refiner.BonusesParent)
-                    : prison != null ? RectOf(prison.BonusesParent)
-                    : salvage != null ? RectOf(salvage.BonusesParent) : null;
+                    : refiner != null ? RectOf(refiner.BonusesParent) : specialBonus;
                 anchor.GetWorldCorners(_corners);
                 _top = _root.InverseTransformPoint(_corners[1]).y;
                 _flow = chest != null;
@@ -99,22 +94,6 @@ internal sealed partial class UnityUiRuntime
                 {
                     HideTarget(_content, bench.ItemOutputsParent.transform.parent);
                     HideTarget(_content, bench.StationStatusText);
-                }
-                if (prison != null)
-                {
-                    // The prisoner block (full or empty cell) and the cell's slots, beside what the
-                    // routing row already lists as station content.
-                    HideTarget(_content, prison.Parent_FullCell != null ? prison.Parent_FullCell.transform : null);
-                    HideTarget(_content, prison.Parent_EmptyCell != null ? prison.Parent_EmptyCell.transform : null);
-                    HideTarget(_content, prison.ItemOutputsParent != null ? prison.ItemOutputsParent.transform.parent : null);
-                    HideTarget(_content, prison.StationStatusText);
-                }
-                if (salvage != null)
-                {
-                    HideTarget(_content, salvage.ItemInputsParent != null ? salvage.ItemInputsParent.transform.parent : null);
-                    HideTarget(_content, salvage.ItemOutputsParent != null ? salvage.ItemOutputsParent.transform.parent : null);
-                    HideTarget(_content, salvage.RefinementProgress);
-                    HideTarget(_content, salvage.StationStatusText);
                 }
                 _strip = new GameObject("Progenitor.ContainerTabs");
                 _strip.transform.SetParent(_layoutParent, false);
@@ -211,6 +190,69 @@ internal sealed partial class UnityUiRuntime
             foreach (var item in _nativeTabs) item.Hide();
             ApplySelection();
             PlacePanel();
+        }
+
+        /// <summary>
+        /// The prison cell and devourer windows: their tab row, bonuses and the content a custom tab
+        /// hides. Each window is read in its own non-inlined method, called inside a try/catch, so a
+        /// member the game renames on one of them fails only that window's tabs (logged once).
+        /// False when the window has no tab row (or failed): no strip is drawn.
+        /// </summary>
+        static bool SpecialStation(VanillaPanelKind kind, GameObject panel, List<HiddenNative> content,
+            out InventoryRoutingParentUI? routing, out RectTransform? bonus)
+        {
+            routing = null;
+            bonus = null;
+            if (VanillaStationWindows.IsFailed(kind)) return false;
+            try
+            {
+                if (kind == VanillaPanelKind.PrisonCell) PrisonTabs(panel, content, out routing, out bonus);
+                else if (kind == VanillaPanelKind.SalvageStation) SalvageTabs(panel, content, out routing, out bonus);
+            }
+            catch (Exception e)
+            {
+                if (VanillaStationWindows.MarkFailed(kind))
+                    Plugin.Logger?.LogWarning("Ui: StationPanel window " + kind + " unavailable (tabs): " + e.GetType().Name + ": " + e.Message);
+                routing = null;
+                bonus = null;
+                return false;
+            }
+
+            return routing != null;
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void PrisonTabs(GameObject panel, List<HiddenNative> content, out InventoryRoutingParentUI? routing, out RectTransform? bonus)
+        {
+            var prison = panel.GetComponent<PrisonSubMenu>();
+            routing = prison != null ? prison.InventoryRoutingParent : null;
+            bonus = prison != null ? RectOf(prison.BonusesParent) : null;
+            if (prison == null || routing == null) return;
+            // The prisoner block (full or empty cell), the recipe grid, the cell's slots and the
+            // status line, beside what the routing row lists as station content. Hiding a piece the
+            // row already hides is harmless (a second CanvasGroup state, restored in order).
+            HideTarget(content, prison.Parent_FullCell != null ? prison.Parent_FullCell.transform : null);
+            HideTarget(content, prison.Parent_EmptyCell != null ? prison.Parent_EmptyCell.transform : null);
+            HideTarget(content, prison.RecipesParent);
+            HideTarget(content, prison.ItemOutputsParent != null ? prison.ItemOutputsParent.transform.parent : null);
+            HideTarget(content, prison.StationStatusText);
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static void SalvageTabs(GameObject panel, List<HiddenNative> content, out InventoryRoutingParentUI? routing, out RectTransform? bonus)
+        {
+            var salvage = panel.GetComponent<SalvagestationSubMenu>();
+            routing = salvage != null ? salvage.InventoryRoutingParent : null;
+            bonus = salvage != null ? RectOf(salvage.BonusesParent) : null;
+            if (salvage == null || routing == null) return;
+            HideTarget(content, salvage.ItemInputsParent != null ? salvage.ItemInputsParent.transform.parent : null);
+            HideTarget(content, salvage.ItemOutputsParent != null ? salvage.ItemOutputsParent.transform.parent : null);
+            HideTarget(content, salvage.RefinementProgress);
+            HideTarget(content, salvage.StationStatusText);
+            HideTarget(content, salvage.ToggleButton_Active);
+            HideTarget(content, salvage.ToggleButton_Inactive);
+            HideTarget(content, salvage.ToggleButtonText);
+            HideTarget(content, salvage.OpenTagEditButton);
         }
 
         static void HideTarget(List<HiddenNative> list, Component? target)
