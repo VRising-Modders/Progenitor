@@ -717,7 +717,7 @@ internal static class SampleFx
     private static void PlayImage()
     {
         Log("image borrow " + ImageName);
-        var handle = BorrowAs<UiImageHandle>(AssetKind.Image, ImageName);
+        var handle = (UiImageHandle)BorrowAs(typeof(UiImageHandle), AssetKind.Image, ImageName);
         handle.Color = Gold;
         handle.Size = ImageSize;
         handle.Position = new EffectVec2(0f, 0f);
@@ -788,7 +788,7 @@ internal static class SampleFx
         var style = ParsedHasBeamStyle ? ParsedBeamStyle : Assets.PreferredBeamStyle();
         SequenceEffectHandle handle = _beam != null
             ? _beam(style)
-            : BorrowAs<SequenceEffectHandle>(AssetKind.Sequence, BeamName);
+            : (SequenceEffectHandle)BorrowAs(typeof(SequenceEffectHandle), AssetKind.Sequence, BeamName);
         Log("beam style " + StyleToken(handle.Enabled ? handle.Style : style));
         Log("beam borrow " + handle.Name);
 #if !PROGENITOR_TESTS
@@ -833,7 +833,7 @@ internal static class SampleFx
     private static void PlayVignette()
     {
         Log("vignette borrow");
-        var handle = BorrowAs<VolumeHandle>(AssetKind.Volume, VolumeName);
+        var handle = (VolumeHandle)BorrowAs(typeof(VolumeHandle), AssetKind.Volume, VolumeName);
         handle.Tint = VignetteGold;
         handle.Intensity = VignetteIntensity;
         handle.Smoothness = VignetteSmoothness;
@@ -844,12 +844,14 @@ internal static class SampleFx
         ScheduleDispose(handle, VignetteSeconds, "vignette");
     }
 
-    private static T BorrowAs<T>(AssetKind kind, string name) where T : class, IEffectHandle
+    // Not generic on purpose: BorrowAs<T> instantiated with Core handle types would live in Core's
+    // load context and keep this plugin loaded until Core unloads (docs/hot-reload.md "Generic helpers").
+    private static IEffectHandle BorrowAs(Type expected, AssetKind kind, string name)
     {
         var raw = Borrow(kind, name);
-        if (raw is T typed) return typed;
+        if (expected.IsInstanceOfType(raw)) return raw;
         throw new InvalidOperationException(
-            "Sample fx expected " + typeof(T).Name + " for " + kind + " '" + name + "', got "
+            "Sample fx expected " + expected.Name + " for " + kind + " '" + name + "', got "
             + raw.GetType().Name);
     }
 

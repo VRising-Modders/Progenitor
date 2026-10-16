@@ -130,6 +130,37 @@ Use the [quickstart](hot-reload.md) for build, deployment and verification steps
 
 - Register through `ctx.Events`, `ctx.Hooks`, `ctx.Systems`, `ctx.Patches` and other owner-aware APIs. Track extra disposable resources; detach external callbacks and stop background work on unload.
 - Do not inject plugin-defined IL2CPP types or `SystemBase` subclasses. Use named virtual systems instead. A reload-folder plugin that does inject is **process-lifetime** (below).
+- Do not define a generic method or type in a plugin and instantiate it with Progenitor types ([below](#generic-helpers-instantiated-with-progenitor-types-pin-the-plugin)).
+
+### Generic helpers instantiated with Progenitor types pin the plugin
+
+The runtime creates an instantiation of a generic in the newest *other* collectible load context among its type arguments. A generic your plugin defines, instantiated with a Core type, therefore lives in Core's context, and Core then keeps your plugin loaded until that Core generation unloads. Every hot reload of the plugin leaks one copy, and Bootstrap refuses Core swaps while a retired copy is alive. Compiling the caller is enough; the call does not have to run.
+
+```csharp
+// Pins the plugin: On<IUiToggle>, On<IUiSlider>, ... are created in Core's context.
+private T On<T>(int tab, T handle) where T : IUiHandle => _tabs!.Add(tab, handle);
+On(tab, panel.Toggle("Toggle", true)).OnChanged(...);
+
+// Fine: IUiTabs.Add<T> is defined in Core. A generic Core defines over any type stays out of Core's context.
+_tabs!.Add(tab, panel.Toggle("Toggle", true)).OnChanged(...);
+
+// Fine: a non-generic helper; cast at the call site.
+private static IEffectHandle BorrowAs(Type expected, AssetKind kind, string name) { ... }
+var image = (UiImageHandle)BorrowAs(typeof(UiImageHandle), AssetKind.Image, ImageName);
+```
+
+The rule, as the runtime applies it:
+
+| Instantiation of a generic the plugin defines | Pins? |
+|---|---|
+| Any argument is a Core type: `On<IUiButton>`, `Pair<string, IUiButton>`, `Pair<MyType, IUiButton>`, `One<IUiButton[]>`, `One<List<IUiButton>>` | Yes. Your own types next to a Core type do not help; they are in the defining context and are skipped. |
+| Only runtime-library and your own types: `Pair<string, int>`, `One<MyType>` | No |
+| A runtime-library generic that mixes Core and your types: `One<Dictionary<IUiButton, MyType>>` | No: that dictionary lives in your (newer) context. |
+| A generic Core defines, over any types: `ctx.Bind<T>`, `IUiTabs.Add<T>` | No |
+
+When a `ProgenitorPlugin` loads from a collectible context, Core scans its metadata (about 6 ms for the 1.5 MB Dev plugin, under 2 ms for the samples) and logs one warning per offending member: `<plugin>: <member> is a generic defined in this plugin and instantiated only with Progenitor types; the runtime will keep this plugin loaded until Progenitor Core unloads, so hot reloads of it leak and block Core swaps. Make the helper non-generic. Instantiations: <list>.` The scan reports references, not calls that ran, and sees only the plugin's own assembly. It is guidance; the plugin loads either way. At a Core swap, a retired plugin that is still alive gets `pin-diag plugin-holder runtime-generic <member> -> released when this Core generation unloads`, plus the slot in Core's loader handle table when the runtime exposes it. The repository test `CrossContextGenericsTests` applies the same scan to every built sample and the Dev plugin.
+
+Source-checked and game-free tested: the test loads each case into real collectible contexts and checks that the runtime records a Core-to-plugin reference exactly when the scan reports one. The pin was observed live with heap analysis of a client process on 2026-10-16 (the Controls sample's `On<T>`) and reproduced on .NET 6.0.35. The admission warning and diagnosis lines are not yet observed live.
 
 ### Plugins that inject IL2CPP types are process-lifetime
 

@@ -157,6 +157,9 @@ public abstract class ProgenitorPlugin<TContext> : BasePlugin
 
         Progenitor.Ui.ModProblems.ClearLoadProblems(guid);
         DirectKeyReadCheck.Run(GetType().Assembly, guid, meta.Name, Log);
+        // A generic this plugin defines and instantiates with Core types pins it to this Core
+        // generation (docs/hot-reload.md "Generic helpers"). Hot-loaded plugins only; guidance, never a gate.
+        Reload.CrossContextGenerics.Admit(GetType().Assembly, w => Log.LogWarning(meta.Name + ": " + w), d => Log.LogDebug(d));
         TContext? ctx = null;
         try
         {
