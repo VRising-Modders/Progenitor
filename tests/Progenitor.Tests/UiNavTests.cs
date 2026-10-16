@@ -739,6 +739,41 @@ public sealed class UiNavTests : IDisposable
             Assert.NotEqual(NavCommand.None, UiNavTestBridge.Command(b));
     }
 
+    [Fact]
+    public void Left_and_right_move_between_compact_dropdowns_and_never_step_their_values()
+    {
+        using var panel = Panel();
+        panel.BeginInline();
+        var scope = (UiChoiceHandle)panel.CompactDropdown("Scope", new[] { "castle", "all" }, "castle");
+        var match = (UiChoiceHandle)panel.CompactDropdown("Match", new[] { "any", "all" }, "any");
+        panel.EndInline();
+        Assert.True(scope.Compact && match.Compact);
+        // One row: Scope at the left, Match beside it.
+        _host.Rects[scope] = Row(100f, 0f, 180f);
+        _host.Rects[match] = Row(100f, 200f, 180f);
+        Surface(Children(panel));
+        UiNav.Execute(NavCommand.Down);
+        Assert.Same(scope, UiNav.Focus.Handle);
+
+        UiNav.Execute(NavCommand.Right);
+        Assert.Same(match, UiNav.Focus.Handle);
+        Assert.Equal("castle", scope.Value);
+        Assert.Equal("any", match.Value);
+        UiNav.Execute(NavCommand.Right); // the row's end: nothing beside it, the value stays
+        Assert.Same(match, UiNav.Focus.Handle);
+        Assert.Equal("any", match.Value);
+        UiNav.Execute(NavCommand.Left);
+        Assert.Same(scope, UiNav.Focus.Handle);
+
+        // A opens the list; there Left and Right are taken by the open list and move nothing.
+        UiNav.Execute(NavCommand.Submit);
+        Assert.True(scope.IsOpen);
+        UiNav.Execute(NavCommand.Right);
+        Assert.Same(scope, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Cancel);
+        Assert.False(scope.IsOpen);
+    }
+
     private sealed class FakeNavHost : INavHost
     {
         internal NavSurface? Surface;

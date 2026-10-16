@@ -460,6 +460,9 @@ internal interface IUiRuntime
     /// <summary>WINDOWS1: whether the pointer is over <paramref name="panel"/>'s frame now (a WhenHovered panel takes the input).</summary>
     bool PanelUnderPointer(IRuntimePanel panel) => false;
 
+    /// <summary>HUB1: the panel's canvas sort order as last written (higher draws on top); 0 when unknown.</summary>
+    int PanelDrawOrder(IRuntimePanel panel) => 0;
+
     /// <summary>WINDOWS1: the widget's rect where it is drawn now (<see cref="WidgetRect"/> unscrolls a window's info column).</summary>
     ScreenRect WidgetDrawnRect(IRuntimeWidget widget) => WidgetRect(widget);
 

@@ -1376,6 +1376,17 @@ public static partial class Ui
         return list;
     }
 
+    /// <summary>HUB1: the panels on screen now, into <paramref name="buffer"/> (cleared first); no allocation once it has grown.</summary>
+    internal static void ShownPanelsInto(List<UiPanelHandle> buffer)
+    {
+        buffer.Clear();
+        lock (Gate)
+        {
+            for (int i = 0; i < Live.Count; i++)
+                if (Live[i] is UiPanelHandle panel && !panel.IsDisposed && panel.IsShownNow) buffer.Add(panel);
+        }
+    }
+
     /// <summary>NAV1: a controller's B: the Escape key's path (a dialog's answer, a screen's Back, else hide).</summary>
     internal static void PressEscapeForNav()
     {

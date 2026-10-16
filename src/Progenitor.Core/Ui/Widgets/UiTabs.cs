@@ -51,7 +51,7 @@ public interface IUiTabs : IUiHandle
 /// <summary>HUB1: how a tab row is drawn (<see cref="UiTabsOptions.Look"/>).</summary>
 public enum UiTabsLook
 {
-    /// <summary>The game's window tabs on a game window (<see cref="UiLook.GameWindow(IUiPanel)"/> and every standard window); chips elsewhere.</summary>
+    /// <summary>The game's window tabs on a panel made a game window with <see cref="UiLook.GameWindow(IUiPanel)"/>; chips elsewhere (the standard windows keep their chips).</summary>
     Auto = 0,
 
     /// <summary>The game's own window tabs (the full-screen menu's inner tab, the art the Character menu's tabs use), wherever the row is.</summary>
@@ -90,6 +90,14 @@ public sealed class UiTabsOptions
     /// the Mods workspace's own history. <see cref="IUiTabs.Back"/> and <see cref="IUiTabs.Forward"/> do the same.
     /// </summary>
     public bool History { get; set; } = true;
+
+    /// <summary>
+    /// HUB1: what <see cref="UiWidgets.Tabs(IUiPanel, string, IReadOnlyList{string}, int)"/> (the overload without options)
+    /// has always drawn, kept for its callers: the popup-button chips and no history; the window keeps its height across
+    /// tabs, as the standard windows do.
+    /// </summary>
+    internal static UiTabsOptions Legacy(int selected) =>
+        new() { Selected = selected, Look = UiTabsLook.Chips, History = false, KeepHeight = true };
 }
 
 /// <summary>P7: the count-badge rule the tabs, the ordered list and the picker share.</summary>
@@ -133,7 +141,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     internal float MinContentHeight { get; }
 
     internal UiTabsHandle(IUiPanel panel, string key, IReadOnlyList<string> captions, int selected)
-        : this(panel, key, captions, new UiTabsOptions { Selected = selected })
+        : this(panel, key, captions, UiTabsOptions.Legacy(selected))
     {
     }
 
@@ -194,9 +202,11 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
         {
             int next = Clamp(value);
             if (IsDisposed || next == _selected) return;
-            _selected = next;
             // HUB1: a selection the player made (a click, a controller press, Selected) goes on the history and drops its
-            // forward part; a step back or forward through the history moves along it instead.
+            // forward part; a step back or forward through the history moves along it instead. A history from before the
+            // window was last closed starts again at the tab it shows.
+            if (!_walking) FreshHistory();
+            _selected = next;
             if (!_walking) _history?.Push(next);
             // The handlers run inside the switch's layout batch too: a handler that rewrites a label or shows a control
             // (the sample's status line) would otherwise lay the page out a second time right after the switch's own pass.
@@ -214,6 +224,29 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
 
     private readonly UiTabHistory? _history;
     private bool _walking;
+
+    /// <summary>The panel's show the history belongs to (<see cref="UiPanelHandle.ShownSequence"/>); 0 before the first.</summary>
+    private long _historyShow;
+
+    /// <summary>
+    /// HUB1: the history lives as long as one opening of its window: when the window was closed and shown again since the
+    /// history last moved, it starts again at the tab shown now (a browser's new tab, not the last session's).
+    /// </summary>
+    private void FreshHistory()
+    {
+        if (_history == null || HostPanel is not UiPanelHandle panel) return;
+        long show = panel.ShownSequence;
+        if (show == _historyShow) return;
+        if (_historyShow != 0) _history.Reset(_selected);
+        _historyShow = show;
+    }
+
+    /// <summary>HUB1: the window closed: the next opening starts a new history (<see cref="IUiWindow.Hide"/>).</summary>
+    internal void ResetHistory()
+    {
+        _history?.Reset(_selected);
+        _historyShow = 0;
+    }
 
     /// <summary>HUB1: the row keeps a history (<see cref="UiTabsOptions.History"/>).</summary>
     internal bool HistoryOn => _history != null && !IsDisposed;
@@ -237,6 +270,7 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
     private bool Walk(bool back)
     {
         if (_history == null || IsDisposed) return false;
+        FreshHistory();
         int tab = back ? _history.Back() : _history.Forward();
         if (tab < 0) return false;
         _walking = true;

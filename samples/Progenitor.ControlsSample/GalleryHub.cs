@@ -17,6 +17,12 @@ internal sealed class GalleryHub : IDisposable
     internal const string TabsKey = "hub-tabs";
     internal const string TableKey = "hub-buildings";
 
+    /// <summary>The sample's key that opens or closes the hub (Ctrl+F8); the gallery's Hub window button shows it.</summary>
+    internal const string ToggleBindId = "ToggleHub";
+
+    /// <summary>The sample's key that closes the hub as its Return button does (Ctrl+Backspace: Escape is the framework's).</summary>
+    internal const string ReturnBindId = "HubReturn";
+
     /// <summary>The window's frame width.</summary>
     internal const float Width = 860f;
 
@@ -96,7 +102,7 @@ internal sealed class GalleryHub : IDisposable
         }
 
         var search = tabs.Add(0, p.SearchInput("Search", ""));
-        Find = tabs.Add(0, search.Action("Find", text => Say("find \"" + text + "\"")));
+        Find = tabs.Add(0, search.ActionButton("Find", text => Say("find \"" + text + "\"")));
         Find.Tooltip("Search the castle's chests and stations.");
 
         var columns = new[]
@@ -111,18 +117,26 @@ internal sealed class GalleryHub : IDisposable
         tabs.Add(1, p.Text("Large wooden chest", "6", UiTextStyle.Number));
         tabs.Add(1, p.Text("31 of 40 slots used.", UiTextStyle.Muted));
 
-        tabs.Add(2, p.Text("The mouse's back and forward buttons, or Alt+Left and Alt+Right, step through the tabs you opened.", UiTextStyle.Body));
+        tabs.Add(2, p.Text("Alt+Left and Alt+Right (and the mouse's back and forward buttons over the Mods menu) step through the tabs you opened.", UiTextStyle.Body));
 
         // A centered Return with its key: the plugin's own registered key (follows a remap), else Esc.
         p.BeginInline();
-        Return = p.Button("Return").Centered().KeyHint(_bindId.Length > 0 ? _bindId : "Esc");
-        Return.OnClick(() =>
-        {
-            Say("return");
-            Window?.Hide();
-        });
+        // A centered Return showing the sample's own Return key (ReturnBindId, registered by the plugin: it closes the hub
+        // as the button does, and the cap follows a remap in the Keybinds tab).
+        Return = p.Button("Return").Centered().KeyHint(_bindId);
+        Return.OnClick(() => Close());
         p.EndInline();
         return p;
+    }
+
+    /// <summary>Close the window (the Return button and the sample's Return key); "closed", or "not open".</summary>
+    internal string Close()
+    {
+        var w = Window;
+        if (w == null || w.State != UiHandleState.Shown) return "not open";
+        Say("return");
+        w.Hide();
+        return "closed";
     }
 
     /// <summary>The table's rows: each building with its build-menu icon (none until the game has drawn it).</summary>

@@ -1372,6 +1372,9 @@ public static class Keybinds
     /// <summary>KEYS4: why a menu bind did not run with the Mods workspace closed.</summary>
     internal const string MenuClosedReason = "suppressed: works only while the Mods menu is open";
 
+    /// <summary>HUB1: why a window key (<see cref="KeybindScope.Window"/>) did not fire.</summary>
+    internal const string WindowClosedReason = "suppressed: works only while a window with tabs is under the pointer or holds the input, or the Mods menu is open";
+
     internal const string PhotoInactiveReason = "suppressed: works only in photo mode";
 
     /// <summary>MAPTP1: why a map bind did not run with the world map closed.</summary>
@@ -1385,6 +1388,7 @@ public static class Keybinds
         KeybindScope.Photo => PhotoInactiveReason,
         KeybindScope.Map => MapClosedReason,
         KeybindScope.Chat => ChatClosedReason,
+        KeybindScope.Window => WindowClosedReason,
         _ => MenuClosedReason,
     };
 
@@ -1394,8 +1398,16 @@ public static class Keybinds
     /// </summary>
     internal static Func<bool> MenuScopeOpen { get; set; } = DefaultMenuScopeOpen;
 
-    /// <summary>KEYS7: the Mods workspace, or the game's full-screen menu on any tab; HUB1: or a window with a tab history under the pointer or holding the input.</summary>
-    private static bool DefaultMenuScopeOpen() => ModsMenu.NavigationScopeOpen;
+    /// <summary>KEYS7: the Mods workspace, or the game's full-screen menu on any tab (never plain gameplay).</summary>
+    private static bool DefaultMenuScopeOpen() => ModsMenu.MenuContextOpen;
+
+    /// <summary>
+    /// HUB1: whether a window key (<see cref="KeybindScope.Window"/>) fires: a window with a tab history is under the
+    /// pointer or holds the input, or a menu the workspace history covers is open. A seam for tests.
+    /// </summary>
+    internal static Func<bool> WindowScopeOpen { get; set; } = DefaultWindowScopeOpen;
+
+    private static bool DefaultWindowScopeOpen() => ModsMenu.NavigationScopeOpen;
 
     /// <summary>
     /// Whether photo mode is active, for <see cref="KeybindScope.Photo"/> binds. Set by photo mode's
@@ -1429,6 +1441,7 @@ public static class Keybinds
             return scope switch
             {
                 KeybindScope.Menu => MenuScopeOpen(),
+                KeybindScope.Window => WindowScopeOpen(),
                 KeybindScope.Photo => PhotoScopeOpen(),
                 KeybindScope.Map => MapScopeOpen(),
                 KeybindScope.Chat => ChatScopeOpen(),
@@ -1494,6 +1507,9 @@ public static class Keybinds
         if (was != null) Raise(new RebindResult(was.Id, RebindOutcome.Cancelled));
     }
 
+    /// <summary>HUB1: the polls so far (one a frame on the client).</summary>
+    internal static int PumpFrame { get; private set; }
+
     /// <summary>
     /// One poll. Called from <c>Plugin.Frame</c> on the client; tests call it directly.
     /// Order matters: chat first (it wins over everything, including an exempt bind), then the
@@ -1501,6 +1517,8 @@ public static class Keybinds
     /// </summary>
     public static void Pump()
     {
+        // HUB1: one count per poll, so a per-frame answer (the window a tab-history key acts on) is taken once a frame.
+        unchecked { PumpFrame++; }
         // KEYS4: the key-conflict dialog's frame (it catches and logs its own failures), and the Keybinds
         // tab following a bind that came, went or changed while it is shown.
         KeybindConflictPrompt.Tick();
@@ -2231,6 +2249,7 @@ public static class Keybinds
         RebindFinished = null;
         RebindRefused = null;
         MenuScopeOpen = DefaultMenuScopeOpen;
+        WindowScopeOpen = DefaultWindowScopeOpen;
         PhotoScopeOpen = NeverOpen;
         MapScopeOpen = DefaultMapScopeOpen;
         ChatScopeOpen = DefaultChatScopeOpen;

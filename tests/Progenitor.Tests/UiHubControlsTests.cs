@@ -60,10 +60,16 @@ public sealed class UiHubControlsTests : IDisposable
     [Fact]
     public void Tabs_on_a_game_window_are_the_games_window_tabs_and_chips_elsewhere()
     {
-        var plain = NewPanel().Tabs("plain", new[] { "Find", "Chests" });
-        var game = NewPanel(gameWindow: true).Tabs("game", new[] { "Find", "Chests" });
+        var plain = NewPanel().Tabs("plain", new[] { "Find", "Chests" }, new UiTabsOptions());
+        var game = NewPanel(gameWindow: true).Tabs("game", new[] { "Find", "Chests" }, new UiTabsOptions());
         Assert.Equal("chips", plain.Describe()["look"]);
         Assert.Equal("game", game.Describe()["look"]);
+        Assert.True(((UiTabsHandle)game).HistoryOn);
+        // The overload without options keeps its old look and has no history, on a game window too.
+        var legacy = NewPanel(gameWindow: true).Tabs("legacy", new[] { "Find", "Chests" });
+        Assert.Equal("chips", legacy.Describe()["look"]);
+        Assert.False(((UiTabsHandle)legacy).HistoryOn);
+        Assert.Equal(CellSkin.Chip, Row("legacy:tabs").Cells().Single(c => c.Key == "tab0").Skin);
         var chip = Row("plain:tabs").Cells().Single(c => c.Key == "tab0");
         var tab = Row("game:tabs").Cells().Single(c => c.Key == "tab0");
         Assert.Equal(CellSkin.Chip, chip.Skin);
@@ -86,7 +92,7 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.True(UiTabsLayout.GameTabWidth("Equipment and crafting", "12", false) > wide);
 
         var panel = NewPanel(gameWindow: true);
-        var tabs = panel.Tabs("t", new[] { "Equipment and crafting" });
+        var tabs = panel.Tabs("t", new[] { "Equipment and crafting" }, new UiTabsOptions());
         float before = Row("t:tabs").Cells().Single(c => c.Key == "tab0").MinWidth;
         tabs.SetBadge(0, 12);
         float after = Row("t:tabs").Cells().Single(c => c.Key == "tab0").MinWidth;
@@ -94,11 +100,40 @@ public sealed class UiHubControlsTests : IDisposable
     }
 
     [Fact]
-    public void The_standard_windows_tabs_are_game_tabs_too()
+    public void The_standard_windows_keep_their_chip_tabs_and_gain_a_history_that_ends_with_the_window()
     {
-        var window = UiApi.Window(UiWindowPreset.Header, "Iron Chest", _owner, "example.hub", new UiWindowOptions { Tabs = new[] { "Contents", "Rules" } });
-        try { Assert.Equal("game", window.Tabs!.Describe()["look"]); }
+        var window = UiApi.Window(UiWindowPreset.Header, "Iron Chest", _owner, "example.hub", new UiWindowOptions { Tabs = new[] { "Contents", "Rules", "Log" } });
+        try
+        {
+            var tabs = (UiTabsHandle)window.Tabs!;
+            Assert.Equal("chips", tabs.Describe()["look"]);
+            Assert.True(tabs.HistoryOn);
+            window.Show();
+            tabs.Selected = 1;
+            tabs.Selected = 2;
+            Assert.Equal(new[] { 0, 1, 2 }, tabs.History!.Entries);
+            // Closing the window ends its history; the next opening starts at the tab it shows.
+            window.Hide();
+            window.Show();
+            Assert.Equal(new[] { 2 }, tabs.History!.Entries);
+            Assert.False(tabs.Back());
+        }
         finally { window.Dispose(); }
+    }
+
+    [Fact]
+    public void A_floating_window_reopened_starts_a_new_history()
+    {
+        var panel = NewPanel(gameWindow: true);
+        var tabs = (UiTabsHandle)panel.Tabs("t", new[] { "A", "B", "C" }, new UiTabsOptions());
+        panel.Show();
+        tabs.Selected = 1;
+        tabs.Selected = 2;
+        panel.Hide(); // Escape, or the mod's own Hide
+        panel.Show();
+        Assert.False(tabs.Back());
+        tabs.Selected = 0;
+        Assert.Equal(new[] { 2, 0 }, tabs.History!.Entries);
     }
 
     // ---- kept height ---------------------------------------------------------------------------------------------------
@@ -164,7 +199,7 @@ public sealed class UiHubControlsTests : IDisposable
     public void A_tab_row_records_clicks_and_back_and_forward_raise_OnChanged_as_a_click()
     {
         var panel = NewPanel(gameWindow: true);
-        var tabs = panel.Tabs("t", new[] { "Find", "Chests", "About" });
+        var tabs = panel.Tabs("t", new[] { "Find", "Chests", "About" }, new UiTabsOptions());
         var changes = new List<int>();
         tabs.OnChanged(changes.Add);
         Click(Row("t:tabs"), "tab1");
@@ -195,17 +230,28 @@ public sealed class UiHubControlsTests : IDisposable
     [Fact]
     public void The_window_under_the_pointer_wins_then_the_one_holding_the_input_then_none()
     {
-        Assert.Equal(-1, UiTabHistoryRoute.Pick(Array.Empty<UiTabHistoryRoute.Candidate>()));
+        Assert.Equal(-1, UiTabHistoryRoute.Pick(Array.Empty<UiTabHistoryRoute.Candidate>(), pointerOverPanel: false));
+        // index, draw order (canvas sort order), shown order, under the pointer, holds the input
         var candidates = new[]
         {
-            new UiTabHistoryRoute.Candidate(0, 5, underPointer: false, holdsInput: true),
-            new UiTabHistoryRoute.Candidate(1, 3, underPointer: true, holdsInput: false),
-            new UiTabHistoryRoute.Candidate(2, 9, underPointer: false, holdsInput: true),
-            new UiTabHistoryRoute.Candidate(3, 4, underPointer: true, holdsInput: true),
+            new UiTabHistoryRoute.Candidate(0, 5010, 5, underPointer: false, holdsInput: true),
+            new UiTabHistoryRoute.Candidate(1, 5012, 3, underPointer: true, holdsInput: false),
+            new UiTabHistoryRoute.Candidate(2, 5014, 9, underPointer: false, holdsInput: true),
+            new UiTabHistoryRoute.Candidate(3, 5011, 8, underPointer: true, holdsInput: true),
         };
-        Assert.Equal(3, UiTabHistoryRoute.Pick(candidates)); // the newest under the pointer
-        Assert.Equal(2, UiTabHistoryRoute.Pick(candidates.Where(c => !c.UnderPointer).ToArray())); // the newest holding the input
-        Assert.Equal(-1, UiTabHistoryRoute.Pick(new[] { new UiTabHistoryRoute.Candidate(0, 1, false, false) }));
+        // Under the pointer: the one drawn on top wins, even though another was shown later.
+        Assert.Equal(1, UiTabHistoryRoute.Pick(candidates, pointerOverPanel: true));
+        var notUnder = candidates.Where(c => !c.UnderPointer).ToArray();
+        // Holding the input: only while the pointer is over no panel (not the Mods workspace, not another window).
+        Assert.Equal(2, UiTabHistoryRoute.Pick(notUnder, pointerOverPanel: false));
+        Assert.Equal(-1, UiTabHistoryRoute.Pick(notUnder, pointerOverPanel: true));
+        // Same draw order: the one shown later.
+        Assert.Equal(7, UiTabHistoryRoute.Pick(new[]
+        {
+            new UiTabHistoryRoute.Candidate(6, 5010, 1, true, false),
+            new UiTabHistoryRoute.Candidate(7, 5010, 2, true, false),
+        }, pointerOverPanel: true));
+        Assert.Equal(-1, UiTabHistoryRoute.Pick(new[] { new UiTabHistoryRoute.Candidate(0, 0, 1, false, false) }, pointerOverPanel: false));
     }
 
     [Fact]
@@ -213,8 +259,8 @@ public sealed class UiHubControlsTests : IDisposable
     {
         var front = NewPanel(gameWindow: true);
         var back = NewPanel(gameWindow: true);
-        var frontTabs = front.Tabs("front", new[] { "A", "B" });
-        var backTabs = back.Tabs("back", new[] { "A", "B" });
+        var frontTabs = front.Tabs("front", new[] { "A", "B" }, new UiTabsOptions());
+        var backTabs = back.Tabs("back", new[] { "A", "B" }, new UiTabsOptions());
         Click(Row("front:tabs"), "tab1");
         Click(Row("back:tabs"), "tab1");
         UiTabHistoryRoute.UnderPointer = p => ReferenceEquals(p, front);
@@ -223,24 +269,32 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.False(UiTabHistoryRoute.TryNavigate(back: true));
         front.Show();
         back.Show();
+        UiTabHistoryRoute.ResetCache();
         Assert.True(UiTabHistoryRoute.TryNavigate(back: true));
         Assert.Equal(0, frontTabs.Selected);
         Assert.Equal(1, backTabs.Selected);
+        // At the start of its history the window does not take Back: it goes on to the workspace.
+        Assert.False(UiTabHistoryRoute.TryNavigate(back: true));
         Assert.True(UiTabHistoryRoute.TryNavigate(back: false));
         Assert.Equal(1, frontTabs.Selected);
+        Assert.False(UiTabHistoryRoute.TryNavigate(back: false));
 
-        // With the pointer over neither, a window that holds the input while shown takes it.
+        // With the pointer over no panel, a window that holds the input while shown takes it.
         UiTabHistoryRoute.UnderPointer = _ => false;
         back.CaptureMode = UiCaptureMode.WhileShown;
+        UiTabHistoryRoute.ResetCache();
         Assert.Same(backTabs, UiTabHistoryRoute.Target());
+        // The answer is taken once a frame: the same frame keeps it, the next poll reads again.
         back.CaptureMode = UiCaptureMode.WhenHovered;
+        Assert.Same(backTabs, UiTabHistoryRoute.Target());
+        Keybinds.Pump();
         Assert.Null(UiTabHistoryRoute.Target());
     }
 
     [Fact]
     public void A_window_tab_row_steps_with_the_controllers_tab_triggers()
     {
-        var tabs = (UiTabsHandle)NewPanel(gameWindow: true).Tabs("t", new[] { "A", "B" });
+        var tabs = (UiTabsHandle)NewPanel(gameWindow: true).Tabs("t", new[] { "A", "B" }, new UiTabsOptions());
         Assert.False(tabs.Step(-1));
         Assert.True(tabs.Step(1));
         Assert.Equal(1, tabs.Selected);
@@ -327,7 +381,7 @@ public sealed class UiHubControlsTests : IDisposable
         var panel = NewPanel(gameWindow: true);
         var search = panel.SearchInput("Search", "iron");
         var found = new List<string>();
-        var find = search.Action("Find", found.Add);
+        var find = search.ActionButton("Find", found.Add);
         Assert.Single(_runtime.InlineButtons);
         Assert.Equal("Find", _runtime.InlineButtons[0].Text);
         var widget = (CellRowTests.FakeWidget)((UiHandle)find).Runtime!;
@@ -343,11 +397,11 @@ public sealed class UiHubControlsTests : IDisposable
     {
         _runtime.JoinRows = false;
         var panel = NewPanel();
-        var find = panel.SearchInput("Search", "").Action("Find", _ => { });
+        var find = panel.SearchInput("Search", "").ActionButton("Find", _ => { });
         Assert.True(find.Enabled);
         Assert.Empty(_runtime.InlineButtons);
         var stray = new UiInputHandle("x", "root", null, null, false, 0);
-        Assert.Throws<ArgumentException>(() => stray.Action("Go", _ => { }));
+        Assert.Throws<ArgumentException>(() => stray.ActionButton("Go", _ => { }));
     }
 
     // ---- centered buttons and key hints -------------------------------------------------------------------------------------
@@ -502,6 +556,54 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.True(UiBuildingIcons.MayScan(100 + UiBuildingIcons.ScanEveryFrames));
         UiBuildingIcons.Clear();
         Assert.True(UiBuildingIcons.MayScan(0));
+    }
+
+    [Fact]
+    public void Scans_back_off_after_misses_and_come_back_when_one_learns_an_icon()
+    {
+        Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+        UiBuildingIcons.ScanDone(learnt: false);
+        Assert.Equal(2 * UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+        UiBuildingIcons.ScanDone(learnt: false);
+        Assert.Equal(4 * UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+        for (int i = 0; i < 20; i++) UiBuildingIcons.ScanDone(learnt: false);
+        Assert.Equal(UiBuildingIcons.MaxScanEveryFrames, UiBuildingIcons.ScanInterval);
+        Assert.True(UiBuildingIcons.MayScan(1000));
+        Assert.False(UiBuildingIcons.MayScan(1000 + UiBuildingIcons.MaxScanEveryFrames - 1));
+        UiBuildingIcons.ScanDone(learnt: true);
+        Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+
+        int v = UiBuildingIcons.Version;
+        var sprite = new object();
+        UiBuildingIcons.Note(7, sprite);
+        Assert.Equal(v + 1, UiBuildingIcons.Version);
+        UiBuildingIcons.Note(7, sprite); // the same sprite again: nothing new learnt
+        Assert.Equal(v + 1, UiBuildingIcons.Version);
+    }
+
+    [Fact]
+    public void A_waiting_row_draws_its_building_icon_once_the_cache_learns_it_and_stops_waiting()
+    {
+        var panel = NewPanel(gameWindow: true);
+        var table = (UiDataTableHandle)panel.DataTable("w", new[] { new UiTableColumn("name", "Building") });
+        table.SetRows(new[] { new UiTableRow("smithy") { BuildingPrefab = -300 }.Text("name", "Smithy") });
+        panel.Show();
+        Assert.Equal(-300, table.WaitingBuilding);
+        int asks = _runtime.BuildingAsks.Count;
+        // While it waits the table asks again each frame (the runtime's back-off decides whether a scan runs).
+        foreach (var t in _runtime.Ticks.ToArray()) t();
+        Assert.True(_runtime.BuildingAsks.Count > asks);
+
+        // The game draws the Smithy in its build menu: the cache learns it and the row draws it, no SetRows needed.
+        var sprite = new object();
+        _runtime.Buildings[-300] = sprite;
+        UiBuildingIcons.Note(-300, sprite);
+        foreach (var t in _runtime.Ticks.ToArray()) t();
+        Assert.Same(sprite, Row("w:row0").Images[UiDataTableLayout.CellIcon]);
+        Assert.Equal(0, table.WaitingBuilding);
+        int ticks = _runtime.Ticks.Count;
+        foreach (var t in _runtime.Ticks.ToArray()) t();
+        Assert.Equal(ticks, _runtime.Ticks.Count);
     }
 
     [Fact]

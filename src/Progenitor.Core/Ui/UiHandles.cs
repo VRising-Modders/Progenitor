@@ -88,6 +88,9 @@ internal abstract class UiHandle : IUiHandle
     /// <summary>HUB1: the Progenitor panel this control was added to (an input's action button joins its row); null for a panel or a stand-alone handle.</summary>
     internal UiPanelHandle? Parent { get; set; }
 
+    /// <summary>HUB1: run once when this handle is disposed (Core only: a key hint drops its cap); never a plugin delegate.</summary>
+    internal Action? Disposing { get; set; }
+
     /// <summary>
     /// INLINEAPPLY1: the button style this handle asked for: <see cref="UiSettingsGrid.GameButtonStyle"/> once
     /// <see cref="UiSettingsControls.GameButton"/> ran, else empty (the kit's). The readback's fallback when the runtime
@@ -154,6 +157,11 @@ internal abstract class UiHandle : IUiHandle
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // HUB1: Core state tied to this control (a key hint) goes with it.
+        var disposing = Disposing;
+        Disposing = null;
+        try { disposing?.Invoke(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: handle dispose hook threw: " + e.Message); }
         try { OnDispose(); }
         catch (Exception e)
         {
@@ -506,7 +514,7 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     }
 
     /// <summary>
-    /// HUB1: a button at the end of <paramref name="field"/>'s row (<see cref="UiWidgets.Action"/>), the game's compact
+    /// HUB1: a button at the end of <paramref name="field"/>'s row (<see cref="UiWidgets.ActionButton"/>), the game's compact
     /// button; a button row of its own when the runtime cannot join the field's row.
     /// </summary>
     internal IUiButton InlineButton(UiHandle field, string caption)

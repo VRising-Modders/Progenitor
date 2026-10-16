@@ -195,17 +195,17 @@ internal sealed class GalleryDemo
                 break;
             case "game-tabs":
                 Action(panel, tab, "Hub window", api, () => Report("hub window = " + _host.ToggleHub()));
-                tabs.Add(tab, panel.Text("The hub window's tabs are the game's window tabs; so are the Header and Tabbed windows' tabs.", UiTextStyle.Body));
+                tabs.Add(tab, panel.Text("The hub window's tabs are the game's window tabs; the Header and Tabbed windows keep their chip tabs.", UiTextStyle.Body));
                 break;
             case "tab-height":
                 tabs.Add(tab, panel.Text("Open the hub window's Chests tab: the window keeps the Find tab's height.", UiTextStyle.Body));
                 break;
             case "tab-history":
-                tabs.Add(tab, panel.Text("In the hub window, open a few tabs, then press the mouse's back button or Alt+Left.", UiTextStyle.Body));
+                tabs.Add(tab, panel.Text("In the hub window, open a few tabs, then press Alt+Left (or the mouse's back button while the Mods menu is open).", UiTextStyle.Body));
                 break;
             case "centered-button":
                 panel.BeginInline();
-                Action(panel, tab, "Return", api, () => Report("centered return")).Centered().KeyHint(bindId);
+                Action(panel, tab, "Hub window", api, () => Report("centered hub window = " + _host.ToggleHub())).Centered();
                 panel.EndInline();
                 break;
             case "footer":
@@ -279,12 +279,12 @@ internal sealed class GalleryDemo
             case "input-action":
             {
                 var search = tabs.Add(tab, panel.SearchInput("Search", ""));
-                tabs.Add(tab, search.Action("Find", text => Report("find \"" + text + "\"")));
+                tabs.Add(tab, search.ActionButton("Find", text => Report("find \"" + text + "\"")));
                 break;
             }
             case "key-hint":
-                Action(panel, tab, "Close", api, () => Report("key hint close")).KeyHint("Esc");
-                Action(panel, tab, "Open this page", api, () => Report("key hint open")).KeyHint(bindId);
+                // The sample's own Ctrl+F8 (GalleryHub.ToggleBindId) does what this button does; the cap follows a remap.
+                Action(panel, tab, "Hub window", api, () => Report("key hint hub window = " + _host.ToggleHub())).KeyHint(GalleryHub.ToggleBindId);
                 break;
             case "textarea":
                 _tabs!.Add(tab, panel.TextArea("Text area", "", 3)).OnChanged(v => Report("text area = " + v.Length + " chars"));

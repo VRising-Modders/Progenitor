@@ -124,7 +124,7 @@ held in the bridge queue, at the title screen, with this sample and a Core built
 Status: built and game-free tested (`UiHubControlsTests.The_gallery_hub_window_builds_every_hub_control`). **Not run in
 the game.** [GalleryHub.cs](GalleryHub.cs): a plain floating game window (`Ui.Panel(...).GameWindow(860)`) with the game's
 window tabs (Find, Chests, About), a row of three compact dropdowns, a search box with **Find**, a table of three castle
-buildings filling the window's height, and a centered **Return** with a key hint naming the sample's own Ctrl+F7 bind.
+buildings filling the window's height, and a centered **Return** with a key hint naming the sample's own **HubReturn** bind (Ctrl+Backspace, which closes the hub as the button does; Escape stays the framework's). The gallery's Hub window button shows **ToggleHub** (Ctrl+F8).
 
 Live check procedure (bridge only, no OS input; acceptance procedure, not run). Same setup as the gallery's, in a world
 (the building icons and the game tab donor need one).
@@ -135,7 +135,7 @@ Live check procedure (bridge only, no OS input; acceptance procedure, not run). 
    caption centered in the tab font), Find lit; Scope, Match and Show on one row, each caption then a dropdown bar as wide
    as its longest option; the search box with **Find** at its end; the table with the chest, the Smithy and the prison
    cell, each with its build-menu icon (an empty aligned place if the game has not drawn it), the table reaching the
-   window's bottom above the version stamp; **Return** centered with the `Ctrl + F7`-style key cap at its right.
+   window's bottom above the version stamp; **Return** centered with the HubReturn key cap (`Backspace + Ctrl`) at its right.
    `mods_ui status` `tabs.stripTabSource` names the donor rung (`fullscreen-inner`, `cached-template`,
    `resident-inner-tab`; `flat` means the chips were drawn).
 3. `widget_click` Chests: the window keeps its height (`ui_read panels` rect height unchanged). About, then the mouse's
@@ -145,7 +145,7 @@ Live check procedure (bridge only, no OS input; acceptance procedure, not run). 
    **Find**: the same line. Open each compact dropdown and pick an option: `hub filter … = …`.
 5. Controller: `nav pad down` to the filters, `nav pad right`: the focus moves from Scope to Match to Show (the values do
    not change); A opens the list. `nav pad` LT/RT step the tabs.
-6. In the Keybinds tab, rebind the sample's Open key: the Return key cap shows the new key within a second.
+6. Press Ctrl+Backspace (`keybind_press` `progenitor.controlssample` / `HubReturn`): the hub closes (`Controls sample: hub key return = closed`). In the Keybinds tab, rebind HubReturn: the Return key cap shows the new key within a second.
 7. Repeat steps 2 and 3 at 2560x1440, then `display restore`. Cleanup as for the gallery.
 
 `tests/Progenitor.Tests/ControlsSampleTests.cs` fails when a new `IUiPanel` member, settings-row

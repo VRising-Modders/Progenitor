@@ -20,6 +20,9 @@ internal sealed partial class UnityUiRuntime
     internal const string CompactRowKind = "compact-choices";
     internal const string KeyHintName = "key-hint";
 
+    /// <summary>HUB1 (<see cref="IUiRuntime.PanelDrawOrder"/>): the panel's cached canvas sort order (WINDOWS1's row layers).</summary>
+    public int PanelDrawOrder(IRuntimePanel panel) => panel is UnityPanel host && host.Alive ? host.CanvasOrder : 0;
+
     // ---- the height rule ------------------------------------------------------------------------------------------
 
     public void SetHeightRule(IRuntimePanel panel, bool keep, float minContentHeight)
@@ -384,7 +387,9 @@ internal sealed partial class UnityUiRuntime
             try { frame = Time.frameCount; }
             catch { frame = 0; }
             if (!UiBuildingIcons.MayScan(frame)) return null;
-            HarvestBuildMenuIcons();
+            int before = UiBuildingIcons.Version;
+            try { HarvestBuildMenuIcons(); }
+            finally { UiBuildingIcons.ScanDone(UiBuildingIcons.Version != before); }
             return UiBuildingIcons.Get(prefab, o => o is Sprite s && Alive(s));
         }
         catch { return null; }

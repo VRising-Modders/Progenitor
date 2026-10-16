@@ -45,6 +45,13 @@ internal enum KeybindScope
     /// the only kind of bind that runs then. Core-internal: the name completion key.
     /// </summary>
     Chat = 4,
+
+    /// <summary>
+    /// HUB1: works while a window with a tab history is under the pointer or holds the input, in play too, or while the
+    /// Mods menu is open: it meets gameplay keys, menu keys and map keys, so a clash with any of them is reported. Core
+    /// only: the tab-history keys (Alt+Left, Alt+Right).
+    /// </summary>
+    Window = 5,
 }
 
 /// <summary>
@@ -370,6 +377,8 @@ internal static class KeybindArbiter
             // live, and the chat key's owner takes the game's action away only while it acts (the name
             // completion puts back the channel the game's own Tab handling cycled).
             KeybindScope.Chat => false,
+            // HUB1: a window key acts in play and in the menus: a gameplay key and a game menu key both stop it.
+            KeybindScope.Window => game.Source == KeybindSource.Game && EnforceGameWins && (game.Mode.Length == 0 || IsGameMenuKey(game)),
             _ => GameWins(game),
         };
 
@@ -417,7 +426,13 @@ internal static class KeybindArbiter
     private static bool ModScopesMeet(KeybindScope a, KeybindScope b) =>
         a == b
         || (a == KeybindScope.Map && b == KeybindScope.Menu)
-        || (a == KeybindScope.Menu && b == KeybindScope.Map);
+        || (a == KeybindScope.Menu && b == KeybindScope.Map)
+        // HUB1: a window key is live in play, in the menus and on the map, so it meets keys of all three.
+        || (a == KeybindScope.Window && WindowMeets(b))
+        || (b == KeybindScope.Window && WindowMeets(a));
+
+    private static bool WindowMeets(KeybindScope other) =>
+        other is KeybindScope.Gameplay or KeybindScope.Menu or KeybindScope.Map or KeybindScope.Window;
 
     /// <summary>KEYS4: whether <paramref name="c"/> can clash with a mod key of <paramref name="scope"/>.</summary>
     internal static bool ScopesMeet(KeybindClaim c, KeybindScope scope)
@@ -426,6 +441,7 @@ internal static class KeybindArbiter
         return scope switch
         {
             KeybindScope.Gameplay => true,
+            KeybindScope.Window => true,
             KeybindScope.Menu => IsGameMenuKey(c),
             KeybindScope.Map => IsGameMapKey(c) || IsGameMenuKey(c) || IsEveryScreenGameKey(c),
             KeybindScope.Chat => IsGameChatKey(c),

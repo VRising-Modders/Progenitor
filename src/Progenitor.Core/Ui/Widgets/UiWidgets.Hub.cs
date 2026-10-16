@@ -31,7 +31,7 @@ public static partial class UiWidgets
     /// shortens to make room. Returns the button (give it a tooltip, a key hint or gray it out). On a panel that cannot
     /// draw the pair the button takes a row of its own under the field, and Enter still runs the action.
     /// </summary>
-    public static IUiButton Action(this IUiInput input, string caption, Action<string> onAction)
+    public static IUiButton ActionButton(this IUiInput input, string caption, Action<string> onAction)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (onAction == null) throw new ArgumentNullException(nameof(onAction));
@@ -152,12 +152,29 @@ internal static class UiKeyHints
             {
                 entry = new Entry(button, hint);
                 Live.Add(entry);
+                // The hint goes with its button at once, not on the next frame.
+                if (button is UiHandle handle) handle.Disposing += () => Drop(button);
             }
             else entry.Hint = hint;
         }
 
         Refresh(entry);
+        // Installed lazily on every add: the tick stops itself when the last hint goes.
         EnsureTick();
+    }
+
+    /// <summary>Forget <paramref name="button"/>'s hint and remove its cap (the button is being disposed).</summary>
+    internal static void Drop(IUiButton button)
+    {
+        lock (Live)
+        {
+            for (int i = Live.Count - 1; i >= 0; i--)
+            {
+                if (!ReferenceEquals(Live[i].Button, button)) continue;
+                Release(Live[i]);
+                Live.RemoveAt(i);
+            }
+        }
     }
 
     /// <summary>The words for <paramref name="hint"/> on <paramref name="button"/>'s plugin now.</summary>

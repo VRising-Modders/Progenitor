@@ -882,6 +882,52 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         if (_bar != null) _bar.OnDragged = DragBar;
     }
 
+    // ---- HUB1: a drawn row waiting for a building's icon ----------------------------------------------------------------
+
+    private int _waitingBuilding;
+    private int _iconVersion;
+    private IDisposable? _iconTick;
+
+    /// <summary>HUB1: a building a drawn row waits for (its icon is not known yet), or 0 (tests and readback).</summary>
+    internal int WaitingBuilding => _waitingBuilding;
+
+    /// <summary>Tick only while a drawn row waits for a building's icon.</summary>
+    private void SyncIconTick()
+    {
+        if (_waitingBuilding == 0 || IsDisposed)
+        {
+            var t = _iconTick;
+            _iconTick = null;
+            try { t?.Dispose(); }
+            catch { /* */ }
+            return;
+        }
+
+        if (_iconTick != null || WidgetRuntime.Current is not { } runtime) return;
+        try { _iconTick = runtime.EveryFrame(IconTick); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' icon wait: " + e.Message); }
+    }
+
+    /// <summary>
+    /// HUB1: one frame while a drawn row waits for a building's icon: when the cache learnt one, draw again (the row shows
+    /// it without a SetRows or a scroll); otherwise ask for the waiting building, which scans the build menu's cells only
+    /// when the cache's back-off allows (<see cref="UiBuildingIcons"/>).
+    /// </summary>
+    internal void IconTick()
+    {
+        if (IsDisposed || _waitingBuilding == 0) return;
+        if (UiBuildingIcons.Version != _iconVersion)
+        {
+            Render();
+            return;
+        }
+
+        if (!Visible || Panel.State != UiHandleState.Shown) return;
+        try { WidgetRuntime.Current?.BuildingIcon(_waitingBuilding); }
+        catch { /* the next frame asks again */ }
+        if (UiBuildingIcons.Version != _iconVersion) Render();
+    }
+
     // ---- HUB1: fill the panel's height --------------------------------------------------------------------------------
 
     private IDisposable? _fillTick;
@@ -934,6 +980,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         try { _fillTick?.Dispose(); }
         catch { /* */ }
         _fillTick = null;
+        try { _iconTick?.Dispose(); }
+        catch { /* */ }
+        _iconTick = null;
         try { _bar?.Dispose(); }
         catch { /* */ }
         _bar = null;
@@ -1073,6 +1122,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             _renderedLines = lines;
             _renderedTop = _viewport.Top;
 
+            _waitingBuilding = 0;
+            _iconVersion = UiBuildingIcons.Version;
             bool icons = AnyIcon();
             bool expander = _model.Grouped || AnyDetail();
             RenderHeader(icons, expander);
@@ -1090,6 +1141,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             }
 
             RenderFooter();
+            SyncIconTick();
             if (_bar != null && !_barDragging)
             {
                 try { _bar.Set(_viewport.BarSize, _viewport.BarPosition); }
@@ -1332,6 +1384,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             {
                 try { icon = WidgetRuntime.Current?.BuildingIcon(data.BuildingPrefab); }
                 catch { icon = null; }
+                if (icon == null) _waitingBuilding = data.BuildingPrefab;
             }
         }
 

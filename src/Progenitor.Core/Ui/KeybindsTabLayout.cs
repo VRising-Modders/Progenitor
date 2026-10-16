@@ -285,7 +285,7 @@ internal sealed class KeybindsRowModel
             ["help"] = HelpLine,
             ["reserved"] = Reserved,
             ["decision"] = DecisionNote,
-            ["scope"] = Claim.Scope switch { KeybindScope.Menu => "menu", KeybindScope.Photo => "photo", KeybindScope.Map => "map", KeybindScope.Chat => "chat", _ => "gameplay" },
+            ["scope"] = Claim.Scope switch { KeybindScope.Menu => "menu", KeybindScope.Photo => "photo", KeybindScope.Map => "map", KeybindScope.Chat => "chat", KeybindScope.Window => "window", _ => "gameplay" },
             ["visible"] = visible,
             ["conflict"] = KeybindArbiter.ConflictReadback(Verdict) ?? (Secondary == null ? null : KeybindArbiter.ConflictReadback(Secondary)),
         };
@@ -1179,6 +1179,7 @@ internal static class KeybindsTabLayout
         else if (row.Claim.Scope == KeybindScope.Photo) info.Add(PhotoScopeNote);
         else if (row.Claim.Scope == KeybindScope.Map) info.Add(MapScopeNote);
         else if (row.Claim.Scope == KeybindScope.Chat) info.Add(ChatScopeNote);
+        else if (row.Claim.Scope == KeybindScope.Window) info.Add(WindowScopeNote);
         if (row.Claim.Source == KeybindSource.Cfg)
         {
             info.Add(FromConfigFile);
@@ -1196,6 +1197,9 @@ internal static class KeybindsTabLayout
 
     /// <summary>KEYS4: the description column's note on a menu key (the workspace's back and forward).</summary>
     internal const string MenuScopeNote = "Works only while the Mods menu is open, so it never clashes with a gameplay key.";
+
+    /// <summary>HUB1: the note on a window key (the tab-history keys): live in play too, so clashes are checked.</summary>
+    internal const string WindowScopeNote = "Works while a window with tabs is under the pointer or holds the input, in play too, and in the Mods menu, so it is checked against gameplay and menu keys.";
 
     internal const string PhotoScopeNote = "Works only in photo mode, which holds your character, so it never clashes with a gameplay key.";
 

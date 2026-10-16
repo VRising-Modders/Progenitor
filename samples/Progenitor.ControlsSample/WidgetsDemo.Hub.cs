@@ -4,7 +4,7 @@ namespace Progenitor.ControlsSample;
 
 /// <summary>
 /// The Widgets page's hub controls (HUB1): a row of compact dropdowns (<see cref="UiWidgets.CompactDropdown"/>), a search
-/// box with its Find button (<see cref="UiWidgets.Action"/>), and a centered button with a key hint
+/// box with its Find button (<see cref="UiWidgets.ActionButton"/>), and a centered button with a key hint
 /// (<see cref="UiWidgets.Centered"/>, <see cref="UiWidgets.KeyHint"/>). Every event writes a <c>Controls sample: widget
 /// hub …</c> log line.
 /// </summary>
@@ -27,11 +27,16 @@ internal sealed partial class WidgetsDemo
         match.OnChanged(v => Report("hub match = " + v));
 
         var search = tabs.Add(tab, panel.SearchInput("Search", ""));
-        HubFind = tabs.Add(tab, search.Action("Find", text => Report("hub find \"" + text + "\"")));
+        HubFind = tabs.Add(tab, search.ActionButton("Find", text => Report("hub find \"" + text + "\"")));
 
+        // A centered button showing the sample's Open key (Ctrl+F7): pressing the key does what the button does.
         panel.BeginInline();
-        HubReturn = tabs.Add(tab, panel.Button("Return")).Centered().KeyHint("Esc");
-        HubReturn.OnClick(() => Report("hub return"));
+        HubReturn = tabs.Add(tab, panel.Button("Close this page")).Centered().KeyHint(ControlsDemo.OpenBindId);
+        HubReturn.OnClick(() =>
+        {
+            Report("hub close page");
+            _hud?.TogglePage();
+        });
         panel.EndInline();
     }
 }

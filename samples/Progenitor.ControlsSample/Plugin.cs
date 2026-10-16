@@ -44,8 +44,16 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         var windows = new GalleryWindows((preset, title, options) => ctx.Windows.Create(preset, title, options), log);
         ctx.Track(windows);
         // The hub window: a plain floating game window with the hub controls (tabs, compact dropdowns, Find, a filling table).
-        var hub = new GalleryHub(() => UiApi.Panel(GalleryHub.Title, ctx.Owner, ctx.Guid), BuildingPrefab, log, ControlsDemo.OpenBindId);
+        var hub = new GalleryHub(() => UiApi.Panel(GalleryHub.Title, ctx.Owner, ctx.Guid), BuildingPrefab, log, GalleryHub.ReturnBindId);
         ctx.Track(hub);
+        // The keys the hub's key hints name: each does what its button does. Escape stays the framework's (it already
+        // closes the topmost window), so Return is Ctrl+Backspace; the hub takes the input while shown, so it fires then.
+        ctx.Keybinds.Register(GalleryHub.ToggleBindId, new KeyChord(UiKey.F8, KeyModifiers.Ctrl),
+            "Open or close the Controls Sample's hub window.", () => log(ControlsDemo.LogPrefix + "hub key toggle = " + hub.Toggle()),
+            allowWhileCaptured: true);
+        ctx.Keybinds.Register(GalleryHub.ReturnBindId, new KeyChord(UiKey.Backspace, KeyModifiers.Ctrl),
+            "Close the Controls Sample's hub window (its Return button).", () => log(ControlsDemo.LogPrefix + "hub key return = " + hub.Close()),
+            allowWhileCaptured: true);
         var gallery = new GalleryHost(ctx, windows, window, dialog, hud, hub);
         ctx.Menu.Register(Name, "Every Progenitor UI control, each wired to a log line and a status label.")
             .Page(GalleryDemo.PageId, panel => new GalleryDemo(log, gallery, hud).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
@@ -66,6 +74,8 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         var world = Progenitor.Worlds.Client;
         return world != null && Progenitor.Ecs.PrefabLookup.TryGetGuidByName(world, name, out var guid) ? guid.GuidHash : 0;
     }
+
+    internal static void TogglePageFor(PluginContext ctx) => TogglePage(ctx);
 
     private static void TogglePage(PluginContext ctx)
     {
@@ -98,6 +108,9 @@ internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDem
     private IUiLocatePing? _ping;
 
     internal ControlsHud(PluginContext ctx) => _ctx = ctx;
+
+    /// <summary>What the sample's Open key (Ctrl+F7) does: open or close the Controls Sample page.</summary>
+    public void TogglePage() => Plugin.TogglePageFor(_ctx);
 
     public void PickSeveral(Action<string, int> picked, Action<int> finished)
     {
