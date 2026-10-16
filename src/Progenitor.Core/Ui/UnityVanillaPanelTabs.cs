@@ -57,10 +57,21 @@ internal sealed partial class UnityUiRuntime
                 var chest = view.Panel.GetComponent<ContainerSubMenu>();
                 var bench = view.Panel.GetComponent<WorkstationSubMenu>();
                 var refiner = view.Panel.GetComponent<RefinementstationSubMenu>();
-                _routing = bench != null ? bench.InventoryRoutingParent : refiner != null ? refiner.InventoryRoutingParent : null;
+                var prison = view.Panel.GetComponent<PrisonSubMenu>();
+                var salvage = view.Panel.GetComponent<SalvagestationSubMenu>();
+                _routing = bench != null ? bench.InventoryRoutingParent
+                    : refiner != null ? refiner.InventoryRoutingParent
+                    : prison != null ? prison.InventoryRoutingParent
+                    : salvage != null ? salvage.InventoryRoutingParent : null;
+                // A station window draws the strip only in place of its own station/redistribution
+                // row (VanillaStationWindows.HostsTabs); never over a window that has none.
+                if (chest == null && bench == null && refiner == null && _routing == null) { Release(); return; }
                 var anchor = _routing != null && _routing.StationTabButton != null
                     ? _routing.StationTabButton.GetComponent<RectTransform>() : view.Grid;
-                _bonusAnchor = bench != null ? RectOf(bench.BonusesParent) : refiner != null ? RectOf(refiner.BonusesParent) : null;
+                _bonusAnchor = bench != null ? RectOf(bench.BonusesParent)
+                    : refiner != null ? RectOf(refiner.BonusesParent)
+                    : prison != null ? RectOf(prison.BonusesParent)
+                    : salvage != null ? RectOf(salvage.BonusesParent) : null;
                 anchor.GetWorldCorners(_corners);
                 _top = _root.InverseTransformPoint(_corners[1]).y;
                 _flow = chest != null;
@@ -88,6 +99,22 @@ internal sealed partial class UnityUiRuntime
                 {
                     HideTarget(_content, bench.ItemOutputsParent.transform.parent);
                     HideTarget(_content, bench.StationStatusText);
+                }
+                if (prison != null)
+                {
+                    // The prisoner block (full or empty cell) and the cell's slots, beside what the
+                    // routing row already lists as station content.
+                    HideTarget(_content, prison.Parent_FullCell != null ? prison.Parent_FullCell.transform : null);
+                    HideTarget(_content, prison.Parent_EmptyCell != null ? prison.Parent_EmptyCell.transform : null);
+                    HideTarget(_content, prison.ItemOutputsParent != null ? prison.ItemOutputsParent.transform.parent : null);
+                    HideTarget(_content, prison.StationStatusText);
+                }
+                if (salvage != null)
+                {
+                    HideTarget(_content, salvage.ItemInputsParent != null ? salvage.ItemInputsParent.transform.parent : null);
+                    HideTarget(_content, salvage.ItemOutputsParent != null ? salvage.ItemOutputsParent.transform.parent : null);
+                    HideTarget(_content, salvage.RefinementProgress);
+                    HideTarget(_content, salvage.StationStatusText);
                 }
                 _strip = new GameObject("Progenitor.ContainerTabs");
                 _strip.transform.SetParent(_layoutParent, false);

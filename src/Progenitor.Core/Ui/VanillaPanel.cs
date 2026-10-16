@@ -103,6 +103,15 @@ public enum VanillaPanelKind
 
     /// <summary>The character menu's own inventory (no external target).</summary>
     Character = 5,
+
+    /// <summary>A prison cell (<c>PrisonSubMenu</c>); the target is the cell's station entity.</summary>
+    PrisonCell = 6,
+
+    /// <summary>A salvage station, the devourer (<c>SalvagestationSubMenu</c>).</summary>
+    SalvageStation = 7,
+
+    /// <summary>A unit station: tomb, vermin nest, Nether Gate (<c>UnitSpawnerstationSubMenu</c>).</summary>
+    UnitStation = 8,
 }
 
 /// <summary>
