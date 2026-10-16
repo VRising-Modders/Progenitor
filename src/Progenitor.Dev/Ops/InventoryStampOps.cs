@@ -49,6 +49,7 @@ internal static class InventoryStampOps
             selfTested = r.SelfTested,
             disabled = r.Disabled,
             auditing = r.Auditing,
+            resumes = r.Resumes,
             entries = r.Entries,
             typeScans = r.TypeScans,
             failures = r.Failures,

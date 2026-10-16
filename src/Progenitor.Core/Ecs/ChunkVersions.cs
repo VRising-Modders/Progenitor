@@ -34,7 +34,8 @@ namespace Progenitor.Ecs;
 /// never a value: the caller turns unknown into a fresh stamp, which reads as changed.</para>
 ///
 /// <para><b>Self-test.</b> The first successful read after Core loads is compared with the interop's
-/// own <c>EntityManager.GetChunk</c> (chunk index, archetype pointer, store pointer). A mismatch
+/// own <c>EntityManager.GetChunk</c> (chunk index, archetype pointer, store pointer). A mismatch (or
+/// <c>GetChunk</c> throwing <see cref="ChunkVersionMath.SelfTestThrowLimit"/> times in a row, logged once)
 /// disables the raw reads for the rest of the process (for this layout; a Core with other layout
 /// declarations tries again): every stamp is then fresh, and one error line says why.</para>
 ///
@@ -106,6 +107,7 @@ internal static unsafe class ChunkVersions
     private static int _maximumChunkCount;
     private static IntPtr _refField;
     private static bool _selfTested;
+    private static int _selfTestThrows;
     private static string? _disabled;
 
     // The current read's type list, for the cache's slot reader (one delegate, no capture per read).
@@ -143,6 +145,7 @@ internal static unsafe class ChunkVersions
         _refField = IntPtr.Zero;
         _maximumChunkCount = 0;
         _selfTested = false;
+        _selfTestThrows = 0;
         _disabled = null;
         Array.Clear(FailureCounts);
     }
@@ -268,12 +271,22 @@ internal static unsafe class ChunkVersions
         }
         catch (Exception e)
         {
-            // No answer is not a pass: try again on the next read.
+            // No answer is not a pass: try again on the next read, logged once, and give up after
+            // a few in a row.
             Fail(Failure.SelfTest);
-            logError?.Invoke("ChunkVersions: the self-test's GetChunk on " + entity.Index + ":" + entity.Version + " threw (" + e.Message + "); retrying on the next read.");
+            _selfTestThrows++;
+            if (_selfTestThrows == 1)
+                logError?.Invoke("ChunkVersions: the self-test's GetChunk on " + entity.Index + ":" + entity.Version + " threw (" + e.Message
+                    + "); retrying on the next read (disabled after " + ChunkVersionMath.SelfTestThrowLimit + " in a row).");
+            if (_selfTestThrows >= ChunkVersionMath.SelfTestThrowLimit)
+            {
+                _selfTested = true;
+                Disable("the self-test's EntityManager.GetChunk threw " + _selfTestThrows + " times in a row (last: " + e.Message + ")", logError);
+            }
             return false;
         }
 
+        _selfTestThrows = 0;
         _selfTested = true;
         if (mismatch == null) return true;
         Disable("the raw chunk read disagreed with EntityManager.GetChunk on " + entity.Index + ":" + entity.Version + ": " + mismatch, logError);
@@ -300,7 +313,8 @@ internal static unsafe class ChunkVersions
         byte* list = store + Layout.EntityComponentStoreArchetypesOffset;
         byte* ptr = *(byte**)(list + Layout.UntypedUnsafeListPtrOffset);
         int length = *(int*)(list + Layout.UntypedUnsafeListLengthOffset);
-        if (ptr == null || length <= 0 || length > MaxArchetypes) return false;
+        int capacity = *(int*)(list + Layout.UntypedUnsafeListCapacityOffset);
+        if (!ChunkVersionMath.ArchetypeListOk(ptr != null, length, capacity, MaxArchetypes)) return false;
         if ((IntPtr)store != _archetypeListStore || (IntPtr)ptr != _archetypeListPtr || length != _archetypeListLength)
         {
             ArchetypeSet.Clear();

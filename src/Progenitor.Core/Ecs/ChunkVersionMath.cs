@@ -61,6 +61,15 @@ internal static class ChunkVersionMath
     internal static bool ListSlotOk(int listIndex, int count, int capacity) =>
         capacity > 0 && count > 0 && count <= capacity && listIndex >= 0 && listIndex < count;
 
+    /// <summary>
+    /// The store's archetype list is safe to walk: a pointer, and 0 &lt; length &lt;= capacity &lt;= <paramref name="max"/>.
+    /// </summary>
+    internal static bool ArchetypeListOk(bool hasPointer, int length, int capacity, int max) =>
+        hasPointer && length > 0 && capacity >= length && capacity <= max;
+
+    /// <summary>Consecutive self-test throws after which the raw reads are disabled.</summary>
+    internal const int SelfTestThrowLimit = 3;
+
     /// <summary>The entity's index in its chunk is below the chunk's entity count.</summary>
     internal static bool IndexInChunkOk(int indexInChunk, int entityCount) =>
         indexInChunk >= 0 && indexInChunk < entityCount;

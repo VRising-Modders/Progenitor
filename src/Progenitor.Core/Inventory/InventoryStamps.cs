@@ -100,6 +100,8 @@ internal sealed class InventoryStamps
     private long _frame;
     private int _entriesEpoch = int.MinValue;
     private long _lastUserFrame = long.MinValue;
+    private long _lastActiveFrame = long.MinValue;
+    private bool _resumePending;
 
     // Clock state: the 64-bit value, the 32-bit sample it was last advanced to, the store it reads.
     private long _clock64;
@@ -156,6 +158,7 @@ internal sealed class InventoryStamps
     {
         get
         {
+            _lastActiveFrame = _frame;
             SampleClock();
             return _clock64;
         }
@@ -173,6 +176,8 @@ internal sealed class InventoryStamps
         _clockSeen = true;
         // The extension must stay congruent with the sample; repair a state that is not.
         if ((uint)_clock64 != _clock32) _clock64 = ChunkVersionMath.Advance(_clock64, _clock32);
+        // Time passed since that generation last sampled: the first sample here is a resume.
+        _resumePending = true;
     }
 
     /// <summary>The clock state as one process-slot string (<c>clock64,clock32,store</c>); empty before the first read.</summary>
@@ -208,10 +213,14 @@ internal sealed class InventoryStamps
             _clock64 = sample;
             _clockSeen = true;
         }
-        else if (store != _clockStore)
+        else if (_resumePending || store != _clockStore)
         {
+            // A new store, or the first sample after the idle window or a Core reload: the clock may
+            // have run any distance (past a 32-bit wrap) unsampled, so jump two eras and forget every
+            // cached reference. Everything then reads as changed once, a false positive.
             _clock64 = ChunkVersionMath.Rebase(_clock64, sample);
-            Clear(); // a new store: no cached chunk, archetype or entity of the old one means anything
+            Clear();
+            Resumes++;
         }
         else
         {
@@ -220,7 +229,18 @@ internal sealed class InventoryStamps
 
         _clock32 = sample;
         _clockStore = store;
+        _resumePending = false;
     }
+
+    /// <summary>
+    /// Whether anything (a plugin, the dev bridge, a watch with the stamp setting on) stamped or read
+    /// the clock within the last <see cref="EvictAfterFrames"/> frames. Only then does the frame tick
+    /// read anything: with no stamp user the service does no raw read at all.
+    /// </summary>
+    internal bool Active => _lastActiveFrame != long.MinValue && _frame - _lastActiveFrame <= EvictAfterFrames;
+
+    /// <summary>Times the clock resumed after the idle window, a reload or a store change (tests, bridge).</summary>
+    internal long Resumes { get; private set; }
 
     // ---- stamps --------------------------------------------------------------------------------
 
@@ -277,7 +297,19 @@ internal sealed class InventoryStamps
     internal void Tick()
     {
         _frame++;
-        Begin();
+        if (!Active)
+        {
+            // Idle: no raw read at all. The first idle frame after use forgets the cache, and the
+            // next stamp call resumes the clock with a rebase.
+            if (_lastActiveFrame != long.MinValue && !_resumePending)
+            {
+                Clear();
+                _resumePending = true;
+            }
+            return;
+        }
+
+        Begin(activity: false);
         try
         {
             if (!_clockSeen) return;
@@ -295,13 +327,14 @@ internal sealed class InventoryStamps
         _auditCursor = 0;
     }
 
-    private void Begin(bool user = false)
+    private void Begin(bool user = false, bool activity = true)
     {
         _batchBound = false;
         _slotsCompleted = false;
         _instancesCompleted = false;
         _batchFailed = false;
         if (user) _lastUserFrame = _frame;
+        if (activity) _lastActiveFrame = _frame;
         SampleClock();
         int epoch = _source.CurrentEpoch;
         if (epoch != _entriesEpoch)
