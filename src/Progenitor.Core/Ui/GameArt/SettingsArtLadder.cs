@@ -241,6 +241,12 @@ internal static class SettingsArtLadder
         return null;
     }
 
+    /// <summary>
+    /// WINDOWS1: parts the kit draws only when the game's sprite is found, with no stand-in: a missing one never keeps
+    /// the live rescans or the loaded-sprite scan going (the window title ornament).
+    /// </summary>
+    internal static bool Optional(SettingsArtPart part) => part == SettingsArtPart.WindowTitleOrnament;
+
     /// <summary>The parts drawn as a game button (the menu button and the popup button family).</summary>
     internal static bool IsButton(SettingsArtPart part) => part is SettingsArtPart.MenuButton
         or SettingsArtPart.PopupButton or SettingsArtPart.PopupButtonHover

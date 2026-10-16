@@ -13049,6 +13049,16 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         {
             // MENUKIT2 round D: a plain row (a note, a label, an inline field) below the first settings
             // row shares the rows' width while the description column is shown, so nothing runs under it.
+            // WINDOWS1: a Tabbed window's info-column row has its own column and cursor; its pinned toolbar and tab row
+            // span the frame (the info column and the content both sit under them).
+            if (PlaceSideRow(row)) return;
+            _placingTop = IsStandardWindow && row.Pin == MenuRowPin.Top;
+            try { PlaceRowBesideColumn(row); }
+            finally { _placingTop = false; }
+        }
+
+        private void PlaceRowBesideColumn(in PanelRow row)
+        {
             bool beside = BesideColumn(row);
             if (beside || row.Grid) _narrowWidth = GridWidth;
             try { PlaceRow(row, beside ? GridShiftX : 0f); }

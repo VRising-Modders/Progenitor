@@ -161,6 +161,13 @@ internal static class UiWindowLayout
     /// <summary>The air between the title text and each ornament.</summary>
     internal const float OrnamentGap = 16f;
 
+    /// <summary>
+    /// Whether a title <paramref name="titleWidth"/> wide leaves the ornaments their room inside the 560-wide title rect
+    /// (at most 336); a longer title is drawn without them rather than under them.
+    /// </summary>
+    internal static bool OrnamentsFit(float titleWidth) =>
+        !float.IsNaN(titleWidth) && titleWidth * 0.5f + OrnamentGap + OrnamentMaxWidth <= UnityUiRuntimeMetrics.RowWidth * 0.5f;
+
     /// <summary>The title's center line from the frame top (the title band's title rect is 18..58).</summary>
     internal const float TitleCenterY = 38f;
 

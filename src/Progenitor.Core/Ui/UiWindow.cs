@@ -88,10 +88,10 @@ internal sealed class UiWindowHandle : IUiWindow
     private readonly string _pluginId;
     private readonly string _stampFooter;
     private readonly IUiPanel _panel;
-    private readonly IUiTabs? _tabs;
-    private readonly WindowColumn? _info;
+    private IUiTabs? _tabs;
+    private WindowColumn? _info;
     private readonly List<IUiButton> _tools = new();
-    private readonly IUiButton? _rename;
+    private IUiButton? _rename;
     private readonly List<Action<string>> _renamed = new();
     private readonly UiWindowSpec _spec;
     private IDisposable? _renameDialog;
@@ -114,6 +114,17 @@ internal sealed class UiWindowHandle : IUiWindow
         _pluginId = _panel.PluginId;
         _stampFooter = UiWindowLayout.StampText(modName, modVersion, Ui.FrameworkFooter, frameWidth: _spec.FrameWidth);
 
+        try { Compose(opts, tabs); }
+        catch
+        {
+            // A window that failed half-built gives its panel back instead of leaving it to the owner sweep.
+            try { _panel.Dispose(); } catch { /* already gone */ }
+            throw;
+        }
+    }
+
+    private void Compose(UiWindowOptions opts, IReadOnlyList<string> tabs)
+    {
         _panel.GameWindow();
         // Text is left-aligned in every standard window (titles center themselves; numbers align right).
         _panel.ContentAlignment = SettingsAlign.Left;
@@ -121,7 +132,7 @@ internal sealed class UiWindowHandle : IUiWindow
         _panel.CaptureMode = opts.CaptureMode ?? _spec.CaptureMode;
         _panel.Footer = !opts.VersionStamp ? "" : opts.VersionText.Trim().Length > 0 ? opts.VersionText.Trim() : _stampFooter;
 
-        if (UiWindowLayout.HasToolbar(preset, opts))
+        if (UiWindowLayout.HasToolbar(Preset, opts))
         {
             Ui.PinMenuRows(_panel, MenuRowPin.Top);
             try
@@ -165,6 +176,8 @@ internal sealed class UiWindowHandle : IUiWindow
         {
             if (string.IsNullOrWhiteSpace(value)) return;
             _panel.Text = value.Trim();
+            // A panel's title write does not lay the panel out again; the ornaments follow the title's new width.
+            Ui.WindowChrome(_panel, _spec);
         }
     }
 

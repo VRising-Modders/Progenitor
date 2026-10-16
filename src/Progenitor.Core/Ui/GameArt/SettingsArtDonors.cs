@@ -230,7 +230,8 @@ internal static class SettingsArtDonors
         }
 
         bool allHeld = true;
-        for (int i = 0; i < PartCount; i++) allHeld &= Art.OwnedUsable(i) || Art.HeldUsable(i);
+        // WINDOWS1: an optional part (the window title ornament) that the game never loads does not keep the scans going.
+        for (int i = 0; i < PartCount; i++) allHeld &= SettingsArtLadder.Optional((SettingsArtPart)i) || Art.OwnedUsable(i) || Art.HeldUsable(i);
         Found? live = null;
         if (SettingsArtLadder.ShouldScanLive(allHeld, _liveScanEpoch, epoch, _liveScanFrame, frame))
         {
@@ -570,7 +571,7 @@ internal static class SettingsArtDonors
     private static void ReadLoadedSprites(Found found)
     {
         bool want = false;
-        for (int i = 0; i < PartCount && !want; i++) want = found.Parts[i] == null;
+        for (int i = 0; i < PartCount && !want; i++) want = found.Parts[i] == null && !SettingsArtLadder.Optional((SettingsArtPart)i);
         if (!want) return;
         var type = Il2CppType.Of<Sprite>();
         if (type == null) return;

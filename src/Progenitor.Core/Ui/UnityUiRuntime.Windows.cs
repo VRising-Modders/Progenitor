@@ -65,7 +65,11 @@ internal sealed partial class UnityUiRuntime
         /// <summary>A standard window's content row width (or the info column's while a side row is placed).</summary>
         private float StandardRowWidth =>
             _placingSide ? Math.Max(1f, SideBand - UiWindowLayout.InfoColumnGap)
+            : _placingTop ? UiWindowLayout.ContentRowWidth(StandardFrameWidth)
             : UiWindowLayout.ContentRowWidth(StandardFrameWidth, SideBand);
+
+        /// <summary>While a pinned top row (the toolbar, the tab row) is placed: it spans the frame, info column included.</summary>
+        private bool _placingTop;
 
         private void BuildHeaderBand()
         {
@@ -205,13 +209,20 @@ internal sealed partial class UnityUiRuntime
                     PlaceTop(_windowDivider, 0f, UiWindowLayout.DividerY - h * 0.5f, w, h);
                 }
 
+                // The art may not have been ready when the window was built (the first open, a Core swap): paint again
+                // until it is, as the game buttons do.
+                RepaintIfMissing(_windowDivider, SettingsArtPart.DetailsOrnament, Rgba(UiWindowLayout.DividerKitColor), keepWhenMissing: true);
+                RepaintIfMissing(_ornamentLeft, SettingsArtPart.WindowTitleOrnament, new Color(0f, 0f, 0f, 0f), keepWhenMissing: false);
+                RepaintIfMissing(_ornamentRight, SettingsArtPart.WindowTitleOrnament, new Color(0f, 0f, 0f, 0f), keepWhenMissing: false);
+
                 float titleWidth = TitleTextWidth();
+                // A title too long to leave the ornaments their room inside the title rect drops them rather than
+                // drawing them over the words.
+                bool room = UiWindowLayout.OrnamentsFit(titleWidth);
                 float half = titleWidth * 0.5f + UiWindowLayout.OrnamentGap + UiWindowLayout.OrnamentMaxWidth * 0.5f;
                 float y = UiWindowLayout.TitleCenterY - UiWindowLayout.OrnamentMaxHeight * 0.5f;
-                if (_ornamentLeft != null)
-                    PlaceTop(_ornamentLeft, -half, y, UiWindowLayout.OrnamentMaxWidth, UiWindowLayout.OrnamentMaxHeight);
-                if (_ornamentRight != null)
-                    PlaceTop(_ornamentRight, half, y, UiWindowLayout.OrnamentMaxWidth, UiWindowLayout.OrnamentMaxHeight);
+                PlaceOrnament(_ornamentLeft, -half, y, room);
+                PlaceOrnament(_ornamentRight, half, y, room);
 
                 if (_infoGround != null)
                 {
@@ -228,6 +239,33 @@ internal sealed partial class UnityUiRuntime
                 }
             }
             catch { /* chrome that cannot be placed leaves the window usable */ }
+        }
+
+        private static void PlaceOrnament(GameObject? go, float x, float y, bool room)
+        {
+            if (go == null) return;
+            try
+            {
+                bool show = room && HasSprite(go);
+                if (go.activeSelf != show) go.SetActive(show);
+                if (show) PlaceTop(go, x, y, UiWindowLayout.OrnamentMaxWidth, UiWindowLayout.OrnamentMaxHeight);
+            }
+            catch { /* an ornament that cannot be placed is left out */ }
+        }
+
+        /// <summary>Paint <paramref name="go"/>'s image with <paramref name="part"/> when it has no sprite yet.</summary>
+        private static void RepaintIfMissing(GameObject? go, SettingsArtPart part, Color kit, bool keepWhenMissing)
+        {
+            if (go == null || HasSprite(go)) return;
+            try
+            {
+                var image = go.GetComponent<Image>();
+                if (image == null) return;
+                bool drawn = PaintPart(image, part, Color.white, kit);
+                if (drawn) image.preserveAspect = part == SettingsArtPart.WindowTitleOrnament;
+                if (!keepWhenMissing && !drawn && go.activeSelf) go.SetActive(false);
+            }
+            catch { /* the next pass tries again */ }
         }
 
         private static bool HasSprite(GameObject go)
@@ -250,7 +288,7 @@ internal sealed partial class UnityUiRuntime
                 tmp.ForceMeshUpdate();
                 float w = tmp.preferredWidth;
                 if (float.IsNaN(w) || w <= 0f) return UnityUiRuntimeMetrics.RowWidth * 0.5f;
-                return Math.Min(w, UnityUiRuntimeMetrics.RowWidth - (UiWindowLayout.OrnamentMaxWidth + UiWindowLayout.OrnamentGap) * 2f);
+                return Math.Min(w, UnityUiRuntimeMetrics.RowWidth);
             }
             catch { return UnityUiRuntimeMetrics.RowWidth * 0.5f; }
         }

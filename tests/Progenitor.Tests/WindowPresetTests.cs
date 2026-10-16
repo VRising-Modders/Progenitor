@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Progenitor.Commands;
 using Progenitor.ControlsSample;
 using Progenitor.Ui;
+using Progenitor.Ui.GameArt;
 using Xunit;
 using UiApi = Progenitor.Ui.Ui;
 
@@ -94,6 +95,21 @@ public sealed class WindowPresetTests : IDisposable
         Assert.Equal(260f, UiWindowLayout.InfoColumnFor(s, 900f));
         Assert.Equal(0f, UiWindowLayout.InfoColumnFor(s, 700f));
         Assert.Equal(0f, UiWindowLayout.InfoColumnFor(UiWindowLayout.Spec(UiWindowPreset.Header), 960f));
+    }
+
+    [Fact]
+    public void Ornaments_need_room_beside_the_title_and_never_hold_the_art_scans()
+    {
+        Assert.True(UiWindowLayout.OrnamentsFit(200f));
+        Assert.True(UiWindowLayout.OrnamentsFit(336f));
+        Assert.False(UiWindowLayout.OrnamentsFit(337f));
+        Assert.False(UiWindowLayout.OrnamentsFit(float.NaN));
+        Assert.Equal("Window_TitleSideOrnament", SettingsArtLadder.SpriteName(SettingsArtPart.WindowTitleOrnament));
+        Assert.True(SettingsArtLadder.Optional(SettingsArtPart.WindowTitleOrnament));
+        Assert.Equal(1, Enumerable.Range(0, SettingsArtLadder.PartCount).Count(i => SettingsArtLadder.Optional((SettingsArtPart)i)));
+        Assert.False(SettingsArtLadder.Sliced(SettingsArtPart.WindowTitleOrnament));
+        string donors = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "GameArt", "SettingsArtDonors.cs");
+        Assert.Contains("SettingsArtLadder.Optional((SettingsArtPart)i) || Art.OwnedUsable(i)", donors);
     }
 
     [Fact]
