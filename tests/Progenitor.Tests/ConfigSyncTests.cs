@@ -660,6 +660,23 @@ public sealed class ConfigSyncTests : IDisposable
     }
 
     [Fact]
+    public void Core_collection_restore_releases_unregistered_session_and_file_save_hold()
+    {
+        var count = _file.Bind("General", "Count", 3);
+        _file.SaveOnConfigSet = true;
+        var registration = ConfigSync.Register("example.mod", "1.0.0", count);
+        ConfigSync.ApplyRecords(new[] { new ConfigSyncRecord("example.mod", "General", "Count", "9") }, snapshot: true);
+        registration.Dispose();
+        Assert.True(ConfigSync.IsLocked("example.mod", "General", "Count"));
+        Assert.False(_file.SaveOnConfigSet);
+        ConfigSync.RestoreLocal(finalAttempt: true);
+        Assert.False(ConfigSync.IsLocked("example.mod", "General", "Count"));
+        Assert.True(_file.SaveOnConfigSet);
+        Assert.Equal(3, count.Value);
+        Assert.Equal(0, ConfigSync.RegisteredCount);
+    }
+
+    [Fact]
     public void Explicit_Save_while_locked_writes_the_local_not_the_server_value()
     {
         var count = ConfigSync.Bind(_file, "example.mod", "General", "Count", 3, "n");

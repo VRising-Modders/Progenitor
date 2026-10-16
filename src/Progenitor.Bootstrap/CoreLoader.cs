@@ -1128,6 +1128,9 @@ public static class CoreLoader
             if (!ControlFormService.BeforeUnload())
                 throw new InvalidOperationException("Core reload refused: temporary player control could not be restored.");
             int n = ReloaderHost.UnloadAllReverse();
+            // Parked synced entries retain ConfigFile event handlers from retired plugins.
+            // Older Core images lack this optional hook and safely refuse if those plugins stay alive.
+            InvokeRuntime("PreparePluginCollection", args: null, out _);
             _watchedPluginAlcs = ReloaderHost.ListCollectiblePluginAlcNames();
             return n;
         }
@@ -1460,6 +1463,7 @@ public static class CoreLoader
         public int ReloadPlugins()
         {
             int n = ReloaderHost.ReloadAll(evenIfLatched: true);
+            InvokeRuntime("CompletePluginCollection", args: null, out _);
             try
             {
                 InvokeRuntime(CoreLayout.ApplyPlaceholdersMethod, args: null, out _);

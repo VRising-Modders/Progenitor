@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **933** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **940** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -486,9 +486,11 @@ acceptance procedure: [modules.md](modules.md#stations).
 | `ctx.Stations.CraftsPossible(StationRecipe, IReadOnlyDictionary<int, long>)` / `CraftsPossible(StationRecipe, IEnumerable<StationItem>)` | landed | Whole crafts a set of item counts pays for. Pure; also `StationLogic.CraftsPossible`. | unit test `StationLogicTests` |
 | `ctx.Stations.IsWorking(Entity)` | landed, not live-verified | True while the station is converting (`StationState.Working`). | `SampleStations.cs` (`.stations status`) |
 | `ctx.Stations.Progress(Entity)` | landed, not live-verified | `StationProgress`, or null for a non-station. | `SampleStations.cs` (`.stations status`) |
+| `ctx.Stations.RedistributionOwnership(Entity)` → `StationRedistributionOwnership` | experimental (source-checked, compile-verified; not live-verified) | Read-only `InventoryRouteParent.AutoRouteItems` through the guarded typed ECS accessor. `Known`, `AutoRouteItems`, `Reason`, `SuspendAutomation`. An existing entity without the component is known unowned; missing entities or failed reads are unknown. Suspend competing feed, return, and output automation when `SuspendAutomation` is true. Does not change route entities, connections, or flags. Also available as `Stations.RedistributionOwnership(World, Entity)`. | unit tests `StationRedistributionOwnershipTests` (policy only) |
+| `ctx.Stations.Demand(Entity)` → `StationDemand` | experimental (source-checked, built, game-free tested; not live-verified) | Read-only copied workstation queue (`RecipeGuid`, `ProgressSeconds`, `RawStatus`) in processing order, plus `Kind`, `IsKnown`, `ProtectAllInputs`, `ReservedInputs`, and `Reason`. Unknown reads retain all inputs. | unit tests `StationDemandTests` |
 | `ctx.Stations.Near(float3, float radius)` | landed, not live-verified | `IReadOnlyList<StationInfo>` of recipe stations, nearest first. Scans every station in the world; call on demand, not per tick. | `SampleStations.cs` (`.stations list`) |
 | `ctx.Stations.MaterialSource` | experimental | Alias of `ctx.MaterialSource` (the same object): crafting is a station feature, building is not, so the canonical name is `ctx.MaterialSource`. [Material sources](#material-sources). | `samples/Progenitor.SharedResourcesTest` (test plugin) |
-| `Stations` (static, takes a `World`) | landed, not live-verified | The same calls without a plugin context: `KindOf`, `Recipes`, `SetRecipeEnabled`, `Progress`, `IsWorking`, `Near`. Throws for any world other than the server default world (`"Server"`). | used by `PluginStations` |
+| `Stations` (static, takes a `World`) | landed, not live-verified | The same calls without a plugin context: `KindOf`, `Recipes`, `SetRecipeEnabled`, `Progress`, `Demand`, `IsWorking`, `Near`. Throws for any world other than the server default world (`"Server"`). | used by `PluginStations` |
 | `StationRecipe` | landed | `RecipeGuid`, `Name`, `Kind`, `Inputs`, `Outputs` (`StationItem` lists, base amounts), `DurationSeconds`, `Enabled`, `CanToggle`, `Unlocked`, `HiddenInStation`. | unit test `StationLogicTests` |
 | `StationItem` | landed | `ItemGuid`, `Amount`. | unit test `StationLogicTests` |
 | `StationProgress` | landed | `Kind`, `State`, `RawStatus`, `IsWorking`, `RecipeGuid`, `Fraction`, `ElapsedSeconds`, `DurationSeconds`, `RemainingSeconds` (speed bonuses not applied), `QueueLength`. | unit test `StationLogicTests` |
@@ -506,6 +508,8 @@ acceptance procedure: [modules.md](modules.md#stations).
 | `BrazierInfo` | landed, not live-verified | `Brazier`, `PrefabGuid`, `Name`, `Position`, `Distance`, `State`. | `SampleBraziers.cs` |
 | `BrazierLogic` | landed | Game-free half: `FuelSecondsLeft`, `PlanSet`, `RequireRadius`, `Describe`. | unit test `SortBrazierPositionTests` |
 
+**Demand qualification.** `Demand` is a server, main-thread read using the existing queue layout; it does not enqueue, cancel, or pay for crafts. `IsKnown` currently means zero reserved inputs: an empty workstation queue, or refinement in `Idle` with no current recipe. A nonempty queue, active or ambiguous refinement, missing station/queue, or failed read sets `ProtectAllInputs` and leaves `IsKnown` false. `ReservedInputs` is currently empty even for unknown demand: never interpret that list without checking `IsKnown`. Exact paid-item reservations and effective recipe costs are unavailable; `StationRecipe.Inputs` remains base costs, without floor bonuses or server cost adjustments. Consumers must retain all inputs while demand is unknown, and may reclaim only after known empty/inactive state. Workstation crafting demand is paid through the material-source path; this API does not justify prefill.
+
 ## Inventory
 
 Server inventories of any kind: chests, station input and output, castle hearts (fuel),
@@ -518,6 +522,8 @@ read back; every count in a result is a read-back. Server only, main thread; cli
 |---|---|---|---|
 | `ctx.Inventory.Of(Entity owner, InventoryPart part = Main)` / `InputOf(Entity)` / `OutputOf(Entity)` → `InventoryRef` | landed | Session handle for one inventory (owner + instance + world epoch). `InventoryPart`: `Main` / `Input` (instance 0), `Output` (instance 1, refinement stations). A reference from before a save reload is refused as stale. | `SampleInventory.cs` (container tokens `#n`, `bag`, `heart`, `/out`) |
 | `ctx.Inventory.Instances(Entity)` | landed | How many inventories the owner has (1 chest or heart, 2 refinement station, 0 none). | none (diagnostic) |
+| `ctx.Inventory.TryIsServantContainer(Entity owner, out bool isServantContainer, out string reason)` | experimental (source-checked, compile-verified; not live-verified) | Native `ServantCoffinstation` or `ServantEquipment` component presence identifies special servant owners independently of names. Return false means unknown, not ordinary storage. Does not follow the coffin's connected servant or filter gear out of inventory reads. | consumer default-eligibility policy |
+| `ctx.Inventory.DescribeAcceptance(InventoryRef)` → `InventoryAcceptance` | experimental (source-checked, built, game-free tested; not live-verified) | Read-only native `RestrictedInventory` rule, independent of free space or furniture names. `Ok`, `Reason`, `Restriction.Item` (prefab GUID), `Restriction.Category` (native category mask), `IsOpen`, and `Allows(int item, long itemCategory)`. `Allows` requires actual `ItemData` category flags, not application category names; it does not check capacity or item-table membership. Failed/stale reads have `Ok=false`, `IsOpen=false`, and reject `Allows`. | unit tests `InventoryAcceptanceTests` |
 | `ctx.Inventory.Read(InventoryRef)` → `InventorySnapshot` / `ReadInto(InventoryRef, InventorySlot[])` | landed | Slots in buffer order: `InventorySlot` (`Slot`, `Item`, `Amount`, `MaxStack`, `StackOverride`, `HasItemEntity`), plus the container's `InventoryRestriction` (`Item`, `Category`). `ReadInto` fills a caller array and allocates nothing. | `SampleInventory.cs` (`.items slots`) |
 | `ctx.Inventory.Count` / `CountMany` / `FreeSpace` | landed | Totals; free space honors stack size, slot overrides and `RestrictedInventory` (exact for chests, stations and hearts, an upper bound for a player bag). | `SampleInventory.cs` (`.items count`, `.items free`) |
 | `ctx.Inventory.TryAdd` / `TryRemove` → `InventoryResult` | landed | Partial allowed; the result says how much and why not. Removal never asks for more than the inventory holds, so worn equipment is never touched. | `SampleInventory.cs` (`.items add`, `.items remove`) |
@@ -1131,7 +1137,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 933 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 940 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1222,6 +1228,7 @@ Purpose lines are the first sentence of each type's own doc comment.
 | `CoreLoadContext` | Collectible Core ALC. | Bootstrap-Core boundary |
 | `CoreLoader` | Loads BepInEx/progenitor-core/Progenitor.dll with LoadFromStream into a collectible ALC (one generation at a time) and invokes Progenitor.Runtime.Install(host). | Bootstrap-Core boundary |
 | `CoreReloadCollect` | Microsoft unloadability helpers for a collectible Core generation. | tests |
+| `RetiringContexts` | Tracks unloading plugin contexts through finalization before Core retirement. | Bootstrap internals |
 | `CoreReloadFrameDriver` | Frame-driven Core swap. | tests |
 | `CoreReloadHolderScan` | Reflective "who holds the unloading generation" walk. | tests |
 | `CoreReloadHolderScan.Options` | Options for Walk. | tests |
@@ -1776,3 +1783,13 @@ Example: `SamplePlayerDirectory.cs` (`.players`, `.players name <displayName>`, 
 
 `UnitSpawnOptions` supports `LifetimeSeconds`, `TeamValue`, `FactionIndex`, `StripVBlood`, `Stats`, and a `Configure` callback. Handles expose `TrySetLifetime`, `TrySetTeam`, `TryStripVBlood`, and `TrySetStats`. These write the spawned entity only — not the shared prefab (`Content.Edit` / `PrefabRegistry.Edit`). A lifetime is stamped on the entity and enforced across plugin unload, Core swaps, world loads and restarts ([lifetime across reload and restart](modules.md#lifetime-across-reload-and-restart)).
 
+
+### Timed camera preview
+
+`PluginCamera.Observe(user, target, seconds)` leases a server streaming origin without moving the real character. Pair it with client `PluginCamera.Preview(point, yaw, seconds, ended, compressedHeight)`, which returns a `CameraPreview` orbit lease with manual rotation and automatic timeout. Dispose restores the player camera and render origin; unload releases the observer. Callers authorize targets, pair lease cleanup across the network, and capture gameplay input during preview. Remote ground-floor streaming and timeout restoration were verified live; upstairs visibility and interruption cases remain under qualification.
+
+`PluginCastles.TryGetBuildingPosition` reads the actual world position of a building, including elevation. Server-only; landed.
+
+`IVanillaPanelTabs` is the owned container/station tab strip. `StationQueuedCraft` describes queued recipe work. Both are landed contracts.
+
+`PluginHud.Locate(position, label, seconds, arrivalDistance, showOnMaps)` adds optional world-map/minimap diamonds and removes the lease when the real character is within the specified 3D distance. The original overloads retain their behavior. Map visibility, single-pin replacement and timed expiry and arrival removal were observed live. `PluginCamera.Preview` temporarily hides the native HUD and restores prior visibility on return (verified live). Castle station enumeration includes `ResearchStation`, including research desks without ordinary crafting recipes.

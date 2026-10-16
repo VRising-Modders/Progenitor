@@ -466,6 +466,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachPlan.cs" Link="Linked\VanillaAttachPlan.cs" />
     <!-- P6: panel sites. The open/close/target tracker, the placement rules and the
          missing-site reporter are game-free; VanillaPanelSiteResolver.cs is the Unity half. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanelTabs.cs" Link="Linked\VanillaPanelTabs.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanel.cs" Link="Linked\VanillaPanel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanelAnchors.cs" Link="Linked\VanillaPanelAnchors.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Hooks\HookOptions.cs" Link="Linked\HookOptions.cs" />
@@ -735,6 +736,7 @@
     <Compile Include="..\..\src\Progenitor.Bootstrap\CoreLayout.cs" Link="Linked\CoreLayout.cs" />
     <Compile Include="..\..\src\Progenitor.Bootstrap\CoreLoadContext.cs" Link="Linked\CoreLoadContext.cs" />
     <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadCollect.cs" Link="Linked\CoreReloadCollect.cs" />
+    <Compile Include="..\..\src\Progenitor.Bootstrap\RetiringContexts.cs" Link="Linked\RetiringContexts.cs" />
     <Compile Include="..\..\src\Progenitor.Bootstrap\CoreReloadStatus.cs" Link="Linked\CoreReloadStatus.cs" />
     <!-- Job FINJ1: process-lifetime plugins (IL2CPP type injection); CoreReloadStatus, PluginSuspend and the orchestrator use it. -->
     <Compile Include="..\..\src\Progenitor.Bootstrap\Il2CppInjectionPolicy.cs" Link="Linked\Il2CppInjectionPolicy.cs" />

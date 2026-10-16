@@ -204,6 +204,78 @@ public static unsafe class Stations
     public static bool IsWorking(World world, Entity station) => Progress(world, station)?.IsWorking ?? false;
 
     /// <summary>
+    /// Read InventoryRouteParent.AutoRouteItems on the placed entity. Component absence means
+    /// known unowned; a missing entity or failed read is unknown. Never modifies native routes.
+    /// </summary>
+    public static StationRedistributionOwnership RedistributionOwnership(World world, Entity station)
+    {
+        var em = RequireServer(world);
+        try
+        {
+            if (station == Entity.Null || !em.Exists(station))
+                return new StationRedistributionOwnership(false, false, "station does not exist");
+            if (!em.HasComponent(station, ComponentIndex.Of<InventoryRouteParent>(ComponentType.AccessMode.ReadOnly)))
+                return new StationRedistributionOwnership(true, false);
+            if (!station.TryRead(em, out InventoryRouteParent route))
+                return new StationRedistributionOwnership(false, false, "native redistribution ownership is unreadable");
+            return new StationRedistributionOwnership(true, route.AutoRouteItems);
+        }
+        catch (Exception e)
+        {
+            return new StationRedistributionOwnership(false, false, "native redistribution ownership read failed: " + e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Read every queued craft using the existing verified layout. Nonempty queues and active
+    /// refinement protect all inputs until native payment/reservation and effective-cost readers
+    /// are verified. An unreadable station is never reported as having no reservations.
+    /// </summary>
+    public static StationDemand Demand(World world, Entity station)
+    {
+        var em = RequireServer(world);
+        var rows = new List<StationQueuedCraft>();
+        var kind = StationKind.None;
+        try
+        {
+            kind = Kind(em, station);
+            if (kind == StationKind.Workstation)
+            {
+                if (!em.HasComponent(station, ComponentIndex.Of<QueuedWorkstationCraftAction>(ComponentType.AccessMode.ReadOnly)))
+                    return new StationDemand(kind, rows, true, "workstation queue is missing");
+                int stride = Layout.QueuedWorkstationCraftActionStride;
+                byte* q = AiRuntime.Buffer<QueuedWorkstationCraftAction>(em, station, stride, false, out int length);
+                if (length < 0 || (length > 0 && q == null))
+                    return new StationDemand(kind, rows, true, "workstation queue is unreadable");
+                for (int i = 0; i < length; i++)
+                {
+                    byte* row = q + i * stride;
+                    rows.Add(new StationQueuedCraft
+                    {
+                        RecipeGuid = *(int*)(row + Layout.QueuedWorkstationCraftActionRecipeGuidOffset),
+                        ProgressSeconds = *(float*)(row + Layout.QueuedWorkstationCraftActionProgressTimeOffset),
+                        RawStatus = *(int*)(row + Layout.QueuedWorkstationCraftActionStatusOffset),
+                    });
+                }
+                return new StationDemand(kind, rows, length > 0,
+                    length > 0 ? "queued craft item reservations and effective costs are not yet verified" : "");
+            }
+            if (kind == StationKind.Refinement)
+            {
+                var progress = Progress(world, station);
+                if (progress != null && progress.State == StationState.Idle && progress.RecipeGuid == 0)
+                    return new StationDemand(kind, rows, false);
+                return new StationDemand(kind, rows, true, "refinement active ingredient reservation is not yet verified");
+            }
+            return new StationDemand(kind, rows, true, "not a readable recipe station");
+        }
+        catch (Exception e)
+        {
+            return new StationDemand(kind, rows, true, "station demand read failed: " + e.Message);
+        }
+    }
+
+    /// <summary>
     /// Recipe stations within <paramref name="radius"/> meters (horizontal) of
     /// <paramref name="position"/>, nearest first. Disabled entities are skipped.
     ///

@@ -1708,3 +1708,23 @@ Several things here were confirmed on a live client today and several were not, 
 | `Ui.RemoveAll` and `.corereload` leave no orphan container and the generation collects | The registry and the watch teardown exist for this. **Spike N6** |
 
 The [Mods workspace](mods-menu.md) is the player-facing directory: a main-menu button, a top-navigation Mods button beside the native tabs, a shortcut that opens through that native menu in a world, a two-pane host, and `ctx.Menu` registration. Its tab strip clones the native inner tab wherever a donor is reachable ([tab look per host](mods-menu.md#tab-look-per-host)). Live verification and remaining defects are on that page. Map layers, draggable/reorderable panels and vanilla Options input-action extension remain outside the implemented scope.
+
+## Container and station tabs
+
+`Ui.AttachPanelTabs(site, captions, owner)` supports `ContainerPanel` and `StationPanel`. The first caption represents the native inventory or production view; the remaining captions select custom content. Track the returned `IVanillaPanelTabs` with the plugin context. Subscribe to `PanelChanged` to resolve the current target, and to `SelectionChanged` to populate a panel, call `Mount(panel)`, then `Ui.Show(panel)`. Create controls after `panel.GameWindow()` to use the native settings layout.
+
+`Selected = 0` restores the native view. Closing, changing target, disposing the owner, and Core reload restore native content and detach callbacks. Reject stale asynchronous replies when the target or selected tab changes. Mounted content scrolls inside the native window; it does not replace the inventory entity or its mapper.
+
+On stations, `ShowRedistribution` optionally adds the game's redistribution view; the default is false. This controls visibility only, not native transfer ownership. Server integrations must inspect `ctx.Stations.RedistributionOwnership` before running competing automation. Changing visibility returns to the native production view.
+
+For a separate manager window, `panel.GameWindow(width)` requests a centered native frame capped to the canvas width. Call before creating controls. The parameterless overload retains ordinary panel placement. Wide manager windows reserve 15% of the canvas at the bottom; mounted tab panels cap their height above the same HUD margin and scroll excess content.
+
+Status: built and game-free lifecycle tests pass. Container and refinement tab selection, content mounting, native restoration and reload were observed on the isolated client at 1920x1080 and 3840x1080. Anvil Production/Input mounting and restricted-container content at 2560x1440 were also observed. The native font, tab height and silver divider are retained from the character-tab donor. Other station layouts, native 4K and physical controller input require their own qualification.
+
+### Search input
+
+Use `panel.SearchInput(label, initial)` for live suggestions. Its `OnChanged` fires while typing; `OnSubmitted` fires separately on Enter. Ordinary `Input` retains its end-edit behavior. `Focus(selectAll: true)` activates a visible field. Debounce network searches and discard stale responses in the consumer. Typing, Enter submission and focus were verified live in Find.
+
+`Ui.TopPanel(panel)` places a panel near the top of the available area; it is intended for brief preview controls. Verified live with room-preview controls above the scene.
+
+Locate pins can opt into map and minimap display with the five-argument `ctx.Hud.Locate` overload. A positive arrival distance ends the pin based on real-character distance, including elevation. Map markers share the ping lifetime and disappear on dispose, timeout, disconnect or owner unload; they do not overwrite the player's native map marker.

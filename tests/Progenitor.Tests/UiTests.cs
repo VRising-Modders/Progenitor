@@ -32,6 +32,30 @@ public class UiTests : IDisposable
     }
 
     [Fact]
+    public void Search_typing_and_enter_are_independent_and_dispose_releases_both_handlers()
+    {
+        var panel = UiApi.Panel("Find", _owner);
+        var input = panel.SearchInput("Search");
+        string typed = "", submitted = "";
+        input.OnChanged(v => typed = v);
+        input.OnSubmitted(v => submitted = v);
+        Assert.Equal(1, _client.SearchInputs);
+        var typingId = _client.LastWiredId;
+        var submitId = _client.SubmitId;
+        Assert.NotEqual(typingId, submitId);
+        UiSlotTable.BootstrapDispatch(typingId, (byte)UiSlotKind.Text, 0, false, "iron");
+        Assert.Equal("iron", typed);
+        Assert.Empty(submitted);
+        UiSlotTable.BootstrapDispatch(submitId, (byte)UiSlotKind.Text, 0, false, "iron");
+        Assert.Equal("iron", submitted);
+        input.Dispose();
+        UiSlotTable.BootstrapDispatch(typingId, (byte)UiSlotKind.Text, 0, false, "after");
+        UiSlotTable.BootstrapDispatch(submitId, (byte)UiSlotKind.Text, 0, false, "after");
+        Assert.Equal("iron", typed);
+        Assert.Equal("iron", submitted);
+    }
+
+    [Fact]
     public void RootName_uses_progenitor_ui_prefix_and_sanitizes_separators()
     {
         Assert.Equal("progenitor-ui-example.sample", UiOwnership.RootName("example.sample"));
@@ -604,6 +628,12 @@ public class UiTests : IDisposable
             if (w != null) w.FloatValue = initial;
             return w;
         }
+
+        public int SearchInputs;
+        public ushort SubmitId;
+        public IRuntimeWidget? AddSearchInput(IRuntimePanel panel, string text, string initial)
+        { SearchInputs++; return AddInput(panel, text, initial); }
+        public bool WireInputSubmit(IRuntimeWidget input, ushort slot) { SubmitId = slot; return true; }
 
         public IRuntimeWidget? AddInput(IRuntimePanel panel, string text, string initial)
         {

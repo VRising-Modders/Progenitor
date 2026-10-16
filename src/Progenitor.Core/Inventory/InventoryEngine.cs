@@ -127,6 +127,12 @@ internal sealed class InventoryEngine
 
     // ---- reads --------------------------------------------------------------------------------
 
+    internal InventoryAcceptance DescribeAcceptance(InventoryRef container)
+    {
+        var snapshot = Read(container);
+        return new InventoryAcceptance(snapshot.Restriction, snapshot.Reason);
+    }
+
     internal InventorySnapshot Read(InventoryRef container)
     {
         if (!Check(container, out string why))

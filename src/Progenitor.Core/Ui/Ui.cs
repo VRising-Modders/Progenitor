@@ -12,7 +12,7 @@ namespace Progenitor.Ui;
 /// a side check. Reload-safe: handles are <see cref="IDisposable"/> and
 /// <see cref="RemoveAll"/> destroys that plugin's exact <c>progenitor-ui-&lt;id&gt;</c> root.
 /// </summary>
-public static class Ui
+public static partial class Ui
 {
     /// <summary>
     /// SkipCoreModules token. Same string as <see cref="HarmonySlotHandoff.UiModule"/>.
@@ -131,6 +131,14 @@ public static class Ui
             || handle.Runtime is not IRuntimePanel runtimePanel) return;
         try { CurrentRuntime().NoScrollPanel(runtimePanel); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: no-scroll panel: " + e.Message); }
+    }
+
+    /// <summary>Keep a transient panel centered at the top of the screen, inside a 24-unit margin.</summary>
+    public static void TopPanel(IUiPanel panel, bool top = true)
+    {
+        if (panel is not UiPanelHandle { Enabled: true, IsDisposed: false } handle
+            || handle.Runtime is not IRuntimePanel runtimePanel) return;
+        CurrentRuntime().TopPanel(runtimePanel, top);
     }
 
     internal static void SelfPlacePanel(IUiPanel panel, bool selfPlaced = true)
@@ -525,6 +533,7 @@ public static class Ui
     public static int RemoveAll(object owner)
     {
         if (owner == null) throw new ArgumentNullException(nameof(owner));
+        VanillaPanelTabs.Drop(owner);
         // DIALOGS1: the owner's dialogs, on screen and queued, go first and run no callback — the
         // second line behind the tracked ctx.Dialogs registration.
         try { UiDialog.DropOwner(owner); }
@@ -630,6 +639,7 @@ public static class Ui
 
     internal static void Uninstall()
     {
+        VanillaPanelTabs.Drop(null);
         // Dialogs first, every one of them (framework and mod, on screen and queued), and latched
         // shut: every later step here disposes panels, and a dialog panel leaving the screen would
         // otherwise show the next queued dialog on a fresh overlay that outlives this generation.
@@ -967,6 +977,7 @@ public static class Ui
 #if PROGENITOR_TESTS
     internal static void ResetForTests()
     {
+        VanillaPanelTabs.Drop(null);
         UiNav.Reset();
         lock (Gate)
         {

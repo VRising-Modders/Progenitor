@@ -135,6 +135,7 @@ internal static class ReloaderHost
     private const double SettleSeconds = 1.0;
     private static readonly object LatchGate = new();
     private static readonly List<WeakReference> LatchedPluginAlcs = new();
+    private static readonly RetiringContexts RetiringPluginContexts = new();
     private static readonly List<string> LatchedPluginNames = new();
     private static int _loggedEnumFail;
     /// <summary>The EnC-unavailable sentence is logged once per process, not once per delta.</summary>
@@ -1284,7 +1285,7 @@ internal static class ReloaderHost
         DropDeltasFor(loaded.Stem);
         DropDeltaStateFor(loaded.Stem);
 
-        try { context?.Unload(); } catch (Exception e) { ProcessHost.Log?.LogWarning($"Reload: context unload: {e.Message}"); }
+        try { RetireContext(context); } catch (Exception e) { ProcessHost.Log?.LogWarning($"Reload: context unload: {e.Message}"); }
 
         // Core-swap Unload keeps the Sprite/Texture2D pair so the next generation can
         // apply-from-cache before the plugin file is back in ByPath. File-removed is
@@ -1298,6 +1299,13 @@ internal static class ReloaderHost
             }
         }
         // ---- end unload steps: Unload ----
+    }
+
+    private static void RetireContext(AssemblyLoadContext? context)
+    {
+        if (context == null) return;
+        RetiringPluginContexts.Track(context);
+        context.Unload();
     }
 
     /// <summary>
@@ -1402,7 +1410,7 @@ internal static class ReloaderHost
                 item.BoundCore = null;
                 Note(IsProcessLifetime(item)
                     ? Il2CppInjectionPolicy.FormatKeptAcrossCoreSwap(Path.GetFileName(item.Path))
-                    : PluginLoadOrder.FormatKeptForDependent(Path.GetFileName(item.Path)));
+                    : "Reload: Core swap keeps " + Path.GetFileName(item.Path) + " loaded: it and its runtime providers do not reference Core.");
                 continue;
             }
             Note($"Reload: {what} unloading {Path.GetFileName(item.Path)} "
@@ -1437,9 +1445,9 @@ internal static class ReloaderHost
     }
 
     /// <summary>
-    /// The plugins a Core swap leaves loaded: process-lifetime plugins that do not reference Core (job FINJ1)
-    /// and, job FORD1, every reload-folder plugin they need at runtime, which would otherwise be swapped
-    /// under them. <see cref="CoreBoundProcessLifetimeFiles"/> refuses the swap when one of those references Core.
+    /// Independent plugins and their providers stay loaded across Core swaps. Unloading a legacy
+    /// Harmony plugin unnecessarily can strand its context in native delegate caches. Core-bound
+    /// plugins still retire first; process-lifetime Core-bound plugins refuse the swap up front.
     /// </summary>
     private static HashSet<Loaded> KeptAcrossCoreSwap()
     {
@@ -1447,10 +1455,11 @@ internal static class ReloaderHost
         foreach (var item in ByPath.Values)
         {
             if (item == null) continue;
-            if (Il2CppInjectionPolicy.Decide(LifetimeEvent.CoreSwap, IsProcessLifetime(item), item.Injection.CoreBound)
-                != LifetimeAction.KeepRunning) continue;
+            var providers = RuntimeProviders(item);
+            if (item.Injection.CoreBound || item.Injection.Error.Length != 0) continue;
+            if (providers.Exists(provider => provider.Injection.CoreBound || provider.Injection.Error.Length != 0)) continue;
             keep.Add(item);
-            foreach (var provider in RuntimeProviders(item)) keep.Add(provider);
+            foreach (var provider in providers) keep.Add(provider);
         }
         return keep;
     }
@@ -1902,14 +1911,14 @@ internal static class ReloaderHost
     }
 
     /// <summary>
-    /// Collectible plugin ALCs still in <c>AssemblyLoadContext.All</c>. A Core swap must
+    /// Retiring collectible plugin ALCs, including those already removed from <c>AssemblyLoadContext.All</c>. A Core swap must
     /// not Unload Core while one of these is alive: it pins both ALCs. Enumeration
     /// failure is fail-closed (count &gt; 0).
     /// </summary>
     public static int AliveCollectibleCount() => ListCollectiblePluginAlcNames().Count;
 
     /// <summary>
-    /// Names of waited collectible plugin ALCs still in <c>AssemblyLoadContext.All</c>
+    /// Names of waited collectible plugin ALCs, tracked through finalization as well as enumerated
     /// (<c>progenitor-reload:*</c> only). Third-party and unnamed collectibles are
     /// pin-diag only (R17 finding 1). Fail closed: an exception in enumeration
     /// counts as still-alive and is logged once.
@@ -1937,13 +1946,15 @@ internal static class ReloaderHost
         error = null;
         try
         {
+            foreach (var retiring in RetiringPluginContexts.Alive())
+                if (!names.Contains(retiring.Name)) names.Add(retiring.Name);
             var live = LiveContextNames();
             foreach (var alc in AssemblyLoadContext.All)
             {
                 if (alc == null || !alc.IsCollectible) continue;
                 if (!CoreReloadPolicy.IsWaitedCollectibleAlc(alc.Name)) continue;
                 if (alc.Name != null && live.Contains(alc.Name)) continue; // job FINJ1: kept, not retiring
-                names.Add(alc.Name ?? "");
+                if (!names.Contains(alc.Name ?? "")) names.Add(alc.Name ?? "");
             }
             return true;
         }
@@ -1955,7 +1966,7 @@ internal static class ReloaderHost
     }
 
     /// <summary>
-    /// Snapshot weaks of still-listed plugin ALCs so a later <c>core_reload</c> refuses
+    /// Snapshot weaks of retiring and still-listed plugin ALCs so a later <c>core_reload</c> refuses
     /// until they die (same latch as a Core generation that did not collect).
     /// </summary>
     public static void LatchAlivePluginAlcs()
@@ -1968,13 +1979,18 @@ internal static class ReloaderHost
             _latchPollFrames = 0;
             try
             {
+                foreach (var retiring in RetiringPluginContexts.Alive())
+                {
+                    LatchedPluginAlcs.Add(retiring.Reference);
+                    LatchedPluginNames.Add(retiring.Name);
+                }
                 var live = LiveContextNames();
                 foreach (var alc in AssemblyLoadContext.All)
                 {
                     if (alc == null || !alc.IsCollectible) continue;
                     if (!CoreReloadPolicy.IsWaitedCollectibleAlc(alc.Name)) continue;
                     if (alc.Name != null && live.Contains(alc.Name)) continue; // job FINJ1: kept, not retiring
-                    LatchedPluginAlcs.Add(new WeakReference(alc));
+                    LatchedPluginAlcs.Add(new WeakReference(alc, trackResurrection: true));
                     LatchedPluginNames.Add(alc.Name ?? CoreReloadPolicy.UnnamedAlcName);
                 }
             }

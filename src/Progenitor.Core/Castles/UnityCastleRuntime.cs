@@ -379,12 +379,12 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
     private CastleInventoryIndex InventoryIndex =>
         _inventoryIndex ??= CastleInventoryIndex.Live = new CastleInventoryIndex(InventoryStamp, ScanInventoryModels);
 
-    private static ComponentType[] InventoryModelTypes(bool instances) => new[]
+    private static ComponentType[] InventoryModelTypes(int kind) => new[]
     {
         ComponentIndex.Of<TileModel>(ComponentType.AccessMode.ReadOnly),
         ComponentIndex.Of<CastleHeartConnection>(ComponentType.AccessMode.ReadOnly),
-        instances
-            ? ComponentIndex.Of<InventoryInstanceElement>(ComponentType.AccessMode.ReadOnly)
+        kind == 2 ? ComponentIndex.Of<ResearchStation>(ComponentType.AccessMode.ReadOnly)
+            : kind == 1 ? ComponentIndex.Of<InventoryInstanceElement>(ComponentType.AccessMode.ReadOnly)
             : ComponentIndex.Of<InventoryBuffer>(ComponentType.AccessMode.ReadOnly),
     };
 
@@ -401,10 +401,10 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         if (world == null || !world.IsCreated) return null;
         var em = world.EntityManager;
         long stamp = 0;
-        foreach (bool instances in new[] { false, true })
+        foreach (int instances in new[] { 0, 1, 2 })
         {
             var query = Query.Build(em, includeDisabled: true, includeSystems: false, InventoryModelTypes(instances));
-            try { stamp = (stamp << 32) | (uint)query.CalculateEntityCount(); }
+            try { stamp = unchecked(stamp * 1000003 + query.CalculateEntityCount()); }
             finally { query.Dispose(); }
         }
         return stamp;
@@ -422,7 +422,7 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
         if (world == null || !world.IsCreated) return result;
         var em = world.EntityManager;
         var seen = new HashSet<CastleId>();
-        foreach (bool instances in new[] { false, true })
+        foreach (int instances in new[] { 0, 1, 2 })
         {
             foreach (var e in Query.Entities(em, includeDisabled: true, includeSystems: false, InventoryModelTypes(instances)))
             {
@@ -472,11 +472,11 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
             var e = b.Entity;
             try
             {
-                if (e.Has<CastleHeart>(em) || !Inventory.UnityInventoryBackend.HasInventory(em, e)) continue;
+                if (e.Has<CastleHeart>(em) || (!Inventory.UnityInventoryBackend.HasInventory(em, e) && !e.Has<ResearchStation>(em))) continue;
                 bool refinement = e.Has<Refinementstation>(em);
                 // Ordinary storage also carries CastleWorkstation for room/servant
                 // bonuses. The recipe buffer distinguishes a crafting workstation.
-                bool station = refinement || e.Has<WorkstationRecipesBuffer>(em);
+                bool station = refinement || e.Has<WorkstationRecipesBuffer>(em) || e.Has<ResearchStation>(em);
                 CastleNameplates.TryRead(em, e, out bool nameable, out string name);
                 rows.Add(new CastleInventoryRow
                 {

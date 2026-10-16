@@ -60,8 +60,18 @@ public class MenuHotkeyGuardTests : IDisposable
     public void The_blocked_set_is_the_menu_open_and_tab_cycling_actions_from_the_dump()
     {
         Assert.Equal(
-            new[] { 18, 20, 21, 22, 23, 24, 25, 26, 1006, 1007, 1008, 1009 },
+            new[] { 1, 18, 20, 21, 22, 23, 24, 25, 26, 1006, 1007, 1008, 1009 },
             MenuHotkeyGuard.BlockedActions());
+    }
+
+    [Fact]
+    public void Typing_guards_container_interact_until_focus_is_released()
+    {
+        MenuHotkeyGuard.SetFocusedField(MenuHotkeyGuard.InstallSearch);
+        Assert.True(MenuHotkeyGuard.HotkeysBlocked);
+        Assert.Contains(1, MenuHotkeyGuard.BlockedActions());
+        MenuHotkeyGuard.SetFocusedField(null);
+        Assert.False(MenuHotkeyGuard.HotkeysBlocked);
     }
 
     /// <summary>

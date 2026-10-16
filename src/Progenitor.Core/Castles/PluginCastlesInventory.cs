@@ -72,6 +72,23 @@ public sealed partial class PluginCastles
         return CastleNameplates.TryWrite(world.EntityManager, entity, name, out reason);
     }
 
+    /// <summary>Read a building's actual world position, including its floor elevation.</summary>
+    public bool TryGetBuildingPosition(Entity entity, out Progenitor.Units.UnitVec3 position)
+    {
+        var em = RequireServer(nameof(TryGetBuildingPosition)).EntityManager;
+        position = default;
+        if (!entity.Exists(em) || !entity.TryRead<Unity.Transforms.Translation>(em, out var value)) return false;
+        position = new Progenitor.Units.UnitVec3(value.Value.x, value.Value.y, value.Value.z);
+        return true;
+    }
+
+    /// <summary>Game floor-height encoding for a building, or -1 if it has no tile position.</summary>
+    public int BuildingFloorHeight(Entity entity)
+    {
+        var em = RequireServer(nameof(BuildingFloorHeight)).EntityManager;
+        return entity.Exists(em) && entity.TryRead<ProjectM.TilePosition>(em, out var tile) ? tile.CompressedHeight : -1;
+    }
+
     private World RequireServer(string op)
     {
         _ctx.EnsureAttached();

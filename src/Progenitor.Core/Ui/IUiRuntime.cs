@@ -15,6 +15,8 @@ internal interface IUiRuntime
 
     IRuntimePanel? CreatePanel(string title, string rootName);
 
+    IRuntimeVanillaTabs? CreateVanillaTabs(VanillaUiSite site, string[] captions, Action<int> selected) => null;
+
     /// <summary>Opt an existing panel into the Mods workspace; ordinary panels are unaffected.</summary>
     void ConfigureMenuPanel(IRuntimePanel panel, bool sidebar) { }
 
@@ -237,6 +239,9 @@ internal interface IUiRuntime
     IRuntimeWidget? AddSlider(IRuntimePanel panel, string text, float min, float max, float initial);
 
     IRuntimeWidget? AddInput(IRuntimePanel panel, string text, string initial);
+    IRuntimeWidget? AddSearchInput(IRuntimePanel panel, string text, string initial) => AddInput(panel, text, initial);
+    bool WireInputSubmit(IRuntimeWidget input, ushort slot) => false;
+    void FocusInput(IRuntimeWidget input, bool selectAll) { }
 
     /// <summary>
     /// Sidebar search box, if this runtime has one. Escape uses it to clear a focused
@@ -451,6 +456,8 @@ internal interface IUiRuntime
     /// </para>
     /// </summary>
     void PlacePanel(IRuntimePanel panel, PanelSpot spot);
+    /// <summary>Place a transient panel at the top, keeping the center of the scene visible.</summary>
+    void TopPanel(IRuntimePanel panel, bool top) { }
 
     void Show(IRuntimePanel panel);
 
