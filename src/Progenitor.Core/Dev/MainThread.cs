@@ -370,13 +370,10 @@ public static class MainThread
     /// </summary>
     internal static string DescribeOwned(string? contextNamePrefix, string? assemblyFullName)
     {
-        int queued = 0;
+        // Never enumerate the ConcurrentQueue (PINS1): enumeration preserves its segments, and a preserved segment keeps
+        // every item dequeued after it referenced, plugin delegates included, until the segment is dropped. Count does not.
+        int queued = Queue.Count;
         int delayed = 0;
-        foreach (var item in Queue)
-        {
-            if (MatchesDescribe(in item, contextNamePrefix, assemblyFullName))
-                queued++;
-        }
         lock (Delayed)
         {
             for (int i = 0; i < Delayed.Count; i++)
@@ -386,7 +383,7 @@ public static class MainThread
                     delayed++;
             }
         }
-        return "pin-diag MainThread queued=" + queued + " delayed=" + delayed;
+        return "pin-diag MainThread queuedTotal=" + queued + " delayed=" + delayed;
     }
 
     private static bool MatchesDescribe(in WorkItem item, string? contextPrefix, string? assemblyFullName)

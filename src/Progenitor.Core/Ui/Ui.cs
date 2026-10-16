@@ -369,7 +369,7 @@ public static partial class Ui
         try
         {
             var watch = UiPointerWatch.Create(target, handler, owner);
-            UiPointerWatchRegistry.Add(owner, watch);
+            UiPointerWatchRegistry.Add(owner, watch, handler);
             return watch;
         }
         catch (Exception e)

@@ -564,6 +564,10 @@ public sealed class Plugin
         try { log.LogInfo(Reload.JsonCacheSweep.DescribeProcessCaches()); }
         catch (Exception e) { log.LogWarning("pin-diag Json: " + e.Message); }
         DiagnoseModulePins(log);
+        // Plugins unloaded by an earlier reload whose contexts are still alive: name what holds them.
+        // Contexts this swap just unloaded are skipped; they have not had a collect yet.
+        try { Reload.PluginPinHolders.Diagnose(log.LogInfo, minAgeSeconds: 5); }
+        catch (Exception e) { log.LogWarning("pin-diag plugin-holders: " + e.Message); }
     }
 
     private static void DiagnoseModulePins(ManualLogSource log)

@@ -480,6 +480,28 @@ public sealed class UiTermsTests : IDisposable
     }
 
     [Fact]
+    public void An_unowned_markers_handler_goes_with_the_plugin_that_declared_it()
+    {
+        // PINS1: matched by assembly only in the reloadable plugin's unload sweep.
+        using var plugin = UnloadingPluginStandIn.Load();
+        int before = UiTerms.HandlerCount;
+        var lease = UiTerms.OnMarkersChanged(PluginA, plugin.Callback);
+        var library = UiTerms.OnMarkersChanged(PluginA, new Action(GC.Collect));
+        var core = UiTerms.OnMarkersChanged(PluginA, () => { });
+        Assert.Equal(before + 3, UiTerms.HandlerCount);
+        UiTerms.DropOwner(plugin.Owner); // a live drop: nothing matched by assembly
+        var bcl = new object();
+        using (PluginDelegateSource.UnloadSweep(bcl)) UiTerms.DropOwner(bcl);
+        Assert.Equal(before + 3, UiTerms.HandlerCount);
+        using (PluginDelegateSource.UnloadSweep(plugin.Owner)) UiTerms.DropOwner(plugin.Owner);
+        Assert.Equal(before + 2, UiTerms.HandlerCount);
+        core.Dispose();
+        library.Dispose();
+        lease.Dispose();
+        Assert.Equal(before, UiTerms.HandlerCount);
+    }
+
+    [Fact]
     public void The_markers_toggle_on_a_header_panel_does_not_outlive_its_toggle()
     {
         UiTerms.Define(PluginA, "Belt", "x");

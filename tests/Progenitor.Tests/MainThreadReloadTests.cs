@@ -21,6 +21,36 @@ public class MainThreadReloadTests
 
     public sealed class ReloadOwner { }
 
+    sealed class Payload { internal int Runs; internal void Run() => Runs++; }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static WeakReference PostOne()
+    {
+        var p = new Payload();
+        MainThread.Post(p.Run);
+        return new WeakReference(p);
+    }
+
+    /// <summary>PINS1: describing the queue for the pin dump must not keep work that already ran referenced.</summary>
+    [Fact]
+    public void Describing_the_queue_does_not_keep_drained_work_alive()
+    {
+        lock (Gate)
+        {
+            MainThread.ResetForTests();
+            var weak = PostOne();
+            Assert.Contains("queuedTotal=1", MainThread.DescribeOwned("progenitor-core", "x"));
+            MainThread.Drain();
+            for (int i = 0; i < 3 && weak.IsAlive; i++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            Assert.False(weak.IsAlive);
+            MainThread.ResetForTests();
+        }
+    }
+
     [Fact]
     public void Reload_same_alc_name_new_owner_token_posts_run()
     {

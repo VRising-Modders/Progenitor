@@ -113,6 +113,9 @@ internal sealed class ExchangeOutcome
     internal byte[] Payload = Array.Empty<byte>();
     internal int Version;
     internal SendResult NotSent = SendResult.Sent;
+
+    /// <summary>The request ended because its mod is unloading (PINS1): a result for an awaiting task, not for the player.</summary>
+    internal bool Unloading;
 }
 
 internal static class ExchangeCodes
@@ -319,10 +322,12 @@ internal sealed class ExchangeClientEngine
     }
 
     /// <summary>Cancel a waiting request: its callback runs with <c>Cancelled</c> and the server is told (best effort).</summary>
-    internal bool Cancel(Pending p, string reason = "cancelled")
+    internal bool Cancel(Pending p, string reason = "cancelled", bool unloading = false)
     {
         if (p == null || p.Finished) return false;
-        Finish(p, Outcome(RequestStatus.Cancelled, reason));
+        var outcome = Outcome(RequestStatus.Cancelled, reason);
+        outcome.Unloading = unloading;
+        Finish(p, outcome);
         try { Send(new ExchangeBody { Op = ExchangeOp.Cancel, ModHash = p.ModHash, Id = p.Id }.Pack()); }
         catch { /* best effort */ }
         return true;
@@ -580,7 +585,7 @@ internal sealed class ExchangeClientEngine
     internal void ForgetMod(string mod)
     {
         foreach (var p in new List<Pending>(_pending.Values))
-            if (string.Equals(p.Mod, mod, StringComparison.OrdinalIgnoreCase)) Cancel(p, "this mod unloaded");
+            if (string.Equals(p.Mod, mod, StringComparison.OrdinalIgnoreCase)) Cancel(p, "this mod unloaded", unloading: true);
         foreach (var s in new List<Sub>(_subs.Values))
         {
             if (!string.Equals(s.Mod, mod, StringComparison.OrdinalIgnoreCase)) continue;

@@ -63,7 +63,13 @@ internal static class PluginStaticApiSweep
         try { effects = Progenitor.Effects.Assets.RemoveAll(plugin); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Reload: Assets.RemoveAll: " + e.Message); }
 
-        try { panels = Progenitor.Ui.Ui.RemoveAll(plugin); }
+        // PINS1: inside the unload sweep, registrations made without an owner are also matched to this plugin by the
+        // assembly that declared their callback.
+        try
+        {
+            using (Progenitor.Ui.PluginDelegateSource.UnloadSweep(plugin))
+                panels = Progenitor.Ui.Ui.RemoveAll(plugin);
+        }
         catch (Exception e) { Plugin.Logger?.LogWarning("Reload: Ui.RemoveAll: " + e.Message); }
 
         // R27 finding 4: EV11-EV14 shipped ServerBeam as a new static API in the same batch

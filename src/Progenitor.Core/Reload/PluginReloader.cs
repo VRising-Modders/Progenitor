@@ -901,6 +901,11 @@ public static class PluginReloader
             }
         }
 
+        // Weakly, for the pin diagnosis: a context recorded here that is still alive at the next
+        // Core swap names its Core holders (pin-diag plugin-holders).
+        try { PluginPinHolders.NoteUnloaded(plugin.GetType(), identity.Name); }
+        catch (Exception e) { Plugin.Logger?.LogWarning($"Reload: PluginPinHolders.NoteUnloaded: {e.Message}"); }
+
         try { EventBus.RemoveAll(plugin); }
         catch (Exception e) { Plugin.Logger?.LogWarning($"Reload: EventBus.RemoveAll: {e.Message}"); }
 

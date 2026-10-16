@@ -1563,12 +1563,15 @@ internal sealed partial class ModSettingsView
     }
 
     /// <summary>NOPROGMSG1: repaint a status row every <paramref name="seconds"/> until it is disposed (the info lines' scheduler).</summary>
-    private static void ScheduleStatus(IUiCellRow row, Action paint, double seconds)
+    private static void ScheduleStatus(IUiCellRow row, Action paint, double seconds, Delegate? pluginSource = null)
     {
         if (seconds <= 0) return;
         var scheduler = UiInfoHandle.Scheduler;
         if (scheduler == null) return;
-        object? owner = (row as UiHandle)?.Owner;
+        // PINS1: the row belongs to the workspace (a Core owner), but the repaint calls the plugin's info function. Post
+        // the repaint under an object of the plugin's own assembly when there is one, so the plugin's unload drops the
+        // pending repaint (by owner assembly) instead of leaving a Core-owned timer that reaches the plugin.
+        object? owner = PluginObjectOf(pluginSource) ?? (row as UiHandle)?.Owner;
         double every = Math.Min(UiInfoHandle.MaxRefreshSeconds, Math.Max(UiInfoHandle.MinRefreshSeconds, seconds));
         void Tick()
         {
@@ -1581,6 +1584,20 @@ internal sealed partial class ModSettingsView
 
         try { scheduler(every, Tick, owner); }
         catch { /* painted once */ }
+    }
+
+    /// <summary>The target of <paramref name="d"/> when it lives in a collectible (reloadable plugin) assembly, else null.</summary>
+    internal static object? PluginObjectOf(Delegate? d)
+    {
+        try
+        {
+            var target = d?.Target;
+            if (target == null) return null;
+            var alc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(target.GetType().Assembly);
+            if (alc == null || !alc.IsCollectible) return null;
+            return ReferenceEquals(target.GetType().Assembly, typeof(ModSettingsView).Assembly) ? null : target;
+        }
+        catch { return null; }
     }
 
     /// <summary>NOPROGMSG1: a server text row's field ended an edit (the draft changed); status rows that preview it repaint.</summary>
@@ -1708,7 +1725,7 @@ internal sealed partial class ModSettingsView
                 DraftChanged += onDraft;
                 _requests.Add(new ActionLease(() => DraftChanged -= onDraft));
                 // NOPROGMSG1: a status row that refreshes is repainted on the info lines' clock while the page is up.
-                ScheduleStatus(row, Paint, item.RefreshSeconds);
+                ScheduleStatus(row, Paint, item.RefreshSeconds, source);
                 binding.Handles.Add(row);
                 binding.Main = row;
                 _bindings.Add(binding);

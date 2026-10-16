@@ -59,8 +59,9 @@ internal sealed class ExchangeTypes
 /// <summary>How one request ended. <see cref="Reply"/> is set only when <see cref="Status"/> is <see cref="RequestStatus.Ok"/>.</summary>
 public sealed class RequestResult<TReply> where TReply : class
 {
-    internal RequestResult(RequestStatus status, TReply? reply, string reason, SendResult notSent, MessageInfo? info)
+    internal RequestResult(RequestStatus status, TReply? reply, string reason, SendResult notSent, MessageInfo? info, bool unloading = false)
     {
+        Unloading = unloading;
         Status = status;
         Reply = reply;
         Reason = reason ?? "";
@@ -69,6 +70,13 @@ public sealed class RequestResult<TReply> where TReply : class
     }
 
     public RequestStatus Status { get; }
+
+    /// <summary>
+    /// True when the request ended because this mod is unloading (<see cref="RequestStatus.Cancelled"/>, or
+    /// <see cref="RequestStatus.NotSent"/> for a send made during unload). The callback still runs so an awaited
+    /// task completes; there is nothing to show the player, and the mod should not touch its UI.
+    /// </summary>
+    public bool Unloading { get; }
 
     /// <summary>True when the server answered with a reply this mod could read.</summary>
     public bool Ok => Status == RequestStatus.Ok;
@@ -250,7 +258,7 @@ public sealed class PluginRequests
         {
             if (o.Status != RequestStatus.Ok)
             {
-                done(new RequestResult<TReply>(o.Status, null, o.Reason, o.NotSent, null));
+                done(new RequestResult<TReply>(o.Status, null, o.Reason, o.NotSent, null, o.Unloading));
                 return;
             }
 
@@ -274,6 +282,15 @@ public sealed class PluginRequests
         {
             var ended = new ExchangeClientEngine.Pending { Finished = true };
             complete(new ExchangeOutcome { Status = RequestStatus.NotSent, Reason = "ctx.Requests.Send runs on a client", NotSent = SendResult.NotConnected });
+            return new RequestHandle(ended);
+        }
+
+        // PINS1: unload already ran ForgetMod for this mod. A request queued now would keep the
+        // callback (a plugin closure) in the client engine after the plugin's context unloads.
+        if (_ctx.IsRetired)
+        {
+            var ended = new ExchangeClientEngine.Pending { Finished = true };
+            complete(new ExchangeOutcome { Status = RequestStatus.NotSent, Reason = "this mod is unloading", NotSent = SendResult.Invalid, Unloading = true });
             return new RequestHandle(ended);
         }
 
@@ -475,6 +492,15 @@ public sealed class PluginSubscriptions
             onEnded?.Invoke(SubscriptionEndReason.NotSent, ended.EndText);
             return new Subscription<TSnapshot, TDelta>(ended);
         }
+
+        // PINS1: after unload's ForgetMod nothing would end this subscription, and its callbacks are
+        // plugin closures. Come back ended without running anything.
+        if (_ctx.IsRetired)
+            return new Subscription<TSnapshot, TDelta>(new ExchangeClientEngine.Sub
+            {
+                Topic = topic, Key = key ?? "", State = SubscriptionState.Ended,
+                EndReason = SubscriptionEndReason.NotSent, EndText = "this mod is unloading",
+            });
 
         var sub = ExchangeNet.Client.Subscribe(guid, topic, key ?? "", snap, delta, snapRun, deltaRun, onEnded);
         // Not tracked one by one (a panel opened a thousand times would grow the bag): unload ends every subscription of

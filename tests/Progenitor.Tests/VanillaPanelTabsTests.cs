@@ -40,6 +40,64 @@ public sealed class VanillaPanelTabsTests
         Assert.Equal(0, other.Host.Disposals);
     }
 
+    sealed class Subscriber
+    {
+        internal int Calls;
+        internal void OnSelect(int _) => Calls++;
+        internal void OnPanel(VanillaPanelEvent _) => Calls++;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static (WeakReference subscriber, WeakReference owner) SubscribeAndForget(VanillaPanelTabs tabs, object owner)
+    {
+        var s = new Subscriber();
+        tabs.SelectionChanged += s.OnSelect;
+        tabs.PanelChanged += s.OnPanel;
+        return (new WeakReference(s), new WeakReference(owner));
+    }
+
+    [Fact]
+    public void OwnerSweepLetsAPluginThatNeverUnsubscribedBeCollected()
+    {
+        var runtime = new Runtime();
+        int before = VanillaPanelTabs.LiveCount;
+        var tabs = CreateFor(runtime, out var refs);
+        Assert.True(tabs.HasSubscribers);
+        Assert.Equal(before + 1, VanillaPanelTabs.LiveCount);
+
+        // The plugin unloads without unsubscribing or disposing: the Ui.RemoveAll sweep runs.
+        DropOwnerOf(refs.owner);
+        Assert.False(tabs.HasSubscribers);
+        Assert.Equal(before, VanillaPanelTabs.LiveCount);
+        Assert.Equal(1, runtime.Host.Disposals);
+        Assert.Equal(1, runtime.Watch.Disposals);
+
+        // The handle itself is still reachable (the runtime's frame callback, a Core cache) and
+        // must not keep the plugin's subscriber or owner alive.
+        for (int i = 0; i < 3 && (refs.subscriber.IsAlive || refs.owner.IsAlive); i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(refs.subscriber.IsAlive);
+        Assert.False(refs.owner.IsAlive);
+        GC.KeepAlive(tabs);
+        runtime.Frame!(Open(1)); // a late frame after the sweep is inert
+        Assert.False(tabs.HasSubscribers);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static void DropOwnerOf(WeakReference owner) => VanillaPanelTabs.Drop(owner.Target);
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    static VanillaPanelTabs CreateFor(Runtime runtime, out (WeakReference subscriber, WeakReference owner) refs)
+    {
+        var owner = new object();
+        var tabs = new VanillaPanelTabs(runtime, VanillaUiSite.ContainerPanel, new[] { "Inventory", "Input" }, owner);
+        refs = SubscribeAndForget(tabs, owner);
+        return tabs;
+    }
+
     [Fact]
     public void ReSelectingNativeTabStillTellsRuntimeToLeaveRedistribution()
     {

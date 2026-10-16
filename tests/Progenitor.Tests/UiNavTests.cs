@@ -619,6 +619,9 @@ public sealed class UiNavTests : IDisposable
 
         top.Dispose();
         ask.Dispose();
+        Assert.True(UiNav.HasReturnFocus);
+        UiNav.Tick(default, 2.5);
+        Assert.False(UiNav.HasReturnFocus); // PINS1: the disposed control (and its plugin owner) is let go
         page.Button("Switch again");
         var askAgain = page.Button("Uninstall again");
         var kids = Children(page);

@@ -50,7 +50,7 @@ public readonly struct UiPointerEvent
 internal static class UiPointerWatchRegistry
 {
     private static readonly object Gate = new();
-    private static readonly List<(object? Owner, IDisposable Watch)> Live = new();
+    private static readonly List<(object? Owner, IDisposable Watch, string? Source)> Live = new();
 
     /// <summary>How many watches are registered.</summary>
     internal static int Count
@@ -58,12 +58,20 @@ internal static class UiPointerWatchRegistry
         get { lock (Gate) return Live.Count; }
     }
 
-    /// <summary>Register a live watch.</summary>
-    internal static void Add(object? owner, IDisposable watch)
+    /// <summary>
+    /// Register a live watch. <paramref name="handler"/> is the plugin's callback: with no
+    /// <paramref name="owner"/> its declaring assembly's name (a string, never the assembly) is kept, so the
+    /// plugin's unload sweep still finds a watch it forgot to own (PINS1).
+    /// </summary>
+    internal static void Add(object? owner, IDisposable watch, Delegate? handler = null)
     {
         if (watch == null) throw new ArgumentNullException(nameof(watch));
-        lock (Gate) Live.Add((owner, watch));
+        string? source = owner == null ? SourceName(handler) : null;
+        lock (Gate) Live.Add((owner, watch, source));
     }
+
+    /// <summary>Full name of the assembly that declared <paramref name="d"/>, unless it is Core's own.</summary>
+    internal static string? SourceName(Delegate? d) => PluginDelegateSource.Name(d);
 
     /// <summary>Forget a watch that disposed itself. Unknown watches are ignored.</summary>
     internal static void Forget(IDisposable watch)
@@ -82,12 +90,15 @@ internal static class UiPointerWatchRegistry
     internal static int RemoveAll(object owner)
     {
         if (owner == null) return 0;
+        string? ownerAssembly = PluginDelegateSource.OwnerName(owner);
         var mine = new List<IDisposable>();
         lock (Gate)
         {
             for (int i = Live.Count - 1; i >= 0; i--)
             {
-                if (!ReferenceEquals(Live[i].Owner, owner)) continue;
+                bool match = ReferenceEquals(Live[i].Owner, owner)
+                    || (Live[i].Owner == null && Live[i].Source != null && string.Equals(Live[i].Source, ownerAssembly, StringComparison.Ordinal));
+                if (!match) continue;
                 mine.Add(Live[i].Watch);
                 Live.RemoveAt(i);
             }
@@ -120,4 +131,69 @@ internal static class UiPointerWatchRegistry
 
         return watches.Count;
     }
+}
+
+/// <summary>
+/// PINS1: for registrations made without an owner, the name (a string, never the <see cref="System.Reflection.Assembly"/>,
+/// which would pin a collectible context) of the assembly that declared the callback, so an owner sweep can still match
+/// them to the plugin that is unloading.
+/// </summary>
+internal static class PluginDelegateSource
+{
+    /// <summary>Full name of the assembly that declared <paramref name="d"/>; null for Core's own or when unknown.</summary>
+    internal static string? Name(Delegate? d)
+    {
+        try
+        {
+            var asm = d?.Method.DeclaringType?.Assembly;
+            if (asm == null || ReferenceEquals(asm, typeof(PluginDelegateSource).Assembly)) return null;
+            return asm.FullName;
+        }
+        catch { return null; }
+    }
+
+    [ThreadStatic] private static object? _sweepOwner;
+
+    /// <summary>
+    /// Opens the plugin unload sweep for <paramref name="owner"/> (<c>PluginStaticApiSweep</c>). Matching by assembly is
+    /// allowed only inside it: a live <c>Ui.RemoveAll(this)</c> keeps the plugin's own unowned registrations, and an
+    /// owner from a shared library (an <c>object</c>) never matches a library callback such as <c>List.Add</c>.
+    /// </summary>
+    internal static Scope UnloadSweep(object owner) => new(owner);
+
+    internal readonly struct Scope : IDisposable
+    {
+        private readonly object? _previous;
+
+        internal Scope(object owner)
+        {
+            _previous = _sweepOwner;
+            _sweepOwner = owner;
+        }
+
+        public void Dispose() => _sweepOwner = _previous;
+    }
+
+    /// <summary>
+    /// Full name of <paramref name="owner"/>'s assembly, for matching unowned registrations: only while the unload sweep
+    /// of that owner runs, and only for an assembly in a collectible (reloadable plugin) load context other than Core's.
+    /// Null otherwise, which matches nothing.
+    /// </summary>
+    internal static string? OwnerName(object? owner)
+    {
+        try
+        {
+            if (owner == null || !ReferenceEquals(owner, _sweepOwner)) return null;
+            var asm = owner.GetType().Assembly;
+            if (ReferenceEquals(asm, typeof(PluginDelegateSource).Assembly)) return null;
+            var alc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(asm);
+            if (alc == null || !alc.IsCollectible) return null;
+            return asm.FullName;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>True when an unowned registration whose callback came from <paramref name="source"/> belongs to <paramref name="ownerName"/>.</summary>
+    internal static bool Matches(string? source, string? ownerName) =>
+        source != null && ownerName != null && string.Equals(source, ownerName, StringComparison.Ordinal);
 }
