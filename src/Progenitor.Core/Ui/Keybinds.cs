@@ -1195,7 +1195,7 @@ public static class Keybinds
             return Not(FieldTakesKeyReason);
         if (focus == ChatFocus.Unknown && !reg.AllowWhenChatUnknown && source.IsAvailable)
             return Not("suppressed: no chat window can be read");
-        string? blocked = SafeWinnerGate(reg);
+        string? blocked = GateNow(reg);
         if (blocked != null) return Not("not-active: " + blocked);
         if (holdFrames < 0)
         {
@@ -1453,6 +1453,39 @@ public static class Keybinds
 
     /// <summary>KEYS4: a live bind's scope (<see cref="KeybindScope.Gameplay"/> for anything else).</summary>
     internal static KeybindScope ScopeOf(IKeybindInfo? bind) => bind is Registration r ? r.Scope : KeybindScope.Gameplay;
+
+    /// <summary>
+    /// The winner rule for a press, with HUB1's one exception: a window key (<see cref="KeybindScope.Window"/>, the
+    /// tab-history keys) that lost its chord to a game key fires anyway while its target window holds the input, that is
+    /// while the native input mask applied now is <see cref="UiMaskScope.Full"/> or stronger. The game's button actions,
+    /// that game key included (Auto Run on the mouse's forward button), are blocked then (<c>GameInputBlocker</c> applies
+    /// <c>BlockAllKeys</c> for a full mask), so the press acts once. Hovered without the mask, the game's key keeps it.
+    /// The Keybinds tab still reports the clash, with a note on this rule.
+    /// </summary>
+    private static string? GateNow(Registration reg)
+    {
+        string? blocked = SafeWinnerGate(reg);
+        if (blocked == null || reg.Scope != KeybindScope.Window) return blocked;
+        try
+        {
+            if (KeybindArbiter.LostToGame(reg.PluginId, reg.Id) && WindowHoldsInput()) return null;
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window key input check threw: " + e.Message); }
+        return blocked;
+    }
+
+    /// <summary>
+    /// HUB1: a window with a tab history is the target and the game's input is blocked now: the applied native mask is
+    /// <see cref="UiMaskScope.Full"/> or <see cref="UiMaskScope.Exclusive"/> (a <see cref="UiCaptureMode.WhileShown"/>
+    /// window, or the pointer over a hovered one). A mask that could not be measured counts as not blocked. A seam for tests.
+    /// </summary>
+    internal static Func<bool> WindowHoldsInput { get; set; } = DefaultWindowHoldsInput;
+
+    private static bool DefaultWindowHoldsInput()
+    {
+        if (UiTabHistoryRoute.Target() == null) return false;
+        return UiInputCapture.IsBlocking && UiInputCapture.TryGetAppliedScope(out var scope) && scope != UiMaskScope.CloseKeyOnly;
+    }
 
     private static string? SafeWinnerGate(Registration reg)
     {
@@ -1741,7 +1774,7 @@ public static class Keybinds
 
             // KEYS1: the winner rule. A bind that lost its chord to the game or to a mod installed
             // first does not run — asked on the press edge only, so a quiet frame costs nothing.
-            string? blocked = SafeWinnerGate(reg);
+            string? blocked = GateNow(reg);
             if (blocked != null)
             {
                 Plugin.Logger?.LogInfo(NotFiredLog(reg.Label, blocked));
@@ -1790,7 +1823,7 @@ public static class Keybinds
             }
 
             if (!down) continue;
-            string? blocked = SafeWinnerGate(reg);
+            string? blocked = GateNow(reg);
             if (blocked != null)
             {
                 Plugin.Logger?.LogInfo(NotFiredLog(reg.Label, blocked));
@@ -2250,6 +2283,7 @@ public static class Keybinds
         RebindRefused = null;
         MenuScopeOpen = DefaultMenuScopeOpen;
         WindowScopeOpen = DefaultWindowScopeOpen;
+        WindowHoldsInput = DefaultWindowHoldsInput;
         PhotoScopeOpen = NeverOpen;
         MapScopeOpen = DefaultMapScopeOpen;
         ChatScopeOpen = DefaultChatScopeOpen;

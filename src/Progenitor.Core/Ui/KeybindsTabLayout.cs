@@ -1199,7 +1199,7 @@ internal static class KeybindsTabLayout
     internal const string MenuScopeNote = "Works only while the Mods menu is open, so it never clashes with a gameplay key.";
 
     /// <summary>HUB1: the note on a window key (the tab-history keys): live in play too, so clashes are checked.</summary>
-    internal const string WindowScopeNote = "Works while a window with tabs is under the pointer or holds the input, in play too, so it is checked against gameplay keys and the game's own keys.";
+    internal const string WindowScopeNote = "Works while a window with tabs is under the pointer or holds the input, in play too, so it is checked against gameplay keys and the game's own keys. When a game key has the same key, the game's key wins, except while the window holds the input: the game's keys are blocked then, so this key works and the game's action does not run.";
 
     internal const string PhotoScopeNote = "Works only in photo mode, which holds your character, so it never clashes with a gameplay key.";
 

@@ -486,6 +486,9 @@ internal static class KeybindArbiter
     private static ulong _gameWorld = ulong.MaxValue;
     private static Dictionary<string, string> _blocked = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>HUB1: the window keys (<see cref="KeybindScope.Window"/>) whose chord a game key won.</summary>
+    private static HashSet<string> _lostToGame = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly record struct Stamp(int Binds, int Keys, int Sources, bool Foreign, bool Enforce, int Names, ulong World);
 
     private static Stamp Now() => new(
@@ -561,6 +564,7 @@ internal static class KeybindArbiter
             _gameStale = true;
             _game = null;
             _blocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _lostToGame = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -667,9 +671,15 @@ internal static class KeybindArbiter
         var picture = Compute(game.Available ? game.Claims : Array.Empty<KeybindClaim>(), ReadProgenitor(), ReadCfg(),
             game.Available, game.Available ? "" : game.Note);
         var blocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var lostToGame = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var v in picture.Verdicts)
             if (v.Claim.Source == KeybindSource.Progenitor && !v.Active)
+            {
                 blocked[v.Claim.OwnerId + "/" + v.Claim.ActionId] = v.Reason;
+                // HUB1: a window key that lost to a game key may still act while its window holds the input (Keybinds.GateNow).
+                if (v.Claim.Scope == KeybindScope.Window && v.Winner?.Source == KeybindSource.Game)
+                    lostToGame.Add(v.Claim.OwnerId + "/" + v.Claim.ActionId);
+            }
         lock (CacheGate)
         {
             _cached = picture;
@@ -683,6 +693,7 @@ internal static class KeybindArbiter
             }
 
             _blocked = blocked;
+            _lostToGame = lostToGame;
         }
 
         return picture;
@@ -719,6 +730,14 @@ internal static class KeybindArbiter
     /// The reason a Progenitor bind must not fire right now, or null when it may. Asked by the pump on a
     /// press edge: a dictionary lookup in the table the last build left, never a rebuild.
     /// </summary>
+    /// <summary>HUB1: whether window key <paramref name="bindId"/> lost its chord to a game key (not to a mod key).</summary>
+    internal static bool LostToGame(string pluginId, string bindId)
+    {
+        HashSet<string> lost;
+        lock (CacheGate) lost = _lostToGame;
+        return lost.Contains((pluginId ?? "") + "/" + (bindId ?? ""));
+    }
+
     internal static string? BlockedReason(string pluginId, string bindId)
     {
         Dictionary<string, string> blocked;

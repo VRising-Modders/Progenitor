@@ -61,6 +61,60 @@ namespace Progenitor.Tests
         }
 
         [Fact]
+        public void A_window_mouse_key_that_lost_to_the_game_fires_only_while_its_window_holds_the_input()
+        {
+            UseGame(AutoRun());
+            NavKeys();
+            var window = UiApi.Panel("Hub", _owner, "example.hub");
+            try
+            {
+                window.GameWindow();
+                var tabs = window.Tabs("hub", new[] { "A", "B", "C" }, new UiTabsOptions());
+                window.Show();
+                tabs.Selected = 1;
+                Assert.True(tabs.Back());
+                UiTabHistoryRoute.UnderPointer = p => ReferenceEquals(p, window);
+                var forward = KeybindArbiter.Current().FindProgenitor(SettingsPanel.PluginId, ModsMenu.WindowTabForwardMouseId)!;
+                // The Keybinds tab keeps reporting the clash with Auto Run.
+                Assert.False(forward.Active);
+                Assert.True(KeybindArbiter.LostToGame(SettingsPanel.PluginId, ModsMenu.WindowTabForwardMouseId));
+                Assert.Contains("except while the window holds the input", KeybindsTabLayout.WindowScopeNote);
+
+                // Hovered, the game's input not blocked: Auto Run keeps the button, the window does not move.
+                Keybinds.WindowHoldsInput = () => false;
+                _keys.Down(MouseForward);
+                _keys.Frame();
+                _keys.Up(UiKey.MouseForward);
+                Assert.Equal(0, tabs.Selected);
+
+                // The window holds the input (the full mask blocks the game's button actions, Auto Run included):
+                // the window key acts.
+                Keybinds.WindowHoldsInput = () => true;
+                _keys.Frame();
+                _keys.Down(MouseForward);
+                _keys.Frame();
+                _keys.Up(UiKey.MouseForward);
+                Assert.Equal(1, tabs.Selected);
+            }
+            finally
+            {
+                window.Dispose();
+                UiTabHistoryRoute.ResetForTests();
+            }
+        }
+
+        [Fact]
+        public void The_exception_is_only_for_a_window_key_beaten_by_the_game_not_by_a_mod()
+        {
+            NavKeys();
+            // An earlier-ranked rival on Alt+Left would be a mod's, never the game's: no exception for it.
+            Assert.False(KeybindArbiter.LostToGame(SettingsPanel.PluginId, ModsMenu.NavigateBackKeysId));
+            Assert.False(KeybindArbiter.LostToGame(SettingsPanel.PluginId, ModsMenu.NavigateBackId));
+            // With no window shown nothing holds the input for a window key.
+            Assert.False(Keybinds.WindowHoldsInput());
+        }
+
+        [Fact]
         public void One_press_of_the_mouse_back_button_steps_a_window_once_in_play_and_over_the_menu()
         {
             NavKeys();
