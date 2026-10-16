@@ -81,6 +81,7 @@ The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a
 - Release everything on every unload reason; nothing you drew may stay on screen.
 - Never persist a raw `Entity` or entity index; stamp kept entities with the `ctx.WorldState` epoch.
 - Never use `ctx.UnsafeHarmony`; use `ctx.Patches` (raw Harmony disables hot reload).
+- Don't write generic helpers that get instantiated with Progenitor types (e.g. `T On<T>(T h) where T : IUiHandle`); the runtime keeps the mod loaded until Core unloads, so hot reloads leak and Core updates are refused. Use non-generic helpers taking the base interface ([why](docs/modules.md#generic-helpers-instantiated-with-progenitor-types-pin-the-plugin)).
 
 ### Settings
 

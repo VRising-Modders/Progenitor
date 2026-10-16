@@ -4,6 +4,8 @@
 
 Building a mod: follow PROGENITOR_GUIDE.md first, start from the dotnet new template, and copy from the samples before writing anything custom. Windows use a standard preset (`ctx.Windows.Create(UiWindowPreset.Basic | Header | Tabbed, title)`), text uses a named style (`panel.Text(text, UiTextStyle.X)`), and notices, chat and command replies get the "<Mod Name>: " prefix from Progenitor. Fonts, colors and text alignment need special attention: they come only from the text styles, never from the mod.
 
+Don't write generic helpers that get instantiated with Progenitor types (e.g. `T On<T>(T h) where T : IUiHandle`); the runtime keeps the mod loaded until Core unloads, so hot reloads leak and Core updates are refused. Use non-generic helpers taking the base interface ([modules.md](docs/modules.md#generic-helpers-instantiated-with-progenitor-types-pin-the-plugin)).
+
 ## Start here
 
 - [PROGENITOR_GUIDE.md](PROGENITOR_GUIDE.md): the "need X, use this API, copy this sample" table and the rules

@@ -13,3 +13,4 @@ What to check in its work:
 - Windows come from `ctx.Windows.Create` with a preset (Basic, Header or Tabbed), and each control is one from the [controls catalog](ui-controls.md); the controls sample's Gallery shows them live.
 - Every line of text has a named style (`panel.Text(text, UiTextStyle.X)`). No hand-set colors, font sizes, fonts or alignment: these are the most common mistakes, so look at every label in the game.
 - Messages are written without the mod's name: `ctx.Hud.Notify`, `ctx.Chat` and command replies add `<Mod Name>: ` themselves.
+- Don't write generic helpers that get instantiated with Progenitor types (e.g. `T On<T>(T h) where T : IUiHandle`); the runtime keeps the mod loaded until Core unloads, so hot reloads leak and Core updates are refused. Use non-generic helpers taking the base interface ([modules.md](modules.md#generic-helpers-instantiated-with-progenitor-types-pin-the-plugin)).
