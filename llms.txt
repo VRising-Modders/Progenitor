@@ -1,0 +1,38 @@
+# Progenitor
+
+> A V Rising modding framework (BepInEx plugin, LGPL-2.1-only). Mods subclass ProgenitorPlugin<TContext> and register settings, keybinds, UI, networking and content through ctx, so hot reload, the in-game Mods menu and compatibility checks work automatically.
+
+Building a mod: follow PROGENITOR_GUIDE.md first, start from the dotnet new template, and copy from the samples before writing anything custom.
+
+## Start here
+
+- [PROGENITOR_GUIDE.md](PROGENITOR_GUIDE.md): the "need X, use this API, copy this sample" table and the rules
+- [AI starter prompt](docs/ai-starter-prompt.md)
+- [Mod template](templates/progenitor-mod): `dotnet new install templates/progenitor-mod`, then `dotnet new progenitor-mod -n MyMod`
+
+## Docs
+
+- [Tutorial](docs/tutorial.md): a first plugin through UI, networking and hot reload
+- [Module reference](docs/modules.md): every ctx facade
+- [API status](docs/api.md): what is verified live
+- [UI style guide](docs/ui-style.md) and [UI toolkit](docs/ui.md)
+- [Mod settings](docs/mod-settings.md)
+- [Publishing on Thunderstore](docs/publishing.md)
+- [Hot reload](docs/hot-reload.md)
+- [Development bridge](docs/bridge.md) and [MCP tools](docs/mcp.md)
+- [All docs](docs/)
+
+## Samples
+
+- [ControlsSample](samples/Progenitor.ControlsSample): every UI control and widget
+- [Sample](samples/Progenitor.Sample): the broad API sample (window, castles, inventory, servants, requests)
+- [PanelsExample](samples/Progenitor.PanelsExample): buttons on the game's own panels
+- [SampleServerLed](samples/Progenitor.SampleServerLed) and [SampleClientLed](samples/Progenitor.SampleClientLed): client and server parts
+- [AboutExample](samples/Progenitor.AboutExample): Mods page About text
+- [ReloadExample](samples/Progenitor.ReloadExample): the smallest reloadable plugin
+- [All samples](samples/)
+
+## Optional
+
+- [Knowledge notes](knowledge/README.md): engine traps found earlier
+- [Roadmap](docs/roadmap.md)

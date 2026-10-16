@@ -292,6 +292,8 @@ $utf8 = New-Object System.Text.UTF8Encoding $false
 
 Copy-Item -LiteralPath (Join-Path $tsRoot "README.md") -Destination (Join-Path $stage "README.md") -Force
 Copy-Item -LiteralPath (Join-Path $tsRoot "CHANGELOG.md") -Destination (Join-Path $stage "CHANGELOG.md") -Force
+# The mod-authoring guide at the zip root, beside the README (its links point into the repository).
+Copy-Item -LiteralPath (Join-Path $repo "PROGENITOR_GUIDE.md") -Destination (Join-Path $stage "PROGENITOR_GUIDE.md") -Force
 
 $icon = Join-Path $tsRoot "icon.png"
 if (Test-Path -LiteralPath $icon) {

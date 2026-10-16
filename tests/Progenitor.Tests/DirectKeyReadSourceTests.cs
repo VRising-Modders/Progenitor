@@ -75,7 +75,7 @@ public class DirectKeyReadSourceTests
     };
 
     /// <summary>Roots scanned, repository-relative.</summary>
-    internal static readonly string[] Roots = { "src", "samples" };
+    internal static readonly string[] Roots = { "src", "samples", "templates" };
 
     [Fact]
     public void No_file_outside_the_framework_input_layer_reads_keys_directly()

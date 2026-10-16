@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ProgenitorMod</AssemblyName>
+    <RootNamespace>ProgenitorMod</RootNamespace>
+    <Description>Progenitor Mod Display Name: a V Rising mod built on Progenitor.</Description>
+    <!-- The plugin id: lower case letters, digits and dots. It names the cfg file and the handshake row, so keep it
+         the same after the first release. -->
+    <BepInExPluginGuid>yourteam.progenitormod</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Mod Display Name</BepInExPluginName>
+    <!-- One version string for [BepInPlugin] (MyPluginInfo.PLUGIN_VERSION), thunderstore/manifest.json and
+         progenitor.json: major.minor.patch (PROGENITOR_GUIDE.md, "Versions and changelog"). -->
+    <Version>1.0.0</Version>
+    <ReferenceGame>true</ReferenceGame>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Compile-time only: players get Progenitor from its own package (BepInEx/progenitor-core); a mod never ships it. -->
+    <ProjectReference Include="$(ProgenitorCoreProject)" Private="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The Mods page's About text. LogicalName gives the resource the exact name the page looks for. -->
+    <EmbeddedResource Include="..\README.md" LogicalName="README.md" />
+    <!-- The mod's help page, opened by the Help button on its settings page: embedded and copied beside the DLL. -->
+    <EmbeddedResource Include="..\help\index.html" LogicalName="help/index.html" />
+    <None Include="..\help\index.html" Link="help\index.html" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

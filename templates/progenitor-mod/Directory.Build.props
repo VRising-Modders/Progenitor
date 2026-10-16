@@ -1,0 +1,52 @@
+<Project>
+  <!--
+    Build settings for this mod and its tests. This file also stops MSBuild from reading a Directory.Build.props
+    further up, so the mod builds the same inside a Progenitor checkout (samples/MyMod) and outside it.
+
+    Machine-specific paths go in a git-ignored Directory.Build.local.props beside this file, for example:
+
+      <Project>
+        <PropertyGroup>
+          <VRisingGameDir>D:\Games\VRising</VRisingGameDir>
+          <ProgenitorRepo>D:\src\Progenitor</ProgenitorRepo>
+        </PropertyGroup>
+      </Project>
+  -->
+  <Import Project="$(MSBuildThisFileDirectory)Directory.Build.local.props" Condition="Exists('$(MSBuildThisFileDirectory)Directory.Build.local.props')" />
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <!-- No machine path in the DLL or PDB. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
+
+  <!-- The game. BepInEx generates <game>\BepInEx\interop the first time the game starts with BepInEx. -->
+  <PropertyGroup>
+    <VRisingGameDir Condition="'$(VRisingGameDir)' == '' and '$(VRISING_GAME_DIR)' != ''">$(VRISING_GAME_DIR)</VRisingGameDir>
+    <VRisingGameDir Condition="'$(VRisingGameDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\VRising</VRisingGameDir>
+    <VRisingInteropDir Condition="'$(VRisingInteropDir)' == '' and '$(VRISING_INTEROP_DIR)' != ''">$(VRISING_INTEROP_DIR)</VRisingInteropDir>
+    <VRisingInteropDir Condition="'$(VRisingInteropDir)' == ''">$(VRisingGameDir)\BepInEx\interop</VRisingInteropDir>
+  </PropertyGroup>
+
+  <!--
+    Progenitor. There is no NuGet package yet: the mod compiles against a Progenitor checkout's src/Progenitor.Core and
+    its tests against src/Progenitor.Testing. The first of these that is set wins: /p:ProgenitorRepo or
+    Directory.Build.local.props, the template's progenitor-repo option, the PROGENITOR_REPO environment variable, a
+    checkout that contains this folder, then ..\Progenitor next to it.
+  -->
+  <PropertyGroup>
+    <ProgenitorRepoFromTemplate>progenitor-repo-auto</ProgenitorRepoFromTemplate>
+    <ProgenitorRepo Condition="'$(ProgenitorRepo)' == '' and !$(ProgenitorRepoFromTemplate.StartsWith('progenitor-repo-'))">$(ProgenitorRepoFromTemplate)</ProgenitorRepo>
+    <ProgenitorRepo Condition="'$(ProgenitorRepo)' == '' and '$(PROGENITOR_REPO)' != ''">$(PROGENITOR_REPO)</ProgenitorRepo>
+    <ProgenitorRepo Condition="'$(ProgenitorRepo)' == ''">$([MSBuild]::GetDirectoryNameOfFileAbove('$(MSBuildThisFileDirectory)..', 'Progenitor.sln'))</ProgenitorRepo>
+    <ProgenitorRepo Condition="'$(ProgenitorRepo)' == '' and Exists('$(MSBuildThisFileDirectory)..\Progenitor\Progenitor.sln')">$(MSBuildThisFileDirectory)..\Progenitor</ProgenitorRepo>
+    <ProgenitorCoreProject>$(ProgenitorRepo)\src\Progenitor.Core\Progenitor.Core.csproj</ProgenitorCoreProject>
+    <ProgenitorTestingProject>$(ProgenitorRepo)\src\Progenitor.Testing\Progenitor.Testing.csproj</ProgenitorTestingProject>
+  </PropertyGroup>
+</Project>

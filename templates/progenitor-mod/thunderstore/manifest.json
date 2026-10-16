@@ -1,0 +1,10 @@
+{
+  "name": "ProgenitorMod",
+  "version_number": "1.0.0",
+  "website_url": "https://github.com/YourTeam/ProgenitorMod",
+  "description": "Client and server · Requires Progenitor. Asks the server for its greeting.",
+  "dependencies": [
+    "BepInEx-BepInExPack_V_Rising-1.733.2",
+    "VRising_Modders-Progenitor-2026.10.1"
+  ]
+}

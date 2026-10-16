@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The `dotnet new` template pack. Install from the folder or from the package (PROGENITOR_GUIDE.md, "Start a mod"):
+
+      dotnet new install templates/progenitor-mod
+      dotnet pack templates/Progenitor.Templates.csproj -o packaging/out
+      dotnet new install packaging/out/Progenitor.Templates.<version>.nupkg
+  -->
+  <PropertyGroup>
+    <PackageType>Template</PackageType>
+    <PackageId>Progenitor.Templates</PackageId>
+    <Title>Progenitor mod templates</Title>
+    <Description>dotnet new progenitor-mod: a V Rising mod built on Progenitor.</Description>
+    <PackageTags>dotnet-new;templates;vrising;bepinex;progenitor</PackageTags>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <IncludeContentInPack>true</IncludeContentInPack>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <ContentTargetFolders>content</ContentTargetFolders>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <EnableDefaultItems>false</EnableDefaultItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="progenitor-mod\**\*" Exclude="progenitor-mod\**\bin\**;progenitor-mod\**\obj\**;progenitor-mod\**\Directory.Build.local.props" />
+  </ItemGroup>
+</Project>
