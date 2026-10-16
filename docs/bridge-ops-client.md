@@ -224,6 +224,33 @@ Either side, main thread. The [material sources](modules.md#material-sources) se
 
 From bash: `node tools/mcp/call.mjs server materials '{"action":"status"}'` (or `client`). There is no MCP wrapper. `status`, `inject` and `clear` ran live on 2026-10-14. `send` (all four events) and `trace` ran live on 2026-10-14: the game counted, paid and repaired or upgraded, or refused a short cost at its check ([Shared Resources Test, Repair and Upgrade cases](../samples/Progenitor.SharedResourcesTest/README.md#repair-and-upgrade-cases)). A `repair_item` the game refuses at its check usually means an ingredient of the repair cost has no source; `trace` shows the rows the check saw.
 
+## `servants`
+
+Server only, main thread. **Built and game-free tested (`ServantBridgeArgsTests`); not run live.**
+A castle's servants and hunts through Core's public `ServantBridge`, the same code as
+[`ctx.Servants`](modules.md#servants) (Core grants Dev no `InternalsVisibleTo`; `ServantBridge` is not a plugin
+API). Refused on the client. MCP: `progenitor_servants`. Every action except `timers` names the castle by
+`territory` (index) or `heart` (`index:version` of the heart or anything connected to it). Ids are of the
+current world load.
+
+| Args | Does |
+|---|---|
+| `{"action":"list","territory":n}` (or `"heart":"i:v"`; `list` is the default) | `servants`: one row per coffin as the throne lists it: `row` (`#1..`), `name`, `state` (`Free`, `HasItems`, `AwayOnHunt`, `Injured`, `Dead`), `servant`, `coffin`, `injuryEndsUtc`, `injury`, `proficiency`, `lootFactor`, `gearLevel`, `expertise`, `perks`, `itemStacks`. `hunts`: the heart's hunt record: `row`, `mission`, `missionName`, `zone` (`x,y#zone`), `slot`, `lengthSeconds`, `startedUtc`, `endsUtc`, `secondsLeft`, `servants`. Also `timersDisabled`. |
+| `{"action":"zones","territory":n}` | The zones with a servant mission that the heart's owner (or `user`, `index:version` of a user entity) discovered; `"all":true` also lists the others. Per zone: `zone`, `mission`, `missionName`, `discovered` (null when the progression cannot be read), `active` (this castle already has a hunt there; the game allows one per zone and castle), `servantSlots` (`MissionData.ServantSlots`, -1 unreadable). Also `durationSlots` (`slot`, `settingSeconds`, `lengthSeconds` a send writes now), `activeHunts`, `discoveryReadable`, `allProgressionUnlocked`, `timersDisabled`. |
+| `{"action":"send","territory":n,"servants":["Alda","#2"],"mission":<guid>,"slot":0}` | `ctx.Servants.Send` as `progenitor.dev bridge` (so `ServantsSent.By` and the `servants: sent by=…` line name the bridge). `servants`: up to three names (case-insensitive, unique), `#n` rows of `list` or `index:version`, as an array or a comma list; omitted: the castle's free servants (capped by the zone's slots). `mission` (GUID hash) or `zone` (`x,y#zone`), not both; neither: the first discovered zone with no hunt of this castle and enough slots. `slot` default 0. `user` and `checkDiscovered` (default true) as in `ServantSendRequest`. Returns `ok`, `refusal` and `reason` (the game's check that failed), `summary`, `mission`, `zone`, `picked`, `slot`, `lengthSeconds`, `startedUtc`, `servants`, `buffApplied`. |
+| `{"action":"finish","territory":n}` (optional `"mission":<guid>`, `"method":"timers"\|"row"`) | Makes the castle's active hunts (or the one on `mission`) end now; the game returns them on its next update. See below. Returns `ok`, `method`, `reason`, `hunts` (as they were), `finished` (method `row`: the rewritten rows), `timersWereDisabled`, `restorePending`. |
+| `{"action":"empty","territory":n}` (optional `"servants":[…]`, `"to":"i:v"`, `"discard":true`) | Moves each servant's inventory into the castle's containers with the inventory engine's `TransferAll` (the `ctx.Inventory.TransferAll` code: the total is conserved, never duplicated or destroyed; worn servant gear is not touched). `servants` as for `send` (any number); omitted: every servant at home (`Free`, `HasItems`, `Injured`); a servant on a hunt is skipped with a reason. `to`: one container of this castle (`index:version`); omitted: the castle's ordinary containers (not stations, the heart or coffins; only containers that accept every item), tried in the castle's order until the servant is empty. Returns `ok`, `targets` (tried, in order) and per servant `before`, `moved`, `left`, `into` (`container xN`) and `reason` (`no room: N unit(s) did not fit and stay on the servant` when the containers are full). **`discard:true` is for tests only**: what did not fit is removed from the servant (`discarded`, `discardedItems`) and the server logs a `servants: EMPTY DISCARD (test only)` warning naming every item. Without it nothing is ever removed. |
+| `{"action":"timers"}`, `{"action":"timers","off":true\|false}` | Reads, or sets, the game's `SyncedServerDebugSettings.ServantTimersDisabled` (`off:true` disables the timers). A set cancels a restore a `finish` scheduled. Returns `timersDisabled`, `wasDisabled`, `restorePending`, `cancelledRestore`. |
+
+`finish` methods and side effects:
+
+- **`timers` (default)**: the game's own servant-timers debug setting (the switch the `DisableServantTimers` console command flips). With it on, the game's return system treats every hunt as due, so **every active hunt on the server returns** on the next update, not only this castle's; a send made while it is on lasts 1e-5 of its length. Progenitor turns it back on (enables the timers) as soon as the targeted rows are gone from the record, at most 10 s later, and also on a Core unload or swap; it logs `servants: finish: the hunt returned; servant timers restored (enabled)`. When the timers were already disabled, nothing changes and nothing is restored. The setting is a replicated, saved server setting: a server stopped in that window keeps it, so read `timers` after a restart and set `off:false` if needed.
+- **`row`**: rewrites only the matching rows' `MissionStartTimeTicks` (verified hunt-record layout, the stride-checked buffer accessor `ctx.Servants` reads with; no other field and no new layout) so start plus length lies one second in the past; a start is never moved later. Only those hunts return, with their real lengths kept for the next send. The throne map shows the hunt's start moved back until it returns.
+
+Either way the game rolls each servant's success at the return, as for any hunt: **a servant can die or come back injured**, so use servants you can lose. Each finish logs `servants: finish by the Dev bridge: …`.
+
+From bash: `node tools/mcp/call.mjs server servants '{"action":"list","territory":5}'`.
+
 ## `dye`
 
 Client, main thread, read only. Reads Core's [Dye all](modules.md#dye-all) through Core's `Progenitor.Dye.DyeAllTestBridge`
