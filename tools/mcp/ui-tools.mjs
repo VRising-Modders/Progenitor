@@ -94,7 +94,7 @@ export function registerUiTools(server, { z, bridge, text, fail }) {
       "top hit, press, drag, selected object and recent pointer events), focus (the kit field with the keyboard, its text, " +
       "and the controller focus), tooltip (the kit tooltip's title, body and rect), widgets (every live widget's key and " +
       "type), widget (key: its own readback: a data table's sort keys, visible slots, pending edits, hidden columns; chips " +
-      "and their lines; a master-detail's tops), panels (every shown panel's title, capture mode and rect; attached: every Ui.AttachToVanilla attachment's site, anchor, anchor status, withheld reason, buttons and rects), tips (the tip " +
+      "and their lines; a master-detail's tops), panels (every shown panel's title, capture mode and rect; attached: every Ui.AttachToVanilla attachment's site, anchor, anchor status, withheld reason, buttons and rects; tabs: every Ui.AttachPanelTabs strip's window kind, rect, tab height and its source, placement and clip state: ok, degenerate, clipped or covered), tips (the tip " +
       "card, its rect, its anchor panel's rect and the offset between them, on-screen), terms (plugin: explained words, " +
       "marker visibility and hover counts), target (the point ui_input would act on).",
     {

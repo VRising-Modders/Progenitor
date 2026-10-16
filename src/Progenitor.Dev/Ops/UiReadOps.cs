@@ -18,7 +18,7 @@ internal static class UiReadOps
         "ui_read needs args.what: state (the synthetic pointer: hovered chain, top hit, press, recent events), focus (the "
         + "kit field with the keyboard and the controller focus), tooltip (the kit tooltip's title, body and rect), widgets "
         + "(every live widget's key and type), widget (args.key: that widget's own readback: a table's visible rows, sort "
-        + "keys, pending edits; chips; a master-detail's tops), panels (every shown panel's title and rect, and as attached every vanilla attachment's site, anchor, state and rects), tips (the tip "
+        + "keys, pending edits; chips; a master-detail's tops), panels (every shown panel's title and rect, and as attached every vanilla attachment's site, anchor, state and rects, and as tabs every Ui.AttachPanelTabs strip's window kind, rect, tab height and clip state), tips (the tip "
         + "card, its rect and its anchor's), terms (args.plugin: explained words and marker visibility), or target "
         + "(args.row / args.cell / args.panel / args.x, args.y: the point ui_input would act on).";
 
