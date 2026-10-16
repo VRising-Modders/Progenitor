@@ -41,7 +41,7 @@ public sealed class PluginPinHoldersTests
         Holder.Typed = new List<PluginThing>();
         try
         {
-            int hits = PluginPinHolders.Walk(new[] { typeof(Holder) }, IsPlugin, null, lines.Add, 5000);
+            int hits = PluginPinHolders.Walk(new[] { typeof(Holder) }, IsPlugin, null, lines.Add, 5000, mayRunStaticInit: _ => true);
             Assert.Equal(5, hits);
             Assert.Contains(lines, l => l.Contains("Holder.Items._items[0] -> ") && l.EndsWith("PluginThing"));
             Assert.Contains(lines, l => l.Contains("Holder.Callback -> delegate ") && l.EndsWith("PluginThing.Handle"));
@@ -64,10 +64,30 @@ public sealed class PluginPinHoldersTests
     public void Walk_reports_nothing_when_no_plugin_value_is_reachable()
     {
         var lines = new List<string>();
-        int hits = PluginPinHolders.Walk(new[] { typeof(CleanHolder) }, IsPlugin, null, lines.Add, 5000);
+        int hits = PluginPinHolders.Walk(new[] { typeof(CleanHolder) }, IsPlugin, null, lines.Add, 5000, mayRunStaticInit: _ => true);
         Assert.Equal(0, hits);
         Assert.Single(lines);
         Assert.StartsWith("pin-diag plugin-holders found=0", lines[0]);
+    }
+
+    static class InitProbe { internal static bool Ran; }
+
+    static class NotYetInitialized
+    {
+        internal static readonly object Value = Touch();
+        static object Touch() { InitProbe.Ran = true; return new object(); }
+    }
+
+    [Fact]
+    public void Walk_never_runs_a_static_initializer_outside_the_registry_namespaces()
+    {
+        var lines = new List<string>();
+        PluginPinHolders.Walk(new[] { typeof(NotYetInitialized) }, IsPlugin, null, lines.Add, 5000);
+        Assert.False(InitProbe.Ran);
+        Assert.False(PluginPinHolders.ShouldReadStatics(typeof(NotYetInitialized)));
+        Assert.True(PluginPinHolders.ShouldReadStatics(typeof(PluginPinHolders))); // Progenitor.Reload: a registry namespace
+        Assert.True(PluginPinHolders.IsRegistryNamespace(typeof(Progenitor.Ui.VanillaPanelTabs)));
+        Assert.False(PluginPinHolders.IsRegistryNamespace(typeof(PluginPinHoldersTests)));
     }
 
     [Fact]

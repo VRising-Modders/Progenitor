@@ -762,18 +762,32 @@ public class DyeAllTests : IDisposable
     [Fact]
     public void An_unowned_pointer_watch_is_swept_with_the_plugin_that_declared_its_handler()
     {
-        // PINS1: stand-ins from another assembly than Core's: a handler and an owner from the BCL.
+        // PINS1: only the unload sweep of a reloadable plugin matches by the handler's assembly.
+        using var plugin = UnloadingPluginStandIn.Load();
         UiPointerWatchRegistry.Clear();
         var unowned = new Counted();
+        var library = new Counted();
         var coreHandler = new Counted();
-        UiPointerWatchRegistry.Add(null, unowned, new Action(GC.Collect));
+        UiPointerWatchRegistry.Add(null, unowned, plugin.Callback);
+        UiPointerWatchRegistry.Add(null, library, new Action(GC.Collect));
         UiPointerWatchRegistry.Add(null, coreHandler, new Action(() => { })); // declared in "Core": never matched by assembly
         Assert.Null(UiPointerWatchRegistry.SourceName(new Action(() => { })));
 
-        Assert.Equal(1, UiPointerWatchRegistry.RemoveAll(new System.Text.StringBuilder()));
+        // A live RemoveAll (no sweep) keeps the plugin's own unowned watch.
+        Assert.Equal(0, UiPointerWatchRegistry.RemoveAll(plugin.Owner));
+        // A library owner never matches a library callback, even inside a sweep.
+        using (PluginDelegateSource.UnloadSweep(this))
+            Assert.Equal(0, UiPointerWatchRegistry.RemoveAll(this));
+        var bcl = new object();
+        using (PluginDelegateSource.UnloadSweep(bcl))
+            Assert.Equal(0, UiPointerWatchRegistry.RemoveAll(bcl));
+
+        using (PluginDelegateSource.UnloadSweep(plugin.Owner))
+            Assert.Equal(1, UiPointerWatchRegistry.RemoveAll(plugin.Owner));
         Assert.Equal(1, unowned.Disposed);
+        Assert.Equal(0, library.Disposed);
         Assert.Equal(0, coreHandler.Disposed);
-        Assert.Equal(1, UiPointerWatchRegistry.Clear());
+        Assert.Equal(2, UiPointerWatchRegistry.Clear());
     }
 
     [Fact]

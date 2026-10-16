@@ -2291,14 +2291,17 @@ public static class ConfigSync
     /// session lock names any more. Such a file belongs to a plugin generation that unloaded (a
     /// reload binds a new <see cref="ConfigFile"/>), and these tables were the only Core references
     /// keeping it — its entries, their <c>SettingChanged</c> handlers and the plugin's load context —
-    /// alive. <c>SaveOnConfigSet</c> on such a file is left off: nothing of the plugin writes to it
-    /// any more, and a save from it could put a stale or server value into the shared cfg path.
+    /// alive. Its <c>SaveOnConfigSet</c> goes back to the value the hold recorded, as on any other
+    /// release, except on a file marked left-live: a key there still holds the server's value, so
+    /// an autosave from it would write that value into the cfg, and it stays off.
     /// A file a live registration still uses is never touched here; its hold is released by the
     /// ordinary restore path. Returns how many files were forgotten.
     /// </summary>
     internal static int DropUnreferencedHolds()
     {
-        var dropped = new List<ConfigFile>();
+        // Inside a restore's save window, as in ReleaseSaveOff: the next call (the restore's own end) does it.
+        if (_suppressSaveDepth > 0) return 0;
+        var dropped = new List<(ConfigFile File, FileSaveHold Hold, bool LeftLive)>();
         lock (Gate)
         {
             var named = new HashSet<ConfigFile>();
@@ -2306,14 +2309,19 @@ public static class ConfigSync
                 if (slot.Entry.ConfigFile != null) named.Add(slot.Entry.ConfigFile);
             foreach (var session in SessionLocks.Values)
                 if (session.Entry.ConfigFile != null) named.Add(session.Entry.ConfigFile);
-            foreach (var file in SaveHolds.Keys)
-                if (!named.Contains(file)) dropped.Add(file);
-            foreach (var file in dropped)
-                SaveHolds.Remove(file);
+            foreach (var kv in SaveHolds)
+                if (!named.Contains(kv.Key)) dropped.Add((kv.Key, kv.Value, ServerValueLeftLive.Contains(kv.Key)));
+            foreach (var d in dropped)
+                SaveHolds.Remove(d.File);
             ServerValueLeftLive.RemoveWhere(f => !named.Contains(f));
         }
         for (int i = 0; i < dropped.Count; i++)
-            LogInfo("ConfigSync: forgot the save hold on a previous generation's '" + SafePath(dropped[i]) + "'");
+        {
+            var (file, hold, leftLive) = dropped[i];
+            if (!leftLive) SetSaveOnConfigSet(file, hold.PreviousSaveOnConfigSet, out _);
+            LogInfo("ConfigSync: forgot the save hold on a previous generation's '" + SafePath(file) + "'"
+                + (leftLive ? " (left off: a key there still holds the server value)" : ""));
+        }
         return dropped.Count;
     }
 

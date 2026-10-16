@@ -692,7 +692,8 @@ public class PluginContext
     internal void UndoAll() => _bag.UndoAll(_log ?? _plugin?.Log ?? Plugin.Logger);
 
     /// <summary>
-    /// PINS1: true from the moment unload starts tearing this context down. Facades that would
+    /// PINS1: true once unload starts reversing this context's registrations, which is after the plugin's
+    /// <c>OnUnload</c> has returned (calls made inside <c>OnUnload</c> still work and are swept). Facades that would
     /// register a plugin callback in a Core table (a request, a subscription, a notice, a tip) refuse
     /// once this is set: the sweep for this plugin has run or is running, so a registration made now
     /// would never be removed and would pin the plugin's load context.

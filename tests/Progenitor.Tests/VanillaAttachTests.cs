@@ -787,6 +787,32 @@ public class VanillaAttachTests : IDisposable
     }
 
     [Fact]
+    public void RemoveAll_of_a_library_owner_leaves_unowned_library_callbacks_alone()
+    {
+        // PINS1 review M1: an owner from a shared library (object) must not match List.Add or GC.Collect.
+        var events = new List<VanillaPanelEvent>();
+        var attach = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, owner: null, pluginId: "example.unowned");
+        using var lease = attach.OnPanel(events.Add);
+        var watch = new LeaseProbe();
+        UiPointerWatchRegistry.Add(null, watch, new Action(GC.Collect));
+        int terms = UiTerms.HandlerCount;
+        using var marker = UiTerms.OnMarkersChanged("example.unowned", new Action(GC.Collect));
+
+        var stranger = new object();
+        UiApi.RemoveAll(stranger);
+        using (PluginDelegateSource.UnloadSweep(stranger))
+            UiApi.RemoveAll(stranger);
+
+        Assert.False(attach.IsDisposed);
+        Assert.Equal(0, watch.Disposals);
+        Assert.Equal(terms + 1, UiTerms.HandlerCount);
+        attach.Dispose();
+        UiPointerWatchRegistry.Forget(watch);
+    }
+
+    sealed class LeaseProbe : IDisposable { internal int Disposals; public void Dispose() => Disposals++; }
+
+    [Fact]
     public void RemoveAll_counts_attachments_alongside_panels_because_the_reload_log_is_one_number()
     {
         var panel = UiApi.Panel("Sample", _owner, "example.sample");

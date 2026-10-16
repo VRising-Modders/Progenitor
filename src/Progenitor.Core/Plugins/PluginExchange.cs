@@ -290,7 +290,7 @@ public sealed class PluginRequests
         if (_ctx.IsRetired)
         {
             var ended = new ExchangeClientEngine.Pending { Finished = true };
-            complete(new ExchangeOutcome { Status = RequestStatus.NotSent, Reason = "this mod is unloading", NotSent = SendResult.NotConnected, Unloading = true });
+            complete(new ExchangeOutcome { Status = RequestStatus.NotSent, Reason = "this mod is unloading", NotSent = SendResult.Invalid, Unloading = true });
             return new RequestHandle(ended);
         }
 

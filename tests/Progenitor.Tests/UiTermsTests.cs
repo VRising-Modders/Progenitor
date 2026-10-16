@@ -482,14 +482,21 @@ public sealed class UiTermsTests : IDisposable
     [Fact]
     public void An_unowned_markers_handler_goes_with_the_plugin_that_declared_it()
     {
-        // PINS1: a BCL method stands in for a plugin's handler, a BCL object for that plugin's owner.
+        // PINS1: matched by assembly only in the reloadable plugin's unload sweep.
+        using var plugin = UnloadingPluginStandIn.Load();
         int before = UiTerms.HandlerCount;
-        var lease = UiTerms.OnMarkersChanged(PluginA, new Action(GC.Collect));
+        var lease = UiTerms.OnMarkersChanged(PluginA, plugin.Callback);
+        var library = UiTerms.OnMarkersChanged(PluginA, new Action(GC.Collect));
         var core = UiTerms.OnMarkersChanged(PluginA, () => { });
+        Assert.Equal(before + 3, UiTerms.HandlerCount);
+        UiTerms.DropOwner(plugin.Owner); // a live drop: nothing matched by assembly
+        var bcl = new object();
+        using (PluginDelegateSource.UnloadSweep(bcl)) UiTerms.DropOwner(bcl);
+        Assert.Equal(before + 3, UiTerms.HandlerCount);
+        using (PluginDelegateSource.UnloadSweep(plugin.Owner)) UiTerms.DropOwner(plugin.Owner);
         Assert.Equal(before + 2, UiTerms.HandlerCount);
-        UiTerms.DropOwner(new System.Text.StringBuilder());
-        Assert.Equal(before + 1, UiTerms.HandlerCount); // Core's own handler is not matched by assembly
         core.Dispose();
+        library.Dispose();
         lease.Dispose();
         Assert.Equal(before, UiTerms.HandlerCount);
     }

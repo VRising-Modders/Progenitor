@@ -686,6 +686,24 @@ public sealed class ConfigSyncTests : IDisposable
         Assert.Equal((0, 0, 0), ConfigSync.HoldCounts());
     }
 
+    [Fact]
+    public void Forgetting_a_previous_generations_hold_restores_its_SaveOnConfigSet()
+    {
+        var oldFile = new ConfigFile(Path.Combine(_dir, "example.mod.cfg"), saveOnInit: false) { SaveOnConfigSet = true };
+        var count = oldFile.Bind("General", "Count", 3);
+        var handle = ConfigSync.Register("example.mod", "1.0.0", count);
+        ConfigSync.ApplyRecords(new[] { new ConfigSyncRecord("example.mod", "General", "Count", "9") }, snapshot: true);
+        Assert.False(oldFile.SaveOnConfigSet);
+        handle.Dispose();
+
+        var newFile = new ConfigFile(Path.Combine(_dir, "example.mod.cfg"), saveOnInit: false);
+        ConfigSync.Bind(newFile, "example.mod", "General", "Count", 3, "n", pluginVersion: "1.0.0");
+        Assert.False(ConfigSync.IsSaveHeldOff(oldFile));
+        Assert.True(oldFile.SaveOnConfigSet);
+        Assert.True(ConfigSync.IsSaveHeldOff(newFile));
+        Assert.False(newFile.SaveOnConfigSet);
+    }
+
     sealed class OldPluginHandler { internal int Calls; internal void On(object? s, EventArgs e) => Calls++; }
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]

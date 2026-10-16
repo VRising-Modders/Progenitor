@@ -152,10 +152,44 @@ internal static class PluginDelegateSource
         catch { return null; }
     }
 
-    /// <summary>Full name of <paramref name="owner"/>'s assembly.</summary>
+    [ThreadStatic] private static object? _sweepOwner;
+
+    /// <summary>
+    /// Opens the plugin unload sweep for <paramref name="owner"/> (<c>PluginStaticApiSweep</c>). Matching by assembly is
+    /// allowed only inside it: a live <c>Ui.RemoveAll(this)</c> keeps the plugin's own unowned registrations, and an
+    /// owner from a shared library (an <c>object</c>) never matches a library callback such as <c>List.Add</c>.
+    /// </summary>
+    internal static Scope UnloadSweep(object owner) => new(owner);
+
+    internal readonly struct Scope : IDisposable
+    {
+        private readonly object? _previous;
+
+        internal Scope(object owner)
+        {
+            _previous = _sweepOwner;
+            _sweepOwner = owner;
+        }
+
+        public void Dispose() => _sweepOwner = _previous;
+    }
+
+    /// <summary>
+    /// Full name of <paramref name="owner"/>'s assembly, for matching unowned registrations: only while the unload sweep
+    /// of that owner runs, and only for an assembly in a collectible (reloadable plugin) load context other than Core's.
+    /// Null otherwise, which matches nothing.
+    /// </summary>
     internal static string? OwnerName(object? owner)
     {
-        try { return owner?.GetType().Assembly.FullName; }
+        try
+        {
+            if (owner == null || !ReferenceEquals(owner, _sweepOwner)) return null;
+            var asm = owner.GetType().Assembly;
+            if (ReferenceEquals(asm, typeof(PluginDelegateSource).Assembly)) return null;
+            var alc = System.Runtime.Loader.AssemblyLoadContext.GetLoadContext(asm);
+            if (alc == null || !alc.IsCollectible) return null;
+            return asm.FullName;
+        }
         catch { return null; }
     }
 

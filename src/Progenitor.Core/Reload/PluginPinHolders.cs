@@ -14,7 +14,7 @@ namespace Progenitor.Reload;
 /// diagnoses pins, or a refused swap restores plugins, each recorded context that is still alive is
 /// a plugin ALC that should have been collected. For those only, a bounded reflective walk of the
 /// static fields of Core and Bootstrap names every path that reaches an object, delegate, type or
-/// assembly from that context, e.g. <c>Ui.VanillaPanelTabs.Live[0]._owner -&gt; Satisvampory.Plugin</c>.
+/// assembly from that context, e.g. <c>Ui.VanillaPanelTabs.Live[0]._owner -&gt; Example.Mod.Plugin</c>.
 /// Nothing runs while every recorded context has been collected, so a healthy reload pays one
 /// weak-reference check per unloaded plugin.</para>
 ///
@@ -85,7 +85,7 @@ internal static class PluginPinHolders
         get { lock (Gate) { Prune(); return RetiredContexts.Count; } }
     }
 
-    /// <summary>Forget every recorded context (Core Uninstall: the next generation starts clean).</summary>
+    /// <summary>Forget every recorded context (tests). A new Core generation starts with an empty table of its own.</summary>
     internal static void Clear()
     {
         lock (Gate) RetiredContexts.Clear();
@@ -105,6 +105,8 @@ internal static class PluginPinHolders
         catch (Exception e) { log("pin-diag plugin-holders: " + e.Message); return; }
         if (targets.Count == 0) return;
 
+        // The budget covers the type listing too, not only the walk.
+        var clock = Stopwatch.StartNew();
         var alcs = new HashSet<AssemblyLoadContext>(ReferenceEqualityComparer.Instance);
         var names = new List<string>();
         foreach (var t in targets)
@@ -130,7 +132,7 @@ internal static class PluginPinHolders
         catch (Exception e) { log("pin-diag plugin-holders bootstrap types: " + e.Message); }
 
         var inAny = IsInAny(alcs);
-        Walk(roots, t => inAny(t.Assembly), inAny, log, BudgetMilliseconds, alcs);
+        Walk(roots, t => inAny(t.Assembly), inAny, log, BudgetMilliseconds, alcs, clock);
     }
 
     /// <summary>Recorded, still alive and older than <paramref name="minAgeSeconds"/>.</summary>
@@ -184,7 +186,7 @@ internal static class PluginPinHolders
         internal readonly Func<Type, bool> IsTargetType;
         internal readonly Func<Assembly, bool>? IsTargetAssembly;
         internal readonly Action<string> Log;
-        internal readonly Stopwatch Clock = Stopwatch.StartNew();
+        internal Stopwatch Clock = Stopwatch.StartNew();
         internal readonly int Budget;
         internal readonly HashSet<object> Seen = new(ReferenceEqualityComparer.Instance);
         internal readonly Dictionary<Type, bool> TargetTypes = new();
@@ -223,13 +225,17 @@ internal static class PluginPinHolders
         Func<Assembly, bool>? isTargetAssembly,
         Action<string> log,
         int budgetMilliseconds,
-        ICollection<AssemblyLoadContext>? targetContexts = null)
+        ICollection<AssemblyLoadContext>? targetContexts = null,
+        Stopwatch? clock = null,
+        Func<Type, bool>? mayRunStaticInit = null)
     {
         var state = new State(isTargetType, isTargetAssembly, log, budgetMilliseconds) { TargetContexts = targetContexts };
+        if (clock != null) state.Clock = clock;
+        var mayInit = mayRunStaticInit ?? IsRegistryNamespace;
         foreach (var type in rootTypes)
         {
             if (state.OutOfTime()) break;
-            if (type == null || !ShouldReadStatics(type)) continue;
+            if (type == null || !ShouldReadStatics(type, mayInit)) continue;
             FieldInfo[] fields;
             try { fields = type.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly); }
             catch { continue; }
@@ -253,22 +259,40 @@ internal static class PluginPinHolders
     }
 
     /// <summary>
-    /// Reading a static runs the type's static constructor if it has not run. That is ordinary
-    /// managed initialization for Core's registries, but a type whose statics are game objects
-    /// would touch the game from a diagnostic, so such a type is skipped unless it has no
-    /// static constructor at all.
+    /// Reading a static runs the type's static constructor if it has not run yet, and this walk runs in the middle of a
+    /// Core swap. So a type with a static constructor is read only when <paramref name="mayRunStaticInit"/> allows it
+    /// (by default: Core's and Bootstrap's registry namespaces, whose initializers only allocate managed tables) and none
+    /// of its statics is a game type. A type without one is always safe to read.
     /// </summary>
-    internal static bool ShouldReadStatics(Type type)
+    internal static bool ShouldReadStatics(Type type, Func<Type, bool>? mayRunStaticInit = null)
     {
         try
         {
             if (type.IsGenericTypeDefinition || type.ContainsGenericParameters) return false;
             if (type.TypeInitializer == null) return true;
+            if (!(mayRunStaticInit ?? IsRegistryNamespace)(type)) return false;
             foreach (var f in type.GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 if (IsGameType(f.FieldType)) return false;
             return true;
         }
         catch { return false; }
+    }
+
+    private static readonly string[] RegistryNamespaces =
+    {
+        "Progenitor.Ui", "Progenitor.Networking", "Progenitor.Config", "Progenitor.Dev", "Progenitor.Reload",
+        "Progenitor.Plugins", "Progenitor.Events", "Progenitor.Hooks", "Progenitor.Persistence", "Progenitor.Commands",
+        "Progenitor.Localization", "Progenitor.Systems", "Progenitor.Bootstrap",
+    };
+
+    /// <summary>Core and Bootstrap namespaces whose static initializers only build managed registries.</summary>
+    internal static bool IsRegistryNamespace(Type type)
+    {
+        string ns = type.Namespace ?? "";
+        if (ns == "Progenitor") return true;
+        foreach (var r in RegistryNamespaces)
+            if (ns == r || ns.StartsWith(r + ".", StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private static bool IsGameType(Type t)
