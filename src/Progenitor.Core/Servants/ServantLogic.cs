@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using Progenitor.Castles;
+using Progenitor.Inventory;
 
 namespace Progenitor.Servants;
 
@@ -278,6 +279,42 @@ internal static class ServantLogic
         if (!alive && !f.CoffinServantAlive) return ServantOutcome.Dead;
         long injury = f.CoffinReadable ? f.InjuryEndTicks : 0;
         return injury > nowTicks ? ServantOutcome.Injured : ServantOutcome.Returned;
+    }
+
+    /// <summary>
+    /// A servant's main inventory, the one reference both <c>ServantInfo.Inventory</c> and
+    /// <c>ReturnedServant.Inventory</c> use: the servant entity's instance 0 in <paramref name="epoch"/>.
+    /// </summary>
+    internal static InventoryRef ServantInventory(CastleId servant, int epoch) =>
+        servant.IsNone ? InventoryRef.None : new InventoryRef(servant.Index, servant.Version, 0, epoch);
+
+    /// <summary>
+    /// One servant of a return as the event carries it. <paramref name="resolved"/> is the living
+    /// servant found at the publish (the row's entity, or the one its coffin names now); a servant
+    /// that is not dead carries that servant's id and inventory, so both are valid for
+    /// <c>ctx.Inventory</c> in a handler (the same reference <c>ctx.Servants.List</c> gives), and a
+    /// dead one keeps the row's id with no inventory. <paramref name="stacks"/> is -1 when the
+    /// inventory could not be read.
+    /// </summary>
+    internal static ReturnedServant Returned(CastleId rowServant, CastleId resolved, CastleId coffin, string name, ReturnFacts f,
+        long nowTicks, int epoch, IReadOnlyList<ServantLoot> loot, int stacks)
+    {
+        var outcome = OutcomeOf(f, nowTicks);
+        bool dead = outcome == ServantOutcome.Dead;
+        var who = dead || resolved.IsNone ? rowServant : resolved;
+        return new ReturnedServant
+        {
+            Servant = who,
+            Coffin = coffin,
+            Name = name,
+            Outcome = outcome,
+            InjuryEndsUtc = outcome == ServantOutcome.Injured ? Utc(f.InjuryEndTicks) : null,
+            Inventory = dead ? InventoryRef.None : ServantInventory(who, epoch),
+            // Sent out again before this publish: its loot was moved for that send, so what it
+            // carries now is not this hunt's haul.
+            Loot = dead || f.OutAgain ? Array.Empty<ServantLoot>() : loot,
+            LootIsHaul = !dead && stacks >= 0 && !f.OutAgain,
+        };
     }
 
     /// <summary>Add up inventory slots (item, amount) into loot rows, in first-seen order.</summary>

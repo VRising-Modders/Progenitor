@@ -2650,7 +2650,10 @@ servant whose entity is gone while its coffin names another living servant is re
 servant's id. Otherwise `Injured` (an injury running) or `Returned`. `Loot` is what its inventory
 holds at the publish, which is the hunt's haul because the game sends only empty servants
 (`LootIsHaul` is false for a dead servant, an inventory that could not be read, or a servant that
-was already sent out again before the publish, whose `Loot` is then empty). An aborted hunt (the
+was already sent out again before the publish, whose `Loot` is then empty). `Inventory` is the
+same reference `List` gives as `ServantInfo.Inventory` (the servant's main inventory, `None` for a
+dead servant), so a handler can move the loot with `ctx.Inventory.TransferAll(servant.Inventory, chest)`
+directly; it stays valid until the world reloads or the servant is destroyed. An aborted hunt (the
 throne's abort) is not reported as a return.
 
 ### Throne list for one player (experimental)

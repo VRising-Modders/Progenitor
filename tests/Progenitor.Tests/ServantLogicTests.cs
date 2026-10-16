@@ -255,6 +255,61 @@ public class ServantLogicTests
     }
 
     [Fact]
+    public void A_returned_servant_carries_the_same_inventory_reference_as_the_throne_list()
+    {
+        const int epoch = 7;
+        var loot = new[] { new ServantLoot(5, 272), new ServantLoot(6, 29) };
+        var back = ServantLogic.Returned(A, A, new CastleId(90, 1), "Gideon", Home(), Now, epoch, loot, stacks: 2);
+        var listed = ServantLogic.ServantInventory(A, epoch); // what ctx.Servants.List gives as ServantInfo.Inventory
+        Assert.Equal(ServantOutcome.Returned, back.Outcome);
+        Assert.Equal(A, back.Servant);
+        Assert.Equal(listed, back.Inventory);
+        Assert.False(back.Inventory.IsNone);
+        Assert.Equal((A.Index, A.Version, 0, epoch), (back.Inventory.OwnerIndex, back.Inventory.OwnerVersion, back.Inventory.Instance, back.Inventory.Epoch));
+        Assert.False(back.Inventory.IsStaleIn(epoch));
+        Assert.True(back.LootIsHaul);
+        Assert.Equal(loot, back.Loot);
+
+        var injured = ServantLogic.Returned(A, A, CastleId.None, "", Home(injuryEnd: Now + 1), Now, epoch, loot, stacks: 2);
+        Assert.Equal(ServantOutcome.Injured, injured.Outcome);
+        Assert.Equal(listed, injured.Inventory);
+    }
+
+    [Fact]
+    public void A_relinked_servant_reports_the_living_servant_and_its_inventory()
+    {
+        var gone = Home();
+        gone.Exists = false;
+        gone.CoffinServantAlive = true;
+        var back = ServantLogic.Returned(A, B, new CastleId(90, 1), "", gone, Now, 3, Array.Empty<ServantLoot>(), stacks: 0);
+        Assert.Equal(ServantOutcome.Returned, back.Outcome);
+        Assert.Equal(B, back.Servant);
+        Assert.Equal(ServantLogic.ServantInventory(B, 3), back.Inventory);
+    }
+
+    [Fact]
+    public void A_dead_servant_has_no_inventory_and_an_unreadable_one_is_no_haul()
+    {
+        var dead = Home(coffinState: 8);
+        var back = ServantLogic.Returned(A, A, CastleId.None, "", dead, Now, 3, new[] { new ServantLoot(5, 1) }, stacks: 1);
+        Assert.Equal(ServantOutcome.Dead, back.Outcome);
+        Assert.True(back.Inventory.IsNone);
+        Assert.Empty(back.Loot);
+        Assert.False(back.LootIsHaul);
+
+        var unreadable = ServantLogic.Returned(A, A, CastleId.None, "", Home(), Now, 3, Array.Empty<ServantLoot>(), stacks: -1);
+        Assert.False(unreadable.LootIsHaul);
+        Assert.Equal(ServantLogic.ServantInventory(A, 3), unreadable.Inventory);
+
+        var again = Home();
+        again.OutAgain = true;
+        var out2 = ServantLogic.Returned(A, A, CastleId.None, "", again, Now, 3, new[] { new ServantLoot(5, 1) }, stacks: 1);
+        Assert.Empty(out2.Loot);
+        Assert.False(out2.LootIsHaul);
+        Assert.Equal(ServantLogic.ServantInventory(A, 3), out2.Inventory);
+    }
+
+    [Fact]
     public void A_servant_sent_out_again_settles_its_earlier_return()
     {
         var again = Home();

@@ -240,7 +240,7 @@ internal static unsafe class ServantRuntime
     /// <summary>Stacks in the servant's inventory; -1 when unreadable.</summary>
     private static int ItemStacks(Entity servant, out InventoryRef inventory, out List<ServantLoot> loot)
     {
-        inventory = InventoryRef.For(servant);
+        inventory = ServantLogic.ServantInventory(CastleId.From(servant), WorldEpoch.Current);
         loot = new List<ServantLoot>();
         if (!InventoryRuntime.Installed) return -1;
         try
@@ -358,7 +358,7 @@ internal static unsafe class ServantRuntime
             Expertise = expertise,
             Perk0 = e.Perk0,
             Perk1 = e.Perk1,
-            Inventory = alive ? InventoryRef.For(servant) : InventoryRef.None,
+            Inventory = alive ? ServantLogic.ServantInventory(CastleId.From(servant), WorldEpoch.Current) : InventoryRef.None,
             ItemStacks = stacks,
             Epoch = WorldEpoch.Current,
         };
@@ -935,29 +935,10 @@ internal static unsafe class ServantRuntime
             var f = ReadReturnFacts(em, id, coffin, buff, current, out var s);
             byte* c = coffin == Entity.Null ? null : AiRuntime.RO<ServantCoffinstation>(em, coffin, CoffinNeed);
             string name = c == null ? "" : CoffinName(c);
-            var outcome = ServantLogic.OutcomeOf(f, now);
             var loot = new List<ServantLoot>();
-            var inventory = InventoryRef.None;
-            bool haul = false;
-            if (outcome != ServantOutcome.Dead)
-            {
-                int stacks = ItemStacks(s, out inventory, out loot);
-                // Sent out again before this publish: its loot was moved for that send, so what it
-                // carries now is not this hunt's haul.
-                haul = stacks >= 0 && !f.OutAgain;
-                if (f.OutAgain) loot = new List<ServantLoot>();
-            }
-            servants.Add(new ReturnedServant
-            {
-                Servant = outcome == ServantOutcome.Dead ? id : CastleId.From(s),
-                Coffin = CastleId.From(coffin),
-                Name = name,
-                Outcome = outcome,
-                InjuryEndsUtc = outcome == ServantOutcome.Injured ? ServantLogic.Utc(f.InjuryEndTicks) : null,
-                Inventory = inventory,
-                Loot = loot,
-                LootIsHaul = haul,
-            });
+            int stacks = -1;
+            if (ServantLogic.OutcomeOf(f, now) != ServantOutcome.Dead) stacks = ItemStacks(s, out _, out loot);
+            servants.Add(ServantLogic.Returned(id, CastleId.From(s), CastleId.From(coffin), name, f, now, WorldEpoch.Current, loot, stacks));
         }
         var castle = Progenitor.Castles.Castles.ForHeart(CastleId.From(heart));
         var zones = ZonesFor(em, row.MissionGuid);

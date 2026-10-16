@@ -229,7 +229,13 @@ public sealed class ReturnedServant
     /// <summary>When the injury heals (UTC), when injured.</summary>
     public DateTime? InjuryEndsUtc { get; init; }
 
-    /// <summary>The servant's inventory; empty reference when dead.</summary>
+    /// <summary>
+    /// The servant's main inventory, <see cref="InventoryRef.None"/> when dead. The same reference
+    /// <c>ctx.Servants.List</c> gives as <c>ServantInfo.Inventory</c> for <see cref="Servant"/>,
+    /// taken at the publish: usable with <c>ctx.Inventory</c> (for example <c>TransferAll</c> to a
+    /// chest) in the handler and afterwards, until the world reloads (then it is stale and refused)
+    /// or the servant is destroyed.
+    /// </summary>
     public InventoryRef Inventory { get; init; }
 
     /// <summary>
