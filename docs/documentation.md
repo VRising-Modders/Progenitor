@@ -23,6 +23,16 @@ Product specifications describe intended behavior and clearly label planned func
 - Use the current API names. When changing a name or contract, search and correct every affected example and summary.
 - Keep current user restrictions separate from generic setup. A machine path or previous authorization is not permission to operate a running game in a later session.
 
+## Keep the help guide current
+
+Every PR that adds, changes or removes a user-facing feature (player, admin, or mod author) updates the help guide ([docs/guide/progenitor-guide.html](guide/progenitor-guide.html)) in the same PR: Getting Started for basics only, the reference chapters for full how-to and settings.
+
+- Each setting gets a row in its feature's table: the label the player sees, the default, what it does. Server-side settings go in the Server Admins chapters.
+- Remove what was removed; label what is not yet verified in game; leave out what is not on main.
+- Keep the glossary consistent: every `[[term|...]]` has an entry and every entry is used.
+- Edit only the content block (`templates/help/README.md`), then run `node tools/help-guide/sync.mjs --check`.
+- `HelpGuideCoverageTests` fails when a row on Progenitor's own page or the Server tab is not named in the guide.
+
 ## Make examples executable and claims verifiable
 
 Prefer one small buildable example per concept. Include its path, prerequisites, exact working directory/commands, expected observations and cleanup. Reuse its source from other pages instead of maintaining divergent code copies. In PowerShell examples, use a JSON file and `@path` for structured bridge arguments; do not rely on escaped inline JSON surviving shell parsing.

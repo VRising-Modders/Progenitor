@@ -13,6 +13,7 @@
 ## Checklist
 
 - [ ] Docs under `docs/` updated in this pull request (API status, module reference, tutorial), with honest verification labels
+- [ ] Help guide (`docs/guide/progenitor-guide.html`) updated for any user-facing feature added, changed or removed: Getting Started for basics, the reference chapters for how-to and settings
 - [ ] Keys go through `ctx.Keybinds`; nothing polls input directly
 - [ ] Unload releases everything this change registers
 - [ ] Original code only; no game files, interop assemblies or personal identifiers committed

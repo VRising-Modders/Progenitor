@@ -70,4 +70,6 @@ When several agents work in one tree, agree on disjoint file ownership. Keep nat
 
 When committing, stage only the intended changes; never sweep a shared working tree with `git commit -a`. Version changes are a separate concern ([versioning](docs/versioning.md)). Commit, push, open pull requests or merge only when the person you work for has authorized it.
 
+A PR that adds, changes or removes a user-facing feature updates the help guide (`docs/guide/progenitor-guide.html`) in the same PR ([rule](docs/documentation.md#keep-the-help-guide-current)).
+
 Keep current API contracts, concise constraints and links in the docs. Do not append session diaries, historical restart debts or review dispatch logs to agent instructions. For each example, record exactly what was source-checked, built or observed live; follow [documentation.md](docs/documentation.md). Write in US English. Do not put personal identifiers (names, account IDs, IP addresses, user paths) in tracked files, commit messages or pull requests.
