@@ -372,6 +372,9 @@ public sealed class Plugin
         // shares is still installed; Ui's teardown then forgets the pointer either way.
         try { Progenitor.Chat.ChatWindow.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ChatWindow.Uninstall: {e.Message}"); }
+        // Chat link handlers: plugin contexts dispose their own; this drops any left so no plugin delegate outlives Core.
+        try { Progenitor.Chat.ChatLinkRegistry.Clear(); }
+        catch (Exception e) { Logger?.LogWarning($"ChatLinkRegistry.Clear: {e.Message}"); }
         try
         {
             Progenitor.Chat.ChatCommandHints.Uninstall();

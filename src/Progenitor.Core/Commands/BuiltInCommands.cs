@@ -26,7 +26,7 @@ internal static class BuiltInCommands
 
             if (TryShowOne(ctx, query)) return;
 
-            ctx.Reply($"Unknown command '{query}'. Type {CommandRegistry.Prefix}help for a list.");
+            ctx.Reply($"Unknown command '{Progenitor.Chat.ChatLinks.Defuse(query)}'. Type {CommandRegistry.Prefix}help for a list.");
         }
         catch (Exception e)
         {

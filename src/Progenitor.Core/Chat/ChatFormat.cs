@@ -9,13 +9,16 @@ namespace Progenitor.Chat;
 /// <summary>CHAT5: a clickable part of a chat message.</summary>
 internal readonly struct ChatSpan
 {
-    internal ChatSpan(ChatSpanKind kind, int start, int length, string target, string? display = null)
+    internal ChatSpan(ChatSpanKind kind, int start, int length, string target, string? display = null,
+        string? owner = null, string? linkType = null)
     {
         Kind = kind;
         Start = start;
         Length = length;
         Target = target ?? "";
         Display = display;
+        Owner = owner ?? "";
+        LinkType = linkType ?? "";
     }
 
     internal ChatSpanKind Kind { get; }
@@ -30,6 +33,15 @@ internal readonly struct ChatSpan
 
     /// <summary>What the line shows instead of the token text (a location's coordinates, an item's name); null: the text.</summary>
     internal string? Display { get; }
+
+    /// <summary>A mod-owned link's owner and type (<see cref="ChatLinkToken"/>); empty for other kinds.</summary>
+    internal string Owner { get; }
+
+    /// <inheritdoc cref="Owner"/>
+    internal string LinkType { get; }
+
+    /// <summary>Drawn as a clickable link (a mod link no handler owns is drawn as its text only).</summary>
+    internal bool IsLink => Kind != ChatSpanKind.ModText;
 }
 
 internal enum ChatSpanKind
@@ -38,6 +50,12 @@ internal enum ChatSpanKind
     Mod = 1,
     Location = 2,
     Item = 3,
+
+    /// <summary>A mod-owned link (<see cref="ChatLinkToken"/>) a handler on this client owns: clickable.</summary>
+    ModLink = 4,
+
+    /// <summary>A server's mod-owned link nothing on this client owns: its text, not a link, without the raw token.</summary>
+    ModText = 5,
 }
 
 /// <summary>
@@ -132,18 +150,30 @@ internal static class ChatFormat
         internal bool Use24Hour { get; init; } = true;
     }
 
-    /// <summary>The clickable parts of <paramref name="text"/>, in order, never overlapping.</summary>
-    internal static List<ChatSpan> Spans(string? text, Options options)
+    /// <summary>
+    /// The clickable parts of <paramref name="text"/>, in order, never overlapping. <paramref name="source"/> is who wrote
+    /// the line: a mod-owned link on a server line is drawn as its text (a link when a handler owns it); on a player's line
+    /// it stays as written unless its owner's handler accepts player links.
+    /// </summary>
+    internal static List<ChatSpan> Spans(string? text, Options options, ChatLinkSource source = ChatLinkSource.Player)
     {
         var spans = new List<ChatSpan>();
         if (string.IsNullOrEmpty(text)) return spans;
+        foreach (var t in ChatLinkToken.Find(text))
+        {
+            if (ChatLinkRegistry.Clickable(t.Owner, source))
+                spans.Add(new ChatSpan(ChatSpanKind.ModLink, t.Start, t.Length, t.Payload, t.Text, t.Owner, t.Type));
+            else if (source == ChatLinkSource.Server)
+                spans.Add(new ChatSpan(ChatSpanKind.ModText, t.Start, t.Length, t.Payload, t.Text, t.Owner, t.Type));
+        }
+
         if (options.ModLinks && ModTokenFinder != null)
         {
             try
             {
                 foreach (var (start, length, package, version) in ModTokenFinder(text!))
                 {
-                    if (start < 0 || length <= 0 || start + length > text!.Length) continue;
+                    if (start < 0 || length <= 0 || start + length > text!.Length || Overlaps(spans, start, length)) continue;
                     spans.Add(new ChatSpan(ChatSpanKind.Mod, start, length,
                         string.IsNullOrEmpty(version) ? package : package + "@" + version));
                 }
@@ -217,13 +247,13 @@ internal static class ChatFormat
         if (rich)
         {
             string body = (r.Full ?? "").Length > 0 ? r.Full! : (ChannelLabel(r.Kind).Length > 0 ? "[" + ChannelLabel(r.Kind) + "] " : "") + r.Text;
-            spans = RichSpans(body, options);
+            spans = RichSpans(body, options, r.Source);
             AppendRich(sb, body, spans);
         }
         else
         {
             sb.Append(prefix);
-            spans = Spans(r.Text, options);
+            spans = Spans(r.Text, options, r.Source);
             AppendMessage(sb, r.Text, spans);
         }
         if (r.Repeat > 1)
@@ -293,11 +323,17 @@ internal static class ChatFormat
             var s = spans[n];
             if (s.Start < at) continue;
             sb.Append(UiRichText.Literal(text.Substring(at, s.Start - at)));
+            at = s.Start + s.Length;
+            if (!s.IsLink)
+            {
+                sb.Append(UiRichText.Literal(s.Display ?? ""));
+                continue;
+            }
+
             sb.Append("<link=\"").Append(LinkPrefix(s.Kind)).Append(n.ToString(CultureInfo.InvariantCulture))
               .Append("\"><color=").Append(color).Append("><u>")
               .Append(UiRichText.Literal(s.Display ?? text.Substring(s.Start, s.Length)))
               .Append("</u></color></link>");
-            at = s.Start + s.Length;
         }
 
         sb.Append(UiRichText.Literal(text.Substring(at)));
@@ -307,9 +343,9 @@ internal static class ChatFormat
     /// The links in a rich-text line: found in its visible text, kept only where they sit outside tags in the line itself
     /// (a link inside a tag's attribute is not wrapped).
     /// </summary>
-    private static List<ChatSpan> RichSpans(string body, Options options)
+    private static List<ChatSpan> RichSpans(string body, Options options, ChatLinkSource source)
     {
-        var found = Spans(body, options);
+        var found = Spans(body, options, source);
         var kept = new List<ChatSpan>();
         foreach (var s in found)
             if (!InsideTag(body, s.Start) && body.IndexOf('<', s.Start, s.Length) < 0) kept.Add(s);
@@ -334,11 +370,17 @@ internal static class ChatFormat
             var s = spans[n];
             if (s.Start < at) continue;
             sb.Append(body, at, s.Start - at);
+            at = s.Start + s.Length;
+            if (!s.IsLink)
+            {
+                sb.Append(UiRichText.Literal(s.Display ?? ""));
+                continue;
+            }
+
             sb.Append("<link=\"").Append(LinkPrefix(s.Kind)).Append(n.ToString(CultureInfo.InvariantCulture))
               .Append("\"><color=").Append(color).Append("><u>")
               .Append(UiRichText.Literal(s.Display ?? body.Substring(s.Start, s.Length)))
               .Append("</u></color></link>");
-            at = s.Start + s.Length;
         }
 
         sb.Append(body, at, body.Length - at);
@@ -351,7 +393,7 @@ internal static class ChatFormat
         if (!int.TryParse(linkId.Substring(2), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)) return null;
         if (n < 0 || n >= spans.Count) return null;
         var s = spans[n];
-        if (!linkId.StartsWith(LinkPrefix(s.Kind), StringComparison.Ordinal)) return null;
+        if (!s.IsLink || !linkId.StartsWith(LinkPrefix(s.Kind), StringComparison.Ordinal)) return null;
         return s;
     }
 
@@ -360,6 +402,8 @@ internal static class ChatFormat
         ChatSpanKind.Mod => "m:",
         ChatSpanKind.Location => "l:",
         ChatSpanKind.Item => "i:",
+        ChatSpanKind.ModLink => "n:",
+        ChatSpanKind.ModText => "-:",
         _ => "u:",
     };
 

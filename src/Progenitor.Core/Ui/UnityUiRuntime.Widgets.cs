@@ -46,6 +46,12 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         get { try { return Alive(_tipRoot) && _tipRoot!.activeSelf; } catch { return false; } }
     }
 
+    /// <summary>
+    /// Whether the box up now was shown with <paramref name="stillShown"/> as its liveness check, so a control that showed it
+    /// can tell its own tooltip from one another control put up since.
+    /// </summary>
+    internal static bool TooltipOwnedBy(Func<bool> stillShown) => stillShown != null && ReferenceEquals(_tipStillShown, stillShown);
+
     /// <summary>The shown tooltip's title (empty when none is up).</summary>
     internal static string TooltipTitle
     {

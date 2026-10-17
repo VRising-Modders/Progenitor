@@ -429,11 +429,13 @@ window.HELP = {
 <li><strong>Type one:</strong> <code>[mod:</code> and part of a name; matches show above the line, <span class="kbd">Tab</span> fills in the first, again for the next.</li></ul>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Suggest mods after "[mod:"</td><td>On</td><td>Installed mods always; Thunderstore mods once the Mods menu has loaded its list.</td></tr></tbody></table>
-<p>A server can turn mod links off (<strong>Allow mod links</strong>).</p>` },
+<p>A server can turn mod links off (<strong>Allow mod links</strong>).</p>
+<p><strong>Links from your mods.</strong> A mod on the server can also put its own links in its messages, such as a storage chest in a reply. You see only the link's words. They are a link, underlined, when you have that mod; otherwise they are plain words. The same link typed by another player stays as they typed it, so a player cannot pass off a link as the server's.</p>` },
         { id: "item-links", title: "Location and item links",
           html: `<ul><li><strong>Location:</strong> start a line with <code>/loc </code>; it becomes <code>[loc:x,z]</code> at your position and shows as <code>[x, z]</code>. A click tells how far and which way it is.</li>
-<li><strong>Item:</strong> <code>[item:id]</code> shows the item's name; a click names it. <code>/item &lt;prefab name&gt; </code> at the start of a line makes the link. No item search yet.</li></ul>`,
-          callout: { title: "Not yet verified in game", text: "Location and item links are tested outside the game only." } },
+<li><strong>Item:</strong> <code>[item:id]</code> shows the item's name. Rest the pointer on it to see the item's name and description; a click shows them in a window. An item the game doesn't know reads <strong>Unknown item</strong>. <code>/item &lt;prefab name&gt; </code> at the start of a line makes the link. No item search yet.</li>
+<li>A mod you have may answer the click instead, for example by showing the place on the map.</li></ul>`,
+          callout: { title: "Not yet verified in game", text: "Location and item links, the item tooltip and links from mods are tested outside the game only." } },
         { id: "mentions", title: "Mentions",
           html: `<p>A line with your name, a watched word, or <code>@all</code> from an admin is highlighted in gold, with a short chirp. System and mod lines never count.</p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>

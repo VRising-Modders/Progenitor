@@ -235,6 +235,8 @@ public sealed class Plugin : ProgenitorPlugin<SampleContext>
         // Map-scope keybinds (ctx.Keybinds.RegisterInMap / RegisterHoldInMap) and the WorldMap
         // pointer: a client-only map ruler. See SampleMap.cs.
         SampleMap.Attach(ctx);
+        // Chat links: the server sends a mod link with `.chat link`, the client handles its click. See SampleChatLinks.cs.
+        SampleChatLinks.Attach(ctx);
         SampleFrostNovaAppearance.Attach(ctx);
         SampleCatalogRecipeExamples.Attach(ctx);
 
@@ -352,6 +354,7 @@ public sealed class Plugin : ProgenitorPlugin<SampleContext>
         SampleCamera.Detach();
         SampleForms.Detach();
         SampleMap.Detach();
+        SampleChatLinks.Detach();
         // Job J19. SampleStore.Detach also calls ModSave.RemoveAll(owner) and logs the count; it
         // must run while Plugin.Active is still set, which is why both sit here and not after the
         // `Active = null` below.

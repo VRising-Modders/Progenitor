@@ -414,6 +414,15 @@ if (ctx.IsServer)
 
 **Worked example: `samples/Progenitor.Sample/SampleChat.cs`**, driven by `.shout <text>` and `.whisper <name> <text>` (`SampleCommands.cs:321,346`). `.shout` calls `ctx.Chat.Broadcast` at `System` and replies with the recipient count, so the server log alone proves it; `.whisper` resolves one connected player and calls `ctx.Chat.SendTo`. The same file carries the module's only compiled `ChatMessage` subscriber, registered at **priority -100** — deliberately *below* the commands module's 500, because the bus runs every handler in descending priority regardless of cancellation, so subscribing under commands is the only way to observe whether a line was handled.
 
+**Chat links (client; not live-verified).** A server line can carry a mod-owned link built with `ChatLinks.ModLink(owner, type, payload, text)`; the client mod that handles it registers `ctx.Chat.OnModLink(owner, click => …)`, and `ctx.Chat.OnLinkClicked(click => …)` sees every other link click first. A handler returns true to skip Progenitor's own action. Check `click.Source` before trusting a link: players can type tokens too. Contract and provenance: [chat.md](chat.md#chat-links-for-mods); example `SampleChatLinks.cs` (`.chat link`).
+
+```csharp
+// Server: a reply with a link.
+ctx.Reply("Stored in " + ChatLinks.ModLink("satisvampory", "chest", chestId, "Storage (Plot 1)"));
+// Client: handle it.
+ctx.Chat.OnModLink("satisvampory", click => { PinChest(click.Payload); return true; });
+```
+
 The non-context path is `Chat.Broadcast(text, type?)` / `Chat.Broadcast(world, text, type?)` / `Chat.SendTo(user, text, type?)` (and the world overloads). Each call creates one outbound entity per recipient:
 
 `NetworkEventType` + `ChatMessageServerEvent` + `SendNetworkEventTag` + `SendEventToUsers` (one-bit `UserBitMask128`).
