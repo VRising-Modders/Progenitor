@@ -270,7 +270,7 @@ public sealed class ChatTabRowTests
         var active = ChatTabRow.Style(ChatTabItemState.Active, donor);
         Assert.Equal(ChatTabRow.GameRestCaption, normal.CaptionR, 3);
         Assert.Equal(1f, active.CaptionR, 3);
-        Assert.Equal(ChatTabRow.GameSelectedGlow, active.GlowAlpha, 3);
+        Assert.Equal(ChatTabRow.GameSelectedGlow * ChatTabRow.ChatGlowScale, active.GlowAlpha, 3);
         Assert.Equal(ChatTabRow.GameSelectedLine, active.LineAlpha, 3);
     }
 
@@ -279,7 +279,7 @@ public sealed class ChatTabRowTests
     {
         var donor = new ChatTabDonorColors { GlowHover = 0.2f, GlowSelected = 0.5f, LineHover = 0.4f, LineSelected = 1f };
         var hover = ChatTabRow.Style(ChatTabItemState.Hover, donor);
-        Assert.Equal(0.2f, hover.GlowAlpha, 3);
+        Assert.Equal(0.2f * ChatTabRow.ChatGlowScale, hover.GlowAlpha, 3);
         Assert.Equal(0.4f, hover.LineAlpha, 3);
     }
 

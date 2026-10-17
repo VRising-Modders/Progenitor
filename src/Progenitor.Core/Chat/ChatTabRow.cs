@@ -86,6 +86,12 @@ internal static class ChatTabRow
     internal const float GameSelectedGlow = 0.502f;
     internal const float GameSelectedLine = 1f;
 
+    /// <summary>
+    /// The game's glow sits on the dark menu bar; over the world behind the chat box it reads too strong at full
+    /// strength, so the chat row draws every glow at this share of the donor's alpha.
+    /// </summary>
+    internal const float ChatGlowScale = 0.55f;
+
     /// <summary>Hover sits this far from normal toward the active look when the donor gives no hover tint of its own.</summary>
     internal const float HoverShare = 0.55f;
 
@@ -143,7 +149,7 @@ internal static class ChatTabRow
         float glowActive = Clamp(donor.GlowSelected ?? GameSelectedGlow, 0.2f, 1f);
         float lineActive = Clamp(donor.LineSelected ?? GameSelectedLine, 0.5f, 1f);
         var normal = new ChatTabStyle(normalCaption.R, normalCaption.G, normalCaption.B, normalCaption.A, 0f, 0f, 1f);
-        var active = new ChatTabStyle(activeCaption.R, activeCaption.G, activeCaption.B, activeCaption.A, glowActive, lineActive, 1f);
+        var active = new ChatTabStyle(activeCaption.R, activeCaption.G, activeCaption.B, activeCaption.A, glowActive * ChatGlowScale, lineActive, 1f);
         switch (state)
         {
             case ChatTabItemState.Active:
@@ -157,7 +163,7 @@ internal static class ChatTabRow
                 var caption = donor.CaptionHover is { } h && Level(h) > Level(normalCaption) && Level(h) < Level(activeCaption) ? h : between;
                 float glow = donor.GlowHover is { } g && g > 0.01f && g < glowActive ? g : glowActive * HoverShare;
                 float line = donor.LineHover is { } l && l > 0.01f && l < lineActive ? l : lineActive * HoverShare;
-                return new ChatTabStyle(caption.R, caption.G, caption.B, caption.A, glow, line, 1f);
+                return new ChatTabStyle(caption.R, caption.G, caption.B, caption.A, glow * ChatGlowScale, line, 1f);
             }
             default:
                 return normal;
