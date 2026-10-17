@@ -27,11 +27,13 @@ Product specifications describe intended behavior and clearly label planned func
 
 Every PR that adds, changes or removes a user-facing feature (player, admin, or mod author) updates the help guide ([docs/guide/progenitor-guide.html](guide/progenitor-guide.html)) in the same PR: Getting Started for basics only, the reference chapters for full how-to and settings.
 
+The guide describes current behavior only. A new feature still gets its guide pages in its own PR; they say what it does, not how far it was tested. Never add testing or verification status to it ("not yet verified in game", "tested outside the game only", "hasn't been tested on a live server"): that belongs in the developer docs, the PR body and the research notes. A real limitation a player would hit stays, written as plain behavior ("There's no item search yet", "Not available on dedicated servers").
+
 - Each setting gets a row in its feature's table: the label the player sees, the default, what it does. Server-side settings go in the Server Admins chapters.
-- Remove what was removed; label what is not yet verified in game; leave out what is not on main.
+- Remove what was removed; leave out what is not on main.
 - Keep the glossary consistent: every `[[term|...]]` has an entry and every entry is used.
 - Edit only the content block (`templates/help/README.md`), then run `node tools/help-guide/sync.mjs --check`.
-- `HelpGuideCoverageTests` fails when a row on Progenitor's own page or the Server tab is not named in the guide.
+- `HelpGuideCoverageTests` fails when a row on Progenitor's own page or the Server tab is not named in the guide, or when the guide contains a testing-status phrase.
 
 ## Make examples executable and claims verifiable
 
@@ -39,7 +41,7 @@ Prefer one small buildable example per concept. Include its path, prerequisites,
 
 Write bridge request files as UTF-8 **without a BOM**; `Set-Content -Encoding UTF8` adds one in Windows PowerShell 5.1 and the bridge caller does not strip it. Use the `WriteAllText` pattern in the reload guide. Explicitly build examples outside the solution before deployment: `-Projects` selects copying, while deployment normally builds the whole solution.
 
-Use these labels accurately:
+Use these labels accurately in developer docs (`api.md`, `modules.md`, `chat.md` and the other pages under `docs/`), PR bodies and research notes. They never appear in the player and admin help guide, which states current behavior only.
 
 - **Source-checked:** names, arguments or behavior inspected in code. Not a runtime result.
 - **Compile-verified:** the exact example built; record the command, source revision/hash and outcome externally.
