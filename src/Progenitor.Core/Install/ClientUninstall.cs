@@ -144,13 +144,13 @@ internal static class ClientUninstall
 
         // The single-folder home (Bootstrap, Core, the tables, the guide, the shipped preloader) and the preloader
         // Bootstrap placed in patchers.
-        foreach (string rel in EnumerateFolder(root, HomeFolder))
+        foreach (string rel in HomeFiles(root, HomeFolder))
             Add(rel);
         // The running Bootstrap's own folder when it is not the canonical one (a renamed package folder; PR #48 review
         // L1). Never the plugins root itself: a Bootstrap still there is named by OwnedPluginFileNames alone.
         string? running = RunningBootstrapFolder(root);
         if (running != null)
-            foreach (string rel in EnumerateFolder(root, running))
+            foreach (string rel in HomeFiles(root, running))
                 Add(rel);
         if (Exists(root, PatchersPreloader)) Add(PatchersPreloader);
 
@@ -284,6 +284,61 @@ internal static class ClientUninstall
 
     public static string Normalize(string? relative) =>
         (relative ?? "").Trim().Replace('\\', '/').TrimStart('/');
+
+    /// <summary>
+    /// What uninstall removes from a folder that holds Progenitor's Bootstrap. The whole folder only when it is a
+    /// Progenitor home (<see cref="LooksLikeProgenitorHome"/>); otherwise (PR #48 review N1: a shared folder such as
+    /// <c>plugins/MyMods/</c>) only the Bootstrap and its staged variants, the shipped preloader and the
+    /// <c>progenitor-core</c> folder inside it. Another mod's file is never named.
+    /// </summary>
+    internal static IEnumerable<string> HomeFiles(string root, string folder)
+    {
+        if (LooksLikeProgenitorHome(root, folder))
+        {
+            foreach (string rel in EnumerateFolder(root, folder)) yield return rel;
+            yield break;
+        }
+        string bootstrap = folder + "/" + Progenitor.SelfUpdate.InstallLayout.BootstrapFileName;
+        foreach (string suffix in new[] { "", ".next", ".prev", ".removed" })
+            if (Exists(root, bootstrap + suffix)) yield return bootstrap + suffix;
+        string shipped = folder + "/" + Progenitor.SelfUpdate.InstallLayout.ShippedPreloaderFileName;
+        if (Exists(root, shipped)) yield return shipped;
+        foreach (string rel in EnumerateFolder(root, folder + "/" + Progenitor.SelfUpdate.InstallLayout.CoreFolderName))
+            yield return rel;
+    }
+
+    /// <summary>
+    /// True when <paramref name="folder"/> is a Progenitor home: its <c>progenitor-core/</c> holds a Core image, and the
+    /// only <c>*.dll</c> anywhere in it is <c>Progenitor.Bootstrap.dll</c> (our <c>.patcher</c>, <c>.next</c>,
+    /// <c>.prev</c> and <c>.removed</c> files are not <c>.dll</c>s).
+    /// </summary>
+    internal static bool LooksLikeProgenitorHome(string root, string folder)
+    {
+        try
+        {
+            string dir = Path.Combine(root, folder.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(dir)) return false;
+            string core = Path.Combine(dir, Progenitor.SelfUpdate.InstallLayout.CoreFolderName);
+            if (!File.Exists(Path.Combine(core, Progenitor.SelfUpdate.InstallLayout.CoreFileName))
+                && !File.Exists(Path.Combine(core, Progenitor.SelfUpdate.InstallLayout.LegacyCoreFileName)))
+                return false;
+            foreach (string f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileName(f);
+                if (!name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(name, Progenitor.SelfUpdate.InstallLayout.BootstrapFileName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(Path.GetDirectoryName(f), dir, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // A legacy-named Core inside progenitor-core is ours too.
+                if (string.Equals(name, Progenitor.SelfUpdate.InstallLayout.LegacyCoreFileName, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(Path.GetDirectoryName(f), core, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                return false;
+            }
+            return true;
+        }
+        catch { return false; }
+    }
 
     /// <summary>The running Bootstrap's folder relative to the root, when it is a folder below <c>plugins/</c>; else null.</summary>
     internal static string? RunningBootstrapFolder(string root)

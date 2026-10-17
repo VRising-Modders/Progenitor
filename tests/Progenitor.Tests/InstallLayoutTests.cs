@@ -501,6 +501,50 @@ public class InstallLayoutTests
     }
 
     [Fact]
+    public void Uninstall_never_names_another_mods_file_in_a_shared_Bootstrap_folder()
+    {
+        // PR #48 review N1: Bootstrap placed in plugins/MyMods beside someone else's mod.
+        string root = TempRoot();
+        try
+        {
+            string shared = Path.Combine(root, "plugins", "MyMods");
+            Directory.CreateDirectory(Path.Combine(shared, "progenitor-core", "addresslib"));
+            Directory.CreateDirectory(Path.Combine(shared, "OtherMod"));
+            File.WriteAllText(Path.Combine(shared, InstallLayout.BootstrapFileName), "b");
+            File.WriteAllText(Path.Combine(shared, InstallLayout.BootstrapFileName + ".next"), "b2");
+            File.WriteAllText(Path.Combine(shared, InstallLayout.ShippedPreloaderFileName), "p");
+            File.WriteAllText(Path.Combine(shared, "progenitor-core", InstallLayout.CoreFileName), "c");
+            File.WriteAllText(Path.Combine(shared, "progenitor-core", "addresslib", "client-1.json"), "{}");
+            File.WriteAllText(Path.Combine(shared, "OtherMod.dll"), "x");
+            File.WriteAllText(Path.Combine(shared, "OtherMod", "OtherMod.cfg"), "y");
+            Assert.False(Progenitor.Install.ClientUninstall.LooksLikeProgenitorHome(root, "plugins/MyMods"));
+
+            InstallLayout.SetCurrent(root,
+                new InstallLayout.CoreHome(Path.Combine(shared, "progenitor-core"), Path.Combine(shared, "progenitor-core", "Progenitor.core"), true, false, Array.Empty<string>(), null),
+                Path.Combine(shared, InstallLayout.BootstrapFileName));
+            try
+            {
+                var plan = Progenitor.Install.ClientUninstall.Plan(root);
+                Assert.Contains("plugins/MyMods/Progenitor.Bootstrap.dll", plan);
+                Assert.Contains("plugins/MyMods/Progenitor.Bootstrap.dll.next", plan);
+                Assert.Contains("plugins/MyMods/Progenitor.Preloader.patcher", plan);
+                Assert.Contains("plugins/MyMods/progenitor-core/Progenitor.core", plan);
+                Assert.Contains("plugins/MyMods/progenitor-core/addresslib/client-1.json", plan);
+                Assert.DoesNotContain("plugins/MyMods/OtherMod.dll", plan);
+                Assert.DoesNotContain("plugins/MyMods/OtherMod/OtherMod.cfg", plan);
+            }
+            finally { InstallLayout.SetCurrent(root, null); }
+
+            // The same folder without the other mod is a home and goes whole.
+            File.Delete(Path.Combine(shared, "OtherMod.dll"));
+            Assert.True(Progenitor.Install.ClientUninstall.LooksLikeProgenitorHome(root, "plugins/MyMods"));
+            // A folder with no Core is never a home.
+            Assert.False(Progenitor.Install.ClientUninstall.LooksLikeProgenitorHome(root, "plugins/MyMods/OtherMod"));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void Preloader_retires_itself_only_when_no_Bootstrap_is_left()
     {
         string root = TempRoot();
