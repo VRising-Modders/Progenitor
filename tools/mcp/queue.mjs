@@ -72,6 +72,8 @@ const READ_ONLY_OPS = new Set([
   "versions", "versions_journal", "versions_plan", "catalog_status", "datetime_read", "rejoin_read", "tree",
   // BRIDGEUI1: widget readback. (screenshot is not here: it writes files on the client's machine.)
   "ui_read",
+  // CAMOFFSET1: the running camera preview's framing readback.
+  "camera_preview",
 ]);
 const READ_ONLY_ACTIONS = new Set(["status", "list", "live"]);
 /** Ops whose default action (no `action` given) is status. */

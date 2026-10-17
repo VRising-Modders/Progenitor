@@ -89,11 +89,23 @@ public sealed class CameraPreviewOptions
 }
 
 /// <summary>
-/// DOCK1: the camera preview's framing offset, game-free. The orbit camera looks at its anchor from
-/// <c>distance</c> meters along its view direction, so a point moved sideways along the camera's right axis by
-/// <c>s</c> projects <c>s / (distance * tan(hfov / 2))</c> of the half-screen right of center. The preview anchors the
-/// orbit on the point moved the other way by that <c>s</c>, recomputed from the current yaw every frame, so the
-/// camera circles the point itself at the offset place on screen.
+/// DOCK1 (fixed in CAMOFFSET1): the camera preview's framing offset, game-free.
+///
+/// <para>The preview anchors the orbit on the point moved sideways, so the camera still circles the point while the
+/// point sits <c>offset</c> of the screen width right of center. How far to move it is <b>measured from the live render
+/// camera</b>, never derived from assumed conventions: the runtime projects two synthetic points with the camera's own
+/// <c>WorldToViewportPoint</c>, the camera's look-at point <c>L</c> (on its forward axis at the previewed point's depth)
+/// and <c>L</c> plus one meter along the camera's own right axis. At one depth the viewport x is linear in the sideways
+/// distance (the perspective divide is by that same depth), so those two readings give the shift that lands the point
+/// at the target exactly, whatever the field of view, aspect, off-center projection or yaw convention.</para>
+///
+/// <para>The first version computed the shift from <c>fieldOfView</c> and <c>aspect</c> and took the right axis from
+/// the yaw it wrote (<c>(cos yaw, 0, -sin yaw)</c>). That is right for an ideal Unity pinhole camera with that yaw
+/// convention, and the tests still show it, but every input was an assumption about the live camera; on a 32:9 screen
+/// the live preview framed empty floor. Measuring removes the field of view, aspect, projection, viewport and axis
+/// assumptions; what stays assumed is only that the orbit camera looks along its forward axis at its anchor (the
+/// centered preview, verified live, already relies on that). The bridge's <c>camera_preview</c> readback reports where
+/// the point really lands.</para>
 /// </summary>
 internal static class CameraFraming
 {
@@ -104,37 +116,80 @@ internal static class CameraFraming
     internal static bool IsValidOffset(float offset) => float.IsFinite(offset) && Math.Abs(offset) <= MaxScreenOffset;
 
     /// <summary>
-    /// The sideways shift, in meters, that puts a point <paramref name="distance"/> meters in front of the camera
-    /// <paramref name="offset"/> of the screen's width right of center, for a camera with a vertical field of view of
-    /// <paramref name="verticalFovDegrees"/> on a screen <paramref name="aspect"/> (width over height) wide. 0 when the
-    /// camera reading is unusable.
+    /// The camera viewport x (0 at its left edge, 1 at its right) a point must project to so it sits at
+    /// <c>0.5 + offset</c> of the <b>screen</b> width, for a camera drawn into the screen from <paramref name="rectX"/>
+    /// over <paramref name="rectWidth"/> (normalized; 0 and 1 for a full-screen camera). An unusable rect counts as full.
     /// </summary>
-    internal static float LateralShift(float offset, float distance, float verticalFovDegrees, float aspect)
+    internal static float ViewportTarget(float offset, float rectX = 0f, float rectWidth = 1f)
     {
-        if (!float.IsFinite(offset) || offset == 0f) return 0f;
-        if (!float.IsFinite(distance) || distance <= 0f) return 0f;
-        if (!float.IsFinite(verticalFovDegrees) || verticalFovDegrees <= 0f || verticalFovDegrees >= 179f) return 0f;
-        if (!float.IsFinite(aspect) || aspect <= 0f) return 0f;
-        double halfV = verticalFovDegrees * Math.PI / 360.0;
-        double tanHalfH = Math.Tan(halfV) * aspect;
-        // The screen spans -1..1 in view space across its width, so a share f of the width is 2f of the half-width.
-        return (float)(2.0 * Math.Clamp(offset, -MaxScreenOffset, MaxScreenOffset) * distance * tanHalfH);
+        float screen = 0.5f + Math.Clamp(float.IsFinite(offset) ? offset : 0f, -MaxScreenOffset, MaxScreenOffset);
+        if (!float.IsFinite(rectX) || !float.IsFinite(rectWidth) || rectWidth <= 0.01f) return screen;
+        return (screen - rectX) / rectWidth;
     }
 
     /// <summary>
-    /// The orbit anchor that frames <paramref name="point"/> <paramref name="shift"/> meters right of center for a camera
-    /// at <paramref name="yawDegrees"/>: the point moved left along the camera's right axis. The game builds the view from
-    /// <c>quaternion.Euler(pitch, yaw, 0)</c>, so the right axis is (cos yaw, 0, -sin yaw) whatever the pitch.
+    /// The sideways distance, in meters along the camera's right axis, from the camera's look-at line to where a point
+    /// at the look-at depth projects to viewport x <paramref name="target"/>: from the viewport x of the look-at point
+    /// (<paramref name="atLookAt"/>) and of the point one meter to its right (<paramref name="atOneMeterRight"/>). False
+    /// when the readings cannot give one (not finite, no change across the meter, or a shift past 100 m).
     /// </summary>
-    internal static UnitVec3 Anchor(UnitVec3 point, float yawDegrees, float shift)
+    internal static bool TryLateral(float target, float atLookAt, float atOneMeterRight, out float lateral)
     {
-        if (shift == 0f || !float.IsFinite(shift) || !float.IsFinite(yawDegrees)) return point;
-        double yaw = yawDegrees * Math.PI / 180.0;
-        return new UnitVec3(
-            (float)(point.X - Math.Cos(yaw) * shift),
-            point.Y,
-            (float)(point.Z + Math.Sin(yaw) * shift));
+        lateral = 0f;
+        if (!float.IsFinite(target) || !float.IsFinite(atLookAt) || !float.IsFinite(atOneMeterRight)) return false;
+        float perMeter = atOneMeterRight - atLookAt;
+        if (Math.Abs(perMeter) < 1e-5f) return false;
+        float l = (target - atLookAt) / perMeter;
+        if (!float.IsFinite(l) || Math.Abs(l) > 100f) return false;
+        lateral = l;
+        return true;
     }
+
+    /// <summary>
+    /// The first version's model, kept for the readback's comparison: the sideways distance an ideal Unity pinhole
+    /// camera (<c>fieldOfView</c> vertical, <c>aspect</c> width over height, no lens shift) needs to put a point
+    /// <paramref name="depth"/> meters in front of it at <paramref name="viewportTarget"/>. 0 when a reading is unusable.
+    /// </summary>
+    internal static float PinholeLateral(float viewportTarget, float depth, float verticalFovDegrees, float aspect)
+    {
+        if (!float.IsFinite(viewportTarget) || !float.IsFinite(depth) || depth <= 0f) return 0f;
+        if (!float.IsFinite(verticalFovDegrees) || verticalFovDegrees <= 0f || verticalFovDegrees >= 179f) return 0f;
+        if (!float.IsFinite(aspect) || aspect <= 0f) return 0f;
+        double tanHalfH = Math.Tan(verticalFovDegrees * Math.PI / 360.0) * aspect;
+        return (float)((2.0 * viewportTarget - 1.0) * depth * tanHalfH);
+    }
+
+    /// <summary>
+    /// Diagnostics only: how far the live camera's right axis agrees with the first version's model of it for the shot's
+    /// <paramref name="yawDegrees"/> ((cos yaw, 0, -sin yaw), from <c>quaternion.Euler(pitch, yaw, 0)</c>): 1 when they
+    /// match, -1 when mirrored, NaN for an unusable axis. The framing always shifts along the camera's own axis.
+    /// </summary>
+    internal static float RightAgreement(float yawDegrees, UnitVec3 cameraRight)
+    {
+        double yaw = yawDegrees * Math.PI / 180.0;
+        double len = Math.Sqrt(cameraRight.X * cameraRight.X + cameraRight.Y * cameraRight.Y + cameraRight.Z * cameraRight.Z);
+        if (!(len > 1e-4) || !double.IsFinite(len)) return float.NaN;
+        return (float)((Math.Cos(yaw) * cameraRight.X - Math.Sin(yaw) * cameraRight.Z) / len);
+    }
+
+    /// <summary>The camera's right axis as a unit vector; false when it is unusable.</summary>
+    internal static bool TryUnit(UnitVec3 v, out UnitVec3 unit)
+    {
+        double len = Math.Sqrt(v.X * v.X + v.Y * v.Y + v.Z * v.Z);
+        unit = default;
+        if (!(len > 1e-4) || !double.IsFinite(len)) return false;
+        unit = new UnitVec3((float)(v.X / len), (float)(v.Y / len), (float)(v.Z / len));
+        return true;
+    }
+
+    /// <summary>
+    /// The orbit anchor that puts <paramref name="point"/> <paramref name="lateral"/> meters right of the look-at line:
+    /// the point moved left along the camera's own <paramref name="right"/> axis (as the camera reports it).
+    /// </summary>
+    internal static UnitVec3 Anchor(UnitVec3 point, UnitVec3 right, float lateral) =>
+        lateral == 0f || !float.IsFinite(lateral)
+            ? point
+            : new UnitVec3(point.X - right.X * lateral, point.Y - right.Y * lateral, point.Z - right.Z * lateral);
 }
 
 /// <summary>Options for <c>ctx.Camera.Observe(user, target, options)</c>. The defaults are the original timed lease.</summary>
