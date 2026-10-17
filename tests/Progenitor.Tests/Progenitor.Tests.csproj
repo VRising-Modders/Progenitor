@@ -1055,6 +1055,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Networking\ServerSettingsLimits.cs" Link="Linked\ServerSettingsLimits.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeRefresh.cs" Link="Linked\HandshakeRefresh.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeReask.cs" Link="Linked\HandshakeReask.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\HandshakeInPlace.cs" Link="Linked\HandshakeInPlace.cs" />
     <!-- Per-server mod pause: the planner, the coordinator (fake backend), the no-Progenitor watch,
          the profile file and Bootstrap's suspend table are all game-free. The notice panel is not. -->
     <Compile Include="..\..\src\Progenitor.Core\Networking\ServerModPause.cs" Link="Linked\ServerModPause.cs" />
