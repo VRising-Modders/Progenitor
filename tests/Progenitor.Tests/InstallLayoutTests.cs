@@ -131,6 +131,166 @@ public class InstallLayoutTests
     }
 
     [Fact]
+    public void A_hosted_child_never_resolves_the_clients_files_through_the_junction()
+    {
+        // PR #48 review M1: only its own staged copy, even when that is missing and the client's Core is visible.
+        string managedCore = P("plugins", "Some-Package", "Progenitor", "progenitor-core", "Progenitor.core");
+        var home = InstallLayout.Resolve(Root, Path.GetDirectoryName(Path.GetDirectoryName(managedCore)), true,
+            Files(NewCore, managedCore), Files(Path.GetDirectoryName(NewCore)!));
+        Assert.False(home.Found);
+        Assert.True(home.Legacy);
+        Assert.Equal(P("progenitor-core"), home.Folder);
+        Assert.Equal(new[] { LegacyCoreImage, LegacyCore }, home.Tried);
+        Assert.DoesNotContain(home.Tried, t => t.Contains(Path.Combine("plugins", ""), StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ---- Core's own resolution (PR #48 review M2) ---------------------------------------------------------------
+
+    [Fact]
+    public void Core_follows_the_resolution_its_Bootstrap_publishes()
+    {
+        var home = InstallLayout.ForCore(Root, true, Path.GetDirectoryName(NewCore), NewCore, Files(NewCore, LegacyCore));
+        Assert.Equal(NewCore, home.CoreFile);
+        Assert.True(home.Found);
+        Assert.False(home.Legacy);
+        var legacy = InstallLayout.ForCore(Root, true, P("progenitor-core"), LegacyCore, Files(LegacyCore));
+        Assert.True(legacy.Legacy);
+    }
+
+    [Fact]
+    public void Core_under_a_Bootstrap_that_publishes_nothing_uses_the_legacy_folder()
+    {
+        // An older Bootstrap loaded Core from BepInEx/progenitor-core, even with a single-folder Core on disk.
+        var home = InstallLayout.ForCore(Root, true, null, null, Files(NewCore, LegacyCore));
+        Assert.Equal(LegacyCore, home.CoreFile);
+        Assert.True(home.Legacy);
+        var none = InstallLayout.ForCore(Root, true, "", "", Files(NewCore));
+        Assert.True(none.Legacy);
+        Assert.False(none.Found);
+    }
+
+    [Fact]
+    public void Core_without_any_Bootstrap_resolves_the_tree_normally()
+    {
+        var home = InstallLayout.ForCore(Root, false, null, null, Files(NewCore, LegacyCore));
+        Assert.Equal(NewCore, home.CoreFile);
+    }
+
+    // ---- the running Bootstrap (PR #48 review L1) ---------------------------------------------------------------
+
+    [Fact]
+    public void The_running_Bootstraps_own_file_is_used_for_its_tree()
+    {
+        string root = TempRoot();
+        try
+        {
+            string managed = Path.Combine(root, "plugins", "Some-Package", "Progenitor", InstallLayout.BootstrapFileName);
+            string other = TempRoot();
+            try
+            {
+                var home = new InstallLayout.CoreHome(Path.Combine(root, "x"), Path.Combine(root, "x", "Progenitor.core"), true, false, Array.Empty<string>(), null);
+                InstallLayout.SetCurrent(root, home, managed);
+                Assert.Equal(managed, InstallLayout.BootstrapFile(root));
+                Assert.Equal(managed, SelfPaths.DefaultBootstrap(root));
+                // Another tree: its single-folder Bootstrap, else its legacy one when only that exists.
+                Assert.Equal(Path.Combine(InstallLayout.HomeFolder(other), InstallLayout.BootstrapFileName), InstallLayout.BootstrapFile(other));
+                Directory.CreateDirectory(Path.Combine(other, "plugins"));
+                File.WriteAllText(InstallLayout.LegacyBootstrapPath(other), "b");
+                Assert.Equal(InstallLayout.LegacyBootstrapPath(other), InstallLayout.BootstrapFile(other));
+            }
+            finally
+            {
+                InstallLayout.SetCurrent(root, null);
+                Cleanup(other);
+            }
+        }
+        finally { Cleanup(root); }
+    }
+
+    // ---- releases from before the single-folder layout (PR #48 review H2) --------------------------------------
+
+    [Fact]
+    public void Only_an_image_that_carries_the_layout_type_counts_as_single_folder()
+    {
+        // This test assembly compiles InstallLayout in, exactly as Core and Bootstrap do; the BCL does not.
+        Assert.True(InstallLayout.KnowsSingleFolder(File.ReadAllBytes(typeof(InstallLayout).Assembly.Location)));
+        Assert.False(InstallLayout.KnowsSingleFolder(File.ReadAllBytes(typeof(Xunit.Assert).Assembly.Location)));
+        Assert.False(InstallLayout.KnowsSingleFolder(new byte[] { 1, 2, 3 }));
+        Assert.False(InstallLayout.KnowsSingleFolder(null));
+    }
+
+    [Fact]
+    public void A_rollback_to_a_copy_from_before_the_layout_is_refused()
+    {
+        string root = TempRoot();
+        try
+        {
+            string newCore = Path.Combine(root, "new.dll");
+            string oldCore = Path.Combine(root, "old.dll");
+            File.Copy(typeof(InstallLayout).Assembly.Location, newCore);
+            File.Copy(typeof(Xunit.Assert).Assembly.Location, oldCore);
+            Assert.True(BootHealth.PreviousFitsLayout(newCore, null));
+            Assert.True(BootHealth.PreviousFitsLayout(newCore, newCore));
+            Assert.False(BootHealth.PreviousFitsLayout(oldCore, null));
+            Assert.False(BootHealth.PreviousFitsLayout(newCore, oldCore));
+            // A missing kept Core is left to the restore's own error.
+            Assert.True(BootHealth.PreviousFitsLayout(Path.Combine(root, "missing.dll"), null));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Theory]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, false, false)]
+    public void A_release_from_before_the_layout_is_refused_by_the_update_reader(bool coreNew, bool bootNew, bool ok)
+    {
+        var zip = SelfUpdateTests.Zip(
+            SelfUpdateTests.CoreImage(5, "2026.10.20.0", "c", singleFolder: coreNew),
+            SelfUpdateTests.BootImage(5, "2026.10.20.0", "b", singleFolder: bootNew), "2026.10.20");
+        var image = Progenitor.Install.SelfImageReader.Read(zip);
+        Assert.Equal(ok, image.Ok);
+        if (!ok) Assert.Contains("install that release by hand", image.Error);
+    }
+
+    [Fact]
+    public void A_rollback_to_a_synthetic_old_copy_is_refused_and_an_unreadable_one_is_left_to_the_restore()
+    {
+        string root = TempRoot();
+        try
+        {
+            string oldCore = Path.Combine(root, "old.dll");
+            string oldBoot = Path.Combine(root, "oldboot.dll");
+            string newCore = Path.Combine(root, "new.dll");
+            File.WriteAllBytes(oldCore, SelfUpdateTests.CoreImage(5, "2026.10.1.0", singleFolder: false));
+            File.WriteAllBytes(oldBoot, SelfUpdateTests.BootImage(5, "2026.10.1.0", singleFolder: false));
+            File.WriteAllBytes(newCore, SelfUpdateTests.CoreImage(5, "2026.10.2.0"));
+            Assert.False(BootHealth.PreviousFitsLayout(oldCore, null));
+            Assert.False(BootHealth.PreviousFitsLayout(newCore, oldBoot));
+            Assert.True(BootHealth.PreviousFitsLayout(newCore, null));
+            File.WriteAllText(Path.Combine(root, "text.dll"), "not an assembly");
+            Assert.True(BootHealth.PreviousFitsLayout(Path.Combine(root, "text.dll"), null));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
+    public void A_legacy_Bootstrap_renamed_aside_by_deploy_is_deleted_at_the_next_start()
+    {
+        string root = TempRoot();
+        try
+        {
+            string legacy = InstallLayout.LegacyBootstrapPath(root);
+            Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+            File.WriteAllText(legacy + LayoutAtStart.RemovedSuffix, "old");
+            string running = Path.Combine(InstallLayout.HomeFolder(root), InstallLayout.BootstrapFileName);
+            Assert.Null(LayoutAtStart.RemoveLegacyBootstrap(root, running, false, out _));
+            Assert.False(File.Exists(legacy + LayoutAtStart.RemovedSuffix));
+        }
+        finally { Cleanup(root); }
+    }
+
+    [Fact]
     public void The_process_resolution_answers_for_its_own_tree_only()
     {
         string root = TempRoot();

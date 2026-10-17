@@ -671,7 +671,24 @@ function Remove-LegacyLayout($t) {
       }
     }
   }
-  if ($t.Running -or -not ((Test-Path -LiteralPath $homeCore) -or $plan)) { return }
+  if ($t.Running) { return }
+  # The old Core goes only once nothing can load it any more (PR #48 review H1): the single-folder
+  # Bootstrap AND Core are in place and the plugins-root Bootstrap is gone. A Core-only deploy into a
+  # tree that still runs the three-location Bootstrap must leave that Bootstrap its Core.
+  $homeReady = (Test-Path -LiteralPath $homeBoot) -and (Test-Path -LiteralPath $homeCore)
+  $legacyBootLeft = (Test-Path -LiteralPath $legacyBoot) -and -not $plan
+  $legacyCoreLeft = @(@("Progenitor.dll", "Progenitor.dll.next", "Progenitor.dll.prev") |
+    Where-Object { Test-Path -LiteralPath (Join-Path $legacyCoreDir $_) }).Count -gt 0
+  if (-not $legacyCoreLeft) { return }
+  if (-not $homeReady -or $legacyBootLeft) {
+    if (-not $plan -and (Test-Path -LiteralPath $homeCore)) {
+      Write-Warning ("[$($t.Name)] kept the three-location BepInEx\progenitor-core: " +
+        $(if ($legacyBootLeft) { "plugins\Progenitor.Bootstrap.dll is still the Bootstrap this side starts" }
+          else { "there is no plugins\Progenitor\Progenitor.Bootstrap.dll yet" }) +
+        ". Deploy Progenitor.Bootstrap too (-Projects Progenitor.Bootstrap,Progenitor.Core) to move this side to the single-folder layout.")
+    }
+    return
+  }
   foreach ($name in @("Progenitor.dll", "Progenitor.dll.next", "Progenitor.dll.prev")) {
     $p = Join-Path $legacyCoreDir $name
     if (-not (Test-Path -LiteralPath $p)) { continue }
@@ -746,6 +763,8 @@ function Get-CoreStatus([hashtable]$t, [int]$TimeoutSeconds = 0) {
     # IL2CPP types. Never unloaded in place; a coreBound one makes every Core swap refuse. Empty on
     # an older Bootstrap (the field is absent).
     ProcessLifetime = @()
+    # reload.layout.coreFile: the Core file the running Bootstrap resolved at start ("" when absent).
+    LayoutCoreFile = ""
     Error = ""
   }
   $call = Join-Path $PSScriptRoot "mcp\call.mjs"
@@ -812,6 +831,9 @@ function Get-CoreStatus([hashtable]$t, [int]$TimeoutSeconds = 0) {
       # ProcessHost at ping time). Absent on an older Bootstrap: false, and the deadline catches it.
       $status.HostingPrivateGame = [bool]$reload.watch.hostingPrivateGame
       $status.HostedChild = [bool]$reload.watch.hostedChild
+      # Single-folder install: where the RUNNING Bootstrap resolved Core (reload.layout.coreFile).
+      # Empty on a Bootstrap built before it, which is always the three-location layout.
+      if ($null -ne $reload.layout) { $status.LayoutCoreFile = [string]$reload.layout.coreFile }
       # The watcher's own clock, if this Bootstrap puts one on the wire (R69 finding 7): the moment
       # the park was taken, else the moment of the last watcher scan. Either answers the only
       # question the wait's park branch needs -- did the watcher look at the file AFTER we staged --
@@ -1549,11 +1571,14 @@ foreach ($t in $targets) {
     }
     continue
   }
-  # THE THREE-LOCATION LAYOUT IS RUNNING. No single-folder Core is live in this tree yet, so the
-  # running process loaded Core from BepInEx/progenitor-core (or none at all) and its watcher looks
-  # there: this run writes the single-folder Core in place and no swap can follow. Only a restart
-  # loads it, so the plugins built against it are withheld.
-  if (-not (Test-Path -LiteralPath (Join-Path $t.Core $t.CoreFile))) {
+  # THE THREE-LOCATION LAYOUT IS RUNNING. No single-folder Core is live in this tree yet, or an
+  # earlier deploy renamed the running three-location Bootstrap aside (the .removed marker stays until
+  # a single-folder Bootstrap starts and deletes it): the running process loaded Core from
+  # BepInEx/progenitor-core and its watcher looks there, so no swap can follow. Only a restart loads
+  # the single-folder Core, so the plugins built against it are withheld. The bridge's reload.layout
+  # (read below) catches the rest.
+  if (-not (Test-Path -LiteralPath (Join-Path $t.Core $t.CoreFile)) -or
+      (Test-Path -LiteralPath (Join-Path $t.Dir "Progenitor.Bootstrap.dll.removed"))) {
     if (-not $plan) {
       Write-Warning ("[$($t.Name)] $($t.Proc) is running the three-location layout (no plugins\Progenitor\progenitor-core\" +
         "$($t.CoreFile) yet). The single-folder Core is written in place and loads at the next start; restart this side.")
@@ -1588,6 +1613,19 @@ foreach ($t in $targets) {
     Write-Warning ("[$($t.Name)] cannot read the Core generation from the bridge ($($before.Error)), so this run " +
       "cannot see whether or when the staged Core swaps.")
     $t.WithholdReason = "the bridge did not answer, so the Core swap cannot be observed"
+    continue
+  }
+  # The running Bootstrap watches the .next beside the Core IT resolved (PR #48 review M3). One that
+  # resolved another file (or predates reload.layout, so is three-location) never sees this run's
+  # stage: withhold now instead of waiting out the hold.
+  $wantCore = [System.IO.Path]::GetFullPath((Join-Path $t.Core $t.CoreFile))
+  $runningCore = ""
+  if ($before.LayoutCoreFile) { try { $runningCore = [System.IO.Path]::GetFullPath($before.LayoutCoreFile) } catch { $runningCore = "" } }
+  if (-not [string]::Equals($runningCore, $wantCore, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Warning ("[$($t.Name)] the running Bootstrap loads Core from " +
+      $(if ($runningCore) { $runningCore } else { "the three-location folder (it reports no reload.layout)" }) +
+      ", not $wantCore, so it will not see this run's staged Core. Restart this side.")
+    $t.WithholdReason = "the running Bootstrap resolved another Core folder; only a restart loads the single-folder Core"
     continue
   }
   if (-not $before.WatchEnabled) {

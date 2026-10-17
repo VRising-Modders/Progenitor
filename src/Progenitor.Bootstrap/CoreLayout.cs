@@ -129,7 +129,7 @@ public static class CoreLayout
         try { dir = string.IsNullOrEmpty(bootstrapPath) ? null : Path.GetDirectoryName(bootstrapPath); }
         catch { dir = null; }
         var home = InstallLayout.Resolve(bepInExRoot, dir, hostedChild, InstallLayout.SafeFileExists, InstallLayout.SafeDirectoryExists);
-        InstallLayout.SetCurrent(bepInExRoot, home);
+        InstallLayout.SetCurrent(bepInExRoot, home, bootstrapPath);
         if (home.StaleLegacyFolder != null)
         {
             try { warn?.Invoke(InstallLayout.FormatStaleLegacy(home)); }

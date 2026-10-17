@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 
 namespace Progenitor.SelfUpdate;
 
@@ -138,11 +140,19 @@ internal static class InstallLayout
             Add(legacy, LegacyCoreFileName, true);
         }
 
-        if (hostedChild) AddLegacy();
-        if (!string.IsNullOrWhiteSpace(bootstrapDir))
-            Add(Path.Combine(bootstrapDir!, CoreFolderName), CoreFileName, false);
-        Add(CanonicalCoreFolder(root), CoreFileName, false);
-        if (!hostedChild) AddLegacy();
+        // A hosted child reads ONLY its own staged copy (PR #48 review M1): its plugins folder is a junction at the
+        // client's, so every other candidate would be the client's file seen through that junction.
+        if (hostedChild)
+        {
+            AddLegacy();
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(bootstrapDir))
+                Add(Path.Combine(bootstrapDir!, CoreFolderName), CoreFileName, false);
+            Add(CanonicalCoreFolder(root), CoreFileName, false);
+            AddLegacy();
+        }
 
         var tried = new List<string>(candidates.Count);
         foreach (var c in candidates) tried.Add(c.File);
@@ -176,6 +186,28 @@ internal static class InstallLayout
         return new CoreHome(first.Folder, Path.Combine(first.Folder, CoreFileName), false, first.Legacy, tried, null);
     }
 
+    /// <summary>
+    /// Core's resolution in Core itself (<c>BootstrapLink.AdoptInstallLayout</c>). A Bootstrap that publishes its
+    /// resolution (<paramref name="publishedFolder"/>, <paramref name="publishedFile"/>) is followed exactly. A Bootstrap
+    /// that is loaded but publishes nothing predates the single-folder layout, so it loaded Core from the legacy
+    /// <c>BepInEx/progenitor-core</c> only, which is also the hosted-child rule (PR #48 review M2). With no Bootstrap at
+    /// all (tests, a Core loaded some other way) the tree is resolved normally.
+    /// </summary>
+    public static CoreHome ForCore(
+        string bepInExRoot,
+        bool bootstrapLoaded,
+        string? publishedFolder,
+        string? publishedFile,
+        Func<string, bool> fileExists,
+        Func<string, bool>? directoryExists = null)
+    {
+        string root = RequireRoot(bepInExRoot);
+        if (!string.IsNullOrEmpty(publishedFolder) && !string.IsNullOrEmpty(publishedFile))
+            return new CoreHome(publishedFolder!, publishedFile!, SafeTest(fileExists, publishedFile!),
+                SamePath(publishedFolder, LegacyCoreFolder(root)), new[] { publishedFile! }, null);
+        return Resolve(root, null, hostedChild: bootstrapLoaded, fileExists, directoryExists);
+    }
+
     /// <summary>One line for a missing Core: every path tried. Starts with <c>Core missing:</c> (tools match it).</summary>
     public static string FormatMissing(CoreHome home) =>
         "Core missing: none of these files exists: " + string.Join("; ", home?.Tried ?? Array.Empty<string>())
@@ -191,6 +223,7 @@ internal static class InstallLayout
     private static readonly object Gate = new();
     private static CoreHome? _current;
     private static string _currentRoot = "";
+    private static string _currentBootstrap = "";
 
     /// <summary>The running process's resolution, once Bootstrap (or Core, from Bootstrap) has set it.</summary>
     public static CoreHome? Current
@@ -198,14 +231,38 @@ internal static class InstallLayout
         get { lock (Gate) return _current; }
     }
 
-    /// <summary>Record the running process's resolution for <paramref name="bepInExRoot"/>.</summary>
-    public static void SetCurrent(string bepInExRoot, CoreHome? home)
+    /// <summary>
+    /// Record the running process's resolution for <paramref name="bepInExRoot"/>, and the file the running
+    /// Bootstrap was loaded from (<see cref="BootstrapFile"/>) when known.
+    /// </summary>
+    public static void SetCurrent(string bepInExRoot, CoreHome? home, string? bootstrapPath = null)
     {
         lock (Gate)
         {
             _current = home;
             _currentRoot = home == null ? "" : Normalize(bepInExRoot ?? "");
+            _currentBootstrap = home == null ? "" : (bootstrapPath ?? "");
         }
+    }
+
+    /// <summary>
+    /// The Bootstrap of <paramref name="bepInExRoot"/>: the running one's own file for the process's own tree (PR #48
+    /// review L1: a renamed package folder is followed), else <c>plugins/Progenitor/Progenitor.Bootstrap.dll</c> when it
+    /// exists, else the legacy <c>plugins/Progenitor.Bootstrap.dll</c> when that exists, else the single-folder path.
+    /// </summary>
+    public static string BootstrapFile(string bepInExRoot)
+    {
+        string root = RequireRoot(bepInExRoot);
+        lock (Gate)
+        {
+            if (_current != null && _currentBootstrap.Length > 0
+                && string.Equals(_currentRoot, Normalize(root), StringComparison.OrdinalIgnoreCase))
+                return _currentBootstrap;
+        }
+        string home = Path.Combine(HomeFolder(root), BootstrapFileName);
+        if (SafeFileExists(home)) return home;
+        string legacy = LegacyBootstrapPath(root);
+        return SafeFileExists(legacy) ? legacy : home;
     }
 
     /// <summary>
@@ -305,6 +362,55 @@ internal static class InstallLayout
         if (string.Equals(Normalize(legacy), Normalize(runningPath!), StringComparison.OrdinalIgnoreCase))
             return LegacyBootstrapAction.None;
         return LegacyBootstrapAction.Remove;
+    }
+
+    // ---- releases from before the single-folder layout -----------------------------------------------------------
+
+    /// <summary>
+    /// Refusal for a Progenitor release (or kept copy) whose Core or Bootstrap predates the single-folder layout. Such
+    /// a Bootstrap looks for Core only in <c>BepInEx/progenitor-core/Progenitor.dll</c>, and such a Core keeps its own
+    /// files there, so putting either into this layout would leave the next start without Core (PR #48 review H2).
+    /// </summary>
+    public const string CrossLayoutRefusal =
+        "it predates the single-folder install (BepInEx/plugins/Progenitor) and cannot be installed over it from here; "
+        + "install that release by hand from its release zip";
+
+    /// <summary>
+    /// True when <paramref name="image"/> (a Core or Bootstrap assembly) carries this type,
+    /// <c>Progenitor.SelfUpdate.InstallLayout</c>: every image built with the single-folder layout compiles it in, and
+    /// none built before does. Reads metadata only; nothing is loaded. False for anything unreadable.
+    /// </summary>
+    public static bool KnowsSingleFolder(byte[]? image) => LayoutOf(image) == ImageLayout.SingleFolder;
+
+    /// <summary>
+    /// True only when <paramref name="image"/> is a readable assembly WITHOUT the layout type: proven to predate the
+    /// single-folder layout. Anything unreadable is not proven old (the caller's own checks report it).
+    /// </summary>
+    public static bool PredatesSingleFolder(byte[]? image) => LayoutOf(image) == ImageLayout.Legacy;
+
+    private enum ImageLayout { Unreadable, Legacy, SingleFolder }
+
+    private static ImageLayout LayoutOf(byte[]? image)
+    {
+        if (image == null || image.Length == 0) return ImageLayout.Unreadable;
+        try
+        {
+            using var pe = new PEReader(new MemoryStream(image, writable: false));
+            if (!pe.HasMetadata) return ImageLayout.Unreadable;
+            var md = pe.GetMetadataReader();
+            foreach (var handle in md.TypeDefinitions)
+            {
+                var type = md.GetTypeDefinition(handle);
+                if (md.StringComparer.Equals(type.Name, nameof(InstallLayout))
+                    && md.StringComparer.Equals(type.Namespace, "Progenitor.SelfUpdate"))
+                    return ImageLayout.SingleFolder;
+            }
+            return ImageLayout.Legacy;
+        }
+        catch
+        {
+            return ImageLayout.Unreadable;
+        }
     }
 
     // ---- helpers ------------------------------------------------------------------------------------------------

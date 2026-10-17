@@ -146,6 +146,12 @@ internal static class ClientUninstall
         // Bootstrap placed in patchers.
         foreach (string rel in EnumerateFolder(root, HomeFolder))
             Add(rel);
+        // The running Bootstrap's own folder when it is not the canonical one (a renamed package folder; PR #48 review
+        // L1). Never the plugins root itself: a Bootstrap still there is named by OwnedPluginFileNames alone.
+        string? running = RunningBootstrapFolder(root);
+        if (running != null)
+            foreach (string rel in EnumerateFolder(root, running))
+                Add(rel);
         if (Exists(root, PatchersPreloader)) Add(PatchersPreloader);
 
         // Core (legacy folder), the pending and reload folders, the caches, staging and the hosted images.
@@ -278,6 +284,21 @@ internal static class ClientUninstall
 
     public static string Normalize(string? relative) =>
         (relative ?? "").Trim().Replace('\\', '/').TrimStart('/');
+
+    /// <summary>The running Bootstrap's folder relative to the root, when it is a folder below <c>plugins/</c>; else null.</summary>
+    internal static string? RunningBootstrapFolder(string root)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(Progenitor.SelfUpdate.InstallLayout.BootstrapFile(root));
+            if (string.IsNullOrEmpty(dir)) return null;
+            string? rel = TryRelative(root, dir!);
+            if (rel == null) return null;
+            if (!rel.StartsWith(InstalledState.PluginsFolder + "/", StringComparison.OrdinalIgnoreCase)) return null;
+            return rel;
+        }
+        catch { return null; }
+    }
 
     private static bool Exists(string root, string relative)
     {

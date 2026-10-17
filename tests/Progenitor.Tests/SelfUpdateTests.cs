@@ -96,8 +96,14 @@ public sealed class SelfUpdateTests : IDisposable
         return list;
     });
 
-    internal static byte[] Image(string name, string type, int protocol, string version, string salt = "", string extra = "")
+    /// <summary>
+    /// A synthetic image. <paramref name="singleFolder"/> compiles in <c>Progenitor.SelfUpdate.InstallLayout</c>, the type
+    /// every image built with the single-folder layout carries (<c>InstallLayout.KnowsSingleFolder</c>); false gives an
+    /// image from before it.
+    /// </summary>
+    internal static byte[] Image(string name, string type, int protocol, string version, string salt = "", string extra = "", bool singleFolder = true)
     {
+        if (singleFolder) extra += "\nnamespace Progenitor.SelfUpdate { internal static class InstallLayout { } }\n";
         int dot = type.LastIndexOf('.');
         string source = "[assembly: System.Reflection.AssemblyVersion(\"" + version + "\")]\n"
             + "namespace " + type.Substring(0, dot) + " { public static class " + type.Substring(dot + 1)
@@ -111,11 +117,13 @@ public sealed class SelfUpdateTests : IDisposable
     }
 
     /// <summary>A Core image: its Bootstrap protocol and its handshake protocol (the running one unless given; 0 leaves it out).</summary>
-    internal static byte[] CoreImage(int protocol, string version, string salt = "", int handshake = Progenitor.Networking.Handshake.ProtocolVersion) =>
+    internal static byte[] CoreImage(int protocol, string version, string salt = "", int handshake = Progenitor.Networking.Handshake.ProtocolVersion, bool singleFolder = true) =>
         Image("Progenitor", "Progenitor.BootstrapLink", protocol, version, salt,
-            handshake > 0 ? "namespace Progenitor.Networking { public static class Handshake { public const int ProtocolVersion = " + handshake + "; } }" : "");
+            handshake > 0 ? "namespace Progenitor.Networking { public static class Handshake { public const int ProtocolVersion = " + handshake + "; } }" : "",
+            singleFolder);
 
-    internal static byte[] BootImage(int protocol, string version, string salt = "") => Image("Progenitor.Bootstrap", "Progenitor.Bootstrap.CoreLayout", protocol, version, salt);
+    internal static byte[] BootImage(int protocol, string version, string salt = "", bool singleFolder = true) =>
+        Image("Progenitor.Bootstrap", "Progenitor.Bootstrap.CoreLayout", protocol, version, salt, singleFolder: singleFolder);
 
     internal static byte[] Zip(byte[]? core, byte[]? boot, string version, bool tables = true)
     {

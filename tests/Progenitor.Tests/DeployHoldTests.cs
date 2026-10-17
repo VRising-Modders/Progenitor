@@ -100,6 +100,82 @@ public class DeployHoldTests
         Assert.Contains("ok=True hosting=True child=False gen=7 pending=True", output, StringComparison.Ordinal);
     }
 
+    /// <summary>PR #48 review M3: the running Bootstrap's resolved Core (reload.layout.coreFile) is read; absent means "".</summary>
+    [Theory]
+    [InlineData(",\"layout\":{\"coreFile\":\"C:\\\\G\\\\BepInEx\\\\plugins\\\\Progenitor\\\\progenitor-core\\\\Progenitor.core\"}", @"C:\G\BepInEx\plugins\Progenitor\progenitor-core\Progenitor.core")]
+    [InlineData("", "")]
+    public void Get_CoreStatus_reads_the_running_layout(string layoutJson, string expected)
+    {
+        string? shell = PowerShellExe();
+        if (shell == null) return;
+        string fn = ExtractPowerShellFunction(DeployScript(), "Get-CoreStatus");
+        string script =
+            "function Assert-NotLiveServerPath($p) { }\n" +
+            "function node { $global:LASTEXITCODE = 0; '{\"reload\":{\"generation\":7,\"inFlight\":false,\"previousAlive\":false," +
+            "\"watch\":{\"enabled\":true,\"pendingNext\":false,\"hostingPrivateGame\":false,\"hostedChild\":false,\"parked\":false}" +
+            layoutJson + ",\"lastReload\":{\"gen\":7,\"outcome\":\"ok\",\"reason\":\"\",\"timestamp\":\"\"}}}' }\n" +
+            fn + "\n" +
+            "$st = Get-CoreStatus @{ Name = 'client'; Config = $PSScriptRoot } 3\n" +
+            "\"ok=$($st.Ok) layout=[$($st.LayoutCoreFile)]\"\n";
+        string output = RunPowerShell(shell, script);
+        Assert.Contains("ok=True layout=[" + expected + "]", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>PR #48 review M3: the layout check withholds before the hold is armed, and the .removed marker counts.</summary>
+    [Fact]
+    public void A_running_Bootstrap_on_another_layout_withholds_before_staging()
+    {
+        string s = DeployScript();
+        int layout = s.IndexOf("$before.LayoutCoreFile", StringComparison.Ordinal);
+        int arm = s.IndexOf("$t.HoldPlugins = $true", StringComparison.Ordinal);
+        Assert.True(layout > 0 && arm > layout, "the pre-check must compare reload.layout before arming the hold");
+        Assert.Contains("\"Progenitor.Bootstrap.dll.removed\"", s, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// PR #48 review H1: deploy removes the three-location Core only once the single-folder Bootstrap and Core are both
+    /// in place and the plugins-root Bootstrap is gone. A Core-only deploy into a three-location tree keeps it.
+    /// </summary>
+    [Theory]
+    [InlineData("core-only", "kept", "kept")]
+    [InlineData("full", "gone", "gone")]
+    [InlineData("running-full", "renamed", "kept")]
+    public void Remove_LegacyLayout_never_strands_the_Bootstrap_that_will_run(string scenario, string boot, string core)
+    {
+        string? shell = PowerShellExe();
+        if (shell == null) return;
+        string root = Path.Combine(Path.GetTempPath(), "progenitor-legacy-" + Guid.NewGuid().ToString("N"), "BepInEx");
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string home = Path.Combine(plugins, "Progenitor");
+            string coreDir = Path.Combine(home, "progenitor-core");
+            Directory.CreateDirectory(coreDir);
+            Directory.CreateDirectory(Path.Combine(root, "progenitor-core"));
+            File.WriteAllText(Path.Combine(plugins, "Progenitor.Bootstrap.dll"), "old boot");
+            File.WriteAllText(Path.Combine(root, "progenitor-core", "Progenitor.dll"), "old core");
+            File.WriteAllText(Path.Combine(coreDir, "Progenitor.core"), "new core");
+            if (scenario != "core-only") File.WriteAllText(Path.Combine(home, "Progenitor.Bootstrap.dll"), "new boot");
+            bool running = scenario.StartsWith("running", StringComparison.Ordinal);
+            string script =
+                "$plan = $false\n" +
+                ExtractPowerShellFunction(DeployScript(), "Remove-LegacyLayout") + "\n" +
+                "$t = @{ Name = 'server'; Dir = $args[0]; Home = $args[1]; Core = $args[2]; CoreFile = 'Progenitor.core'; Running = [bool]::Parse($args[3]) }\n" +
+                "Remove-LegacyLayout $t 3>$null\n";
+            RunPowerShell(shell, script, plugins, home, coreDir, running ? "true" : "false");
+
+            string oldBoot = Path.Combine(plugins, "Progenitor.Bootstrap.dll");
+            string bootState = File.Exists(oldBoot) ? "kept" : File.Exists(oldBoot + ".removed") ? "renamed" : "gone";
+            string coreState = File.Exists(Path.Combine(root, "progenitor-core", "Progenitor.dll")) ? "kept" : "gone";
+            Assert.Equal(boot, bootState);
+            Assert.Equal(core, coreState);
+        }
+        finally
+        {
+            try { Directory.Delete(Path.GetDirectoryName(root)!, recursive: true); } catch { /* temp */ }
+        }
+    }
+
     /// <summary>
     /// Job FINJ1: reload.processLifetimePlugins is read, and a deployed DLL the running process keeps
     /// (it registers its own IL2CPP types) is found by file name, case-insensitively.

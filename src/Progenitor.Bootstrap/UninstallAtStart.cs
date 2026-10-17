@@ -137,7 +137,11 @@ internal static class UninstallAtStart
             {
                 // This process is running from it: delete-on-reboot is the only honest answer, and
                 // the file is still on disk either way, so it counts as left rather than deleted.
-                ScheduleDelete(abs);
+                // PR #48 review L6: it is renamed out of the *.dll scan first (a loaded file can be
+                // renamed), so the next start does not load it even when the reboot delete is refused.
+                string aside = abs + ".removed";
+                string scheduled = TryRenameAside(abs) ? aside : abs;
+                ScheduleDelete(scheduled);
                 left++;
                 continue;
             }
@@ -300,15 +304,17 @@ internal static class UninstallAtStart
             && rel.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void TryRenameAside(string path)
+    private static bool TryRenameAside(string path)
     {
         try
         {
+            if (!File.Exists(path)) return false;
             string aside = path + ".removed";
             if (File.Exists(aside)) File.Delete(aside);
             File.Move(path, aside);
+            return true;
         }
-        catch { /* reported as left */ }
+        catch { return false; /* reported as left */ }
     }
 
     private static bool Exists(string path)

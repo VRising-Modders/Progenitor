@@ -42,7 +42,7 @@ internal static class SelfPaths
     public static string CoreDll(string root) => InstallLayout.CoreFile(root);
     public static string CoreNext(string root) => CoreDll(root) + NextSuffix;
     public static string Tables(string root) => InstallLayout.Tables(root);
-    public static string DefaultBootstrap(string root) => Path.Combine(InstallLayout.HomeFolder(root), BootstrapFile);
+    public static string DefaultBootstrap(string root) => InstallLayout.BootstrapFile(root);
 
     /// <summary>A kept release's folder from its path relative to the BepInEx root (as the journal stores it).</summary>
     public static string Absolute(string root, string relative) =>

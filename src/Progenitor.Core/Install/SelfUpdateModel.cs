@@ -490,6 +490,9 @@ internal static class SelfImageReader
         image.BootstrapProtocol = bp;
         image.BootstrapVersion = bv;
         image.HandshakeProtocol = TryReadConstant(image.Core, HandshakeProtocolType, out int hp) ? hp : 0;
+        // PR #48 review H2: a release from before the single-folder layout is never installed over it from here.
+        if (!InstallLayout.KnowsSingleFolder(image.Core) || !InstallLayout.KnowsSingleFolder(image.Bootstrap))
+            image.Error = "Progenitor " + (cv.Length > 0 ? cv : "release") + ": " + InstallLayout.CrossLayoutRefusal;
         return image;
     }
 
@@ -557,6 +560,10 @@ internal static class SelfImageReader
             }
         }
 
+        // PR #48 review H2: a kept copy from before the single-folder layout is never put back from here.
+        if (!InstallLayout.KnowsSingleFolder(image.Core)
+            || (image.Bootstrap.Length > 0 && !InstallLayout.KnowsSingleFolder(image.Bootstrap)))
+            image.Error = "the kept Progenitor " + (image.CoreVersion.Length > 0 ? image.CoreVersion : "copy") + ": " + InstallLayout.CrossLayoutRefusal;
         return image;
     }
 

@@ -184,15 +184,11 @@ public static class Staging
             Progenitor.SelfUpdate.InstallLayout.CoreFile(clientBepInExRoot);
 
         /// <summary>
-        /// The client's Bootstrap: <c>plugins/Progenitor/Progenitor.Bootstrap.dll</c> in the single-folder layout, else
-        /// the legacy <see cref="BootstrapDllPath"/>.
+        /// The client's Bootstrap: the running one's own file (<see cref="Progenitor.SelfUpdate.InstallLayout.BootstrapFile"/>;
+        /// <c>plugins/Progenitor/Progenitor.Bootstrap.dll</c> in the single-folder layout, else the legacy <see cref="BootstrapDllPath"/>).
         /// </summary>
-        public static string ClientBootstrapDllPath(string clientBepInExRoot)
-        {
-            string home = Path.Combine(
-                Progenitor.SelfUpdate.InstallLayout.HomeFolder(clientBepInExRoot), BootstrapDllName);
-            return File.Exists(home) ? home : BootstrapDllPath(clientBepInExRoot);
-        }
+        public static string ClientBootstrapDllPath(string clientBepInExRoot) =>
+            Progenitor.SelfUpdate.InstallLayout.BootstrapFile(clientBepInExRoot);
 
         /// <summary>Child (or client) path of a leftover <c>plugins/Progenitor.dll</c>.</summary>
         public static string StalePluginsCoreDllPath(string bepInExRoot)

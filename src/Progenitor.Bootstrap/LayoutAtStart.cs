@@ -62,6 +62,9 @@ internal static class LayoutAtStart
     {
         ok = true;
         string legacy = InstallLayout.LegacyBootstrapPath(bepInExRoot);
+        // A legacy Bootstrap renamed aside earlier (tools/deploy.ps1 renames a running one; it is the marker
+        // that says the restart has not happened yet). This process does not run from it, so it goes now.
+        if (!hostedChild && File.Exists(legacy + RemovedSuffix)) TryDelete(legacy + RemovedSuffix);
         var action = InstallLayout.DecideLegacyBootstrap(bepInExRoot, runningPath, File.Exists(legacy), hostedChild);
         if (action != InstallLayout.LegacyBootstrapAction.Remove) return null;
 

@@ -89,7 +89,17 @@ Progenitor itself is one folder, `BepInEx/plugins/Progenitor/` (the single-folde
 
 Core and the shipped preloader are deliberately not `.dll` files there: BepInEx scans `plugins/` recursively for `*.dll`, and its fallback resolver would load a `Progenitor.dll` found under `plugins/` into the default context under Core's name. Where Core is resolved from, and the legacy fallbacks, are in [hot-reload.md](hot-reload.md#where-core-lives).
 
-**Three-location trees.** A tree deployed before the single-folder layout has `plugins/Progenitor.Bootstrap.dll` and `BepInEx/progenitor-core/`. Deploy writes the single-folder copies, then removes the old Bootstrap and the old Core images (`Progenitor.dll`, `.next`, `.prev`) from a stopped side. On a running side it renames the old Bootstrap to `Progenitor.Bootstrap.dll.removed` and withholds the plugins: that process still loads Core from the old folder, so no swap can follow. Restart it. A Bootstrap that finds an old plugins-root Bootstrap at start deletes it itself, and logs the old `progenitor-core` folder as ignored.
+**Three-location trees.** A tree deployed before the single-folder layout has `plugins/Progenitor.Bootstrap.dll` and `BepInEx/progenitor-core/`. Deploy writes the single-folder copies, then removes the old Bootstrap from a stopped side, and the old Core images (`Progenitor.dll`, `.next`, `.prev`) only once the single-folder Bootstrap and Core are both in place and the old Bootstrap is gone. A Core-only deploy into a three-location tree therefore keeps the old Core and warns: deploy `Progenitor.Bootstrap` with it to move that side. On a running side it renames the old Bootstrap to `Progenitor.Bootstrap.dll.removed` and withholds the plugins: that process still loads Core from the old folder, so no swap can follow. Restart it. The `.removed` marker, and the running Bootstrap's own `reload.layout.coreFile` in `ping` (absent on a Bootstrap from before this layout), keep a second deploy before that restart from staging a `.core.next` nobody watches. A Bootstrap that finds an old plugins-root Bootstrap (or its `.removed` marker) at start deletes it itself, and logs the old `progenitor-core` folder as ignored (`Layout: Core loads from ...; the old folder ... is ignored and can be deleted.`).
+
+**Live upgrade tests need a higher Bootstrap version.** BepInEx keeps the higher of two plugins with the same GUID, compares only the first three version parts, and on a tie keeps the first file it finds, which is the plugins-root (old) one. A branch build (`2026.10.12.3`) ties with the `2026.10.12` it is tested against, so the old Bootstrap would win. Build the single-folder Bootstrap with an explicit higher three-part version and deploy that build without rebuilding:
+
+```
+dotnet build src/Progenitor.Bootstrap -p:ProgenitorVersion=2026.10.999
+dotnet build src/Progenitor.Core -p:ProgenitorVersion=2026.10.999
+&./tools/deploy.ps1 -NoBuild -Projects Progenitor.Bootstrap,Progenitor.Core -Side server
+```
+
+(Debug, the configuration deploy ships. Pick any version above the old tree's Bootstrap; `BepInEx/LogOutput.log` shows `Skipping [Progenitor Bootstrap <old>] because a newer version exists` when it worked.) A release is always newer than the release before it, so players never meet the tie.
 
 Deploy stages Bootstrap and Core as `.next` when their target process is running and the live file exists (a first copy into a tree is written in place). Bootstrap promotes a staged Core before its first load and before a requested Core swap. Bootstrap's own staged DLL takes effect on the next launch. The test-server and client launch scripts also promote staged files before launch, covering forced exits that skipped quit handlers.
 

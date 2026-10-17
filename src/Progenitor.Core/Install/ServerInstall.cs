@@ -28,11 +28,10 @@ internal sealed class ServerInstallSource
     /// </summary>
     public static ServerInstallSource FromClientRoot(string clientBepInExRoot, string version)
     {
-        string home = Path.Combine(
-            Progenitor.SelfUpdate.InstallLayout.HomeFolder(clientBepInExRoot),
-            Progenitor.SelfUpdate.InstallLayout.BootstrapFileName);
-        string bootstrap = File.Exists(home) ? home : Hosted.Staging.Layout.BootstrapDllPath(clientBepInExRoot);
-        return new(bootstrap, Progenitor.SelfUpdate.InstallLayout.CoreFile(clientBepInExRoot), version);
+        return new(
+            Progenitor.SelfUpdate.InstallLayout.BootstrapFile(clientBepInExRoot),
+            Progenitor.SelfUpdate.InstallLayout.CoreFile(clientBepInExRoot),
+            version);
     }
 
     /// <summary>The running client's image, or null when BepInEx paths are unavailable (tests, no Bootstrap).</summary>
@@ -374,10 +373,6 @@ internal static class ServerInstall
         }
 
         var previous = status.Ledger;
-        // An install from the three-location layout: its framework files at the old paths are ours (the ledger says
-        // so and the bytes still match), and leaving them would give the server two Bootstraps and two Cores.
-        if (previous != null)
-            RemoveMovedFramework(root, previous);
         var entries = new List<ServerInstallLedgerEntry>();
         if (previous != null)
         {
@@ -400,6 +395,12 @@ internal static class ServerInstall
             RollBack(written);
             return ServerInstallResult.Refuse(RefusalUnwritable + " " + e.Message);
         }
+
+        // An install from the three-location layout: its framework files at the old paths are ours (the old ledger
+        // says so and the bytes still match), and leaving them would give the server two Bootstraps and two Cores.
+        // Only after the new ledger is on disk (PR #48 review M5): a failed write rolls back to the old install intact.
+        if (previous != null)
+            RemoveMovedFramework(root, previous);
 
         var rel = new List<string> { BootstrapRelative, CoreRelative };
         return new ServerInstallResult(true, InstalledStatus(source.Version), rel, Array.Empty<string>());
