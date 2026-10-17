@@ -11,6 +11,7 @@ These rules apply to every AI coding agent working on Progenitor. Read [CLAUDE.m
 - Server code must not branch on dedicated versus client-hosted deployment.
 - Do not commit, push, open or merge pull requests, publish releases or change repository settings unless the person you work for asks. Preserve other contributors' edits.
 - Follow [documentation rules](docs/documentation.md): concise current guidance, buildable examples, exact steps and honest verification labels. Research, evidence, logs, native output, spike reports and review or history narratives stay outside this repository.
+- A PR that adds, changes or removes a user-facing feature (player, admin or mod author) updates the [help guide](docs/guide/progenitor-guide.html) in the same PR: Getting Started for basics only, the reference chapters for full how-to and settings ([rule](docs/documentation.md#keep-the-help-guide-current)).
 
 Before starting work in an area, search the [knowledge notes](knowledge/README.md) (`node tools/kb/kb.mjs search <words>` or `progenitor_kb_search`). When work hits a trap that cost real time and the fix was observed in the game, add a note in the same pull request; the bar and format are in that README. When delegating, put the same instruction in the worker's prompt.
 
