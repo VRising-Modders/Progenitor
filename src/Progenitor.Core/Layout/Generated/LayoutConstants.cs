@@ -1432,7 +1432,7 @@ public static class Layout
     /// <summary>Enum value <c>ServantCoffinState.Reviving</c> (server metadata).</summary>
     public const int ServantCoffinStateReviving = 9;
 
-    /// <summary>Field offset of <c>ServantPower.GearLevel</c> (server metadata).</summary>
+    /// <summary>Field offset of <c>ServantPower.GearLevel</c> (server metadata). float; the success cap writes it for one update and restores it.</summary>
     public const int ServantPowerGearLevelOffset = 0x0;
 
     /// <summary>Field offset of <c>ServantPower.Expertise</c> (server metadata).</summary>

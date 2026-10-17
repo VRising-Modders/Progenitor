@@ -123,13 +123,13 @@ internal static class ServantChanceLogic
     /// <paramref name="returned"/> with the chance read for <paramref name="rowServant"/> (the
     /// servant the hunt row named) before the roll; unchanged when none was read.
     /// </summary>
-    internal static ReturnedServant WithRoll(ReturnedServant returned, CastleId rowServant, IReadOnlyList<ServantChance>? chances)
+    internal static ReturnedServant WithRoll(ReturnedServant returned, CastleId rowServant, IReadOnlyList<ServantChance>? chances, bool forced = false)
     {
         ServantChance? chance = null;
         if (chances != null)
             foreach (var c in chances)
                 if (c.Servant == rowServant) { chance = c; break; }
-        if (chance == null) return returned;
+        if (chance == null && !forced) return returned;
         return new ReturnedServant
         {
             Servant = returned.Servant,
@@ -141,6 +141,7 @@ internal static class ServantChanceLogic
             Loot = returned.Loot,
             LootIsHaul = returned.LootIsHaul,
             Chance = chance,
+            CapForcedFailure = forced,
         };
     }
 

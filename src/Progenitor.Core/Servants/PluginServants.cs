@@ -55,6 +55,8 @@ public sealed class PluginServants
     public ServantSendResult Send(ServantSendRequest request)
     {
         if (request == null) throw new ArgumentNullException(nameof(request));
+        if (!ServantCapMath.IsValidCap(request.MaxSuccess))
+            throw new ArgumentOutOfRangeException(nameof(request), "ServantSendRequest.MaxSuccess must be null or between 0 and 1");
         return ServantRuntime.Send(World(nameof(Send)), request, _ctx.Guid);
     }
 
@@ -90,6 +92,29 @@ public sealed class PluginServants
     {
         if (returned == null) throw new ArgumentNullException(nameof(returned));
         return ServantRuntime.Resend(World(nameof(Resend)), returned, _ctx.Guid);
+    }
+
+    /// <summary>
+    /// <see cref="Resend(ServantsReturned)"/> with a success cap on the new hunt
+    /// (<see cref="ServantSendRequest.MaxSuccess"/>, 0..1; null for none). <b>A capped hunt can kill
+    /// a servant the game would have brought home; that is the intended trade-off.</b>
+    /// Experimental, not live-verified.
+    /// </summary>
+    public ServantSendResult Resend(ServantsReturned returned, float? maxSuccess)
+    {
+        if (returned == null) throw new ArgumentNullException(nameof(returned));
+        if (!ServantCapMath.IsValidCap(maxSuccess)) throw new ArgumentOutOfRangeException(nameof(maxSuccess), "maxSuccess must be null or between 0 and 1");
+        return ServantRuntime.Resend(World(nameof(Resend)), returned, _ctx.Guid, maxSuccess);
+    }
+
+    /// <summary>The success cap's state in this server process: book loaded, caps, forced failures, restores (late ones are errors).</summary>
+    public ServantCapStatus CapStatus
+    {
+        get
+        {
+            World(nameof(CapStatus));
+            return ServantRuntime.CapStatus();
+        }
     }
 
     /// <summary>

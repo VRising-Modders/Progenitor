@@ -23,10 +23,11 @@ internal static class ServantArgs
         Timers,
         Empty,
         Chance,
+        Caps,
     }
 
     /// <summary>The actions the op accepts.</summary>
-    internal const string Actions = "list, zones, send, finish, timers, empty, chance";
+    internal const string Actions = "list, zones, send, finish, timers, empty, chance, caps";
 
     /// <summary>One parsed request.</summary>
     internal sealed record Request(
@@ -43,7 +44,8 @@ internal static class ServantArgs
         CastleId User,
         bool CheckDiscovered,
         CastleId To = default,
-        bool Discard = false);
+        bool Discard = false,
+        float? MaxSuccess = null);
 
     /// <summary>
     /// Parse the op's args. <c>action</c> (default <c>list</c>). Every action except
@@ -53,6 +55,8 @@ internal static class ServantArgs
     /// <c>index:version</c>; omitted: the free servants), <c>mission</c> (GUID hash) or <c>zone</c>
     /// (<c>x,y#zone</c>), at most one (neither: a zone is picked), <c>slot</c> (default 0),
     /// <c>user</c> (whose discovery is checked), <c>checkDiscovered</c> (default true).
+    /// <c>send</c> and <c>chance</c> also take <c>maxSuccess</c> (0..1, the success cap; on
+    /// <c>chance</c> a preview only). <c>caps</c>: the success cap's status, no castle.
     /// <c>chance</c>: the same arguments as <c>send</c>; reports each servant's success chance and
     /// whether the send would be accepted, writes nothing.
     /// <c>finish</c>: <c>mission</c> (optional), <c>method</c> <c>timers</c> (default) or <c>row</c>.
@@ -75,9 +79,12 @@ internal static class ServantArgs
             "timers" => Action.Timers,
             "empty" => Action.Empty,
             "chance" => Action.Chance,
+            "caps" => Action.Caps,
             _ => throw new ArgumentException("unknown action '" + name + "' (" + Actions + ")"),
         };
 
+        if (action == Action.Caps)
+            return new Request(action, null, null, null, 0, null, 0, null, true, false, CastleId.None, true);
         if (action == Action.Timers)
             return new Request(action, null, null, null, 0, null, 0, Bool(args, "off"), true, false, CastleId.None, true);
 
@@ -107,7 +114,9 @@ internal static class ServantArgs
                 if (slot < 0) throw new ArgumentException("args.slot must be >= 0");
                 var servants = ServantList(args);
                 bool check = Bool(args, "checkDiscovered") ?? true;
-                return new Request(action, heart, territory, servants, mission, zone, slot, null, true, false, user, check);
+                float? cap = Float(args, "maxSuccess");
+                if (cap != null && !(cap.Value >= 0f && cap.Value <= 1f)) throw new ArgumentException("args.maxSuccess must be between 0 and 1");
+                return new Request(action, heart, territory, servants, mission, zone, slot, null, true, false, user, check, MaxSuccess: cap);
             }
             case Action.Finish:
             {
@@ -299,6 +308,13 @@ internal static class ServantArgs
         if (!a.TryGetProperty(k, out var v) || v.ValueKind == JsonValueKind.Null) return null;
         if (v.ValueKind != JsonValueKind.Number || !v.TryGetInt32(out int n)) throw new ArgumentException("args." + k + " must be an integer");
         return n;
+    }
+
+    private static float? Float(JsonElement a, string k)
+    {
+        if (!a.TryGetProperty(k, out var v) || v.ValueKind == JsonValueKind.Null) return null;
+        if (v.ValueKind != JsonValueKind.Number || !v.TryGetDouble(out double d)) throw new ArgumentException("args." + k + " must be a number");
+        return (float)d;
     }
 
     private static bool? Bool(JsonElement a, string k)

@@ -21,6 +21,23 @@ internal static class ServantOps
         if (!Progenitor.Plugin.IsServerProcess)
             throw new InvalidOperationException("servants runs on the server (hunts are server-authoritative); send it to the server bridge (27342)");
         var req = ServantArgs.Parse(args);
+        if (req.Action == ServantArgs.Action.Caps)
+        {
+            var c = ServantBridge.CapStatus();
+            return new
+            {
+                action = "caps",
+                ready = c.Ready,
+                caps = c.Caps,
+                forcedFailures = c.ForcedFailures,
+                restores = c.Restores,
+                lateRestores = c.LateRestores,
+                outstanding = c.Outstanding,
+                held = c.Held,
+                releasedUncapped = c.ReleasedUncapped,
+                note = "lateRestores must stay 0 and outstanding 0 outside an update; every cap write and restore is in the log (servants: cap … / servants: restored …)",
+            };
+        }
         if (req.Action == ServantArgs.Action.Timers)
         {
             var st = req.TimersOff == null ? ServantBridge.Timers() : ServantBridge.SetTimers(req.TimersOff.Value);
@@ -122,6 +139,7 @@ internal static class ServantOps
                 DataSlot = req.Slot,
                 User = req.User,
                 CheckDiscovered = req.CheckDiscovered,
+                MaxSuccess = req.MaxSuccess,
             });
             return new
             {
@@ -149,6 +167,7 @@ internal static class ServantOps
             DataSlot = req.Slot,
             User = req.User,
             CheckDiscovered = req.CheckDiscovered,
+            MaxSuccess = req.MaxSuccess,
         });
         var sent = new List<string>();
         foreach (var s in result.Servants) sent.Add(s.ToString());
@@ -170,6 +189,7 @@ internal static class ServantOps
             servants = sent,
             buffApplied = result.Ok ? result.BuffApplied : (bool?)null,
             announced = result.Ok ? result.Announced : (bool?)null,
+            maxSuccess = result.Ok ? result.MaxSuccess : null,
             chances = result.Ok ? ChanceRows(result.Chances) : null,
         };
     }
@@ -278,6 +298,7 @@ internal static class ServantOps
             endsUtc = Utc(m.EndsUtc),
             secondsLeft = Math.Round(left, 1),
             servants,
+            maxSuccess = m.MaxSuccess,
             chances = ChanceRows(m.Chances),
         };
     }

@@ -64,6 +64,13 @@ public static class ServantBridge
         return ServantRuntime.Send(ServantRuntime.RequireWorld("Send"), request, By);
     }
 
+    /// <summary><c>ctx.Servants.CapStatus</c>.</summary>
+    public static ServantCapStatus CapStatus()
+    {
+        ServantRuntime.RequireWorld("CapStatus");
+        return ServantRuntime.CapStatus();
+    }
+
     /// <summary><c>ctx.Servants.Chance</c>: a prospective send's chances, no writes.</summary>
     public static ServantChanceResult Chance(ServantChanceRequest request)
     {

@@ -190,6 +190,12 @@ public sealed class ServantMission
     /// </summary>
     public IReadOnlyList<ServantChance> Chances { get; init; } = Array.Empty<ServantChance>();
 
+    /// <summary>
+    /// The success cap a Progenitor send set on this hunt (<see cref="ServantSendRequest.MaxSuccess"/>),
+    /// null when the hunt is vanilla (or the cap book is not loaded yet).
+    /// </summary>
+    public float? MaxSuccess { get; init; }
+
     /// <summary>The world-load epoch the ids were read in.</summary>
     public int Epoch { get; init; }
 }
@@ -213,7 +219,8 @@ public sealed class ServantChance
     public float Vanilla { get; init; }
 
     /// <summary>
-    /// The success cap on this hunt, null when no cap is applied (the game's chance stands).
+    /// The success cap on this hunt (<see cref="ServantSendRequest.MaxSuccess"/>), null when no cap
+    /// is applied (the game's chance stands).
     /// </summary>
     public float? MaxSuccess { get; init; }
 
@@ -384,6 +391,47 @@ public sealed class ReturnedServant
     /// not be read, or when the return was due before anything subscribed.
     /// </summary>
     public ServantChance? Chance { get; init; }
+
+    /// <summary>
+    /// True when the hunt's success cap decided this servant's roll: Progenitor forced the game's
+    /// roll to fail (<see cref="ServantSendRequest.MaxSuccess"/>). The servant then failed the
+    /// game's way (<see cref="Outcome"/> is <see cref="ServantOutcome.Dead"/>, except with a chance
+    /// of about one in eight million that the game's roll passes anyway).
+    /// </summary>
+    public bool CapForcedFailure { get; init; }
+}
+
+/// <summary>The success cap's state in this server process (<c>ctx.Servants.CapStatus</c>).</summary>
+public sealed class ServantCapStatus
+{
+    /// <summary>True once the cap book is loaded from the server store (caps are enforced).</summary>
+    public bool Ready { get; init; }
+
+    /// <summary>Capped hunts in the book.</summary>
+    public int Caps { get; init; }
+
+    /// <summary>Rolls the cap forced to fail since Core loaded.</summary>
+    public long ForcedFailures { get; init; }
+
+    /// <summary>Temporary writes undone since Core loaded.</summary>
+    public long Restores { get; init; }
+
+    /// <summary>Of those, undone later than the update's own after-hook (each one is logged as an error).</summary>
+    public long LateRestores { get; init; }
+
+    /// <summary>Temporary writes outstanding now (0 outside the update).</summary>
+    public int Outstanding { get; init; }
+
+    /// <summary>Rows held while the book was not readable, and rows released uncapped after the hold timed out.</summary>
+    public long Held { get; init; }
+
+    /// <inheritdoc cref="Held"/>
+    public long ReleasedUncapped { get; init; }
+
+    /// <summary>One line for logs.</summary>
+    public override string ToString() =>
+        "servant caps: ready=" + Ready + " caps=" + Caps + " forced=" + ForcedFailures + " restores=" + Restores
+        + " late=" + LateRestores + " outstanding=" + Outstanding + " held=" + Held + " releasedUncapped=" + ReleasedUncapped;
 }
 
 /// <summary>
@@ -548,6 +596,19 @@ public sealed class ServantSendRequest
     /// as the throne's own send does (default true). Clients show it as a chat line.
     /// </summary>
     public bool Announce { get; init; } = true;
+
+    /// <summary>
+    /// A cap on each servant's success chance for this hunt, 0..1; null (the default) leaves the
+    /// game's chance. When a servant's chance is above the cap, Progenitor makes the game's own roll
+    /// fail with probability <c>1 - cap / chance</c> at the return, so the servant succeeds with
+    /// probability exactly <c>cap</c>. A forced failure is the game's own failure: the servant dies
+    /// (revivable at its coffin), brings no loot, and allied players get the game's "was killed"
+    /// line. <b>A capped hunt can kill a servant the game would have brought home; that is the
+    /// intended trade-off.</b> A cap at or above the chance changes nothing. The cap is kept in
+    /// Progenitor's server store, so it holds across a restart and a Core swap. Experimental, not
+    /// live-verified (<c>docs/modules.md</c>, Servants, Success cap).
+    /// </summary>
+    public float? MaxSuccess { get; init; }
 }
 
 /// <summary>What a send did.</summary>
@@ -593,6 +654,9 @@ public sealed class ServantSendResult
 
     /// <summary>Each servant's success chance at the send, in <see cref="Servants"/> order (empty when unreadable).</summary>
     public IReadOnlyList<ServantChance> Chances { get; init; } = Array.Empty<ServantChance>();
+
+    /// <summary>The success cap recorded for the hunt (<see cref="ServantSendRequest.MaxSuccess"/>), null when none.</summary>
+    public float? MaxSuccess { get; init; }
 
     /// <summary>True when the "Hunt in X started." notice was raised to at least one allied user.</summary>
     public bool Announced { get; init; }
