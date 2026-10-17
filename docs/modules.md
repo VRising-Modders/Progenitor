@@ -2614,6 +2614,135 @@ server, standing next to a chest.
 6. Clean up: remove `Progenitor.PanelsExample` from the client's reload folder and confirm the clean
    unload in the log.
 
+### Container preview
+
+`ctx.Inventory.Preview` (client) opens **the game's own container window** for a chest or brazier somewhere
+else in the world, read-only, for the castle's owner and clan: a Find window docks on the left, where the
+player's bag panel normally sits, and the real container window shows the chest on the right, as if the
+player had opened it at the chest. **Experimental: source-checked, built against the installed game and
+game-free tested (`ContainerPreviewTests`); not live-verified.** The experiments below are open.
+
+```csharp
+// Client: preview a chest the server told us about (a ContainerId from a Find result, for example).
+_preview = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true });
+_preview.Closed += closed =>
+{
+    CloseMyFindWindow();                                   // or keep it; Esc closed only the container
+    if (closed.Reason == ContainerPreviewCloseReason.Refused) ShowNote(closed.Message);
+};
+returnButton.OnClick(() => _preview.Dispose());
+```
+
+**Who may preview what (server, Core-owned).** The request names a `ContainerId`. The server answers yes
+only when every check passes, in this order, and otherwise replies with the sentence in
+`IContainerPreview.Reason`: the user is connected; at most 30 opens a minute; the id parses and names a live
+container; it has an inventory and **no menu of its own** (not a castle heart, a crafting, refining,
+research or salvage station, a vermin nest or tomb, a prison, a servant coffin or a servant: chests and
+braziers pass); it is connected to a castle heart; and the user is that castle's **owner or a member of the
+owner's clan** (`ctx.Castles.RelationTo` `Owner` / `ClanMember`). Allies and strangers are refused. No mod
+can widen the rule. Once a preview runs, the server re-checks existence and access every second and ends it
+when either fails.
+
+**Read-only is the game's rule, not Progenitor's.** Every item event the container window can send (move,
+shift-click, split, take all, smart merge, sort, drop, equip, rename, the brazier's burn toggle) is refused
+on the server unless the sender's character holds an interaction with that container. A preview never
+grants one, so nothing in the container can change, whatever a modified client sends. Castle-wide crafting
+and building from chests is unrelated and unchanged; a player who walks up and opens the same chest gets
+the ordinary window with its ordinary rights.
+
+**What happens, step by step.**
+
+1. `Open` sends the request (`Requesting`). No answer in 8 s closes with `NoAnswer`.
+2. The server holds the user's **streaming origin** at the chest, the same lease `ctx.Camera.Observe` uses,
+   so the chest and its inventory stream to the client (`Waiting`). The lease is shared: a camera preview
+   of the same chest (within 0.5 m) and the container preview hold one lease, each with its own deadline;
+   a lease at another point refuses the request ("Another view is already streaming for you").
+3. When the chest entity and its inventory entity exist on the client (looked up by network id every
+   0.1 s, at most `ReplicationTimeoutSeconds`), and no other game menu is open, the client writes the
+   game's own open request: an init entity carrying `ContainerMenu.InitData {TargetContainer, InteractBuff =
+   Entity.Null}` and an `OpenMenuEvent {Menu = ContainerMenu}`, raw at layout offsets, the way the build
+   menu opener does. With no interaction behind it, closing the window sends no stop-interacting event.
+4. The game's interact HUD closes an interact menu that has no interaction behind it every frame. While the
+   preview owns the window, and only while the window is the container window showing this chest with no
+   interaction behind it and the game has no pending menu request of the local character's, a
+   `SystemHooks.Before<InteractSystemHUD>` skips that system. Interact prompts do not update meanwhile;
+   a menu is open, so input is captured anyway.
+5. Once the window shows (`Open`), the take-all, sort, rename and burn-toggle buttons are hidden with a
+   CanvasGroup (alpha 0, no raycasts) so the window's layout keeps its spacing, and with
+   `HidePlayerInventory` the bag panel too. Everything is put back on close.
+6. With `DropItemEvents` (default), a `Before<SerializeAndSendClientEventsSystem>` drops this client's item
+   events that name the previewed chest or its inventory before they are sent, so a drag snaps back
+   instead of failing on the server. A courtesy only; the server refusal above is the guarantee.
+
+`KeepOpen` previews renew the server lease every 60 s for 180 s, so a client that goes away without saying
+so is let go within three minutes. A timed preview asks for `Seconds` (default 30, at most 600) and closes on
+both sides at that time. One preview runs at a time per client; a new `Open` closes the running one.
+
+**When a preview closes.** `Closed` is raised once on the main thread with the reason, except on unload.
+
+| Reason | When |
+|---|---|
+| `Disposed` | The caller disposed it. |
+| `Escape` | The player pressed Escape and nothing above the preview takes it: a framework dialog or open dropdown, a key capture and the focused chat box each come first. The container window is a game menu, but the preview owns it, so Escape closes it. (The game's own Escape on that menu may close the window first; that reads as `WindowClosed`. E4 records which.) |
+| `WindowClosed` | The game closed the window or opened another menu over it (a real interaction, its own Escape). |
+| `Refused` | The server said no; `Reason` is its sentence. |
+| `NoAnswer` | No answer in 8 s (an older server, or no Progenitor on it). |
+| `ReplicationTimeout` | The chest or its inventory did not reach the client in time. |
+| `OpenFailed` | The window did not appear within 2 s of the open, or another game menu stayed open. |
+| `Timeout` | A timed preview's `Seconds` ran out. |
+| `LeaseEnded` | The server let go: the player moved more than 10 m from where they stood, the time ran out, access changed, the chest is gone, another view took the streaming origin, or the character changed. |
+| `TargetGone` | The chest entity left the client while the window was open. A `Before<ContainerMenuMapper>` skip keeps the game's mapper from reading the destroyed entity for that frame. |
+| `WorldChanged` | Disconnect, leaving, or a new client world. |
+| `Replaced` | A newer preview on this client. |
+| `Failed` | A game read or write threw; the preview closed rather than leave a half-open window. |
+| `Unloaded` | The calling plugin or Core unloaded. `Closed` is not raised. |
+
+Closing calls the game's `HUDMenuManager.CloseMenu(world)` only while the open menu is still the container
+window on this chest (or not bound yet) with no interaction behind it, so a menu the player opened for real
+is left alone. Every hook exists only from the open until the close.
+
+**Not in scope.** Stations, refiners and servant coffins (other menus); a fake interaction buff or the
+game's per-user always-sync buffer (each would need its own opt-in experiment); docking the Find window itself
+(`panel.Dock(UiDock.Left, …)`, [ui.md](ui.md#docked-panels-dock1)).
+
+**Live plan (not run).** On the isolated test server and an idle test client, with the client in a castle
+the test character owns, a second castle chest more than 100 m away (outside ordinary streaming), one chest
+upstairs, a brazier, and a clan member's and an ally's castle for the refusals. Read container ids with the
+Sample's `.items chests` / `.items id <c>` on the server (then remove the Sample again). The bridge op is
+`container_preview` (MCP `progenitor_container_preview`); `status` with `side: "server"` shows the server half
+and the shared lease.
+
+- **E1 relevance.** `open {"id":"c-…","keepOpen":true}` for the far chest. Within the replication timeout,
+  client `status` shows `phase` `Opening` or `Open` with a `target` and an `inventory` entity; server status
+  shows the preview and a lease with 1 holder at the chest's point. With `progenitor_components` on the
+  client inventory entity, `InventoryBuffer` is present; put a weapon in that chest first and confirm its
+  item entity exists on the client. Repeat for the upstairs chest. If the inventory never arrives
+  (`ReplicationTimeout` with "The container's inventory did not arrive."), stop: the option needs the
+  always-sync experiment instead.
+- **E2 open and hold.** First `open {"id":"c-…","hudGate":false}`: the open is written but the interact-HUD
+  skip is off, so the game should close the window at once (`closeReason` `WindowClosed` or `OpenFailed`;
+  expected per the research, not yet observed). Then a normal open: the window appears filled
+  (`progenitor_capture`), `status` shows `menu` 3 with `mapperTarget` equal to `target` and
+  `mapperInteractBuff` `0:0`, and it stays open for its 30 s.
+- **E3 read-only.** Read the chest on the server first (`.items slots c-…`). With `dropEvents: false`, try a
+  drag into the bag, a shift-click, a split, take all, sort, rename and, on the brazier, the burn toggle
+  (real input: take focus briefly). Read the chest again: identical; the server log shows no item change.
+  Then with `dropEvents: true`: `status` `droppedEvents` counts the attempts and nothing leaves the client.
+- **E4 exits.** One open each, closed by: Escape (`closeReason` `Escape` or `WindowClosed`), `close`
+  (`Disposed`), a timed preview with `seconds: 10` (`Timeout`), walking more than 10 m (`LeaseEnded`), the
+  chest destroyed on the server (`TargetGone` or `LeaseEnded`), a Core hot reload (`Unloaded`; the window
+  closes), and disconnect (`WorldChanged`). After each: the window is closed, `status` shows `hooks` false,
+  server status shows no preview and no lease (the user's streaming origin restored), the client log has no
+  stop-interacting send and no mapper exception. Then a camera preview and a container preview of the same
+  chest: server status shows one lease with 2 holders, and ending one leaves the other streaming.
+- **E5 controller and bag.** With a gamepad, cycle focus in the window with the bag hidden by CanvasGroup
+  (default), then `bag {"mode":"inactive"}` and a new open: record where focus lands in each and whether the
+  container's layout moves. Switching focus between a docked Find panel and the container is a `ctx.Keybinds` bind of
+  the mod that docks it, not of this API.
+
+Afterwards: close any preview, disconnect to the title screen, and remove every sample deployed for the
+batch from both reload folders.
+
 ### Online player positions
 
 `ctx.Players.OnlinePositions()` returns a `PlayerPosition` (directory row plus `X`, `Y`, `Z`) for
@@ -5390,6 +5519,15 @@ Escape reaches the framework through Bootstrap's forwarding, which a preview kee
 | `Replaced` | A newer `Observe` for the same user. |
 | `Failed` | A game read or write failed. Ordinary visibility is restored. |
 | `Unloaded` | The plugin or Core unloaded, or the server world went away. `Ended` is not called. |
+
+**One streaming origin per user, shared.** The game streams one extra spot per user, so the lease belongs to the
+user, not to a plugin. A second holder at the same target (within 0.5 m), another plugin's `Observe` or Core's
+[container preview](#container-preview), joins the running lease instead of failing; each holder keeps its own
+deadline, `Renew` and `Hold`, ends on its own `Dispose` or expiry, and the user's origin is restored only when the
+last holder leaves. The safety ends (disconnect, the character gone or moving more than 10 m, another writer of the
+origin) end every holder with that reason. A holder at another point is refused: `Observe` throws "Another view
+already owns this user's streaming origin." The lease is Core-owned, so one holder's plugin unloading leaves the
+others streaming. Sharing is game-free tested (`ContainerPreviewTests`), not live-verified.
 
 Pair the two ends: when the client preview ends, tell the server so it disposes the lease. If that message is lost (the client plugin unloaded, for example), the lease still ends on disconnect, when the player walks away, or at its deadline, at most ten minutes later.
 

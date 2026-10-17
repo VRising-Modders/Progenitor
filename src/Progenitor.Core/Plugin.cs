@@ -137,6 +137,10 @@ public sealed class Plugin
         // InventorySortUsed: client only; a Before hook on the client's event sender.
         try { Inventory.InventorySortRuntime.Install(); }
         catch (Exception e) { Logger?.LogWarning($"InventorySort.Install: {e.Message}"); }
+        // Container preview (ctx.Inventory.Preview): the Core-owned 'PrCp' channel. Server: authorization and the
+        // shared streaming lease; client: the container window, with its hooks only while a preview owns it.
+        try { Inventory.ContainerPreviewServer.Install(); Inventory.ContainerPreviewClient.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Install: {e.Message}"); }
         // ctx.Servants: hunt returns, sends and the experimental throne list hook. Server only;
         // SystemHooks on three servant systems and one Plugin.Frame handler.
         try { Servants.ServantRuntime.Install(); }
@@ -466,6 +470,11 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"Inventory.Uninstall: {e.Message}"); }
         try { Inventory.InventorySortRuntime.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"InventorySort.Uninstall: {e.Message}"); }
+        try { Inventory.ContainerPreviewClient.Uninstall(); Inventory.ContainerPreviewServer.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Uninstall: {e.Message}"); }
+        // Any shared streaming-origin lease still running (plugins end their own on unload): restore the users' origins.
+        try { Cameras.SharedObservation.EndAll(); }
+        catch (Exception e) { Logger?.LogWarning($"SharedObservation.EndAll: {e.Message}"); }
         try { Castles.Castles.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"Castles.Uninstall: {e.Message}"); }
         // Abilities: the no-cooldowns Plugin.Frame handler and its hold table.

@@ -888,6 +888,21 @@ server.tool("progenitor_locate", "Client only. ctx.Hud.Locate pings through the 
   },
   async (args) => { try { return text(await bridge("client", "locate", args)); } catch (e) { return fail(e); } });
 
+server.tool("progenitor_container_preview", "ctx.Inventory.Preview through the Dev bridge: the game's own container window for a chest or brazier somewhere else, read-only, owner or clan only (experiments E1-E5 in docs/modules.md, Container preview). status (default, either side): on the client the running preview (state, phase, closeReason, reason, networkId, client target and inventory entities, hooks, hiddenUi, droppedEvents) plus the open HUD menu (3 = container window), mapperTarget and mapperInteractBuff; on the server every server-side preview (user, container, entity, secondsLeft, leaseHolders) and every shared streaming lease (user, point, holders). open (client): id (a container id, c- plus 32 hex digits; read one from progenitor_castles), keepOpen, seconds (default 30), hideBag (default true), replicationTimeout (default 5), dropEvents (default true: drop this client's item events naming the chest), hudGate (default true; false, E2 only, lets the game auto-close the window). close (client): Dispose. bag (client): mode inactive|alpha, how the next preview hides the bag panel.",
+  {
+    side: z.enum(["client", "server"]).optional().describe("Default client. Use server only for status."),
+    action: z.enum(["status", "open", "close", "bag"]).optional().describe("Default status."),
+    id: z.string().optional().describe("open: the container id (c- plus 32 hex digits)."),
+    keepOpen: z.boolean().optional().describe("open: keep it open until closed (the client renews the server lease)."),
+    seconds: z.number().positive().max(600).optional().describe("open: a timed preview's length, default 30, at most 600."),
+    hideBag: z.boolean().optional().describe("open: hide the player's bag panel, default true."),
+    replicationTimeout: z.number().positive().max(30).optional().describe("open: seconds to wait for the chest to reach the client, default 5."),
+    dropEvents: z.boolean().optional().describe("open: drop this client's item events naming the chest, default true."),
+    hudGate: z.boolean().optional().describe("open, E2 only: false leaves the game's interact-HUD auto-close alone, to observe it closing the window. Default true."),
+    mode: z.enum(["inactive", "alpha"]).optional().describe("bag: SetActive(false) or CanvasGroup alpha 0."),
+  },
+  async ({ side, ...args }) => { try { return text(await bridge(side ?? "client", "container_preview", args)); } catch (e) { return fail(e); } });
+
 // BRIDGEUI1: focus-free UI acceptance tools (ui_input, ui_read, nav, display, screenshot). Implementations live in
 // ui-tools.mjs; a load error must not block the other tools.
 {

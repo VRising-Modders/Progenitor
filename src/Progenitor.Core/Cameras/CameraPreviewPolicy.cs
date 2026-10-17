@@ -326,13 +326,14 @@ internal sealed class CameraObservationPolicy
         _held = true;
     }
 
+    /// <summary>
+    /// One holder's end decision: the lease-wide <see cref="ObservationShareRules.Safety"/> reasons first, then this
+    /// holder's own expiry.
+    /// </summary>
     internal CameraObservationEndReason Decide(double now, in CameraObservationSample s)
     {
-        if (!s.UserConnected) return CameraObservationEndReason.Disconnected;
-        if (!s.OriginOurs) return CameraObservationEndReason.Superseded;
-        if (!s.CharacterRead) return CameraObservationEndReason.CharacterGone;
-        if (!float.IsFinite(s.MovedMeters)) return CameraObservationEndReason.Failed;
-        if (s.MovedMeters > LeaveDistanceMeters) return CameraObservationEndReason.LeftArea;
+        var safety = ObservationShareRules.Safety(s);
+        if (safety != CameraObservationEndReason.None) return safety;
         return Expired(now) ? CameraObservationEndReason.Expired : CameraObservationEndReason.None;
     }
 

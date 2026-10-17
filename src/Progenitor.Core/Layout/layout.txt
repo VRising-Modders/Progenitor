@@ -693,6 +693,31 @@ offset CharacterMenuInitDataDefaultTabOffset       = 0x0  : CharacterMenu.InitDa
 enum   HUDMenuTypeCharacterInfo                    = 1    : HUDMenuType.CharacterInfo
 enum   CharacterMenuTabBuilding                    = 2    : CharacterMenuTab.Building
 
+# ---- Container preview (src/Progenitor.Core/Inventory/ContainerPreviewClient.cs; Dev container_preview) ------------
+# Client only. The game's interaction opens a chest's window (InteractSystemHUD, menu ContainerMenu) with the same
+# OpenMenuEvent as above plus an init entity carrying ContainerMenu.InitData {TargetContainer, InteractBuff}; the
+# preview writes InteractBuff = Entity.Null, so closing the window sends no stop-interacting event. The item events
+# the window can send, each naming inventories by NetworkId (12 bytes), are read before they leave the client so the
+# preview can drop its own refused ones; the sort events' offsets are declared below with the sort publisher.
+offset ContainerMenuInitDataTargetContainerOffset  = 0x0  : ContainerMenu.InitData.TargetContainer  # Entity {Index, Version}
+offset ContainerMenuInitDataInteractBuffOffset     = 0x8  : ContainerMenu.InitData.InteractBuff     # Entity; Entity.Null = no interaction
+enum   HUDMenuTypeContainerMenu                    = 3    : HUDMenuType.ContainerMenu               # an [InteractMenu] type
+offset MoveItemEventFromInventoryOffset            = 0x0  : MoveItemBetweenInventoriesEvent.FromInventory        # NetworkId
+offset MoveItemEventToInventoryOffset              = 0x10 : MoveItemBetweenInventoriesEvent.ToInventory          # NetworkId
+offset MoveAllItemsEventFromInventoryOffset        = 0x0  : MoveAllItemsBetweenInventoriesEvent.FromInventory    # NetworkId
+offset MoveAllItemsEventToInventoryOffset          = 0xC  : MoveAllItemsBetweenInventoriesEvent.ToInventory      # NetworkId
+offset MoveAllItemsEventV2FromInventoryOffset      = 0x0  : MoveAllItemsBetweenInventoriesEventV2.FromInventory  # NetworkId
+offset MoveAllItemsEventV2ToInventoryOffset        = 0xC  : MoveAllItemsBetweenInventoriesEventV2.ToInventory    # NetworkId
+offset SmartMergeEventFromInventoryOffset          = 0x0  : SmartMergeItemsBetweenInventoriesEvent.FromInventory # NetworkId
+offset SmartMergeEventToInventoryOffset            = 0xC  : SmartMergeItemsBetweenInventoriesEvent.ToInventory   # NetworkId
+offset SplitItemEventInventoryOffset               = 0x0  : SplitItemEvent.Inventory                             # NetworkId
+offset SplitItemEventV2FromInventoryOffset         = 0x8  : SplitItemEventV2.FromInventory                       # NetworkId
+offset SplitItemEventV2ToInventoryOffset           = 0x18 : SplitItemEventV2.ToInventory                         # NetworkId
+offset DropInventoryItemEventInventoryOffset       = 0x0  : DropInventoryItemEvent.Inventory                     # NetworkId
+offset EquipItemFromInventoryEventFromInventoryOffset = 0x0 : EquipItemFromInventoryEvent.FromInventory          # NetworkId
+offset ToggleRefiningEventStationOffset            = 0x0  : ToggleRefiningEvent.Refinementstation                # NetworkId; a brazier's burn toggle names the brazier
+offset RenameInteractableIdOffset                  = 0x40 : InteractEvents_Client.RenameInteractable.InteractableId # NetworkId, after FixedString64Bytes NewName
+
 # ---- Authored item stat bonuses (native equip transfer uses stride 0x24) ----------------------
 dump server
 size   ItemStatRowStride = 36 : ModifyUnitStatBuff_DOTS

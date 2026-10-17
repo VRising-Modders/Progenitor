@@ -18,9 +18,14 @@ public sealed partial class PluginCastles
     /// character and the heart, the check the game uses for castle access), or none. A disabled
     /// handle answers <see cref="CastleRelation.None"/>.
     /// </summary>
-    public CastleRelation RelationTo(Entity user, ICastleHandle castle)
+    public CastleRelation RelationTo(Entity user, ICastleHandle castle) => RelationOf(RequireServer(nameof(RelationTo)), user, castle);
+
+    /// <summary>
+    /// <see cref="RelationTo"/> without a plugin context, for Core-owned server checks (the container preview's
+    /// authorization). Server world, main thread.
+    /// </summary>
+    internal static CastleRelation RelationOf(World world, Entity user, ICastleHandle castle)
     {
-        var world = RequireServer(nameof(RelationTo));
         if (castle == null) return CastleRelation.None;
         // Re-read the castle now: a handle's owner and clan are a snapshot, and ownership or clan
         // membership may have changed since it was taken.
