@@ -297,7 +297,7 @@ internal static unsafe class WorldPickBackend
     }
 
     /// <summary><c>OpenHUDMenuSystem.CurrentMenuType</c> of the client world (the system cached per world), or -1.</summary>
-    private static int MenuTypeNow()
+    internal static int MenuTypeNow()
     {
         try
         {

@@ -178,4 +178,25 @@ public class SampleAuthorFacadeTests
         Assert.Contains(".shot mode", SampleCamera.UsageReply);
         Assert.Contains("your client", SampleCamera.SentReply("orbit"));
     }
+
+    [Fact]
+    public void Shot_parse_covers_preview_hold_and_end()
+    {
+        Assert.True(SampleCamera.TryParse("preview", "", "", "", "", "", "", out var timed));
+        Assert.Equal((int)SampleCamera.Kind.Preview, timed.Kind);
+        Assert.Equal(0, timed.Hold);
+
+        Assert.True(SampleCamera.TryParse("preview", "HOLD", "", "", "", "", "", out var held));
+        Assert.Equal((int)SampleCamera.Kind.Preview, held.Kind);
+        Assert.Equal(1, held.Hold);
+
+        Assert.True(SampleCamera.TryParse("hold", "", "", "", "", "", "", out var hold));
+        Assert.Equal((int)SampleCamera.Kind.Hold, hold.Kind);
+        Assert.True(SampleCamera.TryParse("end", "", "", "", "", "", "", out var end));
+        Assert.Equal((int)SampleCamera.Kind.End, end.Kind);
+
+        Assert.False(SampleCamera.TryParse("preview", "forever", "", "", "", "", "", out _));
+        Assert.False(SampleCamera.TryParse("hold", "10", "", "", "", "", "", out _));
+        Assert.Contains(".shot preview [hold]", SampleCamera.UsageReply);
+    }
 }

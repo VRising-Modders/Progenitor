@@ -30,12 +30,18 @@ public sealed partial class PluginCamera
     internal PluginCamera(PluginContext ctx)
     {
         _ctx = ctx ?? throw new ArgumentNullException(nameof(ctx));
-        ctx.Track(new ActionDisposable(() => { foreach (var observation in _observations.Values) observation.Dispose(); _observations.Clear(); }));
+        ctx.Track(new ActionDisposable(() =>
+        {
+            var leases = new CameraObservation[_observations.Count];
+            _observations.Values.CopyTo(leases, 0);
+            _observations.Clear();
+            foreach (var observation in leases) observation.End(CameraObservationEndReason.Unloaded, notify: false);
+        }));
         if (!ctx.IsClient) return;
 
         _director = new CameraDirector(UnityCameraRuntime.Instance, ctx.Name);
         var director = _director;
-        ctx.Track(new ActionDisposable(() => { _preview?.End(false); director.Release(); }));
+        ctx.Track(new ActionDisposable(() => { _preview?.End(CameraPreviewEndReason.Unloaded, notify: false); director.Release(); }));
     }
 
     /// <summary>

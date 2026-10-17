@@ -24,6 +24,12 @@ namespace Progenitor.Sample;
 /// <c>FreeShotLookAt</c> and <c>Reset</c>. Results are <c>Sample camera:</c> lines on the client,
 /// including the Ctrl+F9 panel.
 ///
+/// <para><c>.shot preview [hold]</c> pairs the server's <c>Observe</c> lease (on the caller's own character, so
+/// it needs no authorization beyond being that player) with the client's <c>Preview</c>; <c>.shot hold</c>
+/// keeps both open (<c>CameraObservation.Hold</c>, <c>CameraPreview.Hold</c>) and <c>.shot end</c> ends both.
+/// When the client's preview ends for any reason it tells the server (<c>SmSe</c>), which ends the lease.
+/// The sample does not block gameplay input, so walking ends the preview (<c>Moved</c>).</para>
+///
 /// <para>Named <c>.shot</c> so it does not share a command with NecroArmyExample's <c>.camera</c>
 /// cue list. Parsing is game-free. Source-checked and game-free tested; not live-verified.
 /// The Necro sample separately calls <c>FreeShotLookAt</c> and <c>Reset</c> from its own cues.</para>
@@ -33,10 +39,13 @@ internal static class SampleCamera
     /// <summary>Server→client event id, ASCII <c>SmSh</c>. Outside the reserved <c>0x5072____</c> range.</summary>
     internal const int EventId = 0x536D5368;
 
+    /// <summary>Client→server "my preview ended" event id, ASCII <c>SmSe</c>.</summary>
+    internal const int EndEventId = 0x536D5365;
+
     internal const string Area = "camera";
 
     internal const string UsageReply =
-        "Usage: .shot | .shot reset | .shot mode <topdown|orbit|free|static> | .shot orbit [distance] [yaw] [pitch] | .shot point <x> <y> <z> [distance] [yaw] [pitch] | .shot free | .shot shot <yaw> <pitch> [focus]";
+        "Usage: .shot | .shot reset | .shot mode <topdown|orbit|free|static> | .shot orbit [distance] [yaw] [pitch] | .shot point <x> <y> <z> [distance] [yaw] [pitch] | .shot free | .shot shot <yaw> <pitch> [focus] | .shot preview [hold] | .shot hold | .shot end";
 
     internal const float DefaultDistance = 12f;
     internal const float DefaultYaw = 40f;
@@ -54,6 +63,9 @@ internal static class SampleCamera
         OrbitPoint = 5,
         FreeLook = 6,
         FreeShot = 7,
+        Preview = 8,
+        Hold = 9,
+        End = 10,
     }
 
     /// <summary>Wire form of one <c>.shot</c> request. Plain numbers; the client adds the local character.</summary>
@@ -66,7 +78,16 @@ internal static class SampleCamera
         public float Pitch;
         public float X, Y, Z;
         public int Focus;
+        public int Hold;
     }
+
+#if !PROGENITOR_TESTS
+    /// <summary>Wire form of the client's "preview ended" report: the <see cref="CameraPreviewEndReason"/>.</summary>
+    internal struct EndReport
+    {
+        public int Reason;
+    }
+#endif
 
     internal static bool TryParse(string? verb, string? a, string? b, string? c, string? d, string? e, string? f, out Packet packet)
     {
@@ -110,6 +131,17 @@ internal static class SampleCamera
                     return false;
                 packet.Focus = 1;
                 return true;
+            case "preview":
+                packet.Kind = (int)Kind.Preview;
+                if (string.IsNullOrWhiteSpace(a)) return true;
+                packet.Hold = 1;
+                return string.Equals(a.Trim(), "hold", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(b);
+            case "hold":
+                packet.Kind = (int)Kind.Hold;
+                return string.IsNullOrWhiteSpace(a);
+            case "end":
+                packet.Kind = (int)Kind.End;
+                return string.IsNullOrWhiteSpace(a);
             default:
                 return false;
         }
@@ -122,17 +154,76 @@ internal static class SampleCamera
 #if !PROGENITOR_TESTS
     private static PluginContext? _ctx;
 
+    /// <summary>Client: the running preview, if any.</summary>
+    private static PluginCamera.CameraPreview? _preview;
+
+    /// <summary>Server: each user's observation lease. Leases end themselves; this only finds them again.</summary>
+    private static readonly System.Collections.Generic.Dictionary<Entity, PluginCamera.CameraObservation> Leases = new();
+
     internal static void Attach(PluginContext ctx)
     {
         _ctx = ctx ?? throw new ArgumentNullException(nameof(ctx));
-        if (ctx.IsServer) ctx.Commands.Register(typeof(SampleCameraCommands));
+        if (ctx.IsServer)
+        {
+            ctx.Commands.Register(typeof(SampleCameraCommands));
+            BindEndReport(ctx);
+        }
         if (ctx.IsClient) BindReceive(ctx);
     }
 
     private static unsafe void BindReceive(PluginContext ctx) =>
         ctx.Net.OnReceive(EventId, OnReceive);
 
-    internal static void Detach() => _ctx = null;
+    private static unsafe void BindEndReport(PluginContext ctx) =>
+        ctx.Net.OnReceiveFromClient(EndEventId, OnEndReport);
+
+    /// <summary>Unload ends the preview and the leases (ctx.Camera does it too); the handles are dropped here.</summary>
+    internal static void Detach()
+    {
+        _ctx = null;
+        _preview = null;
+        Leases.Clear();
+    }
+
+    /// <summary>Server, <c>.shot preview</c>: lease the caller's streaming origin at their own character.</summary>
+    internal static string StartLease(PluginContext ctx, Entity user, bool hold)
+    {
+        var em = Progenitor.Worlds.Server!.EntityManager;
+        var character = em.GetComponentData<User>(user).LocalCharacter._Entity;
+        if (character == Entity.Null || !em.Exists(character)) return "no character";
+        var lease = ctx.Camera.Observe(user, character, new CameraObserveOptions
+        {
+            Hold = hold,
+            Ended = reason => SampleLog.Info(Area, "server lease ended: " + reason),
+        });
+        Leases[user] = lease;
+        return "lease " + (hold ? "held" : "timed") + ", " + lease.SecondsLeft.ToString("0", CultureInfo.InvariantCulture) + " s left";
+    }
+
+    /// <summary>Server, <c>.shot hold</c>: keep the lease for its full cap.</summary>
+    internal static string HoldLease(Entity user) =>
+        Leases.TryGetValue(user, out var lease) && lease.Hold() ? "lease held" : "no running lease";
+
+    /// <summary>Server, <c>.shot end</c> or the client's report: end the lease.</summary>
+    internal static string EndLease(Entity user)
+    {
+        if (!Leases.Remove(user, out var lease) || !lease.Active) return "no running lease";
+        lease.Dispose();
+        return "lease ended";
+    }
+
+    private static unsafe void OnEndReport(int eventId, Entity userEntity, User user, byte* payload, int length)
+    {
+        try
+        {
+            if (!CustomEvents.TryRead<EndReport>(payload, length, out var report)) return;
+            SampleLog.Info(Area, "client preview ended (" + (CameraPreviewEndReason)report.Reason + "): " + EndLease(userEntity));
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Sample camera end report threw: " + e);
+        }
+    }
 
     private static unsafe void OnReceive(int eventId, byte* payload, int length)
     {
@@ -210,6 +301,30 @@ internal static class SampleCamera
                     camera.FreeShot(position, packet.Yaw, packet.Pitch);
                     SampleLog.Info(Area, "FreeShot " + position + " yaw=" + packet.Yaw + " pitch=" + packet.Pitch);
                 }
+                return;
+            case Kind.Preview:
+                if (!TryLocalCharacter(out _, out float3 here))
+                {
+                    SampleLog.Info(Area, "preview: no local character in the client world");
+                    return;
+                }
+                _preview = camera.Preview(new UnitVec3(here.x, here.y, here.z), packet.Yaw, new CameraPreviewOptions
+                {
+                    Hold = packet.Hold != 0,
+                    Ended = reason =>
+                    {
+                        SampleLog.Info(Area, "preview ended: " + reason);
+                        ctx.Net.SendToServer(EndEventId, new EndReport { Reason = (int)reason });
+                    },
+                });
+                SampleLog.Info(Area, "Preview at " + here + " held=" + _preview.IsHeld);
+                return;
+            case Kind.Hold:
+                SampleLog.Info(Area, _preview is { } held && held.Hold() ? "preview held" : "hold: no running preview");
+                return;
+            case Kind.End:
+                if (_preview is { Active: true } running) running.Dispose();
+                else SampleLog.Info(Area, "end: no running preview");
                 return;
             default:
                 SampleLog.Info(Area, "ignored kind " + packet.Kind);
@@ -291,9 +406,13 @@ internal static class SampleCameraCommands
                 return;
             }
 
+            string lease = "";
+            if (packet.Kind == (int)SampleCamera.Kind.Preview) lease = SampleCamera.StartLease(plugin, ctx.UserEntity, packet.Hold != 0) + ". ";
+            else if (packet.Kind == (int)SampleCamera.Kind.Hold) lease = SampleCamera.HoldLease(ctx.UserEntity) + ". ";
+            else if (packet.Kind == (int)SampleCamera.Kind.End) lease = SampleCamera.EndLease(ctx.UserEntity) + ". ";
             bool sent = plugin.Net.SendToUser(ctx.UserEntity, SampleCamera.EventId, packet);
             ctx.Reply(sent
-                ? SampleCamera.SentReply(verb)
+                ? lease + SampleCamera.SentReply(verb)
                 : "Could not send to your client (are you connected?).");
             SampleLog.Info(SampleCamera.Area, "server sent " + (verb.Length == 0 ? "status" : verb) + " sent=" + sent);
         }
