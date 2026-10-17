@@ -287,8 +287,10 @@ internal static class SettingPlaces
         foreach (var key in new[] { "View", "Timestamps", "CollapseRepeats", "KeepHistory", "HistoryLines", "Mentions",
                      "MentionSound", "MentionWords", "FontSize", "BackgroundOpacity", "LockPosition", "Recall", "MutedPlayers", "LongMessages", "ChannelColor", "CommandHints", "ModSuggestions" })
             yield return Cfg("Chat", key, Chat, UiFile);
-        // Set from the chat box itself (the tab strip, dragging, the quick menu), not a page row.
-        foreach (var key in new[] { "Tabs", "ActiveTab", "OffsetX", "OffsetY", "Width", "Height", "Colors", "TestNames" })
+        // Set from the chat box itself (the tab strip, dragging, the quick menu), not a page row; TestNames (testing
+        // only), ReplacedBy (another chat mod's compatibility list) and HistoryDefaultRaised (the 500 to 5000 upgrade
+        // marker) are file-only.
+        foreach (var key in new[] { "Tabs", "ActiveTab", "OffsetX", "OffsetY", "Width", "Height", "Colors", "TestNames", "ReplacedBy", "HistoryDefaultRaised" })
             yield return Cfg("Chat", key, CfgOnly, UiFile);
         yield return Cfg("Hosted", "Enabled", PrivateGames, Shared);
         yield return Cfg("Hosted", "DryRun", CfgOnly, Shared);

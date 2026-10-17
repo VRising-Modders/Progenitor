@@ -297,7 +297,22 @@ internal static class ChatWindow
         ChatView.KeepHistory = file.Bind(Section, "KeepHistory", true,
             "Keep each server's chat across sessions, with a line where each session started and ended.");
         ChatView.HistoryLines = file.Bind(Section, "HistoryLines", ChatLog.DefaultCapacity, new ConfigDescription(
-            "How many lines of each server's chat are kept.", new AcceptableValueRange<int>(ChatLog.MinCapacity, ChatLog.MaxCapacity)));
+            "How many lines of each server's chat are kept (50 to 5000). Changes apply at once: a lower number drops the oldest lines.",
+            new AcceptableValueRange<int>(ChatLog.MinCapacity, ChatLog.MaxCapacity)));
+        // The default went from 500 to 5000 (2026-10-17): an untouched old default moves up once (ChatHistorySetting).
+        var raised = file.Bind(Section, ChatHistorySetting.RaisedKey, false,
+            "Set once [Chat] HistoryLines was checked for the old 500-line default after the default became 5000. Leave it.");
+        if (!raised.Value)
+        {
+            int kept = ChatHistorySetting.Upgrade(ChatView.HistoryLines.Value, alreadyRaised: false);
+            if (kept != ChatView.HistoryLines.Value)
+            {
+                ChatView.HistoryLines.Value = kept;
+                Plugin.Logger?.LogInfo("Chat: [Chat] HistoryLines was the old default 500; it is now " + kept + ".");
+            }
+
+            raised.Value = true;
+        }
         ChatView.Mentions = file.Bind(Section, "Mentions", true,
             "Highlight a line that says your name, one of your watched words, or @all from an admin (when the server allows it).");
         ChatView.MentionSound = file.Bind(Section, "MentionSound", true, "Play the whisper sound for a mention.");

@@ -69,6 +69,26 @@ internal sealed class ChatRecord
     /// </summary>
     internal ChatLinkSource Source { get; set; }
 
+    /// <summary>Raised each time the line changes in place (a repeat, a joined part); a drawn copy older than it is redrawn.</summary>
+    internal int Rev { get; set; }
+
+    // ---- the drawn text, cached (ChatView): a line is formatted once, not on every redraw -----------------
+
+    /// <summary>The formatted line last drawn, for <see cref="RenderKey"/> and <see cref="RenderRev"/>; null: not drawn yet.</summary>
+    internal string? RenderText { get; set; }
+
+    /// <summary>The links of <see cref="RenderText"/>.</summary>
+    internal List<ChatSpan>? RenderSpans { get; set; }
+
+    /// <summary>The display settings <see cref="RenderText"/> was formatted with.</summary>
+    internal int RenderKey { get; set; }
+
+    /// <summary>The <see cref="Rev"/> <see cref="RenderText"/> was formatted at.</summary>
+    internal int RenderRev { get; set; } = -1;
+
+    /// <summary>Whether <see cref="RenderText"/> still fits this line and these settings.</summary>
+    internal bool RenderFresh(int key) => RenderText != null && RenderRev == Rev && RenderKey == key;
+
     /// <summary>
     /// The provenance rule: a System or lore line whose sender network id is empty is the server's (or this client's game);
     /// any line with a sender, any other channel, is a player's. The server fills the sender in from the connection, and
@@ -84,27 +104,65 @@ internal sealed class ChatRecord
 /// <para><b>Repeat collapse.</b> The same line (same kind, speaker and text) arriving again within
 /// <see cref="CollapseWindowSeconds"/> of the last one raises its count instead of adding a line ("×3").</para>
 ///
-/// <para><b>Capacity.</b> The oldest lines go first once <see cref="Capacity"/> is reached; the view draws only the
-/// newest lines of the active tab.</para>
+/// <para><b>Capacity.</b> The oldest lines go first once <see cref="Capacity"/> is reached (a ring, so dropping one is
+/// constant time); a lower capacity set later drops the oldest at once, a higher one keeps more from then on.</para>
+///
+/// <para><b>Tab filters.</b> Each tab asked for keeps its own list of the lines it shows, kept up to date as lines
+/// arrive, repeat, join or drop: a new line is checked once per kept tab, never the whole log again. A tab is
+/// scanned in full only the first time it is asked for, after its channels were edited, and after a restore or
+/// clear. <see cref="FilterChecks"/> counts the checks (the performance tests hold it to one per tab per line).</para>
 /// </summary>
 internal sealed class ChatLog
 {
-    internal const int DefaultCapacity = 500;
+    /// <summary>The default of <c>[Chat] HistoryLines</c> since 2026-10-17 (it was 500 before; see <see cref="ChatHistorySetting"/>).</summary>
+    internal const int DefaultCapacity = 5000;
     internal const int MinCapacity = 50;
     internal const int MaxCapacity = 5000;
     internal const double CollapseWindowSeconds = 60;
 
-    private readonly List<ChatRecord> _records = new();
+    /// <summary>Tab filters kept at once (the tab row's six, plus room for edited copies); the least recently used goes.</summary>
+    internal const int MaxFilters = ChatTab.MaxTabs + 2;
+
+    private readonly ChatRing<ChatRecord> _records = new();
+    private readonly List<TabFilter> _filters = new();
     private long _seq;
+    private int _capacity;
+    private long _useClock;
 
-    internal ChatLog(int capacity = DefaultCapacity) => Capacity = ClampCapacity(capacity);
+    private sealed class TabFilter
+    {
+        internal ChatTab Tab = null!;
+        internal ChatScope Scope;
+        internal readonly ChatRing<ChatRecord> Matches = new();
+        internal long LastUsed;
+    }
 
-    internal int Capacity { get; set; }
+    internal ChatLog(int capacity = DefaultCapacity) => _capacity = ClampCapacity(capacity);
+
+    /// <summary>Lines kept; setting it lower drops the oldest lines at once.</summary>
+    internal int Capacity
+    {
+        get => _capacity;
+        set
+        {
+            int next = ClampCapacity(value);
+            if (next == _capacity) return;
+            _capacity = next;
+            if (_records.Count > _capacity)
+            {
+                Trim();
+                Version++;
+            }
+        }
+    }
 
     /// <summary>Raised count of changes; the view redraws when it moves.</summary>
     internal int Version { get; private set; }
 
     internal IReadOnlyList<ChatRecord> Records => _records;
+
+    /// <summary>How many times a tab's filter was asked about one line (for the performance tests).</summary>
+    internal long FilterChecks { get; private set; }
 
     internal static int ClampCapacity(int n) => n < MinCapacity ? MinCapacity : n > MaxCapacity ? MaxCapacity : n;
 
@@ -114,7 +172,7 @@ internal sealed class ChatLog
         if (record == null) throw new ArgumentNullException(nameof(record));
         if (collapse && record.Kind != ChatKind.Session && _records.Count > 0)
         {
-            var last = _records[_records.Count - 1];
+            var last = _records.Last!;
             if (!last.Restored && last.Kind == record.Kind && last.FromSelf == record.FromSelf && last.Source == record.Source
                 && string.Equals(last.User, record.User, StringComparison.Ordinal)
                 && string.Equals(last.Text, record.Text, StringComparison.Ordinal)
@@ -123,14 +181,21 @@ internal sealed class ChatLog
                 last.Repeat++;
                 last.TimeUtc = record.TimeUtc;
                 last.Mention |= record.Mention;
-                Version++;
+                Changed(last);
                 return last;
             }
         }
 
         record.Seq = ++_seq;
         if (record.Repeat < 1) record.Repeat = 1;
-        _records.Add(record);
+        _records.PushBack(record);
+        foreach (var f in _filters)
+        {
+            if (Stale(f)) continue;
+            FilterChecks++;
+            if (f.Tab.Shows(record)) f.Matches.PushBack(record);
+        }
+
         Trim();
         Version++;
         return record;
@@ -144,16 +209,47 @@ internal sealed class ChatLog
     internal ChatRecord? TryJoin(ChatRecord part)
     {
         if (part == null || !ChatLongMessage.IsContinuation(part.Text) || _records.Count == 0) return null;
-        var last = _records[_records.Count - 1];
+        var last = _records.Last!;
         if (last.Restored || last.Kind != part.Kind || last.FromSelf != part.FromSelf || last.Source != part.Source
             || !string.Equals(last.User, part.User, StringComparison.Ordinal) || !ChatLongMessage.ExpectsMore(last.Text)
             || (part.TimeUtc - last.TimeUtc).TotalSeconds > ChatLongMessage.JoinWindowSeconds) return null;
         last.Text = ChatLongMessage.Join(last.Text, part.Text);
         last.TimeUtc = part.TimeUtc;
         last.Mention |= part.Mention;
-        Version++;
+        Changed(last);
         return last;
     }
+
+    /// <summary>
+    /// The newest line changed in place (a repeat or a joined part): drawn again, and a tab that only now shows it (a
+    /// mention arrived with the repeat) takes it. A line never stops showing in a tab, since its kind never changes and
+    /// a mention is never taken back.
+    /// </summary>
+    private void Changed(ChatRecord last)
+    {
+        last.Rev++;
+        foreach (var f in _filters)
+        {
+            if (Stale(f) || ReferenceEquals(f.Matches.Last, last)) continue;
+            FilterChecks++;
+            if (f.Tab.Shows(last)) f.Matches.PushBack(last);
+        }
+
+        Version++;
+    }
+
+    /// <summary>
+    /// A tab whose channels were edited since its list was built: it is no longer kept up to date (its scope is marked
+    /// unknown) and <see cref="Filtered"/> scans it again on the next read, even when the edit was undone before then.
+    /// </summary>
+    private static bool Stale(TabFilter f)
+    {
+        if (f.Scope == f.Tab.Scope) return false;
+        f.Scope = Unbuilt;
+        return true;
+    }
+
+    private const ChatScope Unbuilt = (ChatScope)(-1);
 
     /// <summary>A divider line: <c>Joined Night Garden · 21:04</c> / <c>Left the server · 23:10</c>.</summary>
     internal ChatRecord AddMarker(string text, DateTime utc) =>
@@ -162,26 +258,93 @@ internal sealed class ChatLog
     internal void Clear()
     {
         _records.Clear();
+        _filters.Clear();
         Version++;
     }
 
     private void Trim()
     {
-        int extra = _records.Count - Capacity;
-        if (extra > 0) _records.RemoveRange(0, extra);
+        while (_records.Count > _capacity)
+        {
+            var gone = _records.PopFront();
+            foreach (var f in _filters)
+                if (ReferenceEquals(f.Matches.First, gone)) f.Matches.PopFront();
+        }
+    }
+
+    /// <summary>
+    /// The lines <paramref name="tab"/> shows, oldest first, kept up to date by the log (read it, never keep it across
+    /// frames: it is the log's own list). The first call for a tab, or after its channels changed, scans the log once.
+    /// </summary>
+    internal IReadOnlyList<ChatRecord> Filtered(ChatTab tab)
+    {
+        if (tab == null) throw new ArgumentNullException(nameof(tab));
+        TabFilter? found = null;
+        foreach (var f in _filters)
+        {
+            if (!ReferenceEquals(f.Tab, tab)) continue;
+            found = f;
+            break;
+        }
+
+        if (found == null)
+        {
+            if (_filters.Count >= MaxFilters)
+            {
+                int oldest = 0;
+                for (int i = 1; i < _filters.Count; i++)
+                    if (_filters[i].LastUsed < _filters[oldest].LastUsed) oldest = i;
+                _filters.RemoveAt(oldest);
+            }
+
+            found = new TabFilter { Tab = tab, Scope = Unbuilt };
+            _filters.Add(found);
+        }
+
+        if (found.Scope != tab.Scope)
+        {
+            found.Scope = tab.Scope;
+            found.Matches.Clear();
+            for (int i = 0; i < _records.Count; i++)
+            {
+                FilterChecks++;
+                if (tab.Shows(_records[i])) found.Matches.PushBack(_records[i]);
+            }
+        }
+
+        found.LastUsed = ++_useClock;
+        return found.Matches;
     }
 
     /// <summary>The newest <paramref name="max"/> lines a tab shows, oldest first.</summary>
     internal List<ChatRecord> Visible(ChatTab tab, int max)
     {
-        var result = new List<ChatRecord>();
-        for (int i = _records.Count - 1; i >= 0 && result.Count < max; i--)
+        var all = Filtered(tab);
+        int from = Math.Max(0, all.Count - Math.Max(0, max));
+        var result = new List<ChatRecord>(all.Count - from);
+        for (int i = from; i < all.Count; i++) result.Add(all[i]);
+        return result;
+    }
+
+    /// <summary>
+    /// The index of the last line in <paramref name="lines"/> (oldest first, as <see cref="Filtered"/> gives them) whose
+    /// <see cref="ChatRecord.Seq"/> is at most <paramref name="seq"/>, or -1. A binary search: line numbers only grow.
+    /// </summary>
+    internal static int IndexAtOrBefore(IReadOnlyList<ChatRecord> lines, long seq)
+    {
+        int lo = 0, hi = lines.Count - 1, found = -1;
+        while (lo <= hi)
         {
-            if (tab.Shows(_records[i])) result.Add(_records[i]);
+            int mid = lo + ((hi - lo) >> 1);
+            if (lines[mid].Seq <= seq)
+            {
+                found = mid;
+                lo = mid + 1;
+            }
+            else hi = mid - 1;
         }
 
-        result.Reverse();
-        return result;
+        return found;
     }
 
     internal static string JoinedText(string server, DateTime local) =>
@@ -191,62 +354,51 @@ internal sealed class ChatLog
 
     // ---- persistence: one JSON object per line -----------------------------------------------------------
 
-    /// <summary>The log as JSON lines (the newest <paramref name="max"/>), for the per-server history file.</summary>
-    internal string Serialize(int max)
+    /// <summary>
+    /// The newest <paramref name="max"/> saved lines as plain values (no transient notes), taken on the main thread so a
+    /// background writer never reads a record the log is still changing (<see cref="ChatHistoryFile"/>).
+    /// </summary>
+    internal ChatHistoryLine[] Snapshot(int max)
     {
-        var sb = new StringBuilder();
-        int from = Math.Max(0, _records.Count - max);
+        int from = Math.Max(0, _records.Count - Math.Max(0, max));
+        var lines = new List<ChatHistoryLine>(_records.Count - from);
         for (int i = from; i < _records.Count; i++)
         {
             var r = _records[i];
-            if (r.Transient) continue;
-            sb.Append(JsonSerializer.Serialize(new Dictionary<string, object?>
-            {
-                ["t"] = r.TimeUtc.ToString("o", CultureInfo.InvariantCulture),
-                ["k"] = (int)r.Kind,
-                ["s"] = r.FromSelf,
-                ["u"] = r.User,
-                ["x"] = r.Text,
-                ["f"] = r.Full,
-                ["n"] = r.Repeat,
-                ["p"] = (int)r.Source,
-            }));
-            sb.Append('\n');
+            if (!r.Transient) lines.Add(ChatHistoryLine.From(r));
         }
 
-        return sb.ToString();
+        return lines.ToArray();
     }
 
+    /// <summary>The log as JSON lines (the newest <paramref name="max"/>), for the per-server history file.</summary>
+    internal string Serialize(int max) => ChatHistoryFile.ToText(Snapshot(max));
+
     /// <summary>Lines saved by <see cref="Serialize"/>; malformed lines are skipped. Restored lines never mention.</summary>
-    internal static List<ChatRecord> Deserialize(string? text, int max)
+    internal static List<ChatRecord> Deserialize(string? text, int max) =>
+        string.IsNullOrEmpty(text) ? new List<ChatRecord>() : Deserialize(Encoding.UTF8.GetBytes(text), max);
+
+    /// <summary>
+    /// The history file's bytes as lines (<see cref="Deserialize(string?, int)"/>): read with a forward-only JSON reader,
+    /// one line at a time, with no document tree per line.
+    /// </summary>
+    internal static List<ChatRecord> Deserialize(byte[]? bytes, int max)
     {
         var result = new List<ChatRecord>();
-        if (string.IsNullOrEmpty(text)) return result;
-        foreach (var raw in text.Split('\n'))
+        if (bytes == null || bytes.Length == 0) return result;
+        int at = 0;
+        // A UTF-8 byte order mark, if an editor added one.
+        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) at = 3;
+        while (at < bytes.Length)
         {
-            string line = raw.Trim();
-            if (line.Length == 0) continue;
+            int end = Array.IndexOf(bytes, (byte)'\n', at);
+            if (end < 0) end = bytes.Length;
+            var line = new ReadOnlySpan<byte>(bytes, at, end - at);
+            at = end + 1;
             try
             {
-                using var doc = JsonDocument.Parse(line);
-                var o = doc.RootElement;
-                var r = new ChatRecord
-                {
-                    TimeUtc = DateTime.Parse(o.GetProperty("t").GetString() ?? "", CultureInfo.InvariantCulture,
-                        DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal),
-                    Kind = (ChatKind)o.GetProperty("k").GetInt32(),
-                    FromSelf = o.TryGetProperty("s", out var s) && s.ValueKind == JsonValueKind.True,
-                    User = o.TryGetProperty("u", out var u) ? u.GetString() ?? "" : "",
-                    Text = o.TryGetProperty("x", out var x) ? x.GetString() ?? "" : "",
-                    Full = o.TryGetProperty("f", out var f) ? f.GetString() ?? "" : "",
-                    Repeat = o.TryGetProperty("n", out var n) && n.TryGetInt32(out int rep) && rep > 0 ? rep : 1,
-                    Restored = true,
-                    // Saved before provenance was kept: a player's (its mod links stay as written).
-                    Source = o.TryGetProperty("p", out var p) && p.TryGetInt32(out int src) && src == (int)ChatLinkSource.Server
-                        ? ChatLinkSource.Server : ChatLinkSource.Player,
-                };
-                if (!Enum.IsDefined(typeof(ChatKind), r.Kind)) continue;
-                result.Add(r);
+                var r = ReadLine(line);
+                if (r != null) result.Add(r);
             }
             catch
             {
@@ -258,12 +410,80 @@ internal sealed class ChatLog
         return result;
     }
 
-    /// <summary>Put restored lines back in front of anything already logged.</summary>
+    private static ChatRecord? ReadLine(ReadOnlySpan<byte> line)
+    {
+        var reader = new Utf8JsonReader(line);
+        if (!reader.Read()) return null; // blank
+        if (reader.TokenType != JsonTokenType.StartObject) return null;
+        var r = new ChatRecord { Restored = true };
+        bool hasTime = false, hasKind = false;
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            char key = reader.ValueSpan.Length == 1 ? (char)reader.ValueSpan[0] : '\0';
+            if (!reader.Read()) return null;
+            switch (key)
+            {
+                case 't':
+                    if (!reader.TryGetDateTime(out var t)) return null;
+                    r.TimeUtc = t.Kind switch
+                    {
+                        DateTimeKind.Utc => t,
+                        DateTimeKind.Local => t.ToUniversalTime(),
+                        _ => DateTime.SpecifyKind(t, DateTimeKind.Utc),
+                    };
+                    hasTime = true;
+                    break;
+                case 'k':
+                    r.Kind = (ChatKind)reader.GetInt32();
+                    hasKind = true;
+                    break;
+                case 's':
+                    r.FromSelf = reader.TokenType == JsonTokenType.True;
+                    break;
+                case 'u':
+                    r.User = reader.TokenType == JsonTokenType.String ? reader.GetString() ?? "" : "";
+                    break;
+                case 'x':
+                    r.Text = reader.TokenType == JsonTokenType.String ? reader.GetString() ?? "" : "";
+                    break;
+                case 'f':
+                    r.Full = reader.TokenType == JsonTokenType.String ? reader.GetString() ?? "" : "";
+                    break;
+                case 'n':
+                    r.Repeat = reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int rep) && rep > 0 ? rep : 1;
+                    break;
+                case 'p':
+                    // Saved before provenance was kept: a player's (its mod links stay as written).
+                    r.Source = reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int src) && src == (int)ChatLinkSource.Server
+                        ? ChatLinkSource.Server : ChatLinkSource.Player;
+                    break;
+                default:
+                    reader.Skip();
+                    break;
+            }
+        }
+
+        if (reader.TokenType != JsonTokenType.EndObject || !hasTime || !hasKind) return null;
+        return Enum.IsDefined(typeof(ChatKind), r.Kind) ? r : null;
+    }
+
+    /// <summary>
+    /// Put restored lines back in front of anything already logged. Every line is numbered again in order, so line
+    /// numbers keep growing from the oldest to the newest (<see cref="IndexAtOrBefore"/> relies on it).
+    /// </summary>
     internal void Restore(IEnumerable<ChatRecord> restored)
     {
-        var old = new List<ChatRecord>(restored);
-        foreach (var r in old) r.Seq = ++_seq;
-        _records.InsertRange(0, old);
+        var all = new List<ChatRecord>(restored);
+        for (int i = 0; i < _records.Count; i++) all.Add(_records[i]);
+        _records.Clear();
+        _filters.Clear();
+        _seq = 0;
+        foreach (var r in all)
+        {
+            r.Seq = ++_seq;
+            _records.PushBack(r);
+        }
+
         Trim();
         Version++;
     }
@@ -284,6 +504,78 @@ internal sealed class ChatLog
 
         return safe + "-" + hash.ToString("x8", CultureInfo.InvariantCulture);
     }
+}
+
+/// <summary>
+/// A first-in, first-out ring: constant-time add at the end and drop at the front, indexed oldest first. Game-free.
+/// It grows (doubling) when full; it never shrinks.
+/// </summary>
+internal sealed class ChatRing<T> : IReadOnlyList<T> where T : class
+{
+    private T?[] _items;
+    private int _head;
+    private int _count;
+
+    internal ChatRing(int capacity = 16) => _items = new T?[Math.Max(4, capacity)];
+
+    public int Count => _count;
+
+    public T this[int index]
+    {
+        get
+        {
+            if ((uint)index >= (uint)_count) throw new ArgumentOutOfRangeException(nameof(index));
+            int at = _head + index;
+            if (at >= _items.Length) at -= _items.Length;
+            return _items[at]!;
+        }
+    }
+
+    internal T? First => _count == 0 ? null : _items[_head];
+
+    internal T? Last => _count == 0 ? null : this[_count - 1];
+
+    internal void PushBack(T item)
+    {
+        if (_count == _items.Length) Grow();
+        int at = _head + _count;
+        if (at >= _items.Length) at -= _items.Length;
+        _items[at] = item;
+        _count++;
+    }
+
+    internal T PopFront()
+    {
+        if (_count == 0) throw new InvalidOperationException("The ring is empty.");
+        var item = _items[_head]!;
+        _items[_head] = null;
+        _head++;
+        if (_head == _items.Length) _head = 0;
+        _count--;
+        return item;
+    }
+
+    internal void Clear()
+    {
+        Array.Clear(_items, 0, _items.Length);
+        _head = 0;
+        _count = 0;
+    }
+
+    private void Grow()
+    {
+        var next = new T?[_items.Length * 2];
+        for (int i = 0; i < _count; i++) next[i] = this[i];
+        _items = next;
+        _head = 0;
+    }
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        for (int i = 0; i < _count; i++) yield return this[i];
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 /// <summary>CHAT5: what a tab shows. Game-free.</summary>
