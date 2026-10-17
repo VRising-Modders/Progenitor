@@ -388,7 +388,8 @@ internal static class MouseChords
     internal static string? Refusal(KeyChord chord, KeybindScope scope)
     {
         if (!chord.IsBound || !KeyChord.IsClickButton(chord.Key)) return null;
-        if (scope == KeybindScope.Menu) return MenuClickReason;
+        // HUB2: a window key acts in menus too, where the clicks press the menus' own buttons.
+        if (scope is KeybindScope.Menu or KeybindScope.Window) return MenuClickReason;
         if (scope == KeybindScope.Chat) return ChatClickReason;
         if (chord.Modifiers == KeyModifiers.None) return BareClickReason;
         if (scope == KeybindScope.Map && chord.Key == UiKey.MouseRight

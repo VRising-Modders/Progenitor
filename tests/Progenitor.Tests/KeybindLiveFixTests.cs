@@ -123,7 +123,8 @@ namespace Progenitor.Tests
             _keys.Frame();
 
             var dialog = Shown();
-            Assert.Equal("Companion ping wants F10, used by Progenitor (Open Mods menu). Companion ping is not active until you choose.", dialog.Content.Body);
+            Assert.Equal("Progenitor has it for Open Mods menu (in gameplay). Progenitor's own keys come right after the game's.",
+                dialog.Content.Facts[1].Value);
             Assert.DoesNotContain(dialog.Content.Options, o => o.StartsWith("Give", StringComparison.Ordinal));
             Assert.DoesNotContain(_log.Infos.Concat(_log.Warnings), l => l.Contains("used by " + SettingsPanel.PluginId));
             Assert.True(KeybindConflictPrompt.Choose(KeybindConflictPrompt.ChoiceLeave));

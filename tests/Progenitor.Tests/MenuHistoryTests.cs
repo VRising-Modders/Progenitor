@@ -328,7 +328,7 @@ namespace Progenitor.Tests
             NavKeys();
             var game = InGame();
             Assert.False(ModsMenu.MenuContextOpen);
-            Assert.Equal(Keybinds.MenuClosedReason, Keybinds.SimulatePress(SettingsPanel.PluginId, ModsMenu.NavigateBackId).Single().Reason);
+            Assert.Equal(Keybinds.WindowClosedReason, Keybinds.SimulatePress(SettingsPanel.PluginId, ModsMenu.NavigateBackId).Single().Reason);
             game.Click("Map");
             _keys.Frame();
             game.Click("VBlood");

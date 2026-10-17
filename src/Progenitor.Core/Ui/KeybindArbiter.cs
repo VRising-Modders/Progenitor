@@ -19,7 +19,7 @@ internal enum KeybindSource
 }
 
 /// <summary>
-/// KEYS4: where a key works. A <see cref="Menu"/> key (the Mods workspace's back and forward) fires only
+/// KEYS4: where a key works (the matrix is in docs/mods-menu.md, "Where keys meet"). A <see cref="Menu"/> key fires only
 /// while the workspace is open, so it never meets a gameplay key: it clashes only with other menu keys
 /// and with the game's menu keys (<see cref="GameKeybindCatalog.InMenus"/>: Back, Enter, Select
 /// Progression). A <see cref="Photo"/> key (photo mode's fly-camera controls) fires only while photo
@@ -47,10 +47,11 @@ internal enum KeybindScope
     Chat = 4,
 
     /// <summary>
-    /// HUB1: works while a window with a tab history is under the pointer or holds the input, in play too, or while the
-    /// Mods menu is open: it meets gameplay and map mod keys and the game's own keys, so those clashes are reported. It
-    /// does not meet menu keys: the window mouse keys stand aside while a menu is open. Core only: the tab-history keys
-    /// (Alt+Left, Alt+Right; the mouse's back and forward buttons).
+    /// HUB2: a menu key that also steps a window's tab history outside menus, but only while that window holds the input
+    /// (the game's input is blocked then, so no gameplay action can fire on the same press). For clashes it is a
+    /// <see cref="Menu"/> key: it meets other menu and map keys and the game's menu keys, never a gameplay key or a game
+    /// gameplay action. Outside menus it also gives way, at press time, to any mod's gameplay key on its chord. Core only:
+    /// Navigate back and forward (the mouse's back and forward buttons) and the Alt+Left / Alt+Right tab-history keys.
     /// </summary>
     Window = 5,
 }
@@ -330,15 +331,9 @@ internal static class KeybindArbiter
     /// <summary>The winner's install time is known and the loser's is not.</summary>
     internal const string RuleUnknownTime = "unknown-time";
 
-    /// <summary>HUB1: the loser is one of Progenitor's window keys, which give way to any mod key on their chord.</summary>
-    internal const string RuleWindowYields = "window-yields";
-
-    /// <summary>HUB1: a Progenitor window key's rank: after every mod key (known install time or not).</summary>
-    internal const int WindowYieldRank = 4;
-
     /// <summary>
     /// Plugins whose keys rank right after the game's, above every mod: Core (the Mods-menu opener, the
-    /// input release key) and the dev bridge. A mod can never take their chord, except a window key's (HUB1: those yield).
+    /// input release key) and the dev bridge. A mod can never take their chord.
     /// </summary>
     internal static readonly string[] FrameworkOwners = { "progenitor", "progenitor.dev" };
 
@@ -384,8 +379,8 @@ internal static class KeybindArbiter
             // live, and the chat key's owner takes the game's action away only while it acts (the name
             // completion puts back the channel the game's own Tab handling cycled).
             KeybindScope.Chat => false,
-            // HUB1: a window key acts in play and in the menus: a gameplay key and a game menu key both stop it.
-            KeybindScope.Window => game.Source == KeybindSource.Game && EnforceGameWins && (game.Mode.Length == 0 || IsGameMenuKey(game)),
+            // HUB2: a window key clashes like a menu key; outside menus it acts only while the game's input is blocked.
+            KeybindScope.Window => game.Source == KeybindSource.Game && EnforceGameWins && IsGameMenuKey(game),
             _ => GameWins(game),
         };
 
@@ -430,18 +425,19 @@ internal static class KeybindArbiter
     /// Two mod keys meet in the same scope; a map key also meets a menu key, because the map is a tab of the
     /// game's full-screen menu and menu keys are live there too.
     /// </summary>
-    private static bool ModScopesMeet(KeybindScope a, KeybindScope b) =>
-        a == b
-        || (a == KeybindScope.Map && b == KeybindScope.Menu)
-        || (a == KeybindScope.Menu && b == KeybindScope.Map)
-        // HUB1: a window key is live in play and on the map, so it meets keys of both (and the game's own keys).
-        || (a == KeybindScope.Window && WindowMeets(b))
-        || (b == KeybindScope.Window && WindowMeets(a));
+    private static bool ModScopesMeet(KeybindScope a, KeybindScope b)
+    {
+        // HUB2: a window key clashes as a menu key does. Outside menus it acts only while a window holds the input, when
+        // no gameplay action can fire on the same press, and then it gives way to a mod's gameplay key (YieldsInPlay).
+        a = ClashScope(a);
+        b = ClashScope(b);
+        return a == b
+            || (a == KeybindScope.Map && b == KeybindScope.Menu)
+            || (a == KeybindScope.Menu && b == KeybindScope.Map);
+    }
 
-    private static bool WindowMeets(KeybindScope other) =>
-        // Not Menu: while a menu is open the workspace's menu keys act and a window mouse key stands aside, so Core's
-        // Navigate back and Window tab back (mouse) share the mouse's back button without clashing.
-        other is KeybindScope.Gameplay or KeybindScope.Map or KeybindScope.Window;
+    /// <summary>HUB2: the scope a key clashes in: a <see cref="KeybindScope.Window"/> key is a menu key.</summary>
+    internal static KeybindScope ClashScope(KeybindScope s) => s == KeybindScope.Window ? KeybindScope.Menu : s;
 
     /// <summary>KEYS4: whether <paramref name="c"/> can clash with a mod key of <paramref name="scope"/>.</summary>
     internal static bool ScopesMeet(KeybindClaim c, KeybindScope scope)
@@ -450,8 +446,7 @@ internal static class KeybindArbiter
         return scope switch
         {
             KeybindScope.Gameplay => true,
-            KeybindScope.Window => true,
-            KeybindScope.Menu => IsGameMenuKey(c),
+            KeybindScope.Menu or KeybindScope.Window => IsGameMenuKey(c),
             KeybindScope.Map => IsGameMapKey(c) || IsGameMenuKey(c) || IsEveryScreenGameKey(c),
             KeybindScope.Chat => IsGameChatKey(c),
             _ => false,
@@ -492,8 +487,8 @@ internal static class KeybindArbiter
     private static ulong _gameWorld = ulong.MaxValue;
     private static Dictionary<string, string> _blocked = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>HUB1: the window keys (<see cref="KeybindScope.Window"/>) whose chord a game key won.</summary>
-    private static HashSet<string> _lostToGame = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>HUB2: window keys (<see cref="KeybindScope.Window"/>) and the mod gameplay key each gives way to outside menus.</summary>
+    private static Dictionary<string, KeybindClaim> _yieldsInPlay = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly record struct Stamp(int Binds, int Keys, int Sources, bool Foreign, bool Enforce, int Names, ulong World);
 
@@ -570,7 +565,7 @@ internal static class KeybindArbiter
             _gameStale = true;
             _game = null;
             _blocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            _lostToGame = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _yieldsInPlay = new Dictionary<string, KeybindClaim>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -677,15 +672,10 @@ internal static class KeybindArbiter
         var picture = Compute(game.Available ? game.Claims : Array.Empty<KeybindClaim>(), ReadProgenitor(), ReadCfg(),
             game.Available, game.Available ? "" : game.Note);
         var blocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var lostToGame = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var v in picture.Verdicts)
             if (v.Claim.Source == KeybindSource.Progenitor && !v.Active)
-            {
                 blocked[v.Claim.OwnerId + "/" + v.Claim.ActionId] = v.Reason;
-                // HUB1: a window key that lost to a game key may still act while its window holds the input (Keybinds.GateNow).
-                if (v.Claim.Scope == KeybindScope.Window && v.Winner?.Source == KeybindSource.Game)
-                    lostToGame.Add(v.Claim.OwnerId + "/" + v.Claim.ActionId);
-            }
+        var yieldsInPlay = YieldsInPlay(picture);
         lock (CacheGate)
         {
             _cached = picture;
@@ -699,7 +689,7 @@ internal static class KeybindArbiter
             }
 
             _blocked = blocked;
-            _lostToGame = lostToGame;
+            _yieldsInPlay = yieldsInPlay;
         }
 
         return picture;
@@ -733,17 +723,50 @@ internal static class KeybindArbiter
     }
 
     /// <summary>
+    /// HUB2: for each window key (<see cref="KeybindScope.Window"/>), the mod gameplay key on its chord that it gives way
+    /// to outside menus (another plugin's Progenitor bind, or an ordinary mod's key setting). Not a clash: the two never
+    /// both act in a menu, and outside menus the window key stands aside. Pure.
+    /// </summary>
+    internal static Dictionary<string, KeybindClaim> YieldsInPlay(KeybindPicture picture)
+    {
+        var result = new Dictionary<string, KeybindClaim>(StringComparer.OrdinalIgnoreCase);
+        var gameplay = new Dictionary<KeyChord, KeybindClaim>();
+        foreach (var v in picture.Verdicts)
+        {
+            var c = v.Claim;
+            if (c.Source == KeybindSource.Game || !c.Comparable || c.Scope != KeybindScope.Gameplay) continue;
+            if (!gameplay.ContainsKey(c.Chord)) gameplay[c.Chord] = c;
+        }
+
+        foreach (var v in picture.Verdicts)
+        {
+            var c = v.Claim;
+            if (c.Source != KeybindSource.Progenitor || c.Scope != KeybindScope.Window || !c.Comparable) continue;
+            if (gameplay.TryGetValue(c.Chord, out var holder)) result[c.OwnerId + "/" + c.ActionId] = holder;
+        }
+
+        return result;
+    }
+
+    /// <summary>HUB2: the mod gameplay key window key <paramref name="bindId"/> gives way to outside menus, or null.</summary>
+    internal static KeybindClaim? InPlayHolder(string pluginId, string bindId)
+    {
+        Dictionary<string, KeybindClaim> yields;
+        lock (CacheGate) yields = _yieldsInPlay;
+        return yields.TryGetValue((pluginId ?? "") + "/" + (bindId ?? ""), out var holder) ? holder : null;
+    }
+
+    /// <summary>HUB2: the Keybinds tab's quiet note on a window key that gives way outside menus, or empty.</summary>
+    internal static string InPlayYieldNote(KeybindClaim? holder) =>
+        holder == null
+            ? ""
+            : "Outside menus, " + DisplayNameOf(holder.OwnerId) + "'s " + holder.DisplayName + " also uses " + holder.ChordText
+              + ", so there that key acts instead of this one.";
+
+    /// <summary>
     /// The reason a Progenitor bind must not fire right now, or null when it may. Asked by the pump on a
     /// press edge: a dictionary lookup in the table the last build left, never a rebuild.
     /// </summary>
-    /// <summary>HUB1: whether window key <paramref name="bindId"/> lost its chord to a game key (not to a mod key).</summary>
-    internal static bool LostToGame(string pluginId, string bindId)
-    {
-        HashSet<string> lost;
-        lock (CacheGate) lost = _lostToGame;
-        return lost.Contains((pluginId ?? "") + "/" + (bindId ?? ""));
-    }
-
     internal static string? BlockedReason(string pluginId, string bindId)
     {
         Dictionary<string, string> blocked;
@@ -851,7 +874,7 @@ internal static class KeybindArbiter
         int rb = Rank(b, cache, out var tb);
         if (ra != rb)
         {
-            rule = Math.Min(ra, rb) switch { 0 => RuleGame, 1 => RuleFramework, _ => Math.Max(ra, rb) == WindowYieldRank ? RuleWindowYields : RuleUnknownTime };
+            rule = Math.Min(ra, rb) switch { 0 => RuleGame, 1 => RuleFramework, _ => RuleUnknownTime };
             return ra < rb ? -1 : 1;
         }
 
@@ -873,9 +896,6 @@ internal static class KeybindArbiter
     {
         time = ModInstallTime.Unknown;
         if (c.Source == KeybindSource.Game) return 0;
-        // HUB1: Progenitor's window keys (the tab-history keys) yield to every mod key on their chord: a mod's own key
-        // stays active everywhere, and the window key is the one reported as losing.
-        if (IsFramework(c.OwnerId) && c.Scope == KeybindScope.Window) return WindowYieldRank;
         if (IsFramework(c.OwnerId)) return 1;
         time = InstallOf(c.OwnerId, cache);
         return time.Utc != null ? 2 : 3;
@@ -925,7 +945,6 @@ internal static class KeybindArbiter
         RuleFramework => ", which is part of Progenitor and comes right after the game",
         RuleInstall => ", installed first",
         RuleUnknownTime => ", installed first (this mod's install time is unknown, so it comes after every mod whose time is known)",
-        RuleWindowYields => "; Progenitor's window tab keys always give way to a mod's key",
         _ => ", which comes first by mod id (the install times are the same or unknown)",
     };
 

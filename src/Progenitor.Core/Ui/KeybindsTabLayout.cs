@@ -1179,7 +1179,13 @@ internal static class KeybindsTabLayout
         else if (row.Claim.Scope == KeybindScope.Photo) info.Add(PhotoScopeNote);
         else if (row.Claim.Scope == KeybindScope.Map) info.Add(MapScopeNote);
         else if (row.Claim.Scope == KeybindScope.Chat) info.Add(ChatScopeNote);
-        else if (row.Claim.Scope == KeybindScope.Window) info.Add(WindowScopeNote);
+        else if (row.Claim.Scope == KeybindScope.Window)
+        {
+            info.Add(WindowScopeNote);
+            // HUB2: a mod's gameplay key on the same key is not a clash; a quiet note says which acts outside menus.
+            string yields = KeybindArbiter.InPlayYieldNote(KeybindArbiter.InPlayHolder(row.Claim.OwnerId, row.Claim.ActionId));
+            if (yields.Length > 0) info.Add(yields);
+        }
         if (row.Claim.Source == KeybindSource.Cfg)
         {
             info.Add(FromConfigFile);
@@ -1198,8 +1204,8 @@ internal static class KeybindsTabLayout
     /// <summary>KEYS4: the description column's note on a menu key (the workspace's back and forward).</summary>
     internal const string MenuScopeNote = "Works only while the Mods menu is open, so it never clashes with a gameplay key.";
 
-    /// <summary>HUB1: the note on a window key (the tab-history keys): live in play too, so clashes are checked.</summary>
-    internal const string WindowScopeNote = "Works while a window with tabs is under the pointer or holds the input, in play too, so it is checked against gameplay keys and the game's own keys. When a game key has the same key, the game's key wins, except while the window holds the input: the game's keys are blocked then, so this key works and the game's action does not run. A mod's key on the same key always wins over it.";
+    /// <summary>HUB2: the note on a window key (Navigate back and forward, and their Alt+arrow keys).</summary>
+    internal const string WindowScopeNote = "Works in menus, and in play on a window with tabs while that window holds the input. The game's own actions are blocked then, so it never clashes with a gameplay key.";
 
     internal const string PhotoScopeNote = "Works only in photo mode, which holds your character, so it never clashes with a gameplay key.";
 

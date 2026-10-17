@@ -64,7 +64,7 @@ namespace Progenitor.Tests
             var forward = picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateForwardId)!;
             Assert.True(forward.Active);
             Assert.False(forward.InConflict);
-            Assert.Equal(KeybindScope.Menu, forward.Claim.Scope);
+            Assert.Equal(KeybindScope.Window, forward.Claim.Scope);
 
             // A gameplay mod key on the forward button loses to Auto Run; the menu key is not involved.
             Keybinds.Register(_owner, "a.mod", "Dash", File("a"), MouseForward, "", () => { });
@@ -72,8 +72,8 @@ namespace Progenitor.Tests
             Assert.False(dash.Active);
             Assert.Equal(KeybindArbiter.RuleGame, dash.Rule);
             Assert.DoesNotContain(dash.Others, o => o.OwnerId == SettingsPanel.PluginId && o.ActionId == ModsMenu.NavigateForwardId);
-            // HUB1: the window mouse key on the same button is live in play, so it is reported beside the mod key.
-            Assert.Contains(dash.Others, o => o.OwnerId == SettingsPanel.PluginId && o.ActionId == ModsMenu.WindowTabForwardMouseId);
+            // HUB2: no Core key on the forward button meets a gameplay key, so only the game is reported beside the mod key.
+            Assert.DoesNotContain(dash.Others, o => o.OwnerId == SettingsPanel.PluginId);
 
             // Remapping: the menu key may take a gameplay game key's chord, never another menu key's or a game menu key's.
             Assert.True(Keybinds.TryRebind(SettingsPanel.PluginId, ModsMenu.NavigateBackId, new KeyChord(UiKey.F6), Keybinds.RebindCheck.Full, out _));
@@ -133,9 +133,9 @@ namespace Progenitor.Tests
             Assert.Equal("Mouse Forward", forward.Claim.ChordText);
             Assert.Equal(new KeyChord(UiKey.MouseMiddle).DisplayText, "Middle Mouse");
             Assert.True(KeyChord.TryParse("Mouse Back", out var parsedBack) && parsedBack == MouseBack);
-            Assert.Equal("menu", back.Readback(true)["scope"]);
+            Assert.Equal("window", back.Readback(true)["scope"]);
             Assert.True(back.Editable);
-            Assert.Contains(KeybindsTabLayout.MenuScopeNote, KeybindsTabLayout.Describe(back, "selected").Info);
+            Assert.Contains(KeybindsTabLayout.WindowScopeNote, KeybindsTabLayout.Describe(back, "selected").Info);
         }
 
         [Fact]
@@ -264,7 +264,7 @@ namespace Progenitor.Tests
             int kept = (int)ModsMenu.NavState()["count"]!;
             ModsMenu.Close();
             Assert.Equal(kept, ModsMenu.NavState()["count"]);
-            Assert.Equal(Keybinds.MenuClosedReason, ((Dictionary<string, object?>)((List<object?>)((Dictionary<string, object?>)ModsMenu.NavigateOp(back: true))["dispatch"]!).Single()!)["reason"]);
+            Assert.Equal(Keybinds.WindowClosedReason, ((Dictionary<string, object?>)((List<object?>)((Dictionary<string, object?>)ModsMenu.NavigateOp(back: true))["dispatch"]!).Single()!)["reason"]);
         }
 
         [Fact]

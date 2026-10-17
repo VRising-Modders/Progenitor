@@ -1372,8 +1372,12 @@ public static class Keybinds
     /// <summary>KEYS4: why a menu bind did not run with the Mods workspace closed.</summary>
     internal const string MenuClosedReason = "suppressed: works only while the Mods menu is open";
 
-    /// <summary>HUB1: why a window key (<see cref="KeybindScope.Window"/>) did not fire.</summary>
-    internal const string WindowClosedReason = "suppressed: works only while a window with tabs is under the pointer or holds the input, or the Mods menu is open";
+    /// <summary>HUB2: why a window key (<see cref="KeybindScope.Window"/>) did not fire.</summary>
+    internal const string WindowClosedReason = "suppressed: works only in menus, or while a window with tabs holds the input";
+
+    /// <summary>HUB2: why a window key did not fire outside menus: a mod's gameplay key has its chord.</summary>
+    internal static string WindowYieldReason(KeybindClaim holder) =>
+        "suppressed: outside menus " + KeybindArbiter.DisplayNameOf(holder.OwnerId) + "'s " + holder.DisplayName + " has this key";
 
     internal const string PhotoInactiveReason = "suppressed: works only in photo mode";
 
@@ -1402,12 +1406,18 @@ public static class Keybinds
     private static bool DefaultMenuScopeOpen() => ModsMenu.MenuContextOpen;
 
     /// <summary>
-    /// HUB1: whether a window key (<see cref="KeybindScope.Window"/>) fires: a window with a tab history is under the
-    /// pointer or holds the input, or a menu the workspace history covers is open. A seam for tests.
+    /// HUB2: whether a window key (<see cref="KeybindScope.Window"/>) fires: a menu the workspace history covers is open
+    /// (<see cref="MenuScopeOpen"/>), or a window with a tab history holds the input (<see cref="WindowHoldsInput"/>: the
+    /// game's input is blocked, so no gameplay action fires on the same press). A seam for tests.
     /// </summary>
     internal static Func<bool> WindowScopeOpen { get; set; } = DefaultWindowScopeOpen;
 
-    private static bool DefaultWindowScopeOpen() => ModsMenu.NavigationScopeOpen;
+    private static bool DefaultWindowScopeOpen()
+    {
+        try { if (MenuScopeOpen()) return true; }
+        catch { /* not in a menu */ }
+        return WindowHoldsInput();
+    }
 
     /// <summary>
     /// Whether photo mode is active, for <see cref="KeybindScope.Photo"/> binds. Set by photo mode's
@@ -1455,23 +1465,21 @@ public static class Keybinds
     internal static KeybindScope ScopeOf(IKeybindInfo? bind) => bind is Registration r ? r.Scope : KeybindScope.Gameplay;
 
     /// <summary>
-    /// The winner rule for a press, with HUB1's one exception: a window key (<see cref="KeybindScope.Window"/>, the
-    /// tab-history keys) that lost its chord to a game key fires anyway while its target window holds the input, that is
-    /// while the native input mask applied now is <see cref="UiMaskScope.Full"/> or stronger. The game's button actions,
-    /// that game key included (Auto Run on the mouse's forward button), are blocked then (<c>GameInputBlocker</c> applies
-    /// <c>BlockAllKeys</c> for a full mask), so the press acts once. Hovered without the mask, the game's key keeps it.
-    /// The Keybinds tab still reports the clash, with a note on this rule.
+    /// The winner rule for a press, plus HUB2's rule for a window key (<see cref="KeybindScope.Window"/>): outside menus it
+    /// acts only while its window holds the input (<see cref="WindowScopeOpen"/>), and it gives way to a mod's gameplay key
+    /// on its chord (<see cref="KeybindArbiter.InPlayHolder"/>), so a press is handled once. The game's own actions are
+    /// blocked then (<c>GameInputBlocker</c> applies <c>BlockAllKeys</c> for a full mask), so they never meet it.
     /// </summary>
     private static string? GateNow(Registration reg)
     {
         string? blocked = SafeWinnerGate(reg);
-        if (blocked == null || reg.Scope != KeybindScope.Window) return blocked;
+        if (blocked != null || reg.Scope != KeybindScope.Window) return blocked;
         try
         {
-            if (KeybindArbiter.LostToGame(reg.PluginId, reg.Id) && WindowHoldsInput()) return null;
+            if (!MenuScopeOpen() && KeybindArbiter.InPlayHolder(reg.PluginId, reg.Id) is { } holder) return WindowYieldReason(holder);
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window key input check threw: " + e.Message); }
-        return blocked;
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window key check threw: " + e.Message); }
+        return null;
     }
 
     /// <summary>
