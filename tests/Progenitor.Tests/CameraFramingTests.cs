@@ -153,6 +153,74 @@ public sealed class CameraFramingTests
         Assert.True(worst > 0.2, "the yaw model should miss under a mirrored convention; worst " + worst);
     }
 
+    /// <summary>The previewed point's depth and the camera's forward y, as TryMeasure reads them.</summary>
+    private static (float Depth, float ForwardY) Pose(PinholeCamera cam, UnitVec3 point)
+    {
+        var rel = (X: point.X - cam.Position.X, Y: point.Y - cam.Position.Y, Z: point.Z - cam.Position.Z);
+        return ((float)(rel.X * cam.Forward.X + rel.Y * cam.Forward.Y + rel.Z * cam.Forward.Z), (float)cam.Forward.Y);
+    }
+
+    /// <summary>
+    /// A camera of the preview's orbit rig, <paramref name="distance"/> behind an anchor <paramref name="height"/> meters
+    /// above the point (the game's anchor height offset), at <paramref name="pitch"/>.
+    /// </summary>
+    private static PinholeCamera RigAbove(UnitVec3 point, float height, float distance, float pitch, float yaw = 30f)
+    {
+        var cam = Rig(new UnitVec3(point.X, point.Y + height, point.Z), yaw, pitch, 50f, 32f / 9f);
+        // Rig sits Distance (6) behind; move it to the asked distance along its own forward axis.
+        double extra = distance - Distance;
+        cam.Position = (cam.Position.X - cam.Forward.X * extra, cam.Position.Y - cam.Forward.Y * extra, cam.Position.Z - cam.Forward.Z * extra);
+        return cam;
+    }
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(2f)]
+    [InlineData(5f)]
+    public void The_posed_orbit_camera_is_accepted_with_the_games_anchor_height(float height)
+    {
+        var (depth, fy) = Pose(RigAbove(Point, height, Distance, 35f), Point);
+        Assert.True(CameraFraming.PlausibleOrbitReading(depth, fy, Distance, 35f), "depth " + depth);
+    }
+
+    [Theory]
+    [InlineData(18f, 60f)]   // the player's top-down camera before the orbit camera is up: far, steep
+    [InlineData(14f, 35f)]   // far at the right pitch
+    [InlineData(6f, 70f)]    // right distance, wrong pitch
+    [InlineData(2f, 35f)]    // much nearer than the orbit
+    public void A_reading_from_another_camera_is_refused(float distance, float pitch)
+    {
+        var (depth, fy) = Pose(RigAbove(Point, 0f, distance, pitch), Point);
+        Assert.False(CameraFraming.PlausibleOrbitReading(depth, fy, Distance, 35f), "depth " + depth + ", pitch " + pitch);
+    }
+
+    [Fact]
+    public void A_camera_not_posed_yet_is_refused()
+    {
+        // Still at the origin, or sitting on the point, or an unreadable axis.
+        Assert.False(CameraFraming.PlausibleOrbitReading(0f, -0.57f, Distance, 35f));
+        Assert.False(CameraFraming.PlausibleOrbitReading(1500f, -0.57f, Distance, 35f));
+        Assert.False(CameraFraming.PlausibleOrbitReading(Distance, float.NaN, Distance, 35f));
+        Assert.False(CameraFraming.PlausibleOrbitReading(float.NaN, -0.57f, Distance, 35f));
+        Assert.False(CameraFraming.PlausibleOrbitReading(Distance, 0f, Distance, 35f)); // level, not looking down
+    }
+
+    [Fact]
+    public void The_top_down_camera_measured_first_would_pull_the_anchor_far_aside()
+    {
+        // Why the gate exists: measured from the player's camera (20 m away, steep), the shift is several times the orbit's.
+        var topDown = RigAbove(Point, 0f, 20f, 60f);
+        var orbit = Rig(Point, 30f, 35f, 50f, 32f / 9f);
+        Measure(orbit, Point, 0.15f, out float right);
+        float target = CameraFraming.ViewportTarget(0.15f);
+        var (depth, _) = Pose(topDown, Point);
+        var look = new UnitVec3((float)(topDown.Position.X + topDown.Forward.X * depth), (float)(topDown.Position.Y + topDown.Forward.Y * depth), (float)(topDown.Position.Z + topDown.Forward.Z * depth));
+        var side = new UnitVec3((float)(look.X + topDown.Right.X), (float)(look.Y + topDown.Right.Y), (float)(look.Z + topDown.Right.Z));
+        Assert.True(CameraFraming.TryLateral(target, (float)topDown.Viewport(look).X, (float)topDown.Viewport(side).X, out float wrong));
+        Assert.True(wrong > 2.5f * right, "wrong " + wrong + " vs " + right);
+        Assert.False(CameraFraming.PlausibleOrbitReading(depth, (float)topDown.Forward.Y, Distance, 35f));
+    }
+
     [Fact]
     public void Readings_that_cannot_frame_are_refused_and_no_offset_is_the_point()
     {

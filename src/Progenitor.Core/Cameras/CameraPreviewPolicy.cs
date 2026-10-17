@@ -115,6 +115,34 @@ internal static class CameraFraming
     /// <summary>Whether <paramref name="offset"/> is a usable screen offset.</summary>
     internal static bool IsValidOffset(float offset) => float.IsFinite(offset) && Math.Abs(offset) <= MaxScreenOffset;
 
+    /// <summary>How much nearer than the orbit distance the previewed point may be from a live camera that is the preview's own.</summary>
+    internal const float DepthSlackNear = 1.5f;
+
+    /// <summary>
+    /// How much farther: the orbit looks at the anchor plus the game's anchor height offset, so the point (below that by the
+    /// offset) is about <c>offset * sin(pitch)</c> farther away; this admits an offset up to about 5 m at 35 degrees.
+    /// </summary>
+    internal const float DepthSlackFar = 3f;
+
+    /// <summary>How far the live camera's pitch may differ from the shot's before the reading is not the preview's camera.</summary>
+    internal const float PitchSlackDegrees = 10f;
+
+    /// <summary>
+    /// Whether a live camera reading can be the preview's own posed orbit camera: the previewed point
+    /// <paramref name="depth"/> meters in front of it, near the orbit <paramref name="distance"/> (see
+    /// <see cref="DepthSlackNear"/>, <see cref="DepthSlackFar"/>), and looking down at the shot's
+    /// <paramref name="pitchDegrees"/> (its forward axis's <paramref name="forwardY"/>, within <see cref="PitchSlackDegrees"/>).
+    /// The player's top-down camera before the orbit camera is up, or a camera not posed yet, fails it; such a reading is
+    /// dropped and the last good one kept.
+    /// </summary>
+    internal static bool PlausibleOrbitReading(float depth, float forwardY, float distance, float pitchDegrees)
+    {
+        if (!float.IsFinite(depth) || !float.IsFinite(forwardY) || forwardY < -1.001f || forwardY > 1.001f) return false;
+        if (depth < distance - DepthSlackNear || depth > distance + DepthSlackFar) return false;
+        double pitch = -Math.Asin(Math.Clamp(forwardY, -1f, 1f)) * 180.0 / Math.PI;
+        return Math.Abs(pitch - pitchDegrees) <= PitchSlackDegrees;
+    }
+
     /// <summary>
     /// The camera viewport x (0 at its left edge, 1 at its right) a point must project to so it sits at
     /// <c>0.5 + offset</c> of the <b>screen</b> width, for a camera drawn into the screen from <paramref name="rectX"/>

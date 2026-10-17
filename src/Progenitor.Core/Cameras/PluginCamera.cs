@@ -53,6 +53,9 @@ public sealed partial class PluginCamera
     /// <summary>True while this plugin's shot is being written every frame.</summary>
     public bool IsShotActive => Director.IsShotActive && Director.Owns;
 
+    /// <summary>CAMOFFSET1: this plugin's shot owns the camera and its first write has landed in the camera of its mode.</summary>
+    internal bool ShotLanded => Director.Owns && Director.ShotLanded;
+
     /// <summary>
     /// Switch to <paramref name="mode"/> and stop any scripted shot; the game's own input then
     /// drives the camera. <see cref="CameraMode.TopDown"/> is the same as <see cref="Reset"/>

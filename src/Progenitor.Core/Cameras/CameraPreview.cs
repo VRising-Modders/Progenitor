@@ -95,6 +95,8 @@ public sealed partial class PluginCamera
         private UnitVec3 _anchor;
         private FramingReading _reading;
         private bool _framingLogged;
+        /// <summary>Ticks in a row the orbit shot has been landed; the camera is measured only from the second (posed for a frame).</summary>
+        private int _landedTicks;
 
         /// <summary>The newest running preview of any plugin, for the bridge's readback; null when none runs.</summary>
         internal static CameraPreview? Current { get; private set; }
@@ -167,6 +169,8 @@ public sealed partial class PluginCamera
         {
             if (!CameraFraming.IsValidOffset(offset)) throw new ArgumentOutOfRangeException(nameof(offset), "ScreenOffset must be finite and at most 0.4 either way.");
             if (!Active) return;
+            // The last measurement was for the old offset.
+            if (offset != _screenOffset) _measured = false;
             _screenOffset = offset;
             if (_camera.IsShotActive) _camera.Orbit(Framed(), Distance, _yaw, Pitch);
         }
@@ -174,13 +178,15 @@ public sealed partial class PluginCamera
         /// <summary>
         /// The orbit anchor this frame: the point itself, or with a screen offset the point moved sideways so it projects
         /// at the offset. The sideways distance is measured from the live render camera (<see cref="CameraFraming"/>): its
-        /// own projection of the look-at point and of a point one meter right of it, at the previewed point's depth. A
-        /// frame whose camera cannot be read keeps the last measurement; with none yet the point is framed at the center.
+        /// own projection of the look-at point and of a point one meter right of it, at the previewed point's depth. Only
+        /// once the orbit write has landed and the camera has been posed for a frame, and only from a reading that can be
+        /// the orbit camera (<see cref="CameraFraming.PlausibleOrbitReading"/>). A frame whose camera cannot be read, or
+        /// whose reading is refused, keeps the last measurement; with none yet the point is framed at the center.
         /// </summary>
         private UnitVec3 Framed()
         {
             if (_screenOffset == 0f) { _measured = false; return _anchor = _point; }
-            if (TryMeasure(out var reading))
+            if (_landedTicks >= 2 && TryMeasure(out var reading))
             {
                 _reading = reading;
                 _right = reading.Right;
@@ -194,9 +200,8 @@ public sealed partial class PluginCamera
         /// <summary>What one measurement of the live camera read (kept for the readback and the log line).</summary>
         private struct FramingReading
         {
-            public string Camera;
-            public float Fov, Aspect, RectX, RectWidth, Depth, Target, AtLookAt, AtRight, Lateral, Pinhole, Agreement;
-            public UnitVec3 Right;
+            public float RectX, RectWidth, Depth, Target, AtLookAt, AtRight, Lateral;
+            public UnitVec3 Right, CameraRight;
         }
 
         private bool TryMeasure(out FramingReading r)
@@ -212,7 +217,8 @@ public sealed partial class PluginCamera
                 var right = t.right;
                 var rel = new UnityEngine.Vector3(_point.X - pos.x, _point.Y - pos.y, _point.Z - pos.z);
                 float depth = rel.x * fwd.x + rel.y * fwd.y + rel.z * fwd.z;
-                if (!float.IsFinite(depth) || depth < 0.5f || depth > 200f) depth = Distance;
+                // The player's camera, or one not posed yet: keep the last good reading.
+                if (!CameraFraming.PlausibleOrbitReading(depth, fwd.y, Distance, Pitch)) return false;
                 var look = new UnityEngine.Vector3(pos.x + fwd.x * depth, pos.y + fwd.y * depth, pos.z + fwd.z * depth);
                 var side = new UnityEngine.Vector3(look.x + right.x, look.y + right.y, look.z + right.z);
                 float atLook = cam.WorldToViewportPoint(look).x;
@@ -228,13 +234,10 @@ public sealed partial class PluginCamera
                 if (!CameraFraming.TryLateral(target, atLook, atRight, out float lateral)) return false;
                 var camRight = new UnitVec3(right.x, right.y, right.z);
                 if (!CameraFraming.TryUnit(camRight, out var shotRight)) return false;
-                float agreement = CameraFraming.RightAgreement(_yaw, camRight);
                 r = new FramingReading
                 {
-                    Camera = cam.name ?? "", Fov = cam.fieldOfView, Aspect = cam.aspect, RectX = rectX, RectWidth = rectW,
-                    Depth = depth, Target = target, AtLookAt = atLook, AtRight = atRight, Lateral = lateral,
-                    Pinhole = CameraFraming.PinholeLateral(target, depth, cam.fieldOfView, cam.aspect),
-                    Agreement = agreement, Right = shotRight,
+                    RectX = rectX, RectWidth = rectW, Depth = depth, Target = target, AtLookAt = atLook, AtRight = atRight,
+                    Lateral = lateral, Right = shotRight, CameraRight = camRight,
                 };
                 return true;
             }
@@ -258,15 +261,29 @@ public sealed partial class PluginCamera
             catch { return false; }
         }
 
+        /// <summary>The live camera's name, field of view and aspect, read only for the log line and the readback.</summary>
+        private static (string Name, float Fov, float Aspect) CameraFacts()
+        {
+            try
+            {
+                var cam = UnityEngine.Camera.main;
+                return cam == null ? ("", float.NaN, float.NaN) : (cam.name ?? "", cam.fieldOfView, cam.aspect);
+            }
+            catch { return ("", float.NaN, float.NaN); }
+        }
+
         /// <summary>One line, once per preview with an offset, 1.5 s in: the target, where the point really projects, and the readings.</summary>
         private void LogFraming()
         {
             string where = TryProject(_point, out var v, out float sx) ? Fmt(sx) + " (viewport " + Fmt(v.x) + ", depth " + Fmt(v.z) + ")" : "unreadable";
             var r = _reading;
+            var (name, fov, aspect) = CameraFacts();
             Plugin.Logger?.LogInfo("Camera: preview framing offset " + Fmt(_screenOffset) + ": point at screen x " + where
                 + ", wanted " + Fmt(0.5f + _screenOffset) + (_measured ? "" : " (no camera measurement yet: centered)")
-                + "; camera '" + r.Camera + "' fov " + Fmt(r.Fov) + " aspect " + Fmt(r.Aspect) + " rect " + Fmt(r.RectX) + "+" + Fmt(r.RectWidth)
-                + ", depth " + Fmt(r.Depth) + ", lateral " + Fmt(r.Lateral) + " m (pinhole model " + Fmt(r.Pinhole) + " m), right agreement " + Fmt(r.Agreement) + ".");
+                + "; camera '" + name + "' fov " + Fmt(fov) + " aspect " + Fmt(aspect) + " rect " + Fmt(r.RectX) + "+" + Fmt(r.RectWidth)
+                + ", depth " + Fmt(r.Depth) + ", lateral " + Fmt(r.Lateral) + " m (pinhole model "
+                + Fmt(CameraFraming.PinholeLateral(r.Target, r.Depth, fov, aspect)) + " m), right agreement "
+                + Fmt(CameraFraming.RightAgreement(_yaw, r.CameraRight)) + ".");
         }
 
         private static string Fmt(float v) => float.IsFinite(v) ? v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : "n/a";
@@ -281,6 +298,7 @@ public sealed partial class PluginCamera
             var p = Current;
             if (p == null || !p.Active) return new() { ["active"] = false };
             var r = p._reading;
+            var (name, fov, aspect) = CameraFacts();
             var result = new System.Collections.Generic.Dictionary<string, object?>
             {
                 ["active"] = true,
@@ -291,17 +309,18 @@ public sealed partial class PluginCamera
                 ["screenOffset"] = p._screenOffset,
                 ["wantedScreenX"] = 0.5f + p._screenOffset,
                 ["measured"] = p._measured,
-                ["camera"] = r.Camera,
-                ["fov"] = r.Fov,
-                ["aspect"] = r.Aspect,
+                ["landedTicks"] = p._landedTicks,
+                ["camera"] = name,
+                ["fov"] = fov,
+                ["aspect"] = aspect,
                 ["rect"] = new[] { r.RectX, r.RectWidth },
                 ["depth"] = r.Depth,
                 ["viewportTarget"] = r.Target,
                 ["lookAtViewportX"] = r.AtLookAt,
                 ["oneMeterRightViewportX"] = r.AtRight,
                 ["lateral"] = r.Lateral,
-                ["pinholeLateral"] = r.Pinhole,
-                ["rightAgreement"] = r.Agreement,
+                ["pinholeLateral"] = p._measured ? CameraFraming.PinholeLateral(r.Target, r.Depth, fov, aspect) : float.NaN,
+                ["rightAgreement"] = p._measured ? CameraFraming.RightAgreement(p._yaw, r.CameraRight) : float.NaN,
             };
             if (TryProject(p._point, out var v, out float sx))
             {
@@ -343,6 +362,7 @@ public sealed partial class PluginCamera
                 { _manual = true; _yaw += dx * 0.15f; }
                 if (!_manual) _yaw += (float)(elapsed - _previous) * 8;
                 _previous = elapsed;
+                _landedTicks = _camera.ShotLanded ? Math.Min(_landedTicks + 1, 1000) : 0;
                 _camera.Orbit(Framed(), Distance, _yaw, Pitch);
                 if (!_framingLogged && _screenOffset != 0f && elapsed > 1.5) { _framingLogged = true; LogFraming(); }
                 MainThread.PostDelayed(0.033, Tick, _camera._ctx.Owner);
