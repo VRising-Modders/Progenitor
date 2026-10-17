@@ -12,6 +12,14 @@ Don't write generic helpers that get instantiated with Progenitor types (e.g. `T
 - [AI starter prompt](docs/ai-starter-prompt.md)
 - [Mod template](templates/progenitor-mod): `dotnet new install templates/progenitor-mod`, then `dotnet new progenitor-mod -n MyMod`
 
+## Helping a player with a problem
+
+- Read [SUPPORT.md](SUPPORT.md) and the player pages of [the Help Guide](docs/guide/progenitor-guide.html). Ask for the V Rising and Progenitor versions, the mod list, and the log zip (Mods > Progenitor > Get help > Collect logs).
+- Diagnose from the logs and give steps a player can follow in the game or the game folder.
+- A likely bug: help them write a short report (versions, steps, expected vs actual, the relevant log lines, checked for private details) for the [Progenitor channel](https://discord.com/channels/978094827830915092/1112888087836631090) on the V Rising Mod Community Discord or a GitHub bug report.
+- Advanced users may fork, fix and open a pull request; it is reviewed before merging. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- Logs have IDs, IPs and known player names removed, but the player should look through them before sharing them with anyone, an AI included.
+
 ## Docs
 
 - [Tutorial](docs/tutorial.md): a first plugin through UI, networking and hot reload

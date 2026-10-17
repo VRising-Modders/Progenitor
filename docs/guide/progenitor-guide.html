@@ -275,7 +275,7 @@ a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--r
   </header>
   <nav class="toc" id="toc" aria-label="Contents"></nav>
   <main id="main" tabindex="-1">
-    <div class="crumb"><span class="label" id="crumbLeft"></span><span class="label" id="crumbRight"></span></div>
+    <div class="crumb"><span class="label" id="crumbLeft"></span></div>
     <article class="card" id="card" aria-live="polite"></article>
     <nav class="pager" aria-label="Page">
       <button class="btn" id="prevBtn" type="button"><span class="dir">&larr; Previous</span><span class="ttl" id="prevTitle"></span></button>
@@ -323,34 +323,80 @@ window.HELP = {
     /* ---------------- Players ---------------- */
     {
       id: "players", role: "players", title: "Getting Started", pages: [
+        { id: "install-bepinex", title: "Install BepInEx",
+          html: `<ol><li>Find the [[game-folder|game folder]]: Steam &rsaquo; right-click <strong>V Rising</strong> &rsaquo; <strong>Manage</strong> &rsaquo; <strong>Browse local files</strong>.</li>
+<li>Download <a href="https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/">BepInExPack_V_Rising</a> (<strong>Manual Download</strong>) and extract it outside the game folder.</li>
+<li>Copy everything inside its <code>BepInExPack_V_Rising</code> folder (<code>BepInEx</code>, <code>dotnet</code>, <code>winhttp.dll</code>, <code>doorstop_config.ini</code> and the rest) into the game folder, next to <code>VRising.exe</code>.</li>
+<li>Start the game once. A [[bepinex|BepInEx]] console opens; the first start is slow while it generates its files.</li></ol>
+<p>Already have BepInEx? Skip to the next page.</p>` },
         { id: "install", title: "Install Progenitor",
-          html: `<ol><li>Install a [[mod-manager|mod manager]] (r2modman or the Thunderstore App) and pick <strong>V Rising</strong>.</li>
-<li>Install <strong>Progenitor</strong>. BepInExPack_V_Rising comes with it.</li>
-<li>Start the game from the mod manager.</li></ol>`,
-          callout: { title: "By hand", text: "<code>Progenitor.Bootstrap.dll</code> in <code>BepInEx/plugins</code>, <code>Progenitor.dll</code> in <code>BepInEx/progenitor-core</code>, <code>Progenitor.Preloader.dll</code> in <code>BepInEx/patchers</code>." } },
+          html: `<ol><li>Quit the game.</li>
+<li>Download <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases">release page</a>.</li>
+<li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
+<li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
+<p>To update, extract the new zip the same way and let it replace the files. The zip holds only a <code>BepInEx</code> folder and never changes BepInEx's own files or settings.</p>` },
         { id: "open", title: "Open the Mods menu",
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
 <p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
+        { id: "mod-page", title: "Every mod's settings are here",
+          html: `<p>Every mod built on Progenitor keeps its settings in the Mods menu.</p>
+<ul><li><strong>Mods</strong> tab &rsaquo; pick the mod: on/off switch, About, its settings and keys, and <strong>Help</strong> when it has a guide.</li>
+<li><strong>Keybinds</strong> tab: every mod's keys and the game's own, remappable; conflicts are marked.</li>
+<li>[[server-setting|Server settings]] follow the server while you are on it; only [[admin|admins]] change them. Yours come back when you leave.</li></ul>` },
+        { id: "search", title: "Search",
+          html: `<p>Each tab's search box covers that tab only:</p>
+<ul><li><strong>Mods</strong>: mod names and ids.</li><li><strong>Install Mods</strong>: name, author, description, and the README once loaded.</li>
+<li><strong>Keybinds</strong>: action, key, help text and mod name; the game's keys too.</li><li>A mod's settings, when it has more than ten: names, help and section titles.</li></ul>
+<p><strong>&times;</strong> or <span class="kbd">Escape</span> clears it; closing the menu empties it.</p>` },
+        { id: "features", title: "What Progenitor adds to your game",
+          html: `<table><thead><tr><th class="label">Feature</th><th class="label">What it does</th><th class="label">Default</th></tr></thead><tbody>
+<tr><td>Build menu search</td><td>A search box over every build tab; tooltips show where an item lives.</td><td>On</td></tr>
+<tr><td>Dye all</td><td>Character &rsaquo; Equipment: hold a color swatch to dye every worn piece.</td><td>On</td></tr>
+<tr><td>Chat</td><td>A better chat box (next page).</td><td>On</td></tr>
+<tr><td>[[photo-mode|Photo mode]]</td><td>A free camera with the HUD hidden: <span class="kbd">Ctrl+Shift+F9</span>.</td><td>Off</td></tr>
+<tr><td>Back and forward</td><td>Mouse Back and Forward step through the Mods menu.</td><td>On</td></tr></tbody></table>
+<p>Turn each on or off: <strong>Mods &rsaquo; Progenitor</strong>, groups Photo mode, Build menu, Equipment and Chat. Keys: the Keybinds tab.</p>` },
+        { id: "chat", title: "Chat",
+          html: `<ul><li>Stays up 30 seconds (the game: 14); clicking it doesn't attack.</li>
+<li>Tabs, drag to move and resize, history kept per server, &times;3 for repeats, optional timestamps.</li>
+<li>Clickable links (asks first), highlighted mentions, right-click a line to copy, whisper or mute.</li>
+<li><code>/r</code> replies to the last whisper, <span class="kbd">Tab</span> completes names after <code>/w</code>, <span class="kbd">Up</span> recalls sent lines, <code>.</code> shows the server's commands.</li></ul>
+<p>Settings: <strong>Mods &rsaquo; Progenitor &rsaquo; Chat</strong>. A server may turn links or long messages off.</p>` },
         { id: "install-mods", title: "Install mods",
-          html: `<ol><li>Open [[install-tab|Install Mods]].</li><li>Find a mod and click <strong>Install</strong>.</li><li>Some mods load at once; others ask for a restart.</li></ol>
-<p>Mods from a mod manager show <strong>Managed by</strong> that tool; update those there.</p>` },
+          html: `<p>Open [[install-tab|Install Mods]], find a mod and click <strong>Install</strong>. Some load at once; others ask for a restart.</p>
+<ul><li><strong>Simple</strong> (default): one button per mod. <strong>Advanced</strong>: separate Client and Server columns, a server picker and more filters. Switch at the left of the search box.</li>
+<li>Click a row to see its <strong>Side</strong>: Client (this game), Server, or Client and server.</li>
+<li>Players need only client mods. Server-only mods are listed only for an [[admin|admin]] of the server you are on.</li>
+<li>A client and server mod also needs the server to run it; ask its admin. As an admin, Simple can install it on both at once.</li></ul>` },
         { id: "join", title: "Join a modded server",
           html: `<p>On join, the server's message shows, then <strong>Mods for &lt;server&gt;</strong>:</p>
 <ul><li><strong>Required to join</strong>: [[required-mod|mods you must have]], with <em>N of M ready</em>.</li>
 <li><strong>Recommended</strong>: [[recommended-mod|optional mods]] with the admin's reason.</li>
 <li><strong>Install N mods</strong> gets them from Thunderstore, then join or restart and rejoin.</li></ul>` },
-        { id: "mod-page", title: "Settings and keybinds",
-          html: `<ul><li>Each mod's page in <strong>Mods</strong>: on/off switch, status, version, About and settings.</li>
-<li><strong>Your settings</strong> are yours. <strong>Server settings</strong> are read-only unless you are an [[admin|admin]].</li>
-<li><strong>Keybinds</strong>: remap any mod's key; conflicts are marked.</li></ul>` },
         { id: "updates", title: "Updates",
           html: `<p><strong>Preferences &rsaquo; Updates</strong>:</p>
 <ul><li><strong>Update mods</strong>: Automatic (default), Notify or Off.</li><li><strong>Offer updates before joining a server</strong>: on by default.</li><li>Per mod, on its page: a different mode, or keep one version.</li></ul>` },
         { id: "help", title: "When something goes wrong",
           html: `<ol><li>Crashed? Start the game again; the last three sessions' logs are kept.</li>
-<li><strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong> saves a zip on your Desktop.</li>
-<li>Post it in a bug report or the V Rising Mod Community Discord.</li></ol>`,
-          callout: { title: "Before posting", text: "IDs, IPs and known player names are removed, but look through the zip first." } }
+<li>Collect logs: <strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong>, or on the title screen the zip icon at the end of the bottom-left icon row (for a game that crashes on join). A zip lands on your Desktop.</li>
+<li>Ask an AI assistant (next page), or post the zip in the <a href="https://discord.com/channels/978094827830915092/1112888087836631090">Progenitor channel</a> on the V Rising Mod Community Discord (<a href="https://vrisingmods.com/discord">join it</a> first) or a <a href="https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml">GitHub bug report</a>.</li></ol>`,
+          callout: { title: "Before sharing", text: "IDs, IPs and known player names are removed, but look through the zip before you share it with anyone, an AI included." } },
+        { id: "ai-help", title: "Get help from an AI assistant",
+          html: `<p>Open ChatGPT, Gemini, Grok, Claude or another assistant, paste this prompt, and attach your log zip or its files:</p>{{code}}
+<p>The same prompt, and how to write a bug report: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/SUPPORT.md">SUPPORT.md</a>.</p>`,
+          code: { lang: "prompt", text: `Help me fix a problem with V Rising mods that use Progenitor
+(https://github.com/VRising-Modders/Progenitor).
+
+1. Read the repository's llms.txt, SUPPORT.md and the player pages in
+   docs/guide/progenitor-guide.html, then the docs they link to.
+2. Ask me for my V Rising version, my Progenitor version (Mods > Progenitor),
+   the mods I use, and whether I play on a server or in a private game.
+3. Read the logs I attach (BepInEx LogOutput.log, Player.log, the mod list).
+4. Tell me the likely cause, then give me steps a player can follow in the
+   game or the game folder. No code changes unless I ask.
+5. If it looks like a bug in Progenitor or a mod, help me write a short bug report.
+
+My problem: <describe what happened and what you expected>` } }
       ]
     },
 
@@ -358,9 +404,10 @@ window.HELP = {
     {
       id: "admins", role: "admins", title: "Getting Started", pages: [
         { id: "install", title: "Install on a server",
-          html: `<ul><li>One package, <strong>Client + Server</strong>: install the same profile on the dedicated server.</li>
-<li>By hand: the same three DLLs as a client (<code>plugins</code>, <code>progenitor-core</code>, <code>patchers</code>).</li>
-<li>A private game hosted from a client loads the client's mods; no separate install.</li></ul>`,
+          html: `<ol><li>Copy everything inside <code>BepInExPack_V_Rising</code> into the server folder, next to <code>VRisingServer.exe</code>.</li>
+<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server; update the same way.</li>
+<li>Start the server once; the first start is slow while BepInEx generates its files.</li></ol>
+<p>A private game hosted from a client loads the client's mods; no separate install.</p>`,
           callout: { title: "Never on a public server", warn: true, text: "<code>Progenitor.Dev.dll</code>, the [[dev-bridge|dev bridge]]. Release packages leave it out." } },
         { id: "admins", title: "Who is an admin",
           html: `<ul><li>Players on the server's admin list, or authenticated with <code>adminauth</code>.</li>
@@ -371,10 +418,17 @@ window.HELP = {
           html: `<p>Join your server, open <strong>Mods</strong>, then the [[server-tab|Server]] tab. Admins edit; everyone else reads.</p>
 <ul><li><strong>Server rules</strong>, join settings, updates and backups.</li><li>Each mod's server settings sit on its own page under <strong>Server settings</strong>.</li></ul>` },
         { id: "join-rules", title: "Client mods for players",
-          html: `<p><strong>Progenitor's page &rsaquo; Server settings &rsaquo; When players join &rsaquo; Players joining</strong>:</p>
+          html: `<p><strong>Server &rsaquo; Mods players need &rsaquo; Players joining</strong>:</p>
 <ul><li><strong>Required client mods</strong>, each with a version rule.</li><li><strong>Recommended client mods</strong>, with a reason.</li>
 <li><strong>Which client mods players may use</strong>: Any mods, or Only approved mods.</li><li>The server message players see first.</li></ul>`,
           callout: { title: "House rules, not anti-cheat", text: "Players' games report their own mods." } },
+        { id: "chat-rules", title: "Chat and photo mode",
+          html: `<p><strong>Server &rsaquo; Chat</strong>, for everyone on the server:</p>
+<ul><li>Allow clickable links, mod links, <code>@all</code> from admins and long messages (all on).</li>
+<li>A word filter: replace with <code>***</code> or block the line (off).</li>
+<li>A Discord relay of chosen channels to a webhook (off).</li></ul>
+<p><strong>Mods &rsaquo; Progenitor &rsaquo; On this server</strong>: allow [[photo-mode|photo mode]] (on).</p>`,
+          callout: { title: "Not yet verified in game", text: "The server chat settings are tested outside the game only." } },
         { id: "remote-install", title: "Install mods on the server",
           html: `<p>Joined as an admin, [[remote-install|Install Mods]] can also install, update and remove mods on that server. A mod that cannot load live waits for the next server start.</p>` },
         { id: "updates", title: "Updates",
@@ -388,7 +442,7 @@ window.HELP = {
         { id: "help", title: "When something goes wrong",
           html: `<ul><li><code>.progenitor logs</code> in chat collects the server's logs.</li>
 <li>A world saved with a content mod still loads after that mod is removed (<code>[SaveSafety]</code> in <code>progenitor.cfg</code>).</li>
-<li>Bugs: a GitHub bug report or the V Rising Mod Community Discord.</li></ul>` }
+<li>Bugs: a <a href="https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml">GitHub bug report</a> or the <a href="https://discord.com/channels/978094827830915092/1112888087836631090">Progenitor channel</a> on the V Rising Mod Community Discord (<a href="https://vrisingmods.com/discord">join it</a> first). An AI assistant can help: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/SUPPORT.md">SUPPORT.md</a>.</li></ul>` }
       ]
     },
 
@@ -563,7 +617,9 @@ window.Show();` },
   ],
   glossary: [
     { id: "progenitor", term: "Progenitor", def: "A V Rising modding framework that gives mods settings, keybinds, UI, networking and hot reload, and undoes their registrations on unload." },
-    { id: "mod-manager", term: "Mod manager", def: "An app such as r2modman or the Thunderstore App that installs Thunderstore packages and their dependencies." },
+    { id: "game-folder", term: "Game folder", def: "The V Rising install folder that holds <code>VRising.exe</code>; BepInEx and Progenitor go inside it." },
+    { id: "server-setting", term: "Server setting", def: "A mod setting the server decides for everyone on it; while you are joined it shows the server's value, which only admins change." },
+    { id: "photo-mode", term: "Photo mode", def: "Progenitor's free-flying camera with the HUD hidden, off by default; a server can disallow it." },
     { id: "install-tab", term: "Install Mods tab", def: "The Mods menu tab that lists Thunderstore mods and installs, updates or removes them in game." },
     { id: "server-tab", term: "Server tab", def: "The Mods menu tab for how the joined server is set up: rules, join settings, updates and backups; admins edit, everyone else reads." },
     { id: "required-mod", term: "Required client mod", def: "A client mod a server needs every player to have before they can join." },
@@ -621,7 +677,7 @@ window.Show();` },
     { id: "territory", term: "Territory / plot", def: "The land a castle claims, made of tiles, read on the server through <code>ctx.Castles</code>." },
     { id: "castle-heart", term: "Castle heart", def: "The structure that claims a territory and keeps a castle running." },
     { id: "world-epoch", term: "World epoch", def: "A stamp of the current world load; keep it beside any held entity and check <code>ctx.WorldState.IsStale</code>." },
-    { id: "thunderstore", term: "Thunderstore", def: "The mod site mod managers use; Progenitor publishes there as <code>VRising_Modders-Progenitor</code>." },
+    { id: "thunderstore", term: "Thunderstore", def: "The mod site the Install Mods tab installs from; Progenitor publishes there as <code>VRising_Modders-Progenitor</code>." },
     { id: "stamp", term: "Progenitor stamp", def: "An optional 64 x 64 corner mark on a mod's icon showing it runs on Progenitor, not an endorsement." },
     { id: "dev-bridge", term: "Dev bridge", def: "<code>Progenitor.Dev</code>: a local-only bridge and MCP server for building, reloading and testing in a test game; never on a public server." },
     { id: "game-free-test", term: "Game-free test", def: "A test that runs with <code>dotnet test</code> and no game install, as CI does." }
@@ -782,7 +838,6 @@ window.Show();` },
     var ch = page.chapter, list = path(), i = list.indexOf(page);
     document.title = page.title + " · " + (H.title || "Help");
     $("crumbLeft").textContent = (hasRoles && role && ch.role ? roleById[role].title + " · " : "") + ch.title;
-    $("crumbRight").textContent = "page " + (i + 1) + " of " + list.length;
     var inCh = ch.pages.indexOf(page);
     $("counter").textContent = (inCh + 1) + " / " + ch.pages.length;
     $("counterSub").textContent = ch.title;
