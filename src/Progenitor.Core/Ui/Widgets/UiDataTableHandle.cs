@@ -152,6 +152,15 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     private readonly Dictionary<string, IUiMarkView?>[] _spinners;
     private readonly Dictionary<string, UiDrawnMark>[] _spinnerNow;
 
+    /// <summary>The table's actions column, or null; its buttons' faces are drawn marks (<see cref="UiIconMarks"/>).</summary>
+    private readonly UiTableColumn? _actionsColumn;
+    private readonly int _actionSlots;
+    private readonly UiIconMarks _actionMarks = new();
+    private readonly List<Action<KeyValuePair<string, string>>> _rowActionHandlers = new();
+
+    /// <summary>The filler rows drawn under the lines now (<see cref="UiDataTableOptions.MinRows"/>).</summary>
+    private int _fillers;
+
     internal UiDataTableHandle(
         IUiPanel panel, string key, IEnumerable<UiTableColumn> columns, IEnumerable<UiTableRow>? rows, UiDataTableOptions? options)
         : base(panel, key, key)
@@ -167,6 +176,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _chooser = _options.ColumnChooser && _model.ChooserColumns().Count > 0;
 
         var cols = _model.Columns;
+        _actionsColumn = UiDataTableLayout.ActionsColumn(cols);
+        _actionSlots = _actionsColumn == null ? 0 : UiDataTableLayout.ActionSlotsOf(_actionsColumn);
         _header = Part(panel.CellHeader(UiDataTableLayout.HeaderCells(cols, _multi), RowKey("header"), UiDataTableLayout.ScrollInset));
         Lease(_header.OnSort(k => { if (Live) HeaderClick(k); }));
         foreach (var col in cols)
@@ -213,6 +224,19 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 _checkMarks.Attach(row, UiDataTableLayout.CellCheck, watchHover: false);
             }
             Lease(row.OnClick(UiDataTableLayout.CellExpand, () => ExpandSlot(slot)));
+            if (_actionsColumn != null)
+            {
+                for (int a = 0; a < _actionSlots; a++)
+                {
+                    int place = a;
+                    string cell = UiDataTableLayout.ActionKey(_actionsColumn.Key, a);
+                    // The hover is the table's own (the tooltip and the bright mark), so the marks do not watch it.
+                    _actionMarks.Attach(row, cell, watchHover: false);
+                    Lease(row.OnClick(cell, () => ActionSlot(slot, place)));
+                    Lease(row.OnCellHover(cell, on => HoverAction(slot, place, on)));
+                }
+            }
+
             foreach (var col in cols)
             {
                 if (!IsEditable(col)) continue;
@@ -456,6 +480,76 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     public string StatusText { get; private set; } = "";
 
     public string StatusReason => _model.Reason;
+
+    public IDisposable OnRowAction(Action<string, string> handler)
+    {
+        if (handler == null) throw new ArgumentNullException(nameof(handler));
+        return Subscribe(_rowActionHandlers, (Action<KeyValuePair<string, string>>)(p => handler(p.Key, p.Value)));
+    }
+
+    public bool PressRowAction(string rowId, string actionId)
+    {
+        if (IsDisposed) return false;
+        var action = _model.PressableAction(rowId, actionId);
+        if (action == null) return false;
+        Raise(_rowActionHandlers, new KeyValuePair<string, string>(rowId, action.Id), "row action");
+        return true;
+    }
+
+    // ---- Row actions -------------------------------------------------------------------------
+
+    /// <summary>The action drawn at place <paramref name="place"/> of slot <paramref name="slot"/>, with its row; nulls when none.</summary>
+    private (UiTableRow? Row, UiRowAction? Action) ActionAt(int slot, int place)
+    {
+        var line = LineAtSlot(slot);
+        if (line is not { Kind: UiTableLineKind.Row } l || l.Row == null) return (null, null);
+        var actions = l.Row.Actions;
+        if (place < 0 || place >= actions.Count || place >= _actionSlots) return (l.Row, null);
+        return (l.Row, actions[place]);
+    }
+
+    /// <summary>A click (A on a controller) on an action button: raised when that action is enabled; a faint one does nothing.</summary>
+    internal void ActionSlot(int slot, int place)
+    {
+        if (!Live || _actionsColumn == null || _model.IsHidden(_actionsColumn.Key)) return;
+        var (row, action) = ActionAt(slot, place);
+        if (row == null || action is not { Enabled: true }) return;
+        Raise(_rowActionHandlers, new KeyValuePair<string, string>(row.Id, action.Id), "row action");
+    }
+
+    /// <summary>The pointer on an action button: its mark brightens and its tooltip shows (a disabled one's too).</summary>
+    internal void HoverAction(int slot, int place, bool on)
+    {
+        if (_actionsColumn == null || slot < 0 || slot >= _slots.Count) return;
+        var slotRow = _slots[slot];
+        string cell = UiDataTableLayout.ActionKey(_actionsColumn.Key, place);
+        _actionMarks.SetLit(slotRow, cell, on);
+        if (!on)
+        {
+            HideTooltip();
+            return;
+        }
+
+        var (_, action) = ActionAt(slot, place);
+        if (action == null || string.IsNullOrWhiteSpace(action.Tooltip) || !Visible)
+        {
+            HideTooltip();
+            return;
+        }
+
+        ShowTooltip(RectOf(slotRow, cell), action.Tooltip.Trim(), "", () => slotRow.Visible && RectOf(slotRow, cell).IsKnown);
+    }
+
+    /// <summary>Tests and readback: the mark drawn on slot <paramref name="slot"/>'s action place <paramref name="place"/>.</summary>
+    internal UiDrawnMark ActionMarkAt(int slot, int place) =>
+        _actionsColumn == null ? UiDrawnMark.None : _actionMarks.MarkOf(_slots[slot], UiDataTableLayout.ActionKey(_actionsColumn.Key, place));
+
+    /// <summary>Tests: whether that mark is drawn enabled (not faint).</summary>
+    internal bool ActionEnabledAt(int slot, int place) =>
+        _actionsColumn != null && _actionMarks.EnabledOf(_slots[slot], UiDataTableLayout.ActionKey(_actionsColumn.Key, place));
+
+    /// <summary>Tests and readback: the filler rows drawn under the lines now.</summary>
+    internal int Fillers => _fillers;
 
     // ---- Events ------------------------------------------------------------------------------
 
@@ -976,6 +1070,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     protected override void OnDisposing()
     {
         _checkMarks.Dispose();
+        _actionMarks.Dispose();
         StopTick();
         try { _fillTick?.Dispose(); }
         catch { /* */ }
@@ -1013,7 +1108,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             {
                 ["key"] = c.Key,
                 ["caption"] = c.Caption,
-                ["kind"] = c.Kind == UiTableColumnKind.Number ? "number" : "text",
+                ["kind"] = c.Kind switch { UiTableColumnKind.Number => "number", UiTableColumnKind.Actions => "actions", _ => "text" },
                 ["hidden"] = _model.IsHidden(c.Key),
                 ["hideable"] = c.Hideable,
                 ["sortable"] = c.Sortable,
@@ -1041,6 +1136,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 },
                 ["id"] = line.Row?.Id,
                 ["group"] = line.Group,
+                ["actions"] = DescribeActions(line),
             });
         }
 
@@ -1073,6 +1169,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             ["lines"] = lines.Count,
             ["rows"] = _model.Rows.Count,
             ["visibleRows"] = _viewport.Slots,
+            ["minRows"] = _options.MinRows,
+            ["fillers"] = _fillers,
             ["fillHeight"] = _options.FillHeight,
             ["builtRows"] = _viewport.Built,
             ["slots"] = slots,
@@ -1086,6 +1184,29 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             ["scrollBar"] = _bar != null,
             ["rowKeys"] = RowKey("row") + "<n>",
         };
+    }
+
+    /// <summary>A slot's drawn actions for the readback: <c>[{id, icon, enabled, cell}]</c> (the cell is the button's key).</summary>
+    private List<Dictionary<string, object?>> DescribeActions(UiTableLine line)
+    {
+        var list = new List<Dictionary<string, object?>>();
+        if (_actionsColumn == null || line.Kind != UiTableLineKind.Row || line.Row == null) return list;
+        var actions = line.Row.Actions;
+        for (int a = 0; a < actions.Count && a < _actionSlots; a++)
+        {
+            var action = actions[a];
+            if (action == null) continue;
+            list.Add(new Dictionary<string, object?>
+            {
+                ["id"] = action.Id,
+                ["icon"] = UiDataTableLayout.MarkOf(action.Icon).Name,
+                ["enabled"] = action.Enabled,
+                ["tooltip"] = action.Tooltip,
+                ["cell"] = UiDataTableLayout.ActionKey(_actionsColumn.Key, a),
+            });
+        }
+
+        return list;
     }
 
     // ---- Drawing -------------------------------------------------------------------------------------
@@ -1127,12 +1248,20 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             bool icons = AnyIcon();
             bool expander = _model.Grouped || AnyDetail();
             RenderHeader(icons, expander);
+            // MinRows: blank filler rows right under the lines keep the body's height while there are few lines.
+            _fillers = _viewport.Fillers(_options.MinRows);
+            int fillTo = _viewport.Shown + _fillers;
             for (int i = 0; i < _slots.Count; i++)
             {
                 int index = _viewport.LineAt(i);
                 if (index < 0)
                 {
-                    TrySetVisible(_slots[i], false);
+                    if (i < fillTo)
+                    {
+                        RenderFiller(i, icons, expander);
+                        TrySetVisible(_slots[i], true);
+                    }
+                    else TrySetVisible(_slots[i], false);
                     continue;
                 }
 
@@ -1402,6 +1531,13 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         {
             foreach (var col in _model.Columns)
             {
+                if (col.Kind == UiTableColumnKind.Actions)
+                {
+                    // A drawer line spans the row: its action places are hidden with the other columns.
+                    RenderActions(slot, null, col, hideAll: true);
+                    continue;
+                }
+
                 Write(slot, UiDataTableLayout.ViewKey(col.Key), null, CellTone.Normal, false);
                 if (!IsEditable(col)) continue;
                 Write(slot, UiDataTableLayout.EditKey(col.Key), null, CellTone.Normal, false);
@@ -1439,12 +1575,89 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
     private string? FirstVisibleColumn()
     {
-        foreach (var c in _model.Columns) if (!_model.IsHidden(c.Key)) return c.Key;
+        foreach (var c in _model.Columns)
+            if (!_model.IsHidden(c.Key) && c.Kind != UiTableColumnKind.Actions) return c.Key;
         return null;
+    }
+
+    /// <summary>
+    /// An actions column's places on slot <paramref name="slot"/>: a data row's actions (left to right, faint when
+    /// disabled), a blank of the same width where the row has none, and only blanks on every other line (a group header,
+    /// a subtotal, the total, a filler: <paramref name="line"/> null). <paramref name="hideAll"/> hides every place (a
+    /// drawer line, a hidden column).
+    /// </summary>
+    private void RenderActions(int slot, UiTableLine? line, UiTableColumn col, bool hideAll = false)
+    {
+        var row = _slots[slot];
+        hideAll |= _model.IsHidden(col.Key);
+        var actions = line is { Kind: UiTableLineKind.Row } l && l.Row != null ? l.Row.Actions : null;
+        for (int a = 0; a < _actionSlots; a++)
+        {
+            string key = UiDataTableLayout.ActionKey(col.Key, a);
+            var action = !hideAll && actions != null && a < actions.Count ? actions[a] : null;
+            bool enabled = action is { Enabled: true };
+            // A faint button still shows (it says the action exists but does nothing here), as the list's top-row up.
+            Write(slot, key, "", enabled ? CellTone.Normal : CellTone.Faint, action != null);
+            Write(slot, UiDataTableLayout.ActionPadKey(col.Key, a), "", CellTone.Muted, !hideAll && action == null);
+            _actionMarks.Set(row, key, action == null ? UiDrawnMark.None : UiDataTableLayout.MarkOf(action.Icon), enabled);
+        }
+    }
+
+    /// <summary>
+    /// A filler slot (<see cref="UiDataTableOptions.MinRows"/>): a blank line as tall as any, with every column's place kept
+    /// and nothing to click, select or hover.
+    /// </summary>
+    private void RenderFiller(int slot, bool icons, bool expander)
+    {
+        var row = _slots[slot];
+        if (_multi)
+        {
+            Write(slot, UiDataTableLayout.CellCheck, "", CellTone.Gold, true);
+            _checkMarks.Set(row, UiDataTableLayout.CellCheck, UiDrawnMark.None);
+        }
+
+        Write(slot, UiDataTableLayout.CellIcon, "", CellTone.Normal, false);
+        Write(slot, UiDataTableLayout.CellIconPad, "", CellTone.Muted, icons);
+        Write(slot, UiDataTableLayout.CellDetail, null, CellTone.Muted, false);
+        foreach (var col in _model.Columns)
+        {
+            if (col.Kind == UiTableColumnKind.Actions)
+            {
+                RenderActions(slot, null, col);
+                continue;
+            }
+
+            string view = UiDataTableLayout.ViewKey(col.Key);
+            bool shown = !_model.IsHidden(col.Key);
+            Write(slot, view, "", CellTone.Normal, shown);
+            if (!IsEditable(col)) continue;
+            Write(slot, UiDataTableLayout.EditKey(col.Key), null, CellTone.Normal, false);
+            SpinnerMark(slot, view, UiDrawnMark.None);
+        }
+
+        Write(slot, UiDataTableLayout.CellExpand, UiWidgetLayout.ExpandGlyph, CellTone.Normal, false);
+        Write(slot, UiDataTableLayout.CellExpandPad, "", CellTone.Muted, expander);
+        if (_expandedNow[slot] != false)
+        {
+            row.SetExpanded(false);
+            _expandedNow[slot] = false;
+        }
+
+        if (_selectedNow[slot] != false)
+        {
+            row.SetSelected(false);
+            _selectedNow[slot] = false;
+        }
     }
 
     private void RenderColumn(int slot, UiTableLine line, UiTableColumn col, string? first)
     {
+        if (col.Kind == UiTableColumnKind.Actions)
+        {
+            RenderActions(slot, line, col);
+            return;
+        }
+
         string view = UiDataTableLayout.ViewKey(col.Key);
         string edit = UiDataTableLayout.EditKey(col.Key);
         bool editable = IsEditable(col);

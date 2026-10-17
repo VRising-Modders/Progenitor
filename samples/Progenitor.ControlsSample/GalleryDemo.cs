@@ -358,6 +358,13 @@ internal sealed class GalleryDemo
                 tabs.Add(tab, panel.Text("The hub window's table shows a chest, the Smithy and a prison cell with their build-menu icons.", UiTextStyle.Body));
                 tabs.Add(tab, panel.Text("Open the game's build menu once this session, then reopen the hub: the icons appear.", UiTextStyle.Muted));
                 break;
+            case "row-actions":
+                Action(panel, tab, "Hub window", api, () => Report("hub window = " + _host.ToggleHub()));
+                tabs.Add(tab, panel.Text("Each row of the hub's table has find, up, down and remove buttons; the first row's up and the last row's down are faint.", UiTextStyle.Body));
+                break;
+            case "min-rows":
+                tabs.Add(tab, panel.Text("The hub's table lists three buildings and still draws eight rows: blank rows keep its height.", UiTextStyle.Body));
+                break;
             case "checklist":
                 Action(panel, tab, "Checklist window", api, () => Report("checklist window = " + _host.ToggleChecklist()));
                 tabs.Add(tab, panel.Text("300 chests, stations and belts: search, the Show filter, Select shown, View and Add.", UiTextStyle.Body));

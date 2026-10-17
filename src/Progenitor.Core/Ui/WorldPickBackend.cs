@@ -243,6 +243,23 @@ internal static unsafe class WorldPickBackend
             if (_band is UiPanelHandle { IsDisposed: false } handle && handle.IsShownNow) StyleBand(handle);
         }
 
+        /// <summary>
+        /// <see cref="UiWorldPickOptions.CloseGameWindows"/>: <c>HUDMenuManager.CloseMenu(World)</c>, the close the
+        /// framework already makes for the map and the build menu (<see cref="MapShare"/>, <see cref="BuildMenuOpener"/>)
+        /// and the one the game's own interact HUD makes when an interaction ends; a container or station window's mapper
+        /// then tells the server the interaction ended as it does on Escape. Only an interact window or the character
+        /// inventory is closed (<see cref="UiWorldPickMenus.ClosesForPick"/>).
+        /// </summary>
+        public int CloseGameWindows()
+        {
+            int menu = MenuTypeNow();
+            if (!UiWorldPickMenus.ClosesForPick(menu)) return 0;
+            var world = Worlds.Client;
+            if (world == null || !world.IsCreated) return 0;
+            HUDMenuManager.CloseMenu(world);
+            return menu;
+        }
+
         public void Disarmed()
         {
             ReleaseBand();

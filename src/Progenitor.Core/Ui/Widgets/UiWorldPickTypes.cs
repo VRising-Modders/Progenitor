@@ -104,8 +104,18 @@ public sealed class UiWorldPickOptions
     /// </summary>
     public bool SuppressPanel { get; set; } = true;
 
+    /// <summary>
+    /// True: arming the pick first closes the game window the player has open, as Escape would: a container's or a
+    /// station's window (with the character inventory beside it) or the character inventory itself. The game is told the
+    /// interaction ended, as when the player closes it. Nothing is reopened when the pick ends: the window stays closed.
+    /// Any other game menu (the map, the full-screen menu) is left alone, and so is a pick that could not arm (no world).
+    /// Works with <see cref="Repeat"/>: the window closes once, when the pick arms. False (the default): nothing is closed.
+    /// </summary>
+    public bool CloseGameWindows { get; set; }
+
     internal UiWorldPickOptions Copy() => new()
     {
+        CloseGameWindows = CloseGameWindows,
         Kinds = Kinds,
         Prompt = string.IsNullOrWhiteSpace(Prompt) || (Repeat && Prompt.Trim() == DefaultPrompt)
             ? (Repeat ? DefaultRepeatPrompt : DefaultPrompt)

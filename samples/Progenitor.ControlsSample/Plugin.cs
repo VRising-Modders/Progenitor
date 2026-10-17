@@ -128,7 +128,9 @@ internal sealed class ControlsHud : IWidgetsHud, IWidgetsRepeatPickHud, IHelpDem
                 picked(result.Kind + " " + result.Menu + " (" + result.EntityIndex + ":" + result.EntityVersion + ")", pick?.PickCount ?? 1);
             },
             () => finished(pick?.PickCount ?? 0),
-            new UiWorldPickOptions { Repeat = true });
+            // CloseGameWindows: an open chest or station window (or the inventory) closes first, so the next interact
+            // reaches the world; it is not reopened afterwards.
+            new UiWorldPickOptions { Repeat = true, CloseGameWindows = true });
     }
 
     public string Tip(string id, string title, string body, IUiPanel? anchor, IUiHandle? control) =>

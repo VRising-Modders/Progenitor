@@ -31,6 +31,9 @@ internal static class UiWorldPickMenus
         internal UiWorldPickKind Kind { get; }
     }
 
+    /// <summary><c>HUDMenuType.CharacterInfo</c>: the character inventory (and its other tabs, the build menu among them).</summary>
+    internal const int CharacterMenu = 1;
+
     internal const int ContainerMenu = 3;
     internal const int WorkstationMenu = 4;
     internal const int RefinementstationMenu = 6;
@@ -80,6 +83,14 @@ internal static class UiWorldPickMenus
     /// </summary>
     internal static bool Wants(UiWorldPickKinds kinds, int menuType, out Info info) =>
         TryGet(menuType, out info) && Accepts(kinds, info.Kind);
+
+    /// <summary>
+    /// Whether <see cref="UiWorldPickOptions.CloseGameWindows"/> closes the open HUD menu <paramref name="menuType"/>
+    /// (<c>OpenHUDMenuSystem.CurrentMenuType</c>): an interact window a pick could capture (a container, a station, the
+    /// castle heart and the like) or the character inventory. Nothing open (0), unreadable (-1) and every other menu (the
+    /// map, the full-screen menu) stay as they are.
+    /// </summary>
+    internal static bool ClosesForPick(int menuType) => menuType == CharacterMenu || ByType.ContainsKey(menuType);
 
     private static Dictionary<int, Info> Build()
     {
