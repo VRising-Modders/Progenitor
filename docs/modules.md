@@ -5949,6 +5949,44 @@ before a Core hot swap, and that no old `Progenitor.DyeAll.dll` is left in the c
    Turn it off on its page: `… Progenitor's copy is active.` within a quarter second.
 5. Remove any old Dye all DLL you placed, disconnect and leave the client at the title screen.
 
+## Share a map location
+
+A built-in client feature, on by default, with no plugin API. With the world map open, **Shift + left click** a spot:
+the map closes and the chat input opens with `[loc:x,z]` for that spot (world X and Z, whole meters, the
+[location token](#chat)) after any draft, caret at the end. Nothing is sent until the player presses Enter. A drag
+pans the map as usual and shares nothing. The game's key-hint row at the bottom of the map gets a matching entry right
+after *Add/Remove Marker*: *Shift + [left mouse] Share Location*, or the bound key's name after a remap.
+
+- **Key.** `ShareMapLocation` in Core's `[Keybinds]` (`progenitor.ui.cfg`), a map-scope bind: it works only on the full
+  map, never on the minimap or in gameplay, and shows in the Keybinds tab. A keybind matches its modifiers exactly.
+- **The game's own clicks are untouched.** The map's left click does nothing with Shift alone (the admin teleport is
+  Ctrl + Shift + left click), and the marker is the right click, so nothing is suppressed.
+- **The point** is read as the game's own map click reads it: the pointer on the map texture's rect, then the inverse of
+  the map mapper's world-to-map matrix ([`WorldMap.TryReadPointer`](api.md), `MapTransformMath`).
+- **Closing.** `HUDMenuManager.CloseMenu(World)`, the call the M key makes with the map shown. The chat opens once the
+  menu is gone (the chat input is not usable over the full-screen menu); the insert is dropped after about 5 s if the
+  menu never closes.
+- **No controller binding.** The keybind system reads keyboard and mouse only.
+
+Source: `src/Progenitor.Core/Ui/MapShare.cs` (install, the key, the share, `MapShareTestBridge`), `MapShareHint.cs` (the
+key tip, copied from one of the row's own entries as [Dye all](#dye-all)'s is), and the game-free `MapShareLogic.cs`
+(the click, the token, the tip's words, donor and place; `MapShareTests`). The chat side is
+`ChatWindow.InsertIntoInput(text, afterMenuCloses)` with `ChatInsertPlan` (`ChatTabInput.cs`).
+
+**Status:** source-checked and built; unit-tested outside the game. **Not run live.** The map's key-hint row is assumed
+to be `FullscreenMenu.InputContexts` and the right mouse glyph's sprite name `Icon_RMB…`; both need the live check.
+
+**Live check** (client in a world, no input needed):
+
+1. `map {"action":"open"}`, then `map {"action":"status"}`: `share.installed true`, `share.key` `Left Mouse + Shift`,
+   `share.hintShown true`, `share.hintText` `Shift + [LMB] Share Location`. A capture shows the tip after *Add/Remove Marker*.
+2. `map {"action":"share","x":960,"y":540}` (a screen point on the map; Input System pixels, origin bottom left):
+   `ok true`, `token` `[loc:x,z]`. The map closes, and a few frames later `chat_tabs {"action":"read"}` reports
+   `input.focused true` with the token at the end of `input.text`. Log: `Map share: [loc:x,z] goes to the chat input once the map has closed.`
+3. The real key (foreground, needs a fresh yes): open the map, Shift + left click a spot, check the line, then press
+   Escape to leave the chat without sending. Shift-drag pans and shares nothing; a right click still sets the marker.
+4. Close the chat without sending, disconnect and leave the client at the title screen.
+
 ## Ui
 
 Client-only first cut of M3.1. Full API: [ui.md](ui.md); how to use it: [UI style guide](ui-style.md). Skip token: `HarmonySlotHandoff.UiModule` (`"Ui"`).

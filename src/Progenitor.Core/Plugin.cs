@@ -223,6 +223,9 @@ public sealed class Plugin
         // Client only; [DyeAll] in Core's ui cfg, after Ui (the pointer watches and the hold ring).
         try { Dye.DyeAllFeature.Install(); }
         catch (Exception e) { Logger?.LogWarning($"DyeAllFeature.Install: {e.Message}"); }
+        // Shift-click the full map to put that spot's [loc:x,z] in chat (client only; a map-scope key in Core's ui cfg).
+        try { Ui.MapShare.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"MapShare.Install: {e.Message}"); }
         try { Ui.CharacterSheetFeature.Install(); }
         catch (Exception e) { Logger?.LogWarning($"CharacterSheetFeature.Install: {e.Message}"); }
         // CHAT1: the game's chat box stays up longer and a click on it no longer attacks. Client only;
@@ -408,6 +411,8 @@ public sealed class Plugin
         // The debug tools before the map lease sweep and every world-facing module: their unload
         // clears the Immortal and kill-path guard the debug buff granted while GodMode, ModSave and
         // the world epoch are all still installed.
+        try { Ui.MapShare.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"MapShare.Uninstall: {e.Message}"); }
         try { Debugging.DebugTools.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"DebugTools.Uninstall: {e.Message}"); }
         // MAPTP1: a reveal lease a plugin did not release still puts the map's reveal flag back.

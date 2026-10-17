@@ -268,3 +268,50 @@ internal sealed class ChatSentWatch
     /// <summary>The line in the input was replaced (another tab's draft, a long message sent by parts): forget it.</summary>
     internal void Forget() => _typed = "";
 }
+
+/// <summary>What a pending chat insert does on this frame (<see cref="ChatInsertPlan.Next"/>).</summary>
+internal enum ChatInsertStep
+{
+    /// <summary>Keep waiting.</summary>
+    Wait,
+
+    /// <summary>Open the chat input now (the menu it waited for has closed).</summary>
+    OpenChat,
+
+    /// <summary>The chat has focus: put the text in the line.</summary>
+    Apply,
+
+    /// <summary>The chat never opened: forget the text.</summary>
+    Drop,
+}
+
+/// <summary>
+/// CHAT4 and the map share: when a pending insert lands, game-free. An insert opens the chat at once and waits up to
+/// <see cref="FocusFrames"/> frames for it to take focus. An insert made while the game's full-screen menu closes (the
+/// map share closes the map first: the chat input is not usable over the menu) waits for the menu to be gone, up to
+/// <see cref="MenuFrames"/> frames, then opens the chat and waits as above.
+/// </summary>
+internal static class ChatInsertPlan
+{
+    /// <summary>How long an insert waits for the chat to take focus (about 5 s at 60 fps).</summary>
+    internal const int FocusFrames = 300;
+
+    /// <summary>How long an insert waits for the game's menu to close before it gives up (about 5 s at 60 fps).</summary>
+    internal const int MenuFrames = 300;
+
+    /// <param name="focused">The chat input has focus.</param>
+    /// <param name="waitForMenu">The insert still waits for the menu to close before it opens the chat.</param>
+    /// <param name="menuOpen">The game's full-screen menu is open.</param>
+    /// <param name="frames">Frames this phase has waited, counting this one.</param>
+    internal static ChatInsertStep Next(bool focused, bool waitForMenu, bool menuOpen, int frames)
+    {
+        if (waitForMenu)
+        {
+            if (!menuOpen) return focused ? ChatInsertStep.Apply : ChatInsertStep.OpenChat;
+            return frames > MenuFrames ? ChatInsertStep.Drop : ChatInsertStep.Wait;
+        }
+
+        if (focused) return ChatInsertStep.Apply;
+        return frames > FocusFrames ? ChatInsertStep.Drop : ChatInsertStep.Wait;
+    }
+}

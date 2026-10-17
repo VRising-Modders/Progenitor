@@ -75,8 +75,24 @@ public static class WorldMap
     /// </summary>
     public static bool TryReadPointer(out MapPointer pointer)
     {
+        if (!TryPointerScreen(out float sx, out float sy))
+        {
+            pointer = MapPointer.Off(IsOpen ? "no pointer" : "map closed");
+            return false;
+        }
+
+        return TryReadPointerAt(sx, sy, out pointer);
+    }
+
+    /// <summary>
+    /// <see cref="TryReadPointer"/> for a given screen point (Input System pixels, origin bottom left) instead of the
+    /// pointer: the map share's press position and the dev bridge's <c>map share</c> at a point.
+    /// </summary>
+    internal static bool TryReadPointerAt(float sx, float sy, out MapPointer pointer)
+    {
         pointer = MapPointer.Off("map closed");
         if (!IsOpen) return false;
+        if (!float.IsFinite(sx) || !float.IsFinite(sy)) { pointer = MapPointer.Off("no pointer"); return false; }
         try
         {
             var world = Worlds.Client;
@@ -92,7 +108,6 @@ public static class WorldMap
             var rect = texture.rectTransform;
             if (!Alive(rect)) { pointer = MapPointer.Off("no map rect"); return false; }
 
-            if (!TryPointerScreen(out float sx, out float sy)) { pointer = MapPointer.Off("no pointer"); return false; }
             if (!TryLocal(rect, sx, sy, out float lx, out float ly)) { pointer = MapPointer.Off("pointer not on the map plane"); return false; }
 
             bool inside = rect.rect.Contains(new Vector2(lx, ly));

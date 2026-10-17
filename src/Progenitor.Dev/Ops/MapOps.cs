@@ -45,12 +45,27 @@ internal static class MapOps
     internal static object Run(JsonElement args)
     {
         var action = MapPlan.Parse(args);
+        var point = action == MapPlan.Action.Share ? MapPlan.ParsePoint(args) : (false, 0f, 0f);
         if (Progenitor.Plugin.IsServerProcess) throw new InvalidOperationException(ClientOnlyMessage);
 
         var clock = Stopwatch.StartNew();
         var start = Read();
         if (action == MapPlan.Action.Status)
-            return Reply(true, "status", start, start, "", 0, clock);
+        {
+            var status = Reply(true, "status", start, start, "", 0, clock);
+            status["share"] = ShareBridge("Status", Array.Empty<object?>());
+            return status;
+        }
+
+        if (action == MapPlan.Action.Share)
+        {
+            var shared = ShareBridge("Share", new object?[] { point.Item1, point.Item2, point.Item3 });
+            Plugin.Logger?.LogInfo("Dev map share: " + (shared.TryGetValue("token", out var t) ? t : "nothing")
+                + (shared.TryGetValue("why", out var w) ? " (" + w + ")" : ""));
+            shared["action"] = "share";
+            shared["before"] = start.ToReply();
+            return shared;
+        }
 
         var (step, why) = action == MapPlan.Action.Open ? MapPlan.DecideOpen(start) : MapPlan.DecideClose(start);
         string verb = action == MapPlan.Action.Open ? "open" : "close";
@@ -204,6 +219,26 @@ internal static class MapOps
         }
     }
 
+    private const string ShareBridgeType = "Progenitor.Ui.MapShareTestBridge";
+
+    /// <summary>Core's map share readback or share, by reflection (Core grants Dev no internals).</summary>
+    private static Dictionary<string, object?> ShareBridge(string method, object?[] args)
+    {
+        var type = typeof(ModsMenu).Assembly.GetType(ShareBridgeType, throwOnError: false);
+        if (type == null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = "Core has no " + ShareBridgeType + " (older than this op)" };
+        var mi = type.GetMethod(method, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        if (mi == null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = ShareBridgeType + "." + method + " not found" };
+        try
+        {
+            return mi.Invoke(null, args) as Dictionary<string, object?>
+                ?? new Dictionary<string, object?> { ["ok"] = false, ["error"] = method + " returned nothing" };
+        }
+        catch (System.Reflection.TargetInvocationException e)
+        {
+            return new Dictionary<string, object?> { ["ok"] = false, ["error"] = e.InnerException?.Message ?? e.Message };
+        }
+    }
+
     /// <summary><c>HUDMenuManager.CloseMenu(World)</c>, what the menu's M handler calls with the map shown.</summary>
     private static bool TryCloseMenu(out string error)
     {
@@ -261,6 +296,7 @@ internal static class MapPlan
         Status = 0,
         Open = 1,
         Close = 2,
+        Share = 3,
     }
 
     internal enum Step
@@ -277,7 +313,7 @@ internal static class MapPlan
         Close = 4,
     }
 
-    internal const string UsageMessage = "map needs args.action: open, close or status.";
+    internal const string UsageMessage = "map needs args.action: open, close, status or share (optional x and y).";
 
     /// <summary>The <c>FullscreenMenuState</c> of the Map tab.</summary>
     internal const int MapState = 3;
@@ -322,8 +358,28 @@ internal static class MapPlan
             case "open": return Action.Open;
             case "close": return Action.Close;
             case "status": return Action.Status;
-            default: throw new ArgumentException("map: args.action '" + el.GetString() + "' is not open, close or status. " + UsageMessage);
+            case "share": return Action.Share;
+            default: throw new ArgumentException("map: args.action '" + el.GetString() + "' is not open, close, status or share. " + UsageMessage);
         }
+    }
+
+    /// <summary>
+    /// <c>share</c>'s optional screen point: <c>x</c> and <c>y</c> (Input System pixels, origin bottom left), both or
+    /// neither. Throws <see cref="ArgumentException"/> for one without the other or a value that is not a finite number.
+    /// </summary>
+    internal static (bool HasPoint, float X, float Y) ParsePoint(JsonElement args)
+    {
+        bool hasX = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("x", out var xe);
+        bool hasY = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("y", out var ye);
+        if (!hasX && !hasY) return (false, 0f, 0f);
+        if (hasX != hasY) throw new ArgumentException("map share: give both x and y, or neither (the pointer).");
+        args.TryGetProperty("x", out xe);
+        args.TryGetProperty("y", out ye);
+        if (xe.ValueKind != JsonValueKind.Number || ye.ValueKind != JsonValueKind.Number)
+            throw new ArgumentException("map share: x and y are screen pixels (numbers).");
+        float x = (float)xe.GetDouble(), y = (float)ye.GetDouble();
+        if (!float.IsFinite(x) || !float.IsFinite(y)) throw new ArgumentException("map share: x and y must be finite.");
+        return (true, x, y);
     }
 
     /// <summary>One read of the game's menus and of Core's map detection.</summary>
