@@ -855,6 +855,8 @@
     <Compile Include="..\..\src\Progenitor.Dev\BridgeJson.cs" Link="Linked\BridgeJson.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\GiveArgs.cs" Link="Linked\GiveArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\UnlockArgs.cs" Link="Linked\UnlockArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\StressPlan.cs" Link="Linked\StressPlan.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\StressJob.cs" Link="Linked\StressJob.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\InspectArgs.cs" Link="Linked\InspectArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\SnapshotArgs.cs" Link="Linked\SnapshotArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\TimeArgs.cs" Link="Linked\TimeArgs.cs" />

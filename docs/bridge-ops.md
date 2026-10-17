@@ -1,6 +1,6 @@
 # Bridge operations: core, entities and samples
 
-Operation reference for the [development bridge](bridge.md), part 1 of 5: health, logs, reload, users and worlds, commands and chat, ghost users, entity queries and edits, the Core debug tools and the Sample commands. Other parts: [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
+Operation reference for the [development bridge](bridge.md), part 1 of 5: health, logs, reload, users and worlds, commands and chat, ghost users, stress castles, entity queries and edits, the Core debug tools and the Sample commands. Other parts: [players, world and capture](bridge-ops-player.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
 
 ## Ops
 
@@ -225,6 +225,56 @@ node tools/mcp/call.mjs server command "@$bridgeArgs"
 $bridgeArgs = Join-Path $env:TEMP 'progenitor-ghost-args.json'
 [System.IO.File]::WriteAllText($bridgeArgs, '{"action":"destroy"}', [System.Text.UTF8Encoding]::new($false))
 node tools/mcp/call.mjs server ghost "@$bridgeArgs"
+```
+
+## Stress castles (server): `stress_populate`, `stress_clear`, `stress_status`
+
+Server process only, main thread. Fills the free castle plots of a save with test castles owned by offline test owners, for load tests of `ctx.Castles`, inventories and the server frame. MCP: `progenitor_stress` (`action`: `populate`, `clear`, `status`).
+
+**Refused** unless every check passes: no path of the process (executable, game root, BepInEx config, `-persistentDataPath`) is under `C:\VRisingServer`; the executable or game root is in a `_testserver` folder; `-persistentDataPath` is a `moo-world-copy*` folder under `_testserver` that is not a `.bak` copy; and the request carries `confirm:"stress"` (a `dryRun` needs no confirm). The user approved the op for the Moo World copy test save only. Its owners are meant to stay in that save until `stress_clear` removes them; this is an exception to the ghost-user rule above, for this op only. Back up the save first.
+
+**Status:** planner, gate and runner are game-free and unit-tested (`DevStressPlanTests`); the MCP registration is tested (`stress-tool.test.mjs`); Dev builds. **Not run live.** In this build only the owner step has a proven path. Clans, hearts, fuel, floors, chests, stations and chest fill have none, so a full populate refuses with `unproven` and writes nothing (see `missing` below).
+
+### `stress_populate`
+
+| Arg | Default | Meaning |
+|---|---|---|
+| `seed` | required, 0..9999 | Plan seed. The same seed and world give the same plan. It also picks the owners' PlatformId band. |
+| `owners` | 40 (1..99) | Test owners `Stress01`, `Stress02`, … Each gets 2..5 plots; fewer owners when there are fewer than 2 usable plots each. |
+| `clans` | 12 | Clans `StressClan01`, … of 2..5 owners, adjusted to fit; 0 for none. |
+| `plots` | `"free"` | Every free plot, or an array of territory indices. |
+| `chests` | `[10, 25]` | Chests per plot, `[min, max]`, up to 30. |
+| `stations` | `[6, 10]` | Stations per plot, up to 12. |
+| `fill` | 0.5 | Average share of a chest's slots to fill; about one chest in five is planned nearly full (90..98 %). |
+| `budgetMs` | 4 (0.5..20) | Main-thread milliseconds spent per frame. At least one step runs per frame. |
+| `dryRun` | false | Plan and report; write nothing. |
+| `partial` | false | Run only the steps that have a proven path and refuse each plot at its first step without one. |
+| `confirm` | | `"stress"`. |
+
+What the plan holds per plot: a castle heart (`TM_BloodFountain_CastleHeart`) at the territory's heart pivot (the `bot_territories` centroid spot: pivot tile ≡ 5 mod 10, the 30 × 30 tile footprint all buildable), fuel of 100..400 `Item_BloodEssence_T01`, a 6 × 6 cell floor block (`TM_Castle_Floor_Foundation_Stone01`, 27 floors beside the heart's 3 × 3 cells, in one of four corners that fits the buildable mask, ordered so each floor touches the heart or an earlier floor), stations one per cell (two `TM_Workstation_SimpleCraftingbench`, then furnace small and large, sawmill, grinder, tannery, loom, blood press and fabricator in seeded order) and chests two per cell (general, big, minerals, alchemy, fish and gems kinds, each with 2..6 fitting materials). Prefab names other than the general chest, the heart, the stone floor, the `_Small` refiners, the fabricator and the simple bench are candidates resolved by name and are not checked against the game.
+
+The run is a job: territory discovery (one territory per step), the plan, then owners, clans and per plot heart, fuel, floors, stations, chests and fills. The reply comes once the plan exists (or the job ended), and has the same shape as `stress_status`. A plot refused at plan time has `status: refused` and a `reason`: `plot_taken`, `no_such_plot`, `not_a_plot` (world region `None` or a debug territory), `no_valid_pivot`, `no_floor_fit` or `no_owner_capacity`. At run time a plot whose owner was not created is refused `owner_failed`; one whose heart failed is refused with the heart's code and nothing else is tried on it; other step failures leave it `partial` with the first refusals listed.
+
+`missing` maps each step kind with no proven path to the reason. If it is not empty and `partial` is false, the job ends `refused` with reason `unproven` before any write. The job is also refused when owners of this seed are already in the world (run `stress_clear` first) or owners of another seed are (their names would clash).
+
+Owners: each is a User written the way `ghost create` writes one (a real user's record copied and patched), with `IsConnected` false, `IsBot` true, no `ConnectedUser` and no character, `User.Index` from 20001 and PlatformId `90000000000100000 + seed × 100 + n`. That band is outside the ghost and extra-client bands, so `ghost destroy` and Dev unload leave them. Not live-verified: how an enabled offline User with no character behaves in the game's systems, the autosave and the next load.
+
+### `stress_clear`
+
+Args: `seed` (required), `confirm:"stress"`, `budgetMs`, `dryRun`. Finds every User in that seed's band and destroys each with its character, if any. An owner that still owns a castle heart (`heart_left`) or is in a clan (`clan_member`) is kept and reported: removing a heart or a clan member has no proven path. Run it twice: the second run finds nothing and reports `removed: 0`. The reply comes when the job ends.
+
+### `stress_status`
+
+The running or last job: `kind`, `seed`, `phase` (`discover`, `plan`, `execute`, `done`, `refused`, `failed`, `cancelled`), `reason`, `steps` (`done`/`total`), `ticks`, `maxTickMs`, `totalMs`, `missing`, territory counts, owner and plot counts by status and reason, and rows: `results` (per plot: owner, status, reason, heart, fuel, floors, stations, chests, filled, refusals), `ownerResults` and `clanResults`; for a clear, `removed`, `kept` and `users`. Args: `plot` (territory index) adds that plot's full layout (positions, prefabs, chest contents); `rows:false` returns counts only. `{phase: "idle"}` before any job. A Dev unload stops a job between steps; what it made stays until `stress_clear`.
+
+```
+$bridgeArgs = Join-Path $env:TEMP 'progenitor-stress-args.json'
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":7,"dryRun":true}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_populate "@$bridgeArgs"
+[System.IO.File]::WriteAllText($bridgeArgs, '{"plot":12}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_status "@$bridgeArgs"
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":7,"confirm":"stress"}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_clear "@$bridgeArgs"
 ```
 
 ## `ops`
