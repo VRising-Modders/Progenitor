@@ -161,6 +161,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLog.cs" Link="Linked\ChatLog.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatTabRow.cs" Link="Linked\ChatTabRow.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatFormat.cs" Link="Linked\ChatFormat.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatNameCache.cs" Link="Linked\ChatNameCache.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ModLinkToken.cs" Link="Linked\ModLinkToken.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLinks.cs" Link="Linked\ChatLinks.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ServerChatLogic.cs" Link="Linked\ServerChatLogic.cs" />
@@ -673,6 +674,7 @@
     <!-- Mod compatibility C5: the message fixture format and the bounded recorder behind messages_record (game-free). -->
     <Compile Include="..\..\src\Progenitor.Core\Networking\ModMessageFixtures.cs" Link="Linked\ModMessageFixtures.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\MessagesRecordArgs.cs" Link="Linked\MessagesRecordArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\ChatInjectArgs.cs" Link="Linked\ChatInjectArgs.cs" />
     <!-- Mod compatibility C3: compatibility ranges, declarations, version matching and the join's table hold (game-free). -->
     <Compile Include="..\..\src\Progenitor.Core\Plugins\CompatRange.cs" Link="Linked\CompatRange.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Plugins\CompatDeclaration.cs" Link="Linked\CompatDeclaration.cs" />

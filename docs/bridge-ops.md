@@ -112,18 +112,38 @@ There is no MCP wrapper for this op. `progenitor_ping` already returns world nam
 
 ## `command`
 
-Server process only. Creates a `ChatMessageEvent` as if a connected user typed the line. Anything that hooks chat (Progenitor commands, spike commands) sees it. Replies go to that user's client; if the handler also logs, follow with `logs`. `user` is a character name or a numeric `User.Index`; `userIndex` (int) wins when both are set. Omit both to use the first connected user. Ghosts created by the `ghost` op are `IsConnected` and resolve here the same way (`user":"Ghost1"` or `userIndex":10001`).
+Server process only. Sends a chat line as if a connected player typed it: a `ChatMessageEvent` + `FromCharacter` entity, the shape the server makes from a client's line. Anything that hooks chat (Progenitor commands, the event bus, the word filter, other command frameworks, the game's chat job) sees it. Replies go to that user's client; if the handler also logs, follow with `logs`. Use it for plain lines too (`hello`, item and location tokens, mentions): no OS keystrokes are needed.
+
+| Arg | Default | Meaning |
+|---|---|---|
+| `text` | required | The line. Longer than 509 UTF-8 bytes is cut, as the game cuts it. |
+| `user` | first connected user | A character name, or a numeric `User.Index` (number or numeric string). Ghosts from the `ghost` op resolve the same way (`"Ghost1"`, `10001`). |
+| `userIndex` | | A `User.Index`. Wins over `user`. |
+| `channel` | `local` | `local`, `global` or `clan` (`team`). Whisper (needs a receiver) and System (admin-only, already sent to its sender) are refused. |
+| `echo` | `true` | Also send the line to the speaker, stamped with their own network ids. |
+
+**Why the echo.** The game's chat job never sends a Global, Local or clan line back to the player who typed it: their client draws its own line as they press Enter. An injected line has no typing client, so without the echo a line from the only connected player reaches nobody, and the bridge reply still says it was injected. That was the "nothing arrives, not even `hello`" result. Other players still get the line by the game's own rules (Local: within 48 m on the ground plane; Global: every connected player; mutes apply). The echo goes out whether or not a handler takes the line, as a typed line shows on the typist's screen before the server answers. Set `"echo":false` to see only what the server sends (for example, to count packets).
 
 ```
-→ {"id":6,"token":"...","op":"command","args":{"text":".spike2 give","user":"TestAdmin"}}
-← {"id":6,"ok":true,"result":{"injectedAs":"TestAdmin","userIndex":0,"text":".spike2 give"}}
+→ {"id":6,"token":"...","op":"command","args":{"text":"hello","channel":"global"}}
+← {"id":6,"ok":true,"result":{"injectedAs":"TestAdmin","userIndex":0,"text":"hello","channel":"global","echoed":true}}
+→ {"id":7,"token":"...","op":"command","args":{"text":".spike2 give","user":"TestAdmin","echo":false}}
+← {"id":7,"ok":true,"result":{"injectedAs":"TestAdmin","userIndex":0,"text":".spike2 give","channel":"local","echoed":false}}
 ```
 
-On the client process this returns `ok: false` with `"command runs on the server side only"`. With nobody connected: `"no connected user to speak as"`. A ghost's `Reply` has no network slot, so the system-message text never reaches a client (one-shot `FailedNotConnected`); the command still runs.
+`echoed` is false when the echo was off or the speaker has no connected-user slot (a ghost made with `connectedUser:false`). On the client process this returns `ok: false` with `"command runs on the server side only"`. With nobody connected: `"no connected user to speak as"`. A ghost's `Reply` has no network slot, so the system-message text never reaches a client (one-shot `FailedNotConnected`); the command still runs.
+
+Verification: argument parsing is game-free tested (`ChatInjectArgsTests`); source-checked and built. The echo is **not checked live**: the expected result is the line in the speaker's chat, drawn as their own (live check steps in [chat.md](chat.md#testing-chat-from-the-bridge)).
+
+```
+$bridgeArgs = Join-Path $env:TEMP 'progenitor-command-args.json'
+[System.IO.File]::WriteAllText($bridgeArgs, '{"text":"hello","channel":"global"}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server command "@$bridgeArgs"
+```
 
 ## `chat_observe`
 
-Server process only. Injects a chat line the same way `command` does (`ChatMessageEvent` + `FromCharacter`, `ChatMessageType.Local`), then watches every `ServerBootstrapSystem.SendPacketToUser` for `windowMs` (default 1500). The game frame is not blocked: the observer is a Bootstrap-owned postfix (Dev fills the slot once, lazily), and the bridge completes via `MainThread.PostDelayed` when the window closes. Packet payloads are scanned for the UTF-8 and UTF-16 forms of the injected text (FixedString chat is UTF-8). State-sync packets are omitted unless they contain the needle.
+Server process only. Injects a chat line the same way `command` does with `"echo":false` (`ChatMessageEvent` + `FromCharacter`, `ChatMessageType.Local`; no echo, so the packets it reports are only what the server sends on its own), then watches every `ServerBootstrapSystem.SendPacketToUser` for `windowMs` (default 1500). The game frame is not blocked: the observer is a Bootstrap-owned postfix (Dev fills the slot once, lazily), and the bridge completes via `MainThread.PostDelayed` when the window closes. Packet payloads are scanned for the UTF-8 and UTF-16 forms of the injected text (FixedString chat is UTF-8). State-sync packets are omitted unless they contain the needle.
 
 While armed, each `Plugin.Frame` also queries `ProjectM.Network.ChatMessageServerEvent` entities and records distinct ones. The result field `chatServerEvents` is that count. Use it to tell **consumed silently** (source destroyed, `chatServerEvents` 0, no send) from **sent via an unobserved path** (source destroyed, `chatServerEvents` > 0, still no `SendPacketToUser`). Transient event entities can be created and destroyed between frames, so 0 means "not observed on a frame poll", not a hard proof the job never created one.
 

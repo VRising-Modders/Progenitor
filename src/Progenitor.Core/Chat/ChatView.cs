@@ -366,6 +366,9 @@ internal static class ChatView
             RestoreHistory();
             if (!Attached(window) && !Attach(window)) return;
             ChatTabs.Update(window, chatShown, hudParent);
+            // Item names the game could not give yet (restored history drawn before its item data loaded) are retried;
+            // one that resolves raises the names version in OptionsKey, so the lines redraw with the name.
+            ChatGameData.PollItemNames();
             int optionsKey = OptionsKey();
             if (_drawnVersion != Log.Version || !ReferenceEquals(_drawnTab, _tab) || optionsKey != _drawnOptions) Redraw(optionsKey);
             KeepFontSize();
@@ -481,6 +484,7 @@ internal static class ChatView
         key = key * 2 + (p.AllowModLinks ? 1 : 0);
         key = key * 31 + StringComparer.Ordinal.GetHashCode(Colors?.Value ?? "");
         key = key * 31 + ChatLinkRegistry.Version;
+        key = key * 31 + ChatGameData.ItemNamesVersion;
         return key;
     }
 

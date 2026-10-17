@@ -419,17 +419,21 @@ server.tool("progenitor_users", "Users known to a side's world: index, name, con
   try { return text(await bridge(side, "users")); } catch (e) { return fail(e); }
 });
 
-server.tool("progenitor_command", "Inject a chat line on the test server as if a connected user typed it (e.g. '.spike2 give'). Replies go to that user's client and to the log if the handler logs them; follow with progenitor_logs. Ghosts from progenitor_ghost work: pass user 'Ghost1' or userIndex 10001.",
+server.tool("progenitor_command", "Inject a chat line on the test server as if a connected user typed it (e.g. '.spike2 give' or 'hello'). The game never sends a player's own line back to them (their client shows it as they type), so by default the speaker also gets the line from the server (echo); other players get it by the game's own rules (Local: within 48 m; Global: everyone). Replies go to that user's client and to the log if the handler logs them; follow with progenitor_logs. Ghosts from progenitor_ghost work: pass user 'Ghost1' or userIndex 10001.",
   {
     text: z.string(),
     user: z.string().optional().describe("Character name or numeric User.Index to speak as (Ghost1, 10001). Defaults to the first connected user."),
     userIndex: z.number().int().optional().describe("User.Index to speak as. Wins over user when both are set."),
+    channel: z.enum(["local", "global", "clan"]).optional().describe("The channel the line is typed in. Default local."),
+    echo: z.boolean().optional().describe("Also show the line in the speaker's own chat, as typing it would. Default true."),
   },
-  async ({ text: t, user, userIndex }) => {
+  async ({ text: t, user, userIndex, channel, echo }) => {
     try {
       const args = { text: t };
       if (user) args.user = user;
       if (userIndex != null) args.userIndex = userIndex;
+      if (channel) args.channel = channel;
+      if (echo != null) args.echo = echo;
       return text(await bridge("server", "command", args));
     } catch (e) { return fail(e); }
   });
