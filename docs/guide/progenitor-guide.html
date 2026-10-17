@@ -437,8 +437,7 @@ window.HELP = {
         { id: "item-links", title: "Location and item links",
           html: `<ul><li><strong>Location:</strong> start a line with <code>/loc </code> to share where you are. Clicking the link tells you how far away it is and which way.</li>
 <li><strong>Item:</strong> start a line with <code>/item &lt;prefab name&gt; </code> to link an item. Hover the link for its name and description, or click it to open them in a window. There's no item search yet, so you need the item's prefab name.</li>
-<li>Some mods add more to a click, such as showing the place on the map.</li></ul>`,
-          callout: { title: "New", text: "Location and item links, and links from mods, haven't been tested in a live game yet." } },
+<li>Some mods add more to a click, such as showing the place on the map.</li></ul>` },
         { id: "mentions", title: "Mentions",
           html: `<p>A line with your name, one of your watched words, or <code>@all</code> from an admin is highlighted and plays a short sound. System and mod lines never count.</p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
@@ -778,8 +777,7 @@ LockedInGame = server-rules, updates` } }
 <tr><td>Allow mod links</td><td>On</td><td>[[mod-link|Mod links]] and mod suggestions.</td></tr>
 <tr><td>Allow @all from admins</td><td>On</td><td>Highlights an admin's <code>@all</code> for everyone.</td></tr>
 <tr><td>Allow long messages</td><td>On</td><td>Lines sent in parts.</td></tr>
-<tr><td>Longest long message</td><td class="num">1000</td><td>Characters, 200 to 4000.</td></tr></tbody></table>`,
-          callout: { title: "New", text: "These settings haven't been tested on a live server yet." } },
+<tr><td>Longest long message</td><td class="num">1000</td><td>Characters, 200 to 4000.</td></tr></tbody></table>` },
         { id: "filter", title: "Word filter",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Word filter</td><td>Off</td><td>Checks every player line on the server.</td></tr>
@@ -805,8 +803,7 @@ LockedInGame = server-rules, updates` } }
 <table><thead><tr><th class="label">Operator row</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Remote mod installs</td><td>On</td><td>Off refuses every remote install.</td></tr>
 <tr><td>Admins who may install mods</td><td>Any admin</td><td>SteamID64s, comma separated.</td></tr>
-<tr><td>Saved mod items</td><td></td><td><strong>Manage</strong>: restore, keep or discard items of a removed mod.</td></tr></tbody></table>`,
-          callout: { title: "New", text: "Remote installs haven't been tested on a live server yet." } },
+<tr><td>Saved mod items</td><td></td><td><strong>Manage</strong>: restore, keep or discard items of a removed mod.</td></tr></tbody></table>` },
         { id: "updates", title: "Server updates",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Update server mods</td><td>Notify</td><td>Automatic, Notify or Off.</td></tr>
@@ -943,7 +940,7 @@ window.Show();` },
         { id: "messages", title: "Messages to players",
           html: `<p>Write the message alone, one sentence: the [[message-prefix|prefix]] makes it <code>&lt;Mod Name&gt;: &lt;message&gt;</code>. Client [[notice|notice]]: <code>ctx.Hud.Notify(text, detail, kind)</code>. Server chat: <code>ctx.Chat.SendTo(user, text)</code>. Command reply: <code>Reply(text)</code>.</p>
 <div class="grid two"><div><b>Info</b>Something happened (default).</div><div class="ok"><b>Success</b>An action finished.</div><div class="pend"><b>Warning</b>Worth a look.</div><div class="bad"><b>Error</b>Something failed.</div></div>`,
-          callout: { title: "Player must act?", text: "Use <code>ctx.Dialogs</code>. <code>Notify</code> is tested, not yet verified live." } },
+          callout: { title: "Player must act?", text: "Use <code>ctx.Dialogs</code>." } },
         { id: "mods-page", title: "Your Mods page",
           html: `<p>Your [[mods-page|Mods page]]'s About text, first found wins:</p><ol><li>the installed Thunderstore package's README;</li><li>an embedded <code>README.md</code>;</li><li>[[mod-about|<code>[ModAbout("...")]</code>]];</li><li>the <code>ctx.Menu.Register</code> description.</li></ol>
 <p>Version: from <code>[BepInPlugin]</code>, <code>1.2.0</code> form, same as <code>manifest.json</code>. Example: <code>samples/Progenitor.AboutExample</code>.</p>` },
