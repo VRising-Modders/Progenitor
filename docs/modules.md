@@ -6399,14 +6399,15 @@ same handlers through the same gates and scope. Only Progenitor's own **Share ma
 sets a default:
 
 ```csharp
-var share = ctx.Keybinds.RegisterInMap("ShareSpot", new KeyChord(UiKey.MouseLeft, KeyModifiers.Alt),
-    "Share the spot under the cursor.", () =>
+var ping = ctx.Keybinds.Register("PingSpot", new KeyChord(UiKey.G, KeyModifiers.Ctrl),
+    "Ping the spot in front of you.", () =>
     {
-        // Which chord fired: read the controller cursor instead of the mouse when true.
+        // Which chord fired: true for the controller chord.
         bool pad = Keybinds.PressedWithGamepad;
         // ...
     });
-ctx.Keybinds.SetGamepad(share, KeyChord.Gamepad(UiKey.GamepadNorth, UiKey.GamepadDpadDown));
+// Pad X pressed while D-Pad Up is held.
+ctx.Keybinds.SetGamepad(ping, KeyChord.Gamepad(UiKey.GamepadWest, UiKey.GamepadDpadUp));
 ```
 
 - **Buttons.** `UiKey.GamepadSouth`, `GamepadEast`, `GamepadWest`, `GamepadNorth` (A, B, X, Y on Xbox; Cross, Circle,
@@ -6432,8 +6433,15 @@ ctx.Keybinds.SetGamepad(share, KeyChord.Gamepad(UiKey.GamepadNorth, UiKey.Gamepa
 - **The game's controller bindings** are read like its keys: with a gamepad connected, through the input action map
   (`GetBindingIndexInAction` / `IsBindingComposite` with `ControllerType.Gamepad`, so the player's overrides and camera
   scheme count; `GetBindingDisplayInfo` is never asked for a gamepad type, which with no pad adds a fake device); with
-  none, the shipped bindings (`GamepadKeybindCatalog.Defaults`, both camera schemes) stand in.
+  none, the shipped bindings (`GamepadKeybindCatalog.Defaults`, both camera schemes) stand in. They are read again at
+  world entry, when a gamepad connects or disconnects, and when the Keybinds tab opens. **Known limit:** a controller
+  binding changed in the game's own Options > Controls is seen only at the next of those (there is no hook on that
+  screen closing).
 - **In a handler,** `Keybinds.PressedWithGamepad` is true for a press, hold or release from the controller chord.
+- **The capture** (the Keybinds tab's controller cap) takes every button as a key, B included: the controller's menu
+  Cancel does nothing while it waits. It ends on Escape, a click elsewhere, or 5 seconds with no button down. Two
+  buttons going down on the same frame are refused (`Press the button you hold first, then the other.`), as are
+  three; it keeps waiting.
 - **The bridge.** `keybind_press {"bind":"…","gamepad":true}` presses the controller chord; `{"chord":"GamepadNorth +
   GamepadDpadDown"}` reaches the binds with that controller chord; in the Keybinds tab, `mods_ui keys op=capture
   chord="GamepadNorth + GamepadDpadDown"` on a Progenitor bind's row changes its controller key.

@@ -20,10 +20,17 @@ internal sealed class GamepadCapture
     internal const string TooManyReason =
         "Hold one controller button and press another; three or more buttons together can't be one key.";
 
+    /// <summary>PAD1 review: two buttons went down on the same frame, so which one is held cannot be told.</summary>
+    internal const string SameTimeReason = "Press the button you hold first, then the other.";
+
     private bool _started;
     private uint _ignored;
     private uint _down;
     private readonly List<UiKey> _order = new(3);
+    private bool _sameTime;
+
+    /// <summary>A button is down in the gesture now (the capture's timeout waits while one is).</summary>
+    internal bool Active => _down != 0;
 
     /// <summary>
     /// One read. True when the gesture ended: <paramref name="chord"/> is the chord, or <see cref="KeyChord.None"/> with
@@ -43,19 +50,29 @@ internal sealed class GamepadCapture
         _ignored &= held;
         uint effective = held & ~_ignored;
         uint pressed = effective & ~_down;
+        int added = 0;
         foreach (var key in KeyChord.GamepadKeys)
-            if ((pressed & KeyChord.GamepadBit(key)) != 0 && !_order.Contains(key)) _order.Add(key);
+        {
+            if ((pressed & KeyChord.GamepadBit(key)) == 0 || _order.Contains(key)) continue;
+            _order.Add(key);
+            added++;
+        }
+
+        // PAD1 review: two new buttons on one read have no order; the held one cannot be told from the pressed one.
+        if (added > 1) _sameTime = true;
 
         uint released = _down & ~effective;
         _down = effective;
         if (released == 0 || _order.Count == 0) return false;
 
-        if (_order.Count == 1) chord = KeyChord.Gamepad(_order[0]);
-        else if (_order.Count == 2) chord = KeyChord.Gamepad(_order[1], _order[0]);
-        else refusal = TooManyReason;
+        if (_order.Count > 2) refusal = TooManyReason;
+        else if (_sameTime) refusal = SameTimeReason;
+        else if (_order.Count == 1) chord = KeyChord.Gamepad(_order[0]);
+        else chord = KeyChord.Gamepad(_order[1], _order[0]);
 
         // A new gesture starts once everything still held is let go.
         _order.Clear();
+        _sameTime = false;
         _ignored |= effective;
         _down = 0;
         return true;

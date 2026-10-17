@@ -153,6 +153,8 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
         return held;
     }
 
+    public bool GamepadPresent => CurrentGamepad() != null;
+
     public bool TryReadGamepadHeld(out uint held)
     {
         held = 0;

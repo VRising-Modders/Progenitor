@@ -157,6 +157,12 @@ internal interface IKeyInputSource
         held = 0;
         return false;
     }
+
+    /// <summary>
+    /// PAD1 review: whether a gamepad is connected now, as cheaply as the source can tell (one device read). The winner
+    /// picture re-reads the game's controller bindings when this changes. Defaulted from <see cref="TryReadGamepadHeld"/>.
+    /// </summary>
+    bool GamepadPresent => TryReadGamepadHeld(out _);
 }
 
 /// <summary>Server process, Ui skipped, or no keyboard: nothing is ever pressed.</summary>

@@ -504,15 +504,20 @@ internal static class KeybindArbiter
     private static GameKeybindSnapshot? _gameGamepad;
     private static Dictionary<string, string> _gamepadBlocked = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>PAD1 review: whether a gamepad was connected when the game's bindings were last read.</summary>
+    private static bool _gamePadRead;
+
     /// <summary>HUB2: window keys (<see cref="KeybindScope.Window"/>) and the other mods' keys on their chord.</summary>
     private static Dictionary<string, List<KeybindClaim>> _windowSharers = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly record struct Stamp(int Binds, int Keys, int Sources, bool Foreign, bool Enforce, int Names, ulong World);
+    // PAD1 review: Pad is whether a gamepad is connected; a change re-reads the game's bindings (a connected pad's
+    // live controller bindings replace the shipped ones, and the other way round).
+    private readonly record struct Stamp(int Binds, int Keys, int Sources, bool Foreign, bool Enforce, int Names, ulong World, bool Pad);
 
     private static Stamp Now() => new(
         Keybinds.Version, SettingsCatalog.KeyVersion, SettingsCatalog.SourceCount, SettingsCatalog.AllowForeignEdits,
         _enforceGameWins, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(KeybindConflictSource.NameOf ?? (object)CacheGate),
-        WorldSequence());
+        WorldSequence(), Keybinds.GamepadConnected);
 
     private static ulong WorldSequence()
     {
@@ -587,6 +592,7 @@ internal static class KeybindArbiter
             _cachedGamepad = null;
             _gameGamepad = null;
             _gamepadBlocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _gamePadRead = false;
         }
     }
 
@@ -771,7 +777,7 @@ internal static class KeybindArbiter
         lock (CacheGate)
         {
             if (!_dirty && _cached != null && stamp == _cachedStamp) return _cached;
-            readGame = _gameStale || _game == null || stamp.World != _gameWorld;
+            readGame = _gameStale || _game == null || stamp.World != _gameWorld || stamp.Pad != _gamePadRead;
         }
 
         var game = readGame ? GameSnapshot(stamp.World) : _game!;
@@ -807,6 +813,7 @@ internal static class KeybindArbiter
             {
                 _gameStale = false;
                 _gameWorld = stamp.World;
+                _gamePadRead = stamp.Pad;
             }
 
             _blocked = blocked;

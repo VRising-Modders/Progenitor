@@ -4097,6 +4097,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         var s = new NavSample();
         try { s.TextFocused = FocusedArmedField() != null; } catch { s.TextFocused = false; }
         try { s.Capturing = Keybinds.Capturing; } catch { s.Capturing = false; }
+        try { s.CapturingGamepad = s.Capturing && Keybinds.CapturingGamepad; } catch { s.CapturingGamepad = false; }
 
         var pad = Gamepad.current;
         if (pad != null)

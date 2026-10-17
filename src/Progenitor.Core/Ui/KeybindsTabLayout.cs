@@ -1382,7 +1382,8 @@ internal static class KeybindsTabLayout
 
     /// <summary>PAD1: the controller capture's help line.</summary>
     internal const string CaptureHelpGamepad =
-        "Press a controller button, or hold one and press another; the key is taken when you let go. Escape cancels.";
+        "Press a controller button (B too), or hold one and press another; the key is taken when you let go. "
+        + "Escape, a click elsewhere or 5 seconds with no button cancels.";
 
     /// <summary>PAD1: the edit bar's title suffix while the controller key is changed.</summary>
     internal const string ControllerKeySuffix = " (controller)";

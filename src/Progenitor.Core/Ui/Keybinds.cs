@@ -118,6 +118,14 @@ public static class Keybinds
     internal const string NoGamepadReason = "No controller is connected. Connect one and press the button, or press Escape to cancel.";
 
     /// <summary>
+    /// PAD1 review: a controller capture ends after this long with no button down (it takes B as a key, so B cannot
+    /// cancel it). Each button held restarts it.
+    /// </summary>
+    internal const int GamepadCaptureTimeoutMs = 5000;
+
+    internal const string GamepadCaptureTimedOutReason = "No controller button was pressed within 5 seconds, so the key was left as it was.";
+
+    /// <summary>
     /// KEYS8: the left and right buttons a capture may take, each set once the capture has seen that button up.
     /// The click that started the capture (a row's button, a Keys row) is still going down or coming up when it
     /// begins, so it can never be read as the new key.
@@ -626,7 +634,7 @@ public static class Keybinds
         {
             IKeyInputSource source;
             lock (Gate) source = _source;
-            try { return source.TryReadGamepadHeld(out _); }
+            try { return source.GamepadPresent; }
             catch { return false; }
         }
     }
@@ -1898,9 +1906,13 @@ public static class Keybinds
 
         bool waitingForKey = rebinding != null || capture != null;
         long nowMs = waitingForKey ? Clock() : 0;
-        if (waitingForKey && (nowMs - _waitStarted > CaptureTimeoutMs || nowMs - _waitBegan > CaptureMaxMs))
+        bool padWait;
+        lock (Gate) padWait = capture != null && _captureGamepad;
+        int timeout = padWait ? GamepadCaptureTimeoutMs : CaptureTimeoutMs;
+        if (waitingForKey && (nowMs - _waitStarted > timeout || nowMs - _waitBegan > CaptureMaxMs))
         {
-            TimeOutWait(rebinding, capture, nowMs - _waitBegan > CaptureMaxMs ? CaptureMaxReason : CaptureTimedOutReason);
+            TimeOutWait(rebinding, capture, nowMs - _waitBegan > CaptureMaxMs ? CaptureMaxReason
+                : padWait ? GamepadCaptureTimedOutReason : CaptureTimedOutReason);
             rebinding = null;
             capture = null;
             waitingForKey = false;
@@ -2315,7 +2327,15 @@ public static class Keybinds
         }
 
         if (!connected) return;
-        if (!pad.Observe(held, out var chord, out var refusal)) return;
+        bool ended = pad.Observe(held, out var chord, out var refusal);
+        // A button held is the player choosing: the 5 s wait counts from the last read with none down.
+        if (pad.Active)
+        {
+            lock (Gate)
+                if (ReferenceEquals(_capture, capture)) _waitStarted = Clock();
+        }
+
+        if (!ended) return;
         if (refusal != null)
         {
             lock (Gate)

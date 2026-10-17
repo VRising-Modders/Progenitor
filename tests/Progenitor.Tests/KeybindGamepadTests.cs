@@ -378,6 +378,77 @@ namespace Progenitor.Tests
         }
 
         [Fact]
+        public void Two_buttons_down_on_one_read_are_refused_with_the_hold_first_hint()
+        {
+            uint Bits(params UiKey[] keys) => keys.Aggregate(0u, (m, k) => m | KeyChord.GamepadBit(k));
+            var c = new GamepadCapture();
+            c.Observe(0, out _, out _);
+            Assert.False(c.Observe(Bits(UiKey.GamepadNorth, UiKey.GamepadDpadDown), out _, out _));
+            Assert.True(c.Active);
+            Assert.True(c.Observe(Bits(UiKey.GamepadDpadDown), out var chord, out var refusal));
+            Assert.Equal(GamepadCapture.SameTimeReason, refusal);
+            Assert.Equal(KeyChord.None, chord);
+            // Let go of everything, then the right order works.
+            Assert.False(c.Observe(0, out _, out _));
+            c.Observe(Bits(UiKey.GamepadDpadDown), out _, out _);
+            c.Observe(Bits(UiKey.GamepadDpadDown, UiKey.GamepadNorth), out _, out _);
+            Assert.True(c.Observe(Bits(UiKey.GamepadDpadDown), out chord, out refusal));
+            Assert.Null(refusal);
+            Assert.Equal(PadYDown, chord);
+        }
+
+        [Fact]
+        public void A_controller_capture_ends_after_5_seconds_with_no_button_and_a_held_button_keeps_it()
+        {
+            long now = 1000;
+            Keybinds.Clock = () => now;
+            Keybinds.Register(_owner, "t.mod", "Any", File("t"), F9, "", () => { });
+            KeyCaptureResult? got = null;
+            _keys.PadHeld = 0;
+            Keybinds.BeginCapture(r => got = r, gamepad: true);
+            _keys.Frame();
+            now += 4000;
+            _keys.PadHeld = KeyChord.GamepadBit(UiKey.GamepadEast); // B is held: the wait restarts
+            _keys.Frame();
+            now += 4900;
+            _keys.Frame();
+            Assert.True(Keybinds.CapturingGamepad);
+            Assert.Null(got);
+            _keys.PadHeld = 0; // B released: B is the key
+            _keys.Frame();
+            Assert.Equal(RebindOutcome.Bound, got!.Value.Outcome);
+            Assert.Equal(KeyChord.Gamepad(UiKey.GamepadEast), got.Value.Chord);
+
+            // No button for 5 s: canceled with the reason.
+            got = null;
+            Keybinds.BeginCapture(r => got = r, gamepad: true);
+            _keys.Frame();
+            now += Keybinds.GamepadCaptureTimeoutMs + 1;
+            _keys.Frame();
+            Assert.False(Keybinds.Capturing);
+            Assert.Equal(RebindOutcome.Cancelled, got!.Value.Outcome);
+            Assert.Equal(Keybinds.GamepadCaptureTimedOutReason, got.Value.Reason);
+        }
+
+        [Fact]
+        public void The_game_controller_bindings_are_read_again_when_a_gamepad_connects()
+        {
+            int reads = 0;
+            KeybindArbiter.GameGamepadSource = () => { reads++; return GamepadKeybindCatalog.DefaultSnapshot(); };
+            Keybinds.Register(_owner, "r.mod", "Any", File("r"), F9, "", () => { });
+            KeybindArbiter.Current();
+            int first = reads;
+            KeybindArbiter.RefreshIfStale();
+            Assert.Equal(first, reads); // nothing changed
+            _keys.PadHeld = 0; // a pad connects
+            KeybindArbiter.RefreshIfStale();
+            Assert.Equal(first + 1, reads);
+            _keys.PadHeld = null; // and goes away
+            KeybindArbiter.RefreshIfStale();
+            Assert.Equal(first + 2, reads);
+        }
+
+        [Fact]
         public void The_keybinds_tab_controller_cap_captures_previews_refuses_and_saves()
         {
             UseShippedPad();
