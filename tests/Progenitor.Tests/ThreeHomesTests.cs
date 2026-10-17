@@ -62,9 +62,10 @@ public sealed class ThreeHomesModelTests : IDisposable
         Assert.All(HomedOn("preferences"), id => Assert.DoesNotContain("/JoinAdmin/", id));
         Assert.Contains("progenitor/Settings/EditOtherModsSettings", HomedOn("preferences"));
         Assert.Contains("progenitor/Mods/DedicatedServerPath", HomedOn("preferences"));
-        // Progenitor's page: its own settings, and of the server's only its two toggles (On this server).
+        // Progenitor's page: its own settings, and of the server's only its own three switches (On this server).
         var onThisServer = SettingPlaces.All.Where(p => p.Home == SettingPlaces.OnThisServer).Select(p => p.SettingId).ToArray();
-        Assert.Equal(new[] { SettingPlaces.JoinAdminId(SettingPlaces.OpPhotoMode), SettingPlaces.JoinAdminId(SettingPlaces.OpAllySafeHits) }, onThisServer);
+        Assert.Equal(new[] { SettingPlaces.JoinAdminId(SettingPlaces.OpPhotoMode), SettingPlaces.JoinAdminId(SettingPlaces.OpAllySafeHits),
+            SettingPlaces.JoinAdminId(SettingPlaces.OpContainerPreview) }, onThisServer);
         Assert.All(HomedOn("mods"), id => Assert.True(!id.Contains("/ServerMessage/") && !id.Contains("/ServerRules/") && !id.Contains("/ServerList/"), id));
         // The Server tab: the server message, the server list, the rules, the operator rows, Players without Progenitor.
         foreach (string id in new[]

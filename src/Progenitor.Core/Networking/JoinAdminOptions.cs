@@ -29,6 +29,9 @@ internal static class ServerOptionOps
     /// <summary><c>[Ai] AllySafeHits</c>.</summary>
     internal const string AllySafeHits = "ally-safe-hits";
 
+    /// <summary><c>[ContainerPreview] RemotePreview</c>: remote chest preview off, on PvE servers only, or on.</summary>
+    internal const string ContainerPreview = "container-preview";
+
     /// <summary><c>[RemoteInstall] Enabled</c>.</summary>
     internal const string RemoteInstall = "remote-install";
 
@@ -108,7 +111,7 @@ internal static class ServerOptionOps
 
     internal static readonly IReadOnlyList<string> All = new[]
     {
-        AnswerTimeout, RequireProgenitor, DisconnectGrace, PhotoMode, AllySafeHits, RemoteInstall, AllowedSteamIds, NoticeSeconds, NoticeRepeatSeconds, NoticeCreationLimitSeconds,
+        AnswerTimeout, RequireProgenitor, DisconnectGrace, PhotoMode, AllySafeHits, ContainerPreview, RemoteInstall, AllowedSteamIds, NoticeSeconds, NoticeRepeatSeconds, NoticeCreationLimitSeconds,
         ChatFilter, ChatFilterWords, ChatFilterAction, ChatRelay, ChatRelayUrl,
         ChatRelayGlobal, ChatRelayLocal, ChatRelayClan, ChatRelayWhispers, ChatRelaySystem,
         UpdateMods, UpdateMajors, UpdateRestartWhenEmpty, UpdateEmptyMinutes, UpdateBackup, UpdateBackupKeep, UpdateBackupSkipHours,
@@ -205,6 +208,11 @@ internal static class ServerOptions
             ClientPolicyRecheckLimits.MinDisconnectGraceSeconds, ClientPolicyRecheckLimits.MaxDisconnectGraceSeconds),
         new ServerOptionSpec(ServerOptionOps.PhotoMode, "PhotoMode", "AllowOnThisServer", ServerOptionKind.Switch),
         new ServerOptionSpec(ServerOptionOps.AllySafeHits, "Ai", "AllySafeHits", ServerOptionKind.Switch),
+        new ServerOptionSpec(ServerOptionOps.ContainerPreview, Progenitor.Inventory.ContainerPreviewSettings.Section,
+            Progenitor.Inventory.ContainerPreviewSettings.ModeKey, ServerOptionKind.Choice)
+        {
+            Choices = Progenitor.Inventory.ContainerPreviewSettings.Words,
+        },
         new ServerOptionSpec(ServerOptionOps.RemoteInstall, RemoteInstallSettings.Section, RemoteInstallSettings.EnabledKey, ServerOptionKind.Switch),
         new ServerOptionSpec(ServerOptionOps.AllowedSteamIds, RemoteInstallSettings.Section, RemoteInstallSettings.AllowedSteamIdsKey, ServerOptionKind.SteamIds),
         new ServerOptionSpec(ServerOptionOps.NoticeSeconds, "Networking", "NoAnswerNoticeSeconds", ServerOptionKind.Seconds, 0, 300),

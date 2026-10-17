@@ -120,7 +120,7 @@ internal static unsafe class InventorySortRuntime
     private static InventorySortTarget Classify(EntityManager em, int n0, int n1, int n2)
     {
         if (n0 == 0 && n1 == 0 && n2 == 0) return InventorySortTarget.Unknown;
-        if (!Progenitor.Dye.DyeSender.TryLocalCharacter(em, out var character)) return InventorySortTarget.Unknown;
+        if (!LocalCharacters.TryGet(em, out var character)) return InventorySortTarget.Unknown;
         if (SameId(em, character, n0, n1, n2)) return InventorySortTarget.Own;
         for (int instance = 0; instance < Progenitor.Items.Items.MaxInventoryInstances; instance++)
         {

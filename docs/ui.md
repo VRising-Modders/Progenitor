@@ -1756,6 +1756,25 @@ ctx.Requests.Send<TargetRequest, TargetReply>(
 
 How the server resolves: the game keeps its own network id map (`NetworkIdSystem.Singleton`, a native hash map from `NetworkId` to `Entity`). Reaching it from a plugin needs a new generic interop instantiation over a game value type, which this framework does not create, so the resolver builds its own map from the **same data**: the `NetworkId` component of every castle heart and every entity with `InventoryOwner`, read with the typed accessor the castle reader already uses. A hit is confirmed by reading the entity's id back (a destroyed or reused entity is never trusted from the map, and a request with a forged generation gets the stale reason without evicting the valid row); a miss or a stale row rebuilds the map, **at most once every 250 ms** however many requests miss, so a client sending made-up ids cannot make the server scan every frame (combine it with the request's own rate limit). A request that misses inside that window gets a reason saying when the lookup was refreshed; a container placed since is found on a later request. The map is dropped when the world epoch changes and at Core Uninstall. Authorization is yours: the resolver says *which* container the words name, not whether this user may touch it.
 
+### A container window for a chest somewhere else
+
+`ctx.Inventory.Preview.Open(containerId, options)` (client) opens **the game's own container window** for a chest
+or brazier the player is not standing at, read-only, for the castle's owner and clan. It is the window this page's
+container sites attach to, so a vanilla panel site on the container window is expected to see it like any other
+container window, with `VanillaPanelTarget` naming the previewed chest (inferred from the source, not checked).
+What changes on screen while a preview owns the window:
+
+- The take-all, sort, rename and burn-toggle buttons are hidden with a CanvasGroup (alpha 0, no raycasts, not
+  interactable) so the window's layout keeps its spacing. They only work at the chest.
+- With `ContainerPreviewOptions.HidePlayerInventory` (the default) the player's bag panel is hidden the same
+  way. That is the space a mod window (a Find list, for example) docks into, on the left of the container
+  window, with `panel.Dock(UiDock.Left, …)` ([Docked panels](#docked-panels-dock1)). The pairing of the two is not live-checked.
+- Escape closes the preview and the window after framework dialogs, key captures and the focused chat box
+  (the same precedence as the world pick).
+
+Everything is restored on close. The server rule, the read-only guarantee, the close reasons and the open live
+plan: [modules.md, Container preview](modules.md#container-preview). **Not live-verified.**
+
 ### Layout and placement rules
 
 These are the rules the code applies (`VanillaPanelPlacement`, tested at 1920x1080, 2560x1440 and 3840x2160). The game's HUD scaler matches height to a 1920x1080 reference, so the three resolutions lay out the same canvas and the rules are written in canvas units.

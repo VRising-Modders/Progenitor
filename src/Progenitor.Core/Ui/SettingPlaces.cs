@@ -167,6 +167,7 @@ internal static class SettingPlaces
     internal const string OpRequireProgenitor = "require-progenitor";
     internal const string OpPhotoMode = "photo-mode";
     internal const string OpAllySafeHits = "ally-safe-hits";
+    internal const string OpContainerPreview = "container-preview";
     internal const string OpRemoteInstall = "remote-install";
     internal const string OpAllowedSteamIds = "allowed-steam-ids";
     internal const string OpDisconnectGrace = "disconnect-grace";
@@ -341,6 +342,7 @@ internal static class SettingPlaces
         yield return Admin(OpUnverified, PlayersJoiningPanel, JoinAdminFile + " clientPolicy.unverified", ModsPlayersNeed);
         yield return Admin(OpPhotoMode, OnThisServer, "the server's " + Shared + " [PhotoMode] AllowOnThisServer");
         yield return Admin(OpAllySafeHits, OnThisServer, "the server's " + Shared + " [Ai] AllySafeHits");
+        yield return Admin(OpContainerPreview, OnThisServer, "the server's " + Shared + " [ContainerPreview] RemotePreview");
         yield return Admin(OpRemoteInstall, Operator, "the server's " + Shared + " [RemoteInstall] Enabled");
         yield return Admin(OpAllowedSteamIds, Operator, "the server's " + Shared + " [RemoteInstall] AllowedSteamIds");
         yield return Admin(OpNoticeSeconds, Operator, "the server's " + Shared + " [Networking] NoAnswerNoticeSeconds");
@@ -389,6 +391,7 @@ internal static class SettingPlaces
         // Server values reached only through the admin channel or the file (never drawn as the client's own cfg row).
         yield return Cfg("PhotoMode", "AllowOnThisServer", CfgOnly, Shared);
         yield return Cfg("Ai", "AllySafeHits", CfgOnly, Shared);
+        yield return Cfg("ContainerPreview", "RemotePreview", CfgOnly, Shared);
         yield return Cfg("RemoteInstall", "Enabled", CfgOnly, Shared);
         yield return Cfg("RemoteInstall", "AllowedSteamIds", CfgOnly, Shared);
         // Deprecated (replaced by [ServerSettings] LockedInGame): false locks the list above. Never drawn.

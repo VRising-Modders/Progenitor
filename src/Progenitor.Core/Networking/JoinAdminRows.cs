@@ -458,6 +458,23 @@ internal static class JoinAdminRows
     internal static AdminSettingSpec AllySafeHits() =>
         Spec(ServerOptionOps.AllySafeHits, AdminSettingKind.Toggle, AllySafeHitsLabel, AllySafeHitsHelp);
 
+    /// <summary>Remote chest preview: Off, PvE servers only (the default) or On (<c>[ContainerPreview] RemotePreview</c>).</summary>
+    internal static AdminSettingSpec ContainerPreview() => new()
+    {
+        SettingId = SettingPlaces.JoinAdminId(ServerOptionOps.ContainerPreview),
+        Key = ServerOptionOps.ContainerPreview,
+        Label = Progenitor.Inventory.ContainerPreviewSettings.Label,
+        Help = Progenitor.Inventory.ContainerPreviewSettings.Help,
+        Kind = AdminSettingKind.Choice,
+        Choices = Progenitor.Inventory.ContainerPreviewSettings.Words,
+        ChoiceLabels = Progenitor.Inventory.ContainerPreviewSettings.Labels,
+        ChoiceRadio = true,
+        ChoiceDescriptions = Progenitor.Inventory.ContainerPreviewSettings.Descriptions,
+        Read = () => Value(ServerOptionOps.ContainerPreview),
+        Send = (v, done) => Send(ServerOptionOps.ContainerPreview, v, done),
+        LockedBy = () => LockedBy(SettingPlaces.JoinAdminId(ServerOptionOps.ContainerPreview)),
+    };
+
     internal static AdminSettingSpec RemoteInstall()
     {
         var spec = Spec(ServerOptionOps.RemoteInstall, AdminSettingKind.Toggle, RemoteInstallLabel, RemoteInstallHelp);

@@ -25,9 +25,10 @@ public enum InventoryPart
 /// <see cref="PluginContext.Inventory"/>: read and move items in any inventory on the server —
 /// chests, station input and output, castle hearts, servants, player bags. Every write is
 /// server-authoritative and read back. Main thread only. On the client every call throws
-/// <see cref="InvalidOperationException"/> ("ctx.Inventory runs on the server side only").
+/// <see cref="InvalidOperationException"/> ("ctx.Inventory runs on the server side only"), except
+/// <see cref="Preview"/>, which is client only.
 /// </summary>
-public sealed class PluginInventory
+public sealed partial class PluginInventory
 {
     private readonly PluginContext _ctx;
 
