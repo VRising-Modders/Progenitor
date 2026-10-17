@@ -164,6 +164,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatHistory.cs" Link="Linked\ChatHistory.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatTabRow.cs" Link="Linked\ChatTabRow.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatTabInput.cs" Link="Linked\ChatTabInput.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatSentElsewhere.cs" Link="Linked\ChatSentElsewhere.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatFormat.cs" Link="Linked\ChatFormat.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatNameCache.cs" Link="Linked\ChatNameCache.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ModLinkToken.cs" Link="Linked\ModLinkToken.cs" />
