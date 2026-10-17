@@ -404,7 +404,7 @@ internal static class ChatWindow
     /// </summary>
     private static void Watchdog()
     {
-        if (!ChatClickGuard.Active) return;
+        if (!ChatClickGuard.AnyActive) return;
         int frame;
         try { frame = Time.frameCount; }
         catch { return; }
@@ -430,11 +430,18 @@ internal static class ChatWindow
             }
 
             var system = world.GetExistingSystemManaged<ClientChatSystem>();
-            if (system == null || system.Pointer == IntPtr.Zero) return;
+            if (system == null || system.Pointer == IntPtr.Zero)
+            {
+                ChatClickGuard.Update(false, false, false);
+                ChatClickGuard.UpdateWheel(false);
+                return;
+            }
+
             var window = system._ChatWindow;
             if (window == null || window.Pointer == IntPtr.Zero)
             {
                 ChatClickGuard.Update(false, false, false);
+                ChatClickGuard.UpdateWheel(false);
                 return;
             }
 
@@ -1182,17 +1189,13 @@ internal static class ChatWindow
         return names;
     }
 
+    /// <summary>
+    /// The order-97 context stays registered whatever <c>ClickSafe</c> says: it also carries the wheel guard (the
+    /// mouse wheel over the box scrolls the chat and never zooms the camera), which has no setting. With
+    /// <c>ClickSafe</c> off the buttons half takes nothing.
+    /// </summary>
     private static void UpdateClickGuard(World world, bool overChat)
     {
-        bool enabled = ClickSafe;
-        if (!enabled)
-        {
-            ChatClickGuard.Update(false, false, false);
-            GameInputBlocker.RemoveChatGuard();
-            _retryFrame = 0;
-            return;
-        }
-
         if (_frame >= _retryFrame)
         {
             InputActionSystem? input = null;
@@ -1207,6 +1210,7 @@ internal static class ChatWindow
             RefreshBindings();
         }
 
+        ChatClickGuard.UpdateWheel(overChat);
         ChatClickGuard.Update(ClickSafe, overChat, UnityInputRuntime.AnyMouseButtonHeld());
     }
 

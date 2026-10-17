@@ -1228,17 +1228,24 @@ internal sealed unsafe class GameInputBlocker : IUiInputBlocker
     }
 
     /// <summary>
-    /// CHAT1. The order-97 context's whole mask: the chat click guard's actions, in both button lists, on
-    /// keyboard and mouse only, while <see cref="Progenitor.Chat.ChatClickGuard.Active"/>; nothing else. No
-    /// allocation: the array is replaced whole by its owner, never mutated.
+    /// CHAT1. The order-97 context's whole mask, as <see cref="Progenitor.Chat.ChatMaskPlan"/> decides it, on
+    /// keyboard and mouse only: the chat click guard's actions in both button lists while
+    /// <see cref="Progenitor.Chat.ChatClickGuard.Active"/>, and the camera zoom axis while
+    /// <see cref="Progenitor.Chat.ChatClickGuard.WheelBlocked"/> (the wheel scrolls the chat, not the camera);
+    /// nothing else. No allocation: the array is replaced whole by its owner, never mutated.
     /// </summary>
     private static void MaskChat(IntPtr blockInputState)
     {
-        if (!Progenitor.Chat.ChatClickGuard.Active) return;
+        bool clicks = Progenitor.Chat.ChatClickGuard.Active;
+        bool wheel = Progenitor.Chat.ChatClickGuard.WheelBlocked;
+        if (!clicks && !wheel) return;
         try
         {
             ref BlockInputState state = ref Unsafe.AsRef<BlockInputState>((void*)blockInputState);
-            if (state.ControllerType != ControllerType.KeyboardAndMouse) return;
+            var plan = Progenitor.Chat.ChatMaskPlan.For(clicks, wheel, state.ControllerType == ControllerType.KeyboardAndMouse);
+            if (plan.BlockZoom)
+                state.BlockedAnalogInputActions |= AnalogInputAction.ZoomCamera;
+            if (!plan.BlockButtons) return;
             int[] actions = Progenitor.Chat.ChatClickGuard.BlockedActions();
             for (int i = 0; i < actions.Length; i++)
             {

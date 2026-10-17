@@ -113,11 +113,29 @@ internal static class ChatClickGuard
     };
 
     private static volatile bool _active;
+    private static volatile bool _wheel;
     private static bool _latch;
     private static int[] _blocked = Build(null);
 
     /// <summary>Read by the native mask callback once per frame; a field read, never throws.</summary>
     internal static bool Active => _active;
+
+    /// <summary>
+    /// The pointer is over the visible chat box this frame, so the camera zoom axis (the mouse wheel) is taken
+    /// and the wheel only scrolls the chat. Follows the pointer with no latch, and does not depend on
+    /// <c>ClickSafe</c>: a wheel notch over the box never zooms. Read by the native mask callback.
+    /// </summary>
+    internal static bool WheelBlocked => _wheel;
+
+    /// <summary>Either half of the order-97 mask has something to take this frame.</summary>
+    internal static bool AnyActive => _active || _wheel;
+
+    /// <summary>One frame's wheel decision: <paramref name="overChat"/> is the same test the click guard uses.</summary>
+    internal static bool UpdateWheel(bool overChat)
+    {
+        _wheel = overChat;
+        return overChat;
+    }
 
 
     /// <summary>The live array the mask walks; replaced whole, never mutated, so the callback allocates nothing.</summary>
@@ -146,6 +164,7 @@ internal static class ChatClickGuard
     {
         _latch = false;
         _active = false;
+        _wheel = false;
     }
 
     /// <summary>Replace the blocked set from the game's bindings (null: they could not be read).</summary>
@@ -177,6 +196,48 @@ internal static class ChatClickGuard
         set.CopyTo(result);
         return result;
     }
+}
+
+/// <summary>
+/// What the order-97 chat context (<see cref="UiInputCapture.ChatClickGuardOrder"/>) takes this frame, game-free.
+/// The native callback (<c>GameInputBlocker.MaskChat</c>) only executes this plan.
+///
+/// <para><b>The wheel.</b> Scrolling the chat box also zoomed the camera (user report, 2026-10-17): Progenitor's
+/// context took only mouse buttons and left the zoom axis to the game's own hover context, which adds itself
+/// only from the game's own state and only over the message log, never over Progenitor's tab strip, grip or
+/// scroll bar. So the context now takes <c>ZoomCamera</c> itself while the pointer is over the visible box. That
+/// is the same analog Progenitor's panels take under the pointer (<see cref="InputMaskPlan.BlockZoom"/>), so
+/// every Progenitor surface that scrolls under the pointer stops the wheel reaching the camera.</para>
+///
+/// <para><b>Nothing else changes.</b> No keys, no movement, no aim and no camera turn are added by the wheel half;
+/// the buttons stay the click guard's (<see cref="ChatClickGuard.Active"/>, off with <c>ClickSafe</c>). Keyboard
+/// and mouse only, like the click guard: a controller player whose mouse cursor rests on the box keeps the
+/// stick zoom.</para>
+/// </summary>
+internal readonly struct ChatMaskPlan
+{
+    private ChatMaskPlan(bool blockButtons, bool blockZoom)
+    {
+        BlockButtons = blockButtons;
+        BlockZoom = blockZoom;
+    }
+
+    /// <summary>Take <see cref="ChatClickGuard.BlockedActions"/> in both button lists.</summary>
+    internal bool BlockButtons { get; }
+
+    /// <summary>Take <see cref="AnalogInputActions.ZoomCamera"/>, the mouse wheel's camera zoom, and no other analog.</summary>
+    internal bool BlockZoom { get; }
+
+    /// <summary>True when the plan takes nothing at all.</summary>
+    internal bool Empty => !BlockButtons && !BlockZoom;
+
+    /// <summary>
+    /// The plan for one frame: <paramref name="clicksActive"/> is <see cref="ChatClickGuard.Active"/>,
+    /// <paramref name="wheelActive"/> is <see cref="ChatClickGuard.WheelBlocked"/>, and
+    /// <paramref name="keyboardAndMouse"/> is the input state's controller type.
+    /// </summary>
+    internal static ChatMaskPlan For(bool clicksActive, bool wheelActive, bool keyboardAndMouse) =>
+        keyboardAndMouse ? new ChatMaskPlan(clicksActive, wheelActive) : default;
 }
 
 /// <summary>
