@@ -101,7 +101,9 @@ internal static unsafe partial class ServantRuntime
         // Before runs last and After first among every hook on this system, so no other hook ever
         // sees a servant whose gear level the success cap forced for this update (int priority, higher first).
         _updBefore = SystemHooks.Before<ServantMissionUpdateSystem>(BeforeUpdate, int.MinValue);
-        _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate, int.MaxValue);
+        // The after-hook runs even when the system is skipped (another plugin's Skip, a disabled system),
+        // so a write of the success cap can never stay live for the rest of the update group.
+        _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate, int.MaxValue, options: new HookOptions { OnlyWhenSystemRuns = false });
         _actBefore = SystemHooks.Before<ServantMissionActionSystem>(BeforeAction);
         _infoBefore = SystemHooks.Before<ServantInfoEventSystem_Server>(BeforeInfo);
         _infoAfter = SystemHooks.After<ServantInfoEventSystem_Server>(AfterInfo);
