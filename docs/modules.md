@@ -2300,6 +2300,10 @@ lastLook = now;
   changes the stamp. A reference seen for the first time, an owner that now resolves to another
   inventory, a stale reference and any read that fails its checks (a fresh value every call)
   all read as changed. A `since` the clock never handed out reads as changed.
+- **Expected idle churn.** Containers that share a storage chunk with entities whose other
+  components the game writes regularly can change stamp together with no slot change. On the test
+  server (2026-10-17) a chest and the castle heart changed together about every 10 s while idle.
+  Treat a changed stamp as "re-read", never as "something moved".
 - **Slots only.** Item type, amount, stack override and item entity of each slot. Not item-entity
   state (durability, jewel stats), not the `RestrictedInventory` rule.
 - **Server, main thread, never from inside a native inventory hook** (a Harmony patch on an
@@ -2333,7 +2337,7 @@ so `ctx.Inventory.Read` does not change stamps (`ReadOnlyBufferReadsTests` pins 
 Another mod's `GetBuffer<InventoryBuffer>(e)` does: the interop default is `isReadOnly = false`,
 which marks the chunk changed even when nothing is written. Pass `true` when you only read.
 
-**Experimental**: source-checked and unit-tested (`InventoryStampTests`), **not live-verified**.
+**Experimental**: source-checked and unit-tested (`InventoryStampTests`). **Partly verified live** on the isolated test server (2026-10-17, bridge `inventory_stamp`, 5 containers): the self-test passed, no audit misses, stamps stable at idle with `changedSince` false, a batch took about 25–45 µs, and a stamp changed on `.items add` and `.items remove` and stayed equal across a read-only `.items slots`. Not yet run: panel drag-drop, sort, take-all, station crafting, servant returns, `Watch` with the setting on.
 The read chain and its offsets are in `src/Progenitor.Core/Layout/layout.txt` ("Ecs: chunk change
 versions"). Live check steps: [dev bridge `inventory_stamp`](bridge-ops-client.md#inventory_stamp).
 
