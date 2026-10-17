@@ -264,7 +264,7 @@ namespace Progenitor.Tests
             Assert.Equal(KeybindsTabLayout.GutterCellWidth, reset.Width.Value);
             var gameCells = KeybindsTabLayout.RowCells(game, game.PrimaryText, false, resetIcon: true);
             float Right(IReadOnlyList<CellSpec> c, string key) => MenuPanelLayout.CellColumns(1200f, c).Single(p => p.Key == key).Right;
-            Assert.Equal(Right(modCells, KeybindsTabLayout.CellSecondarySpace), Right(gameCells, KeybindsPane.CellKey2), 1);
+            Assert.Equal(Right(modCells, KeybindsPane.CellKey2), Right(gameCells, KeybindsPane.CellKey2), 1);
             var kitCells = KeybindsTabLayout.RowCells(mod, mod.PrimaryText, false, resetIcon: false);
             Assert.Equal(KeybindsTabLayout.ResetCaption, kitCells.Single(c => c.Key == KeybindsPane.CellReset).Text);
 

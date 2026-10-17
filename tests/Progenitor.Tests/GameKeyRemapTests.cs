@@ -496,6 +496,13 @@ namespace Progenitor.Tests
             foreach (UiKey key in Enum.GetValues(typeof(UiKey)))
             {
                 if (key == UiKey.None || key is UiKey.MouseLeft or UiKey.MouseRight) continue;
+                // PAD1: a controller button is never a game keyboard slot.
+                if (KeyChord.IsGamepadKey(key))
+                {
+                    Assert.False(GameKeyRemap.TryPath(new KeyChord(key), out _), key.ToString());
+                    Assert.Equal(GameKeyRemap.GamepadReason, GameKeyRemap.Refusal(KeyChord.Gamepad(key)));
+                    continue;
+                }
                 var chord = new KeyChord(key);
                 Assert.True(GameKeyRemap.TryPath(chord, out string path), key.ToString());
                 Assert.True(GameKeybindCatalog.TryChord(null, path, out var back), key + " -> " + path);

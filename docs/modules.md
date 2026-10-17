@@ -6044,7 +6044,9 @@ A built-in client feature, on by default, with no plugin API. With the world map
 the map closes and the chat input opens with `[loc:x,z]` for that spot (world X and Z, whole meters, the
 [location token](#chat)) after any draft, caret at the end. Nothing is sent until the player presses Enter. A drag
 pans the map as usual and shares nothing. The game's key-hint row at the bottom of the map gets a matching entry right
-after *Add/Remove Marker*: *Shift + [left mouse] Share Location*, or the bound key's name after a remap.
+after *Add/Remove Marker*: *Shift + [left mouse] Share Location*, or the bound key's name after a remap. On a
+controller, hold **D-Pad Down and press Y** (Triangle on PlayStation): the spot under the map's controller cursor is
+shared the same way, and while the game shows controller glyphs the tip shows that chord with the game's own glyphs.
 
 - **Key.** `ShareMapLocation` in Core's `[Keybinds]` (`progenitor.ui.cfg`), a map-scope bind: it works only on the full
   map, never on the minimap or in gameplay, and shows in the Keybinds tab. A keybind matches its modifiers exactly.
@@ -6055,7 +6057,20 @@ after *Add/Remove Marker*: *Shift + [left mouse] Share Location*, or the bound k
 - **Closing.** `HUDMenuManager.CloseMenu(World)`, the call the M key makes with the map shown. The chat opens once the
   menu is gone (the chat input is not usable over the full-screen menu); the insert is dropped after about 5 s if the
   menu never closes.
-- **No controller binding.** The keybind system reads keyboard and mouse only.
+- **Controller.** The bind's controller chord ([controller keybinds](#controller-keybinds)) defaults to Pad Y with
+  D-Pad Down held (`GamepadNorth + GamepadDpadDown`, `ShareMapLocation.Gamepad` in the same section). Why that pair:
+  in the game's shipped controller bindings every face button, bumper, trigger, stick press, Start and Select is
+  already bound on its own where a map key works (Add Marker on A and RT, Center on LT, Legend on X, the menu's Close
+  on B, its tabs on the bumpers and triggers, Close Map on View), and the only two-button binding there is the admin
+  teleport (L3 + R3). D-Pad Down + Y is no binding of the game's; its pairs of those two buttons are camera keys in play
+  (Y held, D-Pad Down pressed), which a map key never meets. Y alone is the menus' North action and D-Pad Down the
+  menus' Down, neither a map action, so both keep doing what they did. A controller press shares at once (there is no
+  drag to tell apart) the point under the controller cursor: the map mapper's `_GamepadCursor` (0x2A8), else
+  `MapMenu.GamepadCursor` (0x100), converted with a null camera as the mouse point is
+  (`WorldMap.TryReadGamepadCursor`). The tip shows the controller chord while `InputActionSystem.UsingGamepad` is true,
+  drawn with the glyphs from the game's own table (`ControlsVisualMapping.GetInputVisualsMapping` for the button's
+  `<Gamepad>/…` path, the player's controller type), as the held button's glyph, `+`, then the pressed one's in the
+  copied entry's combo slots; with the table not loaded it falls back to the names (`[Pad Y + D-Pad Down]`).
 
 Source: `src/Progenitor.Core/Ui/MapShare.cs` (install, the key, the share, `MapShareTestBridge`), `MapShareHint.cs` (the
 key tip, copied from one of the row's own entries as [Dye all](#dye-all)'s is), and the game-free `MapShareLogic.cs`
@@ -6063,7 +6078,9 @@ key tip, copied from one of the row's own entries as [Dye all](#dye-all)'s is), 
 `ChatWindow.InsertIntoInput(text, afterMenuCloses)` with `ChatInsertPlan` (`ChatTabInput.cs`).
 
 **Status:** source-checked and built; unit-tested outside the game. **Not run live.** The map's key-hint row is assumed
-to be `FullscreenMenu.InputContexts` and the right mouse glyph's sprite name `Icon_RMB…`; both need the live check.
+to be `FullscreenMenu.InputContexts` and the right mouse glyph's sprite name `Icon_RMB…`; both need the live check. The
+controller path (the cursor's screen point, `UsingGamepad`, the glyph table, the entry's combo slots order, and that
+Y and D-Pad Down do nothing on the map) is source-checked only.
 
 **Live check** (client in a world, no input needed):
 
@@ -6074,7 +6091,14 @@ to be `FullscreenMenu.InputContexts` and the right mouse glyph's sprite name `Ic
    `input.focused true` with the token at the end of `input.text`. Log: `Map share: [loc:x,z] goes to the chat input once the map has closed.`
 3. The real key (foreground, needs a fresh yes): open the map, Shift + left click a spot, check the line, then press
    Escape to leave the chat without sending. Shift-drag pans and shares nothing; a right click still sets the marker.
-4. Close the chat without sending, disconnect and leave the client at the title screen.
+4. Controller, no pad needed: `keybind_press {"bind":"ShareMapLocation","gamepad":true}` with the map open:
+   `fired true`; the log names a refusal `no controller cursor on the map` when the game hides the cursor without a
+   pad, else the share line as in step 2.
+5. With a controller connected (foreground, needs a fresh yes): open the map with View, move the cursor with the left
+   stick, check the tip reads *[D-Pad Down] + [Y] Share Location* with the controller's glyphs, hold D-Pad Down and
+   press Y: the map closes and the chat opens with the token for the cursor's spot. Y alone and D-Pad Down alone do
+   nothing on the map.
+6. Close the chat without sending, disconnect and leave the client at the title screen.
 
 ## Ui
 
@@ -6303,7 +6327,7 @@ The only direct readers are the framework's own input layer:
 
 | File | Why it reads devices |
 |---|---|
-| `src/Progenitor.Core/Ui/UnityKeyInputSource.cs` | The keybind input pump (`WasPressedThisFrame`, driven by `Keybinds.Pump`) and the key-capture picker (`TryReadPressedChord`, the Keybinds tab's press-a-key flow). |
+| `src/Progenitor.Core/Ui/UnityKeyInputSource.cs` | The keybind input pump (`WasPressedThisFrame`, driven by `Keybinds.Pump`) and the key-capture picker (`TryReadPressedChord`, the Keybinds tab's press-a-key flow); the same for controller buttons on `Gamepad.current` (`TryReadGamepadHeld`, the controller capture and the chord match). |
 | `src/Progenitor.Core/Ui/UnityUiRuntime.cs` | The UI kit: typed keys for its text fields (`PumpTypedKeys`), the pointer and wheel sample behind hover, drag and scroll on mod panels, the Shift and Ctrl held at a click (the widgets' multi-select; no action is bound to them), and the controller and arrow-key sample behind [panel navigation](ui.md#controller-and-keyboard-navigation-nav1) (`SampleNav`). While the dev bridge holds its synthetic UI input (`UiSyntheticInput`, [ui_input](bridge-ops-ui.md#ui-input-without-focus-bridgeui1)), each of these reads that state instead of the device, and `PhysicalInputUsed` reads the devices only to end the bridge's lease when the player uses them. |
 | `src/Progenitor.Core/Ui/NativeModsEntry.cs` | The UI kit: the pointer hover probe for the Mods entry on the title screen. |
 | `src/Progenitor.Core/Inputs/UnityInputRuntime.cs` | `ctx.Input`'s user-activity sample, which lets an input lease yield when the player moves or clicks. It binds no action to a key. |
@@ -6439,21 +6463,83 @@ A grayed row's undo on the mod page goes through the same checks; if the old key
 
 | Rule | Where | Refusal or reason |
 |---|---|---|
-| A bare left or right click is never a bind; hold Ctrl, Shift or Alt with it. | Every scope: registration (a cfg value falls back to the default, a default is registered unbound), `Keybinds.Rebind`, every capture, the Keybinds tab | `A plain left or right click attacks, moves and clicks menus, so it can't be a key. Hold Ctrl, Shift or Alt with it (for example Left Mouse + Ctrl + Shift).` |
+| A bare left or right click is never a bind; hold Ctrl, Shift or Alt with it. | Every scope: registration (a cfg value falls back to the default, a default is registered unbound), `Keybinds.Rebind`, every capture, the Keybinds tab | `A plain left or right click attacks, moves and clicks menus, so it can't be a key. Hold Ctrl, Shift or Alt with it (for example Left Mouse + Shift).` |
 | Menu and chat keys never use the left or right button, with any modifiers. | `KeybindScope.Menu` (the Mods workspace's own buttons), `KeybindScope.Chat` | `Left and right clicks press the Mods menu's own buttons, …` / `… select text in the chat box, …` |
-| A map key may not be Ctrl+Shift+right click (with or without Alt). | `KeybindScope.Map` | `Ctrl+Shift+right click on the map unlocks map regions for admins in the game. Pick another key.` |
+| A map key may not be Ctrl+Shift+left or Ctrl+Shift+right click (with or without Alt). | `KeybindScope.Map` | `Ctrl+Shift+left click on the map teleports admins in the game. Pick another key.` / `Ctrl+Shift+right click on the map unlocks map regions for admins in the game. Pick another key.` |
 | A left or right click chord never fires while the pointer is over a Progenitor window, `allowWhileCaptured` included: a panel that takes input there (hovered, or one that takes input wherever the pointer is), checked every frame, and on the press itself any Progenitor-owned object that is the top UI raycast hit under the pointer, so a passive overlay's or HUD panel's button counts too (`IUiRuntime.PointerOverOwnedUi`). A Progenitor object under one of the game's windows does not count; the game's window takes that click. | The read (`Keybinds.Pump`, `keybind_press`) | `suppressed: the pointer is over a Progenitor window, so the click is the window's` |
 | A gameplay left or right click chord does not fire while the game's full-screen menu (the map included) is open. | The read, `KeybindScope.Gameplay` | `suppressed: the game's menu is open, so the click is the menu's` |
 
 So a gameplay `MouseLeft + Ctrl` fires in the world view and the character also attacks on that click. The game's other windows (the inventory, a crafting station) are not detected: a modified click there fires the bind as well as the game's own Ctrl or Shift click. Prefer a map key, another button or a keyboard key when that matters.
 
-**On the map.** The game's `MapMenuMapper.OnMapClicked` turns Ctrl+Shift+left click into its admin teleport (`PlayerTeleportDebugEvent`) and Ctrl+Shift+right click into its admin region unlock, both without a client-side check; plain right click places a marker. A server creates those events only for an authenticated admin (`[AdminEvent(MinRequiredLevel = 2, MinRequiredAuthMethod = 2)]`) and drops them for anyone else while reading them. A map key on `MouseLeft + Ctrl + Shift`, such as Core's **Teleport to map point** if the player binds it there (it is unbound by default), is therefore harmless for a player who is not an authenticated admin: the game's event goes nowhere and only the Progenitor bind acts. For an authenticated admin both teleport to the clicked point. Ctrl+Shift+right click would unlock regions for that admin, so it is refused for map keys. The left and right buttons are not read from the game's bindings (the game reports them only as display text), so a click chord is never shown as clashing with a game action. Another mod's `KeyCode` setting on `Mouse0` or `Mouse1` is compared with click chords; its `Mouse2` to `Mouse4` stay not compared, as before KEYS8, so no bind that existed before changes winner.
+**On the map.** The game's `MapMenuMapper.OnMapClicked` turns Ctrl+Shift+left click into its admin teleport (`PlayerTeleportDebugEvent`) and Ctrl+Shift+right click into its admin region unlock, both without a client-side check; plain right click places a marker. A server creates those events only for an authenticated admin (`[AdminEvent(MinRequiredLevel = 2, MinRequiredAuthMethod = 2)]`) and drops them for anyone else while reading them. Both are refused for map keys, with or without Alt (the game checks only that Ctrl and Shift are held): a map key on `MouseLeft + Ctrl + Shift` would also teleport an authenticated admin, and one on `MouseRight + Ctrl + Shift` would also unlock regions. A default or cfg value on either registers unbound (or falls back to the default), and a remap onto either is refused. The left and right buttons are not read from the game's bindings (the game reports them only as display text), so a click chord is never shown as clashing with a game action. Another mod's `KeyCode` setting on `Mouse0` or `Mouse1` is compared with click chords; its `Mouse2` to `Mouse4` stay not compared, as before KEYS8, so no bind that existed before changes winner.
 
 **The capture.** The capture takes a left or right button only after it has seen that button up since the capture began, so the click that opened it (on a row's key cap) never becomes the key. A bare left or right click during a capture is never taken and still reaches what it lands on, so **Cancel**, **Unbind** and the scroll bar work with the mouse. On Progenitor's own UI it is silent (ordinary navigation; the capture's help line says `a left or right click needs Ctrl, Shift or Alt`); elsewhere it is refused with the reason above and the capture keeps waiting. A modified click is taken (or refused with its reason), and its own release does not press the Progenitor button under the pointer: `UiSlotTable` drops clicks on Progenitor's widgets until that button is up and two more frames have passed. However long the button is held the drop lasts; only a button that can no longer be read ends it, 3 s after its last held read. Escape still cancels. Conflicts, the first-installed rule and the remap guard treat a mouse chord like any other chord, within its scope. The `keybind_press` bridge op accepts mouse chords (`{"chord":"Mouse0 + Ctrl + Shift"}`) and reports the click reasons above.
 
 The framework's input file reads the buttons: `UnityKeyInputSource` reads `Mouse.current.leftButton` / `rightButton` beside the middle, back and forward buttons, through the same edge tracker. Bootstrap is unchanged.
 
 **Chat keys (Core only).** `KeybindScope.Chat` binds fire only while the player types in the game's chat box, and are then the only binds that run (press only). They meet only the game's in-chat keys (`CycleChat` on Tab), which never stop them; the owner undoes the game's action when both act on one press (the game reads Tab itself in chat, so it cannot be blocked first). Core's name completion key (`ChatCompleteName`, Tab, [chat.md](chat.md#chat-commands-as-built-chat2)) is the one user. There is no plugin API for this scope yet.
+
+#### Controller keybinds
+
+PAD1. A bind can also answer to a **controller chord**: one gamepad button, or one pressed while another is held. It is
+the bind's second chord beside its keyboard or mouse one, with its own default and its own cfg entry, and it runs the
+same handlers through the same gates and scope. Only Progenitor's own **Share map location** has a controller default
+(Y with D-Pad Down held); every other bind has none until the player gives it one in the Keybinds tab, or the plugin
+sets a default:
+
+```csharp
+var ping = ctx.Keybinds.Register("PingSpot", new KeyChord(UiKey.G, KeyModifiers.Ctrl),
+    "Ping the spot in front of you.", () =>
+    {
+        // Which chord fired: true for the controller chord.
+        bool pad = Keybinds.PressedWithGamepad;
+        // ...
+    });
+// Pad X pressed while D-Pad Up is held.
+ctx.Keybinds.SetGamepad(ping, KeyChord.Gamepad(UiKey.GamepadWest, UiKey.GamepadDpadUp));
+```
+
+- **Buttons.** `UiKey.GamepadSouth`, `GamepadEast`, `GamepadWest`, `GamepadNorth` (A, B, X, Y on Xbox; Cross, Circle,
+  Square, Triangle), `GamepadLeftShoulder`, `GamepadRightShoulder`, `GamepadLeftTrigger`, `GamepadRightTrigger` (the
+  triggers read as buttons at the Input System's press point), `GamepadDpadUp`/`Down`/`Left`/`Right`,
+  `GamepadLeftStick`, `GamepadRightStick` (pressed in), `GamepadStart`, `GamepadSelect`. Stick movement is not a button.
+- **Chord.** `KeyChord.Gamepad(button, held)`; `KeyChord.Held` is the held button (`UiKey.None` for one button),
+  `IsGamepad` says it is a controller chord. It never carries Ctrl, Shift or Alt, and matching is exact as for keys:
+  `Y + D-Pad Down` fires when Y goes down with D-Pad Down and no other button held, so Y alone does not fire it and it
+  does not fire with a bumper held too. A controller chord passed as `Register`'s default is the controller default
+  (the keyboard key is then unbound); `Keybinds.Rebind` with one changes the controller chord.
+- **Cfg.** `[Keybinds] <id>.Gamepad` in the plugin's cfg, beside `<id>`, main button first: `GamepadNorth +
+  GamepadDpadDown`; `None` unbinds. It is written only for a bind with a controller default or a player's choice, so
+  existing cfgs load unchanged and gain no line for binds without one. The shown names parse too (`Pad Y + D-Pad Down`,
+  as do `Triangle`, `buttonNorth`, `dpad/down`, `L1`); bare `A`, `B`, `X`, `Y` are keyboard letters. A controller value
+  in the keyboard entry, or a key in the controller entry, keeps the default and logs why.
+- **Gates.** A controller chord fires where the bind's keyboard chord would by panel, chat and scope, and also while a
+  text field has focus (a button types nothing). The winner rule is the keyboard one, decided in its own picture
+  (`KeybindArbiter.CurrentGamepad`): the game's controller bindings in the bind's scope first (a map key meets the
+  game's map and menu buttons; a gameplay key the always-active gameplay buttons; mode-only ones warn), then the mod
+  installed first. Controller chords never meet keyboard or mouse chords. A remap onto a held button is refused with
+  the holder's name (`Pad A is used by the game (Map Marker). Pick another key.`), never taken.
+- **The game's controller bindings** are read like its keys: with a gamepad connected, through the input action map
+  (`GetBindingIndexInAction` / `IsBindingComposite` with `ControllerType.Gamepad`, so the player's overrides and camera
+  scheme count; `GetBindingDisplayInfo` is never asked for a gamepad type, which with no pad adds a fake device); with
+  none, the shipped bindings (`GamepadKeybindCatalog.Defaults`, both camera schemes) stand in. They are read again at
+  world entry, when a gamepad connects or disconnects, and when the Keybinds tab opens. **Known limit:** a controller
+  binding changed in the game's own Options > Controls is seen only at the next of those (there is no hook on that
+  screen closing).
+- **In a handler,** `Keybinds.PressedWithGamepad` is true for a press, hold or release from the controller chord.
+- **The capture** (the Keybinds tab's controller cap) takes every button as a key, B included: the controller's menu
+  Cancel does nothing while it waits. It ends on Escape, a click elsewhere, or 5 seconds with no button down. Two
+  buttons going down on the same frame are refused (`Press the button you hold first, then the other.`), as are
+  three; it keeps waiting.
+- **The bridge.** `keybind_press {"bind":"…","gamepad":true}` presses the controller chord; `{"chord":"GamepadNorth +
+  GamepadDpadDown"}` reaches the binds with that controller chord; in the Keybinds tab, `mods_ui keys op=capture
+  chord="GamepadNorth + GamepadDpadDown"` on a Progenitor bind's row changes its controller key.
+
+Source: `KeyChord.cs` (the buttons, the chord, the match), `Keybinds.cs` (the entry, `SetGamepadDefault`,
+`TryRebindGamepad`, the pump, the controller capture), `GamepadCapture.cs`, `GamepadKeybindCatalog.cs`,
+`KeybindArbiter.cs` (the gamepad picture), `GameKeybindReader.ReadGamepad`, `UnityKeyInputSource.cs`;
+`KeybindGamepadTests`. **Status:** source-checked, built and game-free tested; **not run live** (no controller has
+pressed a bind; the reader's gamepad path has not run).
 
 ### Settings (FUI5)
 

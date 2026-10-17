@@ -137,7 +137,7 @@ internal static class GameKeyRemap
     internal static bool TryPath(KeyChord chord, out string path)
     {
         path = "";
-        if (!chord.IsBound || chord.Modifiers != KeyModifiers.None) return false;
+        if (!chord.IsBound || chord.IsGamepad || chord.Modifiers != KeyModifiers.None) return false;
         switch (chord.Key)
         {
             case UiKey.MouseLeft: path = "<Mouse>/leftButton"; return true;
@@ -163,9 +163,13 @@ internal static class GameKeyRemap
     internal static string? Refusal(KeyChord chord)
     {
         if (!chord.IsBound) return null;
+        // PAD1: the tab changes the game's keyboard and mouse keys only.
+        if (chord.IsGamepad) return GamepadReason;
         if (chord.Modifiers != KeyModifiers.None) return ModifierReason(chord);
         return null;
     }
+
+    internal const string GamepadReason = "The game's controller buttons are changed in Esc > Options > Controls.";
 
     internal static string ModifierReason(KeyChord chord) =>
         chord.DisplayText + " is a combination. The game's keys take one key or mouse button, without Ctrl, Shift or Alt.";

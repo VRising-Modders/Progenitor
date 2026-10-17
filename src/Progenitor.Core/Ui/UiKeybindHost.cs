@@ -50,6 +50,8 @@ internal static class UiKeybindHost
         SettingsCatalog.SourceSweep = Sweep;
         // KEYS1: the winner rule's live inputs — the game's own keys and install times.
         KeybindArbiter.GameSource = GameKeybindReader.Read;
+        // PAD1: the game's controller bindings, for the controller chords' conflicts.
+        KeybindArbiter.GameGamepadSource = GameKeybindReader.ReadGamepad;
         // KEYS9: the Keybinds tab changes the game's own keys through the game's input settings.
         GameKeyRemap.Writer = GameKeybindWriter.Write;
         KeybindArbiter.InstallTimeOf = KeybindInstallTimes.Of;
@@ -354,6 +356,7 @@ internal static class UiKeybindHost
         CoreUiSettings.Reset();
         KeybindArbiter.EnforceGameWins = true;
         KeybindArbiter.GameSource = null;
+        KeybindArbiter.GameGamepadSource = null;
         GameKeyRemap.Writer = null;
         KeybindArbiter.InstallTimeOf = null;
         GameKeybindReader.Forget();

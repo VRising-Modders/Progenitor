@@ -103,6 +103,28 @@ public static class Keybinds
     /// <summary>KEYS1: the Keybinds tab's key capture (<see cref="BeginCapture"/>), or null.</summary>
     private static Action<KeyCaptureResult>? _capture;
 
+    /// <summary>PAD1: the capture waits for a controller chord (<see cref="BeginCapture(Action{KeyCaptureResult}, bool)"/>).</summary>
+    private static bool _captureGamepad;
+
+    /// <summary>PAD1: the controller capture's gesture state while <see cref="_captureGamepad"/>.</summary>
+    private static GamepadCapture? _gamepadCapture;
+
+    /// <summary>PAD1: true while the Keybinds tab waits for a controller button.</summary>
+    internal static bool CapturingGamepad
+    {
+        get { lock (Gate) return _capture != null && _captureGamepad; }
+    }
+
+    internal const string NoGamepadReason = "No controller is connected. Connect one and press the button, or press Escape to cancel.";
+
+    /// <summary>
+    /// PAD1 review: a controller capture ends after this long with no button down (it takes B as a key, so B cannot
+    /// cancel it). Each button held restarts it.
+    /// </summary>
+    internal const int GamepadCaptureTimeoutMs = 5000;
+
+    internal const string GamepadCaptureTimedOutReason = "No controller button was pressed within 5 seconds, so the key was left as it was.";
+
     /// <summary>
     /// KEYS8: the left and right buttons a capture may take, each set once the capture has seen that button up.
     /// The click that started the capture (a row's button, a Keys row) is still going down or coming up when it
@@ -418,6 +440,205 @@ public static class Keybinds
     /// </summary>
     public static bool MayBindWhenChatUnknown(KeyChord chord) => chord.IsSafeWhileTyping;
 
+    // ---- PAD1: controller chords ----------------------------------------------------------------
+
+    /// <summary>PAD1: the cfg key of a bind's controller chord, next to its keyboard entry: <c>&lt;id&gt;.Gamepad</c>.</summary>
+    public const string GamepadEntrySuffix = ".Gamepad";
+
+    /// <summary>PAD1: appended to a controller entry's cfg description.</summary>
+    public const string GamepadFormatHint =
+        "Controller button, e.g. \"GamepadNorth\", or \"GamepadNorth + GamepadDpadDown\" to press the first while holding "
+        + "the second. Buttons: GamepadSouth/East/West/North, GamepadLeftShoulder/RightShoulder, GamepadLeftTrigger/RightTrigger, "
+        + "GamepadDpadUp/Down/Left/Right, GamepadLeftStick/RightStick (pressed in), GamepadStart, GamepadSelect. \"None\" unbinds it.";
+
+    internal const string NotGamepadReason = "That is not a controller button.";
+
+    internal const string KeyNotGamepadReason = "A controller button goes in the bind's controller key, not its keyboard key.";
+
+    /// <summary>Main thread only (the pump and the bridge's dispatch); saved and restored around each handler.</summary>
+    private static bool _actingGamepad;
+
+    /// <summary>
+    /// PAD1: true while a bind's press, while-held or release handler runs because of its controller chord, false for its
+    /// keyboard or mouse chord (and outside handlers). A handler that reads a pointer can read the game's controller
+    /// cursor instead when this is true (the map share does).
+    /// </summary>
+    public static bool PressedWithGamepad => _actingGamepad;
+
+    /// <summary>PAD1: the winner rule for a controller chord on a press. Production: <see cref="KeybindArbiter.GamepadBlockedReason"/>.</summary>
+    internal static Func<string, string, string?> GamepadWinnerGate { get; set; } = KeybindArbiter.GamepadBlockedReason;
+
+    /// <summary>PAD1: the cfg key of <paramref name="id"/>'s controller entry.</summary>
+    public static string GamepadEntryKey(string id) => (id ?? "").Trim() + GamepadEntrySuffix;
+
+    /// <summary>
+    /// PAD1: bind <paramref name="key"/>'s controller entry when the bind has a controller default, when the cfg already
+    /// holds a value for it (a saved choice survives a reload) or when <paramref name="force"/> (the player just chose one).
+    /// Otherwise no entry is written, so a cfg gains a controller line only for a bind that uses one. Null when not bound.
+    /// </summary>
+    private static ConfigEntry<string>? BindGamepadEntry(ConfigFile? file, string plugin, string key, string description, KeyChord padDefault, bool force)
+    {
+        if (file == null) return null;
+        var definition = new ConfigDefinition(Section, GamepadEntryKey(key));
+        if (!force && !padDefault.IsBound)
+        {
+            bool saved = false;
+            try
+            {
+                saved = file.ContainsKey(definition)
+                    || (Progenitor.Config.ConfigHelper.GetOrphanedEntries(file)?.Contains(definition) ?? false);
+            }
+            catch { saved = false; }
+            if (!saved) return null;
+        }
+
+        try
+        {
+            return file.Bind(Section, GamepadEntryKey(key), padDefault.ToString(),
+                (string.IsNullOrWhiteSpace(description) ? "" : description.Trim() + " ") + GamepadFormatHint);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind '" + plugin + "/" + key + "' could not bind its controller entry: " + e.Message
+                + "; its controller button stays " + padDefault + " and is not editable in the cfg.");
+            return null;
+        }
+    }
+
+    /// <summary>PAD1: a controller entry's chord: a gamepad chord or None; anything else keeps <paramref name="fallback"/> and says so.</summary>
+    private static KeyChord ReadGamepadChord(ConfigEntry<string>? entry, string pluginId, string id, KeyChord fallback)
+    {
+        if (entry == null) return fallback;
+        string? raw;
+        try { raw = entry.Value; }
+        catch { return fallback; }
+        if (KeyChord.TryParse(raw, out var chord) && (!chord.IsBound || chord.IsGamepad)) return chord;
+        Plugin.Logger?.LogWarning("Ui: keybind '" + pluginId + "/" + id + "' has an unreadable controller value '" + (raw ?? "")
+            + "' in the cfg; using " + fallback + " instead. " + GamepadFormatHint);
+        return fallback;
+    }
+
+    /// <summary>
+    /// PAD1: give a registered bind a controller default (<see cref="KeyChord.Gamepad"/>; <see cref="KeyChord.None"/> for
+    /// none). The player's saved choice in <c>[Keybinds] &lt;id&gt;.Gamepad</c> wins over it. The bind then fires on either
+    /// its keyboard or mouse chord or its controller chord, through the same gates, scope and winner rule (the controller
+    /// chord is checked against the game's controller bindings and the other binds' controller chords).
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="padDefault"/> is bound and not a controller chord.</exception>
+    public static IKeybindHandle SetGamepadDefault(IKeybindHandle handle, KeyChord padDefault)
+    {
+        if (handle is not Registration reg) throw new ArgumentException("Not a Progenitor keybind handle.", nameof(handle));
+        if (padDefault.IsBound && !padDefault.IsGamepad)
+            throw new ArgumentException(NotGamepadReason + " (" + padDefault + ")", nameof(padDefault));
+        if (reg.Disposed) return reg;
+
+        var entry = reg.GamepadEntry ?? BindGamepadEntry(reg.File, reg.PluginId, reg.Id, reg.Description, padDefault, force: false);
+        var chord = ReadGamepadChord(entry, reg.PluginId, reg.Id, padDefault);
+        lock (Gate)
+        {
+            reg.DefaultGamepadChord = padDefault;
+            reg.GamepadEntry = entry;
+            reg.GamepadChord = chord;
+            _pumpSnapshot = null;
+            Bump();
+        }
+
+        if (chord.IsBound)
+            Plugin.Logger?.LogInfo("Ui: keybind '" + reg.Label + "' controller button " + chord + ".");
+        return reg;
+    }
+
+    /// <summary>
+    /// PAD1: store a new controller chord for a bind (the Keybinds tab's controller key). Refused with a row-sized
+    /// <paramref name="reason"/> when it is not a controller chord, or when something it would meet already has it: one
+    /// of the game's controller bindings that stops it in the bind's scope, or another Progenitor bind's controller chord
+    /// (a remap never creates a conflict). <see cref="KeyChord.None"/> (unbind) and the chord it has are always accepted.
+    /// The <c>&lt;id&gt;.Gamepad</c> entry is written (and bound first, when the bind had none).
+    /// </summary>
+    internal static bool TryRebindGamepad(string? pluginId, string id, KeyChord chord, bool reset, out string? reason)
+    {
+        reason = null;
+        var target = FindLive(pluginId, id);
+        if (target == null)
+        {
+            reason = NotRegisteredReason;
+            return false;
+        }
+
+        if (chord.IsBound && !chord.IsGamepad) reason = NotGamepadReason;
+        else if (chord.IsBound && chord != target.GamepadChord) reason = GamepadClashReason(target.PluginId, target.Id, target.Scope, chord, reset);
+
+        if (reason == null)
+        {
+            lock (Gate)
+            {
+                if (target.Disposed) reason = NotRegisteredReason;
+                else
+                {
+                    target.GamepadChord = chord;
+                    _pumpSnapshot = null;
+                    Bump();
+                }
+            }
+        }
+
+        if (reason != null)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind '" + target.Label + "' controller button was not changed to " + chord + ": " + reason);
+            Raise(new RebindResult(target.Id, RebindOutcome.Refused, reason));
+            return false;
+        }
+
+        try
+        {
+            target.GamepadEntry ??= BindGamepadEntry(target.File, target.PluginId, target.Id, target.Description, target.DefaultGamepadChord, force: true);
+            target.GamepadEntry?.SetSerializedValue(chord.ToString());
+            Persist(target.GamepadEntry);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind '" + target.Label + "' controller button set to " + chord + " in memory but the cfg write threw: " + e.Message);
+        }
+
+        Plugin.Logger?.LogInfo("Ui: keybind '" + target.Label + "' controller button set to " + chord + ".");
+        Raise(new RebindResult(target.Id, RebindOutcome.Bound));
+        return true;
+    }
+
+    /// <summary>
+    /// PAD1: why a bind of <paramref name="scope"/> may not take controller chord <paramref name="chord"/>, or null. The
+    /// holder is named as the keyboard guard names one (<see cref="KeybindRemapGuard.ClashReason"/>). Fails closed.
+    /// </summary>
+    internal static string? GamepadClashReason(string pluginId, string id, KeybindScope scope, KeyChord chord, bool reset = false)
+    {
+        if (!chord.IsBound) return null;
+        if (!chord.IsGamepad) return NotGamepadReason;
+        try
+        {
+            KeybindArbiter.RefreshIfStale();
+            var holder = KeybindArbiter.GamepadHolderOf(pluginId, id, chord, scope);
+            if (holder == null) return null;
+            return reset ? KeybindRemapGuard.ResetClashReason(chord, holder) : KeybindRemapGuard.ClashReason(chord, holder);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: controller button check threw: " + e.Message + "; the button is refused.");
+            return KeybindRemapGuard.CheckFailedReason;
+        }
+    }
+
+    /// <summary>PAD1: whether a gamepad is connected now (the key source reads one). False on the server and in tests without one.</summary>
+    internal static bool GamepadConnected
+    {
+        get
+        {
+            IKeyInputSource source;
+            lock (Gate) source = _source;
+            try { return source.GamepadPresent; }
+            catch { return false; }
+        }
+    }
+
     /// <summary>
     /// Register a keybind. Returns a handle whose <c>Dispose</c> unregisters it; the config entry
     /// itself is left in the cfg (the player's value survives a reload).
@@ -506,6 +727,14 @@ public static class Keybinds
         string key = id.Trim();
         string desc = description ?? "";
 
+        // PAD1: a controller chord given as the default is the bind's controller default; its keyboard key is unbound.
+        var padDefault = KeyChord.None;
+        if (defaultKey.IsGamepad)
+        {
+            padDefault = defaultKey;
+            defaultKey = KeyChord.None;
+        }
+
         ConfigEntry<string> entry;
         try
         {
@@ -525,6 +754,13 @@ public static class Keybinds
 
         var chord = ReadChord(entry, plugin, key, defaultKey);
         string label = plugin + "/" + key;
+        if (chord.IsGamepad)
+        {
+            // PAD1: the keyboard entry holds keys and mouse buttons; a controller button goes in <id>.Gamepad.
+            Plugin.Logger?.LogWarning("Ui: keybind '" + label + "': " + KeyNotGamepadReason + " Using " + defaultKey
+                + " for the keyboard key; put " + chord + " in [" + Section + "] " + GamepadEntryKey(key) + ".");
+            chord = defaultKey;
+        }
 
         // KEYS2: a chord Windows or Steam takes first never becomes a bind. A cfg value on one falls back
         // to the default; a default on one (or a cfg value equal to it) is registered unbound. The
@@ -592,7 +828,12 @@ public static class Keybinds
 
         var registration = new Registration(
             owner, plugin, key, desc, entry, defaultKey, chord, onPressed, allowWhileCaptured, allowWhenChatUnknown,
-            whileHeld, onReleased) { Reserved = reserved, Scope = scope };
+            whileHeld, onReleased) { Reserved = reserved, Scope = scope, File = file };
+
+        // PAD1: the controller chord: a saved <id>.Gamepad value, else the controller default (none for most binds).
+        registration.DefaultGamepadChord = padDefault;
+        registration.GamepadEntry = BindGamepadEntry(file, plugin, key, desc, padDefault, force: false);
+        registration.GamepadChord = ReadGamepadChord(registration.GamepadEntry, plugin, key, padDefault);
 
         string? conflict = null;
         lock (Gate)
@@ -616,6 +857,8 @@ public static class Keybinds
         }
 
         Plugin.Logger?.LogInfo(RegisteredLog(plugin, key, chord, desc));
+        if (registration.GamepadChord.IsBound)
+            Plugin.Logger?.LogInfo("Ui: keybind '" + label + "' controller button " + registration.GamepadChord + ".");
         if (conflict != null)
             Plugin.Logger?.LogWarning(ConflictLog(chord, conflict, registration.Label));
         LogNotActive(chord);
@@ -714,6 +957,8 @@ public static class Keybinds
     internal static bool TryRebind(string? pluginId, string id, KeyChord chord, RebindCheck check, out string? reason)
     {
         reason = null;
+        // PAD1: a controller chord is the bind's controller key.
+        if (chord.IsGamepad) return TryRebindGamepad(pluginId, id, chord, check == RebindCheck.Reset, out reason);
         Registration? target = FindLive(pluginId, id);
         if (target == null)
         {
@@ -1030,7 +1275,14 @@ public static class Keybinds
     /// chord, so the tab can show a clash before anything is saved. While it waits no bind fires, as
     /// with <see cref="BeginRebind"/>; starting one cancels the other.
     /// </summary>
-    internal static bool BeginCapture(Action<KeyCaptureResult> onDone)
+    internal static bool BeginCapture(Action<KeyCaptureResult> onDone) => BeginCapture(onDone, gamepad: false);
+
+    /// <summary>
+    /// PAD1: <paramref name="gamepad"/> true waits for a controller chord instead (<see cref="GamepadCapture"/>: decided
+    /// when the first button comes up, so a held button is never taken as the key). Escape on the keyboard still cancels;
+    /// other keys are ignored.
+    /// </summary>
+    internal static bool BeginCapture(Action<KeyCaptureResult> onDone, bool gamepad)
     {
         if (onDone == null) throw new ArgumentNullException(nameof(onDone));
         Registration? rebinding;
@@ -1041,6 +1293,8 @@ public static class Keybinds
             _rebinding = null;
             previous = _capture;
             _capture = onDone;
+            _captureGamepad = gamepad;
+            _gamepadCapture = gamepad ? new GamepadCapture() : null;
             _waitStarted = Clock();
             _waitBegan = _waitStarted;
             _leftArmed = _rightArmed = false;
@@ -1108,7 +1362,15 @@ public static class Keybinds
         var result = new List<KeybindDispatch>();
         for (int i = 0; i < snapshot.Length; i++)
         {
-            if (snapshot[i].Disposed || snapshot[i].Chord != chord || !chord.IsBound) continue;
+            if (snapshot[i].Disposed || !chord.IsBound) continue;
+            // PAD1: a controller chord reaches the binds it is the controller chord of.
+            if (chord.IsGamepad)
+            {
+                if (snapshot[i].GamepadChord == chord) result.Add(Dispatch(snapshot[i], -1, gamepad: true));
+                continue;
+            }
+
+            if (snapshot[i].Chord != chord) continue;
             result.Add(Dispatch(snapshot[i]));
         }
 
@@ -1136,22 +1398,36 @@ public static class Keybinds
 
         if (target == null)
             return new[] { new KeybindDispatch(pluginId ?? "", id ?? "", "", false, "unknown bind") };
-        return new[] { Dispatch(target, Math.Max(0, Math.Min(frames, 600))) };
+        return new[] { Dispatch(target, Math.Max(0, Math.Min(frames, 600)), gamepad: false) };
     }
 
-    private static KeybindDispatch Dispatch(Registration reg) => Dispatch(reg, -1);
+    private static KeybindDispatch Dispatch(Registration reg) => Dispatch(reg, -1, gamepad: false);
+
+    /// <summary>
+    /// PAD1 (bridge <c>keybind_press</c> with <c>gamepad: true</c>): dispatch <paramref name="id"/>'s controller chord as a
+    /// real controller press would reach it: the capture, panel, chat and scope gates and the controller winner rule, with
+    /// <see cref="PressedWithGamepad"/> true in the handler.
+    /// </summary>
+    public static IReadOnlyList<KeybindDispatch> SimulateGamepadPress(string? pluginId, string id)
+    {
+        var target = FindLive(pluginId, id);
+        if (target == null)
+            return new[] { new KeybindDispatch(pluginId ?? "", id ?? "", "", false, "unknown bind") };
+        return new[] { Dispatch(target, -1, gamepad: true) };
+    }
 
     /// <summary>TEXTUNDO1: the refusal while a framework text field with owned focus takes the bind's key.</summary>
     internal const string FieldTakesKeyReason = "suppressed: a framework text field has focus and takes this key";
 
     /// <summary><paramref name="holdFrames"/> &lt; 0: a press only. Otherwise press, hold that many frames, release.</summary>
-    private static KeybindDispatch Dispatch(Registration reg, int holdFrames)
+    private static KeybindDispatch Dispatch(Registration reg, int holdFrames, bool gamepad)
     {
         KeybindArbiter.RefreshIfStale();
-        string chordText = reg.Chord.ToString();
+        var chord = gamepad ? reg.GamepadChord : reg.Chord;
+        string chordText = chord.ToString();
         KeybindDispatch Not(string why) => new(reg.PluginId, reg.Id, chordText, false, why);
         if (reg.Disposed) return Not("unknown bind");
-        if (!reg.Chord.IsBound) return Not("unbound");
+        if (!chord.IsBound) return Not(gamepad ? "no controller button" : "unbound");
         IKeyInputSource source;
         bool waiting;
         lock (Gate)
@@ -1163,7 +1439,7 @@ public static class Keybinds
         if (waiting) return Not("suppressed: a key capture is waiting for a key");
         if (!ScopeOpen(reg.Scope)) return Not(ScopeClosedReason(reg.Scope));
         if (UiInputCapture.IsFullyBlocking && !reg.AllowWhileCaptured) return Not("suppressed: a mod panel is taking input");
-        if (ClickChordSuppressedReason(reg.Scope, reg.Chord, raycast: true) is { } click) return Not(click);
+        if (ClickChordSuppressedReason(reg.Scope, chord, raycast: true) is { } click) return Not(click);
         ChatFocus focus;
         try { focus = source.ChatFocus; }
         catch { focus = ChatFocus.Unknown; }
@@ -1172,10 +1448,10 @@ public static class Keybinds
             // CHAT2: the chat box is the field a chat bind serves, so its focus is the gate (ScopeOpen above),
             // not a suppression. Press only. A Progenitor-owned text field still takes its own keys.
             if (MenuHotkeyGuard.HotkeysBlocked) return Not(FieldTakesKeyReason);
-            string? lost = SafeWinnerGate(reg);
+            string? lost = gamepad ? SafeGamepadWinnerGate(reg) : SafeWinnerGate(reg);
             if (lost != null) return Not("not-active: " + lost);
             if (!reg.HasPress) return Not("no press handler: this bind acts while held; use a hold");
-            try { reg.OnPressed(); }
+            try { reg.OnPressed(gamepad); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogError("Ui: keybind '" + reg.Label + "' handler threw: " + e);
@@ -1190,18 +1466,18 @@ public static class Keybinds
         try { typing = source.TextFieldFocused; }
         catch { typing = false; }
         // A mouse button cannot type: a bind on one (Mouse Back = Navigate back) still works while a field has focus.
-        if (typing && !TypingSafeChord(reg.Chord)) return Not("suppressed: a text field has focus");
-        if (MenuHotkeyGuard.HotkeysBlocked && UiTypedKeys.FieldTakes(reg.Chord))
+        if (typing && !TypingSafeChord(chord)) return Not("suppressed: a text field has focus");
+        if (MenuHotkeyGuard.HotkeysBlocked && UiTypedKeys.FieldTakes(chord))
             return Not(FieldTakesKeyReason);
         if (focus == ChatFocus.Unknown && !reg.AllowWhenChatUnknown && source.IsAvailable)
             return Not("suppressed: no chat window can be read");
-        string? blocked = GateNow(reg);
+        string? blocked = gamepad ? SafeGamepadWinnerGate(reg) : GateNow(reg);
         if (blocked != null) return Not("not-active: " + blocked);
         if (holdFrames < 0)
         {
             // Review 2026-09-29: a hold-only bind has no press handler, so a press runs nothing.
             if (!reg.HasPress) return Not("no press handler: this bind acts while held; use a hold");
-            try { reg.OnPressed(); }
+            try { reg.OnPressed(gamepad); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogError("Ui: keybind '" + reg.Label + "' handler threw: " + e);
@@ -1212,7 +1488,7 @@ public static class Keybinds
         }
 
         if (!reg.HasPress && !reg.HasHold) return Not("no handler");
-        try { reg.OnPressed(); }
+        try { reg.OnPressed(gamepad); }
         catch (Exception e)
         {
             Plugin.Logger?.LogError("Ui: keybind '" + reg.Label + "' handler threw: " + e);
@@ -1220,6 +1496,7 @@ public static class Keybinds
         }
 
         reg.Holding = true;
+        reg.HoldingGamepad = gamepad;
         for (int i = 0; i < holdFrames; i++) reg.RunWhileHeld();
         reg.Release();
         return new KeybindDispatch(reg.PluginId, reg.Id, chordText, true, "");
@@ -1522,6 +1799,17 @@ public static class Keybinds
         return UiInputCapture.IsBlocking && UiInputCapture.TryGetAppliedScope(out var scope) && scope != UiMaskScope.CloseKeyOnly;
     }
 
+    /// <summary>PAD1: <see cref="SafeWinnerGate"/> for the controller chord (the gamepad picture's verdict).</summary>
+    private static string? SafeGamepadWinnerGate(Registration reg)
+    {
+        try { return GamepadWinnerGate(reg.PluginId, reg.Id); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind controller winner check threw: " + e.Message + "; the bind fires.");
+            return null;
+        }
+    }
+
     private static string? SafeWinnerGate(Registration reg)
     {
         try { return WinnerGate(reg.PluginId, reg.Id); }
@@ -1618,9 +1906,13 @@ public static class Keybinds
 
         bool waitingForKey = rebinding != null || capture != null;
         long nowMs = waitingForKey ? Clock() : 0;
-        if (waitingForKey && (nowMs - _waitStarted > CaptureTimeoutMs || nowMs - _waitBegan > CaptureMaxMs))
+        bool padWait;
+        lock (Gate) padWait = capture != null && _captureGamepad;
+        int timeout = padWait ? GamepadCaptureTimeoutMs : CaptureTimeoutMs;
+        if (waitingForKey && (nowMs - _waitStarted > timeout || nowMs - _waitBegan > CaptureMaxMs))
         {
-            TimeOutWait(rebinding, capture, nowMs - _waitBegan > CaptureMaxMs ? CaptureMaxReason : CaptureTimedOutReason);
+            TimeOutWait(rebinding, capture, nowMs - _waitBegan > CaptureMaxMs ? CaptureMaxReason
+                : padWait ? GamepadCaptureTimedOutReason : CaptureTimedOutReason);
             rebinding = null;
             capture = null;
             waitingForKey = false;
@@ -1755,17 +2047,21 @@ public static class Keybinds
         {
             var reg = snapshot[i];
             if (reg.Disposed) continue;
-            bool allowed = !(typing && !TypingSafeChord(reg.Chord))
-                && !(captured && !reg.AllowWhileCaptured) && !(chatUnknown && !reg.AllowWhenChatUnknown)
-                && ScopeOpen(reg.Scope) && !(ownedField && UiTypedKeys.FieldTakes(reg.Chord))
+            bool gated = !(captured && !reg.AllowWhileCaptured) && !(chatUnknown && !reg.AllowWhenChatUnknown)
+                && ScopeOpen(reg.Scope);
+            bool allowed = gated && !(typing && !TypingSafeChord(reg.Chord))
+                && !(ownedField && UiTypedKeys.FieldTakes(reg.Chord))
                 && ClickChordSuppressedReason(reg.Scope, reg.Chord) == null;
+            // PAD1: a controller button types nothing and clicks nothing, so only the panel, chat and scope gates apply.
+            bool padAllowed = gated && reg.GamepadChord.IsBound;
 
             if (reg.Holding)
             {
                 bool still = false;
-                if (allowed && reg.Chord.IsBound)
+                var heldChord = reg.HoldingGamepad ? reg.GamepadChord : reg.Chord;
+                if ((reg.HoldingGamepad ? padAllowed : allowed) && heldChord.IsBound)
                 {
-                    try { still = source.IsHeld(reg.Chord); }
+                    try { still = source.IsHeld(heldChord); }
                     catch (Exception e)
                     {
                         Plugin.Logger?.LogWarning("Ui: keybind '" + reg.Label + "' held read threw: " + e.Message);
@@ -1777,53 +2073,65 @@ public static class Keybinds
                 continue;
             }
 
-            if (!allowed) continue;
-
-            var chord = reg.Chord;
-            if (!chord.IsBound) continue;
-
-            bool down;
-            bool refusedAsAltGr = false;
-            try { down = source.WasPressedThisFrame(chord, out refusedAsAltGr); }
-            catch (Exception e)
-            {
-                Plugin.Logger?.LogWarning("Ui: keybind '" + reg.Label + "' key read threw: " + e.Message);
-                continue;
-            }
-
-            if (!down)
-            {
-                // Edge-triggered, so once per attempt: the only thing that tells a US-layout player why
-                // the chord they are holding does nothing (R38 finding 4).
-                if (refusedAsAltGr) Plugin.Logger?.LogWarning(AltGrNotFiredLog(reg.Label, chord));
-                continue;
-            }
-
-            // KEYS8 review: on a click chord's press edge, a click whose top UI hit is a Progenitor object (a
-            // passive overlay's button too) is that object's. The per-frame gate above covers capturing panels.
-            if (KeyChord.IsClickButton(chord.Key) && PointerOnModUi(raycast: true))
-            {
-                Plugin.Logger?.LogDiag("Ui: keybind '" + reg.Label + "' was not fired: " + ClickOverModUiReason + ".");
-                continue;
-            }
-
-            // KEYS1: the winner rule. A bind that lost its chord to the game or to a mod installed
-            // first does not run — asked on the press edge only, so a quiet frame costs nothing.
-            string? blocked = GateNow(reg);
-            if (blocked != null)
-            {
-                Plugin.Logger?.LogInfo(NotFiredLog(reg.Label, blocked));
-                continue;
-            }
-
-            try { reg.OnPressed(); }
-            catch (Exception e)
-            {
-                Plugin.Logger?.LogError("Ui: keybind '" + reg.Label + "' handler threw: " + e);
-            }
-
-            if (reg.HasHold) reg.Holding = true;
+            if (allowed && reg.Chord.IsBound && PumpPress(source, reg, gamepad: false)) continue;
+            if (padAllowed) PumpPress(source, reg, gamepad: true);
         }
+    }
+
+    /// <summary>
+    /// One bind's press edge on one of its chords (the keyboard or mouse one, or PAD1 the controller one): the read, the
+    /// click-over-our-UI and winner gates, the handler, and the hold. True when the chord went down (fired or not).
+    /// </summary>
+    private static bool PumpPress(IKeyInputSource source, Registration reg, bool gamepad)
+    {
+        var chord = gamepad ? reg.GamepadChord : reg.Chord;
+        bool down;
+        bool refusedAsAltGr = false;
+        try { down = source.WasPressedThisFrame(chord, out refusedAsAltGr); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind '" + reg.Label + "' key read threw: " + e.Message);
+            return false;
+        }
+
+        if (!down)
+        {
+            // Edge-triggered, so once per attempt: the only thing that tells a US-layout player why
+            // the chord they are holding does nothing (R38 finding 4).
+            if (refusedAsAltGr) Plugin.Logger?.LogWarning(AltGrNotFiredLog(reg.Label, chord));
+            return false;
+        }
+
+        // KEYS8 review: on a click chord's press edge, a click whose top UI hit is a Progenitor object (a
+        // passive overlay's button too) is that object's. The per-frame gate above covers capturing panels.
+        if (KeyChord.IsClickButton(chord.Key) && PointerOnModUi(raycast: true))
+        {
+            Plugin.Logger?.LogDiag("Ui: keybind '" + reg.Label + "' was not fired: " + ClickOverModUiReason + ".");
+            return true;
+        }
+
+        // KEYS1: the winner rule. A bind that lost its chord to the game or to a mod installed
+        // first does not run — asked on the press edge only, so a quiet frame costs nothing.
+        string? blocked = gamepad ? SafeGamepadWinnerGate(reg) : GateNow(reg);
+        if (blocked != null)
+        {
+            Plugin.Logger?.LogInfo(NotFiredLog(reg.Label + (gamepad ? " (controller)" : ""), blocked));
+            return true;
+        }
+
+        try { reg.OnPressed(gamepad); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("Ui: keybind '" + reg.Label + "' handler threw: " + e);
+        }
+
+        if (reg.HasHold)
+        {
+            reg.Holding = true;
+            reg.HoldingGamepad = gamepad;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1876,6 +2184,14 @@ public static class Keybinds
     /// <summary>The rebind flow or the tab's key capture: read one chord and hand it on.</summary>
     private static void PumpCapture(IKeyInputSource source, Registration? rebinding, Action<KeyCaptureResult>? capture)
     {
+        GamepadCapture? pad;
+        lock (Gate) pad = rebinding == null && _captureGamepad ? _gamepadCapture : null;
+        if (capture != null && pad != null)
+        {
+            PumpGamepadCapture(source, capture, pad);
+            return;
+        }
+
         // KEYS8: a left or right button the capture has not yet seen up belongs to the click that started it.
         if (!_leftArmed && !HeldOrUnknown(source, UiKey.MouseLeft)) _leftArmed = true;
         if (!_rightArmed && !HeldOrUnknown(source, UiKey.MouseRight)) _rightArmed = true;
@@ -1972,6 +2288,78 @@ public static class Keybinds
     }
 
     /// <summary>
+    /// PAD1: the controller capture's pump. Escape on the keyboard cancels; any other key is ignored. The held buttons go
+    /// to <see cref="GamepadCapture"/>, which decides the chord when the first button comes up. A refusal (three buttons)
+    /// keeps the capture waiting, as a reserved key does.
+    /// </summary>
+    private static void PumpGamepadCapture(IKeyInputSource source, Action<KeyCaptureResult> capture, GamepadCapture pad)
+    {
+        bool escape = false;
+        try
+        {
+            if (source.TryReadPressedChord(out var key, out _) && key.Key == UiKey.Escape) escape = true;
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: keybind controller capture key read threw: " + e.Message); }
+
+        if (escape)
+        {
+            lock (Gate)
+            {
+                if (!ReferenceEquals(_capture, capture)) return;
+                _capture = null;
+                _gamepadCapture = null;
+                try { _escapeCancelledAt = Clock(); }
+                catch { _escapeCancelledAt = long.MinValue; }
+            }
+
+            Plugin.Logger?.LogInfo("Ui: keybind controller capture canceled (Escape).");
+            Deliver(capture, new KeyCaptureResult(RebindOutcome.Cancelled, KeyChord.None, null));
+            return;
+        }
+
+        uint held;
+        bool connected;
+        try { connected = source.TryReadGamepadHeld(out held); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind controller capture read threw: " + e.Message);
+            return;
+        }
+
+        if (!connected) return;
+        bool ended = pad.Observe(held, out var chord, out var refusal);
+        // A button held is the player choosing: the 5 s wait counts from the last read with none down.
+        if (pad.Active)
+        {
+            lock (Gate)
+                if (ReferenceEquals(_capture, capture)) _waitStarted = Clock();
+        }
+
+        if (!ended) return;
+        if (refusal != null)
+        {
+            lock (Gate)
+            {
+                if (!ReferenceEquals(_capture, capture)) return;
+                _waitStarted = Clock();
+            }
+
+            Plugin.Logger?.LogInfo("Ui: keybind controller capture refused: " + refusal + " Still waiting for a button.");
+            Deliver(capture, new KeyCaptureResult(RebindOutcome.Refused, KeyChord.None, refusal, stillCapturing: true));
+            return;
+        }
+
+        lock (Gate)
+        {
+            if (!ReferenceEquals(_capture, capture)) return;
+            _capture = null;
+            _gamepadCapture = null;
+        }
+
+        Deliver(capture, new KeyCaptureResult(RebindOutcome.Bound, chord, null));
+    }
+
+    /// <summary>
     /// KEYS2: why a captured keystroke cannot be used and the capture should keep waiting, or null. A key
     /// pressed with a Windows key held is Windows' shortcut (<c>Win+G</c>, <c>Win+Print Screen</c>: no
     /// <see cref="KeyChord"/> can express it); a reserved chord is refused with its own reason; a rebind's
@@ -2064,7 +2452,7 @@ public static class Keybinds
     /// character the player is typing (its modifiers type nothing either). Keys stay suppressed. User report 2026-10-10:
     /// with the search box focused, Mouse Back (Navigate back) was dead.
     /// </summary>
-    internal static bool TypingSafeChord(KeyChord chord) => chord.IsBound && KeyChord.IsMouseKey(chord.Key);
+    internal static bool TypingSafeChord(KeyChord chord) => chord.IsBound && (KeyChord.IsMouseKey(chord.Key) || chord.IsGamepad);
 
     /// <summary>
     /// <c>mods_ui nav_state</c> <c>textFocus</c>: whether the key source sees a focused text field now (every key bind but
@@ -2151,6 +2539,8 @@ public static class Keybinds
             _rebinding = null;
             _capture = null;
             _source = NullKeyInputSource.Instance;
+            _captureGamepad = false;
+            _gamepadCapture = null;
             DisarmPumpLocked();
         }
 
@@ -2185,7 +2575,7 @@ public static class Keybinds
             var reg = snapshot[i];
             if (reg.Disposed) continue;
             if (captured && !reg.AllowWhileCaptured) continue;
-            if (!reg.Chord.IsBound) continue;
+            if (!reg.Chord.IsBound && !reg.GamepadChord.IsBound) continue;
             return true;
         }
 
@@ -2307,6 +2697,10 @@ public static class Keybinds
             _pumpArmed = false;
             Clock = () => Environment.TickCount64;
             WinnerGate = KeybindArbiter.BlockedReason;
+            GamepadWinnerGate = KeybindArbiter.GamepadBlockedReason;
+            _captureGamepad = false;
+            _gamepadCapture = null;
+            _actingGamepad = false;
             _chatUnknown = false;
             _chatUnknownPumps = 0;
             _chatUnknownWorldLogged = false;
@@ -2393,6 +2787,21 @@ public static class Keybinds
 
         public KeyChord Chord { get; set; }
 
+        /// <summary>PAD1: the controller chord (<see cref="KeyChord.None"/> when it has none).</summary>
+        public KeyChord GamepadChord { get; set; }
+
+        /// <summary>PAD1: the plugin's controller default (<see cref="Keybinds.SetGamepadDefault"/>).</summary>
+        public KeyChord DefaultGamepadChord { get; set; }
+
+        /// <summary>PAD1: the <c>&lt;id&gt;.Gamepad</c> cfg entry, bound once the bind has a controller default or value.</summary>
+        public ConfigEntry<string>? GamepadEntry { get; set; }
+
+        /// <summary>PAD1: the owning plugin's cfg, for binding <see cref="GamepadEntry"/> when it is first needed.</summary>
+        public ConfigFile? File { get; init; }
+
+        /// <summary>PAD1: the hold now running was started by the controller chord (its button is the one read for held).</summary>
+        public bool HoldingGamepad { get; set; }
+
         /// <summary>KEYS2: the reserved chord refused at registration, until the player picks a key.</summary>
         public ReservedNote? Reserved { get; set; }
 
@@ -2412,6 +2821,15 @@ public static class Keybinds
 
         public void OnPressed() => _onPressed?.Invoke();
 
+        /// <summary>PAD1: the press handler, with <see cref="Keybinds.PressedWithGamepad"/> saying which chord fired.</summary>
+        public void OnPressed(bool gamepad)
+        {
+            bool was = _actingGamepad;
+            _actingGamepad = gamepad;
+            try { _onPressed?.Invoke(); }
+            finally { _actingGamepad = was; }
+        }
+
         public bool HasPress => _onPressed != null;
 
         /// <summary>KEYS1: true when the bind has a while-held or release handler, so a press starts a hold.</summary>
@@ -2423,17 +2841,25 @@ public static class Keybinds
         public void RunWhileHeld()
         {
             if (_whileHeld == null) return;
+            bool was = _actingGamepad;
+            _actingGamepad = HoldingGamepad;
             try { _whileHeld(); }
             catch (Exception e) { Plugin.Logger?.LogError("Ui: keybind '" + Label + "' while-held handler threw: " + e); }
+            finally { _actingGamepad = was; }
         }
 
         public void Release()
         {
             if (!Holding) return;
             Holding = false;
+            bool pad = HoldingGamepad;
+            HoldingGamepad = false;
             if (_onReleased == null) return;
+            bool was = _actingGamepad;
+            _actingGamepad = pad;
             try { _onReleased(); }
             catch (Exception e) { Plugin.Logger?.LogError("Ui: keybind '" + Label + "' release handler threw: " + e); }
+            finally { _actingGamepad = was; }
         }
 
         public bool Matches(string? pluginId, string id) =>
@@ -2526,6 +2952,12 @@ public interface IKeybindHandle : IDisposable
 
     /// <summary>True after <see cref="IDisposable.Dispose"/> or a Core uninstall.</summary>
     bool IsDisposed { get; }
+
+    /// <summary>
+    /// PAD1: the controller chord this bind also answers to (<see cref="KeyChord.Gamepad"/>), or <see cref="KeyChord.None"/>.
+    /// Set a default with <c>ctx.Keybinds.SetGamepad</c>; the player can change it in the Keybinds tab.
+    /// </summary>
+    KeyChord GamepadChord => KeyChord.None;
 }
 
 /// <summary>Read-only view of one keybind, for the settings panel and diagnostics.</summary>
@@ -2541,6 +2973,12 @@ public interface IKeybindInfo
 
     /// <summary>What the plugin asked for, so the panel can offer "reset".</summary>
     KeyChord DefaultChord { get; }
+
+    /// <summary>PAD1: the controller chord (<see cref="KeyChord.None"/> when it has none).</summary>
+    KeyChord GamepadChord => KeyChord.None;
+
+    /// <summary>PAD1: the plugin's controller default (<see cref="KeyChord.None"/> when it set none).</summary>
+    KeyChord DefaultGamepadChord => KeyChord.None;
 }
 
 /// <summary>KEYS1: how the Keybinds tab's key capture ended (<see cref="Keybinds.BeginCapture"/>).</summary>

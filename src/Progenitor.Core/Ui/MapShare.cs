@@ -22,6 +22,11 @@ namespace Progenitor.Ui;
 /// matrix, <see cref="MapTransformMath"/>). The release shares that point when the pointer stayed within the drag
 /// threshold (a drag pans the map). The minimap is never involved: the key is map scope, live only on the full map.</para>
 ///
+/// <para><b>On a controller</b> (PAD1). The bind's controller default is Pad Y with D-Pad Down held
+/// (<see cref="MapShareLogic.DefaultGamepadKey"/>, chosen against the game's map controls). A controller press shares at
+/// once the point under the map's controller cursor (<see cref="WorldMap.TryReadGamepadCursor"/>), and while the game
+/// shows controller glyphs the key tip shows that chord with the game's own glyphs.</para>
+///
 /// <para><b>Closing the map.</b> <c>HUDMenuManager.CloseMenu(World)</c>, the call the game's M key makes with the map
 /// shown; the chat opens once the menu has closed (<see cref="ChatWindow.InsertIntoInput(string, bool)"/>).
 /// <b>Not live-verified.</b></para>
@@ -65,9 +70,12 @@ internal static class MapShare
                 MapShareLogic.DefaultKey, MapShareLogic.KeybindDescription, Press, null, Release,
                 allowWhileCaptured: false, allowWhenChatUnknown: true, KeybindScope.Map);
             Registrations.Add(_bind);
+            // PAD1: the controller default: Pad Y with D-Pad Down held (MapShareLogic.DefaultGamepadKey).
+            Keybinds.SetGamepadDefault(_bind, MapShareLogic.DefaultGamepadKey);
             _hint = new MapShareHint();
             Plugin.Frame += OnFrame;
-            Plugin.Logger?.LogInfo("Map share: key '" + MapShareLogic.KeybindId + "' on " + _bind.Chord.DisplayText + " (map scope).");
+            Plugin.Logger?.LogInfo("Map share: key '" + MapShareLogic.KeybindId + "' on " + _bind.Chord.DisplayText
+                + (_bind.GamepadChord.IsBound ? ", controller " + _bind.GamepadChord.DisplayText : "") + " (map scope).");
         }
         catch (Exception e)
         {
@@ -98,6 +106,21 @@ internal static class MapShare
 
     private static void Press()
     {
+        if (Keybinds.PressedWithGamepad)
+        {
+            // PAD1: a controller press shares the point under the map's controller cursor at once (no drag to tell apart).
+            Click.Cancel();
+            if (!WorldMap.TryReadGamepadCursor(out var c)) { Refused(c.Why); return; }
+            if (!MapShareLogic.GamepadShareable(c.OnMap, c.HasWorld, c.WorldX, c.WorldZ))
+            {
+                Refused(c.OnMap ? "the map has no data under the controller cursor" : c.Why);
+                return;
+            }
+
+            Share(c.WorldX, c.WorldZ);
+            return;
+        }
+
         if (!WorldMap.TryReadPointer(out var p))
         {
             Click.Cancel();
@@ -111,7 +134,8 @@ internal static class MapShare
 
     private static void Release()
     {
-        if (!Click.Armed) return;
+        // PAD1: a controller press already shared on the press.
+        if (Keybinds.PressedWithGamepad || !Click.Armed) return;
         bool has = UnityUiRuntime.TrySamplePointerScreen(out float sx, out float sy);
         if (Click.Release(WorldMap.IsOpen, has, sx, sy, out float wx, out float wz)) Share(wx, wz);
     }
@@ -145,7 +169,9 @@ internal static class MapShare
         {
             bool open = WorldMap.IsOpen;
             var chord = _bind?.Chord ?? KeyChord.None;
-            if (!MapShareLogic.ShouldShowHint(_installed, open, chord))
+            // PAD1: while the game shows controller glyphs, the tip shows the controller chord.
+            var shown = open ? MapShareLogic.HintChord(chord, _bind?.GamepadChord ?? KeyChord.None, MapShareHint.ControllerActive()) : chord;
+            if (!MapShareLogic.ShouldShowHint(_installed, open, shown))
             {
                 if (_hintWanted) hint.Hide();
                 _hintWanted = false;
@@ -156,7 +182,7 @@ internal static class MapShare
             bool first = !_hintWanted;
             _hintWanted = true;
             if (!first && ++_frame % HintPeriodFrames != 0) return;
-            hint.Show(chord);
+            hint.Show(shown);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Map share: key tip refresh threw: " + e.Message); }
     }
@@ -166,6 +192,8 @@ internal static class MapShare
     {
         ["installed"] = _installed,
         ["key"] = _bind?.Chord.DisplayText ?? "",
+        ["gamepadKey"] = _bind?.GamepadChord.DisplayText ?? "",
+        ["controllerActive"] = MapShareHint.ControllerActive(),
         ["mapOpen"] = WorldMap.IsOpen,
         ["hintShown"] = _hint?.Shown ?? false,
         ["hintText"] = _hint?.Text ?? "",

@@ -113,14 +113,11 @@ namespace Progenitor.Tests
             // An unbound slot is an empty cap, still live on a game row.
             Assert.Equal("", Cap(GameRowId("Chat"), KeybindsPane.CellKey2));
             Assert.Equal(CellTone.Normal, Tone(GameRowId("Chat"), KeybindsPane.CellKey2));
-            // A mod key has one chord: the secondary cap is empty and disabled.
             Assert.Equal("F9", Cap(ModRowId("a.mod"), KeybindsPane.CellKey));
-            // Decided 2026-09-30: a mod row has no second cap, only the space where it would be.
-            Assert.DoesNotContain(RowOf(ModRowId("a.mod")).Cells(), c => c.Key == KeybindsPane.CellKey2);
-            var space = RowOf(ModRowId("a.mod")).Cells().Single(c => c.Key == KeybindsTabLayout.CellSecondarySpace);
-            Assert.Equal(CellKind.Muted, space.Kind);
-            Assert.Equal("", space.Text);
-            Assert.Equal(KeybindsTabLayout.KeyCapWidth, space.Width.Value);
+            // PAD1: a Progenitor bind's second cap is its controller key (empty here: it has none), live.
+            Assert.DoesNotContain(RowOf(ModRowId("a.mod")).Cells(), c => c.Key == KeybindsTabLayout.CellSecondarySpace);
+            Assert.Equal("", Cap(ModRowId("a.mod"), KeybindsPane.CellKey2));
+            Assert.Equal(CellTone.Normal, Tone(ModRowId("a.mod"), KeybindsPane.CellKey2));
 
             var rows = Tab().GetProperty("rows").EnumerateArray().ToList();
             var interact = rows.Single(r => r.GetProperty("action").GetString() == "Interact");
@@ -130,9 +127,10 @@ namespace Progenitor.Tests
             Assert.Equal("General", interact.GetProperty("categoryTitle").GetString());
             var open = rows.Single(r => r.GetProperty("owner").GetString() == "a.mod");
             Assert.Equal("F9", open.GetProperty("primary").GetString());
-            Assert.False(open.TryGetProperty("secondaryCap", out _), "a mod row reports no second cap");
+            Assert.False(open.TryGetProperty("secondaryCap", out _), "a mod row has no second keyboard key");
             Assert.False(open.TryGetProperty("secondaryCaption", out _));
-            Assert.False(open.GetProperty("secondaryEnabled").GetBoolean());
+            Assert.True(open.GetProperty("secondaryEnabled").GetBoolean());
+            Assert.Equal("None", open.GetProperty("gamepad").GetString());
         }
 
         // ---- 3. the read-only note on a game cap ------------------------------------------------
@@ -159,12 +157,13 @@ namespace Progenitor.Tests
                 Assert.Equal(KeybindsTabLayout.GameCapNote, d.GetProperty("info").GetString());
             }
 
-            // A mod row has no second cap to click (decided 2026-09-30), and the op does nothing.
+            // PAD1: a Progenitor row's second cap is its controller key: a click starts the controller capture.
             string mod = ModRowId("a.mod");
-            Assert.False(UiCellRowHandle.TryInvoke(NameRowOf(mod) + "/" + KeybindsPane.CellKey2, out _));
-            Pane().PressSecondary(mod);
+            Assert.True(UiCellRowHandle.TryInvoke(NameRowOf(mod) + "/" + KeybindsPane.CellKey2, out _));
+            Assert.True(Keybinds.CapturingGamepad);
+            Assert.Equal(mod, Pane().SelectedRow);
+            Pane().CancelEdit();
             Assert.False(Keybinds.Capturing);
-            Assert.Equal(game, Pane().SelectedRow);
             Assert.Equal("Change game keys in Esc > Options > Controls.", KeybindsTabLayout.GameCapNote);
         }
 
@@ -279,8 +278,8 @@ namespace Progenitor.Tests
             var cells = RowOf(mod).Cells();
             var placed = MenuPanelLayout.CellColumns(1200f, cells);
             CellPlacement At(string key) => placed.Single(p => p.Key == key);
-            Assert.True(At(KeybindsPane.CellKey).Right <= At(KeybindsTabLayout.CellSecondarySpace).Left);
-            Assert.True(At(KeybindsTabLayout.CellSecondarySpace).Right <= At(KeybindsPane.CellReset).Left);
+            Assert.True(At(KeybindsPane.CellKey).Right <= At(KeybindsPane.CellKey2).Left);
+            Assert.True(At(KeybindsPane.CellKey2).Right <= At(KeybindsPane.CellReset).Left);
             Assert.True(At(KeybindsPane.CellReset).Right <= At(KeybindsPane.CellClear).Left);
             // KEYS3 polish: with no borrowed icon (game-free), reset is a small Reset button; clear is Unbind.
             Assert.Equal(KeybindsTabLayout.ResetCellWidth(resetIcon: false), At(KeybindsPane.CellReset).Width, 1);

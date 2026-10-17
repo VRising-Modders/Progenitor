@@ -539,6 +539,32 @@ public sealed class UiNavTests : IDisposable
         Assert.Equal(1, UiNav.Pane);
     }
 
+    /// <summary>
+    /// PAD1 review F1: while the Keybinds tab waits for a controller button, B is a key to capture, not Cancel: no
+    /// command runs (nor A, nor a direction), and the Escape path is not taken. A keyboard capture keeps B as Cancel.
+    /// </summary>
+    [Fact]
+    public void B_during_a_controller_capture_is_a_key_not_cancel()
+    {
+        using var list = Panel();
+        list.Button("Mod");
+        _host.Surface = new NavSurface("workspace:mods", new IReadOnlyList<UiHandle>[] { Children(list) });
+        UiNav.Execute(NavCommand.Down);
+        var focus = UiNav.Focus;
+        _host.Calls.Clear();
+
+        UiNav.Tick(new NavSample { Cancel = true, Capturing = true, CapturingGamepad = true }, 2.0);
+        UiNav.Tick(new NavSample { Capturing = true, CapturingGamepad = true }, 2.1);
+        UiNav.Tick(new NavSample { Submit = true, Down = true, Capturing = true, CapturingGamepad = true }, 2.2);
+        Assert.DoesNotContain("escape", _host.Calls);
+        Assert.Equal(focus, UiNav.Focus);
+
+        // A keyboard capture: B still cancels it (the Escape path).
+        UiNav.Tick(new NavSample { Capturing = true }, 2.3);
+        UiNav.Tick(new NavSample { Cancel = true, Capturing = true }, 2.4);
+        Assert.Contains("escape", _host.Calls);
+    }
+
     /// <summary>Review finding: the page still shows the previous mod's controls for a frame; the focus waits for new ones.</summary>
     [Fact]
     public void After_A_on_a_list_row_the_focus_waits_for_the_new_page_not_the_old_one()

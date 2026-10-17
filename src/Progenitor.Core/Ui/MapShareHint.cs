@@ -42,6 +42,11 @@ internal sealed class MapShareHint : IDisposable
     private string _builtText = "";
     private TextMeshProUGUI? _prefix;
     private TextMeshProUGUI? _keyText;
+
+    /// <summary>PAD1: the copy's glyph image, its second (combo) image and the text between them.</summary>
+    private Image? _image;
+    private Image? _comboImage;
+    private TextMeshProUGUI? _comboText;
     private bool _warned;
     private bool _disposed;
 
@@ -111,6 +116,9 @@ internal sealed class MapShareHint : IDisposable
         _go = null;
         _prefix = null;
         _keyText = null;
+        _image = null;
+        _comboImage = null;
+        _comboText = null;
         _builtFor = IntPtr.Zero;
     }
 
@@ -152,11 +160,101 @@ internal sealed class MapShareHint : IDisposable
         return list;
     }
 
-    /// <summary>A mouse tip written as text (<c>[Shift + Left Mouse] Share Location</c>), for a row with no such glyph.</summary>
+    /// <summary>
+    /// A mouse tip written as text (<c>[Shift + Left Mouse] Share Location</c>), for a row with no such glyph; PAD1: a
+    /// controller tip as its buttons' names (<c>[Pad Y + D-Pad Down]</c>) when the game's glyphs cannot be read.
+    /// </summary>
     private static MapShareHintParts AsText(MapShareHintParts parts) =>
         parts.Glyph == MapShareGlyph.None ? parts
+        : parts.Glyph == MapShareGlyph.Gamepad ? new MapShareHintParts("", MapShareGlyph.None, parts.KeyText, parts.Action)
         : new MapShareHintParts("", MapShareGlyph.None, (parts.Prefix.Length > 0 ? parts.Prefix + " " : "")
             + (parts.Glyph == MapShareGlyph.MouseLeft ? "Left Mouse" : "Right Mouse"), parts.Action);
+
+    // ---- PAD1: the game's controller glyphs ---------------------------------------------------------
+
+    /// <summary>PAD1: both glyphs a controller tip needs can be read from the game.</summary>
+    private static bool GlyphsReadable(MapShareHintParts parts) =>
+        GamepadGlyph(parts.GamepadKey) != null && (parts.GamepadHeld == UiKey.None || GamepadGlyph(parts.GamepadHeld) != null);
+
+    /// <summary>
+    /// PAD1: a controller tip's art, as the game draws a two-button binding (its <c>InputContextEntry</c> has an image, a
+    /// combo text and a combo image): the held button's glyph, <c>+</c>, then the pressed button's; a single button is
+    /// its glyph alone. Assumed (not seen live) that the entry lays the image before the combo image.
+    /// </summary>
+    private void ApplyGlyphs(MapShareHintParts parts)
+    {
+        bool two = parts.GamepadHeld != UiKey.None && _comboImage != null;
+        var first = GamepadGlyph(two ? parts.GamepadHeld : parts.GamepadKey);
+        if (_image != null && first != null)
+        {
+            _image.sprite = first;
+            _image.gameObject.SetActive(true);
+        }
+
+        if (_comboImage != null)
+        {
+            var second = two ? GamepadGlyph(parts.GamepadKey) : null;
+            if (second != null) _comboImage.sprite = second;
+            _comboImage.gameObject.SetActive(second != null);
+        }
+
+        if (_comboText != null)
+        {
+            _comboText.text = "+";
+            _comboText.gameObject.SetActive(two);
+        }
+    }
+
+    private static int _controllerFrame = int.MinValue;
+    private static bool _controllerActive;
+
+    /// <summary>
+    /// PAD1: whether the game is showing controller glyphs now: <c>InputActionSystem.UsingGamepad</c> (its
+    /// <c>ControllerType</c> is <c>Gamepad</c>; the game switches it when the player uses the other device, and its hint
+    /// rows follow). Read at most every ten frames. False when the system cannot be read. <b>Not live-verified.</b>
+    /// </summary>
+    internal static bool ControllerActive()
+    {
+        int frame;
+        try { frame = Time.frameCount; }
+        catch { frame = 0; }
+        if (frame - _controllerFrame < 10 && frame >= _controllerFrame) return _controllerActive;
+        _controllerFrame = frame;
+        try
+        {
+            // Without a client world the helper logs an error and returns null; the map (and its tip) needs one anyway.
+            var world = Worlds.Client;
+            var system = world != null && world.IsCreated ? ProjectM.InputHelper.GetInputActionSystem() : null;
+            _controllerActive = system != null && system.UsingGamepad;
+        }
+        catch { _controllerActive = false; }
+        return _controllerActive;
+    }
+
+    /// <summary>
+    /// PAD1: the game's own glyph for a controller button, for the controller the player has (Xbox or PlayStation art):
+    /// <c>ControlsVisualMapping.GetInputVisualsMapping(path, ControllerType.Gamepad, CurrentGamepadType, out text, out
+    /// sprite)</c>, the table lookup the game's <c>GetBindingDisplayInfo</c> makes for its own hint glyphs, on the mapping
+    /// the input system already loaded (<c>_ControlsVisualMapping</c>; null until the game first drew a glyph). The path is
+    /// the button's <c>&lt;Gamepad&gt;/...</c> control path (<see cref="GamepadKeybindCatalog.PathOf"/>). Null when the
+    /// mapping or the sprite is missing. <b>Not live-verified.</b>
+    /// </summary>
+    internal static Sprite? GamepadGlyph(UiKey key)
+    {
+        string path = GamepadKeybindCatalog.PathOf(key);
+        if (path.Length == 0) return null;
+        try
+        {
+            // Without a client world the helper logs an error and returns null; the map (and its tip) needs one anyway.
+            var world = Worlds.Client;
+            var system = world != null && world.IsCreated ? ProjectM.InputHelper.GetInputActionSystem() : null;
+            var mapping = system?._ControlsVisualMapping;
+            if (mapping == null) return null;
+            mapping.GetInputVisualsMapping(path, ProjectM.ControllerType.Gamepad, system!.CurrentGamepadType, out string _, out Sprite sprite);
+            return Alive(sprite) ? sprite : null;
+        }
+        catch { return null; }
+    }
 
     private bool Build(RectTransform parent, MapShareHintParts requested)
     {
@@ -164,8 +262,15 @@ internal sealed class MapShareHint : IDisposable
         var entries = Entries(parent);
         var infos = new List<MapHintEntry>(entries.Count);
         foreach (var e in entries) infos.Add(e.Info);
-        int pick = MapShareLogic.PickDonor(infos, parts.Glyph);
         bool asText = false;
+        if (parts.Glyph == MapShareGlyph.Gamepad && !GlyphsReadable(parts))
+        {
+            // PAD1: the game's controller art cannot be read yet: the buttons' names instead.
+            parts = AsText(parts);
+            asText = true;
+        }
+
+        int pick = MapShareLogic.PickDonor(infos, parts.Glyph);
         if (pick < 0 && parts.Glyph != MapShareGlyph.None)
         {
             // No entry with that mouse glyph: the key's name as text instead.
@@ -251,6 +356,9 @@ internal sealed class MapShareHint : IDisposable
             _go = go;
             _prefix = interaction;
             _keyText = keyText;
+            _image = image;
+            _comboImage = comboImage != null ? comboImage.GetComponent<Image>() : null;
+            _comboText = comboText != null ? comboText.GetComponent<TextMeshProUGUI>() : null;
             _builtFor = parent.Pointer;
             _builtGlyph = requested.Glyph;
             _asText = asText;
@@ -279,6 +387,7 @@ internal sealed class MapShareHint : IDisposable
             }
 
             if (_keyText != null && parts.Glyph == MapShareGlyph.None) _keyText.text = parts.KeyText;
+            if (parts.Glyph == MapShareGlyph.Gamepad) ApplyGlyphs(parts);
             _builtText = parts.Text;
         }
         catch (Exception e) { Warn("the key tip's text could not be set: " + e.Message); }

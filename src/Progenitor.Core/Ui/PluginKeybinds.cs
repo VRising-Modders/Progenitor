@@ -145,6 +145,23 @@ public sealed class PluginKeybinds
         return handle;
     }
 
+    /// <summary>
+    /// PAD1: give one of this plugin's binds a controller default, so it also fires on a gamepad:
+    /// <c>ctx.Keybinds.SetGamepad(handle, KeyChord.Gamepad(UiKey.GamepadNorth, UiKey.GamepadDpadDown))</c> presses Pad Y
+    /// while D-Pad Down is held. The player's choice in the Keybinds tab (saved as <c>[Keybinds] &lt;id&gt;.Gamepad</c>)
+    /// wins over the default. The controller chord goes through the bind's own gates, scope and handlers; it is checked
+    /// against the game's controller bindings and the other binds' controller chords by the same winner rule as keys.
+    /// Inside a handler, <see cref="Keybinds.PressedWithGamepad"/> says which chord fired. Returns <paramref name="handle"/>.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="gamepadDefault"/> is bound and not a controller chord.</exception>
+    public IKeybindHandle SetGamepad(IKeybindHandle handle, KeyChord gamepadDefault)
+    {
+        if (handle == null) throw new ArgumentNullException(nameof(handle));
+        if (!string.Equals(handle.PluginId, _ctx.Guid, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("The keybind belongs to another plugin.", nameof(handle));
+        return Keybinds.SetGamepadDefault(handle, gamepadDefault);
+    }
+
     /// <summary>Convenience overload for a bind with no modifiers.</summary>
     public IKeybindHandle Register(
         string id,

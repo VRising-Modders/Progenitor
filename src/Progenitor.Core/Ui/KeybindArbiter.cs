@@ -466,6 +466,19 @@ internal static class KeybindArbiter
     }
 
     private static Func<GameKeybindSnapshot>? _gameSource;
+
+    /// <summary>
+    /// PAD1: the game's gamepad bindings (<see cref="GamepadKeybindCatalog"/>); production installs the client reader,
+    /// which reads the input action map when a gamepad is connected and the shipped defaults otherwise. Null reads as
+    /// unavailable: no gamepad chord is then checked against the game.
+    /// </summary>
+    internal static Func<GameKeybindSnapshot>? GameGamepadSource
+    {
+        get => _gameGamepadSource;
+        set { _gameGamepadSource = value; Invalidate(game: true); }
+    }
+
+    private static Func<GameKeybindSnapshot>? _gameGamepadSource;
     private static Func<IReadOnlyList<KeybindClaim>>? _cfgSource = DefaultCfg;
     private static Func<string, ModInstallTime>? _installTimeOf;
     private static Func<string, string>? _nameOf;
@@ -485,15 +498,26 @@ internal static class KeybindArbiter
     private static ulong _gameWorld = ulong.MaxValue;
     private static Dictionary<string, string> _blocked = new(StringComparer.OrdinalIgnoreCase);
 
+    // PAD1: the gamepad picture, built with the keyboard one from the same stamp: the game's gamepad bindings and every
+    // Progenitor bind's gamepad chord. Gamepad chords never meet keyboard or mouse chords (no button is on both).
+    private static KeybindPicture? _cachedGamepad;
+    private static GameKeybindSnapshot? _gameGamepad;
+    private static Dictionary<string, string> _gamepadBlocked = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>PAD1 review: whether a gamepad was connected when the game's bindings were last read.</summary>
+    private static bool _gamePadRead;
+
     /// <summary>HUB2: window keys (<see cref="KeybindScope.Window"/>) and the other mods' keys on their chord.</summary>
     private static Dictionary<string, List<KeybindClaim>> _windowSharers = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly record struct Stamp(int Binds, int Keys, int Sources, bool Foreign, bool Enforce, int Names, ulong World);
+    // PAD1 review: Pad is whether a gamepad is connected; a change re-reads the game's bindings (a connected pad's
+    // live controller bindings replace the shipped ones, and the other way round).
+    private readonly record struct Stamp(int Binds, int Keys, int Sources, bool Foreign, bool Enforce, int Names, ulong World, bool Pad);
 
     private static Stamp Now() => new(
         Keybinds.Version, SettingsCatalog.KeyVersion, SettingsCatalog.SourceCount, SettingsCatalog.AllowForeignEdits,
         _enforceGameWins, System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(KeybindConflictSource.NameOf ?? (object)CacheGate),
-        WorldSequence());
+        WorldSequence(), Keybinds.GamepadConnected);
 
     private static ulong WorldSequence()
     {
@@ -550,6 +574,7 @@ internal static class KeybindArbiter
     {
         GameKeyRemap.ResetForTests();
         GameSource = null;
+        GameGamepadSource = null;
         CfgSource = DefaultCfg;
         InstallTimeOf = null;
         NameOf = null;
@@ -564,6 +589,10 @@ internal static class KeybindArbiter
             _game = null;
             _blocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _windowSharers = new Dictionary<string, List<KeybindClaim>>(StringComparer.OrdinalIgnoreCase);
+            _cachedGamepad = null;
+            _gameGamepad = null;
+            _gamepadBlocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            _gamePadRead = false;
         }
     }
 
@@ -651,6 +680,91 @@ internal static class KeybindArbiter
         return list;
     }
 
+    /// <summary>PAD1: every live Progenitor bind's gamepad chord as a claim (an unbound one too, for its row).</summary>
+    internal static IReadOnlyList<KeybindClaim> ReadProgenitorGamepad()
+    {
+        IReadOnlyList<IKeybindInfo> binds;
+        try { binds = Keybinds.Snapshot(); }
+        catch { return Array.Empty<KeybindClaim>(); }
+        var list = new List<KeybindClaim>(binds.Count);
+        for (int i = 0; i < binds.Count; i++)
+        {
+            var b = binds[i];
+            if (b is IKeybindHandle { IsDisposed: true }) continue;
+            list.Add(new KeybindClaim(
+                KeybindSource.Progenitor, b.PluginId, b.Id, KeybindDisplayName(b.PluginId, b.Id), b.GamepadChord,
+                help: b.Description, defaultChord: b.DefaultGamepadChord, defaultText: b.DefaultGamepadChord.DisplayText,
+                editable: true, scope: Keybinds.ScopeOf(b)));
+        }
+
+        return list;
+    }
+
+    /// <summary>PAD1: the game's gamepad bindings; unavailable when no reader is installed or it throws.</summary>
+    internal static GameKeybindSnapshot ReadGameGamepad()
+    {
+        var f = GameGamepadSource;
+        if (f == null) return GameKeybindSnapshot.Unavailable(GamepadUnavailableNote);
+        try { return f() ?? GameKeybindSnapshot.Unavailable(GamepadUnavailableNote); }
+        catch (Exception e)
+        {
+            return GameKeybindSnapshot.Unavailable("The game's controller buttons could not be read (" + e.Message + ").");
+        }
+    }
+
+    internal const string GamepadUnavailableNote = "The game's controller buttons couldn't be read, so controller buttons are not checked against them.";
+
+    /// <summary>
+    /// PAD1: the gamepad picture: the game's gamepad bindings and every Progenitor bind's gamepad chord, decided by the
+    /// same winner rule and scopes as the keyboard picture (<see cref="Compute"/>). Built with <see cref="Current"/>.
+    /// </summary>
+    internal static KeybindPicture CurrentGamepad()
+    {
+        Current();
+        lock (CacheGate) return _cachedGamepad ?? new KeybindPicture(Array.Empty<KeybindVerdict>(), false, GamepadUnavailableNote);
+    }
+
+    /// <summary>PAD1: the game's gamepad bindings as last read (with the keyboard ones: at world entry, or after <see cref="Invalidate"/>).</summary>
+    internal static GameKeybindSnapshot GamepadSnapshot()
+    {
+        lock (CacheGate)
+            if (_gameGamepad != null && !_gameStale) return _gameGamepad;
+        Current();
+        lock (CacheGate) return _gameGamepad ?? GameKeybindSnapshot.Unavailable(GamepadUnavailableNote);
+    }
+
+    /// <summary>PAD1: why a Progenitor bind's gamepad chord must not fire right now, or null. As <see cref="BlockedReason"/>.</summary>
+    internal static string? GamepadBlockedReason(string pluginId, string bindId)
+    {
+        Dictionary<string, string> blocked;
+        lock (CacheGate) blocked = _gamepadBlocked;
+        return blocked.TryGetValue((pluginId ?? "") + "/" + (bindId ?? ""), out var reason) ? reason : null;
+    }
+
+    /// <summary>
+    /// PAD1: what in the gamepad picture already has <paramref name="chord"/> where a bind of <paramref name="scope"/>
+    /// would meet it (a game binding that stops it, or another Progenitor bind's gamepad chord), or null. The bind
+    /// itself (<paramref name="pluginId"/>/<paramref name="bindId"/>) is skipped.
+    /// </summary>
+    internal static KeybindClaim? GamepadHolderOf(string pluginId, string bindId, KeyChord chord, KeybindScope scope)
+    {
+        if (!chord.IsBound) return null;
+        var picture = CurrentGamepad();
+        foreach (var v in picture.Verdicts)
+        {
+            var c = v.Claim;
+            if (!c.Comparable || c.Chord != chord) continue;
+            if (c.Source == KeybindSource.Progenitor && string.Equals(c.OwnerId, pluginId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(c.ActionId, bindId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!ScopesMeet(c, scope)) continue;
+            // A game binding that only warns in this scope (a mode-only key) does not hold the button.
+            if (c.Source == KeybindSource.Game && !GameWins(c, scope)) continue;
+            return c;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// The live picture: the game (when readable), every Progenitor bind and every cfg key. Built again only
     /// when something it was built from changed (see <see cref="RefreshIfStale"/>). The built picture holds
@@ -663,7 +777,7 @@ internal static class KeybindArbiter
         lock (CacheGate)
         {
             if (!_dirty && _cached != null && stamp == _cachedStamp) return _cached;
-            readGame = _gameStale || _game == null || stamp.World != _gameWorld;
+            readGame = _gameStale || _game == null || stamp.World != _gameWorld || stamp.Pad != _gamePadRead;
         }
 
         var game = readGame ? GameSnapshot(stamp.World) : _game!;
@@ -674,8 +788,23 @@ internal static class KeybindArbiter
             if (v.Claim.Source == KeybindSource.Progenitor && !v.Active)
                 blocked[v.Claim.OwnerId + "/" + v.Claim.ActionId] = v.Reason;
         var windowSharers = WindowSharers(picture);
+
+        // PAD1: the gamepad picture from the same stamp (the game's gamepad bindings are re-read with the keyboard ones).
+        GameKeybindSnapshot? padGame;
+        lock (CacheGate) padGame = _gameGamepad;
+        if (readGame || padGame == null) padGame = ReadGameGamepad();
+        var padPicture = Compute(padGame.Available ? padGame.Claims : Array.Empty<KeybindClaim>(), ReadProgenitorGamepad(),
+            Array.Empty<KeybindClaim>(), padGame.Available, padGame.Available ? "" : padGame.Note);
+        var padBlocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in padPicture.Verdicts)
+            if (v.Claim.Source == KeybindSource.Progenitor && !v.Active)
+                padBlocked[v.Claim.OwnerId + "/" + v.Claim.ActionId] = v.Reason;
+
         lock (CacheGate)
         {
+            _cachedGamepad = padPicture;
+            _gameGamepad = padGame;
+            _gamepadBlocked = padBlocked;
             _cached = picture;
             _cachedStamp = stamp;
             _dirty = false;
@@ -684,6 +813,7 @@ internal static class KeybindArbiter
             {
                 _gameStale = false;
                 _gameWorld = stamp.World;
+                _gamePadRead = stamp.Pad;
             }
 
             _blocked = blocked;

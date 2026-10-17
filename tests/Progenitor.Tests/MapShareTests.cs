@@ -138,6 +138,8 @@ public class MapShareTests
         // Ctrl + Shift + left click is the game's admin map teleport; a keybind matches its modifiers exactly.
         var teleport = new KeyChord(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Shift);
         Assert.NotEqual(teleport, MapShareLogic.DefaultKey);
+        // #77 review: and a map bind (the share key included) cannot be remapped onto it.
+        Assert.Equal(MouseChords.MapTeleportReason, MouseChords.Refusal(teleport, KeybindScope.Map));
     }
 
     // ---- the key tip ------------------------------------------------------------------------------

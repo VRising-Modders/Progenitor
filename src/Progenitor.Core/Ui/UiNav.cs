@@ -57,6 +57,12 @@ internal struct NavSample
 
     /// <summary>A key capture is waiting for a key: only Cancel navigates.</summary>
     internal bool Capturing;
+
+    /// <summary>
+    /// PAD1 review: the capture waits for a controller button, so every button (B included) is the player choosing a key:
+    /// nothing navigates, not even Cancel. Escape, a click away or the capture's own timeout ends it.
+    /// </summary>
+    internal bool CapturingGamepad;
 }
 
 /// <summary>
@@ -550,6 +556,8 @@ internal static class UiNav
         for (int i = 0; i < Commands.Count; i++)
         {
             var command = Commands[i];
+            // PAD1 review: a controller capture takes every button as a key, B included.
+            if (sample.CapturingGamepad) continue;
             if ((sample.TextFocused || sample.Capturing) && command != NavCommand.Cancel) continue;
             // B while a text field has the keyboard, a key capture waits, or a list the focus is not on is open:
             // that is Escape's first (it blurs the field, cancels the capture, closes the list), never a pane move.

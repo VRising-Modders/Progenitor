@@ -153,6 +153,15 @@ namespace Progenitor.Tests
 
             public bool IsHeld(KeyChord chord) => _held.Contains(chord.Key);
 
+            /// <summary>PAD1: the controller's held buttons (<see cref="KeyChord.GamepadBit"/> bits); null: no controller.</summary>
+            public uint? PadHeld { get; set; }
+
+            public bool TryReadGamepadHeld(out uint held)
+            {
+                held = PadHeld ?? 0;
+                return PadHeld != null;
+            }
+
             /// <summary>One frame: the pump runs and the edges of this frame are consumed.</summary>
             public void Frame()
             {
@@ -294,7 +303,7 @@ namespace Progenitor.Tests
             {
                 Assert.False(row.TwoLine);
                 Assert.Equal(CellWrap.Ellipsis, row.Cells().Single(c => c.Key == KeybindsPane.CellName).Wrap);
-                foreach (var key in row == gameRow ? new[] { KeybindsPane.CellKey, KeybindsPane.CellKey2 } : new[] { KeybindsPane.CellKey })
+                foreach (var key in new[] { KeybindsPane.CellKey, KeybindsPane.CellKey2 })
                 {
                     var cap = row.Cells().Single(c => c.Key == key);
                     Assert.Equal(CellKind.Button, cap.Kind);
@@ -308,7 +317,7 @@ namespace Progenitor.Tests
             var gamePlaced = MenuPanelLayout.CellColumns(1200f, gameRow.Cells());
             var modPlaced = MenuPanelLayout.CellColumns(1200f, modRow.Cells());
             float Right(CellPlacement[] p, string key) => p.Single(c => c.Key == key).Right;
-            Assert.Equal(Right(modPlaced, KeybindsTabLayout.CellSecondarySpace), Right(gamePlaced, KeybindsPane.CellKey2), 1);
+            Assert.Equal(Right(modPlaced, KeybindsPane.CellKey2), Right(gamePlaced, KeybindsPane.CellKey2), 1);
             Assert.Equal(Right(modPlaced, KeybindsPane.CellKey), Right(gamePlaced, KeybindsPane.CellKey), 1);
 
             var toolbar = _runtime.CellRow(KeybindsPane.ToolbarKey)!;
