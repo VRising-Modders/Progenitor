@@ -74,7 +74,7 @@ internal abstract class UiComposedHandle : IUiHandle
         get => _visible;
         set
         {
-            if (_disposed || _visible == value) return;
+            if (_disposed || DeferVisible(value) || _visible == value) return;
             _visible = value;
             if (!value)
             {
@@ -118,6 +118,12 @@ internal abstract class UiComposedHandle : IUiHandle
             }
         }
     }
+
+    /// <summary>
+    /// CHECKLIST1: a widget that holds its visibility itself for a while (a suspended checklist) records the request and
+    /// answers true; <see cref="Visible"/> then changes nothing now.
+    /// </summary>
+    protected virtual bool DeferVisible(bool value) => false;
 
     /// <summary>Input is acted on: not disposed, interactable and shown.</summary>
     protected bool Live => !_disposed && _interactable && _visible;

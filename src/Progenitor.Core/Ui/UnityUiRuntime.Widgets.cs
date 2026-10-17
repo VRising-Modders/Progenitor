@@ -299,6 +299,16 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         return watch;
     }
 
+    public IDisposable? WatchWidget(IRuntimeWidget widget, Action<UiPointerEvent> handler, object? owner)
+    {
+        if (widget == null || handler == null) return null;
+        var go = NavObject(widget);
+        if (go == null) return null;
+        var watch = UiPointerWatch.Create(go, handler, owner);
+        UiPointerWatchRegistry.Add(owner, watch);
+        return watch;
+    }
+
     public IDisposable? WatchHover(IRuntimeWidget widget, Action<bool> onHover, object? owner)
     {
         if (widget == null || onHover == null) return null;

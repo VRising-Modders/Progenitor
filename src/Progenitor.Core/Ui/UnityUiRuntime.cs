@@ -4129,7 +4129,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 s.Left |= keyboard.leftArrowKey.isPressed;
                 s.Right |= keyboard.rightArrowKey.isPressed;
                 s.Submit |= UiNavMath.KeyCounts(keyboard.spaceKey.isPressed, _navSpaceGated, ref _navSpaceLatched);
-                s.Submit |= UiNavMath.KeyCounts(keyboard.enterKey.isPressed || keyboard.numpadEnterKey.isPressed, _navEnterGated, ref _navEnterLatched);
+                bool enter = UiNavMath.KeyCounts(keyboard.enterKey.isPressed || keyboard.numpadEnterKey.isPressed, _navEnterGated, ref _navEnterLatched);
+                s.Submit |= enter;
+                s.Enter |= enter;
             }
             catch { /* */ }
         }
@@ -4193,7 +4195,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             s.Left |= UiSyntheticInput.KeyHeld(UiKey.LeftArrow, frame);
             s.Right |= UiSyntheticInput.KeyHeld(UiKey.RightArrow, frame);
             s.Submit |= UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.Space, frame), _navSpaceGated, ref _navSyntheticSpaceLatched);
-            s.Submit |= UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.Enter, frame), _navEnterGated, ref _navSyntheticEnterLatched);
+            bool enter = UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.Enter, frame), _navEnterGated, ref _navSyntheticEnterLatched);
+            s.Submit |= enter;
+            s.Enter |= enter;
         }
 
         int serial = UiSyntheticInput.PointerSerial;

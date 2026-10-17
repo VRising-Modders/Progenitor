@@ -74,6 +74,7 @@ internal sealed partial class WidgetsDemo
         BuildHub(panel, _tabs, TabInput);
         BuildCode(panel, _tabs);
         BuildTable(panel, _tabs, TabTable);
+        BuildChecklist(panel, _tabs, TabTable);
         BuildMasterDetail(panel, _tabs, TabLayout);
         BuildHud(panel, _tabs);
         HelpHud = _hud as IHelpDemoHud;

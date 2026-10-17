@@ -148,6 +148,17 @@ Live check procedure (bridge only, no OS input; acceptance procedure, not run). 
 6. Press Ctrl+Backspace (`keybind_press` `progenitor.controlssample` / `HubReturn`): the hub closes (`Controls sample: hub key return = closed`). In the Keybinds tab, rebind HubReturn: the Return key cap shows the new key within a second.
 7. Repeat steps 2 and 3 at 2560x1440, then `display restore`. Cleanup as for the gallery.
 
+### Checklist window (CHECKLIST1)
+
+Status: built and game-free tested (`UiChecklistTests.The_gallery_checklist_holds_300_entries_and_its_preview_suspends_and_resumes_the_list`).
+**Not run in the game.** [GalleryChecklist.cs](GalleryChecklist.cs): a plain floating game window
+(`Ui.Panel(...).GameWindow(900)`) with one `panel.Checklist` filling it: 300 synthetic chests, stations and belts in the
+Storage, Crafting and Logistics sections, the **Show** filter (Chests, Stations, Belts, Within 30 m), the Name, Plot,
+Distance and Note columns sorted by distance, every 23rd row grayed (*Another clan's plot*), and **Add N**. A row's
+**View** (or a right-click on the row) is the preview stub: the list is suspended, one line names the entry, and
+**Back to the list** resumes it as it was. The gallery's **Lists** tab opens it (**Checklist window**). Live check:
+[ui.md, Checklist](../../docs/ui.md#checklist-checklist1) (not run).
+
 `tests/Progenitor.Tests/ControlsSampleTests.cs` fails when a new `IUiPanel` member, settings-row
 kind, `ctx.Dialogs` method or `UiLook` helper has no demo here, and when a controller walking the page
 does not reach every interactive control.

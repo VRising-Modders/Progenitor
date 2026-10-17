@@ -272,6 +272,58 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void Enter_runs_a_controls_own_enter_hook_while_Space_and_A_still_press_it()
+    {
+        using var panel = Panel();
+        var row = panel.Button("Row");
+        int enters = 0;
+        UiNav.EnterKey(row, () => { enters++; return true; });
+        Surface(Children(panel));
+        UiNav.Execute(NavCommand.Submit); // shows the focus
+        UiNav.Execute(NavCommand.Submit); // Space or A: the press
+        Assert.Contains("click:Row", _host.Calls);
+        Assert.Equal(0, enters);
+        _host.Calls.Clear();
+        Assert.True(UiNav.ExecuteEnterForTests()); // Enter: the hook, not the press
+        Assert.Equal(1, enters);
+        Assert.DoesNotContain("click:Row", _host.Calls);
+        UiNav.EnterKey(row, () => false); // a hook that declines: Enter presses as Space does
+        UiNav.ExecuteEnterForTests();
+        Assert.Contains("click:Row", _host.Calls);
+        UiNav.EnterKey(row, null);
+    }
+
+    [Fact]
+    public void A_checklist_resumed_after_a_preview_puts_the_controller_focus_back_on_the_previewed_row()
+    {
+        UiApi.SetRuntimeForTests(new TableRuntimeFake());
+        using var panel = Panel();
+        var entries = Enumerable.Range(0, 30).Select(i => new UiChecklistEntry("e" + i.ToString("00"), "Chest " + i)).ToList();
+        var list = panel.Checklist("cl", entries, new UiChecklistOptions { Preview = true, VisibleRows = 4 });
+        var handle = (UiChecklistHandle)list;
+        Surface(Children(panel));
+        var row1 = (UiHandle)handle.SlotAt(1);
+        Assert.True(UiNav.FocusOn(row1, UiChecklistLayout.CellView)); // the focus on row 1's View
+        Assert.True(list.Preview("e01"));
+        list.Suspend();
+        list.TopIndex = 20; // the list scrolled meanwhile (a refresh): the row is no longer drawn
+        list.Resume();
+        Surface(Children(panel));
+        Assert.Contains(UiNav.Focus.Handle, Enumerable.Range(0, 4).Select(i => (UiHandle)handle.SlotAt(i)));
+        int slot = Enumerable.Range(0, 4).Single(i => ReferenceEquals(handle.SlotAt(i), UiNav.Focus.Handle));
+        Assert.Equal("e01", ((List<Dictionary<string, object?>>)list.Describe()["slots"]!)[slot]["id"]);
+
+        // A preview the pointer asked for (the focus elsewhere) leaves the focus alone.
+        var button = panel.Button("Elsewhere");
+        Surface(Children(panel));
+        Assert.True(UiNav.FocusOn((UiHandle)button, ""));
+        list.Preview("e02");
+        list.Suspend();
+        list.Resume();
+        Assert.Same(button, UiNav.Focus.Handle);
+    }
+
+    [Fact]
     public void A_toggle_flips_on_A_and_on_left_or_right()
     {
         using var panel = Panel();
