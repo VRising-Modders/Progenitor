@@ -255,3 +255,57 @@ internal sealed class VanillaTabStripLogGate
         _logged = false;
     }
 }
+
+/// <summary>
+/// The caption placement of each <c>AttachPanelTabs</c> tab. Game-free: the Unity half
+/// (<c>UnityVanillaPanelTabs</c>) stretches the caption over its tab and measures the result.
+///
+/// <para>The caption is the donor tab's own label, carried over with whatever the donor gave it:
+/// a parent inside the tab sized for the character window's tab, a pivot, margins, a rotation or
+/// scale. Any of these moves the text off the center of a tab of another size. The caption is
+/// therefore made a direct child of the tab, stretched over it with <see cref="Inset"/> on each
+/// side, pivoted at its center, with no margins, and put back whenever it drifts.</para>
+/// </summary>
+internal static class VanillaTabCaption
+{
+    /// <summary>The horizontal room between a caption's rect and its tab's left and right edges, in canvas units.</summary>
+    internal const float Inset = 6f;
+
+    /// <summary>How far, in screen pixels, a caption's center may sit from its tab's center and still count as centered.</summary>
+    internal const float Tolerance = 1.5f;
+
+    /// <summary>The inset used on a tab <paramref name="tabWidth"/> wide: <see cref="Inset"/>, reduced so the caption keeps at least one unit.</summary>
+    internal static float InsetFor(float tabWidth)
+    {
+        if (float.IsNaN(tabWidth) || float.IsInfinity(tabWidth) || tabWidth <= 1f) return 0f;
+        return Math.Min(Inset, (tabWidth - 1f) * .5f);
+    }
+
+    /// <summary>The caption's center minus the tab's center, in screen pixels (x right, y up); NaN when either rect is unknown.</summary>
+    internal static (float Dx, float Dy) Offset(ScreenRect tab, ScreenRect caption)
+    {
+        if (!tab.IsKnown || !caption.IsKnown) return (float.NaN, float.NaN);
+        float dx = (caption.MinX + caption.MaxX) * .5f - (tab.MinX + tab.MaxX) * .5f;
+        float dy = (caption.MinY + caption.MaxY) * .5f - (tab.MinY + tab.MaxY) * .5f;
+        return (dx, dy);
+    }
+
+    /// <summary>
+    /// A tab's caption is centered: its rect's center is within <paramref name="tolerance"/> pixels
+    /// of the tab's center both ways, and the drawn text's center is within it horizontally. The
+    /// text's vertical center is reported but not judged: it follows the glyphs (a descender lowers
+    /// it), while a line is centered on the font's line metrics, as on the game's own tabs. An
+    /// unknown text rect (nothing drawn yet) is judged on the caption rect alone.
+    /// </summary>
+    internal static bool Centered(ScreenRect tab, ScreenRect captionRect, ScreenRect text, float tolerance = Tolerance)
+    {
+        var (rx, ry) = Offset(tab, captionRect);
+        if (float.IsNaN(rx) || Math.Abs(rx) > tolerance || Math.Abs(ry) > tolerance) return false;
+        if (!text.IsKnown) return true;
+        var (tx, _) = Offset(tab, text);
+        return Math.Abs(tx) <= tolerance;
+    }
+
+    /// <summary>A placement value moved by more than a hundredth of a unit from what the tab set.</summary>
+    internal static bool Drifted(float now, float wanted) => !(Math.Abs(now - wanted) <= .01f);
+}
