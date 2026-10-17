@@ -47,6 +47,8 @@ public sealed partial class PluginCamera
         if (!float.IsFinite(yawDegrees)) throw new ArgumentOutOfRangeException(nameof(yawDegrees));
         if (!options.Hold && (!float.IsFinite(options.Seconds) || options.Seconds <= 0 || options.Seconds > CameraPreviewPolicy.MaxTimedSeconds))
             throw new ArgumentOutOfRangeException(nameof(options), "Seconds must be more than 0 and at most 10; use Hold for longer.");
+        if (!CameraFraming.IsValidOffset(options.ScreenOffset))
+            throw new ArgumentOutOfRangeException(nameof(options), "ScreenOffset must be finite and at most 0.4 either way.");
         _ = Director;
         _preview?.End(CameraPreviewEndReason.Replaced, notify: true);
         var preview = new CameraPreview(this, point, yawDegrees, options);
@@ -85,6 +87,11 @@ public sealed partial class PluginCamera
         private IDisposable? _escape;
         private bool _forwarding;
         private bool _closeKeyHeld;
+        private float _screenOffset;
+        private float _fov, _aspect;
+
+        /// <summary>The orbit distance and pitch every preview uses.</summary>
+        private const float Distance = 6, Pitch = 35;
 
         /// <summary>True until the preview ends.</summary>
         public bool Active { get; private set; } = true;
@@ -97,7 +104,7 @@ public sealed partial class PluginCamera
 
         internal CameraPreview(PluginCamera camera, UnitVec3 point, float yaw, CameraPreviewOptions options)
         {
-            _camera = camera; _point = point; _yaw = yaw; _ended = options.Ended;
+            _camera = camera; _point = point; _yaw = yaw; _ended = options.Ended; _screenOffset = options.ScreenOffset;
             _policy = new CameraPreviewPolicy(options.Hold ? CameraPreviewPolicy.MaxTimedSeconds : options.Seconds, options.Hold, 0);
             _world = Worlds.Client ?? throw new InvalidOperationException("No client world.");
             _epoch = WorldEpoch.Current;
@@ -105,7 +112,7 @@ public sealed partial class PluginCamera
             _observation = new ClientObservation(camera._ctx, point, options.CompressedHeight);
             try
             {
-                camera.Orbit(point, 6, yaw, 35, instant: true);
+                camera.Orbit(Framed(), Distance, yaw, Pitch, instant: true);
                 _ownsHud = !PhotoHud.IsHidden; if (_ownsHud) PhotoHud.Hide(true);
                 // Escape reaches the framework only while Bootstrap forwards it (a shown panel or this hold).
                 Ui.Ui.CurrentRuntime().SetCapture(true); _forwarding = true;
@@ -133,7 +140,45 @@ public sealed partial class PluginCamera
             if (!float.IsFinite(degrees)) throw new ArgumentOutOfRangeException(nameof(degrees));
             if (!Active || !_camera.IsShotActive) return;
             _manual = true; _yaw += degrees;
-            _camera.Orbit(_point, 6, _yaw, 35);
+            _camera.Orbit(Framed(), Distance, _yaw, Pitch);
+        }
+
+        /// <summary>Where the previewed point sits on screen, as a share of the screen width right of center (<see cref="CameraPreviewOptions.ScreenOffset"/>).</summary>
+        public float ScreenOffset => _screenOffset;
+
+        /// <summary>
+        /// Move the previewed point to <paramref name="offset"/> of the screen's width right of center (0 is the center, at
+        /// most 0.4 either way), for instance when a docked panel opens or closes beside it. The camera keeps orbiting the
+        /// point. Ignored once the preview ended.
+        /// </summary>
+        public void SetScreenOffset(float offset)
+        {
+            if (!CameraFraming.IsValidOffset(offset)) throw new ArgumentOutOfRangeException(nameof(offset), "ScreenOffset must be finite and at most 0.4 either way.");
+            if (!Active) return;
+            _screenOffset = offset;
+            if (_camera.IsShotActive) _camera.Orbit(Framed(), Distance, _yaw, Pitch);
+        }
+
+        /// <summary>
+        /// The orbit anchor this frame: the point itself, or with a screen offset the point moved sideways against the
+        /// camera's current yaw so it projects at the offset (<see cref="CameraFraming"/>). The game camera's field of view
+        /// and aspect are read each time; an unreadable camera keeps the last good reading, and with none yet the point is
+        /// framed at the center.
+        /// </summary>
+        private UnitVec3 Framed()
+        {
+            if (_screenOffset == 0f) return _point;
+            try
+            {
+                var cam = UnityEngine.Camera.main;
+                if (cam != null)
+                {
+                    float fov = cam.fieldOfView, aspect = cam.aspect;
+                    if (float.IsFinite(fov) && fov > 0f && float.IsFinite(aspect) && aspect > 0f) { _fov = fov; _aspect = aspect; }
+                }
+            }
+            catch { /* keep the last reading */ }
+            return CameraFraming.Anchor(_point, _yaw, CameraFraming.LateralShift(_screenOffset, Distance, _fov, _aspect));
         }
 
         /// <summary>
@@ -166,7 +211,7 @@ public sealed partial class PluginCamera
                 { _manual = true; _yaw += dx * 0.15f; }
                 if (!_manual) _yaw += (float)(elapsed - _previous) * 8;
                 _previous = elapsed;
-                _camera.Orbit(_point, 6, _yaw, 35);
+                _camera.Orbit(Framed(), Distance, _yaw, Pitch);
                 MainThread.PostDelayed(0.033, Tick, _camera._ctx.Owner);
             }
             catch (Exception e)

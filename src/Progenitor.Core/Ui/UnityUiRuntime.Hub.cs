@@ -451,8 +451,9 @@ internal sealed partial class UnityUiRuntime
             }
 
             float cap = PanelLayout.PanelHeightFor(1_000_000f, screen);
-            if (_gameWindow && _dialogFrameWidth > PanelWidth) cap = Math.Min(cap, screen * .70f);
+            if (WideGameWindow && !Docked) cap = Math.Min(cap, screen * .70f);
             if (InWindowRow) cap = Math.Min(cap, WindowMaxHeight(screen));
+            if (Docked) cap = Math.Min(cap, DockMaxHeight(screen));
             float tallest = PanelLayout.ViewportHeightFor(cap) - footerBand - (IsStandardWindow && topChrome > 0f ? topChrome : 0f);
             _roomViewport = Math.Max(viewH, Math.Max(0f, tallest));
         }

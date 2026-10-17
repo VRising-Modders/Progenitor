@@ -11865,7 +11865,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         /// <summary>The content's row width, whatever row is being placed (MENUKIT2: the description column's ruler).</summary>
         internal float FullRowWidth =>
-            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;
+            _embeddedWidth > 0 ? _embeddedWidth - 44 : _menuPane ? _menuGeometry.RowWidth : (_dialog || WideGameWindow) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;
 
         /// <summary>
         /// MENUKIT2 round D: while a row below the first settings row is placed beside the description
@@ -12650,7 +12650,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// canvas (<see cref="DialogLayout.FrameWidthFor"/>), else the constant <see cref="PanelWidth"/>.
         /// </summary>
         internal float FrameWidth => _embeddedWidth > 0 ? _embeddedWidth : _menuPane ? _menuGeometry.Width
-            : (_dialog || _gameWindow) && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
+            : _dialog && _dialogFrameWidth > PanelWidth ? DialogLayout.FrameWidthFor(_dialogFrameWidth, AvailableWidth())
+            : WideGameWindow ? DialogLayout.FrameWidthFor(WideAsk, AvailableWidth())
             : IsStandardWindow ? StandardFrameWidth
             : PanelWidth;
 
@@ -13966,13 +13967,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 // changed with the set (a cascade layer) is laid out again first, and placed from the height that
                 // re-layout gave it, never the stale one (UiWindowLayout.RepositionInRow).
                 var at = _menuPane ? new PanelOffset(geometry.X, geometry.Y)
+                    : Docked ? RepositionDocked(rt, AvailableHeight())
                     : InWindowRow ? RepositionInRow(rt, AvailableHeight())
                     : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), AvailableHeight());
                 // INSTALLUX2: a dialog stays in the middle however the shown set changes around it.
                 // A wide game window that asked for a dialog's width is centered too (a standard window is placed above).
-                if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) at = PanelOffset.Centre;
+                if (_dialog || (WideGameWindow && !IsStandardWindow && !Docked)) at = PanelOffset.Centre;
                 rt.anchoredPosition = new Vector2(at.X, at.Y);
-                if (TopAligned) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
+                if (TopAligned && !Docked) rt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - rt.sizeDelta.y) / 2 - 24));
 
                 Plugin.Logger?.LogDiag(
                     "Ui: panel '" + Text + "' placed rank=" + Spot.Rank + "/" + Spot.Count
@@ -14115,15 +14117,17 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     panelHeight = Math.Max(panelHeight, IsStandardWindow
                         ? PanelLayout.PanelHeightFor(StandardBodyHeight(_minContentHeight, refitTop) + footerBand, available.Value)
                         : PanelLayout.PanelHeightFor(_minContentHeight + footerBand, available.Value));
-                if (_gameWindow && _dialogFrameWidth > PanelWidth && !_menuPane && _embeddedHeight <= 0)
+                if (WideGameWindow && !Docked && !_menuPane && _embeddedHeight <= 0)
                     panelHeight = Math.Min(panelHeight, available.Value * .70f);
+                // DOCK1: a docked frame is never taller than its area between the margins.
+                if (Docked) panelHeight = Math.Min(panelHeight, DockMaxHeight(available.Value));
                 // WINDOWS1: a standard window is never taller than its place leaves room for (under the workspace's tab
                 // strip, a cascade layer's offset), so its bottom stays on screen.
                 if (InWindowRow) panelHeight = Math.Min(panelHeight, WindowMaxHeight(available.Value));
                 // WINDOWS1 live fix: a standard window keeps its height across its tabs while it stays open.
                 // HUB1: a floating panel with tabs keeps it too (SetHeightRule), whoever placed it.
                 if (IsStandardWindow && !SelfPlaced || KeepsHeightRule)
-                    panelHeight = StableWindowHeight(panelHeight, InWindowRow ? WindowMaxHeight(available.Value) : 0f, firstShow);
+                    panelHeight = StableWindowHeight(panelHeight, InWindowRow ? WindowMaxHeight(available.Value) : Docked ? DockMaxHeight(available.Value) : 0f, firstShow);
 
                 _laidOutWith = available;
                 var settle = RulerSettle.StateOf(available, _settling, _settleExhausted);
@@ -14216,16 +14220,17 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     // depth >= 1 cross PanelFlow's capacity threshold and jump a whole title band
                     // onto the panel above it. The vertical ladder is a property of the canvas now.
                     placedAt = _menuPane ? new PanelOffset(_menuGeometry.X, _menuGeometry.Y)
+                        : Docked ? DockOffset(panelHeight, available.Value)
                         : InWindowRow ? WindowOffset(panelHeight, available.Value)
                         : PanelFlow.Offset(Spot, PanelWidth, AvailableWidth(), available.Value);
                     // INSTALLUX2: a dialog is centered, never ranked. PanelFlow would give it a
                     // column beside the workspace's panes the moment they joined the shown set,
                     // which is the "flickers in from the left" CONSENT2 fixed for the consent
                     // prompt by hand.
-                    if (_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth && !IsStandardWindow)) placedAt = PanelOffset.Centre;
+                    if (_dialog || (WideGameWindow && !IsStandardWindow && !Docked)) placedAt = PanelOffset.Centre;
                     if (SelfPlaced) placedAt = new PanelOffset(panelRt.anchoredPosition.x, panelRt.anchoredPosition.y);
                     else panelRt.anchoredPosition = new Vector2(placedAt.X, placedAt.Y);
-                    if (TopAligned) panelRt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - panelHeight) / 2 - 24));
+                    if (TopAligned && !Docked) panelRt.anchoredPosition = new Vector2(0, Math.Max(0, (AvailableHeight() - panelHeight) / 2 - 24));
                 }
 
                 if (!_strip) PlaceBottomRows(panelHeight, footerBand);
@@ -14534,6 +14539,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             Released = true;
             try { NoteShown(this, false); } catch { /* */ }
             if (_menuPane) Plugin.Frame -= MenuResizeTick;
+            StopDockWatch();
             // Job FUI32: never leave a released panel in the owed list. SettleTick refuses a
             // released panel anyway, but the list would hold the reference until the next frame,
             // and a Core swap can happen between those two moments.

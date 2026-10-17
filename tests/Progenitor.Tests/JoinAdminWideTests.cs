@@ -34,7 +34,9 @@ public sealed class JoinAdminWideTests
         Assert.Contains("if (content.FrameWidth > DialogLayout.FrameWidth) Ui.SetDialogWidth(panel, content.FrameWidth);", dialog);
         string runtime = Source("Ui", "UnityUiRuntime.cs");
         Assert.Contains("panelRt.sizeDelta = new Vector2(FrameWidth, panelHeight);", runtime);
-        Assert.Contains("(_dialog || (_gameWindow && _dialogFrameWidth > PanelWidth)) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;", runtime);
+        Assert.Contains("(_dialog || WideGameWindow) ? DialogLayout.ContentRowWidth(FrameWidth) : IsStandardWindow ? StandardRowWidth : RowWidth;", runtime);
+        // DOCK1: a wide game window is one whose ask (its own, or a docked window's dock width) passes the kit frame.
+        Assert.Contains("private bool WideGameWindow => _gameWindow && WideAsk > PanelWidth;", Source("Ui", "UnityUiRuntime.Dock.cs"));
     }
 
     [Theory]

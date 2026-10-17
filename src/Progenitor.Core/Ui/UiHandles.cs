@@ -856,6 +856,27 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// </summary>
     internal bool Flows { get; set; } = true;
 
+    /// <summary>DOCK1: the edge this panel is docked to (<see cref="UiPlacement.Dock(IUiPanel, UiDock, UiDockOptions)"/>); null when it is not.</summary>
+    internal UiDockSpec? Dock { get; set; }
+
+    /// <summary>DOCK1: the width <see cref="UiLook.GameWindow(IUiPanel, float)"/> asked for (0: the kit frame).</summary>
+    internal float GameWindowWidth { get; set; }
+
+    /// <summary>
+    /// DOCK1: the dock the re-flow lays the other panels out around, with the width this panel's frame is really drawn at:
+    /// a standard window's own width, a game window's dock width (or its <see cref="GameWindowWidth"/>), else the kit frame.
+    /// </summary>
+    internal UiDockSpec? EffectiveDock
+    {
+        get
+        {
+            if (Dock is not { } d) return null;
+            if (WindowWidth > 0f) return d.WithWidth(WindowWidth);
+            if (IsGameWindow) return d.HasWidth ? d : d.WithWidth(GameWindowWidth);
+            return d.WithWidth(0f);
+        }
+    }
+
     internal void PlaceAt(PanelSpot spot)
     {
         if (_panel == null) return;

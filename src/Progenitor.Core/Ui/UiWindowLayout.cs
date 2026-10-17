@@ -502,26 +502,38 @@ internal static class UiWindowLayout
     /// say whether the Mods workspace is on screen. With no standard window shown, every panel keeps the ordinary rank of
     /// the panel flow, exactly as before the presets existed. Workspace panes, dialogs and self-placed panels never join
     /// the row (they draw from their own geometry or stay centered).
+    /// <para>DOCK1: a docked panel (<paramref name="dock"/> not null) joins neither: it gets a dock spot (its index among
+    /// the shown docked panels, in slot order), and every other spot carries the docks so the row and the panel flow keep
+    /// clear of them (<see cref="UiDockLayout.FreeArea"/>).</para>
     /// </summary>
     internal static List<(T Panel, PanelSpot Spot)> Spots<T>(
         IReadOnlyList<T> shown, Func<T, float> windowWidth, Func<T, bool> workspace, Func<T, bool>? flows = null,
-        Func<T, long>? shownSequence = null)
+        Func<T, long>? shownSequence = null, Func<T, UiDockSpec?>? dock = null)
     {
         var result = new List<(T, PanelSpot)>(shown.Count);
         bool workspaceOpen = false;
         bool anyWindow = false;
+        var docked = new List<int>();
+        var dockSpecs = new List<UiDockSpec>();
         for (int i = 0; i < shown.Count; i++)
         {
             bool pane = workspace(shown[i]);
-            if (pane) workspaceOpen = true;
+            if (pane) { workspaceOpen = true; continue; }
+            if (dock?.Invoke(shown[i]) is { } d)
+            {
+                docked.Add(i);
+                dockSpecs.Add(d);
+            }
             else if (windowWidth(shown[i]) > 0f) anyWindow = true;
         }
 
+        UiDockSpec[]? docks = dockSpecs.Count > 0 ? dockSpecs.ToArray() : null;
         var row = new List<int>();
         var others = new List<int>();
         for (int i = 0; i < shown.Count; i++)
         {
             var p = shown[i];
+            if (docked.Contains(i)) continue;
             bool inRow = !workspace(p) && (windowWidth(p) > 0f || (anyWindow && (flows?.Invoke(p) ?? false)));
             if (inRow) row.Add(i);
             else others.Add(i);
@@ -545,8 +557,12 @@ internal static class UiWindowLayout
             });
         var layer = new int[row.Count];
         for (int l = 0; l < byShow.Count; l++) layer[byShow[l]] = l;
-        for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen, layer[w])));
-        for (int o = 0; o < others.Count; o++) result.Add((shown[others[o]], new PanelSpot(o, others.Count)));
+        for (int w = 0; w < row.Count; w++) result.Add((shown[row[w]], new PanelSpot(w, widths, workspaceOpen, layer[w]).WithDocks(docks)));
+        // Workspace panes draw from their own geometry and never see the docks.
+        for (int o = 0; o < others.Count; o++)
+            result.Add((shown[others[o]], workspace(shown[others[o]]) ? new PanelSpot(o, others.Count) : new PanelSpot(o, others.Count).WithDocks(docks)));
+        for (int k = 0; k < docked.Count; k++)
+            result.Add((shown[docked[k]], new PanelSpot(k, docked.Count).WithDocks(docks, k, workspaceOpen)));
         return result;
     }
 
@@ -588,6 +604,14 @@ internal static class UiWindowLayout
     {
         float canvasW = float.IsNaN(canvasWidth) || canvasWidth <= 0f ? PanelFlow.FallbackCanvasWidth : canvasWidth;
         float canvasH = float.IsNaN(canvasHeight) || canvasHeight <= 0f ? PanelLayout.FallbackScreenHeight : canvasHeight;
+        // DOCK1: with panels docked, the row is laid out on the canvas they leave, and shifted onto it.
+        if (spot.Docks != null && !spot.IsDock)
+        {
+            var (areaWidth, shift) = UiDockLayout.FreeArea(spot.Docks, canvasW);
+            var inArea = Place(spot.WithDocks(null), areaWidth, canvasH, stripBottom);
+            return new WindowPlacement(inArea.X + shift, inArea.Top, inArea.MaxHeight, inArea.Depth);
+        }
+
         float margin = PanelFlow.EdgeMargin;
         float gap = PanelFlow.ColumnGap;
         float top = canvasH * 0.5f - margin;

@@ -151,7 +151,7 @@ internal sealed partial class UnityUiRuntime
         /// WINDOWS1: placed by the window row (<see cref="UiWindowLayout.Place"/>): a standard window, or (review) a
         /// floating panel that shares the screen with one. Dialogs, self-placed and top-pinned panels never are.
         /// </summary>
-        private bool InWindowRow => Spot.IsWindow && !_menuPane && !_dialog && !SelfPlaced && !TopAligned;
+        private bool InWindowRow => Spot.IsWindow && !_menuPane && !_dialog && !SelfPlaced && !TopAligned && !Docked;
 
         /// <summary>The settings grid this panel's rows use (a standard window's has no reset gutter).</summary>
         internal ModSettingsRowGrid RowGrid => IsStandardWindow ? ModSettingsRowGrid.ForWindow(GridWidth) : ModSettingsRowGrid.For(GridWidth);
