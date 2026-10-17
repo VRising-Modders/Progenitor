@@ -393,7 +393,7 @@ internal static class ChatFormat
         if (!int.TryParse(linkId.Substring(2), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)) return null;
         if (n < 0 || n >= spans.Count) return null;
         var s = spans[n];
-        if (!linkId.StartsWith(LinkPrefix(s.Kind), StringComparison.Ordinal)) return null;
+        if (!s.IsLink || !linkId.StartsWith(LinkPrefix(s.Kind), StringComparison.Ordinal)) return null;
         return s;
     }
 

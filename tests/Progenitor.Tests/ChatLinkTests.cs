@@ -35,6 +35,7 @@ public sealed class ChatLinkTests : IDisposable
     public void Format_cleans_text_and_refuses_bad_parts()
     {
         Assert.Equal("[mod:m:k:1|‹b›x y]", ChatLinks.ModLink("m", "k", "1", "<b>x\ny"));
+        Assert.Equal("[mod:m:k:1|abc]", ChatLinks.ModLink("m", "k", "1", "a\u202Eb\u200Bc"));
         Assert.Equal("[mod:m:k:42]", ChatLinks.ModLink("m", "k", "42", ""));
         Assert.Throws<ArgumentException>(() => ChatLinks.ModLink("has space", "k", "1", "x"));
         Assert.Throws<ArgumentException>(() => ChatLinks.ModLink("m", "k:x", "1", "x"));
@@ -63,11 +64,38 @@ public sealed class ChatLinkTests : IDisposable
     }
 
     [Fact]
+    public void Shown_text_from_the_wire_drops_format_characters()
+    {
+        Assert.True(ChatLinkToken.TryParse("[mod:m:k:1|evil\u202Etxt.exe]", out var t));
+        Assert.Equal("eviltxt.exe", t.Text);
+        Assert.True(ChatLinkToken.TryParse("[mod:m:k:\u2066p]", out t));
+        Assert.Equal("p", t.Text);
+        Assert.Equal("\u2066p", t.Payload);
+        Assert.False(ChatLinkToken.TryParse("[mod:m:k:1|\u202E]", out _));
+    }
+
+    [Fact]
     public void Defuse_turns_every_link_token_into_plain_text()
     {
-        Assert.Equal("(mod:a:b:c|x] (item:5] (loc:1,2] [other] ", ChatLinks.Defuse("[mod:a:b:c|x] [item:5] [loc:1,2] [other] "));
+        Assert.Equal("(mod:a:b:c|x) (item:5) (loc:1,2) (other) ", ChatLinks.Defuse("[mod:a:b:c|x] [item:5] [loc:1,2] [other] "));
         Assert.Empty(ChatLinkToken.Find(ChatLinks.Defuse("[mod:a:b:c|x]")));
         Assert.Equal("", ChatLinks.Defuse(null));
+    }
+
+    [Theory]
+    [InlineData("mod:x:give:1|Claim")]
+    [InlineData("MOD:x:give:1|Claim")]
+    [InlineData("item:5")]
+    [InlineData("loc:1,2")]
+    [InlineData("a] [mod:x:give:1|Claim")]
+    public void Defused_text_cannot_complete_a_token_from_brackets_outside_it(string name)
+    {
+        foreach (string line in new[] { "[" + ChatLinks.Defuse(name) + "]", "Unknown '[" + ChatLinks.Defuse(name) + "]'",
+                     "[mod:" + ChatLinks.Defuse(name) + "]" })
+        {
+            Assert.Empty(ChatLinkToken.Find(line));
+            Assert.Empty(ChatTokens.Find(line));
+        }
     }
 
     // ---- provenance --------------------------------------------------------------------------------------
@@ -98,6 +126,9 @@ public sealed class ChatLinkTests : IDisposable
         Assert.DoesNotContain("<link=", s);
         Assert.Single(sSpans);
         Assert.False(sSpans[0].IsLink);
+        // A text-only span has no link id, and no forged id reaches it.
+        Assert.Null(ChatFormat.SpanForLink("u:0", sSpans));
+        Assert.Null(ChatFormat.SpanForLink("-:0", sSpans));
         string p = ChatFormat.Render(player, options, out var pSpans);
         Assert.Contains("[mod:satisvampory:chest:7f3a|Storage (Plot 1)]", p);
         Assert.Empty(pSpans);
@@ -187,7 +218,14 @@ public sealed class ChatLinkTests : IDisposable
     public void One_plugin_per_owner_and_the_same_plugin_replaces()
     {
         var first = ChatLinkRegistry.OnMod(OwnerA, "plugin.a", "m", _ => true, false);
-        Assert.Throws<InvalidOperationException>(() => ChatLinkRegistry.OnMod(OwnerB, "plugin.b", "M", _ => true, false));
+        // Another plugin's claim is refused without throwing; its handle does nothing, and the owner keeps the name.
+        bool squatterRan = false;
+        var squat = ChatLinkRegistry.OnMod(OwnerB, "plugin.b", "M", _ => squatterRan = true, false);
+        Assert.NotNull(squat);
+        Assert.True(ChatLinkRegistry.Dispatch(Click(ChatLinkKind.Mod, "m")));
+        Assert.False(squatterRan);
+        squat.Dispose();
+        Assert.True(ChatLinkRegistry.IsOwned("m"));
         Assert.Throws<ArgumentException>(() => ChatLinkRegistry.OnMod(OwnerB, "plugin.b", "bad owner", _ => true, false));
         // A hot reload: the new generation claims before the old one let go; the old dispose must not drop the new claim.
         var second = ChatLinkRegistry.OnMod(OwnerB, "plugin.a", "m", _ => true, false);
@@ -229,6 +267,9 @@ public sealed class ChatLinkTests : IDisposable
         Assert.Equal("7f3a", mod.Payload);
         Assert.True(mod.IsFromServer);
         Assert.Equal(0, mod.ItemPrefab);
+        Assert.False(mod.IsRestored);
+        var old = new ChatLinkClick(ChatLinkKind.Web, "https://a.b", "a.b", ChatLinkSource.Player, "Bob", false, ChatChannel.Global, "", restored: true);
+        Assert.True(old.IsRestored);
     }
 
     // ---- item text ---------------------------------------------------------------------------------------
@@ -255,6 +296,9 @@ public sealed class ChatLinkTests : IDisposable
         Assert.Equal(SampleChatLinks.LinkOwner, found[0].Owner);
         Assert.StartsWith("evil] [mod:", found[0].Text);
         Assert.Contains(SampleChatLinks.DefaultText, SampleChatLinks.LinkLine(1, "  "));
+        Assert.True(SampleChatLinks.IsPingPayload("3"));
+        Assert.False(SampleChatLinks.IsPingPayload("https://evil.example"));
+        Assert.False(SampleChatLinks.IsPingPayload("0"));
         Assert.Equal("Payload 3, on a line from the server.", SampleChatLinks.ClickNotice("3", ChatLinkSource.Server, "").Body);
         Assert.Equal("Payload 3, on a line from player Bob.", SampleChatLinks.ClickNotice("3", ChatLinkSource.Player, "Bob").Body);
     }

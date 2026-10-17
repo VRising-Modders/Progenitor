@@ -1770,8 +1770,9 @@ public sealed class PluginChat
     /// <see cref="ModLink"/>). With a handler for its owner a link is drawn clickable and its clicks reach this handler
     /// first; without one a client shows only its text. Links on a player's line stay as written, unless
     /// <paramref name="acceptPlayerLinks"/>: then they are clickable too and the handler must check
-    /// <see cref="ChatLinkClick.Source"/>. One plugin per owner: another plugin's claim throws
-    /// <see cref="InvalidOperationException"/>. Tracked: removed on unload.
+    /// <see cref="ChatLinkClick.Source"/>. One plugin per owner: another plugin's claim is refused with a logged warning
+    /// and returns a handle that does nothing. A server line is still the joined server's input: validate the payload
+    /// and never open a URL, path or command from it directly. Tracked: removed on unload.
     /// </summary>
     public IDisposable OnModLink(string owner, ChatLinkHandler handler, bool acceptPlayerLinks = false)
     {

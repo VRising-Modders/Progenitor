@@ -699,7 +699,7 @@ internal static class ChatView
         };
         var channel = (int)r.Kind is >= 0 and <= 8 ? (ChatChannel)(int)r.Kind : ChatChannel.Unknown;
         string shown = span.Display ?? span.Target;
-        return new ChatLinkClick(kind, span.Target, shown, r.Source, r.User, r.FromSelf, channel, r.Text, span.Owner, span.LinkType);
+        return new ChatLinkClick(kind, span.Target, shown, r.Source, r.User, r.FromSelf, channel, r.Text, span.Owner, span.LinkType, r.Restored);
     }
 
     private static void OpenSpan(ChatSpan span, ChatRecord record)
@@ -772,11 +772,19 @@ internal static class ChatView
     // ---- item link hover: the item's name and description in Progenitor's tooltip box --------------------
 
     private static string _hoverKey = "";
-    private static bool _hoverShown;
+    private static Func<bool>? _hoverCheck;
     private static bool _hoverWarned;
     private static float _hoverX = float.NaN, _hoverY = float.NaN;
+    private static int _hoverDrawn = -1;
+    private static float _hoverScroll = float.NaN;
 
-    /// <summary>While the pointer rests on an item link, show its tooltip; hide it when the pointer leaves the link.</summary>
+    /// <summary>Whether the tooltip box is up with this view's item tooltip (another control may have taken it since).</summary>
+    private static bool HoverOwned => _hoverCheck != null && UnityUiRuntime.TooltipShown && UnityUiRuntime.TooltipOwnedBy(_hoverCheck);
+
+    /// <summary>
+    /// While the pointer rests on an item link, show its tooltip; hide it when the pointer leaves the link. Looked at again
+    /// when the pointer moves, when the lines are redrawn (a new line under a still pointer) and when the log scrolls.
+    /// </summary>
     private static void HandleHover()
     {
         if (!UnityUiRuntime.TrySamplePointerScreenAnyFocus(out float x, out float y))
@@ -785,9 +793,12 @@ internal static class ChatView
             return;
         }
 
-        if (x == _hoverX && y == _hoverY) return;
+        float scroll = _window?.ScrollView?.verticalNormalizedPosition ?? 0f;
+        if (x == _hoverX && y == _hoverY && _drawnVersion == _hoverDrawn && scroll == _hoverScroll) return;
         _hoverX = x;
         _hoverY = y;
+        _hoverDrawn = _drawnVersion;
+        _hoverScroll = scroll;
         string key = "";
         string target = "";
         var point = new Vector3(x, y, 0f);
@@ -805,7 +816,7 @@ internal static class ChatView
                     if (span.HasValue && span.Value.Kind == ChatSpanKind.Item)
                     {
                         target = span.Value.Target;
-                        key = slot.Record.Seq.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + link;
+                        key = slot.Record.Seq.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + link + ":" + target;
                     }
                 }
 
@@ -819,7 +830,8 @@ internal static class ChatView
             return;
         }
 
-        if (key == _hoverKey && _hoverShown) return;
+        if (key == _hoverKey && HoverOwned) return;
+        HideHover();
         _hoverKey = key;
         try
         {
@@ -827,12 +839,14 @@ internal static class ChatView
             var (title, body) = ItemContent(target);
             var anchor = ScreenRect.FromCorners(x - 12f, y - 12f, x + 12f, y + 12f);
             string shownFor = key;
-            runtime.ShowGameControlTooltip(anchor, title, body, () => _hoverShown && _hoverKey == shownFor);
-            _hoverShown = UnityUiRuntime.TooltipShown;
+            Func<bool> check = () => _hoverKey == shownFor;
+            _hoverCheck = check;
+            runtime.ShowGameControlTooltip(anchor, title, body, check);
+            if (!HoverOwned) _hoverCheck = null;
         }
         catch (Exception e)
         {
-            _hoverShown = false;
+            _hoverCheck = null;
             if (!_hoverWarned)
             {
                 _hoverWarned = true;
@@ -844,16 +858,18 @@ internal static class ChatView
     /// <summary>The pointer left the log (or the view detached): forget it and hide the tooltip.</summary>
     private static void EndHover()
     {
-        _hoverX = _hoverY = float.NaN;
+        _hoverX = _hoverY = _hoverScroll = float.NaN;
+        _hoverDrawn = -1;
         HideHover();
     }
 
-    /// <summary>Hide the item tooltip this view showed (never another control's).</summary>
+    /// <summary>Hide the item tooltip only while the box still shows this view's tooltip, never another control's.</summary>
     private static void HideHover()
     {
         _hoverKey = "";
-        if (!_hoverShown) return;
-        _hoverShown = false;
+        bool owned = HoverOwned;
+        _hoverCheck = null;
+        if (!owned) return;
         try { WidgetRuntime.Current?.HideTooltip(); }
         catch { /* a gone box needs no hiding */ }
     }

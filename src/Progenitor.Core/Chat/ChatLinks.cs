@@ -11,7 +11,10 @@ public enum ChatLinkKind
     /// <summary>A web address (<c>https://…</c>, <c>www.…</c>). <see cref="ChatLinkClick.Target"/> is the URL.</summary>
     Web = 0,
 
-    /// <summary>A Thunderstore mod link (<c>[mod:Namespace-Name@1.2.3]</c>). Target is the package with an optional <c>@version</c>.</summary>
+    /// <summary>
+    /// A Thunderstore package link (<c>[mod:Namespace-Name@1.2.3]</c>) that players share to point at a mod; Progenitor opens
+    /// that mod in the Mods menu. Target is the package with an optional <c>@version</c>. Not <see cref="Mod"/>.
+    /// </summary>
     Package = 1,
 
     /// <summary>A location link (<c>[loc:x,z]</c>). Target is <c>x,z</c>.</summary>
@@ -20,7 +23,11 @@ public enum ChatLinkKind
     /// <summary>An item link (<c>[item:id]</c>). Target is the prefab id; <see cref="ChatLinkClick.ItemPrefab"/> has it as a number.</summary>
     Item = 3,
 
-    /// <summary>A mod-owned link (<c>[mod:owner:type:payload|text]</c>), built with <see cref="ChatLinks.ModLink"/>.</summary>
+    /// <summary>
+    /// A mod-owned link (<c>[mod:owner:type:payload|text]</c>, a <c>:</c> after <c>mod:</c>), built with
+    /// <see cref="ChatLinks.ModLink"/>: data one mod sends for its own handler (<c>ctx.Chat.OnModLink</c>). Progenitor
+    /// itself does nothing with it. Not <see cref="Package"/>.
+    /// </summary>
     Mod = 4,
 }
 
@@ -33,7 +40,11 @@ public enum ChatLinkSource
     /// <summary>A player typed the line (any player, admins and this player included). Treat its links as untrusted input.</summary>
     Player = 0,
 
-    /// <summary>The server sent it with no speaker: the game's own notices, Progenitor and server mods; or this client's game.</summary>
+    /// <summary>
+    /// The server sent it with no speaker: the game's own notices, Progenitor and any mod on the server you joined; or this
+    /// client's game. It means no player typed it, not that your own mod wrote it: a hostile server can send any owner's
+    /// links. Validate the payload and never open a URL, path or command taken from it directly.
+    /// </summary>
     Server = 1,
 }
 
@@ -66,8 +77,9 @@ public enum ChatChannel
 public sealed class ChatLinkClick
 {
     internal ChatLinkClick(ChatLinkKind kind, string target, string text, ChatLinkSource source, string sender,
-        bool fromSelf, ChatChannel channel, string line, string ns = "", string linkType = "")
+        bool fromSelf, ChatChannel channel, string line, string ns = "", string linkType = "", bool restored = false)
     {
+        IsRestored = restored;
         Kind = kind;
         Target = target ?? "";
         Text = text ?? "";
@@ -106,7 +118,10 @@ public sealed class ChatLinkClick
     /// <summary>For an <see cref="ChatLinkKind.Item"/> link, the item's prefab id; 0 otherwise.</summary>
     public int ItemPrefab { get; }
 
-    /// <summary>Who wrote the line: <see cref="ChatLinkSource.Server"/> lines can be trusted, player lines cannot.</summary>
+    /// <summary>
+    /// Who wrote the line. <see cref="ChatLinkSource.Server"/>: no player typed it, but it is still input from the server you
+    /// joined and its mods, so validate the payload; <see cref="ChatLinkSource.Player"/>: any player could have.
+    /// </summary>
     public ChatLinkSource Source { get; }
 
     /// <summary>Shorthand for <c>Source == ChatLinkSource.Server</c>.</summary>
@@ -123,6 +138,12 @@ public sealed class ChatLinkClick
 
     /// <summary>The line's message text, as written (tokens included).</summary>
     public string Line { get; }
+
+    /// <summary>
+    /// The line was restored from this server's chat history (an earlier session or a Core reload), not received now: what
+    /// it pointed at may be gone.
+    /// </summary>
+    public bool IsRestored { get; }
 }
 
 /// <summary>
@@ -148,6 +169,10 @@ public delegate bool ChatLinkHandler(ChatLinkClick click);
 /// its sender. Everything else is <see cref="ChatLinkSource.Player"/>. A mod link on a player's line stays as written
 /// unless the owning handler accepts player links.</para>
 ///
+/// <para><b>Server is not your mod.</b> A server line means no player typed it. It is still the joined server's input: a
+/// hostile server can send any owner's links with any payload, so a handler validates the payload and never opens a URL,
+/// path or command taken from it directly.</para>
+///
 /// <para><b>Echoing player text.</b> A server line that repeats what a player typed (an "unknown name 'x'" reply) would
 /// carry the player's tokens as the server's. Pass that text through <see cref="Defuse"/> first.</para>
 /// </summary>
@@ -164,9 +189,10 @@ public static class ChatLinks
         ChatLinkToken.Format(owner, type, payload, text);
 
     /// <summary>
-    /// <paramref name="text"/> with every chat link token (<c>[mod:</c>, <c>[item:</c>, <c>[loc:</c>) made plain text, so a
-    /// server line that repeats a player's words cannot carry their links as the server's. The token's <c>[</c> becomes
-    /// <c>(</c>. Null is empty.
+    /// <paramref name="text"/> made unable to form a chat link, so a server line that repeats a player's words cannot carry
+    /// their links as the server's: every <c>[</c> becomes <c>(</c> and every <c>]</c> becomes <c>)</c> (the text can neither
+    /// open nor close a token), and text that starts with <c>mod:</c>, <c>item:</c> or <c>loc:</c> gets a space in front
+    /// (so a <c>[</c> the template puts right before it cannot complete one). Null is empty.
     /// </summary>
     public static string Defuse(string? text) => ChatLinkToken.Defuse(text);
 }
@@ -244,6 +270,7 @@ internal static class ChatLinkToken
         foreach (char c in text)
         {
             if (char.IsControl(c)) sb.Append(' ');
+            else if (IsFormatChar(c)) continue;
             else if (c == '<') sb.Append('‹');
             else if (c == '>') sb.Append('›');
             else sb.Append(c);
@@ -315,7 +342,7 @@ internal static class ChatLinkToken
             if (!ReadFree(text, ref i, limit, MaxText, out shown, out stop) || stop != ']' || shown.Trim().Length == 0) return false;
         }
 
-        string display = shown.Length > 0 ? shown : payload;
+        string display = DropFormat(shown.Length > 0 ? shown : payload);
         if (display.Trim().Length == 0) return false;
         token = new Token(start, i - start, owner, type, payload, display);
         return true;
@@ -390,24 +417,29 @@ internal static class ChatLinkToken
     /// <summary>A payload or text character: no control characters and no angle brackets (they would be rich text).</summary>
     private static bool IsFreeChar(char c) => !char.IsControl(c) && c != '<' && c != '>';
 
-    private static readonly string[] Defused = { "[mod:", "[item:", "[loc:" };
+    /// <summary>Unicode format characters (bidirectional overrides such as U+202E, zero-width joiners): never shown.</summary>
+    internal static bool IsFormatChar(char c) => char.GetUnicodeCategory(c) == UnicodeCategory.Format;
+
+    /// <summary>Shown text without format characters.</summary>
+    internal static string DropFormat(string text)
+    {
+        bool any = false;
+        foreach (char c in text) if (IsFormatChar(c)) { any = true; break; }
+        if (!any) return text;
+        var sb = new StringBuilder(text.Length);
+        foreach (char c in text) if (!IsFormatChar(c)) sb.Append(c);
+        return sb.ToString();
+    }
+
+    private static readonly string[] TokenBodies = { "mod:", "item:", "loc:" };
 
     internal static string Defuse(string? text)
     {
-        if (string.IsNullOrEmpty(text) || text!.IndexOf('[') < 0) return text ?? "";
-        var sb = new StringBuilder(text);
-        for (int i = 0; i < sb.Length; i++)
-        {
-            if (sb[i] != '[') continue;
-            foreach (string p in Defused)
-            {
-                if (i + p.Length > text.Length || string.CompareOrdinal(text, i, p, 0, p.Length) != 0) continue;
-                sb[i] = '(';
-                break;
-            }
-        }
-
-        return sb.ToString();
+        if (string.IsNullOrEmpty(text)) return "";
+        string t = text!.Replace('[', '(').Replace(']', ')');
+        foreach (string body in TokenBodies)
+            if (t.StartsWith(body, StringComparison.OrdinalIgnoreCase)) return " " + t;
+        return t;
     }
 }
 
@@ -451,7 +483,7 @@ internal static class ChatLinkRegistry
 
     /// <summary>
     /// Claim a mod link owner. The same plugin claiming again replaces its handler (a hot reload); another plugin's
-    /// claim is refused with <see cref="InvalidOperationException"/>.
+    /// claim is refused with a logged warning and gets a handle that does nothing.
     /// </summary>
     internal static IDisposable OnMod(object owner, string pluginId, string ns, ChatLinkHandler handler, bool acceptPlayerLinks)
     {
@@ -460,7 +492,11 @@ internal static class ChatLinkRegistry
         if (!ChatLinkToken.IsName(key, ChatLinkToken.MaxOwner))
             throw new ArgumentException("A link owner is 1 to " + ChatLinkToken.MaxOwner + " of a-z 0-9 _ . -.", nameof(ns));
         if (Owners.TryGetValue(key, out var held) && !string.Equals(held.PluginId, pluginId ?? "", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Chat link owner '" + key + "' is already handled by " + held.PluginId + ".");
+        {
+            Plugin.Logger?.LogWarning("Chat: " + (pluginId ?? "a plugin") + " asked to handle chat links of '" + key
+                + "', which " + held.PluginId + " already handles; refused.");
+            return new Handle(null);
+        }
         if (held != null) held.Removed = true;
         var e = new Entry { Owner = owner, PluginId = pluginId ?? "", Namespace = key, Handler = handler, AcceptPlayerLinks = acceptPlayerLinks };
         Owners[key] = e;
@@ -543,7 +579,7 @@ internal static class ChatLinkRegistry
     private sealed class Handle : IDisposable
     {
         private Entry? _entry;
-        internal Handle(Entry e) => _entry = e;
+        internal Handle(Entry? e) => _entry = e;
 
         public void Dispose()
         {

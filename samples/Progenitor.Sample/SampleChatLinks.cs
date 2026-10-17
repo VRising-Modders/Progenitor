@@ -17,7 +17,7 @@ namespace Progenitor.Sample;
 /// typed is escaped inside the token and cannot end it early or add another.</para>
 ///
 /// <para><b>Client.</b> <c>ctx.Chat.OnModLink(LinkOwner, …)</c> makes that link clickable and receives its click first:
-/// it shows a notice with the payload and who wrote the line, and returns true so nothing else runs. A player who types
+/// it checks the payload is one it would send (a server line is still the joined server's input), shows a notice with it and who wrote the line, and returns true so nothing else runs. A player who types
 /// the same token gets plain text: the handler does not accept player links. <c>ctx.Chat.OnLinkClicked</c> logs every
 /// other link click and returns false, so Progenitor's own action (the item dialog, the browser prompt) still runs.
 /// Both are tracked and removed on unload.</para>
@@ -50,6 +50,10 @@ internal static class SampleChatLinks
         return "Click this link: " + ChatLinks.ModLink(LinkOwner, LinkType, N(number), shown);
     }
 
+    /// <summary>A payload the sample sends: a positive number of at most 9 digits. Anything else is ignored.</summary>
+    internal static bool IsPingPayload(string? payload) =>
+        !string.IsNullOrEmpty(payload) && payload!.Length <= 9 && int.TryParse(payload, NumberStyles.None, CultureInfo.InvariantCulture, out int n) && n > 0;
+
     /// <summary>The notice the client shows for a click on the sample's link.</summary>
     internal static (string Title, string Body) ClickNotice(string payload, ChatLinkSource source, string sender) =>
         ("Sample link", "Payload " + payload + ", on a line from "
@@ -68,6 +72,13 @@ internal static class SampleChatLinks
         if (!ctx.IsClient) return;
         ctx.Chat.OnModLink(LinkOwner, click =>
         {
+            // A server line is still the joined server's input: act only on a payload this sample would send.
+            if (!IsPingPayload(click.Payload))
+            {
+                SampleLog.Info(Area, "ignored a sample link with an unexpected payload");
+                return true;
+            }
+
             var (title, body) = ClickNotice(click.Payload, click.Source, click.Sender);
             ctx.Dialogs.Notice(title, body);
             SampleLog.Info(Area, "sample link clicked payload=" + click.Payload + " source=" + click.Source);
