@@ -201,4 +201,60 @@ public sealed class VanillaTabStripLayoutTests
         Assert.False(VanillaTabStripLayout.Check(ScreenRect.Unknown, Array.Empty<(string, ScreenRect)>(),
             Array.Empty<(string, ScreenRect)>(), 12f).Ok);
     }
+
+    [Theory]
+    [InlineData(170f, 6f)]
+    [InlineData(13f, 6f)]
+    [InlineData(9f, 4f)]  // the caption keeps one unit
+    [InlineData(1f, 0f)]
+    [InlineData(0f, 0f)]
+    [InlineData(float.NaN, 0f)]
+    public void CaptionInsetNeverLeavesTheCaptionWithoutWidth(float tabWidth, float inset)
+        => Assert.Equal(inset, VanillaTabCaption.InsetFor(tabWidth));
+
+    [Fact]
+    public void CaptionOffsetIsCenterMinusCenter()
+    {
+        var tab = R(100, 200, 170, 38);
+        Assert.Equal((0f, 0f), VanillaTabCaption.Offset(tab, R(106, 200, 158, 38)));
+        // A label sized for a narrower donor tab and left where the donor put it: left of center, low.
+        Assert.Equal((-15f, -2f), VanillaTabCaption.Offset(tab, R(106, 198, 128, 38)));
+        Assert.True(float.IsNaN(VanillaTabCaption.Offset(tab, ScreenRect.Unknown).Dx));
+    }
+
+    [Theory]
+    [InlineData("Production", 92f)]
+    [InlineData("Input", 38f)]
+    [InlineData("Output", 50f)]
+    public void ACaptionStretchedOverItsTabIsCenteredForAnyLength(string caption, float textWidth)
+    {
+        _ = caption;
+        var tab = R(1210, 600, 170, 38);
+        float inset = VanillaTabCaption.InsetFor(170f);
+        var rect = R(1210 + inset, 600, 170 - 2 * inset, 38);
+        // Center-aligned text is drawn about the rect's center; a descender lowers the glyphs only.
+        var text = R(1295 - textWidth * .5f, 609, textWidth, 18);
+        Assert.True(VanillaTabCaption.Centered(tab, rect, text));
+    }
+
+    [Fact]
+    public void AnOffCenterCaptionRectOrTextIsReported()
+    {
+        var tab = R(0, 0, 170, 38);
+        var rect = R(6, 0, 158, 38);
+        Assert.False(VanillaTabCaption.Centered(tab, R(0, 0, 158, 38), ScreenRect.Unknown));   // rect left of center
+        Assert.False(VanillaTabCaption.Centered(tab, R(6, -3, 158, 38), ScreenRect.Unknown));  // rect low
+        Assert.False(VanillaTabCaption.Centered(tab, rect, R(70, 10, 40, 18)));                // text right of center
+        Assert.True(VanillaTabCaption.Centered(tab, rect, R(65, 6, 40, 18)));                  // glyphs low only: line-centered
+        Assert.True(VanillaTabCaption.Centered(tab, rect, ScreenRect.Unknown));                // nothing drawn yet
+        Assert.False(VanillaTabCaption.Centered(ScreenRect.Unknown, rect, ScreenRect.Unknown));
+    }
+
+    [Fact]
+    public void DriftIgnoresFloatNoiseAndCatchesNaN()
+    {
+        Assert.False(VanillaTabCaption.Drifted(6.001f, 6f));
+        Assert.True(VanillaTabCaption.Drifted(6.5f, 6f));
+        Assert.True(VanillaTabCaption.Drifted(float.NaN, 0f));
+    }
 }

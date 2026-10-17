@@ -40,6 +40,10 @@ internal sealed partial class UnityUiRuntime
         readonly string[] _captions;
         readonly Action<int> _changed;
         readonly List<(GameObject go, ushort slot)> _buttons = new();
+        // Each tab's caption, in _buttons order; kept centered by KeepCaptions.
+        readonly List<TextMeshProUGUI> _labels = new();
+        Dictionary<string, object?>? _captionDonor;
+        int _captionFixes;
         readonly List<HiddenNative> _content = new();
         readonly List<HiddenNative> _nativeTabs = new();
         GameObject? _strip;
@@ -187,18 +191,16 @@ internal sealed partial class UnityUiRuntime
                     var hit = button.GetComponent<Image>();
                     if (hit == null) { hit = button.AddComponent<Image>(); hit.color = Color.clear; }
                     hit.raycastTarget = true;
-                    var captionRect = label.GetComponent<RectTransform>();
-                    captionRect.anchorMin = Vector2.zero; captionRect.anchorMax = Vector2.one;
-                    captionRect.offsetMin = new Vector2(6, 0); captionRect.offsetMax = new Vector2(-6, 0);
-                    // The inventory tab supplies the actual character-window font and size.
-                    // Center within our bounded cell without enlarging short captions.
-                    label.enableAutoSizing = false;
-                    label.alignment = TextAlignmentOptions.Center;
                     rt.anchorMin = rt.anchorMax = new Vector2(0, 1);
                     rt.pivot = new Vector2(0, 1);
                     rt.anchoredPosition = new Vector2(width * i, 0);
                     rt.sizeDelta = new Vector2(width - 3, tabHeight);
                     rt.localScale = Vector3.one;
+                    // The inventory tab supplies the actual character-window font and size. The
+                    // caption is centered in our bounded cell without enlarging short captions.
+                    if (i == 0) _captionDonor = DescribeDonorCaption(label, button);
+                    AdoptCaption(label, button);
+                    _labels.Add(label);
                     var widget = new PanelButtonWidget(button, label, FindClickEvent(button), rt.sizeDelta);
                     ushort slot = UiSlotTable.Alloc(this);
                     int index = i;
@@ -228,6 +230,7 @@ internal sealed partial class UnityUiRuntime
             if (!_flow && _root != null && _strip != null) moved |= PlaceStrip();
             foreach (var item in _nativeTabs) item.Hide();
             ApplySelection();
+            KeepCaptions();
             PlacePanel();
             if (VanillaTabStripLayout.CheckDue(moved, Time.frameCount, _checkFrame)) SelfCheck();
         }
@@ -384,6 +387,9 @@ internal sealed partial class UnityUiRuntime
         internal Dictionary<string, object?> Describe()
         {
             bool shown = Alive(_strip) && _strip!.activeInHierarchy;
+            List<object?>? tabs = null;
+            bool? centered = null;
+            if (shown) { centered = CaptionsCentered(out var list); tabs = list; }
             return new Dictionary<string, object?>
             {
                 ["site"] = _site.ToString(),
@@ -402,7 +408,170 @@ internal sealed partial class UnityUiRuntime
                 ["clip"] = _check.State,
                 ["clipBy"] = _check.By,
                 ["visible"] = Math.Round(_check.Visible, 3),
+                ["captionsCentered"] = centered,
+                ["tabCaptions"] = tabs,
+                ["captionDonor"] = _captionDonor,
+                ["captionFixes"] = _captionFixes,
             };
+        }
+
+        /// <summary>
+        /// Make the donor's caption a direct child of its tab and center it there
+        /// (<see cref="VanillaTabCaption"/>): the donor's label can sit under a parent sized for the
+        /// character window's tab and carry its own pivot, margins and wrapping, each of which moves
+        /// the text off center in a tab of another size.
+        /// </summary>
+        static void AdoptCaption(TextMeshProUGUI label, GameObject tab)
+        {
+            var t = label.transform;
+            if (t.parent == null || t.parent.Pointer != tab.transform.Pointer) t.SetParent(tab.transform, false);
+            t.SetAsLastSibling();
+            label.enableAutoSizing = false;
+            try { label.enableWordWrapping = false; } catch { /* */ }
+            PlaceCaption(label, tab.GetComponent<RectTransform>());
+        }
+
+        /// <summary>
+        /// Stretch the caption over its tab, <see cref="VanillaTabCaption.InsetFor"/> in from each
+        /// side, pivoted at its center, unrotated, unscaled, centered both ways and without margins.
+        /// Writes only what drifted; true when anything did.
+        /// </summary>
+        static bool PlaceCaption(TextMeshProUGUI label, RectTransform? tab)
+        {
+            if (tab == null) return false;
+            var c = label.rectTransform;
+            float inset = VanillaTabCaption.InsetFor(tab.rect.width);
+            bool fixedAny = false;
+            if (Moved(c.anchorMin, Vector2.zero)) { c.anchorMin = Vector2.zero; fixedAny = true; }
+            if (Moved(c.anchorMax, Vector2.one)) { c.anchorMax = Vector2.one; fixedAny = true; }
+            if (Moved(c.pivot, new Vector2(.5f, .5f))) { c.pivot = new Vector2(.5f, .5f); fixedAny = true; }
+            if (Moved(c.offsetMin, new Vector2(inset, 0f))) { c.offsetMin = new Vector2(inset, 0f); fixedAny = true; }
+            if (Moved(c.offsetMax, new Vector2(-inset, 0f))) { c.offsetMax = new Vector2(-inset, 0f); fixedAny = true; }
+            var p = c.localPosition;
+            if (VanillaTabCaption.Drifted(p.z, 0f)) { c.localPosition = new Vector3(p.x, p.y, 0f); fixedAny = true; }
+            if (c.localRotation != Quaternion.identity) { c.localRotation = Quaternion.identity; fixedAny = true; }
+            var s = c.localScale;
+            if (VanillaTabCaption.Drifted(s.x, 1f) || VanillaTabCaption.Drifted(s.y, 1f) || VanillaTabCaption.Drifted(s.z, 1f))
+            { c.localScale = Vector3.one; fixedAny = true; }
+            if (label.alignment != TextAlignmentOptions.Center) { label.alignment = TextAlignmentOptions.Center; fixedAny = true; }
+            var m = label.margin;
+            if (m.x != 0f || m.y != 0f || m.z != 0f || m.w != 0f) { label.margin = Vector4.zero; fixedAny = true; }
+            return fixedAny;
+
+            static bool Moved(Vector2 now, Vector2 wanted)
+                => VanillaTabCaption.Drifted(now.x, wanted.x) || VanillaTabCaption.Drifted(now.y, wanted.y);
+        }
+
+        /// <summary>Put back any caption something moved since the last frame (counted in <c>captionFixes</c>).</summary>
+        void KeepCaptions()
+        {
+            int n = Math.Min(_labels.Count, _buttons.Count);
+            for (int i = 0; i < n; i++)
+            {
+                var label = _labels[i];
+                var go = _buttons[i].go;
+                if (!Alive(label) || !Alive(go)) continue;
+                try { if (PlaceCaption(label, go.GetComponent<RectTransform>())) _captionFixes++; }
+                catch { /* a caption that cannot be read is left as it is */ }
+            }
+        }
+
+        /// <summary>
+        /// The readback: per tab its caption, whether it is selected, the screen rects of the tab,
+        /// the caption rect and the drawn text, and the offsets of their centers from the tab's
+        /// center in pixels. True when every caption is <see cref="VanillaTabCaption.Centered"/>.
+        /// </summary>
+        bool CaptionsCentered(out List<object?> tabs)
+        {
+            tabs = new List<object?>();
+            bool all = true;
+            int n = Math.Min(_labels.Count, _buttons.Count);
+            for (int i = 0; i < n; i++)
+            {
+                var label = _labels[i];
+                var go = _buttons[i].go;
+                if (!Alive(label) || !Alive(go)) { all = false; continue; }
+                var tabRect = go.GetComponent<RectTransform>();
+                if (tabRect == null) { all = false; continue; }
+                var tab = ScreenRectOf(tabRect);
+                var caption = ScreenRectOf(label.rectTransform);
+                var text = TextRectOf(label);
+                bool centered = VanillaTabCaption.Centered(tab, caption, text);
+                all &= centered;
+                var (rx, ry) = VanillaTabCaption.Offset(tab, caption);
+                var (tx, ty) = VanillaTabCaption.Offset(tab, text);
+                var parent = label.transform.parent;
+                tabs.Add(new Dictionary<string, object?>
+                {
+                    ["index"] = i,
+                    ["text"] = label.text,
+                    ["selected"] = i == _selected,
+                    ["centered"] = centered,
+                    ["tab"] = RectDict(tab),
+                    ["caption"] = RectDict(caption),
+                    ["glyphs"] = RectDict(text),
+                    ["captionDx"] = Round1(rx),
+                    ["captionDy"] = Round1(ry),
+                    ["textDx"] = Round1(tx),
+                    ["textDy"] = Round1(ty),
+                    ["parentIsTab"] = parent != null && parent.Pointer == go.transform.Pointer,
+                    ["font"] = label.font != null ? label.font.name : null,
+                    ["fontSize"] = Math.Round(label.fontSize, 1),
+                });
+            }
+
+            return all;
+
+            static object? Round1(float v) => float.IsNaN(v) ? null : Math.Round(v, 1);
+        }
+
+        /// <summary>The drawn text's screen rect (the TMP mesh bounds), Unknown before anything is drawn.</summary>
+        static ScreenRect TextRectOf(TextMeshProUGUI label)
+        {
+            try
+            {
+                label.ForceMeshUpdate();
+                var bounds = label.textBounds;
+                if (bounds.size.x <= .01f || bounds.size.y <= .01f) return ScreenRect.Unknown;
+                var tr = label.rectTransform;
+                Vector2 a = RectTransformUtility.WorldToScreenPoint(null, tr.TransformPoint(bounds.min));
+                Vector2 b = RectTransformUtility.WorldToScreenPoint(null, tr.TransformPoint(bounds.max));
+                return ScreenRect.FromCorners(a.x, a.y, b.x, b.y);
+            }
+            catch { return ScreenRect.Unknown; }
+        }
+
+        /// <summary>What the donor tab's caption brought, read before <see cref="AdoptCaption"/> changes it.</summary>
+        static Dictionary<string, object?> DescribeDonorCaption(TextMeshProUGUI label, GameObject tab)
+        {
+            var d = new Dictionary<string, object?>();
+            try
+            {
+                var rt = label.rectTransform;
+                var parent = label.transform.parent;
+                var m = label.margin;
+                d["parent"] = parent == null ? null : parent.Pointer == tab.transform.Pointer ? "(tab)" : parent.name;
+                d["anchorMin"] = Pair(rt.anchorMin);
+                d["anchorMax"] = Pair(rt.anchorMax);
+                d["pivot"] = Pair(rt.pivot);
+                d["anchoredPosition"] = Pair(rt.anchoredPosition);
+                d["sizeDelta"] = Pair(rt.sizeDelta);
+                d["margin"] = new object[] { Math.Round(m.x, 1), Math.Round(m.y, 1), Math.Round(m.z, 1), Math.Round(m.w, 1) };
+                d["alignment"] = label.alignment.ToString();
+                d["wordWrapping"] = label.enableWordWrapping;
+                var transitions = new List<object?>();
+                var native = tab.GetComponent<SimpleStunButton>();
+                var targets = native != null ? native.TargetSettings : null;
+                if (targets != null)
+                    foreach (var target in targets)
+                        if (target != null && target.Enabled) transitions.Add(target.Transition.ToString());
+                d["transitions"] = transitions;
+            }
+            catch (Exception e) { d["error"] = e.Message; }
+
+            return d;
+
+            static object[] Pair(Vector2 v) => new object[] { Math.Round(v.x, 1), Math.Round(v.y, 1) };
         }
 
         /// <summary>
@@ -555,6 +724,7 @@ internal sealed partial class UnityUiRuntime
             _content.Clear(); _nativeTabs.Clear();
             foreach (var (_, slot) in _buttons) { _runtime.Unwire(slot); UiSlotTable.Release(slot); }
             _buttons.Clear();
+            _labels.Clear(); _captionDonor = null; _captionFixes = 0;
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
             _tabDonorRect = null; _stripRect = null; _height = null; _bonusAnchor = null; _masks.Clear();
