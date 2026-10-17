@@ -43,9 +43,9 @@ internal readonly struct UiChecklistLine
 /// (case- and accent-insensitive, <see cref="UiPickerModel.Fold"/>) appears in its label, note, section, keywords or a text
 /// cell. Entries under a folded heading are not shown (the heading stays, with its count).</para>
 ///
-/// <para><b>Order.</b> Sections keep the order of their first entry in the caller's list (whatever the filter); within a
+/// <para><b>Order.</b> Groups keep the order of their first entry in the caller's list (whatever the filter); within a
 /// section the sort applies (stable: ties keep the caller's order; <see cref="UiDataTableModel.CompareCells"/>'s rules).
-/// Entries without a section while others have one sit under <see cref="UiChecklistOptions.OtherSection"/>.</para>
+/// Entries without a section while others have one sit under <see cref="UiChecklistOptions.OtherGroup"/>.</para>
 ///
 /// <para><b>Checked set.</b> By id, in check order, independent of what is shown: the filter, the search, the sort, a fold
 /// and <see cref="SetEntries"/> never change it, except that ids that leave or become disabled drop out. Only enabled
@@ -221,10 +221,10 @@ internal sealed class UiChecklistModel
     internal string SectionOf(UiChecklistEntry e)
     {
         if (!string.IsNullOrWhiteSpace(e.Section)) return e.Section.Trim();
-        return _anySection ? OtherSection : "";
+        return _anySection ? OtherGroup : "";
     }
 
-    private string OtherSection => string.IsNullOrWhiteSpace(Options.OtherSection) ? "Other" : Options.OtherSection.Trim();
+    private string OtherGroup => string.IsNullOrWhiteSpace(Options.OtherGroup) ? "Other" : Options.OtherGroup.Trim();
 
     /// <summary>The cell an entry draws and sorts by in <paramref name="column"/> (the label and note columns fall back to the entry's).</summary>
     internal UiTableCell? CellOf(UiChecklistEntry entry, UiTableColumn column)
@@ -370,14 +370,14 @@ internal sealed class UiChecklistModel
         return a.CompareTo(b);
     }
 
-    // ---- Sections and lines -------------------------------------------------------------------------
+    // ---- Groups and lines -------------------------------------------------------------------------
 
     internal bool IsCollapsed(string section) => section != null && _collapsed.Contains(section);
 
-    /// <summary>Fold or unfold a section (refused while <see cref="UiChecklistOptions.CollapsibleSections"/> is off). True when it changed.</summary>
+    /// <summary>Fold or unfold a section (refused while <see cref="UiChecklistOptions.CollapsibleGroups"/> is off). True when it changed.</summary>
     internal bool SetCollapsed(string section, bool collapsed)
     {
-        if (string.IsNullOrEmpty(section) || (collapsed && !Options.CollapsibleSections)) return false;
+        if (string.IsNullOrEmpty(section) || (collapsed && !Options.CollapsibleGroups)) return false;
         bool changed = collapsed ? _collapsed.Add(section) : _collapsed.Remove(section);
         if (changed) Invalidate();
         return changed;
@@ -441,7 +441,7 @@ internal sealed class UiChecklistModel
         }
     }
 
-    internal IReadOnlyList<string> Sections
+    internal IReadOnlyList<string> Groups
     {
         get
         {
@@ -489,6 +489,15 @@ internal sealed class UiChecklistModel
         return -1;
     }
 
+    /// <summary>The line drawing group <paramref name="group"/>'s heading, or -1.</summary>
+    internal int LineOfGroup(string group)
+    {
+        var lines = Lines();
+        for (int i = 0; i < lines.Count; i++)
+            if (lines[i].Kind == UiChecklistLineKind.Section && string.Equals(lines[i].Section, group, StringComparison.Ordinal)) return i;
+        return -1;
+    }
+
     /// <summary>A section heading's words: <c>Storage (124)</c>, and <c> · 3 selected</c> while some are checked.</summary>
     internal string SectionCaption(string section)
     {
@@ -501,7 +510,7 @@ internal sealed class UiChecklistModel
 
     internal IReadOnlyList<string> Selected => _selected;
 
-    internal bool IsChecked(string? id) => id != null && _selectedSet.Contains(id);
+    internal bool IsSelected(string? id) => id != null && _selectedSet.Contains(id);
 
     internal string? Anchor => _anchor;
 
@@ -560,10 +569,10 @@ internal sealed class UiChecklistModel
         if (from < 0)
         {
             _anchor = entry.Id;
-            return Set(entry.Id, !IsChecked(entry.Id));
+            return Set(entry.Id, !IsSelected(entry.Id));
         }
 
-        bool on = !IsChecked(entry.Id);
+        bool on = !IsSelected(entry.Id);
         bool changed = false;
         int a = Math.Min(from, line), b = Math.Max(from, line);
         for (int i = a; i <= b; i++)

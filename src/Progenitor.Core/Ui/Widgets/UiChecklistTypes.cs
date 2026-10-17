@@ -39,7 +39,7 @@ public sealed class UiChecklistFilter
 /// <summary>
 /// CHECKLIST1: one row of a checklist (<see cref="UiWidgets.Checklist"/>): a chest, a station, a belt — anything the caller
 /// can name. <see cref="Id"/> is the caller's stable key: the checked set follows it across filtering, searching, sorting
-/// and <see cref="IUiChecklist.SetEntries"/>. Two entries with the same id are refused.
+/// and <see cref="IUiChecklist.SetEntries"/>. Two entries with the same id are refused. The checklist reads an entry when it is handed over (a snapshot): change it, then call <see cref="IUiChecklist.SetEntries"/> again.
 /// </summary>
 public sealed class UiChecklistEntry
 {
@@ -105,7 +105,7 @@ public sealed class UiChecklistEntry
 
     /// <summary>
     /// Why the entry cannot be checked now (<c>Not your clan</c>); empty when it can. The row is drawn grayed, cannot be
-    /// checked (by a click, a range, Select shown or <see cref="IUiChecklist.SetChecked"/>), and shows the reason when hovered.
+    /// checked (by a click, a range, Select shown or <see cref="IUiChecklist.Select"/>), and shows the reason when hovered.
     /// </summary>
     public string DisabledReason { get; set; } = "";
 
@@ -197,19 +197,19 @@ public sealed class UiChecklistOptions
     public bool Buttons { get; set; } = true;
 
     /// <summary>
-    /// Each row gets a <see cref="PreviewCaption"/> button that raises <see cref="IUiChecklist.OnPreview"/>, as do a
-    /// double-click and a right-click on the row. Off by default.
+    /// Each row gets a <see cref="PreviewCaption"/> button that raises <see cref="IUiChecklist.OnPreview"/>, as does a
+    /// right-click on the row. Off by default. (A double-click is two clicks: two flips.)
     /// </summary>
     public bool Preview { get; set; }
 
     /// <summary>The preview button's caption.</summary>
     public string PreviewCaption { get; set; } = "View";
 
-    /// <summary>A section heading folds and unfolds its rows (a click on it). On by default.</summary>
-    public bool CollapsibleSections { get; set; } = true;
+    /// <summary>A group heading (an entry's <see cref="UiChecklistEntry.Section"/>) folds and unfolds its rows (a click on it). On by default.</summary>
+    public bool CollapsibleGroups { get; set; } = true;
 
-    /// <summary>The heading of entries with no <see cref="UiChecklistEntry.Section"/> while other entries name one.</summary>
-    public string OtherSection { get; set; } = "Other";
+    /// <summary>The group of entries with no <see cref="UiChecklistEntry.Section"/> while other entries name one (the data table's rule).</summary>
+    public string OtherGroup { get; set; } = "Other";
 
     /// <summary>The slot rows the body draws (4 to 30; 12 by default). More rows scroll; only these rows are ever built.</summary>
     public int VisibleRows { get; set; } = 12;
@@ -222,9 +222,6 @@ public sealed class UiChecklistOptions
 
     /// <summary>The muted line drawn while the checklist has no entries.</summary>
     public string EmptyText { get; set; } = "Nothing to choose from.";
-
-    /// <summary>Tests: the clock a double-click is timed by, in seconds. Null: the process clock.</summary>
-    internal Func<double>? Clock { get; set; }
 }
 
 /// <summary>
@@ -245,7 +242,9 @@ public interface IUiChecklist : IUiHandle
 
     /// <summary>
     /// Replace every entry (a refresh). No event. Checked ids that remain (and can be checked) stay checked; others drop
-    /// out silently. The search, the filter, the sort, folded sections and the scroll position are kept (clamped).
+    /// out silently. The search, the filter, the sort and folded groups are kept, and the scroll keeps the entry that was
+    /// at the top (by id; clamped when it left). The entries are read here (a snapshot): an entry changed afterwards shows
+    /// its change only after the next <see cref="SetEntries"/>.
     /// </summary>
     void SetEntries(IEnumerable<UiChecklistEntry> entries);
 
@@ -283,10 +282,10 @@ public interface IUiChecklist : IUiHandle
     IReadOnlyList<string> Selected { get; }
 
     /// <summary>Whether <paramref name="id"/> is checked.</summary>
-    bool IsChecked(string id);
+    bool IsSelected(string id);
 
-    /// <summary>Check or uncheck one entry. False for an unknown or disabled entry, or no change. Raises <see cref="OnSelectionChanged"/>.</summary>
-    bool SetChecked(string id, bool on = true);
+    /// <summary>Check or uncheck one entry (the picker's <c>Select</c>). False for an unknown or disabled entry, or no change. Raises <see cref="OnSelectionChanged"/>.</summary>
+    bool Select(string id, bool selected = true);
 
     /// <summary>Check exactly <paramref name="ids"/> (unknown and disabled ids skipped). Raises <see cref="OnSelectionChanged"/> when it changed.</summary>
     void SetSelected(IEnumerable<string> ids);
@@ -297,20 +296,20 @@ public interface IUiChecklist : IUiHandle
     /// </summary>
     int SelectShown();
 
-    /// <summary>Uncheck everything, shown or not (the status line's <b>Clear</b>). Returns how many were unchecked; one event.</summary>
-    int ClearSelection();
+    /// <summary>Uncheck everything, shown or not (the status line's <b>Clear</b>). One event when something was checked.</summary>
+    void ClearSelection();
 
     /// <summary>After the checked set changed.</summary>
     IDisposable OnSelectionChanged(Action<IReadOnlyList<string>> handler);
 
-    /// <summary>The section headings in display order (those with a shown entry).</summary>
-    IReadOnlyList<string> Sections { get; }
+    /// <summary>The group headings in display order (the entries' <see cref="UiChecklistEntry.Section"/>s with a shown entry).</summary>
+    IReadOnlyList<string> Groups { get; }
 
-    /// <summary>Fold or unfold section <paramref name="section"/>. False when nothing changed. No event.</summary>
-    bool SetSectionCollapsed(string section, bool collapsed);
+    /// <summary>Fold or unfold group <paramref name="group"/>. False when nothing changed. No event.</summary>
+    bool SetGroupCollapsed(string group, bool collapsed);
 
-    /// <summary>Whether section <paramref name="section"/> is folded.</summary>
-    bool IsSectionCollapsed(string section);
+    /// <summary>Whether group <paramref name="group"/> is folded.</summary>
+    bool IsGroupCollapsed(string group);
 
     /// <summary>The first body line drawn (0-based, clamped). Setting it scrolls; no event.</summary>
     int TopIndex { get; set; }
@@ -342,15 +341,15 @@ public interface IUiChecklist : IUiHandle
     /// <summary>The Cancel button (and Escape, B on a controller, while a handler is subscribed): raise <see cref="OnCancelled"/>.</summary>
     void Cancel();
 
-    /// <summary>After Cancel. With a handler subscribed, Escape over the shown checklist cancels instead of going on.</summary>
+    /// <summary>After Cancel. With a handler subscribed, Escape cancels while the checklist's panel is the topmost Escape target (the window the press would close); a window over it closes first.</summary>
     IDisposable OnCancelled(Action handler);
 
     /// <summary>Raise <see cref="OnPreview"/> for <paramref name="id"/> as the row's preview button does. False for an unknown id.</summary>
     bool Preview(string id);
 
     /// <summary>
-    /// After the player asked to preview an entry: the row's preview button, a double-click or a right-click on the row
-    /// (with <see cref="UiChecklistOptions.Preview"/>). A disabled entry can be previewed.
+    /// After the player asked to preview an entry: the row's preview button or a right-click on the row (with
+    /// <see cref="UiChecklistOptions.Preview"/>). A disabled entry can be previewed.
     /// </summary>
     IDisposable OnPreview(Action<string> handler);
 
@@ -359,11 +358,15 @@ public interface IUiChecklist : IUiHandle
 
     /// <summary>
     /// Hide the checklist keeping everything (search, filter, checked rows, sort, folded sections, scroll), while the mod
-    /// shows a preview of its own. Escape and Enter are not taken while suspended.
+    /// shows a preview of its own. Escape and Enter are not taken while suspended. Setting <see cref="IUiHandle.Visible"/>
+    /// while suspended (a tab switch) shows nothing: it is remembered and applied by <see cref="Resume"/>.
     /// </summary>
     void Suspend();
 
-    /// <summary>Show the checklist again as it was before <see cref="Suspend"/>.</summary>
+    /// <summary>
+    /// Show the checklist again as it was before <see cref="Suspend"/>. When the controller focus was on one of its rows,
+    /// it returns to the previewed row (scrolled into view).
+    /// </summary>
     void Resume();
 
     /// <summary>Whether <see cref="Suspend"/> is in effect.</summary>
@@ -371,7 +374,7 @@ public interface IUiChecklist : IUiHandle
 
     /// <summary>
     /// Readback: <c>{kind: checklist, key, query, filter, filters, sort, columns, top, lines, entries, shown, visibleRows,
-    /// slots, selected, collapsed, status, confirm, canConfirm, filterOpen, suspended}</c>.
+    /// slots, selected, groups, collapsed, status, confirm, canConfirm, filterOpen, suspended}</c>.
     /// </summary>
     Dictionary<string, object?> Describe();
 }

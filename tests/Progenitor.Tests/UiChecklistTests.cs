@@ -20,7 +20,6 @@ public sealed class UiChecklistTests : IDisposable
     private readonly TableRuntimeFake _runtime = new();
     private readonly object _owner = new();
     private readonly List<IUiPanel> _panels = new();
-    private double _now = 100;
 
     public UiChecklistTests()
     {
@@ -82,7 +81,6 @@ public sealed class UiChecklistTests : IDisposable
         VisibleRows = visible,
         ConfirmFormat = "Add {0}",
         Preview = true,
-        Clock = () => _now,
     };
 
     private static UiChecklistModel Model(IEnumerable<UiChecklistEntry>? entries = null, UiChecklistOptions? options = null)
@@ -189,7 +187,7 @@ public sealed class UiChecklistTests : IDisposable
         m.SetFilter("stations");
         m.SetQuery("furn");
         Assert.Equal(new[] { "#Crafting", "s2" }, LineIds(m));
-        Assert.Equal(new[] { "Crafting" }, m.Sections);
+        Assert.Equal(new[] { "Crafting" }, m.Groups);
     }
 
     [Fact]
@@ -216,8 +214,8 @@ public sealed class UiChecklistTests : IDisposable
         m.SetQuery("furnace");
         Assert.Equal(1, m.SelectShown());
         Assert.Equal(new[] { "c1", "c2", "s2" }, m.Selected);
-        Assert.False(m.IsChecked("s1")); // filtered out, never touched
-        Assert.False(m.IsChecked("b1"));
+        Assert.False(m.IsSelected("s1")); // filtered out, never touched
+        Assert.False(m.IsSelected("b1"));
         Assert.Equal(0, m.SelectShown());
         Assert.False(m.CanSelectShown());
     }
@@ -354,7 +352,7 @@ public sealed class UiChecklistTests : IDisposable
         Assert.True(m.Click(m.LineOf("s1"), range: false));
         Assert.True(m.Click(m.LineOf("s2"), range: true));
         Assert.Equal(new[] { "s1", "s2" }, m.Selected);
-        Assert.False(m.IsChecked("b1")); // between them in the full list, hidden by the filter
+        Assert.False(m.IsSelected("b1")); // between them in the full list, hidden by the filter
         // An anchor that is no longer shown: the click is a plain toggle.
         m.SetFilter("belts");
         Assert.True(m.Click(m.LineOf("b1"), range: true));
@@ -444,7 +442,7 @@ public sealed class UiChecklistTests : IDisposable
         Assert.Equal(CellTone.Disabled, Cell(c3, UiChecklistLayout.CellCheck).Tone);
         Assert.Equal(CellTone.Faint, Cell(c3, "c:label").Tone);
         handle.ClickSlot(3);
-        Assert.False(list.IsChecked("c3"));
+        Assert.False(list.IsSelected("c3"));
         handle.HoverSlotForTests(3, true);
         Assert.Equal(("Locked chest", "Not your clan"), _runtime.Tooltip);
 
@@ -558,12 +556,12 @@ public sealed class UiChecklistTests : IDisposable
     {
         var (list, handle, _) = NewList();
         handle.ClickSlot(0); // #Storage
-        Assert.True(list.IsSectionCollapsed("Storage"));
+        Assert.True(list.IsGroupCollapsed("Storage"));
         // The folded heading stays; the next line is the next heading.
         Assert.Equal("Crafting (3)", Cell(Row("cl:row1"), UiChecklistLayout.CellSection).Text);
         Assert.False(Row("cl:row0").Expanded);
         handle.FoldSlot(0);
-        Assert.False(list.IsSectionCollapsed("Storage"));
+        Assert.False(list.IsGroupCollapsed("Storage"));
         Assert.True(Row("cl:row0").Expanded);
     }
 
@@ -579,7 +577,7 @@ public sealed class UiChecklistTests : IDisposable
     }
 
     [Fact]
-    public void Preview_comes_from_the_view_button_a_double_click_and_a_right_click_and_keeps_the_checked_set()
+    public void Preview_comes_from_the_view_button_and_a_right_click_and_a_double_click_is_two_flips()
     {
         var (list, handle, _) = NewList();
         var previews = new List<string>();
@@ -589,19 +587,83 @@ public sealed class UiChecklistTests : IDisposable
         Assert.Empty(list.Selected);
 
         handle.ClickSlot(1);
-        _now += 0.2;
-        handle.ClickSlot(1); // a double-click: flipped back, and a preview
-        Assert.Equal(new[] { "c2", "c1" }, previews);
+        handle.ClickSlot(1); // two quick clicks: two flips, no preview
+        Assert.Single(previews);
         Assert.Empty(list.Selected);
-        _now += 5;
         handle.ClickSlot(1);
-        _now += 1; // too slow: two clicks
-        handle.ClickSlot(1);
-        Assert.Equal(2, previews.Count);
+        Assert.Equal(new[] { "c1" }, list.Selected);
 
         handle.RightClickForTests(3); // a disabled entry can be previewed
         Assert.Equal("c3", previews[^1]);
+        Assert.Equal(new[] { "c1" }, list.Selected); // a preview flips nothing
         Assert.False(list.Preview("nope"));
+    }
+
+    [Fact]
+    public void While_suspended_a_Visible_change_shows_nothing_and_Resume_applies_it()
+    {
+        var (list, _, _) = NewList();
+        list.Suspend();
+        list.Visible = true; // a tab switching back while the mod previews
+        Assert.False(Row("cl:row0").Visible);
+        Assert.True(list.Suspended);
+        list.Visible = false; // and away again
+        list.Resume();
+        Assert.False(Row("cl:row0").Visible); // the last request wins: hidden
+        Assert.False(list.Visible);
+        list.Visible = true;
+        Assert.True(Row("cl:row0").Visible);
+    }
+
+    [Fact]
+    public void Escape_is_the_top_windows_when_a_window_is_stacked_over_the_checklist()
+    {
+        var (list, handle, panel) = NewList();
+        int cancels = 0;
+        list.OnCancelled(() => cancels++);
+        var over = NewPanel().GameWindow(500f);
+        over.CaptureMode = UiCaptureMode.WhileShown; // a floating window that takes the input: an Escape target
+        over.Show(); // shown after the checklist's panel: the topmost Escape target
+        Assert.False(handle.EscapeKey());
+        list.FilterOpen = true;
+        Assert.False(handle.EscapeKey()); // not even the open filter: the window over it closes first
+        Assert.True(list.FilterOpen);
+        Assert.Equal(0, cancels);
+        over.Hide();
+        Assert.True(handle.EscapeKey()); // the filter
+        Assert.True(handle.EscapeKey()); // then Cancel
+        Assert.Equal(1, cancels);
+
+        // The checklist on a window of its own, with another window over it, then on top again.
+        var own = NewPanel().GameWindow(700f);
+        own.CaptureMode = UiCaptureMode.WhileShown;
+        var second = own.Checklist("cl2", Sample(), Options());
+        own.Show();
+        var top = NewPanel().GameWindow(400f);
+        top.CaptureMode = UiCaptureMode.WhileShown;
+        top.Show();
+        int cancels2 = 0;
+        second.OnCancelled(() => cancels2++);
+        Assert.False(((UiChecklistHandle)second).EscapeKey());
+        top.Hide();
+        Assert.True(((UiChecklistHandle)second).EscapeKey());
+        Assert.Equal(1, cancels2);
+        Assert.NotNull(panel);
+    }
+
+    [Fact]
+    public void Cancel_closes_the_open_filter_chips_and_the_status_is_read_from_the_model()
+    {
+        var (list, _, _) = NewList();
+        list.FilterOpen = true;
+        Assert.True(Row("cl:filters0").Visible);
+        list.Cancel();
+        Assert.False(list.FilterOpen);
+        Assert.False(Row("cl:filters0").Visible);
+        list.Suspend();
+        list.Select("c1"); // applied while hidden: the status still reads it
+        Assert.Equal("6 entries · 1 selected", list.StatusText);
+        list.Resume();
     }
 
     [Fact]
@@ -626,7 +688,7 @@ public sealed class UiChecklistTests : IDisposable
         var (list, handle, _) = NewList(Many(300), Options(visible: 8));
         list.Filter = "chests";
         list.Query = "chest";
-        list.SetChecked("e001");
+        list.Select("e001");
         list.SortBy("distance");
         list.SortBy("distance"); // descending
         list.TopIndex = 40;
@@ -673,8 +735,8 @@ public sealed class UiChecklistTests : IDisposable
     public void SetEntries_keeps_the_checked_ids_the_filter_and_the_scroll()
     {
         var (list, _, _) = NewList(Many(300), Options(visible: 8));
-        list.SetChecked("e010");
-        list.SetChecked("e020");
+        list.Select("e010");
+        list.Select("e020");
         list.Filter = "chests";
         list.TopIndex = 30;
         var changes = 0;
@@ -684,6 +746,22 @@ public sealed class UiChecklistTests : IDisposable
         Assert.Equal(new[] { "e010" }, list.Selected);
         Assert.Equal(0, changes); // a refresh raises nothing
         Assert.Equal("chests", list.Filter);
+        Assert.Equal(29, list.TopIndex); // e020 sat above the top: the same entry stays at the top, one line up
+    }
+
+    [Fact]
+    public void SetEntries_keeps_the_top_entry_by_id_when_rows_above_it_leave()
+    {
+        var (list, handle, _) = NewList(Many(300), Options(visible: 8));
+        list.TopIndex = 40;
+        string topId = (string)((List<Dictionary<string, object?>>)handle.Describe()["slots"]!)[0]["id"]!;
+        // Ten entries above the top leave: the same entry stays at the top (a line number would have jumped ten rows).
+        var next = Many(300).Where(e => string.CompareOrdinal(e.Id, "e010") >= 0).ToList();
+        list.SetEntries(next);
+        Assert.Equal(topId, (string)((List<Dictionary<string, object?>>)handle.Describe()["slots"]!)[0]["id"]!);
+        Assert.Equal(30, list.TopIndex);
+        // The top entry itself left: the line number is kept (clamped).
+        list.SetEntries(next.Where(e => e.Id != topId).ToList());
         Assert.Equal(30, list.TopIndex);
     }
 
@@ -705,7 +783,7 @@ public sealed class UiChecklistTests : IDisposable
         Assert.Equal("opened", sample.Toggle());
         var list = sample.List!;
         Assert.Equal(GalleryChecklist.EntryCount, list.Entries.Count);
-        Assert.Equal(new[] { "Storage", "Crafting", "Logistics" }, list.Sections);
+        Assert.Equal(new[] { "Storage", "Crafting", "Logistics" }, list.Groups);
         Assert.Contains(list.Entries, e => e.Disabled);
         Assert.Equal("distance asc", list.Sort.Single().ToString());
         list.Filter = "near";

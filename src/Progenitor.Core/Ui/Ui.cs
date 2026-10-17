@@ -1344,6 +1344,24 @@ public static partial class Ui
     private static bool HasShownWindow(UiHandle[] snapshot) => ShownWindows(snapshot).Count > 0;
 
     /// <summary>
+    /// CHECKLIST1: whether an Escape that reached the Escape handlers belongs to a control on <paramref name="panel"/>: the
+    /// panel is the window the sweep would close next (the topmost shown standard window or input-taking floating panel),
+    /// or no such window is shown at all (a Mods page, a passive panel), and no dropdown list is open. Otherwise the
+    /// press is the top window's, and the control lets the framework close it.
+    /// </summary>
+    internal static bool IsEscapeTarget(IUiPanel? panel)
+    {
+        if (panel is not UiPanelHandle host || host.IsDisposed || host.State != UiHandleState.Shown) return false;
+        try { if (UiChoiceHandle.AnyOpen) return false; }
+        catch { /* an unreadable list state is no open list */ }
+        UiHandle[] snapshot;
+        lock (Gate)
+            snapshot = Live.ToArray();
+        var top = UiWindowLayout.EscapeTarget(ShownWindows(snapshot), _ => true, p => p.ShownSequence);
+        return top == null || ReferenceEquals(top, host);
+    }
+
+    /// <summary>
     /// WINDOWS1: hide the topmost shown standard window (<see cref="UiWindowLayout.EscapeTarget"/>). False when none is
     /// shown, or when the window is still shown after the hide (the press then falls through to the sweep).
     /// </summary>

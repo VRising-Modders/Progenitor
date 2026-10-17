@@ -28,9 +28,6 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         internal bool Visible { get; }
     }
 
-    /// <summary>Two clicks on one row within this many seconds are a double-click (a preview).</summary>
-    internal const double DoubleClickSeconds = 0.45;
-
     private readonly UiChecklistModel _model;
     private readonly UiChecklistOptions _options;
     private readonly UiTableViewport _viewport;
@@ -59,7 +56,6 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private readonly Dictionary<string, IUiMarkView?> _headerMarks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiDrawnMark> _headerMarkNow = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _headerGoldNow = new(StringComparer.Ordinal);
-    private readonly Func<double> _clock;
     private IWidgetScrollBar? _bar;
     private IReadOnlyList<UiChecklistLine>? _renderedLines;
     private int _renderedTop = -1;
@@ -69,8 +65,8 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private bool _suspended;
     private bool _visibleBeforeSuspend = true;
     private string _hoveredId = "";
-    private string? _lastClickId;
-    private double _lastClickAt = double.NegativeInfinity;
+    private string _previewedId = "";
+    private bool _focusBeforeSuspend;
 
     internal UiChecklistHandle(IUiPanel panel, string key, IEnumerable<UiChecklistEntry>? entries, UiChecklistOptions? options)
         : base(panel, key, key)
@@ -79,8 +75,6 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         _model = new UiChecklistModel(_options);
         _model.SetEntries(entries); // a duplicate id throws here, before a row is built
         if (_options.Selected != null) _model.Replace(_options.Selected);
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        _clock = _options.Clock ?? (() => watch.Elapsed.TotalSeconds);
         _viewport = _options.FillHeight
             ? new UiTableViewport(_options.VisibleRows, UiTableViewport.MaxSlots)
             : new UiTableViewport(_options.VisibleRows);
@@ -213,7 +207,18 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     public void SetEntries(IEnumerable<UiChecklistEntry> entries)
     {
         if (IsDisposed) return;
+        // Keep the scroll on the line that was at the top, by its entry id (or its group heading), not its number.
+        Sync();
+        var lines = _model.Lines();
+        var top = _viewport.Top < lines.Count ? lines[_viewport.Top] : (UiChecklistLine?)null;
         _model.SetEntries(entries);
+        if (top is { } t)
+        {
+            int line = t.Kind == UiChecklistLineKind.Entry ? _model.LineOf(t.Entry!.Id) : _model.LineOfGroup(t.Section);
+            Sync();
+            if (line >= 0) _viewport.SetTop(line);
+        }
+
         Render();
     }
 
@@ -297,11 +302,11 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     public IReadOnlyList<string> Selected => new List<string>(_model.Selected);
 
-    public bool IsChecked(string id) => _model.IsChecked(id);
+    public bool IsSelected(string id) => _model.IsSelected(id);
 
-    public bool SetChecked(string id, bool on = true)
+    public bool Select(string id, bool selected = true)
     {
-        if (IsDisposed || !_model.Set(id, on)) return false;
+        if (IsDisposed || !_model.Set(id, selected)) return false;
         Render();
         RaiseSelection();
         return true;
@@ -324,28 +329,25 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         return added;
     }
 
-    public int ClearSelection()
+    public void ClearSelection()
     {
-        if (IsDisposed) return 0;
-        int n = _model.Clear();
-        if (n == 0) return 0;
+        if (IsDisposed || _model.Clear() == 0) return;
         Render();
         RaiseSelection();
-        return n;
     }
 
     public IDisposable OnSelectionChanged(Action<IReadOnlyList<string>> handler) => Subscribe(_selectionChanged, handler);
 
-    public IReadOnlyList<string> Sections => new List<string>(_model.Sections);
+    public IReadOnlyList<string> Groups => new List<string>(_model.Groups);
 
-    public bool SetSectionCollapsed(string section, bool collapsed)
+    public bool SetGroupCollapsed(string section, bool collapsed)
     {
         if (IsDisposed || !_model.SetCollapsed(section, collapsed)) return false;
         Render();
         return true;
     }
 
-    public bool IsSectionCollapsed(string section) => _model.IsCollapsed(section);
+    public bool IsGroupCollapsed(string section) => _model.IsCollapsed(section);
 
     public int TopIndex
     {
@@ -376,7 +378,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         return true;
     }
 
-    public string StatusText { get; private set; } = "";
+    public string StatusText => _model.Status();
 
     public string ConfirmText => _model.ConfirmCaption(_model.Selected.Count);
 
@@ -394,7 +396,12 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     public void Cancel()
     {
         if (IsDisposed) return;
-        _filterOpen = false;
+        if (_filterOpen)
+        {
+            _filterOpen = false;
+            Render(); // the chips hide
+        }
+
         Raise(_cancelled, true, "cancel");
     }
 
@@ -407,6 +414,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     public bool Preview(string id)
     {
         if (IsDisposed || _model.Find(id) == null) return false;
+        _previewedId = id;
         HideTooltip();
         Raise(_previewHandlers, id, "preview");
         return true;
@@ -420,10 +428,11 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     {
         if (IsDisposed || _suspended) return;
         _visibleBeforeSuspend = Visible;
-        _suspended = true;
+        _focusBeforeSuspend = FocusIsOnSlot();
         SetHovered("");
         HideTooltip();
         Visible = false;
+        _suspended = true; // after the hide: from here a Visible change is held for Resume (DeferVisible)
     }
 
     public void Resume()
@@ -431,9 +440,38 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         if (IsDisposed || !_suspended) return;
         _suspended = false;
         Visible = _visibleBeforeSuspend;
+        if (!_focusBeforeSuspend || !Visible) return;
+        _focusBeforeSuspend = false;
+        // The controller was on the list: put it back on the previewed row (scrolled into view).
+        if (_previewedId.Length == 0 || !ScrollTo(_previewedId)) return;
+        Sync();
+        int slot = _viewport.SlotOf(_model.LineOf(_previewedId));
+        if (slot >= 0 && _slots[slot] is UiHandle row)
+        {
+            try { UiNav.FocusOn(row, ""); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: checklist '" + Key + "' focus: " + e.Message); }
+        }
     }
 
     public bool Suspended => _suspended;
+
+    /// <summary>While suspended, a Visible change (a tab switch) is remembered for <see cref="Resume"/> and shows nothing.</summary>
+    protected override bool DeferVisible(bool value)
+    {
+        if (!_suspended) return false;
+        _visibleBeforeSuspend = value;
+        return true;
+    }
+
+    /// <summary>Whether NAV1's focus is on one of the body's rows now (the row or one of its cells).</summary>
+    private bool FocusIsOnSlot()
+    {
+        var focus = UiNav.Focus;
+        if (focus.IsEmpty) return false;
+        foreach (var slot in _slots)
+            if (ReferenceEquals(slot, focus.Handle)) return true;
+        return false;
+    }
 
     // ---- Events ------------------------------------------------------------------------------------
 
@@ -474,8 +512,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     /// <summary>
     /// A click on slot <paramref name="slot"/>: an entry flips (Shift: the range from the anchor takes its new state), a
-    /// heading folds. A second pointer click on the same entry within <see cref="DoubleClickSeconds"/> is a double-click:
-    /// it flips the entry back and asks for its preview (with <see cref="UiChecklistOptions.Preview"/>).
+    /// heading folds. Every click is one flip: a double-click is two (a preview is the View button or a right-click).
     /// </summary>
     internal void ClickSlot(int slot, UiClickModifiers mods)
     {
@@ -484,28 +521,13 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         if (line == null) return;
         if (line.Value.Kind == UiChecklistLineKind.Section)
         {
-            _lastClickId = null;
-            if (_options.CollapsibleSections) SetSectionCollapsed(line.Value.Section, !_model.IsCollapsed(line.Value.Section));
+            if (_options.CollapsibleGroups) SetGroupCollapsed(line.Value.Section, !_model.IsCollapsed(line.Value.Section));
             return;
         }
 
-        var entry = line.Value.Entry!;
-        bool shift = (mods & UiClickModifiers.Shift) != 0;
-        double now = _clock();
-        // A double-click is the pointer's: a controller or Space pressed twice quickly is two flips.
-        bool pointer = !UiNav.Marked;
-        bool second = _preview && pointer && !shift && string.Equals(_lastClickId, entry.Id, StringComparison.Ordinal)
-            && now - _lastClickAt <= DoubleClickSeconds;
-        _lastClickId = second ? null : entry.Id;
-        _lastClickAt = now;
-        bool changed = _model.Click(_viewport.Top + slot, shift && !second);
-        if (changed)
-        {
-            Render();
-            RaiseSelection();
-        }
-
-        if (second) Preview(entry.Id);
+        if (!_model.Click(_viewport.Top + slot, (mods & UiClickModifiers.Shift) != 0)) return;
+        Render();
+        RaiseSelection();
     }
 
     /// <summary>The fold arrow on a section line.</summary>
@@ -513,11 +535,11 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     {
         if (!Live || _suspended) return;
         var line = LineAtSlot(slot);
-        if (line is { Kind: UiChecklistLineKind.Section } l && _options.CollapsibleSections)
-            SetSectionCollapsed(l.Section, !_model.IsCollapsed(l.Section));
+        if (line is { Kind: UiChecklistLineKind.Section } l && _options.CollapsibleGroups)
+            SetGroupCollapsed(l.Section, !_model.IsCollapsed(l.Section));
     }
 
-    /// <summary>The row's preview button (and a right-click, a double-click).</summary>
+    /// <summary>The row's preview button (and a right-click on the row).</summary>
     internal void PreviewSlot(int slot)
     {
         if (!Live || _suspended || !_preview) return;
@@ -546,6 +568,8 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     internal bool EscapeKey()
     {
         if (IsDisposed || !Visible || _suspended || Panel.State != UiHandleState.Shown) return false;
+        // Only the topmost Escape target's press: a window stacked over this one (or an open dropdown list) closes first.
+        if (!Ui.IsEscapeTarget(Panel)) return false;
         if (_filterOpen)
         {
             FilterOpen = false;
@@ -789,7 +813,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
                 ["kind"] = line.Kind == UiChecklistLineKind.Section ? "section" : "entry",
                 ["id"] = e?.Id,
                 ["section"] = line.Section,
-                ["checked"] = e != null && _model.IsChecked(e.Id),
+                ["checked"] = e != null && _model.IsSelected(e.Id),
                 ["disabled"] = e?.Disabled == true,
                 ["reason"] = e?.DisabledReason ?? "",
             });
@@ -802,7 +826,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         var columns = new List<string>();
         foreach (var c in _model.Columns) columns.Add(c.Key);
         var collapsed = new List<string>();
-        foreach (var s in _model.Sections) if (_model.IsCollapsed(s)) collapsed.Add(s);
+        foreach (var s in _model.Groups) if (_model.IsCollapsed(s)) collapsed.Add(s);
         return new Dictionary<string, object?>
         {
             ["kind"] = "checklist",
@@ -822,7 +846,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             ["fillHeight"] = _options.FillHeight,
             ["slots"] = slots,
             ["selected"] = new List<string>(_model.Selected),
-            ["sections"] = new List<string>(_model.Sections),
+            ["groups"] = new List<string>(_model.Groups),
             ["collapsed"] = collapsed,
             ["status"] = StatusText,
             ["confirm"] = ConfirmText,
@@ -999,11 +1023,11 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         var row = _slots[slot];
         bool section = line.Kind == UiChecklistLineKind.Section;
         var entry = line.Entry;
-        bool on = !section && _model.IsChecked(entry!.Id);
+        bool on = !section && _model.IsSelected(entry!.Id);
         bool disabled = !section && entry!.Disabled;
 
         Write(slot, UiChecklistLayout.CellCheck, CellLayout.CheckText(on), disabled ? CellTone.Disabled : CellTone.Normal, !section);
-        Write(slot, UiChecklistLayout.CellFold, UiWidgetLayout.ExpandGlyph, CellTone.Normal, section && _options.CollapsibleSections);
+        Write(slot, UiChecklistLayout.CellFold, UiWidgetLayout.ExpandGlyph, CellTone.Normal, section && _options.CollapsibleGroups);
         Write(slot, UiChecklistLayout.CellSection, section ? _model.SectionCaption(line.Section) : "", CellTone.Gold, section);
 
         object? icon = null;
@@ -1069,7 +1093,6 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         string status = _model.Status();
         TrySetVisible(_status, true);
         WriteCell(_status, _rowCache, "status/", UiChecklistLayout.CellStatus, status, CellTone.Muted, true);
-        StatusText = status;
         WriteCell(_status, _rowCache, "status/", UiChecklistLayout.CellSelectShown, UiChecklistLayout.SelectShownCaption, CellTone.Normal,
             _model.CanSelectShown());
         WriteCell(_status, _rowCache, "status/", UiChecklistLayout.CellClear, UiChecklistLayout.ClearCaption, CellTone.Normal,
