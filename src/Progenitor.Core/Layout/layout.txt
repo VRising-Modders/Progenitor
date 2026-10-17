@@ -34,6 +34,12 @@
 #     --dump-server <server metadata file> \
 #     --build <build id>
 #
+# --build is the commit the generate ran on: pass `--build $(git rev-parse --short HEAD)` (the
+# parent of the commit that will carry the regenerated file, so the header never names the commit
+# it is in). The header's `build:` line is provenance only: `--check` ignores it and compares the
+# declarations hash and the game identity. Verify before committing with
+# `dotnet run --project tools/layoutgen -- --declarations ... --out ... --dump-server ... --game-assembly server=... --check`.
+#
 # The metadata file comes from PROGENITOR_METADATA_DIR (default <workspace>\_tools\interop-dump,
 # one folder per side); tools/deploy.ps1 finds it there. The server metadata is the authority for
 # every line below. Each of these types is a ProjectM / Stunlock / Unity component present in both
@@ -903,3 +909,54 @@ match  SetMapMarkerEventId    = -132110655 : /EventId_SetMapMarkerEvent = (-?\d+
 match  DeleteMapMarkerEventId = -531442865 : /EventId_DeleteMapMarkerEvent = (-?\d+);/ in NetworkEvents
 dump server
 offset ObservationProxyPositionOffset = 0x98 : User.ProxySyncPosition
+
+# ---- Ecs: chunk change versions (src/Progenitor.Core/Ecs/ChunkVersions.cs, ctx.Inventory.ChangeStamp) ----
+# The read path the game's own ArchetypeChunk.GetChangeVersion takes, done raw so no by-ref type
+# handle call and no generic instantiation is needed: EntityManager -> EntityDataAccess (the
+# component store is embedded at its start) -> m_EntityInChunkByEntity[e.Index].Chunk -> the global
+# PerChunkData array (a SharedStatic owned by EntityComponentStore.PerChunkArray.StaticIdentifier,
+# read through il2cpp_field_static_get_value) -> Archetype -> ArchetypeChunkData.m_Data, laid out as
+# ChunkIndex[Capacity] then uint change versions [ComponentCount * Capacity], type-major. Every read
+# re-checks the chain (entity version, chunk bounds, the ChunkIndex slot naming the chunk, the type
+# slot naming the type) and reports unknown on any mismatch; research note
+# inventory-change-stamp-2026-10-16.
+dump server
+offset EntityManagerEntityDataAccessOffset             = 0x8   : EntityManager.m_EntityDataAccess
+offset EntityDataAccessEntityComponentStoreOffset      = 0x0   : EntityDataAccess.m_EntityComponentStore      # embedded, not a pointer
+offset EntityComponentStoreVersionByEntityOffset       = 0x0   : EntityComponentStore.m_VersionByEntity       # int*
+offset EntityComponentStoreEntityInChunkByEntityOffset = 0x8   : EntityComponentStore.m_EntityInChunkByEntity # EntityInChunk*
+offset EntityComponentStoreGlobalSystemVersionOffset   = 0x198 : EntityComponentStore.m_GlobalSystemVersion   # uint
+offset EntityComponentStoreEntitiesCapacityOffset      = 0x19C : EntityComponentStore.m_EntitiesCapacity      # int
+offset EntityComponentStoreArchetypesOffset            = 0x78  : EntityComponentStore.m_Archetypes            # UnsafePtrList<Archetype>, embedded; next field at 0x90
+# UnsafePtrList<T> is an open generic in the metadata (every field reads 0x0). UntypedUnsafeList is
+# Unity's non-generic layout twin of UnsafeList / UnsafePtrList (same fields, same order), and the
+# 0x18 between m_Archetypes and m_ArchetypeActive matches its extent; its offsets are the ones read.
+offset UntypedUnsafeListPtrOffset                      = 0x0   : UntypedUnsafeList.Ptr                         # Archetype**
+offset UntypedUnsafeListLengthOffset                   = 0x8   : UntypedUnsafeList.m_length
+offset UntypedUnsafeListCapacityOffset                 = 0xC   : UntypedUnsafeList.m_capacity
+size   EntityInChunkStride                             = 8     : EntityInChunk
+offset EntityInChunkChunkOffset                        = 0x0   : EntityInChunk.Chunk                          # ChunkIndex, one int
+offset EntityInChunkIndexInChunkOffset                 = 0x4   : EntityInChunk.IndexInChunk
+size   ChunkIndexStride                                = 4     : ChunkIndex                                   # the ChunkIndex[Capacity] head of m_Data
+offset SharedStaticBufferOffset                        = 0x0   : Unity.Burst.SharedStatic<T>._buffer                # void*, the shared static's storage
+offset PerChunkArrayChunkDataOffset                    = 0x0   : EntityComponentStore.PerChunkArray.m_PerChunkData
+size   PerChunkDataStride                              = 16    : EntityComponentStore.PerChunkArray.PerChunkData
+offset PerChunkDataArchetypeOffset                     = 0x0   : EntityComponentStore.PerChunkArray.PerChunkData.Archetype
+offset PerChunkDataEntityCountOffset                   = 0x8   : EntityComponentStore.PerChunkArray.PerChunkData.EntityCount
+offset PerChunkDataListIndexOffset                     = 0xC   : EntityComponentStore.PerChunkArray.PerChunkData.ListIndex
+offset ArchetypeChunksOffset                           = 0x0   : Unity.Entities.Archetype.Chunks              # ArchetypeChunkData, embedded
+offset ArchetypeTypesOffset                            = 0x70  : Unity.Entities.Archetype.Types               # ComponentTypeInArchetype*
+offset ArchetypeTypesCountOffset                       = 0xC4  : Unity.Entities.Archetype.TypesCount
+offset ArchetypeEntityComponentStoreOffset             = 0x158 : Unity.Entities.Archetype.EntityComponentStore # owner check
+offset ArchetypeChunkDataDataOffset                    = 0x0   : ArchetypeChunkData.m_Data
+offset ArchetypeChunkDataCapacityOffset                = 0x8   : ArchetypeChunkData.<Capacity>k__BackingField
+offset ArchetypeChunkDataCountOffset                   = 0xC   : ArchetypeChunkData.<Count>k__BackingField
+offset ArchetypeChunkDataComponentCountOffset          = 0x14  : ArchetypeChunkData.ComponentCount
+size   ComponentTypeInArchetypeStride                  = 4     : ComponentTypeInArchetype
+offset ComponentTypeInArchetypeTypeIndexOffset         = 0x0   : ComponentTypeInArchetype.TypeIndex          # the full TypeIndex value, flags included
+
+# The audit's raw-row hash (src/Progenitor.Core/Inventory/InventoryStamps.cs): every field of an
+# InventoryBuffer row, never the padding after NetworkedEntity._WaitingForSync.
+offset InventoryBufferItemEntityOffset              = 0x0  : InventoryBuffer.ItemEntity                   # NetworkedEntity
+offset InventoryBufferMaxAmountOverrideOffset       = 0x14 : InventoryBuffer.MaxAmountOverride            # last field
+size   EntityStride                                 = 8    : Unity.Entities.Entity                       # Index, Version

@@ -98,4 +98,4 @@ jobs:
         working-directory: tools/mcp
         run: |
           npm ci --no-audit --no-fund
-          node --test test/kb-tools.test.mjs test/identity.test.mjs test/bridge-who.test.mjs test/queue.test.mjs test/call-mail.test.mjs test/ui-tools.test.mjs test/servants-tool.test.mjs
+          node --test test/kb-tools.test.mjs test/identity.test.mjs test/bridge-who.test.mjs test/queue.test.mjs test/call-mail.test.mjs test/ui-tools.test.mjs test/servants-tool.test.mjs test/inventory-stamp-tool.test.mjs

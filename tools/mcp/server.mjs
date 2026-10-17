@@ -859,6 +859,13 @@ server.tool("progenitor_servants", "Server only. Castle servants and hunts (ctx.
   },
   async (args) => { try { return text(await bridge("server", "servants", args)); } catch (e) { return fail(e); } });
 
+server.tool("progenitor_inventory_stamp", "Server only, read only. ctx.Inventory.ChangeStamp of the named containers in one batch: per container the resolved inventory entity and the stamp (hex; equal = slots unchanged, unequal = may have changed), the 64-bit clock, and with since (a clock from an earlier reply) whether AnyChangedSince says any changed. Also the stamp service's counters: misses (audit saw content change under an unchanged stamp; must stay 0), audits, freshStamps (reads that failed), resolves, entries, typeScans and failures by raw-read check. Source-checked and unit-tested, not live-verified.",
+  {
+    containers: z.union([z.array(z.string()), z.string()]).describe("Owner ids index:version (chest, station, heart, player character, servant); append #1 or /out for a refinement station's output. Array or comma list."),
+    since: z.number().int().optional().describe("A clock value from an earlier reply: also report AnyChangedSince(containers, since)."),
+  },
+  async (args) => { try { return text(await bridge("server", "inventory_stamp", args)); } catch (e) { return fail(e); } });
+
 server.tool("progenitor_photo", "Photo mode (built-in, off by default): fly camera, HUD hide, admin-only world pause. on/off run on the client: on enters photo mode (enable:true first turns [PhotoMode] Enabled on in Core's ui cfg), off leaves it and resumes any pause it asked for. status (either side): enabled, active, paused, hudHidden, pose, speed, fov, holdsInput; on the server, serverPauses (users holding a pause). The pause itself is the P keybind (keybind_press PhotoModePause) and shows up in progenitor_time status as a 'photo mode: <name>' lease. Takes the camera and holds the character while active.",
   {
     side: z.enum(["client", "server"]).optional().describe("Default client. Use server only for status."),
