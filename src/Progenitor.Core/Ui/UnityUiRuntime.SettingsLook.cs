@@ -1394,6 +1394,11 @@ internal sealed partial class UnityUiRuntime
                 {
                     d["band"] = DrawnImage(chrome.Band, row.Go);
                     d["lit"] = chrome.Lit;
+                    // One line under a game tab row: false while this row is the first under the strip.
+                    bool topLine;
+                    try { topLine = chrome.Top != null && chrome.Top.enabled; }
+                    catch { topLine = false; }
+                    d["topLine"] = topLine;
                 }
 
                 var images = new List<object?>();

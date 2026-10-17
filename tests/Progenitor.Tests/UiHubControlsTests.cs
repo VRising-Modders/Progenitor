@@ -123,6 +123,71 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.Equal(0f, UiTabsLayout.GameTabTop(spec.Height, UnityUiRuntimeMetrics.RowHeight));
     }
 
+    private static UiTabsLayout.StripRow SR(bool active = true, bool strip = false, MenuRowPin pin = MenuRowPin.Content, bool line = false) =>
+        new(active, strip, pin, line);
+
+    /// <summary>The lines drawn between a strip's tabs and the content under it: its baseline and the next shown row's top line.</summary>
+    private static int LinesUnderStrip(IReadOnlyList<UiTabsLayout.StripRow> rows, int strip)
+    {
+        var hidden = UiTabsLayout.TopLinesHidden(rows);
+        int lines = rows[strip].TabStrip ? 1 : 0;
+        for (int j = strip + 1; j < rows.Count; j++)
+        {
+            bool below = rows[j].Pin == MenuRowPin.Content || (rows[strip].Pin == MenuRowPin.Top && rows[j].Pin == MenuRowPin.Top);
+            if (!below || !rows[j].Active) continue;
+            if (rows[j].TopLine && !hidden[j]) lines++;
+            break;
+        }
+
+        return lines;
+    }
+
+    [Fact]
+    public void A_game_tab_row_first_in_a_game_window_leaves_exactly_one_line_under_its_tabs()
+    {
+        // Satisvampory's hub (live 2026-10-17): the tab row, then SearchInput (a settings-grid row whose top gradient was
+        // the second line), then more rows.
+        var rows = new[] { SR(strip: true), SR(line: true), SR(line: true), SR(line: true) };
+        Assert.Equal(new[] { false, true, false, false }, UiTabsLayout.TopLinesHidden(rows));
+        Assert.Equal(1, LinesUnderStrip(rows, 0));
+        // The one line is the strip's baseline, and the tabs stand on it.
+        float rowHeight = UnityUiRuntimeMetrics.RowHeight;
+        var (lineTop, lineHeight) = UiTabsLayout.Baseline(rowHeight);
+        Assert.Equal(lineTop + lineHeight, UiTabsLayout.GameTabTop(rowHeight, rowHeight) + rowHeight, 3);
+
+        // The runtime's real rows: the strip is a game tab row with its baseline.
+        var panel = NewPanel(gameWindow: true);
+        panel.Tabs("t", new[] { "Find", "Chests" }, new UiTabsOptions());
+        Assert.Equal(CellRowSkin.GameTabStrip, Row("t:tabs").Spec.Skin);
+    }
+
+    [Fact]
+    public void The_row_under_the_strip_follows_the_selected_tab_and_skips_other_pins()
+    {
+        // A hidden tab's rows are skipped: the first shown row (a list row with its separator) drops its line.
+        var switched = new[] { SR(strip: true), SR(active: false, line: true), SR(active: false), SR(line: true), SR(line: true) };
+        Assert.Equal(new[] { false, false, false, true, false }, UiTabsLayout.TopLinesHidden(switched));
+        Assert.Equal(1, LinesUnderStrip(switched, 0));
+
+        // A standard window: the tab row pinned at the top, a bottom-pinned button row listed before the content.
+        var window = new[] { SR(pin: MenuRowPin.Top), SR(strip: true, pin: MenuRowPin.Top), SR(pin: MenuRowPin.Bottom, line: true), SR(line: true) };
+        Assert.Equal(new[] { false, false, false, true }, UiTabsLayout.TopLinesHidden(window));
+        Assert.Equal(1, LinesUnderStrip(window, 1));
+
+        // A content tab row never reaches a top-pinned row listed after it.
+        var content = new[] { SR(strip: true), SR(pin: MenuRowPin.Top, line: true), SR(line: true) };
+        Assert.Equal(new[] { false, false, true }, UiTabsLayout.TopLinesHidden(content));
+
+        // A first row with no line of its own: nothing is hidden, and the row after it keeps its line.
+        var label = new[] { SR(strip: true), SR(), SR(line: true) };
+        Assert.Equal(new[] { false, false, false }, UiTabsLayout.TopLinesHidden(label));
+        Assert.Equal(1, LinesUnderStrip(label, 0));
+
+        // Chip tabs draw no baseline, so the row under them keeps its line; a hidden strip hides nothing.
+        Assert.Equal(new[] { false, false }, UiTabsLayout.TopLinesHidden(new[] { SR(), SR(line: true) }));
+        Assert.Equal(new[] { false, false }, UiTabsLayout.TopLinesHidden(new[] { SR(active: false, strip: true), SR(line: true) }));
+    }
+
     [Fact]
     public void A_game_tab_is_as_wide_as_its_caption_and_grows_by_its_badge()
     {

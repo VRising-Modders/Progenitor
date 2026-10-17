@@ -509,6 +509,60 @@ internal static class UiTabsLayout
         return (rowHeight - h, h);
     }
 
+    /// <summary>One panel row as the single-line rule sees it (<see cref="TopLinesHidden"/>).</summary>
+    internal readonly struct StripRow
+    {
+        internal StripRow(bool active, bool tabStrip, MenuRowPin pin, bool topLine)
+        {
+            Active = active;
+            TabStrip = tabStrip;
+            Pin = pin;
+            TopLine = topLine;
+        }
+
+        /// <summary>The row is shown (a hidden tab's content is not).</summary>
+        internal bool Active { get; }
+
+        /// <summary>A game window tab row (<see cref="CellRowSkin.GameTabStrip"/>), which draws its own baseline.</summary>
+        internal bool TabStrip { get; }
+
+        internal MenuRowPin Pin { get; }
+
+        /// <summary>
+        /// The row draws a line along its top edge: a settings-grid row's resting top gradient (the game's settings
+        /// entry), or a cell row's separator rule.
+        /// </summary>
+        internal bool TopLine { get; }
+    }
+
+    /// <summary>
+    /// One line under a game tab row: the tabs stand on the strip's baseline, so the first shown row under the strip does
+    /// not draw its own top line (live 2026-10-17: a settings-grid row's top gradient, a row gap under the baseline, read as
+    /// a second line with the tabs floating over it). The row under a strip is the next shown row in the panel's order;
+    /// under a top-pinned strip (a standard window's tab row) that is the next shown top-pinned or content row (the
+    /// content's first row), under a content strip the next shown content row. Rows pinned elsewhere are skipped. True
+    /// at index <c>i</c>: row <c>i</c> hides its top line. Recomputed every layout pass, so switching tabs moves it.
+    /// </summary>
+    internal static bool[] TopLinesHidden(IReadOnlyList<StripRow> rows)
+    {
+        var hidden = new bool[rows.Count];
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var strip = rows[i];
+            if (!strip.Active || !strip.TabStrip || (strip.Pin != MenuRowPin.Content && strip.Pin != MenuRowPin.Top)) continue;
+            for (int j = i + 1; j < rows.Count; j++)
+            {
+                var next = rows[j];
+                bool below = next.Pin == MenuRowPin.Content || (strip.Pin == MenuRowPin.Top && next.Pin == MenuRowPin.Top);
+                if (!below || !next.Active) continue;
+                if (next.TopLine) hidden[j] = true;
+                break;
+            }
+        }
+
+        return hidden;
+    }
+
     /// <summary>HUB1: the most a least content height may ask for.</summary>
     internal const float MaxMinHeight = 2000f;
 
