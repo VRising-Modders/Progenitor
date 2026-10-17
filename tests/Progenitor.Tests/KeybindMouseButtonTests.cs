@@ -17,6 +17,9 @@ namespace Progenitor.Tests
     {
         private static readonly KeyChord LeftCtrlShift = new(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Shift);
         private static readonly KeyChord LeftCtrl = new(UiKey.MouseLeft, KeyModifiers.Ctrl);
+
+        /// <summary>A modified left click a map key may take (Ctrl+Shift+left is the game's admin teleport).</summary>
+        private static readonly KeyChord LeftCtrlAlt = new(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Alt);
         private static readonly KeyChord BareLeft = new(UiKey.MouseLeft);
         private static readonly KeyChord BareRight = new(UiKey.MouseRight);
 
@@ -126,15 +129,20 @@ namespace Progenitor.Tests
                 Assert.Equal(MouseChords.BareClickReason, MouseChords.Refusal(BareLeft, scope));
                 Assert.Equal(MouseChords.BareClickReason, MouseChords.Refusal(BareRight, scope));
                 Assert.Null(MouseChords.Refusal(LeftCtrl, scope));
-                Assert.Null(MouseChords.Refusal(LeftCtrlShift, scope));
+                Assert.Null(MouseChords.Refusal(LeftCtrlAlt, scope));
+                if (scope != KeybindScope.Map) Assert.Null(MouseChords.Refusal(LeftCtrlShift, scope));
             }
 
             // The Mods menu and the chat box take every left and right click.
             Assert.Equal(MouseChords.MenuClickReason, MouseChords.Refusal(LeftCtrlShift, KeybindScope.Menu));
             Assert.Equal(MouseChords.ChatClickReason, MouseChords.Refusal(new KeyChord(UiKey.MouseRight, KeyModifiers.Alt), KeybindScope.Chat));
 
-            // The map: Ctrl+Shift+left is the game's admin teleport (refused by a server for anyone else) and is
-            // allowed; Ctrl+Shift+right is its admin region unlock and is not, with or without Alt.
+            // The map: Ctrl+Shift+left is the game's admin teleport and Ctrl+Shift+right its admin region unlock;
+            // neither is a map key, with or without Alt (#77 review: the left one was allowed before).
+            Assert.Equal(MouseChords.MapTeleportReason, MouseChords.Refusal(LeftCtrlShift, KeybindScope.Map));
+            Assert.Equal(MouseChords.MapTeleportReason,
+                MouseChords.Refusal(new KeyChord(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Shift | KeyModifiers.Alt), KeybindScope.Map));
+            Assert.Null(MouseChords.Refusal(new KeyChord(UiKey.MouseLeft, KeyModifiers.Shift), KeybindScope.Map));
             var unlock = new KeyChord(UiKey.MouseRight, KeyModifiers.Ctrl | KeyModifiers.Shift);
             Assert.Equal(MouseChords.MapUnlockReason, MouseChords.Refusal(unlock, KeybindScope.Map));
             Assert.Equal(MouseChords.MapUnlockReason,
@@ -159,9 +167,12 @@ namespace Progenitor.Tests
             Keybinds.Register(_owner, "b.mod", "Point", file, LeftCtrl, "", () => { });
             Assert.Equal(LeftCtrl, Keybinds.Snapshot().Single(b => b.Id == "Point").Chord);
 
-            // A map key may sit on the game's own admin teleport chord.
+            // #77 review: a map key may not sit on the game's own admin teleport chord; it registers unbound.
             RegisterMap("c.mod", "Teleport", LeftCtrlShift);
-            Assert.Equal(LeftCtrlShift, Keybinds.Snapshot().Single(b => b.Id == "Teleport").Chord);
+            Assert.Equal(KeyChord.None, Keybinds.Snapshot().Single(b => b.Id == "Teleport").Chord);
+            Assert.Contains(_log.Warnings, l => l.Contains(MouseChords.MapTeleportReason));
+            RegisterMap("d.mod", "Mark", LeftCtrlAlt);
+            Assert.Equal(LeftCtrlAlt, Keybinds.Snapshot().Single(b => b.Id == "Mark").Chord);
         }
 
         [Fact]
@@ -333,7 +344,7 @@ namespace Progenitor.Tests
             Keybinds.Register(_owner, "a.mod", "Act", File("a"), LeftCtrl, "", () => gameplay++);
             Keybinds.Register(_owner, "b.mod", "Exempt", File("b"), new KeyChord(UiKey.MouseLeft, KeyModifiers.Alt), "",
                 () => exempt++, allowWhileCaptured: true);
-            RegisterMap("c.mod", "Teleport", LeftCtrlShift, () => map++);
+            RegisterMap("c.mod", "Teleport", LeftCtrlAlt, () => map++);
 
             void Click(KeyChord c)
             {
@@ -378,9 +389,9 @@ namespace Progenitor.Tests
             Click(LeftCtrl);
             Assert.Equal(1, gameplay);
             Assert.Equal(Keybinds.ClickInGameMenuReason, Keybinds.SimulatePress("a.mod", "Act").Single().Reason);
-            Click(LeftCtrlShift);
+            Click(LeftCtrlAlt);
             Assert.Equal(1, map);
-            Assert.True(Keybinds.SimulatePress(LeftCtrlShift).Single().Fired);
+            Assert.True(Keybinds.SimulatePress(LeftCtrlAlt).Single().Fired);
             Assert.Equal(2, map);
         }
 
@@ -388,20 +399,23 @@ namespace Progenitor.Tests
         public void Two_mods_on_one_click_chord_follow_the_first_installed_rule_and_a_remap_onto_it_is_refused()
         {
             KeybindArbiter.InstallTimeOf = id => id == "first.mod" ? Ledger(9) : Ledger(1);
-            RegisterMap("second.mod", "Teleport", LeftCtrlShift);
-            RegisterMap("first.mod", "Teleport", LeftCtrlShift);
+            RegisterMap("second.mod", "Teleport", LeftCtrlAlt);
+            RegisterMap("first.mod", "Teleport", LeftCtrlAlt);
             var picture = KeybindArbiter.Current();
             Assert.True(picture.FindProgenitor("first.mod", "Teleport")!.Active);
             var loser = picture.FindProgenitor("second.mod", "Teleport")!;
             Assert.False(loser.Active);
-            Assert.StartsWith("Not active: Left Mouse + Ctrl + Shift is used by first.mod", loser.Reason);
+            Assert.StartsWith("Not active: Left Mouse + Ctrl + Alt is used by first.mod", loser.Reason);
 
             // A remap never creates a new clash on a click chord either.
             RegisterMap("third.mod", "Mark", new KeyChord(UiKey.MouseLeft, KeyModifiers.Alt));
-            Assert.False(Keybinds.TryRebind("third.mod", "Mark", LeftCtrlShift, Keybinds.RebindCheck.Full, out var why));
+            Assert.False(Keybinds.TryRebind("third.mod", "Mark", LeftCtrlAlt, Keybinds.RebindCheck.Full, out var why));
             Assert.Contains("is used by", why);
+            // #77 review: nor onto the game's admin teleport.
+            Assert.False(Keybinds.TryRebind("third.mod", "Mark", LeftCtrlShift, Keybinds.RebindCheck.Full, out why));
+            Assert.Equal(MouseChords.MapTeleportReason, why);
             // A gameplay key on the same chord is another scope and does not meet the map keys.
-            Keybinds.Register(_owner, "fourth.mod", "Act", File("fourth"), LeftCtrlShift, "", () => { });
+            Keybinds.Register(_owner, "fourth.mod", "Act", File("fourth"), LeftCtrlAlt, "", () => { });
             Assert.True(KeybindArbiter.Current().FindProgenitor("fourth.mod", "Act")!.Active);
         }
     }

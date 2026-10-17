@@ -373,7 +373,7 @@ internal static class MouseChords
 {
     internal const string BareClickReason =
         "A plain left or right click attacks, moves and clicks menus, so it can't be a key. "
-        + "Hold Ctrl, Shift or Alt with it (for example Left Mouse + Ctrl + Shift).";
+        + "Hold Ctrl, Shift or Alt with it (for example Left Mouse + Shift).";
 
     internal const string MenuClickReason =
         "Left and right clicks press the Mods menu's own buttons, so they can't be a Mods menu key. " + KeybindArbiter.PickAnother;
@@ -384,6 +384,10 @@ internal static class MouseChords
     internal const string MapUnlockReason =
         "Ctrl+Shift+right click on the map unlocks map regions for admins in the game. " + KeybindArbiter.PickAnother;
 
+    /// <summary>#77 review: the game's map left click teleports an admin with LeftCtrl and LeftShift held.</summary>
+    internal const string MapTeleportReason =
+        "Ctrl+Shift+left click on the map teleports admins in the game. " + KeybindArbiter.PickAnother;
+
     /// <summary>Why <paramref name="chord"/> may not be a bind in <paramref name="scope"/>, or null (always null off the left and right buttons).</summary>
     internal static string? Refusal(KeyChord chord, KeybindScope scope)
     {
@@ -392,9 +396,10 @@ internal static class MouseChords
         if (scope is KeybindScope.Menu or KeybindScope.Window) return MenuClickReason;
         if (scope == KeybindScope.Chat) return ChatClickReason;
         if (chord.Modifiers == KeyModifiers.None) return BareClickReason;
-        if (scope == KeybindScope.Map && chord.Key == UiKey.MouseRight
+        // The game's map click handler checks only that Ctrl and Shift are held, so Alt with them still reaches it.
+        if (scope == KeybindScope.Map
             && (chord.Modifiers & (KeyModifiers.Ctrl | KeyModifiers.Shift)) == (KeyModifiers.Ctrl | KeyModifiers.Shift))
-            return MapUnlockReason;
+            return chord.Key == UiKey.MouseRight ? MapUnlockReason : MapTeleportReason;
         return null;
     }
 
