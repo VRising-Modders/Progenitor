@@ -868,6 +868,10 @@ offset ServantMissionStartedEventMissionIdOffset     = 0x0  : ServantMissionStar
 offset SerializePersistenceSystemV2WriteToDiskDependencyOffset = 0x198 : SerializePersistenceSystemV2._WriteToDiskDependency  # Nullable<JobHandle>: bool hasValue @+0, JobHandle @+8
 offset SerializePersistenceSystemV2InitializedOffset           = 0x1B0 : SerializePersistenceSystemV2._Initialized
 match  ServantMissionStartedEventId                 = -1997647067 : /EventId_ServantMissionStartedEvent = (-?\d+);/ in NetworkEvents
+# The per-servant "returned" / "was killed" notice the game's return raises to each allied user (one
+# network event entity per user: NetworkEventType + this component + SendNetworkEventTag + SendEventToUser).
+# ctx.Servants.SuppressGameNotices reads Success raw to tell the two lines apart.
+offset ServantMissionFinishedEventSuccessOffset     = 0x44 : ServantMissionFinishedEvent.Success         # bool; ServantName FixedString64 @0x0, MissionId @0x40
 offset MapZoneDataZoneIndexOffset                    = 0x1  : MapZoneData.ZoneIndex                       # byte; MapZoneId.ZoneId is this + 1
 offset MapZoneDataChunkCoordinateOffset              = 0x44 : MapZoneData.ChunkCoordinate                 # TerrainChunk: sbyte X, sbyte Y
 offset MapZoneDataServantMissionAssetOffset          = 0x48 : MapZoneData.ServantMissionAsset             # PrefabGUID
