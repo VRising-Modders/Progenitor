@@ -80,6 +80,9 @@ internal static class ServerOptionOps
     internal const string ChatRelayWhispers = "chat-relay-whispers";
     internal const string ChatRelaySystem = "chat-relay-system";
 
+    /// <summary><c>[HotLoad] Announce</c>: tell every connected player when a mod or Core hot-loads on the server (docs/hot-reload.md).</summary>
+    internal const string HotLoadAnnounce = "hot-load-announce";
+
     // AUTOUPDATE3 (docs/auto-update.md, Server settings): the Server tab's Updates group, the server's [AutoUpdate] section.
 
     /// <summary><c>[AutoUpdate] Mods</c>: Automatic, Notify or Off.</summary>
@@ -113,7 +116,7 @@ internal static class ServerOptionOps
     {
         AnswerTimeout, RequireProgenitor, DisconnectGrace, PhotoMode, AllySafeHits, ContainerPreview, RemoteInstall, AllowedSteamIds, NoticeSeconds, NoticeRepeatSeconds, NoticeCreationLimitSeconds,
         ChatFilter, ChatFilterWords, ChatFilterAction, ChatRelay, ChatRelayUrl,
-        ChatRelayGlobal, ChatRelayLocal, ChatRelayClan, ChatRelayWhispers, ChatRelaySystem,
+        ChatRelayGlobal, ChatRelayLocal, ChatRelayClan, ChatRelayWhispers, ChatRelaySystem, HotLoadAnnounce,
         UpdateMods, UpdateMajors, UpdateRestartWhenEmpty, UpdateEmptyMinutes, UpdateBackup, UpdateBackupKeep, UpdateBackupSkipHours,
     };
 
@@ -240,6 +243,8 @@ internal static class ServerOptions
         new ServerOptionSpec(ServerOptionOps.ChatRelayClan, ServerChatOptions.RelaySection, ServerChatOptions.ClanKey, ServerOptionKind.Switch),
         new ServerOptionSpec(ServerOptionOps.ChatRelayWhispers, ServerChatOptions.RelaySection, ServerChatOptions.WhispersKey, ServerOptionKind.Switch),
         new ServerOptionSpec(ServerOptionOps.ChatRelaySystem, ServerChatOptions.RelaySection, ServerChatOptions.SystemKey, ServerOptionKind.Switch),
+        // Hot-load chat lines (bound by Progenitor.Reload.HotLoadNoticeLive on the server).
+        new ServerOptionSpec(ServerOptionOps.HotLoadAnnounce, ServerChatOptions.HotLoadSection, ServerChatOptions.HotLoadAnnounceKey, ServerOptionKind.Switch),
         // AUTOUPDATE3: the Server tab's Updates group (bound by ServerAutoUpdateLive on the server).
         new ServerOptionSpec(ServerOptionOps.UpdateMods, ServerUpdateSettings.Section, ServerUpdateSettings.ModsKey, ServerOptionKind.Choice)
         {

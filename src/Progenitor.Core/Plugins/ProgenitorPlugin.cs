@@ -198,6 +198,8 @@ public abstract class ProgenitorPlugin<TContext> : BasePlugin
                 ctx.Handshake.DeclareSelf();
             Log.LogInfo($"{meta.Name} {meta.Version} loaded on {process}.");
             ModRegistry.NoteLoaded(guid);
+            // Hot-load chat line (docs/hot-reload.md, "Hot-load messages"): reload-folder plugins only.
+            Reload.HotLoadNoticeLive.NoteLoaded(GetType(), guid, meta.Name, meta.Version?.ToString() ?? "");
         }
         catch (Exception e)
         {
@@ -212,6 +214,7 @@ public abstract class ProgenitorPlugin<TContext> : BasePlugin
             catch (Exception undo) { Log.LogError($"{meta.Name} undo after OnLoad failure threw: {undo}"); }
             _context = null;
             ModRegistry.NoteFailed(guid);
+            Reload.HotLoadNoticeLive.NoteFailed(GetType(), guid, meta.Name, meta.Version?.ToString() ?? "");
             // SETTINGS1 stage 3: the Mods page says "Failed to load", with Retry when the mod can be
             // loaded again without a restart (decided when the page is drawn: the reloader has not
             // registered this plugin yet while its OnLoad is throwing). Nothing is disabled because of it.
@@ -258,6 +261,12 @@ public abstract class ProgenitorPlugin<TContext> : BasePlugin
 
         var name = MetadataHelper.GetMetadata(this).Name;
         var reason = ResolveUnloadReason(name);
+        try
+        {
+            var unloading = MetadataHelper.GetMetadata(this);
+            Reload.HotLoadNoticeLive.NoteUnloaded(GetType(), unloading.GUID, name, unloading.Version?.ToString() ?? "", reason);
+        }
+        catch { /* the chat line is evidence, never a gate */ }
 
         try { OnUnload(ctx, reason); }
         catch (Exception e) { Log.LogError($"{name} OnUnload threw: {e}"); }
