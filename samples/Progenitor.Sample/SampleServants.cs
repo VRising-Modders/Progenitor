@@ -31,6 +31,9 @@ namespace Progenitor.Sample;
 /// <item><description><c>.servants again</c>: resend the last hunt that returned to this castle.</description></item>
 /// <item><description><c>.servants swap on|off</c>: register a list provider that lists, on any
 /// throne you open, the servants of every castle you own or your clan owns (this castle first).</description></item>
+/// <item><description><c>.servants quiet on|off</c>: drop the game's hunt chat lines (started,
+/// returned, killed) for you only, through <c>ctx.Servants.SuppressGameNotices</c>; clan mates still
+/// get them.</description></item>
 /// <item><description><c>.servants status</c>: the list hook's counters.</description></item>
 /// </list>
 /// Parsing and reply lines are game-free so the test project compiles this file.
@@ -40,7 +43,7 @@ internal static class SampleServants
     internal const string Area = "servants";
 
     internal const string UsageReply =
-        "Usage: .servants list | hunts | send <#n[,#n,#n]> <missionGuid|x,y#zone> <slot> | watch on|off|resend | again | swap on|off | status";
+        "Usage: .servants list | hunts | send <#n[,#n,#n]> <missionGuid|x,y#zone> <slot> | watch on|off|resend | again | swap on|off | quiet on|off | status";
 
     internal enum Kind
     {
@@ -51,6 +54,7 @@ internal static class SampleServants
         Again,
         Swap,
         Status,
+        Quiet,
     }
 
     internal enum WatchMode
@@ -106,6 +110,14 @@ internal static class SampleServants
                 }
             case "swap":
                 request.Kind = Kind.Swap;
+                switch (a.ToLowerInvariant())
+                {
+                    case "on": request.On = true; return true;
+                    case "off": request.On = false; return true;
+                    default: return false;
+                }
+            case "quiet":
+                request.Kind = Kind.Quiet;
                 switch (a.ToLowerInvariant())
                 {
                     case "on": request.On = true; return true;
@@ -225,6 +237,8 @@ internal static class SampleServants
     private static WatchMode _watch;
     private static IDisposable? _returns;
     private static IDisposable? _swap;
+    private static IDisposable? _quietFilter;
+    private static readonly HashSet<CastleId> Quiet = new();
     private static readonly Dictionary<int, ServantsReturned> LastByTerritory = new();
 
     internal static void Detach()
@@ -233,6 +247,9 @@ internal static class SampleServants
         _returns = null;
         _swap?.Dispose();
         _swap = null;
+        _quietFilter?.Dispose();
+        _quietFilter = null;
+        Quiet.Clear();
         _watch = WatchMode.Off;
         LastByTerritory.Clear();
     }
@@ -325,6 +342,20 @@ internal static class SampleServants
                 }
                 ctx.Reply("Throne list swap " + (_swap != null ? "on" : "off") + ". " + servants.ListStatus);
                 SampleLog.Info(Area, "swap " + (_swap != null ? "on" : "off"));
+                return;
+            case Kind.Quiet:
+                if (request.On)
+                {
+                    Quiet.Add(CastleId.From(ctx.UserEntity));
+                    _quietFilter ??= servants.SuppressGameNotices((user, _) => Quiet.Contains(CastleId.From(user)));
+                }
+                else
+                {
+                    Quiet.Remove(CastleId.From(ctx.UserEntity));
+                    if (Quiet.Count == 0) { _quietFilter?.Dispose(); _quietFilter = null; }
+                }
+                ctx.Reply("Hunt chat lines for you: " + (request.On ? "off" : "on") + ".");
+                SampleLog.Info(Area, "quiet " + (request.On ? "on" : "off") + " users=" + Quiet.Count);
                 return;
             case Kind.Status:
                 ctx.Reply(servants.ListStatus.ToString() + "; returns " + _watch);

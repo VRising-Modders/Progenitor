@@ -2858,8 +2858,9 @@ On the isolated test server with Core, Dev and `Progenitor.Sample` deployed, an 
 ## Servants
 
 `ctx.Servants` (`Progenitor.Servants`) reads a castle's servants and hunts on the server, sends
-servants on a hunt the way the game's throne does, announces finished hunts, and can swap the
-throne's servant list for one player. **Experimental**: source-checked against the game's metadata
+servants on a hunt the way the game's throne does, announces finished hunts, can swap the
+throne's servant list for one player, and can drop the game's hunt chat lines for chosen users.
+**Experimental**: source-checked against the game's metadata
 and code, built, and game-free tested (`ServantLogicTests`); nothing has run in the game yet. The
 live acceptance procedure is below. Server only and main thread only; on the client every member
 throws. API table: [api.md, Servants](api.md#servants).
@@ -2925,7 +2926,8 @@ Differences from the throne send, by design:
   send raises it to the sender's allied users. Progenitor creates the same network event entity
   chat messages use (`NetworkEventType` with the event id, the event component, `SendNetworkEventTag`,
   `SendEventToUsers` with one bit per user) and writes the event's one field raw at its declared
-  offset; `Announce = false` skips it. A failure is logged and never fails the send. Source-checked,
+  offset; `Announce = false` skips it. Users a [game notice filter](#game-hunt-notices) drops for
+  `Started` are left out of the mask. A failure is logged and never fails the send. Source-checked,
   not live-verified.
 - **The success chance is the game's** unless the send set a cap ([Success cap](#success-cap)). The
   game rolls it at the return, as for any hunt. Progenitor patches no success-chance method: their
@@ -3082,6 +3084,55 @@ only the throne's own servants are left to the game. Counters: `ListStatus`.
 player, with no other ownership check. Return only castles the player may command (the sample
 returns castles the player owns or the player's clan owns, each confirmed with `ctx.Castles.RelationTo`).
 
+### Game hunt notices
+
+**Experimental; source-checked and game-free tested (`ServantNoticeTests`), not live-verified.**
+`SuppressGameNotices(Func<Entity, ServantNoticeKind, bool>)` drops the game's hunt chat lines for
+chosen users, for example a mod that prints its own summary of a resend loop:
+
+```csharp
+// Players who use the mod's summary get no per-servant lines; their clan mates still do.
+ctx.Servants.SuppressGameNotices((user, kind) => kind != ServantNoticeKind.Started && summaryUsers.Contains(CastleId.From(user)));
+```
+
+| Kind | The game's line | Raised by |
+|---|---|---|
+| `Started` | "Hunt in X started." | the throne's send, and Progenitor's `Send` / `Resend` |
+| `Returned` | "&lt;Servant&gt; has returned from a successful Hunt in X." | the return, once per servant that came back |
+| `Killed` | "&lt;Servant&gt; was killed during the Hunt in X." | the return, once per servant that died |
+
+What the game does (source-checked). The lines are not server chat messages. The server raises a
+network event to each recipient and the client prints a System line from it
+(`ServantMissionSystem_Client`, which does nothing else with the event; it throttles finished-hunt
+lines to one every two seconds). The throne's send raises `ServantMissionStartedEvent{MissionId}`;
+the return raises `ServantMissionFinishedEvent{ServantName, MissionId, Success}` once per servant.
+Both go to every user `TeamUtility.GetAlliedUsers` returns for the castle (the clan), as one event
+entity **per user**: `NetworkEvents.SendEvent(commandBuffer, event, in User)` adds
+`NetworkEventType`, the event, `SendNetworkEventTag` and `SendEventToUser{UserIndex = User.Index}`
+through the `PostUpdateBarrier` command buffer. That buffer plays back after `UpdateGroup`, before
+`BeforeSerializeBarrierGroup`, whose `SerializeAndSendServerEventsSystem` sends every event entity
+and destroys it.
+
+How it works. Core registers a `SystemHooks` Before hook on `SerializeAndSendServerEventsSystem`
+when it installs. The hook returns at once unless a filter is registered and one of the two systems
+that raise these events (`ServantMissionUpdateSystem`, `ServantMissionActionSystem`) ran this frame;
+Progenitor's After hooks on those systems set that flag. Then it finds the servant event entities
+with a `SendEventToUser` (two queries, cached per world), maps the index to the connected user, reads `Success` raw at its declared offset (`Returned` when set, else `Killed`),
+asks the filters, and destroys the entities they drop. Each recipient has its own entity, so a drop
+affects that user only and nothing is sent again. Progenitor's own started notice is one entity with
+a user mask; `Send` leaves dropped users out of the mask instead. A hunt that finished while the
+server was down finishes on the first update after the load, through the same events and the same
+hook, so a registered filter applies to it too. The game delivers a line only to a connected user
+(the event's index is a connected-user slot), so players who connect later never get those lines,
+with or without a filter.
+
+Rules: filters of every plugin combine with OR (the first true wins); a filter that throws keeps the
+line and is logged once. Only the line goes; the hunt, its loot and `ServantsReturned` are unchanged.
+Server only (the client throws); it may be registered before the world loads; the handle is
+tracked, so unload or a Core swap removes it. If the hook failed to install, registration still
+succeeds but logs a warning, and `NoticeFilterActive` reads false. A dropped line is not shown later, and a user who is
+not connected when the line is raised is never asked.
+
 ### Limits and open questions
 
 - Nothing here has run in the game. Inferred, not observed: the response list offset (8, from the
@@ -3101,6 +3152,11 @@ returns castles the player owns or the player's clan owns, each confirmed with `
   (the same inputs, read the same frame; the throne comparison above checks the formula); that a
   `SendEventToUsers` mask with several bits carries the started notice the way the game's per-user
   sends do (chat uses one bit per event).
+- Inferred, not observed: that each allied user gets their own finished and started event entity
+  (read from the game's code; the live check below confirms it), and that a plugin's filter is
+  registered before the first update after a restart (Core installs before the world loads; when a
+  plugin loads relative to that update is not checked). The game sends those lines to connected
+  users only, and nobody is connected that early.
 - `ServantsSent` covers Progenitor's sends only. The game's own sends show up in `Missions` and, when
   they finish, in `ServantsReturned`.
 - Servant entities and coffins are session ids. Persist the heart's `ContainerId`, the territory
@@ -3112,7 +3168,8 @@ returns castles the player owns or the player's clan owns, each confirmed with `
 list of the castle you stand on, rows `#1..`), `hunts` (its hunt record with zones `x,y#zone`),
 `send <#n[,#n,#n]> <missionGuid|x,y#zone> <slot>`, `watch on|off|resend` (log every return; `resend`
 also resends), `again` (resend the last return of this castle), `swap on|off` (a provider that lists
-every castle you own or your clan owns, this castle first) and `status`. Every action logs a
+every castle you own or your clan owns, this castle first), `quiet on|off` (drop the game's hunt
+lines for you only, through `SuppressGameNotices`) and `status`. Every action logs a
 `Sample servants: …` line.
 
 The server Dev bridge has the same reads and the send without a sample, plus a way to end a hunt now:
@@ -3186,7 +3243,15 @@ with empty inventories, and a second castle B of the same player or clan with at
     flight)` until the save finalizes, then `servants: cap 0% …`; after the next save completes,
     `pending cap restore record(s) dropped`. Two capped hunts of one castle due together: one is
     finished per update (two `cap …` lines on consecutive updates).
-17. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
+17. Game notice filter, with a clan mate online on a second client: `.servants quiet on` on the
+    first. Send from the throne, then let the hunt return (one servant dying if possible). The first
+    client prints none of the "Hunt in X started.", "has returned" and "was killed" lines; the clan
+    mate's client prints all of them; the server log has `servants: dropped N game hunt notice(s) by
+    filter`. `.servants send …` gives the same split for the started line. `.servants quiet off`:
+    both clients print the lines again. Downtime: let a hunt end while the test server is stopped
+    and note in the log, after the restart, whether its return ran before or after the Sample
+    loaded, and whether any client got its lines.
+18. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
     Sample from the test server's reload folder and confirm the clean unload (`servants: list
     provider unregistered` if the swap was left on).
 

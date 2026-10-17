@@ -25,8 +25,9 @@ namespace Progenitor.Servants;
 ///
 /// <para>Seams: <see cref="SystemHooks"/> Before/After on the managed systems
 /// <c>ServantMissionUpdateSystem</c> (returns), <c>ServantMissionActionSystem</c> (routing a send
-/// from a swapped list) and <c>ServantInfoEventSystem_Server</c> (the list
-/// swap). No game method is patched or called with a by-ref struct; the success-chance methods
+/// from a swapped list), <c>ServantInfoEventSystem_Server</c> (the list
+/// swap) and a Before hook on <c>SerializeAndSendServerEventsSystem</c> (the game notice filter,
+/// ServantRuntime.Notices.cs). No game method is patched or called with a by-ref struct; the success-chance methods
 /// are never touched.</para>
 /// </summary>
 internal static unsafe partial class ServantRuntime
@@ -113,6 +114,8 @@ internal static unsafe partial class ServantRuntime
             catch (Exception ex) { Plugin.Logger?.LogWarning("servants: dropping a disconnected player's list failed: " + ex.Message); }
         }, priority: 1900);
         Plugin.Frame += Tick;
+        try { InstallNotices(); }
+        catch (Exception e) { Plugin.Logger?.LogError("servants: the game notice filter could not install; the game's hunt lines are sent unfiltered: " + e.Message); }
         try { InstallCaps(); }
         catch (Exception e) { Plugin.Logger?.LogError("servants: the success cap could not install; capped hunts are held up to the timeout, then finish uncapped: " + e.Message); }
         _installed = true;
@@ -126,6 +129,7 @@ internal static unsafe partial class ServantRuntime
         try { UninstallCaps(); }
         catch (Exception e) { Plugin.Logger?.LogError("servants: uninstalling the success cap threw: " + e.Message); }
         CapDue.Clear();
+        UninstallNotices();
         Plugin.Frame -= Tick;
         foreach (var h in new[] { _updBefore, _updAfter, _actBefore, _infoBefore, _infoAfter })
         {
@@ -847,6 +851,7 @@ internal static unsafe partial class ServantRuntime
 
     private static void AfterUpdate(SystemHookContext hook)
     {
+        MarkNoticesPending(); // the return raises its per-servant notices in this update
         // First and always: undo every temporary write of the success cap.
         try { AfterUpdateCaps(hook); }
         catch (Exception e) { Plugin.Logger?.LogError("servants: the after-update restore threw; the guards retry it: " + e.Message); }
