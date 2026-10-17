@@ -16,7 +16,7 @@ namespace Progenitor.Dye;
 /// <summary>
 /// Core's Dye all, the client half (all of it): finds the equipment panel's color swatches, watches each one
 /// for a press through <see cref="Ui.Ui.WatchPointer"/>, drives <see cref="DyeHoldMachine"/> and the
-/// <see cref="ChargeRing"/> from <c>Plugin.Frame</c>, and on a completed hold dyes every worn piece
+/// <see cref="ChargeRing"/> from <c>Plugin.Frame</c>, and on a completed hold dyes every piece that shows
 /// through <see cref="DyeSender"/>. Created and stopped by <see cref="DyeAllFeature"/>.
 ///
 /// <para><b>Finding the swatches.</b> <c>TransmogContainer</c> holds the color
@@ -451,7 +451,7 @@ internal sealed class DyeAllClient
         }
 
         var slots = DyeSender.ReadSlots(em, character, _entries.MatchPalettes.Value, _log);
-        var plan = DyePlanner.Plan(slots, color, includeCovered: true);
+        var plan = DyePlanner.Plan(slots, color);
         int sent = DyeSender.Send(em, character, plan, _log);
         if (why == "hold") NoteHold("color " + color.Index + ", sent " + sent + " of " + plan.Targets.Count);
         Report("Dye all (" + why + "): color " + color.Index + ", sent " + sent + " of " + plan.Targets.Count

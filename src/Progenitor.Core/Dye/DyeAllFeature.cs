@@ -11,13 +11,13 @@ namespace Progenitor.Dye;
 
 /// <summary>
 /// DYEALL in Core (decided 2026-10-08: "part of Core Progenitor, one of the small quality-of-life
-/// features"). In Character &gt; Equipment, hold a color swatch until the ring fills and every worn piece and
-/// transmog takes that color; a click keeps the game's behavior. Client only and on by default; there is no
+/// features"). In Character &gt; Equipment, hold a color swatch until the ring fills and every piece that shows (the
+/// transmog where one shows, nothing in a hidden slot) takes that color; a click keeps the game's behavior. Client only and on by default; there is no
 /// plugin API. It sends the same <c>ChangeTransmogColorEvent</c> the game's picker sends, so the server needs
 /// nothing (a server without Progenitor works the same).
 ///
 /// <para><b>Settings.</b> <c>[DyeAll]</c> in <c>progenitor.ui.cfg</c> (<see cref="DyeAllEntries"/>); Progenitor's
-/// page draws <b>Dye all on hold</b> under <b>Equipment</b>. A hold is always one second, and a piece under a transmog is always dyed. The former mod's
+/// page draws <b>Dye all on hold</b> under <b>Equipment</b>. A hold is always one second and dyes only what shows (<see cref="DyePlanner"/>). The former mod's
 /// <c>progenitor.dyeall.cfg</c> is read once on the first install (<see cref="DyeAllLegacy.ImportOnce"/>) and
 /// never written. There is no dye key: the hold is a pointer press on a swatch.</para>
 ///

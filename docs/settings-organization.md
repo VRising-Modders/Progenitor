@@ -476,7 +476,7 @@ Files:
 | Mouse capture for panels | ui `[Ui] CaptureMode` | Page·You | cfg | **cfg-only 2026-10-06** (same reason; the UI group is gone) | live |
 | Photo mode: Enabled, HideHudOnEnter, HideNameplates, LookSensitivity | ui `[PhotoMode] …` (4) | Page·You | Page·You · Gameplay | stay | live |
 | Build menu search: Enabled, ClearOnClose, Breadcrumbs | ui `[BuildSearch] …` (3) | Page·You | Page·You · Gameplay | stay | live |
-| Dye all: Enabled | ui `[DyeAll] Enabled` | — (the former mod's own page) | Page·You · Equipment | new (Dye all in Core, 2026-10-08). IncludeCovered and HoldSeconds were drawn, then removed the same day: covered pieces are always dyed and the hold is always 1 s | not live |
+| Dye all: Enabled | ui `[DyeAll] Enabled` | — (the former mod's own page) | Page·You · Equipment | new (Dye all in Core, 2026-10-08). IncludeCovered and HoldSeconds were drawn, then removed the same day: the hold is always 1 s and, since 2026-10-17, dyes only what shows (a transmog over gear, never a hidden slot) | not live |
 | Dye all: MatchPalettes, LegacySettingsImported | ui `[DyeAll] …` (2) | — | cfg | new (Dye all in Core, 2026-10-08). TestColorIndex was cfg-only for the developer key, then removed with that key | not live |
 | Chat box: VisibleSeconds, KeepVisible, StayWhileHovered, ClickSafe | ui `[Chat] …` (4) | — | Page·You · Chat | new (CHAT1) | live |
 | Chat commands: ReplyShortcut, NameCompletion | ui `[Chat] …` (2) | — | Page·You · Chat | new (CHAT2) | live |

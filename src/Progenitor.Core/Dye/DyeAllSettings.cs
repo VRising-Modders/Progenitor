@@ -16,8 +16,8 @@ internal interface IDyeAllBinder
 /// <summary>
 /// Dye all's entries in Core's own client cfg (<c>progenitor.ui.cfg</c>, section <c>[DyeAll]</c>). All local to
 /// the client, never server-synced. <see cref="Enabled"/> is drawn on Progenitor's page (group <c>Equipment</c>);
-/// the rest stay in the file. A hold is always one second, and a piece under a transmog is always dyed: those
-/// were settings, and the page no longer offers them.
+/// the rest stay in the file. A hold is always one second and dyes only what shows: hold time and dyeing the piece
+/// under a transmog were settings, and the page no longer offers them.
 /// </summary>
 internal sealed class DyeAllEntries
 {
@@ -35,7 +35,7 @@ internal sealed class DyeAllEntries
         LegacyImported = legacyImported;
     }
 
-    /// <summary>On (default): holding a swatch dyes every worn piece. Off: swatches behave exactly as in the game.</summary>
+    /// <summary>On (default): holding a swatch dyes every piece that shows. Off: swatches behave exactly as in the game.</summary>
     internal ConfigEntry<bool> Enabled { get; }
 
     /// <summary>
@@ -57,7 +57,7 @@ internal sealed class DyeAllEntries
         if (bind == null) throw new ArgumentNullException(nameof(bind));
         return new DyeAllEntries(
             bind.Flag(Section, EnabledKey, true,
-                "Hold a color swatch in Character > Equipment to dye every worn piece and transmog. A click still colors "
+                "Hold a color swatch in Character > Equipment to dye every piece that shows: the transmog where one shows, never a hidden slot. A click still colors "
                 + "only the selected piece. Off: swatches behave as in the game."),
             bind.Flag(Section, MatchPalettesKey, false,
                 "Experimental. Read each piece's palette list so a color keeps its palette on pieces whose color lists differ. "
@@ -99,8 +99,8 @@ internal static class DyeAllLegacy
     /// <summary>
     /// Read a BepInEx cfg's text: <c>[Section]</c> headers, <c>Key = Value</c> lines, <c>#</c> comments. Only the
     /// old mod's <c>Enabled</c> and <c>MatchPalettes</c> are taken. <c>HoldSeconds</c>, <c>IncludeCovered</c>,
-    /// <c>[Test] ColorIndex</c> and <c>[Keybinds] DyeAllTestColor</c> are ignored: a hold is always one second, a piece
-    /// under a transmog is always dyed, and Core has no dye key. A value that does not parse is left out.
+    /// <c>[Test] ColorIndex</c> and <c>[Keybinds] DyeAllTestColor</c> are ignored: a hold is always one second, a hold
+    /// dyes only what shows, and Core has no dye key. A value that does not parse is left out.
     /// </summary>
     internal static Values Parse(string? text)
     {

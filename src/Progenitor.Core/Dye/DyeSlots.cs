@@ -88,14 +88,15 @@ internal readonly struct DyePaletteKey : IEquatable<DyePaletteKey>
 /// entity that is not null and not waiting for sync. <see cref="NumColors"/> is
 /// <c>TransmogData.NumColorOptions</c>; 0 (or no <c>TransmogData</c>) means not dyeable.
 /// <see cref="Palettes"/> is null when not read. <see cref="Hidden"/> is the slot's
-/// <c>EquipmentSlot.HideEquipment</c> (the picker's X cell). <see cref="Slotted"/> is the server's
-/// rule for "something is equipped here": the slot's <c>SlotId</c> is nonzero, which is already true
-/// while the entity still waits for sync (<see cref="Pending"/>).
+/// <c>EquipmentSlot.HideEquipment</c> (the picker's X cell) and <see cref="Broken"/> its
+/// <c>EquipmentSlot.IsBroken</c>. <see cref="Slotted"/> is the server's rule for "something is equipped
+/// here": the slot's <c>SlotId</c> is nonzero, which is already true while the entity still waits for
+/// sync (<see cref="Pending"/>).
 /// </summary>
 internal readonly struct DyeItem
 {
     internal DyeItem(int index, int version, bool present, bool hasTransmog, byte activeIndex, byte numColors,
-        IReadOnlyList<DyePaletteKey>? palettes = null, bool hidden = false, bool? slotted = null)
+        IReadOnlyList<DyePaletteKey>? palettes = null, bool hidden = false, bool? slotted = null, bool broken = false)
     {
         Index = index;
         Version = version;
@@ -106,6 +107,7 @@ internal readonly struct DyeItem
         Palettes = palettes;
         Hidden = hidden;
         Slotted = slotted ?? present;
+        Broken = broken;
     }
 
     /// <summary>An empty slot.</summary>
@@ -134,6 +136,9 @@ internal readonly struct DyeItem
 
     /// <summary>The player hid this piece's model with the picker's X cell.</summary>
     internal bool Hidden { get; }
+
+    /// <summary>The piece is broken; the game then shows the slot's default model, not the piece.</summary>
+    internal bool Broken { get; }
 }
 
 /// <summary>One of the five dyeable slots: its stat item and its cosmetic (transmog) item.</summary>
@@ -172,22 +177,18 @@ internal enum DyeSkipReason
     IndexOutOfRange,
 
     /// <summary>
-    /// A piece under a transmog that was left alone: dyeing it rewrites the transmog's shown color (see
-    /// <see cref="DyePlanner"/>), and the transmog cannot be given its own color back (it has no colors, or
-    /// putting it back would show a model the player hid).
+    /// The piece that shows in this slot is hidden with the picker's X cell. Its color is left alone: the
+    /// color event would also clear the hide flag and show the model again.
     /// </summary>
-    TransmogWouldChange,
+    Hidden,
+
+    /// <summary>The piece that would show in this slot is broken, so the game shows the default model instead.</summary>
+    Broken,
 
     /// <summary>
-    /// A piece under a transmog that the player hid with the X cell: its event would clear the hide flag
-    /// and show it again when the transmog comes off.
-    /// </summary>
-    CoveredHidden,
-
-    /// <summary>
-    /// The slot holds a transmog the client cannot use yet (its entity waits for sync): the server already
-    /// treats the slot as covered, so an event for the piece under it would re-key the transmog's shown
-    /// color from that piece's palettes. Nothing is sent for the slot; a later dye-all catches up.
+    /// The slot holds a transmog the client cannot use yet (its entity waits for sync). The transmog is what
+    /// shows, but its item cannot be named in an event yet, so nothing is sent for the slot; a later dye-all
+    /// catches up.
     /// </summary>
     TransmogNotSynced,
 }
@@ -195,12 +196,11 @@ internal enum DyeSkipReason
 /// <summary>An event to send: <c>ChangeTransmogColorEvent</c> for one worn piece.</summary>
 internal readonly struct DyeTarget
 {
-    internal DyeTarget(int equipmentType, DyeItem item, byte newIndex, bool restore = false)
+    internal DyeTarget(int equipmentType, DyeItem item, byte newIndex)
     {
         EquipmentType = equipmentType;
         Item = item;
         NewIndex = newIndex;
-        Restore = restore;
     }
 
     /// <summary>The stat type, or the cosmetic type when the visible piece is a transmog.</summary>
@@ -209,12 +209,6 @@ internal readonly struct DyeTarget
     internal DyeItem Item { get; }
 
     internal byte NewIndex { get; }
-
-    /// <summary>
-    /// True for a transmog sent its own current color after the piece under it was dyed, so the shown
-    /// color is rebuilt from the transmog's own palettes (see <see cref="DyePlanner"/>).
-    /// </summary>
-    internal bool Restore { get; }
 }
 
 /// <summary>A slot that got no event, and why.</summary>
@@ -262,7 +256,7 @@ internal sealed class DyePlan
     {
         var parts = new List<string>();
         foreach (var t in Targets)
-            parts.Add(DyeEquipmentTypes.Name(t.EquipmentType) + (t.Restore ? " kept at " : "->") + t.NewIndex);
+            parts.Add(DyeEquipmentTypes.Name(t.EquipmentType) + "->" + t.NewIndex);
         foreach (var s in Skipped) parts.Add(DyeEquipmentTypes.Name(s.EquipmentType) + " skipped (" + s.Reason + ")");
         return parts.Count == 0 ? "nothing equipped" : string.Join(", ", parts);
     }
@@ -271,28 +265,18 @@ internal sealed class DyePlan
 /// <summary>
 /// Which worn pieces a dye-all touches and with which index. Game-free.
 ///
-/// <para><b>Which piece.</b> The color picker's own rule
-/// (<c>TransmogContainer.TryGetEquipmentOrCosmeticSlotFromEquipmentType</c>): the cosmetic
-/// (transmog) piece when one is equipped, with the cosmetic equipment type; otherwise the stat piece
-/// with the stat type. The stat piece under a transmog is dyed as well, with its stat type, unless
-/// the caller opts out: the server accepts it because that piece is equipped in that slot.</para>
-///
-/// <para><b>Under a transmog.</b> Dye is stored on each item entity (<c>TransmogData.ActiveTransmogIndex</c>);
-/// the character's <c>Equipment</c> slot keeps the shown palette key. The server's slot write
-/// (<c>TransmogEventsSystem.UpdateTransmogColorForEquipmentSlot</c>) picks the slot by
-/// what is shown, not by the event's type: with a transmog equipped it writes the transmog slot's key,
-/// resolved from the palettes of the item the event names. So the stat event under a transmog stores the
-/// color on the real gear but also re-keys the transmog's shown color from the gear's palettes. The plan
-/// therefore sends the covered piece first and the transmog right after it, with the new color or, when
-/// the transmog keeps its color (already that color, palette missing, index out of range), a restore of
-/// its own current index. When no transmog event can follow (the transmog has no colors, its current
-/// index is out of range, or a restore would show a model the player hid; the event clears the hide
-/// flag), the covered piece is left alone (<see cref="DyeSkipReason.TransmogWouldChange"/>). A covered
-/// piece the player hid is left alone too (<see cref="DyeSkipReason.CoveredHidden"/>): its own event would
-/// clear its hide flag. "Covered" is the server's test, the transmog slot's <c>SlotId</c>; while the
-/// transmog's entity still waits for sync, nothing is sent for that slot
-/// (<see cref="DyeSkipReason.TransmogNotSynced"/>). The server handles events one at a time; that it
-/// handles one client's events in the order sent is assumed, not verified.</para>
+/// <para><b>Only what shows.</b> One piece per slot at most: the one the character visibly wears there
+/// (<see cref="Visible"/>). That is the game's own render rule (its hybrid equipment pass, the same rule
+/// the wearable code follows): the transmog (cosmetic) piece when the cosmetic slot's <c>SlotId</c> is
+/// set, otherwise the stat piece; then that piece's hide and broken state. So a transmog that shows is
+/// dyed with its cosmetic equipment type and the gear under it keeps its own color; a slot whose shown
+/// piece the player hid with the X cell is left alone (<see cref="DyeSkipReason.Hidden"/>), and so is a
+/// broken one (<see cref="DyeSkipReason.Broken"/>). A hidden gear piece under a shown transmog does not
+/// matter: the transmog is what shows. While a transmog's entity still waits for sync, the transmog is what
+/// shows but cannot be named, so nothing is sent for that slot (<see cref="DyeSkipReason.TransmogNotSynced"/>).
+/// Each event names only the shown piece: the server writes the color on that item, re-keys the slot that
+/// shows it from that item's own palettes and clears that slot's hide flag, which a shown piece does not
+/// have set.</para>
 ///
 /// <para><b>Which index.</b> An index names a color within one piece's option list, which the piece's
 /// palettes (<c>TransmogAssetKey</c> rows) lay out. With the source piece's palettes known, the
@@ -306,12 +290,8 @@ internal sealed class DyePlan
 /// </summary>
 internal static class DyePlanner
 {
-    /// <summary>
-    /// Plan a dye-all of <paramref name="color"/> over <paramref name="slots"/>. With
-    /// <paramref name="includeCovered"/>, a stat piece under a transmog is dyed too (with its stat
-    /// type), so it already wears the color when the transmog comes off.
-    /// </summary>
-    internal static DyePlan Plan(IReadOnlyList<DyeSlot> slots, DyeColor color, bool includeCovered = true)
+    /// <summary>Plan a dye-all of <paramref name="color"/> over <paramref name="slots"/>: the shown piece of each slot.</summary>
+    internal static DyePlan Plan(IReadOnlyList<DyeSlot> slots, DyeColor color)
     {
         if (slots == null) throw new ArgumentNullException(nameof(slots));
         var plan = new DyePlan();
@@ -325,80 +305,50 @@ internal static class DyePlanner
 
         foreach (var slot in slots)
         {
-            // The server decides "covered" by the transmog slot's SlotId, not by the entity being usable here.
-            if (slot.Cosmetic.Slotted && !slot.Cosmetic.Present)
+            var notShown = Visible(slot, out int type, out var item);
+            if (notShown is { } hidden)
             {
-                plan.Skipped.Add(new DyeSkip(DyeEquipmentTypes.CosmeticOf(slot.StatType), DyeSkipReason.TransmogNotSynced));
+                plan.Skipped.Add(new DyeSkip(type, hidden));
                 continue;
             }
 
-            if (!Choose(slot, out int type, out var item))
+            if (Decide(type, item, color, sourceKey, offset, out var target, out bool matched) is { } why)
             {
-                plan.Skipped.Add(new DyeSkip(slot.StatType, DyeSkipReason.Empty));
+                plan.Skipped.Add(new DyeSkip(type, why));
                 continue;
             }
 
-            bool covered = includeCovered && type != slot.StatType && slot.Stat.Present;
-            if (!covered)
-            {
-                Record(plan, type, Decide(type, item, color, sourceKey, offset, out var target, out bool matched),
-                    target, matched);
-                continue;
-            }
-
-            // Under a transmog: the covered piece first, then the transmog (its new color or a restore).
-            // A covered piece the player hid is left alone: its event would clear its hide flag.
-            DyeTarget under = default;
-            bool underMatched = false;
-            var shownReason = Decide(type, item, color, sourceKey, offset, out var shown, out bool shownMatched);
-            var underReason = slot.Stat.Hidden
-                ? DyeSkipReason.CoveredHidden
-                : Decide(slot.StatType, slot.Stat, color, sourceKey, offset, out under, out underMatched);
-            if (underReason != null)
-            {
-                Record(plan, slot.StatType, underReason, under, underMatched);
-                Record(plan, type, shownReason, shown, shownMatched);
-                continue;
-            }
-
-            if (shownReason == null)
-            {
-                Record(plan, slot.StatType, null, under, underMatched);
-                Record(plan, type, null, shown, shownMatched);
-            }
-            else if (CanRestore(item, shownReason.Value))
-            {
-                Record(plan, slot.StatType, null, under, underMatched);
-                plan.Targets.Add(new DyeTarget(type, item, item.ActiveIndex, restore: true));
-                plan.Skipped.Add(new DyeSkip(type, shownReason.Value));
-            }
-            else
-            {
-                plan.Skipped.Add(new DyeSkip(slot.StatType, DyeSkipReason.TransmogWouldChange));
-                plan.Skipped.Add(new DyeSkip(type, shownReason.Value));
-            }
+            if (matched) plan.MatchedByPalette = true;
+            plan.Targets.Add(target);
         }
 
         return plan;
     }
 
     /// <summary>
-    /// Whether the transmog can be sent its own current index after the piece under it was dyed: it has
-    /// colors, its index is one the server accepts, and the event would not show a hidden model.
+    /// The piece that shows in <paramref name="slot"/> and the equipment type to name it with, or why none
+    /// does (null: <paramref name="item"/> shows). A set cosmetic <c>SlotId</c> means the transmog shows,
+    /// whatever the gear under it is; then the shown piece's hide (X cell) and broken state count.
     /// </summary>
-    private static bool CanRestore(DyeItem transmog, DyeSkipReason why) =>
-        why != DyeSkipReason.NotDyeable && transmog.HasTransmog && transmog.ActiveIndex < transmog.NumColors && !transmog.Hidden;
-
-    private static void Record(DyePlan plan, int type, DyeSkipReason? reason, DyeTarget target, bool matched)
+    internal static DyeSkipReason? Visible(DyeSlot slot, out int equipmentType, out DyeItem item)
     {
-        if (reason is { } why)
+        if (slot.Cosmetic.Slotted)
         {
-            plan.Skipped.Add(new DyeSkip(type, why));
-            return;
+            equipmentType = DyeEquipmentTypes.CosmeticOf(slot.StatType);
+            item = slot.Cosmetic;
+            if (equipmentType < 0) return DyeSkipReason.Empty;
+            if (!item.Present) return DyeSkipReason.TransmogNotSynced;
+        }
+        else
+        {
+            equipmentType = slot.StatType;
+            item = slot.Stat;
+            if (!item.Present) return DyeSkipReason.Empty;
         }
 
-        if (matched) plan.MatchedByPalette = true;
-        plan.Targets.Add(target);
+        if (item.Hidden) return DyeSkipReason.Hidden;
+        if (item.Broken) return DyeSkipReason.Broken;
+        return null;
     }
 
     /// <summary>The event for one piece, or why it gets none (null reason: send <paramref name="target"/>).</summary>
@@ -420,31 +370,6 @@ internal static class DyePlanner
         if (item.ActiveIndex == index) return DyeSkipReason.AlreadyThatColor;
         target = new DyeTarget(type, item, (byte)index);
         return null;
-    }
-
-    /// <summary>
-    /// The piece the picker shows for a slot: the cosmetic one when present (with the cosmetic
-    /// type), else the stat one. False when the slot is empty.
-    /// </summary>
-    internal static bool Choose(DyeSlot slot, out int equipmentType, out DyeItem item)
-    {
-        if (slot.Cosmetic.Present)
-        {
-            equipmentType = DyeEquipmentTypes.CosmeticOf(slot.StatType);
-            item = slot.Cosmetic;
-            return equipmentType >= 0;
-        }
-
-        if (slot.Stat.Present)
-        {
-            equipmentType = slot.StatType;
-            item = slot.Stat;
-            return true;
-        }
-
-        equipmentType = slot.StatType;
-        item = DyeItem.None;
-        return false;
     }
 
     /// <summary>The palette (and the offset within it) that option <paramref name="index"/> comes from.</summary>
