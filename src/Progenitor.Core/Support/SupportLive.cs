@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using Progenitor.Commands;
+using Progenitor.Plugins;
 using Progenitor.Ui;
 
 namespace Progenitor.Support;
@@ -253,7 +254,123 @@ internal static class SupportLive
         request.GameSummary = facts.Format();
         request.KnownNames.AddRange(UserNames(server ? Worlds.Server : Worlds.Client));
         AddDiagnosisInputs(request);
+        AddModList(request, server);
         return request;
+    }
+
+    /// <summary>
+    /// Main thread: the installed mods for <c>mods.md</c> (each chainloader plugin and each plugin loaded from
+    /// <c>BepInEx/progenitor-reload</c>), and on a joined client the server's join list. Plain strings and the help
+    /// facts only; the links are read from disk on the worker thread. Never throws.
+    /// </summary>
+    private static void AddModList(SupportBundleRequest request, bool server)
+    {
+        var byId = new Dictionary<string, SupportMod>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? id, string? name, string? version, string? location, bool onProgenitor)
+        {
+            if (string.IsNullOrWhiteSpace(id) || byId.ContainsKey(id!.Trim())) return;
+            var mod = new SupportMod
+            {
+                Id = id.Trim(),
+                Name = name ?? "",
+                Version = version ?? "",
+                Location = location ?? "",
+                OnProgenitor = onProgenitor,
+                DeclaredHelp = SafeRead(() => ModHelpStore.DeclaredPath(id)) ?? "",
+            };
+            try { if (ModHelpStore.TryGet(id, out var facts)) mod.HelpFacts = facts; }
+            catch { /* no help facts */ }
+            if (mod.Location.Length == 0)
+            {
+                try { if (PluginAboutStore.TryGet(id, out var about)) mod.Location = about.Location; }
+                catch { /* not known */ }
+            }
+            byId[mod.Id] = mod;
+            request.Mods.Add(mod);
+        }
+
+        try
+        {
+            var plugins = BepInEx.Unity.IL2CPP.IL2CPPChainloader.Instance?.Plugins;
+            if (plugins != null)
+                foreach (var pair in plugins)
+                {
+                    var info = pair.Value;
+                    var meta = info?.Metadata;
+                    bool onProgenitor = false;
+                    try { onProgenitor = IsProgenitorType(info?.Instance?.GetType()); } catch { /* unknown */ }
+                    try
+                    {
+                        if (info?.Dependencies != null)
+                            foreach (var d in info.Dependencies)
+                                if (string.Equals(d?.DependencyGUID, SupportModList.ProgenitorId, StringComparison.OrdinalIgnoreCase)) onProgenitor = true;
+                    }
+                    catch { /* unknown */ }
+                    string? location = null;
+                    try { location = info?.Location; } catch { location = null; }
+                    Add(pair.Key ?? meta?.GUID, meta?.Name, meta?.Version?.ToString(), location, onProgenitor);
+                }
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Support: the mod list could not be read (" + e.GetType().Name + ").");
+        }
+
+        try
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (!Reload.PluginReloader.TryGetSourcePath(asm, out string path)) continue;
+                Type?[] types;
+                try { types = asm.GetTypes(); }
+                catch (System.Reflection.ReflectionTypeLoadException e) { types = e.Types; }
+                catch { continue; }
+                foreach (var type in types)
+                {
+                    if (type == null || type.IsAbstract) continue;
+                    BepInEx.BepInPlugin? meta = null;
+                    try
+                    {
+                        foreach (var attribute in type.GetCustomAttributes(typeof(BepInEx.BepInPlugin), inherit: false))
+                            meta = attribute as BepInEx.BepInPlugin;
+                    }
+                    catch { meta = null; }
+                    if (meta == null) continue;
+                    Add(meta.GUID, meta.Name, meta.Version?.ToString(), path, true);
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Support: the reload-folder mods could not be read (" + e.GetType().Name + ").");
+        }
+
+        // A joined client: the mods the server's join list names (the server runs them).
+        if (server) return;
+        try
+        {
+            if (Worlds.Client == null) return;
+            foreach (var record in Networking.Handshake.CopyServerAsked())
+            {
+                if (string.IsNullOrWhiteSpace(record.Guid)) continue;
+                if (byId.TryGetValue(record.Guid.Trim(), out var local)) local.AlsoOnServer = true;
+                else
+                {
+                    var mod = new SupportMod { Id = record.Guid.Trim(), Version = record.Version ?? "", ServerOnly = true };
+                    byId[mod.Id] = mod;
+                    request.Mods.Add(mod);
+                }
+            }
+        }
+        catch { /* no server list */ }
+    }
+
+    /// <summary>A <c>ProgenitorPlugin&lt;T&gt;</c> subclass.</summary>
+    private static bool IsProgenitorType(Type? type)
+    {
+        for (var t = type; t != null; t = t.BaseType)
+            if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(ProgenitorPlugin<>)) return true;
+        return false;
     }
 
     /// <summary>

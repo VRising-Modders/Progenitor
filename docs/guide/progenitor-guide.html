@@ -998,7 +998,7 @@ window.Show();` },
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/test-rig.md">test-rig.md</a>, <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/bridge.md">bridge.md</a>.</p>` } ] },
     { id: "developers/publishing", role: "developers", title: "Publishing to Thunderstore", pages: [
       { id: "overview", title: "Publishing to Thunderstore", soon: true,
-        html: `<ol class="outline"><li>The package: <code>manifest.json</code>, README, icon, <code>progenitor.json</code></li><li>Required and recommended mods</li><li>The "Requires Progenitor" message</li><li>The optional [[stamp|Progenitor stamp]]</li><li><code>tools/publish-check.ps1</code></li></ol>
+        html: `<ol class="outline"><li>The package: <code>manifest.json</code>, README, icon, <code>progenitor.json</code></li><li>Required and recommended mods</li><li>The "Requires Progenitor" message</li><li>The optional [[stamp|Progenitor stamp]]</li><li><code>website_url</code> and an <code>llms.txt</code>, so AI assistants find your docs</li><li><code>tools/publish-check.ps1</code></li></ol>
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md">publishing.md</a>.</p>` } ] },
 
     { id: "developers/reference", role: "developers", title: "Reference Map", pages: [
@@ -1021,27 +1021,28 @@ window.Show();` },
     {
       id: "help", title: "Get Help", pages: [
         { id: "ai-help", title: "Get help from an AI assistant",
-          html: `<p>Open ChatGPT, Gemini, Grok, Claude or another assistant, paste this prompt, and attach your log zip or its files:</p>{{code}}
-<p>The same prompt, and how to write a bug report: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/SUPPORT.md">SUPPORT.md</a>.</p>`,
-          code: { lang: "prompt", text: `Help me fix a problem with V Rising mods that use Progenitor
-(https://github.com/VRising-Modders/Progenitor).
+          html: `<p>Open ChatGPT, Gemini, Grok, Claude or another assistant, paste this prompt and add your question. For a problem, also attach your log zip (<a href="#help/collect-logs">Collect logs</a>); its <code>mods.md</code> lists every mod with its links.</p>{{code}}
+<p>No zip? Each mod's page in the Mods menu shows its version, and <strong>Store page</strong> opens its Thunderstore page. Paste the names, versions and links.</p>
+<p>Found a bug? <a href="https://github.com/VRising-Modders/Progenitor/blob/main/SUPPORT.md">SUPPORT.md</a> shows how to report it.</p>`,
+          code: { lang: "prompt", text: `I play, run a server or make mods for V Rising with Progenitor
+(https://github.com/VRising-Modders/Progenitor). Help me with my question
+about Progenitor or a mod that uses it.
 
-1. Read the repository's llms.txt, SUPPORT.md and the pages for my role
-   (player, server admin or mod developer) in
-   docs/guide/progenitor-guide.html, then the docs they link to.
-2. Ask me for my V Rising version, my Progenitor version (Mods > Progenitor),
-   the mods I use, and whether I play on a server, in a private game,
-   run a server or make a mod.
-3. Read the logs I attach (BepInEx LogOutput.log, Player.log, the mod list).
-4. Tell me the likely cause, then give me steps I can follow in the
-   game or the game folder. No code changes unless I ask.
-5. If it looks like a bug in Progenitor or a mod, help me write a short bug report.
+- First read the repository's llms.txt and the Help Guide pages for my role
+  (docs/guide/progenitor-guide.html).
+- For other mods, use the mod list (mods.md in the log zip, or the list
+  I paste) and each mod's linked page or repository.
+- Answer questions directly. Ask for my Progenitor and V Rising versions,
+  mod list or logs only when you need them, e.g. for a problem or crash.
+- For a problem: the likely cause, then steps I can follow in the game or
+  the game folder. If it looks like a bug, help me write a short report for
+  the Progenitor Discord channel or GitHub.
 
-My problem: <describe what happened and what you expected>` } },
+My question:` } },
         { id: "collect-logs", title: "Collect logs",
           html: `<ul><li><strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs for a help post</strong>, or the zip icon at the bottom left of the title screen.</li>
 <li>One zip lands on your Desktop and its folder opens; the path is on the clipboard.</li>
-<li>Inside: BepInEx's log (this session and the two before it), the game's log, your mod list, a few settings, and the logs of a private game or server running on this PC.</li>
+<li>Inside: BepInEx's log (this session and the two before it), the game's log, <code>mods.md</code> (each mod's version, author and Thunderstore, website and help links), a few settings, and the logs of a private game or server running on this PC.</li>
 <li>Removed: SteamIDs, IP addresses, your Windows user name, passwords and tokens. Character and server names stay.</li></ul>` },
         { id: "logs-settings", title: "Get help settings",
           html: `<table><thead><tr><th class="label">Row</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>

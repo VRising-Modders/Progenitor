@@ -163,6 +163,7 @@ The template gives you: `ProgenitorPlugin<TContext>` with `OnLoad`/`OnUnload`, a
 - Required mods go in `manifest.json` dependencies. Recommended mods go in the README and the server join list's `recommended` rows ([join flow](docs/join-flow.md#recommended-rows-the-panel-and-the-overlay)).
 - The Progenitor stamp on the icon is optional ([publishing §4](docs/publishing.md#4-the-progenitor-stamp-optional)).
 - Never write "official", "verified" or "approved" next to Progenitor.
+- Help AI assistants find your docs: set `website_url` in `manifest.json` to your repository, and ship an `llms.txt` at its root (or a README section) with what the mod does, its settings, keys and commands, and where to report bugs. Players' log zips list that link in `mods.md`.
 
 ## More
 

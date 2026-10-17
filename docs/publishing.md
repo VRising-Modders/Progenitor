@@ -47,7 +47,7 @@ A package is a zip whose root holds:
 
 - **`name`**: PascalCase, letters and digits (`MyMod`). Thunderstore allows `_` and shows it as a space; a hyphen is not allowed. Your team name is not part of it: Thunderstore adds it (`YourTeam-MyMod`).
 - **`version_number`**: three numbers, `major.minor.patch`. The same string goes in `[BepInPlugin]` and `progenitor.json` ([versions](#6-versions-and-compatibility)).
-- **`website_url`**: the mod's public source. Players and server operators use it to see what they are installing.
+- **`website_url`**: the mod's public source. Players and server operators use it to see what they are installing, and players' log zips list it in `mods.md` for AI assistants. An `llms.txt` at the repository root (or a README section) tells an assistant what the mod does and where to report bugs.
 - **`description`**: at most 250 characters, starting with the side: `Client-only`, `Server-only` or `Client and server`, in the [standard form](#3-the-standard-progenitor-message).
 - **`dependencies`**: see [Dependencies](#2-dependencies).
 

@@ -368,19 +368,23 @@ internal sealed class PackageManifestBeside
         internal long CheckedMs;
     }
 
-    private PackageManifestBeside(string owner, string name, string version, string description, string folder)
+    private PackageManifestBeside(string owner, string name, string version, string description, string folder, string websiteUrl)
     {
         Owner = owner;
         Name = name;
         Version = version;
         Description = description;
         Folder = folder;
+        WebsiteUrl = websiteUrl;
     }
 
     internal string Owner { get; }
     internal string Name { get; }
     internal string Version { get; }
     internal string Description { get; }
+
+    /// <summary>The manifest's <c>website_url</c> (the mod's site or repository), or empty.</summary>
+    internal string WebsiteUrl { get; }
 
     /// <summary>The package folder that holds the manifest.</summary>
     internal string Folder { get; }
@@ -479,7 +483,7 @@ internal sealed class PackageManifestBeside
             if (name.Length == 0 || version.Length == 0) return null;
             string owner = OwnerFromFolder(Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)), name, version);
             if (owner.Length == 0) return null;
-            return new PackageManifestBeside(owner, name, version, Text(root, "description"), dir);
+            return new PackageManifestBeside(owner, name, version, Text(root, "description"), dir, Text(root, "website_url"));
         }
         catch { return null; }
     }

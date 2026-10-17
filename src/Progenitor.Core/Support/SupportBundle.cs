@@ -95,6 +95,9 @@ internal sealed class SupportBundleRequest
 
     /// <summary>Why the server's logs are missing when they were asked for; summary.txt and the status line say it.</summary>
     public string? ServerPartNote { get; set; }
+
+    /// <summary>The installed mods for <c>mods.md</c>, read on the main thread; their links are read from disk by <see cref="SupportBundle.Build"/>.</summary>
+    public List<SupportMod> Mods { get; } = new();
 }
 
 /// <summary>A dedicated server running on this PC, as the bundle collects it. Read only: nothing in its folder is written.</summary>
@@ -571,6 +574,9 @@ internal static class SupportBundle
             catch (Exception e) { r.Notes.Add("Looking for local dedicated servers failed: " + scrub.Redact(e.GetType().Name + ": " + e.Message)); }
         }
 
+        // The mods' packages, links and help pages: disk reads, so here on the worker thread, once per build.
+        SupportModList.Resolve(r.Mods, r.BepInExRoot);
+
         string support = SupportFolderOf(r);
         string primary = OutputFolderOf(r);
         string label = string.IsNullOrWhiteSpace(r.OutputLabel) || SamePath(primary, support) ? "BepInEx/" + FolderName : r.OutputLabel!;
@@ -778,6 +784,7 @@ internal static class SupportBundle
             if (!string.IsNullOrWhiteSpace(p.Display)) words.Add(p.Display!);
             words.AddRange(p.Assemblies);
         }
+        words.AddRange(SupportModList.Words(r.Mods));
         return words;
     }
 
@@ -826,6 +833,11 @@ internal static class SupportBundle
             string summary = Summary(r, fileLines, result.Skipped, Listings(r.BepInExRoot), serverLine, report.Section, report.TopName);
             WriteEntry(zip, "summary.txt", redactor.Redact(summary));
             WriteEntry(zip, "README.txt", redactor.Redact(Readme(r.Side, report.TopName)));
+            if (r.Mods.Count > 0)
+            {
+                WriteEntry(zip, SupportModList.EntryName, redactor.Redact(SupportModList.Format(r.Side, r.Mods)));
+                result.Entries.Insert(0, SupportModList.EntryName);
+            }
             result.Entries.Insert(0, "summary.txt");
             result.Entries.Insert(0, "README.txt");
         }
@@ -1081,6 +1093,8 @@ internal static class SupportBundle
         sb.AppendLine();
         sb.AppendLine("- summary.txt: the mods the logs point at, versions, loaded mods, the files in your plugins folder (names");
         sb.AppendLine("  only) and current mod problems.");
+        sb.AppendLine("- mods.md: every installed mod with its version, author, whether it is built on Progenitor, and its");
+        sb.AppendLine("  Thunderstore page, website or repository and help page when known.");
         sb.AppendLine("- bepinex/: BepInEx's log of this session (LogOutput.log, every mod writes to it) and copies of the two");
         sb.AppendLine("  sessions before it (progenitor-logs/session*.log), Steam's ErrorLog.log, and Progenitor's own audit logs,");
         sb.AppendLine("  settings and state files.");
