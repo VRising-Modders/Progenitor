@@ -430,7 +430,13 @@ internal static class ChatWindow
             }
 
             var system = world.GetExistingSystemManaged<ClientChatSystem>();
-            if (system == null || system.Pointer == IntPtr.Zero) return;
+            if (system == null || system.Pointer == IntPtr.Zero)
+            {
+                ChatClickGuard.Update(false, false, false);
+                ChatClickGuard.UpdateWheel(false);
+                return;
+            }
+
             var window = system._ChatWindow;
             if (window == null || window.Pointer == IntPtr.Zero)
             {
