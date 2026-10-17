@@ -49,7 +49,18 @@ internal static unsafe class ChatObserve
     /// Progenitor commands, the event bus, and the game's chat job all see it. Server world only.
     /// </summary>
     internal static InjectedChat Inject(string text, int? userIndex, string? characterName)
+        => Inject(text, userIndex, characterName, ChatMessageType.Local, echo: false, out _);
+
+    /// <summary>
+    /// <see cref="Inject(string, int?, string?)"/> on a chosen channel. The game's chat job never sends a Global, Local or
+    /// clan line back to its speaker: a typing client shows its own line itself. So with <paramref name="echo"/> the
+    /// speaker also gets the line from the server (<see cref="Progenitor.Chat.Chat.SendTo(World, Entity, string, ChatMessageType, Entity)"/>,
+    /// stamped with their own network ids), which is what their chat would show had they typed it; without it, a line
+    /// injected as the only player reaches nobody. <paramref name="echoed"/> is whether that send was created.
+    /// </summary>
+    internal static InjectedChat Inject(string text, int? userIndex, string? characterName, ChatMessageType type, bool echo, out bool echoed)
     {
+        echoed = false;
         if (!Progenitor.Plugin.IsServerProcess)
             throw new InvalidOperationException("chat injection runs on the server side only");
         if (string.IsNullOrEmpty(text))
@@ -65,8 +76,10 @@ internal static unsafe class ChatObserve
         var stored = message.ToString();
         var em = world.EntityManager;
         var ev = em.CreateEntity(ComponentType.ReadWrite<ChatMessageEvent>(), ComponentType.ReadWrite<FromCharacter>());
-        em.SetComponentData(ev, new ChatMessageEvent { MessageText = message, MessageType = ChatMessageType.Local });
+        em.SetComponentData(ev, new ChatMessageEvent { MessageText = message, MessageType = type });
         em.SetComponentData(ev, new FromCharacter { User = userEntity, Character = user.LocalCharacter._Entity });
+        // Created now, before the chat system handles the line (and before any command reply exists).
+        if (echo) echoed = Progenitor.Chat.Chat.SendTo(world, userEntity, stored, type, userEntity);
         return new InjectedChat(ev, user.CharacterName.ToString(), user.Index, stored, text);
     }
 

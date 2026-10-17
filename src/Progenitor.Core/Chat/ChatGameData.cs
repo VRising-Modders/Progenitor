@@ -18,21 +18,46 @@ namespace Progenitor.Chat;
 /// </summary>
 internal static class ChatGameData
 {
-    private static readonly Dictionary<int, string> ItemNames = new();
+    // A miss is retried (ChatNameCache): history is restored when the chat window appears, which can be before the item
+    // data and the string table are loaded, and a miss cached for the world's life left those lines' tokens raw.
+    private static readonly ChatNameCache ItemNames = new(LookUpItemName);
+    private static readonly ChatNameCache ItemDescriptions = new(LookUpItemDescription);
+    private static readonly System.Diagnostics.Stopwatch Clock = System.Diagnostics.Stopwatch.StartNew();
     private static World? _namesWorld;
 
-    /// <summary>An item's localized name (or its prefab name), or null when the id is not an item.</summary>
+    private static double Now() => Clock.Elapsed.TotalSeconds;
+
+    /// <summary>Rises when an item name that was unknown becomes known (or the client world changes): redraw the lines.</summary>
+    internal static int ItemNamesVersion => ItemNames.Version;
+
+    /// <summary>Once a frame from the chat view: retry the item names that were unknown. True when one resolved.</summary>
+    internal static bool PollItemNames()
+    {
+        SyncWorld();
+        return ItemNames.Poll(Now());
+    }
+
+    /// <summary>Both caches belong to one client world; a new one starts them empty.</summary>
+    private static void SyncWorld()
+    {
+        var world = Worlds.Client;
+        if (world == null || ReferenceEquals(world, _namesWorld)) return;
+        _namesWorld = world;
+        ItemNames.Clear();
+        ItemDescriptions.Clear();
+    }
+
+    /// <summary>An item's localized name (or its prefab name), or null when the id is not an item (or not yet known).</summary>
     internal static string? ItemName(int prefabId)
+    {
+        SyncWorld();
+        return ItemNames.Get(prefabId, Now());
+    }
+
+    private static string? LookUpItemName(int prefabId)
     {
         var world = Worlds.Client;
         if (world == null || !world.IsCreated) return null;
-        if (!ReferenceEquals(world, _namesWorld))
-        {
-            ItemNames.Clear();
-            _namesWorld = world;
-        }
-
-        if (ItemNames.TryGetValue(prefabId, out var cached)) return cached.Length == 0 ? null : cached;
         string name = "";
         try
         {
@@ -44,7 +69,6 @@ internal static class ChatGameData
         }
         catch { name = ""; }
 
-        ItemNames[prefabId] = name;
         return name.Length == 0 ? null : name;
     }
 
@@ -86,36 +110,30 @@ internal static class ChatGameData
         return false;
     }
 
-    private static readonly Dictionary<int, string> ItemDescriptions = new();
-    private static World? _descriptionsWorld;
-
     /// <summary>
     /// An item's localized description (<c>ManagedItemData.Description</c> through the game's string table), as the
-    /// game's own text (rich text kept), or null when it has none. Cached per client world.
+    /// game's own text (rich text kept), or null when it has none (or it is not yet known). Cached per client world.
     /// </summary>
     internal static string? ItemDescription(int prefabId)
     {
+        SyncWorld();
+        return ItemDescriptions.Get(prefabId, Now());
+    }
+
+    private static string? LookUpItemDescription(int prefabId)
+    {
         var world = Worlds.Client;
         if (world == null || !world.IsCreated) return null;
-        if (!ReferenceEquals(world, _descriptionsWorld))
-        {
-            ItemDescriptions.Clear();
-            _descriptionsWorld = world;
-        }
-
-        if (ItemDescriptions.TryGetValue(prefabId, out var cached)) return cached.Length == 0 ? null : cached;
-        string text = "";
         try
         {
             var registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry;
             if (registry != null && registry.TryGet<ManagedItemData>(new PrefabGUID(prefabId), out var data) && data != null
                 && Localization.Localization.TryGetGameString(data.Description.Key, out var s) && !string.IsNullOrWhiteSpace(s))
-                text = s.Trim();
+                return s.Trim();
         }
-        catch { text = ""; }
+        catch { /* unknown for now: retried */ }
 
-        ItemDescriptions[prefabId] = text;
-        return text.Length == 0 ? null : text;
+        return null;
     }
 
     /// <summary>An item's prefab id from its spawnable prefab name (<c>Item_Weapon_Sword_T01_Bone</c>), or 0.</summary>

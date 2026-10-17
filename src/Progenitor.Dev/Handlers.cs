@@ -339,48 +339,17 @@ internal sealed class Handlers
     private static object Command(JsonElement args)
     {
         if (!Progenitor.Plugin.IsServerProcess) throw new InvalidOperationException("command runs on the server side only");
-        var text = Get<string?>(args, "text", null) ?? throw new ArgumentException("args.text is required");
-        ResolveCommandUser(args, out var userIndex, out var characterName);
-        var injected = Ops.ChatObserve.Inject(text, userIndex, characterName);
-        return new { injectedAs = injected.InjectedAs, userIndex = injected.UserIndex, text = injected.RequestedText };
-    }
-
-    /// <summary>
-    /// Speaker for <c>command</c>: <c>userIndex</c> (int) wins; otherwise <c>user</c> as an int is
-    /// <c>User.Index</c> (ghosts start at 10001) and any other string is the character name
-    /// (e.g. <c>Ghost1</c>). Both paths hit the same connected-User query ghosts already satisfy.
-    /// </summary>
-    private static void ResolveCommandUser(JsonElement args, out int? userIndex, out string? characterName)
-    {
-        userIndex = null;
-        characterName = null;
-        if (args.ValueKind != JsonValueKind.Object) return;
-
-        if (args.TryGetProperty("userIndex", out var idxEl))
+        var request = Ops.ChatInjectArgs.Parse(args);
+        var injected = Ops.ChatObserve.Inject(request.Text, request.UserIndex, request.CharacterName,
+            (ProjectM.Network.ChatMessageType)request.MessageType, request.Echo, out bool echoed);
+        return new
         {
-            if (idxEl.ValueKind == JsonValueKind.Number && idxEl.TryGetInt32(out var n))
-                userIndex = n;
-            else if (idxEl.ValueKind == JsonValueKind.String
-                     && int.TryParse(idxEl.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out n))
-                userIndex = n;
-        }
-
-        if (!args.TryGetProperty("user", out var whoEl)) return;
-        if (whoEl.ValueKind == JsonValueKind.Number && whoEl.TryGetInt32(out var asIndex))
-        {
-            userIndex ??= asIndex;
-            return;
-        }
-        if (whoEl.ValueKind != JsonValueKind.String) return;
-        var who = whoEl.GetString();
-        if (string.IsNullOrWhiteSpace(who)) return;
-        if (userIndex == null
-            && int.TryParse(who, NumberStyles.Integer, CultureInfo.InvariantCulture, out asIndex))
-        {
-            userIndex = asIndex;
-            return;
-        }
-        characterName = who;
+            injectedAs = injected.InjectedAs,
+            userIndex = injected.UserIndex,
+            text = injected.RequestedText,
+            channel = request.Channel,
+            echoed,
+        };
     }
 
     private static T Get<T>(JsonElement args, string name, T fallback)
