@@ -165,6 +165,8 @@ internal static class ChatView
         get => _tab;
         set
         {
+            // CHAT14: another tab shown: the "sent elsewhere" note belonged to the old one.
+            if (!ReferenceEquals(value, _tab)) Sent.Clear();
             _tab = value ?? ChatTab.All();
             _drawnVersion = -1;
             Scroll.Follow();
@@ -195,6 +197,7 @@ internal static class ChatView
         _ownName = "";
         _host = "";
         _serverName = "";
+        Sent.Clear();
     }
 
     /// <summary>Core unload or the view turned off: save, mark the session end, put the game's view back.</summary>
@@ -495,7 +498,14 @@ internal static class ChatView
         };
 
         // While the history is still being read, the line is held and follows it once it is in.
-        var record = Restoring.TryHold(fresh, window == null) ? fresh : Commit(fresh, window == null);
+        bool held = Restoring.TryHold(fresh, window == null);
+        var record = held ? fresh : Commit(fresh, window == null);
+
+        // CHAT14: your own line, sent from a tab that does not show it: a short note says where it went. The
+        // whisper's recipient is not named: the remembered typed name can be stale, and the game's line is not a
+        // verified source for it.
+        if (record != null && !held && self && window != null)
+            Sent.NoteSent(record, ChatTabs.Tabs, ChatTabs.ActiveIndex, null, SentNow);
 
         if (record != null && mention && record.Repeat == 1 && (MentionSound?.Value ?? true) && window != null)
         {
@@ -584,6 +594,7 @@ internal static class ChatView
                 Redraw(optionsKey);
             if (chatShown) PageAtEdges(optionsKey);
             KeepFontSize();
+            UpdateNote();
             EndFlash(now: false);
             if (chatShown && pointerOverLog)
             {
@@ -640,6 +651,10 @@ internal static class ChatView
     internal static void Detach()
     {
         EndFlash(now: true);
+        Sent.Clear();
+        _noteGo = null;
+        _noteText = null;
+        _noteDrawn = null;
         EndHover();
         try
         {
@@ -973,6 +988,116 @@ internal static class ChatView
         };
     }
 
+    // ---- CHAT14: the "sent elsewhere" note ------------------------------------------------------------------
+
+    /// <summary>The note for a line sent from a tab that does not show it (<see cref="ChatSentElsewhere"/>).</summary>
+    internal static readonly ChatSentElsewhere Sent = new();
+
+    private static readonly System.Diagnostics.Stopwatch SentClock = System.Diagnostics.Stopwatch.StartNew();
+
+    /// <summary>The note's clock, in seconds.</summary>
+    internal static double SentNow => SentClock.Elapsed.TotalSeconds;
+
+    internal const string NoteName = "progenitor-chat-sent-note";
+    private static GameObject? _noteGo;
+    private static TextMeshProUGUI? _noteText;
+    private static ChatSentNote? _noteDrawn;
+    private static float _noteBaseSize;
+
+    /// <summary>
+    /// Each frame: the note, when there is one for the shown tab, is one muted line made from the game's line prefab,
+    /// kept below the newest line (just above the input), fading at the end. It is not one of the log's lines.
+    /// </summary>
+    private static void UpdateNote()
+    {
+        double now = SentNow;
+        var note = Sent.Visible(_tab, now);
+        if (note == null)
+        {
+            HideNote();
+            return;
+        }
+
+        if ((_noteGo == null || _noteGo.Pointer == IntPtr.Zero) && !MakeNote()) return;
+        var go = _noteGo!;
+        var text = _noteText!;
+        if (!ReferenceEquals(note, _noteDrawn))
+        {
+            _noteDrawn = note;
+            var scroll = _window?.ScrollView;
+            bool atBottom = scroll == null || scroll.verticalNormalizedPosition <= 0.02f;
+            text.text = ChatSentElsewhere.Rich(note, Options());
+            text.color = note.Echo ? ColorOf(note.Line.Kind, true) : Color.white;
+            if (!go.activeSelf) go.SetActive(true);
+            go.transform.SetAsLastSibling();
+            if (atBottom && scroll != null)
+            {
+                Canvas.ForceUpdateCanvases();
+                scroll.verticalNormalizedPosition = 0f;
+            }
+        }
+
+        var t = go.transform;
+        if (t.parent != null && t.GetSiblingIndex() != t.parent.childCount - 1) t.SetAsLastSibling();
+        int size = FontSize?.Value ?? 0;
+        float want = size > 0 ? size : _noteBaseSize;
+        if (Math.Abs(text.fontSize - want) > 0.01f) text.fontSize = want;
+        text.alpha = ChatSentElsewhere.Alpha(note, now);
+    }
+
+    private static bool MakeNote()
+    {
+        if (_clone == null || _window == null || _window.ChatMessagePrefab == null) return false;
+        var made = UnityEngine.Object.Instantiate(_window.ChatMessagePrefab.gameObject, _clone.transform)?.TryCast<GameObject>();
+        if (made == null) return false;
+        var tmp = made.GetComponent<TextMeshProUGUI>();
+        if (tmp == null)
+        {
+            UnityEngine.Object.Destroy(made);
+            return false;
+        }
+
+        made.name = NoteName;
+        tmp.richText = true;
+        _noteBaseSize = tmp.fontSize;
+        _noteGo = made;
+        _noteText = tmp;
+        _noteDrawn = null;
+        return true;
+    }
+
+    private static void HideNote()
+    {
+        _noteDrawn = null;
+        if (_noteGo != null && _noteGo.Pointer != IntPtr.Zero && _noteGo.activeSelf) _noteGo.SetActive(false);
+    }
+
+    /// <summary>A click on the note: left shows the tab it names, right copies an echoed line. True when it was hit.</summary>
+    private static bool NoteClicked(Vector2 point, bool right)
+    {
+        var note = _noteDrawn;
+        if (note == null || _noteGo == null || _noteGo.Pointer == IntPtr.Zero || !_noteGo.activeInHierarchy) return false;
+        var rect = _noteGo.transform.TryCast<RectTransform>();
+        if (rect == null || !RectTransformUtility.RectangleContainsScreenPoint(rect, point, null)) return false;
+        if (right)
+        {
+            if (note.Echo) Copy(note.Line);
+            return true;
+        }
+
+        if (note.Target == null) return true;
+        var tabs = ChatTabs.Tabs;
+        for (int i = 0; i < tabs.Count; i++)
+        {
+            if (!ReferenceEquals(tabs[i], note.Target)) continue;
+            ChatTabs.Select(i);
+            break;
+        }
+
+        Sent.Clear();
+        return true;
+    }
+
     // ---- clicks --------------------------------------------------------------------------------------------
 
     private static void HandleClicks()
@@ -985,6 +1110,7 @@ internal static class ChatView
         var viewport = _window?.ScrollView?.viewport;
         if (viewport == null || !RectTransformUtility.RectangleContainsScreenPoint(viewport, new Vector2(x, y), null)) return;
         if (ChatTabs.PointerOver(new Vector2(x, y))) return;
+        if (NoteClicked(new Vector2(x, y), right)) return;
         foreach (var slot in Lines)
         {
             if (slot.Record == null || !slot.Go.activeInHierarchy) continue;

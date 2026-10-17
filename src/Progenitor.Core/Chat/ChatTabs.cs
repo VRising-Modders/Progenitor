@@ -117,6 +117,9 @@ internal static class ChatTabs
 
     internal static IReadOnlyList<ChatTab> Tabs => Set.Tabs;
 
+    /// <summary>The shown tab's index in <see cref="Tabs"/>.</summary>
+    internal static int ActiveIndex => Set.Active;
+
     /// <summary>Load the saved tabs once; false while <c>[Chat] Tabs</c> is not bound yet (nothing may change them then).</summary>
     private static bool EnsureLoaded()
     {
@@ -542,10 +545,14 @@ internal static class ChatTabs
         int dragged = _drag == Drag.TabDrag ? _pressItem : -1;
         int art = ChatTabArt.Version;
         var colors = ChatTabArt.Found ? ChatTabArt.Colors ?? new ChatTabDonorColors() : null;
+        double now = ChatView.SentNow;
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
             var state = ChatTabRow.StateOf(i, Set.Tabs.Count, Set.Active, _hovered, dragged);
+            // CHAT14: the tab a line you just sent went to pulses with the hover look.
+            if (state == ChatTabItemState.Normal && item.Tab >= 0 && item.Tab < Set.Tabs.Count
+                && ChatView.Sent.PulseLit(Set.Tabs[item.Tab], now)) state = ChatTabItemState.Hover;
             bool unread = item.Tab >= 0 && item.Tab != Set.Active && item.Tab < Set.Unread.Length && Set.Unread[item.Tab];
             if (state == item.Drawn && unread == item.DrawnUnread && art == item.DrawnArt) continue;
             item.Drawn = state;

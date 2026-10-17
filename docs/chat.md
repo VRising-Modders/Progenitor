@@ -298,6 +298,21 @@ A tab is a view with its own send channel and its own unsent line.
 6. Type `half a line` on Clan (`line`), click All with the mouse: the input is empty, `tabs[1].draft` is `half a line`, and Up does not offer it; click Clan: the text is back. Escape on a bare prefill adds nothing to Up.
 7. Edit the custom tab's channels: its `sendTo` is empty again.
 
+### Sent elsewhere (CHAT14)
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatSentElsewhereTests`). **Not live-verified.**
+
+A line you send keeps its channel's filtering: `/w Bob hi` typed on a **Clan** tab is a whisper, so it shows in **All**, **Whispers** and any tab showing whispers, and is never copied into the Clan tab. When the tab you sent from does not show the line (`Chat/ChatSentElsewhere.cs`, game-free):
+
+- **The note.** One muted, italic line at the bottom of the current tab, just above the input: `Whisper sent · see Whispers`, or `Sent to Global · see All` for another channel. It is not part of the log: it is never saved in the history, shows only in the tab you sent from, goes when you show another tab, and fades out over its last second after 5 seconds. A left-click on it shows the tab it names.
+- **The tab.** The tab named blinks twice (1 second in all) with the row's own hover look; no new art. It also gets the unread star, as any line does in a tab that is not shown.
+- **Which tab.** The most specific tab that shows the line: the one with the fewest channels, the first in the row on a tie. A Whispers tab is named before All; All when no other tab shows the channel.
+- **No tab.** When no tab shows the line at all, the note repeats the line itself followed by `no tab shows Global` (right-click copies it), so a message never seems to vanish. With **All** always present this happens only for a line of a kind no tab filter knows.
+- The note does not name a whisper's recipient: the name `/r` remembers can be stale, and the game's own line is not a verified source for it. Incoming lines are unchanged: they only mark the tabs that show them unread.
+- With per-tab channels ([CHAT13](#input-line-per-tab-chat13)) a whisper typed on a **Whispers** tab shows there, so no note; the note is for one-off lines such as `/w name hi` or `/g hi` typed on a tab that does not show that channel. Whispers are never remembered as a tab's channel, so the next opening of the Clan tab is on Clan again.
+
+**Live check (not run).** Steam client in a world with a second player online, on the **Clan** tab, a **Whispers** tab in the row: open the input (the channel is Clan, `input.mode` 2) and send `/w <name> hi`; the note `Whisper sent · see Whispers` shows above the input, the Whispers tab blinks (`chat_tabs read` mid-blink shows its `state` as `Hover`), the Clan tab has no whisper line. Reopen the input: still Clan (the whisper was a one-off). Click the note: the Whispers tab is shown with the whisper; opening the input there gives its `/w <partner> ` line, and a whisper sent from it shows no note. Back on Clan, send `/g hi`: `Sent to Global · see All`, and the next opening is on Clan again. Wait 5 seconds: the note fades and is gone; rejoin: it is not in the restored history. Also confirm the game adds your own sent whisper to its chat list at all (the note follows that line; without it no note shows).
+
 **Another chat mod.** Progenitor's chat view steps aside for a mod that replaces the game's chat window; visibility, the click guard and the chat commands still work on the window the game has. Progenitor names no chat mod itself. Two signals turn the view off, either is enough (`ChatReplacement` in `Chat/ChatWindowLogic.cs`, unit-tested):
 
 - **Configured.** `[Chat] ReplacedBy` (client, `progenitor.ui.cfg`, default empty) lists plugin GUIDs or names separated by commas or semicolons (at most 20). A loaded plugin whose GUID or name equals an entry, ignoring case, turns the view off; the setting is read again when it changes. Log: `Chat: <name> replaces the chat window ([Chat] ReplacedBy); Progenitor's chat view stays off.`
