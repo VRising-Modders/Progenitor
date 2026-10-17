@@ -241,7 +241,7 @@ internal static class ControlsDialogs
                         new DialogCheck { Label = "Blood", On = true, Key = "blood" },
                         new DialogCheck { Label = "Weapons", Key = "weapons" },
                         new DialogCheck { Label = "Gems", On = true, Key = "gems" },
-                        new DialogCheck { Label = "Rare finds", Key = "rare", Color = "#B48CF0" },
+                        new DialogCheck { Label = "Rare finds", Key = "rare" },
                     },
                     RequireOne = true,
                     NoneHint = "Turn on at least one stall.",
