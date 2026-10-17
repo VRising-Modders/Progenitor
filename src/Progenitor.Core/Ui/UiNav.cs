@@ -40,6 +40,12 @@ internal struct NavSample
     internal bool TabNext;
     internal bool Reset;
 
+    /// <summary>
+    /// CHECKLIST1: the Enter key (keyboard or synthetic) is part of this frame's <see cref="Submit"/>, so a control that
+    /// gives Enter its own meaning (<see cref="UiNav.EnterKey"/>) can tell it from Space and A.
+    /// </summary>
+    internal bool Enter;
+
     /// <summary>The right stick's vertical axis (-1..1, positive up): scrolls the focused control's list.</summary>
     internal float Scroll;
 
@@ -375,6 +381,42 @@ internal static class UiNav
         if (scroll != null) StickScrolls.Add(h, scroll);
     }
 
+    private static readonly ConditionalWeakTable<UiHandle, Func<bool>> EnterHooks = new();
+
+    /// <summary>
+    /// CHECKLIST1: Enter on this control means something of its own (a checklist row: Confirm), while Space and A still
+    /// press it. <paramref name="onEnter"/> answers true when it took the key; false lets Enter press the control as
+    /// Space does. Null removes the hook. Weak: the hook goes with the handle.
+    /// </summary>
+    internal static void EnterKey(IUiHandle? handle, Func<bool>? onEnter)
+    {
+        if (handle is not UiHandle h) return;
+        EnterHooks.Remove(h);
+        if (onEnter != null) EnterHooks.Add(h, onEnter);
+    }
+
+    /// <summary>The Submit being run came from Enter (<see cref="NavSample.Enter"/> on this frame).</summary>
+    private static bool _submitByEnter;
+
+    private static bool TryEnter()
+    {
+        if (_focus.IsEmpty || !string.IsNullOrEmpty(_focus.Part) || !EnterHooks.TryGetValue(_focus.Handle, out var hook)) return false;
+        try { return hook(); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: nav enter threw: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Tests: run one command as if it came from Enter (<see cref="NavSample.Enter"/>).</summary>
+    internal static bool ExecuteEnterForTests()
+    {
+        _submitByEnter = true;
+        try { return Execute(NavCommand.Submit); }
+        finally { _submitByEnter = false; }
+    }
+
     private static bool TrySteer(NavCommand command)
     {
         if (_focus.IsEmpty || !Steers.TryGetValue(_focus.Handle, out var steer)) return false;
@@ -488,6 +530,23 @@ internal static class UiNav
 
         if (_pendingPane >= 0) StepPending(surface);
 
+        _submitByEnter = sample.Enter;
+        try { RunCommands(sample, ref surface); }
+        finally { _submitByEnter = false; }
+
+        if (surface != null && _marked && !_focus.IsEmpty && !sample.TextFocused
+            && (sample.Scroll > ScrollDeadZone || sample.Scroll < -ScrollDeadZone))
+        {
+            try
+            {
+                if (!TryStickScroll(sample.Scroll)) Host.Scroll(_focus, sample.Scroll);
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: nav scroll threw: " + e.Message); }
+        }
+    }
+
+    private static void RunCommands(in NavSample sample, ref NavSurface? surface)
+    {
         for (int i = 0; i < Commands.Count; i++)
         {
             var command = Commands[i];
@@ -503,20 +562,10 @@ internal static class UiNav
                 continue;
             }
 
-            Execute(command, surface);
+            Execute(command, surface!);
             surface = SafeActive();
             if (surface == null) break;
             if (!string.Equals(surface.Key, _surface, StringComparison.Ordinal)) Enter(surface);
-        }
-
-        if (surface != null && _marked && !_focus.IsEmpty && !sample.TextFocused
-            && (sample.Scroll > ScrollDeadZone || sample.Scroll < -ScrollDeadZone))
-        {
-            try
-            {
-                if (!TryStickScroll(sample.Scroll)) Host.Scroll(_focus, sample.Scroll);
-            }
-            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: nav scroll threw: " + e.Message); }
         }
     }
 
@@ -583,6 +632,7 @@ internal static class UiNav
                 if (stepped) _steppedSurface = _surface;
                 return stepped;
             case NavCommand.Submit:
+                if (_submitByEnter && TryEnter()) return true;
                 return Submit(surface);
             case NavCommand.Cancel:
                 return Cancel(surface);

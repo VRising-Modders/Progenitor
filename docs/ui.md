@@ -811,7 +811,7 @@ Guessed sizes (set from the glyph estimate, not measured live): the 16-unit top 
 
 ## Widgets (P7, P7b)
 
-Composed widgets for a mod's panel or Mods page: an ordered list, an entity and item picker, tabs with count badges, tooltips, a code text area (P7), and a data table, a master-detail screen and chips (P7b). Each one is built from the kit's own cell rows and buttons, so it draws in the game's look, sits on the settings grid with the rows around it, and is reached by a controller like every other kit control. A widget is disposed with its panel (a close, `Ui.RemoveAll`, an unload, the Core teardown), which ends a drag and hides its tooltip. On a runtime that cannot draw (the server, a skipped module) a widget keeps its state and draws nothing, like every other handle. The HUD pieces (notifications, Locate, pick in world) are on `ctx.Hud`, [below](#hud-notifications-locate-and-pick-in-world); explained words and tip cards are under [Help](#help-explained-words-and-first-time-tips-p7b).
+Composed widgets for a mod's panel or Mods page: an ordered list, an entity and item picker, tabs with count badges, tooltips, a code text area (P7), and a data table, a master-detail screen and chips (P7b), and a checklist for choosing several of a long list ([CHECKLIST1](#checklist-checklist1), not live-verified). Each one is built from the kit's own cell rows and buttons, so it draws in the game's look, sits on the settings grid with the rows around it, and is reached by a controller like every other kit control. A widget is disposed with its panel (a close, `Ui.RemoveAll`, an unload, the Core teardown), which ends a drag and hides its tooltip. On a runtime that cannot draw (the server, a skipped module) a widget keeps its state and draws nothing, like every other handle. The HUD pieces (notifications, Locate, pick in world) are on `ctx.Hud`, [below](#hud-notifications-locate-and-pick-in-world); explained words and tip cards are under [Help](#help-explained-words-and-first-time-tips-p7b).
 
 **Status: experimental.** Source-checked, built and game-free tested (P7: `UiWidgetsTests`, `UiCodeAreaTests`; P7b: `UiDataTableTests`, `UiMasterDetailTests`, `UiChipsTests`, `UiTermsTests`, `UiTipsTests`, `UiPickerMultiTests`, `UiWorldPickRepeatTests`); **live-verified on the test client 2026-10-14 through the bridge at 1920x1080 and 2560x1440, plus a 2x supersample capture (layout only)**, the P7 widgets as regressions in the same passes; not verified: native 4K pixel density, the feel of a real-mouse drag, and controller hardware (navigation was driven through the bridge's virtual pad, not a physical controller). The live procedure is [Widgets acceptance procedure](#widgets-acceptance-procedure-run-2026-10-14). Reference page: the Controls sample's **Widgets** page ([`WidgetsDemo.cs`](../samples/Progenitor.ControlsSample/WidgetsDemo.cs) and its `WidgetsDemo.*.cs` parts), five tabs: **Lists** (ordered list, chips), **Input** (pickers, code area), **Table** (data table), **Layout** (master-detail), **HUD** (notifications, pick in world, Locate, explained words, tip cards).
 
@@ -994,6 +994,98 @@ table.OnColumnsChanged(hidden => prefs.Save("hidden", hidden));
 4. Fixed parts: the check cell and the expander are box-less 28-unit cells, the icon well 30. A column that has no icon (or no drawer) on any row is hidden on every row, and a line that does not use one draws an equal blank, so the columns line up on every line. A row whose item has no icon (none given, or the game has none for its `ItemPrefab`) draws no well, only that blank.
 5. A sorted column's caption is drawn in the header's sorted gold, like its sort mark. A text column with a `Value` but empty text draws nothing (the value only sorts).
 6. Checked at 560, 760, 1108 and 1248 units (`UiDataTableTests`).
+
+### Checklist (CHECKLIST1)
+
+Choosing several things out of a long list to act on together: the chests, stations and belts to add to a group, out of a few hundred. It replaces `Picker` with `Multi` for long lists: every row has the game's checkbox, the count is always in view, a filter dropdown sits beside the search, rows carry an icon and the mod's own columns, and **Select shown** never touches a row the filter or the search hides.
+
+**Status: experimental.** Source-checked, built and game-free tested (`UiChecklistTests`, `UiNavTests`); **not live-verified**: nothing of it has been seen in the game. Reference: the Controls sample's **Gallery** → **Lists** tab → **Checklist window** ([`GalleryChecklist.cs`](../samples/Progenitor.ControlsSample/GalleryChecklist.cs)): 300 synthetic rows in three sections, four filters, a default sort, grayed rows and a preview stub.
+
+```csharp
+using Progenitor.Ui;
+
+var list = panel.Checklist("add-chests", chests.Select(c => new UiChecklistEntry(c.Id, c.Name)
+    {
+        Section = c.Kind,                       // "Storage", "Stations", "Belts": a folding heading each
+        Filters = c.Tags,                       // which filter options list it ("chests", "near", …)
+        Note = c.Note,
+        Keywords = new[] { c.PrefabName },      // searched, never shown
+        BuildingPrefab = c.PrefabGuid,          // the build-menu icon
+        DisabledReason = c.InGroup ? "Already in this group" : "",
+    }
+    .Text("plot", c.Plot)
+    .Number("distance", c.Distance, c.Distance + " m")),
+    new UiChecklistOptions
+    {
+        Columns = new[]
+        {
+            new UiTableColumn(UiChecklistEntry.LabelColumn, "Name") { Hideable = false },
+            new UiTableColumn("plot", "Plot") { Width = 90 },
+            new UiTableColumn("distance", "Distance", UiTableColumnKind.Number) { Width = 110 },
+            new UiTableColumn(UiChecklistEntry.NoteColumn, "Note") { Width = 170 },
+        },
+        Sort = new[] { new UiTableSortKey("distance") },
+        Filters = new[] { new UiChecklistFilter("chests", "Chests"), new UiChecklistFilter("near", "Within 30 m") },
+        ConfirmFormat = "Add {0}",
+        Preview = true,
+        FillHeight = true,
+    });
+
+list.OnConfirmed(ids => { group.Add(ids); window.Hide(); });
+list.OnCancelled(() => window.Hide());
+list.OnPreview(id => { list.Suspend(); window.Hide(); camera.ShowChest(id, onDone: () => { window.Show(); list.Resume(); }); });
+```
+
+| Member | Behavior |
+|---|---|
+| `UiChecklistEntry(id, label)` | `Id` is the caller's stable key (duplicates refused, `ArgumentException`). `Section` (a heading; entries without one sit under `OtherSection` while others have one), `Note`, `Keywords`, `Filters` (filter ids), `Icon` / `ItemPrefab` / `BuildingPrefab` (as on a data table row), `DisabledReason` (grays the row, never checked, shown as its tooltip), `Tooltip`. Cells by column key: `Text(column, text, tone)`, `Number(column, value, text)`, `Set(column, cell)`, `entry[column]`. The `label` column (`LabelColumn`) shows `Label` and the `note` column (`NoteColumn`) shows `Note` unless the entry sets its own cell. Read when `SetEntries` (or the factory) takes it: change an entry, then call `SetEntries` again. |
+| `UiChecklistOptions` | `Columns` (`UiTableColumn`s, the data table's: kind, width, sortable; no `label` column: a `LabelCaption` column, `Name`, comes first), `Sort` (the mod's default sort), `Filters` (`UiChecklistFilter(id, label)`), `DefaultFilter` (empty: All), `AllFilterLabel` (`All`; empty: no All option, the first filter applies), `FilterCaption` (`Show`), `Placeholder`, `Selected` (initial ids), `ConfirmFormat` (`Confirm ({0})`), `CancelCaption`, `Buttons` (on: Cancel and Confirm under the list), `Preview` + `PreviewCaption` (`View`), `CollapsibleSections` (on), `OtherSection` (`Other`), `VisibleRows` (4–30, 12), `FillHeight`, `EmptyText`. |
+| `Query`, `Filters`, `Filter`, `FilterOpen`, `OnFilterChanged` | The search and the filter. Setting `Query` rewrites the field; a new query or filter scrolls back to the top. |
+| `Shown` | The entries the filter and the search show, in display order, without those under a folded heading: exactly what **Select shown** acts on. |
+| `Sort`, `SortBy(column, add)`, `OnSortChanged` | The data table's header: a click sorts by the column (again: flipped), Shift-click adds a key; the drawn arrow and the gold caption. The sort applies within each section. |
+| `Selected`, `IsChecked`, `SetChecked(id, on)`, `SetSelected(ids)`, `OnSelectionChanged` | The checked ids in check order, shown or not. Disabled and unknown ids are refused. |
+| `SelectShown()`, `ClearSelection()` | The status line's **Select shown** (only `Shown`, enabled rows; shown while it has work) and **Clear** (everything; shown while something is checked). One event each. |
+| `Sections`, `SetSectionCollapsed`, `IsSectionCollapsed` | Headings in the order of their first entry in the caller's list; a click on a heading (or its arrow) folds it. A folded heading keeps its count. |
+| `SetEntries(entries)` | A refresh: checked ids that remain and can still be checked stay checked, others drop out silently (no event). The search, the filter, the sort, the folds and the scroll stay. |
+| `Confirm()`, `OnConfirmed(ids)`, `Cancel()`, `OnCancelled`, `ConfirmText`, `CanConfirm` | Confirm reads `ConfirmFormat` with the count (`Add 3`), gray and inert at 0. |
+| `Preview(id)`, `OnPreview(id)`, `OnRowHovered(id)` | With `Preview`, each row ends with a **View** link-style button; a double-click (two pointer clicks on one row within 0.45 s: the second flips the row back) and a right-click on the row raise it too. A disabled row can be previewed. `OnRowHovered` gets the id under the pointer, empty when it leaves. |
+| `Suspend()`, `Resume()`, `Suspended` | Hide the checklist keeping everything (search, filter, checks, sort, folds, scroll) while the mod shows its own preview; it takes no clicks, Escape or Enter meanwhile. Hiding the widget or its window keeps the state as well. |
+| `TopIndex`, `LineCount`, `VisibleRows`, `ScrollTo(id)`, `StatusText`, `Describe()` | The scroll window, the status line (`120 of 300 shown · 3 selected (1 not shown)`), the readback (`ui_read widget <key>`). |
+
+**Search.** Case- and accent-insensitive; every word of the query must appear in the entry's label, note, section, keywords or one of its text cells (number cells are not searched). The order is the sort's, not a match rank.
+
+**Keys and controller.** Every row is a NAV1 stop: Up and Down move (and scroll the body at its first and last slot), the right stick scrolls, **Space** or **A** flips the focused row (Shift held: the range), **Enter** on a row confirms (it never flips one), **Escape** or **B** closes the open filter first, then cancels while `OnCancelled` has a handler (with none, the press goes on and closes the window). Subscribe `OnCancelled` only where cancelling closes the checklist's screen (its own window): on a Mods page a handler would keep Escape from closing the menu. No key is read directly: Enter is NAV1's own Submit, told apart from Space (`UiNav.EnterKey`), and Escape is the framework's Escape path.
+
+**Range select.** Shift-click (or Shift with Space) sets every shown, enabled row from the last plain-clicked row to this one to this row's new state; headings, disabled rows and rows the filter, the search or a fold hides are never touched. When the anchor row is no longer shown, the click is a plain flip.
+
+#### Checklist layout rules
+
+```
+┌ Add to group ───────────────────────────────────────────────────────────────┐
+│ [ Search chests, stations and belts          × ]    Show [ All          ▾ ] │  search row
+│   ( All ) ( Chests ) ( Stations ) ( Belts ) ( Within 30 m )                 │  only while the filter is open
+│          NAME ▲                    PLOT    DISTANCE   NOTE                  │  header, small caps
+│ » Storage (100) · 3 selected                                                │  section heading, gold
+│ [✓] [ic] Wooden chest 4            North        6 m   near the gate   View  │  checked: gold band
+│ [ ] [ic] Wooden chest 9            East        12 m                   View  │
+│ [ ] [ic] Wooden chest 2            South       19 m                   View  │  grayed, reason on hover
+│ » Crafting (100)                                                            │
+│ [ ] [ic] Smithy 3                  West        22 m   upstairs        View  │
+│ …                                                                       ▐   │  scroll bar in the right inset
+│ 120 of 300 shown · 3 selected (1 not shown)        Select shown   Clear     │  status line, muted
+│                        [ Cancel ]   [ Add 3 ]                               │  the dialogs' buttons
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. The search row is the game's value box filling the row, then the filter's caption and the game's dropdown bar at its right end (the compact dropdown's sizes: the caption up to 220, the bar as wide as the longest option, 72 to 320). The bar opens the options as chips under the row, the selected one lit; a chip picks and closes them.
+2. The header and the body are the data table's: the same column widths and packing (text up to and including the fill column from the left, the rest from the right, so numbers right-justify on their last digit and text stays left), small-caps captions with the drawn sort mark, every body line one 40-unit settings-grid row with the separator, the 18-unit right inset for the scroll bar.
+3. Every entry line starts with the game's checkbox (24 units, `CellKind.Check`; the kit's framed box until the art is ready), then the icon well or its equal blank, so the check column and the captions line up on every line; the header keeps blanks of the same widths. A checked row also carries the Mods list's gold entry band. A disabled row draws its box half-transparent and its text faint.
+4. A section line hides the entry cells and shows the fold arrow and the heading in gold (`Storage (100) · 3 selected`).
+5. With `Preview`, each entry line ends with the **View** button (box-less, the muted gold); the header keeps a blank as wide.
+6. The status line is muted text with the two links at its right; Cancel and Confirm are the dialogs' button row (the game's popup buttons, Cancel left, centered), Confirm sized for a four-digit count.
+7. Checked at 560, 760, 1108 and 1248 units (`UiChecklistTests`).
+
+**Live check (not run).** On the test client, with the Controls sample deployed: `keybind_press` the sample's Ctrl+F7 opener (or `mods_ui menu open`) to the Gallery page, `widget_click {"label":"gallery-tabs:tabs/tab2"}` (Lists), `widget_click {"label":"Checklist window"}`. Then `ui_read {"what":"widget","key":"gallery-checklist"}`: `entries 300`, `sections` Storage, Crafting, Logistics, `sort` distance ascending, `status` `300 entries · none selected` (**screenshot** at 1920x1080 and 2560x1440: the checkbox column, the captions over their columns, numbers right-aligned, nothing under the scroll bar). `widget_click gallery-checklist:search/filter`, then `widget_click gallery-checklist:filters0/f:4` (Within 30 m): `filter near`, fewer `shown` (**screenshot**). `ui_input {"action":"focus","row":"gallery-checklist:search","cell":"search"}`, `ui_input {"action":"type","text":"chest"}`: only chests. `widget_click gallery-checklist:status/select-shown`: `selected` lists them; clear the search and the filter: the status says how many of them are checked (`… selected`), and nothing else was checked. `ui_input click` on `gallery-checklist:row3`, then on `row8` with `"modifiers":["shift"]`: the range. `ui_input hover` on a grayed row and `ui_read tooltip`: its reason. `widget_click gallery-checklist:row2/view` and `ui_input {"action":"click","row":"gallery-checklist:row4","button":"right"}`: the log has `checklist preview …`, the list hides and **Back to the list** shows; press it: the list as it was (`top`, `selected`, `filter`, `query`). `nav {"action":"focus","row":"gallery-checklist:row1"}`, `nav press a` (flips), then `ui_input {"action":"key","key":"Enter"}`: `checklist confirmed N`, the window closes. Clean up: close the window; remove the Controls sample from both reload folders after the batch.
 
 ### Master-detail
 
@@ -1905,6 +1997,7 @@ Several things here were confirmed on a live client today and several were not, 
 | `Ui.AttachToVanilla` — the plan, the registry, the sweep and the log lines (FUI36) | Landed, **nothing live**. The game was not launched for this job. The pure half (close/reopen, rebuild, degrade, layout branch, `RemoveAll` / Uninstall sweep, pin line) is covered by tests |
 | P6 panel sites (`ContainerPanel`, `StationPanel`, `InventoryPanel`, `CastleHeartPanel` / `ThronePanel`, `InventoryTooltip`): resolution, anchors, buttons, open/close/target events, placement, missing-site line | **Experimental**, built and game-free tested (`VanillaPanelTests`: catalog, tracker, placement at three resolutions, buttons across reopen, click slot, blocked fit, missing donor, `RemoveAll`). Member names source-checked against the game's metadata and the client interop. **Nothing live**: the hierarchy under each window, its rects and whether the bars shrink their children are logged by the one-shot `Ui: site` line on the first live run |
 | Widgets and `ctx.Hud` (P7: ordered list, picker, tabs, tooltips, code area, notifications, Locate, pick in world) | **Experimental**, source-checked, built and game-free tested (`UiWidgetsTests`, `UiCodeAreaTests`, `UiNoticeTests`, `UiLocateTests`, `UiWorldPickTests`); **live-verified on the test client 2026-10-14 through the bridge at 1920x1080 and 2560x1440, plus a 2x supersample capture (layout only)**, as regressions in the P7b passes: the widget pages on the Widgets page, notify (the game's banner and the band it falls back to), pick in world one-shot and repeat, Escape precedence. **Locate not verified live.** not verified: native 4K pixel density, the feel of a real-mouse drag, and controller hardware (navigation was driven through the bridge's virtual pad, not a physical controller). [Widgets acceptance procedure](#widgets-acceptance-procedure-run-2026-10-14) run 2026-10-14 |
+| Checklist (CHECKLIST1: search and filter, sortable columns, the game's checkbox, sections, Select shown, Confirm, preview, suspend) | **Experimental**, source-checked, built and game-free tested (`UiChecklistTests`, `UiNavTests`); **not live-verified**. The [live check](#checklist-checklist1) has not been run |
 | P7b widgets and help (data table, master-detail, chips, picker multi-select links, repeating pick in world, term tooltips, tip cards) | **Experimental**, source-checked, built and game-free tested (`UiDataTableTests`, `UiMasterDetailTests`, `UiChipsTests`, `UiPickerMultiTests`, `UiWorldPickRepeatTests`, `UiTermsTests`, `UiTipsTests`); **live-verified on the test client 2026-10-14 through the bridge at 1920x1080 and 2560x1440, plus a 2x supersample capture (layout only)**: the data table, master-detail, chips, term tooltips and markers, tip cards (`AnchorControl` included), the picker's Select all / Clear, repeat pick in world and the band's notice kinds. not verified: native 4K pixel density, the feel of a real-mouse drag, and controller hardware (navigation was driven through the bridge's virtual pad, not a physical controller). Acceptance procedures run 2026-10-14 |
 | The confirmed destroy, its bounded retry, the split layout fields, the write-on-change guard and the watch race (FUI37, R60 findings 1, 2, 6, 7, 8) | Landed, **nothing live**. All five are covered by tests against the fake runtime; the `retrying` / `leaked` lines have never been seen in a real client, which is the point — they only appear when Unity refuses a destroy |
 | `MapMenuMapper.GetMapMenu()?.WarEventInfo` resolves the **map** card and not the HUD popup | Inferred from the game's metadata plus a third-party mod's live docking. **Spike P2 / N4** |

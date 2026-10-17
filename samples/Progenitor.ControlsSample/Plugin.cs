@@ -54,7 +54,10 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         ctx.Keybinds.Register(GalleryHub.ReturnBindId, new KeyChord(UiKey.Backspace, KeyModifiers.Ctrl),
             "Close the Controls Sample's hub window (its Return button).", () => log(ControlsDemo.LogPrefix + "hub key return = " + hub.Close()),
             allowWhileCaptured: true);
-        var gallery = new GalleryHost(ctx, windows, window, dialog, hud, hub);
+        // The checklist window: 300 synthetic rows with filters, sections, grayed rows and a preview stub.
+        var checklist = new GalleryChecklist(() => UiApi.Panel(GalleryChecklist.Title, ctx.Owner, ctx.Guid), BuildingPrefab, log);
+        ctx.Track(checklist);
+        var gallery = new GalleryHost(ctx, windows, window, dialog, hud, hub, checklist);
         ctx.Menu.Register(Name, "Every Progenitor UI control, each wired to a log line and a status label.")
             .Page(GalleryDemo.PageId, panel => new GalleryDemo(log, gallery, hud).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
             .Page(ControlsDemo.PageId, panel => new ControlsDemo(log, dialog).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
@@ -166,10 +169,13 @@ internal sealed class GalleryHost : IGalleryHost
     private readonly ControlsHud _hud;
 
     private readonly GalleryHub _hub;
+    private readonly GalleryChecklist _checklist;
 
-    internal GalleryHost(PluginContext ctx, GalleryWindows windows, ControlsWindow floating, Action<string> dialog, ControlsHud hud, GalleryHub hub)
+    internal GalleryHost(PluginContext ctx, GalleryWindows windows, ControlsWindow floating, Action<string> dialog, ControlsHud hud, GalleryHub hub,
+        GalleryChecklist checklist)
     {
         _hub = hub;
+        _checklist = checklist;
         _ctx = ctx;
         _windows = windows;
         _floating = floating;
@@ -180,6 +186,8 @@ internal sealed class GalleryHost : IGalleryHost
     public string ToggleWindow(UiWindowPreset preset) => _windows.Toggle(preset);
 
     public string ToggleHub() => _hub.Toggle();
+
+    public string ToggleChecklist() => _checklist.Toggle();
 
     public void OpenFloating() => _floating.Open();
 

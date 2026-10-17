@@ -937,7 +937,7 @@ window.Show();` },
           html: `<table><thead><tr><th class="label">Category</th><th class="label">Controls</th></tr></thead><tbody>
 <tr><td>Layout and windows</td><td>[[window-preset|<code>ctx.Windows.Create</code>]], [[text-style|<code>panel.Text</code>]], <code>Divider</code>, <code>BeginInline</code>, [[tabs|<code>Tabs</code>]]</td></tr>
 <tr><td>Input</td><td><code>Button</code>, <code>ConfirmButton</code>, <code>Toggle</code>, [[dropdown-radio|<code>Dropdown</code>, <code>Radio</code>]], <code>MultiSelect</code>, [[slider|<code>Slider</code>, <code>SliderField</code>, <code>Number</code>]], <code>Input</code>, <code>TextArea</code>, <code>ColorField</code>, <code>DateTimeField</code>, [[key-field|<code>KeyField</code>]], <code>CodeArea</code></td></tr>
-<tr><td>Lists and data</td><td>[[ordered-list|<code>OrderedList</code>]], [[picker|<code>Picker</code>]], [[data-table|<code>DataTable</code>]], [[master-detail|<code>MasterDetail</code>]], [[chips|<code>Chips</code>]]</td></tr>
+<tr><td>Lists and data</td><td>[[ordered-list|<code>OrderedList</code>]], [[picker|<code>Picker</code>]], [[data-table|<code>DataTable</code>]], [[checklist|<code>Checklist</code>]], [[master-detail|<code>MasterDetail</code>]], [[chips|<code>Chips</code>]]</td></tr>
 <tr><td>Feedback</td><td>[[tooltip|<code>Tooltip</code>]], [[term-tooltip|<code>Term</code>]], [[tip-card|<code>ctx.Hud.Tip</code>]], <code>ctx.Dialogs</code>, <code>ctx.Hud.Notify</code>, <code>Label(text, tone)</code></td></tr>
 <tr><td>HUD and world</td><td>[[locate|<code>ctx.Hud.Locate</code>]], [[pick-in-world|<code>ctx.Hud.PickInWorld</code>]]</td></tr>
 <tr><td>Game panels</td><td>[[vanilla-attach|<code>Ui.AttachToVanilla</code>]]</td></tr></tbody></table>
@@ -977,7 +977,7 @@ window.Show();` },
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/input.md">input.md</a>.</p>` } ] },
     { id: "developers/windows", role: "developers", title: "Windows and controls", pages: [
       { id: "overview", title: "Windows and controls", soon: true,
-        html: `<ol class="outline"><li>Layout and windows: settings page, Mods pages, game windows, tabs, presets, [[panel|panels]], [[game-window|GameWindow]], [[widget|widgets]]</li><li>Input: buttons, toggles, dropdowns, radios, sliders, fields, key capture</li><li>Lists and data: ordered list, picker, data table, master-detail, chips</li><li>Feedback: tooltips, term tooltips, tip cards, dialogs, notices</li><li>HUD and world: Locate, pick in world; game-panel attachments</li></ol>
+        html: `<ol class="outline"><li>Layout and windows: settings page, Mods pages, game windows, tabs, presets, [[panel|panels]], [[game-window|GameWindow]], [[widget|widgets]]</li><li>Input: buttons, toggles, dropdowns, radios, sliders, fields, key capture</li><li>Lists and data: ordered list, picker, data table, checklist, master-detail, chips</li><li>Feedback: tooltips, term tooltips, tip cards, dialogs, notices</li><li>HUD and world: Locate, pick in world; game-panel attachments</li></ol>
 <p>Now: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-controls.md">ui-controls.md</a> and the [[gallery|Gallery]], <a href="https://github.com/VRising-Modders/Progenitor/blob/main/docs/ui-style.md">ui-style.md</a>.</p>` } ] },
     { id: "developers/networking", role: "developers", title: "Networking", pages: [
       { id: "overview", title: "Networking", soon: true,
@@ -1104,6 +1104,7 @@ My question:` } },
     { id: "ordered-list", term: "OrderedList", def: "A list the player arranges, such as a priority order, by dragging or arrows." },
     { id: "picker", term: "Picker", def: "Choose one or several of many named things (items, chests, players) with search; unpickable ones are grayed with a reason." },
     { id: "data-table", term: "DataTable", def: "Many records the player sorts, filters, selects and edits." },
+    { id: "checklist", term: "Checklist", def: "Choose several of a long list (hundreds of chests or stations) with search, a filter and a checkbox on every row, then confirm." },
     { id: "master-detail", term: "MasterDetail", def: "A searchable list of named sets on the left, the selected one's editor on the right." },
     { id: "chips", term: "Chips", def: "A few short values the player adds and removes, such as members, tags or filters." },
     { id: "tooltip", term: "Tooltip", def: "Extra detail shown on hover; the control's name must still stand alone." },

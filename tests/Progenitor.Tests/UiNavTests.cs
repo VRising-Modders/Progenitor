@@ -272,6 +272,28 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void Enter_runs_a_controls_own_enter_hook_while_Space_and_A_still_press_it()
+    {
+        using var panel = Panel();
+        var row = panel.Button("Row");
+        int enters = 0;
+        UiNav.EnterKey(row, () => { enters++; return true; });
+        Surface(Children(panel));
+        UiNav.Execute(NavCommand.Submit); // shows the focus
+        UiNav.Execute(NavCommand.Submit); // Space or A: the press
+        Assert.Contains("click:Row", _host.Calls);
+        Assert.Equal(0, enters);
+        _host.Calls.Clear();
+        Assert.True(UiNav.ExecuteEnterForTests()); // Enter: the hook, not the press
+        Assert.Equal(1, enters);
+        Assert.DoesNotContain("click:Row", _host.Calls);
+        UiNav.EnterKey(row, () => false); // a hook that declines: Enter presses as Space does
+        UiNav.ExecuteEnterForTests();
+        Assert.Contains("click:Row", _host.Calls);
+        UiNav.EnterKey(row, null);
+    }
+
+    [Fact]
     public void A_toggle_flips_on_A_and_on_left_or_right()
     {
         using var panel = Panel();

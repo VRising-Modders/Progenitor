@@ -31,6 +31,13 @@ internal interface IWidgetRuntime
     IDisposable? WatchCell(IRuntimeCellRow row, string cellKey, Action<UiPointerEvent> handler, object? owner);
 
     /// <summary>
+    /// CHECKLIST1: watch Down / Up / Exit on a whole widget's own object (a cell row: a press anywhere on it that no cell
+    /// button takes), as <see cref="WatchCell"/> does for one cell. Null when the widget has no object or the runtime
+    /// cannot watch it.
+    /// </summary>
+    IDisposable? WatchWidget(IRuntimeWidget widget, Action<UiPointerEvent> handler, object? owner) => null;
+
+    /// <summary>
     /// Report the pointer entering (<c>true</c>) and leaving any kit widget's object, through owned
     /// <c>EventTrigger</c> rows and the Bootstrap trampoline (the tooltip on an arbitrary handle). Null when the widget
     /// has no object.

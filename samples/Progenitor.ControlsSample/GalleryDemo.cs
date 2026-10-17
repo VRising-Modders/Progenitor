@@ -17,6 +17,9 @@ internal interface IGalleryHost
     /// <summary>Open (or close) the hub window (<see cref="GalleryHub"/>); returns what happened.</summary>
     string ToggleHub() => "no hub window here";
 
+    /// <summary>Open (or close) the checklist window (<see cref="GalleryChecklist"/>); returns what happened.</summary>
+    string ToggleChecklist() => "no checklist window here";
+
     /// <summary>Open the plugin's Mods page <paramref name="page"/>.</summary>
     void OpenPage(string page);
 
@@ -348,6 +351,10 @@ internal sealed class GalleryDemo
             case "building-icons":
                 tabs.Add(tab, panel.Text("The hub window's table shows a chest, the Smithy and a prison cell with their build-menu icons.", UiTextStyle.Body));
                 tabs.Add(tab, panel.Text("Open the game's build menu once this session, then reopen the hub: the icons appear.", UiTextStyle.Muted));
+                break;
+            case "checklist":
+                Action(panel, tab, "Checklist window", api, () => Report("checklist window = " + _host.ToggleChecklist()));
+                tabs.Add(tab, panel.Text("300 chests, stations and belts: search, the Show filter, Select shown, View and Add.", UiTextStyle.Body));
                 break;
             case "master-detail":
                 _widgets.BuildMasterDetail(panel, tabs, tab);
