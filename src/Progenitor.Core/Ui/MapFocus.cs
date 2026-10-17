@@ -37,6 +37,9 @@ internal static class MapFocus
     private static float _x, _z;
     private static int _frames, _selects, _sinceSelect, _stable, _pans, _sincePan;
     private static bool _sawMenu, _hooked, _panPending;
+
+    /// <summary>A pan was written to the map's pan input and its result has not been confirmed yet.</summary>
+    private static bool _panWritten;
     private static (float X, float Y) _before, _target;
     private static IDisposable? _mapperHook;
     private static string _last = "";
@@ -170,6 +173,12 @@ internal static class MapFocus
             if (canPan) target = (tx, ty);
         }
 
+        if (!open)
+        {
+            Stop("map opened, not centered (" + MapFocusLogic.WhyMapClosed + ")");
+            return;
+        }
+
         if (_panPending)
         {
             // The map's update has not run since the pan was asked for.
@@ -191,6 +200,7 @@ internal static class MapFocus
                 _target = target;
                 return;
             case MapFocusCenterStep.Done:
+                _panWritten = false; // confirmed: the map's update consumed it
                 Stop("map opened on [" + Math.Round(_x) + ", " + Math.Round(_z) + "]: " + why);
                 return;
             case MapFocusCenterStep.GiveUp:
@@ -215,6 +225,7 @@ internal static class MapFocus
             var mapper = world.GetExistingSystemManaged<MapMenuMapper>();
             if (mapper == null || mapper.Pointer == IntPtr.Zero) return;
             mapper._PanAdjust = new Vector2(px, py);
+            _panWritten = true;
             _before = (offset.x, offset.y);
             _target = (tx, ty);
             _sincePan = 0;
@@ -331,8 +342,27 @@ internal static class MapFocus
     {
         _phase = Phase.Idle;
         _panPending = false;
+        ClearWrittenPan();
         Unhook();
         if (result != null) Finish(result);
+    }
+
+    /// <summary>
+    /// A pan written but not confirmed (the map closed, an unload, a new request) would stay in the map's pan input and
+    /// move a later open: put it back to zero when the map system exists.
+    /// </summary>
+    private static void ClearWrittenPan()
+    {
+        if (!_panWritten) return;
+        _panWritten = false;
+        try
+        {
+            var world = Worlds.Client;
+            if (world == null || !world.IsCreated) return;
+            var mapper = world.GetExistingSystemManaged<MapMenuMapper>();
+            if (mapper != null && mapper.Pointer != IntPtr.Zero) mapper._PanAdjust = Vector2.zero;
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Map focus: clearing the pan threw: " + e.Message); }
     }
 
     private static void Finish(string result)
