@@ -11,7 +11,9 @@ A zip lands on your Desktop. If the game crashed, start it again first; the logs
 
 ## 2. Ask an AI assistant
 
-Open a chat with an AI assistant (ChatGPT, Gemini, Grok, Claude or another), paste the prompt below and add your question. For a problem, also attach the zip or the files in it; its `mods.md` lists every installed mod with its version, author and Thunderstore, website and help links. No zip? Each mod's page in the Mods menu shows its version, and **Store page** opens its Thunderstore page: paste the names, versions and links.
+Open ChatGPT, Gemini, Grok, Claude or another assistant, paste the prompt below and add your question. For a problem, also attach the zip. Its `mods.md` lists your mods and their links.
+
+No zip? Each mod's page in the Mods menu shows its version, and **Store page** opens its Thunderstore page. Paste the names, versions and links.
 
 <a id="ai-starter-prompt"></a>
 ```text
