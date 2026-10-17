@@ -44,6 +44,7 @@ public sealed class LocateArgsTests
     [InlineData("{\"action\":\"pin\",\"x\":1,\"y\":2}")]
     [InlineData("{\"action\":\"pin\",\"x\":1,\"y\":2,\"z\":\"3\"}")]
     [InlineData("{\"action\":\"pin\",\"x\":1,\"y\":2,\"z\":3,\"arrival\":-1}")]
+    [InlineData("{\"action\":\"pin\",\"x\":1,\"y\":2,\"z\":3,\"seconds\":-1}")]
     [InlineData("{\"action\":\"pin\",\"position\":[1,2]}")]
     [InlineData("{\"action\":\"status\",\"x\":1}")]
     [InlineData("{\"action\":\"move\"}")]

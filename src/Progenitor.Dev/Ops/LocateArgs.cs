@@ -59,6 +59,7 @@ internal static class LocateArgs
             if (args.TryGetProperty("seconds", out var s))
             {
                 seconds = Number(s, "seconds");
+                if (seconds < 0) throw new ArgumentException("args.seconds must be 0 (until cleared) or more");
                 pinOnly = true;
             }
 

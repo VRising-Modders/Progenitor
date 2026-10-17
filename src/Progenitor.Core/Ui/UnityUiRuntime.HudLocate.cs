@@ -31,6 +31,16 @@ internal sealed partial class UnityUiRuntime
     private static int _localCharacterEpoch = int.MinValue;
     private static double _localCharacterAt = double.NegativeInfinity;
     private static bool _locateLogged;
+    private static double _framesWantedUntil = double.NegativeInfinity;
+
+    /// <summary>How long a bridge request keeps per-frame diagnostics on (<see cref="HudLocateWantFrames"/>).</summary>
+    internal const double FramesWantedSeconds = 15.0;
+
+    /// <summary>The bridge's <c>locate</c> asks for <see cref="UiLocatePingHandle.LastFrame"/> for the next few seconds.</summary>
+    internal static void HudLocateWantFrames() => _framesWantedUntil = HudNow() + FramesWantedSeconds;
+
+    /// <summary>Live pings, for the bridge's cap check.</summary>
+    internal static int HudPingCount => LocateSet.Count;
 
     private sealed class PingView
     {
@@ -189,7 +199,8 @@ internal sealed partial class UnityUiRuntime
         }
 
         string text = UiLocateLook.Label(ping.Label, meters);
-        RecordFrame(ping, cam, now, from, vp, place, meters, text, screenW, screenH);
+        // Diagnostics only while the bridge's locate status has asked for them: production pings skip the camera reads.
+        if (now < _framesWantedUntil) RecordFrame(ping, cam, now, from, vp, place, meters, text, screenW, screenH);
         if (view.Label != null)
         {
             if (!string.Equals(text, view.LastLabel, StringComparison.Ordinal))
@@ -255,12 +266,16 @@ internal sealed partial class UnityUiRuntime
         position = default;
         try
         {
-            if (_localCharacter != Entity.Null
-                && !UiLocateLook.KeepCachedCharacter(_localCharacterEpoch, epoch, em.Exists(_localCharacter),
-                    em.Exists(_localCharacter) && _localCharacter.Has<LocalCharacter>(em)))
+            if (_localCharacter != Entity.Null)
             {
-                if (_localCharacterEpoch != epoch) _localCharacterAt = double.NegativeInfinity; // a new world: look at once
-                _localCharacter = Entity.Null;
+                // Short-circuit: no entity read for a cache from another world, no tag read for a gone entity.
+                bool exists = _localCharacterEpoch == epoch && em.Exists(_localCharacter);
+                bool isLocal = exists && _localCharacter.Has<LocalCharacter>(em);
+                if (!UiLocateLook.KeepCachedCharacter(_localCharacterEpoch, epoch, exists, isLocal))
+                {
+                    if (_localCharacterEpoch != epoch) _localCharacterAt = double.NegativeInfinity; // a new world: look at once
+                    _localCharacter = Entity.Null;
+                }
             }
 
             if (_localCharacter == Entity.Null && now - _localCharacterAt >= 1.0)
@@ -393,6 +408,7 @@ internal sealed partial class UnityUiRuntime
         _markerTexture = _arrowTexture = null;
         _localCharacter = Entity.Null;
         _localCharacterEpoch = int.MinValue;
+        _framesWantedUntil = double.NegativeInfinity;
         _localCharacterAt = double.NegativeInfinity;
     }
 }

@@ -31,7 +31,10 @@ public static class HudLocateBridge
         if (Progenitor.Plugin.IsServerProcess)
             throw new InvalidOperationException("locate runs on the client (pings are client UI); send it to the client bridge (27341)");
         long? pinned = null;
+        string? refused = null;
         int cleared = 0;
+        // Every locate request turns the per-frame readback on for a few seconds; production pings never record it.
+        UnityUiRuntime.HudLocateWantFrames();
         switch (action)
         {
             case "pin":
@@ -39,6 +42,15 @@ public static class HudLocateBridge
                     throw new ArgumentException("pin needs finite x, y and z (world meters, y up)");
                 if (!float.IsFinite(arrivalDistance) || arrivalDistance < 0)
                     throw new ArgumentException("arrival must be 0 or more meters");
+                if (double.IsNaN(seconds) || seconds < 0)
+                    throw new ArgumentException("seconds must be 0 (until cleared) or more");
+                // A ninth ping ends the oldest; a test pin must never push out a plugin's ping.
+                if (UnityUiRuntime.HudPingCount >= UiLocateLook.MaxPings)
+                {
+                    refused = "cap reached (" + UiLocateLook.MaxPings + " pings live); clear or wait for one to end";
+                    break;
+                }
+
                 var ping = UnityUiRuntime.HudLocate(Owner, UiLocateTarget.Point(x, y, z), label ?? "", seconds);
                 ping.ArrivalDistance = arrivalDistance;
                 ping.ShowOnMaps = showOnMaps;
@@ -55,12 +67,17 @@ public static class HudLocateBridge
 
         var result = Status();
         result["action"] = action;
+        result["ok"] = refused == null;
+        result["refused"] = refused;
         result["pinned"] = pinned;
         result["cleared"] = cleared;
         if (pinned != null)
             result["note"] = "the ping draws from the next frame on; read status again for its screen position and label";
         return result;
     }
+
+    /// <summary>End the bridge's pings (the Dev bridge's unload). Plugin pings are untouched. Main thread.</summary>
+    public static int Clear() => Progenitor.Plugin.IsServerProcess ? 0 : UnityUiRuntime.HudDropPings(Owner);
 
     /// <summary>Every live ping and its last drawn frame.</summary>
     public static Dictionary<string, object?> Status()
@@ -73,6 +90,7 @@ public static class HudLocateBridge
             ["count"] = rows.Count,
             ["pings"] = rows,
             ["heightOffset"] = UiLocateLook.HeightOffset,
+            ["now"] = UnityUiRuntime.HudNow(),
         };
     }
 
