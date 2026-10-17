@@ -276,6 +276,9 @@ internal static class ReloadAllowStore
     /// <summary>Core's own image leaf name — Bootstrap's <c>CoreLayout.FileName</c>, spelled here so both mirrors stay one file.</summary>
     internal const string CoreImageFileName = "Progenitor.dll";
 
+    /// <summary>Core's image leaf in the single-folder install (<c>InstallLayout.CoreFileName</c>).</summary>
+    internal const string SingleFolderCoreImageFileName = "Progenitor.core";
+
     /// <summary>
     /// Suffixes a Core image on disk carries while it is being staged or rotated
     /// (<c>CoreWatchPolicy.NextSuffix</c>, <c>CoreImagePolicy.PrevSuffix</c> /
@@ -342,33 +345,39 @@ internal static class ReloadAllowStore
             }
         }
 
-        if (!string.Equals(live, CoreImageFileName, StringComparison.OrdinalIgnoreCase))
+        // Single-folder install: the image is Progenitor.core on disk; a row under either name lists Core.
+        if (!string.Equals(live, CoreImageFileName, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(live, SingleFolderCoreImageFileName, StringComparison.OrdinalIgnoreCase))
         {
             error = leaf + " is not " + CoreImageFileName + " (or a staged copy of it)";
             return false;
         }
 
+        string liveName = string.Equals(live, SingleFolderCoreImageFileName, StringComparison.OrdinalIgnoreCase)
+            ? SingleFolderCoreImageFileName
+            : CoreImageFileName;
+
         // R38 finding 7. The leaf was a staging or rotation name, so the row we are about to write
         // names a file the caller did not hash. Listing it is only honest when the file that will
         // actually be looked up already holds these bytes.
-        if (!string.Equals(leaf, CoreImageFileName, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(leaf, liveName, StringComparison.OrdinalIgnoreCase))
         {
             string livePath;
             try
             {
                 string dir = System.IO.Path.GetDirectoryName(imagePath ?? "") ?? "";
-                livePath = System.IO.Path.Combine(dir, CoreImageFileName);
+                livePath = System.IO.Path.Combine(dir, liveName);
             }
             catch (Exception e)
             {
-                error = leaf + " is a staged copy and " + CoreImageFileName
+                error = leaf + " is a staged copy and " + liveName
                     + " could not be resolved beside it (" + e.GetType().Name + ": " + e.Message + ")";
                 return false;
             }
 
             if (!File.Exists(livePath))
             {
-                error = leaf + " is a staged copy and there is no " + CoreImageFileName
+                error = leaf + " is a staged copy and there is no " + liveName
                     + " beside it, so a row under that name would list a Core that is not on disk";
                 return false;
             }
@@ -380,7 +389,7 @@ internal static class ReloadAllowStore
             }
             catch (Exception e)
             {
-                error = leaf + " is a staged copy and " + CoreImageFileName
+                error = leaf + " is a staged copy and " + liveName
                     + " beside it could not be read (" + e.GetType().Name + ": " + e.Message + ")";
                 return false;
             }
@@ -388,14 +397,14 @@ internal static class ReloadAllowStore
             if (!string.Equals(liveHex, (imageSha256 ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
             {
                 error = leaf + " is a staged copy whose promote has not happened: "
-                    + CoreImageFileName + " is sha256=" + ReloadAllowPolicy.Short(liveHex)
+                    + liveName + " is sha256=" + ReloadAllowPolicy.Short(liveHex)
                     + ", the staged bytes are sha256=" + ReloadAllowPolicy.Short(imageSha256)
-                    + "; list " + CoreImageFileName + " itself, or create the allowlist after the promote";
+                    + "; list " + liveName + " itself, or create the allowlist after the promote";
                 return false;
             }
         }
 
-        if (!ReloadAllowPolicy.TryRowName(CoreImageFileName, out name, out error))
+        if (!ReloadAllowPolicy.TryRowName(liveName, out name, out error))
             return false;
 
         return true;

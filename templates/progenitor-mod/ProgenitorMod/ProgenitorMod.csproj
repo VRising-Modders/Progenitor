@@ -13,7 +13,7 @@
     <ReferenceGame>true</ReferenceGame>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Compile-time only: players get Progenitor from its own package (BepInEx/progenitor-core); a mod never ships it. -->
+    <!-- Compile-time only: players get Progenitor from its own package (BepInEx/plugins/Progenitor); a mod never ships it. -->
     <ProjectReference Include="$(ProgenitorCoreProject)" Private="false" />
   </ItemGroup>
   <ItemGroup>

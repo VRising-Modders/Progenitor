@@ -1,17 +1,32 @@
 using System;
 using System.IO;
+using Progenitor.SelfUpdate;
 
 namespace Progenitor.Bootstrap;
 
 /// <summary>
 /// On-disk layout for the Core assembly. Step D: Bootstrap <c>LoadFromStream</c>s this file
-/// into a collectible ALC. The chainloader never sees it; a leftover copy in
-/// <c>BepInEx/plugins</c> would be loaded first and steal the <c>Progenitor</c> identity.
+/// into a collectible ALC. The chainloader never sees it: in the single-folder layout it is
+/// <c>BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core</c>, which no BepInEx scan or
+/// resolver treats as an assembly; a <c>Progenitor.dll</c> under <c>BepInEx/plugins</c> would be
+/// loaded first and steal the <c>Progenitor</c> identity. Where Core lives is decided once, at the
+/// start of <c>Plugin.Load</c>, by <see cref="InstallLayout.Resolve"/> (<see cref="ResolveAtStart"/>);
+/// every path below reads that one answer.
 /// </summary>
 public static class CoreLayout
 {
-    public const string FolderName = "progenitor-core";
-    public const string FileName = "Progenitor.dll";
+    public const string FolderName = InstallLayout.CoreFolderName;
+
+    /// <summary>
+    /// Core's <em>logical</em> image name: the allowlist row name, the log label and the name a
+    /// staged copy is checked against. On disk the single-folder image is
+    /// <see cref="ImageFileName"/>; a row for either name lists Core
+    /// (<see cref="DecideCoreRow"/>), so an existing <c>progenitor-allow.txt</c> keeps working.
+    /// </summary>
+    public const string FileName = InstallLayout.LegacyCoreFileName;
+
+    /// <summary>Core's file name on disk in the single-folder layout.</summary>
+    public const string ImageFileName = InstallLayout.CoreFileName;
     public const string AssemblySimpleName = "Progenitor";
     public const string RuntimeTypeName = "Progenitor.Runtime";
     public const string InstallMethod = "Install";
@@ -68,18 +83,58 @@ public static class CoreLayout
     public const string ProtocolFieldName = "ProtocolVersion";
 
     /// <summary>
-    /// Logged when the Core DLL is absent. Bootstrap then does not call Install or scan plugins.
-    /// Tools and tests match this text.
+    /// Logged when no Core image is found: every path tried, in order
+    /// (<see cref="InstallLayout.FormatMissing"/>). Bootstrap then does not call Install or scan
+    /// plugins. Tools and tests match this prefix.
     /// </summary>
-    public const string MissingLog =
-        "Core missing: BepInEx/progenitor-core/Progenitor.dll was not found. Bootstrap will not load plugins.";
+    public const string MissingLogPrefix = "Core missing:";
 
-    public static string Folder(string bepInExRoot)
+    /// <summary>Core's folder for this process (see <see cref="InstallLayout.CoreFolder"/>).</summary>
+    public static string Folder(string bepInExRoot) => InstallLayout.CoreFolder(bepInExRoot);
+
+    /// <summary>Core's live image for this process. Staging is this path plus <c>.next</c>.</summary>
+    public static string DllPath(string bepInExRoot) => InstallLayout.CoreFile(bepInExRoot);
+
+    /// <summary>
+    /// Core reads these by reflection (<c>BootstrapLink</c>) so both assemblies use the one
+    /// resolution Bootstrap made at start. Null before <see cref="ResolveAtStart"/>.
+    /// </summary>
+    public static string? ResolvedFolder => InstallLayout.Current?.Folder;
+
+    /// <summary>See <see cref="ResolvedFolder"/>.</summary>
+    public static string? ResolvedCoreFile => InstallLayout.Current?.CoreFile;
+
+    /// <summary>
+    /// Allowlist verdict for a Core image: listed when a row names either
+    /// <see cref="ImageFileName"/> or <see cref="FileName"/> with this hash. Otherwise the verdict
+    /// for <see cref="FileName"/> (no list, unlisted or malformed).
+    /// </summary>
+    public static AllowDecision DecideCoreRow(Func<string, string, AllowDecision> decide, string? fileName, string sha256Hex)
     {
-        if (string.IsNullOrEmpty(bepInExRoot))
-            throw new ArgumentException("bepInExRoot is required.", nameof(bepInExRoot));
-        return Path.Combine(bepInExRoot, FolderName);
+        _ = fileName;
+        var legacy = decide(FileName, sha256Hex);
+        if (legacy == AllowDecision.Listed) return legacy;
+        var image = decide(ImageFileName, sha256Hex);
+        return image == AllowDecision.Listed ? image : legacy;
     }
 
-    public static string DllPath(string bepInExRoot) => Path.Combine(Folder(bepInExRoot), FileName);
+    /// <summary>
+    /// Resolve Core's location for this process and record it (<see cref="InstallLayout.SetCurrent"/>).
+    /// Called first thing in <c>Plugin.Load</c>, before the uninstall check, the start-loop guard
+    /// and the first Core read, so every one of them reads the same folder.
+    /// </summary>
+    internal static InstallLayout.CoreHome ResolveAtStart(string bepInExRoot, string? bootstrapPath, bool hostedChild, Action<string>? warn)
+    {
+        string? dir = null;
+        try { dir = string.IsNullOrEmpty(bootstrapPath) ? null : Path.GetDirectoryName(bootstrapPath); }
+        catch { dir = null; }
+        var home = InstallLayout.Resolve(bepInExRoot, dir, hostedChild, InstallLayout.SafeFileExists, InstallLayout.SafeDirectoryExists);
+        InstallLayout.SetCurrent(bepInExRoot, home);
+        if (home.StaleLegacyFolder != null)
+        {
+            try { warn?.Invoke(InstallLayout.FormatStaleLegacy(home)); }
+            catch { /* a log is not a gate */ }
+        }
+        return home;
+    }
 }

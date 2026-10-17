@@ -199,7 +199,7 @@ public static class Resilience
     /// </summary>
     public const string CoreFolderName = "progenitor-core";
 
-    /// <summary>Core's file name inside <see cref="CoreFolderName"/> (<c>CoreLayout.FileName</c>).</summary>
+    /// <summary>Core's legacy file name (<c>CoreLayout.FileName</c>); the single-folder image is <c>Progenitor.core</c>.</summary>
     public const string CoreFileName = "Progenitor.dll";
 
     /// <summary>BepInEx's folder name inside the game folder.</summary>
@@ -372,10 +372,10 @@ public static class Resilience
         if (!string.IsNullOrEmpty(gameRoot))
         {
             string derived;
-            try { derived = Path.Combine(gameRoot, BepInExFolderName, CoreFolderName); }
+            try { derived = Progenitor.SelfUpdate.InstallLayout.CoreFolder(Path.Combine(gameRoot, BepInExFolderName)); }
             catch { derived = ""; }
             if (derived.Length > 0)
-                candidates.Add((derived, "game folder + " + BepInExFolderName + "/" + CoreFolderName));
+                candidates.Add((derived, "game folder + Core's folder (" + derived + ")"));
         }
 
         foreach (var candidate in candidates)
@@ -412,11 +412,15 @@ public static class Resilience
     {
         if (!string.IsNullOrEmpty(assemblyLocation)) return assemblyLocation;
         if (string.IsNullOrEmpty(coreFolder)) return "";
-        string path;
-        try { path = Path.Combine(coreFolder, CoreFileName); }
-        catch { return ""; }
-        try { return fileExists(path) ? path : ""; }
-        catch { return ""; }
+        foreach (string name in new[] { Progenitor.SelfUpdate.InstallLayout.CoreFileName, CoreFileName })
+        {
+            string path;
+            try { path = Path.Combine(coreFolder, name); }
+            catch { return ""; }
+            try { if (fileExists(path)) return path; }
+            catch { return ""; }
+        }
+        return "";
     }
 
     private static string DirectoryOf(string path)

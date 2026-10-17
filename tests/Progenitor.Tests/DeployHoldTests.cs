@@ -60,6 +60,28 @@ public class DeployHoldTests
         Assert.Contains("errors=0", output, StringComparison.Ordinal);
     }
 
+    /// <summary>The other scripts that know the single-folder layout parse too.</summary>
+    [Theory]
+    [InlineData("package.ps1")]
+    [InlineData("test-server.ps1")]
+    [InlineData("stage-test-server.ps1")]
+    [InlineData("launch-client.ps1")]
+    [InlineData("verify.ps1")]
+    [InlineData("headless-root.ps1")]
+    [InlineData("resilience-report.ps1")]
+    public void Layout_scripts_parse(string file)
+    {
+        string? shell = PowerShellExe();
+        if (shell == null) return;
+        string script =
+            "$e = $null; $tk = $null\n" +
+            "[System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$tk, [ref]$e) | Out-Null\n" +
+            "\"errors=\" + $e.Count\n" +
+            "$e | ForEach-Object { $_.ToString() }\n";
+        string output = RunPowerShell(shell, script, Path.Combine(FindRepoRoot(), "tools", file));
+        Assert.Contains("errors=0", output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Get_CoreStatus_reads_the_hosted_game_flags()
     {

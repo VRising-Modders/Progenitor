@@ -23,7 +23,13 @@ public class HostedStagingTests
     {
         Assert.Equal(CoreLayout.FolderName, Staging.Layout.CoreFolderName);
         Assert.Equal(CoreLayout.FileName, Staging.Layout.CoreDllName);
-        Assert.Equal(CoreLayout.DllPath(BepInEx), Staging.Layout.CoreDllPath(BepInEx));
+        // The child's own copy sits in the legacy location, which a hosted child's Bootstrap reads first.
+        Assert.Equal(
+            Progenitor.SelfUpdate.InstallLayout.Resolve(BepInEx, null, hostedChild: true, _ => false).Folder,
+            Path.GetDirectoryName(Staging.Layout.CoreDllPath(BepInEx)));
+        Assert.Equal(Path.Combine(BepInEx, "progenitor-core", "Progenitor.dll"), Staging.Layout.CoreDllPath(BepInEx));
+        // The client's own image is read from wherever the client keeps it (nothing installed here: the single folder).
+        Assert.Equal(CoreLayout.DllPath(BepInEx), Staging.Layout.ClientCoreDllPath(BepInEx));
         Assert.Equal(
             Path.Combine(BepInEx, "plugins", "Progenitor.Bootstrap.dll"),
             Staging.Layout.BootstrapDllPath(BepInEx));

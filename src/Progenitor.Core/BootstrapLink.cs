@@ -470,6 +470,54 @@ internal static class BootstrapLink
         }
     }
 
+    private const string LayoutTypeName = "Progenitor.Bootstrap.CoreLayout";
+
+    /// <summary>
+    /// Single-folder install: take the Core location Bootstrap resolved at its start
+    /// (<c>CoreLayout.ResolvedFolder</c> / <c>ResolvedCoreFile</c>, read by name), so this Core's
+    /// copy of <see cref="Progenitor.SelfUpdate.InstallLayout"/> answers exactly what Bootstrap's does.
+    /// Without a Bootstrap that publishes it, the folder is resolved here the same way, beside the
+    /// loaded Bootstrap's file. Never throws.
+    /// </summary>
+    internal static void AdoptInstallLayout(string? bepInExRoot)
+    {
+        if (string.IsNullOrWhiteSpace(bepInExRoot)) return;
+        try
+        {
+            var host = _hostType ?? FindHostType();
+            string? folder = null, file = null, bootstrapDir = null;
+            if (host != null)
+            {
+                try { bootstrapDir = System.IO.Path.GetDirectoryName(host.Assembly.Location); }
+                catch { bootstrapDir = null; }
+                var layout = host.Assembly.GetType(LayoutTypeName);
+                folder = layout?.GetProperty("ResolvedFolder", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string;
+                file = layout?.GetProperty("ResolvedCoreFile", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string;
+            }
+
+            Progenitor.SelfUpdate.InstallLayout.CoreHome home;
+            if (!string.IsNullOrEmpty(folder) && !string.IsNullOrEmpty(file))
+            {
+                bool legacy = Progenitor.SelfUpdate.InstallLayout.SamePath(
+                    folder!, Progenitor.SelfUpdate.InstallLayout.LegacyCoreFolder(bepInExRoot!));
+                home = new Progenitor.SelfUpdate.InstallLayout.CoreHome(
+                    folder!, file!, System.IO.File.Exists(file!), legacy, new[] { file! }, null);
+            }
+            else
+            {
+                home = Progenitor.SelfUpdate.InstallLayout.Resolve(
+                    bepInExRoot!, bootstrapDir, hostedChild: false,
+                    Progenitor.SelfUpdate.InstallLayout.SafeFileExists,
+                    Progenitor.SelfUpdate.InstallLayout.SafeDirectoryExists);
+            }
+            Progenitor.SelfUpdate.InstallLayout.SetCurrent(bepInExRoot!, home);
+        }
+        catch
+        {
+            // InstallLayout then resolves the tree on disk on every call.
+        }
+    }
+
     private static Type? FindHostType()
     {
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())

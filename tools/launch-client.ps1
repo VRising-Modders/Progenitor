@@ -9,8 +9,8 @@
   running unless -Restart.
 
   -Restart first sends the bridge "quit" op (UnityEngine.Application.Quit, which runs
-  Application.quitting and promotes a staged Progenitor.dll.next under
-  BepInEx/progenitor-core and Progenitor.Bootstrap.dll.next under BepInEx/plugins), waits
+  Application.quitting and promotes a staged Progenitor.core.next under
+  BepInEx/plugins/Progenitor/progenitor-core and Progenitor.Bootstrap.dll.next beside Bootstrap), waits
   up to 30 s for the process to exit, then falls back to Stop-Process on the path-matched
   VRising.exe.
   Without -Force, -Restart refuses when a client world exists in the bridge ping worlds list
@@ -19,8 +19,8 @@
   running but the bridge does not answer, -Restart also refuses without -Force or -Quit
   (cannot tell whether the user is playing).
 
-  Application.quitting and promotes a staged Progenitor.dll.next (under BepInEx/progenitor-core)
-  and Progenitor.Bootstrap.dll.next (under BepInEx/plugins)), waits up to 30 s for the process to exit, then falls back
+  Application.quitting and promotes a staged Progenitor.core.next (under BepInEx/plugins/Progenitor/progenitor-core)
+  and Progenitor.Bootstrap.dll.next (beside Bootstrap)), waits up to 30 s for the process to exit, then falls back
   so the menu joins a dedicated server. Default target is the staged test server at 127.0.0.1:9976.
   Pass -Connect "" to skip the join. -Password is the optional server join password.
   -Protocol SteamIPv4 (default) or Lidgren is passed through on the connect payload. The LanMode
@@ -222,20 +222,23 @@ if ($running) {
   # Promote staged restart-only DLLs before launch: Bootstrap's own startup promotion of
   # itself is one launch too late. Same Move-Item + log line as tools/test-server.ps1 start.
   $pluginsDir = Join-Path $gameDir "BepInEx\plugins"
-  $coreDir = Join-Path $gameDir "BepInEx\progenitor-core"
-  $core = Join-Path $coreDir "Progenitor.dll"
-  if (Test-Path "$core.next") {
-    if (-not (Test-Path $coreDir)) { New-Item -ItemType Directory -Force -Path $coreDir | Out-Null }
-    Move-Item "$core.next" $core -Force
-    Write-Host "promoted Progenitor.dll.next"
+  # The single-folder install (BepInEx/plugins/Progenitor), then the three-location layout until a
+  # single-folder Bootstrap's first start retires it.
+  $homeDir = Join-Path $pluginsDir "Progenitor"
+  foreach ($core in @((Join-Path $homeDir "progenitor-core\Progenitor.core"), (Join-Path $gameDir "BepInEx\progenitor-core\Progenitor.dll"))) {
+    if (Test-Path "$core.next") {
+      Move-Item "$core.next" $core -Force
+      Write-Host "promoted $(Split-Path $core -Leaf).next"
+    }
   }
-  $bootstrap = Join-Path $pluginsDir "Progenitor.Bootstrap.dll"
-  if (Test-Path "$bootstrap.next") { Move-Item "$bootstrap.next" $bootstrap -Force; Write-Host "promoted Progenitor.Bootstrap.dll.next" }
+  foreach ($bootstrap in @((Join-Path $homeDir "Progenitor.Bootstrap.dll"), (Join-Path $pluginsDir "Progenitor.Bootstrap.dll"))) {
+    if (Test-Path "$bootstrap.next") { Move-Item "$bootstrap.next" $bootstrap -Force; Write-Host "promoted Progenitor.Bootstrap.dll.next" }
+  }
   $staleCore = Join-Path $pluginsDir "Progenitor.dll"
   foreach ($p in @($staleCore, "$staleCore.next", "$staleCore.prev")) {
     if (Test-Path $p) {
       Remove-Item $p -Force
-      Write-Host "removed stale $(Split-Path $p -Leaf) from plugins (Core lives in progenitor-core)"
+      Write-Host "removed stale $(Split-Path $p -Leaf) from plugins (Core is plugins/Progenitor/progenitor-core/Progenitor.core)"
     }
   }
   # Job FENC2 (roadmap M4 item 5), documented and deliberately NOT implemented here.

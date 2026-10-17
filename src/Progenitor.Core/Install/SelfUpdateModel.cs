@@ -392,6 +392,10 @@ internal sealed class SelfImage
 {
     public byte[] Core { get; set; } = Array.Empty<byte>();
     public byte[] Bootstrap { get; set; } = Array.Empty<byte>();
+
+    /// <summary>The package's preloader (<c>Progenitor.Preloader.patcher</c>), or empty when it ships none.</summary>
+    public byte[] Preloader { get; set; } = Array.Empty<byte>();
+
     public Dictionary<string, byte[]> Tables { get; } = new(StringComparer.OrdinalIgnoreCase);
     public string CoreSha { get; set; } = "";
     public string BootstrapSha { get; set; } = "";
@@ -417,8 +421,10 @@ internal sealed class SelfImage
 }
 
 /// <summary>
-/// AUTOUPDATE5: reads a Progenitor package zip: <c>BepInEx/plugins/Progenitor.Bootstrap.dll</c>,
-/// <c>BepInEx/progenitor-core/Progenitor.dll</c> and its <c>addresslib/*.json</c>. The Core/Bootstrap protocol and the
+/// AUTOUPDATE5: reads a Progenitor package zip: <c>BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll</c>,
+/// <c>BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core</c>, its <c>addresslib/*.json</c> and the shipped
+/// preloader. A three-location package (<c>BepInEx/plugins/Progenitor.Bootstrap.dll</c>,
+/// <c>BepInEx/progenitor-core/Progenitor.dll</c>) still reads, so a kept or older release can be installed back. The Core/Bootstrap protocol and the
 /// versions are read from each image's metadata (<c>Progenitor.BootstrapLink.ProtocolVersion</c>,
 /// <c>Progenitor.Bootstrap.CoreLayout.ProtocolVersion</c>), and Core's handshake protocol
 /// (<c>Progenitor.Networking.Handshake.ProtocolVersion</c>); nothing is loaded.
@@ -434,6 +440,7 @@ internal static class SelfImageReader
     public static SelfImage Read(byte[] zip)
     {
         var image = new SelfImage();
+        bool coreFromImageName = false;
         try
         {
             using var archive = new ZipArchive(new MemoryStream(zip, writable: false), ZipArchiveMode.Read);
@@ -446,10 +453,21 @@ internal static class SelfImageReader
                     image.PackageVersion = SelfState.Str(JsonDocument.Parse(ReadAll(entry)).RootElement, "version_number");
                 else if (lower == "changelog.md")
                     image.Changelog = System.Text.Encoding.UTF8.GetString(ReadAll(entry));
-                else if (lower.EndsWith("/plugins/progenitor.bootstrap.dll", StringComparison.Ordinal) || lower == "plugins/progenitor.bootstrap.dll")
+                else if (IsBootstrapEntry(lower))
                     image.Bootstrap = ReadAll(entry);
-                else if (lower.EndsWith("/progenitor-core/progenitor.dll", StringComparison.Ordinal) || lower == "progenitor-core/progenitor.dll")
+                else if (IsCoreEntry(lower, InstallLayout.CoreFileName))
+                {
                     image.Core = ReadAll(entry);
+                    coreFromImageName = true;
+                }
+                else if (IsCoreEntry(lower, InstallLayout.LegacyCoreFileName))
+                {
+                    // A three-location package; the single-folder image wins when a package carries both.
+                    if (!coreFromImageName) image.Core = ReadAll(entry);
+                }
+                else if (lower.EndsWith("/" + InstallLayout.ShippedPreloaderFileName.ToLowerInvariant(), StringComparison.Ordinal)
+                         || lower.EndsWith("/patchers/" + InstallLayout.PreloaderFileName.ToLowerInvariant(), StringComparison.Ordinal))
+                    image.Preloader = ReadAll(entry);
                 else if (lower.Contains("/progenitor-core/addresslib/") && lower.EndsWith(".json", StringComparison.Ordinal)
                          && (Path.GetFileName(lower).StartsWith("client-", StringComparison.Ordinal) || Path.GetFileName(lower).StartsWith("server-", StringComparison.Ordinal)))
                     image.Tables[Path.GetFileName(path)] = ReadAll(entry);
@@ -461,8 +479,8 @@ internal static class SelfImageReader
             return image;
         }
 
-        if (image.Core.Length == 0) { image.Error = "the package has no BepInEx/progenitor-core/Progenitor.dll"; return image; }
-        if (image.Bootstrap.Length == 0) { image.Error = "the package has no BepInEx/plugins/Progenitor.Bootstrap.dll"; return image; }
+        if (image.Core.Length == 0) { image.Error = "the package has no BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core"; return image; }
+        if (image.Bootstrap.Length == 0) { image.Error = "the package has no BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll"; return image; }
         image.CoreSha = SelfFiles.Sha256(image.Core);
         image.BootstrapSha = SelfFiles.Sha256(image.Bootstrap);
         if (!TryReadAssembly(image.Core, "Progenitor", CoreProtocolType, out int cp, out string cv, out string ce)) { image.Error = "Core: " + ce; return image; }
@@ -473,6 +491,24 @@ internal static class SelfImageReader
         image.BootstrapVersion = bv;
         image.HandshakeProtocol = TryReadConstant(image.Core, HandshakeProtocolType, out int hp) ? hp : 0;
         return image;
+    }
+
+    /// <summary>
+    /// <c>Progenitor.Bootstrap.dll</c> anywhere under <c>plugins/</c>: the single-folder
+    /// <c>plugins/Progenitor/Progenitor.Bootstrap.dll</c> or the three-location <c>plugins/Progenitor.Bootstrap.dll</c>.
+    /// </summary>
+    internal static bool IsBootstrapEntry(string lower)
+    {
+        string leaf = "/" + InstallLayout.BootstrapFileName.ToLowerInvariant();
+        if (!(lower.EndsWith(leaf, StringComparison.Ordinal) || lower == leaf.Substring(1))) return false;
+        return lower.StartsWith("plugins/", StringComparison.Ordinal) || lower.Contains("/plugins/");
+    }
+
+    /// <summary>A Core image named <paramref name="fileName"/> directly in a <c>progenitor-core</c> folder.</summary>
+    internal static bool IsCoreEntry(string lower, string fileName)
+    {
+        string tail = InstallLayout.CoreFolderName + "/" + fileName.ToLowerInvariant();
+        return lower == tail || lower.EndsWith("/" + tail, StringComparison.Ordinal);
     }
 
     /// <summary>

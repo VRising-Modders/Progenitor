@@ -151,9 +151,11 @@ public static class CompatRewriteHost
         }
     }
 
-    /// <summary><c>BepInEx/progenitor-core</c> — beside Core, next to the address tables.</summary>
+    /// <summary>Core's folder (<c>InstallLayout.CoreFolder</c>), next to the address tables.</summary>
     public static string CoreFolder(string bepInExRoot) =>
-        Path.Combine(bepInExRoot ?? "", CoreFolderName);
+        string.IsNullOrEmpty(bepInExRoot)
+            ? CoreFolderName
+            : Progenitor.SelfUpdate.InstallLayout.CoreFolder(bepInExRoot);
 
     /// <summary>The game root's <c>GameAssembly.dll</c>: the parent of the BepInEx root.</summary>
     public static string GameAssemblyPath(string bepInExRoot)

@@ -86,7 +86,7 @@ public sealed class ServerInstallTests : IDisposable
         var result = ServerInstall.Install(_server, _source);
         Assert.False(result.Ok);
         Assert.False(File.Exists(ServerInstallLedger.PathFor(_server)));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
         // Revert: dropping HasBepInExCore from Inspect writes Bootstrap into a server that cannot load it.
     }
 
@@ -104,7 +104,7 @@ public sealed class ServerInstallTests : IDisposable
         var noSpace = ServerInstall.Install(_server, _source);
         Assert.False(noSpace.Ok);
         Assert.Equal(ServerInstall.RefusalNoSpace, noSpace.Message);
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core")));
         // Revert: skipping the free-space check leaves a torn copy on a full drive.
     }
 
@@ -127,7 +127,7 @@ public sealed class ServerInstallTests : IDisposable
         Assert.False(uninstall.Ok);
         Assert.Contains(exe, uninstall.Message);
         Assert.True(File.Exists(ServerInstallLedger.PathFor(_server)));
-        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
 
         // The product never operates a process: no Start/Kill/CloseMainWindow statements in the feature.
         string src = SourcePin.ReadFile("src", "Progenitor.Core", "Install", "ServerInstall.cs");
@@ -149,8 +149,8 @@ public sealed class ServerInstallTests : IDisposable
         Assert.True(result.Ok, result.Message);
         Assert.Equal("Progenitor 0.1.0 installed (server needs a restart)", result.Message);
 
-        string bootstrap = Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll");
-        string core = Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll");
+        string bootstrap = Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll");
+        string core = Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core");
         Assert.Equal(Bytes("bootstrap-v1"), File.ReadAllBytes(bootstrap));
         Assert.Equal(Bytes("core-v1"), File.ReadAllBytes(core));
         Assert.True(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-pending")));
@@ -184,14 +184,14 @@ public sealed class ServerInstallTests : IDisposable
         Assert.True(ServerInstall.Install(_server, _source).Ok);
         string ledgerPath = ServerInstallLedger.PathFor(_server);
         string before = File.ReadAllText(ledgerPath);
-        var stamp = File.GetLastWriteTimeUtc(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll"));
+        var stamp = File.GetLastWriteTimeUtc(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll"));
 
         var again = ServerInstall.Install(_server, _source);
         Assert.True(again.Ok);
         Assert.True(again.NoOp);
         Assert.Empty(again.Removed);
         Assert.Equal(before, File.ReadAllText(ledgerPath));
-        Assert.Equal(stamp, File.GetLastWriteTimeUtc(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.Equal(stamp, File.GetLastWriteTimeUtc(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
         // Revert: always copying would rewrite Bootstrap under an unchanged install.
     }
 
@@ -220,7 +220,7 @@ public sealed class ServerInstallTests : IDisposable
         var update = ServerInstall.Install(_server, source2);
         Assert.True(update.Ok, update.Message);
         Assert.False(update.NoOp);
-        Assert.Equal(Bytes("core-v2"), File.ReadAllBytes(Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll")));
+        Assert.Equal(Bytes("core-v2"), File.ReadAllBytes(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core")));
         var ledger = ServerInstallLedger.TryRead(_server)!;
         Assert.Equal("0.2.0", ledger.Version);
         Assert.Equal(Sha(Bytes("core-v2")), ledger.CoreSha256);
@@ -258,9 +258,9 @@ public sealed class ServerInstallTests : IDisposable
         Assert.Contains(pendingRel, result.Removed);
         Assert.Contains("BepInEx/progenitor-reload/index/Mod.dll", result.Removed);
 
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll")));
-        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-core")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core")));
+        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core")));
         Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-pending")));
         Assert.False(File.Exists(promoted));
         Assert.False(File.Exists(ServerInstallLedger.PathFor(_server)));
@@ -279,7 +279,7 @@ public sealed class ServerInstallTests : IDisposable
     public void Uninstall_leaves_a_changed_ledger_file_in_place_and_reports_it()
     {
         Assert.True(ServerInstall.Install(_server, _source).Ok);
-        string core = Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll");
+        string core = Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core");
         File.WriteAllBytes(core, Bytes("user-edited-core"));
 
         var result = ServerInstall.Uninstall(_server);
@@ -289,13 +289,56 @@ public sealed class ServerInstallTests : IDisposable
         Assert.Contains("changed", result.Message);
         Assert.True(File.Exists(core));
         Assert.Equal(Bytes("user-edited-core"), File.ReadAllBytes(core));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
 
         var remaining = ServerInstallLedger.TryRead(_server);
         Assert.NotNull(remaining);
         Assert.Single(remaining!.Files);
         Assert.Equal(ServerInstall.CoreRelative, remaining.Files[0].Path);
         // Revert: deleting without the hash compare removes the user's edited Core.
+    }
+
+    [Fact]
+    public void Updating_a_three_location_install_moves_it_into_the_single_folder()
+    {
+        // The ledger and files an older Progenitor wrote: Bootstrap at the plugins root, Core in BepInEx/progenitor-core.
+        string oldBoot = Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll");
+        string oldCore = Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(oldCore)!);
+        File.WriteAllBytes(oldBoot, Bytes("bootstrap-v0"));
+        File.WriteAllBytes(oldCore, Bytes("core-v0"));
+        var when = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        new ServerInstallLedger("0.0.9", Sha(Bytes("bootstrap-v0")), Sha(Bytes("core-v0")), when, new[]
+        {
+            new ServerInstallLedgerEntry("BepInEx/plugins/Progenitor.Bootstrap.dll", Sha(Bytes("bootstrap-v0")), 12, ServerInstallLedger.CategoryFramework, "client-image:x", when),
+            new ServerInstallLedgerEntry("BepInEx/progenitor-core/Progenitor.dll", Sha(Bytes("core-v0")), 7, ServerInstallLedger.CategoryFramework, "client-image:y", when),
+        }).Write(_server);
+
+        var result = ServerInstall.Install(_server, _source);
+        Assert.True(result.Ok, result.Message);
+        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
+        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core")));
+        Assert.False(File.Exists(oldBoot));
+        Assert.False(File.Exists(oldCore));
+        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-core")));
+        var ledger = ServerInstallLedger.TryRead(_server)!;
+        Assert.Equal(new[] { ServerInstall.BootstrapRelative, ServerInstall.CoreRelative },
+            ledger.OfCategory(ServerInstallLedger.CategoryFramework).Select(f => f.Path).ToArray());
+        // Revert: keeping the old framework files gives the server two Bootstraps and two Cores.
+    }
+
+    [Fact]
+    public void Updating_keeps_an_old_framework_file_whose_bytes_changed()
+    {
+        string oldBoot = Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll");
+        File.WriteAllBytes(oldBoot, Bytes("edited-by-hand"));
+        var when = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+        new ServerInstallLedger("0.0.9", Sha(Bytes("bootstrap-v0")), "", when, new[]
+        {
+            new ServerInstallLedgerEntry("BepInEx/plugins/Progenitor.Bootstrap.dll", Sha(Bytes("bootstrap-v0")), 12, ServerInstallLedger.CategoryFramework, "client-image:x", when),
+        }).Write(_server);
+        Assert.True(ServerInstall.Install(_server, _source).Ok);
+        Assert.True(File.Exists(oldBoot));
     }
 
     [Fact]
@@ -423,7 +466,7 @@ public sealed class ServerInstallTests : IDisposable
         int rebuilds = 0;
         pane.SetRebuild(() => rebuilds++);
         toggle.Fire(true);
-        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
         Assert.Equal("Progenitor 0.1.0 installed (server needs a restart)", pane.ServerInstallLine);
         Assert.Equal(1, rebuilds);
         var readback = pane.ServerInstallReadback();
@@ -473,7 +516,7 @@ public sealed class ServerInstallTests : IDisposable
         panel.Buttons.Single(b => b.Text == ConfigurationPane.ServerRemoveButton).Fire();
         Assert.False(pane.UninstallPromptOpen);
         Assert.False(File.Exists(ServerInstallLedger.PathFor(_server)));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
         Assert.Equal("not-installed", pane.ServerInstallReadback()["state"]);
         Assert.Contains("removed", pane.ServerInstallLine);
         // Revert: uninstalling straight from the toggle (no prompt) fails the ledger-still-present assert after toggle off.
@@ -586,9 +629,9 @@ public sealed class ServerInstallTests : IDisposable
         panel.Buttons.Single(b => b.Text == ConfigurationPane.ServerRemoveButton).Fire();
         Assert.False(pane.UninstallPromptOpen);
         Assert.False(File.Exists(ServerInstallLedger.PathFor(_server)));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "progenitor-core", "Progenitor.dll")));
-        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-core")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core", "Progenitor.core")));
+        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core")));
         Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-pending")));
         Assert.True(Directory.Exists(reloadDir));
         Assert.Equal(Bytes("not-progenitors"), File.ReadAllBytes(otherTool));

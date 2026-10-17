@@ -1075,6 +1075,10 @@
          marker, path checks and one MoveFileEx seam), so its honour/refuse rules are tested on a
          temp folder without a client. Core's mirror is Install/ClientUninstall.cs. -->
     <Compile Include="..\..\src\Progenitor.Bootstrap\UninstallAtStart.cs" Link="Linked\UninstallAtStart.Bootstrap.cs" />
+    <!-- Single-folder install: preloader placement and legacy Bootstrap cleanup at start, and the
+         preloader's own "Progenitor is gone" check. Game-free; InstallLayout comes in with SelfUpdate\*.cs. -->
+    <Compile Include="..\..\src\Progenitor.Bootstrap\LayoutAtStart.cs" Link="Linked\LayoutAtStart.cs" />
+    <Compile Include="..\..\src\Progenitor.Preloader\ProgenitorPresence.cs" Link="Linked\ProgenitorPresence.cs" />
     <!-- Job FENC2 -->
     <Compile Include="..\..\tools\enc\EncClassifier.cs" Link="Linked\EncClassifier.cs" />
     <Compile Include="..\..\tools\enc\EncDeltaFile.cs" Link="Linked\EncDeltaFile.cs" />

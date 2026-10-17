@@ -6593,7 +6593,7 @@ public static partial class ModsMenu
             List<(string, string)>? guides = null;
             if (string.Equals(pluginId, SettingsPanel.PluginId, StringComparison.OrdinalIgnoreCase) && bep.Length > 0)
             {
-                string core = Path.Combine(bep, Progenitor.Compat.CompatRewriteHost.CoreFolderName);
+                string core = Progenitor.SelfUpdate.InstallLayout.CoreFolder(bep);
                 guides = new List<(string, string)> { (core, ModHelp.ProgenitorGuidePath), (core, ModHelp.IndexPath) };
             }
 
@@ -6644,7 +6644,7 @@ public static partial class ModsMenu
         {
             string bep = HelpBepInExRoot();
             if (bep.Length == 0) return ModHelpTarget.None;
-            string core = Path.Combine(bep, Progenitor.Compat.CompatRewriteHost.CoreFolderName);
+            string core = Progenitor.SelfUpdate.InstallLayout.CoreFolder(bep);
             var target = ModHelp.Resolve(SettingsPanel.PluginId, null, null, null, null,
                 new List<(string, string)> { (core, ModHelp.ProgenitorGuidePath), (core, ModHelp.IndexPath) });
             return target.Source == ModHelpSource.Guide ? target : ModHelpTarget.None;

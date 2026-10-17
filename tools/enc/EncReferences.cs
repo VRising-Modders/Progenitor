@@ -85,7 +85,11 @@ public static class EncReferences
         foreach (string dir in dirs)
         {
             if (!Directory.Exists(dir)) continue;
-            foreach (string dll in Directory.GetFiles(dir, "*.dll"))
+            // Core ships as Progenitor.core in the single-folder install (never a .dll under plugins/);
+            // its stem is still Progenitor.
+            var files = new List<string>(Directory.GetFiles(dir, "*.dll"));
+            files.AddRange(Directory.GetFiles(dir, "Progenitor.core"));
+            foreach (string dll in files)
             {
                 string stem = Path.GetFileNameWithoutExtension(dll);
                 if (!seen.Add(stem)) continue;

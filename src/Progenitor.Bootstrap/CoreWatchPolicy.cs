@@ -57,7 +57,8 @@ public static class CoreWatchPolicy
     public const string ResumeReasonChildExited = "hosted child exited";
     public const string ResumeReasonDedicatedJoin = "joined a dedicated server";
 
-    public static string NextFileName => CoreLayout.FileName + NextSuffix;
+    /// <summary>The staged Core's leaf in the single-folder layout (<c>Progenitor.core.next</c>).</summary>
+    public static string NextFileName => CoreLayout.ImageFileName + NextSuffix;
 
     public static string NextPath(string dllPath) => dllPath + NextSuffix;
 
@@ -598,17 +599,25 @@ public static class CoreWatchPolicy
     /// only looks at <c>.next</c>, so this file cannot retrigger a swap. Milliseconds
     /// keep two failures in the same UTC second from clobbering each other.
     /// </summary>
-    public static string FailedFileName(DateTime utc) =>
-        CoreLayout.FileName + ".failed-" + utc.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+    public static string FailedFileName(DateTime utc) => FailedFileName(CoreLayout.FileName, utc);
+
+    /// <summary>
+    /// <see cref="FailedFileName(DateTime)"/> for the live image named <paramref name="liveFileName"/>
+    /// (<c>Progenitor.core</c> in the single-folder layout, <c>Progenitor.dll</c> in the legacy one).
+    /// </summary>
+    public static string FailedFileName(string? liveFileName, DateTime utc) =>
+        (string.IsNullOrEmpty(liveFileName) ? CoreLayout.FileName : liveFileName) + ".failed-"
+        + utc.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
 
     public static string QuarantinePath(string dllPath, DateTime utc)
     {
         if (string.IsNullOrEmpty(dllPath))
             throw new ArgumentException("dllPath is required.", nameof(dllPath));
         string? dir = Path.GetDirectoryName(dllPath);
+        string name = FailedFileName(Path.GetFileName(dllPath), utc);
         if (string.IsNullOrEmpty(dir))
-            return FailedFileName(utc);
-        return Path.Combine(dir, FailedFileName(utc));
+            return name;
+        return Path.Combine(dir, name);
     }
 
     private static bool ContainsArg(string commandLine, string arg)

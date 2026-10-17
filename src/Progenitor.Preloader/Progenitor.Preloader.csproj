@@ -13,6 +13,10 @@
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Single-folder install: the shared layout names (BCL only), for the "Progenitor is gone" check. -->
+    <Compile Include="..\Progenitor.Core\SelfUpdate\InstallLayout.cs" Link="Shared\InstallLayout.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Only BepInEx's own preloader surface, from the installed game's BepInEx/core (never NuGet). -->
     <Reference Include="$(VRisingGameDir)\BepInEx\core\BepInEx.Core.dll" Private="false" />
     <Reference Include="$(VRisingGameDir)\BepInEx\core\BepInEx.Preloader.Core.dll" Private="false" />

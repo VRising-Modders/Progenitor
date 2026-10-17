@@ -42,7 +42,7 @@ After the switch, open the Security tab once as an outside reader would and conf
 
 1. Confirm `main` is green and the [roadmap](roadmap.md) and [api.md](api.md) match what ships.
 2. Versions are computed from git ([versioning.md](versioning.md)); do not edit version numbers by hand. Build the package with `powershell -File tools/package.ps1` (never `-IncludeDev` for a public release: the dev bridge must not ship).
-3. Inspect both zips' file lists: Bootstrap, Core and the preloader, and no `Progenitor.Dev.dll`, token or opt-in marker. `packaging/out/Progenitor-<version>.zip` is the manual install; its only root entry is `BepInEx/`. `packaging/out/Progenitor-<version>-thunderstore.zip` is the same tree plus the Thunderstore root files.
+3. Inspect both zips' file lists: one folder, `BepInEx/plugins/Progenitor/`, holding `Progenitor.Bootstrap.dll`, `Progenitor.Preloader.patcher` and `progenitor-core/` (`Progenitor.core`, `addresslib/*.json`, `docs/guide/progenitor-guide.html`), and no `Progenitor.Dev.dll`, token or opt-in marker. Packaging fails when anything in a zip's BepInEx tree is outside that folder. `packaging/out/Progenitor-<version>.zip` is the manual install; its only root entry is `BepInEx/`, so a player either extracts it into the game folder or copies the `Progenitor` folder into `BepInEx/plugins`. `packaging/out/Progenitor-<version>-thunderstore.zip` is the same tree plus the Thunderstore root files.
 4. Create a **signed, annotated tag** on the release commit and push it:
 
    ```

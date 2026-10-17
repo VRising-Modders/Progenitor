@@ -11,8 +11,9 @@ namespace Progenitor.Bootstrap;
 /// <c>Application.quitting</c> uses <c>DelegateSupport.ConvertDelegate</c>, which caches an
 /// IL2CPP delegate — that is why this subscription lives here and not in Core.
 ///
-/// Step C: Core lives under <c>BepInEx/progenitor-core/</c> and is not yet mapped when Bootstrap
-/// <c>Load</c>s, so a staged <c>Progenitor.dll.next</c> is promoted <em>before</em>
+/// Step C: Core lives in its own folder (<see cref="CoreLayout.Folder"/>; in the single-folder layout
+/// <c>BepInEx/plugins/Progenitor/progenitor-core/</c>) and is not mapped when Bootstrap
+/// <c>Load</c>s, so a staged <c>Progenitor.core.next</c> is promoted <em>before</em>
 /// <c>Assembly.LoadFrom</c> and takes effect this launch. Loop scripts still promote both
 /// before spawn because a forced kill never runs these handlers.
 /// </summary>
@@ -351,7 +352,7 @@ internal static class SelfUpdate
         var result = PromoteSequence.Promote(
             RealPromoteFileSystem.Instance,
             request,
-            ReloadAllowStore.Decide,
+            (name, hash) => CoreLayout.DecideCoreRow(ReloadAllowStore.Decide, name, hash),
             (image, _) => TryAcceptStagedCore(image, requireMatchingProtocol, out var why) ? "" : why);
 
         switch (result.Status)

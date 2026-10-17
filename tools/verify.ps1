@@ -830,7 +830,9 @@ function Test-CoreCommitAtLeast([string]$sha, $ping) {
     return [pscustomobject]@{ State = "unknown"; Reason = "could not read the commit date of $($full.Substring(0,7))" }
   }
 
-  $corePath = Join-Path $BepInExDir "progenitor-core\Progenitor.dll"
+  # The single-folder Core, else the three-location one (src/Progenitor.Core/SelfUpdate/InstallLayout.cs).
+  $corePath = Join-Path $BepInExDir "plugins\Progenitor\progenitor-core\Progenitor.core"
+  if (-not (Test-Path -LiteralPath $corePath)) { $corePath = Join-Path $BepInExDir "progenitor-core\Progenitor.dll" }
   Assert-NotLiveServerPath $corePath
   if (-not (Test-Path -LiteralPath $corePath)) {
     return [pscustomobject]@{ State = "unknown"; Reason = "no Core image at $corePath" }

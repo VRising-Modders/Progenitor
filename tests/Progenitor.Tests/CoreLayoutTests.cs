@@ -13,11 +13,14 @@ namespace Progenitor.Tests;
 public class CoreLayoutTests
 {
     [Fact]
-    public void DllPath_is_under_progenitor_core()
+    public void DllPath_is_in_the_single_folder_home_when_nothing_is_installed()
     {
-        var root = @"C:\Fake\BepInEx";
-        Assert.Equal(Path.Combine(root, "progenitor-core"), CoreLayout.Folder(root));
-        Assert.Equal(Path.Combine(root, "progenitor-core", "Progenitor.dll"), CoreLayout.DllPath(root));
+        var root = Path.Combine(Path.GetTempPath(), "progenitor-corelayout-" + Guid.NewGuid().ToString("N"), "BepInEx");
+        var home = Path.Combine(root, "plugins", "Progenitor", "progenitor-core");
+        Assert.Equal(home, CoreLayout.Folder(root));
+        Assert.Equal(Path.Combine(home, "Progenitor.core"), CoreLayout.DllPath(root));
+        Assert.Equal("Progenitor.dll", CoreLayout.FileName);
+        Assert.Equal("Progenitor.core", CoreLayout.ImageFileName);
         Assert.Equal("Progenitor", CoreLayout.AssemblySimpleName);
         Assert.Equal("Progenitor.Runtime", CoreLayout.RuntimeTypeName);
         Assert.Equal("Install", CoreLayout.InstallMethod);
@@ -39,11 +42,29 @@ public class CoreLayoutTests
     }
 
     [Fact]
-    public void MissingLog_is_the_grep_line()
+    public void MissingLog_keeps_the_grep_prefix_and_lists_every_path_tried()
     {
-        Assert.Equal(
-            "Core missing: BepInEx/progenitor-core/Progenitor.dll was not found. Bootstrap will not load plugins.",
-            CoreLayout.MissingLog);
+        var root = @"C:\Fake\BepInEx";
+        var home = Progenitor.SelfUpdate.InstallLayout.Resolve(root, @"C:\Fake\BepInEx\plugins\Progenitor", false, _ => false);
+        string line = Progenitor.SelfUpdate.InstallLayout.FormatMissing(home);
+        Assert.StartsWith(CoreLayout.MissingLogPrefix, line);
+        Assert.EndsWith("Bootstrap will not load plugins.", line);
+        Assert.Contains(Path.Combine(root, "plugins", "Progenitor", "progenitor-core", "Progenitor.core"), line);
+        Assert.Contains(Path.Combine(root, "progenitor-core", "Progenitor.core"), line);
+        Assert.Contains(Path.Combine(root, "progenitor-core", "Progenitor.dll"), line);
+    }
+
+    [Theory]
+    [InlineData(AllowDecision.Listed, AllowDecision.Unlisted, AllowDecision.Listed)]
+    [InlineData(AllowDecision.Unlisted, AllowDecision.Listed, AllowDecision.Listed)]
+    [InlineData(AllowDecision.Unlisted, AllowDecision.Unlisted, AllowDecision.Unlisted)]
+    [InlineData(AllowDecision.NoList, AllowDecision.NoList, AllowDecision.NoList)]
+    [InlineData(AllowDecision.Malformed, AllowDecision.Malformed, AllowDecision.Malformed)]
+    public void A_Core_row_under_either_name_lists_Core(AllowDecision legacyRow, AllowDecision imageRow, AllowDecision expected)
+    {
+        AllowDecision Decide(string name, string _) =>
+            name == CoreLayout.FileName ? legacyRow : name == CoreLayout.ImageFileName ? imageRow : AllowDecision.Unlisted;
+        Assert.Equal(expected, CoreLayout.DecideCoreRow(Decide, CoreLayout.FileName, "00"));
     }
 
     [Fact]

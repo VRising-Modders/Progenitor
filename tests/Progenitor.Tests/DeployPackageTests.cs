@@ -181,11 +181,11 @@ public sealed class DeployPackageTests
         new object[] { "BepInEx/progenitor-reload/Progenitor.Sample.3.delta" },
         new object[] { "BepInEx/progenitor-reload/Progenitor.Sample.delta-state" },
         new object[] { "BepInEx/config/progenitor-allow.txt" },
-        new object[] { "BepInEx/progenitor-core/addresslib/build-client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json" },
-        new object[] { "BepInEx/progenitor-core/driftmap-248100992-6a1b2c33-ff01234-aabbccdd11223344.json" },
-        new object[] { "BepInEx/progenitor-core/access.txt" },
-        new object[] { "BepInEx/plugins/Progenitor.Bootstrap.pdb" },
-        new object[] { "BepInEx/plugins/Progenitor.Bootstrap.deps.json" },
+        new object[] { "BepInEx/plugins/Progenitor/progenitor-core/addresslib/build-client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json" },
+        new object[] { "BepInEx/plugins/Progenitor/progenitor-core/driftmap-248100992-6a1b2c33-ff01234-aabbccdd11223344.json" },
+        new object[] { "BepInEx/plugins/Progenitor/progenitor-core/access.txt" },
+        new object[] { "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.pdb" },
+        new object[] { "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.deps.json" },
         new object[] { "BepInEx/progenitor-pending/example.host/example.mod.dll" },
     };
 
@@ -204,9 +204,9 @@ public sealed class DeployPackageTests
         try
         {
             // A legitimate public layout, plus the one artifact under test.
-            Seed(stage, "BepInEx/plugins/Progenitor.Bootstrap.dll");
-            Seed(stage, "BepInEx/progenitor-core/Progenitor.dll");
-            Seed(stage, "BepInEx/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json");
+            Seed(stage, "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll");
+            Seed(stage, "BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core");
+            Seed(stage, "BepInEx/plugins/Progenitor/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json");
             Seed(stage, "manifest.json");
             Seed(stage, relativePath);
 
@@ -233,10 +233,11 @@ public sealed class DeployPackageTests
             Seed(stage, "README.md");
             Seed(stage, "CHANGELOG.md");
             Seed(stage, "icon.png");
-            Seed(stage, "BepInEx/plugins/Progenitor.Bootstrap.dll");
-            Seed(stage, "BepInEx/progenitor-core/Progenitor.dll");
-            Seed(stage, "BepInEx/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json");
-            Seed(stage, "BepInEx/progenitor-core/addresslib/server-248598344-6a148fd0-ed22e34-3dcd792996235366.json");
+            Seed(stage, "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll");
+            Seed(stage, "BepInEx/plugins/Progenitor/Progenitor.Preloader.patcher");
+            Seed(stage, "BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core");
+            Seed(stage, "BepInEx/plugins/Progenitor/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json");
+            Seed(stage, "BepInEx/plugins/Progenitor/progenitor-core/addresslib/server-248598344-6a148fd0-ed22e34-3dcd792996235366.json");
 
             var (exit, _, stderr) = RunAssertNoDeveloperArtefacts(shell, stage);
             Assert.True(exit == 0, "package.ps1 refused the public layout: " + stderr);
@@ -251,13 +252,14 @@ public sealed class DeployPackageTests
 
     private static readonly string[] ManualRequired =
     {
-        "BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll",
+        "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll", "BepInEx/plugins/Progenitor/Progenitor.Preloader.patcher", "BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core",
     };
 
     /// <summary>
-    /// The manual zip's only root entry is <c>BepInEx/</c>: extracted into the folder that holds VRising.exe, every file
-    /// lands where the Thunderstore layout puts it, and the Thunderstore root files (manifest, README, icon) stay out of
-    /// the game folder. Entry names use <c>/</c>. Run through <c>package.ps1</c>'s own function.
+    /// The manual zip's only root entry is <c>BepInEx/</c> and every file is inside <c>BepInEx/plugins/Progenitor/</c>:
+    /// extracted into the folder that holds VRising.exe it lands one folder, the same one a player can copy into
+    /// <c>BepInEx/plugins</c> by hand, and the Thunderstore root files (manifest, README, icon) stay out of the game
+    /// folder. Entry names use <c>/</c>. Run through <c>package.ps1</c>'s own function.
     /// </summary>
     [Fact]
     public void ManualZipHoldsOnlyTheBepInExTree()
@@ -269,11 +271,11 @@ public sealed class DeployPackageTests
         {
             var bepInEx = new[]
             {
-                "BepInEx/plugins/Progenitor.Bootstrap.dll",
-                "BepInEx/patchers/Progenitor.Preloader.dll",
-                "BepInEx/progenitor-core/Progenitor.dll",
-                "BepInEx/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json",
-                "BepInEx/progenitor-core/docs/guide/progenitor-guide.html",
+                "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll",
+                "BepInEx/plugins/Progenitor/Progenitor.Preloader.patcher",
+                "BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core",
+                "BepInEx/plugins/Progenitor/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json",
+                "BepInEx/plugins/Progenitor/progenitor-core/docs/guide/progenitor-guide.html",
             };
             foreach (string f in bepInEx) Seed(stage, f);
             foreach (string f in new[] { "manifest.json", "README.md", "CHANGELOG.md", "icon.png", "PROGENITOR_GUIDE.md" }) Seed(stage, f);
@@ -292,11 +294,11 @@ public sealed class DeployPackageTests
         }
     }
 
-    /// <summary>A staged tree that lacks one of the three DLLs is refused, so a manual zip can never ship half an install.</summary>
+    /// <summary>A staged tree that lacks one of the three images is refused, so a manual zip can never ship half an install.</summary>
     [Theory]
-    [InlineData("BepInEx/plugins/Progenitor.Bootstrap.dll")]
-    [InlineData("BepInEx/patchers/Progenitor.Preloader.dll")]
-    [InlineData("BepInEx/progenitor-core/Progenitor.dll")]
+    [InlineData("BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll")]
+    [InlineData("BepInEx/plugins/Progenitor/Progenitor.Preloader.patcher")]
+    [InlineData("BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core")]
     public void ManualZipRefusesAMissingPiece(string missing)
     {
         string shell = RequirePowerShell();
@@ -335,7 +337,8 @@ public sealed class DeployPackageTests
     private static string ScriptGuardFunctions()
     {
         string src = ReadRepoFile("tools", "package.ps1");
-        return ExtractPowerShellFunction(src, "Get-InstallScriptNames") + "\n" + ExtractPowerShellFunction(src, "Assert-NoInstallScripts");
+        return ExtractPowerShellFunction(src, "Get-InstallScriptNames") + "\n" + ExtractPowerShellFunction(src, "Assert-NoInstallScripts")
+            + "\n" + ExtractPowerShellFunction(src, "Get-OutsideHomeEntries");
     }
 
     /// <summary>
@@ -371,6 +374,50 @@ public sealed class DeployPackageTests
         Assert.True(exit == 0, "the script guard refused Progenitor's own files: " + stderr);
     }
 
+    /// <summary>
+    /// Single-folder install: nothing in either zip's BepInEx tree is outside <c>BepInEx/plugins/Progenitor/</c> (Bootstrap
+    /// places the preloader in <c>patchers</c> by itself). The three-location paths are refused; the Dev bridge of an
+    /// <c>-IncludeDev</c> package and the Thunderstore root files are not BepInEx entries of the folder and pass.
+    /// </summary>
+    [Theory]
+    [InlineData("BepInEx/patchers/Progenitor.Preloader.dll")]
+    [InlineData("BepInEx/progenitor-core/Progenitor.dll")]
+    [InlineData("BepInEx/plugins/Progenitor.Bootstrap.dll")]
+    [InlineData("BepInEx/plugins/Other/Other.dll")]
+    public void ManualZipRefusesAnEntryOutsideTheFolder(string stray)
+    {
+        string shell = RequirePowerShell();
+        string stage = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        string zip = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            foreach (string f in ManualRequired) Seed(stage, f);
+            Seed(stage, stray);
+            var (exit, _, stderr) = RunNewGameFolderZip(shell, stage, zip);
+            Assert.True(exit != 0, "New-GameFolderZip accepted " + stray);
+            Assert.Contains("outside BepInEx/plugins/Progenitor/", stderr);
+        }
+        finally
+        {
+            try { Directory.Delete(stage, true); } catch { /* temp */ }
+            try { File.Delete(zip); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>The outside-the-folder rule on its own: what passes and what is reported.</summary>
+    [Fact]
+    public void OutsideHomeEntriesNamesOnlyStrayBepInExFiles()
+    {
+        string shell = RequirePowerShell();
+        string script = "$ErrorActionPreference = 'Stop'\n" + ScriptGuardFunctions()
+                        + "\n(Get-OutsideHomeEntries -Names @('manifest.json', 'README.md', 'BepInEx/', 'BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll', "
+                        + "'BepInEx\\plugins\\Progenitor\\progenitor-core\\Progenitor.core', 'BepInEx/progenitor-reload/Progenitor.Dev.dll', "
+                        + "'BepInEx/patchers/Progenitor.Preloader.dll')) -join '|'\n";
+        var (exit, stdout, stderr) = RunPowerShellScript(shell, script);
+        Assert.True(exit == 0, stderr);
+        Assert.Equal("BepInEx/patchers/Progenitor.Preloader.dll", stdout.Trim());
+    }
+
     /// <summary>A staged install script never reaches the manual zip.</summary>
     [Fact]
     public void ManualZipRefusesAStagedScript()
@@ -381,7 +428,7 @@ public sealed class DeployPackageTests
         try
         {
             foreach (string f in ManualRequired) Seed(stage, f);
-            Seed(stage, "BepInEx/plugins/install.ps1");
+            Seed(stage, "BepInEx/plugins/Progenitor/install.ps1");
             var (exit, _, stderr) = RunNewGameFolderZip(shell, stage, zip);
             Assert.True(exit != 0, "New-GameFolderZip accepted a staged install.ps1");
             Assert.Contains("script or executable", stderr);

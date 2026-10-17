@@ -35,8 +35,9 @@
   client or server. Decides which <side>-<build>.json is expected. Default: client.
 
 .PARAMETER CoreDll
-  Progenitor.dll whose game references are checked. Default: the one deployed in
-  <game>\BepInEx\progenitor-core, else this repo's build output.
+  Core image whose game references are checked. Default: the one deployed in
+  <game>\BepInEx\plugins\Progenitor\progenitor-core (else the three-location
+  <game>\BepInEx\progenitor-core), else this repo's build output.
 
 .PARAMETER TablesDir
   Extra folder(s) to search for <side>-<build>.json, tried after the deployed Core folder.
@@ -124,11 +125,12 @@ if (-not (Test-Path -LiteralPath $GameDir)) { Fail "Game folder not found: $Game
 $gameAssembly = Join-Path $GameDir 'GameAssembly.dll'
 if (-not (Test-Path -LiteralPath $gameAssembly)) { Fail "GameAssembly.dll not found in $GameDir" }
 $interopDir = Join-Path $GameDir 'BepInEx\interop'
-$deployedCoreDir = Join-Path $GameDir 'BepInEx\progenitor-core'
+$deployedCoreDir = Join-Path $GameDir 'BepInEx\plugins\Progenitor\progenitor-core'
 
 if ([string]::IsNullOrWhiteSpace($CoreDll)) {
     $candidates = @(
-        (Join-Path $deployedCoreDir 'Progenitor.dll'),
+        (Join-Path $deployedCoreDir 'Progenitor.core'),
+        (Join-Path $GameDir 'BepInEx\progenitor-core\Progenitor.dll'),
         (Join-Path $repoRoot 'src\Progenitor.Core\bin\Release\net6.0\Progenitor.dll'),
         (Join-Path $repoRoot 'src\Progenitor.Core\bin\Debug\net6.0\Progenitor.dll')
     )

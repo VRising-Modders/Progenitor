@@ -587,7 +587,7 @@ server.tool("progenitor_build", "dotnet build of the Progenitor solution (or one
     return text(`exit ${r.code}\n${[...new Set(lines)].join("\n")}`);
   });
 
-server.tool("progenitor_deploy", "Deploy selected projects to explicit client/server development targets. Reloadable plugins go to progenitor-reload; Core goes to progenitor-core and compatible Bootstrap can swap it in process. Bootstrap goes to plugins and requires restarting each affected process. Specify projects and side. Unless build=false, the script builds the whole solution. Inspect reload_status through the direct bridge and logs for completion; deployment alone is not proof of success.",
+server.tool("progenitor_deploy", "Deploy selected projects to explicit client/server development targets. Reloadable plugins go to progenitor-reload; Core goes to plugins/Progenitor/progenitor-core and compatible Bootstrap can swap it in process. Bootstrap goes to plugins/Progenitor and requires restarting each affected process. Specify projects and side. Unless build=false, the script builds the whole solution. Inspect reload_status through the direct bridge and logs for completion; deployment alone is not proof of success.",
   { projects: z.array(z.string()).optional().describe("Project names; default Progenitor.Bootstrap, Progenitor.Core, Progenitor.Dev."), side: z.enum(["client", "server", "both"]).optional(), build: z.boolean().optional().describe("Run dotnet build first (default true).") },
   async ({ projects, side, build }) => {
     const refusal = queueGate(side === "client" || side === "server" ? [side] : ["client", "server"], "deploy", {});
@@ -813,7 +813,7 @@ server.tool("progenitor_disconnect", "Client only: request the production Leave-
     try { return text(await bridge("client", "disconnect", { statusOnly: statusOnly ?? false })); } catch (e) { return fail(e); }
   });
 
-server.tool("progenitor_quit", "Request UnityEngine.Application.Quit on the given side (client or server). Returns {ok:true} immediately; the process exits after the current frame. Core's Application.quitting handler promotes a staged Progenitor.dll.next. Logs 'quit requested via bridge'. Does not refuse.",
+server.tool("progenitor_quit", "Request UnityEngine.Application.Quit on the given side (client or server). Returns {ok:true} immediately; the process exits after the current frame. Core's Application.quitting handler promotes a staged Progenitor.core.next. Logs 'quit requested via bridge'. Does not refuse.",
   { side },
   async ({ side }) => {
     try { return text(await bridge(side, "quit")); } catch (e) { return fail(e); }

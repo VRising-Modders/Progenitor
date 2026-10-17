@@ -2,7 +2,7 @@
 
 V Rising modding framework. **One dependency: BepInEx.** Original LGPL-2.1-only code.
 
-This is the **Client + Server** package. Install it once; the mod manager puts `Progenitor.Bootstrap.dll` in `BepInEx/plugins`, `Progenitor.Preloader.dll` in `BepInEx/patchers` and `Progenitor.dll` in `BepInEx/progenitor-core` on both sides. There is no second download. For a manual install without a mod manager, use `Progenitor-<version>.zip` from the GitHub release instead: extract it into the folder that holds `VRising.exe` (or `VRisingServer.exe`), on top of BepInExPack_V_Rising. Bootstrap and Core are required: the chainloader only sees Bootstrap, which loads Core. The preloader patcher carries out the Mods menu's next-start plugin actions and keeps the per-session logs that **Get help → Collect logs** bundles.
+This is the **Client + Server** package. Install it once; everything goes into one `Progenitor` folder under `BepInEx/plugins` on both sides (Bootstrap, Core in `progenitor-core`, and the preloader). There is no second download. For a manual install without a mod manager, use `Progenitor-<version>.zip` from the GitHub release instead: copy its `Progenitor` folder into `BepInEx/plugins` (or extract the zip into the folder that holds `VRising.exe` or `VRisingServer.exe`), on top of BepInExPack_V_Rising. Bootstrap and Core are required: the chainloader only sees Bootstrap, which loads Core. At its first start Progenitor copies the preloader to `BepInEx/patchers` by itself; from the next start the preloader patcher carries out the Mods menu's next-start plugin actions and keeps the per-session logs that **Get help → Collect logs** bundles.
 
 ## Players
 

@@ -95,7 +95,7 @@ $hostDefaults | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $settingsDir "
 Copy-Item (Join-Path $serverDir "VRisingServer_Data\StreamingAssets\Settings\ServerGameSettings.json") (Join-Path $settingsDir "ServerGameSettings.json") -Force
 
 # 3b. Progenitor developer-tree config. Reload.WatchCore ships FALSE (job FRLD): watching
-#     progenitor-core/Progenitor.dll.next is an automatic code-loading path and must be
+#     plugins/Progenitor/progenitor-core/Progenitor.core.next is an automatic code-loading path and must be
 #     opt-in for anyone who installs a release. This is a throwaway developer tree, so the
 #     entry is written explicitly here (tools/deploy.ps1 re-asserts it on every deploy) and
 #     the in-process Core hot swap keeps working. Never run against C:\VRisingServer: the

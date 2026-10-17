@@ -175,6 +175,25 @@ public static class Staging
             return Path.Combine(bepInExRoot, PluginsFolderName, BootstrapDllName);
         }
 
+        /// <summary>
+        /// The client's Core image, wherever this tree keeps it (<see cref="Progenitor.SelfUpdate.InstallLayout.CoreFile"/>:
+        /// <c>plugins/Progenitor/progenitor-core/Progenitor.core</c> in the single-folder layout). The child always gets
+        /// its own real copy at <see cref="CoreDllPath"/>, which a hosted child's Bootstrap reads first.
+        /// </summary>
+        public static string ClientCoreDllPath(string clientBepInExRoot) =>
+            Progenitor.SelfUpdate.InstallLayout.CoreFile(clientBepInExRoot);
+
+        /// <summary>
+        /// The client's Bootstrap: <c>plugins/Progenitor/Progenitor.Bootstrap.dll</c> in the single-folder layout, else
+        /// the legacy <see cref="BootstrapDllPath"/>.
+        /// </summary>
+        public static string ClientBootstrapDllPath(string clientBepInExRoot)
+        {
+            string home = Path.Combine(
+                Progenitor.SelfUpdate.InstallLayout.HomeFolder(clientBepInExRoot), BootstrapDllName);
+            return File.Exists(home) ? home : BootstrapDllPath(clientBepInExRoot);
+        }
+
         /// <summary>Child (or client) path of a leftover <c>plugins/Progenitor.dll</c>.</summary>
         public static string StalePluginsCoreDllPath(string bepInExRoot)
         {
@@ -511,8 +530,8 @@ public static class Staging
                 return;
             }
 
-            string clientBootstrapDll = Layout.BootstrapDllPath(clientBepInEx);
-            string clientCoreDll = Layout.CoreDllPath(clientBepInEx);
+            string clientBootstrapDll = Layout.ClientBootstrapDllPath(clientBepInEx);
+            string clientCoreDll = Layout.ClientCoreDllPath(clientBepInEx);
             if (!File.Exists(clientBootstrapDll))
             {
                 Finish(false, $"client {Layout.BootstrapDllName} missing: {clientBootstrapDll}", actions);
@@ -731,8 +750,8 @@ public static class Staging
                         ? Layout.CoreDllPath(bep)
                         : Layout.BootstrapDllPath(bep);
                     string clientDll = isCore
-                        ? Layout.CoreDllPath(clientBep)
-                        : Layout.BootstrapDllPath(clientBep);
+                        ? Layout.ClientCoreDllPath(clientBep)
+                        : Layout.ClientBootstrapDllPath(clientBep);
                     bool expectedDllPresent = File.Exists(expectedDll);
                     bool staleCore = File.Exists(Layout.StalePluginsCoreDllPath(bep));
                     bool clientNext = File.Exists(clientDll + Layout.NextSuffix);

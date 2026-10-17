@@ -48,6 +48,8 @@ public static class Runtime
     public static void Install(object? host)
     {
         _host = host;
+        try { BootstrapLink.AdoptInstallLayout(BepInEx.Paths.BepInExRootPath); }
+        catch { /* InstallLayout resolves on disk instead */ }
         try
         {
             bool fresh = Plugin.Install(ReadLog(host));

@@ -65,6 +65,12 @@ internal static class ClientUninstall
         "progenitor-hosted",
     };
 
+    /// <summary>The single-folder home, relative to the BepInEx root (<c>plugins/Progenitor</c>).</summary>
+    public const string HomeFolder = Progenitor.SelfUpdate.InstallLayout.PluginsFolderName + "/" + Progenitor.SelfUpdate.InstallLayout.HomeFolderName;
+
+    /// <summary>The preloader Bootstrap places in <c>BepInEx/patchers</c>.</summary>
+    public const string PatchersPreloader = Progenitor.SelfUpdate.InstallLayout.PatchersFolderName + "/" + Progenitor.SelfUpdate.InstallLayout.PreloaderFileName;
+
     /// <summary>Files under <c>BepInEx/plugins/</c> that are Progenitor's own plugins.</summary>
     public static readonly IReadOnlyList<string> OwnedPluginFileNames = new[]
     {
@@ -136,7 +142,13 @@ internal static class ClientUninstall
             if (Exists(root, rel)) Add(rel);
         }
 
-        // Core, the pending and reload folders, the caches, staging and the hosted images.
+        // The single-folder home (Bootstrap, Core, the tables, the guide, the shipped preloader) and the preloader
+        // Bootstrap placed in patchers.
+        foreach (string rel in EnumerateFolder(root, HomeFolder))
+            Add(rel);
+        if (Exists(root, PatchersPreloader)) Add(PatchersPreloader);
+
+        // Core (legacy folder), the pending and reload folders, the caches, staging and the hosted images.
         for (int i = 0; i < OwnedFolders.Count; i++)
             foreach (string rel in EnumerateFolder(root, OwnedFolders[i]))
                 Add(rel);

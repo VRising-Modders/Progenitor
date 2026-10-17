@@ -21,12 +21,19 @@ internal sealed class ServerInstallSource
     public string CorePath { get; }
     public string Version { get; }
 
-    /// <summary>Client image under <paramref name="clientBepInExRoot"/> (<c>plugins/</c> + <c>progenitor-core/</c>).</summary>
-    public static ServerInstallSource FromClientRoot(string clientBepInExRoot, string version) =>
-        new(
-            Hosted.Staging.Layout.BootstrapDllPath(clientBepInExRoot),
-            Hosted.Staging.Layout.CoreDllPath(clientBepInExRoot),
-            version);
+    /// <summary>
+    /// Client image under <paramref name="clientBepInExRoot"/>: its Bootstrap (the single-folder
+    /// <c>plugins/Progenitor/</c> one, else the legacy <c>plugins/</c> one) and its Core
+    /// (<see cref="Progenitor.SelfUpdate.InstallLayout.CoreFile"/>).
+    /// </summary>
+    public static ServerInstallSource FromClientRoot(string clientBepInExRoot, string version)
+    {
+        string home = Path.Combine(
+            Progenitor.SelfUpdate.InstallLayout.HomeFolder(clientBepInExRoot),
+            Progenitor.SelfUpdate.InstallLayout.BootstrapFileName);
+        string bootstrap = File.Exists(home) ? home : Hosted.Staging.Layout.BootstrapDllPath(clientBepInExRoot);
+        return new(bootstrap, Progenitor.SelfUpdate.InstallLayout.CoreFile(clientBepInExRoot), version);
+    }
 
     /// <summary>The running client's image, or null when BepInEx paths are unavailable (tests, no Bootstrap).</summary>
     public static ServerInstallSource? Detect()
@@ -182,8 +189,12 @@ internal sealed class LedgerReconcileResult
 /// </summary>
 internal static class ServerInstall
 {
-    public const string BootstrapRelative = "BepInEx/plugins/" + Hosted.Staging.Layout.BootstrapDllName;
-    public const string CoreRelative = "BepInEx/" + Hosted.Staging.Layout.CoreFolderName + "/" + Hosted.Staging.Layout.CoreDllName;
+    /// <summary>Where the server's Bootstrap goes: the single-folder home, <c>BepInEx/plugins/Progenitor/</c>.</summary>
+    public const string BootstrapRelative = "BepInEx/plugins/" + Progenitor.SelfUpdate.InstallLayout.HomeFolderName + "/" + Hosted.Staging.Layout.BootstrapDllName;
+
+    /// <summary>Where the server's Core goes: <c>BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core</c>.</summary>
+    public const string CoreRelative = "BepInEx/plugins/" + Progenitor.SelfUpdate.InstallLayout.HomeFolderName + "/"
+        + Progenitor.SelfUpdate.InstallLayout.CoreFolderName + "/" + Progenitor.SelfUpdate.InstallLayout.CoreFileName;
     public const string PendingRelative = "BepInEx/" + Networking.ModManifestPending.PendingFolderName;
     public const string ReloadRelative = "BepInEx/" + Networking.ModFolders.ReloadFolderName;
 
@@ -206,6 +217,7 @@ internal static class ServerInstall
         PendingRelative,
         ReloadRelative,
         "BepInEx/" + Hosted.Staging.Layout.CoreFolderName,
+        "BepInEx/plugins/" + Progenitor.SelfUpdate.InstallLayout.HomeFolderName,
     };
 
     /// <summary>Test seam: server root → full path of a running <c>VRisingServer.exe</c> inside it, or null. Production scans processes by full path.</summary>
@@ -362,6 +374,10 @@ internal static class ServerInstall
         }
 
         var previous = status.Ledger;
+        // An install from the three-location layout: its framework files at the old paths are ours (the ledger says
+        // so and the bytes still match), and leaving them would give the server two Bootstraps and two Cores.
+        if (previous != null)
+            RemoveMovedFramework(root, previous);
         var entries = new List<ServerInstallLedgerEntry>();
         if (previous != null)
         {
@@ -1066,6 +1082,28 @@ internal static class ServerInstall
         if (!Directory.Exists(core)) return false;
         try { return Directory.GetFiles(core, "BepInEx.*.dll", SearchOption.TopDirectoryOnly).Length > 0; }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// Delete framework files the ledger lists at a path this install no longer writes (the three-location
+    /// <c>plugins/Progenitor.Bootstrap.dll</c> and <c>progenitor-core/Progenitor.dll</c>), only when their bytes still
+    /// match the ledger. Anything else is left alone.
+    /// </summary>
+    private static void RemoveMovedFramework(string root, ServerInstallLedger ledger)
+    {
+        var entries = ledger.OfCategory(ServerInstallLedger.CategoryFramework);
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var entry = entries[i];
+            if (string.Equals(entry.Path, BootstrapRelative, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entry.Path, CoreRelative, StringComparison.OrdinalIgnoreCase))
+                continue;
+            string abs = ServerInstallLedger.Absolute(root, entry.Path);
+            if (!Networking.ModManifestIds.IsUnder(root, abs) || !File.Exists(abs)) continue;
+            if (!HashMatches(abs, entry.Sha256)) continue;
+            InstallStaging.TryDelete(abs);
+        }
+        RemoveEmptyTree(ServerInstallLedger.Absolute(root, "BepInEx/" + Hosted.Staging.Layout.CoreFolderName));
     }
 
     private static void RemoveCategory(string root, ServerInstallLedger ledger, string category, List<string> removed, List<string> skipped)

@@ -19,7 +19,7 @@
     BepInEx\core, interop, unity-libs   junctions (generated interop is shared, never regenerated here)
     BepInEx\cache          copy (so BepInEx does not regenerate interop against the junction)
     BepInEx\config         BepInEx.cfg copy, progenitor-dev.enable copy
-    BepInEx\plugins, progenitor-core, progenitor-reload   filled by
+    BepInEx\plugins (Progenitor\ inside it), progenitor-reload   filled by
                            tools/deploy.ps1 -Side client -GameDir <Root>
 
   After a game update: re-run with -Force to relink the binaries.
@@ -96,7 +96,7 @@ Set-Junction "dotnet"
 $bep = Join-Path $rootFull "BepInEx"
 New-Dir $bep
 foreach ($d in @("core", "interop", "unity-libs")) { Set-Junction "BepInEx\$d" }
-foreach ($d in @("patchers", "plugins", "config", "progenitor-core", "progenitor-reload")) { New-Dir (Join-Path $bep $d) }
+foreach ($d in @("patchers", "plugins", "config", "progenitor-reload")) { New-Dir (Join-Path $bep $d) }
 Copy-IfMissing "BepInEx\cache"
 Copy-IfMissing "BepInEx\config\BepInEx.cfg"
 Copy-IfMissing "BepInEx\config\progenitor-dev.enable"

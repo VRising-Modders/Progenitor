@@ -1642,7 +1642,8 @@ public class ResilienceTests
 
         var folder = ResilienceModule.ResolveCoreFolder("", install.GameRoot, Directory.Exists, out var origin);
 
-        Assert.Equal(install.CoreFolder, folder);
+        // Nothing installed yet: the single-folder layout's Core folder.
+        Assert.Equal(Path.Combine(install.GameRoot, "BepInEx", "plugins", "Progenitor", "progenitor-core"), folder);
         Assert.Contains("does not exist yet", origin, StringComparison.Ordinal);
     }
 
