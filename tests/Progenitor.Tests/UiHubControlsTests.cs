@@ -691,6 +691,86 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.Equal(v + 1, UiBuildingIcons.Version);
     }
 
+    // The four buildings of the Core 2026.10.84 report (client prefab ids).
+    private const int MineralsChestT02 = -1155345803; // TM_Castle_Container_Specialized_Minerals_T02
+    private const int WoodChest = -251472465;         // TM_Stash_Chest_Wood_General
+    private const int SmallFurnace = -1150411622;     // TM_RefinementStation_Furnace_Small
+    private const int Fabricator = -465055967;        // TM_RefinementStation_Fabricator
+
+    [Fact]
+    public void A_stale_build_menu_cell_never_names_the_icon_of_a_blueprint_with_its_own_icon()
+    {
+        // The report: a pooled cell still showing an earlier sprite (a quill) while the Furnace's and the
+        // Fabricator's sprites stream in. Each of the four blueprints names an icon asset of its own.
+        var quill = new object();
+        foreach (int prefab in new[] { MineralsChestT02, WoodChest, SmallFurnace, Fabricator })
+        {
+            UiBuildingIcons.NoteKey(prefab, hasBlueprintKey: true);
+            Assert.False(UiBuildingIcons.AcceptsCell(prefab, cellLoading: false));
+            Assert.False(UiBuildingIcons.AcceptsCell(prefab, cellLoading: true));
+            Assert.Equal("none", UiBuildingIcons.SourceName(prefab));
+        }
+
+        // Each resolves to its own blueprint sprite, read back as "blueprint".
+        var sprites = new Dictionary<int, object>
+        {
+            [MineralsChestT02] = new(), [WoodChest] = new(), [SmallFurnace] = new(), [Fabricator] = new(),
+        };
+        foreach (var (prefab, sprite) in sprites) UiBuildingIcons.Note(prefab, sprite, BuildingIconSource.Blueprint);
+        foreach (var (prefab, sprite) in sprites)
+        {
+            Assert.Same(sprite, UiBuildingIcons.Get(prefab));
+            Assert.Equal("blueprint", UiBuildingIcons.SourceName(prefab));
+        }
+
+        // A cell icon arriving later does not replace a blueprint icon.
+        UiBuildingIcons.Note(SmallFurnace, quill, BuildingIconSource.BuildMenu);
+        UiBuildingIcons.Note(Fabricator, quill);
+        Assert.Same(sprites[SmallFurnace], UiBuildingIcons.Get(SmallFurnace));
+        Assert.Same(sprites[Fabricator], UiBuildingIcons.Get(Fabricator));
+    }
+
+    [Fact]
+    public void A_cell_icon_is_kept_only_for_a_building_whose_blueprint_names_no_icon_and_withdrawn_when_one_does()
+    {
+        var cellSprite = new object();
+        Assert.False(UiBuildingIcons.AcceptsCell(-77, cellLoading: false)); // not asked yet: no cell is trusted
+        UiBuildingIcons.NoteKey(-77, hasBlueprintKey: false);
+        Assert.True(UiBuildingIcons.KeyKnown(-77));
+        Assert.False(UiBuildingIcons.AcceptsCell(-77, cellLoading: true)); // its own sprite has not arrived
+        Assert.True(UiBuildingIcons.AcceptsCell(-77, cellLoading: false));
+        UiBuildingIcons.Note(-77, cellSprite, BuildingIconSource.BuildMenu);
+        Assert.Equal("build-menu", UiBuildingIcons.SourceName(-77));
+
+        // Game data later names an icon asset for it: the cell's icon is withdrawn and a waiting row redraws.
+        int v = UiBuildingIcons.Version;
+        UiBuildingIcons.NoteKey(-77, hasBlueprintKey: true);
+        Assert.True(UiBuildingIcons.Version > v);
+        Assert.Null(UiBuildingIcons.Get(-77));
+        Assert.Equal("none", UiBuildingIcons.SourceName(-77));
+        Assert.False(UiBuildingIcons.AcceptsCell(-77, cellLoading: false));
+    }
+
+    [Fact]
+    public void Missed_buildings_wait_for_the_next_scan_until_an_icon_is_learnt_and_Clear_forgets_everything()
+    {
+        UiBuildingIcons.Want(SmallFurnace);
+        UiBuildingIcons.Want(Fabricator);
+        UiBuildingIcons.Want(0);
+        Assert.Equal(new[] { Fabricator, SmallFurnace }.OrderBy(x => x), UiBuildingIcons.WaitingNow().OrderBy(x => x));
+        UiBuildingIcons.Note(SmallFurnace, new object(), BuildingIconSource.Blueprint);
+        Assert.Equal(new[] { Fabricator }, UiBuildingIcons.WaitingNow());
+        UiBuildingIcons.Want(SmallFurnace); // known now: not waiting again
+        Assert.Equal(new[] { Fabricator }, UiBuildingIcons.WaitingNow());
+
+        UiBuildingIcons.NoteKey(WoodChest, hasBlueprintKey: false);
+        UiBuildingIcons.Clear();
+        Assert.Empty(UiBuildingIcons.WaitingNow());
+        Assert.False(UiBuildingIcons.KeyKnown(WoodChest));
+        Assert.Equal(0, UiBuildingIcons.Count);
+        Assert.Equal(BuildingIconSource.None, UiBuildingIcons.Source(SmallFurnace));
+    }
+
     [Fact]
     public void A_waiting_row_draws_its_building_icon_once_the_cache_learns_it_and_stops_waiting()
     {

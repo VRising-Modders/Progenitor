@@ -12,7 +12,7 @@ namespace Progenitor.Ui;
 /// <summary>
 /// HUB1: the Unity half of the hub controls: compact dropdowns sharing an inline row, an action button at the end of a
 /// field's row, centered button rows, key hints on buttons, the game's window tabs as a cell skin, the height rule of a
-/// floating window with tabs, a panel's room for a table that fills it, and castle building icons from the build menu.
+/// floating window with tabs, a panel's room for a table that fills it, and castle building icons (<see cref="UnityBuildingIcons"/>).
 /// Every object here is a child of its panel or button, so it goes with it.
 /// </summary>
 internal sealed partial class UnityUiRuntime
@@ -378,47 +378,23 @@ internal sealed partial class UnityUiRuntime
             if (!ReferenceEquals(world, _buildingIconWorld))
             {
                 UiBuildingIcons.Clear();
+                UnityBuildingIcons.Clear();
                 _buildingIconWorld = world;
             }
 
             var icon = UiBuildingIcons.Get(prefab, o => o is Sprite s && Alive(s));
             if (icon != null) return icon;
+            UiBuildingIcons.Want(prefab);
             int frame;
             try { frame = Time.frameCount; }
             catch { frame = 0; }
             if (!UiBuildingIcons.MayScan(frame)) return null;
             int before = UiBuildingIcons.Version;
-            try { HarvestBuildMenuIcons(); }
+            try { UnityBuildingIcons.Scan(world); }
             finally { UiBuildingIcons.ScanDone(UiBuildingIcons.Version != before); }
             return UiBuildingIcons.Get(prefab, o => o is Sprite s && Alive(s));
         }
         catch { return null; }
-    }
-
-    /// <summary>
-    /// Read every build-menu cell the game has drawn (<c>BuildMenu_StructureEntry</c>: a building or one of its variants,
-    /// found with the non-generic <c>Resources.FindObjectsOfTypeAll</c>): its prefab and the sprite it shows. Read only.
-    /// </summary>
-    private static void HarvestBuildMenuIcons()
-    {
-        var type = Il2CppType.Of<BuildMenu_StructureEntry>();
-        if (type == null) return;
-        var all = Resources.FindObjectsOfTypeAll(type);
-        if (all == null) return;
-        for (int i = 0; i < all.Length; i++)
-        {
-            try
-            {
-                var entry = all[i] == null ? null : all[i].TryCast<BuildMenu_StructureEntry>();
-                if (entry == null || !Alive(entry)) continue;
-                int guid = entry.PrefabGuid.GuidHash;
-                if (guid == 0) continue;
-                var image = entry.Icon != null ? entry.Icon.CurrentImage : null;
-                var sprite = image != null ? image.sprite : null;
-                if (sprite != null && Alive(sprite)) UiBuildingIcons.Note(guid, sprite);
-            }
-            catch { /* one unreadable cell does not stop the scan */ }
-        }
     }
 
     // ---- the panel side ---------------------------------------------------------------------------------------------

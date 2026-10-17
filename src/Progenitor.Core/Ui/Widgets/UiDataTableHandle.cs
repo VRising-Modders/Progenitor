@@ -1045,8 +1045,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
     /// <summary>
     /// HUB1: one frame while a drawn row waits for a building's icon: when the cache learnt one, draw again (the row shows
-    /// it without a SetRows or a scroll); otherwise ask for the waiting building, which scans the build menu's cells only
-    /// when the cache's back-off allows (<see cref="UiBuildingIcons"/>).
+    /// it without a SetRows or a scroll); otherwise ask for the waiting building, which scans the loaded blueprint icons
+    /// only when the cache's back-off allows (<see cref="UiBuildingIcons"/>).
     /// </summary>
     internal void IconTick()
     {
@@ -1177,6 +1177,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 },
                 ["id"] = line.Row?.Id,
                 ["group"] = line.Group,
+                ["buildingPrefab"] = line.Row?.BuildingPrefab ?? 0,
+                ["iconSource"] = line.Row is { BuildingPrefab: not 0 } r ? UiBuildingIcons.SourceName(r.BuildingPrefab) : null,
                 ["actions"] = DescribeActions(line),
             });
         }
@@ -1552,7 +1554,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 catch { icon = null; }
             }
 
-            // HUB1: a castle building's build-menu icon; none yet (the game has not drawn it) keeps the aligned blank.
+            // HUB1: a castle building's blueprint icon; none yet (the game has not loaded it) keeps the aligned blank.
             if (icon == null && data.BuildingPrefab != 0)
             {
                 try { icon = WidgetRuntime.Current?.BuildingIcon(data.BuildingPrefab); }
