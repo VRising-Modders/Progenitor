@@ -20,7 +20,7 @@ public class ContainerPreviewTests
 
     private static ContainerPreviewFacts Allowed(CastleRelation relation = CastleRelation.Owner) => new()
     {
-        UserConnected = true, RateOk = true, IdParsed = true, Found = true, HasInventory = true,
+        UserConnected = true, Mode = ContainerPreviewMode.On, RateOk = true, IdParsed = true, Found = true, HasInventory = true,
         HasOwnMenu = false, InCastle = true, Relation = relation, HasNetworkId = true,
     };
 
@@ -84,6 +84,126 @@ public class ContainerPreviewTests
     [InlineData(double.PositiveInfinity, 30)]
     public void Granted_seconds_are_clamped(double requested, double granted) =>
         Assert.Equal(granted, ContainerPreviewAuthorization.GrantSeconds(requested));
+
+    // ---- the server setting --------------------------------------------------------------------
+
+    [Fact]
+    public void The_setting_defaults_to_PvE_servers_only()
+    {
+        Assert.Equal(ContainerPreviewSettings.WordPvE, ContainerPreviewSettings.DefaultWord);
+        Assert.Equal(ContainerPreviewMode.PvEOnly, ContainerPreviewSettings.Parse(null));
+        Assert.Equal(ContainerPreviewMode.PvEOnly, ContainerPreviewSettings.Parse("nonsense"));
+        Assert.Equal(ContainerPreviewMode.Off, ContainerPreviewSettings.Parse(" Off "));
+        Assert.Equal(ContainerPreviewMode.On, ContainerPreviewSettings.Parse("ON"));
+        Assert.Equal(new[] { "off", "pve", "on" }, ContainerPreviewSettings.Words);
+        Assert.Equal(3, ContainerPreviewSettings.Labels.Count);
+        Assert.Equal(3, ContainerPreviewSettings.Descriptions.Count);
+    }
+
+    [Theory]
+    [InlineData(2, true, true)]
+    [InlineData(2, false, true)]
+    [InlineData(2, null, true)]
+    [InlineData(1, true, true)]
+    [InlineData(1, false, false)]
+    [InlineData(1, null, false)]
+    [InlineData(0, true, false)]
+    [InlineData(0, false, false)]
+    public void The_setting_allows_by_mode_and_game_mode(int mode, bool? pve, bool allowed) =>
+        Assert.Equal(allowed, ContainerPreviewSettings.Refusal((ContainerPreviewMode)mode, pve) == null);
+
+    [Fact]
+    public void A_server_with_the_setting_off_tells_the_player_so_before_anything_else_about_the_chest()
+    {
+        var f = Allowed(); f.Mode = ContainerPreviewMode.Off; f.Found = false; f.RateOk = false;
+        Assert.Equal(ContainerPreviewSettings.OffRefusal, ContainerPreviewAuthorization.Refusal(f));
+        f = Allowed(); f.Mode = ContainerPreviewMode.PvEOnly; f.IsPvE = false;
+        Assert.Equal(ContainerPreviewSettings.PvPRefusal, ContainerPreviewAuthorization.Refusal(f));
+        Assert.Contains("turned off", ContainerPreviewSettings.OffRefusal);
+        f = Allowed(); f.Mode = ContainerPreviewMode.PvEOnly; f.IsPvE = true;
+        Assert.Null(ContainerPreviewAuthorization.Refusal(f));
+        f = new ContainerPreviewFacts { Mode = ContainerPreviewMode.Off };
+        Assert.Equal("You are not connected.", ContainerPreviewAuthorization.Refusal(f));
+    }
+
+    [Fact]
+    public void The_admin_option_is_a_three_way_choice_stored_in_the_shared_cfg()
+    {
+        var spec = Progenitor.Networking.ServerOptions.Find(Progenitor.Networking.ServerOptionOps.ContainerPreview);
+        Assert.NotNull(spec);
+        Assert.Equal(Progenitor.Networking.ServerOptionKind.Choice, spec!.Kind);
+        Assert.Equal(ContainerPreviewSettings.Section, spec.Section);
+        Assert.Equal(ContainerPreviewSettings.ModeKey, spec.Key);
+        Assert.Equal(ContainerPreviewSettings.Words, spec.Choices);
+        Assert.Contains(Progenitor.Networking.ServerOptionOps.ContainerPreview, Progenitor.Networking.ServerOptionOps.All);
+    }
+
+    // ---- what is a plain container ---------------------------------------------------------------
+
+    [Fact]
+    public void Stations_with_their_own_menus_are_on_the_refusal_list()
+    {
+        foreach (var name in new[]
+                 {
+                     "CastleHeart", "Refinementstation", "WorkstationRecipesBuffer", "ResearchStation", "Salvagestation",
+                     "UnitSpawnerstation", "PrisonCell", "ServantCoffinstation", "ServantEquipment", "Forge_Shared",
+                     "FusionForge_Shared", "BloodMixer_Shared", "JewelCraftingStation", "Stables_Shared",
+                     "CastleArenaStation_Shared", "InventoryRouteStation",
+                 })
+            Assert.Contains(name, ContainerPreviewMenus.OwnMenuComponents);
+        Assert.DoesNotContain("BurnContainer", ContainerPreviewMenus.OwnMenuComponents);   // braziers are plain containers
+    }
+
+    [Fact]
+    public void The_server_checks_every_name_on_the_refusal_list_and_nothing_else()
+    {
+        string source = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
+        int start = source.IndexOf("private static bool HasOwnMenu(", StringComparison.Ordinal);
+        Assert.True(start > 0);
+        string body = source.Substring(start, source.IndexOf(";", start, StringComparison.Ordinal) - start);
+        var checks = System.Text.RegularExpressions.Regex.Matches(body, @"Has<(?:[A-Za-z0-9_]+\.)*([A-Za-z0-9_]+)>\(em\)");
+        var names = new System.Collections.Generic.List<string>();
+        foreach (System.Text.RegularExpressions.Match m in checks) names.Add(m.Groups[1].Value);
+        Assert.Equal(ContainerPreviewMenus.OwnMenuComponents, names);
+    }
+
+    // ---- telling the server ----------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(ContainerPreviewCloseReason.Unloaded, true)]
+    [InlineData(ContainerPreviewCloseReason.NoAnswer, true)]
+    [InlineData(ContainerPreviewCloseReason.Disposed, true)]
+    [InlineData(ContainerPreviewCloseReason.Escape, true)]
+    [InlineData(ContainerPreviewCloseReason.WindowClosed, true)]
+    [InlineData(ContainerPreviewCloseReason.ReplicationTimeout, true)]
+    [InlineData(ContainerPreviewCloseReason.OpenFailed, true)]
+    [InlineData(ContainerPreviewCloseReason.Timeout, true)]
+    [InlineData(ContainerPreviewCloseReason.TargetGone, true)]
+    [InlineData(ContainerPreviewCloseReason.Replaced, true)]
+    [InlineData(ContainerPreviewCloseReason.Failed, true)]
+    [InlineData(ContainerPreviewCloseReason.Refused, false)]
+    [InlineData(ContainerPreviewCloseReason.LeaseEnded, false)]
+    [InlineData(ContainerPreviewCloseReason.WorldChanged, false)]
+    public void Every_close_but_the_servers_own_and_a_lost_connection_releases_the_lease(ContainerPreviewCloseReason reason, bool tells) =>
+        Assert.Equal(tells, ContainerPreviewMachine.TellsServer(reason));
+
+    [Fact]
+    public void The_client_sends_close_through_the_one_rule()
+    {
+        string source = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewClient.cs");
+        Assert.Contains("if (tellServer && ContainerPreviewMachine.TellsServer(reason))", source);
+    }
+
+    // ---- the mapper guard after close -----------------------------------------------------------
+
+    [Fact]
+    public void The_mapper_guard_stays_until_the_window_is_gone_or_two_seconds_pass()
+    {
+        Assert.False(ContainerPreviewMachine.MapperGuardDone(worldAlive: true, windowStillOnTarget: true, 0.5));
+        Assert.True(ContainerPreviewMachine.MapperGuardDone(true, windowStillOnTarget: false, 0));
+        Assert.True(ContainerPreviewMachine.MapperGuardDone(worldAlive: false, true, 0));
+        Assert.True(ContainerPreviewMachine.MapperGuardDone(true, true, ContainerPreviewMachine.MapperGuardSeconds));
+    }
 
     // ---- wire ----------------------------------------------------------------------------------
 

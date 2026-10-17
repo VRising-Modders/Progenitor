@@ -178,7 +178,7 @@ internal static class ProgenitorPage
     }
 
     /// <summary>
-    /// Three homes: <b>On this server</b> — only Progenitor's own two server toggles (the admin channel: an admin edits
+    /// Three homes: <b>On this server</b> — only Progenitor's own server settings (the admin channel: an admin edits
     /// them, everyone else does not see them, decision 5), then the link to the Server tab, which everyone sees.
     /// </summary>
     internal static void BuildOnThisServer(SettingsPageBuilder page)
@@ -187,6 +187,7 @@ internal static class ProgenitorPage
         page.Section(OnThisServerSection);
         Admin(page, Networking.JoinAdminRows.PhotoMode());
         Admin(page, Networking.JoinAdminRows.AllySafeHits());
+        Admin(page, Networking.JoinAdminRows.ContainerPreview());
         page.Link(SettingsLinks.ServerTabKey, LinkServerText, () => ModsMenu.OpenServerTabFromLink(),
             SettingsLinks.TargetServerTab, LinkServerHelp, SettingScope.ServerWide);
     }
@@ -412,7 +413,8 @@ internal static class ProgenitorPage
         try
         {
             return Networking.JoinAdminRows.Shown(Networking.JoinAdminRows.PhotoMode().Key)
-                || Networking.JoinAdminRows.Shown(Networking.JoinAdminRows.AllySafeHits().Key);
+                || Networking.JoinAdminRows.Shown(Networking.JoinAdminRows.AllySafeHits().Key)
+                || Networking.JoinAdminRows.Shown(Networking.JoinAdminRows.ContainerPreview().Key);
         }
         catch { return false; }
     }

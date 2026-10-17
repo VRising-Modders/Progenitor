@@ -32,6 +32,7 @@ internal static unsafe class ContainerPreviewServer
     private static readonly Dictionary<Entity, Holder> ByUser = new();
     private static readonly RemoteInstallRateLimiter Opens = new(30, 60);
     private static bool _installed;
+    private static BepInEx.Configuration.ConfigEntry<string>? _mode;
     private static double _nextCheck;
 
     internal static int ActiveCount => ByUser.Count;
@@ -42,12 +43,27 @@ internal static unsafe class ContainerPreviewServer
         _installed = true;
         CustomEvents.OnReceiveFromClient(ContainerPreviewWire.EventId, OnRequest);
         Plugin.Frame += Tick;
+        try
+        {
+            Config.SharedConfig.BindWhenAvailable(
+                "[" + ContainerPreviewSettings.Section + "] " + ContainerPreviewSettings.ModeKey,
+                file =>
+                {
+                    if (!_installed) return;
+                    _mode = Config.ConfigHelper.Bind(file, ContainerPreviewSettings.Section, ContainerPreviewSettings.ModeKey,
+                        ContainerPreviewSettings.DefaultWord, ContainerPreviewSettings.ConfigDescription);
+                    Plugin.Logger?.LogInfo("ContainerPreview: [" + ContainerPreviewSettings.Section + "] " + ContainerPreviewSettings.ModeKey
+                        + " = " + _mode.Value + ".");
+                });
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: binding the setting threw: " + e.Message + "; the default applies."); }
     }
 
     internal static void Uninstall()
     {
         if (!_installed) return;
         _installed = false;
+        _mode = null;
         try { CustomEvents.RemoveClientHandler(ContainerPreviewWire.EventId); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: handler removal threw: " + e.Message); }
         Plugin.Frame -= Tick;
@@ -113,7 +129,7 @@ internal static unsafe class ContainerPreviewServer
     private static void Open(World world, Entity userEntity, User user, ContainerPreviewPacket request)
     {
         var em = world.EntityManager;
-        var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected };
+        var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected, Mode = Mode, IsPvE = IsPvE() };
         facts.RateOk = facts.UserConnected && Opens.TryTake(user.PlatformId, Now);
         facts.IdParsed = ContainerId.TryParse(request.Container, out var id);
         Entity container = Entity.Null;
@@ -156,11 +172,37 @@ internal static unsafe class ContainerPreviewServer
         Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType);
     }
 
-    /// <summary>Anything with a menu of its own (or no business in a container window): only plain containers pass.</summary>
+    /// <summary>
+    /// Anything with a menu of its own (or no business in a container window): only plain containers pass. One check per
+    /// name of <see cref="ContainerPreviewMenus.OwnMenuComponents"/>, in the same order (a source test keeps them equal).
+    /// </summary>
     private static bool HasOwnMenu(EntityManager em, Entity e) =>
         e.Has<CastleHeart>(em) || e.Has<Refinementstation>(em) || e.Has<WorkstationRecipesBuffer>(em)
         || e.Has<ResearchStation>(em) || e.Has<Salvagestation>(em) || e.Has<UnitSpawnerstation>(em)
-        || e.Has<PrisonCell>(em) || e.Has<ServantCoffinstation>(em) || e.Has<ServantEquipment>(em);
+        || e.Has<PrisonCell>(em) || e.Has<ServantCoffinstation>(em) || e.Has<ServantEquipment>(em)
+        || e.Has<Forge_Shared>(em) || e.Has<FusionForge_Shared>(em) || e.Has<BloodMixer_Shared>(em) || e.Has<JewelCraftingStation>(em)
+        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em);
+
+    /// <summary>The server's setting now (the default until the shared cfg binds).</summary>
+    internal static ContainerPreviewMode Mode
+    {
+        get
+        {
+            try { return ContainerPreviewSettings.Parse(_mode?.Value); }
+            catch { return ContainerPreviewSettings.Parse(null); }
+        }
+    }
+
+    /// <summary>The server's game mode is PvE; null when unreadable.</summary>
+    internal static bool? IsPvE()
+    {
+        try
+        {
+            var mode = ServerRulesGame.Loaded(ServerRules.GameModeType);
+            return mode == null ? null : string.Equals(mode, "PvE", StringComparison.Ordinal);
+        }
+        catch { return null; }
+    }
 
     private static ICastleHandle? CastleOf(World world, Entity container)
     {
@@ -180,12 +222,15 @@ internal static unsafe class ContainerPreviewServer
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
         var em = world.EntityManager;
+        // An admin turning the setting off (or a PvE-only server becoming PvP) ends every running preview.
+        string? settingOff = ContainerPreviewSettings.Refusal(Mode, IsPvE());
         foreach (var holder in new List<Holder>(ByUser.Values))
         {
-            string? why = null;
+            string? why = settingOff;
             try
             {
-                if (!holder.Entity.Exists(em)) why = "The container is gone.";
+                if (why != null) { }
+                else if (!holder.Entity.Exists(em)) why = "The container is gone.";
                 else
                 {
                     var castle = CastleOf(world, holder.Entity);

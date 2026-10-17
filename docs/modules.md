@@ -2635,13 +2635,26 @@ returnButton.OnClick(() => _preview.Dispose());
 
 **Who may preview what (server, Core-owned).** The request names a `ContainerId`. The server answers yes
 only when every check passes, in this order, and otherwise replies with the sentence in
-`IContainerPreview.Reason`: the user is connected; at most 30 opens a minute; the id parses and names a live
-container; it has an inventory and **no menu of its own** (not a castle heart, a crafting, refining,
-research or salvage station, a vermin nest or tomb, a prison, a servant coffin or a servant: chests and
-braziers pass); it is connected to a castle heart; and the user is that castle's **owner or a member of the
-owner's clan** (`ctx.Castles.RelationTo` `Owner` / `ClanMember`). Allies and strangers are refused. No mod
-can widen the rule. Once a preview runs, the server re-checks existence and access every second and ends it
-when either fails.
+`IContainerPreview.Reason`: the user is connected; the server's **Remote chest preview** setting allows it
+(below); at most 30 opens a minute; the id parses and names a live container; it has an inventory and **no
+menu of its own** (not a castle heart, a crafting, refining, research or salvage station, a forge, fusion
+forge, blood mixer, jewel crafting station, stable, arena station or route station, a vermin nest or tomb,
+a prison, a servant coffin or a servant: chests and braziers pass); it is connected to a castle heart; and
+the user is that castle's **owner or a member of the owner's clan** (`ctx.Castles.RelationTo` `Owner` /
+`ClanMember`). Allies and strangers are refused. No mod can widen the rule. Once a preview runs, the server
+re-checks the setting, existence and access every second and ends it when any fails.
+
+**Clan membership is the whole access rule.** The game has no per-container permission inside a clan: every
+clan member may open every chest of the clan's castles at the chest, and its only per-player castle
+permissions (for allies) cover opening doors and building. The preview follows that; allies are refused
+outright.
+
+**The server setting.** *Remote chest preview* (Mods, Progenitor, On this server; admins only; the server's
+`progenitor.cfg` `[ContainerPreview] RemotePreview`): **Off** (`off`), **PvE servers only** (`pve`, the
+default: allowed while the server's game mode is PvE, refused on PvP or when the mode cannot be read) or
+**On** (`on`). A refused player reads "This server has remote chest preview turned off." or "This server
+allows remote chest preview only in PvE, and it is a PvP server." Turning it off ends running previews within
+a second.
 
 **Read-only is the game's rule, not Progenitor's.** Every item event the container window can send (move,
 shift-click, split, take all, smart merge, sort, drop, equip, rename, the brazier's burn toggle) is refused
@@ -2678,6 +2691,16 @@ the ordinary window with its ordinary rights.
 so is let go within three minutes. A timed preview asks for `Seconds` (default 30, at most 600) and closes on
 both sides at that time. One preview runs at a time per client; a new `Open` closes the running one.
 
+Every close tells the server, so the lease goes at once, except a refusal (no lease was made), the server's
+own end, and a world change (the connection is gone). That includes an unload of the calling plugin or Core
+and a request that got no answer in time: if the server made the lease after all, the close releases it
+instead of leaving it to its deadline (180 s with `KeepOpen`, up to 600 s otherwise). The server ignores a close
+for a sequence it does not hold.
+
+The shared lease's 10 m walk-away rule (`LeftArea`) measures from where the character stood when the lease
+started: when a container preview joins a camera preview's lease (or the other way round), the distance still
+counts from the first holder's start, not from where the player stood when the second one joined.
+
 **When a preview closes.** `Closed` is raised once on the main thread with the reason, except on unload.
 
 | Reason | When |
@@ -2691,7 +2714,7 @@ both sides at that time. One preview runs at a time per client; a new `Open` clo
 | `OpenFailed` | The window did not appear within 2 s of the open, or another game menu stayed open. |
 | `Timeout` | A timed preview's `Seconds` ran out. |
 | `LeaseEnded` | The server let go: the player moved more than 10 m from where they stood, the time ran out, access changed, the chest is gone, another view took the streaming origin, or the character changed. |
-| `TargetGone` | The chest entity left the client while the window was open. A `Before<ContainerMenuMapper>` skip keeps the game's mapper from reading the destroyed entity for that frame. |
+| `TargetGone` | The chest entity left the client while the window was open. A `Before<ContainerMenuMapper>` skip keeps the game's mapper from reading the destroyed entity, and stays after the close until the window is confirmed gone (the menu is no longer the container window on that chest), at most 2 s. |
 | `WorldChanged` | Disconnect, leaving, or a new client world. |
 | `Replaced` | A newer preview on this client. |
 | `Failed` | A game read or write threw; the preview closed rather than leave a half-open window. |
@@ -2699,7 +2722,7 @@ both sides at that time. One preview runs at a time per client; a new `Open` clo
 
 Closing calls the game's `HUDMenuManager.CloseMenu(world)` only while the open menu is still the container
 window on this chest (or not bound yet) with no interaction behind it, so a menu the player opened for real
-is left alone. Every hook exists only from the open until the close.
+is left alone. Every hook exists only from the open until the close, except the mapper guard, which waits for the window to be gone (above). A hook that throws logs one warning per preview, not one per frame.
 
 **Not in scope.** Stations, refiners and servant coffins (other menus); a fake interaction buff or the
 game's per-user always-sync buffer (each would need its own opt-in experiment); docking the Find window itself
@@ -5525,7 +5548,8 @@ user, not to a plugin. A second holder at the same target (within 0.5 m), anothe
 [container preview](#container-preview), joins the running lease instead of failing; each holder keeps its own
 deadline, `Renew` and `Hold`, ends on its own `Dispose` or expiry, and the user's origin is restored only when the
 last holder leaves. The safety ends (disconnect, the character gone or moving more than 10 m, another writer of the
-origin) end every holder with that reason. A holder at another point is refused: `Observe` throws "Another view
+origin) end every holder with that reason; the 10 m is measured from where the character stood when the lease
+started (its first holder), not from where it stood when a later holder joined. A holder at another point is refused: `Observe` throws "Another view
 already owns this user's streaming origin." The lease is Core-owned, so one holder's plugin unloading leaves the
 others streaming. Sharing is game-free tested (`ContainerPreviewTests`), not live-verified.
 

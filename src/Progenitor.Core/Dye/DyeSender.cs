@@ -36,15 +36,7 @@ internal static unsafe class DyeSender
     private const int NetworkIdSize = 12;
 
     /// <summary>The local character (this client's own), or false.</summary>
-    internal static bool TryLocalCharacter(EntityManager em, out Entity character)
-    {
-        character = Entity.Null;
-        var locals = Query.Entities(em, includeDisabled: false, includeSystems: false,
-            ComponentIndex.Of<LocalCharacter>(ComponentType.AccessMode.ReadOnly));
-        if (locals.Count == 0) return false;
-        character = locals[0];
-        return em.Exists(character);
-    }
+    internal static bool TryLocalCharacter(EntityManager em, out Entity character) => LocalCharacters.TryGet(em, out character);
 
     /// <summary>The five dyeable slots of <paramref name="character"/>, stat and cosmetic piece each.</summary>
     internal static List<DyeSlot> ReadSlots(EntityManager em, Entity character, bool palettes, ManualLogSource log)

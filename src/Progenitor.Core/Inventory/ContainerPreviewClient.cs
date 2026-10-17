@@ -40,6 +40,7 @@ internal static unsafe class ContainerPreviewClient
     private static bool _installed;
     private static int _sequence;
     private static ContainerPreviewHandle? _current;
+    private static readonly List<ContainerPreviewHandle> Guarding = new();
 
     /// <summary>
     /// Bag hide mode for qualification (E5): true (the default) = a CanvasGroup with alpha 0, raycasts and interaction
@@ -67,6 +68,8 @@ internal static unsafe class ContainerPreviewClient
         _installed = false;
         _current?.Close(ContainerPreviewCloseReason.Unloaded, "", notify: false);
         _current = null;
+        foreach (var guarded in Guarding) guarded.FinishMapperGuard();
+        Guarding.Clear();
         try { CustomEvents.RemoveHandler(ContainerPreviewWire.EventId); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: handler removal threw: " + e.Message); }
         Handshake.ServerContextCleared -= OnContextCleared;
@@ -121,8 +124,21 @@ internal static unsafe class ContainerPreviewClient
     private static void OnContextCleared(string _) =>
         _current?.Close(ContainerPreviewCloseReason.WorldChanged, "", notify: true, tellServer: false);
 
+    /// <summary>L2: a closed preview whose mapper guard waits for the window to be confirmed closed.</summary>
+    internal static void Guard(ContainerPreviewHandle handle)
+    {
+        if (!Guarding.Contains(handle)) Guarding.Add(handle);
+    }
+
     private static void Tick()
     {
+        for (int i = Guarding.Count - 1; i >= 0; i--)
+        {
+            bool done;
+            try { done = Guarding[i].PollMapperGuard(); }
+            catch { done = true; Guarding[i].FinishMapperGuard(); }
+            if (done) Guarding.RemoveAt(i);
+        }
         var current = _current;
         if (current == null) return;
         try { current.Tick(); }
@@ -232,6 +248,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private bool _capturing;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
     private bool _targetGoneSeen;
+    private double _guardSince;
+    private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
     private EventDropQueries? _drop;
 
     internal ContainerPreviewHandle(ContainerId container, ContainerPreviewOptions options, World world, int sequence, object? owner)
@@ -374,7 +392,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         catch (Exception e)
         {
             c.Skip = false;
-            Plugin.Logger?.LogWarning("ContainerPreview: HUD gate threw: " + e.Message);
+            WarnOnce("HUD gate", e);
         }
     }
 
@@ -391,7 +409,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         try
         {
             if (entities.Length == 0) return 0;
-            if (!Progenitor.Dye.DyeSender.TryLocalCharacter(em, out var character)) return entities.Length;
+            if (!LocalCharacters.TryGet(em, out var character)) return entities.Length;
             int n = 0;
             for (int i = 0; i < entities.Length; i++)
                 if (!entities[i].TryRead<EntityOwner>(em, out var owner) || owner.Owner == character) n++;
@@ -403,7 +421,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// <summary>N3: the container left this client; never let the mapper read a destroyed entity.</summary>
     private void BeforeMapper(SystemHookContext c)
     {
-        if (c.World != _world || !Machine.OwnsWindow || _target == Entity.Null) return;
+        // Also after the close, until the window is confirmed gone (FinishMapperGuard): the mapper must never read a destroyed chest.
+        if (c.World != _world || _mapperHook == null || _target == Entity.Null) return;
         try
         {
             if (c.World.EntityManager.Exists(_target)) return;
@@ -412,7 +431,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             _targetGoneSeen = true;
             Dev.MainThread.Post(() => Close(ContainerPreviewCloseReason.TargetGone, "", notify: true));
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: mapper gate threw: " + e.Message); }
+        catch (Exception e) { WarnOnce("mapper gate", e); }
     }
 
     /// <summary>N5: destroy this client's item events naming the previewed container before they are sent.</summary>
@@ -424,7 +443,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             _drop ??= new EventDropQueries();
             DroppedEvents += _drop.Drop(c.World, _targetWords, _inventoryWords);
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: event filter threw: " + e.Message); }
+        catch (Exception e) { WarnOnce("event filter", e); }
     }
 
     private bool OnEscape()
@@ -550,9 +569,15 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         try { RestoreUi(); } catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: UI restore threw: " + e.Message); }
         // The machine is closed, so every hook body already returns at once; dispose them now.
         var hud = _hudHook; _hudHook = null;
-        var mapper = _mapperHook; _mapperHook = null;
         var send = _sendHook; _sendHook = null;
-        DisposeQuiet(send); DisposeQuiet(hud); DisposeQuiet(mapper);
+        DisposeQuiet(send); DisposeQuiet(hud);
+        // The mapper guard stays until the window is confirmed closed (the close above takes effect on a later frame):
+        // a chest that went away must not be read by the mapper in between. Unload and a dead world drop it now.
+        if (_mapperHook != null)
+        {
+            if (reason == ContainerPreviewCloseReason.Unloaded || !_world.IsCreated) FinishMapperGuard();
+            else { _guardSince = ContainerPreviewClient.Now; ContainerPreviewClient.Guard(this); }
+        }
         var escape = _escape; _escape = null;
         DisposeQuiet(escape);
         if (_capturing)
@@ -562,8 +587,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         }
         _goToMenu.Release();
         _drop?.Release(); _drop = null;
-        if (tellServer && reason is not (ContainerPreviewCloseReason.Refused or ContainerPreviewCloseReason.NoAnswer
-            or ContainerPreviewCloseReason.LeaseEnded or ContainerPreviewCloseReason.WorldChanged or ContainerPreviewCloseReason.Unloaded))
+        if (tellServer && ContainerPreviewMachine.TellsServer(reason))
             ContainerPreviewClient.SendRequest(ContainerPreviewWire.KindClose, Sequence, Container, 0);
         Plugin.Logger?.LogInfo("ContainerPreview: " + Container + " closed (" + reason + (Machine.Message.Length > 0 ? ": " + Machine.Message : "")
             + (DroppedEvents > 0 ? ", " + DroppedEvents + " item events dropped" : "") + ").");
@@ -571,6 +595,40 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (!notify || reason == ContainerPreviewCloseReason.Unloaded || closed == null) return;
         try { closed(new ContainerPreviewClosed(Container, reason, Machine.Message)); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: Closed handler threw: " + e.Message); }
+    }
+
+    /// <summary>One frame of the post-close mapper guard (<see cref="ContainerPreviewMachine.MapperGuardDone"/>); true when it is gone.</summary>
+    internal bool PollMapperGuard()
+    {
+        if (_mapperHook == null) return true;
+        bool done;
+        try
+        {
+            bool alive = _world.IsCreated;
+            bool onTarget = false;
+            if (alive)
+            {
+                var window = ContainerPreviewClient.ReadWindow(_world);
+                onTarget = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target;
+            }
+            done = ContainerPreviewMachine.MapperGuardDone(alive, onTarget, ContainerPreviewClient.Now - _guardSince);
+        }
+        catch { done = true; }
+        if (done) FinishMapperGuard();
+        return done;
+    }
+
+    internal void FinishMapperGuard()
+    {
+        var mapper = _mapperHook; _mapperHook = null;
+        DisposeQuiet(mapper);
+    }
+
+    /// <summary>L3: a hook that throws logs once per preview, not every frame.</summary>
+    private void WarnOnce(string what, Exception e)
+    {
+        if (!_warned.Add(what)) return;
+        Plugin.Logger?.LogWarning("ContainerPreview: " + what + " threw (further failures of it are not logged): " + e.Message);
     }
 
     private static void DisposeQuiet(IDisposable? d)

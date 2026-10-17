@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Progenitor.Castles;
 
 namespace Progenitor.Inventory;
@@ -289,6 +290,26 @@ internal sealed class ContainerPreviewMachine
         }
     }
 
+    /// <summary>
+    /// Whether a close for <paramref name="reason"/> sends the server a close message. Every reason does but the ones
+    /// where the server already let go or cannot hear it: a refusal (no lease was made), the server's own end, and a
+    /// world change (the connection is gone). An unload and a request that got no answer in time do send it, so a
+    /// lease the server made after all is released at once instead of at its deadline; the server ignores a close for
+    /// a sequence it does not hold.
+    /// </summary>
+    internal static bool TellsServer(ContainerPreviewCloseReason reason) => reason is not (ContainerPreviewCloseReason.None
+        or ContainerPreviewCloseReason.Refused or ContainerPreviewCloseReason.LeaseEnded or ContainerPreviewCloseReason.WorldChanged);
+
+    /// <summary>Most a closed preview keeps its mapper guard while waiting for the window to go away.</summary>
+    internal const double MapperGuardSeconds = 2;
+
+    /// <summary>
+    /// Whether a closed preview may drop its container-mapper guard: the world is gone, the game's open menu is no
+    /// longer the container window on this chest, or <see cref="MapperGuardSeconds"/> passed since the close.
+    /// </summary>
+    internal static bool MapperGuardDone(bool worldAlive, bool windowStillOnTarget, double secondsSinceClose) =>
+        !worldAlive || !windowStillOnTarget || secondsSinceClose >= MapperGuardSeconds;
+
     /// <summary>Close from outside the tick (Dispose, Escape, the server's end, unload). False when already closed.</summary>
     internal bool Close(ContainerPreviewCloseReason reason, string message)
     {
@@ -354,13 +375,17 @@ internal static class ContainerPreviewEscape
 internal struct ContainerPreviewFacts
 {
     public bool UserConnected;
+    /// <summary>The server's <c>[ContainerPreview] RemotePreview</c> setting.</summary>
+    public ContainerPreviewMode Mode;
+    /// <summary>The server's game mode is PvE; null when it could not be read.</summary>
+    public bool? IsPvE;
     public bool RateOk;
     public bool IdParsed;
     /// <summary>The id names a live container (<c>ctx.Inventory.TryFind</c>).</summary>
     public bool Found;
     /// <summary>The model has an inventory.</summary>
     public bool HasInventory;
-    /// <summary>A castle heart, a crafting, refining, research or salvage station, a vermin nest or tomb, a prison, a servant coffin or a servant: anything with its own menu.</summary>
+    /// <summary>The model carries one of <see cref="ContainerPreviewMenus.OwnMenuComponents"/>: it has a menu of its own.</summary>
     public bool HasOwnMenu;
     /// <summary>The model is connected to a castle heart.</summary>
     public bool InCastle;
@@ -370,8 +395,13 @@ internal struct ContainerPreviewFacts
 }
 
 /// <summary>
-/// Core's server rule for a container preview: owner or clan member of a plain container's castle, nothing else.
-/// Allies, strangers, stations, hearts and servant coffins are refused. No mod can widen it.
+/// Core's server rule for a container preview: the server's setting allows it, and the user is the owner or a clan
+/// member of a plain container's castle, nothing else. Allies, strangers, stations, hearts and servant coffins are
+/// refused. No mod can widen it.
+///
+/// <para>Clan membership is the whole access rule: the game has no per-container permission inside a clan (its ally
+/// permissions grant only opening doors and building, and allies are refused here anyway), so a clan member may open
+/// every chest of the clan's castles at the chest, and the preview follows that.</para>
 /// </summary>
 internal static class ContainerPreviewAuthorization
 {
@@ -379,6 +409,7 @@ internal static class ContainerPreviewAuthorization
     internal static string? Refusal(in ContainerPreviewFacts f)
     {
         if (!f.UserConnected) return "You are not connected.";
+        if (ContainerPreviewSettings.Refusal(f.Mode, f.IsPvE) is { } off) return off;
         if (!f.RateOk) return "Too many preview requests; try again shortly.";
         if (!f.IdParsed) return "That is not a container id.";
         if (!f.Found) return "That container no longer exists.";
@@ -394,4 +425,85 @@ internal static class ContainerPreviewAuthorization
     /// <summary>The lease seconds the server grants for a requested length: clamped to (0, 600], 30 when unusable.</summary>
     internal static double GrantSeconds(double requested) =>
         !double.IsFinite(requested) || requested <= 0 ? 30 : Math.Min(requested, ContainerPreviewOptions.MaxSeconds);
+}
+
+/// <summary>The server's remote chest preview setting (<c>[ContainerPreview] RemotePreview</c>).</summary>
+internal enum ContainerPreviewMode
+{
+    Off = 0,
+    /// <summary>Allowed only while the server's game mode is PvE.</summary>
+    PvEOnly = 1,
+    On = 2,
+}
+
+/// <summary>
+/// The server setting that turns remote chest preview off, on for PvE servers only, or on, game-free. Edited by an admin
+/// in the Mods menu (Progenitor, On this server) over the admin channel; stored in the server's <c>progenitor.cfg</c>.
+/// </summary>
+internal static class ContainerPreviewSettings
+{
+    internal const string Section = "ContainerPreview";
+    internal const string ModeKey = "RemotePreview";
+
+    internal const string WordOff = "off";
+    internal const string WordPvE = "pve";
+    internal const string WordOn = "on";
+
+    /// <summary>The stored words, in the order the row shows them.</summary>
+    internal static readonly IReadOnlyList<string> Words = new[] { WordOff, WordPvE, WordOn };
+
+    /// <summary>The default for a server that never set it. One line to change.</summary>
+    internal const string DefaultWord = WordPvE;
+
+    internal const string Label = "Remote chest preview";
+    internal const string Help =
+        "Lets players open the window of a chest in their own or their clan's castle from anywhere, to look inside. They "
+        + "can never take, move or sort anything through it.";
+    internal static readonly IReadOnlyList<string> Labels = new[] { "Off", "PvE servers only", "On" };
+    internal static readonly IReadOnlyList<string> Descriptions = new[]
+    {
+        "Nobody can look into chests from afar on this server.",
+        "Allowed while this server's game mode is PvE; off on PvP.",
+        "Allowed on this server whatever its game mode.",
+    };
+
+    internal const string ConfigDescription =
+        "Server. Remote chest preview: off, pve (only while the game mode is PvE) or on. Players see their own or their "
+        + "clan's chests from afar, read-only. Edited in the Mods menu (Progenitor, On this server).";
+
+    internal const string OffRefusal = "This server has remote chest preview turned off.";
+    internal const string PvPRefusal = "This server allows remote chest preview only in PvE, and it is a PvP server.";
+
+    /// <summary>The mode a stored word names; anything unknown is the default.</summary>
+    internal static ContainerPreviewMode Parse(string? word) => (word ?? "").Trim().ToLowerInvariant() switch
+    {
+        WordOff => ContainerPreviewMode.Off,
+        WordPvE => ContainerPreviewMode.PvEOnly,
+        WordOn => ContainerPreviewMode.On,
+        _ => Parse(DefaultWord),
+    };
+
+    /// <summary>Null when the setting allows a preview now, else the refusal. An unreadable game mode counts as not PvE.</summary>
+    internal static string? Refusal(ContainerPreviewMode mode, bool? isPvE) => mode switch
+    {
+        ContainerPreviewMode.On => null,
+        ContainerPreviewMode.PvEOnly => isPvE == true ? null : PvPRefusal,
+        _ => OffRefusal,
+    };
+}
+
+/// <summary>
+/// What a plain container is not, game-free: the component names of every placed model with a menu of its own. The
+/// server refuses a preview of anything carrying one of them (<c>ContainerPreviewServer.HasOwnMenu</c> checks each name;
+/// a source test keeps the two lists equal).
+/// </summary>
+internal static class ContainerPreviewMenus
+{
+    internal static readonly IReadOnlyList<string> OwnMenuComponents = new[]
+    {
+        "CastleHeart", "Refinementstation", "WorkstationRecipesBuffer", "ResearchStation", "Salvagestation",
+        "UnitSpawnerstation", "PrisonCell", "ServantCoffinstation", "ServantEquipment",
+        "Forge_Shared", "FusionForge_Shared", "BloodMixer_Shared", "JewelCraftingStation", "Stables_Shared",
+        "CastleArenaStation_Shared", "InventoryRouteStation",
+    };
 }

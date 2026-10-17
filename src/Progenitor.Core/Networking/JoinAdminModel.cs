@@ -418,7 +418,7 @@ internal static class JoinAdminOps
         MidSession,
         VersionMatching, ServerModRule,
         // Settings organization stage 5: the server values edited from Progenitor's page (JoinAdminOptions.cs).
-        ServerOptionOps.AnswerTimeout, ServerOptionOps.RequireProgenitor, ServerOptionOps.PhotoMode, ServerOptionOps.AllySafeHits, ServerOptionOps.RemoteInstall,
+        ServerOptionOps.AnswerTimeout, ServerOptionOps.RequireProgenitor, ServerOptionOps.PhotoMode, ServerOptionOps.AllySafeHits, ServerOptionOps.ContainerPreview, ServerOptionOps.RemoteInstall,
         ServerOptionOps.AllowedSteamIds, ServerOptionOps.NoticeSeconds, ServerOptionOps.NoticeRepeatSeconds, ServerOptionOps.NoticeCreationLimitSeconds,
         // REQRULE5: Disconnect them's delay ([ClientPolicy] DisconnectGraceSeconds).
         ServerOptionOps.DisconnectGrace,
