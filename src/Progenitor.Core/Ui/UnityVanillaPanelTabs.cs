@@ -44,6 +44,10 @@ internal sealed partial class UnityUiRuntime
         readonly List<TextMeshProUGUI> _labels = new();
         Dictionary<string, object?>? _captionDonor;
         int _captionFixes;
+        // Each tab's frame art (and the objects between it and the tab), stretched over the tab by AdoptArt.
+        readonly List<List<RectTransform>> _art = new();
+        List<object?>? _artDonor;
+        int _artFixes;
         readonly List<HiddenNative> _content = new();
         readonly List<HiddenNative> _nativeTabs = new();
         GameObject? _strip;
@@ -201,6 +205,8 @@ internal sealed partial class UnityUiRuntime
                     if (i == 0) _captionDonor = DescribeDonorCaption(label, button);
                     AdoptCaption(label, button);
                     _labels.Add(label);
+                    if (i == 0) _artDonor = DescribeImages(button, label, null, rt);
+                    _art.Add(AdoptArt(button, label));
                     var widget = new PanelButtonWidget(button, label, FindClickEvent(button), rt.sizeDelta);
                     ushort slot = UiSlotTable.Alloc(this);
                     int index = i;
@@ -412,6 +418,9 @@ internal sealed partial class UnityUiRuntime
                 ["tabCaptions"] = tabs,
                 ["captionDonor"] = _captionDonor,
                 ["captionFixes"] = _captionFixes,
+                ["artDonor"] = _artDonor,
+                ["artFixes"] = _artFixes,
+                ["stripArt"] = shown ? StripArt() : null,
             };
         }
 
@@ -473,6 +482,12 @@ internal sealed partial class UnityUiRuntime
                 if (!Alive(label) || !Alive(go)) continue;
                 try { if (PlaceCaption(label, go.GetComponent<RectTransform>())) _captionFixes++; }
                 catch { /* a caption that cannot be read is left as it is */ }
+                if (i >= _art.Count) continue;
+                foreach (var art in _art[i])
+                {
+                    try { if (Alive(art) && Stretch(art)) _artFixes++; }
+                    catch { /* art that cannot be read is left as it is */ }
+                }
             }
         }
 
@@ -496,10 +511,14 @@ internal sealed partial class UnityUiRuntime
                 var tab = ScreenRectOf(tabRect);
                 var caption = ScreenRectOf(label.rectTransform);
                 var text = TextRectOf(label);
-                bool centered = VanillaTabCaption.Centered(tab, caption, text);
+                var art = DescribeImages(go, label, i < _art.Count ? _art[i] : null, tabRect, out var artBox);
+                // Judged against the art the player sees, never the tab's rect alone.
+                bool centered = VanillaTabCaption.Centered(artBox, caption, text);
                 all &= centered;
-                var (rx, ry) = VanillaTabCaption.Offset(tab, caption);
-                var (tx, ty) = VanillaTabCaption.Offset(tab, text);
+                var (rx, ry) = VanillaTabCaption.Offset(artBox, caption);
+                var (tx, ty) = VanillaTabCaption.Offset(artBox, text);
+                var (tabTx, _) = VanillaTabCaption.Offset(tab, text);
+                var (artDx, artDy) = VanillaTabCaption.Offset(tab, artBox);
                 var parent = label.transform.parent;
                 tabs.Add(new Dictionary<string, object?>
                 {
@@ -508,6 +527,11 @@ internal sealed partial class UnityUiRuntime
                     ["selected"] = i == _selected,
                     ["centered"] = centered,
                     ["tab"] = RectDict(tab),
+                    ["artBox"] = RectDict(artBox),
+                    ["artDx"] = Round1(artDx),
+                    ["artDy"] = Round1(artDy),
+                    ["tabTextDx"] = Round1(tabTx),
+                    ["art"] = art,
                     ["caption"] = RectDict(caption),
                     ["glyphs"] = RectDict(text),
                     ["captionDx"] = Round1(rx),
@@ -539,6 +563,229 @@ internal sealed partial class UnityUiRuntime
                 return ScreenRect.FromCorners(a.x, a.y, b.x, b.y);
             }
             catch { return ScreenRect.Unknown; }
+        }
+
+        /// <summary>
+        /// Stretch the tab's frame art over the tab (<see cref="VanillaTabCaption.IsFrameArt"/>): the
+        /// donor tab's frame and state images keep the donor's own anchors, position and size, so in
+        /// a tab of another size they draw off the tab's center while the caption is centered on
+        /// the tab. Every object between an art image and the tab is stretched too. Small images
+        /// (icons, badges) are left as they are. Returns what was stretched, to keep it there.
+        /// </summary>
+        static List<RectTransform> AdoptArt(GameObject tab, TextMeshProUGUI label)
+        {
+            var stretched = new List<RectTransform>();
+            try
+            {
+                var images = tab.GetComponentsInChildren<Image>(true);
+                if (images == null) return stretched;
+                var pieces = new List<(RectTransform Rect, float W, float H)>();
+                float maxW = 0f, maxH = 0f;
+                foreach (var image in images)
+                {
+                    if (image == null || image.transform.Pointer == tab.transform.Pointer) continue;
+                    if (image.transform.IsChildOf(label.transform)) continue;
+                    var r = image.rectTransform;
+                    var size = r.rect.size;
+                    var scale = r.localScale;
+                    float w = Math.Abs(size.x * scale.x), h = Math.Abs(size.y * scale.y);
+                    pieces.Add((r, w, h));
+                    maxW = Math.Max(maxW, w);
+                    maxH = Math.Max(maxH, h);
+                }
+
+                foreach (var (r, w, h) in pieces)
+                {
+                    if (!VanillaTabCaption.IsFrameArt(w, h, maxW, maxH)) continue;
+                    for (var t = r.transform; t != null && t.Pointer != tab.transform.Pointer; t = t.parent)
+                    {
+                        var link = t.GetComponent<RectTransform>();
+                        if (link == null || stretched.Exists(x => x.Pointer == link.Pointer)) continue;
+                        Stretch(link);
+                        stretched.Add(link);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Ui: panel tab art could not be fitted: " + e.Message);
+            }
+
+            return stretched;
+        }
+
+        /// <summary>Fill the parent exactly: stretched anchors, no offsets, centered pivot, unrotated, unit scale (a mirror flip is kept). True when anything moved.</summary>
+        static bool Stretch(RectTransform r)
+        {
+            bool moved = false;
+            if (Moved(r.anchorMin, Vector2.zero)) { r.anchorMin = Vector2.zero; moved = true; }
+            if (Moved(r.anchorMax, Vector2.one)) { r.anchorMax = Vector2.one; moved = true; }
+            if (Moved(r.pivot, new Vector2(.5f, .5f))) { r.pivot = new Vector2(.5f, .5f); moved = true; }
+            if (Moved(r.offsetMin, Vector2.zero)) { r.offsetMin = Vector2.zero; moved = true; }
+            if (Moved(r.offsetMax, Vector2.zero)) { r.offsetMax = Vector2.zero; moved = true; }
+            if (r.localRotation != Quaternion.identity) { r.localRotation = Quaternion.identity; moved = true; }
+            var s = r.localScale;
+            var unit = new Vector3(s.x < 0f ? -1f : 1f, s.y < 0f ? -1f : 1f, 1f);
+            if (VanillaTabCaption.Drifted(s.x, unit.x) || VanillaTabCaption.Drifted(s.y, unit.y) || VanillaTabCaption.Drifted(s.z, 1f))
+            { r.localScale = unit; moved = true; }
+            return moved;
+
+            static bool Moved(Vector2 now, Vector2 wanted)
+                => VanillaTabCaption.Drifted(now.x, wanted.x) || VanillaTabCaption.Drifted(now.y, wanted.y);
+        }
+
+        static List<object?> DescribeImages(GameObject tab, TextMeshProUGUI label, List<RectTransform>? art, RectTransform tabRect)
+            => DescribeImages(tab, label, art, tabRect, out _);
+
+        /// <summary>
+        /// Every image under a tab (the tab's own included), with its path, whether it draws, its
+        /// sprite (name, type, border, packing padding, pivot), its rect's anchors, pivot, position
+        /// and size, its screen rect and its center's offset from the tab's center. <paramref name="artBox"/>
+        /// is the visible art box (<see cref="VanillaTabCaption.ArtBox"/>).
+        /// </summary>
+        static List<object?> DescribeImages(GameObject tab, TextMeshProUGUI label, List<RectTransform>? art,
+            RectTransform tabRect, out ScreenRect artBox)
+        {
+            var list = new List<object?>();
+            var boxes = new List<(ScreenRect Rect, bool Visible)>();
+            artBox = ScreenRect.Unknown;
+            try
+            {
+                var tabScreen = ScreenRectOf(tabRect);
+                var images = tab.GetComponentsInChildren<Image>(true);
+                if (images == null) return list;
+                foreach (var image in images)
+                {
+                    if (image == null || image.transform.IsChildOf(label.transform)) continue;
+                    var d = new Dictionary<string, object?>();
+                    try
+                    {
+                        var r = image.rectTransform;
+                        var screen = ScreenRectOf(r);
+                        var drawn = DrawnRect(image, screen);
+                        bool visible = Draws(image);
+                        boxes.Add((drawn, visible));
+                        var (dx, dy) = VanillaTabCaption.Offset(tabScreen, drawn);
+                        d["path"] = PathUnder(image.transform, tab.transform);
+                        d["visible"] = visible;
+                        d["stretched"] = art != null && art.Exists(x => x.Pointer == r.Pointer);
+                        d["rect"] = RectDict(screen);
+                        d["drawn"] = RectDict(drawn);
+                        d["dx"] = float.IsNaN(dx) ? null : Math.Round(dx, 1);
+                        d["dy"] = float.IsNaN(dy) ? null : Math.Round(dy, 1);
+                        d["anchorMin"] = Pair(r.anchorMin);
+                        d["anchorMax"] = Pair(r.anchorMax);
+                        d["pivot"] = Pair(r.pivot);
+                        d["anchoredPosition"] = Pair(r.anchoredPosition);
+                        d["sizeDelta"] = Pair(r.sizeDelta);
+                        d["type"] = image.type.ToString();
+                        d["preserveAspect"] = image.preserveAspect;
+                        var sprite = image.sprite;
+                        d["sprite"] = sprite != null ? sprite.name : null;
+                        if (sprite != null)
+                        {
+                            var b = sprite.border;
+                            d["border"] = new object[] { Math.Round(b.x, 1), Math.Round(b.y, 1), Math.Round(b.z, 1), Math.Round(b.w, 1) };
+                            var pad = UnityEngine.Sprites.DataUtility.GetPadding(sprite);
+                            d["padding"] = new object[] { Math.Round(pad.x, 1), Math.Round(pad.y, 1), Math.Round(pad.z, 1), Math.Round(pad.w, 1) };
+                            var sr = sprite.rect;
+                            d["spriteSize"] = Pair(new Vector2(sr.width, sr.height));
+                            d["spritePivot"] = sr.width > 0f && sr.height > 0f
+                                ? Pair(new Vector2(sprite.pivot.x / sr.width, sprite.pivot.y / sr.height)) : null;
+                        }
+                    }
+                    catch (Exception e) { d["error"] = e.Message; }
+                    list.Add(d);
+                }
+            }
+            catch (Exception e) { list.Add(new Dictionary<string, object?> { ["error"] = e.Message }); }
+
+            artBox = VanillaTabCaption.ArtBox(boxes);
+            return list;
+
+            static object[] Pair(Vector2 v) => new object[] { Math.Round(v.x, 1), Math.Round(v.y, 1) };
+        }
+
+        /// <summary>
+        /// The part of an image's screen rect its sprite draws (<see cref="VanillaTabCaption.Drawn"/>):
+        /// minus the sprite's packing padding, scaled with the sprite for a simple image and by the
+        /// image's pixels per unit for a sliced or tiled one, as the image builds its mesh.
+        /// </summary>
+        static ScreenRect DrawnRect(Image image, ScreenRect screen)
+        {
+            var sprite = image.sprite;
+            if (sprite == null || !screen.IsKnown) return screen;
+            try
+            {
+                var pad = UnityEngine.Sprites.DataUtility.GetPadding(sprite);
+                if (pad.x == 0f && pad.y == 0f && pad.z == 0f && pad.w == 0f) return screen;
+                var rect = image.rectTransform.rect;
+                float w = screen.MaxX - screen.MinX, h = screen.MaxY - screen.MinY;
+                if (rect.width <= .01f || rect.height <= .01f) return screen;
+                float sx, sy;
+                if (image.type == Image.Type.Simple || image.type == Image.Type.Filled)
+                {
+                    var sr = sprite.rect;
+                    if (sr.width <= .01f || sr.height <= .01f) return screen;
+                    sx = w / sr.width;
+                    sy = h / sr.height;
+                }
+                else
+                {
+                    float ppu = image.pixelsPerUnit;
+                    if (ppu <= .0001f) return screen;
+                    sx = w / rect.width / ppu;
+                    sy = h / rect.height / ppu;
+                }
+
+                return VanillaTabCaption.Drawn(screen, pad.x * sx, pad.y * sy, pad.z * sx, pad.w * sy);
+            }
+            catch { return screen; }
+        }
+
+        /// <summary>The strip's own images (the baseline trim), with screen rects, for comparing tab art with what surrounds it.</summary>
+        List<object?>? StripArt()
+        {
+            if (_strip == null) return null;
+            var list = new List<object?>();
+            try
+            {
+                for (int i = 0; i < _strip.transform.childCount; i++)
+                {
+                    var child = _strip.transform.GetChild(i);
+                    var image = child != null ? child.GetComponent<Image>() : null;
+                    if (image == null) continue;
+                    list.Add(new Dictionary<string, object?>
+                    {
+                        ["name"] = child!.name,
+                        ["visible"] = Draws(image),
+                        ["sprite"] = image.sprite != null ? image.sprite.name : null,
+                        ["type"] = image.type.ToString(),
+                        ["rect"] = RectDict(ScreenRectOf(image.rectTransform)),
+                    });
+                }
+            }
+            catch (Exception e) { list.Add(new Dictionary<string, object?> { ["error"] = e.Message }); }
+
+            return list;
+        }
+
+        /// <summary>The image draws something: active, enabled, and neither its color nor its renderer's alpha (a button state tint) is clear.</summary>
+        static bool Draws(Image image)
+        {
+            if (!image.isActiveAndEnabled || image.color.a <= .01f) return false;
+            try { if (image.canvasRenderer != null && image.canvasRenderer.GetAlpha() <= .01f) return false; }
+            catch { /* the color alone decides */ }
+            return true;
+        }
+
+        /// <summary>The object's path from (not including) <paramref name="root"/>; "(tab)" for the root itself.</summary>
+        static string PathUnder(Transform t, Transform root)
+        {
+            if (t.Pointer == root.Pointer) return "(tab)";
+            var path = t.name;
+            for (var p = t.parent; p != null && p.Pointer != root.Pointer; p = p.parent) path = p.name + "/" + path;
+            return path;
         }
 
         /// <summary>What the donor tab's caption brought, read before <see cref="AdoptCaption"/> changes it.</summary>
@@ -725,6 +972,7 @@ internal sealed partial class UnityUiRuntime
             foreach (var (_, slot) in _buttons) { _runtime.Unwire(slot); UiSlotTable.Release(slot); }
             _buttons.Clear();
             _labels.Clear(); _captionDonor = null; _captionFixes = 0;
+            _art.Clear(); _artDonor = null; _artFixes = 0;
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
             _tabDonorRect = null; _stripRect = null; _height = null; _bonusAnchor = null; _masks.Clear();

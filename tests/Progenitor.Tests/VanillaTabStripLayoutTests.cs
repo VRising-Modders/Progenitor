@@ -250,6 +250,67 @@ public sealed class VanillaTabStripLayoutTests
         Assert.False(VanillaTabCaption.Centered(ScreenRect.Unknown, rect, ScreenRect.Unknown));
     }
 
+    [Theory]
+    [InlineData(146f, 40f, true)]   // the frame itself
+    [InlineData(122.5f, 31f, true)] // a state overlay nearly as big
+    [InlineData(24f, 24f, false)]   // an icon
+    [InlineData(146f, 4f, false)]   // a thin underline
+    public void FrameArtIsWhatNearlyFillsTheLargestImage(float w, float h, bool frame)
+        => Assert.Equal(frame, VanillaTabCaption.IsFrameArt(w, h, 146f, 40f));
+
+    [Fact]
+    public void NoImagesMeansNoFrameArt()
+        => Assert.False(VanillaTabCaption.IsFrameArt(10f, 10f, 0f, 0f));
+
+    [Fact]
+    public void ArtBoxIsTheLargestVisibleImage()
+    {
+        var frame = R(2164, 600, 146, 31);
+        var images = new (ScreenRect, bool)[]
+        {
+            (R(2164, 600, 190.3f, 38), false), // the tab's clear hit image: draws nothing
+            (frame, true),
+            (R(2200, 605, 20, 20), true),      // an icon
+            (ScreenRect.Unknown, true),
+        };
+        Assert.Equal(frame, VanillaTabCaption.ArtBox(images));
+        Assert.False(VanillaTabCaption.ArtBox(Array.Empty<(ScreenRect, bool)>()).IsKnown);
+    }
+
+    [Fact]
+    public void ACaptionCenteredOnTheTabButNotOnItsArtIsNotCentered()
+    {
+        // The live readback that passed falsely: glyphs centered on a 190.3 wide tab whose frame
+        // art kept the donor's 146-wide box at the tab's left edge.
+        var tab = R(2164, 600, 190.3f, 38);
+        var caption = R(2170, 600, 178.3f, 38);
+        var glyphs = R(2218, 610, 82.4f, 18);
+        Assert.True(VanillaTabCaption.Centered(tab, caption, glyphs));
+        var art = VanillaTabCaption.ArtBox(new (ScreenRect, bool)[] { (R(2164, 600, 146, 38), true) });
+        Assert.False(VanillaTabCaption.Centered(art, caption, glyphs));
+        // Once the art is stretched over the tab, the two agree.
+        art = VanillaTabCaption.ArtBox(new (ScreenRect, bool)[] { (tab, true) });
+        Assert.True(VanillaTabCaption.Centered(art, caption, glyphs));
+    }
+
+    [Fact]
+    public void DrawnRectRemovesSpritePadding()
+    {
+        var rect = R(0, 0, 100, 40);
+        var drawn = VanillaTabCaption.Drawn(rect, 10, 2, 0, 2);
+        Assert.Equal(10f, drawn.MinX);
+        Assert.Equal(100f, drawn.MaxX);
+        Assert.Equal(2f, drawn.MinY);
+        Assert.Equal(38f, drawn.MaxY);
+        Assert.Equal((5f, 0f), VanillaTabCaption.Offset(rect, drawn)); // padding on the left moves the art right
+
+        var collapsed = VanillaTabCaption.Drawn(rect, 80, 0, 80, 0);
+        Assert.Equal(50f, collapsed.MinX);
+        Assert.Equal(50f, collapsed.MaxX);
+        Assert.Equal(rect, VanillaTabCaption.Drawn(rect, float.NaN, 0, 0, 0));
+        Assert.False(VanillaTabCaption.Drawn(ScreenRect.Unknown, 1, 1, 1, 1).IsKnown);
+    }
+
     [Fact]
     public void DriftIgnoresFloatNoiseAndCatchesNaN()
     {

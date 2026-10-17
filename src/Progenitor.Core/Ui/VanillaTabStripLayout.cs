@@ -265,6 +265,11 @@ internal sealed class VanillaTabStripLogGate
 /// scale. Any of these moves the text off the center of a tab of another size. The caption is
 /// therefore made a direct child of the tab, stretched over it with <see cref="Inset"/> on each
 /// side, pivoted at its center, with no margins, and put back whenever it drifts.</para>
+///
+/// <para>The donor's frame and state images keep the donor's anchors, position and size in the same
+/// way, so a caption centered on the tab's rect can still sit off the art the player sees. Images
+/// that make up the frame (<see cref="IsFrameArt"/>) are stretched over the tab as well, and a
+/// caption is judged against the visible art box (<see cref="ArtBox"/>), not the tab's rect.</para>
 /// </summary>
 internal static class VanillaTabCaption
 {
@@ -292,7 +297,9 @@ internal static class VanillaTabCaption
 
     /// <summary>
     /// A tab's caption is centered: its rect's center is within <paramref name="tolerance"/> pixels
-    /// of the tab's center both ways, and the drawn text's center is within it horizontally. The
+    /// of the center of <paramref name="tab"/> both ways, and the drawn text's center is within it
+    /// horizontally. Pass the tab's visible art box (<see cref="ArtBox"/>): an unknown box (no art
+    /// measured) is never centered. The
     /// text's vertical center is reported but not judged: it follows the glyphs (a descender lowers
     /// it), while a line is centered on the font's line metrics, as on the game's own tabs. An
     /// unknown text rect (nothing drawn yet) is judged on the caption rect alone.
@@ -304,6 +311,58 @@ internal static class VanillaTabCaption
         if (!text.IsKnown) return true;
         var (tx, _) = Offset(tab, text);
         return Math.Abs(tx) <= tolerance;
+    }
+
+    /// <summary>The share of the largest image's width and height an image must reach to count as the tab's frame art.</summary>
+    internal const float FrameShare = .6f;
+
+    /// <summary>
+    /// An image <paramref name="width"/> by <paramref name="height"/> is part of the tab's frame art
+    /// (its frame or a state overlay of it), not a small decoration such as an icon or badge: at
+    /// least <see cref="FrameShare"/> of the largest image in the tab both ways.
+    /// </summary>
+    internal static bool IsFrameArt(float width, float height, float maxWidth, float maxHeight)
+        => maxWidth > 0f && maxHeight > 0f && width >= maxWidth * FrameShare && height >= maxHeight * FrameShare;
+
+    /// <summary>
+    /// The visible art box of a tab: the screen rect of the largest visible image in it (the frame
+    /// the player sees). <see cref="ScreenRect.Unknown"/> when nothing visible is drawn. A caption
+    /// is judged against this box, not the tab's rect: art that does not fill its tab moves what
+    /// the player reads as the tab's center.
+    /// </summary>
+    internal static ScreenRect ArtBox(IReadOnlyList<(ScreenRect Rect, bool Visible)> images)
+    {
+        var best = ScreenRect.Unknown;
+        float bestArea = 0f;
+        if (images == null) return best;
+        foreach (var (rect, visible) in images)
+        {
+            if (!visible || !rect.IsKnown) continue;
+            float area = (rect.MaxX - rect.MinX) * (rect.MaxY - rect.MinY);
+            if (area <= bestArea) continue;
+            bestArea = area;
+            best = rect;
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The part of an image's screen rect its sprite draws: <paramref name="rect"/> inset by the
+    /// sprite's packing padding (left, bottom, right, top), already converted to screen pixels.
+    /// A padding larger than the rect leaves its center line; unknown or non-finite input gives the rect.
+    /// </summary>
+    internal static ScreenRect Drawn(ScreenRect rect, float left, float bottom, float right, float top)
+    {
+        if (!rect.IsKnown) return rect;
+        if (!Ok(left) || !Ok(bottom) || !Ok(right) || !Ok(top)) return rect;
+        float minX = rect.MinX + left, maxX = rect.MaxX - right;
+        float minY = rect.MinY + bottom, maxY = rect.MaxY - top;
+        if (minX > maxX) minX = maxX = (rect.MinX + rect.MaxX) * .5f;
+        if (minY > maxY) minY = maxY = (rect.MinY + rect.MaxY) * .5f;
+        return ScreenRect.FromCorners(minX, minY, maxX, maxY);
+
+        static bool Ok(float v) => !float.IsNaN(v) && !float.IsInfinity(v) && v >= 0f;
     }
 
     /// <summary>A placement value moved by more than a hundredth of a unit from what the tab set.</summary>
