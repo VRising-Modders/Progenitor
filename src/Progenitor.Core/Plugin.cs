@@ -236,6 +236,9 @@ public sealed class Plugin
         // [Chat] in Core's ui cfg, after Ui (the input mask it shares with the mod panels).
         try { Progenitor.Chat.ChatWindow.Install(); }
         catch (Exception e) { Logger?.LogWarning($"ChatWindow.Install: {e.Message}"); }
+        // Hot-load chat lines (docs/hot-reload.md): after ChatWindow, whose [Chat] HotLoadMessages the client reads.
+        try { Reload.HotLoadNoticeLive.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"HotLoadNotice.Install: {e.Message}"); }
         // Chat command hints (reserved id 'PrCh'): the server answers a player's catalog request with the
         // commands that player can run; the client asks after the server's hello. One side each.
         try
@@ -377,6 +380,9 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"CharacterSheetFeature.Uninstall: {e.Message}"); }
         // CHAT1: before Ui, so its click guard leaves the game's input list while the input mask it
         // shares is still installed; Ui's teardown then forgets the pointer either way.
+        // Hot-load chat lines: leaves its plain-text state for the next Core generation (AppDomain data).
+        try { Reload.HotLoadNoticeLive.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"HotLoadNotice.Uninstall: {e.Message}"); }
         try { Progenitor.Chat.ChatWindow.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ChatWindow.Uninstall: {e.Message}"); }
         // Chat link handlers: plugin contexts dispose their own; this drops any left so no plugin delegate outlives Core.

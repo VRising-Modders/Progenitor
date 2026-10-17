@@ -267,6 +267,8 @@ internal static class ChatWindow
                     "A chat line longer than the game takes is sent in parts, joined back into one line for players with Progenitor.");
                 ChatView.MutedPlayers = file.Bind(Section, "MutedPlayers", "",
                     "Players whose chat lines Progenitor's chat view leaves out, separated by commas (right-click a line to mute).");
+                ChatView.HotLoadMessages = file.Bind(Section, "HotLoadMessages", true,
+                    "A System line in chat when a mod or Progenitor loads, reloads or is removed while the game runs, on this PC or on the server.");
             }
             catch (Exception e)
             {
