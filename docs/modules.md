@@ -2663,7 +2663,7 @@ ctx.Events.On<ServantsReturned>(ev =>
 | Hunt record | A castle heart carries an `ActiveServantMission` buffer (networked, so every client's throne map shows it): mission prefab, start (`DateTime.UtcNow` ticks), length in seconds, the length choice (`MissiontDataId`, an index into the game's mission settings), up to three servants and their count. |
 | Send | The client's `SendOnMissionEvent` is handled by `ServantMissionActionSystem`. In order it checks: the sender's progression is readable and has discovered the zone (skipped by the "all progression unlocked" debug setting); the zone has a mission; the servants exist, are not on a hunt, not dead, carry nothing, and are not injured; the sender could interact with the throne and every servant's coffin is connected to the throne's heart; the heart has no hunt on that mission yet (one hunt per zone and castle) and no hunt naming those servants; no more servants than the mission's `MissionData.ServantSlots`; the length choice exists. Any failure drops the event silently. |
 | Send writes | One row added to the heart's record (length = the setting's length, times 1e-5 with the "servant timers disabled" debug setting); the mission buff (`ServantMissionSettingsSingleton.MissionBuff`) applied to each servant, whose server script sets `ServantData.IsOnMission` (and clears it when the buff goes); a "mission started" notice to the sender's allies. **No success chance or injury is rolled at the send.** |
-| Return | `ServantMissionUpdateSystem` finishes every hunt whose start plus length has passed: it rolls each servant's success there (`GetMissionSuccessChanceForServant_Server`), destroys the servants that failed or injures them (coffin `InjuryEndTimeTicks`, `Injury`), adds randomized loot to the survivors' inventories, summons them back to their coffins, removes the row, removes the mission buff and notifies allies. |
+| Return | `ServantMissionUpdateSystem` finishes every hunt whose start plus length has passed: it rolls each servant's success there (`GetMissionSuccessChanceForServant_Server`, [Success chance](#success-chance)), destroys the servants that failed (coffin revivable; no injury is rolled on this build), adds randomized loot to the survivors' inventories, summons them back to their coffins, removes the row, removes the mission buff and notifies allies. |
 | Throne list | `ServantInfoEventSystem_Server` answers a player who opens a throne with every coffin connected to the throne's heart that holds a living, revivable or reviving servant. State: revivable or reviving coffin is `Dead`; an injury still running is `Injured`; named by the heart's record is `AwayOnHunt`; carrying items is `HasItems`; otherwise `Free`. Proficiency is `round(gear level × 10) + 100 + round(expertise × 100)`. |
 
 ### Send and resend
@@ -2688,8 +2688,14 @@ Differences from the throne send, by design:
 - **Discovery** is checked for `ServantSendRequest.User` (default: the heart's owner) against any zone
   of the mission; `CheckDiscovered = false` skips it. `Resend` skips it, because the game accepted
   the zone for the first send.
-- **The "mission started" notice** to allies is not sent (it is a client notice only); a mod that wants
-  one sends its own from `ServantsSent`.
+- **The "mission started" notice** (`ServantMissionStartedEvent{MissionId}`, which a client prints
+  as "Hunt in X started.") goes to every connected user whose character is allied with the castle
+  heart (the game's check: `Team.IsAllies`), plus `ServantSendRequest.User` when connected. The game's
+  send raises it to the sender's allied users. Progenitor creates the same network event entity
+  chat messages use (`NetworkEventType` with the event id, the event component, `SendNetworkEventTag`,
+  `SendEventToUsers` with one bit per user) and writes the event's one field raw at its declared
+  offset; `Announce = false` skips it. A failure is logged and never fails the send. Source-checked,
+  not live-verified.
 - **The success chance is never touched.** The game rolls it at the return, as for any hunt.
   Progenitor patches no success-chance method: their list parameter breaks the hook trampoline.
 
@@ -2697,6 +2703,46 @@ Differences from the throne send, by design:
 mission and length choice. A servant that still carries its loot is refused (`ServantHasItems`), as
 the game would: move the loot first (`ctx.Inventory.TransferAll(servant.Inventory, chest)`). A return
 from an earlier world load is refused.
+
+### Success chance
+
+The game rolls each servant's success when the hunt returns, not at the send, and stores no chance
+(source-checked: `ServantMissionUpdateSystem` calls `GetMissionSuccessChanceForServant_Server` per
+servant, then `NextFloat() <= chance`; a failure destroys the servant, sets its coffin to revivable
+and gives no loot; there is no injury roll at the return on this build). Progenitor computes the
+same number with the game-free `ServantChanceLogic` (unit-tested against the formula), fed with raw
+reads at the [layout constants](#layout-constants): the servant's live `ServantPower` (gear level,
+expertise) and first two `PerksBuffer` perks, the mission prefab's `MissionData.MissionDifficulty`
+and `PerksBuffer`, each perk prefab's `PerkData` (`LootValue`, `PowerValue`), the settings
+singleton's `StaticPartyBonus` and the length choice's `SuccessRateBonus`.
+
+| Step | The game's computation (source-checked) |
+|---|---|
+| Proficiency | `round(gear level × 10) + 100 + round(expertise × 100)`, from the servant's live `ServantPower` (not the coffin's copy). |
+| Perks | For every servant of the party, each of the mission's perks is matched against the servant's first, then second perk. A match whose perk is not used yet counts once for the whole party: `PowerValue` comes off the difficulty, `LootValue` adds to the loot bonus (which starts at 1). |
+| Party bonus | `StaticPartyBonus` once for each other servant of the party (the throne's "+n"). |
+| Chance | `x = proficiency + party bonus - (difficulty - perk reduction)`; `x >= 0` is 100%; otherwise `1 - x² / 15000 + SuccessRateBonus`, clamped to 0..1. The length choice's bonus only matters when the party is short. |
+
+`Chance(ServantChanceRequest)` answers for a prospective party, zone and length, and says whether
+`Send` would accept it now (the same checks, nothing written). `Missions` carries the live chances
+of every hunt out (`ServantMission.Chances`), `Send` returns them (`ServantSendResult.Chances`), and
+`ServantsReturned` carries the chance read just before the game rolled it (`ReturnedServant.Chance`;
+read in the same hook that snapshots the due rows, so only while something is subscribed). Between
+the send and the return the chance changes only if a servant's `ServantPower`, perks or the game data
+change. The throne shows the same number (its hunt menu calls the client form of the same function
+with the selected servants), which is the live check. `ServantChance.MaxSuccess` is null and
+`Applied` equals `Vanilla`: no cap is applied.
+
+### Mission names
+
+The server cannot name a mission: the name is `ManagedMissionData.Name`, a client-only managed
+component, read through the game's string table. `MissionDisplayName(missionGuid)` does that on the
+client, through the `GameDataSystem.ManagedDataRegistry` route item names in chat already take,
+and returns null on the server. For a server mod, `MissionToken(missionGuid)` gives the chat token
+`[mission:<guid>]`, which Progenitor clients draw as the name ([chat.md](chat.md), hunt names) and
+vanilla clients show as written. A notice can read
+`$"{s.Name} came back from {ctx.Servants.MissionToken(ev.MissionGuid)} ({s.Chance?.Vanilla:P0})"`.
+Source-checked and unit-tested (token parsing, rendering); not live-verified.
 
 ### Returns
 
@@ -2769,6 +2815,10 @@ returns castles the player owns or the player's clan owns, each confirmed with `
 - A return seen but not yet published (the half second to five seconds `ServantsReturned` waits) is
   lost when Core is swapped or unloaded in that window, and so is the throne list a player was
   shown; the hunt itself is unaffected.
+- Inferred, not observed: that the chance computed before the update equals the one the game rolls
+  (the same inputs, read the same frame; the throne comparison above checks the formula); that a
+  `SendEventToUsers` mask with several bits carries the started notice the way the game's per-user
+  sends do (chat uses one bit per event).
 - `ServantsSent` covers Progenitor's sends only. The game's own sends show up in `Missions` and, when
   they finish, in `ServantsReturned`.
 - Servant entities and coffins are session ids. Persist the heart's `ContainerId`, the territory
@@ -2824,7 +2874,19 @@ with empty inventories, and a second castle B of the same player or clan with at
    heart=<B>`; `.servants hunts` standing in B lists the hunt and B's throne map shows it.
    `.servants status` counts one swap and one routed send. `.servants swap off`, reopen the throne:
    only A's servants.
-10. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
+10. Chance parity: with the server bridge, `servants` `action: chance` for a 1-, 2- and 3-servant
+    party of free servants on one zone, on several length slots, with and without a servant whose
+    perk matches the mission's, a short party and a certain one. Sit on the throne, pick the same
+    servants, zone and length: the hunt menu's % equals `chances[].percent` (rounded to whole
+    percent) and its "+n" equals `partyBonus`. Send one: `servants list` shows the same chances
+    under `hunts[].chances`, and the return's `ReturnedServant.Chance` (Sample watch log) matches.
+11. Hunt started notice: send with `.servants send …` while a clan member is online: both clients
+    print "Hunt in <zone> started."; a player of another clan does not. `chances` and `announced`
+    are in the bridge `send` reply.
+12. Mission names (client): a mod or the client bridge calls `ctx.Servants.MissionDisplayName` for
+    three missions; each equals the name in the vanilla hunt chat lines. A server line containing
+    `[mission:<guid>]` draws as that name on a Progenitor client and as the raw token on a vanilla one.
+13. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
     Sample from the test server's reload folder and confirm the clean unload (`servants: list
     provider unregistered` if the swap was left on).
 

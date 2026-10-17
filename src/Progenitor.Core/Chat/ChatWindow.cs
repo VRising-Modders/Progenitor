@@ -272,6 +272,8 @@ internal static class ChatWindow
         ChatView.OpenModLink = ModLinks.Open;
         // CHAT8: item links show the item's name.
         ChatFormat.ItemNameResolver = ChatGameData.ItemName;
+        // Servant mission tokens show the mission's name, as the game's hunt notices print it.
+        ChatFormat.MissionNameResolver = ChatGameData.MissionName;
         ChatInputTokens.Position = () => ChatGameData.TryLocalPosition(out float x, out float z) ? (true, x, z) : (false, 0f, 0f);
         ChatInputTokens.ItemIdByPrefabName = ChatGameData.ItemIdByPrefabName;
 
@@ -326,6 +328,7 @@ internal static class ChatWindow
         ChatFormat.ModTokenFinder = null;
         ChatView.OpenModLink = null;
         ChatFormat.ItemNameResolver = null;
+        ChatFormat.MissionNameResolver = null;
         ChatInputTokens.Position = null;
         ChatInputTokens.ItemIdByPrefabName = null;
         try { ChatView.Uninstall(); }

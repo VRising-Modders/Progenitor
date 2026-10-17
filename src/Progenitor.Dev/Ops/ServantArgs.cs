@@ -22,10 +22,11 @@ internal static class ServantArgs
         Finish,
         Timers,
         Empty,
+        Chance,
     }
 
     /// <summary>The actions the op accepts.</summary>
-    internal const string Actions = "list, zones, send, finish, timers, empty";
+    internal const string Actions = "list, zones, send, finish, timers, empty, chance";
 
     /// <summary>One parsed request.</summary>
     internal sealed record Request(
@@ -52,6 +53,8 @@ internal static class ServantArgs
     /// <c>index:version</c>; omitted: the free servants), <c>mission</c> (GUID hash) or <c>zone</c>
     /// (<c>x,y#zone</c>), at most one (neither: a zone is picked), <c>slot</c> (default 0),
     /// <c>user</c> (whose discovery is checked), <c>checkDiscovered</c> (default true).
+    /// <c>chance</c>: the same arguments as <c>send</c>; reports each servant's success chance and
+    /// whether the send would be accepted, writes nothing.
     /// <c>finish</c>: <c>mission</c> (optional), <c>method</c> <c>timers</c> (default) or <c>row</c>.
     /// <c>timers</c>: <c>off</c> (bool; omitted reads only). <c>empty</c>: <c>servants</c> (as for
     /// <c>send</c>; omitted: every servant at home), <c>to</c> (a container's <c>index:version</c>;
@@ -71,6 +74,7 @@ internal static class ServantArgs
             "finish" => Action.Finish,
             "timers" => Action.Timers,
             "empty" => Action.Empty,
+            "chance" => Action.Chance,
             _ => throw new ArgumentException("unknown action '" + name + "' (" + Actions + ")"),
         };
 
@@ -96,6 +100,7 @@ internal static class ServantArgs
         switch (action)
         {
             case Action.Send:
+            case Action.Chance:
             {
                 if (mission != 0 && zone != null) throw new ArgumentException("name args.mission or args.zone, not both");
                 int slot = Int(args, "slot") ?? 0;

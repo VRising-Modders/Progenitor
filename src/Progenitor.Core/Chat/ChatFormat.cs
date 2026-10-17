@@ -56,11 +56,13 @@ internal enum ChatSpanKind
 
     /// <summary>A server's mod-owned link nothing on this client owns: its text, not a link, without the raw token.</summary>
     ModText = 5,
+    Mission = 6,
 }
 
 /// <summary>
 /// CHAT8: location and item tokens in chat, game-free. <c>[loc:x,z]</c> (world coordinates, whole numbers) and
-/// <c>[item:id]</c> (the item's prefab id). Players without Progenitor see the token as written.
+/// <c>[item:id]</c> (the item's prefab id), and <c>[mission:guid]</c> (a servant mission, shown as its localized
+/// name). Players without Progenitor see the token as written.
 /// </summary>
 internal static class ChatTokens
 {
@@ -70,6 +72,9 @@ internal static class ChatTokens
         "[loc:" + ((int)Math.Round(x)).ToString(CultureInfo.InvariantCulture) + "," + ((int)Math.Round(z)).ToString(CultureInfo.InvariantCulture) + "]";
 
     internal static string Item(int prefabId) => "[item:" + prefabId.ToString(CultureInfo.InvariantCulture) + "]";
+
+    /// <summary><c>[mission:guid]</c>: a servant mission, shown by Progenitor clients as its localized name.</summary>
+    internal static string Mission(int missionGuid) => "[mission:" + missionGuid.ToString(CultureInfo.InvariantCulture) + "]";
 
     internal static bool TryParseLocation(string target, out int x, out int z)
     {
@@ -99,6 +104,9 @@ internal static class ChatTokens
             else if (body.StartsWith("item:", StringComparison.Ordinal) && body.Length <= 17
                 && int.TryParse(body.Substring(5), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int id) && id != 0)
                 found.Add((open, close - open + 1, ChatSpanKind.Item, id.ToString(CultureInfo.InvariantCulture)));
+            else if (body.StartsWith("mission:", StringComparison.Ordinal) && body.Length <= 20
+                && int.TryParse(body.Substring(8), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int mission) && mission != 0)
+                found.Add((open, close - open + 1, ChatSpanKind.Mission, mission.ToString(CultureInfo.InvariantCulture)));
             at = close + 1;
         }
 
@@ -159,6 +167,9 @@ internal static class ChatFormat
     /// <summary>CHAT8: an item's display name by prefab id, or null when unknown (the token then shows as written).</summary>
     internal static Func<int, string?>? ItemNameResolver { get; set; }
 
+    /// <summary>A servant mission's display name by mission GUID, or null when unknown (the token then shows as written).</summary>
+    internal static Func<int, string?>? MissionNameResolver { get; set; }
+
     internal sealed class Options
     {
         internal bool Timestamps { get; init; }
@@ -213,6 +224,13 @@ internal static class ChatFormat
                 string? name = null;
                 try { name = ItemNameResolver?.Invoke(int.Parse(target, CultureInfo.InvariantCulture)); } catch { name = null; }
                 if (!string.IsNullOrWhiteSpace(name)) display = "[" + name + "]";
+            }
+            else if (kind == ChatSpanKind.Mission)
+            {
+                // Shown the way the game's hunt notices name it: the plain name, no brackets.
+                string? name = null;
+                try { name = MissionNameResolver?.Invoke(int.Parse(target, CultureInfo.InvariantCulture)); } catch { name = null; }
+                if (!string.IsNullOrWhiteSpace(name)) display = name;
             }
 
             spans.Add(new ChatSpan(kind, start, length, target, display));
@@ -422,6 +440,7 @@ internal static class ChatFormat
         ChatSpanKind.Item => "i:",
         ChatSpanKind.ModLink => "n:",
         ChatSpanKind.ModText => "-:",
+        ChatSpanKind.Mission => "h:",
         _ => "u:",
     };
 

@@ -54,6 +54,8 @@ internal static class ServantOps
             }
             case ServantArgs.Action.Send:
                 return Send(req, heart, territory);
+            case ServantArgs.Action.Chance:
+                return Send(req, heart, territory, chanceOnly: true);
             case ServantArgs.Action.Empty:
                 return Empty(req, heart, territory);
             default:
@@ -75,7 +77,7 @@ internal static class ServantOps
         }
     }
 
-    private static object Send(ServantArgs.Request req, CastleId heart, int territory)
+    private static object Send(ServantArgs.Request req, CastleId heart, int territory, bool chanceOnly = false)
     {
         var list = ServantBridge.List(heart);
         List<CastleId> servants;
@@ -110,6 +112,35 @@ internal static class ServantOps
             if (req.Servants == null && servants.Count > z.ServantSlots) servants = servants.GetRange(0, z.ServantSlots);
         }
 
+        if (chanceOnly)
+        {
+            var c = ServantBridge.Chance(new ServantChanceRequest
+            {
+                Heart = heart,
+                Servants = servants,
+                MissionGuid = mission,
+                DataSlot = req.Slot,
+                User = req.User,
+                CheckDiscovered = req.CheckDiscovered,
+            });
+            return new
+            {
+                action = "chance",
+                ok = c.Ok,
+                wouldSend = c.WouldSend,
+                refusal = c.WouldSend ? null : c.Refusal.ToString(),
+                reason = c.Reason.Length > 0 ? c.Reason : null,
+                heart = heart.ToString(),
+                territory,
+                mission,
+                zone = zone.IsNone ? null : zone.ToString(),
+                picked = picked.Length > 0 ? picked : null,
+                slot = req.Slot,
+                chances = ChanceRows(c.Chances),
+                note = "compare percent and partyBonus with the throne's hunt menu for the same servants, zone and length",
+            };
+        }
+
         var result = ServantBridge.Send(new ServantSendRequest
         {
             Heart = heart,
@@ -138,7 +169,30 @@ internal static class ServantOps
             startedUtc = result.Ok ? Utc(result.StartedUtc) : null,
             servants = sent,
             buffApplied = result.Ok ? result.BuffApplied : (bool?)null,
+            announced = result.Ok ? result.Announced : (bool?)null,
+            chances = result.Ok ? ChanceRows(result.Chances) : null,
         };
+    }
+
+    private static List<object> ChanceRows(IReadOnlyList<ServantChance> chances)
+    {
+        var rows = new List<object>();
+        foreach (var c in chances)
+            rows.Add(new
+            {
+                servant = c.Servant.ToString(),
+                percent = Math.Round(c.Vanilla * 100.0, 1),
+                vanilla = c.Vanilla,
+                maxSuccess = c.MaxSuccess,
+                applied = c.Applied,
+                proficiency = c.Proficiency,
+                partyBonus = c.PartyBonus,
+                missionDifficulty = c.MissionDifficulty,
+                perkReduction = c.PerkReduction,
+                perkLootBonus = c.PerkLootBonus,
+                successRateBonus = c.SuccessRateBonus,
+            });
+        return rows;
     }
 
     private static object Empty(ServantArgs.Request req, CastleId heart, int territory)
@@ -224,6 +278,7 @@ internal static class ServantOps
             endsUtc = Utc(m.EndsUtc),
             secondsLeft = Math.Round(left, 1),
             servants,
+            chances = ChanceRows(m.Chances),
         };
     }
 

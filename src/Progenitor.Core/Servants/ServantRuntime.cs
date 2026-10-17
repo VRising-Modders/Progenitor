@@ -50,6 +50,17 @@ internal static unsafe partial class ServantRuntime
     // Rows snapshotted before the update system ran, per heart, for the hearts with a hunt due.
     private static readonly Dictionary<CastleId, List<MissionRow>> Due = new();
 
+    /// <summary>What Progenitor read about one due row just before the game rolled it.</summary>
+    private sealed class RowRoll
+    {
+        public List<ServantChance> Chances = new();
+    }
+
+    // The rolls of the due rows, read in BeforeUpdate (this update only), and of the finished rows
+    // waiting for their publish (consumed by BuildReturn).
+    private static readonly Dictionary<(CastleId Heart, (int, long, CastleId) Key), RowRoll> DueRolls = new();
+    private static readonly Dictionary<(CastleId Heart, (int, long, CastleId) Key), RowRoll> ReturnRolls = new();
+
     // Pending list swaps: user index -> request facts (Before the info system), applied After.
     private static readonly Dictionary<int, (CastleId User, CastleId Heart, byte[] Throne, IReadOnlyList<CastleId> Hearts)> PendingSwaps = new();
 
@@ -108,6 +119,8 @@ internal static unsafe partial class ServantRuntime
         Lists.Unregistered = null;
         MissionHearts.Clear();
         Due.Clear();
+        DueRolls.Clear();
+        ReturnRolls.Clear();
         PendingSwaps.Clear();
         Confirm.Clear();
         PendingReturns.Clear();
@@ -408,6 +421,7 @@ internal static unsafe partial class ServantRuntime
             LengthSeconds = r.LengthSeconds,
             EndsUtc = ServantLogic.Utc(ServantLogic.CompletionTicks(r.StartTicks, r.LengthSeconds)),
             Servants = new List<CastleId>(r.Servants()),
+            Chances = ChancesFor(world, em, r.MissionGuid, r.DataSlot, r.Servants(), null, out _),
             Epoch = WorldEpoch.Current,
         };
     }
@@ -420,7 +434,7 @@ internal static unsafe partial class ServantRuntime
     /// script marks it as on a hunt). Validated first with the game's checks; nothing is written
     /// on a refusal.
     /// </summary>
-    internal static ServantSendResult Send(World world, ServantSendRequest req, string by, bool dryRun = false)
+    internal static ServantSendResult Send(World world, ServantSendRequest req, string by, bool dryRun = false, bool log = true)
     {
         var em = world.EntityManager;
         int epoch = WorldEpoch.Current;
@@ -507,7 +521,7 @@ internal static unsafe partial class ServantRuntime
         var plan = ServantLogic.PlanSend(f);
         if (!plan.Ok || plan.Row == null)
         {
-            Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " mission=" + req.MissionGuid
+            if (log) Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " mission=" + req.MissionGuid
                 + " slot=" + req.DataSlot + " (" + plan.Refusal + "): " + plan.Reason);
             return new ServantSendResult
             {
@@ -521,7 +535,7 @@ internal static unsafe partial class ServantRuntime
         foreach (var sf in facts)
             if (AiRuntime.FindBuff(em, sf.Servant.ToEntity(), buff) != Entity.Null)
                 return Fail(req, ServantSendRefusal.ServantBusy, "servant " + sf.Servant
-                    + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false);
+                    + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false, quiet: !log);
 
         // Validation only (a routed throne send checks every heart before it writes any).
         if (dryRun)
@@ -530,6 +544,9 @@ internal static unsafe partial class ServantRuntime
                 Ok = true, Heart = req.Heart, MissionGuid = plan.Row.MissionGuid, Zone = f.Zone, DataSlot = plan.Row.DataSlot,
                 LengthSeconds = plan.Row.LengthSeconds, Servants = new List<CastleId>(plan.Row.Servants()),
             };
+
+        // The chances at the send, read before any write (the send changes none of their inputs).
+        var chances = ChancesFor(world, em, plan.Row.MissionGuid, plan.Row.DataSlot, plan.Row.Servants(), null, out _);
 
         // The buff first: if the game does not spawn it for every servant, nothing is in the record
         // yet and the buffs that did go on are taken off again. The buff spawns synchronously on
@@ -584,6 +601,10 @@ internal static unsafe partial class ServantRuntime
         _heartsDirty = true;
         var sent = new List<CastleId>(row.Servants());
         Confirm.Add((DateTime.UtcNow.Ticks + ConfirmAfterTicks, sent, buff, req.Heart, row));
+        // The game's send ends with this notice to the sender's allies; a vanilla client prints it.
+        int announced = req.Announce
+            ? AnnounceStarted(world, em, heart, row.MissionGuid, req.User.IsNone ? Entity.Null : req.User.ToEntity())
+            : 0;
         var result = new ServantSendResult
         {
             Ok = true,
@@ -595,19 +616,22 @@ internal static unsafe partial class ServantRuntime
             StartedUtc = ServantLogic.Utc(row.StartTicks),
             Servants = sent,
             BuffApplied = true,
+            Chances = chances,
+            Announced = announced > 0,
         };
         Plugin.Logger?.LogInfo("servants: sent by=" + by + " heart=" + req.Heart + " mission=" + row.MissionGuid
             + (f.MissionName.Length > 0 ? " (" + f.MissionName + ")" : "") + " zone=" + f.Zone + " slot=" + row.DataSlot
-            + " length=" + row.LengthSeconds + "s servants=" + string.Join(",", sent));
+            + " length=" + row.LengthSeconds + "s servants=" + string.Join(",", sent)
+            + " chances=[" + string.Join(", ", chances) + "] notice=" + announced + " user(s)");
         try { EventBus.Publish(new ServantsSent { Result = result, By = by }); }
         catch (Exception e) { Plugin.Logger?.LogWarning("servants: ServantsSent handler threw: " + e.Message); }
         return result;
     }
 
-    private static ServantSendResult Fail(ServantSendRequest req, ServantSendRefusal refusal, string why, string by, bool log)
+    private static ServantSendResult Fail(ServantSendRequest req, ServantSendRefusal refusal, string why, string by, bool log, bool quiet = false)
     {
         if (log) Plugin.Logger?.LogWarning("servants: send failed by=" + by + " heart=" + req.Heart + ": " + why);
-        else Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " (" + refusal + "): " + why);
+        else if (!quiet) Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " (" + refusal + "): " + why);
         return new ServantSendResult { Ok = false, Refusal = refusal, Reason = why, Heart = req.Heart, MissionGuid = req.MissionGuid, DataSlot = req.DataSlot, Servants = req.Servants };
     }
 
@@ -733,6 +757,7 @@ internal static unsafe partial class ServantRuntime
     private static void BeforeUpdate(SystemHookContext hook)
     {
         Due.Clear();
+        DueRolls.Clear();
         if (EventBus.SubscriberCount<ServantsReturned>() == 0) return;
         try
         {
@@ -751,12 +776,26 @@ internal static unsafe partial class ServantRuntime
                 foreach (var r in rows)
                     if (ServantLogic.IsDue(r, now, DueSlackTicks, timers)) { Due[CastleId.From(heart)] = rows; break; }
             }
+            // The chance of each due row, from the same live inputs the game's return reads next.
+            foreach (var kv in Due)
+                foreach (var r in kv.Value)
+                {
+                    if (!ServantLogic.IsDue(r, now, DueSlackTicks, timers)) continue;
+                    var roll = RollOf(kv.Key, r);
+                    roll.Chances = ChancesFor(hook.World, em, r.MissionGuid, r.DataSlot, r.Servants(), null, out _);
+                }
         }
         catch (Exception e)
         {
             Due.Clear();
             Plugin.Logger?.LogWarning("servants: return snapshot failed: " + e.Message);
         }
+    }
+
+    private static RowRoll RollOf(CastleId heart, MissionRow row)
+    {
+        if (!DueRolls.TryGetValue((heart, row.Key), out var roll)) DueRolls[(heart, row.Key)] = roll = new RowRoll();
+        return roll;
     }
 
     private static void AfterUpdate(SystemHookContext hook)
@@ -780,6 +819,10 @@ internal static unsafe partial class ServantRuntime
             Plugin.Logger?.LogWarning("servants: return check failed: " + e.Message);
         }
         Due.Clear();
+        foreach (var (heart, row) in finished)
+            if (DueRolls.TryGetValue((CastleId.From(heart), row.Key), out var roll))
+                ReturnRolls[(CastleId.From(heart), row.Key)] = roll;
+        DueRolls.Clear();
         if (finished.Count == 0) return;
         _heartsDirty = true;
         long now = DateTime.UtcNow.Ticks;
@@ -929,6 +972,8 @@ internal static unsafe partial class ServantRuntime
     {
         var servants = new List<ReturnedServant>();
         var current = CurrentRows(em, heart);
+        ReturnRolls.TryGetValue((CastleId.From(heart), row.Key), out var roll);
+        ReturnRolls.Remove((CastleId.From(heart), row.Key));
         foreach (var id in row.Servants())
         {
             coffins.TryGetValue(id, out var coffin);
@@ -940,7 +985,8 @@ internal static unsafe partial class ServantRuntime
             var loot = new List<ServantLoot>();
             int stacks = -1;
             if (ServantLogic.OutcomeOf(f, now) != ServantOutcome.Dead) stacks = ItemStacks(s, out _, out loot);
-            servants.Add(ServantLogic.Returned(id, CastleId.From(s), CastleId.From(coffin), name, f, now, WorldEpoch.Current, loot, stacks));
+            var returned = ServantLogic.Returned(id, CastleId.From(s), CastleId.From(coffin), name, f, now, WorldEpoch.Current, loot, stacks);
+            servants.Add(ServantChanceLogic.WithRoll(returned, id, roll?.Chances));
         }
         var castle = Progenitor.Castles.Castles.ForHeart(CastleId.From(heart));
         var zones = ZonesFor(em, row.MissionGuid);

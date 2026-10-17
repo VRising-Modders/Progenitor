@@ -136,6 +136,42 @@ internal static class ChatGameData
         return null;
     }
 
+    private static readonly Dictionary<int, string> MissionNames = new();
+    private static World? _missionNamesWorld;
+
+    /// <summary>
+    /// A servant mission's localized name (<c>ManagedMissionData.Name</c> from
+    /// <c>GameDataSystem.ManagedDataRegistry</c>, resolved through the game's string table, the
+    /// route the game's own hunt notices take), or null when the id is not a mission. Client only;
+    /// cached per client world. <c>ManagedMissionData</c> is a managed class, so the registry
+    /// lookup instantiates no generic over a game value type.
+    /// </summary>
+    internal static string? MissionName(int missionGuid)
+    {
+        var world = Worlds.Client;
+        if (world == null || !world.IsCreated || missionGuid == 0) return null;
+        if (!ReferenceEquals(world, _missionNamesWorld))
+        {
+            MissionNames.Clear();
+            _missionNamesWorld = world;
+        }
+
+        if (MissionNames.TryGetValue(missionGuid, out var cached)) return cached.Length == 0 ? null : cached;
+        string name = "";
+        try
+        {
+            var registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry;
+            if (registry != null && registry.TryGet<ManagedMissionData>(new PrefabGUID(missionGuid), out var data) && data != null
+                && Localization.Localization.TryGetGameString(data.Name, out var s) && !string.IsNullOrWhiteSpace(s))
+                name = s.Trim();
+        }
+        catch { name = ""; }
+
+        // An empty answer before the game data is loaded is not cached, so a later ask can succeed.
+        if (name.Length > 0) MissionNames[missionGuid] = name;
+        return name.Length == 0 ? null : name;
+    }
+
     /// <summary>An item's prefab id from its spawnable prefab name (<c>Item_Weapon_Sword_T01_Bone</c>), or 0.</summary>
     internal static int ItemIdByPrefabName(string name)
     {

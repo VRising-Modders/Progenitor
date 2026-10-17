@@ -819,6 +819,18 @@ offset ServantMissionSettingsMissionBuffOffset       = 0x8  : ServantMissionSett
 offset ServantMissionSettingMissionLengthOffset      = 0x8  : ServantMissionSetting.MissionLength         # float seconds
 size   ServantMissionSettingStride                   = 0x14 : ServantMissionSetting
 offset MissionDataServantSlotsOffset                 = 0x8  : MissionData.ServantSlots                    # int, on the mission prefab
+# The success chance the game rolls at the return (ctx.Servants.Chance, ServantChanceLogic): the
+# mission's difficulty, each matching perk's power and loot bonus, the party bonus per other servant
+# and the length choice's success bonus. Raw reads only, on prefabs and the settings singleton.
+offset MissionDataMissionDifficultyOffset            = 0x4  : MissionData.MissionDifficulty               # int, on the mission prefab
+offset PerkDataLootValueOffset                       = 0x0  : PerkData.LootValue                          # float, on the perk prefab
+offset PerkDataPowerValueOffset                      = 0x8  : PerkData.PowerValue                         # int, subtracted from the mission difficulty
+offset ServantMissionSettingSuccessRateBonusOffset   = 0x4  : ServantMissionSetting.SuccessRateBonus      # float, added only when the party is short
+offset ServantMissionSettingsStaticPartyBonusOffset  = 0x4  : ServantMissionSettingsSingleton.StaticPartyBonus  # int, per other servant of the party
+# The "Hunt in X started." notice the game's send raises to allied users: one network event entity
+# (NetworkEventType + this component + SendNetworkEventTag + SendEventToUsers), the shape chat uses.
+offset ServantMissionStartedEventMissionIdOffset     = 0x0  : ServantMissionStartedEvent.MissionId        # PrefabGUID, the only field
+match  ServantMissionStartedEventId                  = -1997647067 : /EventId_ServantMissionStartedEvent = (-?\d+);/ in NetworkEvents
 offset MapZoneDataZoneIndexOffset                    = 0x1  : MapZoneData.ZoneIndex                       # byte; MapZoneId.ZoneId is this + 1
 offset MapZoneDataChunkCoordinateOffset              = 0x44 : MapZoneData.ChunkCoordinate                 # TerrainChunk: sbyte X, sbyte Y
 offset MapZoneDataServantMissionAssetOffset          = 0x48 : MapZoneData.ServantMissionAsset             # PrefabGUID
