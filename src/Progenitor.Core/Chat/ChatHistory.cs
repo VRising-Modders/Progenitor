@@ -151,6 +151,22 @@ internal sealed class ChatHistorySession
     /// <summary>The host whose file a save writes now, or empty: nothing is written before the open or after the close.</summary>
     internal string SaveHost => Opened && !Closed ? Host : "";
 
+    /// <summary>
+    /// Open the history when it may be: only while the client holds a connection (connecting or connected) and the
+    /// server's host is known. At the title or the disconnect screen a surviving client world still remembers the last
+    /// server (a Core swap there must not reopen that server's file under its host), and a join whose host is not known
+    /// yet would open with none and never save; both wait. True when it opened now.
+    /// </summary>
+    internal bool TryOpen(bool connectionHeld, string? host)
+    {
+        if (Opened || !MayOpen(connectionHeld, host)) return false;
+        Open(host);
+        return true;
+    }
+
+    /// <summary>Whether a history may open: a held connection to a server whose host is known.</summary>
+    internal static bool MayOpen(bool connectionHeld, string? host) => connectionHeld && !string.IsNullOrWhiteSpace(host);
+
     internal void Open(string? host)
     {
         Opened = true;

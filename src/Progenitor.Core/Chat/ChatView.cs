@@ -261,9 +261,14 @@ internal static class ChatView
     private static void RestoreHistory()
     {
         if (History.Opened) return;
+        // Only on a held connection with the server's host known: never the last server's host at the title or the
+        // disconnect screen (a Core swap there), never an unknown host (it would never save). Until then nothing opens.
+        bool held;
+        try { held = Networking.Handshake.ClientConnectionHeld; } catch { held = false; }
+        if (!held) return;
         string host;
         try { host = Networking.ServerModPause.CurrentHost() ?? ""; } catch { host = ""; }
-        History.Open(host);
+        if (!History.TryOpen(held, host)) return;
         try { _serverName = Networking.ServerModPause.CurrentServerName() ?? ""; } catch { _serverName = ""; }
         int keep = ChatLog.ClampCapacity(HistoryLines?.Value ?? ChatLog.DefaultCapacity);
         Log.Capacity = keep;

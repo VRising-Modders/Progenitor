@@ -129,6 +129,53 @@ public sealed class LiveFindings1017Tests
     }
 
     [Fact]
+    public void A_core_swap_at_the_title_does_not_reopen_the_last_servers_history()
+    {
+        // The new generation at the title or the disconnect screen: the surviving client world still remembers server A,
+        // but no connection is held, so nothing opens and nothing can be written under A.
+        var h = new ChatHistorySession();
+        Assert.False(h.TryOpen(connectionHeld: false, host: "server-a:9876"));
+        Assert.False(h.Opened);
+        Assert.Equal("", h.SaveHost);
+        Assert.Equal("", h.Close(0));
+
+        // Joining server B in that surviving world: the history opens under B, never A.
+        Assert.True(h.TryOpen(connectionHeld: true, host: "server-b:9876"));
+        Assert.Equal("server-b:9876", h.SaveHost);
+        Assert.False(h.TryOpen(connectionHeld: true, host: "server-a:9876"));
+        Assert.Equal("server-b:9876", h.SaveHost);
+    }
+
+    [Fact]
+    public void A_rejoin_waits_for_the_host_before_opening()
+    {
+        var h = new ChatHistorySession();
+        h.Open("server-a:9876");
+        h.Close(1);
+        Assert.True(h.RejoinedAt(2));
+        h.Reset();
+        // Connected, host not known yet: wait (opening now would never save).
+        Assert.False(h.TryOpen(connectionHeld: true, host: ""));
+        Assert.False(h.TryOpen(connectionHeld: true, host: null));
+        Assert.False(h.TryOpen(connectionHeld: true, host: "  "));
+        Assert.False(h.Opened);
+        // The host arrives: it opens with it, and saves go to it.
+        Assert.True(h.TryOpen(connectionHeld: true, host: "server-b:9876"));
+        Assert.Equal("server-b:9876", h.SaveHost);
+        Assert.Equal("server-b:9876", h.Close(2));
+    }
+
+    [Fact]
+    public void The_chat_view_opens_the_history_only_on_a_held_connection_with_a_host()
+    {
+        string view = SourcePin.ReadFile("src", "Progenitor.Core", "Chat", "ChatView.cs");
+        string restore = SourcePin.MethodBody(view, "private static void RestoreHistory(");
+        SourcePin.AssertUncommented(restore, "try { held = Networking.Handshake.ClientConnectionHeld; } catch { held = false; }");
+        SourcePin.AssertUncommented(restore, "if (!History.TryOpen(held, host)) return;");
+        Assert.DoesNotContain("History.Open(", restore);
+    }
+
+    [Fact]
     public void A_local_game_has_no_history_to_write()
     {
         var h = new ChatHistorySession();
