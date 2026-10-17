@@ -952,6 +952,12 @@ internal static class ChatView
         scroll.velocity = Vector2.zero;
     }
 
+    /// <summary>
+    /// The color the log draws a kind's lines in, as <c>#RRGGBB</c>: the player's <c>[Chat] Colors</c> choice, else the
+    /// game's (the tab editor's channel labels).
+    /// </summary>
+    internal static string LineHex(ChatKind kind) => ChatColors.HexFor(Colors?.Value, kind) ?? GameHex(kind);
+
     /// <summary>The game's own color for a kind as <c>#RRGGBB</c> (the Colors line draws an unchanged channel in it).</summary>
     internal static string GameHex(ChatKind kind)
     {

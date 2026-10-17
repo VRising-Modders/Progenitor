@@ -241,12 +241,14 @@ internal static class ControlsDialogs
                         new DialogCheck { Label = "Blood", On = true, Key = "blood" },
                         new DialogCheck { Label = "Weapons", Key = "weapons" },
                         new DialogCheck { Label = "Gems", On = true, Key = "gems" },
+                        new DialogCheck { Label = "Rare finds", Key = "rare", Color = "#B48CF0" },
                     },
                     RequireOne = true,
                     NoneHint = "Turn on at least one stall.",
                     Validate = r => r.Text.Trim().Length == 0 ? "Enter a name." : null,
                     OnCancel = () => Say("cancel"),
-                }, r => Say("\"" + r.Text + "\" blood=" + r.IsOn("blood") + " weapons=" + r.IsOn("weapons") + " gems=" + r.IsOn(2)));
+                }, r => Say("\"" + r.Text + "\" blood=" + r.IsOn("blood") + " weapons=" + r.IsOn("weapons") + " gems=" + r.IsOn(2)
+                    + " rare=" + r.IsOn("rare")));
                 break;
             default:
                 Say("unknown kind");

@@ -496,15 +496,18 @@ internal static class ChatTabForm
     internal const string TabGone = "This tab was closed. Cancel and open it again.";
     internal const string RowFull = "The tab row is full: close a tab first.";
 
-    /// <summary>The form for <paramref name="tab"/>: its name in the field, a box per channel, one channel required.</summary>
-    internal static DialogFormOptions Options(ChatTab tab) => new()
+    /// <summary>
+    /// The form for <paramref name="tab"/>: its name in the field, a box per channel (in <paramref name="colorOf"/>'s
+    /// channel colors, see <see cref="Checks"/>), one channel required.
+    /// </summary>
+    internal static DialogFormOptions Options(ChatTab tab, Func<ChatKind, string?>? colorOf = null) => new()
     {
         Caption = NameCaption,
         Initial = tab?.Name ?? "",
         Placeholder = Placeholder,
         MaxLength = ChatTab.MaxNameLength,
         Heading = Heading,
-        Checks = Checks(tab?.Scope ?? ChatScope.None),
+        Checks = Checks(tab?.Scope ?? ChatScope.None, colorOf),
         RequireOne = true,
         NoneHint = NoneHint,
         Save = SaveCaption,
@@ -530,12 +533,40 @@ internal static class ChatTabForm
     /// <summary>The dialog's title for a new tab or an existing one.</summary>
     internal static string Title(bool isNew) => isNew ? NewTitle : EditTitle;
 
-    /// <summary>The boxes for <paramref name="scope"/>, in <see cref="ChatTabStrip.ScopeChoices"/> order.</summary>
-    internal static DialogCheck[] Checks(ChatScope scope)
+    /// <summary>
+    /// The "Mentions of me" label's color: the mention highlight's gold (<see cref="ChatFormat.MentionMark"/>) without its
+    /// transparency, since a mention has no channel color of its own.
+    /// </summary>
+    internal const string MentionHex = "#E8B33F";
+
+    /// <summary>The line kind whose color a channel box is drawn in (<see cref="ChatKind.Unknown"/> for Mentions).</summary>
+    internal static ChatKind KindOf(ChatScope scope) => scope switch
+    {
+        ChatScope.Global => ChatKind.Global,
+        ChatScope.Local => ChatKind.Local,
+        ChatScope.Clan => ChatKind.Team,
+        ChatScope.Whispers => ChatKind.WhisperFrom,
+        ChatScope.SystemAndMods => ChatKind.System,
+        _ => ChatKind.Unknown,
+    };
+
+    /// <summary>
+    /// The boxes for <paramref name="scope"/>, in <see cref="ChatTabStrip.ScopeChoices"/> order. Each channel's label is
+    /// drawn in <paramref name="colorOf"/> of its line kind (the chat log's color: the player's <c>[Chat] Colors</c> or the
+    /// game's; null or empty: the normal label color); Mentions of me in <see cref="MentionHex"/>.
+    /// </summary>
+    internal static DialogCheck[] Checks(ChatScope scope, Func<ChatKind, string?>? colorOf = null)
     {
         var choices = ChatTabStrip.ScopeChoices;
         var checks = new DialogCheck[choices.Length];
-        for (int i = 0; i < choices.Length; i++) checks[i] = new DialogCheck { Label = choices[i].Label, On = (scope & choices[i].Scope) != 0 };
+        for (int i = 0; i < choices.Length; i++)
+        {
+            var kind = KindOf(choices[i].Scope);
+            string? color = choices[i].Scope == ChatScope.Mentions ? MentionHex
+                : kind == ChatKind.Unknown || colorOf == null ? null : colorOf(kind);
+            checks[i] = new DialogCheck { Label = choices[i].Label, On = (scope & choices[i].Scope) != 0, Color = color ?? "" };
+        }
+
         return checks;
     }
 

@@ -26,6 +26,28 @@ public sealed class ChatTabFormTests
     }
 
     [Fact]
+    public void Each_channel_box_is_labeled_in_its_chat_color()
+    {
+        // The editor's source: the player's [Chat] Colors choice, else the game's color (here a stand-in gray).
+        string saved = ChatColors.Set(ChatColors.Set("", "Global", "#7AB8F5"), "Whispers", "#F08AD0");
+        var asked = new List<ChatKind>();
+        string? ColorOf(ChatKind k) { asked.Add(k); return ChatColors.HexFor(saved, k) ?? "#C8C8C8"; }
+
+        var checks = ChatTabForm.Options(new ChatTab { Name = "Trade", Scope = ChatScope.Global }, ColorOf).Checks;
+        Assert.Equal(new[] { "#7AB8F5", "#C8C8C8", "#C8C8C8", "#F08AD0", "#C8C8C8", ChatTabForm.MentionHex },
+            checks.Select(c => c.Color).ToArray());
+        Assert.Equal(new[] { ChatKind.Global, ChatKind.Local, ChatKind.Team, ChatKind.WhisperFrom, ChatKind.System }, asked.ToArray());
+    }
+
+    [Fact]
+    public void Without_a_color_source_only_Mentions_is_colored()
+    {
+        var checks = ChatTabForm.Checks(ChatScope.All);
+        Assert.Equal(new[] { "", "", "", "", "", ChatTabForm.MentionHex }, checks.Select(c => c.Color).ToArray());
+        Assert.Equal(new[] { "", "" }, ChatTabForm.Checks(ChatScope.All, _ => null).Take(2).Select(c => c.Color).ToArray());
+    }
+
+    [Fact]
     public void A_new_custom_tab_starts_with_a_free_name_and_Global_on()
     {
         var fresh = ChatTabForm.Fresh(3);

@@ -17026,6 +17026,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         private static void ApplyTextTone(Cell cell, CellTone tone)
         {
             if (cell.Tmp == null) return;
+            // FORMDIALOG1: a cell's own text color (a form check's label color) replaces its own tone's, not another tone.
+            if (cell.Spec.TextColor is { } own && tone == cell.Spec.Tone)
+            {
+                try { cell.Tmp.color = ToColor(own); }
+                catch { /* */ }
+                return;
+            }
+
             try { cell.Tmp.color = ToColor(cell.Spec.Kind == CellKind.Mono && tone == CellTone.Normal ? MenuPalette.Mono : MenuPalette.TextColor(tone)); }
             catch { /* */ }
         }

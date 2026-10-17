@@ -7,12 +7,13 @@ namespace Progenitor.Ui;
 /// FORMDIALOG1: one check box of a form dialog (<see cref="DialogFormOptions.Checks"/>): its label, whether it starts
 /// checked, and an optional key the result is read by (<see cref="DialogFormResult.IsOn(string)"/>). The dialog draws it as
 /// the game's Options checkbox with the label after it; a click anywhere on the line, or Space, Enter or the
-/// controller's A on it, flips it.
+/// controller's A on it, flips it. An optional <see cref="Color"/> draws the label in that color.
 /// </summary>
 public sealed class DialogCheck
 {
     private readonly string _label = "";
     private readonly string _key = "";
+    private readonly string _color = "";
 
     /// <summary>The words after the box (trimmed).</summary>
     public string Label { get => _label; init => _label = (value ?? "").Trim(); }
@@ -23,8 +24,15 @@ public sealed class DialogCheck
     /// <summary>A name for the box in <see cref="DialogFormResult.IsOn(string)"/> (trimmed); empty: its label is used.</summary>
     public string Key { get => _key; init => _key = (value ?? "").Trim(); }
 
+    /// <summary>
+    /// The label's color as <c>#RRGGBB</c> (the kit's hex form, as <c>ColorField</c> takes it; trimmed, uppercased).
+    /// Empty, the default, or anything that is not <c>#RRGGBB</c>: the dialog's normal label color. A color too dark for
+    /// the dialog is lifted toward white until it reads.
+    /// </summary>
+    public string Color { get => _color; init => _color = DialogForm.CleanColor(value); }
+
     /// <summary>The same box, checked or not.</summary>
-    public DialogCheck With(bool on) => new() { Label = Label, On = on, Key = Key };
+    public DialogCheck With(bool on) => new() { Label = Label, On = on, Key = Key, Color = Color };
 
     public override string ToString() => (On ? "[x] " : "[ ] ") + Label;
 }
@@ -160,6 +168,37 @@ internal static class DialogForm
         return false;
     }
 
+    /// <summary>A check label's color is drawn at or above this contrast on the dialog's ground (the captions' rule).</summary>
+    internal const float MinLabelContrast = MenuPalette.MinCaptionContrast;
+
+    /// <summary><paramref name="hex"/> trimmed and uppercased when it is <c>#RRGGBB</c>, else empty.</summary>
+    internal static string CleanColor(string? hex)
+    {
+        string s = (hex ?? "").Trim();
+        if (s.Length != 7 || s[0] != '#') return "";
+        for (int i = 1; i < 7; i++)
+            if (!Uri.IsHexDigit(s[i])) return "";
+        return s.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// The color a check label is drawn in for <paramref name="hex"/>: null (the normal label color) when it is empty or
+    /// not <c>#RRGGBB</c>; else the color, mixed toward white in small steps until it clears
+    /// <see cref="MinLabelContrast"/> on the dialog's ground (<see cref="MenuPalette.PaneFill"/>, the frame's color).
+    /// </summary>
+    internal static PaletteColor? ReadableLabel(string? hex)
+    {
+        string clean = CleanColor(hex);
+        if (clean.Length == 0) return null;
+        int rgb = int.Parse(clean.Substring(1), System.Globalization.NumberStyles.HexNumber,
+            System.Globalization.CultureInfo.InvariantCulture);
+        var color = PaletteColor.Hex(rgb);
+        var ground = MenuPalette.PaneFill; // the dialog frame's ground (DialogFrameColors.Frame is it at alpha 1)
+        for (int step = 0; step < 40 && color.ContrastAgainst(ground) < MinLabelContrast; step++)
+            color = new PaletteColor(color.R + (1f - color.R) * 0.1f, color.G + (1f - color.G) * 0.1f, color.B + (1f - color.B) * 0.1f);
+        return color;
+    }
+
     /// <summary>The checks' states, in order (what <c>onSave</c> gets).</summary>
     internal static bool[] States(IReadOnlyList<DialogCheck>? checks)
     {
@@ -264,7 +303,8 @@ internal static class DialogForm
     }
 
     /// <summary>
-    /// One check line: the inset, the game's checkbox, the label (bright, left) filling the rest. A plain row whose click
+    /// One check line: the inset, the game's checkbox, the label (bright, or in the box's readable
+    /// <see cref="DialogCheck.Color"/>; the disabled tone when disabled; left) filling the rest. A plain row whose click
     /// target the dialog adds (<see cref="IUiCellRow.OnRowClick"/>), so a click anywhere on the line flips the box.
     /// </summary>
     internal static CellRowSpec CheckRowSpec(int index, DialogCheck check, bool enabled = true)
@@ -277,7 +317,8 @@ internal static class DialogForm
                 width: CellWidth.Px(CellLayout.CheckWidth), minWidth: CellLayout.CheckWidth),
             new CellSpec(CellKind.Text, CellLabel).With(text: check.Label, align: CellAlign.Left,
                 tone: enabled ? CellTone.Normal : CellTone.Disabled, fontSize: LabelFontSize,
-                width: CellWidth.Fill(CellLayout.MinTextWidth), minWidth: CellLayout.MinTextWidth),
+                width: CellWidth.Fill(CellLayout.MinTextWidth), minWidth: CellLayout.MinTextWidth)
+                .WithTextColor(enabled ? ReadableLabel(check.Color) : null),
             Inset(CellInset + "-right"),
         };
         return new CellRowSpec(CheckRow(index), cells, height: CheckRowHeight, plain: true, compact: true, gapAbove: CheckRowGap);
