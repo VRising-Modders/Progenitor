@@ -40,7 +40,7 @@ internal sealed class Handlers
         "ui_input", "ui_read", "display", "screenshot", "console",
         "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release",
         "freeze_hold", "time", "photo", "setting", "join_ui", "messages_record", "item_catalog",
-        "join_admin", "server_desc", "server_rules", "world_backups", "server_browser", "auto_update",
+        "join_admin", "server_desc", "server_rules", "world_backups", "server_browser", "auto_update", "chat_tabs",
     };
 
     public bool IsMainThreadOp(string op) => MainThreadOps.Contains(op);
@@ -171,6 +171,7 @@ internal sealed class Handlers
             // SERVERDESC1. Main thread, both sides: the server-list description (rows, composed text, live value,
             // Steam keys, settings files); server: set the rows and apply as an admin edit does.
             case "server_desc": return Ops.ServerDescOps.Run(args);
+            case "chat_tabs": return Ops.ChatTabsOps.Run(args);
             case "server_browser": return Ops.ServerBrowserOps.Run(args);
             // JOINFLOW1. Client, main thread: read and drive the join screens (server message, mods page,
             // Thunderstore confirmation) through the buttons' own handlers.

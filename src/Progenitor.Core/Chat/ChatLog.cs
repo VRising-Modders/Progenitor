@@ -282,7 +282,7 @@ internal enum ChatScope
     All = Global | Local | Clan | Whispers | SystemAndMods,
 }
 
-/// <summary>CHAT5: one chat tab. <c>All</c> is fixed; the rest are the player's.</summary>
+/// <summary>CHAT5: one chat tab. <c>All</c> is fixed (never edited or closed, but it can be moved); the rest are the player's.</summary>
 internal sealed class ChatTab
 {
     internal const string AllName = "All";
@@ -338,37 +338,61 @@ internal sealed class ChatTab
         _ => -1,
     };
 
-    /// <summary>The player's tabs after All, as saved in <c>[Chat] Tabs</c>: <c>Name=scope,scope;Name=scope</c>.</summary>
+    /// <summary>
+    /// The tabs as saved in <c>[Chat] Tabs</c>: <c>Name=scope;Name=scope</c>, in the row's order. All is fixed and not
+    /// saved with a scope; when the player has moved it away from the front, a bare <see cref="AllName"/> entry marks
+    /// its place (<c>Clan=4;All;Trade=1</c>). Builds before tab reordering skip that entry and put All first.
+    /// </summary>
     internal static string Save(IReadOnlyList<ChatTab> tabs)
     {
         var parts = new List<string>();
-        foreach (var t in tabs)
+        for (int i = 0; i < tabs.Count; i++)
         {
-            if (t.Fixed) continue;
+            var t = tabs[i];
+            if (t.Fixed)
+            {
+                if (i > 0) parts.Add(AllName);
+                continue;
+            }
+
             parts.Add(Clean(t.Name) + "=" + ((int)t.Scope).ToString(CultureInfo.InvariantCulture));
         }
 
         return string.Join(";", parts);
     }
 
-    /// <summary>All, then the saved tabs (bad entries skipped, at most <see cref="MaxTabs"/> in all).</summary>
+    /// <summary>
+    /// The saved tabs in their saved order (bad entries skipped, at most <see cref="MaxTabs"/> in all), with All where a
+    /// bare <see cref="AllName"/> entry puts it, else first (a config saved before tab reordering).
+    /// </summary>
     internal static List<ChatTab> Load(string? saved)
     {
-        var tabs = new List<ChatTab> { All() };
-        if (saved == null) return tabs;
-        foreach (var part in saved.Split(';'))
+        var tabs = new List<ChatTab>();
+        int allAt = -1;
+        if (saved != null)
         {
-            if (tabs.Count >= MaxTabs) break;
-            int eq = part.LastIndexOf('=');
-            if (eq <= 0) continue;
-            string name = Clean(part.Substring(0, eq));
-            if (name.Length == 0 || string.Equals(name, AllName, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!int.TryParse(part.Substring(eq + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int s)) continue;
-            var scope = (ChatScope)s & (ChatScope.All | ChatScope.Mentions);
-            if (scope == ChatScope.None) continue;
-            tabs.Add(new ChatTab { Name = name, Scope = scope });
+            foreach (var raw in saved.Split(';'))
+            {
+                if (tabs.Count >= MaxTabs - 1) break;
+                string part = raw.Trim();
+                if (allAt < 0 && string.Equals(part, AllName, StringComparison.OrdinalIgnoreCase))
+                {
+                    allAt = tabs.Count;
+                    continue;
+                }
+
+                int eq = part.LastIndexOf('=');
+                if (eq <= 0) continue;
+                string name = Clean(part.Substring(0, eq));
+                if (name.Length == 0 || string.Equals(name, AllName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!int.TryParse(part.Substring(eq + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int s)) continue;
+                var scope = (ChatScope)s & (ChatScope.All | ChatScope.Mentions);
+                if (scope == ChatScope.None) continue;
+                tabs.Add(new ChatTab { Name = name, Scope = scope });
+            }
         }
 
+        tabs.Insert(allAt < 0 ? 0 : Math.Min(allAt, tabs.Count), All());
         return tabs;
     }
 
