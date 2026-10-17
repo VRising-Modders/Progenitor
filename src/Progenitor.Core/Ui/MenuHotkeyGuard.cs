@@ -31,8 +31,9 @@ internal enum HotkeyMaskTarget
 
     /// <summary>
     /// CHAT1: the order-97 context (<see cref="UiInputCapture.ChatClickGuardOrder"/>): the mouse-bound
-    /// gameplay actions in <c>Progenitor.Chat.ChatClickGuard.BlockedActions</c> and <b>nothing else</b>, and
-    /// only while <c>ChatClickGuard.Active</c> (a press that starts over the visible chat box).
+    /// gameplay actions in <c>Progenitor.Chat.ChatClickGuard.BlockedActions</c> while <c>ChatClickGuard.Active</c>
+    /// (a press that starts over the visible chat box), the camera zoom axis while <c>ChatClickGuard.WheelBlocked</c>
+    /// (the pointer is over the box), and <b>nothing else</b> (<c>Progenitor.Chat.ChatMaskPlan</c>).
     /// </summary>
     Chat,
 }

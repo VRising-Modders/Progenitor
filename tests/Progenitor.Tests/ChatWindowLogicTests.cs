@@ -195,4 +195,84 @@ public sealed class ChatWindowLogicTests : IDisposable
         Assert.False(ChatReplacement.ContentTakenOver(IntPtr.Zero, node, clone));
         Assert.False(ChatReplacement.ContentTakenOver(other, IntPtr.Zero, clone));
     }
+
+    [Fact]
+    public void Wheel_over_the_chat_box_blocks_only_the_camera_zoom()
+    {
+        // The pointer over the visible box, no button held: the wheel half is on.
+        Assert.True(ChatClickGuard.UpdateWheel(overChat: true));
+        Assert.True(ChatClickGuard.WheelBlocked);
+        Assert.True(ChatClickGuard.AnyActive);
+
+        var plan = ChatMaskPlan.For(clicksActive: false, wheelActive: ChatClickGuard.WheelBlocked, keyboardAndMouse: true);
+        Assert.True(plan.BlockZoom);
+        Assert.False(plan.BlockButtons);
+        Assert.False(plan.Empty);
+    }
+
+    [Fact]
+    public void Wheel_guard_does_not_depend_on_click_safe()
+    {
+        // ClickSafe off: the buttons half takes nothing, the wheel half still follows the pointer.
+        Assert.False(ChatClickGuard.Update(enabled: false, overChat: true, anyButtonHeld: false));
+        ChatClickGuard.UpdateWheel(overChat: true);
+        var plan = ChatMaskPlan.For(ChatClickGuard.Active, ChatClickGuard.WheelBlocked, keyboardAndMouse: true);
+        Assert.True(plan.BlockZoom);
+        Assert.False(plan.BlockButtons);
+    }
+
+    [Fact]
+    public void Wheel_follows_the_pointer_with_no_latch()
+    {
+        // A press that started on the box keeps the buttons blocked off it; the wheel goes back to the camera at once.
+        ChatClickGuard.Update(true, overChat: true, anyButtonHeld: false);
+        ChatClickGuard.UpdateWheel(true);
+        Assert.True(ChatClickGuard.Update(true, overChat: false, anyButtonHeld: true));
+        ChatClickGuard.UpdateWheel(false);
+        var plan = ChatMaskPlan.For(ChatClickGuard.Active, ChatClickGuard.WheelBlocked, keyboardAndMouse: true);
+        Assert.True(plan.BlockButtons);
+        Assert.False(plan.BlockZoom);
+    }
+
+    [Fact]
+    public void Off_the_chat_box_the_mask_takes_nothing()
+    {
+        ChatClickGuard.Update(true, overChat: false, anyButtonHeld: false);
+        ChatClickGuard.UpdateWheel(false);
+        Assert.False(ChatClickGuard.AnyActive);
+        Assert.True(ChatMaskPlan.For(ChatClickGuard.Active, ChatClickGuard.WheelBlocked, keyboardAndMouse: true).Empty);
+    }
+
+    [Fact]
+    public void Clicks_and_wheel_over_the_box_take_both_halves()
+    {
+        var plan = ChatMaskPlan.For(clicksActive: true, wheelActive: true, keyboardAndMouse: true);
+        Assert.True(plan.BlockButtons);
+        Assert.True(plan.BlockZoom);
+    }
+
+    [Fact]
+    public void A_controller_keeps_its_zoom_and_buttons_whatever_the_mouse_rests_on()
+    {
+        Assert.True(ChatMaskPlan.For(clicksActive: true, wheelActive: true, keyboardAndMouse: false).Empty);
+    }
+
+    [Fact]
+    public void Reset_drops_the_wheel_guard()
+    {
+        ChatClickGuard.UpdateWheel(true);
+        ChatClickGuard.Reset();
+        Assert.False(ChatClickGuard.WheelBlocked);
+        Assert.False(ChatClickGuard.AnyActive);
+    }
+
+    [Fact]
+    public void Chat_and_panel_masks_take_the_same_zoom_axis()
+    {
+        // The shared rule: every Progenitor surface that scrolls under the pointer takes ZoomCamera, and the panel
+        // scope that blocks under the pointer does too.
+        Assert.True(InputMaskPlan.For(InputMaskPlan.ScopeFor(pointerBlocked: true)).BlockZoom);
+        Assert.False(InputMaskPlan.For(InputMaskPlan.ScopeFor(pointerBlocked: false)).BlockZoom);
+        Assert.Equal(16, AnalogInputActions.ZoomCamera);
+    }
 }

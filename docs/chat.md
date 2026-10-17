@@ -38,6 +38,8 @@ Settings: `[Chat]` in `BepInEx/config/progenitor.ui.cfg`, also on Progenitor's p
 
 **How it works.** `Progenitor.Chat.ChatWindow` runs just before the game's `ClientChatSystem` update and moves the game's `_MessageTime` forward, never backward and never past now (`ChatVisibility`). The click guard is a third Progenitor input context at order 97 (`UiInputCapture.ChatClickGuardOrder`). It is registered once per client world, and it shares the input mask the mod panels use. It takes only gameplay actions bound to a mouse button: attack, camera turn, build place and pick up, plus any eligible action bound to the middle, back or forward button. Keyboard keys, push-to-talk, the map and menus are never taken. A press that starts on the box stays blocked until release; a press that starts elsewhere, such as a camera drag, is never cut off as it crosses the box. If the chat update stops, a frame watchdog drops the guard.
 
+**The wheel over the box scrolls only the chat** (2026-10-17, source-checked and game-free tested, not yet live-verified). The same order-97 context takes the camera zoom axis, and nothing else, while the pointer is over the visible box (log, scroll bar, tab line, grip, input line), whatever **Clicking chat doesn't attack** says; keys, movement and the mouse buttons are unchanged (`ChatMaskPlan`).
+
 **Where clicks are taken.** Over the message log (the same area the game's own hover test uses), over its scroll bar, which sits just outside the log's left edge, and over the input line while it shows, and only while the box is on screen: not after it fades, and not while the HUD is hidden. The area stays for as long as the box is shown, so a longer visibility time also keeps it longer. The guard is armed only when Core's UI module is installed, because that module's teardown releases the input mask it shares.
 
 **Limitations.**
@@ -55,6 +57,7 @@ Steam client in a world on the isolated test server, with the client free for a 
 4. Start a right-drag outside the box and cross it: the camera keeps turning. Hold attack and cross the box: the attack continues.
 5. Turn **Clicking chat doesn't attack** off: clicks reach the game again. Leave the world and rejoin: the guard registers again (one `Chat: click guard registered` line per world).
 6. Hot-swap Core while in a world: no stuck input, and the log shows the guard removed and registered again.
+7. Scroll the wheel with the pointer over the log, the scroll bar and the tab line: the chat scrolls and the camera does not zoom, with **Clicking chat doesn't attack** on and off. Move the pointer off the box (or let it fade) and scroll: the camera zooms. While over the box, WASD still walks.
 
 ## Chat commands: as built (CHAT2)
 
