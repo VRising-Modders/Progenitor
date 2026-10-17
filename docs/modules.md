@@ -430,7 +430,7 @@ Inbound `ChatMessageType.Whisper` becomes outbound `WhisperFrom`. Region still s
 
 Fire-and-forget: unload has nothing to reverse. `SerializeAndSendServerEventsSystem` consumes the entities the same frame and calls `SendPacketToUser(..., reliable: true)`.
 
-Debug bridge: `broadcast` op (`{text, type?: ChatMessageType name}`). Returns `{recipients, type, text}`.
+Debug bridge: `broadcast` op (`{text, type?: ChatMessageType name, count?: 1-100}`). Returns `{recipients, count, type, text}`. `count` sends that many lines (`text (i/count)`) in the one call, so they reach a client in the same frame (not live-verified).
 
 **Verified live 2026-09-03.** One connected player: `recipients` is 1, the player sees the line, and `chat_observe` with the same `match` reports `chatServerEvents: 1` (`Chat.Broadcast` / `SendTo` per connected user as the game does; evidence 48). Two clients connected at once: `broadcast` `recipients: 2` (evidence 55, 58, 60). A handled command is not broadcast to the other client.
 
