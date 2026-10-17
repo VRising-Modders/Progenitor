@@ -342,3 +342,48 @@ internal static class ChatReplacement
     internal static bool ContentTakenOver(IntPtr scrollContent, IntPtr gameNode, IntPtr ownClone) =>
         scrollContent != IntPtr.Zero && gameNode != IntPtr.Zero && scrollContent != gameNode && scrollContent != ownClone;
 }
+
+/// <summary>
+/// CHAT5: which entries of the game's chat list are new since the last read, game-free. The live half is
+/// <c>ChatWindow.NoteNewMessages</c>, which passes each entry's object pointer (stable: the game's objects never move).
+///
+/// <para><b>Why a count is not enough.</b> The game keeps at most 50 entries in <c>ClientChatSystem._ChatMessages</c>
+/// and drops the oldest for each new one. Once the list is full its count stops changing, so several lines that arrive
+/// in the same frame (a mod sending a header and nine lines from one handler) left the count at 50, and only the newest
+/// was taken: the chat view showed the last line only. The list grows at the end and drops from the front, so the
+/// surviving part of the previous read is a prefix of the current one; everything after that prefix is new.</para>
+/// </summary>
+internal static class ChatNewEntries
+{
+    /// <summary>
+    /// The index of the first new entry in <paramref name="current"/> (its count when nothing is new). The longest tail
+    /// of <paramref name="previous"/> that starts <paramref name="current"/> is the part already seen. When no tail lines
+    /// up (the game changed the list some other way), the entries after the previous newest one are new, or all of them
+    /// when that one is gone too (more lines than the list holds arrived at once). An empty previous read: all are new.
+    /// </summary>
+    internal static int FirstNew(IReadOnlyList<IntPtr>? previous, IReadOnlyList<IntPtr>? current)
+    {
+        int m = previous?.Count ?? 0, n = current?.Count ?? 0;
+        if (n == 0 || m == 0) return 0;
+        for (int start = Math.Max(0, m - n); start < m; start++)
+        {
+            int overlap = m - start;
+            bool match = true;
+            for (int j = 0; j < overlap; j++)
+            {
+                if (previous![start + j] != current![j]) { match = false; break; }
+            }
+
+            if (match) return overlap;
+        }
+
+        IntPtr newest = previous![m - 1];
+        if (newest != IntPtr.Zero)
+        {
+            for (int i = n - 1; i >= 0; i--)
+                if (current![i] == newest) return i + 1;
+        }
+
+        return 0;
+    }
+}

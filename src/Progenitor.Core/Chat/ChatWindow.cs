@@ -169,6 +169,8 @@ internal static class ChatWindow
     private static World? _world;
     private static int _lastCount = -1;
     private static IntPtr _lastEntry;
+    /// <summary>The entry pointers of the last read of the game's chat list, oldest first (<see cref="ChatNewEntries"/>).</summary>
+    private static List<IntPtr> _seen = new();
     private static float _lastActivity = float.NegativeInfinity;
     private static float _lastWheel;
     private static bool _lastWheelHad;
@@ -365,6 +367,7 @@ internal static class ChatWindow
         _canvas = null;
         _lastCount = -1;
         _lastEntry = IntPtr.Zero;
+        _seen = new List<IntPtr>();
         _lastActivity = float.NegativeInfinity;
         _lastWheel = 0f;
         _lastWheelHad = false;
@@ -484,32 +487,47 @@ internal static class ChatWindow
     }
 
     /// <summary>
-    /// A new message is a change in the count of <c>_ChatMessages</c> or in its last entry (in case the list
-    /// is capped and drops from the front). The first read in a world only records the baseline.
+    /// A new message is a change in the count of <c>_ChatMessages</c> or in its last entry. The game caps the list at
+    /// 50 and drops from the front, so a full list keeps its count while lines arrive: which entries are new comes from
+    /// lining up this read with the previous one (<see cref="ChatNewEntries"/>), so every line of a burst is taken,
+    /// not only the newest. The first read in a world only records the baseline.
     /// </summary>
     private static void NoteNewMessages(ClientChatSystem system, HUDChatWindow window, World world, float now)
     {
         var list = system._ChatMessages;
         int count = list == null ? 0 : list.Count;
         IntPtr last = count > 0 && list![count - 1] != null ? list[count - 1].Pointer : IntPtr.Zero;
-        if (_lastCount < 0)
+        bool first = _lastCount < 0;
+        if (!first && count == _lastCount && last == _lastEntry) return;
+
+        var entries = new ChatEntry?[count];
+        var pointers = new List<IntPtr>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var entry = list![i];
+            entries[i] = entry;
+            pointers.Add(entry == null ? IntPtr.Zero : entry.Pointer);
+        }
+
+        if (first)
         {
             // CHAT5: the lines the game already had when this world's chat was first read go into the view's log.
-            for (int i = 0; i < count; i++) ChatView.Ingest(list![i], world, null);
+            for (int i = 0; i < count; i++)
+                if (entries[i] != null) ChatView.Ingest(entries[i]!, world, null);
         }
-        else if ((count != _lastCount || last != _lastEntry) && count > 0)
+        else if (count > 0)
         {
             _lastActivity = now;
-            // CHAT3: whispers among the new entries set the /r partner. When the list did not simply grow (capped),
-            // only the newest entry is read. CHAT5: the same entries go into the chat view's log.
-            int from = count > _lastCount ? _lastCount : count - 1;
-            for (int i = Math.Max(0, from); i < count; i++)
+            // CHAT3: whispers among the new entries set the /r partner. CHAT5: the same entries go into the chat view's log.
+            for (int i = ChatNewEntries.FirstNew(_seen, pointers); i < count; i++)
             {
-                NoteWhisper(list![i]);
-                ChatView.Ingest(list[i], world, window);
+                if (entries[i] == null) continue;
+                NoteWhisper(entries[i]);
+                ChatView.Ingest(entries[i]!, world, window);
             }
         }
 
+        _seen = pointers;
         _lastCount = count;
         _lastEntry = last;
     }

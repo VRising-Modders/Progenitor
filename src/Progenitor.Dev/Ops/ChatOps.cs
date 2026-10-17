@@ -14,7 +14,9 @@ internal static class ChatOps
 {
     /// <summary>
     /// <paramref name="args"/>: <c>text</c> required; <c>type</c> optional inbound
-    /// <see cref="ChatMessageType"/> name (default System). Server, main thread.
+    /// <see cref="ChatMessageType"/> name (default System); <c>count</c> optional (1 to 100, default 1): that many
+    /// lines, <c>text (i/count)</c>, sent in this one call, so they reach the client in the same frame (the burst a mod's
+    /// event handler sends). Server, main thread.
     /// </summary>
     public static object Run(JsonElement args)
     {
@@ -31,10 +33,24 @@ internal static class ChatOps
             && !Enum.TryParse(typeName, ignoreCase: true, out type))
             throw new ArgumentException("args.type must be a ChatMessageType name (Global, Region, Team, Whisper, Local, System)");
 
-        int recipients = Progenitor.Chat.Chat.Broadcast(text, type);
+        int count = 1;
+        if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("count", out var c))
+        {
+            if (c.ValueKind != JsonValueKind.Number || !c.TryGetInt32(out count) || count < 1 || count > 100)
+                throw new ArgumentException("args.count must be a whole number from 1 to 100");
+        }
+
+        int recipients = 0;
+        for (int i = 1; i <= count; i++)
+        {
+            int n = Progenitor.Chat.Chat.Broadcast(count == 1 ? text : text + " (" + i + "/" + count + ")", type);
+            if (i == 1) recipients = n;
+        }
+
         return new
         {
             recipients,
+            count,
             type = type.ToString(),
             text,
         };
