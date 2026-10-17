@@ -334,6 +334,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Cameras\ObservationShares.cs" Link="Linked\ObservationShares.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerPreviewPolicy.cs" Link="Linked\ContainerPreviewPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerPreviewWire.cs" Link="Linked\ContainerPreviewWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerPreviewSyncPolicy.cs" Link="Linked\ContainerPreviewSyncPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Units\UnitVec3.cs" Link="Linked\UnitVec3.cs" />
     <!-- ctx.Input: ownership, the user yield, what to write each frame and the command patch are
          game-free; UnityInputRuntime.cs and PluginInput.cs are the game half and stay out. -->

@@ -67,6 +67,12 @@ internal sealed class ContainerPreviewPacket
     /// <summary>open / renew: the lease seconds asked for.</summary>
     public double Seconds { get; set; }
 
+    /// <summary>
+    /// open: put the user in the chest's inventory sync lists for the lease (default true; a packet without the field,
+    /// from an older client, gets true). False only for the Dev bridge's E1b comparison.
+    /// </summary>
+    public bool SyncInventory { get; set; } = true;
+
     /// <summary>reply: the server agreed.</summary>
     public bool Ok { get; set; }
 

@@ -43,6 +43,7 @@ internal static unsafe class ContainerPreviewServer
         _installed = true;
         CustomEvents.OnReceiveFromClient(ContainerPreviewWire.EventId, OnRequest);
         Plugin.Frame += Tick;
+        Persistence.ModSave.BeforeSave += OnBeforeSave;
         try
         {
             Config.SharedConfig.BindWhenAvailable(
@@ -67,8 +68,20 @@ internal static unsafe class ContainerPreviewServer
         try { CustomEvents.RemoveClientHandler(ContainerPreviewWire.EventId); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: handler removal threw: " + e.Message); }
         Plugin.Frame -= Tick;
+        Persistence.ModSave.BeforeSave -= OnBeforeSave;
         foreach (var holder in new List<Holder>(ByUser.Values)) holder.End(CameraObservationEndReason.Unloaded, notify: false, message: "");
         ByUser.Clear();
+    }
+
+    /// <summary>A world save is starting: take every preview's sync entries out (whether the game saves them is unknown).</summary>
+    private static void OnBeforeSave()
+    {
+        double now = Now;
+        foreach (var holder in ByUser.Values)
+        {
+            try { holder.Sync?.Suspend(now); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: taking sync entries out for the save threw: " + e.Message); }
+        }
     }
 
     /// <summary>Dev bridge status: every server-side preview.</summary>
@@ -87,6 +100,9 @@ internal static unsafe class ContainerPreviewServer
                 ["entity"] = h.Entity.Index + ":" + h.Entity.Version,
                 ["secondsLeft"] = Math.Round(Math.Max(0, h.Policy.Deadline - SharedObservation.Now), 1),
                 ["leaseHolders"] = lease?.HolderCount ?? 0,
+                ["syncInventory"] = h.Sync != null,
+                ["syncSuspended"] = h.Sync?.Suspended ?? false,
+                ["synced"] = h.Sync?.Describe(),
             });
         }
         return rows;
@@ -167,8 +183,21 @@ internal static unsafe class ContainerPreviewServer
             return;
         }
         ByUser[userEntity] = holder;
+        // E1: the chest's inventory reaches only users in its sync list; the streaming lease cannot reach it.
+        if (request.SyncInventory)
+        {
+            holder.Sync = new ContainerPreviewSync(world, userEntity, container);
+            try { holder.Sync.Refresh(); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("ContainerPreview: inventory sync failed: " + e.Message);
+                holder.End(CameraObservationEndReason.Failed, notify: false, message: "");
+                Reply(world, user.Index, request.Sequence, false, "The server could not share that container's contents.", 0, 0, 0);
+                return;
+            }
+        }
         Plugin.Logger?.LogInfo("ContainerPreview: user " + user.PlatformId + " previews " + id + " (" + container.Index + ":" + container.Version
-            + ", " + holder.Policy.Deadline.ToString("0") + ").");
+            + ", " + holder.Policy.Deadline.ToString("0") + ", inventory sync " + (holder.Sync == null ? "off" : holder.Sync.HeldCount + " entities") + ").");
         Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType);
     }
 
@@ -239,7 +268,14 @@ internal static unsafe class ContainerPreviewServer
                 }
             }
             catch (Exception e) { why = "The preview check failed: " + e.Message; }
-            if (why != null) holder.End(CameraObservationEndReason.Disposed, notify: true, message: why);
+            if (why != null) { holder.End(CameraObservationEndReason.Disposed, notify: true, message: why); continue; }
+            // Items that entered or left the chest since the last second; entries put back after a save.
+            try { holder.Sync?.Tick(now); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("ContainerPreview: inventory sync refresh threw: " + e.Message);
+                holder.End(CameraObservationEndReason.Failed, notify: true, message: "The server could not keep sharing that container's contents.");
+            }
         }
     }
 
@@ -293,6 +329,9 @@ internal static unsafe class ContainerPreviewServer
         internal Entity Entity { get; }
         internal SharedObservation? Lease => _lease;
 
+        /// <summary>This preview's entries in the chest's inventory sync lists; null with <c>syncInventory: false</c>.</summary>
+        internal ContainerPreviewSync? Sync { get; set; }
+
         public CameraObservationPolicy Policy { get; }
         public string Name => "container-preview:" + Container;
         public void Attached(SharedObservation lease) => _lease = lease;
@@ -319,6 +358,9 @@ internal static unsafe class ContainerPreviewServer
             _ended = true;
             _lease = null;
             if (ByUser.TryGetValue(User, out var current) && ReferenceEquals(current, this)) ByUser.Remove(User);
+            // Every end path (unload, disconnect, expiry, failure, replacement, the 1 s checks) comes through here.
+            try { Sync?.End(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: sync cleanup threw: " + e.Message); }
             Plugin.Logger?.LogInfo("ContainerPreview: " + Container + " ended (" + reason + (_message.Length > 0 ? ", " + _message : "") + ").");
             if (!notify || reason is CameraObservationEndReason.Disconnected or CameraObservationEndReason.Unloaded) return;
             var world = Worlds.Server;

@@ -32,8 +32,8 @@ test('container preview tool sends open, status, close and bag to the container_
   await tool.handler(tool.schema.parse({}));
   assert.deepEqual(plain(calls[0]), ['client', 'container_preview', {}]);
   const id = 'c-' + '0123456789abcdef'.repeat(2);
-  await tool.handler(tool.schema.parse({ action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false }));
-  assert.deepEqual(plain(calls[1]), ['client', 'container_preview', { action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false }]);
+  await tool.handler(tool.schema.parse({ action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false, syncInventory: false }));
+  assert.deepEqual(plain(calls[1]), ['client', 'container_preview', { action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false, syncInventory: false }]);
   await tool.handler(tool.schema.parse({ side: 'server' }));
   assert.deepEqual(plain(calls[2]), ['server', 'container_preview', {}]);
   await tool.handler(tool.schema.parse({ action: 'close' }));

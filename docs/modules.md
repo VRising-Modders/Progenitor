@@ -2667,9 +2667,13 @@ the ordinary window with its ordinary rights.
 
 1. `Open` sends the request (`Requesting`). No answer in 8 s closes with `NoAnswer`.
 2. The server holds the user's **streaming origin** at the chest, the same lease `ctx.Camera.Observe` uses,
-   so the chest and its inventory stream to the client (`Waiting`). The lease is shared: a camera preview
-   of the same chest (within 0.5 m) and the container preview hold one lease, each with its own deadline;
-   a lease at another point refuses the request ("Another view is already streaming for you").
+   so the chest entity streams to the client and stays enabled on the server (`Waiting`). The lease is shared:
+   a camera preview of the same chest (within 0.5 m) and the container preview hold one lease, each with its own
+   deadline; a lease at another point refuses the request ("Another view is already streaming for you").
+   **The streaming origin does not reach the inventory** (live 2026-10-17, E1: the chest arrived, its inventory
+   never did). A chest's inventory entity is sent only to the users in its `SyncToUserBuffer`, a per-user list
+   the game fills when someone starts interacting with the chest. So the server also puts the user in that list
+   for the lease (next paragraph).
 3. When the chest entity and its inventory entity exist on the client (looked up by network id every
    0.1 s, at most `ReplicationTimeoutSeconds`), and no other game menu is open, the client writes the
    game's own open request: an init entity carrying `ContainerMenu.InitData {TargetContainer, InteractBuff =
@@ -2690,6 +2694,28 @@ the ordinary window with its ordinary rights.
 `KeepOpen` previews renew the server lease every 60 s for 180 s, so a client that goes away without saying
 so is let go within three minutes. A timed preview asks for `Seconds` (default 30, at most 600) and closes on
 both sides at that time. One preview runs at a time per client; a new `Open` closes the running one.
+
+**Inventory sync (server, for the lease).** Right after the lease starts, the server appends one copy of the
+user entity to the `SyncToUserBuffer` of each of the chest's inventory entities and of each slot item entity that
+has one (a weapon or a piece of armor). Once a second it adds a copy to items that entered the chest and removes
+its own copy from items that left. When the preview ends, for any reason (close, timeout, expiry, the player
+leaving the area, disconnect, access or setting change, failure, replacement, Core or plugin unload), it
+removes exactly the copies it added: one copy per entity, the last match, as the game's own interaction end does.
+It never clears a list. The list is a multiset that a real interaction with the same chest, or another
+player's, shares, so either order of ending is safe. The game's own item sync may add its own copy to an item
+that enters the chest while the user is listed; the preview leaves that copy alone (the game does the same
+after a real interaction, inferred). The edit is the raw buffer path Core uses for the respawn list: one
+`AddBufferElement` to append, and `SetBufferDataRaw` to write the list back with one copy removed. The element
+layout is a layout fact (`SyncToUserBufferStride` 8, `SyncToUserBufferUserEntityOffset` 0). Main thread only. A
+failed first write refuses the preview ("The server could not share that container's contents.") after
+removing whatever it added; a failed later refresh ends it the same way.
+
+**Open question: is `SyncToUserBuffer` saved?** Not known (the game rebuilds the bitmask it feeds after a
+load, which suggests that the mask is not saved; the list was not traced). If it is saved, a server crash during a
+preview would leave the user synced to that chest's contents: read-only data for the castle's own owner or
+clan member, no permission change. Mitigation: before every world save (`ModSave.BeforeSave`) the server takes
+all preview entries out, and puts them back 5 s later; the previewing client may see the window stop updating
+for those seconds. A load-time sweep of leftover entries is not built.
 
 Every close tells the server, so the lease goes at once, except a refusal (no lease was made), the server's
 own end, and a world change (the connection is gone). That includes an unload of the calling plugin or Core
@@ -2724,8 +2750,8 @@ Closing calls the game's `HUDMenuManager.CloseMenu(world)` only while the open m
 window on this chest (or not bound yet) with no interaction behind it, so a menu the player opened for real
 is left alone. Every hook exists only from the open until the close, except the mapper guard, which waits for the window to be gone (above). A hook that throws logs one warning per preview, not one per frame.
 
-**Not in scope.** Stations, refiners and servant coffins (other menus); a fake interaction buff or the
-game's per-user always-sync buffer (each would need its own opt-in experiment); docking the Find window itself
+**Not in scope.** Stations, refiners and servant coffins (other menus); a fake interaction buff (it would make the window writable);
+a load-time sweep of leftover sync entries; docking the Find window itself
 (`panel.Dock(UiDock.Left, …)`, [ui.md](ui.md#docked-panels-dock1)).
 
 **Live plan (not run).** On the isolated test server and an idle test client, with the client in a castle
@@ -2739,9 +2765,29 @@ and the shared lease.
   client `status` shows `phase` `Opening` or `Open` with a `target` and an `inventory` entity; server status
   shows the preview and a lease with 1 holder at the chest's point. With `progenitor_components` on the
   client inventory entity, `InventoryBuffer` is present; put a weapon in that chest first and confirm its
-  item entity exists on the client. Repeat for the upstairs chest. If the inventory never arrives
-  (`ReplicationTimeout` with "The container's inventory did not arrive."), stop: the option needs the
-  always-sync experiment instead.
+  item entity exists on the client. Repeat for the upstairs chest. **Run 2026-10-17 (before the inventory
+  sync): failed.** The chest arrived; the inventory never did (`ReplicationTimeout`, "The container's inventory
+  did not arrive.") at about 740 m and 1000 m. Cause and fix: the inventory sync paragraph above.
+- **E1b inventory sync (not run).** Same chest, with a few stacks and one weapon in it.
+  1. Server, before: `progenitor_components` on the chest's inventory entity and the weapon's item entity:
+     `SyncToUserBuffer` length (0, or other users' interactions) and `SyncToUserBitMask` 0.
+  2. Control: client `open {"id":"c-…","keepOpen":true,"syncInventory":false}`: the E1 result again
+     (`ReplicationTimeout`). Server status for it shows `syncInventory` false and no `synced` rows.
+  3. Client `open {"id":"c-…","keepOpen":true}` (sync on, the default). Server status
+     (`container_preview` with `side: "server"`): the preview has `syncInventory` true, `syncSuspended` false, and
+     `synced` rows for the inventory entity (`inventory` true) and the weapon, each `thisUser` 1 and `users` one
+     more than in step 1. `progenitor_components` on the inventory: `SyncToUserBitMask` has one bit set.
+  4. Client within about 1 s: `status` shows an `inventory` entity and `phase` `Opening` or `Open`; on the client,
+     the inventory's `InventoryBuffer` matches the server slot for slot and the weapon's item entity exists. Note
+     whether the client copies carry `Disabled` (input for E2).
+  5. Move an item into the chest on the server (`.items add c-… <item> 1`, a weapon), wait 2 s: a new `synced` row.
+     Take it out (`.items remove`): the row goes and that item's list loses one copy.
+  6. Save during the preview (`progenitor_world_save`): server status shows `syncSuspended` true and no rows
+     right after, and the rows back after about 5 s.
+  7. `close`: server status shows no preview; `progenitor_components` on both entities: the step 1 lengths
+     again. Record what the client's inventory entity does (destroyed, disabled, or stops updating).
+  8. Cleanup as in E4: every list back to its step 1 contents (the persistence guard), the client at the title
+     screen, sample plugins removed from both reload folders.
 - **E2 open and hold.** First `open {"id":"c-…","hudGate":false}`: the open is written but the interact-HUD
   skip is off, so the game should close the window at once (`closeReason` `WindowClosed` or `OpenFailed`;
   expected per the research, not yet observed). Then a normal open: the window appears filled

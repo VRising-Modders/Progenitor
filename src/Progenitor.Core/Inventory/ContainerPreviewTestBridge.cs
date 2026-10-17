@@ -13,7 +13,7 @@ namespace Progenitor.Inventory;
 /// </summary>
 internal static class ContainerPreviewTestBridge
 {
-    public static Dictionary<string, object?> Open(string id, bool keepOpen, double seconds, bool hideBag, double replicationTimeout, bool dropEvents, bool hudGate)
+    public static Dictionary<string, object?> Open(string id, bool keepOpen, double seconds, bool hideBag, double replicationTimeout, bool dropEvents, bool hudGate, bool syncInventory)
     {
         if (Plugin.IsServerProcess) throw new InvalidOperationException("container_preview open runs on the client");
         if (!ContainerId.TryParse(id, out var container)) throw new ArgumentException("args.id must be a container id (c- plus 32 hex digits)");
@@ -27,7 +27,7 @@ internal static class ContainerPreviewTestBridge
         };
         var problem = options.Problem();
         if (problem != null) throw new ArgumentException(problem);
-        var handle = ContainerPreviewClient.Open(container, options, typeof(ContainerPreviewTestBridge), hudGate);
+        var handle = ContainerPreviewClient.Open(container, options, typeof(ContainerPreviewTestBridge), hudGate, syncInventory);
         var result = handle.Describe();
         result["requested"] = "open";
         return result;

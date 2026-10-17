@@ -15,9 +15,10 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{}</c> or <c>{"action":"status"}</c> (either side): the client's running preview (state, phase, network id,
 /// client target and inventory entities, hooks, hidden UI, dropped item events) and the game's open menu and container
 /// window target; on the server, every server-side preview and every shared streaming lease (user, point, holders).</item>
-/// <item><c>{"action":"open","id":"c-...","keepOpen":false,"seconds":30,"hideBag":true,"replicationTimeout":5,"dropEvents":true,"hudGate":true}</c>
+/// <item><c>{"action":"open","id":"c-...","keepOpen":false,"seconds":30,"hideBag":true,"replicationTimeout":5,"dropEvents":true,"hudGate":true,"syncInventory":true}</c>
 /// (client): start a preview of that container; read <c>status</c> for the outcome. <c>hudGate: false</c> (E2 only)
-/// leaves the game's interact-HUD auto-close alone, to observe it closing the window.</item>
+/// leaves the game's interact-HUD auto-close alone, to observe it closing the window. <c>syncInventory: false</c> (E1b only) does
+/// not put the user in the chest's inventory sync lists, so the inventory stays away as in E1.</item>
 /// <item><c>{"action":"close"}</c> (client): what Dispose does.</item>
 /// <item><c>{"action":"bag","mode":"inactive"|"alpha"}</c> (client): how the next preview hides the bag panel (E5).</item>
 /// </list>
@@ -39,7 +40,8 @@ internal static class ContainerPreviewOps
                 Bool(args, "hideBag") ?? true,
                 Num(args, "replicationTimeout") ?? 5,
                 Bool(args, "dropEvents") ?? true,
-                Bool(args, "hudGate") ?? true),
+                Bool(args, "hudGate") ?? true,
+                Bool(args, "syncInventory") ?? true),
             "close" => Call("Close"),
             "bag" => Call("BagMode", Str(args, "mode")?.Trim().ToLowerInvariant() ?? throw new ArgumentException("args.mode (inactive or alpha) is required for bag")),
             _ => throw new ArgumentException("args.action must be status, open, close or bag"),

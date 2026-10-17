@@ -77,7 +77,7 @@ internal static unsafe class ContainerPreviewClient
     }
 
     /// <summary>Start a preview; a running one closes (<see cref="ContainerPreviewCloseReason.Replaced"/>).</summary>
-    internal static ContainerPreviewHandle Open(ContainerId container, ContainerPreviewOptions options, object? owner, bool hudGate = true)
+    internal static ContainerPreviewHandle Open(ContainerId container, ContainerPreviewOptions options, object? owner, bool hudGate = true, bool syncInventory = true)
     {
         if (!_installed) throw new InvalidOperationException("The container preview is not installed (client side only).");
         if (container.IsNone) throw new ArgumentException("No container id.", nameof(container));
@@ -85,18 +85,18 @@ internal static unsafe class ContainerPreviewClient
         if (world == null || !world.IsCreated) throw new InvalidOperationException("No client world (join a game first).");
         _current?.Close(ContainerPreviewCloseReason.Replaced, "", notify: true);
         int sequence = _sequence = _sequence == int.MaxValue ? 1 : _sequence + 1;
-        var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate };
+        var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate, SyncInventory = syncInventory };
         _current = handle;
-        if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds))
+        if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds, syncInventory))
             handle.Close(ContainerPreviewCloseReason.Failed, "The preview request could not be sent.", notify: true);
         return handle;
     }
 
-    internal static bool SendRequest(string kind, int sequence, ContainerId container, double seconds)
+    internal static bool SendRequest(string kind, int sequence, ContainerId container, double seconds, bool syncInventory = true)
     {
         try
         {
-            var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket { Kind = kind, Sequence = sequence, Container = container.ToString(), Seconds = seconds });
+            var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket { Kind = kind, Sequence = sequence, Container = container.ToString(), Seconds = seconds, SyncInventory = syncInventory });
             return CustomEvents.SendToServer(ContainerPreviewWire.EventId, bytes);
         }
         catch (Exception e)
@@ -267,6 +267,9 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// opened. The Dev bridge's <c>hudGate</c>; always true for plugin previews.
     /// </summary>
     internal bool HudGate { get; init; } = true;
+
+    /// <summary>E1b only: false asks the server not to put the user in the chest's inventory sync lists. The Dev bridge's <c>syncInventory</c>; always true for plugin previews.</summary>
+    internal bool SyncInventory { get; init; } = true;
     internal Entity Target => _target;
     internal int DroppedEvents { get; private set; }
 
@@ -652,6 +655,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["droppedEvents"] = DroppedEvents,
         ["keepOpen"] = _options.KeepOpen,
         ["hudGate"] = HudGate,
+        ["syncInventory"] = SyncInventory,
         ["owner"] = _owner?.GetType().Name,
     };
 
