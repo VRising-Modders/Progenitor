@@ -877,6 +877,9 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\GameMenuHistory.cs" Link="Linked\GameMenuHistory.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Navigation.cs" Link="Linked\ModsMenu.Navigation.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\GameKeybindCatalog.cs" Link="Linked\GameKeybindCatalog.cs" />
+    <!-- PAD1: the game's gamepad bindings (game-free half) and the gamepad key capture. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GamepadKeybindCatalog.cs" Link="Linked\GamepadKeybindCatalog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GamepadCapture.cs" Link="Linked\GamepadCapture.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\GameKeyRemap.cs" Link="Linked\GameKeyRemap.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsCatalog.Keys.cs" Link="Linked\SettingsCatalog.Keys.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\KeybindGroups.cs" Link="Linked\KeybindGroups.cs" />

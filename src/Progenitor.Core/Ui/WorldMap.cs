@@ -85,6 +85,44 @@ public static class WorldMap
     }
 
     /// <summary>
+    /// PAD1: the map point under the game's controller cursor, as <see cref="TryReadPointer"/> reads the mouse's. The
+    /// cursor is the map mapper's <c>_GamepadCursor</c> (0x2A8), else the menu's <c>MapMenu.GamepadCursor</c> (0x100,
+    /// <c>[AllowNullReference]</c>), both <c>GameObject</c>s on the map's screen-space canvas (the game's own map click
+    /// converts with a null camera), so its screen point is <c>RectTransformUtility.WorldToScreenPoint(null, position)</c>.
+    /// False with the reason when the map is closed or the cursor is missing or hidden. <b>Not live-verified.</b>
+    /// </summary>
+    internal static bool TryReadGamepadCursor(out MapPointer pointer)
+    {
+        pointer = MapPointer.Off("map closed");
+        if (!IsOpen) return false;
+        try
+        {
+            var world = Worlds.Client;
+            if (world == null || !world.IsCreated) { pointer = MapPointer.Off("no client world"); return false; }
+            var mapper = world.GetExistingSystemManaged<MapMenuMapper>();
+            if (mapper == null || mapper.Pointer == IntPtr.Zero) { pointer = MapPointer.Off("no map system"); return false; }
+            GameObject? cursor = null;
+            try { cursor = mapper._GamepadCursor; }
+            catch { cursor = null; }
+            if (!Alive(cursor))
+            {
+                var menu = mapper._MapMenu;
+                if (!Alive(menu)) menu = mapper.GetMapMenu();
+                cursor = Alive(menu) ? menu!.GamepadCursor : null;
+            }
+
+            if (!Alive(cursor) || !cursor!.activeInHierarchy) { pointer = MapPointer.Off("no controller cursor on the map"); return false; }
+            var screen = RectTransformUtility.WorldToScreenPoint(null, cursor.transform.position);
+            return TryReadPointerAt(screen.x, screen.y, out pointer);
+        }
+        catch (Exception e)
+        {
+            pointer = MapPointer.Off("controller cursor read threw: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// <see cref="TryReadPointer"/> for a given screen point (Input System pixels, origin bottom left) instead of the
     /// pointer: the map share's press position and the dev bridge's <c>map share</c> at a point.
     /// </summary>

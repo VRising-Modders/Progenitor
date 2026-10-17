@@ -365,7 +365,11 @@ internal sealed class KeybindsPane
             catch { cached = null; }
         }
 
-        return KeybindsTabModel.Build(picture, SafeOrder(), SafeHasPage, cached);
+        // PAD1: the controller keys come from the gamepad picture, built with this one.
+        KeybindPicture? gamepad;
+        try { gamepad = KeybindArbiter.CurrentGamepad(); }
+        catch { gamepad = null; }
+        return KeybindsTabModel.Build(picture, SafeOrder(), SafeHasPage, cached, gamepad: gamepad);
     }
 
     private IReadOnlyList<(string Id, string Name)> SafeOrder()
@@ -854,14 +858,30 @@ internal sealed class KeybindsPane
         SyncCurrent();
     }
 
-    /// <summary>The secondary cap: live on a game row only (KEYS9: its second slot); a mod key has one chord.</summary>
+    /// <summary>
+    /// The secondary cap: a game row's second slot (KEYS9); PAD1: a Progenitor bind's controller key, which starts the
+    /// controller capture.
+    /// </summary>
     internal void PressSecondary(string rowId)
     {
         var row = _model?.FindRow(rowId);
         if (row == null || !row.SecondaryEnabled) return;
         _selected = row.Id;
+        if (row.HasGamepadCap)
+        {
+            BeginEdit(row.Id, GamepadSlot);
+            SyncCurrent();
+            return;
+        }
+
         PressGameCap(row, 1);
     }
+
+    /// <summary>PAD1: the edit slot of a Progenitor bind's controller key.</summary>
+    internal const int GamepadSlot = 2;
+
+    /// <summary>PAD1: the key being changed is a controller key.</summary>
+    private bool EditingGamepad => _editSlot == GamepadSlot;
 
     /// <summary>KEYS9: a game cap's click: the capture for that slot, or the note saying why it cannot change.</summary>
     private void PressGameCap(KeybindsRowModel row, int slot)
@@ -1293,12 +1313,14 @@ internal sealed class KeybindsPane
             return false;
         }
 
-        _editSlot = row.IsGame && slot == 1 ? 1 : 0;
+        _editSlot = row.IsGame && slot == 1 ? 1 : !row.IsGame && slot == GamepadSlot && row.HasGamepadCap ? GamepadSlot : 0;
         _editing = row.Id;
         _pending = null;
         _swapWith = null;
         _takeFrom.Clear();
-        _editStatus = KeybindsTabLayout.CaptureHelp;
+        _editStatus = EditingGamepad
+            ? KeybindsTabLayout.CaptureHelpGamepad + (Keybinds.GamepadConnected ? "" : " " + Keybinds.NoGamepadReason)
+            : KeybindsTabLayout.CaptureHelp;
         StartCapture();
         SyncEditBarRow();
         SyncCurrent();
@@ -1317,7 +1339,7 @@ internal sealed class KeybindsPane
             {
                 if (token != _captureToken) return;
                 OnCaptured(result);
-            });
+            }, gamepad: EditingGamepad);
         }
         catch (Exception e)
         {
@@ -1365,6 +1387,26 @@ internal sealed class KeybindsPane
                     _pending = null;
                     _editStatus = KeybindsTabLayout.StillWaiting(KeybindsTabLayout.ModifiersOnlyReason);
                     StartCapture();
+                    break;
+                }
+
+                if (EditingGamepad)
+                {
+                    // PAD1: a controller key is refused when something it would meet has it (the game's controller
+                    // binding, another bind's controller key); it is not taken from them.
+                    string? padRefusal = !result.Chord.IsGamepad ? Keybinds.NotGamepadReason
+                        : result.Chord == row.GamepadChord ? null
+                        : Keybinds.GamepadClashReason(row.Claim.OwnerId, row.Claim.ActionId, row.Claim.Scope, result.Chord);
+                    if (padRefusal != null)
+                    {
+                        _pending = null;
+                        _editStatus = KeybindsTabLayout.StillWaiting(padRefusal);
+                        StartCapture();
+                        break;
+                    }
+
+                    _pending = result.Chord;
+                    _editStatus = KeybindsTabLayout.GamepadPreviewSentence(row.GamepadChord, result.Chord);
                     break;
                 }
 
@@ -1568,7 +1610,10 @@ internal sealed class KeybindsPane
     /// <summary>The bridge's capture: as if <paramref name="chord"/> was pressed while <paramref name="rowId"/> waits.</summary>
     internal bool CaptureForBridge(string rowId, KeyChord chord)
     {
-        if (!string.Equals(_editing, rowId, StringComparison.OrdinalIgnoreCase) && !BeginEdit(rowId)) return false;
+        // PAD1: a controller chord edits the row's controller key.
+        int slot = chord.IsGamepad ? GamepadSlot : -1;
+        bool sameEdit = string.Equals(_editing, rowId, StringComparison.OrdinalIgnoreCase) && EditingGamepad == chord.IsGamepad;
+        if (!sameEdit && !BeginEdit(rowId, slot)) return false;
         _captureToken++;
         try { Keybinds.CancelCapture(); }
         catch { /* */ }
@@ -1738,7 +1783,16 @@ internal sealed class KeybindsPane
             return;
         }
 
-        if (row.Claim.DefaultChord is not { } d) return;
+        // PAD1: the controller key goes back to its default too.
+        if (row.GamepadChanged && row.Gamepad!.Claim.DefaultChord is { } padDefault)
+        {
+            _editSlot = GamepadSlot;
+            Store(row, padDefault, reset: true);
+            row = _model?.FindRow(rowId) ?? row;
+        }
+
+        if (!row.Claim.Modified || row.Claim.DefaultChord is not { } d) return;
+        _editSlot = 0;
         Store(row, d, reset: true);
     }
 
@@ -1747,7 +1801,7 @@ internal sealed class KeybindsPane
         var row = _model?.FindRow(rowId);
         if (row == null || !row.CanClear) return;
         // KEYS9: on a game row the gutter's Unbind clears the primary key, as the game's own Clear does.
-        if (row.IsGame) _editSlot = 0;
+        _editSlot = 0;
         Store(row, KeyChord.None);
     }
 
@@ -1758,7 +1812,7 @@ internal sealed class KeybindsPane
     /// </summary>
     internal bool Store(KeybindsRowModel row, KeyChord chord, bool reset = false, IReadOnlyList<KeybindClaim>? take = null)
     {
-        int slot = row.IsGame ? _editSlot : 0;
+        int slot = row.IsGame || (EditingGamepad && row.HasGamepadCap) ? _editSlot : 0;
         var released = new List<(KeybindClaim Holder, string Kept)>();
         string status = "";
         bool ok = true;
@@ -1856,6 +1910,14 @@ internal sealed class KeybindsPane
             return written.Ok;
         }
 
+        if (row.Claim.Source == KeybindSource.Progenitor && slot == GamepadSlot)
+        {
+            // PAD1: the controller key, through its own entry and check.
+            bool padOk = Keybinds.TryRebindGamepad(row.Claim.OwnerId, row.Claim.ActionId, chord, reset, out string? padWhy);
+            status = padOk ? "Saved." : padWhy ?? Keybinds.NotRegisteredReason;
+            return padOk;
+        }
+
         if (row.Claim.Source == KeybindSource.Progenitor)
         {
             // KEYS2: Keybinds refuses a reserved chord and any chord something else has (a reset's default
@@ -1951,9 +2013,9 @@ internal sealed class KeybindsPane
         string primary = string.Equals(keyText, KeybindsTabLayout.CapturingText, StringComparison.Ordinal)
             ? keyText : KeybindsTabLayout.CapCaption(keyText);
         string secondary = model.SecondaryCaption;
-        if (editing && model.IsGame && _editSlot == 1)
+        if (editing && ((model.IsGame && _editSlot == 1) || (model.HasGamepadCap && EditingGamepad)))
         {
-            // KEYS9: the second slot is the one waiting; the primary cap keeps its key.
+            // KEYS9: the second slot is the one waiting; the primary cap keeps its key. PAD1: so is the controller key.
             secondary = _capturing ? KeybindsTabLayout.CapturingText
                 : _pending is { } p2 ? KeybindsTabLayout.CapCaption(p2.IsBound ? p2.DisplayText : "") : secondary;
             primary = model.PrimaryCaption;
@@ -1995,14 +2057,15 @@ internal sealed class KeybindsPane
         bool on = row != null;
         SetVisible(bar, on);
         if (!on) return;
-        string title = KeybindsTabLayout.EditTitle(SectionTitleOf(row!), row!.Name + (row.IsGame && _editSlot == 1 ? KeybindsTabLayout.SecondKeySuffix : ""));
+        string title = KeybindsTabLayout.EditTitle(SectionTitleOf(row!), row!.Name
+            + (row.IsGame && _editSlot == 1 ? KeybindsTabLayout.SecondKeySuffix : EditingGamepad ? KeybindsTabLayout.ControllerKeySuffix : ""));
         // KEYS3 polish (user report 2026-09-30): the bar stays short; the full status (a refusal, the
         // preview) is in the description column and the edit readback.
         bar.SetCell(CellEditText, text: KeybindsTabLayout.EditBarText(title, _capturing, _pending),
-            tone: _pending is { } p && (_takeFrom.Count > 0 || Preview(row.SlotClaim(_editSlot), p) is { InConflict: true }) ? CellTone.Warn : CellTone.Normal);
+            tone: !EditingGamepad && _pending is { } p && (_takeFrom.Count > 0 || Preview(row.SlotClaim(_editSlot), p) is { InConflict: true }) ? CellTone.Warn : CellTone.Normal);
         bar.SetCell(CellSave, visible: _pending != null);
         bar.SetCell(CellSwap, visible: _swapWith != null);
-        bar.SetCell(CellUnbind, visible: row.IsGame ? !IsUnbound(row.SlotClaim(_editSlot)) : row.CanClear);
+        bar.SetCell(CellUnbind, visible: EditingGamepad ? row.GamepadChord.IsBound : row.IsGame ? !IsUnbound(row.SlotClaim(_editSlot)) : row.CanClear);
     }
 
     private static bool IsUnbound(KeybindClaim claim) =>

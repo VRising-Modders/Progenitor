@@ -92,6 +92,76 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
         catch { return null; }
     }
 
+    /// <summary>PAD1: the gamepad buttons' own edge state (another device, another id).</summary>
+    private readonly KeyEdgeTracker _padEdges = new();
+
+    private static Gamepad? CurrentGamepad()
+    {
+        try { return Gamepad.current; }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// PAD1: the control behind a gamepad <see cref="UiKey"/> on <c>Gamepad.current</c>, as the client's metadata lists
+    /// them (<c>buttonSouth</c> ... <c>selectButton</c>, <c>dpad.up</c> ...; the triggers are <c>ButtonControl</c>s
+    /// with the Input System's press point). Null for any other key or when there is no gamepad. Re-fetched per read:
+    /// a pad that is unplugged and plugged back is a new device.
+    /// </summary>
+    private static UnityEngine.InputSystem.Controls.ButtonControl? PadButton(Gamepad? pad, UiKey key)
+    {
+        if (pad == null) return null;
+        try
+        {
+            return key switch
+            {
+                UiKey.GamepadSouth => pad.buttonSouth,
+                UiKey.GamepadEast => pad.buttonEast,
+                UiKey.GamepadWest => pad.buttonWest,
+                UiKey.GamepadNorth => pad.buttonNorth,
+                UiKey.GamepadLeftShoulder => pad.leftShoulder,
+                UiKey.GamepadRightShoulder => pad.rightShoulder,
+                UiKey.GamepadLeftTrigger => pad.leftTrigger,
+                UiKey.GamepadRightTrigger => pad.rightTrigger,
+                UiKey.GamepadDpadUp => pad.dpad?.up,
+                UiKey.GamepadDpadDown => pad.dpad?.down,
+                UiKey.GamepadDpadLeft => pad.dpad?.left,
+                UiKey.GamepadDpadRight => pad.dpad?.right,
+                UiKey.GamepadLeftStick => pad.leftStickButton,
+                UiKey.GamepadRightStick => pad.rightStickButton,
+                UiKey.GamepadStart => pad.startButton,
+                UiKey.GamepadSelect => pad.selectButton,
+                _ => null,
+            };
+        }
+        catch { return null; }
+    }
+
+    /// <summary>PAD1: every gamepad button held now, as <see cref="KeyChord.GamepadBit"/> bits. 0 when unreadable.</summary>
+    private static uint PadHeld(Gamepad pad)
+    {
+        uint held = 0;
+        foreach (var key in KeyChord.GamepadKeys)
+        {
+            var button = PadButton(pad, key);
+            try
+            {
+                if (button != null && button.isPressed) held |= KeyChord.GamepadBit(key);
+            }
+            catch { /* a control read mid-teardown is not held */ }
+        }
+
+        return held;
+    }
+
+    public bool TryReadGamepadHeld(out uint held)
+    {
+        held = 0;
+        var pad = CurrentGamepad();
+        if (pad == null) return false;
+        held = PadHeld(pad);
+        return true;
+    }
+
     public bool IsAvailable
     {
         get
@@ -195,6 +265,15 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
     {
         refusedAsAltGr = false;
         if (!chord.IsBound) return false;
+        if (chord.IsGamepad)
+        {
+            // PAD1: a gamepad button, with exactly the chord's held button (KeyChord.MatchesGamepadHeld).
+            var pad = CurrentGamepad();
+            var padButton = PadButton(pad, chord.Key);
+            if (padButton == null || !WentDown(pad!, _padEdges, chord.Key, padButton)) return false;
+            return chord.MatchesGamepadHeld(PadHeld(pad!));
+        }
+
         var keyboard = Keyboard.current;
         if (KeyChord.IsMouseKey(chord.Key))
         {
@@ -229,6 +308,12 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
         if (!chord.IsBound) return false;
         try
         {
+            if (chord.IsGamepad)
+            {
+                var padButton = PadButton(CurrentGamepad(), chord.Key);
+                return padButton != null && padButton.isPressed;
+            }
+
             if (KeyChord.IsMouseKey(chord.Key))
             {
                 var button = MouseButton(CurrentMouse(), chord.Key);
@@ -361,6 +446,8 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
     private int _deviceId;
     private IntPtr _deviceIdPtr2;
     private int _deviceId2;
+    private IntPtr _deviceIdPtr3;
+    private int _deviceId3;
 
     /// <summary>
     /// <c>InputDevice.deviceId</c>, cached per device object (keyboard and mouse: two slots).
@@ -375,10 +462,13 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
         {
             if (ptr == _deviceIdPtr) return _deviceId;
             if (ptr == _deviceIdPtr2) return _deviceId2;
+            if (ptr == _deviceIdPtr3) return _deviceId3;
         }
         int id = device.deviceId;
         if (ptr == IntPtr.Zero) return id;
-        // Two slots, oldest replaced: keyboard and mouse alternate without evicting each other.
+        // Three slots, oldest replaced: keyboard, mouse and (PAD1) gamepad alternate without evicting each other.
+        _deviceIdPtr3 = _deviceIdPtr2;
+        _deviceId3 = _deviceId2;
         _deviceIdPtr2 = _deviceIdPtr;
         _deviceId2 = _deviceId;
         _deviceIdPtr = ptr;
@@ -559,6 +649,8 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
             if (KeyChord.IsModifierKey(key)) continue;
             // KEYS4: the mouse buttons are read from the mouse, after the keyboard.
             if (KeyChord.IsMouseKey(key)) continue;
+            // PAD1: the gamepad buttons are read from the gamepad, and only by the gamepad capture.
+            if (KeyChord.IsGamepadKey(key)) continue;
             list.Add(key);
         }
 

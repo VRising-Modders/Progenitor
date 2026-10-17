@@ -17,6 +17,11 @@ namespace Progenitor.Ui;
 /// (<c>leftButton</c>, <c>rightButton</c>). They bind and clash like keys. The left and right buttons
 /// attack, move and click menus, so a chord on one needs a modifier and they are never Mods-menu keys
 /// (<see cref="MouseChords"/>).</para>
+///
+/// <para>PAD1: the last sixteen are gamepad buttons (<see cref="GamepadSouth"/> ... <see cref="GamepadSelect"/>), the
+/// Input System's <c>GamepadButton</c> names with a <c>Gamepad</c> prefix. They make controller chords
+/// (<see cref="KeyChord.Gamepad"/>), a bind's second chord beside its keyboard or mouse one, and never mix with keys or
+/// Ctrl, Shift and Alt.</para>
 /// </summary>
 public enum UiKey
 {
@@ -48,6 +53,58 @@ public enum UiKey
 
     /// <summary>KEYS8: the right mouse button. A chord on it needs Ctrl, Shift or Alt (<see cref="MouseChords"/>).</summary>
     MouseRight,
+
+    // PAD1: gamepad buttons. The names are the Input System's GamepadButton names with a "Gamepad" prefix, read from
+    // Gamepad.current by the input source (never through the keyboard map). A gamepad chord is one of these, optionally
+    // with one more of them held (KeyChord.Held); it never carries Ctrl, Shift or Alt.
+
+    /// <summary>PAD1: the bottom face button (Xbox A, PlayStation Cross; <c>buttonSouth</c>).</summary>
+    GamepadSouth,
+
+    /// <summary>PAD1: the right face button (Xbox B, PlayStation Circle; <c>buttonEast</c>).</summary>
+    GamepadEast,
+
+    /// <summary>PAD1: the left face button (Xbox X, PlayStation Square; <c>buttonWest</c>).</summary>
+    GamepadWest,
+
+    /// <summary>PAD1: the top face button (Xbox Y, PlayStation Triangle; <c>buttonNorth</c>).</summary>
+    GamepadNorth,
+
+    /// <summary>PAD1: the left bumper (LB, L1; <c>leftShoulder</c>).</summary>
+    GamepadLeftShoulder,
+
+    /// <summary>PAD1: the right bumper (RB, R1; <c>rightShoulder</c>).</summary>
+    GamepadRightShoulder,
+
+    /// <summary>PAD1: the left trigger read as a button (LT, L2; <c>leftTrigger</c>).</summary>
+    GamepadLeftTrigger,
+
+    /// <summary>PAD1: the right trigger read as a button (RT, R2; <c>rightTrigger</c>).</summary>
+    GamepadRightTrigger,
+
+    /// <summary>PAD1: d-pad up (<c>dpad/up</c>).</summary>
+    GamepadDpadUp,
+
+    /// <summary>PAD1: d-pad down (<c>dpad/down</c>).</summary>
+    GamepadDpadDown,
+
+    /// <summary>PAD1: d-pad left (<c>dpad/left</c>).</summary>
+    GamepadDpadLeft,
+
+    /// <summary>PAD1: d-pad right (<c>dpad/right</c>).</summary>
+    GamepadDpadRight,
+
+    /// <summary>PAD1: the left stick pressed in (L3; <c>leftStickPress</c>).</summary>
+    GamepadLeftStick,
+
+    /// <summary>PAD1: the right stick pressed in (R3; <c>rightStickPress</c>).</summary>
+    GamepadRightStick,
+
+    /// <summary>PAD1: Start (Xbox Menu, PlayStation Options; <c>start</c>).</summary>
+    GamepadStart,
+
+    /// <summary>PAD1: Select (Xbox View, PlayStation Share or Create; <c>select</c>).</summary>
+    GamepadSelect,
 }
 
 /// <summary>Modifier keys held with a <see cref="KeyChord"/>'s main key. Side-agnostic: either Ctrl counts.</summary>
@@ -122,7 +179,63 @@ public readonly struct KeyChord : IEquatable<KeyChord>
     public KeyChord(UiKey key, KeyModifiers modifiers = KeyModifiers.None)
     {
         Key = key;
-        Modifiers = key == UiKey.None ? KeyModifiers.None : modifiers;
+        // PAD1: a gamepad button never carries keyboard modifiers.
+        Modifiers = key == UiKey.None || IsGamepadKey(key) ? KeyModifiers.None : modifiers;
+        Held = UiKey.None;
+    }
+
+    private KeyChord(UiKey button, UiKey held, bool gamepad)
+    {
+        bool ok = gamepad && IsGamepadKey(button);
+        Key = ok ? button : UiKey.None;
+        Modifiers = KeyModifiers.None;
+        Held = ok && held != button && IsGamepadKey(held) ? held : UiKey.None;
+    }
+
+    /// <summary>
+    /// PAD1: a gamepad chord: <paramref name="button"/> pressed while <paramref name="held"/> (another gamepad button, or
+    /// <see cref="UiKey.None"/>) is down. A <paramref name="button"/> that is not a gamepad button gives <see cref="None"/>;
+    /// a <paramref name="held"/> that is not one (or is the button itself) is dropped.
+    /// </summary>
+    public static KeyChord Gamepad(UiKey button, UiKey held = UiKey.None) => new(button, held, gamepad: true);
+
+    /// <summary>
+    /// PAD1: the gamepad button that must be held when <see cref="Key"/> goes down (a gamepad chord's modifier), or
+    /// <see cref="UiKey.None"/>. Always None for a keyboard or mouse chord.
+    /// </summary>
+    public UiKey Held { get; }
+
+    /// <summary>PAD1: true for a bound gamepad chord (its <see cref="Key"/> is a gamepad button).</summary>
+    public bool IsGamepad => IsGamepadKey(Key);
+
+    /// <summary>PAD1: true for the gamepad buttons (<see cref="UiKey.GamepadSouth"/> to <see cref="UiKey.GamepadSelect"/>).</summary>
+    public static bool IsGamepadKey(UiKey key) => key >= UiKey.GamepadSouth && key <= UiKey.GamepadSelect;
+
+    /// <summary>PAD1: every gamepad button, in <see cref="UiKey"/> order.</summary>
+    public static readonly UiKey[] GamepadKeys = BuildGamepadKeys();
+
+    private static UiKey[] BuildGamepadKeys()
+    {
+        var list = new UiKey[UiKey.GamepadSelect - UiKey.GamepadSouth + 1];
+        for (int i = 0; i < list.Length; i++) list[i] = UiKey.GamepadSouth + i;
+        return list;
+    }
+
+    /// <summary>PAD1: one gamepad button's bit in a held-buttons mask (<see cref="IKeyInputSource.TryReadGamepadHeld"/>); 0 for any other key.</summary>
+    public static uint GamepadBit(UiKey key) => IsGamepadKey(key) ? 1u << (key - UiKey.GamepadSouth) : 0u;
+
+    /// <summary>
+    /// PAD1: the firing rule for a gamepad chord, exact as the keyboard's modifiers are: when <see cref="Key"/> goes down,
+    /// the other gamepad buttons held (<paramref name="heldMask"/>, bits from <see cref="GamepadBit"/>; the main button's
+    /// own bit is ignored) must be exactly <see cref="Held"/>, or none for a chord without one. So Pad Y does not fire on
+    /// D-Pad Down + Pad Y, and that chord does not fire with Pad LB held as well. Stick movement is not a button and never
+    /// counts.
+    /// </summary>
+    public bool MatchesGamepadHeld(uint heldMask)
+    {
+        if (!IsGamepad) return false;
+        uint others = heldMask & ~GamepadBit(Key);
+        return others == GamepadBit(Held);
     }
 
     /// <summary>Main key. <see cref="UiKey.None"/> means unbound.</summary>
@@ -330,6 +443,7 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         var parts = text.Split('+');
         var modifiers = KeyModifiers.None;
         UiKey key = UiKey.None;
+        UiKey held = UiKey.None;
         bool sawKey = false;
 
         for (int i = 0; i < parts.Length; i++)
@@ -344,12 +458,29 @@ public readonly struct KeyChord : IEquatable<KeyChord>
                 continue;
             }
 
-            if (sawKey) return false;
-            if (!TryParseKey(token, out key)) return false;
-            sawKey = true;
+            if (!TryParseKey(token, out var parsed)) return false;
+            if (!sawKey)
+            {
+                key = parsed;
+                sawKey = true;
+                continue;
+            }
+
+            // PAD1: a gamepad chord's second button is the one held ("GamepadNorth + GamepadDpadDown").
+            if (!IsGamepadKey(key) || !IsGamepadKey(parsed) || held != UiKey.None || parsed == key) return false;
+            held = parsed;
         }
 
-        chord = key == UiKey.None ? None : new KeyChord(key, modifiers);
+        if (key == UiKey.None) return true;
+        if (IsGamepadKey(key))
+        {
+            // A gamepad button never takes Ctrl, Shift or Alt.
+            if (modifiers != KeyModifiers.None) return false;
+            chord = Gamepad(key, held);
+            return true;
+        }
+
+        chord = new KeyChord(key, modifiers);
         return true;
     }
 
@@ -395,6 +526,7 @@ public readonly struct KeyChord : IEquatable<KeyChord>
     public override string ToString()
     {
         if (!IsBound) return "None";
+        if (IsGamepad) return Held == UiKey.None ? Key.ToString() : Key + Separator + Held;
         var sb = new StringBuilder(Key.ToString());
         if ((Modifiers & KeyModifiers.Ctrl) != 0) sb.Append(Separator).Append("Ctrl");
         if ((Modifiers & KeyModifiers.Shift) != 0) sb.Append(Separator).Append("Shift");
@@ -412,6 +544,8 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         get
         {
             if (!IsBound) return "None";
+            if (IsGamepad)
+                return Held == UiKey.None ? KeyDisplayName(Key) : KeyDisplayName(Key) + Separator + KeyDisplayName(Held);
             var sb = new StringBuilder(KeyDisplayName(Key));
             if ((Modifiers & KeyModifiers.Ctrl) != 0) sb.Append(Separator).Append("Ctrl");
             if ((Modifiers & KeyModifiers.Shift) != 0) sb.Append(Separator).Append("Shift");
@@ -428,14 +562,75 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         UiKey.MouseMiddle => "Middle Mouse",
         UiKey.MouseLeft => "Left Mouse",
         UiKey.MouseRight => "Right Mouse",
+        // PAD1: the Xbox labels with "Pad" in front, so a shown gamepad chord parses back and never reads as a letter key.
+        UiKey.GamepadSouth => "Pad A",
+        UiKey.GamepadEast => "Pad B",
+        UiKey.GamepadWest => "Pad X",
+        UiKey.GamepadNorth => "Pad Y",
+        UiKey.GamepadLeftShoulder => "Pad LB",
+        UiKey.GamepadRightShoulder => "Pad RB",
+        UiKey.GamepadLeftTrigger => "Pad LT",
+        UiKey.GamepadRightTrigger => "Pad RT",
+        UiKey.GamepadDpadUp => "D-Pad Up",
+        UiKey.GamepadDpadDown => "D-Pad Down",
+        UiKey.GamepadDpadLeft => "D-Pad Left",
+        UiKey.GamepadDpadRight => "D-Pad Right",
+        UiKey.GamepadLeftStick => "Pad L3",
+        UiKey.GamepadRightStick => "Pad R3",
+        UiKey.GamepadStart => "Pad Menu",
+        UiKey.GamepadSelect => "Pad View",
         _ => key.ToString(),
     };
 
-    public bool Equals(KeyChord other) => Key == other.Key && Modifiers == other.Modifiers;
+    /// <summary>
+    /// PAD1: a gamepad button by its shown name (<c>Pad Y</c>, <c>D-Pad Down</c>), the Input System's control name
+    /// (<c>buttonNorth</c>, <c>dpad/down</c>, <c>leftStickPress</c>), the GamepadButton name after a <c>Gamepad</c> or
+    /// <c>Pad</c> prefix (<c>GamepadNorth</c>, <c>Pad DpadDown</c>) or the PlayStation name (<c>Triangle</c>, <c>L1</c>),
+    /// case, spaces and dashes ignored. Bare <c>A</c>, <c>B</c>, <c>X</c>, <c>Y</c>, <c>Up</c> and <c>Start</c> are not
+    /// gamepad buttons (the letters are keyboard keys).
+    /// </summary>
+    public static bool TryGamepadKey(string? token, out UiKey key)
+    {
+        key = UiKey.None;
+        string t = (token ?? "").Replace(" ", "").Replace("-", "").Replace("_", "").Replace("/", "").Trim().ToLowerInvariant();
+        if (t.StartsWith("gamepad", StringComparison.Ordinal)) t = t.Substring(7);
+        else if (t.StartsWith("pad", StringComparison.Ordinal)) t = t.Substring(3);
+        else if (!IsPlainGamepadWord(t)) return false;
+        key = t switch
+        {
+            "south" or "buttonsouth" or "a" or "cross" => UiKey.GamepadSouth,
+            "east" or "buttoneast" or "b" or "circle" => UiKey.GamepadEast,
+            "west" or "buttonwest" or "x" or "square" => UiKey.GamepadWest,
+            "north" or "buttonnorth" or "y" or "triangle" => UiKey.GamepadNorth,
+            "leftshoulder" or "lb" or "l1" or "leftbumper" => UiKey.GamepadLeftShoulder,
+            "rightshoulder" or "rb" or "r1" or "rightbumper" => UiKey.GamepadRightShoulder,
+            "lefttrigger" or "lt" or "l2" => UiKey.GamepadLeftTrigger,
+            "righttrigger" or "rt" or "r2" => UiKey.GamepadRightTrigger,
+            "dpadup" or "up" => UiKey.GamepadDpadUp,
+            "dpaddown" or "down" => UiKey.GamepadDpadDown,
+            "dpadleft" or "left" => UiKey.GamepadDpadLeft,
+            "dpadright" or "right" => UiKey.GamepadDpadRight,
+            "leftstick" or "leftstickpress" or "l3" => UiKey.GamepadLeftStick,
+            "rightstick" or "rightstickpress" or "r3" => UiKey.GamepadRightStick,
+            "start" or "menu" or "options" => UiKey.GamepadStart,
+            "select" or "view" or "share" or "create" => UiKey.GamepadSelect,
+            _ => UiKey.None,
+        };
+        return key != UiKey.None;
+    }
+
+    /// <summary>PAD1: the words that name a gamepad button without a prefix (none of them is a keyboard key's name).</summary>
+    private static bool IsPlainGamepadWord(string t) => t is
+        "buttonsouth" or "buttoneast" or "buttonwest" or "buttonnorth" or "cross" or "circle" or "square" or "triangle"
+        or "leftshoulder" or "rightshoulder" or "lefttrigger" or "righttrigger" or "dpadup" or "dpaddown" or "dpadleft"
+        or "dpadright" or "leftstickpress" or "rightstickpress" or "l1" or "r1" or "l2" or "r2" or "l3" or "r3"
+        or "lb" or "rb" or "lt" or "rt";
+
+    public bool Equals(KeyChord other) => Key == other.Key && Modifiers == other.Modifiers && Held == other.Held;
 
     public override bool Equals(object? obj) => obj is KeyChord other && Equals(other);
 
-    public override int GetHashCode() => ((int)Key * 397) ^ (int)Modifiers;
+    public override int GetHashCode() => (((int)Key * 397) ^ (int)Modifiers) ^ ((int)Held << 20);
 
     public static bool operator ==(KeyChord a, KeyChord b) => a.Equals(b);
 
@@ -488,6 +683,9 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         // The punctuation keys by the character they type on a US layout, and their common names. The console key is
         // Backquote: "`" and "~" (its shifted character) both name it. "+" cannot be a key name: it joins a chord.
         if (TryPunctuationKey(token, out key)) return true;
+
+        // PAD1: the gamepad buttons by their other names (the enum names parse below too).
+        if (TryGamepadKey(token, out key)) return true;
 
         // KEYS4: the mouse buttons by the game's words too ("Mouse Button 4" is the forward button).
         switch (token.Replace(" ", "").ToLowerInvariant())

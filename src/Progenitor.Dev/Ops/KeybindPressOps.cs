@@ -13,7 +13,9 @@ namespace Progenitor.Dev.Ops;
 ///
 /// <para>Arguments: <c>{bind, plugin?}</c> presses one registered bind by id (and owning plugin
 /// GUID, when ids collide); <c>{chord}</c> presses a chord such as <c>"F10 + Ctrl"</c> and lets
-/// the registry decide which binds it reaches. Exactly one form. Client only, main thread.</para>
+/// the registry decide which binds it reaches (PAD1: a controller chord such as <c>"GamepadNorth + GamepadDpadDown"</c>
+/// reaches the binds whose controller chord it is); <c>{bind, gamepad: true}</c> presses that bind's controller chord, with
+/// <c>Keybinds.PressedWithGamepad</c> true in the handler. Exactly one form. Client only, main thread.</para>
 ///
 /// <para>Reply: <c>{request, fired, dispatches:[{plugin, bind, chord, fired, reason}]}</c>.
 /// <c>fired</c> counts handlers that ran; <c>reason</c> is empty for a fired bind and otherwise
@@ -30,8 +32,9 @@ internal static class KeybindPressOps
     /// <summary>A parsed request: a bind by id, or a chord.</summary>
     internal sealed class Request
     {
-        internal Request(string? plugin, string? bind, KeyChord? chord, int? hold = null)
+        internal Request(string? plugin, string? bind, KeyChord? chord, int? hold = null, bool gamepad = false)
         {
+            Gamepad = gamepad;
             Hold = hold;
             Plugin = plugin;
             Bind = bind;
@@ -45,9 +48,12 @@ internal static class KeybindPressOps
         /// <summary>Review 2026-09-29: press, hold this many frames, release (a bind only); null for a press.</summary>
         internal int? Hold { get; }
 
+        /// <summary>PAD1: press the bind's controller chord (<c>args.gamepad: true</c>), as a controller press reaches it.</summary>
+        internal bool Gamepad { get; }
+
         internal object Describe() => Chord is KeyChord chord
             ? new Dictionary<string, object?> { ["chord"] = chord.ToString() }
-            : new Dictionary<string, object?> { ["plugin"] = Plugin, ["bind"] = Bind, ["hold"] = Hold };
+            : new Dictionary<string, object?> { ["plugin"] = Plugin, ["bind"] = Bind, ["hold"] = Hold, ["gamepad"] = Gamepad };
     }
 
     /// <summary>Parse and validate the arguments. Throws <see cref="ArgumentException"/> with the usage line.</summary>
@@ -76,7 +82,10 @@ internal static class KeybindPressOps
             hold = frames;
         }
 
-        return new Request(plugin, bind, null, hold);
+        bool gamepad = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("gamepad", out var g) && g.ValueKind == JsonValueKind.True;
+        if (gamepad && hold != null)
+            throw new ArgumentException("keybind_press: args.gamepad presses the controller chord once; args.hold is for the keyboard chord.");
+        return new Request(plugin, bind, null, hold, gamepad);
     }
 
     /// <summary>A trimmed string property, or null when absent, not a string, or blank.</summary>
@@ -98,6 +107,8 @@ internal static class KeybindPressOps
 
         var dispatches = request.Chord is KeyChord chord
             ? Keybinds.SimulatePress(chord)
+            : request.Gamepad
+                ? Keybinds.SimulateGamepadPress(request.Plugin, request.Bind!)
             : request.Hold is int frames
                 ? Keybinds.SimulateHold(request.Plugin, request.Bind!, frames)
                 : Keybinds.SimulatePress(request.Plugin, request.Bind!);

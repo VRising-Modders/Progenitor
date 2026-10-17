@@ -16,6 +16,9 @@ internal enum MapShareGlyph
 
     /// <summary>The game's right mouse button glyph.</summary>
     MouseRight,
+
+    /// <summary>PAD1: the game's controller glyphs for a controller chord (the held button, then the pressed one).</summary>
+    Gamepad,
 }
 
 /// <summary>What the map share key tip shows, from the bound key (<see cref="MapShareLogic.Hint"/>).</summary>
@@ -27,7 +30,23 @@ internal readonly struct MapShareHintParts
         Glyph = glyph;
         KeyText = keyText ?? "";
         Action = action ?? "";
+        GamepadKey = UiKey.None;
+        GamepadHeld = UiKey.None;
     }
+
+    /// <summary>PAD1: a controller chord's tip: the game's glyph for <paramref name="held"/> (if any), then for <paramref name="key"/>.</summary>
+    internal MapShareHintParts(UiKey key, UiKey held, string action)
+        : this("", MapShareGlyph.Gamepad, KeyChord.Gamepad(key, held).DisplayText, action)
+    {
+        GamepadKey = key;
+        GamepadHeld = held;
+    }
+
+    /// <summary>PAD1: the controller button pressed (<see cref="MapShareGlyph.Gamepad"/>), else None.</summary>
+    internal UiKey GamepadKey { get; }
+
+    /// <summary>PAD1: the controller button held with it, else None.</summary>
+    internal UiKey GamepadHeld { get; }
 
     /// <summary>The words before a mouse glyph (<c>Shift +</c>); empty for a text key.</summary>
     internal string Prefix { get; }
@@ -50,6 +69,8 @@ internal readonly struct MapShareHintParts
             {
                 MapShareGlyph.MouseLeft => (Prefix.Length > 0 ? Prefix + " " : "") + "[LMB]",
                 MapShareGlyph.MouseRight => (Prefix.Length > 0 ? Prefix + " " : "") + "[RMB]",
+                MapShareGlyph.Gamepad => (GamepadHeld != UiKey.None ? "[" + KeyChord.KeyDisplayName(GamepadHeld) + "] + " : "")
+                    + "[" + KeyChord.KeyDisplayName(GamepadKey) + "]",
                 _ => "[" + KeyText + "]",
             };
             return key + " " + Action;
@@ -104,6 +125,28 @@ internal static class MapShareLogic
     /// <summary>The default key: Shift + left mouse.</summary>
     internal static readonly KeyChord DefaultKey = new(UiKey.MouseLeft, KeyModifiers.Shift);
 
+    /// <summary>
+    /// PAD1: the controller default: Pad Y (North) pressed while D-Pad Down is held. Chosen against the game's shipped
+    /// controller bindings live in the map (<see cref="GamepadKeybindCatalog.Defaults"/>; the map's own actions and the
+    /// menus'): every face button, bumper, trigger, stick press, Start and Select is bound there on its own (Add Marker
+    /// on A and RT, Center on LT, Legend on X, Close on B, the menu's tabs on the bumpers and triggers, Close Map on
+    /// View), and the only pair live in the map is the admin teleport (L3 + R3). D-Pad Down + Pad Y is no binding at all;
+    /// the game's pairs of these two buttons are camera keys in play (Pad Y held, D-Pad Down pressed), which never meet a
+    /// map key. Pad Y alone is the menus' North action and D-Pad Down the menus' Down; neither is a map action.
+    /// </summary>
+    internal static readonly KeyChord DefaultGamepadKey = KeyChord.Gamepad(UiKey.GamepadNorth, UiKey.GamepadDpadDown);
+
+    /// <summary>
+    /// PAD1: the chord the tip shows: the controller chord while the game shows controller glyphs (the player is on a
+    /// controller) and the bind has one, else the keyboard or mouse chord.
+    /// </summary>
+    internal static KeyChord HintChord(KeyChord keyboard, KeyChord gamepad, bool controllerActive) =>
+        controllerActive && gamepad.IsBound ? gamepad : keyboard;
+
+    /// <summary>PAD1: whether a controller press shares: the cursor is on the map and the point there has world coordinates.</summary>
+    internal static bool GamepadShareable(bool onMap, bool hasWorld, float worldX, float worldZ) =>
+        onMap && hasWorld && !float.IsNaN(worldX) && !float.IsInfinity(worldX) && !float.IsNaN(worldZ) && !float.IsInfinity(worldZ);
+
     /// <summary>The tip's caption, in the game's title case (<i>Add/Remove Marker</i>, <i>Open Legend</i>).</summary>
     internal const string Action = "Share Location";
 
@@ -135,6 +178,8 @@ internal static class MapShareLogic
     /// </summary>
     internal static MapShareHintParts Hint(KeyChord chord)
     {
+        // PAD1: a controller chord shows the game's controller glyphs.
+        if (chord.IsGamepad) return new MapShareHintParts(chord.Key, chord.Held, Action);
         string mods = ModifierWords(chord.Modifiers);
         if (chord.Key == UiKey.MouseLeft || chord.Key == UiKey.MouseRight)
         {
@@ -187,6 +232,12 @@ internal static class MapShareLogic
             if (prefix != null)
             {
                 if (!e.IconShown || !e.Sprite.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                rank = e.Active ? 0 : 1;
+            }
+            else if (glyph == MapShareGlyph.Gamepad)
+            {
+                // PAD1: any entry drawing a glyph (on a controller the row's entries all do); the copy takes the game's sprite.
+                if (!e.IconShown) continue;
                 rank = e.Active ? 0 : 1;
             }
             else

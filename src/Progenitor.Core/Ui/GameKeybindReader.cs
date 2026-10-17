@@ -110,6 +110,63 @@ internal static class GameKeybindReader
         }
     }
 
+    /// <summary>
+    /// PAD1: the game's current gamepad bindings, read-only, for the gamepad picture. With a gamepad connected, the same
+    /// calls as the keyboard read (<c>GetBindingIndexInAction</c> / <c>IsBindingComposite</c>, the game's own
+    /// primary/secondary selection, and the effective control path) with <c>ControllerType.Gamepad</c>, so the player's
+    /// controller overrides and camera scheme count; <c>GetBindingDisplayInfo</c> is never called with a gamepad type (with
+    /// no pad connected it adds a fake XInput device). With no gamepad connected the shipped bindings
+    /// (<see cref="GamepadKeybindCatalog.DefaultSnapshot"/>) stand in, so a controller button chosen at the desk is still
+    /// checked. Source-checked against the client's metadata; <b>not live-verified</b>.
+    /// </summary>
+    internal static GameKeybindSnapshot ReadGamepad()
+    {
+        if (!Keybinds.GamepadConnected) return GamepadKeybindCatalog.DefaultSnapshot();
+        try
+        {
+            InputActionSystem? system = InputHelper.GetInputActionSystem();
+            if (system == null || !system.HasLoadedInputActions) return GamepadKeybindCatalog.DefaultSnapshot();
+            var asset = system._LoadedInputActions;
+            if (asset == null) return GamepadKeybindCatalog.DefaultSnapshot();
+            var pad = new Nullable_Unboxed<ControllerType>(ControllerType.Gamepad);
+            var claims = new List<KeybindClaim>();
+            foreach (var actionName in GamepadKeybindCatalog.Actions)
+            {
+                try
+                {
+                    if (!System.Enum.TryParse(actionName, out ButtonInputAction button)) continue;
+                    var action = asset.FindAction(actionName, false);
+                    if (action == null) continue;
+                    string name = ActionName(system, button, actionName, out string description);
+                    for (int slot = 0; slot < 2; slot++)
+                    {
+                        bool primary = slot == 0;
+                        int first = system.GetBindingIndexInAction(action, primary, false, false, pad);
+                        if (first < 0) continue;
+                        string? modifierPath = null, keyPath;
+                        if (system.IsBindingComposite(action, primary, pad))
+                        {
+                            int second = system.GetBindingIndexInAction(action, primary, false, true, pad);
+                            modifierPath = PathOf(action, first);
+                            keyPath = second >= 0 ? PathOf(action, second) : null;
+                        }
+                        else keyPath = PathOf(action, first);
+
+                        claims.Add(GamepadKeybindCatalog.Claim(actionName, name, slot, modifierPath, keyPath, description));
+                    }
+                }
+                catch { /* one action unreadable costs its rows */ }
+            }
+
+            return claims.Count > 0 ? new GameKeybindSnapshot(true, claims, "") : GamepadKeybindCatalog.DefaultSnapshot();
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogDiag("Ui: the game's controller bindings could not be read (" + e.Message + "); using the shipped ones.");
+            return GamepadKeybindCatalog.DefaultSnapshot();
+        }
+    }
+
     /// <summary>One slot of a button action; false when the game has no keyboard binding for it.</summary>
     private static bool ReadSlot(
         InputActionSystem system, InputAction action, ButtonInputAction button, bool primary, Nullable_Unboxed<ControllerType> kbm,

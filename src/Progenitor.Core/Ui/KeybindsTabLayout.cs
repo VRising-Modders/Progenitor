@@ -59,6 +59,25 @@ internal sealed class KeybindsRowModel
     /// <summary>A game action's secondary slot; null for a mod key.</summary>
     internal KeybindVerdict? Secondary { get; }
 
+    /// <summary>
+    /// PAD1: a Progenitor bind's controller chord, from the gamepad picture (<see cref="KeybindArbiter.CurrentGamepad"/>):
+    /// drawn in the row's second cap and changed there. Null for a game key, a cfg key and a group's read-only row.
+    /// </summary>
+    internal KeybindVerdict? Gamepad { get; init; }
+
+    /// <summary>PAD1: the second cap is this bind's controller key.</summary>
+    internal bool HasGamepadCap => !IsGame && Info == null && Gamepad != null && Claim.Source == KeybindSource.Progenitor;
+
+    /// <summary>PAD1: the bind's controller chord (None without one).</summary>
+    internal KeyChord GamepadChord => Gamepad?.Claim.Chord ?? KeyChord.None;
+
+    /// <summary>PAD1: the controller key is off its default.</summary>
+    internal bool GamepadChanged => HasGamepadCap && Gamepad!.Claim.DefaultChord is { } d && d != Gamepad.Claim.Chord;
+
+    /// <summary>PAD1: the controller key's conflict sentence, with "Controller: " in front; empty without one.</summary>
+    internal string GamepadConflictText =>
+        HasGamepadCap && Gamepad!.Reason.Length > 0 ? KeybindsTabLayout.ControllerPrefix + Gamepad.Reason : "";
+
     internal KeybindClaim Claim => Verdict.Claim;
 
     /// <summary>The claim's key; a group's read-only row is <c>info:&lt;owner&gt;/&lt;group&gt;/&lt;id&gt;</c>, never a bind's.</summary>
@@ -90,7 +109,7 @@ internal sealed class KeybindsRowModel
     /// KEYS3: the secondary key cap's caption. A game action's second slot (empty when unbound); always
     /// empty for a mod key, whose cap is drawn disabled (<see cref="SecondaryEnabled"/>).
     /// </summary>
-    internal string SecondaryText => IsGame ? CapText(Secondary?.Claim.ChordText) : "";
+    internal string SecondaryText => IsGame ? CapText(Secondary?.Claim.ChordText) : HasGamepadCap ? CapText(Gamepad!.Claim.ChordText) : "";
 
     /// <summary>KEYS3: what the caps draw (<see cref="KeybindsTabLayout.CapCaption"/>); the readback keeps the full text too.</summary>
     internal string PrimaryCaption => KeybindsTabLayout.CapCaption(PrimaryText);
@@ -98,12 +117,13 @@ internal sealed class KeybindsRowModel
     internal string SecondaryCaption => KeybindsTabLayout.CapCaption(SecondaryText);
 
     /// <summary>KEYS3: only a game row's second cap is live (it shows the read-only note); a mod key has one chord.</summary>
-    internal bool SecondaryEnabled => IsGame;
+    internal bool SecondaryEnabled => IsGame || (HasGamepadCap && Editable);
 
     /// <summary>KEYS3: the warn tone on the cap whose key is not active; the kit's muted caption on a read-only mod key.</summary>
     internal CellTone PrimaryTone => !Verdict.Active ? CellTone.Warn : !IsGame && !Editable ? CellTone.Muted : CellTone.Normal;
 
-    internal CellTone SecondaryTone => !IsGame ? CellTone.Disabled
+    internal CellTone SecondaryTone => !IsGame
+            ? (!HasGamepadCap || !Editable ? CellTone.Disabled : !Gamepad!.Active ? CellTone.Warn : CellTone.Normal)
         : Secondary is { Claim.GameSlotExists: false } ? CellTone.Disabled
         : Secondary != null && !Secondary.Active ? CellTone.Warn : CellTone.Normal;
 
@@ -119,12 +139,12 @@ internal sealed class KeybindsRowModel
         return t.Length == 0 || string.Equals(t, "None", StringComparison.OrdinalIgnoreCase) ? "" : t;
     }
 
-    internal bool Active => Verdict.Active && (Secondary?.Active ?? true);
+    internal bool Active => Verdict.Active && (Secondary?.Active ?? true) && (!HasGamepadCap || Gamepad!.Active);
 
-    internal bool Conflict => Verdict.InConflict || (Secondary?.InConflict ?? false);
+    internal bool Conflict => Verdict.InConflict || (Secondary?.InConflict ?? false) || (HasGamepadCap && Gamepad!.InConflict);
 
-    /// <summary>A mod key off its default; KEYS9: a game key whose primary or secondary slot is off the game's default.</summary>
-    internal bool Changed => IsGame ? Claim.Modified || (Secondary?.Claim.Modified ?? false) : Claim.Modified;
+    /// <summary>A mod key off its default; KEYS9: a game key whose primary or secondary slot is off the game's default; PAD1: or its controller key.</summary>
+    internal bool Changed => IsGame ? Claim.Modified || (Secondary?.Claim.Modified ?? false) : Claim.Modified || GamepadChanged;
 
     /// <summary>
     /// A mod key this tab can write (a Progenitor bind, or a cfg key the catalog allows). KEYS9: a game key on the
@@ -152,9 +172,11 @@ internal sealed class KeybindsRowModel
         {
             string a = Verdict.Reason;
             string b = Secondary?.Reason ?? "";
-            if (a.Length == 0) return b;
-            if (b.Length == 0 || string.Equals(a, b, StringComparison.Ordinal)) return a;
-            return a + " " + b;
+            string pad = GamepadConflictText;
+            string keys = a.Length == 0 ? b
+                : b.Length == 0 || string.Equals(a, b, StringComparison.Ordinal) ? a
+                : a + " " + b;
+            return keys.Length == 0 ? pad : pad.Length == 0 ? keys : keys + " " + pad;
         }
     }
 
@@ -177,7 +199,9 @@ internal sealed class KeybindsRowModel
 
             if (Info != null) parts.Add(Claim.NotEditableReason);
             if (Changed && IsGame) parts.Add(GameDefaultSentence);
-            else if (Changed) parts.Add(ModSettingsLayout.ChangedFromPrefix + (Claim.DefaultText.Length == 0 ? "(empty)" : Claim.DefaultText) + ".");
+            else if (Claim.Modified) parts.Add(ModSettingsLayout.ChangedFromPrefix + (Claim.DefaultText.Length == 0 ? "(empty)" : Claim.DefaultText) + ".");
+            // PAD1: the controller key's own default, when it differs.
+            if (GamepadChanged) parts.Add(KeybindsTabLayout.ControllerDefaultSentence(Gamepad!.Claim.DefaultChord ?? KeyChord.None));
             return string.Join(" ", parts);
         }
     }
@@ -236,13 +260,13 @@ internal sealed class KeybindsRowModel
     /// KEYS2: a Progenitor bind that is not active (it lost its chord to the game or to a mod installed
     /// first). The Conflicts view counts these in its header line.
     /// </summary>
-    internal bool Inactive => !IsGame && Claim.Source == KeybindSource.Progenitor && !Verdict.Active;
+    internal bool Inactive => !IsGame && Claim.Source == KeybindSource.Progenitor && (!Verdict.Active || (HasGamepadCap && !Gamepad!.Active));
 
     /// <summary>
     /// Live check 2026-09-29: only the side that is not active is drawn in the warn tone; a winning key
     /// (or one that only warns) looks normal with a muted note.
     /// </summary>
-    internal bool Loses => !Verdict.Active || (Secondary != null && !Secondary.Active);
+    internal bool Loses => !Verdict.Active || (Secondary != null && !Secondary.Active) || (HasGamepadCap && !Gamepad!.Active);
 
     /// <summary>The row's tone: <c>warn</c> when this key is not active, <c>readonly</c> for a game key, else <c>normal</c>.</summary>
     internal string Tone => Loses ? "warn" : (IsGame && !Editable) || IsInfo ? "readonly" : "normal";
@@ -295,8 +319,17 @@ internal sealed class KeybindsRowModel
         if (IsGame) d["secondaryCaption"] = SecondaryCaption;
         d["marker"] = KeybindsTabLayout.RowMarker(this);
         d["primaryTone"] = UiCellRowHandle.ToneName(PrimaryTone);
-        // A mod row has no second cap (decided 2026-09-30), so it reports none.
+        // A mod row has no second keyboard key (decided 2026-09-30); PAD1: its second cap is the controller key.
         if (IsGame) d["secondaryCap"] = SecondaryText;
+        if (HasGamepadCap)
+        {
+            d["gamepad"] = Gamepad!.Claim.ChordText;
+            d["gamepadCaption"] = SecondaryCaption;
+            d["gamepadDefault"] = Gamepad.Claim.DefaultText;
+            d["gamepadActive"] = Gamepad.Active;
+            d["gamepadChanged"] = GamepadChanged;
+            d["gamepadConflict"] = KeybindArbiter.ConflictReadback(Gamepad);
+        }
         d["secondaryEnabled"] = SecondaryEnabled;
         d["description"] = Description;
         // Settings organization stage 2: a mod key is one stored value, also drawn on its mod page.
@@ -613,7 +646,7 @@ internal sealed class KeybindsTabModel
                     if (row.Claim.Source != KeybindSource.Progenitor) continue;
                     int at = g.IndexOf(row.Claim.ActionId);
                     if (at < 0) continue;
-                    taken.Add((at, new KeybindsRowModel(section.Id, row.Verdict, row.Secondary, g.GroupId)));
+                    taken.Add((at, new KeybindsRowModel(section.Id, row.Verdict, row.Secondary, g.GroupId) { Gamepad = row.Gamepad }));
                     owner.Rows.RemoveAt(r);
                 }
 
@@ -649,7 +682,7 @@ internal sealed class KeybindsTabModel
     internal static KeybindsTabModel Build(
         KeybindPicture picture, IReadOnlyList<(string Id, string Name)>? modOrder, Func<string, bool>? hasModPage = null,
         (IReadOnlyList<KeybindClaim> Claims, DateTime SavedUtc)? cachedGame = null,
-        IReadOnlyList<KeybindGroupDefinition>? groups = null)
+        IReadOnlyList<KeybindGroupDefinition>? groups = null, KeybindPicture? gamepad = null)
     {
         var sections = new List<KeybindsSectionModel>();
         // Requested 2026-09-30: the mods' keys come first, then the game's categories.
@@ -752,7 +785,12 @@ internal sealed class KeybindsTabModel
                 int s = a.Claim.Source.CompareTo(b.Claim.Source);
                 return s != 0 ? s : StringComparer.OrdinalIgnoreCase.Compare(a.Claim.ActionId, b.Claim.ActionId);
             });
-            foreach (var v in verdicts) section.Rows.Add(new KeybindsRowModel(section.Id, v));
+            foreach (var v in verdicts)
+            {
+                // PAD1: a Progenitor bind's controller key comes from the gamepad picture.
+                var pad = v.Claim.Source == KeybindSource.Progenitor ? gamepad?.FindProgenitor(v.Claim.OwnerId, v.Claim.ActionId) : null;
+                section.Rows.Add(new KeybindsRowModel(section.Id, v) { Gamepad = pad });
+            }
             sections.Add(section);
         }
 
@@ -1112,9 +1150,10 @@ internal static class KeybindsTabLayout
             new CellSpec(CellKind.Button, CellPrimary).With(text: primary, width: CellWidth.Px(KeyCapWidth),
                 align: CellAlign.Right, tone: row.PrimaryTone, skin: CellSkin.KeyCap, minWidth: KeyCapWidth,
                 fontSize: CapFontSize(primary)),
-            // Decided 2026-09-30: a mod key has one chord, so its row has no second cap (an empty,
-            // unclickable cap confused the player). The column stays as empty space, so every row's
-            // primary cap and gutter line up with the game rows' (second keys for mod binds: roadmap).
+            // Decided 2026-09-30: a mod key has one keyboard chord, so an ordinary mod's key setting has no second cap
+            // (an empty, unclickable cap confused the player); the column stays as empty space, so every row's
+            // primary cap and gutter line up with the game rows'. PAD1: a Progenitor bind's second cap is its
+            // controller key, live (empty when it has none).
             row.SecondaryEnabled
                 ? new CellSpec(CellKind.Button, CellSecondary).With(text: secondary, width: CellWidth.Px(KeyCapWidth),
                     align: CellAlign.Right, tone: row.SecondaryTone, skin: CellSkin.KeyCap, minWidth: KeyCapWidth,
@@ -1340,6 +1379,28 @@ internal static class KeybindsTabLayout
     internal const string NoConflicts = "No key conflicts.";
 
     internal const string CaptureHelp = "Press the new key or chord; a left or right click needs Ctrl, Shift or Alt. Escape cancels.";
+
+    /// <summary>PAD1: the controller capture's help line.</summary>
+    internal const string CaptureHelpGamepad =
+        "Press a controller button, or hold one and press another; the key is taken when you let go. Escape cancels.";
+
+    /// <summary>PAD1: the edit bar's title suffix while the controller key is changed.</summary>
+    internal const string ControllerKeySuffix = " (controller)";
+
+    /// <summary>PAD1: in front of a controller key's conflict sentence on the row.</summary>
+    internal const string ControllerPrefix = "Controller: ";
+
+    /// <summary>PAD1: <c>Controller default: Pad Y + D-Pad Down.</c></summary>
+    internal static string ControllerDefaultSentence(KeyChord chord) =>
+        "Controller default: " + (chord.IsBound ? chord.DisplayText : "none") + ".";
+
+    /// <summary>PAD1: the preview before a controller key is saved.</summary>
+    internal static string GamepadPreviewSentence(KeyChord current, KeyChord chord)
+    {
+        if (!chord.IsBound) return "Remove the controller button: the controller does nothing for this key until you pick another.";
+        if (chord == current) return chord.DisplayText + " is already this key's controller button.";
+        return chord.DisplayText + " is free. Save to use it.";
+    }
 
     internal const string SwapCaption = "Swap";
 

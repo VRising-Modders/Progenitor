@@ -439,7 +439,7 @@ window.HELP = {
 <p><strong>Links from mods.</strong> A server mod can put links in its messages, such as a storage chest in a reply. They're clickable when you have that mod, and plain words otherwise. Players can't fake one by typing it.</p>` },
         { id: "item-links", title: "Location and item links",
           html: `<ul><li><strong>Location:</strong> start a line with <code>/loc </code> to share where you are, or send <code>/loc</code> on its own. Clicking a location asks <em>Set a map marker here?</em> with how far away it is and which way. <strong>Set marker</strong> puts your own map marker there, the same one you place by clicking the map, with its route on the map and its guide on the compass. It replaces your old marker.</li>
-<li><strong>From the map:</strong> <span class="kbd">Shift</span> + click a spot on the world map. The map closes and that spot's location goes into your chat line, ready for you to add a few words and press <span class="kbd">Enter</span>. The map's key hints at the bottom show it as <em>Share Location</em>. Remap it in the Keybinds tab (Share map location).</li>
+<li><strong>From the map:</strong> <span class="kbd">Shift</span> + click a spot on the world map. The map closes and that spot's location goes into your chat line, ready for you to add a few words and press <span class="kbd">Enter</span>. The map's key hints at the bottom show it as <em>Share Location</em>. On a controller, hold <span class="kbd">D-Pad Down</span> and press <span class="kbd">Y</span> (<span class="kbd">Triangle</span>) to share the spot under the map cursor. Remap it in the Keybinds tab (Share map location).</li>
 <li><strong>Item:</strong> start a line with <code>/item &lt;prefab name&gt; </code> to link an item. Hover the link for its name and description, or click it to open them in a window. There's no item search yet, so you need the item's prefab name.</li>
 <li><strong>Hunt zone:</strong> when a mod names a servant hunt in chat, you see the zone's name, like "Fishing Lake". Players without Progenitor see a code such as <code>[mission:-1234]</code> instead.</li>
 <li>Some mods add more to a click, such as showing the place on the map.</li></ul>` },
@@ -550,7 +550,8 @@ window.HELP = {
 <li><strong>Save</strong>, <strong>Unbind</strong> or <strong>Cancel</strong>.</li></ol>
 <ul><li>The reset arrow puts one row back to its default; <strong>Reset all mod keys</strong> does every mod key, never the game's.</li>
 <li>Keys Windows or Steam keep (<span class="kbd">Alt+F4</span>) are refused.</li>
-<li>Mouse: Middle Mouse, Mouse Back and Mouse Forward work as keys; Left and Right Mouse with a modifier.</li></ul>` },
+<li>Mouse: Middle Mouse, Mouse Back and Mouse Forward work as keys; Left and Right Mouse with a modifier.</li>
+<li>Controller: the second key on a mod's row is its controller button. Click it, then press a button, or hold one and press another; it is taken when you let go. A button the game already uses there is refused. Only Share map location has one to start with.</li></ul>` },
         { id: "conflicts", title: "Conflicts",
           html: `<p>Two keys conflict only on the exact same chord, in the same place. Who keeps the key:</p>
 <ol><li>The game's own keys.</li><li>Progenitor's keys.</li><li>Between mods, the one installed first.</li></ol>

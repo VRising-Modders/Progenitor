@@ -40,7 +40,8 @@ public class DirectKeyReadSourceTests
     {
         ["src/Progenitor.Core/Ui/UnityKeyInputSource.cs"] =
             "The keybind input pump (WasPressedThisFrame, read by Keybinds.Pump) and the key-capture picker "
-            + "(TryReadPressedChord, the Keybinds tab's press-a-key flow).",
+            + "(TryReadPressedChord, the Keybinds tab's press-a-key flow); PAD1: the same for controller buttons on "
+            + "Gamepad.current (TryReadGamepadHeld, the controller capture and chord match).",
         ["src/Progenitor.Core/Ui/UnityUiRuntime.cs"] =
             "The UI kit: the typed-key pump for its text fields (PumpTypedKeys) and the pointer/wheel "
             + "sample that drives hover, drag and scroll on mod panels (SamplePointer, PumpShownInputBody), "

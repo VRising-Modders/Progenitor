@@ -398,10 +398,13 @@ public static partial class SettingsCatalog
 
     private static bool HasKeybind(IReadOnlyList<IKeybindInfo> binds, string pluginId, string key)
     {
+        // PAD1: a bind's controller entry (<id>.Gamepad) is that bind's too.
+        string id = key.EndsWith(Keybinds.GamepadEntrySuffix, StringComparison.OrdinalIgnoreCase)
+            ? key.Substring(0, key.Length - Keybinds.GamepadEntrySuffix.Length) : key;
         for (int i = 0; i < binds.Count; i++)
         {
             if (string.Equals(binds[i].PluginId, pluginId, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(binds[i].Id, key, StringComparison.OrdinalIgnoreCase))
+                && string.Equals(binds[i].Id, id, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
 

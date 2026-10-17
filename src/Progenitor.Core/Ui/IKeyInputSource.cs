@@ -144,6 +144,19 @@ internal interface IKeyInputSource
     /// handlers. Never throws; false when it cannot tell. Defaulted so existing sources need no change.
     /// </summary>
     bool IsHeld(KeyChord chord) => false;
+
+    /// <summary>
+    /// PAD1: which gamepad buttons are down now, as a mask of <see cref="KeyChord.GamepadBit"/> bits, read from
+    /// <c>Gamepad.current</c> (each button's <c>ButtonControl.isPressed</c>; the triggers by their press point). False
+    /// when there is no gamepad. The gamepad key capture reads this once a pump (<see cref="GamepadCapture"/>). A gamepad
+    /// chord's press and hold go through <see cref="WasPressedThisFrame"/> and <see cref="IsHeld"/> like any other chord.
+    /// Never throws. Defaulted so existing sources need no change.
+    /// </summary>
+    bool TryReadGamepadHeld(out uint held)
+    {
+        held = 0;
+        return false;
+    }
 }
 
 /// <summary>Server process, Ui skipped, or no keyboard: nothing is ever pressed.</summary>
