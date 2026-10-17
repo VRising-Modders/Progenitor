@@ -164,6 +164,8 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
             // Core static, so a leftover would pin this plugin ALC and refuse the next swap.
             Ops.PerfOps.Shutdown();
             Ops.GhostOps.Shutdown();
+            // Stops a stress job between steps; its owners stay in the save until stress_clear.
+            Ops.StressOps.Shutdown();
             Ops.TimeOps.Shutdown();
             Ops.WakeOps.Shutdown();
             Ops.CatalogAssetOps.Shutdown();
