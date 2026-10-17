@@ -46,6 +46,7 @@ internal static class MapOps
     {
         var action = MapPlan.Parse(args);
         var point = action == MapPlan.Action.Share ? MapPlan.ParsePoint(args) : (false, 0f, 0f);
+        var spot = action == MapPlan.Action.Focus ? MapPlan.ParseWorld(args) : (0f, 0f);
         if (Progenitor.Plugin.IsServerProcess) throw new InvalidOperationException(ClientOnlyMessage);
 
         var clock = Stopwatch.StartNew();
@@ -54,7 +55,21 @@ internal static class MapOps
         {
             var status = Reply(true, "status", start, start, "", 0, clock);
             status["share"] = ShareBridge("Status", Array.Empty<object?>());
+            status["focus"] = CoreBridge(FocusBridgeType, "Status", Array.Empty<object?>());
             return status;
+        }
+
+        if (action == MapPlan.Action.Focus)
+        {
+            // Core's map focus (the chat location link's Set marker after the marker): open the map centered on a spot.
+            // It works over the next frames; read the result with map status (focus.last).
+            var focused = CoreBridge(FocusBridgeType, "Focus", new object?[] { spot.Item1, spot.Item2 });
+            Plugin.Logger?.LogInfo("Dev map focus: [" + Math.Round(spot.Item1) + ", " + Math.Round(spot.Item2) + "] "
+                + (focused.TryGetValue("ok", out var fok) && fok is true ? "started" : "refused")
+                + (focused.TryGetValue("why", out var fw) ? " (" + fw + ")" : ""));
+            focused["action"] = "focus";
+            focused["before"] = start.ToReply();
+            return focused;
         }
 
         if (action == MapPlan.Action.Share)
@@ -220,14 +235,18 @@ internal static class MapOps
     }
 
     private const string ShareBridgeType = "Progenitor.Ui.MapShareTestBridge";
+    private const string FocusBridgeType = "Progenitor.Ui.MapFocusTestBridge";
 
     /// <summary>Core's map share readback or share, by reflection (Core grants Dev no internals).</summary>
-    private static Dictionary<string, object?> ShareBridge(string method, object?[] args)
+    private static Dictionary<string, object?> ShareBridge(string method, object?[] args) => CoreBridge(ShareBridgeType, method, args);
+
+    /// <summary>A Core test bridge's static method, by reflection.</summary>
+    private static Dictionary<string, object?> CoreBridge(string typeName, string method, object?[] args)
     {
-        var type = typeof(ModsMenu).Assembly.GetType(ShareBridgeType, throwOnError: false);
-        if (type == null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = "Core has no " + ShareBridgeType + " (older than this op)" };
+        var type = typeof(ModsMenu).Assembly.GetType(typeName, throwOnError: false);
+        if (type == null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = "Core has no " + typeName + " (older than this op)" };
         var mi = type.GetMethod(method, System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-        if (mi == null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = ShareBridgeType + "." + method + " not found" };
+        if (mi == null) return new Dictionary<string, object?> { ["ok"] = false, ["error"] = typeName + "." + method + " not found" };
         try
         {
             return mi.Invoke(null, args) as Dictionary<string, object?>
@@ -297,6 +316,7 @@ internal static class MapPlan
         Open = 1,
         Close = 2,
         Share = 3,
+        Focus = 4,
     }
 
     internal enum Step
@@ -313,7 +333,7 @@ internal static class MapPlan
         Close = 4,
     }
 
-    internal const string UsageMessage = "map needs args.action: open, close, status or share (optional x and y).";
+    internal const string UsageMessage = "map needs args.action: open, close, status, share (optional x and y) or focus (world x and z).";
 
     /// <summary>The <c>FullscreenMenuState</c> of the Map tab.</summary>
     internal const int MapState = 3;
@@ -359,7 +379,8 @@ internal static class MapPlan
             case "close": return Action.Close;
             case "status": return Action.Status;
             case "share": return Action.Share;
-            default: throw new ArgumentException("map: args.action '" + el.GetString() + "' is not open, close, status or share. " + UsageMessage);
+            case "focus": return Action.Focus;
+            default: throw new ArgumentException("map: args.action '" + el.GetString() + "' is not open, close, status, share or focus. " + UsageMessage);
         }
     }
 
@@ -380,6 +401,18 @@ internal static class MapPlan
         float x = (float)xe.GetDouble(), y = (float)ye.GetDouble();
         if (!float.IsFinite(x) || !float.IsFinite(y)) throw new ArgumentException("map share: x and y must be finite.");
         return (true, x, y);
+    }
+
+    /// <summary><c>focus</c>'s world spot: <c>x</c> and <c>z</c> (world meters), both required and finite.</summary>
+    internal static (float X, float Z) ParseWorld(JsonElement args)
+    {
+        if (args.ValueKind != JsonValueKind.Object || !args.TryGetProperty("x", out var xe) || !args.TryGetProperty("z", out var ze))
+            throw new ArgumentException("map focus: give the world spot as x and z.");
+        if (xe.ValueKind != JsonValueKind.Number || ze.ValueKind != JsonValueKind.Number)
+            throw new ArgumentException("map focus: x and z are world meters (numbers).");
+        float x = (float)xe.GetDouble(), z = (float)ze.GetDouble();
+        if (!float.IsFinite(x) || !float.IsFinite(z)) throw new ArgumentException("map focus: x and z must be finite.");
+        return (x, z);
     }
 
     /// <summary>One read of the game's menus and of Core's map detection.</summary>

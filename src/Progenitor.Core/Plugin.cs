@@ -417,6 +417,8 @@ public sealed class Plugin
         // the world epoch are all still installed.
         try { Ui.MapShare.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"MapShare.Uninstall: {e.Message}"); }
+        try { Ui.MapFocus.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"MapFocus.Uninstall: {e.Message}"); }
         try { Debugging.DebugTools.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"DebugTools.Uninstall: {e.Message}"); }
         // MAPTP1: a reveal lease a plugin did not release still puts the map's reveal flag back.
