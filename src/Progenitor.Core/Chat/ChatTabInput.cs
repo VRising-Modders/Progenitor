@@ -16,29 +16,30 @@ internal enum ChatSend
 }
 
 /// <summary>
-/// CHAT13: the input line per tab. Game-free; the live half is <see cref="ChatTabs"/> (tab switches) and
-/// <c>ChatWindow</c> (each frame).
+/// CHAT13: the input line per tab. Game-free; the live half is <see cref="ChatTabs"/> (tab switches, each frame).
 ///
 /// <list type="bullet">
-/// <item><b>Send channel per tab.</b> Each tab remembers the channel last chosen while it was shown
-/// (<see cref="ChatTab.SendTo"/>), saved with the tab. Until then it uses <see cref="DefaultFor"/>: the narrowest
-/// audience the tab shows (Clan, then Local, then Global), so a mixed tab never defaults to the whole server; a tab
-/// that shows whispers and no other sendable channel whispers the latest partner; All, Mentions and System tabs keep
-/// whatever channel is in use. Showing a tab switches the game's channel to the tab's.</item>
-/// <item><b>Explicit choices win.</b> A channel the player picks while typing (<c>/g</c>, <c>/l</c>, <c>/c</c>, the
-/// game's Tab cycle) becomes the shown tab's channel (<see cref="Remember"/>). A whisper is never remembered as a
-/// tab's channel (whispers are not sticky in the popular chats); on a whisper tab it brings back the tab's default.</item>
-/// <item><b>Whisper tab.</b> Opening the input on a whisper tab with an empty line puts <c>/w partner </c> in it,
-/// once per opening, the partner being <c>/r</c>'s (<see cref="ChatWhisperMemory.Partner"/>). With no partner yet
-/// the tab falls back to its first other channel, else keeps the current one.</item>
+/// <item><b>Send channel per tab.</b> A tab that shows a channel a line can be typed to has a default
+/// (<see cref="DefaultFor"/>): the narrowest audience it shows (Clan, then Local, then Global), so a mixed tab never
+/// defaults to the whole server; a tab that shows whispers and no other such channel whispers the latest partner.
+/// Showing the tab, and opening the input on it, switches the game's channel to the tab's.</item>
+/// <item><b>Picks.</b> A channel the player picks while typing (<c>/g</c>, <c>/l</c>, <c>/c</c>, the game's Tab
+/// cycle) is remembered as the tab's only when the tab shows that channel (<see cref="CanRemember"/>); any other pick
+/// lasts for that opening of the input. All, Mentions-only and System-only tabs have no default and never remember a
+/// pick: they keep the channel in use. Whispers are never remembered (not sticky in the popular chats).</item>
+/// <item><b>Whisper tab.</b> Opening the input on a whisper tab with an empty line puts <c>/w partner </c> in it, once
+/// per opening, the partner being <c>/r</c>'s (<see cref="ChatWhisperMemory.Partner"/>). Under that line, and with no
+/// partner yet, the channel is the tab's first other channel, else Local (<see cref="WhisperFallback"/>): never
+/// Global by default.</item>
 /// <item><b>Draft per tab.</b> Unsent text stays with the tab it was typed in and comes back when that tab is shown
-/// again (<see cref="SwapDraft"/>). Drafts are kept for the session only: a half-typed game chat line is stale by the
-/// next session, and the sent-line recall (Up) already keeps what was sent.</item>
+/// again (<see cref="SwapDraft"/>); a bare <c>/w name</c> line is never a draft. Drafts are kept for the session
+/// only: a half-typed game chat line is stale by the next session, and the sent-line recall (Up) keeps what was
+/// sent.</item>
 /// </list>
 /// </summary>
 internal static class ChatTabInput
 {
-    /// <summary>The tab's channel before the player chose one: null keeps the channel in use.</summary>
+    /// <summary>The tab's channel before the player chose one: null keeps the channel in use (and never remembers).</summary>
     internal static ChatSend? DefaultFor(ChatTab tab)
     {
         if (tab == null || tab.Fixed) return null;
@@ -55,43 +56,97 @@ internal static class ChatTabInput
     }
 
     /// <summary>
-    /// Where typing in <paramref name="tab"/> goes now: the remembered channel, else the default. A whisper with no
-    /// partner yet falls back to the tab's first other channel, or null (keep the channel in use).
+    /// The channel under a whisper tab's line (a cleared line, or no partner yet): the tab's first other channel, else
+    /// Local. Clan would be the better default for a player in a clan, but the client's own clan is not read here.
     /// </summary>
+    internal static ChatSend WhisperFallback(ChatTab tab) => FirstChannel(tab.Scope) ?? ChatSend.Local;
+
+    /// <summary>
+    /// Whether a pick of <paramref name="send"/> may be remembered on <paramref name="tab"/>: the tab has a default and
+    /// shows that channel (System only on a tab that shows system lines); a whisper only on a whisper tab, where it is
+    /// the default again.
+    /// </summary>
+    internal static bool CanRemember(ChatTab tab, ChatSend send)
+    {
+        var def = DefaultFor(tab);
+        if (def == null) return false;
+        return send switch
+        {
+            ChatSend.Global => (tab.Scope & ChatScope.Global) != 0,
+            ChatSend.Local => (tab.Scope & ChatScope.Local) != 0,
+            ChatSend.Clan => (tab.Scope & ChatScope.Clan) != 0,
+            ChatSend.System => (tab.Scope & ChatScope.SystemAndMods) != 0,
+            ChatSend.Whisper => def == ChatSend.Whisper,
+            _ => false,
+        };
+    }
+
+    /// <summary>Where typing in <paramref name="tab"/> goes now: the remembered channel, else the default, or null.</summary>
     internal static ChatSend? EffectiveFor(ChatTab tab, string? partner)
     {
         if (tab == null) return null;
         var send = tab.SendTo ?? DefaultFor(tab);
-        if (send == ChatSend.Whisper && string.IsNullOrWhiteSpace(partner)) return FirstChannel(tab.Scope);
+        if (send == ChatSend.Whisper && string.IsNullOrWhiteSpace(partner)) return WhisperFallback(tab);
         return send;
     }
 
-    /// <summary>The game channel number to switch to when the tab is shown, or -1 (leave it; whisper is a prefill).</summary>
+    /// <summary>
+    /// The game channel number to switch to when the tab is shown or the input opens on it, or -1 (keep the channel
+    /// in use). A whisper tab's whisper is a prefilled line over <see cref="WhisperFallback"/>.
+    /// </summary>
     internal static int ModeFor(ChatTab tab, string? partner)
     {
         var send = EffectiveFor(tab, partner);
-        return send == null || send == ChatSend.Whisper ? -1 : (int)send.Value;
+        if (send == null) return -1;
+        return send == ChatSend.Whisper ? (int)WhisperFallback(tab) : (int)send.Value;
     }
 
     /// <summary>The line an empty input gets on this tab: <c>/w partner </c> for a whisper tab, else null.</summary>
     internal static string? PrefillFor(ChatTab tab, string? partner) =>
         EffectiveFor(tab, partner) == ChatSend.Whisper ? "/w " + partner!.Trim() + " " : null;
 
-    /// <summary>Whether <paramref name="text"/> is only a prefill (nothing typed after <c>/w name </c>).</summary>
-    internal static bool IsOnlyPrefill(string? text, string? prefill) =>
-        !string.IsNullOrEmpty(prefill) && string.Equals((text ?? "").Trim(), prefill!.Trim(), StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// A whisper command with a name and nothing after it (<c>/w Bob</c>, <c>/whisper Bob </c>): a prefill, the
+    /// right-click Whisper line, or a stale one from an earlier partner. Never a draft, never recalled as sent.
+    /// </summary>
+    internal static bool IsBareWhisper(string? text)
+    {
+        string t = (text ?? "").Trim();
+        foreach (var c in new[] { "/whisper ", "/w " })
+        {
+            if (!t.StartsWith(c, StringComparison.OrdinalIgnoreCase)) continue;
+            string rest = t.Substring(c.Length).Trim();
+            return rest.Length > 0 && rest.IndexOf(' ') < 0;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The line after a pending insert (right-click Whisper, Share in chat) lands in <paramref name="current"/>: a
+    /// whisper insert replaces a bare whisper line (so a prefilled <c>/w Bob </c> never becomes
+    /// <c>/w Bob /w Carol</c>); anything else is appended, with a space when needed.
+    /// </summary>
+    internal static string JoinInsert(string? current, string insert)
+    {
+        string now = current ?? "";
+        if (IsBareWhisper(now) && IsWhisperCommand(insert)) return insert;
+        return now.Length == 0 || now.EndsWith(" ", StringComparison.Ordinal) ? now + insert : now + " " + insert;
+    }
+
+    private static bool IsWhisperCommand(string? text) =>
+        text != null && (text.StartsWith("/w ", StringComparison.OrdinalIgnoreCase) || text.StartsWith("/whisper ", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// The game's channel moved to <paramref name="mode"/> while the player typed on <paramref name="tab"/>: remember it
-    /// as the tab's (a value equal to the default is stored as none, so editing the tab's channels later re-derives it).
-    /// Region, unknown modes and whispers are not remembered (a whisper on a whisper tab is its default again). True
-    /// when it changed.
+    /// as the tab's when <see cref="CanRemember"/> allows (a value equal to the default is stored as none, so editing
+    /// the tab's channels later re-derives it). True when the stored value changed.
     /// </summary>
     internal static bool Remember(ChatTab tab, int mode)
     {
         if (tab == null || !Enum.IsDefined(typeof(ChatSend), mode)) return false;
         var send = (ChatSend)mode;
-        if (send == ChatSend.Whisper && DefaultFor(tab) != ChatSend.Whisper) return false;
+        if (!CanRemember(tab, send)) return false;
         ChatSend? stored = send == DefaultFor(tab) ? null : send;
         if (tab.SendTo == stored) return false;
         tab.SendTo = stored;
@@ -99,28 +154,29 @@ internal static class ChatTabInput
     }
 
     /// <summary>
-    /// Move the line between tabs: the leaving tab keeps <paramref name="current"/> as its draft (not a bare prefill),
-    /// and the line becomes the arriving tab's draft. Returns the new line. With no leaving tab (the first tab shown in
-    /// a world) or the same tab, the line stays as it is.
+    /// Move the line between tabs: the leaving tab keeps <paramref name="current"/> as its draft (not a bare whisper
+    /// line), and the line becomes the arriving tab's draft. Returns the new line. With no leaving tab (the first tab
+    /// shown in a world) or the same tab, the line stays as it is.
     /// </summary>
-    internal static string SwapDraft(ChatTab? from, ChatTab to, string? current, string? fromPrefill)
+    internal static string SwapDraft(ChatTab? from, ChatTab to, string? current)
     {
         if (from == null || ReferenceEquals(from, to)) return current ?? "";
-        from.Draft = IsOnlyPrefill(current, fromPrefill) ? "" : current ?? "";
+        from.Draft = IsBareWhisper(current) ? "" : current ?? "";
         return to.Draft ?? "";
     }
 }
 
 /// <summary>
-/// CHAT13: follows the game's channel each frame to learn the player's explicit choices, and arms the whisper prefill
-/// once per opening of the input. Game-free.
+/// CHAT13: follows the game's channel each frame to learn the player's picks, notices the input opening, and arms the
+/// whisper prefill once per opening. Game-free.
 /// </summary>
 internal sealed class ChatTabInputTracker
 {
     private int _lastMode = -1;
+    private bool _wasFocused;
     private bool _prefilled;
 
-    /// <summary>The channel Progenitor just set (a tab switch): not the player's choice.</summary>
+    /// <summary>The channel Progenitor just set (a tab switch, an opening): not the player's choice.</summary>
     internal void Applied(int mode)
     {
         if (mode >= 0) _lastMode = mode;
@@ -132,37 +188,83 @@ internal sealed class ChatTabInputTracker
     internal void Reset()
     {
         _lastMode = -1;
+        _wasFocused = false;
         _prefilled = false;
     }
 
     /// <summary>
-    /// One frame. A channel change seen while the player types is remembered on <paramref name="tab"/> (returns true:
-    /// save the tabs); a change while the input is closed (a world load) is only noted.
+    /// One frame. A channel change seen while the player types is offered to <paramref name="tab"/> (returns true when
+    /// the tab's remembered channel changed: save the tabs); a change while the input is closed (a world load) is only
+    /// noted. <paramref name="opened"/> is true on the frame the input gains focus.
     /// </summary>
-    internal bool Observe(ChatTab? tab, int mode, bool focused)
+    internal bool Observe(ChatTab? tab, int mode, bool focused, out bool opened)
     {
+        opened = focused && !_wasFocused;
         bool changed = false;
-        if (focused && _lastMode >= 0 && mode != _lastMode && tab != null) changed = ChatTabInput.Remember(tab, mode);
+        if (focused && !opened && _lastMode >= 0 && mode != _lastMode && tab != null) changed = ChatTabInput.Remember(tab, mode);
         _lastMode = mode;
         if (!focused) _prefilled = false;
+        _wasFocused = focused;
         return changed;
     }
 
     /// <summary>
     /// The line to put in the input this frame, or null: the tab's whisper prefill, once per opening (or tab switch),
-    /// while the input is open and empty.
+    /// while the input is open and empty and no insert is waiting to land.
     /// </summary>
-    internal string? Prefill(ChatTab? tab, string? partner, bool focused, string? text)
+    internal string? Prefill(ChatTab? tab, string? partner, bool focused, string? text, bool insertPending)
     {
         if (!focused || _prefilled || tab == null) return null;
-        if (!string.IsNullOrEmpty(text))
-        {
-            // Something is already typed: this opening never gets a prefill.
-            _prefilled = true;
-            return null;
-        }
-
+        if (insertPending) return null;
         _prefilled = true;
+        // Something is already typed: this opening never gets a prefill.
+        if (!string.IsNullOrEmpty(text)) return null;
         return ChatTabInput.PrefillFor(tab, partner);
     }
+}
+
+/// <summary>
+/// CHAT7 and CHAT13: when a typed line counts as sent, for the sent-line recall. A line counts when the input loses
+/// focus with the line emptied (the game empties it when Enter sends); not when the focus went to a press on the tab
+/// row (a tab click: the line becomes that tab's draft), not for a bare whisper line, and not after the line was
+/// swapped for another tab's (<see cref="Forget"/>). Escape on a typed line may count; recall then offers it, which is
+/// harmless. Game-free.
+/// </summary>
+internal sealed class ChatSentWatch
+{
+    private string _typed = "";
+    private bool _wasFocused;
+
+    /// <summary>The line typed so far while the input has focus (empty after <see cref="Forget"/>).</summary>
+    internal string Typed => _typed;
+
+    /// <summary>The last focus loss went to a press on the tab row.</summary>
+    internal bool LastLossWasTabClick { get; private set; }
+
+    /// <summary>
+    /// One frame: the line that was just sent, or null. <paramref name="lostToTabRow"/> is asked, with the typed line,
+    /// only on the frame focus is lost.
+    /// </summary>
+    internal string? Frame(bool focused, string? text, Func<string, bool> lostToTabRow)
+    {
+        string? sent = null;
+        if (focused) _typed = text ?? "";
+        else if (_wasFocused)
+        {
+            string typed = _typed;
+            _typed = "";
+            bool tabClick = typed.Length > 0 && lostToTabRow(typed);
+            LastLossWasTabClick = tabClick;
+            if (!tabClick && string.IsNullOrEmpty(text) && typed.Trim().Length > 0 && !ChatTabInput.IsBareWhisper(typed)) sent = typed;
+        }
+
+        _wasFocused = focused;
+        return sent;
+    }
+
+    /// <summary>Whether the input loses focus this frame (the caller ends recall browsing then).</summary>
+    internal bool LostFocus(bool focused) => _wasFocused && !focused;
+
+    /// <summary>The line in the input was replaced (another tab's draft, a long message sent by parts): forget it.</summary>
+    internal void Forget() => _typed = "";
 }

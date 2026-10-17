@@ -241,35 +241,36 @@ Status: source-checked, built against the installed game, and game-free tested (
 
 ### Input line per tab (CHAT13)
 
-Status: source-checked, built against the installed game, and game-free tested (`ChatTabInputTests`). **Not live-verified.**
+Status: source-checked, built against the installed game, and game-free tested (`ChatTabInputTests`). **Not live-verified.** Background and sources: internal research note `chat-tab-input-channel-2026-10-17.md`.
 
-A tab is a view with its own send channel and its own unsent line, as in WoW's per-window input (IM style), City of Heroes' per-tab default channel, and Discord and Slack, where the draft follows the conversation. Players of base games without it (ESO) add it with addons. Design decided 2026-10-17.
+A tab is a view with its own send channel and its own unsent line.
 
-| Tab | Channel when first shown | Opening the input | Picking a channel while typing (`/g`, `/l`, `/c`, the game's Tab cycle) |
+| Tab | Channel | Opening the input | Picking a channel while typing (`/g`, `/l`, `/c`, the game's Tab cycle) |
 |---|---|---|---|
-| One channel (Global, Local or Clan) | That channel | The tab's channel | Becomes the tab's channel |
-| Several channels | The smallest group it shows: Clan, then Local, then Global (never the whole server when a smaller group is shown) | The tab's channel | Becomes the tab's channel |
-| Whispers, with no Global, Local or Clan | Whispers the latest partner (the one `/r` answers) | An empty line gets `/w <partner> `, once per opening; with no partner yet, the channel in use | Becomes the tab's channel; a whisper brings back the whisper default |
-| Mentions only, System and mods only, All | The channel in use (unchanged) | The channel in use | Becomes the tab's channel (All too); a whisper is not remembered |
+| One channel (Global, Local or Clan) | That channel | The tab's channel is set again if it changed while the input was closed | Remembered only if the tab shows it; otherwise for this opening only |
+| Several channels | The smallest group it shows: Clan, then Local, then Global; a remembered pick instead | As above | As above |
+| Whispers, with no Global, Local or Clan | Local, under a `/w <partner> ` line (the partner `/r` answers); Local with no partner yet | An empty line gets `/w <partner> `, once per opening; never in front of a pending insert | Never remembered (the tab shows no other channel); for this opening only |
+| All, Mentions only, System and mods only | The channel in use, unchanged | Unchanged | Never remembered |
 
-- **Whispers are never sticky** on another tab: a `/w name` line from the Clan tab is a one-off, and the tab keeps Clan.
-- **Unsent text** stays with the tab it was typed in and comes back when the tab is shown again; a bare `/w <partner> ` line is not kept. Drafts last for the session only and are dropped on leaving the world: a half-typed game chat line is stale by the next session, and Up already recalls what was sent.
-- **Editing a tab's channels** (Edit this tab) forgets its remembered channel, so it follows the new channels.
-- The channel shown on the empty input line and the line's color are the game's for the channel in use, so they follow the tab.
+- **Whispers are never sticky.** A `/w name` line from the Clan tab is a one-off; the next opening is on Clan again.
+- **A right-click Whisper or Share in chat** lands before the whisper tab's prefill; a whisper insert replaces a bare `/w name` line instead of following it.
+- **Unsent text** stays with the tab it was typed in and comes back when the tab is shown again. A bare `/w name` line (a prefill, or a stale one after the partner changed) is never a draft and never recalled as sent. A tab switch never records the line as sent, also when clicking a tab takes the input's focus, and it ends Up recall browsing. While an input method composition is active the switch of the line waits until it ends. Drafts last for the session only and are dropped on leaving the world.
+- **Editing a tab's channels** (Edit this tab) forgets its remembered channel.
+- The empty input line's channel label and the line's color are the game's for the channel in use, so they follow the tab.
+- Clan instead of Local under a whisper tab's line, for a player in a clan, is not done: the chat code has no verified read of the player's own clan yet.
 
-**How it works** (`Chat/ChatTabInput.cs`, `ChatTabs.ApplyInput`, `ChatTabs.UpdateInput`). Showing a tab sets the game's sticky channel (`ClientChatSystem._DefaultMode`) and its placeholder, as the earlier one-channel rule did. Each chat update, a change of that channel while the input is focused is the player's choice and is stored on the shown tab; a change while it is closed (a world load) is not. A whisper tab's line is a prefill, the same text the right-click **Whisper** puts in the input, so the game's own whisper parsing, its "No vampire with that name found" and its whisper mode apply unchanged.
+**How it works** (`Chat/ChatTabInput.cs`, `ChatTabs.ApplyInput`, `ChatTabs.UpdateInput`). Showing a tab, and the first frame of each opening of the input, set the game's sticky channel (`ClientChatSystem._DefaultMode`) and its placeholder. Each chat update, a change of that channel while the input stays focused is a pick, offered to the shown tab (`ChatTabInput.CanRemember`); a change while it is closed is not. A whisper tab's line is a prefill, the same text the right-click **Whisper** puts in the input, so the game's own whisper parsing, its "No vampire with that name found" and its whisper mode apply unchanged. When the input loses focus to a press on the tab row, the line is kept for the switch (the game may empty an unfocused line) and not recalled (`ChatSentWatch`).
 
-**Saved.** `[Chat] Tabs` gains an optional marker entry after a tab: `>` and the channel's word (`global`, `local`, `clan`, `system`; `whisper` is read but never written), only when the remembered channel differs from the tab's default. All is then written even when first: `All;>local;Clan=4;Trade=1;>global`. Tab names cannot contain `>`. Builds before CHAT13 skip the marker (it has no `=`) and load the same tabs.
+**Saved.** `[Chat] Tabs` gains an optional marker entry after a tab: `>` and the channel's word (`global`, `local`, `clan`, `system`), only for a remembered pick that differs from the tab's default: `Clan=4;Mix=5;>global;All`. On load a marker the tab may not remember is dropped (All, a channel it does not show, `whisper`, the default). Tab names cannot contain `>`. Builds before CHAT13 skip the marker (it has no `=`) and load the same tabs.
 
 **Live check (not run).** Steam client in a world, chat shown, a second player online to whisper with, and the Dev bridge (`chat_tabs read`, `select {index}`, `line {text}`; `key` to open the input):
-1. Tabs All, Clan, a Global+Clan custom tab, Whispers and Mentions. `chat_tabs read`: `tabs[].sendNow` is `keep`, `clan`, `clan`, `keep` (no partner yet) and `keep`.
-2. Select Clan: `input.mode` is 2 and the placeholder says clan. Select Mentions: the mode stays 2.
-3. On the custom tab, open the input, type `/g`: `tabs[2].sendTo` is `global` and `saved` has `>global`. Select Clan and back: the mode follows (2, then 0). Rejoin: still `global`.
-4. Receive a whisper from the second player, select Whispers, open the input: the line is `/w <partner> `; send it with a message; the whisper arrives. Close and reopen: the prefill comes back. On the Clan tab, `/w <partner> hi` sends and the tab stays on Clan.
-5. Type `half a line` on Clan (`line`), select All: the input is empty and `tabs[1].draft` is `half a line`; select Clan: the text is back. Escape on a bare prefill adds nothing to Up recall.
-6. Edit the custom tab's channels: its `sendTo` is empty again.
-
-**Edit dialog follow-up.** The one-step Edit tab dialog (built separately) may add a **Send to** choice per tab: the tab's channels that can be typed to plus **Keep the channel in use**, set through `ChatTab.SendTo` (null for the default) after the scope, since setting `Scope` clears it.
+1. Tabs All, Clan, a Global+Clan custom tab, Whispers and Mentions. `chat_tabs read`: `tabs[].sendNow` is `keep`, `clan`, `clan`, `local` (no partner yet) and `keep`.
+2. Select Clan: `input.mode` is 2. Select Mentions: the mode stays 2. On Mentions, `/g`: close and reopen, still 0 (unchanged, not remembered: `sendTo` empty).
+3. On the custom tab, open the input, type `/g`: `tabs[2].sendTo` is `global` and `saved` has `>global`. Select Clan and back: the mode follows (2, then 0). Rejoin: still `global`. On the custom tab, `/l`: close and reopen, the mode is 0 again.
+4. Receive a whisper from the second player, select Whispers, open the input: the line is `/w <partner> ` and the mode is 4 (3 once the game takes the `/w` line as its whisper mode). Send it with a message; the whisper arrives. Reopen: the prefill comes back. Clear the line and send `hi`: it goes to Local. On the Clan tab, `/w <partner> hi` sends and the next opening is on Clan.
+5. On Whispers with the input closed, right-click another player's line, Whisper: the line is `/w <them> ` only.
+6. Type `half a line` on Clan (`line`), click All with the mouse: the input is empty, `tabs[1].draft` is `half a line`, and Up does not offer it; click Clan: the text is back. Escape on a bare prefill adds nothing to Up.
+7. Edit the custom tab's channels: its `sendTo` is empty again.
 
 **Another chat mod.** Progenitor's chat view steps aside for a mod that replaces the game's chat window; visibility, the click guard and the chat commands still work on the window the game has. Progenitor names no chat mod itself. Two signals turn the view off, either is enough (`ChatReplacement` in `Chat/ChatWindowLogic.cs`, unit-tested):
 

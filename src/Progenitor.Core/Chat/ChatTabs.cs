@@ -1054,8 +1054,17 @@ internal static class ChatTabs
     private static ChatTab? _lineOwner;
 
     /// <summary>
-    /// Show <paramref name="tab"/>'s line: the leaving tab keeps its draft and the arriving tab's comes back
+    /// The line the input held when it lost focus to a press on the tab row (the game may empty an unfocused line), so
+    /// the tab switch that follows keeps it as the leaving tab's draft; with the frame it was taken.
+    /// </summary>
+    private static string? _lostLine;
+    private static int _lostFrame;
+    private const int LostLineFrames = 120;
+
+    /// <summary>
+    /// Show the shown tab's line in the input: the leaving tab keeps its draft and the arriving tab's comes back
     /// (<see cref="ChatTabInput.SwapDraft"/>), and the game's channel becomes the tab's (<see cref="ChatTabInput.ModeFor"/>).
+    /// Deferred to <see cref="UpdateInput"/> while an input method composition is active.
     /// </summary>
     private static void ApplyInput(ClientChatSystem system, ChatTab tab)
     {
@@ -1064,47 +1073,71 @@ internal static class ChatTabs
         var field = window != null && window.Pointer != IntPtr.Zero ? window.ChatInputField : null;
         if (field != null && field.Pointer != IntPtr.Zero && !ReferenceEquals(_lineOwner, tab))
         {
+            if (Composing(field)) return;
             string current = field.text ?? "";
-            string? leavingPrefill = _lineOwner != null ? ChatTabInput.PrefillFor(_lineOwner, partner) : null;
-            string next = ChatTabInput.SwapDraft(_lineOwner, tab, current, leavingPrefill);
-            if (!string.Equals(next, current, StringComparison.Ordinal))
+            if (current.Length == 0 && _lostLine != null && Time.frameCount - _lostFrame <= LostLineFrames) current = _lostLine;
+            _lostLine = null;
+            string next = ChatTabInput.SwapDraft(_lineOwner, tab, current);
+            if (!string.Equals(next, field.text ?? "", StringComparison.Ordinal))
             {
                 field.text = next;
                 field.MoveTextEnd(false);
             }
 
+            // A swapped line was never sent: recall must not take it, and Up starts from the newest line again.
+            ChatWindow.ForgetTypedLine();
             InputTracker.TabChanged();
             _lineOwner = tab;
         }
 
-        int channel = ChatTabInput.ModeFor(tab, partner);
+        SetMode(system, ChatTabInput.ModeFor(tab, partner));
+    }
+
+    private static void SetMode(ClientChatSystem system, int channel)
+    {
         if (channel < 0) return;
-        system._DefaultMode = (ChatMessageType)channel;
-        window?.SetPlaceholderMode((ChatMessageType)channel, system._WhisperUserName ?? "");
+        if ((int)system._DefaultMode != channel)
+        {
+            system._DefaultMode = (ChatMessageType)channel;
+            var window = system._ChatWindow;
+            if (window != null && window.Pointer != IntPtr.Zero) window.SetPlaceholderMode((ChatMessageType)channel, system._WhisperUserName ?? "");
+        }
+
         InputTracker.Applied(channel);
     }
 
+    /// <summary>An input method composition is in progress (a swap now would cut it).</summary>
+    private static bool Composing(TMP_InputField field)
+    {
+        try { return field.m_IsCompositionActive; }
+        catch { return false; }
+    }
+
     /// <summary>
-    /// CHAT13, each frame from the chat update: the first frame in a world shows the shown tab's line and channel; a
-    /// channel the player picks while typing becomes the shown tab's (saved); an empty line opened on a whisper tab
-    /// gets <c>/w partner </c>.
+    /// CHAT13, each frame from the chat update (after a pending insert has landed): the first frame in a world, or a
+    /// deferred switch, shows the shown tab's line and channel; opening the input puts the tab's channel back if the
+    /// game changed it while the input was closed (or a pick outside the tab's channels ended with the last opening);
+    /// a pick the tab may remember is saved; an empty line opened on a whisper tab gets <c>/w partner </c>.
     /// </summary>
-    internal static void UpdateInput(ClientChatSystem system, HUDChatWindow window)
+    internal static void UpdateInput(ClientChatSystem system, HUDChatWindow window, bool insertPending)
     {
         if (!EnsureLoaded() || Set.Active < 0 || Set.Active >= Set.Tabs.Count) return;
         var tab = Set.Tabs[Set.Active];
         var field = window.ChatInputField;
         if (field == null || field.Pointer == IntPtr.Zero) return;
-        if (_lineOwner == null)
+        if (_lineOwner == null) _lineOwner = tab;
+        if (!ReferenceEquals(_lineOwner, tab) || !_appliedInWorld)
         {
-            _lineOwner = tab;
+            _appliedInWorld = true;
             ApplyInput(system, tab);
         }
 
         bool focused = window.IsChatFocused;
-        if (InputTracker.Observe(tab, (int)system._DefaultMode, focused) && TabsSetting != null)
+        if (focused) _lostLine = null;
+        if (InputTracker.Observe(tab, (int)system._DefaultMode, focused, out bool opened) && TabsSetting != null)
             TabsSetting.Value = ChatTab.Save(Set.Tabs);
-        string? line = InputTracker.Prefill(tab, ChatWindow.WhisperPartner, focused, field.text);
+        if (opened) SetMode(system, ChatTabInput.ModeFor(tab, ChatWindow.WhisperPartner));
+        string? line = InputTracker.Prefill(tab, ChatWindow.WhisperPartner, focused, field.text, insertPending);
         if (line != null)
         {
             field.text = line;
@@ -1112,15 +1145,38 @@ internal static class ChatTabs
         }
     }
 
-    /// <summary>Whether <paramref name="text"/> is only the shown tab's whisper prefill (never recalled as sent).</summary>
-    internal static bool IsPrefillOnly(string? text) =>
-        Set.Active >= 0 && Set.Active < Set.Tabs.Count
-        && ChatTabInput.IsOnlyPrefill(text, ChatTabInput.PrefillFor(Set.Tabs[Set.Active], ChatWindow.WhisperPartner));
+    private static bool _appliedInWorld;
+
+    /// <summary>
+    /// CHAT13, from the recall's focus check: the input lost focus while the pointer is pressing the tab row. That is a
+    /// tab click, not a send: keep the line for the tab switch and tell the caller not to recall it.
+    /// </summary>
+    internal static bool FocusLostToTabRow(string typed)
+    {
+        bool press = _drag == Drag.TabPress || _drag == Drag.TabDrag;
+        if (!press)
+        {
+            try
+            {
+                press = UnityInputRuntime.AnyMouseButtonHeld()
+                    && UnityUiRuntime.TrySamplePointerScreenAnyFocus(out float x, out float y)
+                    && PointerOver(new Vector2(x, y));
+            }
+            catch { press = false; }
+        }
+
+        if (!press) return false;
+        _lostLine = typed ?? "";
+        try { _lostFrame = Time.frameCount; } catch { _lostFrame = 0; }
+        return true;
+    }
 
     /// <summary>A new world (or Core unload): the next frame applies the shown tab again; drafts belong to the old server.</summary>
     internal static void ForgetInput()
     {
         _lineOwner = null;
+        _appliedInWorld = false;
+        _lostLine = null;
         InputTracker.Reset();
         foreach (var t in Set.Tabs) t.Draft = "";
     }

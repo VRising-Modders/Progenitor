@@ -436,7 +436,9 @@ internal sealed class ChatTab
                 string part = raw.Trim();
                 if (part.Length > 0 && part[0] == SendMarker)
                 {
-                    if (last != null && ParseSendWord(part.Substring(1)) is ChatSend send) last.SendTo = send;
+                    // Only a channel the tab may remember (a hand edit or a newer build may say more).
+                    if (last != null && ParseSendWord(part.Substring(1)) is ChatSend send && ChatTabInput.CanRemember(last, send)
+                        && send != ChatTabInput.DefaultFor(last)) last.SendTo = send;
                     last = null;
                     continue;
                 }
