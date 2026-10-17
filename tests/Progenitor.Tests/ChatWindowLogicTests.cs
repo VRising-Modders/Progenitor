@@ -275,4 +275,60 @@ public sealed class ChatWindowLogicTests : IDisposable
         Assert.False(InputMaskPlan.For(InputMaskPlan.ScopeFor(pointerBlocked: false)).BlockZoom);
         Assert.Equal(16, AnalogInputActions.ZoomCamera);
     }
+
+    [Fact]
+    public void Lingering_chat_box_is_scrolled_by_progenitor()
+    {
+        Assert.True(ChatWheelScroll.ProgenitorScrolls(ChatWheelScroll.OpenUnfocused, visible: true, overChat: true, notch: true, buttonHeld: false));
+    }
+
+    [Fact]
+    public void Open_input_line_leaves_the_wheel_to_the_game_so_a_notch_is_not_applied_twice()
+    {
+        Assert.False(ChatWheelScroll.ProgenitorScrolls(ChatWheelScroll.OpenFocused, true, true, true, false));
+    }
+
+    [Theory]
+    [InlineData(false, true, true, false)]  // faded or HUD hidden
+    [InlineData(true, false, true, false)]  // pointer elsewhere: the wheel is the camera's
+    [InlineData(true, true, false, false)]  // a held reading, not a new notch
+    [InlineData(true, true, true, true)]    // a scroll bar drag owns the log
+    public void Lingering_chat_box_is_not_scrolled_without_a_notch_over_it(bool visible, bool overChat, bool notch, bool held)
+    {
+        Assert.False(ChatWheelScroll.ProgenitorScrolls(ChatWheelScroll.OpenUnfocused, visible, overChat, notch, held));
+    }
+
+    [Fact]
+    public void Closed_chat_box_is_never_scrolled()
+    {
+        Assert.False(ChatWheelScroll.ProgenitorScrolls(3, true, true, true, false));
+    }
+
+    [Fact]
+    public void A_notch_over_the_shown_box_keeps_it_up_in_either_open_state()
+    {
+        Assert.True(ChatWheelScroll.KeepsVisible(visible: true, overChat: true, notch: true));
+        Assert.False(ChatWheelScroll.KeepsVisible(visible: true, overChat: false, notch: true));
+        Assert.False(ChatWheelScroll.KeepsVisible(visible: false, overChat: true, notch: true));
+        Assert.False(ChatWheelScroll.KeepsVisible(visible: true, overChat: true, notch: false));
+    }
+
+    [Fact]
+    public void Wheel_up_moves_toward_older_lines_and_down_toward_the_newest()
+    {
+        float up = ChatWheelScroll.NextPosition(0f, 120f, contentHeight: 1000f, viewportHeight: 200f);
+        Assert.True(up > 0f && up <= 1f);
+        float down = ChatWheelScroll.NextPosition(up, -120f, 1000f, 200f);
+        Assert.Equal(0f, down, 3);
+        // Clamped at both ends.
+        Assert.Equal(1f, ChatWheelScroll.NextPosition(1f, 120f, 1000f, 200f), 3);
+        Assert.Equal(0f, ChatWheelScroll.NextPosition(0f, -120f, 1000f, 200f), 3);
+    }
+
+    [Fact]
+    public void A_log_that_fits_is_not_moved()
+    {
+        Assert.Equal(0.4f, ChatWheelScroll.NextPosition(0.4f, 120f, contentHeight: 150f, viewportHeight: 200f));
+        Assert.Equal(0.4f, ChatWheelScroll.NextPosition(0.4f, 120f, contentHeight: 0f, viewportHeight: 0f));
+    }
 }

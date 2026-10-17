@@ -4260,9 +4260,36 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     /// </summary>
     private static float WheelDeltaY(Mouse? mouse)
     {
-        if (UiSyntheticInput.Active) return UiSyntheticInput.SampleWheel();
-        try { return mouse == null ? 0f : mouse.scroll.ReadValue().y; }
-        catch { return 0f; }
+        // One reading a frame, shared by every reader (the panel pump and the chat box's wheel): a second reader in the
+        // same frame must not dequeue the next synthetic notch, or each would see only half of them.
+        int frame = -1;
+        try { frame = Time.frameCount; } catch { /* no frame clock: read fresh */ }
+        if (frame >= 0 && frame == _wheelSampleFrame) return _wheelSampleValue;
+        float value;
+        if (UiSyntheticInput.Active) value = UiSyntheticInput.SampleWheel();
+        else
+        {
+            try { value = mouse == null ? 0f : mouse.scroll.ReadValue().y; }
+            catch { value = 0f; }
+        }
+
+        _wheelSampleFrame = frame;
+        _wheelSampleValue = value;
+        return value;
+    }
+
+    private static int _wheelSampleFrame = -1;
+    private static float _wheelSampleValue;
+
+    /// <summary>
+    /// This frame's wheel reading for the chat box, whatever the window focus (a background window gets no wheel
+    /// anyway). The same reading the panel pump uses, including the dev bridge's synthetic notches.
+    /// </summary>
+    internal static float SampleWheelDeltaY()
+    {
+        Mouse? mouse = null;
+        try { mouse = Mouse.current; } catch { /* */ }
+        return WheelDeltaY(mouse);
     }
 
     /// <summary>
