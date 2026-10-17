@@ -160,6 +160,23 @@ Client, main thread. CHAT12: the chat tab row as drawn ([chat.md](chat.md#tab-ro
 
 Aim a `mouse` `move`, `click` or `drag` at an item's center to test hover, selection and reordering. Source-checked and built; not run live.
 
+## `chat_history`
+
+Client, main thread. The chat log, the drawn window and the history file ([large history](chat.md#large-history-and-performance)). Reflection into Core's `Progenitor.Chat.ChatView`. No MCP wrapper; use `call.mjs`.
+
+| Arguments | Does |
+|---|---|
+| `{"action":"read"}` | `on`, `attached`, `lines` (in the log), `capacity` and `setting` (`[Chat] HistoryLines`), `tab` and `tabLines` (lines the active tab shows), `windowStart` and `windowCount` (the drawn window in the tab's lines), `following` (false while scrolled back), `lineObjects` and `lineObjectsShown` (UI line objects built and showing, at most 120), `filterChecks` (tab filter checks so far), `loading` and `pending` (the history read at join and the lines waiting for it), `saveDirty`, `saving`, `keepHistory`. |
+| `{"action":"fill","count":5000}` | Adds `count` (1 to 5000) numbered test lines to this client's log only: nothing is sent to the server or another player. Spread over Global, Local, Clan, System and whispers, or all on `kind` (`Global`, `Region`, `Team`, `WhisperFrom`, `WhisperTo`, `System`, `Lore`, `Local`). They are saved with the history like other lines. Replies with the read. Refused while the view is off or the history is still being read. |
+
+```powershell
+$bridgeArgs = Join-Path $env:TEMP 'chat-history.json'
+[System.IO.File]::WriteAllText($bridgeArgs, '{"action":"fill","count":5000}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs client chat_history "@$bridgeArgs"
+```
+
+Source-checked and built; not run live.
+
 ## `nav`
 
 Client, main thread. NAV1 [controller and keyboard navigation](ui.md#controller-and-keyboard-navigation-nav1): read the focus, take one step, or press a button on a virtual gamepad.

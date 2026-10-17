@@ -105,7 +105,8 @@ internal static class ProgenitorPage
                 help: "The same line again within a minute shows ×2, ×3 instead of a new line.")
             .SettingRef("Chat", "KeepHistory", label: "Keep chat between sessions", control: SettingControl.Toggle,
                 help: "Each server's chat comes back when you rejoin, with a line where each session started and ended.")
-            .SettingRef("Chat", "HistoryLines", label: "Lines kept per server")
+            .SettingRef("Chat", "HistoryLines", label: "Lines kept per server", control: SettingControl.Number,
+                help: "50 to 5000. Scroll up in the chat box to read back through them. A lower number drops the oldest lines at once.")
             .SettingRef("Chat", "Mentions", label: "Highlight mentions", control: SettingControl.Toggle,
                 help: "A line with your name, a watched word, or @all from an admin is highlighted.")
             .SettingRef("Chat", "MentionSound", label: "Play a sound for mentions", control: SettingControl.Toggle)
