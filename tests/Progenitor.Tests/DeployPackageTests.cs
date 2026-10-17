@@ -1453,9 +1453,16 @@ public sealed class DeployPackageTests
         return stdout;
     }
 
+    /// <summary>
+    /// Runs a snippet as a script file. An uncaught terminating error is written to stderr as its
+    /// plain message: pwsh 7's default error view colors it and wraps it at the console width with
+    /// <c>| </c> prefixes, so a message carrying a long temp path (CI's runner profile) split
+    /// "script or executable" across two lines, while Windows PowerShell 5.1 printed it whole.
+    /// </summary>
     private static (int, string, string) RunPowerShellScript(string shell, string script, params string[] args)
     {
         string file = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N") + ".ps1");
+        script = "try {\n" + script + "\n} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }\n";
         File.WriteAllText(file, script, new UTF8Encoding(false));
         try { return Invoke(shell, Path.GetTempPath(), file, args); }
         finally { try { File.Delete(file); } catch { /* temp */ } }
