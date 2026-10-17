@@ -174,8 +174,10 @@ internal static unsafe partial class ServantRuntime
     /// plus <paramref name="sender"/> when connected. One network event entity with the shape chat
     /// messages use (<c>NetworkEventType</c>, the event component, <c>SendNetworkEventTag</c>,
     /// <c>SendEventToUsers</c> with one bit per user); the event's only field is written raw at its
-    /// declared offset, so no generic over the event type is instantiated. Returns how many users
-    /// it went to; 0 on any failure (logged), which never fails the send.
+    /// declared offset, so no generic over the event type is instantiated. A user a
+    /// <c>SuppressGameNotices</c> filter drops for <see cref="ServantNoticeKind.Started"/> is left
+    /// out of the mask. Returns how many users it went to; 0 on any failure (logged), which never
+    /// fails the send.
     /// </summary>
     internal static int AnnounceStarted(World world, EntityManager em, Entity heart, int missionGuid, Entity sender)
     {
@@ -203,6 +205,7 @@ internal static unsafe partial class ServantRuntime
                     }
                 }
                 if (!include) continue;
+                if (Notices.Any && Notices.ShouldSuppress(u, ServantNoticeKind.Started)) continue;
                 mask.SetUserBit(index);
                 users++;
             }
