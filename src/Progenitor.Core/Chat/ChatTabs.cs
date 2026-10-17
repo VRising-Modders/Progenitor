@@ -23,7 +23,7 @@ namespace Progenitor.Chat;
 /// glyph, which hover the same way. Left-click a tab to show it; typing in a single-channel tab sends to that channel.
 /// Press and drag a tab sideways to move it (<see cref="ChatTabRow"/>); the order is saved in <c>[Chat] Tabs</c>.
 /// Right-click a tab, or click the menu glyph, for the quick menu.</item>
-/// <item><b>Quick menu</b> (framework dialogs): Edit this tab, Move left / right, Close this tab, New tab, Colors
+/// <item><b>Quick menu</b> (framework dialogs): Edit this tab, Move left / right (reordering without a drag), Close this tab, New tab, Colors
 /// (<see cref="ChatColorPanel"/>), Background opacity, Lock / Unlock position, Reset position and size, All chat
 /// settings. It stores no copies of the settings.</item>
 /// <item><b>Move</b> by dragging the row (not on a tab); <b>resize</b> by dragging the corner grip; both are stored in
@@ -45,10 +45,8 @@ internal static class ChatTabs
     internal static ConfigEntry<int>? Opacity;
     internal static ConfigEntry<bool>? Locked;
 
-    private static List<ChatTab> _tabs = new() { ChatTab.All(), ChatTab.Clan() };
-    private static bool[] _unread = new bool[ChatTab.MaxTabs];
-    private static int _active;
-    private static bool _loaded;
+    /// <summary>The tabs, their unread marks and the shown tab; loaded once from <c>[Chat] Tabs</c>.</summary>
+    private static readonly ChatTabSet Set = new();
 
     private static IntPtr _windowPtr;
     private static HUDChatWindow? _window;
@@ -117,26 +115,26 @@ internal static class ChatTabs
     private static float _grabOffset;
     private static int _dropSlot = -1;
 
-    internal static IReadOnlyList<ChatTab> Tabs => _tabs;
+    internal static IReadOnlyList<ChatTab> Tabs => Set.Tabs;
 
-    private static void EnsureLoaded()
+    /// <summary>Load the saved tabs once; false while <c>[Chat] Tabs</c> is not bound yet (nothing may change them then).</summary>
+    private static bool EnsureLoaded()
     {
-        if (_loaded) return;
-        _loaded = true;
-        _tabs = ChatTab.Load(TabsSetting?.Value ?? ChatTab.DefaultSaved);
-        _active = Math.Max(0, Math.Min(_tabs.Count - 1, ActiveSetting?.Value ?? 0));
-        ChatView.ActiveTab = _tabs[_active];
+        if (Set.Loaded) return true;
+        if (!Set.EnsureLoaded(TabsSetting?.Value, ActiveSetting?.Value ?? 0)) return false;
+        ChatView.ActiveTab = Set.Tabs[Set.Active];
+        return true;
     }
 
     /// <summary>A new line in the log: tabs that show it and are not the active one get the unread mark.</summary>
     internal static void NoteNew(ChatRecord r)
     {
-        EnsureLoaded();
+        if (!EnsureLoaded()) return;
         if (r.Kind == ChatKind.Session || r.Transient) return;
-        for (int i = 0; i < _tabs.Count && i < _unread.Length; i++)
+        for (int i = 0; i < Set.Tabs.Count && i < Set.Unread.Length; i++)
         {
-            if (i == _active || _unread[i] || !_tabs[i].Shows(r)) continue;
-            _unread[i] = true;
+            if (i == Set.Active || Set.Unread[i] || !Set.Tabs[i].Shows(r)) continue;
+            Set.Unread[i] = true;
         }
     }
 
@@ -144,7 +142,7 @@ internal static class ChatTabs
 
     internal static void Update(HUDChatWindow window, bool chatShown, RectTransform? hudParent)
     {
-        EnsureLoaded();
+        if (!EnsureLoaded()) return;
         if (_strip == null || _windowPtr != window.Pointer || _strip.Pointer == IntPtr.Zero) Attach(window, hudParent);
         if (_stripRect == null) return;
         ChatTabArt.Refresh();
@@ -220,6 +218,8 @@ internal static class ChatTabs
             }
         }
 
+        // A new window (usually a new world): the game's textures may have been released, so find the art again.
+        ChatTabArt.OnAttach();
         _strip = strip;
         _stripRect = rect;
         _grip = grip;
@@ -313,8 +313,8 @@ internal static class ChatTabs
     private static string BuildKey(float width)
     {
         var sb = new System.Text.StringBuilder(64);
-        foreach (var t in _tabs) sb.Append(t.Name).Append('\u0001');
-        sb.Append(_tabs.Count < ChatTab.MaxTabs ? '+' : '-').Append(ChatTabArt.Version).Append('|')
+        foreach (var t in Set.Tabs) sb.Append(t.Name).Append('\u0001');
+        sb.Append(Set.Tabs.Count < ChatTab.MaxTabs ? '+' : '-').Append(ChatTabArt.Version).Append('|')
             .Append(Mathf.RoundToInt(width)).Append('|').Append(Mathf.RoundToInt(_chatFontSize));
         return sb.ToString();
     }
@@ -343,8 +343,8 @@ internal static class ChatTabs
         float size = ChatTabRow.FontSize(_chatFontSize);
         for (int pass = 0; pass < 2; pass++)
         {
-            for (int i = 0; i < _tabs.Count; i++) _items.Add(MakeItem(i, _tabs[i].Name, size));
-            if (_tabs.Count < ChatTab.MaxTabs) _items.Add(MakeItem(AddItem, "+", size));
+            for (int i = 0; i < Set.Tabs.Count; i++) _items.Add(MakeItem(i, Set.Tabs[i].Name, size));
+            if (Set.Tabs.Count < ChatTab.MaxTabs) _items.Add(MakeItem(AddItem, "+", size));
             _items.Add(MakeItem(MenuItem, ChatTabStrip.MenuGlyph, size));
 
             var widths = new float[_items.Count];
@@ -545,8 +545,8 @@ internal static class ChatTabs
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
-            var state = ChatTabRow.StateOf(i, _tabs.Count, _active, _hovered, dragged);
-            bool unread = item.Tab >= 0 && item.Tab != _active && item.Tab < _unread.Length && _unread[item.Tab];
+            var state = ChatTabRow.StateOf(i, Set.Tabs.Count, Set.Active, _hovered, dragged);
+            bool unread = item.Tab >= 0 && item.Tab != Set.Active && item.Tab < Set.Unread.Length && Set.Unread[item.Tab];
             if (state == item.Drawn && unread == item.DrawnUnread && art == item.DrawnArt) continue;
             item.Drawn = state;
             item.DrawnUnread = unread;
@@ -608,7 +608,12 @@ internal static class ChatTabs
 
     private static void HandleInput()
     {
-        if (!UnityUiRuntime.TrySamplePointerScreenAnyFocus(out float x, out float y)) return;
+        if (!UnityUiRuntime.TrySamplePointerScreenAnyFocus(out float x, out float y))
+        {
+            _hovered = -1;
+            return;
+        }
+
         var point = new Vector2(x, y);
         // The colors panel handles its own clicks.
         if (_drag == Drag.None && ChatColorPanel.Contains(point))
@@ -673,7 +678,7 @@ internal static class ChatTabs
         int tab = over >= 0 ? _items[over].Tab : -1;
         if (right)
         {
-            OpenMenu(tab >= 0 ? tab : _active);
+            OpenMenu(tab >= 0 ? tab : Set.Active);
             return;
         }
 
@@ -688,7 +693,7 @@ internal static class ChatTabs
         }
 
         if (over >= 0 && _items[over].Tab == AddItem) NewTab();
-        else if (over >= 0 && _items[over].Tab == MenuItem) OpenMenu(_active);
+        else if (over >= 0 && _items[over].Tab == MenuItem) OpenMenu(Set.Active);
         else if (!(Locked?.Value ?? false))
         {
             _drag = Drag.Move;
@@ -762,7 +767,7 @@ internal static class ChatTabs
     /// <summary>The tabs' resting layout (the + and menu items excluded).</summary>
     private static void TabLayout(out float[] lefts, out float[] widths)
     {
-        int n = Math.Min(_tabs.Count, _items.Count);
+        int n = Math.Min(Set.Tabs.Count, _items.Count);
         lefts = new float[n];
         widths = new float[n];
         for (int i = 0; i < n; i++)
@@ -788,17 +793,30 @@ internal static class ChatTabs
     /// <summary>Move a tab in the row and save the order; the shown tab and the unread marks go with their tabs.</summary>
     internal static bool MoveTab(int from, int to)
     {
-        if (!ChatTabRow.Move(_tabs, _unread, ref _active, from, to)) return false;
-        if (TabsSetting != null) TabsSetting.Value = ChatTab.Save(_tabs);
-        if (ActiveSetting != null) ActiveSetting.Value = _active;
+        // Refused until the saved tabs are loaded, so the defaults never overwrite them.
+        if (!EnsureLoaded()) return false;
+        // A move from the menu or the bridge during a drag ends the drag: the dragged item's index would be stale.
+        if (_drag == Drag.TabPress || _drag == Drag.TabDrag)
+        {
+            _drag = Drag.None;
+            _pressItem = -1;
+            _dropSlot = -1;
+            if (_marker != null && _marker.Pointer != IntPtr.Zero) _marker.gameObject.SetActive(false);
+            _built = "";
+        }
+
+        if (!Set.Move(from, to)) return false;
+        if (TabsSetting != null) TabsSetting.Value = ChatTab.Save(Set.Tabs);
+        if (ActiveSetting != null) ActiveSetting.Value = Set.Active;
         _built = "";
-        Plugin.Logger?.LogInfo("Chat: moved tab " + _tabs[Math.Max(0, Math.Min(_tabs.Count - 1, to))].Name + " from " + from + " to " + to + ".");
+        Plugin.Logger?.LogInfo("Chat: moved tab " + Set.Tabs[Math.Max(0, Math.Min(Set.Tabs.Count - 1, to))].Name + " from " + from + " to " + to + ".");
         return true;
     }
 
     /// <summary>The row as drawn, for the Dev bridge's <c>chat_tabs</c> read.</summary>
     internal static Dictionary<string, object?> Describe()
     {
+        bool loaded = EnsureLoaded();
         var items = new List<object?>();
         for (int i = 0; i < _items.Count; i++)
         {
@@ -833,13 +851,14 @@ internal static class ChatTabs
         return new Dictionary<string, object?>
         {
             ["ok"] = true,
+            ["loaded"] = loaded,
             ["attached"] = _stripRect != null,
             ["art"] = ChatTabArt.Source,
             ["artFont"] = ChatTabArt.Font != null ? ChatTabArt.Font.name : "",
             ["artGlow"] = ChatTabArt.Glow != null ? ChatTabArt.Glow.name : "",
             ["artLine"] = ChatTabArt.Line != null ? ChatTabArt.Line.name : "",
             ["artStar"] = ChatTabArt.Star != null ? ChatTabArt.Star.name : "",
-            ["active"] = _active,
+            ["active"] = Set.Active,
             ["hovered"] = _hovered,
             ["drag"] = _drag.ToString(),
             ["saved"] = TabsSetting?.Value ?? "",
@@ -950,12 +969,12 @@ internal static class ChatTabs
 
     internal static void Select(int index)
     {
-        if (index < 0 || index >= _tabs.Count) return;
-        _active = index;
-        _unread[index] = false;
-        ChatView.ActiveTab = _tabs[index];
+        if (index < 0 || index >= Set.Tabs.Count) return;
+        Set.Active = index;
+        Set.Unread[index] = false;
+        ChatView.ActiveTab = Set.Tabs[index];
         if (ActiveSetting != null) ActiveSetting.Value = index;
-        int channel = _tabs[index].SendChannel();
+        int channel = Set.Tabs[index].SendChannel();
         if (channel < 0) return;
         try
         {
@@ -970,10 +989,10 @@ internal static class ChatTabs
 
     private static void SaveTabs()
     {
-        if (TabsSetting != null) TabsSetting.Value = ChatTab.Save(_tabs);
-        if (_active >= _tabs.Count) _active = _tabs.Count - 1;
-        _unread = new bool[ChatTab.MaxTabs];
-        Select(_active);
+        if (TabsSetting != null) TabsSetting.Value = ChatTab.Save(Set.Tabs);
+        if (Set.Active >= Set.Tabs.Count) Set.Active = Set.Tabs.Count - 1;
+        Set.Unread = new bool[ChatTab.MaxTabs];
+        Select(Set.Active);
     }
 
     private static UiDialog Choose(string title, string body, IReadOnlyList<string> options, Action<int> pick) =>
@@ -983,22 +1002,22 @@ internal static class ChatTabs
     {
         var options = new List<string>();
         var actions = new List<Action>();
-        bool exists = tab >= 0 && tab < _tabs.Count;
-        bool editable = exists && !_tabs[tab].Fixed;
+        bool exists = tab >= 0 && tab < Set.Tabs.Count;
+        bool editable = exists && !Set.Tabs[tab].Fixed;
         if (editable)
         {
             options.Add("Edit this tab");
             actions.Add(() => EditTab(tab));
         }
 
-        // The keyboard and controller way to reorder (the mouse drags the tab).
+        // Reordering without a drag.
         if (exists && tab > 0)
         {
             options.Add("Move left");
             actions.Add(() => MoveTab(tab, tab - 1));
         }
 
-        if (exists && tab < _tabs.Count - 1)
+        if (exists && tab < Set.Tabs.Count - 1)
         {
             options.Add("Move right");
             actions.Add(() => MoveTab(tab, tab + 1));
@@ -1009,13 +1028,13 @@ internal static class ChatTabs
             options.Add("Close this tab");
             actions.Add(() =>
             {
-                _tabs.RemoveAt(tab);
-                _active = ChatTabRow.ActiveAfterClose(_active, tab, _tabs.Count);
+                Set.Tabs.RemoveAt(tab);
+                Set.Active = ChatTabRow.ActiveAfterClose(Set.Active, tab, Set.Tabs.Count);
                 SaveTabs();
             });
         }
 
-        if (_tabs.Count < ChatTab.MaxTabs)
+        if (Set.Tabs.Count < ChatTab.MaxTabs)
         {
             options.Add("New tab");
             actions.Add(NewTab);
@@ -1039,7 +1058,7 @@ internal static class ChatTabs
         options.Add("All chat settings");
         actions.Add(ModsMenu.OpenChatSettings);
 
-        string title = tab >= 0 && tab < _tabs.Count ? "Chat · " + _tabs[tab].Name : "Chat";
+        string title = tab >= 0 && tab < Set.Tabs.Count ? "Chat · " + Set.Tabs[tab].Name : "Chat";
         Choose(title, "", options, i => { if (i >= 0 && i < actions.Count) actions[i](); });
     }
 
@@ -1054,12 +1073,12 @@ internal static class ChatTabs
 
     private static void NewTab()
     {
-        if (_tabs.Count >= ChatTab.MaxTabs) return;
+        if (Set.Tabs.Count >= ChatTab.MaxTabs) return;
         var presets = new List<ChatTab>();
         foreach (var p in ChatTab.Presets())
         {
             bool taken = false;
-            foreach (var t in _tabs) if (string.Equals(t.Name, p.Name, StringComparison.OrdinalIgnoreCase)) taken = true;
+            foreach (var t in Set.Tabs) if (string.Equals(t.Name, p.Name, StringComparison.OrdinalIgnoreCase)) taken = true;
             if (!taken) presets.Add(p);
         }
 
@@ -1070,13 +1089,13 @@ internal static class ChatTabs
         {
             if (i >= 0 && i < presets.Count)
             {
-                _tabs.Add(presets[i]);
-                _active = _tabs.Count - 1;
+                Set.Tabs.Add(presets[i]);
+                Set.Active = Set.Tabs.Count - 1;
                 SaveTabs();
             }
             else if (i == presets.Count)
             {
-                var fresh = new ChatTab { Name = "Tab " + _tabs.Count, Scope = ChatScope.Global };
+                var fresh = new ChatTab { Name = "Tab " + Set.Tabs.Count, Scope = ChatScope.Global };
                 NameTab(fresh, isNew: true);
             }
         });
@@ -1084,8 +1103,8 @@ internal static class ChatTabs
 
     private static void EditTab(int index)
     {
-        if (index < 0 || index >= _tabs.Count || _tabs[index].Fixed) return;
-        NameTab(_tabs[index], isNew: false);
+        if (index < 0 || index >= Set.Tabs.Count || Set.Tabs[index].Fixed) return;
+        NameTab(Set.Tabs[index], isNew: false);
     }
 
     private static void NameTab(ChatTab tab, bool isNew)
@@ -1118,8 +1137,8 @@ internal static class ChatTabs
             if (tab.Scope == ChatScope.None) tab.Scope = ChatScope.Global;
             if (isNew)
             {
-                _tabs.Add(tab);
-                _active = _tabs.Count - 1;
+                Set.Tabs.Add(tab);
+                Set.Active = Set.Tabs.Count - 1;
             }
 
             SaveTabs();

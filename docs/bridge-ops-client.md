@@ -154,8 +154,8 @@ Client, main thread. CHAT12: the chat tab row as drawn ([chat.md](chat.md#tab-ro
 
 | Arguments | Does |
 |---|---|
-| `{"action":"read"}` | `art` (`menu`, `resident`, `kit` or `unresolved`) with `artFont`, `artGlow`, `artLine`, `artStar`; `active`, `hovered`, `drag`, `saved` (`[Chat] Tabs`); `items`, each `kind` (`tab`, `add`, `menu`), `caption`, `state` (`Normal`, `Hover`, `Active`, `Dragged`), for tabs `index` and `unread`, `font`, `fontSize` and its screen rect (`minX`..`maxY`, `centerX`, `centerY`, the `mouse` op's coordinates). |
-| `{"action":"move","from":2,"to":0}` | Moves a tab as the quick menu's Move left / right does, saves the order, and replies with `moved` and the read. |
+| `{"action":"read"}` | `loaded` (the saved tabs are read; false until the chat first updates), `art` (`menu`, `resident`, `kit` or `unresolved`) with `artFont`, `artGlow`, `artLine`, `artStar`; `active`, `hovered`, `drag`, `saved` (`[Chat] Tabs`); `items`, each `kind` (`tab`, `add`, `menu`), `caption`, `state` (`Normal`, `Hover`, `Active`, `Dragged`), for tabs `index` and `unread`, `font`, `fontSize` and its screen rect (`minX`..`maxY`, `centerX`, `centerY`, the `mouse` op's coordinates). |
+| `{"action":"move","from":2,"to":0}` | Moves a tab as the quick menu's Move left / right does, saves the order, and replies with `moved` and the read. Refused (`moved false`, nothing saved) while `loaded` is false; a drag in progress is cancelled. |
 
 Aim a `mouse` `move`, `click` or `drag` at an item's center to test hover, selection and reordering. Source-checked and built; not run live.
 

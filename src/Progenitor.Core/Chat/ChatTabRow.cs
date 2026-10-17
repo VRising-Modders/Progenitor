@@ -263,3 +263,35 @@ internal static class ChatTabRow
 
     private static float Clamp(float v, float lo, float hi) => v < lo ? lo : v > hi ? hi : v;
 }
+
+/// <summary>
+/// CHAT12: the player's tabs as the row holds them (order, unread marks, the shown tab), game-free. They are loaded
+/// once from <c>[Chat] Tabs</c>; until then nothing may change or save them, so an early call (a bridge move before the
+/// chat first updates, a setting not bound yet) can never overwrite the player's saved tabs with the defaults.
+/// </summary>
+internal sealed class ChatTabSet
+{
+    internal List<ChatTab> Tabs = new() { ChatTab.All(), ChatTab.Clan() };
+    internal bool[] Unread = new bool[ChatTab.MaxTabs];
+    internal int Active;
+
+    internal bool Loaded { get; private set; }
+
+    /// <summary>
+    /// Load from the saved setting the first time it is readable. <paramref name="saved"/> null means the setting is not
+    /// bound yet: false, and nothing is loaded.
+    /// </summary>
+    internal bool EnsureLoaded(string? saved, int savedActive)
+    {
+        if (Loaded) return true;
+        if (saved == null) return false;
+        Tabs = ChatTab.Load(saved);
+        Active = Math.Max(0, Math.Min(Tabs.Count - 1, savedActive));
+        Unread = new bool[ChatTab.MaxTabs];
+        Loaded = true;
+        return true;
+    }
+
+    /// <summary>Move a tab (<see cref="ChatTabRow.Move"/>); refused until the tabs are loaded.</summary>
+    internal bool Move(int from, int to) => Loaded && ChatTabRow.Move(Tabs, Unread, ref Active, from, to);
+}

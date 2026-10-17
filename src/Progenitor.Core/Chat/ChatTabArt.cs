@@ -2,6 +2,7 @@
 using System;
 using Il2CppInterop.Runtime;
 using Progenitor.Ui;
+using Progenitor.Ui.GameArt;
 using ProjectM.UI;
 using TMPro;
 using UnityEngine;
@@ -16,8 +17,12 @@ namespace Progenitor.Chat;
 /// (<c>Name/Line</c>, sprite <c>OuterTab_UnderLine</c>), tinted per state by its button; its new-unlock marker is
 /// <c>HighlightImage</c> (<c>Stunlock_Icon_NewStar</c>), which the row uses for unread tabs.
 ///
-/// <para>Read only: the donor is never cloned, changed or parented. The sprites and the font are the game's own
-/// assets, referenced, not copied, so nothing here needs releasing. The ladder, retried while unresolved:</para>
+/// <para>The donor is never cloned, changed or parented. Its three sprites go through the kit's
+/// <see cref="OwnedSprites"/> store: held on a hidden holder and copied into textures Progenitor owns, because a game
+/// texture can be released on world load even while a sprite is referenced (K2, K8). The row draws the owned copy,
+/// else the held original while its texture is loaded. The font cannot be copied; its atlas texture is checked
+/// instead. The ladder, run again on every chat window attach (a new window or world) and retried while
+/// unresolved:</para>
 /// <list type="number">
 /// <item><b>menu</b>: the open full-screen menu's top tabs.</item>
 /// <item><b>resident</b>: an outer tab entry already loaded in memory (a bounded object scan), so a chat seen before
@@ -32,26 +37,36 @@ internal static class ChatTabArt
     internal const string SourceResident = "resident";
     internal const string SourceKit = "kit";
 
+    internal const string HolderName = UiOwnership.Prefix + "core-chat-tab-art";
+    internal const string AssetTag = "chat-tab-art-";
+
     private const string GlowPath = "Glow";
     private const string NamePath = "Name";
     private const string LinePath = "Name/Line";
     private const string LineSpriteName = "OuterTab_UnderLine";
 
-    /// <summary>Resident scans per Core generation, and the frames between two of them.</summary>
+    private const int GlowPart = 0, LinePart = 1, StarPart = 2;
+    private static readonly OwnedSprites Art = new(HolderName, AssetTag, "Chat: tab art ", new[] { "glow", "line", "star" });
+    private static readonly bool[] Taken = new bool[3];
+
+    /// <summary>Resident scans per attach, and the frames between two of them.</summary>
     private const int MaxResidentScans = 4;
     private const int ResidentScanSpacing = 600;
     private const int MenuCheckSpacing = 30;
+
+    /// <summary>Frames between two liveness checks of the art once found.</summary>
+    private const int AliveCheckSpacing = 30;
 
     internal static string Source { get; private set; } = SourceUnresolved;
     internal static TMP_FontAsset? Font { get; private set; }
     internal static Material? FontMaterial { get; private set; }
     internal static FontStyles FontStyle { get; private set; } = FontStyles.Normal;
     internal static float CharacterSpacing { get; private set; }
-    internal static Sprite? Glow { get; private set; }
+    internal static Sprite? Glow => Use(GlowPart);
     internal static Image.Type GlowType { get; private set; } = Image.Type.Simple;
-    internal static Sprite? Line { get; private set; }
+    internal static Sprite? Line => Use(LinePart);
     internal static Image.Type LineType { get; private set; } = Image.Type.Simple;
-    internal static Sprite? Star { get; private set; }
+    internal static Sprite? Star => Use(StarPart);
     internal static ChatTabDonorColors? Colors { get; private set; }
 
     /// <summary>The donor's glow size over its tab's size; the row scales its glow by the same.</summary>
@@ -66,22 +81,86 @@ internal static class ChatTabArt
     private static int _residentScans;
     private static int _nextResidentFrame = int.MinValue;
     private static int _nextMenuFrame = int.MinValue;
+    private static int _nextAliveFrame = int.MinValue;
+    private static bool _found;
 
-    /// <summary>True when the game's art is in hand (menu or resident) and still loaded.</summary>
-    internal static bool Found => (Source == SourceMenu || Source == SourceResident) && UnityAlive.Of(Line) && UnityAlive.Of(Font);
+    /// <summary>True when the game's art is in hand (menu or resident) and every part it took is still drawable.</summary>
+    internal static bool Found => _found;
+
+    /// <summary>The owned copy of a part, else the held original while its texture is loaded, else null.</summary>
+    private static Sprite? Use(int part)
+    {
+        if (!Taken[part]) return null;
+        try
+        {
+            if (Art.OwnedUsable(part)) return Art.Owned(part);
+            if (Art.HeldUsable(part)) return Art.Held(part)!.sprite;
+        }
+        catch { /* not drawable */ }
+        return null;
+    }
+
+    /// <summary>Every part taken from the donor can still be drawn, and the font's atlas texture is loaded.</summary>
+    private static bool StillUsable()
+    {
+        try
+        {
+            if (Font == null || !UnityAlive.Of(Font) || !UnityAlive.Of(Font.atlasTexture)) return false;
+            for (int part = 0; part < Taken.Length; part++)
+                if (Taken[part] && Use(part) == null) return false;
+            return Taken[LinePart];
+        }
+        catch { return false; }
+    }
 
     /// <summary>
-    /// Each frame the row is shown: keep the art, or look again while it is missing. Cheap once found (two liveness
-    /// reads); while unresolved, the open menu is checked every <see cref="MenuCheckSpacing"/> frames and the
-    /// resident scan runs a few times per Core generation.
+    /// A chat window was attached (a new window, usually a new world): look for the art again, since a world load can
+    /// release the game's textures. The owned copies stay until a new donor replaces them.
+    /// </summary>
+    internal static void OnAttach()
+    {
+        _found = false;
+        Source = SourceUnresolved;
+        _residentScans = 0;
+        _nextResidentFrame = int.MinValue;
+        _nextMenuFrame = int.MinValue;
+        _nextAliveFrame = int.MinValue;
+        Version++;
+    }
+
+    /// <summary>Core unload: destroy the holder and the owned copies.</summary>
+    internal static void Release()
+    {
+        try { Art.Release(); }
+        catch { /* the unload sweep removes owned leftovers by name */ }
+        for (int i = 0; i < Taken.Length; i++) Taken[i] = false;
+        Font = null;
+        FontMaterial = null;
+        Colors = null;
+        _found = false;
+        Source = SourceUnresolved;
+    }
+
+    /// <summary>
+    /// Each frame the row is shown: keep the art (its parts checked every <see cref="AliveCheckSpacing"/> frames), or
+    /// look again while it is missing: the open menu every <see cref="MenuCheckSpacing"/> frames, the resident scan a
+    /// few times per attach.
     /// </summary>
     internal static void Refresh()
     {
-        if (Found) return;
-        if (Source == SourceMenu || Source == SourceResident) Forget();
         int frame;
         try { frame = Time.frameCount; }
         catch { frame = 0; }
+        if (_found)
+        {
+            if (frame < _nextAliveFrame) return;
+            _nextAliveFrame = frame + AliveCheckSpacing;
+            if (StillUsable()) return;
+            _found = false;
+            Version++;
+            Plugin.Logger?.LogInfo("Chat: tab row art was released; looking for it again.");
+        }
+
         if (frame >= _nextMenuFrame)
         {
             _nextMenuFrame = frame + MenuCheckSpacing;
@@ -101,17 +180,6 @@ internal static class ChatTabArt
             Version++;
             Plugin.Logger?.LogInfo("Chat: tab row art source=kit (the game's menu tab is not loaded yet; looking again when the menu opens).");
         }
-    }
-
-    private static void Forget()
-    {
-        Font = null;
-        FontMaterial = null;
-        Glow = null;
-        Line = null;
-        Star = null;
-        Colors = null;
-        Version++;
     }
 
     private static bool TryFromOpenMenu()
@@ -174,24 +242,38 @@ internal static class ChatTabArt
         if (caption == null || caption.font == null || line == null) return false;
         if (!string.Equals(line.name, LineSpriteName, StringComparison.Ordinal)) return false;
 
+        if (!GameArtUnity.AliveSprite(line) || !UnityAlive.Of(caption.font.atlasTexture)) return false;
         var glowImage = ImageAt(root, GlowPath);
+        var glow = Drawn(glowImage);
+        Sprite? star;
+        try { star = tab.HighlightImage != null ? tab.HighlightImage.sprite : null; }
+        catch { star = null; }
         Font = caption.font;
         FontMaterial = caption.fontSharedMaterial;
         FontStyle = caption.fontStyle;
         CharacterSpacing = caption.characterSpacing;
-        Line = line;
         LineType = lineImage!.type;
-        Glow = Drawn(glowImage);
         GlowType = glowImage != null ? glowImage.type : Image.Type.Simple;
-        try { Star = tab.HighlightImage != null ? tab.HighlightImage.sprite : null; }
-        catch { Star = null; }
+        Take(LinePart, line);
+        Take(GlowPart, GameArtUnity.AliveSprite(glow) ? glow : null);
+        Take(StarPart, GameArtUnity.AliveSprite(star) ? star : null);
+        _found = true;
+        _nextAliveFrame = int.MinValue;
         ReadRatios(root, caption, glowImage, lineImage);
         Colors = ReadColors(tab, root);
         Source = source;
         Version++;
         Plugin.Logger?.LogInfo("Chat: tab row art source=" + source + " (font " + Font.name + ", underline " + line.name
-            + ", glow " + (Glow != null ? Glow.name : "none") + ", unread mark " + (Star != null ? Star.name : "none") + ").");
+            + ", glow " + (glow != null ? glow.name : "none") + ", unread mark " + (star != null ? star.name : "none")
+            + "; owned copies " + (Art.OwnedUsable(LinePart) ? "made" : "refused, drawing the held originals") + ").");
         return true;
+    }
+
+    /// <summary>Hold a donor sprite for one part and copy its pixels (once per sprite); null forgets the part.</summary>
+    private static void Take(int part, Sprite? sprite)
+    {
+        Taken[part] = sprite != null;
+        if (sprite != null) Art.Hold(part, sprite);
     }
 
     private static Image? ImageAt(Transform root, string path)

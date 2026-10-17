@@ -125,6 +125,36 @@ public sealed class ChatTabRowTests
         Assert.Equal(new[] { "Clan", "All", "Trade", "Local" }, ChatTab.Load(ChatTab.Save(tabs)).Select(t => t.Name));
     }
 
+    [Fact]
+    public void A_move_before_the_saved_tabs_are_loaded_is_refused_and_saves_nothing()
+    {
+        var set = new ChatTabSet();
+        Assert.False(set.Loaded);
+        Assert.False(set.Move(1, 0));
+        Assert.Equal(new[] { "All", "Clan" }, set.Tabs.Select(t => t.Name)); // the defaults were not reordered
+        // The setting is not bound yet: still not loaded, still refused.
+        Assert.False(set.EnsureLoaded(null, 0));
+        Assert.False(set.Move(1, 0));
+
+        Assert.True(set.EnsureLoaded("Whispers=8;Trade=1", 2));
+        Assert.Equal(new[] { "All", "Whispers", "Trade" }, set.Tabs.Select(t => t.Name));
+        Assert.Equal(2, set.Active);
+        Assert.True(set.Move(2, 0));
+        Assert.Equal("Trade=1;All;Whispers=8", ChatTab.Save(set.Tabs));
+        Assert.Equal(0, set.Active);
+        // Loaded once: a later read of the setting does not reload over the moved order.
+        Assert.True(set.EnsureLoaded("Clan=4", 0));
+        Assert.Equal(new[] { "Trade", "All", "Whispers" }, set.Tabs.Select(t => t.Name));
+    }
+
+    [Fact]
+    public void Loading_clamps_a_stale_active_index()
+    {
+        var set = new ChatTabSet();
+        Assert.True(set.EnsureLoaded("Clan=4", 9));
+        Assert.Equal(1, set.Active);
+    }
+
     // ---- drag decisions --------------------------------------------------------------------------------------------
 
     [Theory]

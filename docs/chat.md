@@ -207,7 +207,7 @@ Status: source-checked, built against the installed game, and game-free tested (
 
 Status: source-checked, built against the installed game, and game-free tested (`ChatTabRowTests`, `ChatLogTests`). **Not live-verified.**
 
-**Look.** The row borrows the game's full-screen menu top bar (EMOTES, VAMPIRE POWERS, SPELLBOOK...), whose entries draw a caption, a soft glow behind it (`Glow04`) and an underline (`OuterTab_UnderLine`), tinted per state. The row reads that art and never changes it (`Chat/ChatTabArt.cs`): the open menu's top tabs first, then a top tab entry already loaded in memory, else the kit look. The caption uses the menu's font, style and letter spacing at the chat's line size (14 to 21; smaller once if the row is wider than the box). A glyph the menu font lacks (**≡**) falls back to the chat's own font.
+**Look.** The row borrows the game's full-screen menu top bar (EMOTES, VAMPIRE POWERS, SPELLBOOK...), whose entries draw a caption, a soft glow behind it (`Glow04`) and an underline (`OuterTab_UnderLine`), tinted per state. The row reads that art and never changes it (`Chat/ChatTabArt.cs`): the open menu's top tabs first, then a top tab entry already loaded in memory, else the kit look. The three sprites are held and copied into textures Progenitor owns (the kit's owned-copy store), because a world load can release a game texture that is only referenced; the font's atlas texture is checked every 30 frames, and every chat window attach (a new world) looks for the art again. The caption uses the menu's font, style and letter spacing at the chat's line size (14 to 21; smaller once if the row is wider than the box). A glyph the menu font lacks (**≡**) falls back to the chat's own font.
 
 | State | Caption | Glow | Underline |
 |---|---|---|---|
@@ -219,7 +219,7 @@ Status: source-checked, built against the installed game, and game-free tested (
 
 **+** and **≡** hover the same way and are never active. Active always reads stronger than hover, and hover than normal, whatever the donor's tints are (`ChatTabRow.Style`). Without the game's art (kit look) the states keep the same order with a flat tint, a drawn 2-unit underline and a gold dot for unread; the row switches to the game's art when it is found, for example the first time the player opens the menu.
 
-**Reordering.** Press a tab and drag it sideways: past 6 canvas units it follows the pointer and a marker (the game's underline stood upright) shows where it will land; release to drop. A press that moves less is a click and shows the tab on release. Every tab can be moved, **All** included (it stays fixed in the sense that it cannot be edited or closed): there is no reason to pin it. The keyboard and controller way is **Move left** / **Move right** in the tab's quick menu. The shown tab and the unread marks move with their tabs. Drag uses the same pointer reads as moving the box; the Lock setting stops moving and resizing the box, not reordering.
+**Reordering.** Press a tab and drag it sideways: past 6 canvas units it follows the pointer and a marker (the game's underline stood upright) shows where it will land; release to drop. A press that moves less is a click and shows the tab on release. Every tab can be moved, **All** included (it stays fixed in the sense that it cannot be edited or closed): there is no reason to pin it. Without a drag, **Move left** / **Move right** in the tab's quick menu do the same. The quick menu opens with a right-click or **≡**; the chat window has no keyboard or controller navigation, so there is no controller way to reorder yet. The shown tab and the unread marks move with their tabs. Drag uses the same pointer reads as moving the box; the Lock setting stops moving and resizing the box, not reordering.
 
 **Saved order.** `[Chat] Tabs` keeps the tabs in row order. All is written only when it is not first, as a bare `All` entry (`Clan=4;All;Trade=1`). A config without it (saved before CHAT12) loads with All first; builds before CHAT12 skip the bare entry and also put All first. A new tab is added at the end. `[Chat] ActiveTab` follows the shown tab.
 
@@ -229,7 +229,8 @@ Status: source-checked, built against the installed game, and game-free tested (
 3. `mouse move` to another tab's `centerX`/`centerY`: its `state` is `Hover`; capture. Move to **+** and **≡**: both hover.
 4. Send a line to a channel only another tab shows: that tab's `unread` is true and its star shows.
 5. `mouse drag` from a tab's center to the right past the next tab: `saved` and the item order change, the shown tab stays shown; mid-drag captures show the tab following the pointer and the marker. A `mouse click` on a tab selects it without moving it.
-6. `chat_tabs move {from,to}` and the quick menu's Move left / right do the same; rejoin: the order is kept.
+6. `chat_tabs move {from,to}` and the quick menu's Move left / right do the same; rejoin: the order is kept and `art` is found again.
+7. Before the chat has updated once in a session (`loaded false`), `chat_tabs move` replies `moved false` and `[Chat] Tabs` is unchanged.
 
 **Another chat mod.** Progenitor's chat view steps aside for a mod that replaces the game's chat window; visibility, the click guard and the chat commands still work on the window the game has. Progenitor names no chat mod itself. Two signals turn the view off, either is enough (`ChatReplacement` in `Chat/ChatWindowLogic.cs`, unit-tested):
 

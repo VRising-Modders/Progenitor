@@ -326,6 +326,7 @@ internal static class ChatWindow
         ChatInputTokens.ItemIdByPrefabName = null;
         try { ChatView.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Chat: chat view uninstall threw: " + e.Message); }
+        ChatTabArt.Release();
         try { _hook?.Dispose(); } catch { /* */ }
         _hook = null;
         try { _afterHook?.Dispose(); } catch { /* */ }
