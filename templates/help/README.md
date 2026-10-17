@@ -37,7 +37,7 @@ window.HELP = {
 - `html` is HTML. `[[term-id|words]]` underlines the words and shows that glossary entry on hover; a click opens the glossary.
 - `{{code}}` places the page's code block; without it the block goes after the text. The code is plain text, not HTML.
 - Links to other pages: `<a href="#chapter-id/page-id">`. Anything outside the page needs a full `https://` URL: the file ships on its own, so a relative link points at nothing.
-- Optional paths: add `roles: [{ id, title, blurb }]`, give chapters a `role`, and add a page with `chooser: true`. Readers then pick a path, and Previous and Next stay on it. Chapters without a `role` are shared.
+- Optional paths: add `roles: [{ id, title, blurb }]`, give chapters a `role`, and add a page with `chooser: true`. Readers then pick a path, and Previous and Next stay on it. Chapters without a `role` are shared. Search lists the reader's path and the shared chapters first, and other paths under **Other roles**; opening one of those moves the reader onto that path, with a button back.
 
 ## Keep it short
 

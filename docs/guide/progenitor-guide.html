@@ -112,6 +112,10 @@ a:hover { color: #dfe7f7; }
 .r-snip { display: block; font-size: 13px; color: var(--muted); }
 .results mark { background: rgba(200, 50, 60, 0.35); color: var(--text); }
 .r-none { padding: 10px 14px; color: var(--muted); font-size: 14px; }
+.r-div { margin: 6px 0 2px; padding: 8px 14px 2px; border-top: 1px solid var(--rule-soft); }
+.pathnote { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 16px; padding: 8px 12px; border: 1px solid var(--rule-soft); background: rgba(0, 0, 0, 0.28); font-size: 14px; color: var(--muted); }
+.pathnote b { color: var(--text); }
+.pathnote .btn { padding: 6px 10px; font-size: 13px; }
 
 /* Sidebar */
 .toc {
@@ -313,7 +317,7 @@ window.HELP = {
       id: "start", title: "Welcome", pages: [
         { id: "welcome", title: "What Progenitor is",
           html: `<p>[[progenitor|Progenitor]] is a modding framework for V Rising, loaded through [[bepinex|BepInEx]]. It gives every mod one in-game <strong>Mods</strong> menu: settings, keybinds, installs and updates.</p>
-<p>Mods built on it can be swapped into a running game, and undo everything they added when removed.</p>
+<p>Mods built on it can load, update and unload while the game runs, and clean up after themselves.</p>
 <p>For the fastest help, <a href="#help/ai-help">ask an AI assistant (ChatGPT, Gemini, Grok, Claude&hellip;) with our ready-made prompt &rarr;</a></p>` },
         { id: "choose", title: "Choose your path", chooser: true,
           html: `<p>Pick what you want to do. You can switch at any time from the contents.</p>` }
@@ -334,7 +338,7 @@ window.HELP = {
 <li>Download <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases">release page</a>.</li>
 <li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
 <li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
-<p>To update, extract the new zip the same way and let it replace the files. The zip holds only a <code>BepInEx</code> folder and never changes BepInEx's own files or settings.</p>` },
+<p>To update by hand, extract the new zip the same way and let it replace the files. It never changes BepInEx's own files or settings.</p>` },
         { id: "open", title: "Open the Mods menu",
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
 <p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
@@ -348,7 +352,7 @@ window.HELP = {
 <li><a href="#game/build-search">Build menu search</a> and <a href="#game/dye-all">Dye all</a> (hold a color swatch).</li>
 <li><a href="#game/photo-mode">Photo mode</a> (off until you turn it on), <a href="#game/history">Back and forward</a> through menus.</li>
 <li><a href="#keybinds/tab">Remappable keys</a> for every mod and the game.</li></ul>
-<p>Each one, with every setting: the chapters after this one.</p>` },
+<p>The next chapters cover each one and its settings.</p>` },
         { id: "install-mods", title: "Install mods",
           html: `<p>Open [[install-tab|Install Mods]], find a mod and click <strong>Install</strong>. Some load at once; others ask for a restart.</p>
 <ul><li><strong>Simple</strong> (default): one button per mod. <strong>Advanced</strong>: separate Client and Server columns, a server picker and more filters. Switch at the left of the search box.</li>
@@ -356,7 +360,7 @@ window.HELP = {
 <li>Players need only client mods. Server-only mods are listed only for an [[admin|admin]] of the server you are on.</li>
 <li>A client and server mod also needs the server to run it; ask its admin. As an admin, Simple can install it on both at once.</li></ul>` },
         { id: "join", title: "Join a modded server",
-          html: `<p>On join, your mods are checked against the server's (the [[handshake|handshake]]); its message shows, then <strong>Mods for &lt;server&gt;</strong>:</p>
+          html: `<p>When you join, the server checks your mods against its own (the [[handshake|handshake]]). After its welcome message, <strong>Mods for &lt;server&gt;</strong> shows:</p>
 <ul><li><strong>Required to join</strong>: [[required-mod|mods you must have]], with <em>N of M ready</em>.</li>
 <li><strong>Recommended</strong>: [[recommended-mod|optional mods]] with the admin's reason.</li>
 <li><strong>Install N mods</strong> gets them from Thunderstore, then join or restart and rejoin.</li></ul>` },
@@ -365,9 +369,9 @@ window.HELP = {
 <ul><li><strong>Update mods</strong>: Automatic (default), Notify or Off.</li><li><strong>Offer updates before joining a server</strong>: on by default.</li><li>Per mod, on its page: a different mode, or keep one version.</li></ul>` },
         { id: "help", title: "When something goes wrong",
           html: `<ol><li>Crashed? Start the game again; the last three sessions' logs are kept.</li>
-<li>Collect logs: <strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong>, or on the title screen the zip icon at the end of the bottom-left icon row (for a game that crashes on join). A zip lands on your Desktop.</li>
+<li>Collect logs: <strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong>. If the game crashes when you join, use the zip icon at the bottom left of the title screen. A zip lands on your Desktop.</li>
 <li>For the fastest help, <a href="#help/ai-help">ask an AI assistant (ChatGPT, Gemini, Grok, Claude&hellip;) with our ready-made prompt &rarr;</a> Or post the zip in the <a href="https://discord.com/channels/978094827830915092/1112888087836631090">Progenitor channel</a> on the V Rising Mod Community Discord (<a href="https://vrisingmods.com/discord">join it</a> first) or a <a href="https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml">GitHub bug report</a>.</li></ol>`,
-          callout: { title: "Before sharing", text: "IDs, IPs and known player names are removed, but look through the zip before you share it with anyone, an AI included." } }
+          callout: { title: "Before sharing", text: "IDs, IP addresses and known player names are removed, but look through the zip before you share it with anyone, an AI included." } }
       ]
     },
 
@@ -375,40 +379,40 @@ window.HELP = {
     {
       id: "chat", role: "players", title: "Chat", pages: [
         { id: "overview", title: "The chat box",
-          html: `<p>Progenitor keeps the game's chat box and adds to it. Turn its own lines off with <strong>Progenitor's chat lines</strong> to get the game's back.</p>
-<ul><li>Stays up 30 seconds after the last message (the game: 14).</li><li>Clicking it doesn't attack or turn the camera; the wheel over it scrolls only the chat.</li>
-<li>Tabs, moving and resizing, history per server, links, mentions and line actions: the next pages.</li></ul>
+          html: `<p>Progenitor builds on the game's chat box. To go back to the game's own chat lines, turn off <strong>Progenitor's chat lines</strong>.</p>
+<ul><li>Chat stays on screen for 30 seconds after the last message, instead of 14.</li><li>Clicking the chat doesn't attack or turn the camera, and the mouse wheel scrolls only the chat.</li>
+<li>The next pages cover tabs, moving and resizing, history, links, mentions and more.</li></ul>
 <p>Settings: <strong>Mods &rsaquo; Progenitor &rsaquo; Chat</strong>, or <strong>&equiv;</strong> &rsaquo; <strong>All chat settings</strong> on the chat box.</p>`,
-          callout: { title: "Another chat mod?", text: "Progenitor's chat lines step aside for a mod that replaces the chat window. The fade, the click guard and the commands still work." } },
+          callout: { title: "Another chat mod?", text: "If another mod replaces the chat window, Progenitor's chat lines turn off on their own. The fade, click protection and commands keep working." } },
         { id: "window", title: "Fade and clicks",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Seconds chat stays on screen</td><td class="num">30</td><td>14 to 600 seconds after the last message.</td></tr>
 <tr><td>Keep chat on screen</td><td>Off</td><td>Never fades; Escape still closes it.</td></tr>
-<tr><td>Keep chat up while the mouse is over it</td><td>On</td><td>The countdown waits while the pointer rests on it.</td></tr>
-<tr><td>Clicking chat doesn't attack</td><td>On</td><td>Clicks on the box never attack, turn the camera or build.</td></tr></tbody></table>
-<p>Moved attack to a keyboard key? That key does nothing while the pointer is over the box.</p>` },
+<tr><td>Keep chat up while the mouse is over it</td><td>On</td><td>Chat doesn't fade while your mouse is over it.</td></tr>
+<tr><td>Clicking chat doesn't attack</td><td>On</td><td>Clicks on the chat never attack, turn the camera or build.</td></tr></tbody></table>
+<p>If you moved attack to a keyboard key, that key also does nothing while your mouse is over the chat.</p>` },
         { id: "move", title: "Move and resize",
-          html: `<ul><li><strong>Move:</strong> drag the tab row's empty space (not a tab, <strong>+</strong> or <strong>&equiv;</strong>).</li>
+          html: `<ul><li><strong>Move:</strong> drag an empty spot in the tab row.</li>
 <li><strong>Resize:</strong> drag the <strong>&#9701;</strong> corner at the top right.</li>
 <li><strong>Reset:</strong> <strong>&equiv;</strong> &rsaquo; <strong>Reset position and size</strong>.</li>
-<li><strong>Lock / Unlock position</strong> in the same menu stops both.</li></ul>
+<li><strong>Lock / Unlock position</strong> in the same menu keeps it where it is.</li></ul>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
-<tr><td>Lock the chat box's position</td><td>Off</td><td>No moving or resizing by dragging.</td></tr>
-<tr><td>Text size</td><td class="num">0</td><td>0 keeps the game's size; up to 40.</td></tr>
-<tr><td>Background opacity</td><td class="num">-1</td><td>-1 keeps the game's; 0 to 100 percent. Quick choices in <strong>&equiv;</strong>.</td></tr></tbody></table>` },
+<tr><td>Lock the chat box's position</td><td>Off</td><td>Stops moving and resizing.</td></tr>
+<tr><td>Text size</td><td class="num">0</td><td>Up to 40; 0 uses the game's size.</td></tr>
+<tr><td>Background opacity</td><td class="num">-1</td><td>0 to 100 percent; -1 uses the game's. Quick picks are in <strong>&equiv;</strong>.</td></tr></tbody></table>` },
         { id: "tabs", title: "Tabs",
-          html: `<p>The tab row: <strong>All</strong>, your tabs (<strong>Clan</strong> to start), <strong>+</strong> and <strong>&equiv;</strong>. Up to six tabs. It looks like the game's menu tabs: gray at rest, brighter with a soft glow and underline under the pointer, and the shown tab white with the full glow and underline.</p>
-<ul><li><strong>Show:</strong> click a tab (it switches when you let go). A one-channel tab (Global, Local or Clan) also sends to that channel.</li>
-<li><strong>Reorder:</strong> drag a tab left or right and drop it where the marker shows. Without dragging: right-click the tab (or <strong>&equiv;</strong>) &rsaquo; <strong>Move left</strong> / <strong>Move right</strong>. All can move too. The order is saved and comes back next time.</li>
+          html: `<p>The tab row has <strong>All</strong>, your own tabs (<strong>Clan</strong> to start), <strong>+</strong> (add a tab) and <strong>&equiv;</strong> (tab menu). You can have up to six.</p>
+<ul><li><strong>Show:</strong> click a tab. A Global, Local or Clan tab also sends what you type to that channel.</li>
+<li><strong>Reorder:</strong> drag a tab to a new spot, or right-click it &rsaquo; <strong>Move left</strong> / <strong>Move right</strong>. The order is saved.</li>
 <li><strong>Add:</strong> <strong>+</strong> or <strong>New tab</strong>: Whispers, System and mods, Mentions, Clan, Local, or <strong>Custom</strong>.</li>
-<li><strong>Rename and filter:</strong> right-click the tab (or <strong>&equiv;</strong>) &rsaquo; <strong>Edit this tab</strong>: a name (up to 16 characters), then <strong>Show messages from</strong>: Global, Local, Clan, Whispers, System and mods, Mentions of me.</li>
-<li><strong>Remove:</strong> <strong>Close this tab</strong>. All can't be edited or closed.</li>
-<li><strong>Unread:</strong> the game's "new" star on the tab (a gold dot until the game's art has loaded).</li></ul>` },
+<li><strong>Rename and filter:</strong> right-click the tab &rsaquo; <strong>Edit this tab</strong>. Give it a name (up to 16 characters) and pick what it shows under <strong>Show messages from</strong>.</li>
+<li><strong>Remove:</strong> right-click &rsaquo; <strong>Close this tab</strong>. All can't be edited or closed.</li>
+<li>A star on a tab means it has new messages.</li></ul>` },
         { id: "colors", title: "Channel colors",
-          html: `<p><strong>&equiv;</strong> &rsaquo; <strong>Colors</strong> opens a panel above the chat box: one row per channel with the game's color and ten swatches.</p>
-<ul><li>A click recolors that channel's lines and the line you type, and is saved at once.</li><li><strong>Use the game's colors</strong> resets all; <strong>Done</strong> or a click outside closes it.</li></ul>
+          html: `<p><strong>&equiv;</strong> &rsaquo; <strong>Colors</strong> lets you pick a color for each channel.</p>
+<ul><li>Click a swatch to recolor that channel. It's saved right away.</li><li><strong>Use the game's colors</strong> puts them all back.</li></ul>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
-<tr><td>Color the line you type by channel</td><td>On</td><td>Shows the channel while you type.</td></tr></tbody></table>` },
+<tr><td>Color the line you type by channel</td><td>On</td><td>What you type takes the channel's color, so you can see where it goes.</td></tr></tbody></table>` },
         { id: "history", title: "History, repeats and time",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Progenitor's chat lines</td><td>On</td><td>Tabs, history, links, mentions and repeat counts. Off: the game's own lines.</td></tr>
@@ -417,30 +421,29 @@ window.HELP = {
 <tr><td>Fold repeated lines into a count</td><td>On</td><td>The same line within a minute shows &times;2, &times;3.</td></tr>
 <tr><td>Show the time on each line</td><td>Off</td><td><code>[16:05]</code>; skipped when the game's own timestamps are on.</td></tr></tbody></table>` },
         { id: "links", title: "Web links",
-          html: `<ul><li>Addresses in chat (<code>https://&hellip;</code>, <code>www.&hellip;</code>, <code>site.com/page</code>) are clickable.</li>
-<li>A click asks <strong>Open this link?</strong>: <strong>Open in browser</strong>, <strong>Copy link</strong> or <strong>Cancel</strong>. Nothing opens without it.</li>
-<li>Only <code>http</code> and <code>https</code> addresses open.</li>
+          html: `<ul><li>Web addresses in chat are clickable.</li>
+<li>Clicking one always asks first: <strong>Open in browser</strong>, <strong>Copy link</strong> or <strong>Cancel</strong>.</li>
 <li>A server can turn clickable links off (<strong>Allow clickable links</strong>).</li></ul>`,
           callout: { title: "Open only links you trust", warn: true, text: "Anyone in chat can post a link." } },
         { id: "mod-links", title: "Mod links",
           html: `<p>A mod link points at a Thunderstore mod: <code>[mod:Namespace-Name]</code>, or <code>[mod:Namespace-Name@1.2.3]</code> for one version.</p>
 <ul><li><strong>Click one:</strong> opens the mod's page if you have it, else its Install Mods listing. It never installs anything.</li>
 <li><strong>Share one:</strong> hover a row in Mods or Install Mods and click <strong>Share</strong>, or <strong>Copy link</strong> on a mod page. Paste it in chat with <span class="kbd">Ctrl+V</span>.</li>
-<li><strong>Type one:</strong> <code>[mod:</code> and part of a name; matches show above the line, <span class="kbd">Tab</span> fills in the first, again for the next.</li></ul>
+<li><strong>Type one:</strong> type <code>[mod:</code> and part of a name, then press <span class="kbd">Tab</span> to fill in a match (again for the next).</li></ul>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
-<tr><td>Suggest mods after "[mod:"</td><td>On</td><td>Installed mods always; Thunderstore mods once the Mods menu has loaded its list.</td></tr></tbody></table>
+<tr><td>Suggest mods after "[mod:"</td><td>On</td><td>Suggests mod names as you type.</td></tr></tbody></table>
 <p>A server can turn mod links off (<strong>Allow mod links</strong>).</p>
-<p><strong>Links from your mods.</strong> A mod on the server can also put its own links in its messages, such as a storage chest in a reply. You see only the link's words. They are a link, underlined, when you have that mod; otherwise they are plain words. The same link typed by another player stays as they typed it, so a player cannot pass off a link as the server's.</p>` },
+<p><strong>Links from mods.</strong> A server mod can put links in its messages, such as a storage chest in a reply. They're clickable when you have that mod, and plain words otherwise. Players can't fake one by typing it.</p>` },
         { id: "item-links", title: "Location and item links",
-          html: `<ul><li><strong>Location:</strong> start a line with <code>/loc </code>; it becomes <code>[loc:x,z]</code> at your position and shows as <code>[x, z]</code>. A click tells how far and which way it is.</li>
-<li><strong>Item:</strong> <code>[item:id]</code> shows the item's name. Rest the pointer on it to see the item's name and description; a click shows them in a window. An item the game doesn't know reads <strong>Unknown item</strong>. <code>/item &lt;prefab name&gt; </code> at the start of a line makes the link. No item search yet.</li>
-<li>A mod you have may answer the click instead, for example by showing the place on the map.</li></ul>`,
-          callout: { title: "Not yet verified in game", text: "Location and item links, the item tooltip and links from mods are tested outside the game only." } },
+          html: `<ul><li><strong>Location:</strong> start a line with <code>/loc </code> to share where you are. Clicking the link tells you how far away it is and which way.</li>
+<li><strong>Item:</strong> start a line with <code>/item &lt;prefab name&gt; </code> to link an item. Hover the link for its name and description, or click it to open them in a window. There's no item search yet, so you need the item's prefab name.</li>
+<li>Some mods add more to a click, such as showing the place on the map.</li></ul>`,
+          callout: { title: "New", text: "Location and item links, and links from mods, haven't been tested in a live game yet." } },
         { id: "mentions", title: "Mentions",
-          html: `<p>A line with your name, a watched word, or <code>@all</code> from an admin is highlighted in gold, with a short chirp. System and mod lines never count.</p>
+          html: `<p>A line with your name, one of your watched words, or <code>@all</code> from an admin is highlighted and plays a short sound. System and mod lines never count.</p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Highlight mentions</td><td>On</td><td>Highlights the line.</td></tr>
-<tr><td>Play a sound for mentions</td><td>On</td><td>Plays the chirp once.</td></tr>
+<tr><td>Play a sound for mentions</td><td>On</td><td>Plays the sound.</td></tr>
 <tr><td>Watched words</td><td>Empty</td><td>Extra words, comma separated (up to 20).</td></tr></tbody></table>
 <p>A server can turn <code>@all</code> off (<strong>Allow @all from admins</strong>).</p>` },
         { id: "line-actions", title: "Copy, whisper and mute",
@@ -457,7 +460,7 @@ window.HELP = {
 <tr><td>Up and Down bring back sent lines</td><td>On</td><td>Your last 50 lines, commands too.</td></tr>
 <tr><td>Show command hints after "."</td><td>On</td><td>The server's commands you can run show above the line; <span class="kbd">Tab</span> completes the first. Needs Progenitor on the server.</td></tr>
 <tr><td>Send long lines in parts</td><td>On</td><td>A line too long for the game goes out in parts; players with Progenitor see one line.</td></tr></tbody></table>
-<p>Keys (remappable, chat only): complete <span class="kbd">Tab</span>, recall <span class="kbd">Up</span>/<span class="kbd">Down</span>, send long <span class="kbd">Enter</span>.</p>` }
+<p>You can remap these chat keys in the Keybinds tab: <span class="kbd">Tab</span> to complete, <span class="kbd">Up</span>/<span class="kbd">Down</span> to recall, <span class="kbd">Enter</span> to send a long line.</p>` }
       ]
     },
     /* ---------------- Players: Mods menu ---------------- */
@@ -468,19 +471,19 @@ window.HELP = {
 <tr><td>Title screen</td><td><strong>MODS</strong>, above Continue.</td></tr>
 <tr><td>In a world</td><td>The <strong>Mods</strong> tab in the game's menu, beside Spellbook.</td></tr>
 <tr><td>Anywhere</td><td><span class="kbd">F10</span> (Open Mods menu, remappable).</td></tr></tbody></table>
-<p>The menu is Progenitor's [[workspace|workspace]]. Close: <strong>Close Mods</strong> at the bottom of the left list, <span class="kbd">F10</span> again, or <span class="kbd">Escape</span>. In a search box, Escape first clears the text.</p>
-<p>Tabs: Mods, Install Mods, Keybinds, Preferences, Server. Each keeps its own search and scroll.</p>` },
+<p>To close the [[workspace|Mods menu]], click <strong>Close Mods</strong> at the bottom of the left list, or press <span class="kbd">F10</span> or <span class="kbd">Escape</span>. In a search box, Escape clears the text first.</p>
+<p>Tabs: Mods, Install Mods, Keybinds, Preferences, Server.</p>` },
         { id: "landing", title: "The Mods tab",
           html: `<p>With no mod picked, tiles lead to <strong>Your settings</strong>, <strong>Server settings</strong>, <strong>Preferences</strong>, <strong>Collect logs</strong> and the <strong>Help guide</strong> (this page).</p>
 <ul><li>The list: <strong>Installed</strong>, <strong>On this server</strong>, <strong>Required by Progenitor</strong>. Filter chips: All, Needs attention, Disabled.</li>
-<li>The diamond: green running, amber warning or conflict, red failed, gray off, hollow waiting or paused. <strong>Update</strong> marks a newer version.</li></ul>` },
+<li>The diamond beside a mod shows how it's doing: green is running, amber needs a look, red failed, gray is off, hollow is waiting. <strong>Update</strong> means a newer version is out.</li></ul>` },
         { id: "mod-page", title: "A mod's page",
           html: `<ol><li><strong>The bar:</strong> the on/off switch, its status, version, conflicts, <strong>Help</strong> (when the mod has a guide) and <strong>Uninstall</strong>.</li>
 <li><strong>Problems</strong>, with <strong>Retry</strong> and <strong>Copy report</strong>.</li>
 <li><strong>Details:</strong> where it installs, its store page and <strong>Share in chat</strong> ([[mod-link|mod link]]), updates, kept versions and <strong>Roll back</strong>.</li>
 <li><strong>Settings:</strong> Your settings, then [[server-setting|Server settings]]. Each row has a reset arrow; <strong>Restart</strong> marks one that applies at the next start; <strong>Reset all</strong> asks first.</li>
 <li><strong>About</strong>: the mod's description.</li></ol>
-<p>More than ten rows? A search box covers names, help and section titles.</p>` },
+<p>Long pages get a search box.</p>` },
         { id: "switch", title: "Turn a mod off",
           html: `<ul><li>A mod built on Progenitor turns off and on at once.</li><li>Others wait for the next start: <em>Turns off at next start</em>.</li>
 <li>If other mods need it, it asks first.</li><li>BepInEx and Progenitor's own parts can't be turned off.</li></ul>
@@ -490,11 +493,11 @@ window.HELP = {
 <tr><td>Edit other mods' settings</td><td>Off</td><td>Lets the Mods menu change mods not built on Progenitor.</td></tr>
 <tr><td>Install view</td><td>Simple</td><td>Simple or Advanced Install Mods tab.</td></tr>
 <tr><td>Remember Install filters and sort</td><td>Off</td><td>Keeps them between sessions.</td></tr>
-<tr><td>Use Thunderstore</td><td>On</td><td>Where Install Mods finds mods.</td></tr>
+<tr><td>Use Thunderstore</td><td>On</td><td>Lists Thunderstore's mods in Install Mods.</td></tr>
 <tr><td>Show mods with NSFW content</td><td>Off</td><td>Lists them too.</td></tr>
-<tr><td>Download limit</td><td class="num">128</td><td>MB, 8 to 1,024; bigger packages aren't installed.</td></tr>
+<tr><td>Download limit</td><td class="num">128</td><td>MB, 8 to 1,024. Bigger mods aren't installed.</td></tr>
 <tr><td>Show only Progenitor servers</td><td>Off</td><td>Filters the game's Join Game list.</td></tr></tbody></table>
-<p><strong>Advanced sources &rsaquo; Expand</strong>: <strong>Package index path</strong> (empty: the default) and <strong>Keep the in-game frame canonical</strong> (on). Updates: next page. <strong>Local server</strong>: set up a server on this PC.</p>` },
+<p><strong>Advanced sources</strong> holds <strong>Package index path</strong> and <strong>Keep the in-game frame canonical</strong>; most players leave both alone. <strong>Local server</strong> sets up a server on this PC. Updates are on the next page.</p>` },
         { id: "updates", title: "Updates",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Update mods</td><td>Automatic</td><td>Automatic, Notify or Off, for mods Progenitor installed.</td></tr>
@@ -509,18 +512,18 @@ window.HELP = {
     {
       id: "install", role: "players", title: "Install Mods", pages: [
         { id: "simple", title: "Simple view",
-          html: `<ul><li>One row per mod: Released, Downloads, Version, Status and one button.</li>
-<li><strong>Show</strong>: All, Installed, Updates. Click a column header to sort (newest first by default).</li>
-<li>Status: <em>Installed</em>, <em>Update available</em>, <em>Missing on server</em>, <em>Loads at next start</em>, <em>Removed at next start</em>.</li>
-<li>Acts on this PC, and on the joined server too when you are its [[admin|admin]].</li></ul>` },
+          html: `<ul><li>One row per mod, with one button.</li>
+<li><strong>Show</strong> picks All, Installed or Updates. Click a column header to sort.</li>
+<li><em>Loads at next start</em> or <em>Removed at next start</em> means the change waits for a restart.</li>
+<li>The button acts on this PC, and on the joined server too when you are its [[admin|admin]].</li></ul>` },
         { id: "advanced", title: "Advanced view",
           html: `<ul><li>Separate <strong>Client</strong> and <strong>Server</strong> columns, each with its own button.</li>
 <li><strong>Server</strong> picker: the connected server, a server on this PC, private games, or none.</li>
-<li>Filters: <strong>Side</strong> (Any, Client, Server, Both), <strong>Show</strong> (All, Installed, Missing a side, Needs update), <strong>Only</strong> (No restart needed, Current game update); <strong>Clear filters</strong>.</li></ul>
+<li>More filters: <strong>Side</strong>, <strong>Show</strong> and <strong>Only</strong>. <strong>Clear filters</strong> resets them.</li></ul>
 <p>Switch views at the left of the search box, or in Preferences (Install view).</p>` },
         { id: "row", title: "A mod's row",
-          html: `<p>Click a row to open its drawer: description, <strong>Read full description</strong>, latest version, side, what it requires.</p>
-<ul><li>Buttons: <strong>Install</strong>, <strong>Update</strong>, <strong>Uninstall</strong>, <strong>Cancel</strong>, <strong>Install on both</strong>. Each asks first; <em>· restart</em> means it loads at the next start.</li>
+          html: `<p>Click a row for the mod's description, latest version, side and what it requires.</p>
+<ul><li><strong>Install</strong>, <strong>Update</strong>, <strong>Uninstall</strong> and <strong>Install on both</strong> ask first. <em>· restart</em> means it loads at the next start.</li>
 <li>Mods it needs install with it.</li><li><strong>Share</strong> on hover, or <strong>Copy link</strong>, makes a [[mod-link|mod link]] for chat.</li>
 <li><strong>Updates</strong> band: <strong>Update all</strong>, or <strong>Keep 1.2.0</strong> on a row (<strong>Unpin</strong> undoes it).</li></ul>` },
         { id: "source", title: "Where mods come from",
@@ -533,9 +536,9 @@ window.HELP = {
     {
       id: "keybinds", role: "players", title: "Keybinds", pages: [
         { id: "tab", title: "The Keybinds tab",
-          html: `<p>Every mod's keys, then the game's own, in one list. The column on the right explains the row under the pointer.</p>
+          html: `<p>Every mod's keys, then the game's own, in one list. Hover a row to see what it does.</p>
 <ul><li><strong>Show</strong>: All, <strong>Conflicts N</strong> or Changed.</li><li><strong>&darr; Mod keys</strong>, <strong>&darr; Game keys</strong> and <strong>Jump to mod</strong> move through the list.</li>
-<li>Search: action, key, help text and mod name.</li>
+<li>Search by action, key or mod name.</li>
 <li>Each mod's page has the same keys under <strong>Keys</strong>; a change in one shows in the other.</li></ul>` },
         { id: "remap", title: "Change a key",
           html: `<ol><li>Click the key on the row and press the new key or chord (<span class="kbd">Ctrl</span>, <span class="kbd">Shift</span>, <span class="kbd">Alt</span> allowed). <span class="kbd">Escape</span> cancels.</li>
@@ -548,7 +551,7 @@ window.HELP = {
           html: `<p>Two keys conflict only on the exact same chord, in the same place. Who keeps the key:</p>
 <ol><li>The game's own keys.</li><li>Progenitor's keys.</li><li>Between mods, the one installed first.</li></ol>
 <ul><li>The other key is <strong>not active</strong>: its row says why, the Mods list marks the mod, and <strong>Conflicts N</strong> lists it. Click its key to pick another.</li>
-<li>A mod that reads its own keys from its config file still fires; Progenitor can't stop it, and says so.</li>
+<li>A mod that reads keys from its own config file still fires. Progenitor can't stop it, and the row says so.</li>
 <li>A conflict clears as soon as either key changes or its mod is removed.</li></ul>` },
         { id: "dialog", title: "The Key conflict dialog",
           html: `<p>When a mod loads wanting a taken key, <strong>Key conflict: &lt;mod&gt;</strong> asks once. It names the key, the mod that holds it and why that one comes first.</p>
@@ -582,16 +585,16 @@ window.HELP = {
     {
       id: "game", role: "players", title: "In the Game", pages: [
         { id: "build-search", title: "Build menu search",
-          html: `<ul><li>A <strong>Search buildings</strong> box sits above the build menu's item row. Type to filter the selected tab by item name; switching tabs keeps the text.</li>
+          html: `<ul><li>The build menu gets a <strong>Search buildings</strong> box. Type to filter the current tab by name.</li>
 <li><span class="kbd">Enter</span> keeps the filter and returns to the game; <span class="kbd">Escape</span> or <strong>&times;</strong> clears it.</li>
-<li>Item tooltips show where the item lives: <em>Category &rsaquo; Tag &rsaquo; Group</em>.</li></ul>
+<li>Item tooltips show where to find the item in the menu.</li></ul>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Build menu search</td><td>On</td><td>The search box.</td></tr>
 <tr><td>Clear the search on close</td><td>On</td><td>Empties the box when the build menu closes.</td></tr>
-<tr><td>Breadcrumbs</td><td>On</td><td>The "where it lives" tooltip line.</td></tr></tbody></table>
+<tr><td>Breadcrumbs</td><td>On</td><td>The "where to find it" line in tooltips.</td></tr></tbody></table>
 <p><strong>Mods &rsaquo; Progenitor &rsaquo; Build menu</strong>.</p>` },
         { id: "dye-all", title: "Dye all",
-          html: `<ol><li>Open <strong>Character &rsaquo; Equipment</strong> and the dye colors.</li><li>Hold a color swatch until the ring fills (one second).</li><li>Every worn piece and transmog takes that color.</li></ol>
+          html: `<ol><li>Open <strong>Character &rsaquo; Equipment</strong> and the dye colors.</li><li>Hold a color swatch for a second.</li><li>Every worn piece and transmog takes that color.</li></ol>
 <p>A click still colors only the selected piece.</p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Dye all on hold</td><td>On</td><td>Holding a swatch dyes everything. <strong>Mods &rsaquo; Progenitor &rsaquo; Equipment</strong>.</td></tr></tbody></table>` },
@@ -600,7 +603,7 @@ window.HELP = {
 <table><thead><tr><th class="label">Key</th><th class="label">Does</th></tr></thead><tbody>
 <tr><td><span class="kbd">W</span> <span class="kbd">A</span> <span class="kbd">S</span> <span class="kbd">D</span>, <span class="kbd">E</span> up, <span class="kbd">Q</span> down</td><td>Fly</td></tr>
 <tr><td>Hold right mouse; the wheel</td><td>Look around; flying speed</td></tr>
-<tr><td>Hold <span class="kbd">R</span> / <span class="kbd">F</span></td><td>4x faster / a fifth of the speed</td></tr>
+<tr><td>Hold <span class="kbd">R</span> / <span class="kbd">F</span></td><td>Fly faster / slower</td></tr>
 <tr><td><span class="kbd">Z</span> / <span class="kbd">X</span></td><td>Zoom in / out</td></tr>
 <tr><td><span class="kbd">H</span></td><td>Hide or show the HUD</td></tr>
 <tr><td>Middle mouse</td><td>Hold to target a unit, release to lock on, tap to unlock</td></tr>
@@ -613,7 +616,7 @@ window.HELP = {
 <tr><td>Hide the HUD on entry</td><td>On</td><td>Starts with the HUD hidden; <span class="kbd">H</span> toggles it.</td></tr>
 <tr><td>Hide nameplates with the HUD</td><td>On</td><td>Also hides nameplates, health bars and combat text.</td></tr>
 <tr><td>Look speed</td><td class="num">1</td><td>Mouse-look speed.</td></tr></tbody></table>
-<p>A server can turn photo mode off; you then leave it at once.</p>` },
+<p>A server can turn photo mode off.</p>` },
         { id: "character-sheet", title: "Character sheet",
           html: `<p>The game's Character sheet gets extra stat lines with tooltips: resource power, siege power, movement speed, resistances, cooldown recovery and more.</p><p>No setting.</p>` },
         { id: "history", title: "Back and forward",
@@ -628,8 +631,8 @@ window.HELP = {
 <p><strong>Mods &rsaquo; Progenitor &rsaquo; Private games</strong>.</p>` },
         { id: "uninstall", title: "Remove Progenitor",
           html: `<ol><li><strong>Mods &rsaquo; Progenitor &rsaquo; Private games &rsaquo; Remove Progenitor from this PC &rsaquo; Uninstall</strong>, and confirm.</li>
-<li>The page shows <strong>Removal requested</strong>; nothing is deleted while the game runs.</li>
-<li>At the next game start Progenitor removes itself and every mod it installed. BepInEx stays.</li></ol>
+<li>The page shows <strong>Removal requested</strong>.</li>
+<li>The next time you start the game, Progenitor removes itself and every mod it installed. BepInEx stays.</li></ol>
 <p>Changed your mind? <strong>Cancel the removal</strong> (<strong>Keep Progenitor</strong>) before you restart.</p>` }
       ]
     },
@@ -642,7 +645,7 @@ window.HELP = {
 <li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server; update the same way.</li>
 <li>Start the server once; the first start is slow while BepInEx generates its files.</li></ol>
 <p>A private game hosted from a client loads the client's mods; no separate install.</p>`,
-          callout: { title: "Never on a public server", warn: true, text: "<code>Progenitor.Dev.dll</code>, the [[dev-bridge|dev bridge]]. Release packages leave it out." } },
+          callout: { title: "Never on a public server", warn: true, text: "Don't put <code>Progenitor.Dev.dll</code> (the [[dev-bridge|dev bridge]]) on a public server. Release packages don't include it." } },
         { id: "admins", title: "Who is an admin",
           html: `<ul><li>Players on the server's admin list, or authenticated with <code>adminauth</code>.</li>
 <li>The host of a private game.</li>
@@ -653,7 +656,7 @@ window.HELP = {
 <ul><li><a href="#admins/joining/popup">Mods players need</a>: required and recommended client mods.</li>
 <li><a href="#admins/rules/rules">Server rules</a>, <a href="#admins/backups/backups">backups</a>, <a href="#admins/chat/allow">chat</a> and <a href="#admins/mods/updates">updates</a>.</li>
 <li>Each mod's server settings sit on its own page under <strong>Server settings</strong>.</li></ul>
-<p>Every group and setting: the chapters after this one.</p>` },
+<p>The next chapters cover every group and setting.</p>` },
         { id: "help", title: "When something goes wrong",
           html: `<ul><li><code>.progenitor logs</code> in chat collects the server's logs.</li>
 <li>Bugs: a <a href="https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml">GitHub bug report</a> or the <a href="https://discord.com/channels/978094827830915092/1112888087836631090">Progenitor channel</a> on the V Rising Mod Community Discord (<a href="https://vrisingmods.com/discord">join it</a> first).</li>
@@ -667,12 +670,12 @@ window.HELP = {
           html: `<p><strong>Mods &rsaquo; Server</strong>, while joined. In order:</p>
 <ol><li><strong>When players join</strong>: the server message.</li><li><strong>Mods players need</strong>: join rules.</li><li><strong>Server listing</strong>: name and description.</li>
 <li><strong>Server rules &middot; applied at the next restart</strong>, with backups.</li><li><strong>Chat on this server</strong>.</li><li><strong>Players without Progenitor</strong>.</li><li><strong>Updates</strong>.</li><li><strong>Operator</strong>.</li></ol>
-<p>Everyone else sees <em>Admin only &middot; &lt;value&gt;</em>; groups only admins receive say <em>Admin only</em>. Each edit reads <em>Saved by the server</em> or the server's reason.</p>` },
+<p>Players who aren't admins see these rows marked <em>Admin only</em> and can't change them. After each edit the row says <em>Saved by the server</em>, or why the server refused it.</p>` },
         { id: "on-this-server", title: "Progenitor's own server switches",
           html: `<p><strong>Mods &rsaquo; Progenitor &rsaquo; On this server</strong> (admins only), then the link <em>This server's setup is in the Server tab.</em></p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
-<tr><td>Allow photo mode on this server</td><td>On</td><td>Off: nobody enters [[photo-mode|photo mode]] here, players in it leave, and the world pause is refused. Applies at once.</td></tr>
-<tr><td>Ally-safe hits</td><td>On</td><td>Hits from units a mod spawned through Progenitor skip allies. Game units and bosses are unchanged.</td></tr></tbody></table>
+<tr><td>Allow photo mode on this server</td><td>On</td><td>Off: nobody can use [[photo-mode|photo mode]] here. Applies at once.</td></tr>
+<tr><td>Ally-safe hits</td><td>On</td><td>Units a mod spawns through Progenitor don't hit their allies. The game's own units and bosses are unchanged.</td></tr></tbody></table>
 <p>Each other mod's server settings are on its own page under <strong>Server settings</strong>.</p>` },
         { id: "message", title: "When players join",
           html: `<ul><li><strong>Message</strong>: up to 2,000 characters, with <strong>Insert</strong> for a countdown or the reset date, a <strong>Players see</strong> preview and <strong>Apply</strong>.</li>
@@ -763,7 +766,7 @@ LockedInGame = server-rules, updates` } }
 <li>Type <code>RESTORE</code>, then <strong>Restore at next restart</strong> or <strong>Restore and restart now</strong> (players are warned).</li></ol>
 <ul><li>The current world is backed up first. <strong>Restore pending</strong> shows the request; <strong>Cancel the restore</strong> drops it.</li>
 <li><strong>Last restore</strong> says how it went. Progenitor never starts the server again; your host does.</li></ul>`,
-          callout: { title: "Not yet", text: "Restores in a hosted private game, and from autosaves." } }
+          callout: { title: "Not supported yet", text: "Restoring in a hosted private game, or from an autosave." } }
       ]
     },
     {
@@ -776,7 +779,7 @@ LockedInGame = server-rules, updates` } }
 <tr><td>Allow @all from admins</td><td>On</td><td>Highlights an admin's <code>@all</code> for everyone.</td></tr>
 <tr><td>Allow long messages</td><td>On</td><td>Lines sent in parts.</td></tr>
 <tr><td>Longest long message</td><td class="num">1000</td><td>Characters, 200 to 4000.</td></tr></tbody></table>`,
-          callout: { title: "Not yet verified in game", text: "The server chat settings are tested outside the game only." } },
+          callout: { title: "New", text: "These settings haven't been tested on a live server yet." } },
         { id: "filter", title: "Word filter",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Word filter</td><td>Off</td><td>Checks every player line on the server.</td></tr>
@@ -797,13 +800,13 @@ LockedInGame = server-rules, updates` } }
       id: "admins/mods", role: "admins", title: "Server Mods and Updates", pages: [
         { id: "remote-install", title: "Install mods on the server",
           html: `<p>Joined as an admin, [[remote-install|Install Mods]] installs, updates and removes mods on the server: <strong>Install on server</strong>, <strong>Install on both</strong>, <strong>Update on server</strong>.</p>
-<ul><li>The server downloads from Thunderstore itself. A hot-loadable mod loads at once; others read <em>Pending server restart</em>.</li>
-<li>A server on this PC or your private game is installed straight into its folder.</li></ul>
+<ul><li>The server downloads the mod itself. Some mods load at once; others show <em>Pending server restart</em>.</li>
+<li>For a server on this PC or your private game, the mod goes straight into its folder.</li></ul>
 <table><thead><tr><th class="label">Operator row</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Remote mod installs</td><td>On</td><td>Off refuses every remote install.</td></tr>
 <tr><td>Admins who may install mods</td><td>Any admin</td><td>SteamID64s, comma separated.</td></tr>
 <tr><td>Saved mod items</td><td></td><td><strong>Manage</strong>: restore, keep or discard items of a removed mod.</td></tr></tbody></table>`,
-          callout: { title: "Not yet verified in game", text: "Remote installs are tested outside the game only." } },
+          callout: { title: "New", text: "Remote installs haven't been tested on a live server yet." } },
         { id: "updates", title: "Server updates",
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Update server mods</td><td>Notify</td><td>Automatic, Notify or Off.</td></tr>
@@ -825,7 +828,7 @@ LockedInGame = server-rules, updates` } }
 <tr><td><code>.progenitor logs</code></td><td>Admins</td><td>Saves the server's log zip in <code>BepInEx/progenitor-support</code>.</td></tr>
 <tr><td><code>.stop-server</code></td><td>Admins</td><td>Saves the world and stops the server.</td></tr></tbody></table>` },
         { id: "save-safety", title: "Removing a content mod",
-          html: `<p>A world saved with a content mod still loads after the mod is removed: Progenitor drops the mod's unknown objects and logs a loud warning. Over the limits it fails the load as the game would.</p>
+          html: `<p>A world saved with a content mod still loads after you remove the mod: Progenitor drops what the mod added and logs a warning. If that is more than the limits below, the world fails to load, as it would without Progenitor.</p>
 <p>Settings: <code>[SaveSafety]</code> in <code>progenitor.cfg</code> (<code>DropUnknownPrefabs</code> on, <code>MaxDropPercent</code> 0.5, <code>MaxDropEntities</code> 5000). Applies after a restart.</p>` }
       ]
     },
@@ -851,7 +854,7 @@ LockedInGame = server-rules, updates` } }
           code: { lang: "shell", text: `dotnet new progenitor-mod -n MyMod
 cd MyMod
 dotnet build` },
-          callout: { title: "Template not found?", text: "It is new. Build it by hand from the next two pages." } },
+          callout: { title: "Template not found?", text: "Set the project up by hand from the next two pages." } },
         { id: "project-file", title: "The project file",
           html: `<p>Inside the Progenitor repository, beside the samples:</p>{{code}}<p>Outside it, copy the game references from <code>Directory.Build.targets</code> and <code>.props</code>.</p>`,
           code: { lang: "xml", text: `<Project Sdk="Microsoft.NET.Sdk">
@@ -1036,7 +1039,7 @@ window.Show();` },
 
 My problem: <describe what happened and what you expected>` } },
         { id: "collect-logs", title: "Collect logs",
-          html: `<ul><li><strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs for a help post</strong>, or the zip icon at the end of the title screen's bottom-left icon row.</li>
+          html: `<ul><li><strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs for a help post</strong>, or the zip icon at the bottom left of the title screen.</li>
 <li>One zip lands on your Desktop and its folder opens; the path is on the clipboard.</li>
 <li>Inside: BepInEx's log (this session and the two before it), the game's log, your mod list, a few settings, and the logs of a private game or server running on this PC.</li>
 <li>Removed: SteamIDs, IP addresses, your Windows user name, passwords and tokens. Character and server names stay.</li></ul>` },
@@ -1053,7 +1056,7 @@ My problem: <describe what happened and what you expected>` } },
     { id: "glossary", title: "Glossary", pages: [ { id: "terms", title: "Glossary", lede: "Hover an underlined word anywhere to see its entry.", glossary: true } ] }
   ],
   glossary: [
-    { id: "progenitor", term: "Progenitor", def: "A V Rising modding framework that gives mods settings, keybinds, UI, networking and hot reload, and undoes their registrations on unload." },
+    { id: "progenitor", term: "Progenitor", def: "A V Rising modding framework that gives every mod one in-game Mods menu for settings, keybinds and installs, and gives mod makers settings, UI, networking and hot reload." },
     { id: "game-folder", term: "Game folder", def: "The V Rising install folder that holds <code>VRising.exe</code>; BepInEx and Progenitor go inside it." },
     { id: "server-setting", term: "Server setting", def: "A mod setting the server decides for everyone on it; while you are joined it shows the server's value, which only admins change." },
     { id: "photo-mode", term: "Photo mode", def: "Progenitor's free-flying camera with the HUD hidden, off by default; a server can disallow it." },
@@ -1116,7 +1119,7 @@ My problem: <describe what happened and what you expected>` } },
     { id: "world-epoch", term: "World epoch", def: "A stamp of the current world load; keep it beside any held entity and check <code>ctx.WorldState.IsStale</code>." },
     { id: "mod-link", term: "Mod link", def: "A chat token such as <code>[mod:Namespace-Name]</code> that opens a mod's page or Install Mods listing when clicked, and never installs anything." },
     { id: "thunderstore", term: "Thunderstore", def: "The mod site the Install Mods tab installs from; Progenitor publishes there as <code>VRising_Modders-Progenitor</code>." },
-    { id: "stamp", term: "Progenitor stamp", def: "An optional 64 x 64 corner mark on a mod's icon showing it runs on Progenitor, not an endorsement." },
+    { id: "stamp", term: "Progenitor stamp", def: "An optional corner mark on a mod's icon showing it runs on Progenitor; it is not an endorsement." },
     { id: "dev-bridge", term: "Dev bridge", def: "<code>Progenitor.Dev</code>: a local-only bridge and MCP server for building, reloading and testing in a test game; never on a public server." },
     { id: "game-free-test", term: "Game-free test", def: "A test that runs with <code>dotnet test</code> and no game install, as CI does." }
   ]
@@ -1267,11 +1270,19 @@ My problem: <describe what happened and what you expected>` } },
   // ---- Navigation ----
   var current = null, card = $("card"), prevBtn = $("prevBtn"), nextBtn = $("nextBtn");
   function setRole(r) { role = r; store(":role", r); }
+  // Opening another path's page (a search result, a link) moves the reader onto that path, so Previous and Next
+  // stay on the path of the page shown. The page then says so once, with a way back.
   function show(page) {
     if (!page) page = pages[0];
-    if (hasRoles && page.chapter.role && page.chapter.role !== role) setRole(page.chapter.role);
+    var from = null, fromPage = current;
+    if (hasRoles && page.chapter.role && page.chapter.role !== role) { from = role; setRole(page.chapter.role); }
     current = page;
     card.innerHTML = renderPage(page);
+    if (from && roleById[from] && fromPage) {
+      card.insertAdjacentHTML("afterbegin", '<p class="pathnote"><span>You are now on the <b>' + esc(roleById[role].title) + "</b> path.</span>" +
+        '<button class="btn" type="button" id="pathBack" data-role="' + esc(from) + '" data-page="' + esc(fromPage.key) + '">Back to ' + esc(roleById[from].title) + "</button></p>");
+      $("pathBack").addEventListener("click", function () { setRole(this.dataset.role); go(this.dataset.page); });
+    }
     wireCard();
     var ch = page.chapter, list = path(), i = list.indexOf(page);
     document.title = page.title + " · " + (H.title || "Help");
@@ -1407,13 +1418,19 @@ My problem: <describe what happened and what you expected>` } },
       var t = row.page.title.toLowerCase(), x = row.text.toLowerCase(), s = 0;
       for (var i = 0; i < words.length; i++) { if (t.indexOf(words[i]) > -1) s += 10; else if (x.indexOf(words[i]) > -1) s += 1; else return null; }
       return { row: row, s: s };
-    }).filter(Boolean).sort(function (a, b) { return b.s - a.s; }).slice(0, 12);
-    results.innerHTML = hits.length ? hits.map(function (h, i) {
+    }).filter(Boolean).sort(function (a, b) { return b.s - a.s; });
+    // With a path chosen, its pages and the shared chapters come first; other paths' pages follow under a divider.
+    function own(h) { var r = h.row.page.chapter.role; return !hasRoles || !role || !r || r === role; }
+    var mine = hits.filter(own).slice(0, 10), other = hits.filter(function (h) { return !own(h); }).slice(0, 6), n = 0;
+    function item(h) {
       var p = h.row.page, x = h.row.text.toLowerCase().indexOf(words[0]);
       var snip = x > -1 ? h.row.text.slice(Math.max(0, x - 40), x + 90) : h.row.text.slice(0, 120);
-      var where = (p.chapter.role && roleById[p.chapter.role] ? roleById[p.chapter.role].title + " · " : "") + p.chapter.title;
-      return '<li><a role="option" id="res-' + i + '" href="#' + p.key + '"><span class="r-title">' + mark(p.title, words[0]) + '</span><span class="r-where">' + esc(where) + '</span><span class="r-snip">' + (x > 40 ? "…" : "") + mark(snip, words[0]) + "…</span></a></li>";
-    }).join("") : '<li class="r-none">Nothing matches.</li>';
+      var r = p.chapter.role, where = (r && roleById[r] && r !== role ? roleById[r].title + " · " : "") + p.chapter.title;
+      return '<li><a role="option" id="res-' + (n++) + '" href="#' + p.key + '"><span class="r-title">' + mark(p.title, words[0]) + '</span><span class="r-where">' + esc(where) + '</span><span class="r-snip">' + (x > 40 ? "…" : "") + mark(snip, words[0]) + "…</span></a></li>";
+    }
+    results.innerHTML = mine.length || other.length
+      ? mine.map(item).join("") + (other.length ? '<li class="r-div label" role="presentation">Other roles</li>' + other.map(item).join("") : "")
+      : '<li class="r-none">Nothing matches.</li>';
     results.hidden = false; active = -1; search.setAttribute("aria-expanded", "true");
   }
   function move(d) {
