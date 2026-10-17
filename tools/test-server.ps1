@@ -71,7 +71,7 @@ function Remove-StaleChainloaderCore([string]$pluginsDir) {
   }
 }
 
-function Start-TestServer {
+function Start-TestServer([string]$Launch = "") {
   if (Get-TestServerProcess) { Write-Host "already running"; return }
   # A Core or Bootstrap staged by deploy.ps1 while the server was running is promoted here: a
   # forced stop never runs the in-game promote-at-exit, and promoting Bootstrap from inside the
@@ -82,12 +82,17 @@ function Start-TestServer {
   Promote-Staged (Join-Path $pluginsDir "Progenitor.Bootstrap.dll") "Progenitor.Bootstrap.dll.next"
   Remove-StaleChainloaderCore $pluginsDir
   # WMI Create keeps the server alive after this shell exits; Start-Process would put it in our job object.
-  $commandLine = "cmd.exe /c `"$bat`""
+  # A restart passes the running server's own command line, so it comes back on the same world
+  # (-persistentDataPath / -saveName); a plain start uses start-test-server.bat.
+  $target = if ($Launch) { $Launch } else { "`"$bat`"" }
+  # A relaunch of the servers own command line goes straight to Win32_Process.Create: cmd /c would
+  # mangle its leading quoted exe path.
+  $commandLine = if ($Launch) { $Launch } else { "cmd.exe /c $target" }
   if ($EditAndContinue) {
     # `set VAR=debug&&` with no space before the && (a space would land in the value) puts the
     # variable in cmd's environment before the .bat runs, so VRisingServer.exe and the CoreCLR
     # Doorstop starts inside it inherit it. This is the one line the research note's S3 needs.
-    $commandLine = "cmd.exe /c set DOTNET_MODIFIABLE_ASSEMBLIES=debug&& `"$bat`""
+    $commandLine = "cmd.exe /c set DOTNET_MODIFIABLE_ASSEMBLIES=debug&& $target"
     Write-Host "Edit-and-Continue: DOTNET_MODIFIABLE_ASSEMBLIES=debug in the server's environment"
   }
   # The server's console (and the BepInEx console inside it) starts minimized without taking focus:
@@ -109,7 +114,19 @@ function Stop-TestServer {
 switch ($Action) {
   "start"   { Start-TestServer }
   "stop"    { Stop-TestServer }
-  "restart" { Stop-TestServer; Start-Sleep -Seconds 2; Start-TestServer }
+  "restart" {
+    # Keep the running world: read the live server's command line (exe path plus -persistentDataPath,
+    # -saveName and the rest) before stopping it, and relaunch exactly that. start-test-server.bat
+    # starts the default world, which is wrong when another world (a copy started by its own .bat) is up.
+    $launch = ""
+    $p = Get-TestServerProcess | Select-Object -First 1
+    if ($p) {
+      $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
+      if ($cmd -and $cmd -like "*VRisingServer.exe*") { $launch = $cmd; Write-Host "restart keeps the running command line: $cmd" }
+      else { Write-Warning "could not read the running server's command line; restarting with start-test-server.bat (the default world)" }
+    }
+    Stop-TestServer; Start-Sleep -Seconds 2; Start-TestServer -Launch $launch
+  }
   "status"  {
     $p = Get-TestServerProcess
     if ($p) { $p | Select-Object Id, StartTime, @{n = 'CPU(s)'; e = { [int]$_.CPU } }, @{n = 'RAM(MB)'; e = { [int]($_.WorkingSet64 / 1MB) } } | Format-Table -AutoSize }
