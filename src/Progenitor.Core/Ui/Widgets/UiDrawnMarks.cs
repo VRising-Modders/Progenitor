@@ -41,6 +41,9 @@ internal enum UiMarkShape
 
     /// <summary>A storage chest: a box outline, its lid line and a latch (the default face of a P6 icon button).</summary>
     Chest = 11,
+
+    /// <summary>A locate target: a ring with a center dot and four short ticks outside it (a table row's find button).</summary>
+    Locate = 12,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -95,7 +98,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     /// <summary>An icon button's mark: <see cref="UiMarkShape.Up"/>, <see cref="UiMarkShape.Down"/>, <see cref="UiMarkShape.Remove"/>, <see cref="UiMarkShape.Check"/> or <see cref="UiMarkShape.Grip"/>.</summary>
     internal static UiDrawnMark Icon(UiMarkShape shape) =>
         shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest
+            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate
             ? new UiDrawnMark(shape, 0, 0)
             : None;
 
@@ -107,10 +110,11 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static readonly UiDrawnMark CheckEmptyMark = Icon(UiMarkShape.CheckEmpty);
     internal static readonly UiDrawnMark CheckBoxMark = Icon(UiMarkShape.CheckBox);
     internal static readonly UiDrawnMark ChestMark = Icon(UiMarkShape.Chest);
+    internal static readonly UiDrawnMark LocateMark = Icon(UiMarkShape.Locate);
 
     /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
     internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest;
+        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate;
 
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
@@ -129,6 +133,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.CheckEmpty => "check-empty",
         UiMarkShape.CheckBox => "check-box",
         UiMarkShape.Chest => "chest",
+        UiMarkShape.Locate => "locate",
         _ => "",
     };
 
@@ -165,6 +170,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "check-empty":
             case "check-box":
             case "chest":
+            case "locate":
                 if (colon >= 0) return false;
                 mark = Icon(head switch
                 {
@@ -175,6 +181,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
                     "check-empty" => UiMarkShape.CheckEmpty,
                     "check-box" => UiMarkShape.CheckBox,
                     "chest" => UiMarkShape.Chest,
+                    "locate" => UiMarkShape.Locate,
                     _ => UiMarkShape.Grip,
                 });
                 return true;
@@ -216,7 +223,7 @@ internal static class UiDrawnMarkArt
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
         UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
         UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
-            or UiMarkShape.Chest => (TextureHeight, TextureHeight),
+            or UiMarkShape.Chest or UiMarkShape.Locate => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -311,6 +318,10 @@ internal static class UiDrawnMarkArt
                     new[] { 0.16f, 0.58f, 0.84f, 0.58f }, new[] { 0.5f, 0.58f, 0.5f, 0.44f })));
             case UiMarkShape.Grip:
                 return Clamp01(Strokes2(px, py, 0.065f, new[] { 0.18f, 0.28f, 0.82f, 0.28f }, new[] { 0.18f, 0.5f, 0.82f, 0.5f }, new[] { 0.18f, 0.72f, 0.82f, 0.72f }));
+            case UiMarkShape.Locate:
+                return Clamp01(Math.Max(Target(px, py), Strokes2(px, py, 0.05f,
+                    new[] { 0.5f, 0.06f, 0.5f, 0.2f }, new[] { 0.5f, 0.8f, 0.5f, 0.94f },
+                    new[] { 0.06f, 0.5f, 0.2f, 0.5f }, new[] { 0.8f, 0.5f, 0.94f, 0.5f })));
             default:
                 return 0f;
         }
@@ -345,6 +356,17 @@ internal static class UiDrawnMarkArt
         float inside = Math.Min(Math.Max(dx, dy), 0f);
         float d = Math.Abs(outside + inside);
         return Smooth((half - d) * n);
+    }
+
+    /// <summary>The locate target's ring (radius 0.28 of the texture, stroke 0.10) and its center dot (radius 0.08).</summary>
+    private static float Target(float px, float py)
+    {
+        float n = TextureHeight, c = n / 2f;
+        float dx = px - c, dy = py - c;
+        float r = (float)Math.Sqrt(dx * dx + dy * dy);
+        float ring = Smooth(n * 0.05f - Math.Abs(r - n * 0.28f));
+        float dot = Smooth(n * 0.08f - r);
+        return Math.Max(ring, dot);
     }
 
     /// <summary>The share of the texture's height the order digit takes (the caption's cap height times about 0.7).</summary>

@@ -80,6 +80,16 @@ internal sealed class UiTableViewport
     /// <summary>The slots that draw a line (the rest are hidden).</summary>
     internal int Shown => Math.Max(0, Math.Min(Slots, Count - Top));
 
+    /// <summary>
+    /// The blank filler rows drawn under the lines so the body is at least <paramref name="minRows"/> rows tall
+    /// (<see cref="UiDataTableOptions.MinRows"/>, at most the slots in use); 0 when the lines fill that much.
+    /// </summary>
+    internal int Fillers(int minRows)
+    {
+        int want = minRows < 0 ? 0 : minRows > Slots ? Slots : minRows;
+        return Math.Max(0, want - Shown);
+    }
+
     /// <summary>The window scrolls at all.</summary>
     internal bool Scrolls => Count > Slots;
 

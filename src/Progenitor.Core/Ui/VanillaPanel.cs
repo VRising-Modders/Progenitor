@@ -61,7 +61,7 @@ public readonly struct VanillaButtonIcon : IEquatable<VanillaButtonIcon>
 
     /// <summary>
     /// The framework's drawn mark shown when there is no item icon: <c>chest</c> (the default),
-    /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c> or <c>grip</c>.
+    /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c>, <c>grip</c> or <c>locate</c>.
     /// </summary>
     public string Mark { get; }
 

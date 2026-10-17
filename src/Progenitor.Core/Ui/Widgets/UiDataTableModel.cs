@@ -83,9 +83,11 @@ internal sealed class UiDataTableModel
         {
             if (c == null) continue;
             if (_byKey.ContainsKey(c.Key)) throw new ArgumentException("Two columns have the key '" + c.Key + "'.", nameof(columns));
+            if (c.Kind == UiTableColumnKind.Actions && UiDataTableLayout.ActionsColumn(_columns) != null)
+                throw new ArgumentException("A table has at most one actions column ('" + c.Key + "' is the second).", nameof(columns));
             _byKey[c.Key] = c;
             _columns.Add(c);
-            if (c.Hidden && c.Hideable) _hidden.Add(c.Key);
+            if (c.Hidden && UiDataTableLayout.Hideable(c)) _hidden.Add(c.Key);
         }
 
         if (_columns.Count == 0) throw new ArgumentException("A table needs at least one column.", nameof(columns));
@@ -186,7 +188,7 @@ internal sealed class UiDataTableModel
         foreach (var k in keys ?? Array.Empty<UiTableSortKey>())
         {
             var c = Column(k.Column);
-            if (c == null || !c.Sortable || !seen.Add(c.Key)) continue;
+            if (c == null || !Sorts(c) || !seen.Add(c.Key)) continue;
             next.Add(new UiTableSortKey(c.Key, k.Ascending));
         }
 
@@ -213,7 +215,7 @@ internal sealed class UiDataTableModel
     internal bool ClickSort(string column, bool add)
     {
         var c = Column(column);
-        if (c == null || !c.Sortable) return false;
+        if (c == null || !Sorts(c)) return false;
         int at = _sort.FindIndex(k => string.Equals(k.Column, c.Key, StringComparison.Ordinal));
         var next = new List<UiTableSortKey>(_sort);
         if (add)
@@ -229,6 +231,19 @@ internal sealed class UiDataTableModel
         }
 
         return SetSort(next);
+    }
+
+    /// <summary>Whether a column sorts: <see cref="UiTableColumn.Sortable"/>, never an actions column.</summary>
+    internal static bool Sorts(UiTableColumn c) => c.Sortable && c.Kind != UiTableColumnKind.Actions;
+
+    /// <summary>
+    /// Row <paramref name="rowId"/>'s action <paramref name="actionId"/> when it may be pressed now (known and enabled), or
+    /// null.
+    /// </summary>
+    internal UiRowAction? PressableAction(string? rowId, string? actionId)
+    {
+        var action = Find(rowId)?.FindAction(actionId);
+        return action is { Enabled: true } ? action : null;
     }
 
     /// <summary>A first click sorts A to Z, smallest first.</summary>
@@ -314,7 +329,7 @@ internal sealed class UiDataTableModel
     internal bool SetVisible(string column, bool visible)
     {
         var c = Column(column);
-        if (c == null || !c.Hideable) return false;
+        if (c == null || !UiDataTableLayout.Hideable(c)) return false;
         return visible ? _hidden.Remove(c.Key) : _hidden.Add(c.Key);
     }
 
@@ -325,7 +340,7 @@ internal sealed class UiDataTableModel
         foreach (var k in columns ?? Array.Empty<string>())
         {
             var c = Column(k);
-            if (c != null && c.Hideable) next.Add(c.Key);
+            if (c != null && UiDataTableLayout.Hideable(c)) next.Add(c.Key);
         }
 
         if (next.SetEquals(_hidden)) return false;
@@ -338,7 +353,7 @@ internal sealed class UiDataTableModel
     internal List<UiTableColumn> ChooserColumns()
     {
         var list = new List<UiTableColumn>();
-        foreach (var c in _columns) if (c.Hideable) list.Add(c);
+        foreach (var c in _columns) if (UiDataTableLayout.Hideable(c)) list.Add(c);
         return list;
     }
 

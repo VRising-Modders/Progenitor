@@ -8,7 +8,8 @@ namespace Progenitor.ControlsSample;
 /// The gallery's hub window: a plain floating game window (<c>Ui.Panel(...).GameWindow()</c>) with the hub controls
 /// together, as a mod's hub would use them: the game's window tabs (their height kept across tabs, a browser-style
 /// history), a Find tab with a row of compact dropdowns, a search box with its Find button, and a table of castle
-/// buildings with their build-menu icons that fills the window's height; a centered Return button with a key hint.
+/// buildings with their build-menu icons that fills the window's height, at least eight rows tall, each row with its find,
+/// up, down and remove buttons; a centered Return button with a key hint.
 /// Every control writes a log line. Game-free: the panel and the building ids come from the plugin.
 /// </summary>
 internal sealed class GalleryHub : IDisposable
@@ -109,8 +110,12 @@ internal sealed class GalleryHub : IDisposable
         {
             new UiTableColumn("name", "Building"),
             new UiTableColumn("count", "Count", UiTableColumnKind.Number),
+            // Each row's own commands: find, move up, move down, remove (UiTableRow.Action, raised by OnRowAction).
+            new UiTableColumn(ActionsKey, "", UiTableColumnKind.Actions),
         };
-        Table = tabs.Add(0, p.DataTable(TableKey, columns, new UiDataTableOptions { FillHeight = true }));
+        // MinRows: three buildings still draw a table eight rows tall (blank rows below them).
+        Table = tabs.Add(0, p.DataTable(TableKey, columns, new UiDataTableOptions { FillHeight = true, MinRows = MinRows }));
+        Table.OnRowAction(RowAction);
         Table.SetRows(Rows());
 
         // Chests: a short tab, so the kept height shows (the window does not shrink).
@@ -139,18 +144,48 @@ internal sealed class GalleryHub : IDisposable
         return "closed";
     }
 
-    /// <summary>The table's rows: each building with its build-menu icon (none until the game has drawn it).</summary>
+    /// <summary>The table's actions column key.</summary>
+    internal const string ActionsKey = "actions";
+
+    /// <summary>The fewest rows the table draws (<see cref="UiDataTableOptions.MinRows"/>).</summary>
+    internal const int MinRows = 8;
+
+    /// <summary>The buildings the table lists now, in the player's order (up, down and remove change it).</summary>
+    private readonly List<int> _order = new() { 0, 1, 2 };
+
+    /// <summary>
+    /// The table's rows, in the player's order: each building with its build-menu icon (none until the game has drawn
+    /// it) and its four actions; the first row's up and the last row's down are disabled.
+    /// </summary>
     internal List<UiTableRow> Rows()
     {
-        var rows = new List<UiTableRow>(Buildings.Length);
-        foreach (var b in Buildings)
+        var rows = new List<UiTableRow>(_order.Count);
+        for (int i = 0; i < _order.Count; i++)
         {
-            var row = new UiTableRow(b.Prefab).Text("name", b.Name).Number("count", b.Count);
+            var b = Buildings[_order[i]];
+            var row = new UiTableRow(b.Prefab).Text("name", b.Name).Number("count", b.Count)
+                .Action("locate", UiRowActionIcon.Locate, "Find in the world")
+                .Action("up", UiRowActionIcon.Up, "Move up", enabled: i > 0)
+                .Action("down", UiRowActionIcon.Down, "Move down", enabled: i < _order.Count - 1)
+                .Action("remove", UiRowActionIcon.Remove, "Remove from the list");
             row.BuildingPrefab = _prefabByName(b.Prefab);
             rows.Add(row);
         }
 
         return rows;
+    }
+
+    /// <summary>A row action: up and down swap the row with its neighbor, remove drops it, locate only logs (no world target here).</summary>
+    internal void RowAction(string rowId, string action)
+    {
+        int i = _order.FindIndex(k => Buildings[k].Prefab == rowId);
+        Say("row " + action + " " + rowId);
+        if (i < 0) return;
+        int j = action == "up" ? i - 1 : action == "down" ? i + 1 : -1;
+        if (j >= 0 && j < _order.Count) (_order[i], _order[j]) = (_order[j], _order[i]);
+        else if (action == "remove") _order.RemoveAt(i);
+        else return;
+        Table?.SetRows(Rows());
     }
 
     public void Dispose()

@@ -756,6 +756,16 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.Single(_runtime.Centered);
         Assert.Single(_runtime.Hints);
         Assert.Contains(_runtime.HeightRules, r => r.Keep);
+        Assert.Equal(Progenitor.ControlsSample.GalleryHub.MinRows, hub.Table.Describe()["minRows"]);
+
+        // The row actions: the first row cannot move up; down swaps it with the next; remove drops a row.
+        var first = hub.Rows()[0];
+        Assert.False(hub.Table.PressRowAction(first.Id, "up"));
+        Assert.True(hub.Table.PressRowAction(first.Id, "down"));
+        Assert.Equal(first.Id, hub.Table.Rows[1].Id);
+        Assert.True(hub.Table.PressRowAction(first.Id, "remove"));
+        Assert.Equal(2, hub.Table.Rows.Count);
+        Assert.Contains(log, l => l.EndsWith("hub row remove " + first.Id, StringComparison.Ordinal));
         Assert.Equal("closed", hub.Toggle());
     }
 

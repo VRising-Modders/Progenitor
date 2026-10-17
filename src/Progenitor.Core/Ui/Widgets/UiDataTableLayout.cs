@@ -25,6 +25,7 @@ internal static class UiDataTableLayout
     internal const string CellDetail = UiWidgetLayout.CellDetail;
     internal const string CellExpand = UiWidgetLayout.CellExpand;
     internal const string CellExpandPad = "expand-pad";
+    internal const string CellCheckPad = "check-pad";
     internal const string CellStatus = "status";
     internal const string CellColumns = "columns";
     internal const string CellReason = "reason";
@@ -37,6 +38,48 @@ internal static class UiDataTableLayout
 
     /// <summary>A column chooser chip.</summary>
     internal static string ChipKey(string column) => "col:" + column;
+
+    /// <summary>An actions column's icon button number <paramref name="index"/> (0 the leftmost).</summary>
+    internal static string ActionKey(string column, int index) => "a:" + column + ":" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The blank as wide as an action button, drawn where a line has no action there (the columns line up).</summary>
+    internal static string ActionPadKey(string column, int index) => "ap:" + column + ":" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The most icon buttons an actions column has room for.</summary>
+    internal const int MaxActionSlots = 6;
+
+    /// <summary>An actions column's button count: its <see cref="UiTableColumn.ActionSlots"/>, 1 to <see cref="MaxActionSlots"/>.</summary>
+    internal static int ActionSlotsOf(UiTableColumn column) =>
+        column.ActionSlots < 1 ? 1 : column.ActionSlots > MaxActionSlots ? MaxActionSlots : column.ActionSlots;
+
+    /// <summary>An actions column's width: its buttons (28 units each) and the cell gaps between them.</summary>
+    internal static float ActionsWidth(int slots) =>
+        Math.Max(1, slots) * UiWidgetLayout.IconButtonWidth + (Math.Max(1, slots) - 1) * CellLayout.Gap;
+
+    /// <summary>The drawn mark of a row action's icon.</summary>
+    internal static UiDrawnMark MarkOf(UiRowActionIcon icon) => icon switch
+    {
+        UiRowActionIcon.Locate => UiDrawnMark.LocateMark,
+        UiRowActionIcon.Up => UiDrawnMark.UpMark,
+        UiRowActionIcon.Down => UiDrawnMark.DownMark,
+        UiRowActionIcon.Remove => UiDrawnMark.RemoveMark,
+        UiRowActionIcon.Chest => UiDrawnMark.ChestMark,
+        UiRowActionIcon.Check => UiDrawnMark.CheckMark,
+        _ => UiDrawnMark.LocateMark,
+    };
+
+    /// <summary>
+    /// Whether the player may hide a column (the chooser offers it) and a narrow row may drop it:
+    /// <see cref="UiTableColumn.Hideable"/>, ignored on an actions column, which is always shown.
+    /// </summary>
+    internal static bool Hideable(UiTableColumn column) => column.Hideable && column.Kind != UiTableColumnKind.Actions;
+
+    /// <summary>The table's actions column (the first one), or null.</summary>
+    internal static UiTableColumn? ActionsColumn(IReadOnlyList<UiTableColumn> columns)
+    {
+        foreach (var c in columns) if (c.Kind == UiTableColumnKind.Actions) return c;
+        return null;
+    }
 
     /// <summary>The right band every table row keeps free for the scroll bar (the bar, its padding and one gap).</summary>
     internal const float ScrollInset = 18f;
@@ -69,14 +112,15 @@ internal static class UiDataTableLayout
     /// <summary>
     /// Which column fills (and so where right-packing starts): the first with no width, else the first text column; but
     /// never one after a number column, so every number column is packed from the right and its figures line up on their
-    /// last digit. With a number column first, the first column.
+    /// last digit. With a number column first, the first column. An actions column never fills.
     /// </summary>
     internal static int FillIndex(IReadOnlyList<UiTableColumn> columns)
     {
         int firstNumber = columns.Count;
         for (int i = 0; i < columns.Count; i++)
             if (columns[i].Kind == UiTableColumnKind.Number) { firstNumber = i; break; }
-        for (int i = 0; i < firstNumber; i++) if (columns[i].Width <= 0f) return i;
+        for (int i = 0; i < firstNumber; i++)
+            if (columns[i].Width <= 0f && columns[i].Kind != UiTableColumnKind.Actions) return i;
         for (int i = 0; i < firstNumber; i++) if (columns[i].Kind == UiTableColumnKind.Text) return i;
         return 0;
     }
@@ -173,6 +217,8 @@ internal static class UiDataTableLayout
     /// <summary>A column's width: its ask, never under its caption's need or its kind's floor. The fill column's floor.</summary>
     internal static float WidthOf(UiTableColumn column, bool fill)
     {
+        // The buttons alone decide an actions column's width, so its header lines up with them exactly.
+        if (column.Kind == UiTableColumnKind.Actions) return ActionsWidth(ActionSlotsOf(column));
         float need = HeaderNeed(column);
         if (fill) return Math.Max(UiWidgetLayout.CaptionMinWidth, need);
         float floor = column.Editable && column.Kind == UiTableColumnKind.Number ? MinEditWidth
@@ -195,8 +241,13 @@ internal static class UiDataTableLayout
         int fill = FillIndex(columns);
         var cells = new List<CellSpec>(columns.Count * 2 + 6);
         if (multi)
+        {
             cells.Add(new CellSpec(CellKind.Button, CellCheck) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Quiet }
                 .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
+            // A filler row draws this blank instead of the check cell (no dead click or navigation stop), as wide.
+            cells.Add(new CellSpec(CellKind.Muted, CellCheckPad) { MinWidth = UiWidgetLayout.IconButtonWidth, Visible = false }
+                .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
+        }
         cells.Add(new CellSpec(CellKind.Image, CellIcon) { MinWidth = UiWidgetLayout.IconSize, Skin = CellSkin.IconWell }
             .With(width: CellWidth.Px(UiWidgetLayout.IconSize)));
         cells.Add(new CellSpec(CellKind.Muted, CellIconPad) { MinWidth = UiWidgetLayout.IconSize, Visible = false }
@@ -207,7 +258,25 @@ internal static class UiDataTableLayout
             bool isFill = i == fill;
             float w = WidthOf(col, isFill) + (NeedsLeftJustify(columns, col) ? LeftTextLead : 0f);
             var align = AlignOf(i, fill);
-            bool optional = col.Hideable && !isFill;
+            bool optional = Hideable(col) && !isFill;
+            if (col.Kind == UiTableColumnKind.Actions)
+            {
+                // Each place is a pair, as the icon and the expander: the box-less icon button (its face a drawn mark,
+                // UiIconMarks) or a blank as wide, so a line without that action keeps every button in its column.
+                int n = ActionSlotsOf(col);
+                for (int a = 0; a < n; a++)
+                {
+                    var button = UiWidgetLayout.IconButton(ActionKey(col.Key, a));
+                    button.Align = align;
+                    button.Optional = optional;
+                    cells.Add(button);
+                    cells.Add(new CellSpec(CellKind.Muted, ActionPadKey(col.Key, a)) { MinWidth = UiWidgetLayout.IconButtonWidth, Visible = false }
+                        .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth), align: align, optional: optional));
+                }
+
+                continue;
+            }
+
             // Numbers are proportional body text, right-justified: the monospace run spaced the thousands separator
             // ("266 , 400"); the game's figures are lining, and right-justified they line up on their last digit.
             var kind = CellKind.Text;
@@ -246,8 +315,8 @@ internal static class UiDataTableLayout
             bool isFill = i == fill;
             float w = WidthOf(col, isFill) + (NeedsLeftJustify(columns, col) ? LeftTextLead : 0f);
             var cell = new CellSpec(CellKind.Text, ViewKey(col.Key)) { MinWidth = w, SmallCaps = true, FontSizeOverride = InstallColumns.HeaderFontSize }
-                .With(text: col.Caption, width: WidthSpec(col, isFill, w), align: AlignOf(i, fill), optional: col.Hideable && !isFill);
-            if (col.Sortable) cell.SortKey = col.Key;
+                .With(text: col.Caption, width: WidthSpec(col, isFill, w), align: AlignOf(i, fill), optional: Hideable(col) && !isFill);
+            if (col.Sortable && col.Kind != UiTableColumnKind.Actions) cell.SortKey = col.Key;
             cells.Add(cell);
         }
 

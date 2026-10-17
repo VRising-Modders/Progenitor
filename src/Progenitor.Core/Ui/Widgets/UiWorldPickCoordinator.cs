@@ -26,6 +26,13 @@ internal interface IUiWorldPickBackend
 
     /// <summary>P7b: the repeating pick <paramref name="pick"/> delivered a target and stays armed (redraw its count).</summary>
     void Repicked(UiWorldPickHandle pick) { }
+
+    /// <summary>
+    /// <see cref="UiWorldPickOptions.CloseGameWindows"/>: close the open container or station window, or the character
+    /// inventory (<see cref="UiWorldPickMenus.ClosesForPick"/>), as Escape would. Called once, after <see cref="Ready"/>
+    /// and before <see cref="Armed"/>. Returns the menu type it closed, or 0 when nothing was closed.
+    /// </summary>
+    int CloseGameWindows() => 0;
 }
 
 /// <summary>What the coordinator answers when the game is about to open an interact panel.</summary>
@@ -114,6 +121,19 @@ internal sealed class UiWorldPickCoordinator
 
         // A previous pick's callback may have armed one of its own while we were ending it; this call is newer.
         if (_current != null) End(_current, UiWorldPickState.Cancelled, runCallback: true);
+
+        // CloseGameWindows: the open container, station or inventory window goes first, so the player's next interact
+        // reaches the world and Escape is the pick's. Not reopened later.
+        if (opts.CloseGameWindows)
+        {
+            try
+            {
+                int closed = _backend.CloseGameWindows();
+                pick.ClosedMenu = closed;
+                if (closed > 0) _log("Ui: world pick #" + pick.Id + " closed the open game window (menu " + closed + ") before arming.");
+            }
+            catch (Exception e) { _log("Ui: world pick #" + pick.Id + " could not close the game window: " + e.Message); }
+        }
 
         pick.State = UiWorldPickState.Armed;
         _current = pick;
@@ -353,6 +373,9 @@ internal sealed class UiWorldPickHandle : IUiWorldPick
 
     /// <summary>The last target delivered.</summary>
     internal UiWorldPickResult? Result { get; set; }
+
+    /// <summary>The game menu type <see cref="UiWorldPickOptions.CloseGameWindows"/> closed at arm time, or 0 (tests, logs).</summary>
+    internal int ClosedMenu { get; set; }
 
     /// <inheritdoc />
     public int PickCount { get; internal set; }

@@ -11,6 +11,69 @@ public enum UiTableColumnKind
 
     /// <summary>A number: sorted by <see cref="UiTableCell.Value"/>, drawn in tabular figures, right-justified.</summary>
     Number = 1,
+
+    /// <summary>
+    /// A column of small icon buttons per row: each row's <see cref="UiTableRow.Actions"/>, raising
+    /// <see cref="IUiDataTable.OnRowAction"/>. Never sorts, holds no cells, is always shown (<see cref="UiTableColumn.Hideable"/> is ignored: the column chooser never offers it), and has
+    /// room for <see cref="UiTableColumn.ActionSlots"/> buttons. One per table.
+    /// </summary>
+    Actions = 2,
+}
+
+/// <summary>The face of a row action button (<see cref="UiRowAction"/>): a drawn mark in the kit's glyph-button gold.</summary>
+public enum UiRowActionIcon
+{
+    /// <summary>A target ring with four ticks: find or locate the row's thing.</summary>
+    Locate = 0,
+
+    /// <summary>A triangle pointing up: move the row up.</summary>
+    Up = 1,
+
+    /// <summary>A triangle pointing down: move the row down.</summary>
+    Down = 2,
+
+    /// <summary>A cross: remove the row.</summary>
+    Remove = 3,
+
+    /// <summary>A storage chest: open or show the row's container.</summary>
+    Chest = 4,
+
+    /// <summary>A check mark: confirm or mark the row.</summary>
+    Check = 5,
+}
+
+/// <summary>
+/// One small icon button on a data table row (<see cref="UiTableRow.Actions"/>), drawn in the table's
+/// <see cref="UiTableColumnKind.Actions"/> column. A click (or A on a controller) raises
+/// <see cref="IUiDataTable.OnRowAction"/> with the row's id and <see cref="Id"/>; a disabled one is drawn faint and does
+/// nothing. Hovering it shows <see cref="Tooltip"/>.
+/// </summary>
+public sealed class UiRowAction
+{
+    /// <summary>An action <paramref name="id"/> (the caller's name, raised with the click) drawn as <paramref name="icon"/>.</summary>
+    public UiRowAction(string id, UiRowActionIcon icon, string tooltip = "", bool enabled = true)
+    {
+        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("A row action needs an id.", nameof(id));
+        Id = id.Trim();
+        Icon = icon;
+        Tooltip = tooltip ?? "";
+        Enabled = enabled;
+    }
+
+    /// <summary>The caller's name for the action (<c>locate</c>, <c>up</c>, <c>remove</c>). Never shown.</summary>
+    public string Id { get; }
+
+    /// <summary>The button's face.</summary>
+    public UiRowActionIcon Icon { get; }
+
+    /// <summary>Hover text (<c>Move up</c>); empty for none. Shown for a disabled button too.</summary>
+    public string Tooltip { get; set; }
+
+    /// <summary>False: drawn faint and a click does nothing (the first row's up, the last row's down).</summary>
+    public bool Enabled { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString() => Id + (Enabled ? "" : " (disabled)");
 }
 
 /// <summary>P7b: what a column's subtotal and total rows show (<see cref="UiTableColumn.Subtotal"/>).</summary>
@@ -45,6 +108,11 @@ public sealed class UiTableColumn
         Key = key.Trim();
         Caption = caption ?? "";
         Kind = kind;
+        if (kind == UiTableColumnKind.Actions)
+        {
+            Sortable = false;
+            Hideable = false;
+        }
     }
 
     /// <summary>The caller's stable name. Never shown.</summary>
@@ -53,8 +121,16 @@ public sealed class UiTableColumn
     /// <summary>The header caption, drawn in the game's small caps.</summary>
     public string Caption { get; }
 
-    /// <summary>Text or number.</summary>
+    /// <summary>Text, number or the row actions.</summary>
     public UiTableColumnKind Kind { get; }
+
+    /// <summary>
+    /// An <see cref="UiTableColumnKind.Actions"/> column: how many icon buttons each row has room for (1 to 6; 4 by
+    /// default). The column is exactly that wide (28 units a button, 8 between); <see cref="Width"/> is ignored, and a
+    /// caption longer than the buttons is cut. Give every row the same actions in the same order and disable those that
+    /// do not apply, so each icon stays in its own column from row to row.
+    /// </summary>
+    public int ActionSlots { get; set; } = 4;
 
     /// <summary>
     /// The column's width in UI units, or 0 for the fill column (takes what the row has left, never under 120). The table
@@ -62,7 +138,7 @@ public sealed class UiTableColumn
     /// </summary>
     public float Width { get; set; }
 
-    /// <summary>Clicking the header sorts by this column. On by default.</summary>
+    /// <summary>Clicking the header sorts by this column. On by default (off, and ignored, on an actions column).</summary>
     public bool Sortable { get; set; } = true;
 
     /// <summary>
@@ -260,6 +336,35 @@ public sealed class UiTableRow
     /// <summary>Every editable cell of the row is locked (a guest's view).</summary>
     public bool Locked { get; set; }
 
+    private IReadOnlyList<UiRowAction> _actions = Array.Empty<UiRowAction>();
+
+    /// <summary>
+    /// The row's icon buttons, drawn left to right in the table's <see cref="UiTableColumnKind.Actions"/> column (as many
+    /// as its <see cref="UiTableColumn.ActionSlots"/>). Read at every draw: after changing an action's
+    /// <see cref="UiRowAction.Enabled"/>, call <see cref="IUiDataTable.SetRows"/> to redraw. Empty: none.
+    /// </summary>
+    public IReadOnlyList<UiRowAction> Actions
+    {
+        get => _actions;
+        set => _actions = value ?? Array.Empty<UiRowAction>();
+    }
+
+    /// <summary>Add an icon button (see <see cref="UiRowAction"/>) after the row's others; returns the row (for initializers).</summary>
+    public UiTableRow Action(string id, UiRowActionIcon icon, string tooltip = "", bool enabled = true)
+    {
+        _actions = new List<UiRowAction>(_actions) { new UiRowAction(id, icon, tooltip, enabled) };
+        return this;
+    }
+
+    /// <summary>The action <paramref name="id"/> of the row, or null.</summary>
+    internal UiRowAction? FindAction(string? id)
+    {
+        if (id == null) return null;
+        foreach (var a in _actions)
+            if (a != null && string.Equals(a.Id, id, StringComparison.Ordinal)) return a;
+        return null;
+    }
+
     /// <inheritdoc />
     public override string ToString() => Id;
 }
@@ -384,6 +489,14 @@ public sealed class UiDataTableOptions
     /// Off by default.
     /// </summary>
     public bool FillHeight { get; set; }
+
+    /// <summary>
+    /// The fewest body rows the table draws (0 to 30, at most the rows in use; 0 by default): with fewer lines, blank
+    /// filler rows below them keep the table's height, so a tab with two rows is as tall as one with ten. A filler row
+    /// takes no click, selection, tooltip or hover wash, has no check cell, and the navigation passes over it. Scrolling
+    /// past <see cref="VisibleRows"/> is unchanged.
+    /// </summary>
+    public int MinRows { get; set; }
 
     /// <summary>Rows can be selected (click). On by default.</summary>
     public bool Selectable { get; set; } = true;
@@ -541,8 +654,21 @@ public interface IUiDataTable : IUiHandle
     string StatusReason { get; }
 
     /// <summary>
-    /// Readback: <c>{kind: datatable, key, columns, sort, hidden, grouped, top, lines, rows, visibleRows, slots, selected,
-    /// expanded, collapsed, pending, status, reason, chooserOpen}</c>.
+    /// After the player pressed an enabled row action button (<see cref="UiTableRow.Actions"/>): the row's id and the
+    /// action's <see cref="UiRowAction.Id"/>. The table changes nothing itself: move or remove the row and call
+    /// <see cref="SetRows"/>.
+    /// </summary>
+    IDisposable OnRowAction(Action<string, string> handler);
+
+    /// <summary>
+    /// Press row <paramref name="rowId"/>'s action <paramref name="actionId"/> as if clicked (the bridge, a keybind): raises
+    /// <see cref="OnRowAction"/>. False when the row or the action is unknown, or the action is disabled.
+    /// </summary>
+    bool PressRowAction(string rowId, string actionId);
+
+    /// <summary>
+    /// Readback: <c>{kind: datatable, key, columns, sort, hidden, grouped, top, lines, rows, visibleRows, minRows, fillers,
+    /// slots (each with its row's actions), selected, expanded, collapsed, pending, status, reason, chooserOpen}</c>.
     /// </summary>
     Dictionary<string, object?> Describe();
 }
