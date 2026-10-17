@@ -2719,7 +2719,7 @@ singleton's `StaticPartyBonus` and the length choice's `SuccessRateBonus`.
 
 | Step | The game's computation (source-checked) |
 |---|---|
-| Proficiency | `round(gear level × 10) + 100 + round(expertise × 100)`, from the servant's live `ServantPower` (not the coffin's copy). |
+| Proficiency | `round(gear level × 10) + 100 + round(expertise × 100)`, from the servant's live `ServantPower` (not the coffin's copy). The rounding is the runtime's `Math.Round(double)`: an exact .5 goes to the even integer (22.5 to 22, 37.5 to 38). |
 | Perks | For every servant of the party, each of the mission's perks is matched against the servant's first, then second perk. A match whose perk is not used yet counts once for the whole party: `PowerValue` comes off the difficulty, `LootValue` adds to the loot bonus (which starts at 1). |
 | Party bonus | `StaticPartyBonus` once for each other servant of the party (the throne's "+n"). |
 | Chance | `x = proficiency + party bonus - (difficulty - perk reduction)`; `x >= 0` is 100%; otherwise `1 - x² / 15000 + SuccessRateBonus`, clamped to 0..1. The length choice's bonus only matters when the party is short. |
@@ -2755,24 +2755,34 @@ ctx.Events.On<ServantsReturned>(ev =>
 
 How it works. The cap is applied inside the before/after hooks Progenitor already has on
 `ServantMissionUpdateSystem`, the system that rolls the return, with data writes only; no game
-method is called or patched.
+method is called or patched. The before-hook is registered at the lowest priority and the
+after-hook at the highest, so no other hook on that system sees a forced value (a plugin that
+orders itself explicitly against Progenitor's id can still change that order).
 
 | Step | What happens |
 |---|---|
-| Record | On a capped send the cap goes into the cap book and the server store (`ServerSave`, store `progenitor.servants`, key `cap:<mission>:<start ticks>`, territory as a cross-check), flushed to disk before `Send` returns. The book is Core's, so a plugin unload or a Core swap does not lose it; it loads with Core, before the world. A cap is dropped when the game finishes its hunt, or ten minutes after the hunt's end once no castle's record holds it (an orphan after a rollback). |
-| Veto | Before the update, for each capped hunt the game finishes in this update (due by Progenitor's clock, which the game reads after it), each servant's vanilla chance `c` is computed from the same live inputs ([Success chance](#success-chance)). With probability `1 - cap/c` Progenitor writes that servant's `ServantPower.GearLevel` = -10000 (proficiency about -99,900, so the game's chance clamps to 0). Its overall success is then `(1 - q) · c = cap`. The vetoed servant fails the game's way: destroyed, coffin revivable, no loot, the game's "was killed" line to allies. The others are untouched: the veto changes only that servant's proficiency, not the party bonus or perks. The game's roll can still pass a forced failure with probability about 1.2e-7. |
-| Hold | A capped hunt due within the two-second clock slack but not yet due by Progenitor's clock is held for that update: its row's length is raised by three seconds for the update only. So the veto always happens in the update that finishes the hunt, and no servant is ever written in an update that does not finish its hunt. |
-| Restore | After the update every write is undone and read back (`servants: restored … read back`). If that hook does not run (the update threw), the restore runs after `UpdateGroup` (which catches its systems' exceptions), before `PersistenceGroup` of the next frame, on the next frame, before the next update, and at Core unload; each of those is a **late restore**, logged as an error and counted in `CapStatus.LateRestores`. A restore writes only when the target is the same servant (world-load epoch and network id) and still reads the value written; otherwise it logs and leaves it. |
-| Pending-restore record | Before each gear write, a record (process, world-load epoch, entity, network id, castle territory, coffin name, the original value) goes into the same store, flushed; the restore removes it. A later Core or process that finds one acts on it once per world load: in the same process and world load it restores the entity after validating it; otherwise it restores only a servant whose gear level reads exactly -10000 and whose castle and coffin name match one record, and drops the rest with an error line. |
-| No save sees it | The write and its restore are inside one `ServantMissionUpdateSystem.Update` on the main thread (`UpdateGroup`); the game's save systems run in `PersistenceGroup`, in `StartSimulationGroup`, a different part of the frame. The raw accessors complete the jobs that use the component before returning the pointer, so no scheduled job reads it mid-write. The `Before(PersistenceGroup)` guard restores anything a failed update left before any save system runs. |
-| Book not loaded | While the server store is not loaded yet (normally it is, from the `-persistentDataPath` or the game's data path at Core load), every due hunt is held update by update for up to 30 seconds, then released to the game uncapped with an error line. With the game's servant timers off a hunt cannot be held; it finishes uncapped with a warning. |
+| Record | On a capped send the cap goes into the cap book and the server store (`ServerSave`, store `progenitor.servants`, key `cap:<world id>:<mission>:<start ticks>`, territory as a cross-check), flushed to disk before `Send` returns. The server store is machine-wide (shared by hosted games, kept across wipes), so every key carries the world's id, a random id kept in the world's own `ModSave` store `progenitor.servants` (a wipe or another save gets a new one); a book loads, expires and sweeps only its own world's keys. The book is Core's, so a plugin unload or a Core swap does not lose it. A capped send made before both stores are loaded is refused (`WriteFailed`, nothing written). A cap is dropped when the game finishes its hunt, or ten minutes after the hunt's end once no castle's record holds it (an orphan after a rollback). The Dev bridge's `finish` (method `row`) moves a hunt's start, and its cap moves with it. |
+| Which row | The game finishes at most one row per castle heart per update: the first due row in record order (`FindFinishedMissionsJob` stops at it; with the servant timers off, always row 0). Progenitor picks that row the same way and draws vetoes only for it. |
+| Veto | For the capped row the game finishes this update (due by Progenitor's clock, which the game reads after it), each servant's vanilla chance `c` is computed from the same live inputs ([Success chance](#success-chance)). With probability `1 - cap/c` Progenitor writes that servant's `ServantPower.GearLevel` = -10000 (proficiency about -99,900, so the game's chance clamps to 0). Its overall success is then `(1 - q) · c = cap`. The vetoed servant fails the game's way: destroyed, coffin revivable, no loot, the game's "was killed" line to allies. The others are untouched: the veto changes only that servant's proficiency, not the party bonus or perks. The game's roll can still pass a forced failure with probability about 1.2e-7. |
+| Hold | A capped row the game may or may not finish this update is held for that update instead: its length is raised by three seconds and restored after. That covers a capped row due only within the two-second clock slack, a capped row after an uncapped row that is due only within the slack (the game may finish either), and every capped row while a save is in flight. A held row reads as not due, so the game's walk goes on to the next row. No servant is ever written in an update that does not finish its hunt. |
+| Saves | The game's save (`SerializePersistenceSystemV2.TriggerSave`) schedules its serialization jobs and keeps their handle in `_WriteToDiskDependency` (its `IsSaving`) until a later update completes and finalizes them; those jobs hold no `ServantPower` handle, so a raw write does not wait for them. Progenitor reads that flag raw at its declared offset (checked once against the runtime's own field offset) and never vetoes while it is set: the capped row is held. If the flag cannot be read, capped hunts finish uncapped with an error line. A held row's raised length could be captured by a save in flight; that hunt then ends at most three seconds later after a restart. |
+| Restore | After the update every write is undone and read back (`servants: restored … read back`). If that hook does not run (the update threw), the restore runs after `UpdateGroup` (which catches its systems' exceptions), before `PersistenceGroup` of the next frame, on the next frame, before the next update, and at Core unload; each of those is a **late restore**, logged as an error and counted in `CapStatus.LateRestores`. A restore writes only when the target is the same servant (world-load epoch and network id) and still reads the value written; otherwise it logs and leaves it. A restore that throws is retried by the next guard (three tries). |
+| Pending-restore record | Before each gear write, a record (world id, process, world-load epoch, entity, network id, castle territory, coffin name, the original value) goes into the same store, flushed. A successful restore marks it restored and keeps it until a save that **started after the restore** has completed (watched after each update of the save system); one that did not read back keeps it unrestored. Once per world load, after the world finished loading, Core acts on this world's records: in the same process and world load (a Core swap) it restores the entity after validating it; otherwise (a restart) it restores only a servant whose gear level reads exactly -10000 and whose castle and coffin name match one record, keeps that record until the next save, and drops records that match no servant (the loaded world does not hold the forced value). |
+| Load gate | Cap expiry and the record sweep run only once the world has finished loading (a load completed in this Core generation, or Core was installed into a running world); the hooks fire earlier, while the world is still being built. Vetoes and holds do not wait for it. |
+| Book not loaded | While the server store or the world's store is not loaded yet, every due hunt is held update by update for up to 30 seconds, then released to the game uncapped with an error line. A world in which no capped send was ever made has no id and no caps, and is never held. With the game's servant timers off a hunt cannot be held; it finishes uncapped with a warning. Without the game's servant mission settings the game finishes nothing, and the cap does nothing. |
+
+The game's own recompute (source-checked): `ServantPowerSystem` sets `GearLevel` from the
+servant's equipment, but its query has a change filter on `ServantEquipment`, so it runs only for
+chunks whose equipment changed. A forced value therefore does not heal by itself each frame; it
+would heal when equipment in that chunk changes, and probably after a load (freshly loaded chunks
+count as changed; inferred, live check owed). The restore does not rely on it.
 
 Downtime: a hunt that ended while the server was down resolves on the first update after the
-world loads, and the cap applies there because the book is loaded before the world (inferred, the
-live check below verifies it). Limits: the cap uses Progenitor's replica of the chance; if the
-replica disagreed with the game's number, the overall success would be `cap / c_replica · c_game`
-(the parity check below compares them). Hunts sent by the throne, and by another mod outside
-`ctx.Servants`, have no cap.
+world loads, and the cap applies there once both stores are loaded; until then the hunt is held,
+at most 30 seconds (inferred, the live check below verifies it). Limits: the cap uses Progenitor's
+replica of the chance; if the replica disagreed with the game's number, the overall success would
+be `cap / c_replica · c_game` (the parity check below compares them). Hunts sent by the throne, and
+by another mod outside `ctx.Servants`, have no cap.
 
 ### Mission names
 
@@ -2940,7 +2950,12 @@ with empty inventories, and a second castle B of the same player or clan with at
     server normally, wait past the hunt's end, start it again. The servant is dead and the log shows
     `servants: cap book loaded (1 …)` before `servants: cap 0% on mission …` on the first update.
     Control: an uncapped hunt across the same restart returns as vanilla.
-16. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
+16. Save in flight: with timers on, send a `maxSuccess` 0.0 hunt on the shortest slot and trigger a
+    world save (bridge `world_save`) a second before it is due. Debug log: `held mission … (a save is in
+    flight)` until the save finalizes, then `servants: cap 0% …`; after the next save completes,
+    `pending cap restore record(s) dropped`. Two capped hunts of one castle due together: one is
+    finished per update (two `cap …` lines on consecutive updates).
+17. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
     Sample from the test server's reload folder and confirm the clean unload (`servants: list
     provider unregistered` if the swap was left on).
 

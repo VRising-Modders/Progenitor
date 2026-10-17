@@ -84,12 +84,26 @@ internal sealed class ServantCapBook
     internal static string Key(int missionGuid, long startTicks) =>
         missionGuid.ToString(CultureInfo.InvariantCulture) + ":" + startTicks.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>The server store key for a hunt.</summary>
-    internal static string StoreKey(int missionGuid, long startTicks) => StorePrefix + Key(missionGuid, startTicks);
+    /// <summary>
+    /// The world (save) the book belongs to: the server store is machine-wide (shared by hosted
+    /// games, kept across wipes), so every key carries the world's id and a book only ever holds and
+    /// expires the caps of its own world.
+    /// </summary>
+    internal string World { get; set; } = "";
 
-    /// <summary>The book key inside a store key, or null when it is not a cap key.</summary>
-    internal static string? FromStoreKey(string storeKey) =>
-        storeKey != null && storeKey.StartsWith(StorePrefix, StringComparison.Ordinal) ? storeKey.Substring(StorePrefix.Length) : null;
+    /// <summary>The server store key for a hunt of <paramref name="world"/>: <c>cap:world:mission:startTicks</c>.</summary>
+    internal static string StoreKey(string world, int missionGuid, long startTicks) => StorePrefix + world + ":" + Key(missionGuid, startTicks);
+
+    /// <summary>The server store key for a hunt of this book's world.</summary>
+    internal string StoreKey(int missionGuid, long startTicks) => StoreKey(World, missionGuid, startTicks);
+
+    /// <summary>The book key inside a store key of <paramref name="world"/>, or null when it is not one (another world's, or not a cap).</summary>
+    internal static string? FromStoreKey(string storeKey, string world)
+    {
+        if (storeKey == null || string.IsNullOrEmpty(world)) return null;
+        string prefix = StorePrefix + world + ":";
+        return storeKey.StartsWith(prefix, StringComparison.Ordinal) ? storeKey.Substring(prefix.Length) : null;
+    }
 
     /// <summary>Add or replace a cap. Returns its store key.</summary>
     internal string Add(CapRecord record)
@@ -97,6 +111,19 @@ internal sealed class ServantCapBook
         if (record == null) throw new ArgumentNullException(nameof(record));
         _caps[Key(record.MissionGuid, record.StartTicks)] = record;
         return StoreKey(record.MissionGuid, record.StartTicks);
+    }
+
+    /// <summary>
+    /// A hunt's start moved (the Dev bridge's <c>finish</c> rewrites it): carry its cap to the new
+    /// key. Returns the old and new store keys, or null when the hunt had no cap.
+    /// </summary>
+    internal (string Old, string New, CapRecord Record)? Rekey(int missionGuid, long oldStart, long newStart)
+    {
+        if (!_caps.TryGetValue(Key(missionGuid, oldStart), out var r)) return null;
+        _caps.Remove(Key(missionGuid, oldStart));
+        string old = StoreKey(missionGuid, oldStart);
+        r.StartTicks = newStart;
+        return (old, Add(r), r);
     }
 
     /// <summary>
@@ -280,7 +307,16 @@ internal sealed class TransientJournal
 internal sealed class GearRestoreRecord
 {
     public string Process { get; set; } = "";
+    public string World { get; set; } = "";
     public int Epoch { get; set; }
+
+    /// <summary>
+    /// True once the in-process restore wrote the original back. The record is kept anyway until a
+    /// save that started after the restore has completed, because a save in flight could still have
+    /// captured the forced value; a later process restores from it only a servant that still reads
+    /// exactly the forced value.
+    /// </summary>
+    public bool Restored { get; set; }
     public int Index { get; set; }
     public int Version { get; set; }
     public string NetworkId { get; set; } = "";
@@ -293,10 +329,14 @@ internal sealed class GearRestoreRecord
     /// <summary>Prefix of the store keys that hold pending restores.</summary>
     internal const string StorePrefix = "restore:";
 
-    /// <summary>The store key for a write: <c>restore:index:version:ticks</c>.</summary>
-    internal static string StoreKey(CastleId servant, long ticks) =>
-        StorePrefix + servant.Index.ToString(CultureInfo.InvariantCulture) + ":" + servant.Version.ToString(CultureInfo.InvariantCulture)
+    /// <summary>The store key for a write in <paramref name="world"/>: <c>restore:world:index:version:ticks</c>.</summary>
+    internal static string StoreKey(string world, CastleId servant, long ticks) =>
+        StorePrefix + world + ":" + servant.Index.ToString(CultureInfo.InvariantCulture) + ":" + servant.Version.ToString(CultureInfo.InvariantCulture)
         + ":" + ticks.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>True for a pending-restore store key of <paramref name="world"/>.</summary>
+    internal static bool IsKeyOf(string storeKey, string world) =>
+        !string.IsNullOrEmpty(world) && storeKey != null && storeKey.StartsWith(StorePrefix + world + ":", StringComparison.Ordinal);
 
     /// <summary>Hex of a network id, for the record.</summary>
     internal static string Hex(byte[] bytes)
@@ -323,6 +363,192 @@ internal sealed class GearRestoreRecord
         }
         return found;
     }
+}
+
+/// <summary>One row of a heart's hunt record, as the cap's selection reads it before the update.</summary>
+internal readonly struct CapRowState
+{
+    internal CapRowState(bool dueSoon, bool dueNow, bool capped, bool mustHold = false)
+    {
+        DueSoon = dueSoon;
+        DueNow = dueNow;
+        Capped = capped;
+        MustHold = mustHold;
+    }
+
+    /// <summary>Due within the clock slack (the game reads the clock after Progenitor, so it may finish it).</summary>
+    internal bool DueSoon { get; }
+
+    /// <summary>Due by Progenitor's clock: the game, reading later, finishes it if it reaches it.</summary>
+    internal bool DueNow { get; }
+
+    /// <summary>The cap book holds a cap for it.</summary>
+    internal bool Capped { get; }
+
+    /// <summary>The cap book cannot be read yet and the row's hold has not timed out: hold it, cap unknown.</summary>
+    internal bool MustHold { get; }
+}
+
+/// <summary>What the cap does with one row this update.</summary>
+internal enum CapRowAction
+{
+    /// <summary>Nothing.</summary>
+    None = 0,
+
+    /// <summary>Raise its length for this update only, so the game does not finish it now.</summary>
+    Hold,
+
+    /// <summary>The game finishes this row in this update: draw the veto for each of its servants.</summary>
+    Veto,
+}
+
+/// <summary>
+/// Which rows of one heart the cap holds and which one it vetoes, game-free. The game's finish
+/// check (<c>FindFinishedMissionsJob</c>) walks the heart's record in index order and finishes
+/// only the <b>first</b> due row per heart per update; with servant timers off that is always row 0.
+/// A held row is skipped by that walk (it reads as not due), so the walk goes on to the next row.
+/// </summary>
+internal static class CapSelection
+{
+    /// <summary>
+    /// The action for each row. Without timers: a row not due within the slack is left alone; a
+    /// row that must be held (book not readable) is held; a capped row is held when it is not due
+    /// by Progenitor's clock, when a save is in flight, or when an earlier row may be finished
+    /// instead (an uncapped row due only within the slack); the first row due by Progenitor's
+    /// clock that is not held is the one the game finishes, and is vetoed when capped; nothing
+    /// after it is touched. With timers off nothing can be held: row 0 is finished, and is vetoed
+    /// when capped and no save is in flight (otherwise it finishes uncapped:
+    /// <paramref name="uncapped"/> is set).
+    /// </summary>
+    internal static CapRowAction[] Select(IReadOnlyList<CapRowState> rows, bool timersDisabled, bool saveInFlight, out bool uncapped)
+    {
+        uncapped = false;
+        var actions = new CapRowAction[rows.Count];
+        if (rows.Count == 0) return actions;
+        if (timersDisabled)
+        {
+            var first = rows[0];
+            if (first.MustHold) uncapped = true;
+            else if (first.Capped)
+            {
+                if (saveInFlight) uncapped = true;
+                else actions[0] = CapRowAction.Veto;
+            }
+            return actions;
+        }
+        bool uncertain = false;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            var r = rows[i];
+            if (!r.DueSoon) continue;
+            if (r.MustHold)
+            {
+                actions[i] = CapRowAction.Hold;
+                continue;
+            }
+            if (r.Capped && (!r.DueNow || saveInFlight || uncertain))
+            {
+                actions[i] = CapRowAction.Hold;
+                continue;
+            }
+            if (!r.DueNow)
+            {
+                uncertain = true; // uncapped and maybe due by the game's clock: it may be the one finished
+                continue;
+            }
+            if (r.Capped) actions[i] = CapRowAction.Veto;
+            break; // the game finishes this row (or the uncertain one before it); later rows wait
+        }
+        return actions;
+    }
+}
+
+/// <summary>
+/// The game's save in flight, observed through <c>SerializePersistenceSystemV2._WriteToDiskDependency</c>
+/// (its <c>IsSaving</c>): set when <c>TriggerSave</c> schedules the serialization jobs, cleared
+/// when the system completes and finalizes them on a later update. Counts the saves seen to start
+/// and to finish, so a pending-restore record is kept until a save that started after its restore
+/// has completed. A save that starts and is finalized between two observations is not seen; a
+/// record then waits for the next one (kept longer, never dropped early).
+/// </summary>
+internal sealed class SaveTracker
+{
+    private bool _inFlight;
+
+    /// <summary>Saves seen to start.</summary>
+    internal long Started { get; private set; }
+
+    /// <summary>The <see cref="Started"/> count of the last save seen to complete.</summary>
+    internal long Completed { get; private set; }
+
+    /// <summary>The last observation.</summary>
+    internal bool InFlight => _inFlight;
+
+    /// <summary>Record an observation of the save system's in-flight flag.</summary>
+    internal void Observe(bool inFlight)
+    {
+        if (inFlight && !_inFlight) Started++;
+        if (!inFlight && _inFlight) Completed = Started;
+        _inFlight = inFlight;
+    }
+
+    /// <summary>The mark of a restore made now: a save counts for it only when it starts after this.</summary>
+    internal long Mark() => Started;
+
+    /// <summary>True once a save that started after <paramref name="mark"/> has completed.</summary>
+    internal bool SavedSince(long mark) => Completed > mark;
+}
+
+/// <summary>
+/// Pending-restore records that were restored in this process and wait for a save that started
+/// after the restore to complete before they are dropped from the store. Game-free.
+/// </summary>
+internal sealed class RetainedRestores
+{
+    private readonly List<(string Key, long Mark)> _kept = new();
+
+    /// <summary>Records waiting.</summary>
+    internal int Count => _kept.Count;
+
+    /// <summary>Keep <paramref name="storeKey"/> until a save after <paramref name="mark"/> (<see cref="SaveTracker.Mark"/>) completes.</summary>
+    internal void Keep(string storeKey, long mark)
+    {
+        if (string.IsNullOrEmpty(storeKey)) return;
+        _kept.RemoveAll(k => k.Key == storeKey);
+        _kept.Add((storeKey, mark));
+    }
+
+    /// <summary>The records a completed save released, removed from the list.</summary>
+    internal List<string> Release(SaveTracker saves)
+    {
+        var done = new List<string>();
+        for (int i = _kept.Count - 1; i >= 0; i--)
+        {
+            if (!saves.SavedSince(_kept[i].Mark)) continue;
+            done.Add(_kept[i].Key);
+            _kept.RemoveAt(i);
+        }
+        return done;
+    }
+
+    /// <summary>Forget (Core unload: the records stay in the store for the next Core).</summary>
+    internal void Clear() => _kept.Clear();
+}
+
+/// <summary>When the once-per-world-load work (cap expiry, the pending-restore sweep) may run, game-free.</summary>
+internal static class CapGate
+{
+    /// <summary>
+    /// The world has finished loading in this Core generation (a load completed), or Core was
+    /// installed into a world that was already running (a hot swap). Before that, the hooks can
+    /// fire on a world still being built, whose castles and servants are not all there yet.
+    /// </summary>
+    internal static bool WorldLoaded(int loadsThisGeneration, bool installedIntoRunningWorld) =>
+        loadsThisGeneration > 0 || installedIntoRunningWorld;
+
+    /// <summary>Expiry and the sweep need the world loaded, the server store loaded and the world's id.</summary>
+    internal static bool CanSweep(bool worldLoaded, bool storeReady, string? worldId) =>
+        worldLoaded && storeReady && !string.IsNullOrEmpty(worldId);
 }
 
 /// <summary>What the hold check decided for one due row while the cap book is not readable.</summary>

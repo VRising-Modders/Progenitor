@@ -15,49 +15,70 @@ namespace Progenitor.Servants;
 
 /// <summary>
 /// The success cap (<see cref="ServantSendRequest.MaxSuccess"/>). Data only, inside the existing
-/// <c>ServantMissionUpdateSystem</c> before/after hooks: no game method is called or patched.
+/// <c>ServantMissionUpdateSystem</c> before/after hooks (registered last and first): no game method
+/// is called or patched.
 ///
-/// <para><b>Mechanism.</b> Before the update, for each capped hunt the game finishes this update,
-/// each servant's vanilla chance <c>c</c> is computed from the live inputs the game reads next; with
-/// probability <c>1 - cap / c</c> the servant's <c>ServantPower.GearLevel</c> is set to
-/// <see cref="ServantCapMath.ForcedGearLevel"/> for this update, so the game's own roll fails and
-/// the servant fails the game's way. After the update every temporary write is undone and read
-/// back. A capped hunt due within the clock slack but not yet due by Progenitor's clock is held this
-/// update (its row length raised for the update only), so no servant is ever touched in an update
-/// that does not finish its hunt and the cap cannot be skipped by the clock race.</para>
+/// <para><b>Mechanism.</b> The game finishes at most one row per heart per update: the first due row
+/// in record order (<c>FindFinishedMissionsJob</c>). Before the update, <see cref="CapSelection"/>
+/// picks, per heart, the row the game will finish; when it is capped, each servant's vanilla chance
+/// <c>c</c> is computed from the live inputs the game reads next, and with probability
+/// <c>1 - cap / c</c> the servant's <c>ServantPower.GearLevel</c> is set to
+/// <see cref="ServantCapMath.ForcedGearLevel"/> for this update, so the game's own roll fails. After
+/// the update every temporary write is undone and read back. A capped row the game may or may not
+/// finish this update (due only within the clock slack, after an uncertain row, or while a save is
+/// in flight) is held this update instead: its row length is raised for the update only.</para>
+///
+/// <para><b>Saves.</b> The game's save (<c>SerializePersistenceSystemV2.TriggerSave</c>) schedules its
+/// serialization jobs and keeps the handle in <c>_WriteToDiskDependency</c> until a later update of
+/// that system completes and finalizes them; those jobs hold no <c>ServantPower</c> handle, so a raw
+/// write does not wait for them. So no veto is made while that handle is set (the row is held), and
+/// a pending-restore record is kept until a save that started after the restore has completed.</para>
 ///
 /// <para><b>Restore, always.</b> The journal is drained after the update; if that hook does not run
-/// (the update threw), after the update group (which catches its systems' exceptions), before the
-/// persistence group of the next frame (before any save system), on the next frame tick, and at Core
-/// unload. Every late restore is logged as an error. A gear write is also recorded in the server
-/// store before it is made, so a later Core generation or process restores it (or, when the world
-/// on disk cannot hold it, drops the record and says so).</para>
+/// (the update threw), after <c>UpdateGroup</c> (which catches its systems' exceptions), before the
+/// next <c>PersistenceGroup</c>, on the next frame tick, before the next update and at Core unload;
+/// every late restore is logged as an error.</para>
 ///
-/// <para><b>Why a save cannot see the forced value.</b> The write and its restore are both inside
-/// one <c>ServantMissionUpdateSystem.Update</c> on the main thread, in <c>UpdateGroup</c>; the game's
-/// save systems run in <c>PersistenceGroup</c>, a different group in an earlier part of the frame
-/// (<c>StartSimulationGroup</c>). The raw read/write accessors complete the jobs that use the
-/// component first, so a job still reading <c>ServantPower</c> finishes before the write.</para>
+/// <para><b>Scope.</b> The server store is machine-wide (hosted games share it; it survives wipes),
+/// so caps and pending-restore records are keyed by the world's id, kept in the world's own
+/// <see cref="ModSave"/> store (a wipe or another save starts a new id). The cap expiry and the
+/// pending-restore sweep run only once the world is loaded, and only over that world's keys.</para>
 /// </summary>
 internal static unsafe partial class ServantRuntime
 {
-    /// <summary>The server store that holds the cap book and the pending restores.</summary>
+    /// <summary>The server store (and the world store) that hold the cap book, the pending restores and the world's id.</summary>
     internal const string CapStoreGuid = "progenitor.servants";
 
+    private const string WorldIdKey = "worldId";
+
+    /// <summary>The world store is loaded and holds no id: no capped send was made in this world, so it has no caps.</summary>
+    private const string NoWorldId = "-";
     private const long CapExpireEveryTicks = 60 * ServantLogic.TicksPerSecond;
+
+    /// <summary>
+    /// <c>Nullable&lt;JobHandle&gt;.hasValue</c> inside <c>_WriteToDiskDependency</c>: the instantiated
+    /// <c>System_Nullable_JobHandle__Fields</c> is <c>{ bool hasValue; JobHandle value; }</c> (server
+    /// metadata header), so the flag is at +0 and the 8-aligned 12-byte handle at +8; the field spans
+    /// 0x18 bytes, which is where <c>_Initialized</c> starts (<see cref="Layout.SerializePersistenceSystemV2InitializedOffset"/>).
+    /// </summary>
+    private const int NullableHasValueOffset = 0;
 
     private static readonly ServantCapBook CapBook = new();
     private static readonly TransientJournal Journal = new();
     private static readonly HoldTracker Holds = new();
+    private static readonly SaveTracker Saves = new();
+    private static readonly RetainedRestores Retained = new();
     private static readonly Random CapRandom = new();
     private static IModStore? _capStore;
-    private static IDisposable? _capReady, _guardGroup, _guardPersist;
-    private static bool _capLoaded;
+    private static IDisposable? _guardGroup, _guardPersist, _saveWatch;
     private static long _forcedFailures;
     private static long _capExpireStamp;
     private static int _sweptEpoch = int.MinValue;
-    private static bool _timersHoldWarned;
+    private static bool _timersHoldWarned, _saveUnreadableWarned, _installedIntoRunningWorld;
     private static string? _processId;
+    private static string? _worldId;
+    private static int _worldIdEpoch = int.MinValue;
+    private static bool? _saveOffsetChecked;
 
     private static string ProcessId
     {
@@ -74,9 +95,13 @@ internal static unsafe partial class ServantRuntime
         }
     }
 
+    private static bool CapLoaded => !string.IsNullOrEmpty(_worldId) && CapBook.World == _worldId && StoreReady;
+
+    private static bool StoreReady => _capStore is ModStore ms && ms.IsReady;
+
     internal static ServantCapStatus CapStatus() => new()
     {
-        Ready = _capLoaded,
+        Ready = CapLoaded,
         Caps = CapBook.Count,
         ForcedFailures = _forcedFailures,
         Restores = Journal.Restores,
@@ -89,54 +114,107 @@ internal static unsafe partial class ServantRuntime
     private static void InstallCaps()
     {
         _capStore = ServerSave.Store(CapStoreGuid);
-        if (_capStore is ModStore ms && ms.IsReady) LoadCapBook(_capStore);
-        else _capReady = _capStore.WhenReady(LoadCapBook);
-        _guardGroup = SystemHooks.After<UpdateGroup>(_ => GuardRestore("after the update group"));
-        _guardPersist = SystemHooks.Before<PersistenceGroup>(_ => GuardRestore("before the persistence group"));
+        var world = Worlds.Server;
+        _installedIntoRunningWorld = world != null && world.IsCreated;
+        _guardGroup = SystemHooks.After<UpdateGroup>(_ => GuardRestore("after the update group"), int.MaxValue);
+        _guardPersist = SystemHooks.Before<PersistenceGroup>(_ => GuardRestore("before the persistence group"), int.MaxValue);
+        _saveWatch = SystemHooks.After<SerializePersistenceSystemV2>(ObserveSave, int.MaxValue);
     }
 
     private static void UninstallCaps()
     {
         // The world may still be up (a Core swap): undo anything outstanding while it is.
         GuardRestore("at Core unload");
-        foreach (var h in new[] { _capReady, _guardGroup, _guardPersist })
+        foreach (var h in new[] { _guardGroup, _guardPersist, _saveWatch })
         {
             try { h?.Dispose(); } catch { }
         }
-        _capReady = _guardGroup = _guardPersist = null;
+        _guardGroup = _guardPersist = _saveWatch = null;
         if (Journal.Count > 0)
             Plugin.Logger?.LogError("servants: " + Journal.Count + " temporary cap write(s) could not be undone at Core unload (no server world); "
-                + "the pending-restore records in the server store are kept for the next Core");
+                + "their pending-restore records stay in the server store for the next Core");
         Journal.Clear();
+        // Kept records stay in the store; the next Core's sweep re-keeps them until a later save.
+        Retained.Clear();
         try { ServerSave.SaveAll(); } catch { }
         CapBook.Clear();
+        CapBook.World = "";
         Holds.Clear();
-        _capLoaded = false;
         _capStore = null;
+        _worldId = null;
+        _worldIdEpoch = int.MinValue;
         _sweptEpoch = int.MinValue;
     }
 
-    private static void LoadCapBook(IModStore store)
+    /// <summary>
+    /// The world's id, from its own <see cref="ModSave"/> store (created on first need), cached per
+    /// world load; null while that store is not loaded.
+    /// </summary>
+    private static string? WorldId(bool create)
     {
+        if (_worldIdEpoch == WorldEpoch.Current && _worldId != null && (_worldId != NoWorldId || !create)) return _worldId;
+        var store = ModSave.Store(CapStoreGuid);
+        if (!(store is ModStore ms && ms.IsReady)) return null;
+        string id = store.Get<string>(WorldIdKey) ?? "";
+        if (id.Length == 0)
+        {
+            if (!create)
+            {
+                // No capped send was ever made in this world: it has no caps (and no records) at all.
+                _worldId = NoWorldId;
+                _worldIdEpoch = WorldEpoch.Current;
+                return NoWorldId;
+            }
+            id = Guid.NewGuid().ToString("N").Substring(0, 16);
+            store.Set(WorldIdKey, id);
+            try { ModSave.SaveAll(); } catch (Exception e) { Plugin.Logger?.LogWarning("servants: saving the world's cap id failed: " + e.Message); }
+            Plugin.Logger?.LogInfo("servants: this world's cap id is " + id);
+        }
+        _worldId = id;
+        _worldIdEpoch = WorldEpoch.Current;
+        return id;
+    }
+
+    /// <summary>Load the book for the current world when it is not loaded; true when caps can be read.</summary>
+    private static bool EnsureBook(bool create = false)
+    {
+        if (!StoreReady) return false;
+        var id = WorldId(create);
+        if (string.IsNullOrEmpty(id)) return false;
+        if (CapBook.World == id) return true;
+        if (id == NoWorldId)
+        {
+            CapBook.Clear();
+            CapBook.World = NoWorldId;
+            Holds.Clear();
+            return true;
+        }
         try
         {
             CapBook.Clear();
-            foreach (var key in store.Keys)
+            CapBook.World = id!;
+            foreach (var key in _capStore!.Keys)
             {
-                if (ServantCapBook.FromStoreKey(key) == null) continue;
-                var r = store.Get<CapRecord>(key);
+                if (ServantCapBook.FromStoreKey(key, id!) == null) continue;
+                var r = _capStore.Get<CapRecord>(key);
                 if (r != null && ServantCapMath.IsValidCap(r.MaxSuccess) && r.MissionGuid != 0) CapBook.Add(r);
             }
-            _capLoaded = true;
             Holds.Clear();
-            Plugin.Logger?.LogInfo("servants: cap book loaded (" + CapBook.Count + " capped hunt(s))");
+            Plugin.Logger?.LogInfo("servants: cap book loaded for world " + id + " (" + CapBook.Count + " capped hunt(s))");
+            return true;
         }
         catch (Exception e)
         {
+            CapBook.Clear();
+            CapBook.World = "";
             Plugin.Logger?.LogError("servants: the cap book could not be loaded; due hunts are held up to "
                 + HoldTracker.TimeoutTicks / ServantLogic.TicksPerSecond + " s, then finish uncapped: " + e.Message);
+            return false;
         }
     }
+
+    /// <summary>For a capped send: the book is readable (or can be created) now.</summary>
+    private static bool CapBookWritable() => EnsureBook(create: true);
 
     /// <summary>Record a send's cap in the book and the server store, flushed to disk now.</summary>
     private static void RecordCap(MissionRow row, int territory, float cap)
@@ -167,15 +245,31 @@ internal static unsafe partial class ServantRuntime
         if (!CapBook.Remove(missionGuid, startTicks)) return;
         try
         {
-            _capStore?.Remove(ServantCapBook.StoreKey(missionGuid, startTicks));
+            _capStore?.Remove(CapBook.StoreKey(missionGuid, startTicks));
             ServerSave.SaveAll();
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("servants: dropping a finished hunt's cap from the server store failed: " + e.Message); }
     }
 
+    /// <summary>The Dev bridge's finish moved a row's start: carry its cap along.</summary>
+    internal static void RekeyCap(int missionGuid, long oldStart, long newStart)
+    {
+        if (!CapLoaded) return;
+        var moved = CapBook.Rekey(missionGuid, oldStart, newStart);
+        if (moved == null) return;
+        try
+        {
+            _capStore?.Remove(moved.Value.Old);
+            _capStore?.Set(moved.Value.New, moved.Value.Record);
+            ServerSave.SaveAll();
+            Plugin.Logger?.LogInfo("servants: the cap of mission " + missionGuid + " follows its row to the new start " + newStart);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("servants: moving a cap to its row's new start failed: " + e.Message); }
+    }
+
     private static float? CapOf(MissionRow row, Entity heart)
     {
-        if (CapBook.Count == 0) return null;
+        if (!CapLoaded || CapBook.Count == 0) return null;
         return CapBook.TryGet(row.MissionGuid, row.StartTicks, TerritoryOf(heart), out var r, out _) ? r!.MaxSuccess : null;
     }
 
@@ -189,73 +283,143 @@ internal static unsafe partial class ServantRuntime
         catch { return -1; }
     }
 
+    // ---- the game's save in flight ------------------------------------------------------------------
+
+    /// <summary>
+    /// True while the game's save has serialization jobs scheduled and not yet finalized
+    /// (<c>SerializePersistenceSystemV2._WriteToDiskDependency.HasValue</c>, the system's own
+    /// <c>IsSaving</c>), read raw from the managed system object at the declared offset, after
+    /// checking that offset once against the runtime's own field offset. Null when unreadable.
+    /// </summary>
+    private static bool? SaveInFlight(World world)
+    {
+        try
+        {
+            var system = world.GetExistingSystemManaged<SerializePersistenceSystemV2>();
+            if (system == null) return null;
+            if (_saveOffsetChecked == null)
+            {
+                uint runtime = Progenitor.Access.AccessResolver.FieldOffset(typeof(SerializePersistenceSystemV2), "SerializePersistenceSystemV2", "_WriteToDiskDependency");
+                _saveOffsetChecked = runtime == (uint)Layout.SerializePersistenceSystemV2WriteToDiskDependencyOffset;
+                if (_saveOffsetChecked == false)
+                    Plugin.Logger?.LogError("servants: the save system's in-flight field is at 0x" + runtime.ToString("X") + ", not the declared 0x"
+                        + Layout.SerializePersistenceSystemV2WriteToDiskDependencyOffset.ToString("X") + "; capped hunts finish uncapped until the layout is fixed");
+            }
+            if (_saveOffsetChecked != true) return null;
+            byte* p = (byte*)system.Pointer;
+            if (p == null) return null;
+            return p[Layout.SerializePersistenceSystemV2WriteToDiskDependencyOffset + NullableHasValueOffset] != 0;
+        }
+        catch (Exception e)
+        {
+            if (!_saveUnreadableWarned)
+                Plugin.Logger?.LogError("servants: the game's save state could not be read; capped hunts finish uncapped: " + e.Message);
+            _saveUnreadableWarned = true;
+            return null;
+        }
+    }
+
+    /// <summary>After the save system's update: count saves started and finished, release kept records.</summary>
+    private static void ObserveSave(SystemHookContext hook)
+    {
+        try
+        {
+            var inFlight = SaveInFlight(hook.World);
+            if (inFlight == null) return;
+            Saves.Observe(inFlight.Value);
+            if (Retained.Count == 0) return;
+            var done = Retained.Release(Saves);
+            if (done.Count == 0) return;
+            foreach (var key in done) _capStore?.Remove(key);
+            ServerSave.SaveAll();
+            Plugin.Logger?.LogInfo("servants: " + done.Count + " pending cap restore record(s) dropped: a save that started after the restore completed");
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("servants: watching the game's save failed: " + e.Message); }
+    }
+
     // ---- before the update --------------------------------------------------------------------------
 
-    /// <summary>The cap's work before <c>ServantMissionUpdateSystem</c>: holds and vetoes.</summary>
+    /// <summary>The cap's work before <c>ServantMissionUpdateSystem</c>: the sweep, expiry, holds and vetoes.</summary>
     private static void BeforeUpdateCaps(SystemHookContext hook)
     {
         var world = hook.World;
         var em = world.EntityManager;
-        if (_sweptEpoch != WorldEpoch.Current)
+        bool ready = EnsureBook();
+        bool loaded = CapGate.WorldLoaded(WorldEpoch.Loads, _installedIntoRunningWorld);
+        if (_sweptEpoch != WorldEpoch.Current && CapGate.CanSweep(loaded, StoreReady, ready && _worldId != NoWorldId ? _worldId : null))
         {
             _sweptEpoch = WorldEpoch.Current;
-            SweepPendingRestores(em);
+            SweepPendingRestores(em, _worldId!);
         }
-        if (_capLoaded && CapBook.Count == 0) return;
+        if (ready && CapBook.Count == 0) return;
+        if (Singleton<ServantMissionSettingsSingleton>(em, ref _missionSettings) == Entity.Null) return; // the game finishes nothing without it
 
         long now = DateTime.UtcNow.Ticks;
         bool timers = DebugFlags(em).TimersDisabled;
         if (timers) _heartsDirty = true;
         RefreshHearts(em, now);
-        if (_capLoaded && now - _capExpireStamp > CapExpireEveryTicks) ExpireCaps(em, now);
+        if (ready && loaded && now - _capExpireStamp > CapExpireEveryTicks) ExpireCaps(em, now);
+
+        bool? saving = SaveInFlight(world);
+        if (saving != null) Saves.Observe(saving.Value);
+        if (!ready && timers && !_timersHoldWarned)
+        {
+            Plugin.Logger?.LogWarning("servants: the cap book is not loaded and the game's servant timers are off, so due hunts cannot be held; they finish uncapped");
+            _timersHoldWarned = true;
+        }
+
         foreach (var heart in MissionHearts)
         {
             if (!em.Exists(heart)) continue;
             var rows = ReadRows(em, heart);
-            int territory = -2;
-            for (int i = 0; i < rows.Count; i++)
+            if (rows.Count == 0) continue;
+            var heartId = CastleId.From(heart);
+            int territory = TerritoryOf(heart);
+            var states = new List<CapRowState>(rows.Count);
+            var caps = new CapRecord?[rows.Count];
+            foreach (var r in rows)
             {
-                var r = rows[i];
-                if (!ServantLogic.IsDue(r, now, DueSlackTicks, timers)) continue;
+                bool dueSoon = ServantLogic.IsDue(r, now, DueSlackTicks, timers);
                 bool dueNow = ServantLogic.IsDue(r, now, 0, timers);
-                var heartId = CastleId.From(heart);
-                if (!_capLoaded)
+                bool capped = false, mustHold = false;
+                if (dueSoon && ready)
                 {
-                    if (timers)
-                    {
-                        if (!_timersHoldWarned)
-                            Plugin.Logger?.LogWarning("servants: the cap book is not loaded and the game's servant timers are off, so due hunts cannot be held; they finish uncapped");
-                        _timersHoldWarned = true;
-                        continue;
-                    }
-                    if (Holds.Decide(heartId, r.Key, now, out bool firstRelease) == HoldDecision.Hold)
-                        HoldRow(em, heart, i, r, "the cap book is not loaded yet");
-                    else if (firstRelease)
-                        Plugin.Logger?.LogError("servants: the cap book is still not loaded after " + HoldTracker.TimeoutTicks / ServantLogic.TicksPerSecond
-                            + " s; mission " + r.MissionGuid + " of heart " + heartId + " finishes WITHOUT its cap, if it had one");
-                    continue;
-                }
-                if (territory == -2) territory = TerritoryOf(heart);
-                if (!CapBook.TryGet(r.MissionGuid, r.StartTicks, territory, out var cap, out bool mismatch))
-                {
+                    capped = CapBook.TryGet(r.MissionGuid, r.StartTicks, territory, out var rec, out bool mismatch);
+                    caps[states.Count] = rec;
                     if (mismatch)
                         Plugin.Logger?.LogWarning("servants: a cap for mission " + r.MissionGuid + " start " + r.StartTicks
                             + " names another castle territory than heart " + heartId + "'s; not applied");
-                    continue;
                 }
-                if (!dueNow)
+                else if (dueSoon && !timers)
                 {
-                    // Due within the slack but not by this clock: the game may or may not finish it in
-                    // this update. Hold it, so the veto happens in the update that finishes it.
-                    HoldRow(em, heart, i, r, "a capped hunt due within the clock slack");
-                    continue;
+                    mustHold = Holds.Decide(heartId, r.Key, now, out bool firstRelease) == HoldDecision.Hold;
+                    if (firstRelease)
+                        Plugin.Logger?.LogError("servants: the cap book is still not loaded after " + HoldTracker.TimeoutTicks / ServantLogic.TicksPerSecond
+                            + " s; mission " + r.MissionGuid + " of heart " + heartId + " finishes WITHOUT its cap, if it had one");
                 }
-                VetoRow(world, em, heartId, r, cap!, territory);
+                if (capped && saving == null)
+                {
+                    capped = false; // fail toward vanilla: the save state is unknown
+                    if (!_saveUnreadableWarned)
+                        Plugin.Logger?.LogError("servants: the game's save state is unreadable; capped hunts finish uncapped");
+                    _saveUnreadableWarned = true;
+                }
+                states.Add(new CapRowState(dueSoon, dueNow, capped, mustHold));
+            }
+            var actions = CapSelection.Select(states, timers, saving == true, out bool uncapped);
+            if (uncapped && saving == true)
+                Plugin.Logger?.LogWarning("servants: a capped hunt of heart " + heartId + " finishes during a save with the game's servant timers off (it cannot be held); it finishes WITHOUT its cap");
+            for (int i = 0; i < actions.Length; i++)
+            {
+                if (actions[i] == CapRowAction.Hold)
+                    HoldRow(em, heart, i, rows[i], !ready ? "the cap book is not loaded yet" : saving == true ? "a save is in flight" : "a capped hunt the game may not finish this update");
+                else if (actions[i] == CapRowAction.Veto && caps[i] != null)
+                    VetoRow(world, em, heartId, rows[i], caps[i]!, territory);
             }
         }
     }
 
-    /// <summary>The veto for one capped row the game finishes this update.</summary>
+    /// <summary>The veto for the one capped row of a heart the game finishes this update.</summary>
     private static void VetoRow(World world, EntityManager em, CastleId heart, MissionRow row, CapRecord cap, int territory)
     {
         var chances = ChancesFor(world, em, row.MissionGuid, row.DataSlot, row.Servants(), cap.MaxSuccess, out string why);
@@ -272,8 +436,7 @@ internal static unsafe partial class ServantRuntime
         foreach (var c in chances)
         {
             double q = ServantCapMath.VetoProbability(c.Vanilla, cap.MaxSuccess);
-            double u = CapRandom.NextDouble();
-            bool veto = u < q;
+            bool veto = CapRandom.NextDouble() < q;
             if (veto && ForceFailure(em, c.Servant, territory))
             {
                 roll.Forced.Add(c.Servant);
@@ -294,7 +457,7 @@ internal static unsafe partial class ServantRuntime
         try
         {
             byte* ro = AiRuntime.RO<ServantPower>(em, s, Layout.ServantPowerGearLevelOffset + 4);
-            if (ro == null) return false;
+            if (ro == null || string.IsNullOrEmpty(_worldId) || _worldId == NoWorldId) return false;
             float original = *(float*)(ro + Layout.ServantPowerGearLevelOffset);
             if (original.Equals(ServantCapMath.ForcedGearLevel))
             {
@@ -315,25 +478,13 @@ internal static unsafe partial class ServantRuntime
                 WrittenTicks = ticks,
                 Territory = territory,
                 Name = c == null ? "" : CoffinName(c),
+                StoreKey = GearRestoreRecord.StoreKey(_worldId!, servant, ticks),
             };
             // Journal and record first: whatever happens after this line, a restore knows about it.
             Journal.Add(write);
-            write.StoreKey = GearRestoreRecord.StoreKey(servant, ticks);
             try
             {
-                _capStore?.Set(write.StoreKey, new GearRestoreRecord
-                {
-                    Process = ProcessId,
-                    Epoch = write.Epoch,
-                    Index = servant.Index,
-                    Version = servant.Version,
-                    NetworkId = GearRestoreRecord.Hex(write.NetworkId),
-                    Territory = territory,
-                    Name = write.Name,
-                    Original = original,
-                    Written = write.Written,
-                    WrittenTicks = ticks,
-                });
+                _capStore?.Set(write.StoreKey, RecordOf(write));
                 ServerSave.SaveAll();
             }
             catch (Exception e)
@@ -353,6 +504,22 @@ internal static unsafe partial class ServantRuntime
             return false;
         }
     }
+
+    private static GearRestoreRecord RecordOf(TransientWrite w, bool restored = false) => new()
+    {
+        Process = ProcessId,
+        World = _worldId ?? "",
+        Epoch = w.Epoch,
+        Index = w.Target.Index,
+        Version = w.Target.Version,
+        NetworkId = GearRestoreRecord.Hex(w.NetworkId),
+        Territory = w.Territory,
+        Name = w.Name,
+        Original = w.Original,
+        Written = w.Written,
+        WrittenTicks = w.WrittenTicks,
+        Restored = restored,
+    };
 
     /// <summary>Hold a due row this update: raise its length so the game's finish check is false, journaled.</summary>
     private static void HoldRow(EntityManager em, Entity heart, int index, MissionRow row, string why)
@@ -400,7 +567,11 @@ internal static unsafe partial class ServantRuntime
         RestoreAll(world.EntityManager, when, late: true);
     }
 
-    /// <summary>Undo every journaled write, read each back, drop the pending-restore records.</summary>
+    /// <summary>
+    /// Undo every journaled write and read each back. A gear write's pending-restore record is
+    /// marked restored and kept until a save that started after now completes; a restore that threw
+    /// is retried, one that did not read back keeps its record unrestored.
+    /// </summary>
     private static void RestoreAll(EntityManager em, string when, bool late)
     {
         if (Journal.Count == 0) return;
@@ -408,7 +579,7 @@ internal static unsafe partial class ServantRuntime
         bool storeChanged = false;
         foreach (var w in writes)
         {
-            string result;
+            RestoreResult result;
             try { result = RestoreOne(em, w); }
             catch (Exception e)
             {
@@ -417,14 +588,20 @@ internal static unsafe partial class ServantRuntime
                     + (again ? "retried by the next guard" : "given up; its pending-restore record is kept for the next Core"));
                 continue;
             }
-            if (w.StoreKey.Length > 0)
+            if (w.StoreKey.Length > 0 && result.Done)
             {
-                try { _capStore?.Remove(w.StoreKey); storeChanged = true; } catch { }
+                try
+                {
+                    _capStore?.Set(w.StoreKey, RecordOf(w, restored: true));
+                    Retained.Keep(w.StoreKey, Saves.Mark());
+                    storeChanged = true;
+                }
+                catch { }
             }
             if (late)
-                Plugin.Logger?.LogError("servants: LATE RESTORE " + when + " (the update's own after-hook did not run): " + w + ": " + result);
-            else if (w.Kind == TransientKind.GearLevel || !result.StartsWith("restored", StringComparison.Ordinal))
-                Plugin.Logger?.LogInfo("servants: restored " + w + ": " + result);
+                Plugin.Logger?.LogError("servants: LATE RESTORE " + when + " (the update's own after-hook did not run): " + w + ": " + result.Text);
+            else if (w.Kind == TransientKind.GearLevel || !result.Done)
+                Plugin.Logger?.LogInfo("servants: restored " + w + ": " + result.Text);
         }
         if (storeChanged)
         {
@@ -432,7 +609,17 @@ internal static unsafe partial class ServantRuntime
         }
     }
 
-    private static string RestoreOne(EntityManager em, TransientWrite w)
+    private readonly struct RestoreResult
+    {
+        internal RestoreResult(bool done, string text) { Done = done; Text = text; }
+
+        /// <summary>The target holds no forced value any more (restored, already original, gone, or changed by the game).</summary>
+        internal bool Done { get; }
+
+        internal string Text { get; }
+    }
+
+    private static RestoreResult RestoreOne(EntityManager em, TransientWrite w)
     {
         if (w.Kind == TransientKind.GearLevel)
         {
@@ -451,17 +638,17 @@ internal static unsafe partial class ServantRuntime
                     if (!now.Equals(w.Original))
                     {
                         Plugin.Logger?.LogError("servants: the gear level of servant " + w.Target + " reads " + now + " after its restore to " + w.Original);
-                        return "restore did NOT read back";
+                        return new RestoreResult(false, "restore did NOT read back; its record stays for the next Core");
                     }
-                    return "restored, read back";
-                case RestoreAction.AlreadyOriginal: return "restored already";
-                case RestoreAction.TargetGone: return "servant gone (destroyed by the game's failure); nothing to restore";
+                    return new RestoreResult(true, "restored, read back");
+                case RestoreAction.AlreadyOriginal: return new RestoreResult(true, "restored already");
+                case RestoreAction.TargetGone: return new RestoreResult(true, "servant gone (destroyed by the game's failure); nothing to restore");
                 case RestoreAction.IdentityMismatch:
                     Plugin.Logger?.LogError("servants: the entity at servant " + w.Target + " is not the servant the cap wrote (epoch or network id differ); not touched");
-                    return "identity mismatch, not touched";
+                    return new RestoreResult(false, "identity mismatch, not touched; its record stays for the next Core");
                 default:
                     Plugin.Logger?.LogWarning("servants: the gear level of servant " + w.Target + " changed to " + current + " since the cap wrote it; left as is");
-                    return "changed elsewhere, left";
+                    return new RestoreResult(true, "changed elsewhere, left");
             }
         }
 
@@ -480,22 +667,18 @@ internal static unsafe partial class ServantRuntime
             case RestoreAction.Write:
                 byte* rwb = AiRuntime.Buffer<ActiveServantMission>(em, heart, stride, write: true, out _);
                 *(float*)(rwb + at * stride + Layout.ActiveServantMissionLengthOffset) = w.Original;
-                return "restored";
-            case RestoreAction.AlreadyOriginal: return "restored already";
+                return new RestoreResult(true, "restored");
+            case RestoreAction.AlreadyOriginal: return new RestoreResult(true, "restored already");
             case RestoreAction.TargetGone:
                 Plugin.Logger?.LogError("servants: a held hunt row of heart " + w.Target + " is gone after the update it was held in");
-                return "row gone";
+                return new RestoreResult(true, "row gone");
             default:
                 Plugin.Logger?.LogWarning("servants: a held hunt row's length changed since the hold; left as is");
-                return "changed elsewhere, left";
+                return new RestoreResult(true, "changed elsewhere, left");
         }
     }
 
-    /// <summary>
-    /// The cap's work after the update: undo every write, then drop the caps of the hunts that
-    /// finished (<paramref name="finished"/>, from the return detector, may be empty when nothing
-    /// subscribed: the caps of rows gone from their heart are then dropped by the expiry).
-    /// </summary>
+    /// <summary>The cap's work after the update: undo every write.</summary>
     private static void AfterUpdateCaps(SystemHookContext hook)
     {
         RestoreAll(hook.World.EntityManager, "after the update", late: false);
@@ -517,7 +700,7 @@ internal static unsafe partial class ServantRuntime
         CapDue.Clear();
     }
 
-    /// <summary>Drop caps whose hunt ended long ago and is in no heart's record.</summary>
+    /// <summary>Drop this world's caps whose hunt ended long ago and is in no heart's record.</summary>
     private static void ExpireCaps(EntityManager em, long now)
     {
         _capExpireStamp = now;
@@ -537,26 +720,28 @@ internal static unsafe partial class ServantRuntime
     }
 
     /// <summary>
-    /// Once per world load, before any cap work: act on pending-restore records a previous Core
-    /// generation or process left (it stopped between a write and its restore). Same process and
-    /// world load: located by entity, validated by network id, restored when it still reads the
-    /// forced value. Otherwise: only a servant whose gear level reads exactly the forced value and
-    /// whose castle territory and coffin name match is restored; the rest is logged and dropped.
+    /// Once per world load, once the world is loaded, before any cap work: act on this world's
+    /// pending-restore records. Same process and world load (a Core swap): located by entity,
+    /// validated by network id, restored when it still reads the forced value, then kept until a
+    /// later save completes. Otherwise (a restart): only a servant whose gear level reads exactly
+    /// the forced value and whose castle territory and coffin name match one record is restored
+    /// (then kept the same way); a record that matches none is dropped, because the loaded world
+    /// does not hold the forced value.
     /// </summary>
-    private static void SweepPendingRestores(EntityManager em)
+    private static void SweepPendingRestores(EntityManager em, string world)
     {
-        if (_capStore == null || !(_capStore is ModStore ms && ms.IsReady)) { _sweptEpoch = int.MinValue; return; }
+        if (_capStore == null) return;
         var keys = new List<string>();
-        foreach (var k in _capStore.Keys) if (k.StartsWith(GearRestoreRecord.StorePrefix, StringComparison.Ordinal)) keys.Add(k);
+        foreach (var k in _capStore.Keys) if (GearRestoreRecord.IsKeyOf(k, world)) keys.Add(k);
         if (keys.Count == 0) return;
-        Plugin.Logger?.LogError("servants: " + keys.Count + " pending cap restore record(s) found from an earlier Core or process; acting on them now");
+        Plugin.Logger?.LogWarning("servants: " + keys.Count + " pending cap restore record(s) of this world found; checking them now");
         List<(Entity Servant, int Territory, string Name, float Gear)>? forced = null;
         foreach (var key in keys)
         {
             var rec = _capStore.Get<GearRestoreRecord>(key);
-            _capStore.Remove(key);
-            if (rec == null) continue;
+            if (rec == null) { _capStore.Remove(key); continue; }
             string outcome;
+            bool keep;
             if (rec.Process == ProcessId && rec.Epoch == WorldEpoch.Current)
             {
                 var w = new TransientWrite
@@ -568,7 +753,10 @@ internal static unsafe partial class ServantRuntime
                     Original = rec.Original,
                     Written = rec.Written,
                 };
-                outcome = RestoreOne(em, w);
+                var r = RestoreOne(em, w);
+                outcome = r.Text;
+                keep = true;
+                if (r.Done) rec.Restored = true;
             }
             else
             {
@@ -577,20 +765,32 @@ internal static unsafe partial class ServantRuntime
                 foreach (var f in forced) view.Add((f.Territory, f.Name, f.Gear));
                 int at = rec.MatchForeign(view);
                 if (at < 0)
-                    outcome = "no servant reads the forced value in that castle (the world on disk never held it); dropped";
+                {
+                    outcome = "no servant reads the forced value in that castle (the loaded world does not hold it); dropped";
+                    keep = false;
+                }
                 else
                 {
                     var s = forced[at].Servant;
                     byte* rw = AiRuntime.RW<ServantPower>(em, s, Layout.ServantPowerGearLevelOffset + 4);
                     *(float*)(rw + Layout.ServantPowerGearLevelOffset) = rec.Original;
                     byte* back = AiRuntime.RO<ServantPower>(em, s, Layout.ServantPowerGearLevelOffset + 4);
-                    outcome = back != null && (*(float*)(back + Layout.ServantPowerGearLevelOffset)).Equals(rec.Original)
-                        ? "restored servant " + CastleId.From(s) + " to " + rec.Original + ", read back"
+                    bool ok = back != null && (*(float*)(back + Layout.ServantPowerGearLevelOffset)).Equals(rec.Original);
+                    outcome = ok
+                        ? "restored servant " + CastleId.From(s) + " to " + rec.Original + ", read back (the loaded world held the forced value)"
                         : "restore of servant " + CastleId.From(s) + " did NOT read back";
+                    rec.Restored = ok;
+                    keep = true;
                     forced.RemoveAt(at);
                 }
             }
-            Plugin.Logger?.LogError("servants: pending restore of '" + rec.Name + "' (territory " + rec.Territory + "): " + outcome);
+            if (keep)
+            {
+                _capStore.Set(key, rec);
+                if (rec.Restored) Retained.Keep(key, Saves.Mark());
+            }
+            else _capStore.Remove(key);
+            Plugin.Logger?.LogWarning("servants: pending restore of '" + rec.Name + "' (territory " + rec.Territory + "): " + outcome);
         }
         if (forced != null)
             foreach (var f in forced)

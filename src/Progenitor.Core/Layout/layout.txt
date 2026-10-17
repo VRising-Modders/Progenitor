@@ -830,7 +830,13 @@ offset ServantMissionSettingsStaticPartyBonusOffset  = 0x4  : ServantMissionSett
 # The "Hunt in X started." notice the game's send raises to allied users: one network event entity
 # (NetworkEventType + this component + SendNetworkEventTag + SendEventToUsers), the shape chat uses.
 offset ServantMissionStartedEventMissionIdOffset     = 0x0  : ServantMissionStartedEvent.MissionId        # PrefabGUID, the only field
-match  ServantMissionStartedEventId                  = -1997647067 : /EventId_ServantMissionStartedEvent = (-?\d+);/ in NetworkEvents
+# The game's save in flight (the success cap never forces a roll while it is set): the save system
+# keeps its scheduled serialization jobs' handle in this Nullable<JobHandle> until a later update
+# completes and finalizes them (its IsSaving reads the Nullable's hasValue, the first byte). Read raw
+# from the managed system object; _Initialized pins the field's 0x18-byte span.
+offset SerializePersistenceSystemV2WriteToDiskDependencyOffset = 0x198 : SerializePersistenceSystemV2._WriteToDiskDependency  # Nullable<JobHandle>: bool hasValue @+0, JobHandle @+8
+offset SerializePersistenceSystemV2InitializedOffset           = 0x1B0 : SerializePersistenceSystemV2._Initialized
+match  ServantMissionStartedEventId                 = -1997647067 : /EventId_ServantMissionStartedEvent = (-?\d+);/ in NetworkEvents
 offset MapZoneDataZoneIndexOffset                    = 0x1  : MapZoneData.ZoneIndex                       # byte; MapZoneId.ZoneId is this + 1
 offset MapZoneDataChunkCoordinateOffset              = 0x44 : MapZoneData.ChunkCoordinate                 # TerrainChunk: sbyte X, sbyte Y
 offset MapZoneDataServantMissionAssetOffset          = 0x48 : MapZoneData.ServantMissionAsset             # PrefabGUID

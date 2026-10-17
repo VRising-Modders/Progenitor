@@ -318,6 +318,8 @@ internal static unsafe partial class ServantRuntime
             var back = ServantLogic.DecodeRow(new ReadOnlySpan<byte>(raw + i * stride, stride));
             if (back.StartTicks != start)
                 return new ServantFinishResult { Ok = false, Method = method, Reason = "row " + i + " did not read back the new start", Hunts = before, Finished = after };
+            // The cap book keys a hunt by its start: a capped hunt keeps its cap under the new start.
+            RekeyCap(current.MissionGuid, current.StartTicks, start);
             after.Add(ToMission(world, em, heart, back, i));
         }
         _heartsDirty = true;

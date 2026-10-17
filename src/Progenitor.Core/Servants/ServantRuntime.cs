@@ -57,7 +57,12 @@ internal static unsafe partial class ServantRuntime
 
         /// <summary>The servants whose roll the success cap forced to fail.</summary>
         public HashSet<CastleId> Forced = new();
+
+        /// <summary>When it was read (UTC ticks): a roll whose return is never published ages out.</summary>
+        public long Ticks = DateTime.UtcNow.Ticks;
     }
+
+    private const long ReturnRollMaxAgeTicks = 60 * ServantLogic.TicksPerSecond;
 
     // Capped rows vetoed this update: their caps go once the game finished them.
     private static readonly List<(Entity Heart, MissionRow Row)> CapDue = new();
@@ -93,8 +98,10 @@ internal static unsafe partial class ServantRuntime
         if (!Plugin.IsServerProcess || _installed) return;
         Lists.Log = line => Plugin.Logger?.LogInfo(line);
         Lists.Unregistered = () => PendingSwaps.Clear(); // holds the provider's lists: never past its unregistration
-        _updBefore = SystemHooks.Before<ServantMissionUpdateSystem>(BeforeUpdate);
-        _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate);
+        // Before runs last and After first among every hook on this system, so no other hook ever
+        // sees a servant whose gear level the success cap forced for this update (int priority, higher first).
+        _updBefore = SystemHooks.Before<ServantMissionUpdateSystem>(BeforeUpdate, int.MinValue);
+        _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate, int.MaxValue);
         _actBefore = SystemHooks.Before<ServantMissionActionSystem>(BeforeAction);
         _infoBefore = SystemHooks.Before<ServantInfoEventSystem_Server>(BeforeInfo);
         _infoAfter = SystemHooks.After<ServantInfoEventSystem_Server>(AfterInfo);
@@ -551,6 +558,10 @@ internal static unsafe partial class ServantRuntime
                 return Fail(req, ServantSendRefusal.ServantBusy, "servant " + sf.Servant
                     + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false, quiet: !log);
 
+        // A capped send needs the cap book of this world (its server store and the world's own id).
+        if (req.MaxSuccess != null && !dryRun && !CapBookWritable())
+            return Fail(req, ServantSendRefusal.WriteFailed, "the success cap cannot be recorded yet (Progenitor's server store or this world's store is not loaded); nothing was written", by, log: true);
+
         // Validation only (a routed throne send checks every heart before it writes any).
         if (dryRun)
             return new ServantSendResult
@@ -862,6 +873,13 @@ internal static unsafe partial class ServantRuntime
             if (DueRolls.TryGetValue((CastleId.From(heart), row.Key), out var roll))
                 ReturnRolls[(CastleId.From(heart), row.Key)] = roll;
         DueRolls.Clear();
+        if (ReturnRolls.Count > 0)
+        {
+            long cut = DateTime.UtcNow.Ticks - ReturnRollMaxAgeTicks;
+            var stale = new List<(CastleId, (int, long, CastleId))>();
+            foreach (var kv in ReturnRolls) if (kv.Value.Ticks < cut) stale.Add(kv.Key);
+            foreach (var k in stale) ReturnRolls.Remove(k);
+        }
         if (finished.Count == 0) return;
         _heartsDirty = true;
         long now = DateTime.UtcNow.Ticks;
@@ -1271,6 +1289,8 @@ internal static unsafe partial class ServantRuntime
                     DataSlot = slot,
                     User = userId,
                     CheckDiscovered = true,
+                    // One throne send, one "Hunt in X started." notice, however many hearts it spans.
+                    Announce = requests.Count == 0,
                 };
                 var check = Send(world, req, "progenitor.throne", dryRun: true);
                 if (!check.Ok) { refusal = "heart " + heart + ": " + check.Reason; break; }

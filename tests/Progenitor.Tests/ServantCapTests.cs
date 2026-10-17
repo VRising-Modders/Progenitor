@@ -101,11 +101,13 @@ public class ServantCapTests
     [Fact]
     public void Caps_are_keyed_by_mission_and_start_with_a_territory_cross_check()
     {
-        var book = new ServantCapBook();
+        var book = new ServantCapBook { World = "w1" };
         string key = book.Add(Record());
-        Assert.Equal("cap:-77:638000000000000000", key);
-        Assert.Equal("-77:638000000000000000", ServantCapBook.FromStoreKey(key));
-        Assert.Null(ServantCapBook.FromStoreKey("restore:1:1:5"));
+        Assert.Equal("cap:w1:-77:638000000000000000", key);
+        Assert.Equal("-77:638000000000000000", ServantCapBook.FromStoreKey(key, "w1"));
+        Assert.Null(ServantCapBook.FromStoreKey(key, "w2")); // another world's cap is never loaded
+        Assert.Null(ServantCapBook.FromStoreKey("restore:w1:1:1:5", "w1"));
+        Assert.Null(ServantCapBook.FromStoreKey(key, ""));
 
         Assert.True(book.TryGet(-77, 638_000_000_000_000_000L, 4, out var r, out bool mismatch));
         Assert.Equal(0.75f, r!.MaxSuccess);
@@ -136,7 +138,10 @@ public class ServantCapTests
         var r2 = JsonSerializer.Deserialize<GearRestoreRecord>(JsonSerializer.Serialize(restore))!;
         Assert.Equal("01ab", r2.NetworkId);
         Assert.Equal(12.5f, r2.Original);
-        Assert.Equal("restore:5:1:99", GearRestoreRecord.StoreKey(new CastleId(5, 1), 99));
+        Assert.Equal("restore:w1:5:1:99", GearRestoreRecord.StoreKey("w1", new CastleId(5, 1), 99));
+        Assert.True(GearRestoreRecord.IsKeyOf("restore:w1:5:1:99", "w1"));
+        Assert.False(GearRestoreRecord.IsKeyOf("restore:w1:5:1:99", "w10"));
+        Assert.False(GearRestoreRecord.IsKeyOf("restore:w1:5:1:99", ""));
     }
 
     [Fact]
