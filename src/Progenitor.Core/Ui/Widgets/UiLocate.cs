@@ -95,6 +95,43 @@ internal static class UiLocateProjection
         return new UiLocatePlacement(false, ex, ey, Angle(dx, dy));
     }
 
+    /// <summary>
+    /// A camera's viewport point (x, y in 0..1 across the camera's view, z the distance in front of it, negative
+    /// behind) in pixels of the screen the overlay canvas covers. The Unity half projects with
+    /// <c>WorldToViewportPoint</c> and scales here instead of taking <c>WorldToScreenPoint</c> pixels, which are
+    /// pixels of the camera's own render rect: when the game camera renders at another size than the window (a
+    /// render scale, a render texture), those pixels are not the overlay's and every marker lands off its target,
+    /// pulled toward the bottom-left corner.
+    /// </summary>
+    internal static (float X, float Y, float Z) ViewportToScreen(float vx, float vy, float vz, float screenWidth, float screenHeight)
+    {
+        float w = Math.Max(1f, Finite(screenWidth, 1f));
+        float h = Math.Max(1f, Finite(screenHeight, 1f));
+        return (Finite(vx, 0.5f) * w, Finite(vy, 0.5f) * h, vz);
+    }
+
+    /// <summary>
+    /// A pinhole projection of <paramref name="point"/> for a camera at <paramref name="eye"/> looking along
+    /// <paramref name="forward"/> with <paramref name="up"/> roughly up, a vertical field of view of
+    /// <paramref name="verticalFovDegrees"/> and <paramref name="aspect"/> = width / height: the viewport point the
+    /// game camera should give (x, y 0..1 across the view, z the depth along <paramref name="forward"/>). The bridge's
+    /// <c>locate</c> readback reports it beside the camera's own result, so a wrong camera shows as a mismatch.
+    /// </summary>
+    internal static (float X, float Y, float Z) PinholeViewport(System.Numerics.Vector3 eye, System.Numerics.Vector3 forward,
+        System.Numerics.Vector3 up, float verticalFovDegrees, float aspect, System.Numerics.Vector3 point)
+    {
+        var f = System.Numerics.Vector3.Normalize(forward);
+        var r = System.Numerics.Vector3.Normalize(System.Numerics.Vector3.Cross(up, f)); // Unity is left-handed: right = up x forward
+        var u = System.Numerics.Vector3.Cross(f, r);
+        var d = point - eye;
+        float z = System.Numerics.Vector3.Dot(d, f);
+        float x = System.Numerics.Vector3.Dot(d, r), y = System.Numerics.Vector3.Dot(d, u);
+        float tanHalf = (float)Math.Tan(verticalFovDegrees * Math.PI / 360.0);
+        float a = aspect > 0f ? aspect : 1f;
+        float depth = Math.Abs(z) < 1e-6f ? 1e-6f : z;
+        return (0.5f + x / (depth * tanHalf * a) * 0.5f, 0.5f + y / (depth * tanHalf) * 0.5f, z);
+    }
+
     /// <summary>Degrees counterclockwise from +x, in [0, 360).</summary>
     internal static float Angle(float dx, float dy)
     {
@@ -200,6 +237,29 @@ internal static class UiLocateLook
         return (meters / 1000.0).ToString("0.0", CultureInfo.InvariantCulture) + " km";
     }
 
+    /// <summary>
+    /// The distance the label shows and the arrival check uses: straight-line meters (3D, so a chest a floor up is
+    /// not "here" while the player stands under it) from the local character's position to the ping's target
+    /// point, the point the caller gave (the marker itself floats <see cref="HeightOffset"/> above it).
+    /// </summary>
+    internal static double Meters(float fromX, float fromY, float fromZ, float toX, float toY, float toZ)
+    {
+        double dx = (double)toX - fromX, dy = (double)toY - fromY, dz = (double)toZ - fromZ;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /// <summary>True when a ping with a positive <paramref name="arrivalDistance"/> is reached at <paramref name="meters"/>.</summary>
+    internal static bool Arrived(double meters, float arrivalDistance) =>
+        arrivalDistance > 0f && !double.IsNaN(meters) && meters <= arrivalDistance;
+
+    /// <summary>
+    /// Whether a cached local character may be used this frame: it must be from the current world epoch (entity
+    /// index and version are reused by the next world, where the same pair can name any entity: a wall, a chest)
+    /// and must still exist and carry <c>LocalCharacter</c>. Anything else re-finds the character.
+    /// </summary>
+    internal static bool KeepCachedCharacter(int cachedEpoch, int currentEpoch, bool exists, bool isLocalCharacter) =>
+        cachedEpoch == currentEpoch && exists && isLocalCharacter;
+
     /// <summary>The label: "Iron chest · 14 m", or just the distance, or just the label when there is no distance.</summary>
     internal static string Label(string? label, double meters)
     {
@@ -240,6 +300,46 @@ internal readonly struct UiLocateTarget
 
     internal float Z { get; }
 }
+
+/// <summary>One drawn frame of a ping, as the presenter computed it (diagnostics only; written on the main thread).</summary>
+#pragma warning disable CS0649 // written by the Unity half (RecordFrame), which the test project does not compile
+internal sealed class UiLocateFrame
+{
+    /// <summary>Seconds (the HUD clock) when it was drawn.</summary>
+    internal double At;
+
+    /// <summary>The local character's position the distance was measured from.</summary>
+    internal float FromX, FromY, FromZ;
+
+    /// <summary>The camera's viewport point of the marker's anchor (target plus the height offset).</summary>
+    internal float ViewportX, ViewportY, Depth;
+
+    /// <summary>Where the marker or arrow went, screen pixels (origin bottom-left).</summary>
+    internal float ScreenX, ScreenY;
+
+    internal bool OnScreen;
+
+    internal float AngleDegrees;
+
+    internal double Meters;
+
+    internal string LabelText = "";
+
+    internal string Camera = "";
+
+    internal float CameraX, CameraY, CameraZ;
+
+    internal float CameraForwardX, CameraForwardY, CameraForwardZ;
+
+    internal float CameraUpX, CameraUpY, CameraUpZ;
+
+    internal float FieldOfView, Aspect;
+
+    internal float ScreenWidth, ScreenHeight, CameraPixelWidth, CameraPixelHeight;
+
+    internal int CharacterIndex, CharacterVersion;
+}
+#pragma warning restore CS0649
 
 /// <summary>One ping: the handle a plugin holds and the set's record.</summary>
 internal sealed class UiLocatePingHandle : IUiLocatePing
@@ -288,6 +388,9 @@ internal sealed class UiLocatePingHandle : IUiLocatePing
 
     /// <summary>The presenter's own objects for this ping; null when none are built.</summary>
     internal object? PresenterState { get; set; }
+
+    /// <summary>What the last drawn frame computed (the bridge's <c>locate</c> readback); null before the first.</summary>
+    internal UiLocateFrame? LastFrame { get; set; }
 
     public bool Active
     {

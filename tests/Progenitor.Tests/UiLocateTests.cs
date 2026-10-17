@@ -299,6 +299,117 @@ public sealed class UiLocateTests
         Assert.Equal(MenuPalette.ClientText, UiLocateLook.LabelColor);
     }
 
+    // ---- Distance, arrival and the character the distance is measured from ----
+
+    [Fact]
+    public void The_label_shows_the_real_distance_from_the_character_not_the_arrival_distance()
+    {
+        // The reported case: a chest pinned at (-1444, 11, -740), the player at about (-1460, 5, -726).
+        double meters = UiLocateLook.Meters(-1460f, 5f, -726f, -1444f, 11f, -740f);
+        Assert.Equal(Math.Sqrt(16 * 16 + 6 * 6 + 14 * 14), meters, 3);
+        Assert.Equal("Minerals (Plot 6) · 22 m", UiLocateLook.Label("Minerals (Plot 6)", meters));
+        Assert.False(UiLocateLook.Arrived(meters, 3f));
+
+        // At the chest's own floor height the distance is the horizontal one.
+        Assert.Equal("21 m", UiLocateLook.Distance(UiLocateLook.Meters(-1460f, 5.02f, -726f, -1444f, 5.02f, -740f)));
+    }
+
+    [Fact]
+    public void Arrival_is_within_the_distance_in_3D_and_zero_never_arrives()
+    {
+        Assert.True(UiLocateLook.Arrived(2.9, 3f));
+        Assert.True(UiLocateLook.Arrived(3.0, 3f));
+        Assert.False(UiLocateLook.Arrived(3.01, 3f));
+        Assert.False(UiLocateLook.Arrived(0.0, 0f));
+        Assert.False(UiLocateLook.Arrived(double.NaN, 3f));
+        // Standing right under a chest one floor up (about 5 m) is not arriving.
+        Assert.False(UiLocateLook.Arrived(UiLocateLook.Meters(0f, 0f, 0f, 0.5f, 5f, 0.5f), 3f));
+    }
+
+    [Fact]
+    public void A_character_cached_in_another_world_is_never_reused_even_when_its_id_exists()
+    {
+        // The next world reuses entity index and version: the same pair can name a wall or a chest there.
+        Assert.False(UiLocateLook.KeepCachedCharacter(cachedEpoch: 7, currentEpoch: 8, exists: true, isLocalCharacter: true));
+        Assert.False(UiLocateLook.KeepCachedCharacter(7, 8, exists: true, isLocalCharacter: false));
+        Assert.False(UiLocateLook.KeepCachedCharacter(8, 8, exists: true, isLocalCharacter: false));
+        Assert.False(UiLocateLook.KeepCachedCharacter(8, 8, exists: false, isLocalCharacter: false));
+        Assert.True(UiLocateLook.KeepCachedCharacter(8, 8, exists: true, isLocalCharacter: true));
+    }
+
+    // ---- Projection ----
+
+    [Theory]
+    [MemberData(nameof(Screens))]
+    public void Viewport_points_scale_to_the_overlay_screen_whatever_the_camera_renders_at(float w, float h)
+    {
+        var p = UiLocateProjection.ViewportToScreen(0.25f, 0.75f, 12f, w, h);
+        Assert.Equal(w * 0.25f, p.X, 3);
+        Assert.Equal(h * 0.75f, p.Y, 3);
+        Assert.Equal(12f, p.Z);
+
+        // A camera rendering at two thirds of the window answers WorldToScreenPoint in its own pixels; read as overlay
+        // pixels that put the marker a third of the way toward the bottom-left corner. The viewport point does not move.
+        float cameraPixelsX = 0.25f * (w * 2f / 3f);
+        Assert.True(Math.Abs(cameraPixelsX - p.X) > w * 0.05f);
+    }
+
+    [Fact]
+    public void Viewport_scaling_survives_bad_input()
+    {
+        var p = UiLocateProjection.ViewportToScreen(float.NaN, float.PositiveInfinity, -3f, 0f, float.NaN);
+        Assert.Equal(0.5f, p.X);
+        Assert.Equal(0.5f, p.Y);
+        Assert.Equal(-3f, p.Z);
+    }
+
+    [Fact]
+    public void The_pinhole_projection_puts_the_view_axis_at_the_center_and_the_frustum_edges_at_0_and_1()
+    {
+        var eye = System.Numerics.Vector3.Zero;
+        var fwd = new System.Numerics.Vector3(0f, 0f, 1f);
+        var up = new System.Numerics.Vector3(0f, 1f, 0f);
+        float aspect = 16f / 9f;
+        float tan = (float)Math.Tan(30.0 * Math.PI / 180.0);
+
+        var c = UiLocateProjection.PinholeViewport(eye, fwd, up, 60f, aspect, new System.Numerics.Vector3(0f, 0f, 10f));
+        Assert.Equal(0.5f, c.X, 4);
+        Assert.Equal(0.5f, c.Y, 4);
+        Assert.Equal(10f, c.Z, 4);
+
+        var top = UiLocateProjection.PinholeViewport(eye, fwd, up, 60f, aspect, new System.Numerics.Vector3(0f, 10f * tan, 10f));
+        Assert.Equal(1f, top.Y, 4);
+        var right = UiLocateProjection.PinholeViewport(eye, fwd, up, 60f, aspect, new System.Numerics.Vector3(10f * tan * aspect, 0f, 10f));
+        Assert.Equal(1f, right.X, 4); // Unity's camera space: +x (east here) is screen right
+        var behind = UiLocateProjection.PinholeViewport(eye, fwd, up, 60f, aspect, new System.Numerics.Vector3(0f, 0f, -5f));
+        Assert.True(behind.Z < 0f);
+    }
+
+    [Fact]
+    public void A_target_twenty_meters_away_does_not_draw_over_the_player()
+    {
+        // A top-down game camera: 14 m up and 10 m south of the player, looking at the player, 1920x1080.
+        var player = new System.Numerics.Vector3(-1460f, 5f, -726f);
+        var eye = player + new System.Numerics.Vector3(0f, 14f, -10f);
+        var fwd = player - eye;
+        var up = new System.Numerics.Vector3(0f, 1f, 0f);
+        const float w = 1920f, h = 1080f;
+        (float X, float Y) Screen(System.Numerics.Vector3 p)
+        {
+            var v = UiLocateProjection.PinholeViewport(eye, fwd, up, 40f, w / h, p + new System.Numerics.Vector3(0f, UiLocateLook.HeightOffset, 0f));
+            var s = UiLocateProjection.ViewportToScreen(v.X, v.Y, v.Z, w, h);
+            var place = UiLocateProjection.Place(s.X, s.Y, s.Z, w, h, Margin, Top);
+            return (place.X, place.Y);
+        }
+
+        var atPlayer = Screen(player);
+        Assert.Equal(w / 2f, atPlayer.X, 0); // straight below the view axis' end, centered
+        var chest = Screen(new System.Numerics.Vector3(-1444f, 5.02f, -740f));
+        float dx = chest.X - atPlayer.X, dy = chest.Y - atPlayer.Y;
+        Assert.True(dx > 200f, "16 m east draws well to the right of the player, got dx " + dx);
+        Assert.True(Math.Sqrt(dx * dx + dy * dy) > 300.0);
+    }
+
     private static void AssertInside(UiLocatePlacement p, float w, float h)
     {
         Assert.InRange(p.X, Margin - 0.01f, w - Margin + 0.01f);

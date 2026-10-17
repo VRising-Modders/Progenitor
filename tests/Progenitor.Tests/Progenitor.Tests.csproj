@@ -831,6 +831,7 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\SnapshotArgs.cs" Link="Linked\SnapshotArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\TimeArgs.cs" Link="Linked\TimeArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PhotoArgs.cs" Link="Linked\PhotoArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\LocateArgs.cs" Link="Linked\LocateArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfReport.cs" Link="Linked\PerfReport.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfFrameDetail.cs" Link="Linked\PerfFrameDetail.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\PerfProgress.cs" Link="Linked\PerfProgress.cs" />

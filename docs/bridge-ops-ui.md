@@ -1,6 +1,6 @@
 # Bridge operations: Mods workspace UI
 
-Operation reference for the [development bridge](bridge.md), part 3 of 5: the Mods workspace (`mods_ui`), the game menu, text fields and the date-time picker, and `setting`. Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
+Operation reference for the [development bridge](bridge.md), part 3 of 5: the Mods workspace (`mods_ui`), the game menu, text fields and the date-time picker, `setting`, and `locate` (HUD Locate pings). Other parts: [core, entities and samples](bridge-ops.md), [players, world and capture](bridge-ops-player.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
 
 ## `mods_ui`
 
@@ -536,3 +536,21 @@ Both sides, main thread (TEXTLIMIT1). Core's `ServerSettingsTestBridge`, reached
 | `{"action":"get","row":"<plugin guid>/<Section>/<Key>"}` | both | The synced setting's stored value on this side (the server's own value, or the client's synced copy): `{side, row, type, locked, adminEditable, canRequest, length, utf8Bytes, escapedBytes, lineBreaks, hash, value (≤200 characters) or head/tail, declared {maxLength, multiline, limit, effective}, fits}` |
 | `{"action":"audit","lines":5}` | server | The last lines (at most 200) of `BepInEx/progenitor-settings.log` |
 | `{"action":"request","row":"…","value":"…"}` (or `"repeat":"x","count":N`, at most 20,000 characters), optional `"skipClientCheck":true`, `"expected":"…"` | client | An administrator edit sent as the page's **Apply** sends it (the expected value is the client's displayed value unless given). `skipClientCheck` skips the client's own length check, as a client that does not run it would; the server's check is unchanged. Waits up to 10 s: `{done, success, error, answeredValue/answeredLength/answeredHash…, request}` |
+
+## `locate`
+
+Client, main thread. `ctx.Hud.Locate` pings through Core's `HudLocateBridge`, the same presenter plugins use ([Locate](ui.md#locate)). Source-checked and built, not live-verified. MCP: `progenitor_locate`.
+
+| Arguments | Result |
+|---|---|
+| `{}` / `{"action":"status"}` | Every live ping, any owner: `serial`, `owner`, `label`, `target` (`x`, `y`, `z` or `entity`), `seconds`, `arrivalDistance`, `showOnMaps`, and once it has been drawn: `labelText` (what the screen shows), `meters`, `from` (the character position the distance was measured from) and `character` (its client entity), `onScreen`, `screen` (pixels, origin bottom-left), `viewport` (`x`, `y` 0..1, `depth`), `angleDegrees` (the edge arrow), `screenSize`, `cameraPixels`, `camera` (`name`, position, `fov`, `aspect`) and, for a point, `pinholeViewport` (a plain projection of the same point from the camera's pose). Read only. |
+| `{"action":"pin","x":-1444,"y":5.02,"z":-740,"label":"Minerals","seconds":60,"arrival":3,"maps":true}` | Starts a ping owned by the bridge at that world point (meters, `y` up; `position: [x, y, z]` also works). `seconds` default 30 (0: until cleared), `arrival` default 0 (never), `maps` default false. Answers `pinned` (its serial) and the status; the ping draws from the next frame, so read `status` again for its screen position and label. |
+| `{"action":"clear"}` | Ends the bridge's pings (`cleared`: how many). Plugin pings are untouched. |
+
+Checks for a pinned point: `meters` matches the distance from `from` to the target and `labelText` ends in that distance; `from` is the player's position (compare `players` on the server) and `character` is the `LocalCharacter` entity (`query` on the client); `viewport` and `pinholeViewport` agree to a few thousandths (a large gap means the camera's matrices are not a plain perspective of its transform, or `Camera.main` is not the game camera); `screen` is `viewport` times `screenSize` unless the point is off screen (`onScreen: false`, clamped to the edge).
+
+```
+→ {"id":1,"token":"...","op":"locate","args":{"action":"pin","x":-1444,"y":5.02,"z":-740,"label":"Minerals","arrival":3}}
+→ {"id":2,"token":"...","op":"locate","args":{}}
+→ {"id":3,"token":"...","op":"locate","args":{"action":"clear"}}
+```
