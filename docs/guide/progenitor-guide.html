@@ -327,12 +327,14 @@ window.HELP = {
           html: `<ol><li>Find the [[game-folder|game folder]]: Steam &rsaquo; right-click <strong>V Rising</strong> &rsaquo; <strong>Manage</strong> &rsaquo; <strong>Browse local files</strong>.</li>
 <li>Download <a href="https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/">BepInExPack_V_Rising</a> (<strong>Manual Download</strong>) and extract it outside the game folder.</li>
 <li>Copy everything inside its <code>BepInExPack_V_Rising</code> folder (<code>BepInEx</code>, <code>dotnet</code>, <code>winhttp.dll</code>, <code>doorstop_config.ini</code> and the rest) into the game folder, next to <code>VRising.exe</code>.</li>
-<li>Start the game once. A [[bepinex|BepInEx]] console opens; the first start is slow while it generates its files.</li></ol>` },
+<li>Start the game once. A [[bepinex|BepInEx]] console opens; the first start is slow while it generates its files.</li></ol>
+<p>Already have BepInEx? Skip to the next page.</p>` },
         { id: "install", title: "Install Progenitor",
-          html: `<ol><li>Download the Progenitor zip and extract it.</li>
-<li>Copy its <code>BepInEx</code> folder into the game folder, merging it with the one there.</li>
-<li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>`,
-          callout: { title: "What goes where", text: "<code>BepInEx/plugins/Progenitor.Bootstrap.dll</code>, <code>BepInEx/patchers/Progenitor.Preloader.dll</code> and <code>BepInEx/progenitor-core/</code> (<code>Progenitor.dll</code>, its <code>addresslib</code> tables, this guide). Keep them together; the zip's other files are not needed." } },
+          html: `<ol><li>Quit the game.</li>
+<li>Download <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases">release page</a>.</li>
+<li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
+<li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
+<p>To update, extract the new zip the same way and let it replace the files. The zip holds only a <code>BepInEx</code> folder and never changes BepInEx's own files or settings.</p>` },
         { id: "open", title: "Open the Mods menu",
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
 <p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
@@ -376,9 +378,25 @@ window.HELP = {
 <ul><li><strong>Update mods</strong>: Automatic (default), Notify or Off.</li><li><strong>Offer updates before joining a server</strong>: on by default.</li><li>Per mod, on its page: a different mode, or keep one version.</li></ul>` },
         { id: "help", title: "When something goes wrong",
           html: `<ol><li>Crashed? Start the game again; the last three sessions' logs are kept.</li>
-<li><strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong> saves a zip on your Desktop.</li>
-<li>Post it in a bug report or the V Rising Mod Community Discord.</li></ol>`,
-          callout: { title: "Before posting", text: "IDs, IPs and known player names are removed, but look through the zip first." } }
+<li>Collect logs: <strong>Mods &rsaquo; Progenitor &rsaquo; Get help &rsaquo; Collect logs</strong>, or on the title screen the zip icon at the end of the bottom-left icon row (for a game that crashes on join). A zip lands on your Desktop.</li>
+<li>Ask an AI assistant (next page), or post the zip in the <a href="https://discord.com/channels/978094827830915092/1112888087836631090">Progenitor channel</a> on the V Rising Mod Community Discord (<a href="https://vrisingmods.com/discord">join it</a> first) or a <a href="https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml">GitHub bug report</a>.</li></ol>`,
+          callout: { title: "Before sharing", text: "IDs, IPs and known player names are removed, but look through the zip before you share it with anyone, an AI included." } },
+        { id: "ai-help", title: "Get help from an AI assistant",
+          html: `<p>Open ChatGPT, Gemini, Grok, Claude or another assistant, paste this prompt, and attach your log zip or its files:</p>{{code}}
+<p>The same prompt, and how to write a bug report: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/SUPPORT.md">SUPPORT.md</a>.</p>`,
+          code: { lang: "prompt", text: `Help me fix a problem with V Rising mods that use Progenitor
+(https://github.com/VRising-Modders/Progenitor).
+
+1. Read the repository's llms.txt, SUPPORT.md and the player pages in
+   docs/guide/progenitor-guide.html, then the docs they link to.
+2. Ask me for my V Rising version, my Progenitor version (Mods > Progenitor),
+   the mods I use, and whether I play on a server or in a private game.
+3. Read the logs I attach (BepInEx LogOutput.log, Player.log, the mod list).
+4. Tell me the likely cause, then give me steps a player can follow in the
+   game or the game folder. No code changes unless I ask.
+5. If it looks like a bug in Progenitor or a mod, help me write a short bug report.
+
+My problem: <describe what happened and what you expected>` } }
       ]
     },
 
@@ -387,7 +405,7 @@ window.HELP = {
       id: "admins", role: "admins", title: "Getting Started", pages: [
         { id: "install", title: "Install on a server",
           html: `<ol><li>Copy everything inside <code>BepInExPack_V_Rising</code> into the server folder, next to <code>VRisingServer.exe</code>.</li>
-<li>Copy the Progenitor zip's <code>BepInEx</code> folder there too. It is one package for client and server.</li>
+<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server; update the same way.</li>
 <li>Start the server once; the first start is slow while BepInEx generates its files.</li></ol>
 <p>A private game hosted from a client loads the client's mods; no separate install.</p>`,
           callout: { title: "Never on a public server", warn: true, text: "<code>Progenitor.Dev.dll</code>, the [[dev-bridge|dev bridge]]. Release packages leave it out." } },
@@ -424,7 +442,7 @@ window.HELP = {
         { id: "help", title: "When something goes wrong",
           html: `<ul><li><code>.progenitor logs</code> in chat collects the server's logs.</li>
 <li>A world saved with a content mod still loads after that mod is removed (<code>[SaveSafety]</code> in <code>progenitor.cfg</code>).</li>
-<li>Bugs: a GitHub bug report or the V Rising Mod Community Discord.</li></ul>` }
+<li>Bugs: a <a href="https://github.com/VRising-Modders/Progenitor/issues/new?template=bug-report.yml">GitHub bug report</a> or the <a href="https://discord.com/channels/978094827830915092/1112888087836631090">Progenitor channel</a> on the V Rising Mod Community Discord (<a href="https://vrisingmods.com/discord">join it</a> first). An AI assistant can help: <a href="https://github.com/VRising-Modders/Progenitor/blob/main/SUPPORT.md">SUPPORT.md</a>.</li></ul>` }
       ]
     },
 
