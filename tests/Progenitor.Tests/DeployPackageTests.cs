@@ -247,6 +247,170 @@ public sealed class DeployPackageTests
         }
     }
 
+    // ---- 2b. executed: the manual-install zip (one copy into the game folder) -------------
+
+    private static readonly string[] ManualRequired =
+    {
+        "BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll",
+    };
+
+    /// <summary>
+    /// The manual zip's only root entry is <c>BepInEx/</c>: extracted into the folder that holds VRising.exe, every file
+    /// lands where the Thunderstore layout puts it, and the Thunderstore root files (manifest, README, icon) stay out of
+    /// the game folder. Entry names use <c>/</c>. Run through <c>package.ps1</c>'s own function.
+    /// </summary>
+    [Fact]
+    public void ManualZipHoldsOnlyTheBepInExTree()
+    {
+        string shell = RequirePowerShell();
+        string stage = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        string zip = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            var bepInEx = new[]
+            {
+                "BepInEx/plugins/Progenitor.Bootstrap.dll",
+                "BepInEx/patchers/Progenitor.Preloader.dll",
+                "BepInEx/progenitor-core/Progenitor.dll",
+                "BepInEx/progenitor-core/addresslib/client-247473480-6a147771-ec12531-66fe4b61f7a0d186.json",
+                "BepInEx/progenitor-core/docs/guide/progenitor-guide.html",
+            };
+            foreach (string f in bepInEx) Seed(stage, f);
+            foreach (string f in new[] { "manifest.json", "README.md", "CHANGELOG.md", "icon.png", "PROGENITOR_GUIDE.md" }) Seed(stage, f);
+
+            var (exit, _, stderr) = RunNewGameFolderZip(shell, stage, zip);
+            Assert.True(exit == 0, "New-GameFolderZip failed: " + stderr);
+
+            using var archive = System.IO.Compression.ZipFile.OpenRead(zip);
+            var names = archive.Entries.Select(e => e.FullName).OrderBy(n => n, StringComparer.Ordinal).ToArray();
+            Assert.Equal(bepInEx.OrderBy(n => n, StringComparer.Ordinal).ToArray(), names);
+        }
+        finally
+        {
+            try { Directory.Delete(stage, true); } catch { /* temp */ }
+            try { File.Delete(zip); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>A staged tree that lacks one of the three DLLs is refused, so a manual zip can never ship half an install.</summary>
+    [Theory]
+    [InlineData("BepInEx/plugins/Progenitor.Bootstrap.dll")]
+    [InlineData("BepInEx/patchers/Progenitor.Preloader.dll")]
+    [InlineData("BepInEx/progenitor-core/Progenitor.dll")]
+    public void ManualZipRefusesAMissingPiece(string missing)
+    {
+        string shell = RequirePowerShell();
+        string stage = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        string zip = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            foreach (string f in ManualRequired.Where(f => f != missing)) Seed(stage, f);
+            var (exit, _, stderr) = RunNewGameFolderZip(shell, stage, zip);
+            Assert.True(exit != 0, "New-GameFolderZip accepted a tree without " + missing);
+            Assert.Contains("has no " + missing, stderr);
+        }
+        finally
+        {
+            try { Directory.Delete(stage, true); } catch { /* temp */ }
+            try { File.Delete(zip); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>The script builds the manual zip from the asserted stage with the same three required entries, and names the two assets apart.</summary>
+    [Fact]
+    public void PackageWritesTheManualZipFromTheAssertedStage()
+    {
+        string s = ReadRepoFile("tools", "package.ps1");
+        Assert.Contains("New-GameFolderZip -Stage $stage -ZipPath $manualZipPath -Required $requiredEntries", s);
+        foreach (string entry in ManualRequired) Assert.Contains("\"" + entry + "\"", s);
+        Assert.Contains("(\"Progenitor-\" + $version + \".zip\")", s);
+        Assert.Contains("(\"Progenitor-\" + $version + \"-thunderstore.zip\")", s);
+        // Both zips are attested in SHA256SUMS.
+        Assert.Contains("Get-Item -LiteralPath $zipPath, $manualZipPath", s);
+        // Built after both stage assertions ran.
+        Assert.True(s.IndexOf("Assert-NoDeveloperArtefacts -Root $stage", StringComparison.Ordinal)
+                    < s.IndexOf("New-GameFolderZip -Stage $stage", StringComparison.Ordinal));
+    }
+
+    private static string ScriptGuardFunctions()
+    {
+        string src = ReadRepoFile("tools", "package.ps1");
+        return ExtractPowerShellFunction(src, "Get-InstallScriptNames") + "\n" + ExtractPowerShellFunction(src, "Assert-NoInstallScripts");
+    }
+
+    /// <summary>
+    /// Release packages are a plain extract: a script, batch file or executable anywhere in a zip fails packaging
+    /// (Nexus refuses .bat/.ps1 in a package). Run through <c>package.ps1</c>'s own functions.
+    /// </summary>
+    [Theory]
+    [InlineData("install.bat")]
+    [InlineData("BepInEx/plugins/setup.cmd")]
+    [InlineData("BepInEx/progenitor-core/install.ps1")]
+    [InlineData("BepInEx/patchers/run.exe")]
+    [InlineData("tools/install.sh")]
+    [InlineData("BepInEx/x.vbs")]
+    public void PackageRefusesInstallScripts(string name)
+    {
+        string shell = RequirePowerShell();
+        string script = "$ErrorActionPreference = 'Stop'\n" + ScriptGuardFunctions()
+                        + "\nAssert-NoInstallScripts -Names @('BepInEx/plugins/Progenitor.Bootstrap.dll', $args[0]) -Where 'test'\n";
+        var (exit, _, stderr) = RunPowerShellScript(shell, script, name);
+        Assert.True(exit != 0, "package.ps1 accepted " + name);
+        Assert.Contains("script or executable", stderr);
+    }
+
+    /// <summary>The real package contents pass the script guard: DLLs, JSON tables, the HTML guide and the Thunderstore files.</summary>
+    [Fact]
+    public void PackageAcceptsItsOwnFileTypes()
+    {
+        string shell = RequirePowerShell();
+        string script = "$ErrorActionPreference = 'Stop'\n" + ScriptGuardFunctions()
+                        + "\nAssert-NoInstallScripts -Names @('manifest.json', 'README.md', 'icon.png', 'BepInEx/plugins/Progenitor.Bootstrap.dll', "
+                        + "'BepInEx/progenitor-core/addresslib/client-1.json', 'BepInEx/progenitor-core/docs/guide/progenitor-guide.html', 'BepInEx/progenitor-core/') -Where 'test'\n";
+        var (exit, _, stderr) = RunPowerShellScript(shell, script);
+        Assert.True(exit == 0, "the script guard refused Progenitor's own files: " + stderr);
+    }
+
+    /// <summary>A staged install script never reaches the manual zip.</summary>
+    [Fact]
+    public void ManualZipRefusesAStagedScript()
+    {
+        string shell = RequirePowerShell();
+        string stage = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N"));
+        string zip = Path.Combine(Path.GetTempPath(), "progenitor-fdep-" + Guid.NewGuid().ToString("N") + ".zip");
+        try
+        {
+            foreach (string f in ManualRequired) Seed(stage, f);
+            Seed(stage, "BepInEx/plugins/install.ps1");
+            var (exit, _, stderr) = RunNewGameFolderZip(shell, stage, zip);
+            Assert.True(exit != 0, "New-GameFolderZip accepted a staged install.ps1");
+            Assert.Contains("script or executable", stderr);
+        }
+        finally
+        {
+            try { Directory.Delete(stage, true); } catch { /* temp */ }
+            try { File.Delete(zip); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>The script guard runs on the staged tree and on both finished zips.</summary>
+    [Fact]
+    public void PackageChecksScriptsOnStageAndBothZips()
+    {
+        string s = ReadRepoFile("tools", "package.ps1");
+        Assert.Contains("Assert-NoInstallScripts -Names @(Get-ChildItem -LiteralPath $stage", s);
+        Assert.Contains("Assert-NoInstallScripts -Names @($zip.Entries", s);
+        Assert.Contains("Assert-NoInstallScripts -Names $names -Where $ZipPath", s);
+    }
+
+    private static (int Exit, string Out, string Err) RunNewGameFolderZip(string shell, string stage, string zip)
+    {
+        string fn = ScriptGuardFunctions() + "\n" + ExtractPowerShellFunction(ReadRepoFile("tools", "package.ps1"), "New-GameFolderZip");
+        string script = "$ErrorActionPreference = 'Stop'\n" + fn + "\nNew-GameFolderZip -Stage $args[0] -ZipPath $args[1] -Required @("
+                        + PsList(ManualRequired) + ")\n";
+        return RunPowerShellScript(shell, script, stage, zip);
+    }
+
     // ---- 3. executed: the shared fence (tools/common/Fence.ps1) ---------------------------
     //
     // R40 finding 4. The fence used to be `$root -like "C:\VRisingServer*"` on the RAW parameter

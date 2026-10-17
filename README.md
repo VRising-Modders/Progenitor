@@ -30,7 +30,13 @@ Progenitor is one Thunderstore package, tagged **Client + Server**, published as
 2. Install **Progenitor**. The mod manager also installs its dependency, **BepInExPack_V_Rising**.
 3. Install the same profile for the game client and for a dedicated server. There is no separate server package.
 
-For a manual install, the zip carries three DLLs that must stay together: `Progenitor.Bootstrap.dll` in `BepInEx/plugins/`, `Progenitor.dll` in `BepInEx/progenitor-core/` (Bootstrap loads it) and `Progenitor.Preloader.dll` in `BepInEx/patchers/`. **Never put `Progenitor.Dev.dll` on a public server**: it is the development bridge, and release packages do not include it.
+**Manual install (one copy).** [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/) must already be installed; Progenitor never ships or replaces BepInEx files.
+
+1. Quit the game (or stop the server).
+2. Download `Progenitor-<version>.zip` from the GitHub release.
+3. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the folder that holds `VRisingServer.exe`). Allow it to replace files when you update.
+
+The zip holds a single `BepInEx` folder, so the extract adds `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and `BepInEx/progenitor-core/` (Core, its address tables and the help guide) in one step, at the same paths as the Thunderstore package. It contains no other mod's files and no BepInEx files or settings. To remove Progenitor, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed. The menu removal leaves `BepInEx/patchers/Progenitor.Preloader.dll`; on its own it needs no other Progenitor file: it keeps copies of the session logs and carries out any Mods-menu plugin request still pending, and you can delete it while the game is closed. **Never put `Progenitor.Dev.dll` on a public server**: it is the development bridge, and release packages do not include it.
 
 ### Reporting a problem
 

@@ -1,14 +1,21 @@
 <#
 .SYNOPSIS
-  Build a Release Thunderstore zip under packaging/out/. Never writes into a game folder.
+  Build the Release zips under packaging/out/. Never writes into a game folder.
 
 .DESCRIPTION
   Builds Progenitor.Bootstrap, Progenitor.Preloader and Progenitor.Core (and Progenitor.Dev
-  when -IncludeDev) in Release, then assembles
+  when -IncludeDev) in Release, then assembles two zips from one staged tree:
 
-    packaging/out/Progenitor-<version>.zip
+    packaging/out/Progenitor-<version>.zip               the manual install: its only root
+                                                         entry is BepInEx/, so a player extracts
+                                                         it into the folder that holds VRising.exe
+                                                         (or VRisingServer.exe) in one step
+    packaging/out/Progenitor-<version>-thunderstore.zip  the Thunderstore package: the same
+                                                         BepInEx/ tree plus manifest.json,
+                                                         README.md, CHANGELOG.md, icon.png and
+                                                         PROGENITOR_GUIDE.md at the root
 
-  with Thunderstore metadata from packaging/thunderstore/ and
+  Thunderstore metadata comes from packaging/thunderstore/. Both zips carry
 
     BepInEx/plugins/Progenitor.Bootstrap.dll
     BepInEx/patchers/Progenitor.Preloader.dll
@@ -184,6 +191,90 @@ function Assert-NoExtraInstanceAuth {
   }
 }
 
+function Get-InstallScriptNames {
+  <#
+    Release packages are a plain folder extraction and nothing else: no install script, batch file,
+    PowerShell script or executable of our own, in any zip (Nexus refuses .bat/.ps1 in a package, and the
+    install instruction is "extract into the folder with VRising.exe"). Returns the offending names from
+    a list of file paths or zip entry names; empty when the package is clean. One list, used on the
+    staged tree and on both finished zips.
+  #>
+  param([string[]]$Names)
+  $blocked = @(".bat", ".cmd", ".ps1", ".psm1", ".psd1", ".exe", ".com", ".scr", ".msi", ".vbs", ".vbe", ".wsf", ".sh", ".lnk", ".reg")
+  $bad = New-Object System.Collections.Generic.List[string]
+  foreach ($n in @($Names)) {
+    if (-not $n) { continue }
+    $ext = [System.IO.Path]::GetExtension($n.Replace('\', '/').TrimEnd('/')).ToLowerInvariant()
+    if ($blocked -contains $ext) { $bad.Add($n) }
+  }
+  return ,$bad.ToArray()
+}
+
+function Assert-NoInstallScripts {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$Names,
+    [Parameter(Mandatory = $true)][string]$Where
+  )
+  $bad = Get-InstallScriptNames -Names $Names
+  if ($bad.Count -gt 0) {
+    throw "packaging assertion failed: $Where contains a script or executable (release packages are a plain extract): $($bad -join ', ')"
+  }
+}
+
+function New-GameFolderZip {
+  <#
+    The manual-install zip: one copy, extracted into the folder that holds VRising.exe (or
+    VRisingServer.exe). Its only root entry is BepInEx/, taken from the staged tree, so the
+    extract lands every file at the path the mod-manager package already uses
+    (BepInEx/plugins, BepInEx/patchers, BepInEx/progenitor-core) and nothing else lands in the
+    game folder. No code reads it differently: it is the same files at the same paths.
+
+    Entries are written one by one with '/' separators (Windows PowerShell's CreateFromDirectory
+    writes '\', which some extractors turn into file names). The finished zip is then asserted:
+    every entry is under BepInEx/ and each of -Required is present.
+  #>
+  param(
+    [Parameter(Mandatory = $true)][string]$Stage,
+    [Parameter(Mandatory = $true)][string]$ZipPath,
+    [Parameter(Mandatory = $true)][string[]]$Required
+  )
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $bepRoot = Join-Path $Stage "BepInEx"
+  if (-not (Test-Path -LiteralPath $bepRoot -PathType Container)) {
+    throw "packaging assertion failed: the staged tree has no BepInEx folder: $bepRoot"
+  }
+  $stageFull = [System.IO.Path]::GetFullPath($Stage).TrimEnd('\', '/')
+  if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+  $level = [System.IO.Compression.CompressionLevel]::Optimal
+  $archive = [System.IO.Compression.ZipFile]::Open($ZipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+  try {
+    foreach ($file in @(Get-ChildItem -LiteralPath $bepRoot -Recurse -File | Sort-Object FullName)) {
+      $relative = $file.FullName.Substring($stageFull.Length + 1).Replace('\', '/')
+      [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $file.FullName, $relative, $level)
+    }
+  } finally {
+    $archive.Dispose()
+  }
+
+  $check = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+  try {
+    $names = @($check.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+    $outside = @($names | Where-Object { -not $_.StartsWith("BepInEx/", [System.StringComparison]::Ordinal) })
+    if ($outside.Count -gt 0) {
+      throw "packaging assertion failed: the game-folder zip has entries outside BepInEx/: $($outside -join ', ')"
+    }
+    Assert-NoInstallScripts -Names $names -Where $ZipPath
+    foreach ($entry in $Required) {
+      if ($names -notcontains $entry) {
+        throw "packaging assertion failed: the game-folder zip has no $entry"
+      }
+    }
+  } finally {
+    $check.Dispose()
+  }
+}
+
 function Get-ProgenitorVersion {
   <#
     The build version, computed by the same MSBuild target every project build runs
@@ -262,11 +353,15 @@ $packRoot = Join-Path $repo "packaging"
 $tsRoot = Join-Path $packRoot "thunderstore"
 $outDir = Join-Path $packRoot "out"
 $stage = Join-Path $outDir "_stage"
-$zipPath = Join-Path $outDir ("Progenitor-" + $version + ".zip")
+# Two release assets from one staged tree. Progenitor-<version>.zip is the manual install (the one players download from
+# the release page); Progenitor-<version>-thunderstore.zip is the package uploaded to Thunderstore.
+$zipPath = Join-Path $outDir ("Progenitor-" + $version + "-thunderstore.zip")
+$manualZipPath = Join-Path $outDir ("Progenitor-" + $version + ".zip")
 
 Assert-NotForbidden $outDir
 Assert-NotForbidden $stage
 Assert-NotForbidden $zipPath
+Assert-NotForbidden $manualZipPath
 
 foreach ($required in @("manifest.json", "README.md", "CHANGELOG.md")) {
   $p = Join-Path $tsRoot $required
@@ -379,6 +474,7 @@ if (Test-Path -LiteralPath $zipPath) {
 # Assert the staged tree before it is sealed into a zip.
 Assert-NoDevPayload -Root $stage -DevExpected ([bool]$IncludeDev)
 Assert-NoDeveloperArtefacts -Root $stage
+Assert-NoInstallScripts -Names @(Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object { $_.FullName }) -Where "the staged tree"
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $compression = [System.IO.Compression.CompressionLevel]::Optimal
@@ -411,9 +507,16 @@ try {
   if ($junk.Count -gt 0) {
     throw "packaging assertion failed: $zipPath contains developer-only artifacts: $(($junk | ForEach-Object { $_.FullName }) -join ', ')"
   }
+  Assert-NoInstallScripts -Names @($zip.Entries | ForEach-Object { $_.FullName }) -Where $zipPath
 } finally {
   $zip.Dispose()
 }
+
+# The manual-install zip (one copy into the game folder): the same staged BepInEx/ tree, already asserted above, and
+# nothing else at its root. The Thunderstore zip stays as it is: Thunderstore needs manifest.json, README.md and
+# icon.png at the root, which a player extracting into the game folder should not get.
+$requiredEntries = @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll")
+New-GameFolderZip -Stage $stage -ZipPath $manualZipPath -Required $requiredEntries
 
 Remove-Item -LiteralPath $stage -Recurse -Force
 
@@ -435,7 +538,7 @@ $sums.Add("# '<zip>!<path>' rows are the files inside that zip. Any row below --
 $sums.Add("# can be pasted as-is into BepInEx/config/progenitor-allow.txt to allowlist that file")
 $sums.Add("# for the reload folder or Core; the name is matched on its leaf.")
 $sums.Add("# See docs/modules.md, Hot reload.")
-foreach ($z in @(Get-Item -LiteralPath $zipPath)) {
+foreach ($z in @(Get-Item -LiteralPath $zipPath, $manualZipPath)) {
   $sums.Add("")
   $sums.Add((Format-SumsRow -Hash (Get-FileHash -LiteralPath $z.FullName -Algorithm SHA256).Hash -Name $z.Name))
   $archive = [System.IO.Compression.ZipFile]::OpenRead($z.FullName)
@@ -458,6 +561,7 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllLines($sumsPath, $sums, $utf8NoBom)
 
 Write-Host "wrote $zipPath"
+Write-Host "wrote $manualZipPath (manual install: extract into the folder that holds VRising.exe or VRisingServer.exe)"
 Write-Host "wrote $sumsPath (zip + every zip entry, sha256)"
 if ($IncludeDev) {
   Write-Host "included BepInEx/progenitor-reload/Progenitor.Dev.dll (-IncludeDev)"
