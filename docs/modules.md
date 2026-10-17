@@ -3113,9 +3113,11 @@ through the `PostUpdateBarrier` command buffer. That buffer plays back after `Up
 `BeforeSerializeBarrierGroup`, whose `SerializeAndSendServerEventsSystem` sends every event entity
 and destroys it.
 
-How it works. A `SystemHooks` Before hook on `SerializeAndSendServerEventsSystem` (only while a
-filter is registered) finds the servant event entities with a `SendEventToUser`, maps the index to
-the connected user, reads `Success` raw at its declared offset (`Returned` when set, else `Killed`),
+How it works. Core registers a `SystemHooks` Before hook on `SerializeAndSendServerEventsSystem`
+when it installs. The hook returns at once unless a filter is registered and one of the two systems
+that raise these events (`ServantMissionUpdateSystem`, `ServantMissionActionSystem`) ran this frame;
+Progenitor's After hooks on those systems set that flag. Then it finds the servant event entities
+with a `SendEventToUser` (two queries, cached per world), maps the index to the connected user, reads `Success` raw at its declared offset (`Returned` when set, else `Killed`),
 asks the filters, and destroys the entities they drop. Each recipient has its own entity, so a drop
 affects that user only and nothing is sent again. Progenitor's own started notice is one entity with
 a user mask; `Send` leaves dropped users out of the mask instead. A hunt that finished while the
@@ -3127,7 +3129,8 @@ with or without a filter.
 Rules: filters of every plugin combine with OR (the first true wins); a filter that throws keeps the
 line and is logged once. Only the line goes; the hunt, its loot and `ServantsReturned` are unchanged.
 Server only (the client throws); it may be registered before the world loads; the handle is
-tracked, so unload or a Core swap removes it. A dropped line is not shown later, and a user who is
+tracked, so unload or a Core swap removes it. If the hook failed to install, registration still
+succeeds but logs a warning, and `NoticeFilterActive` reads false. A dropped line is not shown later, and a user who is
 not connected when the line is raised is never asked.
 
 ### Limits and open questions

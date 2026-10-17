@@ -184,10 +184,20 @@ public sealed class PluginServants
         _ctx.EnsureAttached();
         if (!Plugin.IsServerProcess || !ServantRuntime.Installed)
             throw new InvalidOperationException("ctx.Servants.SuppressGameNotices runs on the server side only; the hunt notices are raised by the server.");
+        if (!ServantRuntime.NoticeHookInstalled)
+            Plugin.Logger?.LogWarning("ctx.Servants.SuppressGameNotices: the notice hook is not installed (see the Core install log); "
+                + _ctx.Guid + " is registered, but the game's hunt lines are sent unfiltered. Check NoticeFilterActive.");
         var handle = ServantRuntime.Notices.Register(suppress, _ctx.Guid);
         _ctx.Track(handle);
         return handle;
     }
+
+    /// <summary>
+    /// True when the hook behind <see cref="SuppressGameNotices"/> is installed in this server
+    /// process, so registered filters take effect. False on the client, and when the hook failed to
+    /// install (registration still succeeds, with a warning).
+    /// </summary>
+    public bool NoticeFilterActive => Plugin.IsServerProcess && ServantRuntime.Installed && ServantRuntime.NoticeHookInstalled;
 
     /// <summary>The throne list hook: who registered and what it did. Server only.</summary>
     public ServantListStatus ListStatus

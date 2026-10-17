@@ -851,6 +851,7 @@ internal static unsafe partial class ServantRuntime
 
     private static void AfterUpdate(SystemHookContext hook)
     {
+        MarkNoticesPending(); // the return raises its per-servant notices in this update
         // First and always: undo every temporary write of the success cap.
         try { AfterUpdateCaps(hook); }
         catch (Exception e) { Plugin.Logger?.LogError("servants: the after-update restore threw; the guards retry it: " + e.Message); }

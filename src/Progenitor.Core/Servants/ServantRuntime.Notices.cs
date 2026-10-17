@@ -4,6 +4,8 @@ using ProjectM.Network;
 using Progenitor.Ai;
 using Progenitor.Ecs;
 using Progenitor.Hooks;
+using ProjectM.Shared.Systems;
+using Unity.Collections;
 using Unity.Entities;
 
 namespace Progenitor.Servants;
@@ -21,7 +23,10 @@ namespace Progenitor.Servants;
 /// <c>PostUpdateBarrier</c> command buffer. That buffer plays back after <c>UpdateGroup</c> and
 /// before <c>BeforeSerializeBarrierGroup</c>, whose <c>SerializeAndSendServerEventsSystem</c> sends
 /// every event entity and destroys it. So a Before hook on that system sees each recipient's own
-/// event and destroying it drops the line for that user only; nothing has to be sent again.</para>
+/// event and destroying it drops the line for that user only; nothing has to be sent again.
+/// The hook is registered at Core install and returns at once unless a filter is registered and
+/// one of the two servant systems ran this frame (their After hooks set the flag); the event
+/// queries are cached per world.</para>
 ///
 /// <para>Progenitor's own "hunt started" notice is one entity with a user mask; it is filtered where
 /// it is built (<see cref="AnnounceStarted"/>), so this hook reads single-recipient events only.</para>
@@ -30,32 +35,56 @@ internal static unsafe partial class ServantRuntime
 {
     internal static readonly ServantNoticeFilters<Entity> Notices = new();
 
-    private static IDisposable? _sendBefore;
+    private static IDisposable? _sendBefore, _actAfter;
+
+    // Set after a frame's update or action system ran (the only raisers of these events) while a
+    // filter is registered; the send hook scans only then, and clears it.
+    private static bool _noticesPending;
+
+    private static readonly WorldBoundQuery FinishedQuery = new("servants: finished notices");
+    private static readonly WorldBoundQuery StartedQuery = new("servants: started notices");
+
+    /// <summary>True when the send hook is in place (Core install); false means filters cannot act.</summary>
+    internal static bool NoticeHookInstalled => _sendBefore != null;
 
     private static void InstallNotices()
     {
         Notices.Log = line => Plugin.Logger?.LogInfo(line);
+        _actAfter = SystemHooks.After<ServantMissionActionSystem>(_ => MarkNoticesPending());
         _sendBefore = SystemHooks.Before<SerializeAndSendServerEventsSystem>(BeforeServerSend);
     }
 
     private static void UninstallNotices()
     {
         try { _sendBefore?.Dispose(); } catch { }
-        _sendBefore = null;
+        try { _actAfter?.Dispose(); } catch { }
+        _sendBefore = _actAfter = null;
+        _noticesPending = false;
+        FinishedQuery.Release();
+        StartedQuery.Release();
         Notices.Clear();
         Notices.Log = null;
     }
 
+    /// <summary>A servant system that can raise hunt notices ran this frame (called from its After hooks).</summary>
+    internal static void MarkNoticesPending()
+    {
+        if (Notices.Any) _noticesPending = true;
+    }
+
     private static void BeforeServerSend(SystemHookContext hook)
     {
+        if (!_noticesPending) return;
+        _noticesPending = false;
         if (!Notices.Any) return;
-        var em = hook.World.EntityManager;
+        var world = hook.World;
+        var em = world.EntityManager;
         Dictionary<int, Entity>? users = null;
         List<Entity>? drop = null;
         try
         {
-            ScanNotices(em, finished: true, ref users, ref drop);
-            ScanNotices(em, finished: false, ref users, ref drop);
+            ScanNotices(world, em, finished: true, ref users, ref drop);
+            ScanNotices(world, em, finished: false, ref users, ref drop);
         }
         catch (Exception e)
         {
@@ -80,15 +109,26 @@ internal static unsafe partial class ServantRuntime
         if (dropped > 0) Plugin.Logger?.LogInfo("servants: dropped " + dropped + " game hunt notice(s) by filter");
     }
 
-    private static void ScanNotices(EntityManager em, bool finished, ref Dictionary<int, Entity>? users, ref List<Entity>? drop)
+    private static void ScanNotices(World world, EntityManager em, bool finished, ref Dictionary<int, Entity>? users, ref List<Entity>? drop)
     {
-        var events = finished
-            ? Query.Entities(em, includeDisabled: false, includeSystems: false,
-                ComponentIndex.Of<ServantMissionFinishedEvent>(ComponentType.AccessMode.ReadOnly),
-                ComponentIndex.Of<SendEventToUser>(ComponentType.AccessMode.ReadOnly))
-            : Query.Entities(em, includeDisabled: false, includeSystems: false,
-                ComponentIndex.Of<ServantMissionStartedEvent>(ComponentType.AccessMode.ReadOnly),
+        var cache = finished ? FinishedQuery : StartedQuery;
+        if (!cache.TryGet(world, out var query))
+        {
+            query = Query.Build(em, includeDisabled: false, includeSystems: false,
+                finished
+                    ? ComponentIndex.Of<ServantMissionFinishedEvent>(ComponentType.AccessMode.ReadOnly)
+                    : ComponentIndex.Of<ServantMissionStartedEvent>(ComponentType.AccessMode.ReadOnly),
                 ComponentIndex.Of<SendEventToUser>(ComponentType.AccessMode.ReadOnly));
+            cache.Store(world, query);
+        }
+        if (query.IsEmptyIgnoreFilter) return;
+        var events = new List<Entity>();
+        var array = query.ToEntityArray(Allocator.Temp);
+        try
+        {
+            for (int i = 0; i < array.Length; i++) events.Add(array[i]);
+        }
+        finally { array.Dispose(); }
         if (events.Count == 0) return;
         users ??= ConnectedUsersByIndex(em);
         foreach (var ev in events)

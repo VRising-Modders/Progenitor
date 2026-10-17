@@ -153,6 +153,11 @@ public class ServantNoticeTests
         Assert.Contains("ComponentIndex.Of<ServantMissionFinishedEvent>", notices);
         Assert.Contains("ComponentIndex.Of<ServantMissionStartedEvent>", notices);
         Assert.Contains("Notices.ShouldSuppress(user, kind)", notices);
+        // The per-frame scan is gated on the raising systems' After hooks and uses cached queries.
+        Assert.Contains("if (!_noticesPending) return;", notices);
+        Assert.Contains("SystemHooks.After<ServantMissionActionSystem>(_ => MarkNoticesPending())", notices);
+        Assert.Contains("query.IsEmptyIgnoreFilter", notices);
+        Assert.Contains("static readonly WorldBoundQuery FinishedQuery", notices);
 
         string chance = SourcePin.ReadFile("src", "Progenitor.Core", "Servants", "ServantRuntime.Chance.cs");
         Assert.Contains("Notices.ShouldSuppress(u, ServantNoticeKind.Started)", chance);
@@ -160,8 +165,11 @@ public class ServantNoticeTests
         string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Servants", "ServantRuntime.cs");
         Assert.Contains("InstallNotices();", runtime);
         Assert.Contains("UninstallNotices();", runtime);
+        Assert.Contains("MarkNoticesPending(); // the return raises", runtime);
 
         string api = SourcePin.ReadFile("src", "Progenitor.Core", "Servants", "PluginServants.cs");
         Assert.Contains("_ctx.Track(handle);", api);
+        Assert.Contains("if (!ServantRuntime.NoticeHookInstalled)", api);
+        Assert.Contains("public bool NoticeFilterActive", api);
     }
 }
