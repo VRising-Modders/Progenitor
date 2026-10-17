@@ -103,6 +103,9 @@ internal static class ChatWindow
     /// <summary>CHAT3: the latest whisper partner, for <c>/r</c>.</summary>
     private static readonly ChatWhisperMemory Whispers = new();
 
+    /// <summary>CHAT13: the latest whisper partner (<c>/r</c>'s), for a whisper tab's <c>/w partner </c> line; or empty.</summary>
+    internal static string WhisperPartner => Whispers.Partner;
+
     /// <summary>CHAT4: text waiting to be put in the chat input once the chat has focus (<see cref="InsertIntoInput"/>).</summary>
     private static string? _pendingInsert;
     private static int _pendingInsertFrames;
@@ -374,6 +377,7 @@ internal static class ChatWindow
         _bindingsFrame = int.MinValue;
         Completer.Reset();
         Whispers.Reset();
+        ChatTabs.ForgetInput();
         _pendingInsert = null;
         LongParts.Clear();
         RestoreInput();
@@ -629,6 +633,8 @@ internal static class ChatWindow
     private static void UpdateCommands(ClientChatSystem system, HUDChatWindow window)
     {
         _modeBefore = -1;
+        // CHAT13: the shown tab's channel, the player's channel choices, and the whisper tab's line.
+        ChatTabs.UpdateInput(system, window);
         ApplyPendingInsert(window);
         ColorInput(system, window);
         bool reply = ReplyShortcut, completion = NameCompletion;
@@ -691,7 +697,7 @@ internal static class ChatWindow
         {
             string now = window.ChatInputField?.text ?? "";
             SendLocAfterGame(window, _focusedText, now);
-            if (now.Length == 0 && _focusedText.Trim().Length > 0)
+            if (now.Length == 0 && _focusedText.Trim().Length > 0 && !ChatTabs.IsPrefillOnly(_focusedText))
             {
                 EnsureRecallLoaded();
                 Recall.Push(_focusedText);

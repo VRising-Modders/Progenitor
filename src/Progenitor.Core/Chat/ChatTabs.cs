@@ -20,7 +20,7 @@ namespace Progenitor.Chat;
 /// top bar, through <see cref="ChatTabArt"/>): the font, the soft highlight and the underline. A tab at rest is gray;
 /// under the pointer it brightens with a fainter highlight and underline; the shown tab is white with the full
 /// highlight and underline. A tab with unread lines carries the game's new-unlock star. Then <b>+</b> and the menu
-/// glyph, which hover the same way. Left-click a tab to show it; typing in a single-channel tab sends to that channel.
+/// glyph, which hover the same way. Left-click a tab to show it; its own send channel and unsent line come with it (CHAT13, <see cref="ChatTabInput"/>).
 /// Press and drag a tab sideways to move it (<see cref="ChatTabRow"/>); the order is saved in <c>[Chat] Tabs</c>.
 /// Right-click a tab, or click the menu glyph, for the quick menu.</item>
 /// <item><b>Quick menu</b> (framework dialogs): Edit this tab, Move left / right (reordering without a drag), Close this tab, New tab, Colors
@@ -863,7 +863,69 @@ internal static class ChatTabs
             ["drag"] = _drag.ToString(),
             ["saved"] = TabsSetting?.Value ?? "",
             ["items"] = items,
+            ["tabs"] = DescribeTabs(),
+            ["input"] = DescribeInput(),
         };
+    }
+
+    /// <summary>CHAT13, for the bridge: each tab's name, scope, remembered and effective send channel, and draft.</summary>
+    private static List<object?> DescribeTabs()
+    {
+        var list = new List<object?>();
+        string partner = ChatWindow.WhisperPartner;
+        for (int i = 0; i < Set.Tabs.Count; i++)
+        {
+            var t = Set.Tabs[i];
+            list.Add(new Dictionary<string, object?>
+            {
+                ["index"] = i,
+                ["name"] = t.Name,
+                ["scope"] = (int)t.Scope,
+                ["sendTo"] = t.SendTo is ChatSend s ? ChatTab.SendWord(s) : "",
+                ["sendNow"] = ChatTabInput.EffectiveFor(t, partner) is ChatSend n ? ChatTab.SendWord(n) : "keep",
+                ["draft"] = t.Draft,
+                ["holdsLine"] = ReferenceEquals(t, _lineOwner),
+            });
+        }
+
+        return list;
+    }
+
+    /// <summary>CHAT13, for the bridge: the input line, the game's channel, focus and the whisper partner.</summary>
+    private static Dictionary<string, object?> DescribeInput()
+    {
+        var d = new Dictionary<string, object?> { ["partner"] = ChatWindow.WhisperPartner };
+        try
+        {
+            var system = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>();
+            var window = system?._ChatWindow;
+            if (system == null || window == null || window.Pointer == IntPtr.Zero) return d;
+            d["mode"] = (int)system._DefaultMode;
+            d["modeName"] = system._DefaultMode.ToString();
+            d["whisperTarget"] = system._WhisperUserName ?? "";
+            d["focused"] = window.IsChatFocused;
+            d["text"] = window.ChatInputField?.text ?? "";
+        }
+        catch (Exception e) { d["error"] = e.Message; }
+        return d;
+    }
+
+    /// <summary>CHAT13, for the bridge's <c>chat_tabs select</c>: show a tab as a click does. False when not loaded or out of range.</summary>
+    internal static bool SelectTab(int index)
+    {
+        if (!EnsureLoaded() || index < 0 || index >= Set.Tabs.Count) return false;
+        Select(index);
+        return true;
+    }
+
+    /// <summary>CHAT13, for the bridge's <c>chat_tabs line</c>: put text in the input line, as typing would leave it.</summary>
+    internal static bool SetInputLine(string text)
+    {
+        var field = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>()?._ChatWindow?.ChatInputField;
+        if (field == null || field.Pointer == IntPtr.Zero) return false;
+        field.text = text ?? "";
+        field.MoveTextEnd(false);
+        return true;
     }
 
     private static float CanvasScale()
@@ -974,17 +1036,93 @@ internal static class ChatTabs
         Set.Unread[index] = false;
         ChatView.ActiveTab = Set.Tabs[index];
         if (ActiveSetting != null) ActiveSetting.Value = index;
-        int channel = Set.Tabs[index].SendChannel();
-        if (channel < 0) return;
         try
         {
             var world = Worlds.Client;
             var system = world?.GetExistingSystemManaged<ClientChatSystem>();
-            if (system == null) return;
-            system._DefaultMode = (ChatMessageType)channel;
-            system._ChatWindow?.SetPlaceholderMode((ChatMessageType)channel, system._WhisperUserName ?? "");
+            if (system == null || system.Pointer == IntPtr.Zero) return;
+            ApplyInput(system, Set.Tabs[index]);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Chat: switching the send channel threw: " + e.Message); }
+    }
+
+    // ---- CHAT13: the input line per tab --------------------------------------------------------------------
+
+    private static readonly ChatTabInputTracker InputTracker = new();
+
+    /// <summary>The tab whose line is in the input field (null until the first tab is applied in a world).</summary>
+    private static ChatTab? _lineOwner;
+
+    /// <summary>
+    /// Show <paramref name="tab"/>'s line: the leaving tab keeps its draft and the arriving tab's comes back
+    /// (<see cref="ChatTabInput.SwapDraft"/>), and the game's channel becomes the tab's (<see cref="ChatTabInput.ModeFor"/>).
+    /// </summary>
+    private static void ApplyInput(ClientChatSystem system, ChatTab tab)
+    {
+        string partner = ChatWindow.WhisperPartner;
+        var window = system._ChatWindow;
+        var field = window != null && window.Pointer != IntPtr.Zero ? window.ChatInputField : null;
+        if (field != null && field.Pointer != IntPtr.Zero && !ReferenceEquals(_lineOwner, tab))
+        {
+            string current = field.text ?? "";
+            string? leavingPrefill = _lineOwner != null ? ChatTabInput.PrefillFor(_lineOwner, partner) : null;
+            string next = ChatTabInput.SwapDraft(_lineOwner, tab, current, leavingPrefill);
+            if (!string.Equals(next, current, StringComparison.Ordinal))
+            {
+                field.text = next;
+                field.MoveTextEnd(false);
+            }
+
+            InputTracker.TabChanged();
+            _lineOwner = tab;
+        }
+
+        int channel = ChatTabInput.ModeFor(tab, partner);
+        if (channel < 0) return;
+        system._DefaultMode = (ChatMessageType)channel;
+        window?.SetPlaceholderMode((ChatMessageType)channel, system._WhisperUserName ?? "");
+        InputTracker.Applied(channel);
+    }
+
+    /// <summary>
+    /// CHAT13, each frame from the chat update: the first frame in a world shows the shown tab's line and channel; a
+    /// channel the player picks while typing becomes the shown tab's (saved); an empty line opened on a whisper tab
+    /// gets <c>/w partner </c>.
+    /// </summary>
+    internal static void UpdateInput(ClientChatSystem system, HUDChatWindow window)
+    {
+        if (!EnsureLoaded() || Set.Active < 0 || Set.Active >= Set.Tabs.Count) return;
+        var tab = Set.Tabs[Set.Active];
+        var field = window.ChatInputField;
+        if (field == null || field.Pointer == IntPtr.Zero) return;
+        if (_lineOwner == null)
+        {
+            _lineOwner = tab;
+            ApplyInput(system, tab);
+        }
+
+        bool focused = window.IsChatFocused;
+        if (InputTracker.Observe(tab, (int)system._DefaultMode, focused) && TabsSetting != null)
+            TabsSetting.Value = ChatTab.Save(Set.Tabs);
+        string? line = InputTracker.Prefill(tab, ChatWindow.WhisperPartner, focused, field.text);
+        if (line != null)
+        {
+            field.text = line;
+            field.MoveTextEnd(false);
+        }
+    }
+
+    /// <summary>Whether <paramref name="text"/> is only the shown tab's whisper prefill (never recalled as sent).</summary>
+    internal static bool IsPrefillOnly(string? text) =>
+        Set.Active >= 0 && Set.Active < Set.Tabs.Count
+        && ChatTabInput.IsOnlyPrefill(text, ChatTabInput.PrefillFor(Set.Tabs[Set.Active], ChatWindow.WhisperPartner));
+
+    /// <summary>A new world (or Core unload): the next frame applies the shown tab again; drafts belong to the old server.</summary>
+    internal static void ForgetInput()
+    {
+        _lineOwner = null;
+        InputTracker.Reset();
+        foreach (var t in Set.Tabs) t.Draft = "";
     }
 
     private static void SaveTabs()

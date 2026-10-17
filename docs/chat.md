@@ -189,7 +189,7 @@ Status: source-checked, built against the installed game, and game-free tested (
 | Feature | How it behaves | Live (2026-10-07) |
 |---|---|---|
 | Lines | Each line keeps the game's channel tag and colored name; the message is redrawn with every character escaped, so players still cannot add formatting. | Verified: lines match the game's look. |
-| Tabs | A row above the log in the look of the game's menu tabs ([tab row](#tab-row-look-and-reordering-chat12)): **All**, the player's tabs (default **Clan**), **+** and **≡**. Left-click a tab to show it (single-channel tabs also switch the send channel); drag a tab sideways to move it; right-click a tab or click **≡** for the quick menu. A tab with unread lines gets the game's new-unlock star. Six tabs at most. | Verified (CHAT6 text row): clicking **Clan** and **All** switched the view. The CHAT12 row is not live-verified. |
+| Tabs | A row above the log in the look of the game's menu tabs ([tab row](#tab-row-look-and-reordering-chat12)): **All**, the player's tabs (default **Clan**), **+** and **≡**. Left-click a tab to show it (its own send channel and unsent line come with it: [input line per tab](#input-line-per-tab-chat13)); drag a tab sideways to move it; right-click a tab or click **≡** for the quick menu. A tab with unread lines gets the game's new-unlock star. Six tabs at most. | Verified (CHAT6 text row): clicking **Clan** and **All** switched the view. The CHAT12 row is not live-verified. |
 | Quick menu | Edit this tab (one dialog: the name and a "Show messages from" check box per channel, Save and Cancel; [tab editor](#tab-editor-formdialog1)), Move left, Move right (CHAT12), Close this tab, New tab (presets Whispers, System and mods, Mentions, Clan, Local, or Custom), Colors (a panel directly above the chat box, design approved 2026-10-07: one row per channel, Global, Local, Clan, Whispers, System and mods, each with a sample line in its color now and swatches, the game's color then ten colors; a click recolors the sample, the chat and the line you type in that channel at once and is saved at once; the chosen swatch is outlined and the hovered one is named in the title; Use the game's colors resets all; Done or a click outside closes it; the chat stays shown while it is open. `[Chat] Colors`, e.g. `Global=#7AB8F5;Clan=#8ED86E`. Earlier builds used two dialogs, which never opened, then a line that cycled colors on click, which was rejected), Background opacity, Lock / Unlock position, Reset position and size, All chat settings (opens the Mods menu through the game's menu, waits for it, then Progenitor's page at Chat; opening it directly left the player on the game's spellbook page, user report 2026-10-07). | Not checked. |
 | Move and resize | Drag the tab row (not a tab, + or ≡) to move the box, the ◥ corner (top right) to resize it, up to the top and right edges of the screen; a move keeps the whole box, from the tab line to the game's channel hint under the input, on screen; Lock stops both. Resizing changes the messages area (the game's fixed 512 x 212 `TextArea`) and grows the window by the same amounts, so the input line keeps its width. Stored in `[Chat] OffsetX`, `OffsetY`, and `Width`, `Height` (the messages area; 0 is the game's size). | First build resized only the window (user report 2026-10-07); fixed, not checked live. |
 | History | Each server's log comes back when you rejoin, dimmed, with `— Joined <server> · 13:23 —` and `— Left the server · 13:28 —` dividers. | Verified: 8 lines restored after a rejoin, both dividers drawn. |
@@ -238,6 +238,38 @@ Status: source-checked, built against the installed game, and game-free tested (
 5. `mouse drag` from a tab's center to the right past the next tab: `saved` and the item order change, the shown tab stays shown; mid-drag captures show the tab following the pointer and the marker. A `mouse click` on a tab selects it without moving it.
 6. `chat_tabs move {from,to}` and the quick menu's Move left / right do the same; rejoin: the order is kept and `art` is found again.
 7. Before the chat has updated once in a session (`loaded false`), `chat_tabs move` replies `moved false` and `[Chat] Tabs` is unchanged.
+
+### Input line per tab (CHAT13)
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatTabInputTests`). **Not live-verified.**
+
+A tab is a view with its own send channel and its own unsent line, as in WoW's per-window input (IM style), City of Heroes' per-tab default channel, and Discord and Slack, where the draft follows the conversation. Players of base games without it (ESO) add it with addons. Design decided 2026-10-17.
+
+| Tab | Channel when first shown | Opening the input | Picking a channel while typing (`/g`, `/l`, `/c`, the game's Tab cycle) |
+|---|---|---|---|
+| One channel (Global, Local or Clan) | That channel | The tab's channel | Becomes the tab's channel |
+| Several channels | The smallest group it shows: Clan, then Local, then Global (never the whole server when a smaller group is shown) | The tab's channel | Becomes the tab's channel |
+| Whispers, with no Global, Local or Clan | Whispers the latest partner (the one `/r` answers) | An empty line gets `/w <partner> `, once per opening; with no partner yet, the channel in use | Becomes the tab's channel; a whisper brings back the whisper default |
+| Mentions only, System and mods only, All | The channel in use (unchanged) | The channel in use | Becomes the tab's channel (All too); a whisper is not remembered |
+
+- **Whispers are never sticky** on another tab: a `/w name` line from the Clan tab is a one-off, and the tab keeps Clan.
+- **Unsent text** stays with the tab it was typed in and comes back when the tab is shown again; a bare `/w <partner> ` line is not kept. Drafts last for the session only and are dropped on leaving the world: a half-typed game chat line is stale by the next session, and Up already recalls what was sent.
+- **Editing a tab's channels** (Edit this tab) forgets its remembered channel, so it follows the new channels.
+- The channel shown on the empty input line and the line's color are the game's for the channel in use, so they follow the tab.
+
+**How it works** (`Chat/ChatTabInput.cs`, `ChatTabs.ApplyInput`, `ChatTabs.UpdateInput`). Showing a tab sets the game's sticky channel (`ClientChatSystem._DefaultMode`) and its placeholder, as the earlier one-channel rule did. Each chat update, a change of that channel while the input is focused is the player's choice and is stored on the shown tab; a change while it is closed (a world load) is not. A whisper tab's line is a prefill, the same text the right-click **Whisper** puts in the input, so the game's own whisper parsing, its "No vampire with that name found" and its whisper mode apply unchanged.
+
+**Saved.** `[Chat] Tabs` gains an optional marker entry after a tab: `>` and the channel's word (`global`, `local`, `clan`, `system`; `whisper` is read but never written), only when the remembered channel differs from the tab's default. All is then written even when first: `All;>local;Clan=4;Trade=1;>global`. Tab names cannot contain `>`. Builds before CHAT13 skip the marker (it has no `=`) and load the same tabs.
+
+**Live check (not run).** Steam client in a world, chat shown, a second player online to whisper with, and the Dev bridge (`chat_tabs read`, `select {index}`, `line {text}`; `key` to open the input):
+1. Tabs All, Clan, a Global+Clan custom tab, Whispers and Mentions. `chat_tabs read`: `tabs[].sendNow` is `keep`, `clan`, `clan`, `keep` (no partner yet) and `keep`.
+2. Select Clan: `input.mode` is 2 and the placeholder says clan. Select Mentions: the mode stays 2.
+3. On the custom tab, open the input, type `/g`: `tabs[2].sendTo` is `global` and `saved` has `>global`. Select Clan and back: the mode follows (2, then 0). Rejoin: still `global`.
+4. Receive a whisper from the second player, select Whispers, open the input: the line is `/w <partner> `; send it with a message; the whisper arrives. Close and reopen: the prefill comes back. On the Clan tab, `/w <partner> hi` sends and the tab stays on Clan.
+5. Type `half a line` on Clan (`line`), select All: the input is empty and `tabs[1].draft` is `half a line`; select Clan: the text is back. Escape on a bare prefill adds nothing to Up recall.
+6. Edit the custom tab's channels: its `sendTo` is empty again.
+
+**Edit dialog follow-up.** The one-step Edit tab dialog (built separately) may add a **Send to** choice per tab: the tab's channels that can be typed to plus **Keep the channel in use**, set through `ChatTab.SendTo` (null for the default) after the scope, since setting `Scope` clears it.
 
 **Another chat mod.** Progenitor's chat view steps aside for a mod that replaces the game's chat window; visibility, the click guard and the chat commands still work on the window the game has. Progenitor names no chat mod itself. Two signals turn the view off, either is enough (`ChatReplacement` in `Chat/ChatWindowLogic.cs`, unit-tested):
 

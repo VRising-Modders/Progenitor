@@ -16,6 +16,8 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{"action":"read"}</c></item>
 /// <item><c>{"action":"move","from":2,"to":0}</c></item>
 /// <item><c>{"action":"edit","tab":1}</c> (FORMDIALOG1: the tab editor; <c>-1</c>: a new custom tab)</item>
+/// <item><c>{"action":"select","index":1}</c>: CHAT13, show a tab as a click does.</item>
+/// <item><c>{"action":"line","text":"hello"}</c>: CHAT13, put text in the chat input line.</item>
 /// </list>
 /// </summary>
 internal static class ChatTabsOps
@@ -49,8 +51,26 @@ internal static class ChatTabsOps
                 var reply = Invoke(type, "OpenEditorForBridge", tab) as Dictionary<string, object?> ?? new Dictionary<string, object?>();
                 return new Dictionary<string, object?> { ["opened"] = true, ["dialog"] = reply };
             }
+            case "select":
+            {
+                // CHAT13: show a tab as a click does (its draft and send channel come with it).
+                int index = Int(args, "index") ?? throw new ArgumentException("args.index is required");
+                bool selected = Invoke(type, "SelectTab", index) is true;
+                var reply = Invoke(type, "Describe") as Dictionary<string, object?> ?? new Dictionary<string, object?>();
+                reply["selected"] = selected;
+                return reply;
+            }
+            case "line":
+            {
+                // CHAT13: put text in the chat input line, as typing leaves it.
+                string text = Str(args, "text") ?? throw new ArgumentException("args.text is required");
+                bool set = Invoke(type, "SetInputLine", text) is true;
+                var reply = Invoke(type, "Describe") as Dictionary<string, object?> ?? new Dictionary<string, object?>();
+                reply["set"] = set;
+                return reply;
+            }
             default:
-                throw new ArgumentException("args.action must be read, move or edit");
+                throw new ArgumentException("args.action must be read, move, edit, select or line");
         }
     }
 
