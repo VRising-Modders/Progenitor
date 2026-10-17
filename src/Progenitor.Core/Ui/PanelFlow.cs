@@ -63,7 +63,37 @@ internal readonly struct PanelSpot
         WindowWidths = null;
         WorkspaceOpen = false;
         Layer = 0;
+        Docks = null;
+        DockIndex = -1;
     }
+
+    private PanelSpot(in PanelSpot from, UiDockSpec[]? docks, int dockIndex, bool workspaceOpen)
+    {
+        Rank = from.Rank;
+        Count = from.Count;
+        WindowWidths = from.WindowWidths;
+        WorkspaceOpen = from.WorkspaceOpen || workspaceOpen;
+        Layer = from.Layer;
+        Docks = docks;
+        DockIndex = dockIndex;
+    }
+
+    /// <summary>
+    /// DOCK1: this spot with the shown docked panels (<paramref name="docks"/>, in slot order) the layout keeps clear of,
+    /// and, for a docked panel's own spot, its index among them (<paramref name="dockIndex"/>; -1 for every other panel).
+    /// <paramref name="workspaceOpen"/> says the Mods workspace is shown (a docked panel stays under its tab strip).
+    /// </summary>
+    internal PanelSpot WithDocks(UiDockSpec[]? docks, int dockIndex = -1, bool workspaceOpen = false) =>
+        new(this, docks != null && docks.Length > 0 ? docks : null, docks != null && dockIndex >= 0 && dockIndex < docks.Length ? dockIndex : -1, workspaceOpen);
+
+    /// <summary>DOCK1: every shown docked panel's dock, in slot order; null when none is docked.</summary>
+    internal UiDockSpec[]? Docks { get; }
+
+    /// <summary>DOCK1: this docked panel's index in <see cref="Docks"/>; -1 for a panel that is not docked.</summary>
+    internal int DockIndex { get; }
+
+    /// <summary>DOCK1: a docked panel's own spot.</summary>
+    internal bool IsDock => Docks != null && DockIndex >= 0;
 
     /// <summary>
     /// WINDOWS1: a standard window's spot: the <paramref name="rank"/>th of the <paramref name="windowWidths"/>.Length shown
@@ -78,6 +108,8 @@ internal readonly struct PanelSpot
         WindowWidths = windowWidths;
         WorkspaceOpen = workspaceOpen;
         Layer = layer >= 0 ? layer : rank;
+        Docks = null;
+        DockIndex = -1;
     }
 
     /// <summary>
@@ -328,6 +360,14 @@ internal static class PanelFlow
         float canvasHeight)
     {
         if (!spot.IsPlaced) return PanelOffset.Centre;
+
+        // DOCK1: with panels docked, the flow is laid out on the canvas they leave, and shifted onto it.
+        if (spot.Docks != null && !spot.IsDock)
+        {
+            var (areaWidth, shift) = UiDockLayout.FreeArea(spot.Docks, SaneCanvas(canvasWidth, FallbackCanvasWidth));
+            var inArea = Offset(spot.WithDocks(null), panelWidth, areaWidth, canvasHeight);
+            return new PanelOffset(inArea.X + shift, inArea.Y);
+        }
 
         float canvasW = SaneCanvas(canvasWidth, FallbackCanvasWidth);
         float canvasH = SaneCanvas(canvasHeight, PanelLayout.FallbackScreenHeight);

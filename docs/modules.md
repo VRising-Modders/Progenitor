@@ -5243,6 +5243,16 @@ A preview shows the player a distant spot (a storage room, say) without moving t
 
 **Holding a preview open.** A timed preview lasts at most 10 seconds. To keep one open (a "Keep open" button), call `Hold()` on both handles. That keeps the current orbit and rotation (nothing restarts) and removes the short timeout. A hold still has a cap of ten minutes from the last `Hold()` on both sides (`CameraPreview.MaxHoldSeconds`, `CameraObservation.MaxRenewSeconds`); calling `Hold()` again restarts it. On the server, `Renew(seconds)` sets the lease's deadline to at most ten minutes from now, for a mod that would rather send a heartbeat.
 
+**Framing offset (DOCK1; source-checked and game-free tested in `UiDockTests`, not live-verified).** `CameraPreviewOptions.ScreenOffset` puts the previewed point beside the center of the screen instead of on it, as a share of the screen's width right of center: 0.15 for a panel docked left ([Docked panels](ui.md#docked-panels-dock1)), a negative value for one docked right, at most 0.4 either way (out of range throws). The camera still orbits the point itself: only the framing moves. Each frame the orbit is anchored on the point moved sideways along the camera's right axis by `2 × offset × 6 m × tan(hfov / 2)`, from the game camera's current field of view and aspect, so the point stays at that place on screen at every yaw and the camera stays 6 m from its look-at line. `CameraPreview.SetScreenOffset(offset)` changes it on a running preview (the panel was docked or undocked). With no camera reading yet the point is framed at the center. The horizontal place is exact for the orbit's look-at height; the game's anchor height offset can move the point a little up or down, as it does with no offset.
+
+```csharp
+var controls = Ui.Panel("Object preview", ctx.Owner, ctx.Guid).GameWindow(640f).Dock(UiDock.Left, 24f);
+controls.Show();
+_preview = ctx.Camera.Preview(point, yawDegrees: 30, new CameraPreviewOptions { Hold = true, ScreenOffset = 0.15f });
+// The player closed the controls but kept looking: center the object again.
+_preview.SetScreenOffset(0f);
+```
+
 **Number each preview.** Both messages carry a sequence number the server hands out. Re-running a preview ends the old one on the client with `Replaced`, and that "ended" report reaches the server after the server already started the new lease. Without the number the server would end the new lease; with it, the stale report is ignored.
 
 ```csharp

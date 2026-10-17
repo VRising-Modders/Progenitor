@@ -903,6 +903,7 @@
          Job FUI21 renamed the file: the panels are tiled into columns and only cascade when they
          cannot all fit, so "cascade" was no longer the model it implements. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\PanelFlow.cs" Link="Linked\PanelFlow.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiDock.cs" Link="Linked\UiDock.cs" />
     <!-- Job FUI26 (R45 findings 2 and 22): the clone-then-build recovery for a settings editor
          control, and the sentence a panel prints when it reads back what ScrollRect actually did
          with its scrollbar. Both are game-free precisely so the branch that decides whether a

@@ -20,6 +20,9 @@ internal interface IGalleryHost
     /// <summary>Open (or close) the checklist window (<see cref="GalleryChecklist"/>); returns what happened.</summary>
     string ToggleChecklist() => "no checklist window here";
 
+    /// <summary>Open (or close) the docked panel (<see cref="GalleryDocked"/>); returns what happened.</summary>
+    string ToggleDocked() => "no docked panel here";
+
     /// <summary>Open the plugin's Mods page <paramref name="page"/>.</summary>
     void OpenPage(string page);
 
@@ -132,6 +135,9 @@ internal sealed class GalleryDemo
                 break;
             case "floating-panel":
                 Action(panel, tab, "Floating panel", api, () => { _host.OpenFloating(); Report("floating panel opened"); });
+                break;
+            case "docked-panel":
+                Action(panel, tab, "Docked panel", api, () => Report("docked panel = " + _host.ToggleDocked()));
                 break;
             case "mods-page":
                 Action(panel, tab, "Open All controls", api, () => { _host.OpenPage(ControlsDemo.PageId); Report("page " + ControlsDemo.PageId); });

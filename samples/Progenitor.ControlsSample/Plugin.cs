@@ -57,7 +57,10 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         // The checklist window: 300 synthetic rows with filters, sections, grayed rows and a preview stub.
         var checklist = new GalleryChecklist(() => UiApi.Panel(GalleryChecklist.Title, ctx.Owner, ctx.Guid), BuildingPrefab, log);
         ctx.Track(checklist);
-        var gallery = new GalleryHost(ctx, windows, window, dialog, hud, hub, checklist);
+        // The docked panel: a game window against a screen edge (UiPlacement.Dock); the other windows keep clear of it.
+        var docked = new GalleryDocked(() => UiApi.Panel(GalleryDocked.Title, ctx.Owner, ctx.Guid), log);
+        ctx.Track(docked);
+        var gallery = new GalleryHost(ctx, windows, window, dialog, hud, hub, checklist, docked);
         ctx.Menu.Register(Name, "Every Progenitor UI control, each wired to a log line and a status label.")
             .Page(GalleryDemo.PageId, panel => new GalleryDemo(log, gallery, hud).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
             .Page(ControlsDemo.PageId, panel => new ControlsDemo(log, dialog).Build(panel, ctx.Guid, ControlsDemo.OpenBindId))
@@ -170,10 +173,12 @@ internal sealed class GalleryHost : IGalleryHost
 
     private readonly GalleryHub _hub;
     private readonly GalleryChecklist _checklist;
+    private readonly GalleryDocked _docked;
 
     internal GalleryHost(PluginContext ctx, GalleryWindows windows, ControlsWindow floating, Action<string> dialog, ControlsHud hud, GalleryHub hub,
-        GalleryChecklist checklist)
+        GalleryChecklist checklist, GalleryDocked docked)
     {
+        _docked = docked;
         _hub = hub;
         _checklist = checklist;
         _ctx = ctx;
@@ -188,6 +193,8 @@ internal sealed class GalleryHost : IGalleryHost
     public string ToggleHub() => _hub.Toggle();
 
     public string ToggleChecklist() => _checklist.Toggle();
+
+    public string ToggleDocked() => _docked.Toggle();
 
     public void OpenFloating() => _floating.Open();
 

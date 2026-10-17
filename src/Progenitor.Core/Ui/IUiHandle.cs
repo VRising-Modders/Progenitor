@@ -506,12 +506,13 @@ public static class UiLook
     }
 
     /// <summary>Game-styled window with a requested width, capped to the available canvas.
-    /// Call before adding controls. Wider windows are centered.</summary>
+    /// Call before adding controls. Wider windows are centered, unless docked (<see cref="UiPlacement.Dock(IUiPanel, UiDock, float)"/>).</summary>
     public static IUiPanel GameWindow(this IUiPanel panel, float width)
     {
         panel.GameWindow();
         // A wider frame is centered by the runtime, never flowed beside the standard windows.
         if (panel is UiPanelHandle tagged && width > UnityUiRuntimeMetrics.PanelWidth) tagged.Flows = false;
+        if (panel is UiPanelHandle sized) sized.GameWindowWidth = float.IsNaN(width) || width <= UnityUiRuntimeMetrics.PanelWidth ? 0f : width;
         if (panel is UiPanelHandle host && !host.IsDisposed && host.Runtime is IRuntimePanel runtimePanel)
             Ui.CurrentRuntime().SetDialogWidth(runtimePanel, width);
         return panel;

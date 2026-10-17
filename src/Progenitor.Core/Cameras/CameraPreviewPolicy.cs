@@ -1,4 +1,5 @@
 using System;
+using Progenitor.Units;
 
 namespace Progenitor.Cameras;
 
@@ -77,6 +78,63 @@ public sealed class CameraPreviewOptions
 
     /// <summary>The target's compressed tile height for upstairs rooms, or -1 for none.</summary>
     public int CompressedHeight { get; set; } = -1;
+
+    /// <summary>
+    /// Where the previewed point sits on screen, as a share of the screen's width right of center: 0 (the default) is
+    /// dead center, 0.15 puts it 15% of the screen right of center (beside a panel docked left), a negative value left of
+    /// center. At most 0.4 either way. The camera still orbits the point itself: only the framing moves, so the point stays
+    /// at that place on screen while the camera turns. Change it on a running preview with <c>SetScreenOffset</c>.
+    /// </summary>
+    public float ScreenOffset { get; set; }
+}
+
+/// <summary>
+/// DOCK1: the camera preview's framing offset, game-free. The orbit camera looks at its anchor from
+/// <c>distance</c> meters along its view direction, so a point moved sideways along the camera's right axis by
+/// <c>s</c> projects <c>s / (distance * tan(hfov / 2))</c> of the half-screen right of center. The preview anchors the
+/// orbit on the point moved the other way by that <c>s</c>, recomputed from the current yaw every frame, so the
+/// camera circles the point itself at the offset place on screen.
+/// </summary>
+internal static class CameraFraming
+{
+    /// <summary>The largest offset a preview takes, as a share of the screen width either side of center.</summary>
+    internal const float MaxScreenOffset = 0.4f;
+
+    /// <summary>Whether <paramref name="offset"/> is a usable screen offset.</summary>
+    internal static bool IsValidOffset(float offset) => float.IsFinite(offset) && Math.Abs(offset) <= MaxScreenOffset;
+
+    /// <summary>
+    /// The sideways shift, in meters, that puts a point <paramref name="distance"/> meters in front of the camera
+    /// <paramref name="offset"/> of the screen's width right of center, for a camera with a vertical field of view of
+    /// <paramref name="verticalFovDegrees"/> on a screen <paramref name="aspect"/> (width over height) wide. 0 when the
+    /// camera reading is unusable.
+    /// </summary>
+    internal static float LateralShift(float offset, float distance, float verticalFovDegrees, float aspect)
+    {
+        if (!float.IsFinite(offset) || offset == 0f) return 0f;
+        if (!float.IsFinite(distance) || distance <= 0f) return 0f;
+        if (!float.IsFinite(verticalFovDegrees) || verticalFovDegrees <= 0f || verticalFovDegrees >= 179f) return 0f;
+        if (!float.IsFinite(aspect) || aspect <= 0f) return 0f;
+        double halfV = verticalFovDegrees * Math.PI / 360.0;
+        double tanHalfH = Math.Tan(halfV) * aspect;
+        // The screen spans -1..1 in view space across its width, so a share f of the width is 2f of the half-width.
+        return (float)(2.0 * Math.Clamp(offset, -MaxScreenOffset, MaxScreenOffset) * distance * tanHalfH);
+    }
+
+    /// <summary>
+    /// The orbit anchor that frames <paramref name="point"/> <paramref name="shift"/> meters right of center for a camera
+    /// at <paramref name="yawDegrees"/>: the point moved left along the camera's right axis. The game builds the view from
+    /// <c>quaternion.Euler(pitch, yaw, 0)</c>, so the right axis is (cos yaw, 0, -sin yaw) whatever the pitch.
+    /// </summary>
+    internal static UnitVec3 Anchor(UnitVec3 point, float yawDegrees, float shift)
+    {
+        if (shift == 0f || !float.IsFinite(shift) || !float.IsFinite(yawDegrees)) return point;
+        double yaw = yawDegrees * Math.PI / 180.0;
+        return new UnitVec3(
+            (float)(point.X - Math.Cos(yaw) * shift),
+            point.Y,
+            (float)(point.Z + Math.Sin(yaw) * shift));
+    }
 }
 
 /// <summary>Options for <c>ctx.Camera.Observe(user, target, options)</c>. The defaults are the original timed lease.</summary>

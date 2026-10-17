@@ -523,6 +523,12 @@ internal interface IUiRuntime
     /// <summary>Place a transient panel at the top, keeping the center of the scene visible.</summary>
     void TopPanel(IRuntimePanel panel, bool top) { }
 
+    /// <summary>
+    /// DOCK1: dock <paramref name="panel"/> to a screen edge (<paramref name="dock"/>), or undock it (null), and place it
+    /// again. The runtime keeps a docked panel in place across resolution changes. No-op on a runtime without Unity panels.
+    /// </summary>
+    void DockPanel(IRuntimePanel panel, UiDockSpec? dock) { }
+
     void Show(IRuntimePanel panel);
 
     void Hide(IRuntimePanel panel);
