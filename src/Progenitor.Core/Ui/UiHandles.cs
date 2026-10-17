@@ -2135,6 +2135,8 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
                 CellRowSkin.GameTabStrip => "game-tab-strip",
                 _ => "category-heading",
             };
+        // The strip's baseline: a line this tall along the row's bottom edge, the tabs' bottoms on it.
+        if (_spec.Skin == CellRowSkin.GameTabStrip) row["baseline"] = UiTabsLayout.BaselineHeight;
         if (_header)
         {
             row["sortedKey"] = _sortedKey;

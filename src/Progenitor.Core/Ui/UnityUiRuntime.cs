@@ -13196,6 +13196,51 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             catch { return true; }
         }
 
+        /// <summary>
+        /// One line under a game tab row (<see cref="UiTabsLayout.TopLinesHidden"/>): the first shown row under the strip
+        /// drops its own top line (a settings-grid row's top gradient, a cell row's separator), so the tabs stand on the
+        /// strip's baseline alone. Run every layout pass, after a tab switch showed or hid rows.
+        /// </summary>
+        private void ApplyTabStripLines()
+        {
+            bool anyStrip = false;
+            foreach (var cr in _cellRows.Values)
+                if (cr.IsGameTabStrip) { anyStrip = true; break; }
+            if (!anyStrip && !_stripLinesHidden) return;
+            var rows = new List<UiTabsLayout.StripRow>(_rows.Count);
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                var row = _rows[i];
+                // A removed row can stay listed until the next sweep: a destroyed object is not shown, so the scan passes it.
+                if (row.Go == null || !Alive(row.Go))
+                {
+                    rows.Add(new UiTabsLayout.StripRow(false, false, row.Pin, false));
+                    continue;
+                }
+
+                _cellRows.TryGetValue(row.Go, out var cellRow);
+                bool topLine = cellRow != null ? cellRow.HasTopLine : _gridChrome.TryGetValue(row.Go, out var c) && c.Top != null;
+                rows.Add(new UiTabsLayout.StripRow(RowActive(row), cellRow != null && cellRow.IsGameTabStrip, row.Pin, topLine));
+            }
+
+            var hidden = UiTabsLayout.TopLinesHidden(rows);
+            _stripLinesHidden = false;
+            for (int i = 0; i < _rows.Count; i++)
+            {
+                var go = _rows[i].Go;
+                if (go == null || !Alive(go)) continue;
+                if (hidden[i]) _stripLinesHidden = true;
+                if (_cellRows.TryGetValue(go, out var cellRow)) cellRow.SetTopLineHidden(hidden[i]);
+                else if (_gridChrome.TryGetValue(go, out var chrome) && chrome.Top != null)
+                {
+                    try { if (chrome.Top.enabled == hidden[i]) chrome.Top.enabled = !hidden[i]; } catch { /* */ }
+                }
+            }
+        }
+
+        /// <summary>Some row's top line is hidden under a game tab row, so a pass after the strip is gone restores it.</summary>
+        private bool _stripLinesHidden;
+
         /// <summary>Cell rows registered on this panel (LIST1), keyed by the row object.</summary>
         private readonly Dictionary<GameObject, UnityCellRow> _cellRows = new();
 
@@ -14092,6 +14137,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 BeginSidePass(TitleBand + (refitTop > 0f ? refitTop : PanelLayout.PadTop));
                 for (int i = 0; i < _rows.Count; i++)
                     PlaceRow(_rows[i]);
+                ApplyTabStripLines();
                 PlaceSettingsColumn();
                 EndSidePass();
 
@@ -15532,6 +15578,25 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         public CellRowSpec Spec => _spec;
 
+        /// <summary>The separator rule along the row's top edge (<see cref="CellRowSpec.Separator"/>), when it draws one.</summary>
+        private Image? _separator;
+
+        /// <summary>The row draws a line along its top edge (its separator rule).</summary>
+        internal bool HasTopLine => _separator != null;
+
+        /// <summary>
+        /// Hide the row's top line while it is the first row under a game tab row (<see cref="UiTabsLayout.TopLinesHidden"/>):
+        /// the strip's baseline is the one line there.
+        /// </summary>
+        internal void SetTopLineHidden(bool hidden)
+        {
+            if (_separator == null) return;
+            try { if (_separator.enabled == hidden) _separator.enabled = !hidden; } catch { /* */ }
+        }
+
+        /// <summary>The row is a game window tab strip, which draws its own baseline.</summary>
+        internal bool IsGameTabStrip => !_header && _spec.Skin == CellRowSkin.GameTabStrip;
+
         public bool Alive => !_released && UnityUiRuntime.Alive(GameObject);
 
         /// <summary>NAV1: the panel the row is on (the right stick scrolls its list).</summary>
@@ -15667,6 +15732,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 var rule = BandChild(GameObject, "row-separator", new Vector2(0f, 1f), new Vector2(1f, 1f),
                     new Vector2(0.5f, 1f), new Vector2(0f, -1f), Vector2.zero);
                 try { if (rule != null) rule.color = ToColor(MenuPalette.RowSeparator); } catch { /* */ }
+                _separator = rule;
             }
 
             if (!_header)
