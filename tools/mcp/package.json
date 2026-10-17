@@ -6,7 +6,7 @@
   "description": "MCP server exposing the Progenitor debug bridge (V Rising client and test server) plus build, deploy, and server control.",
   "bin": { "progenitor-mcp": "server.mjs" },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "zod": "^3.23.8"
   }
 }
