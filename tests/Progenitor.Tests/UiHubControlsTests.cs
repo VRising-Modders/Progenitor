@@ -169,7 +169,11 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.Equal(new[] { false, false, false, true, false }, UiTabsLayout.TopLinesHidden(switched));
         Assert.Equal(1, LinesUnderStrip(switched, 0));
 
-        // A standard window: the tab row pinned at the top, a bottom-pinned button row listed before the content.
+        // A removed row still listed (its object destroyed) is read as not shown and passed over the same way.
+        var removed = new[] { SR(strip: true), SR(active: false, line: true), SR(line: true) };
+        Assert.Equal(new[] { false, false, true }, UiTabsLayout.TopLinesHidden(removed));
+
+        // A top-pinned tab row (Look = Game on a panel that pins it), a bottom-pinned button row listed before the content.
         var window = new[] { SR(pin: MenuRowPin.Top), SR(strip: true, pin: MenuRowPin.Top), SR(pin: MenuRowPin.Bottom, line: true), SR(line: true) };
         Assert.Equal(new[] { false, false, false, true }, UiTabsLayout.TopLinesHidden(window));
         Assert.Equal(1, LinesUnderStrip(window, 1));

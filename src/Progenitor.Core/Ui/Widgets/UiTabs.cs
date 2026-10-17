@@ -539,7 +539,7 @@ internal static class UiTabsLayout
     /// One line under a game tab row: the tabs stand on the strip's baseline, so the first shown row under the strip does
     /// not draw its own top line (live 2026-10-17: a settings-grid row's top gradient, a row gap under the baseline, read as
     /// a second line with the tabs floating over it). The row under a strip is the next shown row in the panel's order;
-    /// under a top-pinned strip (a standard window's tab row) that is the next shown top-pinned or content row (the
+    /// under a top-pinned strip that is the next shown top-pinned or content row (the
     /// content's first row), under a content strip the next shown content row. Rows pinned elsewhere are skipped. True
     /// at index <c>i</c>: row <c>i</c> hides its top line. Recomputed every layout pass, so switching tabs moves it.
     /// </summary>

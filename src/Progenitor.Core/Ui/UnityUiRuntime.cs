@@ -13205,23 +13205,30 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             bool anyStrip = false;
             foreach (var cr in _cellRows.Values)
                 if (cr.IsGameTabStrip) { anyStrip = true; break; }
-            if (!anyStrip && _stripLinesHidden.Count == 0) return;
+            if (!anyStrip && !_stripLinesHidden) return;
             var rows = new List<UiTabsLayout.StripRow>(_rows.Count);
             for (int i = 0; i < _rows.Count; i++)
             {
                 var row = _rows[i];
+                // A removed row can stay listed until the next sweep: a destroyed object is not shown, so the scan passes it.
+                if (row.Go == null || !Alive(row.Go))
+                {
+                    rows.Add(new UiTabsLayout.StripRow(false, false, row.Pin, false));
+                    continue;
+                }
+
                 _cellRows.TryGetValue(row.Go, out var cellRow);
                 bool topLine = cellRow != null ? cellRow.HasTopLine : _gridChrome.TryGetValue(row.Go, out var c) && c.Top != null;
                 rows.Add(new UiTabsLayout.StripRow(RowActive(row), cellRow != null && cellRow.IsGameTabStrip, row.Pin, topLine));
             }
 
             var hidden = UiTabsLayout.TopLinesHidden(rows);
-            _stripLinesHidden.Clear();
+            _stripLinesHidden = false;
             for (int i = 0; i < _rows.Count; i++)
             {
                 var go = _rows[i].Go;
-                if (go == null) continue;
-                if (hidden[i]) _stripLinesHidden.Add(go);
+                if (go == null || !Alive(go)) continue;
+                if (hidden[i]) _stripLinesHidden = true;
                 if (_cellRows.TryGetValue(go, out var cellRow)) cellRow.SetTopLineHidden(hidden[i]);
                 else if (_gridChrome.TryGetValue(go, out var chrome) && chrome.Top != null)
                 {
@@ -13230,8 +13237,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             }
         }
 
-        /// <summary>The rows whose top line is hidden under a game tab row (readback: <c>topLineHidden</c>).</summary>
-        private readonly HashSet<GameObject> _stripLinesHidden = new();
+        /// <summary>Some row's top line is hidden under a game tab row, so a pass after the strip is gone restores it.</summary>
+        private bool _stripLinesHidden;
 
         /// <summary>Cell rows registered on this panel (LIST1), keyed by the row object.</summary>
         private readonly Dictionary<GameObject, UnityCellRow> _cellRows = new();
