@@ -1117,13 +1117,13 @@ public static class ConfigHelper
         }
     }
 
-    private static bool EntryStillLive(ConfigFile file, ConfigDefinition definition)
+    internal static bool EntryStillLive(ConfigFile file, ConfigDefinition definition)
     {
         try { return file.ContainsKey(definition); }
         catch { return true; }
     }
 
-    private static void TryDropLiveEntry(ConfigFile file, ConfigDefinition definition)
+    internal static void TryDropLiveEntry(ConfigFile file, ConfigDefinition definition)
     {
         try
         {

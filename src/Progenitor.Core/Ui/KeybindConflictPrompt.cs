@@ -72,13 +72,20 @@ internal sealed class KeybindConflictClash
 /// <summary>KEYS4: one dialog's worth: the mod whose keys lost, and each clash.</summary>
 internal sealed class KeybindConflictCase
 {
-    internal KeybindConflictCase(string pluginId, IReadOnlyList<KeybindConflictClash> clashes)
+    internal KeybindConflictCase(string pluginId, IReadOnlyList<KeybindConflictClash> clashes, string triggerId = "")
     {
         PluginId = pluginId ?? "";
         Clashes = clashes ?? Array.Empty<KeybindConflictClash>();
+        TriggerId = string.IsNullOrWhiteSpace(triggerId) ? PluginId : triggerId.Trim();
     }
 
     internal string PluginId { get; }
+
+    /// <summary>
+    /// KEYS10: the mod whose loading raised the dialog: <see cref="PluginId"/> itself (it wants keys that are taken), or
+    /// the mod that just loaded and comes before it for these keys (the first-installed rule).
+    /// </summary>
+    internal string TriggerId { get; }
 
     internal IReadOnlyList<KeybindConflictClash> Clashes { get; }
 
@@ -101,10 +108,12 @@ internal sealed class KeybindConflictCase
 /// Mods workspace open, the title screen's Mods entry up, or the HUD up in a world). Just before showing,
 /// each clash is checked again; one that has gone is dropped.</para>
 ///
-/// <para><b>The dialog</b> is the framework's own (<see cref="UiDialog"/>, a Choose): <b>Choose new keys</b>
-/// (opens the Keybinds tab with the first clashing row in capture), <b>Give &lt;key&gt; to &lt;mod&gt;</b>
-/// (only when every holder is another mod: they are unbound, so there is still no conflict), <b>Leave
-/// unbound</b> (the clashing binds are unbound), and <b>Later</b>, which is also Escape: nothing is written,
+/// <para><b>The dialog</b> is the framework's own (<see cref="UiDialog"/>, a Choose with option rows; words in
+/// <see cref="ContentFor"/>): <b>Pick a new key for &lt;action&gt;</b> / <b>Pick new keys for
+/// &lt;mod&gt;</b> (opens the Keybinds tab with the first clashing row in capture), <b>Give &lt;key&gt; to &lt;action&gt;</b>
+/// (only when every holder is another mod: they are unbound, so there is still no conflict), <b>Leave &lt;action&gt;
+/// unbound</b> / <b>Leave &lt;mod&gt;'s N actions unbound</b> (the clashing binds are unbound; the holders keep
+/// theirs), and <b>Later</b>, which is also Escape: nothing is written,
 /// the binds stay inactive, and the dialog is not shown again in this Core generation (a hot reload of the
 /// mod included); the next start asks again. Give and Leave write through <see cref="Keybinds.TryRebind"/>
 /// (or the cfg key's own writer), i.e. the mod's <c>[Keybinds]</c> cfg value, so the decision is kept across
@@ -121,8 +130,6 @@ internal static class KeybindConflictPrompt
     internal const string ChoiceLeave = "leave";
     internal const string ChoiceLater = "later";
 
-    internal const string EditCaption = "Choose new keys";
-    internal const string LeaveCaption = "Leave unbound";
     internal const string LaterCaption = "Later";
 
     /// <summary>Frames a "Choose new keys" waits for the Mods workspace to open before it gives up.</summary>
@@ -304,11 +311,14 @@ internal static class KeybindConflictPrompt
     internal static List<KeybindConflictCase> Find(KeybindPicture picture, ISet<string>? involved)
     {
         var byMod = new Dictionary<string, List<KeybindConflictClash>>(StringComparer.OrdinalIgnoreCase);
+        var triggers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var order = new List<string>();
         foreach (var v in picture.Verdicts)
         {
             if (!v.Enforced || v.Winner == null || !v.Claim.Chord.IsBound) continue;
             var loser = v.Claim;
+            // HUB2: Core's own optional back and forward keys never raise a dialog; their row says what happens.
+            if (loser.Scope == KeybindScope.Window && KeybindArbiter.IsFramework(loser.OwnerId)) continue;
             var winner = v.Winner;
             bool involves = involved == null || involved.Contains(loser.OwnerId)
                 || (winner.Source != KeybindSource.Game && involved.Contains(winner.OwnerId));
@@ -330,10 +340,15 @@ internal static class KeybindConflictPrompt
             }
 
             list.Add(new KeybindConflictClash(loser, winner, holders));
+            // KEYS10: what set the dialog off: the loser itself when it is one of the mods that just registered, else the
+            // winner that just did (it comes before the loser by the first-installed rule).
+            bool loserNoted = involved == null || involved.Contains(loser.OwnerId);
+            if (loserNoted) triggers[loser.OwnerId] = loser.OwnerId;
+            else if (!triggers.ContainsKey(loser.OwnerId)) triggers[loser.OwnerId] = winner.OwnerId;
         }
 
         var cases = new List<KeybindConflictCase>(order.Count);
-        foreach (var id in order) cases.Add(new KeybindConflictCase(id, byMod[id]));
+        foreach (var id in order) cases.Add(new KeybindConflictCase(id, byMod[id], triggers.TryGetValue(id, out var t) ? t : id));
         return cases;
     }
 
@@ -355,7 +370,7 @@ internal static class KeybindConflictPrompt
                 }
             }
 
-            return keep.Count == 0 ? null : new KeybindConflictCase(c.PluginId, keep);
+            return keep.Count == 0 ? null : new KeybindConflictCase(c.PluginId, keep, c.TriggerId);
         }
 
         return null;
@@ -363,46 +378,44 @@ internal static class KeybindConflictPrompt
 
     // ---- the dialog ----------------------------------------------------------------------------
 
-    /// <summary>The dialog's words for <paramref name="c"/>, with the choice each option stands for.</summary>
+    // ---- the dialog's words (pure: the case, names, versions and install times are all it reads) ------------------
+
+    /// <summary>
+    /// The dialog's words for <paramref name="c"/>, with the choice each option stands for. KEYS10 (live feedback
+    /// 2026-10-16, then "short UI text"): one line saying which mod (and version) it is about, or which mod just loaded and
+    /// had the key first; two short lines per key (whose action is off, and who holds the key, where, and why); options that
+    /// name their subject. Only Give has a second line (what it unbinds).
+    /// </summary>
     internal static DialogContent ContentFor(KeybindConflictCase c, out List<string> choices)
     {
         choices = new List<string>();
         var options = new List<string>();
-        var lines = new List<string>();
+        var notes = new List<string>();
         var givable = new List<KeybindConflictClash>();
         foreach (var clash in c.Clashes) if (clash.Givable) givable.Add(clash);
 
-        string body;
-        if (c.Clashes.Count == 1)
-        {
-            body = c.Clashes[0].Sentence + " " + c.Clashes[0].Loser.DisplayName + " is not active until you choose.";
-        }
-        else
-        {
-            body = "These keys are already in use, so they are not active until you choose:";
-            foreach (var clash in c.Clashes) lines.Add(clash.Sentence);
-        }
-
-        options.Add(EditCaption);
+        options.Add(EditCaptionFor(c));
+        notes.Add("");
         choices.Add(ChoiceEdit);
         if (givable.Count > 0)
         {
             options.Add(GiveCaption(c, givable));
+            notes.Add(GiveNote(givable));
             choices.Add(ChoiceGive);
-            foreach (var g in givable) lines.Add(GiveLine(c, g));
         }
 
-        options.Add(LeaveCaption);
+        options.Add(LeaveCaptionFor(c));
+        notes.Add("");
         choices.Add(ChoiceLeave);
-        lines.Add(LeaveLine(c));
-        lines.Add(LaterLine);
         return new DialogContent
         {
             Shape = UiDialogShape.Choose,
             Title = TitleFor(c),
-            Body = body,
-            Lines = lines,
+            Body = BodyFor(c),
+            Facts = FactsFor(c),
+            Note = LaterNote,
             Options = options,
+            OptionNotes = givable.Count > 0 ? notes : new List<string>(),
             CancelCaption = LaterCaption,
             Footer = Ui.FrameworkFooter,
         };
@@ -410,29 +423,173 @@ internal static class KeybindConflictPrompt
 
     internal static string TitleFor(KeybindConflictCase c) => "Key conflict: " + c.ModName;
 
-    /// <summary><c>Give F8 to Progenitor Sample Companion</c>; several keys: <c>Give these keys to …</c>.</summary>
-    internal static string GiveCaption(KeybindConflictCase c, IReadOnlyList<KeybindConflictClash> givable)
+    /// <summary>A mod's version as BepInEx reports it; null or empty when unknown. A seam for tests.</summary>
+    internal static Func<string, string?> VersionOf { get; set; } = DefaultVersionOf;
+
+    private static string? DefaultVersionOf(string id)
     {
-        var chords = new HashSet<KeyChord>();
-        foreach (var g in givable) chords.Add(g.Chord);
-        return chords.Count == 1 ? "Give " + givable[0].Loser.ChordText + " to " + c.ModName : "Give these keys to " + c.ModName;
+#if PROGENITOR_TESTS
+        return null;
+#else
+        try
+        {
+            var plugins = BepInEx.Unity.IL2CPP.IL2CPPChainloader.Instance?.Plugins;
+            if (plugins == null || string.IsNullOrWhiteSpace(id)) return null;
+            return plugins.TryGetValue(id.Trim(), out var info) ? info?.Metadata?.Version?.ToString() : null;
+        }
+        catch { return null; }
+#endif
     }
 
-    /// <summary><c>Give: Progenitor Sample's Net ping becomes unbound.</c> (one line per givable clash).</summary>
-    internal static string GiveLine(KeybindConflictCase c, KeybindConflictClash g) =>
-        "Give " + g.Loser.ChordText + ": " + g.HoldersPhrase + " becomes unbound.";
-
-    internal static string LeaveLine(KeybindConflictCase c) =>
-        "Leave unbound: " + LosersPhrase(c) + (c.Clashes.Count == 1 ? " is" : " are") + " unbound until you pick a key in Mods > Keybinds.";
-
-    internal const string LaterLine = "Later (Escape): nothing changes now; you are asked again at the next start.";
-
-    private static string LosersPhrase(KeybindConflictCase c)
+    /// <summary><c>Hunts 1.2.0</c>: a mod's name, with its version when known.</summary>
+    internal static string NameWithVersion(string pluginId)
     {
-        var names = new List<string>();
-        foreach (var clash in c.Clashes) if (!names.Contains(clash.Loser.DisplayName)) names.Add(clash.Loser.DisplayName);
-        return KeybindConflictSource.JoinNames(names);
+        string name = KeybindArbiter.DisplayNameOf(pluginId);
+        string? v = null;
+        try { v = VersionOf(pluginId); }
+        catch { v = null; }
+        return string.IsNullOrWhiteSpace(v) ? name : name + " " + v!.Trim();
     }
+
+    /// <summary><c>Oct 16, 2026</c>: a mod's install date (the first-installed rule's), or empty when unknown.</summary>
+    internal static string InstalledOn(string pluginId)
+    {
+        var t = KeybindArbiter.InstallOf(pluginId);
+        return t.Utc is { } utc ? DateText(utc) : "";
+    }
+
+    internal static string DateText(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime().ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// <c>Hunts 1.2.0 (installed Oct 16, 2026) wants a taken key.</c> / <c>wants 2 taken keys.</c>; or, when the mod that just
+    /// loaded holds the keys: <c>Companion 2.0 just loaded and had F8 first.</c>
+    /// </summary>
+    internal static string BodyFor(KeybindConflictCase c)
+    {
+        if (c.TriggerId.Length > 0 && !string.Equals(c.TriggerId, c.PluginId, StringComparison.OrdinalIgnoreCase))
+            return NameWithVersion(c.TriggerId) + " just loaded and had " + ChordsPhrase(c.Clashes) + " first.";
+        string on = InstalledOn(c.PluginId);
+        int n = c.Clashes.Count;
+        return NameWithVersion(c.PluginId) + (on.Length > 0 ? " (installed " + on + ")" : "") + " wants "
+            + (n == 1 ? "a taken key." : n.ToString(System.Globalization.CultureInfo.InvariantCulture) + " taken keys.");
+    }
+
+    /// <summary>Two facts per key: <c>F8: Sprint (gameplay) is off.</c> then <c>Held by Companion: Net ping (gameplay), installed first (Oct 7, 2026).</c></summary>
+    internal static List<DialogFact> FactsFor(KeybindConflictCase c)
+    {
+        var facts = new List<DialogFact>(c.Clashes.Count * 2);
+        foreach (var clash in c.Clashes)
+        {
+            facts.Add(new DialogFact(KeybindArbiter.ChordPhrase(clash.Loser.ChordText, clash.Holder),
+                clash.Loser.DisplayName + " (" + WhereOf(clash.Loser) + ") is off.", DialogFactTone.Warn));
+            facts.Add(new DialogFact("", HolderLine(clash)));
+        }
+
+        return facts;
+    }
+
+    /// <summary>Where a key works, in a word or two: <c>gameplay</c>, <c>menus</c>, <c>map</c>, a game key's mode.</summary>
+    internal static string WhereOf(KeybindClaim k)
+    {
+        if (k.Source == KeybindSource.Game)
+        {
+            if (k.Mode.Length == 0) return "gameplay";
+            return k.Mode.StartsWith("in the ", StringComparison.Ordinal) ? k.Mode.Substring(7)
+                : k.Mode.StartsWith("in ", StringComparison.Ordinal) ? k.Mode.Substring(3) : k.Mode;
+        }
+
+        return k.Scope switch
+        {
+            KeybindScope.Menu => "menus",
+            KeybindScope.Window => "menus and windows",
+            KeybindScope.Map => "map",
+            KeybindScope.Photo => "photo mode",
+            KeybindScope.Chat => "chat",
+            _ => "gameplay",
+        };
+    }
+
+    /// <summary><c>Held by the game: Interrupt Ability Cast (gameplay), the game's key comes first.</c></summary>
+    internal static string HolderLine(KeybindConflictClash clash)
+    {
+        var h = clash.Holder;
+        string holder = h.Source == KeybindSource.Game ? KeybindArbiter.GameName : KeybindArbiter.DisplayNameOf(h.OwnerId);
+        return "Held by " + holder + ": " + h.DisplayName + " (" + WhereOf(h) + "), " + WhyPhrase(clash) + ".";
+    }
+
+    /// <summary>Why the holder keeps the key, from the first-installed rule (<see cref="KeybindArbiter.Precedence"/>).</summary>
+    internal static string WhyPhrase(KeybindConflictClash clash)
+    {
+        var h = clash.Holder;
+        switch (KeybindArbiter.RuleFor(h, clash.Loser, null))
+        {
+            case KeybindArbiter.RuleGame:
+                return "the game's key comes first";
+            case KeybindArbiter.RuleFramework:
+                return "Progenitor's key comes first";
+            case KeybindArbiter.RuleInstall:
+            {
+                string on = InstalledOn(h.OwnerId);
+                return "installed first" + (on.Length > 0 ? " (" + on + ")" : "");
+            }
+            case KeybindArbiter.RuleUnknownTime:
+                return "counts as first: " + KeybindArbiter.DisplayNameOf(clash.Loser.OwnerId) + "'s install date is unknown";
+            default:
+                return "same install date; decided by mod id";
+        }
+    }
+
+    /// <summary><c>F8</c>, <c>F8 and G</c>: the clashing keys, each once.</summary>
+    internal static string ChordsPhrase(IEnumerable<KeybindConflictClash> clashes)
+    {
+        var keys = new List<string>();
+        foreach (var clash in clashes) if (!keys.Contains(clash.Loser.ChordText)) keys.Add(clash.Loser.ChordText);
+        return KeybindConflictSource.JoinNames(keys);
+    }
+
+    private static int LoserCount(KeybindConflictCase c)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var clash in c.Clashes) names.Add(clash.Loser.ActionId);
+        return names.Count;
+    }
+
+    /// <summary><c>Pick a new key for Sprint</c>; several: <c>Pick new keys for Hunts</c> (the Keybinds tab opens on the first).</summary>
+    internal static string EditCaptionFor(KeybindConflictCase c) =>
+        LoserCount(c) == 1 ? "Pick a new key for " + c.Clashes[0].Loser.DisplayName : "Pick new keys for " + c.ModName;
+
+    /// <summary><c>Leave Sprint unbound</c>; several: <c>Leave Hunts's 2 actions unbound</c>.</summary>
+    internal static string LeaveCaptionFor(KeybindConflictCase c)
+    {
+        int n = LoserCount(c);
+        return n == 1
+            ? "Leave " + c.Clashes[0].Loser.DisplayName + " unbound"
+            : "Leave " + c.ModName + "'s " + n.ToString(System.Globalization.CultureInfo.InvariantCulture) + " actions unbound";
+    }
+
+    /// <summary><c>Give F8 to Sprint</c>; several keys: <c>Give F8 and G to Hunts</c>.</summary>
+    internal static string GiveCaption(KeybindConflictCase c, IReadOnlyList<KeybindConflictClash> givable) =>
+        givable.Count == 1
+            ? "Give " + givable[0].Loser.ChordText + " to " + givable[0].Loser.DisplayName
+            : "Give " + ChordsPhrase(givable) + " to " + c.ModName;
+
+    /// <summary><c>Unbinds Companion's Net ping.</c></summary>
+    internal static string GiveNote(IReadOnlyList<KeybindConflictClash> givable)
+    {
+        var parts = new List<string>();
+        foreach (var g in givable)
+            foreach (var h in g.Holders)
+            {
+                string p = KeybindArbiter.DisplayNameOf(h.OwnerId) + "'s " + h.DisplayName;
+                if (!parts.Contains(p)) parts.Add(p);
+            }
+
+        return "Unbinds " + KeybindConflictSource.JoinNames(parts) + ".";
+    }
+
+    /// <summary>Later, which is also Escape. Asked again at the next start, and after a reload of Progenitor.</summary>
+    internal const string LaterNote = "Later: nothing is saved; asks again later.";
 
     private static void ShowNext()
     {
@@ -735,23 +892,23 @@ internal static class KeybindConflictPrompt
                 ["index"] = i,
                 ["choice"] = choices[i],
                 ["caption"] = content.Options[i],
+                ["note"] = content.OptionNote(i),
             });
+        var facts = new List<object?>();
+        foreach (var f in content.Facts) facts.Add(f.ToString());
         return new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["plugin"] = c.PluginId,
             ["mod"] = c.ModName,
+            ["trigger"] = c.TriggerId,
             ["title"] = content.Title,
             ["body"] = content.Body,
-            ["lines"] = new List<object?>(ToObjects(content.Lines)),
+            ["lines"] = facts,
+            ["note"] = content.Note,
             ["options"] = options,
             ["cancel"] = content.CancelCaption,
             ["clashes"] = clashes,
         };
-    }
-
-    private static IEnumerable<object?> ToObjects(IReadOnlyList<string> list)
-    {
-        foreach (var s in list) yield return s;
     }
 
     private static IEnumerable<object?> SortedLater()
@@ -804,5 +961,6 @@ internal static class KeybindConflictPrompt
         Factory = DefaultFactory;
         DialogArtReady = AlwaysReady;
         NowMs = DefaultNowMs;
+        VersionOf = DefaultVersionOf;
     }
 }
