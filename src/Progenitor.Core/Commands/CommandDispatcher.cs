@@ -203,7 +203,7 @@ public static class CommandDispatcher
         string ownerId = tokens[1].Value;
         if (!CommandRegistry.TryGetQualifiedOwner(ownerId, out var byPath))
         {
-            ctx.Reply($"Unknown command owner '{ownerId}'. Try {CommandRegistry.Prefix}help.");
+            ctx.Reply($"Unknown command owner '{Progenitor.Chat.ChatLinks.Defuse(ownerId)}'. Try {CommandRegistry.Prefix}help.");
             result = CommandResult.Executed;
             return false;
         }
@@ -247,7 +247,7 @@ public static class CommandDispatcher
             }
         }
 
-        ctx.Reply($"Unknown command for owner '{ownerId}'. Try {CommandRegistry.Prefix}help.");
+        ctx.Reply($"Unknown command for owner '{Progenitor.Chat.ChatLinks.Defuse(ownerId)}'. Try {CommandRegistry.Prefix}help.");
         result = CommandResult.Executed;
         return false;
     }

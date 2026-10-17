@@ -62,6 +62,20 @@ internal sealed class ChatRecord
 
     /// <summary>A note for this session only ("Copied the line"): drawn, never saved.</summary>
     internal bool Transient { get; set; }
+
+    /// <summary>
+    /// Who wrote the line, from the game's event (a System or lore line with no sender is the server's), never from its
+    /// text. Decides whether its mod links are trusted (<see cref="ChatLinks"/>). Player by default.
+    /// </summary>
+    internal ChatLinkSource Source { get; set; }
+
+    /// <summary>
+    /// The provenance rule: a System or lore line whose sender network id is empty is the server's (or this client's game);
+    /// any line with a sender, any other channel, is a player's. The server fills the sender in from the connection, and
+    /// forwards a player's System line only from an admin, with the admin as the sender.
+    /// </summary>
+    internal static ChatLinkSource SourceOf(ChatKind kind, bool hasSender) =>
+        !hasSender && (kind == ChatKind.System || kind == ChatKind.Lore) ? ChatLinkSource.Server : ChatLinkSource.Player;
 }
 
 /// <summary>
@@ -101,7 +115,7 @@ internal sealed class ChatLog
         if (collapse && record.Kind != ChatKind.Session && _records.Count > 0)
         {
             var last = _records[_records.Count - 1];
-            if (!last.Restored && last.Kind == record.Kind && last.FromSelf == record.FromSelf
+            if (!last.Restored && last.Kind == record.Kind && last.FromSelf == record.FromSelf && last.Source == record.Source
                 && string.Equals(last.User, record.User, StringComparison.Ordinal)
                 && string.Equals(last.Text, record.Text, StringComparison.Ordinal)
                 && (record.TimeUtc - last.TimeUtc).TotalSeconds <= CollapseWindowSeconds)
@@ -131,7 +145,7 @@ internal sealed class ChatLog
     {
         if (part == null || !ChatLongMessage.IsContinuation(part.Text) || _records.Count == 0) return null;
         var last = _records[_records.Count - 1];
-        if (last.Restored || last.Kind != part.Kind || last.FromSelf != part.FromSelf
+        if (last.Restored || last.Kind != part.Kind || last.FromSelf != part.FromSelf || last.Source != part.Source
             || !string.Equals(last.User, part.User, StringComparison.Ordinal) || !ChatLongMessage.ExpectsMore(last.Text)
             || (part.TimeUtc - last.TimeUtc).TotalSeconds > ChatLongMessage.JoinWindowSeconds) return null;
         last.Text = ChatLongMessage.Join(last.Text, part.Text);
@@ -195,6 +209,7 @@ internal sealed class ChatLog
                 ["x"] = r.Text,
                 ["f"] = r.Full,
                 ["n"] = r.Repeat,
+                ["p"] = (int)r.Source,
             }));
             sb.Append('\n');
         }
@@ -226,6 +241,9 @@ internal sealed class ChatLog
                     Full = o.TryGetProperty("f", out var f) ? f.GetString() ?? "" : "",
                     Repeat = o.TryGetProperty("n", out var n) && n.TryGetInt32(out int rep) && rep > 0 ? rep : 1,
                     Restored = true,
+                    // Saved before provenance was kept: a player's (its mod links stay as written).
+                    Source = o.TryGetProperty("p", out var p) && p.TryGetInt32(out int src) && src == (int)ChatLinkSource.Server
+                        ? ChatLinkSource.Server : ChatLinkSource.Player,
                 };
                 if (!Enum.IsDefined(typeof(ChatKind), r.Kind)) continue;
                 result.Add(r);

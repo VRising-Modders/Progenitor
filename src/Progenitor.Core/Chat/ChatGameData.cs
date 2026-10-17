@@ -86,6 +86,38 @@ internal static class ChatGameData
         return false;
     }
 
+    private static readonly Dictionary<int, string> ItemDescriptions = new();
+    private static World? _descriptionsWorld;
+
+    /// <summary>
+    /// An item's localized description (<c>ManagedItemData.Description</c> through the game's string table), as the
+    /// game's own text (rich text kept), or null when it has none. Cached per client world.
+    /// </summary>
+    internal static string? ItemDescription(int prefabId)
+    {
+        var world = Worlds.Client;
+        if (world == null || !world.IsCreated) return null;
+        if (!ReferenceEquals(world, _descriptionsWorld))
+        {
+            ItemDescriptions.Clear();
+            _descriptionsWorld = world;
+        }
+
+        if (ItemDescriptions.TryGetValue(prefabId, out var cached)) return cached.Length == 0 ? null : cached;
+        string text = "";
+        try
+        {
+            var registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry;
+            if (registry != null && registry.TryGet<ManagedItemData>(new PrefabGUID(prefabId), out var data) && data != null
+                && Localization.Localization.TryGetGameString(data.Description.Key, out var s) && !string.IsNullOrWhiteSpace(s))
+                text = s.Trim();
+        }
+        catch { text = ""; }
+
+        ItemDescriptions[prefabId] = text;
+        return text.Length == 0 ? null : text;
+    }
+
     /// <summary>An item's prefab id from its spawnable prefab name (<c>Item_Weapon_Sword_T01_Bone</c>), or 0.</summary>
     internal static int ItemIdByPrefabName(string name)
     {

@@ -162,6 +162,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatTabRow.cs" Link="Linked\ChatTabRow.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatFormat.cs" Link="Linked\ChatFormat.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ModLinkToken.cs" Link="Linked\ModLinkToken.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLinks.cs" Link="Linked\ChatLinks.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ServerChatLogic.cs" Link="Linked\ServerChatLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\ServerChatRows.cs" Link="Linked\ServerChatRows.cs" />
     <!-- AUTOUPDATE3: the Server tab's Updates group rows. -->
@@ -1142,6 +1143,7 @@
     <Compile Include="..\..\samples\Progenitor.ControlsSample\WidgetsDemo*.cs" Link="Linked\%(Filename)%(Extension)" />
     <Compile Include="..\..\samples\Progenitor.ControlsSample\Gallery*.cs" Link="Linked\%(Filename)%(Extension)" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleChat.cs" Link="Linked\SampleChat.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleChatLinks.cs" Link="Linked\SampleChatLinks.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleNet.cs" Link="Linked\SampleNet.cs" />
     <!-- The map-scope keybind example: the ruler, the coordinate check and the lines are game-free;
          the RegisterInMap / RegisterHoldInMap calls and the WorldMap reads are behind !PROGENITOR_TESTS. -->

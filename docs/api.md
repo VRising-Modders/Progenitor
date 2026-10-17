@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **960** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **966** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -284,12 +284,16 @@ from your own four-letter tag (`modules.md#networking`).
 
 Server send that skips `ChatMessageSystem`. Recipients are `ConnectedUser` only (not offline).
 
-The game's client chat box, which these lines reach, has these defaults: it fades 14 seconds after the last message, shows at most 50 lines across all channels, draws player text inside `<noparse>` (no formatting, no links), and lists server notices, admin announcements and mod replies as the same System type. Progenitor's client improvements to that box have no plugin API; see [chat.md](chat.md).
+The game's client chat box, which these lines reach, has these defaults: it fades 14 seconds after the last message, shows at most 50 lines across all channels, draws player text inside `<noparse>` (no formatting, no links), and lists server notices, admin announcements and mod replies as the same System type. Progenitor's client improvements to that box are described in [chat.md](chat.md); its link clicks and mod-owned links have the client API below ([chat links for mods](chat.md#chat-links-for-mods)).
 
 | Member | Status | Intent | Example |
 |---|---|---|---|
 | `Chat.Broadcast(text, type=System)` / `SendTo(user, text, type)` | verified live | Includes the speaker. Truncates at 509 UTF-8. World and speaker overloads at `Chat.cs:40,48,93,99`. | **none** — `SampleChat.cs` uses the `ctx` forms |
 | `PluginChat.Broadcast` / `SendTo` / `Add(IDisposable)` | verified live | Bound to `ctx.World`; 0 / false on the client. `PluginContext.cs:1160,1171,1184`. | `SampleChat.cs` (`.shout` -> `Broadcast`, `.whisper` -> `SendTo`) |
+| `ctx.Chat.OnLinkClicked(ChatLinkHandler handler)` → `IDisposable`; `ChatLinkHandler` (`bool (ChatLinkClick click)`) | source-checked, built and game-free tested (`ChatLinkTests`), **not live-verified** | Client. Runs when the player clicks a link in Progenitor's chat (web, mod package, location, item and mod links), before Progenitor's own action; returning true marks it handled and skips later handlers and the default dialog. Order: a mod link's owner first, then these handlers in registration order. A throwing handler counts as not handled and is logged once. Tracked: removed on unload. Never fires on a server. | `SampleChatLinks.cs` (logs every click, returns false) |
+| `ctx.Chat.OnModLink(owner, ChatLinkHandler handler, acceptPlayerLinks = false)` → `IDisposable` | source-checked, built and game-free tested (`ChatLinkTests`), **not live-verified** | Client. Claims the mod links `[mod:owner:…]`: they are drawn as clickable text and their clicks reach this handler first. Links on a player's line stay as written unless `acceptPlayerLinks`, and then the handler must check `click.Source`. One plugin per owner (another plugin's claim throws `InvalidOperationException`; the same plugin claiming again replaces its handler). Tracked: removed on unload. | `SampleChatLinks.cs` (`progenitor.sample` links show a notice) |
+| `ChatLinks.ModLink(owner, type, payload, text)` / `ctx.Chat.ModLink(…)` → `string`; `ChatLinks.Defuse(text)` | source-checked, built and game-free tested (`ChatLinkTests`), **not live-verified** | Either side. The token `[mod:owner:type:payload\|text]` with `\`, `\|` and `]` escaped; owner and type 1 to 48 and 1 to 32 of `a-z 0-9 _ . -` (lowercased), payload at most 160 characters without control characters or angle brackets (otherwise `ArgumentException`), text cleaned to at most 80 characters. Send it in a line of its own size: a reply longer than one chat line is split by bytes and can cut a token. `Defuse` turns `[mod:`, `[item:` and `[loc:` in player text into `(…`, for a server line that repeats what a player typed. | `SampleChatLinks.cs` (`.chat link [text]`) |
+| `ChatLinkClick` (`Kind`, `Target`, `Text`, `Owner`, `LinkType`, `Payload`, `ItemPrefab`, `Source`, `IsFromServer`, `Sender`, `FromSelf`, `Channel`, `Line`); `ChatLinkKind` (`Web`, `Package`, `Location`, `Item`, `Mod`); `ChatLinkSource` (`Player`, `Server`); `ChatChannel` | source-checked, built and game-free tested, **not live-verified** | What a handler gets. `Source` is `Server` only for a System or lore line whose sender network id is empty, read from the game's chat event, never from the text ([provenance](chat.md#who-wrote-a-line)). | `SampleChatLinks.cs` |
 | `PluginChat.Broadcast(text, bool prefix, type = System)` / `SendTo(user, text, bool prefix, type = System)`; the message prefix | landed (WINDOWS1) — game-free tested, not live-verified | Both the old and the new forms send `<Mod Name>: text` by default (not twice); `prefix: false` sends the text as given. A text over one chat line (500 UTF-8 bytes with the name) goes as several lines, the name on the first, instead of being cut; `Broadcast` returns the first line's recipients, `SendTo` true when every line was sent. `Chat.Broadcast` / `Chat.SendTo` (no plugin) are unchanged. [Message prefix](modules.md#message-prefix). | unit test `ModMessagePrefixTests` |
 
 ## Localization
@@ -1152,7 +1156,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 960 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 966 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API

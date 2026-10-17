@@ -1,6 +1,6 @@
 # Chat box improvements
 
-Progenitor improves the game's own chat box on the client. It keeps the game's input line, sending, channel cycling, whispers, mute and profanity filter, and adds behavior around them. It is built into Core, with no plugin API. Server-side chat sending for plugins is a separate contract: `ctx.Chat` in [api.md](api.md#chat).
+Progenitor improves the game's own chat box on the client. It keeps the game's input line, sending, channel cycling, whispers, mute and profanity filter, and adds behavior around them. It is built into Core. Its one plugin API is [chat links for mods](#chat-links-for-mods); server-side chat sending for plugins is a separate contract: `ctx.Chat` in [api.md](api.md#chat).
 
 Design decisions were made 2026-10-07. The game facts below come from the client's chat code.
 
@@ -199,7 +199,7 @@ Status: source-checked, built against the installed game, and game-free tested (
 | Copy, whisper, mute | Right-click a player's line: Copy line, Whisper them (puts `/w name ` in the input), Mute or Unmute them (their lines stay out of Progenitor's view; `[Chat] MutedPlayers`). Right-click a system line copies it. A copy shows "Copied the line" in the input line's placeholder for 2 s and adds nothing to the log (the first build added a log line per copy; user report 2026-10-07). | Not checked. |
 | Recall | While typing, Up brings back the lines you sent (commands too) and Down goes forward again (`ChatRecallPrevious` / `ChatRecallNext`, chat-scope keys). Kept in `progenitor-cache/chat/sent.txt`. A line counts as sent when the chat closes with its input emptied. | Not checked: the Dev `key` op cannot submit the game's input. |
 | Location links | `/loc ` at the start of a line becomes `[loc:x,z]` at your position; it draws as `[x, z]` and a click says how far and in which direction it is. | Not checked. |
-| Item links | `[item:id]` draws as the item's name; a click names it. `/item <prefab name> ` at the start of a line becomes the token (there is no completion over all items: listing them would need an unproven native enumeration). | Not checked. |
+| Item links | `[item:id]` draws as the item's name. Resting the pointer on it shows the item's name and description from the game (`ManagedItemData`) in Progenitor's tooltip box; a click opens a notice with the same text (name as the title, description as the body; a description's `{0}` placeholders, which the game fills from an item in a slot, show as `…`). An id the game does not know reads "Unknown item"; the raw id is never shown. The game's own item tooltip is not used: Progenitor shows no game item tooltip anywhere yet, and that one is built from an item in an inventory slot. A mod can take the click first ([chat links for mods](#chat-links-for-mods)). `/item <prefab name> ` at the start of a line becomes the token (there is no completion over all items: listing them would need an unproven native enumeration). | Not checked (hover and the new dialog not live-verified). |
 | Long messages | A line too long for one chat line (480 bytes) goes out in parts on Enter (`ChatSendLong`, a chat-scope key beside the game's Enter): `… ` at the end of a part, `↪ ` at the start of the next. Progenitor clients join the parts into one line; other players read the parts. The input takes up to the server's limit (default 1000 characters). If the game handles Enter first, the line goes out cut as before; it is never sent twice. | Not checked. |
 | Channel color | The line you type takes its channel's color (the game's Global, Clan, Whisper, Local and System colors), so the channel shows while typing, not only in the empty line's placeholder (`[Chat] ChannelColor`). | Not checked. |
 | Command hints | While a line starts with `.`, up to three of the server's matching commands show above the input (command, usage, help), from the [command hints data](#command-hints-data); Tab completes the first and cycles on the next press, undoing the game's Tab channel cycle as for names. Only commands this player can run; none on a server without Progenitor (`[Chat] CommandHints`). | Not checked. |
@@ -243,3 +243,52 @@ Status: source-checked, built against the installed game, and game-free tested (
 Not checked live: neither signal has been exercised with a chat mod installed. A chat mod that draws its own window without touching the game's scroll area is not observed; list it in `[Chat] ReplacedBy`.
 
 **Clicks and focus.** The chat view reads the pointer whatever the window focus (`TrySamplePointerScreenAnyFocus`): a window in the background gets no presses anyway, and the Dev `mouse` op can then test it. The click guard covers the log, its scroll bar, the tab line and the grip.
+
+## Chat links for mods
+
+Status: source-checked, built against the installed game, and game-free tested (`ChatLinkTests`). **Not live-verified.** API rows: [api.md](api.md#chat).
+
+**Click handlers.** On the client, `ctx.Chat.OnLinkClicked(handler)` runs for every link a player clicks in Progenitor's chat view, before Progenitor's own action. The handler gets a `ChatLinkClick`: the kind, the target, the text the line shows, who wrote the line (`Source`, `Sender`, `FromSelf`), whether the line was restored from an earlier session (`IsRestored`), the channel and the line's text. Returning true marks the click handled: later handlers and Progenitor's dialog are skipped.
+
+| `ChatLinkKind` | Written as | Target | Progenitor's own action |
+|---|---|---|---|
+| `Web` | `https://…`, `www.…` | the URL | asks before opening the browser |
+| `Package` | `[mod:Namespace-Name@1.2.3]`: a Thunderstore package that players share | the package, `@version` optional | opens the mod in the Mods menu |
+| `Location` | `[loc:x,z]` | `x,z` | says how far and which way |
+| `Item` | `[item:id]` | the prefab id (`ItemPrefab`) | the item's name and description |
+| `Mod` | `[mod:owner:type:payload\|text]`: a link one mod sends and handles, with its own data | the payload (`Owner`, `LinkType`, `Payload`) | none: only its owner's handler acts |
+
+The two `[mod:` forms never overlap: a package link has no `:` after `mod:`.
+
+**Mod links.** A mod writes a mod link into a server line with `ChatLinks.ModLink(owner, type, payload, text)`, which escapes `\`, `|` and `]` (written `\\`, `\|`, `\]`) and checks the limits. On a Progenitor client:
+
+| Line from | A mod on this client handles the owner (`ctx.Chat.OnModLink`) | No mod handles it |
+|---|---|---|
+| The server | The text, as a link; the click goes to that handler first | The text only, not a link, without the raw token |
+| A player | As written, unless the handler accepts player links (`acceptPlayerLinks: true`): then a link, with `Source = Player` | As written |
+
+A client without Progenitor shows the token as written. Example: `  5,000 [item:862477668] → ` followed by `ChatLinks.ModLink("satisvampory", "chest", guid, "Storage (Plot 1)")` reads `5,000 [<item name>] → Storage (Plot 1)`, with *Storage (Plot 1)* a link for players who have the mod. The shown text never carries control or Unicode format characters (bidirectional overrides such as U+202E included): the builder and the client both drop them, so a link cannot show reordered text.
+
+**Order.** A mod link goes to its owner's handler first; then every `OnLinkClicked` handler, in registration order (plugin load order); the first that returns true ends it. A throwing handler counts as not handled and is logged once. A mod link nobody handled does nothing more. One plugin owns an owner name: another plugin's `OnModLink` for it is refused with a logged warning and gets a handle that does nothing; the same plugin claiming it again (a hot reload) replaces its handler. Every handler is tracked by the plugin's context and removed on unload, and Core's unload forgets them all; the chat redraws so links of an owner that went away become plain text.
+
+### Who wrote a line
+
+A line is the **server's** (`ChatLinkSource.Server`) only when the game's chat event is a System or lore line with an empty sender network id (`ChatEntry.From`). Everything else is a **player's**, admins and your own lines included. This never looks at the text:
+
+- The client cannot set the type or the sender of the line other players receive: it sends `ChatMessageEvent`, and the server builds each recipient's `ChatMessageServerEvent`, filling the sender from the user the message came from.
+- The game forwards a player's System line only from an admin, with that admin as its sender, so it counts as a player's.
+- Server notices, admin console announcements, Progenitor's lines and mod replies (`ctx.Chat`, `ctx.Reply`) carry no sender. Lines this client's game adds itself ("No vampire with that name found") have none either.
+- `ctx.Chat` sends with a speaker (`Chat.Broadcast(world, text, type, speakerUser)`) count as that player's.
+- The history file keeps each line's source; lines saved before it was kept count as a player's.
+
+**What Server means.** `Server` says another player did not type the line. It does not say your mod's server half wrote it: it is the server you joined and any mod running there, and a hostile or careless server can send any owner's links with any payload. Treat the payload as untrusted server input: parse and validate it, act only on what your own mod would send, and never open a URL, a file path or a command taken from it directly.
+
+**Echoes.** A server line that repeats a player's words (an "unknown name 'x'" reply) would carry their tokens as the server's. Pass such text through `ChatLinks.Defuse`. Its rule: every `[` becomes `(` and every `]` becomes `)`, so the text can neither open nor close a token; and text that starts with `mod:`, `item:` or `loc:` gets a space in front, so a `[` the template puts right before it cannot complete one either. Progenitor's own command replies that echo input (unknown command, unknown command owner) do this. A token must fit in one chat line: a reply longer than a line is split by bytes and may cut it.
+
+**Not live-verified:** that the game leaves `ChatEntry.From` empty (type `None`) for its own System lines and Progenitor's sends, the hover tooltip over a chat line, and the Sample's `.chat link`.
+
+**Acceptance procedure — not run** (Steam client with the Sample on the isolated test server):
+1. Type `.chat link hello`: a System reply (after the mod name) "Click this link: hello" with *hello* drawn as a link. Click it: a notice "Payload 1, on a line from the server." and the client log `Sample chat: sample link clicked payload=1 source=Server`.
+2. Type `[mod:progenitor.sample:ping:9|fake]` in Global: the line shows the token as written, not a link.
+3. Click an item link from `/item Item_Weapon_Sword_T01_Bone `: the Sample logs `link clicked kind=Item … source=Player`, then the notice shows the sword's name and description. Rest the pointer on the link: the tooltip shows the same text and goes when the pointer leaves; scroll the log under the still pointer: the tooltip follows what is under it.
+4. Remove the Sample from the client's reload folder: the System reply now shows *hello* as plain text. Remove it from the server too and clean up.

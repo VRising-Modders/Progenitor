@@ -9,6 +9,7 @@ using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 using Progenitor.Buffs;
 using Progenitor.Castles;
+using Progenitor.Chat;
 using Progenitor.Commands;
 using Progenitor.Config;
 using Progenitor.Content;
@@ -1680,9 +1681,9 @@ public sealed partial class PluginCastles
 /// <summary>
 /// Chat-send facade bound to one plugin's side world. Pass-through to
 /// <see cref="Progenitor.Chat.Chat.Broadcast"/> / <see cref="Progenitor.Chat.Chat.SendTo"/> so a
-/// mod does not have to pick <c>Worlds.Server</c> itself. Not recorded for undo: each call
+/// mod does not have to pick <c>Worlds.Server</c> itself. Sends are not recorded for undo: each call
 /// creates game event entities that <c>SerializeAndSendServerEventsSystem</c> consumes the same
-/// frame.
+/// frame. The client link handlers (<c>OnLinkClicked</c>, <c>OnModLink</c>) are tracked and removed on unload.
 /// </summary>
 public sealed class PluginChat
 {
@@ -1749,6 +1750,43 @@ public sealed class PluginChat
 
         return any && all;
     }
+
+    /// <summary>
+    /// Client: run <paramref name="handler"/> when the player clicks a link in Progenitor's chat (web, mod package,
+    /// location, item and mod links), before Progenitor's own action. Return true to mark the click handled: later
+    /// handlers and the default dialog are skipped. Handlers run in registration order, after a mod link's owner
+    /// (<see cref="OnModLink"/>). Tracked: removed on unload. Never fires on a server.
+    /// </summary>
+    public IDisposable OnLinkClicked(ChatLinkHandler handler)
+    {
+        _ctx.EnsureAttached();
+        var handle = ChatLinkRegistry.OnClick(_ctx.Owner, _ctx.Guid, handler);
+        _ctx.Track(handle);
+        return handle;
+    }
+
+    /// <summary>
+    /// Client: handle the mod links of <paramref name="owner"/> (<c>[mod:owner:type:payload|text]</c>, built with
+    /// <see cref="ModLink"/>). With a handler for its owner a link is drawn clickable and its clicks reach this handler
+    /// first; without one a client shows only its text. Links on a player's line stay as written, unless
+    /// <paramref name="acceptPlayerLinks"/>: then they are clickable too and the handler must check
+    /// <see cref="ChatLinkClick.Source"/>. One plugin per owner: another plugin's claim throws
+    /// <see cref="InvalidOperationException"/>. Tracked: removed on unload.
+    /// </summary>
+    public IDisposable OnModLink(string owner, ChatLinkHandler handler, bool acceptPlayerLinks = false)
+    {
+        _ctx.EnsureAttached();
+        var handle = ChatLinkRegistry.OnMod(_ctx.Owner, _ctx.Guid, owner, handler, acceptPlayerLinks);
+        _ctx.Track(handle);
+        return handle;
+    }
+
+    /// <summary>
+    /// A mod link token for a chat line: <c>[mod:owner:type:payload|text]</c> with <c>\</c>, <c>|</c> and <c>]</c>
+    /// escaped. Same as <see cref="ChatLinks.ModLink"/>; see it for the limits.
+    /// </summary>
+    public string ModLink(string owner, string type, string payload, string text) =>
+        ChatLinks.ModLink(owner, type, payload, text);
 }
 
 internal sealed class DisposableBag
