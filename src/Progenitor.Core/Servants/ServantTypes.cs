@@ -28,6 +28,22 @@ public enum ServantState : byte
     Free = (byte)Layout.ServantInfoStateFree,
 }
 
+/// <summary>
+/// Which of the game's hunt chat lines a notice is (<c>ctx.Servants.SuppressGameNotices</c>).
+/// The game prints each as a System line on the receiving client, one per servant for returns.
+/// </summary>
+public enum ServantNoticeKind
+{
+    /// <summary>"Hunt in X started.": the throne's send, and Progenitor's own <c>Send</c> / <c>Resend</c>.</summary>
+    Started = 0,
+
+    /// <summary>"&lt;Servant&gt; has returned from a successful Hunt in X.", one per servant that came back.</summary>
+    Returned = 1,
+
+    /// <summary>"&lt;Servant&gt; was killed during the Hunt in X.", one per servant that died.</summary>
+    Killed = 2,
+}
+
 /// <summary>How one servant came back from a hunt.</summary>
 public enum ServantOutcome
 {

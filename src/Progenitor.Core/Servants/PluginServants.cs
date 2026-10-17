@@ -10,7 +10,8 @@ namespace Progenitor.Servants;
 /// <see cref="PluginContext.Servants"/>: castle servants and their hunts on the server. Read a
 /// castle's servants the way its throne lists them, read the heart's hunt record, send servants
 /// on a hunt with the writes the game's own throne send makes (validated with the game's checks),
-/// send a returned hunt again, and swap the throne's list for one player (experimental).
+/// send a returned hunt again, swap the throne's list for one player (experimental), and drop the
+/// game's hunt chat lines for chosen users (<see cref="SuppressGameNotices"/>).
 /// Returns are announced with <see cref="ServantsReturned"/> and Progenitor's sends with
 /// <see cref="ServantsSent"/> on <c>ctx.Events</c>.
 ///
@@ -161,6 +162,29 @@ public sealed class PluginServants
     {
         World(nameof(RegisterListProvider));
         var handle = ServantRuntime.Lists.Register(provider, _ctx.Guid);
+        _ctx.Track(handle);
+        return handle;
+    }
+
+    /// <summary>
+    /// Drop the game's hunt chat lines for chosen users. <paramref name="suppress"/> is asked once per
+    /// line and recipient, on the server main thread, with the recipient's user entity and the line's
+    /// <see cref="ServantNoticeKind"/>: <c>Started</c> ("Hunt in X started.", from a throne send and
+    /// from Progenitor's own <see cref="Send(ServantSendRequest)"/> / <c>Resend</c>), <c>Returned</c>
+    /// and <c>Killed</c> (one line per servant when a hunt finishes, including a hunt that finished
+    /// while the server was down). Returning true drops that line for that user only; the other
+    /// recipients still get it. Several filters, from one plugin or many, combine with OR; a filter
+    /// that throws keeps the line (logged once). Only the chat line goes: the hunt, its loot and
+    /// <see cref="ServantsReturned"/> are unchanged. Server only; may be registered before the world
+    /// loads. The handle is tracked, so unload removes the filter. Experimental, not live-verified.
+    /// </summary>
+    public IDisposable SuppressGameNotices(Func<Entity, ServantNoticeKind, bool> suppress)
+    {
+        if (suppress == null) throw new ArgumentNullException(nameof(suppress));
+        _ctx.EnsureAttached();
+        if (!Plugin.IsServerProcess || !ServantRuntime.Installed)
+            throw new InvalidOperationException("ctx.Servants.SuppressGameNotices runs on the server side only; the hunt notices are raised by the server.");
+        var handle = ServantRuntime.Notices.Register(suppress, _ctx.Guid);
         _ctx.Track(handle);
         return handle;
     }

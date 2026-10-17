@@ -146,6 +146,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantChanceLogic.cs" Link="Linked\ServantChanceLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantCapLogic.cs" Link="Linked\ServantCapLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantListRegistry.cs" Link="Linked\ServantListRegistry.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Servants\ServantNoticeFilters.cs" Link="Linked\ServantNoticeFilters.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleServants.cs" Link="Linked\SampleServants.cs" />
     <!-- Milestone P3 spike: ctx.MaterialSource. Game-free halves only; the Plugin*, *Runtime and
          Unity* files are not on this list. -->
