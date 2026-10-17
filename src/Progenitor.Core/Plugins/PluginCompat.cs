@@ -96,7 +96,8 @@ public sealed class PluginPeers
         if (!_ctx.IsServer) return PeerTableView.Unknown;
         int index = ModCompatNet.UserIndexOf(userEntity);
         if (index < 0) return PeerTableView.Unknown;
-        return new PeerTableView(_ctx.Guid, () => ModCompatNet.PeerTables.Get(index));
+        // NOKICK1: a mod this player was kept in place without (or at a version this server does not accept) reads as absent.
+        return new PeerTableView(_ctx.Guid, () => ModCompatNet.PeerTables.Get(index), masked: g => HandshakeInPlaceMask.Shared.IsMasked(index, g));
     }
 
     /// <summary>

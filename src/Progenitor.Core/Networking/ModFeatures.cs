@@ -880,12 +880,21 @@ internal sealed class PeerTableView : IPeerView
     private readonly string _self;
     private readonly Func<FeatureTable?> _table;
     private readonly Func<string, string?>? _fallbackVersion;
+    private readonly Func<string, bool>? _masked;
 
-    internal PeerTableView(string selfModId, Func<FeatureTable?> table, Func<string, string?>? fallbackVersion = null)
+    /// <param name="masked">NOKICK1 (server): mods to read as absent for this peer (<c>HandshakeInPlaceMask</c>).</param>
+    internal PeerTableView(string selfModId, Func<FeatureTable?> table, Func<string, string?>? fallbackVersion = null, Func<string, bool>? masked = null)
     {
         _self = selfModId ?? "";
         _table = table ?? (() => null);
         _fallbackVersion = fallbackVersion;
+        _masked = masked;
+    }
+
+    private bool Masked(string modGuid)
+    {
+        try { return _masked != null && _masked(modGuid); }
+        catch { return false; }
     }
 
     /// <summary>A view that never knows anything (the server's <c>ctx.Peer</c>, the client's <c>ctx.Peers.Of</c>).</summary>
@@ -893,13 +902,13 @@ internal sealed class PeerTableView : IPeerView
 
     public bool Known => SafeTable() != null;
 
-    public bool Has(string feature, int minLevel = 1) => SafeTable()?.Has(_self, feature, minLevel) ?? false;
+    public bool Has(string feature, int minLevel = 1) => !Masked(_self) && (SafeTable()?.Has(_self, feature, minLevel) ?? false);
 
-    public bool Has(string modGuid, string feature, int minLevel = 1) => SafeTable()?.Has(modGuid, feature, minLevel) ?? false;
+    public bool Has(string modGuid, string feature, int minLevel = 1) => !Masked(modGuid) && (SafeTable()?.Has(modGuid, feature, minLevel) ?? false);
 
     public string? ModVersion(string modGuid)
     {
-        if (string.IsNullOrEmpty(modGuid)) return null;
+        if (string.IsNullOrEmpty(modGuid) || Masked(modGuid)) return null;
         var t = SafeTable();
         if (t != null && t.Mods.TryGetValue(modGuid, out var row) && row.Version.Length > 0) return row.Version;
         if (t != null && t.Mods.ContainsKey(modGuid)) return "";

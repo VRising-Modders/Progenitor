@@ -223,9 +223,20 @@ internal enum HandshakeAskKind
     /// <summary>
     /// A re-ask after a Core generation change of a user who answered this session: the request is sent again and
     /// retried with backoff; a missing answer never disconnects, and the join-time rules (Keep them out, the client mod
-    /// policy's wait for a report) do not apply. An actual answer is still checked.
+    /// policy's wait for a report) do not apply. An actual answer is still checked, and a failing one keeps them connected
+    /// in place (NOKICK1, <see cref="HandshakeReask.MismatchOutcome"/>).
     /// </summary>
     SoftReask,
+}
+
+/// <summary>NOKICK1: what a failing handshake answer does (<see cref="HandshakeReask.MismatchOutcome"/>).</summary>
+internal enum HandshakeMismatchOutcome
+{
+    /// <summary>A join, or a client-side change: the existing rules (install window, refusal, kick).</summary>
+    Refuse,
+
+    /// <summary>An answer to a server-initiated ask: accepted, told in place, enforced at their next join.</summary>
+    KeepInPlace,
 }
 
 /// <summary>REASK1: the next step of a soft re-ask after one wait.</summary>
@@ -266,17 +277,45 @@ internal static class HandshakeReask
     internal static bool RefreshAllowed(bool handshakeOk, bool softReaskPending) => handshakeOk || softReaskPending;
 
     /// <summary>
-    /// RESEND1: the judgment of an answer to a requirement re-send (<see cref="HandshakeRequirementWatch"/>) from a user
-    /// whose handshake was already ok. A mismatch keeps them connected (a server mod loading mid-session is not their
-    /// join); the next join is judged in full.
+    /// NOKICK1 (live 2026-10-17, scope decided in review): what a failing handshake answer does. Only an answer to a
+    /// SERVER-initiated ask keeps the player connected in place: the soft re-ask after a server Core swap (a remembered
+    /// user answering while it waits), or a requirement re-send after a server plugin's <c>Require</c> or hot-load (only ok
+    /// users get one). The server changed, not their join. Every other failing answer keeps the existing flow (the install
+    /// window, then the refusal): a join, and a re-answer caused by a client-side change (the client hot-unloaded a
+    /// required mod, or swapped its own Core to a mismatched version).
     /// </summary>
-    internal static bool KeepConnectedOnMismatch(bool requirementResend, bool wasAlreadyOk) => requirementResend && wasAlreadyOk;
+    internal static HandshakeMismatchOutcome MismatchOutcome(bool softReaskPending, bool requirementResend) =>
+        softReaskPending || requirementResend ? HandshakeMismatchOutcome.KeepInPlace : HandshakeMismatchOutcome.Refuse;
 
-    /// <summary>RESEND1: the admins' log line for a mismatch that <see cref="KeepConnectedOnMismatch"/> kept connected.</summary>
+    /// <summary>
+    /// NOKICK1: whether a connected user's status at a Core swap is remembered for the next generation (beyond the users
+    /// who answered, who are remembered when they do): one let in without an answer because nothing required one.
+    /// </summary>
+    internal static bool RememberAcrossSwap(HandshakeAnswerWatch.Status status) => status == HandshakeAnswerWatch.Status.Unverified;
+
+    /// <summary>
+    /// NOKICK1: the game-free half of the swap's let-in memory: every connected user whose status
+    /// <see cref="RememberAcrossSwap"/> is remembered in <paramref name="memory"/> (unless it already is). Returns how many.
+    /// </summary>
+    internal static int RememberLetIn(IEnumerable<(int Index, ulong PlatformId, bool Connected, HandshakeAnswerWatch.Status Status)> users,
+        HandshakeSessionMemory memory)
+    {
+        int kept = 0;
+        foreach (var u in users)
+        {
+            if (!u.Connected || !RememberAcrossSwap(u.Status) || memory.Contains(u.Index, u.PlatformId)) continue;
+            memory.Remember(u.Index, u.PlatformId);
+            if (memory.Contains(u.Index, u.PlatformId)) kept++;
+        }
+
+        return kept;
+    }
+
+    /// <summary>NOKICK1: the admins' log line for a failing answer that <see cref="MismatchOutcome"/> kept connected.</summary>
     internal static string KeptAfterRequirementChangeLine(string name, IReadOnlyList<string> problems) =>
-        "Handshake: " + name + " no longer matches this server's mods after they changed mid-session ("
-        + string.Join("; ", problems) + "); they stay connected for now. Only this answer is let pass: a later re-answer or "
-        + "soft re-ask is judged as usual, and their next join is checked against the new list.";
+        "Handshake: " + name + " no longer matches this server's mods after they changed while " + name + " was connected ("
+        + string.Join("; ", problems) + "); they stay connected and are told in place. Only what needs those mods is missing "
+        + "for them, and their next join is checked against the new list.";
 
     /// <summary>The admins' log line when a soft re-ask got no answer.</summary>
     internal static string KeptConnectedLine(string name, int sends) =>

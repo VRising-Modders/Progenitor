@@ -226,7 +226,7 @@ internal static unsafe class ExchangeNet
             connected: Handshake.UserAnswerStatus(userIndex) == "ok",
             hasMessagesBit: (Handshake.CapsOf(userIndex) & Handshake.Capability.ModExchange) != 0,
             tableKnown: table != null,
-            listsMod: table != null && table.Mods.ContainsKey(modGuid));
+            listsMod: HandshakeInPlaceMask.ListsMod(table, userIndex, modGuid));
         return ModMessageGate.Decide(state, 0);
     }
 

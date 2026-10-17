@@ -130,11 +130,12 @@ public sealed class LiveFindings20261014Tests : IDisposable
     [Fact]
     public void The_live_resend_reaches_stale_ok_users_and_a_mismatch_in_its_answer_never_kicks()
     {
-        Assert.True(HandshakeReask.KeepConnectedOnMismatch(requirementResend: true, wasAlreadyOk: true));
-        Assert.False(HandshakeReask.KeepConnectedOnMismatch(requirementResend: false, wasAlreadyOk: true));
-        Assert.False(HandshakeReask.KeepConnectedOnMismatch(requirementResend: true, wasAlreadyOk: false));
+        // NOKICK1 (2026-10-17) widened this to every server-initiated ask (NoKickOnServerChangeTests).
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: true));
+        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: false)); // a client-side change: the existing flow
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: true, requirementResend: false));
         string line = HandshakeReask.KeptAfterRequirementChangeLine("a player", new[] { "x" });
-        Assert.Contains("a later re-answer or soft re-ask is judged as usual", line, StringComparison.Ordinal);
+        Assert.Contains("their next join is checked against the new list", line, StringComparison.Ordinal);
 
         string handshake = Source("src/Progenitor.Core/Networking/Handshake.cs").Replace("\r\n", "\n");
         string refresh = Source("src/Progenitor.Core/Networking/HandshakeRefresh.cs").Replace("\r\n", "\n");
@@ -155,7 +156,7 @@ public sealed class LiveFindings20261014Tests : IDisposable
 
         int take = handshake.IndexOf("bool requirementResend = RequirementWatch.TakeResendAnswer(user.Index);", StringComparison.Ordinal);
         int okBranch = handshake.IndexOf("if (problems.Count == 0)", take, StringComparison.Ordinal);
-        int keep = handshake.IndexOf("HandshakeReask.KeepConnectedOnMismatch(requirementResend,", StringComparison.Ordinal);
+        int keep = handshake.IndexOf("HandshakeReask.MismatchOutcome(softReask, requirementResend)", StringComparison.Ordinal);
         int note = handshake.IndexOf("RefusedJoins.Note(user.Index, failedIds, server, answered, user.PlatformId);", StringComparison.Ordinal);
         Assert.True(take > 0 && take < okBranch, "the owed answer is taken once, before either branch");
         Assert.True(keep > 0 && keep < note, "the keep-connected check comes before the refusal path");
