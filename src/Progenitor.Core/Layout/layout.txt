@@ -874,5 +874,14 @@ dump client
 offset ObservationLocalUserOffset = 0x0 : CommonClientData.LocalUser
 offset ObservationControlledEntityOffset = 0x14 : CommonClientData.LocalUserData.ControlledEntity
 offset ObservationControlledPositionOffset = 0x48 : CommonClientData.LocalUserData.ControlledPosition
+
+# ---- Map marker (src/Progenitor.Core/Ui/MapMarkerSender.cs) ----
+# SetMapMarkerEvent is the client-to-server event the world map sends when the player places their
+# custom marker (MapMenuMapper.OnMapClicked and HandleInput, via NetworkEvents.SendEvent with
+# Position = world (x, z)). DeleteMapMarkerEvent has no fields. Written field by field, never as a blob.
+dump client
+offset SetMapMarkerEventPositionOffset = 0x0 : SetMapMarkerEvent.Position   # float2: world x, world z
+match  SetMapMarkerEventId    = -132110655 : /EventId_SetMapMarkerEvent = (-?\d+);/ in NetworkEvents
+match  DeleteMapMarkerEventId = -531442865 : /EventId_DeleteMapMarkerEvent = (-?\d+);/ in NetworkEvents
 dump server
 offset ObservationProxyPositionOffset = 0x98 : User.ProxySyncPosition

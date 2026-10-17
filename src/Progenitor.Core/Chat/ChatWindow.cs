@@ -255,8 +255,8 @@ internal static class ChatWindow
                     new KeyChord(UiKey.UpArrow), "Bring back the previous line you sent in chat.",
                     () => RecallStep(up: true), null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
                 _sendLongKey = Keybinds.RegisterScoped(typeof(ChatWindow), SettingsPanel.PluginId, SendLongKeybindId, file,
-                    new KeyChord(UiKey.Enter), "Send a long chat line in parts (the game's own Enter sends ordinary lines).",
-                    SendLong, null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
+                    new KeyChord(UiKey.Enter), "Send a long chat line in parts, and turn /loc into your location (the game's own Enter sends ordinary lines).",
+                    OnSendKey, null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
                 _recallDownKey = Keybinds.RegisterScoped(typeof(ChatWindow), SettingsPanel.PluginId, RecallDownKeybindId, file,
                     new KeyChord(UiKey.DownArrow), "Go forward through the lines you sent in chat.",
                     () => RecallStep(up: false), null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
@@ -690,6 +690,7 @@ internal static class ChatWindow
         else if (_wasFocused)
         {
             string now = window.ChatInputField?.text ?? "";
+            SendLocAfterGame(window, _focusedText, now);
             if (now.Length == 0 && _focusedText.Trim().Length > 0)
             {
                 EnsureRecallLoaded();
@@ -750,6 +751,59 @@ internal static class ChatWindow
         int want = LongAllowed ? ChatPolicy.ClampLongMessage(ChatPolicy.Current.MaxLongMessageChars) : _gameCharacterLimit;
         if (_gameCharacterLimit > 0 && want < _gameCharacterLimit) want = _gameCharacterLimit;
         if (field.characterLimit != want) field.characterLimit = want;
+    }
+
+    /// <summary>
+    /// The chat-scope Enter: a line that is exactly <c>/loc</c> becomes the location token, which the game's own Enter
+    /// then sends (CHAT8; <c>/loc </c> with a space already expanded as it was typed); otherwise a long line goes in parts.
+    /// </summary>
+    private static void OnSendKey()
+    {
+        try
+        {
+            var system = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>();
+            var field = system?._ChatWindow?.ChatInputField;
+            string line = field?.text ?? "";
+            if (system != null && field != null && ChatInputTokens.TryExpandOnSend(line, out string token))
+            {
+                // Empty the input so the game's Enter sends nothing, and send the token ourselves (as long lines do).
+                field.text = "";
+                _focusedText = "";
+                EnsureRecallLoaded();
+                Recall.Push(line);
+                SaveRecall();
+                QueueLine(system, token);
+                return;
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: /loc on send threw: " + e.Message); }
+
+        SendLong();
+    }
+
+    /// <summary>One line on the channel the input would have sent it to, through the long-part queue (in order).</summary>
+    private static void QueueLine(ClientChatSystem system, string text)
+    {
+        LongParts.Enqueue((text, system._DefaultMode, system._WhisperUser));
+        Plugin.Logger?.LogInfo("Chat: /loc sent as " + text + ".");
+    }
+
+    /// <summary>
+    /// The game handled Enter on <c>/loc</c> before the send key ran (<see cref="ChatInputTokens.SendAfterGame"/>):
+    /// send the location now.
+    /// </summary>
+    private static void SendLocAfterGame(HUDChatWindow window, string lineBefore, string lineNow)
+    {
+        try
+        {
+            var field = window.ChatInputField;
+            bool canceled = field != null && field.wasCanceled;
+            if (!ChatInputTokens.SendAfterGame(lineBefore, lineNow, canceled)) return;
+            if (!ChatInputTokens.TryExpandOnSend(lineBefore, out string token)) return;
+            var system = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>();
+            if (system != null) QueueLine(system, token);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: /loc after send threw: " + e.Message); }
     }
 
     /// <summary>

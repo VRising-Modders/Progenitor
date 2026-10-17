@@ -23,6 +23,9 @@ namespace Progenitor.Ui;
 /// prior value back when the last lease goes — also with no client world (a disconnect, an unload at the
 /// title screen), because the flag is a process-wide static. The player's exploration data is never written.
 /// <b>Not live-verified.</b></para>
+///
+/// <para><b>Marker</b> (<see cref="SetMarker"/>, <see cref="ClearMarker"/>) places or removes the player's own map
+/// marker with the game's own events (<see cref="MapMarkerSender"/>). <b>Not live-verified.</b></para>
 /// </summary>
 public static class WorldMap
 {
@@ -113,6 +116,53 @@ public static class WorldMap
         catch (Exception e)
         {
             pointer = MapPointer.Off("map read threw: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Place this player's own map marker at world <paramref name="x"/>, <paramref name="z"/>: the marker the player
+    /// sets by clicking the map, with its route on the map and its guide on the compass. Each player has one; this
+    /// moves it. The same event the map's own click sends (<see cref="MapMarkerSender"/>); the server places it.
+    /// False with no client world or character, or for a coordinate that is not a finite number. Client only, main
+    /// thread. <b>Not live-verified.</b>
+    /// </summary>
+    public static bool SetMarker(float x, float z)
+    {
+        if (!float.IsFinite(x) || !float.IsFinite(z)) return false;
+        try
+        {
+            if (MapMarkerSender.Set(x, z, out string why))
+            {
+                Plugin.Logger?.LogInfo("WorldMap: map marker set at [" + Math.Round(x) + ", " + Math.Round(z) + "].");
+                return true;
+            }
+
+            Plugin.Logger?.LogInfo("WorldMap: map marker not set (" + why + ").");
+            return false;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("WorldMap: map marker could not be set: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Remove this player's own map marker, as the map's delete does. False with no client world or character.
+    /// Client only, main thread. <b>Not live-verified.</b>
+    /// </summary>
+    public static bool ClearMarker()
+    {
+        try
+        {
+            if (MapMarkerSender.Clear(out string why)) return true;
+            Plugin.Logger?.LogInfo("WorldMap: map marker not cleared (" + why + ").");
+            return false;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("WorldMap: map marker could not be cleared: " + e.Message);
             return false;
         }
     }

@@ -268,7 +268,7 @@ public sealed class ChatTokenTests
     [Theory]
     [InlineData(0f, 10f, "north")]
     [InlineData(10f, 0f, "east")]
-    [InlineData(-10f, -10f, "south-west")]
+    [InlineData(-10f, -10f, "southwest")]
     [InlineData(0.1f, 0.1f, "here")]
     public void Directions_follow_the_compass(float dx, float dz, string expected) =>
         Assert.Equal(expected, ChatTokens.Direction(dx, dz));
@@ -298,6 +298,59 @@ public sealed class ChatTokenTests
             ChatInputTokens.ItemIdByPrefabName = oldItem;
         }
     }
+
+    [Fact]
+    public void Loc_alone_expands_on_send_and_nothing_else_does()
+    {
+        var oldPos = ChatInputTokens.Position;
+        try
+        {
+            ChatInputTokens.Position = () => (true, 100.4f, -50f);
+            Assert.True(ChatInputTokens.TryExpandOnSend("/loc", out var a));
+            Assert.Equal("[loc:100,-50]", a);
+            Assert.True(ChatInputTokens.TryExpandOnSend("/LOC  ", out var b));
+            Assert.Equal("[loc:100,-50]", b);
+            Assert.False(ChatInputTokens.TryExpandOnSend("/local", out var c));
+            Assert.Equal("/local", c);
+            Assert.False(ChatInputTokens.TryExpandOnSend("/locate", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend("/lo", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend(" /loc", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend("say /loc", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend("", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend(null, out _));
+            // "/loc" while it is still being typed is not touched (it may become /local).
+            Assert.False(ChatInputTokens.TryExpand("/loc", out _));
+            Assert.False(ChatInputTokens.TryExpand("/local", out _));
+            ChatInputTokens.Position = () => (false, 0f, 0f);
+            Assert.False(ChatInputTokens.TryExpandOnSend("/loc", out _));
+            ChatInputTokens.Position = null;
+            Assert.False(ChatInputTokens.TryExpandOnSend("/loc", out _));
+        }
+        finally { ChatInputTokens.Position = oldPos; }
+    }
+
+    [Theory]
+    [InlineData("/loc", "", false, true)]     // the game took Enter first and emptied the line
+    [InlineData("/LOC ", "", false, true)]
+    [InlineData("/loc", "", true, false)]     // Escape: nothing is sent
+    [InlineData("/loc", "/loc", false, false)] // still in the input (focus moved away without sending)
+    [InlineData("/local", "", false, false)]
+    [InlineData("", "", false, false)]         // Progenitor's key already sent it and emptied the line
+    [InlineData("hello", "", false, false)]
+    public void Loc_fallback_sends_only_when_the_game_took_a_bare_loc(string before, string now, bool canceled, bool expected) =>
+        Assert.Equal(expected, ChatInputTokens.SendAfterGame(before, now, canceled));
+
+    [Theory]
+    [InlineData(187, 187, true, 100f, 100f, "Set a map marker here? (123 m northeast)")]
+    [InlineData(100, -400, true, 100f, 100f, "Set a map marker here? (500 m south)")]
+    [InlineData(10, 20, true, 10.2f, 19.9f, "Set a map marker here? (you are here)")]
+    [InlineData(10, 20, false, 0f, 0f, "Set a map marker here?")]
+    public void Location_click_asks_to_set_a_map_marker(int x, int z, bool have, float px, float pz, string expected) =>
+        Assert.Equal(expected, ChatTokens.MarkerPrompt(x, z, have, px, pz));
+
+    [Fact]
+    public void Location_confirm_title_names_the_coordinates() =>
+        Assert.Equal("Location [-1200, 35]", ChatTokens.MarkerTitle(-1200, 35));
 
     [Fact]
     public void Long_messages_split_under_the_byte_limit_and_join_back()

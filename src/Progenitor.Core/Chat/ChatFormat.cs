@@ -105,14 +105,32 @@ internal static class ChatTokens
         return found;
     }
 
-    /// <summary>A compass direction from a world-space offset (x east, z north): north, north-east, and so on.</summary>
+    /// <summary>A compass direction from a world-space offset (x east, z north): north, northeast, and so on.</summary>
     internal static string Direction(float dx, float dz)
     {
         if (Math.Abs(dx) < 0.5f && Math.Abs(dz) < 0.5f) return "here";
         double deg = Math.Atan2(dx, dz) * 180.0 / Math.PI;
         if (deg < 0) deg += 360.0;
-        string[] names = { "north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west" };
+        string[] names = { "north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest" };
         return names[(int)Math.Round(deg / 45.0) % 8];
+    }
+
+    /// <summary>The location-link confirm's title: <c>Location [x, z]</c>.</summary>
+    internal static string MarkerTitle(int x, int z) =>
+        "Location [" + x.ToString(CultureInfo.InvariantCulture) + ", " + z.ToString(CultureInfo.InvariantCulture) + "]";
+
+    /// <summary>
+    /// The location-link confirm's question: <c>Set a map marker here? (123 m northeast)</c>; without the distance
+    /// when this player's position is unknown, and <c>(you are here)</c> within a meter.
+    /// </summary>
+    internal static string MarkerPrompt(int x, int z, bool havePosition, float px, float pz)
+    {
+        const string ask = "Set a map marker here?";
+        if (!havePosition) return ask;
+        float dx = x - px, dz = z - pz;
+        double meters = Math.Round(Math.Sqrt(dx * dx + dz * dz));
+        if (meters < 1) return ask + " (you are here)";
+        return ask + " (" + meters.ToString(CultureInfo.InvariantCulture) + " m " + Direction(dx, dz) + ")";
     }
 }
 

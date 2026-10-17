@@ -690,6 +690,9 @@ internal static class ChatView
     /// <summary>The link dialog's line for a chat link: anyone in chat may have written it.</summary>
     internal const string LinkBody = "Someone shared this link in chat. It opens in your web browser; open only links you trust.";
 
+    /// <summary>The location link confirm's button: it places the player's own map marker there.</summary>
+    internal const string MarkerSetButton = "Set marker";
+
     /// <summary>The click as a mod's handler sees it.</summary>
     private static ChatLinkClick ClickOf(ChatSpan span, ChatRecord r)
     {
@@ -720,12 +723,17 @@ internal static class ChatView
         if (span.Kind == ChatSpanKind.Location)
         {
             if (!ChatTokens.TryParseLocation(span.Target, out int lx, out int lz)) return;
-            string where = "[" + lx + ", " + lz + "]";
-            string body = ChatGameData.TryLocalPosition(out float px, out float pz)
-                ? where + " is about " + Math.Round(Math.Sqrt((lx - px) * (lx - px) + (lz - pz) * (lz - pz))) + " m "
-                    + ChatTokens.Direction(lx - px, lz - pz) + " of you."
-                : where;
-            UiDialogs.Notice(typeof(ChatView), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter, "Location", body, "OK", null);
+            bool have = ChatGameData.TryLocalPosition(out float px, out float pz);
+            UiDialogs.Choose(typeof(ChatView), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter,
+                ChatTokens.MarkerTitle(lx, lz), ChatTokens.MarkerPrompt(lx, lz, have, px, pz),
+                new[] { MarkerSetButton },
+                pick =>
+                {
+                    if (pick != 0) return;
+                    try { WorldMap.SetMarker(lx, lz); }
+                    catch (Exception e) { Plugin.Logger?.LogWarning("Chat: map marker threw: " + e.Message); }
+                },
+                Networking.JoinLinkText.CancelButton, null);
             return;
         }
 
