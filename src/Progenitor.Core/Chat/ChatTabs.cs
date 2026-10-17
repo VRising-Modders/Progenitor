@@ -1095,8 +1095,7 @@ internal static class ChatTabs
             }
             else if (i == presets.Count)
             {
-                var fresh = new ChatTab { Name = "Tab " + Set.Tabs.Count, Scope = ChatScope.Global };
-                NameTab(fresh, isNew: true);
+                OpenTabForm(ChatTabForm.Fresh(Set.Tabs.Count), isNew: true);
             }
         });
     }
@@ -1104,45 +1103,55 @@ internal static class ChatTabs
     private static void EditTab(int index)
     {
         if (index < 0 || index >= Set.Tabs.Count || Set.Tabs[index].Fixed) return;
-        NameTab(Set.Tabs[index], isNew: false);
+        OpenTabForm(Set.Tabs[index], isNew: false);
     }
 
-    private static void NameTab(ChatTab tab, bool isNew)
+    /// <summary>
+    /// FORMDIALOG1: the tab editor, one dialog: the name, the "Show messages from" check boxes, Save and Cancel
+    /// (<see cref="ChatTabForm"/>). Nothing changes until Save; a tab closed while its editor is open is not brought back.
+    /// </summary>
+    private static UiDialog OpenTabForm(ChatTab tab, bool isNew)
     {
-        UiDialogs.Prompt(typeof(ChatTabs), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter,
-            isNew ? "New tab" : "Edit tab", "The tab's name.", tab.Name,
-            name =>
+        // A tab closed (or the tabs read again) while its editor is open, or a full row for a new one, is refused under
+        // the field (ChatTabForm.Refusal) rather than dropped silently; Save checks again in case the row changed since.
+        var options = ChatTabForm.Options(tab);
+        options.Validate = r => ChatTabForm.Refusal(Set.Tabs, tab, isNew, r.Text, r.States);
+        return UiDialogs.Form(typeof(ChatTabs), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter,
+            ChatTabForm.Title(isNew), options, r =>
             {
-                tab.Name = ChatTab.Clean(name);
-                EditScope(tab, isNew);
-            },
-            "Trade", n => ChatTab.Clean(n).Length == 0 ? "Enter a name." : null, "Next", ChatTab.MaxNameLength, "Cancel", null);
+                if (ChatTabForm.Refusal(Set.Tabs, tab, isNew, r.Text, r.States) != null) return;
+                if (!ChatTabForm.Apply(tab, r.Text, r.States)) return;
+                if (isNew)
+                {
+                    Set.Tabs.Add(tab);
+                    Set.Active = Set.Tabs.Count - 1;
+                }
+
+                SaveTabs();
+            });
     }
 
-    /// <summary>"Show messages from": pick a line to switch it; Done keeps the tab.</summary>
-    private static void EditScope(ChatTab tab, bool isNew)
+    /// <summary>
+    /// FORMDIALOG1, bridge (<c>chat_tabs edit</c>): open the editor of tab <paramref name="index"/>, or of a new custom tab
+    /// when <paramref name="index"/> is -1, as the quick menu does. Refused for the fixed All tab, a tab that does not
+    /// exist, a full row of tabs, or before the saved tabs are read.
+    /// </summary>
+    internal static Dictionary<string, object?> OpenEditorForBridge(int index)
     {
-        var options = new List<string>();
-        foreach (var c in ChatTabStrip.ScopeChoices) options.Add(ChatTabStrip.ScopeLine(tab.Scope, c));
-        options.Add("Done");
-        Choose(tab.Name, "Show messages from:", options, i =>
+        if (!EnsureLoaded()) throw new InvalidOperationException("the chat tabs are not read yet (the chat has not updated this session)");
+        if (index == -1)
         {
-            if (i >= 0 && i < ChatTabStrip.ScopeChoices.Length)
-            {
-                tab.Scope ^= ChatTabStrip.ScopeChoices[i].Scope;
-                EditScope(tab, isNew);
-                return;
-            }
+            if (Set.Tabs.Count >= ChatTab.MaxTabs) throw new InvalidOperationException("the tab row is full (" + ChatTab.MaxTabs + " tabs)");
+            OpenTabForm(ChatTabForm.Fresh(Set.Tabs.Count), isNew: true);
+        }
+        else
+        {
+            if (index < 0 || index >= Set.Tabs.Count) throw new ArgumentException("no tab " + index + " (there are " + Set.Tabs.Count + ")");
+            if (Set.Tabs[index].Fixed) throw new ArgumentException("tab " + index + " (" + Set.Tabs[index].Name + ") cannot be edited");
+            OpenTabForm(Set.Tabs[index], isNew: false);
+        }
 
-            if (tab.Scope == ChatScope.None) tab.Scope = ChatScope.Global;
-            if (isNew)
-            {
-                Set.Tabs.Add(tab);
-                Set.Active = Set.Tabs.Count - 1;
-            }
-
-            SaveTabs();
-        });
+        return UiDialog.Describe();
     }
 }
 #endif

@@ -475,6 +475,9 @@ internal interface IUiRuntime
     /// <summary>NAV1: give the text field in <paramref name="widget"/> the keyboard, as a click on it does. False when it has none.</summary>
     bool FocusTextIn(IRuntimeWidget widget) => false;
 
+    /// <summary>FORMDIALOG1: take the keyboard back from the focused text field, as a click elsewhere does.</summary>
+    void BlurText() { }
+
     /// <summary>NAV1: scroll the list holding <paramref name="widget"/> by a stick's deflection (-1..1 per frame, positive up).</summary>
     void ScrollNear(IRuntimeWidget widget, float amount) { }
 

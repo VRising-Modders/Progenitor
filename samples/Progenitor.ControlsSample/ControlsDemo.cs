@@ -21,7 +21,7 @@ internal sealed class ControlsDemo
 
     /// <summary>The <c>ctx.Dialogs</c> kinds the panel offers a button for.</summary>
     internal static readonly string[] DialogKinds =
-        { "Confirm", "Confirm (facts)", "Notice", "Notice (facts)", "Choose", "Prompt" };
+        { "Confirm", "Confirm (facts)", "Notice", "Notice (facts)", "Choose", "Prompt", "Form" };
 
     private static readonly string[] Fruits = { "apple", "pear", "plum" };
     private static readonly string[] FruitLabels = { "Apple", "Pear", "Plum" };

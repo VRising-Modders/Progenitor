@@ -311,6 +311,17 @@ internal static class SettingsArtDonors
     /// The sprite to draw for <paramref name="part"/>, how (sliced or simple) and its pixels-per-unit
     /// multiplier; false for the kit's own drawing. The color is the caller's (<see cref="GameSettingsLook"/>).
     /// </summary>
+    /// <summary>
+    /// FORMDIALOG1: no later frame will bring <paramref name="part"/>: it resolved to the kit's look, or it is still
+    /// unresolved after this world's idle preparation finished. A skin retry for it can stop.
+    /// </summary>
+    internal static bool PartFinal(SettingsArtPart part)
+    {
+        int i = (int)part;
+        if (i < 0 || i >= PartCount) return true;
+        return Sources[i] == GameArtSource.Kit || (Sources[i] == GameArtSource.Unresolved && IdlePrepared());
+    }
+
     internal static bool TryPart(SettingsArtPart part, out Sprite? sprite, out Image.Type type, out float ppuMultiplier)
     {
         int i = (int)part;

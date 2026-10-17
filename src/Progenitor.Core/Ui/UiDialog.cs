@@ -124,6 +124,33 @@ internal sealed class DialogContent
     /// <summary>TEXTEXPAND1: the number the counter divides by.</summary>
     internal int ShownLimit => CounterLimit > 0 ? CounterLimit : MaxLength;
 
+    /// <summary>
+    /// FORMDIALOG1: a caption on the left of a Prompt's one-line field (<c>Name</c>), which then fills the content row from
+    /// the form's left edge (<see cref="DialogForm.CaptionedFieldRowSpec"/>); empty keeps the centered field.
+    /// </summary>
+    internal string InputCaption { get; set; } = "";
+
+    /// <summary>
+    /// FORMDIALOG1: a Prompt's check boxes, under the field (<see cref="DialogForm"/>), in their current state: the dialog
+    /// replaces the list as the player flips one, so a dialog rebuilt after a framework dialog stepped in keeps them.
+    /// </summary>
+    internal IReadOnlyList<DialogCheck> Checks { get; set; } = Array.Empty<DialogCheck>();
+
+    /// <summary>FORMDIALOG1: the small heading over the check boxes (<c>Show messages from</c>); empty for none.</summary>
+    internal string ChecksHeading { get; set; } = "";
+
+    /// <summary>FORMDIALOG1: the main action waits until at least one box is checked.</summary>
+    internal bool ChecksRequireOne { get; set; }
+
+    /// <summary>FORMDIALOG1: the line under the boxes while none is checked and one must be.</summary>
+    internal string ChecksHint { get; set; } = DialogForm.DefaultNoneHint;
+
+    /// <summary>FORMDIALOG1: whether the boxes as they stand may be saved.</summary>
+    internal bool ChecksOk => DialogForm.Satisfied(Checks, ChecksRequireOne);
+
+    /// <summary>Whether the main action is enabled for <paramref name="typed"/>: the confirmation word and the boxes.</summary>
+    internal bool MainEnabled(string? typed) => Unlocks(typed) && ChecksOk;
+
     /// <summary>The version footer line.</summary>
     internal string Footer { get; set; } = "";
 
@@ -207,7 +234,7 @@ internal sealed class DialogContent
         }
 
         if (Shape != UiDialogShape.Choose && MainCaption.Length > 0)
-            list.Add(new DialogButton(MainKey, MainCaption, DialogButtonRole.Main, Unlocks(InputInitial) ? MainTone : CellTone.Disabled));
+            list.Add(new DialogButton(MainKey, MainCaption, DialogButtonRole.Main, MainEnabled(InputInitial) ? MainTone : CellTone.Disabled));
         return list;
     }
 }
@@ -266,6 +293,15 @@ internal sealed class UiDialogView
     internal IUiCellRow? InputNoteRow { get; private set; }
 
     internal IUiCellRow? Error { get; private set; }
+
+    /// <summary>FORMDIALOG1: the heading over the check boxes (<see cref="DialogContent.ChecksHeading"/>).</summary>
+    internal IUiCellRow? ChecksHeadingRow { get; private set; }
+
+    /// <summary>FORMDIALOG1: one row per check box, in order.</summary>
+    internal List<IUiCellRow> CheckRows { get; } = new();
+
+    /// <summary>FORMDIALOG1: the hint under the boxes, shown while none is checked and one must be.</summary>
+    internal IUiCellRow? ChecksHintRow { get; private set; }
 
     internal IUiCellRow? Buttons { get; private set; }
 
@@ -376,6 +412,12 @@ internal sealed class UiDialogView
                 if (!string.IsNullOrWhiteSpace(content.InputNote))
                     view.InputNoteRow = panel.CellRow(DialogLayout.InputNoteRowSpec(UiDialogs.InputNoteRow, content.InputNote, DialogLayout.ContentRowWidth(frameWidth)));
             }
+            else if (!string.IsNullOrWhiteSpace(content.InputCaption))
+            {
+                // FORMDIALOG1: the caption on the form's left edge, the field filling the rest of the row.
+                view.Input = panel.CellRow(DialogForm.CaptionedFieldRowSpec(
+                    UiDialogs.InputRow, content.InputCaption, field, DialogLayout.ContentRowWidth(frameWidth)));
+            }
             else
             {
                 view.Input = panel.CellRow(DialogLayout.CentredRowSpec(
@@ -384,10 +426,33 @@ internal sealed class UiDialogView
             var error = new CellSpec(CellKind.Text, UiDialogs.CellError).With(
                 text: "", align: CellAlign.Center, tone: CellTone.Orange, wrap: CellWrap.Wrap,
                 fontSize: DialogLayout.ErrorFontSize, vAlign: CellVAlign.Top);
-            view.Error = panel.CellRow(DialogLayout.CentredRowSpec(
-                UiDialogs.ErrorRow, error, DialogLayout.BodyWidth(), UnityUiRuntimeMetrics.RowHeight));
+            view.Error = panel.CellRow(!string.IsNullOrWhiteSpace(content.InputCaption) && content.EditorHeight <= 0f
+                ? DialogForm.FieldErrorRowSpec(UiDialogs.ErrorRow, content.InputCaption, error, DialogLayout.ContentRowWidth(frameWidth))
+                : DialogLayout.CentredRowSpec(UiDialogs.ErrorRow, error, DialogLayout.BodyWidth(), UnityUiRuntimeMetrics.RowHeight));
             try { view.Error.Visible = false; }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog error row: " + e.Message); }
+        }
+
+        if (content.Checks.Count > 0)
+        {
+            // FORMDIALOG1: the heading, one line per box (the game's checkbox and its label), and the hint.
+            if (!string.IsNullOrWhiteSpace(content.ChecksHeading))
+            {
+                try { view.ChecksHeadingRow = panel.CellRow(DialogForm.HeadingRowSpec(content.ChecksHeading)); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog checks heading threw: " + e.Message); }
+            }
+
+            for (int i = 0; i < content.Checks.Count; i++)
+                view.CheckRows.Add(panel.CellRow(DialogForm.CheckRowSpec(i, content.Checks[i])));
+            if (content.ChecksRequireOne)
+            {
+                try
+                {
+                    view.ChecksHintRow = panel.CellRow(DialogForm.HintRowSpec(content.ChecksHint));
+                    view.ChecksHintRow.Visible = !content.ChecksOk;
+                }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog checks hint threw: " + e.Message); }
+            }
         }
 
         if (content.OptionsAsRows)
@@ -459,6 +524,9 @@ internal sealed class UiDialogView
             if (CounterRow != null) list.Add(CounterRow);
             if (InputNoteRow != null) list.Add(InputNoteRow);
             if (Error != null) list.Add(Error);
+            if (ChecksHeadingRow != null) list.Add(ChecksHeadingRow);
+            list.AddRange(CheckRows);
+            if (ChecksHintRow != null) list.Add(ChecksHintRow);
             list.AddRange(OptionHeadingRows);
             list.AddRange(OptionRows);
             foreach (var (_, row) in ExtraRows) list.Add(row);
@@ -513,6 +581,8 @@ internal sealed class UiDialog : IDisposable
     private Action<int>? _pick;
     private Action<string>? _submit;
     private Func<string, string?>? _validate;
+    private Action<DialogFormResult>? _save;
+    private Func<DialogFormResult, string?>? _validateForm;
     private IUiPanel? _panel;
     private UiDialogView? _view;
     private string _text;
@@ -602,7 +672,12 @@ internal sealed class UiDialog : IDisposable
             ["typed"] = open?._text ?? "",
             // The text the field draws (equal to typed after a keystroke or dialog_type; empty shows the placeholder).
             ["field"] = open?.FieldText ?? "",
-            ["mainEnabled"] = open == null || open.Content.Unlocks(open._text),
+            ["mainEnabled"] = open == null || open.Content.MainEnabled(open._text),
+            // FORMDIALOG1: a form's boxes ({index, row, label, on}), the heading, and whether Save may be pressed for them.
+            ["checks"] = ChecksReadback(open),
+            ["checksHeading"] = open?.Content.ChecksHeading ?? "",
+            ["checksOk"] = open == null || open.Content.ChecksOk,
+            ["checksHint"] = open?.View?.ChecksHintRow is { } hintRow && hintRow.Visible ? open.Content.ChecksHint : "",
             // WORLDRESTORE1: the extra answers (their keys and captions), whether they wait for the word, and the date field.
             ["extras"] = ExtrasReadback(open),
             // DIALOGS3: what dialog_choose takes here: each answer's index (-1: none), cell key, caption and keywords.
@@ -634,6 +709,19 @@ internal sealed class UiDialog : IDisposable
         if (open == null) return list;
         foreach (var (index, key, caption, aliases) in open.BridgeChoices())
             list.Add(new Dictionary<string, object?> { ["index"] = index, ["key"] = key, ["caption"] = caption, ["aliases"] = aliases });
+        return list;
+    }
+
+    private static List<object?> ChecksReadback(UiDialog? open)
+    {
+        var list = new List<object?>();
+        if (open == null) return list;
+        var checks = open.Content.Checks;
+        for (int i = 0; i < checks.Count; i++)
+            list.Add(new Dictionary<string, object?>
+            {
+                ["index"] = i, ["row"] = DialogForm.CheckRow(i), ["label"] = checks[i].Label, ["on"] = checks[i].On,
+            });
         return list;
     }
 
@@ -836,6 +924,55 @@ internal sealed class UiDialog : IDisposable
     }
 
     /// <summary>
+    /// FORMDIALOG1: a form's Save: <paramref name="handler"/> gets the text and every box's state, after
+    /// <paramref name="validate"/> (error text under the field, or null to accept). Replaces <see cref="OnSubmit"/>.
+    /// </summary>
+    internal UiDialog OnSave(Action<DialogFormResult>? handler, Func<DialogFormResult, string?>? validate)
+    {
+        _save = handler;
+        _validateForm = validate;
+        return this;
+    }
+
+    /// <summary>FORMDIALOG1: the boxes' states now, in order.</summary>
+    internal IReadOnlyList<bool> CheckStates => DialogForm.States(Content.Checks);
+
+    /// <summary>
+    /// FORMDIALOG1: flip box <paramref name="index"/> (a click on its line, the controller's A on it, the bridge): its
+    /// mark, then the Save button and the hint follow whether one is checked. False when the dialog is not open or there
+    /// is no such box.
+    /// </summary>
+    internal bool ToggleCheck(int index)
+    {
+        if (!IsOpen || index < 0 || index >= Content.Checks.Count) return false;
+        Content.Checks = DialogForm.Flip(Content.Checks, index);
+        bool on = Content.Checks[index].On;
+        if (_view != null && index < _view.CheckRows.Count)
+        {
+            try { _view.CheckRows[index].SetCell(DialogForm.CellCheck, CellLayout.CheckText(on)); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog check mark: " + e.Message); }
+        }
+
+        GateMain();
+        var hint = _view?.ChecksHintRow;
+        if (hint != null)
+        {
+            try { hint.Visible = !Content.ChecksOk; }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog checks hint: " + e.Message); }
+        }
+
+        return true;
+    }
+
+    /// <summary>The main button lit or grayed for the word and the boxes as they stand.</summary>
+    private void GateMain()
+    {
+        if (Content.MainCaption.Length == 0 || _view?.Buttons is not { } buttons) return;
+        try { buttons.SetCell(Content.MainKey, tone: Content.MainEnabled(_text) ? Content.MainTone : CellTone.Disabled); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog main gate: " + e.Message); }
+    }
+
+    /// <summary>
     /// Escape answers the open dialog with its dismissal (a Notice's is its OK). Called from the key
     /// hook before the sweep that hides every shown panel.
     /// </summary>
@@ -870,12 +1007,15 @@ internal sealed class UiDialog : IDisposable
 
         // Enter typed into another field (the game's chat, a search box) is that field's.
         if (typingElsewhere) return false;
-        // A destructive confirmation needs a click on its button.
-        if (open.Content.Danger) return false;
         long now;
         try { now = Clock(); }
         catch { now = open._shownAt + EnterGraceMs; }
         if (now - open._shownAt < EnterGraceMs) return false;
+        // FORMDIALOG1: the keyboard focus the player moved onto a box or a button takes Enter (Cancel cancels, a box
+        // flips); a destructive main answer still needs a click, so Enter on it presses nothing.
+        if (open._view != null && UiNav.PressFocusAmong(open._view.Rows, open.Content.Danger ? open.Content.MainKey : null)) return true;
+        // A destructive confirmation needs a click on its button.
+        if (open.Content.Danger) return false;
         var c = open.Content;
         switch (c.Shape)
         {
@@ -1225,6 +1365,13 @@ internal sealed class UiDialog : IDisposable
             else view.OptionRows[i].OnClick(UiDialogs.OptionKey(i), () => Pick(index));
         }
 
+        // FORMDIALOG1: a click anywhere on a check line (and the controller's A on it) flips its box.
+        for (int i = 0; i < view.CheckRows.Count; i++)
+        {
+            int index = i;
+            view.CheckRows[i].OnRowClick(() => ToggleCheck(index));
+        }
+
         view.Input?.OnChanged(UiDialogs.CellField, OnTyped);
     }
 
@@ -1286,6 +1433,19 @@ internal sealed class UiDialog : IDisposable
             }
 
             if (row.TryInvokeCell(label, out detail)) return true;
+            if (refused == null && UiClickGate.RefusalOf(detail) != null) refused = detail;
+        }
+
+        // FORMDIALOG1: a check line answers to its row key or its label, through the row's own click slot.
+        for (int i = 0; i < _view.CheckRows.Count; i++)
+        {
+            if (_view.CheckRows[i] is not UiCellRowHandle row) continue;
+            string key = label.Trim();
+            bool match = string.Equals(key, row.Key, StringComparison.Ordinal)
+                || (i < Content.Checks.Count && Content.Checks[i].Label.Length > 0
+                    && string.Equals(key, Content.Checks[i].Label, StringComparison.OrdinalIgnoreCase));
+            if (!match) continue;
+            if (row.TryInvokeRow(out detail)) return true;
             if (refused == null && UiClickGate.RefusalOf(detail) != null) refused = detail;
         }
 
@@ -1462,11 +1622,7 @@ internal sealed class UiDialog : IDisposable
         // WORLDRESTORE1: extra answers that wait for the word light with it.
         if (Content.ConfirmWord.Length > 0 && Content.ExtrasNeedWord) GateExtras(Content.Unlocks(_text));
         // WIPECONFIRM1: the main action lights only once the confirmation word is typed.
-        if (Content.ConfirmWord.Length > 0 && _view?.Buttons is { } gate)
-        {
-            try { gate.SetCell(Content.MainKey, tone: Content.Unlocks(_text) ? Content.MainTone : CellTone.Disabled); }
-            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog confirm gate: " + e.Message); }
-        }
+        if (Content.ConfirmWord.Length > 0) GateMain();
 
         // WIPEPOLISH1: a short hint under the field while something is typed that is not the word.
         if (Content.ConfirmWord.Length > 0 && _text.Trim().Length > 0 && !Content.Unlocks(_text))
@@ -1510,12 +1666,21 @@ internal sealed class UiDialog : IDisposable
         string text = _text ?? "";
         // WIPECONFIRM1: a disabled main action does nothing (no error: the field's hint says what to type).
         if (!Content.Unlocks(text)) return;
+        // FORMDIALOG1: no box checked where one must be: the hint under the boxes says so, and Save waits.
+        if (!Content.ChecksOk)
+        {
+            try { if (_view?.ChecksHintRow is { } hint) hint.Visible = true; }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog checks hint: " + e.Message); }
+            return;
+        }
+
+        var result = new DialogFormResult(text, Content.Checks);
         string? error = null;
         if (Content.MaxLength > 0 && text.Length > Content.MaxLength)
             error = UiDialogs.TooLong(Content.MaxLength);
-        if (error == null && _validate != null)
+        if (error == null && (_validate != null || _validateForm != null))
         {
-            try { error = _validate(text); }
+            try { error = _validateForm != null ? _validateForm(result) : _validate!(text); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: dialog '" + Content.Title + "' validation threw: " + e.Message);
@@ -1527,6 +1692,13 @@ internal sealed class UiDialog : IDisposable
         if (error != null)
         {
             ShowError(string.IsNullOrWhiteSpace(error) ? UiDialogs.NotAccepted : error);
+            return;
+        }
+
+        var save = _save;
+        if (save != null)
+        {
+            Answer(() => save(result));
             return;
         }
 
@@ -1643,6 +1815,8 @@ internal sealed class UiDialog : IDisposable
         _pick = null;
         _submit = null;
         _validate = null;
+        _save = null;
+        _validateForm = null;
     }
 
     /// <summary>The panel left the screen without the dialog closing it: drop the dialog, no callback.</summary>
@@ -1811,6 +1985,41 @@ internal static class UiDialogs
             Footer = footer,
         };
         return Queue(owner, pluginId, content, "prompt").OnSubmit(onSubmit, validate).OnNo(onCancel);
+    }
+
+    /// <summary>
+    /// FORMDIALOG1: a form (<see cref="DialogFormOptions"/>): a one-line field with its caption on the left, the check
+    /// boxes under their heading, and Save / Cancel. Save and Enter validate (the field's error line, as a Prompt's) and,
+    /// with <see cref="DialogFormOptions.RequireOne"/>, wait for one box to be checked (Save is grayed and a hint says so);
+    /// <paramref name="onSave"/> gets the text and every box's state. Throws for no box or more than ten.
+    /// </summary>
+    internal static UiDialog Form(
+        object owner, string pluginId, string footer, string title, DialogFormOptions options, Action<DialogFormResult> onSave)
+    {
+        if (onSave == null) throw new ArgumentNullException(nameof(onSave));
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        string? countProblem = DialogForm.CountProblem(options.Checks);
+        if (countProblem != null) throw new ArgumentException(countProblem, nameof(options));
+        string initial = options.Initial ?? "";
+        int maxLength = options.MaxLength > 0 ? options.MaxLength : 0;
+        var content = new DialogContent
+        {
+            Shape = UiDialogShape.Prompt,
+            Title = title ?? "",
+            InputCaption = options.Caption ?? "",
+            MainCaption = string.IsNullOrWhiteSpace(options.Save) ? "Save" : options.Save,
+            MainTone = CellTone.Gold,
+            CancelCaption = string.IsNullOrWhiteSpace(options.Cancel) ? "Cancel" : options.Cancel,
+            InputInitial = maxLength > 0 && initial.Length > maxLength ? initial.Substring(0, maxLength) : initial,
+            InputPlaceholder = options.Placeholder ?? "",
+            MaxLength = maxLength,
+            Checks = DialogForm.Clean(options.Checks),
+            ChecksHeading = options.Heading ?? "",
+            ChecksRequireOne = options.RequireOne,
+            ChecksHint = string.IsNullOrWhiteSpace(options.NoneHint) ? DialogForm.DefaultNoneHint : options.NoneHint,
+            Footer = footer,
+        };
+        return Queue(owner, pluginId, content, "form").OnSave(onSave, options.Validate).OnNo(options.OnCancel);
     }
 
     private static UiDialog Queue(object owner, string pluginId, DialogContent content, string kind)

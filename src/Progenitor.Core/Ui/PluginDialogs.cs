@@ -121,6 +121,25 @@ public sealed class PluginDialogs
             submit, maxLength, cancel, onCancel);
     }
 
+    /// <summary>
+    /// FORMDIALOG1: a small form: a one-line text field with <see cref="DialogFormOptions.Caption"/> on its left, then
+    /// <see cref="DialogFormOptions.Checks"/> as the game's checkboxes under <see cref="DialogFormOptions.Heading"/>, then
+    /// Cancel (left) and Save (right). A click anywhere on a box's line flips it. Save validates
+    /// (<see cref="DialogFormOptions.Validate"/>: an error under the field, or null), and Enter does too unless the
+    /// keyboard focus is on a box or a button, which Enter then presses. With <see cref="DialogFormOptions.RequireOne"/>
+    /// Save is grayed while no box is checked. <paramref name="onSave"/> gets the text and each box's state; Cancel and
+    /// Escape run <see cref="DialogFormOptions.OnCancel"/>. One to ten boxes, or <see cref="ArgumentException"/>.
+    /// </summary>
+    public IDisposable Form(string title, DialogFormOptions options, Action<DialogFormResult> onSave)
+    {
+        if (onSave == null) throw new ArgumentNullException(nameof(onSave));
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        string? countProblem = DialogForm.CountProblem(options.Checks);
+        if (countProblem != null) throw new ArgumentException(countProblem, nameof(options));
+        if (ServerSide()) return Noop.Instance;
+        return UiDialogs.Form(_ctx.Owner, _ctx.Guid, Footer(options.ShowModVersion), title, options, onSave);
+    }
+
     private string Footer(bool? showModVersion) =>
         UiDialogs.Footer(_ctx.Name, _ctx.Version, showModVersion ?? ShowModVersion);
 

@@ -437,6 +437,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\DialogLayout.cs" Link="Linked\DialogLayout.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiDialog.cs" Link="Linked\UiDialog.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\DialogFact.cs" Link="Linked\DialogFact.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\DialogForm.cs" Link="Linked\DialogForm.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextEdit.cs" Link="Linked\UiTextEdit.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiFieldInsert.cs" Link="Linked\UiFieldInsert.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiKeyRepeat.cs" Link="Linked\UiKeyRepeat.cs" />

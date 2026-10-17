@@ -390,6 +390,9 @@ internal sealed class GalleryDemo
             case "prompt":
                 Action(panel, tab, "Prompt", api, () => { _host.OpenDialog("Prompt"); Report("dialog Prompt"); });
                 break;
+            case "form":
+                Action(panel, tab, "Form", api, () => { _host.OpenDialog("Form"); Report("dialog Form"); });
+                break;
             case "tooltip":
                 _tabs!.Add(tab, panel.Text("Hover any gallery button: its tooltip names the call.", UiTextStyle.Body));
                 break;
