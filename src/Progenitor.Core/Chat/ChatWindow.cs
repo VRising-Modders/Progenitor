@@ -170,6 +170,8 @@ internal static class ChatWindow
     private static int _lastCount = -1;
     private static IntPtr _lastEntry;
     private static float _lastActivity = float.NegativeInfinity;
+    private static float _lastWheel;
+    private static bool _lastWheelHad;
     private static int _frame;
     private static int _retryFrame;
     private static int _bindingsFrame = int.MinValue;
@@ -363,6 +365,8 @@ internal static class ChatWindow
         _lastCount = -1;
         _lastEntry = IntPtr.Zero;
         _lastActivity = float.NegativeInfinity;
+        _lastWheel = 0f;
+        _lastWheelHad = false;
         _bindingsFrame = int.MinValue;
         Completer.Reset();
         Whispers.Reset();
@@ -452,6 +456,7 @@ internal static class ChatWindow
             bool visible = state != StateClose && IsShown(window);
             bool overChat = visible && PointerOver(window);
             if (overChat && StayWhileHovered) _lastActivity = now;
+            UpdateWheel(window, state, visible, overChat, now);
             // The colors panel keeps the chat shown while it is open.
             if (ChatColorPanel.IsOpen) _lastActivity = now;
 
@@ -540,6 +545,34 @@ internal static class ChatWindow
         if (!canvas.isActiveAndEnabled) return false;
         var root = canvas.rootCanvas;
         return root == null || root.isActiveAndEnabled;
+    }
+
+    /// <summary>
+    /// The wheel over the chat box (<see cref="ChatWheelScroll"/>): a notch over the shown box restarts the fade
+    /// countdown, and while the box lingers after the input closes, when the game's UI does not scroll the log,
+    /// Progenitor moves the log itself. The camera zoom is taken separately (<see cref="ChatClickGuard.WheelBlocked"/>).
+    /// </summary>
+    private static void UpdateWheel(HUDChatWindow window, int state, bool visible, bool overChat, float now)
+    {
+        float wheel = UnityUiRuntime.SampleWheelDeltaY();
+        bool notch = UiShownInput.IsNewNotch(wheel, _lastWheel, _lastWheelHad);
+        _lastWheel = wheel;
+        _lastWheelHad = UiShownInput.HasWheelDelta(wheel);
+        if (ChatWheelScroll.KeepsVisible(visible, overChat, notch)) _lastActivity = now;
+        if (!ChatWheelScroll.ProgenitorScrolls(state, visible, overChat, notch, UnityInputRuntime.AnyMouseButtonHeld())) return;
+
+        var scroll = window.ScrollView;
+        if (scroll == null || scroll.Pointer == IntPtr.Zero) return;
+        var content = scroll.content;
+        var viewport = scroll.viewport;
+        if (content == null || viewport == null) return;
+        float position = scroll.verticalNormalizedPosition;
+        float next = ChatWheelScroll.NextPosition(position, wheel, content.rect.height, viewport.rect.height);
+        if (next - position > 0.0001f || position - next > 0.0001f)
+        {
+            scroll.velocity = Vector2.zero;
+            scroll.verticalNormalizedPosition = next;
+        }
     }
 
     /// <summary>

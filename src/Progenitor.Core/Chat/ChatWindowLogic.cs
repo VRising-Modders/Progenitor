@@ -241,6 +241,50 @@ internal readonly struct ChatMaskPlan
 }
 
 /// <summary>
+/// The mouse wheel over the chat box while it lingers, game-free. The live half is <c>ChatWindow</c>.
+///
+/// <para><b>The defect</b> (user report, 2026-10-17): the wheel scrolled the log only while the input line was
+/// open. In the lingering state, shown for reading after the input closes (<see cref="OpenUnfocused"/>), the
+/// game's UI does not deliver the wheel to the log's <c>ScrollRect</c>, so nothing moved it. Progenitor now moves
+/// the log itself in that state, one notch at a time, with the framework's own wheel reading and the same step as
+/// its panel lists (<see cref="MenuPanelLayout.NextScrollPosition"/>). While the input line is open the game's UI
+/// scrolls the log and Progenitor writes nothing, so a notch is never applied twice.</para>
+///
+/// <para><b>Reading keeps the box up.</b> A wheel notch over the visible box counts as activity and restarts the
+/// fade countdown, whatever <c>StayWhileHovered</c> says.</para>
+/// </summary>
+internal static class ChatWheelScroll
+{
+    /// <summary>The game's <c>ChatWindowState</c> while the input line is open and focused.</summary>
+    internal const int OpenFocused = 1;
+
+    /// <summary>The game's <c>ChatWindowState</c> while the box lingers for reading after the input closes.</summary>
+    internal const int OpenUnfocused = 2;
+
+    /// <summary>
+    /// Progenitor moves the log for this notch: the box lingers (<see cref="OpenUnfocused"/>), it is shown, the
+    /// pointer is over it, the reading is a new notch, and no mouse button is held (a drag on the scroll bar owns
+    /// the log).
+    /// </summary>
+    internal static bool ProgenitorScrolls(int state, bool visible, bool overChat, bool notch, bool buttonHeld) =>
+        state == OpenUnfocused && visible && overChat && notch && !buttonHeld;
+
+    /// <summary>A notch over the visible box restarts the fade countdown, in either open state.</summary>
+    internal static bool KeepsVisible(bool visible, bool overChat, bool notch) => visible && overChat && notch;
+
+    /// <summary>
+    /// The log's next <c>verticalNormalizedPosition</c> (1 is the oldest line, 0 the newest) for one wheel reading:
+    /// up (positive) moves toward older lines. Unchanged while the content fits or its size is not known yet.
+    /// </summary>
+    internal static float NextPosition(float position, float deltaY, float contentHeight, float viewportHeight)
+    {
+        if (float.IsNaN(position)) return position;
+        if (!MenuPanelLayout.CanApplyNormalized(contentHeight, viewportHeight)) return position;
+        return MenuPanelLayout.NextScrollPosition(position, deltaY, contentHeight, viewportHeight, MenuPanelLayout.RowStep);
+    }
+}
+
+/// <summary>
 /// When Progenitor's chat view steps aside for another mod that replaces the game's chat window, game-free. The
 /// live half is <c>ChatView</c>.
 ///

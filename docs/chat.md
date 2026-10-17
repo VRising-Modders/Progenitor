@@ -40,6 +40,8 @@ Settings: `[Chat]` in `BepInEx/config/progenitor.ui.cfg`, also on Progenitor's p
 
 **The wheel over the box scrolls only the chat** (2026-10-17, source-checked and game-free tested, not yet live-verified). The same order-97 context takes the camera zoom axis, and nothing else, while the pointer is over the visible box (log, scroll bar, tab line, grip, input line), whatever **Clicking chat doesn't attack** says; keys, movement and the mouse buttons are unchanged (`ChatMaskPlan`).
 
+**The wheel scrolls the box while it lingers** (2026-10-17, source-checked and game-free tested, not yet live-verified). After the input line closes, the box stays up for reading, and in that state the game's UI does not deliver the wheel to the log. Progenitor then moves the log itself, two rows a notch, the same step as its panel lists. While the input line is open the game scrolls the log and Progenitor writes nothing. A notch over the shown box also restarts the fade countdown, whether or not **Keep chat up while the mouse is over it** is on (`ChatWheelScroll`).
+
 **Where clicks are taken.** Over the message log (the same area the game's own hover test uses), over its scroll bar, which sits just outside the log's left edge, and over the input line while it shows, and only while the box is on screen: not after it fades, and not while the HUD is hidden. The area stays for as long as the box is shown, so a longer visibility time also keeps it longer. The guard is armed only when Core's UI module is installed, because that module's teardown releases the input mask it shares.
 
 **Limitations.**
@@ -58,6 +60,7 @@ Steam client in a world on the isolated test server, with the client free for a 
 5. Turn **Clicking chat doesn't attack** off: clicks reach the game again. Leave the world and rejoin: the guard registers again (one `Chat: click guard registered` line per world).
 6. Hot-swap Core while in a world: no stuck input, and the log shows the guard removed and registered again.
 7. Scroll the wheel with the pointer over the log, the scroll bar and the tab line: the chat scrolls and the camera does not zoom, with **Clicking chat doesn't attack** on and off. Move the pointer off the box (or let it fade) and scroll: the camera zooms. While over the box, WASD still walks.
+8. Send a line so the input closes and the box lingers. With the pointer over the log, scroll up and down: the log moves two rows a notch and the box stays up while you keep scrolling. Open the input line and scroll: the log moves by the game's own step, not twice.
 
 ## Chat commands: as built (CHAT2)
 
