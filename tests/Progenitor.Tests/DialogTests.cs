@@ -412,6 +412,148 @@ public sealed class DialogTests : IDisposable
         Assert.Equal("Riverside", got);
     }
 
+    // ---- Form (FORMDIALOG1) --------------------------------------------------------------------
+
+    private UiDialog Form(Action<string, IReadOnlyList<bool>> onSave, bool blood = true, bool gems = false, Func<string, IReadOnlyList<bool>, string?>? validate = null) =>
+        UiDialogs.Form(_owner, Guid, Plain, "Edit stall", "Name", "Night market", "stall", 24, "Show stalls for",
+            new[] { new DialogCheck("Blood", blood), new DialogCheck(" Weapons ", false), new DialogCheck("Gems", gems) },
+            requireOne: true, "Turn on at least one stall.", onSave, validate, "Save", "Cancel", null);
+
+    private static void ClickRow(IUiCellRow row) =>
+        UiSlotTable.BootstrapDispatch(((UiHandle)row).WidgetId, (byte)UiSlotKind.Click, 0f, false, null);
+
+    /// <summary>
+    /// The user's report on the two-step tab editor: "Edit this tab shouldn't require me to click next to change what
+    /// channels it listens to", and the Done button looked like one more channel. A form is one dialog: the captioned
+    /// field, the heading, one line per box (the check cell and its label, left on one edge), the hidden hint, and the
+    /// centered Cancel / Save pair, Save the gold main action.
+    /// </summary>
+    [Fact]
+    public void A_form_is_one_dialog_with_the_field_the_boxes_and_a_Save_set_apart()
+    {
+        var form = Form((_, _) => { });
+        var view = form.View!;
+        var field = view.Input!.Cells;
+        Assert.Equal("Name", field.Single(c => c.Key == DialogForm.CellCaption).Text);
+        Assert.Equal(CellAlign.Left, field.Single(c => c.Key == DialogForm.CellCaption).Align);
+        Assert.Equal("Night market", field.Single(c => c.Key == UiDialogs.CellField).Text);
+        Assert.Equal(24, field.Single(c => c.Key == UiDialogs.CellField).MaxLength);
+        Assert.Equal("Show stalls for", view.ChecksHeadingRow!.Cells.Single(c => c.Key == DialogForm.CellHeading).Text);
+
+        Assert.Equal(3, view.CheckRows.Count);
+        Assert.Equal(new[] { "on", "off", "off" }, view.CheckRows.Select(r => r.Cells.Single(c => c.Key == DialogForm.CellCheck).Text).ToArray());
+        Assert.All(view.CheckRows, r => Assert.Equal(CellKind.Check, r.Cells.Single(c => c.Key == DialogForm.CellCheck).Kind));
+        Assert.Equal(new[] { "Blood", "Weapons", "Gems" }, view.CheckRows.Select(r => r.Cells.Single(c => c.Key == DialogForm.CellLabel).Text).ToArray());
+        Assert.All(view.CheckRows, r => Assert.True(((UiCellRowHandle)r).RowClickReachable));
+        Assert.False(view.ChecksHintRow!.Visible);
+
+        // One left edge: the caption, the heading and every box start after the same inset.
+        float Left(CellRowSpec spec, string key) => MenuPanelLayout.CellColumns(DialogLayout.RowWidth, spec).Single(p => p.Key == key).Left;
+        float edge = Left(DialogForm.CaptionedFieldRowSpec("f", "Name", new CellSpec(CellKind.Input, "field")), DialogForm.CellCaption);
+        Assert.Equal(edge, Left(DialogForm.HeadingRowSpec("Show stalls for"), DialogForm.CellHeading), 1);
+        Assert.Equal(edge, Left(DialogForm.CheckRowSpec(0, new DialogCheck("Blood", true)), DialogForm.CellCheck), 1);
+
+        // Order on the panel: field, error, heading, boxes, hint, then the buttons.
+        var keys = view.Rows.Select(r => r is IUiCellRow c ? c.Key : "").Where(k => k.Length > 0).ToList();
+        Assert.True(keys.IndexOf(UiDialogs.InputRow) < keys.IndexOf(DialogForm.HeadingRow));
+        Assert.True(keys.IndexOf(DialogForm.CheckRow(2)) < keys.IndexOf(DialogForm.HintRow));
+        Assert.Equal(UiDialogs.ButtonsRow, keys.Last());
+        var buttons = view.Buttons!.Cells.Where(c => c.Kind == CellKind.Button).ToList();
+        Assert.Equal(new[] { "Cancel", "Save" }, buttons.Select(b => b.Text).ToArray());
+        Assert.All(buttons, b => Assert.Equal(CellSkin.PopupButton, b.Skin));
+        Assert.Equal(CellTone.Gold, buttons.Last().Tone);
+        Assert.Equal("form", form.Kind);
+    }
+
+    /// <summary>
+    /// A click anywhere on a box's line flips it. With every box off, Save is grayed, Enter saves nothing and the hint
+    /// says why; checking one lights Save again and hides the hint.
+    /// </summary>
+    [Fact]
+    public void A_form_flips_boxes_by_their_line_and_waits_for_one_checked()
+    {
+        int saves = 0;
+        var form = Form((_, _) => saves++);
+        var view = form.View!;
+        CellTone SaveTone() => view.Buttons!.Cells.Single(c => c.Key == UiDialogs.CellMain).Tone;
+
+        ClickRow(view.CheckRows[0]); // Blood off: nothing is checked
+        Assert.Equal("off", view.CheckRows[0].Cells.Single(c => c.Key == DialogForm.CellCheck).Text);
+        Assert.False(form.Content.ChecksOk);
+        Assert.Equal(CellTone.Disabled, SaveTone());
+        Assert.True(view.ChecksHintRow!.Visible);
+        Assert.Equal(false, UiDialog.Describe()["mainEnabled"]);
+        Assert.Equal("Turn on at least one stall.", UiDialog.Describe()["checksHint"]);
+
+        Later();
+        Assert.True(UiDialog.NotifyEnter());
+        Assert.True(form.IsOpen);
+        Assert.Equal(0, saves);
+
+        ClickRow(view.CheckRows[2]); // Gems on
+        Assert.True(form.Content.ChecksOk);
+        Assert.Equal(CellTone.Gold, SaveTone());
+        Assert.False(view.ChecksHintRow.Visible);
+        Assert.Equal(new[] { false, false, true }, form.CheckStates.ToArray());
+    }
+
+    /// <summary>Save hands over the text and every box's state; the validator's error shows under the field and keeps it open.</summary>
+    [Fact]
+    public void A_form_saves_the_text_and_the_boxes_after_validation()
+    {
+        string? name = null;
+        bool[]? states = null;
+        var form = Form((n, s) => { name = n; states = s.ToArray(); },
+            validate: (n, s) => n.Trim().Length == 0 ? "Enter a name." : s.Count != 3 ? "three boxes" : null);
+        _runtime.Type(UiDialogs.InputRow, UiDialogs.CellField, "  ");
+        Assert.True(_runtime.Click(UiDialogs.ButtonsRow, UiDialogs.CellMain));
+        Assert.True(form.IsOpen);
+        Assert.Equal("Enter a name.", form.Error);
+        Assert.True(form.View!.Error!.Visible);
+
+        _runtime.Type(UiDialogs.InputRow, UiDialogs.CellField, "Trade");
+        ClickRow(form.View.CheckRows[1]);
+        var checks = (List<object?>)UiDialog.Describe()["checks"]!;
+        Assert.Equal(true, ((Dictionary<string, object?>)checks[1]!)["on"]);
+        Assert.Equal("Weapons", ((Dictionary<string, object?>)checks[1]!)["label"]);
+        Assert.True(_runtime.Click(UiDialogs.ButtonsRow, UiDialogs.CellMain));
+        Assert.Null(UiDialog.Current);
+        Assert.Equal("Trade", name);
+        Assert.Equal(new[] { true, true, false }, states);
+    }
+
+    /// <summary>
+    /// The bridge flips a box by its label (or its row key) through the line's own click slot, as a pointer does; a
+    /// framework dialog that steps in and back rebuilds the form with the boxes as the player left them.
+    /// </summary>
+    [Fact]
+    public void A_form_box_answers_the_bridge_by_label_and_survives_a_framework_dialog()
+    {
+        var form = Form((_, _) => { });
+        Assert.True(form.TryClickForBridge("weapons", out var detail));
+        Assert.Equal(DialogForm.CheckRow(1), detail["label"]);
+        Assert.True(form.Content.Checks[1].On);
+
+        var framework = UiApi.Dialog("Uninstall HotDemo?", "", "Yes, uninstall", LabelTone.Orange, "No", owner: new object(), pluginId: "progenitor");
+        Assert.True(form.IsQueued);
+        framework.Close();
+        Assert.True(form.IsOpen);
+        Assert.Equal(new[] { "on", "on", "off" }, form.View!.CheckRows.Select(r => r.Cells.Single(c => c.Key == DialogForm.CellCheck).Text).ToArray());
+    }
+
+    /// <summary>The public call refuses an empty set of boxes, and more than ten.</summary>
+    [Fact]
+    public void A_form_needs_one_to_ten_boxes()
+    {
+        var eleven = Enumerable.Range(0, 11).Select(i => new DialogCheck("Box " + i, false)).ToArray();
+        Assert.Throws<ArgumentException>(() => UiDialogs.Form(_owner, Guid, Plain, "T", "Name", "", "", 0, "", eleven, false, null,
+            (_, _) => { }, null, "Save", "Cancel", null));
+        Assert.Equal("[x] Blood", new DialogCheck(" Blood ", true).ToString());
+        Assert.False(DialogForm.Satisfied(new[] { new DialogCheck("a", false) }, requireOne: true));
+        Assert.True(DialogForm.Satisfied(new[] { new DialogCheck("a", false) }, requireOne: false));
+        Assert.True(DialogForm.Satisfied(Array.Empty<DialogCheck>(), requireOne: true));
+    }
+
     // ---- Choose -------------------------------------------------------------------------------
 
     /// <summary>

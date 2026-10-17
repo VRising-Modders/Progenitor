@@ -1560,6 +1560,14 @@ internal enum CellKind
     /// explicit height); the wheel over it scrolls the block, not the list. The Install drawer.
     /// </summary>
     ScrollText = 11,
+
+    /// <summary>
+    /// FORMDIALOG1: a check box drawn with the game's own Options checkbox (<c>Checkbox_Normal</c> and the
+    /// checkmark sprite; the kit's framed box until that art is ready). <see cref="CellSpec.Text"/> is
+    /// <see cref="CellLayout.CheckOn"/> or <see cref="CellLayout.CheckOff"/>; the <see cref="CellTone.Disabled"/> tone
+    /// grays it. Not a click target itself: its row's click flips it (a dialog's check line, clicked anywhere).
+    /// </summary>
+    Check = 12,
 }
 
 /// <summary>INSTALLSIDES1: what one line of a <see cref="CellKind.ScrollText"/> cell is.</summary>
@@ -2666,6 +2674,21 @@ internal static class CellLayout
     /// <summary>SETTINGS1 stage 3: the status diamond's cell width (the turned square plus air).</summary>
     internal const float DiamondWidth = 22f;
 
+    /// <summary>FORMDIALOG1: a <see cref="CellKind.Check"/> cell's box, the game's Options checkbox size.</summary>
+    internal const float CheckWidth = Progenitor.Ui.GameArt.GameSettingsLook.CheckboxSize;
+
+    /// <summary>FORMDIALOG1: the mark inside a <see cref="CellKind.Check"/> box, the game's checkmark size.</summary>
+    internal const float CheckMarkSize = Progenitor.Ui.GameArt.GameSettingsLook.CheckmarkSize;
+
+    /// <summary>FORMDIALOG1: a <see cref="CellKind.Check"/> cell's text when checked.</summary>
+    internal const string CheckOn = "on";
+
+    /// <summary>FORMDIALOG1: a <see cref="CellKind.Check"/> cell's text when not checked.</summary>
+    internal const string CheckOff = "off";
+
+    /// <summary>FORMDIALOG1: the text a <see cref="CellKind.Check"/> cell carries for <paramref name="on"/>.</summary>
+    internal static string CheckText(bool on) => on ? CheckOn : CheckOff;
+
     /// <summary>SETTINGS1 stage 3: the side of the square that is turned 45 degrees (its diagonal is about 15 px).</summary>
     internal const float DiamondSide = 11f;
 
@@ -2756,6 +2779,8 @@ internal static class CellLayout
                 return SwitchWidth;
             case CellKind.Diamond:
                 return DiamondWidth;
+            case CellKind.Check:
+                return CheckWidth;
             case CellKind.Mono:
                 return Math.Max(MinTextWidth, EstimateTextWidth(spec.Text, spec.FontSize, mono: true) + 4f);
             default:
@@ -2777,6 +2802,7 @@ internal static class CellLayout
             CellKind.Input => MinInputWidth,
             CellKind.Switch => SwitchWidth,
             CellKind.Diamond => DiamondWidth,
+            CellKind.Check => CheckWidth,
             _ => MinTextWidth,
         };
     }

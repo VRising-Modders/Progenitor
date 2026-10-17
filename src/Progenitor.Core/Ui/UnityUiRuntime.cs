@@ -4064,7 +4064,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         try { dialog = UiDialog.Current is { IsOpen: true } || UiDialog.EnterFallback != null; } catch { /* */ }
         _navSpaceGated = field || capture;
         _navEnterGated = field || capture || dialog;
+        _navFieldGated = field;
     }
+
+    private static bool _navFieldGated;
+    private static bool _navDownLatched;
+    private static bool _navSyntheticDownLatched;
 
     /// <summary>NAV1: read the navigation inputs and run <see cref="UiNav.Tick"/>. Once a frame while a panel is shown.</summary>
     private static void PumpNav()
@@ -4119,7 +4124,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             try
             {
                 s.Up |= keyboard.upArrowKey.isPressed;
-                s.Down |= keyboard.downArrowKey.isPressed;
+                // FORMDIALOG1: a Down that left a dialog's field (the typed-key pump) does not step again until released.
+                s.Down |= UiNavMath.KeyCounts(keyboard.downArrowKey.isPressed, _navFieldGated, ref _navDownLatched);
                 s.Left |= keyboard.leftArrowKey.isPressed;
                 s.Right |= keyboard.rightArrowKey.isPressed;
                 s.Submit |= UiNavMath.KeyCounts(keyboard.spaceKey.isPressed, _navSpaceGated, ref _navSpaceLatched);
@@ -4183,7 +4189,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         if (!s.TextFocused)
         {
             s.Up |= UiSyntheticInput.KeyHeld(UiKey.UpArrow, frame);
-            s.Down |= UiSyntheticInput.KeyHeld(UiKey.DownArrow, frame);
+            s.Down |= UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.DownArrow, frame), _navFieldGated, ref _navSyntheticDownLatched);
             s.Left |= UiSyntheticInput.KeyHeld(UiKey.LeftArrow, frame);
             s.Right |= UiSyntheticInput.KeyHeld(UiKey.RightArrow, frame);
             s.Submit |= UiNavMath.KeyCounts(UiSyntheticInput.KeyHeld(UiKey.Space, frame), _navSpaceGated, ref _navSyntheticSpaceLatched);
@@ -5138,6 +5144,22 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             try { UiDialog.NotifyEnter(TypingOutsideDialog(field)); }
             catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog enter threw: " + e.Message); }
             field = FocusedArmedField();
+        }
+
+        // FORMDIALOG1: in an open dialog, Tab and Shift+Tab walk its one-line field, its check boxes and its buttons, and
+        // Down leaves the one-line field for the first of them (Up from the first comes back: UiNav). Not while a field
+        // outside the dialog has the keyboard (the game's chat), nor in a multi-line field, where the keys are the text's.
+        if (UiDialog.Current is { IsOpen: true } && !TypingOutsideDialog(field) && !(field != null && IsMultiline(field)))
+        {
+            bool tabEdge = TypeKeyDown(keyboard, UiKey.Tab, frame);
+            bool downEdge = field != null && TypeKeyDown(keyboard, UiKey.DownArrow, frame);
+            if (tabEdge || downEdge)
+            {
+                bool back = tabEdge && (KeyHeld(keyboard, Key.LeftShift) || KeyHeld(keyboard, Key.RightShift));
+                try { UiNav.TabStep(back ? -1 : 1, fromField: field != null); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog tab threw: " + e.Message); }
+                field = FocusedArmedField();
+            }
         }
 
         if (!ReferenceEquals(field, _repeatField))
@@ -16327,6 +16349,34 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     PaintDiamond(cell, turned);
                     break;
                 }
+                case CellKind.Check:
+                {
+                    // FORMDIALOG1: the game's Options checkbox (the settings grid's AddGridCheckbox look): the
+                    // Checkbox_Normal frame and the checkmark sprite over it while checked. No raycast: the row's
+                    // own click target takes the press anywhere on the line and flips it.
+                    var go = new GameObject("cell-check");
+                    go.transform.SetParent(GameObject.transform, false);
+                    cell.Fill = TryAdd<Image>(go);
+                    if (cell.Fill != null)
+                    {
+                        try { cell.Fill.raycastTarget = false; } catch { /* */ }
+                        try { cell.Fill.maskable = true; } catch { /* */ }
+                        try { cell.Fill.preserveAspect = true; } catch { /* */ }
+                    }
+                    var markGo = new GameObject("checkmark");
+                    markGo.transform.SetParent(go.transform, false);
+                    cell.Picture = TryAdd<Image>(markGo);
+                    if (cell.Picture != null)
+                    {
+                        try { cell.Picture.raycastTarget = false; } catch { /* */ }
+                        try { cell.Picture.maskable = true; } catch { /* */ }
+                        try { cell.Picture.preserveAspect = true; } catch { /* */ }
+                    }
+                    cell.Go = go;
+                    // The art arrives on idle frames: until it does the kit's box is drawn, and the paint is tried again.
+                    if (!PaintCheck(cell)) RetrySkinLater(go, () => PaintCheck(cell));
+                    break;
+                }
                 case CellKind.ScrollText:
                     BuildScrollText(cell);
                     break;
@@ -16952,6 +17002,44 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             if (cell.Tmp == null) return;
             try { cell.Tmp.color = ToColor(cell.Spec.Kind == CellKind.Mono && tone == CellTone.Normal ? MenuPalette.Mono : MenuPalette.TextColor(tone)); }
             catch { /* */ }
+        }
+
+        /// <summary>
+        /// FORMDIALOG1: a check cell from its spec: the game's checkbox frame and checkmark when they are ready (else the
+        /// kit's framed box and a filled square), the mark shown while the text is <see cref="CellLayout.CheckOn"/>, the
+        /// whole box half-transparent in the disabled tone. True when the game's art drew (no retry needed).
+        /// </summary>
+        private static bool PaintCheck(Cell cell)
+        {
+            bool on = string.Equals(cell.Spec.Text, CellLayout.CheckOn, StringComparison.Ordinal);
+            float alpha = cell.Spec.Tone == CellTone.Disabled ? 0.45f : 1f;
+            bool framed = false, marked = false;
+            var frame = cell.Fill;
+            if (frame != null)
+            {
+                framed = PaintPart(frame, GameArt.SettingsArtPart.CheckboxFrame, new Color(1f, 1f, 1f, alpha), Grey(0.16f, alpha));
+                if (!framed) ApplyFrame(frame, Grey(0.16f, alpha));
+            }
+
+            var mark = cell.Picture;
+            if (mark != null)
+            {
+                marked = PaintPart(mark, GameArt.SettingsArtPart.CheckboxMark, new Color(1f, 1f, 1f, alpha), Grey(0.92f, alpha));
+                try
+                {
+                    var rt = mark.rectTransform;
+                    float size = marked ? CellLayout.CheckMarkSize : Math.Max(6f, CellLayout.CheckWidth * 0.4f);
+                    rt.anchorMin = new Vector2(0.5f, 0.5f);
+                    rt.anchorMax = new Vector2(0.5f, 0.5f);
+                    rt.pivot = new Vector2(0.5f, 0.5f);
+                    rt.anchoredPosition = Vector2.zero;
+                    rt.sizeDelta = new Vector2(size, size);
+                }
+                catch { /* */ }
+                try { mark.enabled = on; } catch { /* */ }
+            }
+
+            return framed && marked;
         }
 
         /// <summary>SETTINGS1 stage 2: the track's tone and the knob's side from the cell's spec.</summary>
@@ -17925,6 +18013,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 case CellKind.Badge: PaintBadge(cell); break;
                 case CellKind.Switch: PaintSwitch(cell); break;
                 case CellKind.Diamond: PaintDiamond(cell); break;
+                case CellKind.Check:
+                    if (!PaintCheck(cell) && cell.Go != null) RetrySkinLater(cell.Go, () => PaintCheck(cell));
+                    break;
                 case CellKind.Button: PaintButton(cell); break;
                 case CellKind.Image: break;
                 case CellKind.Chevron: break;
@@ -18143,6 +18234,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     case CellKind.Badge: h = Math.Min(24f, rowHeight - 4f); break;
                     case CellKind.Switch: h = Math.Min(CellLayout.SwitchHeight, rowHeight - 4f); break;
                     case CellKind.Diamond: h = Math.Min(CellLayout.DiamondWidth, rowHeight - 4f); break;
+                    case CellKind.Check: h = Math.Min(CellLayout.CheckWidth, rowHeight - 2f); break;
                     case CellKind.Button: h = Math.Min(UnityUiRuntimeMetrics.RowHeight - 8f, rowHeight - 6f); break;
                     case CellKind.Input: h = Math.Min(InputHeight, rowHeight - 6f); break;
                     default: h = rowHeight; break;

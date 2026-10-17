@@ -121,6 +121,30 @@ public sealed class PluginDialogs
             submit, maxLength, cancel, onCancel);
     }
 
+    /// <summary>
+    /// FORMDIALOG1: a small form: a one-line text field with <paramref name="caption"/> on its left, then
+    /// <paramref name="checks"/> as the game's checkboxes under the <paramref name="heading"/>, then
+    /// <paramref name="cancel"/> (left) and <paramref name="save"/> (right). A click anywhere on a box's line flips it.
+    /// <paramref name="save"/> and Enter validate: <paramref name="validate"/> gets the text and every box's state and
+    /// returns an error to show under the field (the dialog stays open) or null to accept; with
+    /// <paramref name="requireOne"/> Save is grayed while no box is checked and <paramref name="noneHint"/> (default
+    /// <c>Turn on at least one.</c>) shows under the boxes. <paramref name="onSave"/> gets the text and each box's state,
+    /// in the order given; <paramref name="cancel"/> and Escape run <paramref name="onCancel"/>. One to ten boxes.
+    /// </summary>
+    public IDisposable Form(
+        string title, string caption, string initial, string heading, IReadOnlyList<DialogCheck> checks,
+        Action<string, IReadOnlyList<bool>> onSave, Func<string, IReadOnlyList<bool>, string?>? validate = null,
+        bool requireOne = false, string noneHint = "", string placeholder = "", int maxLength = 0,
+        string save = "Save", string cancel = "Cancel", Action? onCancel = null, bool? showModVersion = null)
+    {
+        if (onSave == null) throw new ArgumentNullException(nameof(onSave));
+        if (checks == null || checks.Count == 0) throw new ArgumentException("At least one check box is required.", nameof(checks));
+        if (ServerSide()) return Noop.Instance;
+        return UiDialogs.Form(
+            _ctx.Owner, _ctx.Guid, Footer(showModVersion), title, caption, initial, placeholder, maxLength,
+            heading, checks, requireOne, noneHint, onSave, validate, save, cancel, onCancel);
+    }
+
     private string Footer(bool? showModVersion) =>
         UiDialogs.Footer(_ctx.Name, _ctx.Version, showModVersion ?? ShowModVersion);
 

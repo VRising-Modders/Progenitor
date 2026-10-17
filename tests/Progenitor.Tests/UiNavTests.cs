@@ -152,6 +152,49 @@ public sealed class UiNavTests : IDisposable
         Assert.Same(second, UiNav.Focus.Handle);
     }
 
+    /// <summary>
+    /// FORMDIALOG1: in a dialog, Tab walks the text field and every stop and wraps around; leaving the field takes its
+    /// keyboard back, landing on it gives it the keyboard and puts the marker away; Shift+Tab walks back; Up from the
+    /// first stop returns to the field. A screen that is not a dialog takes no Tab.
+    /// </summary>
+    [Fact]
+    public void Tab_walks_a_dialogs_field_and_stops_and_Up_from_the_first_stop_returns_to_the_field()
+    {
+        using var panel = Panel();
+        // A dialog's field is a plain cell row whose input cell is no stop of its own (the Prompt's dialog-input).
+        var field = panel.CellRow(new CellRowSpec("dialog-input", new[] { new CellSpec(CellKind.Input, "field") }, plain: true));
+        Assert.False(UiNav.IsStop((UiHandle)field));
+        var first = panel.Button("Global");
+        var save = panel.Button("Save");
+        var surface = Surface(Children(panel));
+        Assert.False(UiNav.TabStep(1, fromField: true));
+
+        surface.TabCycle = true;
+        surface.Field = (UiHandle)field;
+        Assert.True(UiNav.TabStep(1, fromField: true));
+        Assert.Contains("blur", _host.Calls);
+        Assert.Same(first, UiNav.Focus.Handle);
+        Assert.True(UiNav.Marked);
+
+        Assert.True(UiNav.TabStep(1, fromField: false));
+        Assert.Same(save, UiNav.Focus.Handle);
+
+        _host.Calls.Clear();
+        Assert.True(UiNav.TabStep(1, fromField: false));
+        Assert.Contains("text:" + field.Text, _host.Calls);
+        Assert.False(UiNav.Marked);
+
+        Assert.True(UiNav.TabStep(-1, fromField: true));
+        Assert.Same(save, UiNav.Focus.Handle);
+        Assert.True(UiNav.TabStep(-1, fromField: false));
+        Assert.Same(first, UiNav.Focus.Handle);
+
+        _host.Calls.Clear();
+        Assert.True(UiNav.Execute(NavCommand.Up));
+        Assert.Contains("text:" + field.Text, _host.Calls);
+        Assert.False(UiNav.Marked);
+    }
+
     [Fact]
     public void A_windows_left_column_is_entered_from_the_tabs_and_crossed_to_the_nearest_row()
     {
@@ -798,6 +841,8 @@ public sealed class UiNavTests : IDisposable
         public void Click(UiHandle handle) => Calls.Add("click:" + handle.Text);
 
         public void Escape() => Calls.Add("escape");
+
+        public void BlurText() => Calls.Add("blur");
 
         public void Scroll(NavTarget target, float amount) => Calls.Add("scroll");
     }

@@ -55,6 +55,9 @@ internal sealed class UiNavHost : INavHost
         var surface = new NavSurface("dialog:" + RuntimeHelpers.GetHashCode(dialog), new IReadOnlyList<UiHandle>[] { panel.ChildrenSnapshot() });
         var view = dialog.View;
         var content = dialog.Content;
+        // FORMDIALOG1: Tab walks the field and the stops; the one-line field is where Shift+Tab and Up come back to.
+        surface.TabCycle = true;
+        if (view?.Input is UiCellRowHandle input && content.EditorHeight <= 0f && !content.InputReadOnly) surface.Field = input;
         // A long Choose: its first option. Else the dismissal (see StartKey).
         if (view != null && view.OptionRows.Count > 0 && view.OptionRows[0] is UiCellRowHandle first)
         {
@@ -134,6 +137,8 @@ internal sealed class UiNavHost : INavHost
         if (handle?.Runtime is not { Alive: true } widget) return false;
         return Ui.CurrentRuntime().FocusTextIn(widget);
     }
+
+    public void BlurText() => Ui.CurrentRuntime().BlurText();
 
     public void Click(UiHandle handle)
     {

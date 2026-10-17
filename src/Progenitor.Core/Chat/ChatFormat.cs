@@ -438,9 +438,66 @@ internal static class ChatTabStrip
         (ChatScope.Mentions, "Mentions of me"),
     };
 
-    /// <summary>A scope choice's line in the editor: a check mark when on.</summary>
-    internal static string ScopeLine(ChatScope scope, (ChatScope Scope, string Label) choice) =>
-        ((scope & choice.Scope) != 0 ? "✓ " : "   ") + choice.Label;
+}
+
+/// <summary>
+/// FORMDIALOG1: the tab editor's one dialog (<c>ctx.Dialogs.Form</c>'s framework twin), game-free: the name field and one
+/// check box per <see cref="ChatTabStrip.ScopeChoices"/> line, Save and Cancel. The user's report on the old two-step
+/// editor (a name prompt, Next, then a list of buttons with a Done that looked like one more channel): changing what a
+/// tab listens to must not need Next, and the channels are check boxes, the game's own, with Save set apart from them.
+/// </summary>
+internal static class ChatTabForm
+{
+    internal const string NewTitle = "New tab";
+    internal const string EditTitle = "Edit tab";
+    internal const string NameCaption = "Name";
+    internal const string Heading = "Show messages from";
+    internal const string Placeholder = "Trade";
+    internal const string NameRequired = "Enter a name.";
+    internal const string NoneHint = "Turn on at least one channel.";
+    internal const string SaveCaption = "Save";
+
+    /// <summary>The dialog's title for a new tab or an existing one.</summary>
+    internal static string Title(bool isNew) => isNew ? NewTitle : EditTitle;
+
+    /// <summary>The boxes for <paramref name="scope"/>, in <see cref="ChatTabStrip.ScopeChoices"/> order.</summary>
+    internal static DialogCheck[] Checks(ChatScope scope)
+    {
+        var choices = ChatTabStrip.ScopeChoices;
+        var checks = new DialogCheck[choices.Length];
+        for (int i = 0; i < choices.Length; i++) checks[i] = new DialogCheck(choices[i].Label, (scope & choices[i].Scope) != 0);
+        return checks;
+    }
+
+    /// <summary>The scope the boxes stand for (missing entries are off; extra ones are ignored).</summary>
+    internal static ChatScope ScopeOf(IReadOnlyList<bool>? states)
+    {
+        var choices = ChatTabStrip.ScopeChoices;
+        var scope = ChatScope.None;
+        for (int i = 0; i < choices.Length && states != null && i < states.Count; i++)
+            if (states[i]) scope |= choices[i].Scope;
+        return scope;
+    }
+
+    /// <summary>Why Save is refused (shown under the field), or null: a name is required and at least one channel.</summary>
+    internal static string? Problem(string? name, IReadOnlyList<bool>? states)
+    {
+        if (ChatTab.Clean(name).Length == 0) return NameRequired;
+        if (ScopeOf(states) == ChatScope.None) return NoneHint;
+        return null;
+    }
+
+    /// <summary>Write a saved form to <paramref name="tab"/>: the cleaned name and the scope. False (nothing written) when refused or fixed.</summary>
+    internal static bool Apply(ChatTab tab, string? name, IReadOnlyList<bool>? states)
+    {
+        if (tab == null || tab.Fixed || Problem(name, states) != null) return false;
+        tab.Name = ChatTab.Clean(name);
+        tab.Scope = ScopeOf(states);
+        return true;
+    }
+
+    /// <summary>The tab a Custom pick starts from: a free <c>Tab N</c> name and Global on.</summary>
+    internal static ChatTab Fresh(int tabCount) => new() { Name = "Tab " + tabCount.ToString(CultureInfo.InvariantCulture), Scope = ChatScope.Global };
 }
 
 /// <summary>CHAT5: whether a chat line mentions this player. Game-free.</summary>

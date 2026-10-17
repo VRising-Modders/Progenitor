@@ -229,6 +229,13 @@ internal static class ControlsDialogs
                     placeholder: "text", validate: s => (s ?? "").Trim().Length < 3 ? "At least three characters." : null,
                     maxLength: 40, onCancel: () => Say("cancel"));
                 break;
+            case "Form":
+                ctx.Dialogs.Form("Form dialog", "Name", "Night market", "Show stalls for",
+                    new[] { new DialogCheck("Blood", true), new DialogCheck("Weapons", false), new DialogCheck("Gems", true) },
+                    (name, on) => Say("\"" + name + "\" " + string.Join(",", on)),
+                    validate: (name, _) => (name ?? "").Trim().Length == 0 ? "Enter a name." : null,
+                    requireOne: true, noneHint: "Turn on at least one stall.", maxLength: 24, onCancel: () => Say("cancel"));
+                break;
             default:
                 Say("unknown kind");
                 break;

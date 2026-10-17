@@ -2176,6 +2176,7 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         CellKind.Input => "input",
         CellKind.Switch => "switch",
         CellKind.Diamond => "diamond",
+        CellKind.Check => "check",
         _ => "spacer",
     };
 

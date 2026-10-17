@@ -184,6 +184,16 @@ internal sealed partial class UnityUiRuntime
         catch { return false; }
     }
 
+    public void BlurText()
+    {
+        try
+        {
+            var field = FocusedArmedField();
+            if (field != null) ReleaseWidgetField(field);
+        }
+        catch { /* the field keeps the keyboard; Escape still blurs it */ }
+    }
+
     public bool RevealInColumn(IRuntimeWidget widget)
     {
         try

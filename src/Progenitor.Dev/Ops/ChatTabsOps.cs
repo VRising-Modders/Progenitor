@@ -15,6 +15,7 @@ namespace Progenitor.Dev.Ops;
 /// <list type="bullet">
 /// <item><c>{"action":"read"}</c></item>
 /// <item><c>{"action":"move","from":2,"to":0}</c></item>
+/// <item><c>{"action":"edit","tab":1}</c> (FORMDIALOG1: the tab editor; <c>-1</c>: a new custom tab)</item>
 /// </list>
 /// </summary>
 internal static class ChatTabsOps
@@ -41,8 +42,15 @@ internal static class ChatTabsOps
                 reply["moved"] = moved;
                 return reply;
             }
+            case "edit":
+            {
+                // FORMDIALOG1: the tab editor, as the quick menu's Edit this tab (tab N) or New tab, Custom (tab -1).
+                int tab = Int(args, "tab") ?? throw new ArgumentException("args.tab is required (a tab index, or -1 for a new tab)");
+                var reply = Invoke(type, "OpenEditorForBridge", tab) as Dictionary<string, object?> ?? new Dictionary<string, object?>();
+                return new Dictionary<string, object?> { ["opened"] = true, ["dialog"] = reply };
+            }
             default:
-                throw new ArgumentException("args.action must be read or move");
+                throw new ArgumentException("args.action must be read, move or edit");
         }
     }
 

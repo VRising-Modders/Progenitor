@@ -669,6 +669,7 @@ The runtime draws the title and body through `IUiRuntime.AddDialogText` (a label
 | `Prompt(title, body, initial, onSubmit, placeholder = "", validate = null, submit = "OK", maxLength = 0, cancel = "Cancel", onCancel = null, showModVersion = null)` → `IDisposable` | A text field. The main button and Enter validate: `validate` returns null to accept, and `onSubmit` gets the text; anything else refuses and is shown under the field (the dialog stays open) — an empty or blank string shows `Not accepted.`. A text longer than `maxLength` is refused the same way (`At most N characters.`); the field also stops typing at it, and an `initial` longer than `maxLength` is cut to it (the field and the value agree). The field has the keyboard when the dialog appears (the same focus path a click takes). Typing clears the error. A validator that throws blocks the submit (`This value could not be checked.`) and is logged. |
 | `Confirm(title, facts, yes, onYes, note = "", no = "Cancel", onNo = null, danger = false, showModVersion = null)` → `IDisposable` | <a id="facts"></a>DIALOGS2: the same yes/no, with label/value `DialogFact` rows in place of the body and at most one short `note` under them. A fact with an empty value is left out; an empty label continues the fact above (a second `Requires` line). `DialogFactTone` `Ok` / `Warn` / `Danger` colors a value. |
 | `Notice(title, facts, note = "", ok = "OK", onClose = null, showModVersion = null)` → `IDisposable` | DIALOGS2: a notice with facts. |
+| `Form(title, caption, initial, heading, checks, onSave, validate = null, requireOne = false, noneHint = "", placeholder = "", maxLength = 0, save = "Save", cancel = "Cancel", onCancel = null, showModVersion = null)` → `IDisposable` | FORMDIALOG1: a name and a few on/off choices in one dialog: a captioned one-line field, one to ten `DialogCheck` boxes under `heading`, Cancel and Save. `onSave(text, states)`; `validate(text, states)` as a Prompt's. See [Form dialog](#form-dialog-formdialog1). |
 | `ShowModVersion` (get/set, default `true`) | The per-plugin default of the footer's mod name and version. A call's `showModVersion` wins. |
 | `IUiPanel.ConfirmButton(text, question, body)` → `IUiButton` | The stage 2 confirmed button with a muted body under the question. Same dialog. |
 
@@ -693,6 +694,47 @@ ctx.Dialogs.Confirm("Plant the herb garden?",
 ```
 
 Shortened from `SampleDialogs.Facts` (**Dialogs → Facts dialog**). The readback `mods_ui status` → `dialog.facts` lists `{label, value, tone}` and `dialog.note` the sentence.
+
+### Form dialog (FORMDIALOG1)
+
+**Status: source-checked, built and game-free tested (`DialogTests` `A_form_*`, `ChatTabFormTests`, `UiNavTests.Tab_walks_a_dialogs_field_and_stops_and_Up_from_the_first_stop_returns_to_the_field`), not live-verified.** Decided 2026-10-17 from the user's review of the chat tab editor: changing what a tab shows must not need a Next step, the channel choices are check boxes like the game's Options menu, and Save is set apart from them.
+
+```
+                    Edit tab
+       ─────────────────◆─────────────────
+   Name     [ Trade                              ]
+   Show messages from
+   [x] Global
+   [ ] Local
+   [ ] Clan
+   [x] Whispers
+   [ ] System and mods
+   [ ] Mentions of me
+            [   Cancel   ]   [    Save    ]
+                Progenitor 2026.10.x
+```
+
+```csharp
+ctx.Dialogs.Form("Form dialog", "Name", "Night market", "Show stalls for",
+    new[] { new DialogCheck("Blood", true), new DialogCheck("Weapons", false), new DialogCheck("Gems", true) },
+    (name, on) => Say("\"" + name + "\" " + string.Join(",", on)),
+    validate: (name, _) => (name ?? "").Trim().Length == 0 ? "Enter a name." : null,
+    requireOne: true, noneHint: "Turn on at least one stall.", maxLength: 24, onCancel: () => Say("cancel"));
+```
+
+From `samples/Progenitor.ControlsSample/Plugin.cs` (`ControlsDialogs`, kind `Form`; compile-checked with the sample's build): the Controls sample's **All controls** page (Dialogs) and the Gallery's Feedback tab, **Form**.
+
+| Part | Rule (`DialogForm`) |
+|---|---|
+| Edge | Every part starts on one left edge, the facts block's 24-unit inset inside the 560-unit content row: the field's caption, the heading, the boxes. The buttons stay the dialog's centered popup pair, Cancel left, Save right in the accent. |
+| Field | `dialog-input`: the caption (17 px, muted) in a column as wide as its estimate × 1.3 plus the facts' label pad (at least 56), then the field (the Prompt's `field` cell) filling the row. The error line `dialog-error/error` starts under the field, left-aligned, in the error tone. The field has the keyboard when the dialog opens. |
+| Heading | `dialog-checks-heading/heading`: 17 px, muted, 6 units under the field. |
+| Boxes | `dialog-check-<i>`: one 30-unit line per box, 2 apart: the `check` cell (`CellKind.Check`, 24 units: the game's `Checkbox_Normal` frame and checkmark from the settings art, the kit's framed box until that art is ready, tried again on later frames) and the `label` cell (17 px, bright, left). The whole line is the click target. |
+| Hint | `dialog-checks-hint/hint`: with `requireOne`, shown in the error tone while no box is checked, when Save is grayed. |
+
+- **Keys.** Enter saves (validated, as a Prompt's submit), Escape cancels. Tab and Shift+Tab walk the field, each box and the buttons, in reading order, and wrap around; Down leaves the one-line field for the first box, and Up from the first box goes back into the field. Space or Enter on a focused box (A on a controller) flips it; arrows move between boxes and buttons. These keys are read by the framework's own input layer (the typed-key pump and `UiNav`), like every dialog's Enter, and apply to every dialog with a one-line field (a Prompt too).
+- **State.** Nothing is written until Save. A framework dialog that steps in front puts the form back in the queue with its text and boxes as the player left them.
+- **Bridge.** `widget_click` with a box's label or row key flips it through the line's own click slot. `mods_ui status` → `dialog.checks [{index, row, label, on}]`, `checksHeading`, `checksOk`, `checksHint` (the hint while shown) and `mainEnabled`.
 
 ### Behavior
 
@@ -734,7 +776,7 @@ Plain buttons and labels keep the kit's look on a floating window unless it asks
 
 ### Readback and bridge handles
 
-`mods_ui status` → `dialog {open, key, kind, footer, title, error, queued}`. A mod's dialog: buttons row `dialog-buttons` with cells `cancel`, `main`, `option-<i>`; a list option `dialog-option-<i>/option-<i>`; the Prompt field `dialog-input/field` and the error line `dialog-error/error`. `widget_click dialog-buttons/main` answers the dialog as a click does.
+`mods_ui status` → `dialog {open, key, kind, footer, title, error, queued}`. A mod's dialog: buttons row `dialog-buttons` with cells `cancel`, `main`, `option-<i>`; a list option `dialog-option-<i>/option-<i>`; the Prompt field `dialog-input/field` and the error line `dialog-error/error`; a form's boxes `dialog-check-<i>` (cells `check`, `label`), its heading `dialog-checks-heading` and hint `dialog-checks-hint`. `widget_click dialog-buttons/main` answers the dialog as a click does.
 
 ### Dialog acceptance procedure (not run)
 

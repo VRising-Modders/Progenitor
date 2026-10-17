@@ -208,6 +208,15 @@ internal sealed class NavSurface
 
     /// <summary>WINDOWS1: the pinned rows above the columns (a window's toolbar and tab row).</summary>
     internal ISet<UiHandle>? TopRows { get; set; }
+
+    /// <summary>
+    /// FORMDIALOG1: the screen's one-line text field (a Prompt's or a form's), which is not a stop of its own: Tab from it
+    /// goes to the first stop, Shift+Tab or Up from the first stop comes back to it.
+    /// </summary>
+    internal UiHandle? Field { get; set; }
+
+    /// <summary>FORMDIALOG1: Tab and Shift+Tab walk this screen's field and stops (<see cref="UiNav.TabStep"/>): a dialog.</summary>
+    internal bool TabCycle { get; set; }
 }
 
 /// <summary>NAV1: what the model needs from the game and the menus. Production: <see cref="UiNavHost"/>; tests substitute a fake.</summary>
@@ -234,6 +243,9 @@ internal interface INavHost
 
     /// <summary>Give a text field (or the field inside a control) the keyboard. False when it has none.</summary>
     bool FocusText(UiHandle handle);
+
+    /// <summary>FORMDIALOG1: take the keyboard back from the focused text field (Tab out of a dialog's field).</summary>
+    void BlurText() { }
 
     /// <summary>A button's click, through the same slot a pointer click takes.</summary>
     void Click(UiHandle handle);
@@ -788,7 +800,8 @@ internal static class UiNav
         {
             // No geometry (a runtime that does not draw): the build order.
             pick = OrderedNeighbor(surface.Panes[_pane], direction);
-            if (pick < 0) return false;
+            // FORMDIALOG1: Up past a dialog's topmost stop goes back into its text field.
+            if (pick < 0) return direction == NavCommand.Up && EnterField(surface);
             var ordered = OrderedStops(surface.Panes[_pane]);
             SetFocus(ordered[pick]);
             return true;
@@ -1103,6 +1116,108 @@ internal static class UiNav
         _returnFocus = default;
         _returnPane = 0;
         _returnX = _returnY = float.NaN;
+    }
+
+    /// <summary>
+    /// FORMDIALOG1: Tab (+1) or Shift+Tab (-1) on a screen that takes it (a dialog: <see cref="NavSurface.TabCycle"/>):
+    /// the focus walks the dialog's text field and its stops in reading order (top to bottom, then left to right) and wraps
+    /// around. <paramref name="fromField"/>: the dialog's field has the keyboard now, so the walk starts there; landing on
+    /// the field gives it the keyboard (the marker steps aside), leaving it takes the keyboard back. False when no screen
+    /// takes Tab or it has nothing to walk.
+    /// </summary>
+    internal static bool TabStep(int direction, bool fromField)
+    {
+        var surface = SafeActive();
+        if (surface == null || !surface.TabCycle) return false;
+        _active = true;
+        if (!string.Equals(surface.Key, _surface, StringComparison.Ordinal)) Enter(surface);
+        else Revalidate(surface);
+        var cycle = new List<NavTarget>();
+        var field = surface.Field is { } f && !f.IsDisposed ? f : null;
+        if (field != null) cycle.Add(new NavTarget(field, FieldPart));
+        cycle.AddRange(ReadingOrder(surface));
+        if (cycle.Count == 0) return false;
+        int step = direction < 0 ? -1 : 1;
+        int at = -1;
+        if (fromField && field != null) at = 0;
+        else if (!_focus.IsEmpty && _marked) at = cycle.IndexOf(_focus);
+        int next = at < 0 ? (step > 0 ? (field != null && !fromField && cycle.Count > 1 ? 1 : 0) : cycle.Count - 1)
+            : ((at + step) % cycle.Count + cycle.Count) % cycle.Count;
+        var target = cycle[next];
+        if (field != null && ReferenceEquals(target.Handle, field) && target.Part == FieldPart)
+        {
+            Unmark();
+            try { return Host.FocusText(field); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Ui: nav field focus threw: " + e.Message);
+                return false;
+            }
+        }
+
+        if (fromField)
+        {
+            try { Host.BlurText(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: nav field blur threw: " + e.Message); }
+        }
+
+        SetFocus(target);
+        Mark();
+        return true;
+    }
+
+    /// <summary>FORMDIALOG1: the part name the Tab walk gives a dialog's text field (never a real cell's focus).</summary>
+    internal const string FieldPart = "field";
+
+    /// <summary>
+    /// FORMDIALOG1: Up from the dialog's topmost stop goes back into its text field (a Prompt or a form), as Shift+Tab
+    /// from the first stop does. False when the screen has no field.
+    /// </summary>
+    private static bool EnterField(NavSurface surface)
+    {
+        if (surface.Field is not { IsDisposed: false } field) return false;
+        Unmark();
+        try { return Host.FocusText(field); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: nav field focus threw: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>Every stop of the focus pane, each cell its own, top to bottom and then left to right (build order without geometry).</summary>
+    private static List<NavTarget> ReadingOrder(NavSurface surface)
+    {
+        var placed = new List<(NavTarget Target, ScreenRect Rect, int Order)>();
+        int pane = _pane >= 0 && _pane < surface.Panes.Count ? _pane : 0;
+        if (surface.Panes.Count == 0) return new List<NavTarget>();
+        bool known = true;
+        foreach (var handle in surface.Panes[pane])
+        {
+            if (surface.Field != null && ReferenceEquals(handle, surface.Field)) continue;
+            foreach (var stop in Stops(handle))
+            {
+                var rect = Host.Rect(stop);
+                if (!rect.IsKnown) known = false;
+                placed.Add((stop, rect, placed.Count));
+            }
+        }
+
+        if (known)
+        {
+            placed.Sort((a, b) =>
+            {
+                float dy = b.Rect.MaxY - a.Rect.MaxY;
+                if (Math.Abs(dy) > 0.5f) return dy > 0 ? 1 : -1;
+                float dx = a.Rect.MinX - b.Rect.MinX;
+                if (Math.Abs(dx) > 0.5f) return dx > 0 ? 1 : -1;
+                return a.Order.CompareTo(b.Order);
+            });
+        }
+
+        var list = new List<NavTarget>(placed.Count);
+        foreach (var p in placed) list.Add(p.Target);
+        return list;
     }
 
     private static NavSurface? SafeActive()
