@@ -535,7 +535,8 @@ public class VanillaPanelTests : IDisposable
     private static VanillaPanelTarget Recipe(int recipe, int product = 500, int amount = 1, VanillaPanelKind kind = VanillaPanelKind.Workstation, params VanillaRecipeRequirement[] needs) =>
         new(kind, kind == VanillaPanelKind.Character ? 0 : 812, kind == VanillaPanelKind.Character ? 0 : 3,
             kind == VanillaPanelKind.Character ? 0 : 40, kind == VanillaPanelKind.Character ? 0 : 1, kind == VanillaPanelKind.Character ? 0 : 1,
-            recipe, product, amount, needs);
+            recipe, kind == VanillaPanelKind.RefinementStation ? recipe : product, kind == VanillaPanelKind.RefinementStation ? 0 : amount,
+            product, amount, needs);
 
     [Fact]
     public void Each_hovered_recipe_is_a_new_target_with_its_product_and_requirements()
@@ -605,6 +606,10 @@ public class VanillaPanelTests : IDisposable
 
         var described = (string[])((VanillaAttachHandle)h).Readback().Describe()["rowTones"]!;
         Assert.Equal(new[] { "normal", "normal", "normal" }, described);
+
+        h.ClearRows();
+        Assert.Empty(_client.RowTexts);
+        Assert.Equal(0, h.RowCount);
         h.Dispose();
     }
 
@@ -627,11 +632,14 @@ public class VanillaPanelTests : IDisposable
         Assert.Equal(a.GetHashCode(), b.GetHashCode());
         Assert.NotEqual(a, c);
         Assert.NotEqual(a, Recipe(9001, 500, 1, VanillaPanelKind.RefinementStation));
-        Assert.Equal("kind=RefinementStation entity=812:3 net=40:1 recipe=9001 item=500x1 needs=301x3", a.ToString());
+        Assert.Equal("kind=RefinementStation entity=812:3 net=40:1 recipe=9001 item=9001x0 makes=500x1 needs=301x3", a.ToString());
+        Assert.Equal(new VanillaRecipeRequirement(500, 1), a.Product);
+        Assert.Equal(9001, a.ItemGuid);
+        Assert.Equal("kind=Workstation entity=812:3 net=40:1 recipe=9001 item=500x1 needs=301x3", Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3)).ToString());
 
         // The public constructor copies the list; the old constructor carries no recipe.
         var list = new List<VanillaRecipeRequirement> { new(301, 3) };
-        var d = new VanillaPanelTarget(VanillaPanelKind.Workstation, 1, 1, 0, 0, 0, 9001, 500, 1, list);
+        var d = new VanillaPanelTarget(VanillaPanelKind.Workstation, 1, 1, 0, 0, 0, 9001, 500, 1, 500, 1, list);
         list[0] = new VanillaRecipeRequirement(999, 9);
         Assert.Equal(301, d.Requirements[0].ItemGuid);
         var item = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0, itemGuid: 9, itemAmount: 2);

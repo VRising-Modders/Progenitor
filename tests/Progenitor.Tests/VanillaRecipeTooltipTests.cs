@@ -13,20 +13,30 @@ public class VanillaRecipeTooltipTests
     private static VanillaRecipeRequirement R(int guid, int amount) => new(guid, amount);
 
     [Fact]
-    public void The_product_is_the_first_output_with_an_item()
+    public void The_product_is_output_row_zero_only()
     {
         Assert.True(VanillaRecipeTooltip.TryProduct(new[] { R(500, 2), R(501, 1) }, out int g, out int a));
         Assert.Equal(500, g);
         Assert.Equal(2, a);
 
-        Assert.True(VanillaRecipeTooltip.TryProduct(new[] { R(0, 0), R(501, 4) }, out g, out a));
-        Assert.Equal(501, g);
-        Assert.Equal(4, a);
+        // The game passes row 0 as is; an empty row 0 is no product, not the next row.
+        Assert.False(VanillaRecipeTooltip.TryProduct(new[] { R(0, 0), R(501, 4) }, out g, out a));
+        Assert.Equal(0, g);
+        Assert.Equal(0, a);
 
         Assert.False(VanillaRecipeTooltip.TryProduct(new VanillaRecipeRequirement[0], out g, out a));
         Assert.False(VanillaRecipeTooltip.TryProduct(null, out g, out a));
-        Assert.Equal(0, g);
-        Assert.Equal(0, a);
+    }
+
+    [Theory]
+    [InlineData(VanillaPanelKind.Workstation, 500, 2)]
+    [InlineData(VanillaPanelKind.Character, 500, 2)]
+    [InlineData(VanillaPanelKind.RefinementStation, 9001, 0)]
+    public void The_tooltip_subject_is_the_product_except_at_a_refinement_station(VanillaPanelKind kind, int item, int amount)
+    {
+        VanillaRecipeTooltip.Subject(kind, 9001, 500, 2, out int g, out int a);
+        Assert.Equal(item, g);
+        Assert.Equal(amount, a);
     }
 
     [Fact]

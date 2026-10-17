@@ -92,7 +92,7 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
             recipeLog.LogInfo("Panels example: recipe " + t);
             recipeBody.SetRows(new VanillaRow[]
             {
-                new("Example: recipe " + t.RecipeGuid + " makes " + t.ItemAmount + " x " + t.ItemGuid
+                new("Example: recipe " + t.RecipeGuid + " makes " + t.ProductAmount + " x " + t.ProductGuid + ", tooltip shows " + t.ItemGuid
                     + (t.HasNetworkId ? " at station " + t.NetworkIdIndex : " (crafting tab)"), LabelTone.Muted),
             });
         }));

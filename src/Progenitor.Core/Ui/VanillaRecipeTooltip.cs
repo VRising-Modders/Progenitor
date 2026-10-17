@@ -19,23 +19,35 @@ internal static class VanillaRecipeTooltip
     internal const int MaxRequirements = 16;
 
     /// <summary>
-    /// The product: the first output row with an item. The tooltip describes output 0
-    /// (<c>RecipeOutputBuffer[0]</c>); an empty first row falls through to the next one.
+    /// The product: output row 0 (<c>RecipeOutputBuffer[0]</c>), exactly the row the workstation and
+    /// the crafting tab pass to their tooltip. No fall-through to a later row: the game has none.
     /// </summary>
     internal static bool TryProduct(IReadOnlyList<VanillaRecipeRequirement>? outputs, out int itemGuid, out int amount)
     {
         itemGuid = 0;
         amount = 0;
-        if (outputs == null) return false;
-        for (int i = 0; i < outputs.Count; i++)
+        if (outputs == null || outputs.Count == 0 || outputs[0].ItemGuid == 0) return false;
+        itemGuid = outputs[0].ItemGuid;
+        amount = outputs[0].Amount;
+        return true;
+    }
+
+    /// <summary>
+    /// What the game's tooltip describes, per window: the workstation and the crafting tab pass the
+    /// product (output row 0); the refinement station passes the recipe's own <c>PrefabGUID</c>
+    /// (<c>RefinementstationRecipeEntry.EntryId</c>). The amount is the product's, or 0 for the recipe.
+    /// </summary>
+    internal static void Subject(VanillaPanelKind kind, int recipeGuid, int productGuid, int productAmount, out int itemGuid, out int itemAmount)
+    {
+        if (kind == VanillaPanelKind.RefinementStation)
         {
-            if (outputs[i].ItemGuid == 0) continue;
-            itemGuid = outputs[i].ItemGuid;
-            amount = outputs[i].Amount;
-            return true;
+            itemGuid = recipeGuid;
+            itemAmount = 0;
+            return;
         }
 
-        return false;
+        itemGuid = productGuid;
+        itemAmount = productAmount;
     }
 
     /// <summary>

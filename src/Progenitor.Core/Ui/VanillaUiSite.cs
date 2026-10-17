@@ -132,9 +132,13 @@ public enum VanillaUiSite
     /// station (<c>RefinementstationSubMenu</c>, rows <c>RefinementstationRecipeEntry</c>) and the
     /// character menu's crafting tab (<c>InventorySubMenu.RecipesParent</c>, no station). The target
     /// carries the recipe (<see cref="VanillaPanelTarget.RecipeGuid"/>, the entry's <c>EntryId</c>), the
-    /// station and its <c>NetworkId</c>, the product (<see cref="VanillaPanelTarget.ItemGuid"/> /
-    /// <see cref="VanillaPanelTarget.ItemAmount"/>, the recipe's first <c>RecipeOutputBuffer</c> row) and
+    /// station and its <c>NetworkId</c>, the item the game's tooltip describes
+    /// (<see cref="VanillaPanelTarget.ItemGuid"/>: the product at a workstation and in the crafting tab,
+    /// the recipe itself at a refinement station), the product (<see cref="VanillaPanelTarget.ProductGuid"/> /
+    /// <see cref="VanillaPanelTarget.ProductAmount"/>, the recipe's <c>RecipeOutputBuffer</c> row 0) and
     /// <see cref="VanillaPanelTarget.Requirements"/> (its <c>RecipeRequirementBuffer</c> rows, in order).
+    /// Hover is the entry's <c>IsHovered</c>, which follows the mouse only: with a gamepad the site
+    /// stays closed (the game's own tooltip follows its selection group's cursor, not read here).
     /// A new hovered recipe is a <see cref="VanillaPanelChange.TargetChanged"/>. Rows only, cloned from
     /// the tooltip's <c>Description</c>. Anchors: <see cref="VanillaPanelAnchor.TooltipBody"/> (under the
     /// product's description) and <see cref="VanillaPanelAnchor.TooltipRequirements"/> (under the

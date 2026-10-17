@@ -957,9 +957,10 @@ internal sealed partial class UnityUiRuntime
         view.BodyDonor = TmpOf(tooltip.Description);
 
         ReadNetworkId(world, station, out int n0, out int n1, out int n2);
+        VanillaRecipeTooltip.Subject(kind, recipe, RecipeHover.ProductGuid, RecipeHover.ProductAmount, out int item, out int itemAmount);
         var target = VanillaPanelTarget.ForRecipe(
             kind, station.Index, station.Version, n0, n1, n2,
-            recipe, RecipeHover.ProductGuid, RecipeHover.ProductAmount, RecipeHover.Requirements);
+            recipe, item, itemAmount, RecipeHover.ProductGuid, RecipeHover.ProductAmount, RecipeHover.Requirements);
         return Finish(VanillaUiSite.RecipeTooltip, view, target);
     }
 
@@ -1102,16 +1103,31 @@ internal sealed partial class UnityUiRuntime
             }
         }
 
+        // The frame this runs on most is "tooltip shown over something that is not a recipe" (a station
+        // bonus, an output slot): every entry is read and none is hovered. So the per-entry cost is the
+        // one field read (IsHovered, pointer arithmetic on the entry's own object), and the Unity
+        // liveness check is paid only by the hovered entry. A hovered state can change on any pointer
+        // move (OnPointerEnter/Exit, OnDisable) and nothing cheaper than this read observes it, so a
+        // "none hovered" answer is not cached across frames.
         for (int i = 0; i < cache.Entries.Count; i++)
         {
             var entry = cache.Entries[i];
+            bool hovered;
+            try { hovered = entry.IsHovered; }
+            catch
+            {
+                cache.ChildCount = -1;
+                continue;
+            }
+
+            if (!hovered) continue;
             if (!Alive(entry))
             {
                 cache.ChildCount = -1;
                 continue;
             }
 
-            if (entry.IsHovered && entry.gameObject.activeInHierarchy)
+            if (entry.gameObject.activeInHierarchy)
             {
                 _hoveredRecipe = entry;
                 return entry;
