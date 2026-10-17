@@ -262,13 +262,30 @@ internal static class ChatMute
 /// <summary>
 /// CHAT8: <c>/loc </c> and <c>/item name </c> at the start of the chat line become link tokens as they are typed:
 /// <c>/loc </c> → <c>[loc:x,z] </c> at this player's position; <c>/item Item_Weapon_Sword_T01_Bone </c> →
-/// <c>[item:id] </c> when the prefab name is an item. Game-free; the client fills <see cref="Position"/> and
-/// <see cref="ItemIdByPrefabName"/>.
+/// <c>[item:id] </c> when the prefab name is an item. <c>/loc</c> alone (nothing after it) is expanded when the line is
+/// sent instead (<see cref="TryExpandOnSend"/>), so a longer word such as <c>/local</c> is never touched while it is typed.
+/// Game-free; the client fills <see cref="Position"/> and <see cref="ItemIdByPrefabName"/>.
 /// </summary>
 internal static class ChatInputTokens
 {
     internal const string LocCommand = "/loc ";
+    internal const string LocWord = "/loc";
     internal const string ItemCommand = "/item ";
+
+    /// <summary>
+    /// On send (Enter): a line that is exactly <c>/loc</c> (any case, trailing spaces ignored) becomes <c>[loc:x,z]</c>
+    /// at this player's position. Anything else, <c>/local</c> included, is left alone.
+    /// </summary>
+    internal static bool TryExpandOnSend(string? text, out string expanded)
+    {
+        expanded = text ?? "";
+        if (string.IsNullOrEmpty(text) || Position == null) return false;
+        if (!string.Equals(text!.TrimEnd(), LocWord, StringComparison.OrdinalIgnoreCase)) return false;
+        var (ok, x, z) = Position();
+        if (!ok) return false;
+        expanded = ChatTokens.Location(x, z);
+        return true;
+    }
 
     internal static Func<(bool Ok, float X, float Z)>? Position { get; set; }
     internal static Func<string, int>? ItemIdByPrefabName { get; set; }

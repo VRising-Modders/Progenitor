@@ -300,6 +300,48 @@ public sealed class ChatTokenTests
     }
 
     [Fact]
+    public void Loc_alone_expands_on_send_and_nothing_else_does()
+    {
+        var oldPos = ChatInputTokens.Position;
+        try
+        {
+            ChatInputTokens.Position = () => (true, 100.4f, -50f);
+            Assert.True(ChatInputTokens.TryExpandOnSend("/loc", out var a));
+            Assert.Equal("[loc:100,-50]", a);
+            Assert.True(ChatInputTokens.TryExpandOnSend("/LOC  ", out var b));
+            Assert.Equal("[loc:100,-50]", b);
+            Assert.False(ChatInputTokens.TryExpandOnSend("/local", out var c));
+            Assert.Equal("/local", c);
+            Assert.False(ChatInputTokens.TryExpandOnSend("/locate", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend("/lo", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend(" /loc", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend("say /loc", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend("", out _));
+            Assert.False(ChatInputTokens.TryExpandOnSend(null, out _));
+            // "/loc" while it is still being typed is not touched (it may become /local).
+            Assert.False(ChatInputTokens.TryExpand("/loc", out _));
+            Assert.False(ChatInputTokens.TryExpand("/local", out _));
+            ChatInputTokens.Position = () => (false, 0f, 0f);
+            Assert.False(ChatInputTokens.TryExpandOnSend("/loc", out _));
+            ChatInputTokens.Position = null;
+            Assert.False(ChatInputTokens.TryExpandOnSend("/loc", out _));
+        }
+        finally { ChatInputTokens.Position = oldPos; }
+    }
+
+    [Theory]
+    [InlineData(187, 187, true, 100f, 100f, "Set a map marker here? (123 m north-east)")]
+    [InlineData(100, -400, true, 100f, 100f, "Set a map marker here? (500 m south)")]
+    [InlineData(10, 20, true, 10.2f, 19.9f, "Set a map marker here? (you are here)")]
+    [InlineData(10, 20, false, 0f, 0f, "Set a map marker here?")]
+    public void Location_click_asks_to_set_a_map_marker(int x, int z, bool have, float px, float pz, string expected) =>
+        Assert.Equal(expected, ChatTokens.MarkerPrompt(x, z, have, px, pz));
+
+    [Fact]
+    public void Location_confirm_title_names_the_coordinates() =>
+        Assert.Equal("Location [-1200, 35]", ChatTokens.MarkerTitle(-1200, 35));
+
+    [Fact]
     public void Long_messages_split_under_the_byte_limit_and_join_back()
     {
         string text = string.Join(" ", System.Linq.Enumerable.Repeat("wordy", 300)); // about 1800 characters

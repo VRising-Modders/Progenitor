@@ -114,6 +114,24 @@ internal static class ChatTokens
         string[] names = { "north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west" };
         return names[(int)Math.Round(deg / 45.0) % 8];
     }
+
+    /// <summary>The location-link confirm's title: <c>Location [x, z]</c>.</summary>
+    internal static string MarkerTitle(int x, int z) =>
+        "Location [" + x.ToString(CultureInfo.InvariantCulture) + ", " + z.ToString(CultureInfo.InvariantCulture) + "]";
+
+    /// <summary>
+    /// The location-link confirm's question: <c>Set a map marker here? (123 m north-east)</c>; without the distance
+    /// when this player's position is unknown, and <c>(you are here)</c> within a meter.
+    /// </summary>
+    internal static string MarkerPrompt(int x, int z, bool havePosition, float px, float pz)
+    {
+        const string ask = "Set a map marker here?";
+        if (!havePosition) return ask;
+        float dx = x - px, dz = z - pz;
+        double meters = Math.Round(Math.Sqrt(dx * dx + dz * dz));
+        if (meters < 1) return ask + " (you are here)";
+        return ask + " (" + meters.ToString(CultureInfo.InvariantCulture) + " m " + Direction(dx, dz) + ")";
+    }
 }
 
 /// <summary>

@@ -255,8 +255,8 @@ internal static class ChatWindow
                     new KeyChord(UiKey.UpArrow), "Bring back the previous line you sent in chat.",
                     () => RecallStep(up: true), null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
                 _sendLongKey = Keybinds.RegisterScoped(typeof(ChatWindow), SettingsPanel.PluginId, SendLongKeybindId, file,
-                    new KeyChord(UiKey.Enter), "Send a long chat line in parts (the game's own Enter sends ordinary lines).",
-                    SendLong, null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
+                    new KeyChord(UiKey.Enter), "Send a long chat line in parts, and turn /loc into your location (the game's own Enter sends ordinary lines).",
+                    OnSendKey, null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
                 _recallDownKey = Keybinds.RegisterScoped(typeof(ChatWindow), SettingsPanel.PluginId, RecallDownKeybindId, file,
                     new KeyChord(UiKey.DownArrow), "Go forward through the lines you sent in chat.",
                     () => RecallStep(up: false), null, null, allowWhileCaptured: false, allowWhenChatUnknown: false, KeybindScope.Chat);
@@ -750,6 +750,26 @@ internal static class ChatWindow
         int want = LongAllowed ? ChatPolicy.ClampLongMessage(ChatPolicy.Current.MaxLongMessageChars) : _gameCharacterLimit;
         if (_gameCharacterLimit > 0 && want < _gameCharacterLimit) want = _gameCharacterLimit;
         if (field.characterLimit != want) field.characterLimit = want;
+    }
+
+    /// <summary>
+    /// The chat-scope Enter: a line that is exactly <c>/loc</c> becomes the location token, which the game's own Enter
+    /// then sends (CHAT8; <c>/loc </c> with a space already expanded as it was typed); otherwise a long line goes in parts.
+    /// </summary>
+    private static void OnSendKey()
+    {
+        try
+        {
+            var field = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>()?._ChatWindow?.ChatInputField;
+            if (field != null && ChatInputTokens.TryExpandOnSend(field.text, out string token))
+            {
+                SetLine(field, token);
+                return;
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: /loc on send threw: " + e.Message); }
+
+        SendLong();
     }
 
     /// <summary>
