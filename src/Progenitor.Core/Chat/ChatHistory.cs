@@ -130,6 +130,84 @@ internal sealed class ChatSaveSchedule
 }
 
 /// <summary>
+/// Which server's history file the chat log belongs to, game-free. A world's join opens it (<see cref="Open"/>, the
+/// server's host); leaving the server closes it (<see cref="Close"/>) and that leave is the one that writes the file.
+/// After the close nothing writes it again: not the next world's load, not a Core unload at the title, so a history file
+/// changed or restored while at the title is what the next join reads. A Core swap in a world writes without closing
+/// (<see cref="SaveHost"/>), so the next generation continues the same session. A join that reuses the world it left
+/// (the client took a new connection since the close, <see cref="RejoinedAt"/>) starts a new log.
+/// </summary>
+internal sealed class ChatHistorySession
+{
+    /// <summary>This world's history was opened (read or found missing); the next world opens it again.</summary>
+    internal bool Opened { get; private set; }
+
+    /// <summary>Closed by a leave: the log is the previous server's and is never written again.</summary>
+    internal bool Closed { get; private set; }
+
+    /// <summary>The server's host the history is keyed by; empty when there is none (a local game, or no history kept).</summary>
+    internal string Host { get; private set; } = "";
+
+    /// <summary>The host whose file a save writes now, or empty: nothing is written before the open or after the close.</summary>
+    internal string SaveHost => Opened && !Closed ? Host : "";
+
+    /// <summary>
+    /// Open the history when it may be: only while the client holds a connection (connecting or connected) and the
+    /// server's host is known. At the title or the disconnect screen a surviving client world still remembers the last
+    /// server (a Core swap there must not reopen that server's file under its host), and a join whose host is not known
+    /// yet would open with none and never save; both wait. True when it opened now.
+    /// </summary>
+    internal bool TryOpen(bool connectionHeld, string? host)
+    {
+        if (Opened || !MayOpen(connectionHeld, host)) return false;
+        Open(host);
+        return true;
+    }
+
+    /// <summary>Whether a history may open: a held connection to a server whose host is known.</summary>
+    internal static bool MayOpen(bool connectionHeld, string? host) => connectionHeld && !string.IsNullOrWhiteSpace(host);
+
+    internal void Open(string? host)
+    {
+        Opened = true;
+        Closed = false;
+        Host = host ?? "";
+    }
+
+    /// <summary>The client's connection serial when the history was closed.</summary>
+    internal int ClosedSerial { get; private set; }
+
+    /// <summary>
+    /// Leaving the server: the host to write one last time (empty when nothing is open or it was already closed), then
+    /// closed. <paramref name="serial"/> is the serial of the client's connection that ended; a second notice of the same
+    /// leave (the connection's error, then the world ending) writes nothing.
+    /// </summary>
+    internal string Close(int serial = 0)
+    {
+        string host = SaveHost;
+        if (Opened)
+        {
+            Closed = true;
+            ClosedSerial = serial;
+        }
+
+        return host;
+    }
+
+    /// <summary>The history was closed by a leave and the client has taken a new connection since.</summary>
+    internal bool RejoinedAt(int serial) => Closed && serial != ClosedSerial;
+
+    /// <summary>A new world (or an unload): nothing open until the next <see cref="Open"/>.</summary>
+    internal void Reset()
+    {
+        Opened = false;
+        Closed = false;
+        ClosedSerial = 0;
+        Host = "";
+    }
+}
+
+/// <summary>
 /// <c>[Chat] HistoryLines</c>'s default was raised from 500 to 5000 on 2026-10-17, game-free. BepInEx writes a default
 /// into the file the first time it is bound, so a saved 500 cannot tell the old default from a chosen 500: once, when
 /// <c>[Chat] HistoryDefaultRaised</c> is not yet set, a saved 500 becomes 5000; any other saved value is kept. The

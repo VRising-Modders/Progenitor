@@ -105,7 +105,7 @@ public sealed class DialogsVanillaTests : IDisposable
 
         SettingsArtLadder.Prepare();
         var art = SettingsArtLadder.DescribeDialog();
-        foreach (var key in new[] { "frame", "titleRule", "button", "buttonHover", "buttonPressed", "buttonDisabled" })
+        foreach (var key in new[] { "frame", "titleRule", "button", "buttonHover", "buttonPressed", "buttonDisabled", "check", "checkMark" })
             Assert.Equal("kit", ((Dictionary<string, object?>)art[key]!)["source"]);
         Assert.Equal("game-blocker-black-0.8", art["overlay"]);
         Assert.True(UiDialog.Describe().ContainsKey("art"));
