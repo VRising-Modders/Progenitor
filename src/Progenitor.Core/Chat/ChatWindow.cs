@@ -83,8 +83,8 @@ internal static class ChatWindow
     /// <summary>CHAT7: sent-line recall (Up/Down while typing), kept in <c>progenitor-cache/chat/sent.txt</c>.</summary>
     private static readonly ChatRecall Recall = new();
     private static bool _recallLoaded;
-    private static bool _wasFocused;
-    private static string _focusedText = "";
+    /// <summary>CHAT7/CHAT13: when a typed line counts as sent (<see cref="ChatSentWatch"/>).</summary>
+    private static readonly ChatSentWatch SentWatch = new();
 
     internal const string RecallUpKeybindId = "ChatRecallPrevious";
 
@@ -102,6 +102,19 @@ internal static class ChatWindow
 
     /// <summary>CHAT3: the latest whisper partner, for <c>/r</c>.</summary>
     private static readonly ChatWhisperMemory Whispers = new();
+
+    /// <summary>
+    /// CHAT13: the input line was swapped for another tab's: what was typed is that tab's draft, not a sent line, and
+    /// Up recall starts again from the newest line.
+    /// </summary>
+    internal static void ForgetTypedLine()
+    {
+        SentWatch.Forget();
+        Recall.EndBrowsing();
+    }
+
+    /// <summary>CHAT13: the latest whisper partner (<c>/r</c>'s), for a whisper tab's <c>/w partner </c> line; or empty.</summary>
+    internal static string WhisperPartner => Whispers.Partner;
 
     /// <summary>CHAT4: text waiting to be put in the chat input once the chat has focus (<see cref="InsertIntoInput"/>).</summary>
     private static string? _pendingInsert;
@@ -150,7 +163,8 @@ internal static class ChatWindow
         var field = window.ChatInputField;
         if (field == null) return;
         string current = field.text ?? "";
-        string joined = current.Length == 0 || current.EndsWith(" ", StringComparison.Ordinal) ? current + _pendingInsert : current + " " + _pendingInsert;
+        // CHAT13: a whisper insert replaces a bare whisper line (a whisper tab's prefill) instead of following it.
+        string joined = ChatTabInput.JoinInsert(current, _pendingInsert);
         _pendingInsert = null;
         SetLine(field, joined);
     }
@@ -389,6 +403,7 @@ internal static class ChatWindow
         _bindingsFrame = int.MinValue;
         Completer.Reset();
         Whispers.Reset();
+        ChatTabs.ForgetInput();
         _pendingInsert = null;
         LongParts.Clear();
         RestoreInput();
@@ -644,7 +659,10 @@ internal static class ChatWindow
     private static void UpdateCommands(ClientChatSystem system, HUDChatWindow window)
     {
         _modeBefore = -1;
+        // A pending insert lands first, so a whisper tab's prefill never goes in front of it.
         ApplyPendingInsert(window);
+        // CHAT13: the shown tab's channel, the player's channel choices, and the whisper tab's line.
+        ChatTabs.UpdateInput(system, window, _pendingInsert != null);
         ColorInput(system, window);
         bool reply = ReplyShortcut, completion = NameCompletion;
         if (!window.IsChatFocused)
@@ -697,27 +715,20 @@ internal static class ChatWindow
     private static void NoteSent(HUDChatWindow window)
     {
         bool focused = window.IsChatFocused;
-        if (focused)
+        bool lost = SentWatch.LostFocus(focused);
+        string typed = SentWatch.Typed;
+        string now = window.ChatInputField?.text ?? "";
+        string? sent = SentWatch.Frame(focused, now, ChatTabs.FocusLostToTabRow);
+        // CHAT8: a /loc line the game just sent gets its location token after it; never on a tab click.
+        if (lost && !SentWatch.LastLossWasTabClick) SendLocAfterGame(window, typed, now);
+        if (sent != null)
         {
-            var field = window.ChatInputField;
-            _focusedText = field?.text ?? "";
-        }
-        else if (_wasFocused)
-        {
-            string now = window.ChatInputField?.text ?? "";
-            SendLocAfterGame(window, _focusedText, now);
-            if (now.Length == 0 && _focusedText.Trim().Length > 0)
-            {
-                EnsureRecallLoaded();
-                Recall.Push(_focusedText);
-                SaveRecall();
-            }
-
-            Recall.EndBrowsing();
-            _focusedText = "";
+            EnsureRecallLoaded();
+            Recall.Push(sent);
+            SaveRecall();
         }
 
-        _wasFocused = focused;
+        if (lost) Recall.EndBrowsing();
     }
 
     private static string RecallPath() =>
@@ -783,7 +794,7 @@ internal static class ChatWindow
             {
                 // Empty the input so the game's Enter sends nothing, and send the token ourselves (as long lines do).
                 field.text = "";
-                _focusedText = "";
+                SentWatch.Forget();
                 EnsureRecallLoaded();
                 Recall.Push(line);
                 SaveRecall();
@@ -838,7 +849,7 @@ internal static class ChatWindow
             if (text.Length == 0 || text[0] == '/' || text[0] == '.' || !ChatLongMessage.IsLong(text)) return;
             var parts = ChatLongMessage.Split(text, ChatPolicy.ClampLongMessage(ChatPolicy.Current.MaxLongMessageChars));
             field.text = "";
-            _focusedText = "";
+            SentWatch.Forget();
             EnsureRecallLoaded();
             Recall.Push(text);
             SaveRecall();

@@ -600,8 +600,27 @@ internal sealed class ChatTab
     internal const int MaxNameLength = 16;
 
     internal string Name { get; set; } = "";
-    internal ChatScope Scope { get; set; }
+
+    /// <summary>What the tab shows. Changing it forgets the remembered send channel (CHAT13), which then follows the new channels.</summary>
+    internal ChatScope Scope
+    {
+        get => _scope;
+        set
+        {
+            if (value != _scope) SendTo = null;
+            _scope = value;
+        }
+    }
+
+    private ChatScope _scope;
+
     internal bool Fixed { get; set; }
+
+    /// <summary>CHAT13: the channel last chosen on this tab, or null for <see cref="ChatTabInput.DefaultFor"/>. Saved.</summary>
+    internal ChatSend? SendTo { get; set; }
+
+    /// <summary>CHAT13: the unsent line typed on this tab while another tab is shown. This session only, never saved.</summary>
+    internal string Draft { get; set; } = "";
 
     internal static ChatTab All() => new() { Name = AllName, Scope = ChatScope.All | ChatScope.Mentions, Fixed = true };
 
@@ -637,21 +656,40 @@ internal sealed class ChatTab
     };
 
     /// <summary>
-    /// The channel typing in this tab sends to, as the game's <c>ChatMessageType</c> number (Global 0, Team 2, Local 4),
-    /// or -1 to leave the player's channel alone (All, mixed tabs, whispers and system tabs).
+    /// The channel typing in this tab sends to before the player chose one (<see cref="ChatTabInput.DefaultFor"/>), as
+    /// the game's <c>ChatMessageType</c> number (Global 0, Team 2, Whisper 3, Local 4), or -1 to leave the player's
+    /// channel alone (All, Mentions and System tabs).
     /// </summary>
-    internal int SendChannel() => Scope switch
+    internal int SendChannel() => ChatTabInput.DefaultFor(this) is ChatSend s ? (int)s : -1;
+
+    /// <summary>CHAT13: the send-channel marker words in <c>[Chat] Tabs</c> (<c>&gt;clan</c>).</summary>
+    internal static string SendWord(ChatSend send) => send switch
     {
-        ChatScope.Clan => 2,
-        ChatScope.Local => 4,
-        ChatScope.Global => 0,
-        _ => -1,
+        ChatSend.Global => "global",
+        ChatSend.Clan => "clan",
+        ChatSend.Whisper => "whisper",
+        ChatSend.Local => "local",
+        ChatSend.System => "system",
+        _ => "",
     };
+
+    internal static ChatSend? ParseSendWord(string? word)
+    {
+        foreach (ChatSend s in Enum.GetValues(typeof(ChatSend)))
+            if (string.Equals(SendWord(s), (word ?? "").Trim(), StringComparison.OrdinalIgnoreCase)) return s;
+        return null;
+    }
+
+    /// <summary>CHAT13: the marker entry's first character; tab names never contain it (<see cref="Clean"/>).</summary>
+    internal const char SendMarker = '>';
 
     /// <summary>
     /// The tabs as saved in <c>[Chat] Tabs</c>: <c>Name=scope;Name=scope</c>, in the row's order. All is fixed and not
     /// saved with a scope; when the player has moved it away from the front, a bare <see cref="AllName"/> entry marks
     /// its place (<c>Clan=4;All;Trade=1</c>). Builds before tab reordering skip that entry and put All first.
+    /// CHAT13: a tab with a remembered send channel is followed by a marker entry, <c>&gt;</c> and the channel's word
+    /// (<c>Clan=4;Trade=5;&gt;global;All;&gt;local</c>); All is then written even when first. Older builds skip the
+    /// marker (it has no <c>=</c>) and load the tabs as before.
     /// </summary>
     internal static string Save(IReadOnlyList<ChatTab> tabs)
     {
@@ -661,11 +699,12 @@ internal sealed class ChatTab
             var t = tabs[i];
             if (t.Fixed)
             {
-                if (i > 0) parts.Add(AllName);
-                continue;
+                if (i > 0 || t.SendTo != null) parts.Add(AllName);
+                if (i == 0 && t.SendTo == null) continue;
             }
+            else parts.Add(Clean(t.Name) + "=" + ((int)t.Scope).ToString(CultureInfo.InvariantCulture));
 
-            parts.Add(Clean(t.Name) + "=" + ((int)t.Scope).ToString(CultureInfo.InvariantCulture));
+            if (t.SendTo is ChatSend send) parts.Add(SendMarker + SendWord(send));
         }
 
         return string.Join(";", parts);
@@ -679,15 +718,29 @@ internal sealed class ChatTab
     {
         var tabs = new List<ChatTab>();
         int allAt = -1;
+        var all = All();
+        // The tab a send marker belongs to: the entry just before it.
+        ChatTab? last = null;
         if (saved != null)
         {
             foreach (var raw in saved.Split(';'))
             {
-                if (tabs.Count >= MaxTabs - 1) break;
                 string part = raw.Trim();
+                if (part.Length > 0 && part[0] == SendMarker)
+                {
+                    // Only a channel the tab may remember (a hand edit or a newer build may say more).
+                    if (last != null && ParseSendWord(part.Substring(1)) is ChatSend send && ChatTabInput.CanRemember(last, send)
+                        && send != ChatTabInput.DefaultFor(last)) last.SendTo = send;
+                    last = null;
+                    continue;
+                }
+
+                last = null;
+                if (tabs.Count >= MaxTabs - 1) break;
                 if (allAt < 0 && string.Equals(part, AllName, StringComparison.OrdinalIgnoreCase))
                 {
                     allAt = tabs.Count;
+                    last = all;
                     continue;
                 }
 
@@ -698,11 +751,12 @@ internal sealed class ChatTab
                 if (!int.TryParse(part.Substring(eq + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int s)) continue;
                 var scope = (ChatScope)s & (ChatScope.All | ChatScope.Mentions);
                 if (scope == ChatScope.None) continue;
-                tabs.Add(new ChatTab { Name = name, Scope = scope });
+                last = new ChatTab { Name = name, Scope = scope };
+                tabs.Add(last);
             }
         }
 
-        tabs.Insert(allAt < 0 ? 0 : Math.Min(allAt, tabs.Count), All());
+        tabs.Insert(allAt < 0 ? 0 : Math.Min(allAt, tabs.Count), all);
         return tabs;
     }
 
