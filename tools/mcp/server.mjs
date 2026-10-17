@@ -868,6 +868,19 @@ server.tool("progenitor_photo", "Photo mode (built-in, off by default): fly came
   },
   async ({ side, ...args }) => { try { return text(await bridge(side ?? "client", "photo", args)); } catch (e) { return fail(e); } });
 
+server.tool("progenitor_locate", "Client only. ctx.Hud.Locate pings through the Dev bridge (the same presenter plugins use). pin: a ping at world point x, y (up), z in the game's meters (Translation), owned by the bridge; label, seconds (default 30, 0 = until cleared), arrival (meters, 3D, default 0 = never) and maps (world map and minimap diamonds). status (default): every live ping (any owner) with its last drawn frame: labelText, meters, from (the character position the distance was measured from) and character (its entity), onScreen, screen (pixels, origin bottom-left), viewport, angleDegrees, screenSize, cameraPixels, camera (name, position, fov, aspect) and pinholeViewport (a plain projection of the same point from the camera pose; it should match viewport). Frames are recorded only for 15 s after any locate call: read status a frame or more after pin (or after a first status). pin refuses (ok:false, cap reached) while 8 pings are live. clear: end the bridge's pings.",
+  {
+    action: z.enum(["status", "pin", "clear"]).optional().describe("Default status."),
+    x: z.number().optional().describe("pin: world x (meters)."),
+    y: z.number().optional().describe("pin: world y, up (meters). The marker floats 1.6 m above it."),
+    z: z.number().optional().describe("pin: world z (meters)."),
+    label: z.string().optional().describe("pin: the label before the distance."),
+    seconds: z.number().min(0).optional().describe("pin: lifetime, default 30; 0 = until cleared."),
+    arrival: z.number().min(0).optional().describe("pin: end the ping when the character is within this many meters (3D). Default 0 = never."),
+    maps: z.boolean().optional().describe("pin: also show it on the world map and minimap."),
+  },
+  async (args) => { try { return text(await bridge("client", "locate", args)); } catch (e) { return fail(e); } });
+
 // BRIDGEUI1: focus-free UI acceptance tools (ui_input, ui_read, nav, display, screenshot). Implementations live in
 // ui-tools.mjs; a load error must not block the other tools.
 {

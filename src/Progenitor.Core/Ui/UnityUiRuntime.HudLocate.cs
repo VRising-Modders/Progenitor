@@ -15,7 +15,7 @@ namespace Progenitor.Ui;
 /// P7 <c>ctx.Hud.Locate</c>, the Unity half. The game has no ping or world-marker HUD (only the map's single custom
 /// marker, which is persisted per player on the server), so a ping is framework UI: each frame its target's position
 /// (the client entity's <c>Translation</c>, read through <c>TryRead</c>) goes through the game camera's
-/// <c>WorldToScreenPoint</c>; on screen a gold diamond marker floats over it with "label · 14 m", off screen or behind
+/// <c>WorldToViewportPoint</c>, scaled to the overlay's screen (<see cref="UiLocateProjection.ViewportToScreen"/>); on screen a gold diamond marker floats over it with "label · 14 m", off screen or behind
 /// the camera an arrow sits on the screen edge pointing the way to turn. The frame tick runs only while a ping exists.
 /// A ping ends when its time is up, its entity no longer exists, the world epoch changes, or its owner unloads.
 /// </summary>
@@ -28,8 +28,19 @@ internal sealed partial class UnityUiRuntime
     private static Sprite? _markerSprite, _arrowSprite;
     private static Texture2D? _markerTexture, _arrowTexture;
     private static Entity _localCharacter = Entity.Null;
+    private static int _localCharacterEpoch = int.MinValue;
     private static double _localCharacterAt = double.NegativeInfinity;
     private static bool _locateLogged;
+    private static double _framesWantedUntil = double.NegativeInfinity;
+
+    /// <summary>How long a bridge request keeps per-frame diagnostics on (<see cref="HudLocateWantFrames"/>).</summary>
+    internal const double FramesWantedSeconds = 15.0;
+
+    /// <summary>The bridge's <c>locate</c> asks for <see cref="UiLocatePingHandle.LastFrame"/> for the next few seconds.</summary>
+    internal static void HudLocateWantFrames() => _framesWantedUntil = HudNow() + FramesWantedSeconds;
+
+    /// <summary>Live pings, for the bridge's cap check.</summary>
+    internal static int HudPingCount => LocateSet.Count;
 
     private sealed class PingView
     {
@@ -92,7 +103,8 @@ internal sealed partial class UnityUiRuntime
             bool worldAlive = world != null && world.IsCreated;
             bool hasCharacter = false;
             Vector3 characterAt = default;
-            if (worldAlive) hasCharacter = TryLocalCharacterPosition(world!.EntityManager, now, out characterAt);
+            if (worldAlive)
+                hasCharacter = TryLocalCharacterPosition(world!.EntityManager, now, Progenitor.WorldState.WorldEpoch.Current, out characterAt);
             if (LocateSet.Readiness(now, worldAlive, hasCharacter) > 0)
                 Plugin.Logger?.LogInfo("Ui: ctx.Hud.Locate ended every ping: the player left the world.");
             if (LocateSet.Count == 0)
@@ -112,7 +124,7 @@ internal sealed partial class UnityUiRuntime
 
             if (!EnsureLocateCanvas()) return;
             _locateCanvas!.SetActive(true);
-            var em = world.EntityManager;
+            var em = world!.EntityManager;
             var canvasRt = _locateCanvas.GetComponent<RectTransform>();
             float canvasW = canvasRt.rect.width, canvasH = canvasRt.rect.height;
             float screenW = Screen.width, screenH = Screen.height;
@@ -145,18 +157,21 @@ internal sealed partial class UnityUiRuntime
             return;
         }
 
-        if (ping.ArrivalDistance > 0 && Vector3.Distance(from, target) <= ping.ArrivalDistance)
-        { LocateSet.End(ping, "arrived"); return; }
+        double meters = UiLocateLook.Meters(from.x, from.y, from.z, target.x, target.y, target.z);
+        if (UiLocateLook.Arrived(meters, ping.ArrivalDistance)) { LocateSet.End(ping, "arrived"); return; }
         var view = ping.PresenterState as PingView ?? BuildPingView(ping);
         if (view == null) return;
 
         if (ping.ShowOnMaps) DrawMapPings(view, target);
         double age = now - ping.StartedAt;
         var above = target + new Vector3(0f, UiLocateLook.HeightOffset, 0f);
-        Vector3 sp = cam.WorldToScreenPoint(above);
+        // Viewport, not screen pixels: WorldToScreenPoint answers in the camera's own render rect, which need not be
+        // the window the overlay canvas covers.
+        Vector3 vp = cam.WorldToViewportPoint(above);
+        var sp = UiLocateProjection.ViewportToScreen(vp.x, vp.y, vp.z, screenW, screenH);
         float margin = (UiLocateLook.EdgeMargin + UiLocateLook.MarkerSize * 0.5f) * k;
         float labelRoom = (UiLocateLook.LabelGap + UiLocateLook.LabelHeight) * k;
-        var place = UiLocateProjection.Place(sp.x, sp.y, sp.z, screenW, screenH, margin, labelRoom);
+        var place = UiLocateProjection.Place(sp.X, sp.Y, sp.Z, screenW, screenH, margin, labelRoom);
 
         var pos = new Vector2(place.X / k, place.Y / k);
         view.Root.SetActive(true);
@@ -183,10 +198,11 @@ internal sealed partial class UnityUiRuntime
             labelPos = pos + inward * (UiLocateLook.ArrowSize + UiLocateLook.LabelHeight);
         }
 
+        string text = UiLocateLook.Label(ping.Label, meters);
+        // Diagnostics only while the bridge's locate status has asked for them: production pings skip the camera reads.
+        if (now < _framesWantedUntil) RecordFrame(ping, cam, now, from, vp, place, meters, text, screenW, screenH);
         if (view.Label != null)
         {
-            double meters = Vector3.Distance(from, target);
-            string text = UiLocateLook.Label(ping.Label, meters);
             if (!string.Equals(text, view.LastLabel, StringComparison.Ordinal))
             {
                 view.LastLabel = text;
@@ -239,23 +255,42 @@ internal sealed partial class UnityUiRuntime
         return false;
     }
 
-    /// <summary>The local character's position (cached entity, re-found at most once a second); false when there is none.</summary>
-    private static bool TryLocalCharacterPosition(EntityManager em, double now, out Vector3 position)
+    /// <summary>
+    /// The local character's position; false when there is none. The entity is cached for one world epoch and re-found
+    /// (at most once a second) when it is gone, no longer carries <c>LocalCharacter</c>, or the world changed: the next
+    /// world reuses entity index and version, so a cache kept across a reconnect read some other entity's position (a
+    /// wall, a chest) and the label showed the distance from that entity instead of from the player.
+    /// </summary>
+    private static bool TryLocalCharacterPosition(EntityManager em, double now, int epoch, out Vector3 position)
     {
         position = default;
         try
         {
-            if ((_localCharacter == Entity.Null || !em.Exists(_localCharacter)) && now - _localCharacterAt >= 1.0)
+            if (_localCharacter != Entity.Null)
             {
-                _localCharacterAt = now;
-                _localCharacter = Entity.Null;
-                var locals = Query.Entities(em, includeDisabled: false, includeSystems: false,
-                    ComponentIndex.Of<LocalCharacter>(ComponentType.AccessMode.ReadOnly));
-                if (locals.Count > 0) _localCharacter = locals[0];
+                // Short-circuit: no entity read for a cache from another world, no tag read for a gone entity.
+                bool exists = _localCharacterEpoch == epoch && em.Exists(_localCharacter);
+                bool isLocal = exists && _localCharacter.Has<LocalCharacter>(em);
+                if (!UiLocateLook.KeepCachedCharacter(_localCharacterEpoch, epoch, exists, isLocal))
+                {
+                    if (_localCharacterEpoch != epoch) _localCharacterAt = double.NegativeInfinity; // a new world: look at once
+                    _localCharacter = Entity.Null;
+                }
             }
 
-            if (_localCharacter != Entity.Null && em.Exists(_localCharacter)
-                && _localCharacter.TryRead<Translation>(em, out var tr))
+            if (_localCharacter == Entity.Null && now - _localCharacterAt >= 1.0)
+            {
+                _localCharacterAt = now;
+                var locals = Query.Entities(em, includeDisabled: false, includeSystems: false,
+                    ComponentIndex.Of<LocalCharacter>(ComponentType.AccessMode.ReadOnly));
+                if (locals.Count > 0)
+                {
+                    _localCharacter = locals[0];
+                    _localCharacterEpoch = epoch;
+                }
+            }
+
+            if (_localCharacter != Entity.Null && _localCharacter.TryRead<Translation>(em, out var tr))
             {
                 position = new Vector3(tr.Value.x, tr.Value.y, tr.Value.z);
                 return true;
@@ -264,6 +299,37 @@ internal sealed partial class UnityUiRuntime
         catch { /* treated as no character this frame */ }
 
         return false;
+    }
+
+    /// <summary>Keep what this frame computed on the ping, for the bridge's <c>locate</c> readback.</summary>
+    private static void RecordFrame(UiLocatePingHandle ping, Camera cam, double now, Vector3 from, Vector3 viewport,
+        UiLocatePlacement place, double meters, string text, float screenW, float screenH)
+    {
+        try
+        {
+            var f = ping.LastFrame ?? new UiLocateFrame();
+            var t = cam.transform;
+            var p = t.position;
+            var fw = t.forward;
+            var up = t.up;
+            f.At = now;
+            f.FromX = from.x; f.FromY = from.y; f.FromZ = from.z;
+            f.ViewportX = viewport.x; f.ViewportY = viewport.y; f.Depth = viewport.z;
+            f.ScreenX = place.X; f.ScreenY = place.Y; f.OnScreen = place.OnScreen; f.AngleDegrees = place.AngleDegrees;
+            f.Meters = meters;
+            f.LabelText = text;
+            f.Camera = cam.name ?? "";
+            f.CameraX = p.x; f.CameraY = p.y; f.CameraZ = p.z;
+            f.CameraForwardX = fw.x; f.CameraForwardY = fw.y; f.CameraForwardZ = fw.z;
+            f.CameraUpX = up.x; f.CameraUpY = up.y; f.CameraUpZ = up.z;
+            f.FieldOfView = cam.fieldOfView;
+            f.Aspect = cam.aspect;
+            f.ScreenWidth = screenW; f.ScreenHeight = screenH;
+            f.CameraPixelWidth = cam.pixelWidth; f.CameraPixelHeight = cam.pixelHeight;
+            f.CharacterIndex = _localCharacter.Index; f.CharacterVersion = _localCharacter.Version;
+            ping.LastFrame = f;
+        }
+        catch { /* diagnostics only */ }
     }
 
     private static bool EnsureLocateCanvas()
@@ -341,6 +407,8 @@ internal sealed partial class UnityUiRuntime
         _markerSprite = _arrowSprite = null;
         _markerTexture = _arrowTexture = null;
         _localCharacter = Entity.Null;
+        _localCharacterEpoch = int.MinValue;
+        _framesWantedUntil = double.NegativeInfinity;
         _localCharacterAt = double.NegativeInfinity;
     }
 }

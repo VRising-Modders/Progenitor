@@ -75,7 +75,7 @@ const READ_ONLY_OPS = new Set([
 ]);
 const READ_ONLY_ACTIONS = new Set(["status", "list", "live"]);
 /** Ops whose default action (no `action` given) is status. */
-const STATUS_BY_DEFAULT = new Set(["time", "photo", "unlock"]);
+const STATUS_BY_DEFAULT = new Set(["time", "photo", "unlock", "locate"]);
 /** mods_ui actions that change nothing (ModsUiOps.IsLightRead plus status and widget_read). */
 const MODS_UI_READS = new Set(["status", "widget_read", "menu_tab_state", "nav_state", "rects", "window", "scene", "tabs", "perf", "settings_places"]);
 

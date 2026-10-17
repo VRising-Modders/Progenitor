@@ -178,6 +178,8 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
             Ops.UiInputOps.Shutdown();
             // And a display set still pending: the window and the game's graphics settings go back to the baseline.
             Ops.DisplayOps.Shutdown();
+            // And the Locate pings the locate op placed (plugin pings stay).
+            try { Progenitor.Ui.HudLocateBridge.Clear(); } catch { /* best-effort */ }
 #if PROGENITOR_EXTRA_INSTANCE
             Ops.ExtraInstanceAuth.Shutdown();
             Ops.ExtraInstanceServerAuth.Shutdown();

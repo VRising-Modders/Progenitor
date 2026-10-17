@@ -1190,10 +1190,22 @@ ctx.Hud.PickInWorld(
 
 ### Locate
 
-`Locate(Entity target, label = "", seconds = 10)` / `Locate(float3 position, label = "", seconds = 10)` → `IUiLocatePing` (`Active`, `Dispose`).
+`Locate(Entity target, label = "", seconds = 10)` / `Locate(float3 position, label = "", seconds = 10)` / `Locate(float3 position, string label, double seconds, float arrivalDistance, bool showOnMaps)` → `IUiLocatePing` (`Active`, `Dispose`).
 
-- The game has no world ping, so this is framework UI drawn each frame over the game camera: a gold diamond marker 1.6 m above the target with `<label> · 14 m` (the distance from the player's character), and, while the target is off screen or behind the camera, an arrow on the screen edge pointing the way to turn. It pulses for its first second and fades in and out.
+| Parameter | Meaning |
+|---|---|
+| `target` | A client-world entity. Its `Translation` (or `LocalToWorld`) is read every frame, so the marker follows it. |
+| `position` | A fixed point in the game's world space, meters, as `Translation` holds it: `x` east, `y` up (height), `z` north. Pass the real floor height of the thing you mean: the marker floats 1.6 m above `y`, and a `y` a floor too high draws the marker in the air above it. |
+| `label` | The text before the distance, up to 60 characters. Empty: the distance alone. |
+| `seconds` | Lifetime; 0 or less: until disposed. Clamped to 1..3600. |
+| `arrivalDistance` | Meters. A positive value ends the ping (`arrived`) once the player's character is within that straight-line (3D) distance of `position`; 0 never ends it that way. It is never shown. |
+| `showOnMaps` | Also draws a diamond on the world map and the minimap for the ping's lifetime (they do not touch the player's own map marker). |
+
+- The game has no world ping, so this is framework UI drawn each frame over the game camera (`Camera.main`): a gold diamond marker 1.6 m above the target and, while the target is off screen or behind the camera, an arrow on the screen edge pointing the way to turn. It pulses for its first second and fades in and out.
+- **The label** is `<label> · 22 m`: the straight-line (3D) distance from the player's character to the target point (`position` itself, not the marker 1.6 m above it), rounded to whole meters (`<1 m` under a meter, `1.2 km` from 999.5 m). It is the real distance, recomputed every frame, never `arrivalDistance`. The character is found by its `LocalCharacter` tag and re-found in every new world (the next world reuses entity ids, so a character kept from the last one would be some other entity there).
+- **Placement.** The target point plus 1.6 m goes through the camera's viewport projection and is scaled to the window the overlay canvas covers, so the marker sits on its target whatever size the game camera renders at.
 - The marker and arrow are drawn into textures (as the kit's radio circles are), not font glyphs, so no glyph can be missing. `UiLocate` places them: the edge clamp keeps a margin at every resolution and aspect (tested at 1920×1080, 2560×1440, 3840×2160, 3440×1440), and a target behind the camera flips its arrow.
+- The Dev bridge's [`locate`](bridge-ops-ui.md#locate) op places a ping at given coordinates and reads back every ping's last drawn frame (screen position, label, distance, the character position it was measured from, the camera).
 - A ping ends when its time is up (0 or less: until disposed), the entity no longer exists, the client world changes or goes away, the player's character has been missing for 3 s (a kick or a disconnect; a respawn survives), or the plugin unloads. At most 8 at once; a ninth ends the oldest. The `Entity` overload takes a client-world entity.
 - **A target the server names:** `ctx.Hud.TryFindByNetworkId(index, generation, type, out Entity entity, out string reason)` turns the network id words the server sent (`ctx.Inventory.TryGetNetworkId`, [below](#resolving-a-target-on-the-server)) into this client's entity, for `Locate`. One pass over the client's networked entities (`NetworkId`, read with the typed accessor): call it once per reply, not every frame. False with a reason on malformed words, on the server, or when no entity of the client world carries the id (destroyed, or not streamed to this client: a building far away may not be). **Experimental**, built; not verified live.
 
@@ -1924,4 +1936,4 @@ Use `panel.SearchInput(label, initial)` for live suggestions. Its `OnChanged` fi
 
 `Ui.TopPanel(panel)` places a panel near the top of the available area; it is intended for brief preview controls. Verified live with room-preview controls above the scene.
 
-Locate pins can opt into map and minimap display with the five-argument `ctx.Hud.Locate` overload. A positive arrival distance ends the pin based on real-character distance, including elevation. Map markers share the ping lifetime and disappear on dispose, timeout, disconnect or owner unload; they do not overwrite the player's native map marker.
+Locate pins can opt into map and minimap display with the five-argument `ctx.Hud.Locate` overload ([parameters](#locate)). A positive arrival distance ends the pin based on real-character distance, including elevation. Map markers share the ping lifetime and disappear on dispose, timeout, disconnect or owner unload; they do not overwrite the player's native map marker.
