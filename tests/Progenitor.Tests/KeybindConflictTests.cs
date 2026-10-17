@@ -65,28 +65,19 @@ namespace Progenitor.Tests
             Assert.Equal("Key conflict: Progenitor Sample Companion", dialog.Content.Title);
             string d1 = KeybindConflictPrompt.DateText(Now.AddDays(-1));
             string d9 = KeybindConflictPrompt.DateText(Now.AddDays(-9));
-            // KEYS10: which mod, when it was installed, and that its action is off until the player chooses.
-            Assert.Equal("Progenitor Sample Companion (installed " + d1 + ") wants a key that is already taken. "
-                + "Until you choose, this action of Progenitor Sample Companion is off:", dialog.Content.Body);
-            // Per key: who wants it and where, who has it and where, and why that one keeps it.
+            // KEYS10: which mod and when it was installed; per key, whose action is off and who holds the key, and why.
+            Assert.Equal("Progenitor Sample Companion (installed " + d1 + ") wants a taken key.", dialog.Content.Body);
             Assert.Equal(new[]
             {
-                "F8: Companion ping wants it (in gameplay).",
-                "Progenitor Sample has it for Net ping (in gameplay). Progenitor Sample was installed first ("
-                    + d9 + "; Progenitor Sample Companion: " + d1 + ").",
+                "F8: Companion ping (gameplay) is off.",
+                "Held by Progenitor Sample: Net ping (gameplay), installed first (" + d9 + ").",
             }, dialog.Content.Facts.Select(f => f.ToString()));
-            // Each option names its subject, and its second line says exactly what changes.
-            Assert.Equal(new[] { "Pick another key for Companion ping", "Give F8 to Progenitor Sample Companion", "Leave Companion ping unbound" },
+            // Each option names its subject; only Give has a second line.
+            Assert.Equal(new[] { "Pick a new key for Companion ping", "Give F8 to Companion ping", "Leave Companion ping unbound" },
                 dialog.Content.Options);
-            Assert.Equal(new[]
-            {
-                "Opens Mods > Keybinds on Companion ping, waiting for its new key. Progenitor Sample keeps its key.",
-                "Progenitor Sample's Net ping becomes unbound, and Companion ping gets F8.",
-                "Companion ping gets no key; Progenitor Sample keeps its key. You can pick a key any time in Mods > Keybinds.",
-            }, dialog.Content.OptionNotes);
+            Assert.Equal(new[] { "", "Unbinds Progenitor Sample's Net ping.", "" }, dialog.Content.OptionNotes);
             Assert.Equal("Later", dialog.Content.CancelCaption);
-            Assert.Equal("Later (Escape): nothing is saved. Companion ping stays off, and you are asked again at the next start.",
-                dialog.Content.Note);
+            Assert.Equal("Later: nothing is saved; asks again later.", dialog.Content.Note);
             Assert.True(dialog.Content.OptionsAsRows);
             Assert.Equal(UiDialogShape.Choose, dialog.Content.Shape);
 
@@ -126,30 +117,60 @@ namespace Progenitor.Tests
             string d9 = KeybindConflictPrompt.DateText(Now.AddDays(-9));
 
             Assert.Equal("Key conflict: Hunts", content.Title);
-            Assert.Equal("Hunts 1.2.0 (installed " + d1 + ") wants keys that are already taken. Until you choose, these actions of Hunts are off:",
-                content.Body);
+            Assert.Equal("Hunts 1.2.0 (installed " + d1 + ") wants 2 taken keys.", content.Body);
             Assert.Equal(new[]
             {
-                "Mouse Back (the game's Mouse Button 5): Dodge wants it (in gameplay).",
-                "The game has it for Interrupt Ability Cast (in gameplay). The game's own keys always come first.",
-                "F8: Sprint wants it (in gameplay).",
-                "Companion has it for Net ping (in gameplay). Companion was installed first (" + d9 + "; Hunts: " + d1 + ").",
+                "Mouse Back (the game's Mouse Button 5): Dodge (gameplay) is off.",
+                "Held by the game: Interrupt Ability Cast (gameplay), the game's key comes first.",
+                "F8: Sprint (gameplay) is off.",
+                "Held by Companion: Net ping (gameplay), installed first (" + d9 + ").",
             }, content.Facts.Select(f => f.ToString()));
             // Give is offered for the key another mod holds (never for the game's).
-            Assert.Equal(new[] { "Pick other keys for Hunts's actions", "Give F8 to Hunts", "Leave Hunts's 2 actions unbound" }, content.Options);
+            Assert.Equal(new[] { "Pick new keys for Hunts", "Give F8 to Sprint", "Leave Hunts's 2 actions unbound" }, content.Options);
             Assert.Equal(new[] { KeybindConflictPrompt.ChoiceEdit, KeybindConflictPrompt.ChoiceGive, KeybindConflictPrompt.ChoiceLeave }, choices);
-            Assert.Equal(new[]
-            {
-                "Opens Mods > Keybinds on Dodge, waiting for its new key; Hunts's other actions are listed there too. The game and Companion keep their keys.",
-                "Companion's Net ping becomes unbound, and Sprint gets F8.",
-                "Dodge and Sprint get no key; the game and Companion keep their keys. You can pick a key any time in Mods > Keybinds.",
-            }, content.OptionNotes);
-            Assert.Equal("Later (Escape): nothing is saved. Dodge and Sprint stay off, and you are asked again at the next start.", content.Note);
+            Assert.Equal(new[] { "", "Unbinds Companion's Net ping.", "" }, content.OptionNotes);
+            Assert.Equal("Later: nothing is saved; asks again later.", content.Note);
 
-            // Where each key works, in words.
-            Assert.Equal("in menus", KeybindConflictPrompt.WhereOf(new KeybindClaim(KeybindSource.Progenitor, "x", "y", "Y", F8, scope: KeybindScope.Menu)));
-            Assert.Equal("on the map", KeybindConflictPrompt.WhereOf(new KeybindClaim(KeybindSource.Progenitor, "x", "y", "Y", F8, scope: KeybindScope.Map)));
+            // Two givable keys: one caption naming both, to the mod.
+            var g = new KeybindClaim(KeybindSource.Progenitor, "hunts", "Grab", "Grab", new KeyChord(UiKey.G));
+            var gHolder = new KeybindClaim(KeybindSource.Progenitor, "companion", "Greet", "Greet", new KeyChord(UiKey.G));
+            var two = new KeybindConflictCase("hunts", new[]
+            {
+                new KeybindConflictClash(sprint, ping, new[] { ping }),
+                new KeybindConflictClash(g, gHolder, new[] { gHolder }),
+            });
+            var twoContent = KeybindConflictPrompt.ContentFor(two, out _);
+            Assert.Contains("Give F8 and G to Hunts", twoContent.Options);
+            Assert.Contains("Unbinds Companion's Net ping and Companion's Greet.", twoContent.OptionNotes);
+
+            // Where each key works, in a word or two.
+            Assert.Equal("menus", KeybindConflictPrompt.WhereOf(new KeybindClaim(KeybindSource.Progenitor, "x", "y", "Y", F8, scope: KeybindScope.Menu)));
+            Assert.Equal("map", KeybindConflictPrompt.WhereOf(new KeybindClaim(KeybindSource.Progenitor, "x", "y", "Y", F8, scope: KeybindScope.Map)));
             Assert.Equal("while building", KeybindConflictPrompt.WhereOf(new KeybindClaim(KeybindSource.Game, "game", "Place", "Place", F8, mode: "while building")));
+            Assert.Equal("menus", KeybindConflictPrompt.WhereOf(new KeybindClaim(KeybindSource.Game, "game", "Back", "Back", F8, mode: GameKeybindCatalog.InMenus)));
+        }
+
+        [Fact]
+        public void The_why_phrase_covers_an_unknown_install_date_and_the_mod_id_tiebreak()
+        {
+            KeybindArbiter.NameOf = id => id == "a.mod" ? "Alpha" : id == "b.mod" ? "Beta" : id;
+            var holder = new KeybindClaim(KeybindSource.Progenitor, "a.mod", "One", "One", F8);
+            var loser = new KeybindClaim(KeybindSource.Progenitor, "b.mod", "Two", "Two", F8);
+            var clash = new KeybindConflictClash(loser, holder, new[] { holder });
+
+            // Alpha's install date is known, Beta's is not.
+            KeybindArbiter.InstallTimeOf = id => id == "a.mod" ? Ledger(3) : ModInstallTime.Unknown;
+            Assert.Equal("Held by Alpha: One (gameplay), counts as first: Beta's install date is unknown.", KeybindConflictPrompt.HolderLine(clash));
+
+            // Neither is known (or both are the same): the mod id decides.
+            KeybindArbiter.InstallTimeOf = _ => ModInstallTime.Unknown;
+            Assert.Equal("Held by Alpha: One (gameplay), same install date; decided by mod id.", KeybindConflictPrompt.HolderLine(clash));
+            KeybindArbiter.InstallTimeOf = _ => Ledger(3);
+            Assert.Equal("Held by Alpha: One (gameplay), same install date; decided by mod id.", KeybindConflictPrompt.HolderLine(clash));
+
+            // Progenitor's own key.
+            var core = new KeybindClaim(KeybindSource.Progenitor, SettingsPanel.PluginId, "Open", "Open Mods menu", F8);
+            Assert.EndsWith("Progenitor's key comes first.", KeybindConflictPrompt.HolderLine(new KeybindConflictClash(loser, core, new[] { core })));
         }
 
         [Fact]
@@ -279,12 +300,10 @@ namespace Progenitor.Tests
             RegisterCompanion(File("companion"));
             _keys.Frame();
             var dialog = Shown();
-            Assert.Equal("Progenitor Sample Companion wants a key that is already taken. Until you choose, this action of Progenitor Sample Companion is off:",
-                dialog.Content.Body);
-            Assert.Equal("The game has it for Interact (in gameplay). The game's own keys always come first.", dialog.Content.Facts[1].Value);
-            Assert.Equal(new[] { "Pick another key for Companion ping", "Leave Companion ping unbound" }, dialog.Content.Options);
-            Assert.EndsWith("waiting for its new key. The game keeps its key.", dialog.Content.OptionNotes[0]);
-            Assert.StartsWith("Companion ping gets no key; the game keeps its key.", dialog.Content.OptionNotes[1]);
+            Assert.Equal("Progenitor Sample Companion wants a taken key.", dialog.Content.Body);
+            Assert.Equal("Held by the game: Interact (gameplay), the game's key comes first.", dialog.Content.Facts[1].Value);
+            Assert.Equal(new[] { "Pick a new key for Companion ping", "Leave Companion ping unbound" }, dialog.Content.Options);
+            Assert.Empty(dialog.Content.OptionNotes);
             Assert.Throws<ArgumentException>(() => ModsMenu.KeysOp("conflict-choose", "give", null));
             Assert.NotNull(UiDialog.Current);
         }
@@ -302,13 +321,11 @@ namespace Progenitor.Tests
             _keys.Frame();
             var dialog = Shown();
             Assert.Equal("Key conflict: Progenitor Sample", dialog.Content.Title);
-            Assert.Equal(SampleId, dialog.Key);
-            Assert.Contains("Give F8 to Progenitor Sample", dialog.Content.Options);
+            Assert.Contains("Give F8 to Net ping", dialog.Content.Options);
             // KEYS10: the newcomer set it off, and the first-installed rule is why it keeps the key.
-            Assert.Equal("Progenitor Sample Companion just loaded and comes before Progenitor Sample for a key. "
-                + "Until you choose, this action of Progenitor Sample is off:", dialog.Content.Body);
-            Assert.StartsWith("Progenitor Sample Companion has it for Companion ping (in gameplay). Progenitor Sample Companion was installed first (",
-                dialog.Content.Facts[1].Value);
+            Assert.Equal("Progenitor Sample Companion just loaded and had F8 first.", dialog.Content.Body);
+            Assert.Equal("Held by Progenitor Sample Companion: Companion ping (gameplay), installed first ("
+                + KeybindConflictPrompt.DateText(Now.AddDays(-9)) + ").", dialog.Content.Facts[1].Value);
             var read = (Dictionary<string, object?>)((Dictionary<string, object?>)ModsMenu.KeysOp("conflict", null, null))["dialog"]!;
             Assert.Equal(CompanionId, read["trigger"]);
         }

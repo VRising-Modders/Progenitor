@@ -1375,9 +1375,9 @@ public static class Keybinds
     /// <summary>HUB2: why a window key (<see cref="KeybindScope.Window"/>) did not fire.</summary>
     internal const string WindowClosedReason = "suppressed: works only in menus, or while a window with tabs holds the input";
 
-    /// <summary>HUB2: why a window key did not fire outside menus: a mod's gameplay key has its chord.</summary>
+    /// <summary>HUB2: why a window key did not fire: another mod's key on its chord acts on this press.</summary>
     internal static string WindowYieldReason(KeybindClaim holder) =>
-        "suppressed: outside menus " + KeybindArbiter.DisplayNameOf(holder.OwnerId) + "'s " + holder.DisplayName + " has this key";
+        "suppressed: " + KeybindArbiter.DisplayNameOf(holder.OwnerId) + "'s " + holder.DisplayName + " has this key and acts";
 
     internal const string PhotoInactiveReason = "suppressed: works only in photo mode";
 
@@ -1465,10 +1465,11 @@ public static class Keybinds
     internal static KeybindScope ScopeOf(IKeybindInfo? bind) => bind is Registration r ? r.Scope : KeybindScope.Gameplay;
 
     /// <summary>
-    /// The winner rule for a press, plus HUB2's rule for a window key (<see cref="KeybindScope.Window"/>): outside menus it
-    /// acts only while its window holds the input (<see cref="WindowScopeOpen"/>), and it gives way to a mod's gameplay key
-    /// on its chord (<see cref="KeybindArbiter.InPlayHolder"/>), so a press is handled once. The game's own actions are
-    /// blocked then (<c>GameInputBlocker</c> applies <c>BlockAllKeys</c> for a full mask), so they never meet it.
+    /// The winner rule for a press, plus HUB2's rule for a window key (<see cref="KeybindScope.Window"/>): it gives way to
+    /// another mod's key on its chord whenever that key can act now (<see cref="SharerActingNow"/>), in menus and in play
+    /// alike, so one press never fires both, and never neither. Outside menus it acts only while its window holds the input
+    /// (<see cref="WindowScopeOpen"/>); the game's own actions are blocked then (<c>GameInputBlocker</c> applies
+    /// <c>BlockAllKeys</c> for a full mask), so they never meet it.
     /// </summary>
     private static string? GateNow(Registration reg)
     {
@@ -1476,9 +1477,35 @@ public static class Keybinds
         if (blocked != null || reg.Scope != KeybindScope.Window) return blocked;
         try
         {
-            if (!MenuScopeOpen() && KeybindArbiter.InPlayHolder(reg.PluginId, reg.Id) is { } holder) return WindowYieldReason(holder);
+            if (SharerActingNow(reg) is { } holder) return WindowYieldReason(holder);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: window key check threw: " + e.Message); }
+        return null;
+    }
+
+    /// <summary>
+    /// HUB2: the other mod's key on window key <paramref name="reg"/>'s chord that acts on this press, or null. An ordinary
+    /// mod's key setting always counts (that mod reads the key itself, Progenitor cannot tell when). A Progenitor bind counts
+    /// when it is live, active (not beaten by the game or a mod installed first), its scope is open now, and it may run while
+    /// a panel holds the input when one does: the same gates the pump applies to it.
+    /// </summary>
+    private static KeybindClaim? SharerActingNow(Registration reg)
+    {
+        var sharers = KeybindArbiter.SharersOf(reg.PluginId, reg.Id);
+        if (sharers.Count == 0) return null;
+        bool captured = UiInputCapture.IsFullyBlocking;
+        foreach (var s in sharers)
+        {
+            if (s.Source == KeybindSource.Cfg) return s;
+            if (s.Source != KeybindSource.Progenitor) continue;
+            var other = FindLive(s.OwnerId, s.ActionId);
+            if (other == null || other.Disposed || other.Chord != reg.Chord) continue;
+            if (captured && !other.AllowWhileCaptured) continue;
+            if (!ScopeOpen(other.Scope)) continue;
+            if (SafeWinnerGate(other) != null) continue;
+            return s;
+        }
+
         return null;
     }
 

@@ -139,32 +139,24 @@ namespace Progenitor.Tests
             Assert.False(back.InConflict);
             Assert.Equal(0, picture.ConflictCount);
             Assert.Null(UiDialog.Current);
-            Assert.Equal("a.mod", KeybindArbiter.InPlayHolder(SettingsPanel.PluginId, ModsMenu.NavigateBackId)!.OwnerId);
+            Assert.Equal("a.mod", Assert.Single(KeybindArbiter.SharersOf(SettingsPanel.PluginId, ModsMenu.NavigateBackId)).OwnerId);
 
             OpenKeybindsTab();
             var row = Pane().Model!.ModRows().Single(r => r.Claim.OwnerId == SettingsPanel.PluginId && r.Claim.ActionId == ModsMenu.NavigateBackId);
             var described = KeybindsTabLayout.Describe(row, "selected");
             Assert.Equal("", described.Warning);
-            Assert.Contains("Outside menus, a.mod's Dodge also uses Mouse Back, so there that key acts instead of this one.", described.Info);
+            Assert.Contains("a.mod's Dodge also uses Mouse Back; whenever it can act, it does and this key doesn't.", described.Info);
             ModsMenu.Close();
 
-            var window = UiApi.Panel("Hub", _owner, "example.hub");
+            var window = HubWindow(out var tabs);
             try
             {
-                window.GameWindow();
-                var tabs = window.Tabs("hub", new[] { "A", "B" }, new UiTabsOptions());
-                window.Show();
-                tabs.Selected = 1;
-                UiTabHistoryRoute.UnderPointer = p => ReferenceEquals(p, window);
-                // Even while the window holds the input, the press outside menus is the mod's: it fires and the window does not move.
+                // The window holds the input and Dodge may run under capture: the press is Dodge's alone.
                 Keybinds.WindowHoldsInput = () => true;
-                _keys.Frame();
-                _keys.Down(MouseBack);
-                _keys.Frame();
-                _keys.Up(UiKey.MouseBack);
+                PressMouseBack();
                 Assert.Equal(1, fired);
                 Assert.Equal(1, tabs.Selected);
-                Assert.StartsWith("not-active: suppressed: outside menus a.mod's Dodge has this key",
+                Assert.StartsWith("not-active: suppressed: a.mod's Dodge has this key and acts",
                     Keybinds.SimulatePress(SettingsPanel.PluginId, ModsMenu.NavigateBackId).Single().Reason);
             }
             finally
@@ -174,28 +166,146 @@ namespace Progenitor.Tests
             }
         }
 
-        [Fact]
-        public void A_mods_menu_key_on_the_same_button_is_a_real_clash_and_Progenitor_keeps_it()
+        /// <summary>A shown game window with tabs A and B, B selected, holding the input, under the pointer.</summary>
+        private IUiPanel HubWindow(out IUiTabs tabs)
         {
-            NavKeys();
-            Keybinds.RegisterScoped(_owner, "a.mod", "MenuBack", File("a"), MouseBack, "", () => { }, null, null,
-                allowWhileCaptured: true, allowWhenChatUnknown: false, KeybindScope.Menu);
-            var picture = KeybindArbiter.Current();
-            Assert.True(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateBackId)!.Active);
-            var lost = picture.FindProgenitor("a.mod", "MenuBack")!;
-            Assert.False(lost.Active);
-            Assert.Equal(KeybindArbiter.RuleFramework, lost.Rule);
+            var window = UiApi.Panel("Hub", _owner, "example.hub");
+            window.GameWindow();
+            window.CaptureMode = UiCaptureMode.WhileShown;
+            tabs = window.Tabs("hub", new[] { "A", "B" }, new UiTabsOptions());
+            window.Show();
+            tabs.Selected = 1;
+            UiTabHistoryRoute.UnderPointer = p => ReferenceEquals(p, window);
+            return window;
+        }
+
+        private void PressMouseBack()
+        {
+            _keys.Frame();
+            _keys.Down(MouseBack);
+            _keys.Frame();
+            _keys.Up(UiKey.MouseBack);
+            _keys.Frame();
         }
 
         [Fact]
-        public void A_window_scope_clashes_as_a_menu_scope()
+        public void A_mod_key_that_cannot_act_under_capture_leaves_the_press_to_the_window_key()
+        {
+            NavKeys();
+            int fired = 0;
+            // The default: a gameplay key does not run while a panel holds the input.
+            Keybinds.Register(_owner, "a.mod", "Dodge", File("a"), MouseBack, "Dodge.", () => fired++);
+            var window = HubWindow(out var tabs);
+            try
+            {
+                Keybinds.WindowHoldsInput = () => true;
+                Assert.True(UiInputCapture.IsFullyBlocking);
+                PressMouseBack();
+                // Exactly one of the two acts: the window steps, Dodge (suppressed by the capture) does not.
+                Assert.Equal(0, fired);
+                Assert.Equal(0, tabs.Selected);
+            }
+            finally
+            {
+                window.Dispose();
+                UiTabHistoryRoute.ResetForTests();
+            }
+        }
+
+        [Fact]
+        public void A_mod_key_that_lost_to_the_game_leaves_the_press_to_the_window_key()
+        {
+            UseGame(InterruptCast());
+            NavKeys();
+            int fired = 0;
+            Keybinds.Register(_owner, "a.mod", "Dodge", File("a"), MouseBack, "Dodge.", () => fired++, allowWhileCaptured: true);
+            Assert.False(KeybindArbiter.Current().FindProgenitor("a.mod", "Dodge")!.Active);
+            Assert.Empty(KeybindArbiter.SharersOf(SettingsPanel.PluginId, ModsMenu.NavigateBackId));
+            var window = HubWindow(out var tabs);
+            try
+            {
+                Keybinds.WindowHoldsInput = () => true;
+                PressMouseBack();
+                Assert.Equal(0, fired);
+                Assert.Equal(0, tabs.Selected);
+            }
+            finally
+            {
+                window.Dispose();
+                UiTabHistoryRoute.ResetForTests();
+            }
+        }
+
+        [Fact]
+        public void A_mods_menu_or_map_key_on_a_navigation_chord_keeps_it_with_no_dialog_and_wins_the_press()
+        {
+            KeybindConflictPrompt.ScreenReady = () => true;
+            NavKeys();
+            int menuFired = 0, mapFired = 0;
+            Keybinds.RegisterScoped(_owner, "a.mod", "MenuBack", File("a"), MouseBack, "", () => menuFired++, null, null,
+                allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Menu);
+            Keybinds.RegisterScoped(_owner, "b.mod", "MapLeft", File("b"), new KeyChord(UiKey.LeftArrow, KeyModifiers.Alt), "", () => mapFired++,
+                null, null, allowWhileCaptured: true, allowWhenChatUnknown: true, KeybindScope.Map);
+            _keys.Frame();
+            var picture = KeybindArbiter.Current();
+            Assert.True(picture.FindProgenitor("a.mod", "MenuBack")!.Active);
+            Assert.False(picture.FindProgenitor("a.mod", "MenuBack")!.InConflict);
+            Assert.True(picture.FindProgenitor("b.mod", "MapLeft")!.Active);
+            Assert.True(picture.FindProgenitor(SettingsPanel.PluginId, ModsMenu.NavigateBackKeysId)!.Active);
+            Assert.Equal(0, picture.ConflictCount);
+            Assert.Empty(KeybindConflictPrompt.Find(picture, null));
+            Assert.Null(UiDialog.Current);
+
+            // In a menu (the map is a tab of the game's full-screen menu) each press is the mod's alone.
+            Keybinds.MenuScopeOpen = () => true;
+            Keybinds.MapScopeOpen = () => true;
+            RegisterMod("c.mod", "Gamma");
+            using var menu = ModsMenu.Register(_owner, "c.mod", "Gamma", "A mod.");
+            ModsMenu.Open();
+            ModsMenu.OpenMod("c.mod");
+            int index = (int)ModsMenu.NavState()["index"]!;
+            PressMouseBack();
+            Assert.Equal(1, menuFired);
+            Assert.Equal(index, ModsMenu.NavState()["index"]);
+            _keys.Down(new KeyChord(UiKey.LeftArrow, KeyModifiers.Alt));
+            _keys.Frame();
+            _keys.Up(UiKey.LeftArrow);
+            Assert.Equal(1, mapFired);
+            Assert.Equal(index, ModsMenu.NavState()["index"]);
+        }
+
+        [Fact]
+        public void In_the_games_full_screen_menu_a_mods_gameplay_key_and_Navigate_back_never_both_fire()
+        {
+            NavKeys();
+            int fired = 0;
+            Keybinds.Register(_owner, "a.mod", "Dodge", File("a"), MouseBack, "Dodge.", () => fired++);
+            // The game's full-screen menu (inventory, Spellbook): a menu the history covers, and no Progenitor capture.
+            Keybinds.MenuScopeOpen = () => true;
+            Assert.False(UiInputCapture.IsFullyBlocking);
+            PressMouseBack();
+            Assert.Equal(1, fired);
+            Assert.StartsWith("not-active: suppressed: a.mod's Dodge has this key and acts",
+                Keybinds.SimulatePress(SettingsPanel.PluginId, ModsMenu.NavigateBackId).Single().Reason);
+
+            // With no menu and no window holding the input Navigate does not act at all.
+            Keybinds.MenuScopeOpen = () => false;
+            Keybinds.WindowHoldsInput = () => false;
+            Assert.Equal(Keybinds.WindowClosedReason, Keybinds.SimulatePress(SettingsPanel.PluginId, ModsMenu.NavigateBackId).Single().Reason);
+        }
+
+        [Fact]
+        public void A_window_scope_meets_no_other_mod_scope_and_meets_the_games_keys_as_a_menu_key()
         {
             Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Gameplay)));
-            Assert.True(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Menu), Mod(KeybindScope.Window)));
-            Assert.True(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Map)));
+            Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Menu), Mod(KeybindScope.Window)));
+            Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Map)));
             Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Photo)));
             Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Window), Mod(KeybindScope.Chat)));
             Assert.False(KeybindArbiter.ScopesMeet(Mod(KeybindScope.Menu), Mod(KeybindScope.Gameplay)));
+            Assert.False(KeybindArbiter.ScopesMeet(AutoRun(), KeybindScope.Window));
+            var back = GameKeybindCatalog.Claim(GameKeybindCatalog.OtherKeys.Single(e => e.Action == "Back"), "Back", 0, null, "<Keyboard>/f6", "");
+            Assert.True(KeybindArbiter.ScopesMeet(back, KeybindScope.Window));
             Assert.Equal(MouseChords.MenuClickReason, MouseChords.Refusal(new KeyChord(UiKey.MouseLeft, KeyModifiers.Ctrl), KeybindScope.Window));
         }
 
@@ -338,6 +448,14 @@ namespace Progenitor.Tests
             Assert.Equal(1, ModsMenu.DropRetiredNavigationKeys(file));
             Assert.False(file.ContainsKey(new ConfigDefinition(Keybinds.Section, "WindowTabBackMouse")));
             Assert.DoesNotContain("WindowTabBackMouse", System.IO.File.ReadAllText(file.ConfigFilePath));
+
+            // BepInEx's Remove throwing: the row is dropped from Entries anyway before the save.
+            var stubborn = File("core-stubborn");
+            stubborn.Bind(Keybinds.Section, "WindowTabForwardMouse", "F7");
+            stubborn.RemoveThrows = true;
+            Assert.Equal(1, ModsMenu.DropRetiredNavigationKeys(stubborn));
+            Assert.False(stubborn.ContainsKey(new ConfigDefinition(Keybinds.Section, "WindowTabForwardMouse")));
+            Assert.DoesNotContain("WindowTabForwardMouse", System.IO.File.ReadAllText(stubborn.ConfigFilePath));
         }
     }
 }

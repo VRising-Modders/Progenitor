@@ -150,15 +150,21 @@ public static partial class ModsMenu
             {
                 var definition = new ConfigDefinition(Keybinds.Section, id);
                 bool had = false;
-                try
+                bool live = false;
+                try { live = file.ContainsKey(definition); }
+                catch { live = false; }
+                if (live)
                 {
-                    if (file.ContainsKey(definition))
-                    {
-                        file.Remove(definition);
-                        had = true;
-                    }
+                    had = true;
+                    try { file.Remove(definition); }
+                    catch (Exception e) { Plugin.Logger?.LogWarning("Ui: removing retired key " + id + " threw: " + e.Message); }
+                    // BepInEx's Remove can throw or leave the row; drop it from Entries then, so the Save below cannot
+                    // write it back.
+                    if (Progenitor.Config.ConfigHelper.EntryStillLive(file, definition))
+                        Progenitor.Config.ConfigHelper.TryDropLiveEntry(file, definition);
+                    if (Progenitor.Config.ConfigHelper.EntryStillLive(file, definition))
+                        Plugin.Logger?.LogWarning("Ui: retired key " + id + " could not be dropped; it stays in the file, unused.");
                 }
-                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dropping retired key " + id + " threw: " + e.Message); }
 
                 try
                 {

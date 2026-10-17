@@ -34,7 +34,7 @@ namespace Progenitor.Tests
             var dialog = Shown();
             Assert.Equal("Key conflict: Progenitor Sample Companion", dialog.Content.Title);
             Assert.StartsWith("Progenitor Sample Companion (installed ", dialog.Content.Body);
-            Assert.StartsWith("Progenitor Sample has it for Net ping (in gameplay).", dialog.Content.Facts[1].Value);
+            Assert.StartsWith("Held by Progenitor Sample: Net ping (gameplay), installed first (", dialog.Content.Facts[1].Value);
             Assert.DoesNotContain(SampleId, dialog.Content.Title + dialog.Content.Body + string.Join("|", dialog.Content.Facts)
                 + string.Join("|", dialog.Content.Options) + string.Join("|", dialog.Content.OptionNotes) + dialog.Content.Note);
         }

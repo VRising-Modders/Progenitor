@@ -1182,8 +1182,8 @@ internal static class KeybindsTabLayout
         else if (row.Claim.Scope == KeybindScope.Window)
         {
             info.Add(WindowScopeNote);
-            // HUB2: a mod's gameplay key on the same key is not a clash; a quiet note says which acts outside menus.
-            string yields = KeybindArbiter.InPlayYieldNote(KeybindArbiter.InPlayHolder(row.Claim.OwnerId, row.Claim.ActionId));
+            // HUB2: a mod's key on the same key is not a clash (the mod's key keeps it); a quiet note says so.
+            string yields = KeybindArbiter.WindowShareNote(KeybindArbiter.SharersOf(row.Claim.OwnerId, row.Claim.ActionId));
             if (yields.Length > 0) info.Add(yields);
         }
         if (row.Claim.Source == KeybindSource.Cfg)
@@ -1205,7 +1205,7 @@ internal static class KeybindsTabLayout
     internal const string MenuScopeNote = "Works only while the Mods menu is open, so it never clashes with a gameplay key.";
 
     /// <summary>HUB2: the note on a window key (Navigate back and forward, and their Alt+arrow keys).</summary>
-    internal const string WindowScopeNote = "Works in menus, and in play on a window with tabs while that window holds the input. The game's own actions are blocked then, so it never clashes with a gameplay key.";
+    internal const string WindowScopeNote = "Works in menus, and in play on a window with tabs while that window holds the input, when the game's actions are blocked. A mod's key on the same key always comes first.";
 
     internal const string PhotoScopeNote = "Works only in photo mode, which holds your character, so it never clashes with a gameplay key.";
 

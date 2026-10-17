@@ -123,7 +123,7 @@ namespace Progenitor.Tests
             _keys.Frame();
 
             var dialog = Shown();
-            Assert.Equal("Progenitor has it for Open Mods menu (in gameplay). Progenitor's own keys come right after the game's.",
+            Assert.Equal("Held by Progenitor: Open Mods menu (gameplay), Progenitor's key comes first.",
                 dialog.Content.Facts[1].Value);
             Assert.DoesNotContain(dialog.Content.Options, o => o.StartsWith("Give", StringComparison.Ordinal));
             Assert.DoesNotContain(_log.Infos.Concat(_log.Warnings), l => l.Contains("used by " + SettingsPanel.PluginId));
