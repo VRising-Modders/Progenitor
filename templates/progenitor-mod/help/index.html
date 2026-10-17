@@ -112,6 +112,10 @@ a:hover { color: #dfe7f7; }
 .r-snip { display: block; font-size: 13px; color: var(--muted); }
 .results mark { background: rgba(200, 50, 60, 0.35); color: var(--text); }
 .r-none { padding: 10px 14px; color: var(--muted); font-size: 14px; }
+.r-div { margin: 6px 0 2px; padding: 8px 14px 2px; border-top: 1px solid var(--rule-soft); }
+.pathnote { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 16px; padding: 8px 12px; border: 1px solid var(--rule-soft); background: rgba(0, 0, 0, 0.28); font-size: 14px; color: var(--muted); }
+.pathnote b { color: var(--text); }
+.pathnote .btn { padding: 6px 10px; font-size: 13px; }
 
 /* Sidebar */
 .toc {
@@ -482,11 +486,19 @@ window.HELP = {
   // ---- Navigation ----
   var current = null, card = $("card"), prevBtn = $("prevBtn"), nextBtn = $("nextBtn");
   function setRole(r) { role = r; store(":role", r); }
+  // Opening another path's page (a search result, a link) moves the reader onto that path, so Previous and Next
+  // stay on the path of the page shown. The page then says so once, with a way back.
   function show(page) {
     if (!page) page = pages[0];
-    if (hasRoles && page.chapter.role && page.chapter.role !== role) setRole(page.chapter.role);
+    var from = null, fromPage = current;
+    if (hasRoles && page.chapter.role && page.chapter.role !== role) { from = role; setRole(page.chapter.role); }
     current = page;
     card.innerHTML = renderPage(page);
+    if (from && roleById[from] && fromPage) {
+      card.insertAdjacentHTML("afterbegin", '<p class="pathnote"><span>You are now on the <b>' + esc(roleById[role].title) + "</b> path.</span>" +
+        '<button class="btn" type="button" id="pathBack" data-role="' + esc(from) + '" data-page="' + esc(fromPage.key) + '">Back to ' + esc(roleById[from].title) + "</button></p>");
+      $("pathBack").addEventListener("click", function () { setRole(this.dataset.role); go(this.dataset.page); });
+    }
     wireCard();
     var ch = page.chapter, list = path(), i = list.indexOf(page);
     document.title = page.title + " · " + (H.title || "Help");
@@ -622,13 +634,19 @@ window.HELP = {
       var t = row.page.title.toLowerCase(), x = row.text.toLowerCase(), s = 0;
       for (var i = 0; i < words.length; i++) { if (t.indexOf(words[i]) > -1) s += 10; else if (x.indexOf(words[i]) > -1) s += 1; else return null; }
       return { row: row, s: s };
-    }).filter(Boolean).sort(function (a, b) { return b.s - a.s; }).slice(0, 12);
-    results.innerHTML = hits.length ? hits.map(function (h, i) {
+    }).filter(Boolean).sort(function (a, b) { return b.s - a.s; });
+    // With a path chosen, its pages and the shared chapters come first; other paths' pages follow under a divider.
+    function own(h) { var r = h.row.page.chapter.role; return !hasRoles || !role || !r || r === role; }
+    var mine = hits.filter(own).slice(0, 10), other = hits.filter(function (h) { return !own(h); }).slice(0, 6), n = 0;
+    function item(h) {
       var p = h.row.page, x = h.row.text.toLowerCase().indexOf(words[0]);
       var snip = x > -1 ? h.row.text.slice(Math.max(0, x - 40), x + 90) : h.row.text.slice(0, 120);
-      var where = (p.chapter.role && roleById[p.chapter.role] ? roleById[p.chapter.role].title + " · " : "") + p.chapter.title;
-      return '<li><a role="option" id="res-' + i + '" href="#' + p.key + '"><span class="r-title">' + mark(p.title, words[0]) + '</span><span class="r-where">' + esc(where) + '</span><span class="r-snip">' + (x > 40 ? "…" : "") + mark(snip, words[0]) + "…</span></a></li>";
-    }).join("") : '<li class="r-none">Nothing matches.</li>';
+      var r = p.chapter.role, where = (r && roleById[r] && r !== role ? roleById[r].title + " · " : "") + p.chapter.title;
+      return '<li><a role="option" id="res-' + (n++) + '" href="#' + p.key + '"><span class="r-title">' + mark(p.title, words[0]) + '</span><span class="r-where">' + esc(where) + '</span><span class="r-snip">' + (x > 40 ? "…" : "") + mark(snip, words[0]) + "…</span></a></li>";
+    }
+    results.innerHTML = mine.length || other.length
+      ? mine.map(item).join("") + (other.length ? '<li class="r-div label" role="presentation">Other roles</li>' + other.map(item).join("") : "")
+      : '<li class="r-none">Nothing matches.</li>';
     results.hidden = false; active = -1; search.setAttribute("aria-expanded", "true");
   }
   function move(d) {

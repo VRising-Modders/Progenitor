@@ -3,9 +3,9 @@
 ## 1. Collect your logs
 
 - **In game or at the title screen:** **Mods** → **Progenitor** → **Get help** → **Collect logs**.
-- **At the title screen:** the zip icon at the end of the bottom-left icon row ("Collect logs for a help post"). Use this when the game crashes on join.
+- **If the game crashes when you join:** the zip icon at the bottom left of the title screen.
 
-Progenitor saves `vrising-mod-logs-client-<date>-<time>.zip` on your Desktop. If the game crashed, start it again first: the logs of the last three sessions are kept.
+A zip lands on your Desktop. If the game crashed, start it again first; the logs of the last three sessions are kept.
 
 **Privacy.** SteamIDs, IP addresses, computer and user names and known player names are removed. Names typed in chat or written by other mods may remain. Look through the zip before you share it with anyone, an AI assistant included.
 

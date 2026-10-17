@@ -24,31 +24,30 @@ For mod authors:
 
 ## Install (players)
 
-Progenitor is one Thunderstore package, tagged **Client + Server**, published as **`VRising_Modders-Progenitor`** once the first release is out. Until then there is nothing to download.
-
-1. Install a Thunderstore mod manager such as [r2modman](https://thunderstore.io/c/v-rising/) or the Thunderstore App, and pick the **V Rising** community.
-2. Install **Progenitor**. The mod manager also installs its dependency, **BepInExPack_V_Rising**.
-3. Install the same profile for the game client and for a dedicated server. There is no separate server package.
-
-**Manual install (one copy).** [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/) must already be installed; Progenitor never ships or replaces BepInEx files.
+You need [BepInExPack_V_Rising](https://thunderstore.io/c/v-rising/p/BepInEx/BepInExPack_V_Rising/) first. Progenitor never ships or changes BepInEx's files.
 
 1. Quit the game (or stop the server).
-2. Download `Progenitor-<version>.zip` from the GitHub release.
-3. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the folder that holds `VRisingServer.exe`). Allow it to replace files when you update.
+2. Download `Progenitor-<version>.zip` from the [release page](https://github.com/VRising-Modders/Progenitor/releases). There is nothing to download until the first release is out.
+3. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the one that holds `VRisingServer.exe`). Let it replace files when you update.
+4. Start the game. **Mods** appears on the title screen: install and update other mods there, change their settings and remap their keys.
 
-The zip holds a single `BepInEx` folder, so the extract adds `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and `BepInEx/progenitor-core/` (Core, its address tables and the help guide) in one step, at the same paths as the Thunderstore package. It contains no other mod's files and no BepInEx files or settings. To remove Progenitor, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed. The menu removal leaves `BepInEx/patchers/Progenitor.Preloader.dll`; on its own it needs no other Progenitor file: it keeps copies of the session logs and carries out any Mods-menu plugin request still pending, and you can delete it while the game is closed. **Never put `Progenitor.Dev.dll` on a public server**: it is the development bridge, and release packages do not include it.
+The same zip works for the game and for a dedicated server. It adds three things: `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and the `BepInEx/progenitor-core/` folder. Progenitor will also be published on Thunderstore as **`VRising_Modders-Progenitor`**.
+
+To remove it, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed. The menu removal leaves the small preloader in `BepInEx/patchers`; you can delete it while the game is closed.
+
+**Never put `Progenitor.Dev.dll` on a public server.** It is the development bridge, and release packages don't include it.
 
 ### Reporting a problem
 
-1. If the game crashed, start it again. Progenitor's preloader keeps the logs of the last three sessions, so the crashed session's log is still there.
-2. Open **Mods** (title screen or Escape menu) → **Progenitor** → **Get help** → **Collect logs**, or click the zip icon in the title screen's bottom-left icon row. Progenitor saves one `vrising-mod-logs-client-<date>-<time>.zip` on your Desktop and selects it in a file window.
-3. [Open a bug report](../../issues/new?template=bug-report.yml) and attach the zip, or post it in the **#technical-support** forum of the [V Rising Mod Community Discord](https://vrisingmods.com/discord).
+1. If the game crashed, start it again. The logs of the last three sessions are kept.
+2. Open **Mods** → **Progenitor** → **Get help** → **Collect logs**, or click the zip icon at the bottom left of the title screen. A zip lands on your Desktop.
+3. [Open a bug report](../../issues/new?template=bug-report.yml) with the zip, or post it in the [Progenitor channel](https://discord.com/channels/978094827830915092/1112888087836631090) on the V Rising Mod Community Discord ([join it](https://vrisingmods.com/discord) first). [SUPPORT.md](SUPPORT.md) has a ready-made prompt for asking an AI assistant.
 
-The bundle holds BepInEx's log, the game's `Player.log`, a list of your mods and a few Progenitor settings files, plus the logs of a private game you host. SteamIDs, IP addresses, host names, Windows user and computer names, passwords and tokens are replaced before zipping, and player names Progenitor knows become `[player-1]` and so on. Names typed in chat or written by other mods' logs may remain, so look through the zip before posting it publicly. An admin of the server you are on can include that server's logs too; server admins can also type `.progenitor logs` in chat ([commands](docs/commands.md#progenitor-logs-server-logs)).
+The zip holds BepInEx's log, the game's `Player.log`, your mod list and a few Progenitor settings, plus the logs of a private game you host. SteamIDs, IP addresses, computer and user names, passwords and tokens are removed, and the player names Progenitor knows are replaced. Names typed in chat or written by other mods may remain, so look through the zip before you post it. Server admins can type `.progenitor logs` in chat to collect the server's logs ([commands](docs/commands.md#progenitor-logs-server-logs)).
 
 ### Note for server operators
 
-A world save records a mod's prefab GUID like a vanilla one, so a save written while a content mod was loaded normally cannot be loaded once that mod is removed, and the next autosave overwrites the good save. Progenitor's Bootstrap guards against that: on load it drops root entities whose prefab the current game cannot resolve, within a cap (`SaveSafety.MaxDropEntities` 5000, `MaxDropPercent` 0.5) that falls back to the vanilla failure rather than deleting a world. The switches are under `[SaveSafety]` in `BepInEx/config/progenitor.cfg`; `FailLoadInstead` restores the vanilla behavior.
+A world saved with a content mod normally won't load once that mod is removed, and the next autosave then overwrites the good save. Progenitor guards against this: on load it drops what the missing mod left behind, within limits (`SaveSafety.MaxDropEntities` 5000, `MaxDropPercent` 0.5). Past those limits the load fails as it would without Progenitor, so a world is never emptied. The switches are under `[SaveSafety]` in `BepInEx/config/progenitor.cfg`; `FailLoadInstead` turns the guard off.
 
 ## Quick start (mod authors)
 
@@ -123,7 +122,7 @@ The UI toolkit is called statically (`Progenitor.Ui.Ui`) rather than through `ct
 Building the framework and the samples needs a local V Rising install, because they compile against the game's assemblies, which are never redistributed.
 
 1. Install the **.NET 8 SDK**.
-2. Install V Rising and **BepInExPack_V_Rising** (through a mod manager, or unpacked into the game folder).
+2. Install V Rising and **BepInExPack_V_Rising**, unpacked into the game folder.
 3. **Launch the game once with BepInEx.** The first launch generates `<game>\BepInEx\interop`: managed interop assemblies (`ProjectM.dll`, `Unity.Entities.dll`, …) that Progenitor compiles against.
 4. If the game is not in the default Steam location, set `VRISING_GAME_DIR` or create a git-ignored `Directory.Build.local.props`:
 
