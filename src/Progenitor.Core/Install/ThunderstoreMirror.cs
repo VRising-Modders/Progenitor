@@ -198,10 +198,65 @@ internal static class ThunderstoreMirror
             return null;
         }
 
+        if (IsFallenBack(u))
+        {
+            note = "off: " + u + " refused the connection; thunderstore.io is used for this session (the cfg is unchanged)";
+            Log(note);
+            return null;
+        }
+
         note = "on: " + u;
         Log(note);
         return u;
     }
+
+    // ---- INSTALLERR1: the session fallback ---------------------------------------------------------------------------
+
+    private static string? _fallbackFor;
+    private static readonly System.Threading.AsyncLocal<string?> TestFallbackLocal = new();
+
+    private static string? FallbackFor
+    {
+        get => TestOverride != null ? TestFallbackLocal.Value : _fallbackFor;
+        set
+        {
+            if (TestOverride != null) TestFallbackLocal.Value = value;
+            else _fallbackFor = value;
+        }
+    }
+
+    private static bool IsFallenBack(Uri u) =>
+        FallbackFor is { } fb && string.Equals(fb, u.ToString(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// INSTALLERR1 (user decision 2026-10-14): the active stand-in refused the connection, so this process uses
+    /// thunderstore.io until it ends or <c>DevThunderstoreUrl</c> names another address. The cfg is never edited. True when
+    /// the fallback started now (false: no stand-in active, or already fallen back).
+    /// </summary>
+    public static bool FallBackForSession()
+    {
+        var b = Base;
+        if (b == null) return false;
+        FallbackFor = b.ToString();
+        return true;
+    }
+
+    /// <summary>The configured stand-in is set and allowed, but this session fell back to thunderstore.io from it.</summary>
+    public static bool SessionFallbackActive
+    {
+        get
+        {
+            var test = TestOverride;
+            string? text;
+            try { text = test != null ? test.Value.Url : UrlProbe?.Invoke(); }
+            catch { text = null; }
+            var u = ParseLoopback(text, out _);
+            return u != null && IsFallenBack(u);
+        }
+    }
+
+    /// <summary>Tests: forget the fallback of this test flow.</summary>
+    internal static void ResetFallbackForTests() => FallbackFor = null;
 
     private static void Log(string note)
     {

@@ -317,7 +317,7 @@ internal sealed class ConditionalIndexFetch
                 string why = "Thunderstore index checks paused after " + failures + " failures in a row; the next automatic check is after "
                     + until.ToString("HH:mm", CultureInfo.InvariantCulture) + " UTC";
                 InstallLog.Info("Thunderstore: index check (" + Owner + ") skipped: " + why + ".");
-                return new CatalogTextFetchResult(false, why, null, 0, 0);
+                return new CatalogTextFetchResult(false, why, null, 0, 0) { Paused = true };
             }
         }
 
@@ -337,7 +337,11 @@ internal sealed class ConditionalIndexFetch
         }
         catch (Exception e)
         {
-            fetched = new CatalogTextFetchResult(false, InstallReasons.FetchTransport + ": " + e.Message, null, 0, 0);
+            // INSTALLERR1: the cause from the exception's type, never its localized text.
+            fetched = new CatalogTextFetchResult(false, InstallReasons.FetchTransport + ": " + e.Message, null, 0, 0)
+            {
+                FailureCause = RecordingCatalogTransport.Classify(e, cancellationToken.IsCancellationRequested),
+            };
         }
 
         now = _clock.UtcNow;

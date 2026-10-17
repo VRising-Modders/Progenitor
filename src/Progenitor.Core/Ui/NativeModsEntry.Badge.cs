@@ -75,13 +75,17 @@ internal static partial class NativeModsEntry
             catch (Exception e) { Plugin.Logger?.LogWarning(ClientUpdates.LogPrefix + "prime failed: " + e.Message); }
         }
 
+        // AUTOUPDATE2 (phase 1 open issue 3): a changed [Install] DevThunderstoreUrl rebuilds the index source.
+        // INSTALLERR1: in a world as well (a cleared URL there kept the stand-in's list on show).
+        if (_updatesPrimed)
+        {
+            try { ModsMenu.FollowIndexSource(); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Install: index source check threw: " + e.Message); }
+        }
+
         // AUTOUPDATE2: Automatic mode, only in the apply window (the title screen; the window check says the rest).
         if (_updatesPrimed && AtTitleScreen)
         {
-            // AUTOUPDATE2 (phase 1 open issue 3): a changed [Install] DevThunderstoreUrl rebuilds the index source.
-            try { ModsMenu.FollowIndexSource(); }
-            catch (Exception e) { Plugin.Logger?.LogWarning("Install: index source check threw: " + e.Message); }
-
             try { _lastAuto = ClientAutoUpdate.Tick(); }
             catch (Exception e) { _lastAuto = "threw: " + e.Message; }
         }
