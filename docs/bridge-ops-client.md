@@ -45,6 +45,9 @@ Client, main thread. Opens, closes or reads the game's world map (the full-scree
 | `{"action":"status"}` | Reads the state in the same frame. |
 | `{"action":"open"}` | Opens the map: raises the menu from gameplay, or switches to the Map tab from another tab. Idempotent: with the map open it replies `ok true` and `why: already: the map is open`. |
 | `{"action":"close"}` | Closes the map and the menu. With the map not shown it does nothing: `why` is `already: the map is not open` or `not-map: …` when the menu is open on another tab, which it leaves alone. |
+| `{"action":"share","x":960,"y":540}` | [Shares a map location](modules.md#share-a-map-location) as the share key's click does: reads the map at that screen point (Input System pixels, origin bottom left; without `x` and `y`, under the pointer), closes the map and queues `[loc:x,z]` for the chat input. Replies at once with `{ok, token, world, screen, onMap, hasWorld, why?, status, before}`. Not run live. |
+
+`status` also carries `share`: Core's map share readback (`installed`, `key`, `mapOpen`, `hintShown`, `hintText`, `lastShare`, `lastRefusal`, `pendingInsert`).
 
 `open` and `close` reply once Core's own map detection (`WorldMap.IsOpen`, the state map-scope keybinds use) has agreed for 4 frames, or with `ok false` and the state after 180 frames. The reply is `{ok, action, open, changed, step, before, after, framesWaited, readback, ms, handler?, setStateCalls?, why | error}`. `before` and `after` hold `inWorld`, `hudMenu`, `menuOpen`, `tab`, `view`, `workspaceOpen`, `probe` and `mapOpen`.
 

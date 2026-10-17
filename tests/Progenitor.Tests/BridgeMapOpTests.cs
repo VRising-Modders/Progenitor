@@ -44,6 +44,21 @@ public class BridgeMapOpTests
         Assert.Throws<ArgumentException>(() => MapOps.Run(Args("{\"action\":\"spin\"}")));
 
     [Fact]
+    public void Share_parses_with_or_without_a_point()
+    {
+        Assert.Equal(MapPlan.Action.Share, MapPlan.Parse(Args("{\"action\":\"share\"}")));
+        Assert.Equal((false, 0f, 0f), MapPlan.ParsePoint(Args("{\"action\":\"share\"}")));
+        Assert.Equal((true, 640f, 360.5f), MapPlan.ParsePoint(Args("{\"action\":\"share\",\"x\":640,\"y\":360.5}")));
+    }
+
+    [Theory]
+    [InlineData("{\"action\":\"share\",\"x\":1}")]
+    [InlineData("{\"action\":\"share\",\"y\":1}")]
+    [InlineData("{\"action\":\"share\",\"x\":\"1\",\"y\":2}")]
+    public void Share_refuses_half_a_point(string json) =>
+        Assert.Throws<ArgumentException>(() => MapPlan.ParsePoint(Args(json)));
+
+    [Fact]
     public void Open_from_play_raises_the_menu() =>
         Assert.Equal(MapPlan.Step.Raise, MapPlan.DecideOpen(Play()).Step);
 

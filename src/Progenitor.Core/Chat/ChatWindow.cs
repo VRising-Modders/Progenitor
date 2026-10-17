@@ -116,19 +116,26 @@ internal static class ChatWindow
     /// <summary>CHAT13: the latest whisper partner (<c>/r</c>'s), for a whisper tab's <c>/w partner </c> line; or empty.</summary>
     internal static string WhisperPartner => Whispers.Partner;
 
-    /// <summary>CHAT4: text waiting to be put in the chat input once the chat has focus (<see cref="InsertIntoInput"/>).</summary>
+    /// <summary>CHAT4: text waiting to be put in the chat input once the chat has focus (<see cref="InsertIntoInput(string)"/>).</summary>
     private static string? _pendingInsert;
     private static int _pendingInsertFrames;
 
-    /// <summary>How long a pending insert waits for the chat to open before it is dropped (about 5 s at 60 fps).</summary>
-    private const int PendingInsertMaxFrames = 300;
+    /// <summary>The pending insert waits for the game's full-screen menu to close before it opens the chat (the map share).</summary>
+    private static bool _pendingAfterMenu;
 
     /// <summary>
     /// CHAT4: put <paramref name="text"/> at the end of the chat input for the player to finish and send (the Mods
     /// menu's Share in chat). Opens the chat when it is closed. Never sends. False when there is no client world or
     /// chat window (the title screen).
     /// </summary>
-    internal static bool InsertIntoInput(string text)
+    internal static bool InsertIntoInput(string text) => InsertIntoInput(text, afterMenuCloses: false);
+
+    /// <summary>
+    /// As <see cref="InsertIntoInput(string)"/>; with <paramref name="afterMenuCloses"/> the chat is opened only once the
+    /// game's full-screen menu has closed (the map share closes the map first: the chat input is not usable over the
+    /// menu). See <see cref="ChatInsertPlan"/>.
+    /// </summary>
+    internal static bool InsertIntoInput(string text, bool afterMenuCloses)
     {
         if (string.IsNullOrEmpty(text)) return false;
         try
@@ -140,7 +147,8 @@ internal static class ChatWindow
             if (window == null || window.Pointer == IntPtr.Zero) return false;
             _pendingInsert = text;
             _pendingInsertFrames = 0;
-            if (!window.IsChatFocused) ChatHelper.ToggleChat(world);
+            _pendingAfterMenu = afterMenuCloses;
+            if (!afterMenuCloses && !window.IsChatFocused) ChatHelper.ToggleChat(world);
             return true;
         }
         catch (Exception e)
@@ -150,14 +158,35 @@ internal static class ChatWindow
         }
     }
 
+    /// <summary>The text a pending insert still waits to put in the chat input, or null (the dev bridge's readback).</summary>
+    internal static string? PendingInsert => _pendingInsert;
+
     /// <summary>Apply a pending insert once the chat has focus; drop it when the chat never opens.</summary>
     private static void ApplyPendingInsert(HUDChatWindow window)
     {
         if (_pendingInsert == null) return;
-        if (!window.IsChatFocused)
+        bool focused = window.IsChatFocused;
+        bool menuOpen = _pendingAfterMenu && GameMenuHistory.SafeMenuOpen();
+        switch (ChatInsertPlan.Next(focused, _pendingAfterMenu, menuOpen, ++_pendingInsertFrames))
         {
-            if (++_pendingInsertFrames > PendingInsertMaxFrames) _pendingInsert = null;
-            return;
+            case ChatInsertStep.Wait:
+                return;
+            case ChatInsertStep.Drop:
+                Plugin.Logger?.LogInfo("Chat: a pending insert was dropped: the chat input did not open"
+                    + (_pendingAfterMenu ? " (the game's menu stayed open)." : "."));
+                _pendingInsert = null;
+                _pendingAfterMenu = false;
+                return;
+            case ChatInsertStep.OpenChat:
+                _pendingAfterMenu = false;
+                _pendingInsertFrames = 0;
+                try
+                {
+                    var world = Worlds.Client;
+                    if (world != null && world.IsCreated) ChatHelper.ToggleChat(world);
+                }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Chat: opening the chat for an insert threw: " + e.Message); }
+                return;
         }
 
         var field = window.ChatInputField;
@@ -166,6 +195,7 @@ internal static class ChatWindow
         // CHAT13: a whisper insert replaces a bare whisper line (a whisper tab's prefill) instead of following it.
         string joined = ChatTabInput.JoinInsert(current, _pendingInsert);
         _pendingInsert = null;
+        _pendingAfterMenu = false;
         SetLine(field, joined);
     }
 
@@ -408,6 +438,7 @@ internal static class ChatWindow
         Whispers.Reset();
         ChatTabs.ForgetInput();
         _pendingInsert = null;
+        _pendingAfterMenu = false;
         LongParts.Clear();
         RestoreInput();
         DestroyHints();
