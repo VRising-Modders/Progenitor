@@ -575,7 +575,8 @@ internal static class SupportBundle
         }
 
         // The mods' packages, links and help pages: disk reads, so here on the worker thread, once per build.
-        SupportModList.Resolve(r.Mods, r.BepInExRoot);
+        try { SupportModList.Resolve(r.Mods, r.BepInExRoot); }
+        catch (Exception e) { r.Notes.Add("The mods' links could not be read: " + e.GetType().Name + "."); }
 
         string support = SupportFolderOf(r);
         string primary = OutputFolderOf(r);
@@ -697,6 +698,7 @@ internal static class SupportBundle
                 result.Skipped.Clear();
                 var redactor = new SupportRedactor(r.UserProfile, r.UserName, r.MachineName);
                 redactor.ExcludeNames(PluginWords(r));
+                redactor.ExcludeNames(SupportModList.Words(r.Mods, names));
                 redactor.AddNames(names);
                 WriteZip(temp, r, plan, cap, redactor, result, serverPart);
                 result.Players = redactor.PlayerCount;
@@ -784,7 +786,6 @@ internal static class SupportBundle
             if (!string.IsNullOrWhiteSpace(p.Display)) words.Add(p.Display!);
             words.AddRange(p.Assemblies);
         }
-        words.AddRange(SupportModList.Words(r.Mods));
         return words;
     }
 
@@ -830,14 +831,23 @@ internal static class SupportBundle
             var report = diagnosis.Finish();
             result.LikelyInvolved = report.StatusPhrase;
             result.TopSuspect = report.TopName;
+            bool modsWritten = false;
+            if (r.Mods.Count > 0)
+            {
+                // The mod list is extra: if it cannot be written, the bundle still is, and summary.txt says why.
+                string? mods = null;
+                try { mods = redactor.Redact(SupportModList.Format(r.Side, r.Mods)); }
+                catch (Exception e) { result.Skipped.Add(SupportModList.EntryName + ": " + e.GetType().Name + ": " + redactor.Redact(e.Message)); }
+                if (mods != null)
+                {
+                    WriteEntry(zip, SupportModList.EntryName, mods);
+                    modsWritten = true;
+                }
+            }
             string summary = Summary(r, fileLines, result.Skipped, Listings(r.BepInExRoot), serverLine, report.Section, report.TopName);
             WriteEntry(zip, "summary.txt", redactor.Redact(summary));
             WriteEntry(zip, "README.txt", redactor.Redact(Readme(r.Side, report.TopName)));
-            if (r.Mods.Count > 0)
-            {
-                WriteEntry(zip, SupportModList.EntryName, redactor.Redact(SupportModList.Format(r.Side, r.Mods)));
-                result.Entries.Insert(0, SupportModList.EntryName);
-            }
+            if (modsWritten) result.Entries.Insert(0, SupportModList.EntryName);
             result.Entries.Insert(0, "summary.txt");
             result.Entries.Insert(0, "README.txt");
         }

@@ -155,8 +155,6 @@ public sealed class SupportModListTests : IDisposable
             UserName = "alice",
             MachineName = "DESKTOP-ABC123",
         };
-        // A player who shares the mod author's name: the author stays, the player name elsewhere is replaced.
-        request.KnownNames.Add("SomeTeam");
         request.Mods.Add(new SupportMod { Id = "someteam.minimap", Name = "Minimap", Version = "1.2.0", Location = dll, OnProgenitor = true });
         request.Mods.Add(new SupportMod { Id = "loose.mod", Name = "Loose", Version = "0.1.0", Location = SupportRedactorTests.Profile + @"\Mods\Loose.dll" });
 
@@ -171,11 +169,101 @@ public sealed class SupportModListTests : IDisposable
 
         Assert.Contains("## Minimap", text);
         Assert.Contains("- Author: SomeTeam", text);
+        Assert.Contains("- Built on Progenitor: yes", text);
         Assert.Contains("- Website or repository: https://example.com/minimap", text);
         Assert.DoesNotContain("s3cret", text);
         Assert.DoesNotContain("Minimap.dll", text);
         Assert.DoesNotContain("Loose.dll", text);
         Assert.DoesNotContain("alice", text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(_base, text, StringComparison.OrdinalIgnoreCase);
+    }
+    [Fact]
+    public void A_player_who_shares_a_mods_author_or_name_is_still_replaced_in_the_logs()
+    {
+        string dll = Dll("plugins/SomeTeam-Minimap/Minimap.dll");
+        Put(Path.Combine(_root, "plugins", "SomeTeam-Minimap", "manifest.json"), "{\"name\":\"Minimap\",\"version_number\":\"1.2.0\"}");
+        Put(Path.Combine(_root, "LogOutput.log"), "[Info] SomeTeam joined; Minimap loaded; Arena loaded\n");
+        var request = new SupportBundleRequest
+        {
+            Side = "client",
+            BepInExRoot = _root,
+            NowLocal = new DateTime(2026, 10, 17, 9, 5, 0),
+            UserProfile = SupportRedactorTests.Profile,
+            UserName = "alice",
+            MachineName = "DESKTOP-ABC123",
+        };
+        request.KnownNames.Add("SomeTeam");
+        request.KnownNames.Add("Arena");
+        request.Mods.Add(new SupportMod { Id = "someteam.minimap", Name = "Minimap", Version = "1.2.0", Location = dll });
+        request.Mods.Add(new SupportMod { Id = "fighters.arena", Name = "Arena", Version = "2.0.0" });
+
+        var result = SupportBundle.Build(request);
+        Assert.True(result.Ok, result.Error);
+        string log;
+        using (var zip = ZipFile.OpenRead(result.Path))
+        using (var reader = new StreamReader(zip.GetEntry("bepinex/LogOutput.log")!.Open(), Encoding.UTF8))
+            log = reader.ReadToEnd();
+
+        Assert.DoesNotContain("SomeTeam", log);
+        Assert.DoesNotContain("Arena", log);
+        // A mod name no player has is kept, so its log lines still name it.
+        Assert.Contains("Minimap loaded", log);
+    }
+
+    [Fact]
+    public void Mod_words_skip_authors_server_only_ids_and_player_names()
+    {
+        var mods = new[]
+        {
+            new SupportMod { Id = "someteam.minimap", Name = "Minimap", Author = "SomeTeam", Package = "SomeTeam-Minimap" },
+            new SupportMod { Id = "server.only", ServerOnly = true },
+        };
+        var words = SupportModList.Words(mods, new[] { "someteam" });
+        Assert.Equal(new[] { "Minimap" }, words);
+    }
+
+    [Fact]
+    public void Line_breaks_and_control_characters_in_mod_facts_stay_on_one_line()
+    {
+        var mods = new[] { new SupportMod { Id = "x.mod", Name = "Evil\n## Fake heading\r\u0007", Version = "1.0\n- Author: someone" } };
+        string text = SupportModList.Format("client", mods).Replace("\r\n", "\n");
+        Assert.Contains("## Evil ## Fake heading", text);
+        Assert.Contains("- Version: 1.0 - Author: someone", text);
+        Assert.False(text.Contains((char)7), "a control character was kept");
+        Assert.False(text.Contains("\n## Fake", StringComparison.Ordinal));
+        Assert.Equal(200, SupportModList.Clean(new string('a', 500)).Length);
+    }
+
+    [Theory]
+    [InlineData("{ not json")]
+    [InlineData("[1, 2]")]
+    [InlineData("{\"name\":\"Minimap\"}")]
+    public void A_malformed_manifest_gives_no_package(string manifest)
+    {
+        string dll = Dll("plugins/SomeTeam-Minimap/Minimap.dll");
+        Put(Path.Combine(_root, "plugins", "SomeTeam-Minimap", "manifest.json"), manifest);
+        var mod = new SupportMod { Id = "someteam.minimap", Name = "Minimap", Location = dll };
+
+        SupportModList.Resolve(new[] { mod }, _root);
+
+        Assert.Equal("", mod.Author);
+        Assert.Equal("", mod.StoreUrl);
+        Assert.Equal("", mod.WebsiteUrl);
+        Assert.Equal("BepInEx/plugins", mod.Folder);
+    }
+
+    [Fact]
+    public void An_oversized_manifest_is_not_read()
+    {
+        string dll = Dll("plugins/SomeTeam-Minimap/Minimap.dll");
+        string pad = new string(' ', 300 * 1024);
+        Put(Path.Combine(_root, "plugins", "SomeTeam-Minimap", "manifest.json"),
+            "{\"name\":\"Minimap\",\"version_number\":\"1.2.0\",\"website_url\":\"https://example.com/m\"" + pad + "}");
+        var mod = new SupportMod { Id = "someteam.minimap", Name = "Minimap", Location = dll };
+
+        SupportModList.Resolve(new[] { mod }, _root);
+
+        Assert.Equal("", mod.Author);
+        Assert.Equal("", mod.WebsiteUrl);
     }
 }

@@ -91,7 +91,9 @@ internal static class SupportModList
             }
             catch { /* no ledger */ }
         }
-        string cache = bep.Length > 0 ? Path.Combine(bep, "progenitor-cache") : "";
+        string cache = "";
+        try { if (bep.Length > 0) cache = Path.Combine(bep, "progenitor-cache"); }
+        catch { cache = ""; }
 
         foreach (var mod in mods)
         {
@@ -221,18 +223,45 @@ internal static class SupportModList
         catch { return ""; }
     }
 
-    /// <summary>The words the redactor must never treat as player names: the mods' names, ids, authors and packages.</summary>
-    internal static List<string> Words(IEnumerable<SupportMod>? mods)
+    /// <summary>
+    /// The words the redactor must never treat as player names: each installed mod's own id and name. Not authors,
+    /// packages (their first half is the author) or server-only ids, and never a word with a part that is a player name
+    /// in <paramref name="players"/>: a player who shares a mod's name stays redacted in every file.
+    /// </summary>
+    internal static List<string> Words(IEnumerable<SupportMod>? mods, IEnumerable<string>? players)
     {
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (players != null)
+            foreach (var p in players)
+                if (!string.IsNullOrWhiteSpace(p)) known.Add(p.Trim());
         var words = new List<string>();
         if (mods == null) return words;
         foreach (var m in mods)
         {
-            if (m == null) continue;
-            foreach (var w in new[] { m.Id, m.Name, m.Author, m.Package })
-                if (!string.IsNullOrWhiteSpace(w)) words.Add(w);
+            if (m == null || m.ServerOnly) continue;
+            foreach (var w in new[] { m.Id, m.Name })
+            {
+                if (string.IsNullOrWhiteSpace(w)) continue;
+                string word = w.Trim();
+                bool player = known.Contains(word);
+                foreach (string part in word.Split('.', '-', '_', ' '))
+                    if (known.Contains(part)) player = true;
+                if (!player) words.Add(word);
+            }
         }
         return words;
+    }
+
+    /// <summary>One line of text: control characters and line breaks become spaces, at most 200 characters.</summary>
+    internal static string Clean(string? text)
+    {
+        var sb = new StringBuilder();
+        foreach (char c in text ?? "")
+        {
+            if (sb.Length >= 200) break;
+            sb.Append(char.IsControl(c) || c == (char)0x2028 || c == (char)0x2029 ? (char)0x20 : c);
+        }
+        return sb.ToString().Trim();
     }
 
     /// <summary><c>mods.md</c>: a short note for whoever reads it, then one section per mod, then the server-only ones.</summary>
@@ -263,15 +292,15 @@ internal static class SupportModList
         foreach (var m in list)
         {
             sb.AppendLine("## " + Title(m));
-            sb.AppendLine("- Id: " + m.Id.Trim());
-            sb.AppendLine("- Version: " + (m.Version.Trim().Length > 0 ? m.Version.Trim() : "unknown"));
-            if (m.Author.Length > 0) sb.AppendLine("- Author: " + m.Author);
+            sb.AppendLine("- Id: " + Clean(m.Id));
+            sb.AppendLine("- Version: " + (Clean(m.Version).Length > 0 ? Clean(m.Version) : "unknown"));
+            if (m.Author.Length > 0) sb.AppendLine("- Author: " + Clean(m.Author));
             sb.AppendLine("- Built on Progenitor: " + (string.Equals(m.Id, ProgenitorId, StringComparison.OrdinalIgnoreCase) ? "it is Progenitor" : m.OnProgenitor ? "yes" : "no"));
             if (m.AlsoOnServer) sb.AppendLine("- On the joined server too: yes");
             if (m.StoreUrl.Length > 0) sb.AppendLine("- Thunderstore: " + m.StoreUrl);
             if (m.WebsiteUrl.Length > 0) sb.AppendLine("- Website or repository: " + m.WebsiteUrl);
-            if (m.Help.Length > 0) sb.AppendLine("- Help page: " + m.Help);
-            if (m.Folder.Length > 0) sb.AppendLine("- Folder: " + m.Folder);
+            if (m.Help.Length > 0) sb.AppendLine("- Help page: " + Clean(m.Help));
+            if (m.Folder.Length > 0) sb.AppendLine("- Folder: " + Clean(m.Folder));
             sb.AppendLine();
         }
 
@@ -280,11 +309,11 @@ internal static class SupportModList
             sb.AppendLine("## On the joined server only");
             sb.AppendLine("From the server's join list: id and version only.");
             foreach (var m in serverOnly)
-                sb.AppendLine("- " + m.Id.Trim() + " " + (m.Version.Trim().Length > 0 ? m.Version.Trim() : "version unknown"));
+                sb.AppendLine("- " + Clean(m.Id) + " " + (Clean(m.Version).Length > 0 ? Clean(m.Version) : "version unknown"));
             sb.AppendLine();
         }
         return sb.ToString().TrimEnd() + Environment.NewLine;
     }
 
-    private static string Title(SupportMod m) => m.Name.Trim().Length > 0 ? m.Name.Trim() : m.Id.Trim();
+    private static string Title(SupportMod m) => Clean(m.Name).Length > 0 ? Clean(m.Name) : Clean(m.Id);
 }
