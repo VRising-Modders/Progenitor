@@ -12,7 +12,7 @@ namespace Progenitor.Tests;
 /// <summary>
 /// DOCK1: docked panels (<see cref="UiDockLayout"/>, <see cref="UiPlacement"/>) and the camera preview's framing offset
 /// (<see cref="CameraFraming"/>). Game-free: the placement arithmetic across resolutions, its interplay with the window
-/// row and the panel flow, the handle-level API through the kit's fake runtime, and the offset projection.
+/// row and the panel flow, and the handle-level API through the kit's fake runtime. The framing offset is CameraFramingTests.
 /// </summary>
 [Collection("PluginLogger")]
 public sealed class UiDockTests : IDisposable
@@ -287,64 +287,5 @@ public sealed class UiDockTests : IDisposable
         plain.Dock(UiDock.Left, new UiDockOptions { Width = 900f });
         Assert.Equal(Basic, UiDockLayout.FrameWidth(plain.EffectiveDock!.Value, 1920f));
         Assert.Throws<ArgumentOutOfRangeException>(() => plain.Dock(UiDock.Left, new UiDockOptions { Margin = -3f }));
-    }
-
-    // ---- camera preview framing offset ---------------------------------------------------------------------------------
-
-    /// <summary>
-    /// Where <paramref name="point"/> lands on screen, as a share of the width right of center, for the orbit camera the
-    /// game builds: <c>quaternion.Euler(pitch, yaw, 0)</c>, <paramref name="distance"/> behind <paramref name="anchor"/>.
-    /// </summary>
-    private static (float ScreenX, float Range) Project(UnitVec3 anchor, UnitVec3 point, float yaw, float pitch, float distance, float vfov, float aspect)
-    {
-        double y = yaw * Math.PI / 180, p = pitch * Math.PI / 180;
-        var forward = (X: Math.Sin(y) * Math.Cos(p), Y: -Math.Sin(p), Z: Math.Cos(y) * Math.Cos(p));
-        var right = (X: Math.Cos(y), Y: 0.0, Z: -Math.Sin(y));
-        var cam = (X: anchor.X - forward.X * distance, Y: anchor.Y - forward.Y * distance, Z: anchor.Z - forward.Z * distance);
-        var rel = (X: point.X - cam.X, Y: point.Y - cam.Y, Z: point.Z - cam.Z);
-        double depth = rel.X * forward.X + rel.Y * forward.Y + rel.Z * forward.Z;
-        double side = rel.X * right.X + rel.Y * right.Y + rel.Z * right.Z;
-        double tanHalfH = Math.Tan(vfov * Math.PI / 360) * aspect;
-        double range = Math.Sqrt(rel.X * rel.X + rel.Y * rel.Y + rel.Z * rel.Z);
-        return ((float)(side / depth / tanHalfH * 0.5), (float)range);
-    }
-
-    [Theory]
-    [InlineData(0.15f, 50f, 16f / 9f)]
-    [InlineData(-0.2f, 60f, 16f / 9f)]
-    [InlineData(0.15f, 50f, 21f / 9f)]
-    [InlineData(0.3f, 40f, 4f / 3f)]
-    public void The_offset_puts_the_point_at_its_share_of_the_screen_at_every_yaw(float offset, float vfov, float aspect)
-    {
-        var point = new UnitVec3(120.5f, 3f, -48.25f);
-        const float distance = 6f, pitch = 35f;
-        float shift = CameraFraming.LateralShift(offset, distance, vfov, aspect);
-        float? range = null;
-        for (float yaw = 0f; yaw < 720f; yaw += 17.5f)
-        {
-            var anchor = CameraFraming.Anchor(point, yaw, shift);
-            var (x, r) = Project(anchor, point, yaw, pitch, distance, vfov, aspect);
-            Assert.Equal(offset, x, 4);
-            // The camera circles the point itself: always the same distance away.
-            range ??= r;
-            Assert.Equal(range.Value, r, 3);
-            // Only the framing moves: the anchor stays level with the point, beside it.
-            Assert.Equal(point.Y, anchor.Y);
-        }
-    }
-
-    [Fact]
-    public void No_offset_frames_the_point_itself_and_bad_readings_fall_back_to_the_center()
-    {
-        var point = new UnitVec3(1f, 2f, 3f);
-        Assert.Equal(point, CameraFraming.Anchor(point, 40f, CameraFraming.LateralShift(0f, 6f, 50f, 1.7f)));
-        Assert.Equal(0f, CameraFraming.LateralShift(0.15f, 6f, 0f, 1.7f));
-        Assert.Equal(0f, CameraFraming.LateralShift(0.15f, 6f, 50f, float.NaN));
-        Assert.Equal(0f, CameraFraming.LateralShift(0.15f, 0f, 50f, 1.7f));
-        Assert.True(CameraFraming.IsValidOffset(0.4f));
-        Assert.True(CameraFraming.IsValidOffset(-0.15f));
-        Assert.False(CameraFraming.IsValidOffset(0.41f));
-        Assert.False(CameraFraming.IsValidOffset(float.NaN));
-        Assert.Equal(0f, new CameraPreviewOptions().ScreenOffset);
     }
 }

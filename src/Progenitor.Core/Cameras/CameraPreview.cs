@@ -88,7 +88,18 @@ public sealed partial class PluginCamera
         private bool _forwarding;
         private bool _closeKeyHeld;
         private float _screenOffset;
-        private float _fov, _aspect;
+        // CAMOFFSET1: the framing measured from the live camera (CameraFraming), and the anchor last written.
+        private bool _measured;
+        private float _lateral;
+        private UnitVec3 _right;
+        private UnitVec3 _anchor;
+        private FramingReading _reading;
+        private bool _framingLogged;
+        /// <summary>Ticks in a row the orbit shot has been landed; the camera is measured only from the second (posed for a frame).</summary>
+        private int _landedTicks;
+
+        /// <summary>The newest running preview of any plugin, for the bridge's readback; null when none runs.</summary>
+        internal static CameraPreview? Current { get; private set; }
 
         /// <summary>The orbit distance and pitch every preview uses.</summary>
         private const float Distance = 6, Pitch = 35;
@@ -104,7 +115,7 @@ public sealed partial class PluginCamera
 
         internal CameraPreview(PluginCamera camera, UnitVec3 point, float yaw, CameraPreviewOptions options)
         {
-            _camera = camera; _point = point; _yaw = yaw; _ended = options.Ended; _screenOffset = options.ScreenOffset;
+            _camera = camera; _point = point; _anchor = point; _yaw = yaw; _ended = options.Ended; _screenOffset = options.ScreenOffset;
             _policy = new CameraPreviewPolicy(options.Hold ? CameraPreviewPolicy.MaxTimedSeconds : options.Seconds, options.Hold, 0);
             _world = Worlds.Client ?? throw new InvalidOperationException("No client world.");
             _epoch = WorldEpoch.Current;
@@ -112,7 +123,9 @@ public sealed partial class PluginCamera
             _observation = new ClientObservation(camera._ctx, point, options.CompressedHeight);
             try
             {
-                camera.Orbit(Framed(), Distance, yaw, Pitch, instant: true);
+                // Centered first: the camera on screen now is still the player's, so the offset is measured from the
+                // orbit camera on the next ticks, and the shot glides to it.
+                camera.Orbit(point, Distance, yaw, Pitch, instant: true);
                 _ownsHud = !PhotoHud.IsHidden; if (_ownsHud) PhotoHud.Hide(true);
                 // Escape reaches the framework only while Bootstrap forwards it (a shown panel or this hold).
                 Ui.Ui.CurrentRuntime().SetCapture(true); _forwarding = true;
@@ -131,6 +144,7 @@ public sealed partial class PluginCamera
                 }
                 throw;
             }
+            Current = this;
             MainThread.PostDelayed(0.033, Tick, camera._ctx.Owner);
         }
 
@@ -155,30 +169,167 @@ public sealed partial class PluginCamera
         {
             if (!CameraFraming.IsValidOffset(offset)) throw new ArgumentOutOfRangeException(nameof(offset), "ScreenOffset must be finite and at most 0.4 either way.");
             if (!Active) return;
+            // The last measurement was for the old offset.
+            if (offset != _screenOffset) _measured = false;
             _screenOffset = offset;
             if (_camera.IsShotActive) _camera.Orbit(Framed(), Distance, _yaw, Pitch);
         }
 
         /// <summary>
-        /// The orbit anchor this frame: the point itself, or with a screen offset the point moved sideways against the
-        /// camera's current yaw so it projects at the offset (<see cref="CameraFraming"/>). The game camera's field of view
-        /// and aspect are read each time; an unreadable camera keeps the last good reading, and with none yet the point is
-        /// framed at the center.
+        /// The orbit anchor this frame: the point itself, or with a screen offset the point moved sideways so it projects
+        /// at the offset. The sideways distance is measured from the live render camera (<see cref="CameraFraming"/>): its
+        /// own projection of the look-at point and of a point one meter right of it, at the previewed point's depth. Only
+        /// once the orbit write has landed and the camera has been posed for a frame, and only from a reading that can be
+        /// the orbit camera (<see cref="CameraFraming.PlausibleOrbitReading"/>). A frame whose camera cannot be read, or
+        /// whose reading is refused, keeps the last measurement; with none yet the point is framed at the center.
         /// </summary>
         private UnitVec3 Framed()
         {
-            if (_screenOffset == 0f) return _point;
+            if (_screenOffset == 0f) { _measured = false; return _anchor = _point; }
+            if (_landedTicks >= 2 && TryMeasure(out var reading))
+            {
+                _reading = reading;
+                _right = reading.Right;
+                _lateral = reading.Lateral;
+                _measured = true;
+            }
+
+            return _anchor = _measured ? CameraFraming.Anchor(_point, _right, _lateral) : _point;
+        }
+
+        /// <summary>What one measurement of the live camera read (kept for the readback and the log line).</summary>
+        private struct FramingReading
+        {
+            public float RectX, RectWidth, Depth, Target, AtLookAt, AtRight, Lateral;
+            public UnitVec3 Right, CameraRight;
+        }
+
+        private bool TryMeasure(out FramingReading r)
+        {
+            r = default;
             try
             {
                 var cam = UnityEngine.Camera.main;
-                if (cam != null)
+                if (cam == null) return false;
+                var t = cam.transform;
+                var pos = t.position;
+                var fwd = t.forward;
+                var right = t.right;
+                var rel = new UnityEngine.Vector3(_point.X - pos.x, _point.Y - pos.y, _point.Z - pos.z);
+                float depth = rel.x * fwd.x + rel.y * fwd.y + rel.z * fwd.z;
+                // The player's camera, or one not posed yet: keep the last good reading.
+                if (!CameraFraming.PlausibleOrbitReading(depth, fwd.y, Distance, Pitch)) return false;
+                var look = new UnityEngine.Vector3(pos.x + fwd.x * depth, pos.y + fwd.y * depth, pos.z + fwd.z * depth);
+                var side = new UnityEngine.Vector3(look.x + right.x, look.y + right.y, look.z + right.z);
+                float atLook = cam.WorldToViewportPoint(look).x;
+                float atRight = cam.WorldToViewportPoint(side).x;
+                float rectX = 0f, rectW = 1f;
+                if (cam.targetTexture == null)
                 {
-                    float fov = cam.fieldOfView, aspect = cam.aspect;
-                    if (float.IsFinite(fov) && fov > 0f && float.IsFinite(aspect) && aspect > 0f) { _fov = fov; _aspect = aspect; }
+                    var rect = cam.rect;
+                    rectX = rect.x; rectW = rect.width;
                 }
+
+                float target = CameraFraming.ViewportTarget(_screenOffset, rectX, rectW);
+                if (!CameraFraming.TryLateral(target, atLook, atRight, out float lateral)) return false;
+                var camRight = new UnitVec3(right.x, right.y, right.z);
+                if (!CameraFraming.TryUnit(camRight, out var shotRight)) return false;
+                r = new FramingReading
+                {
+                    RectX = rectX, RectWidth = rectW, Depth = depth, Target = target, AtLookAt = atLook, AtRight = atRight,
+                    Lateral = lateral, Right = shotRight, CameraRight = camRight,
+                };
+                return true;
             }
-            catch { /* keep the last reading */ }
-            return CameraFraming.Anchor(_point, _yaw, CameraFraming.LateralShift(_screenOffset, Distance, _fov, _aspect));
+            catch { return false; }
+        }
+
+        /// <summary>Where the previewed point projects right now on the live camera: viewport x and y, depth, and the screen share.</summary>
+        private static bool TryProject(UnitVec3 point, out UnityEngine.Vector3 viewport, out float screenX)
+        {
+            viewport = default; screenX = float.NaN;
+            try
+            {
+                var cam = UnityEngine.Camera.main;
+                if (cam == null) return false;
+                viewport = cam.WorldToViewportPoint(new UnityEngine.Vector3(point.X, point.Y, point.Z));
+                float rectX = 0f, rectW = 1f;
+                if (cam.targetTexture == null) { var rect = cam.rect; rectX = rect.x; rectW = rect.width; }
+                screenX = rectX + viewport.x * rectW;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>The live camera's name, field of view and aspect, read only for the log line and the readback.</summary>
+        private static (string Name, float Fov, float Aspect) CameraFacts()
+        {
+            try
+            {
+                var cam = UnityEngine.Camera.main;
+                return cam == null ? ("", float.NaN, float.NaN) : (cam.name ?? "", cam.fieldOfView, cam.aspect);
+            }
+            catch { return ("", float.NaN, float.NaN); }
+        }
+
+        /// <summary>One line, once per preview with an offset, 1.5 s in: the target, where the point really projects, and the readings.</summary>
+        private void LogFraming()
+        {
+            string where = TryProject(_point, out var v, out float sx) ? Fmt(sx) + " (viewport " + Fmt(v.x) + ", depth " + Fmt(v.z) + ")" : "unreadable";
+            var r = _reading;
+            var (name, fov, aspect) = CameraFacts();
+            Plugin.Logger?.LogInfo("Camera: preview framing offset " + Fmt(_screenOffset) + ": point at screen x " + where
+                + ", wanted " + Fmt(0.5f + _screenOffset) + (_measured ? "" : " (no camera measurement yet: centered)")
+                + "; camera '" + name + "' fov " + Fmt(fov) + " aspect " + Fmt(aspect) + " rect " + Fmt(r.RectX) + "+" + Fmt(r.RectWidth)
+                + ", depth " + Fmt(r.Depth) + ", lateral " + Fmt(r.Lateral) + " m (pinhole model "
+                + Fmt(CameraFraming.PinholeLateral(r.Target, r.Depth, fov, aspect)) + " m), right agreement "
+                + Fmt(CameraFraming.RightAgreement(_yaw, r.CameraRight)) + ".");
+        }
+
+        private static string Fmt(float v) => float.IsFinite(v) ? v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : "n/a";
+
+        /// <summary>
+        /// The bridge's readback of the newest running preview (<c>camera_preview</c>): the offset asked, the screen x the
+        /// previewed point really projects to on the live camera now (so a live check needs no screenshot), and every
+        /// reading the framing was measured from. <c>{ active: false }</c> when no preview runs.
+        /// </summary>
+        internal static System.Collections.Generic.Dictionary<string, object?> Readback()
+        {
+            var p = Current;
+            if (p == null || !p.Active) return new() { ["active"] = false };
+            var r = p._reading;
+            var (name, fov, aspect) = CameraFacts();
+            var result = new System.Collections.Generic.Dictionary<string, object?>
+            {
+                ["active"] = true,
+                ["held"] = p.IsHeld,
+                ["point"] = new[] { p._point.X, p._point.Y, p._point.Z },
+                ["anchor"] = new[] { p._anchor.X, p._anchor.Y, p._anchor.Z },
+                ["yaw"] = p._yaw,
+                ["screenOffset"] = p._screenOffset,
+                ["wantedScreenX"] = 0.5f + p._screenOffset,
+                ["measured"] = p._measured,
+                ["landedTicks"] = p._landedTicks,
+                ["camera"] = name,
+                ["fov"] = fov,
+                ["aspect"] = aspect,
+                ["rect"] = new[] { r.RectX, r.RectWidth },
+                ["depth"] = r.Depth,
+                ["viewportTarget"] = r.Target,
+                ["lookAtViewportX"] = r.AtLookAt,
+                ["oneMeterRightViewportX"] = r.AtRight,
+                ["lateral"] = r.Lateral,
+                ["pinholeLateral"] = p._measured ? CameraFraming.PinholeLateral(r.Target, r.Depth, fov, aspect) : float.NaN,
+                ["rightAgreement"] = p._measured ? CameraFraming.RightAgreement(p._yaw, r.CameraRight) : float.NaN,
+            };
+            if (TryProject(p._point, out var v, out float sx))
+            {
+                result["screenX"] = sx;
+                result["viewport"] = new[] { v.x, v.y, v.z };
+                result["error"] = sx - (0.5f + p._screenOffset);
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -211,7 +362,9 @@ public sealed partial class PluginCamera
                 { _manual = true; _yaw += dx * 0.15f; }
                 if (!_manual) _yaw += (float)(elapsed - _previous) * 8;
                 _previous = elapsed;
+                _landedTicks = _camera.ShotLanded ? Math.Min(_landedTicks + 1, 1000) : 0;
                 _camera.Orbit(Framed(), Distance, _yaw, Pitch);
+                if (!_framingLogged && _screenOffset != 0f && elapsed > 1.5) { _framingLogged = true; LogFraming(); }
                 MainThread.PostDelayed(0.033, Tick, _camera._ctx.Owner);
             }
             catch (Exception e)
@@ -306,6 +459,7 @@ public sealed partial class PluginCamera
             Active = false;
             EndReason = reason;
             if (ReferenceEquals(_camera._preview, this)) _camera._preview = null;
+            if (ReferenceEquals(Current, this)) Current = null;
             try { ReleaseInput(afterEscape: reason == CameraPreviewEndReason.Escape); }
             finally
             {
@@ -325,5 +479,16 @@ public sealed partial class PluginCamera
             }
         }
     }
+}
+
+/// <summary>
+/// CAMOFFSET1: the Dev bridge's <c>camera_preview</c> readback of the newest running <c>ctx.Camera.Preview</c>: the
+/// framing offset asked, the screen x the previewed point really projects to on the live camera, and the readings the
+/// framing was measured from. Read-only; not a plugin API.
+/// </summary>
+public static class CameraPreviewBridge
+{
+    /// <summary>The readback (<c>{ active: false }</c> when no preview runs). Main thread.</summary>
+    public static object Readback() => PluginCamera.CameraPreview.Readback();
 }
 #endif

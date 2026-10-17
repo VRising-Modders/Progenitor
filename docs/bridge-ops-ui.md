@@ -538,6 +538,20 @@ Both sides, main thread (TEXTLIMIT1). Core's `ServerSettingsTestBridge`, reached
 | `{"action":"audit","lines":5}` | server | The last lines (at most 200) of `BepInEx/progenitor-settings.log` |
 | `{"action":"request","row":"…","value":"…"}` (or `"repeat":"x","count":N`, at most 20,000 characters), optional `"skipClientCheck":true`, `"expected":"…"` | client | An administrator edit sent as the page's **Apply** sends it (the expected value is the client's displayed value unless given). `skipClientCheck` skips the client's own length check, as a client that does not run it would; the server's check is unchanged. Waits up to 10 s: `{done, success, error, answeredValue/answeredLength/answeredHash…, request}` |
 
+## `camera_preview`
+
+Client, main thread, read-only. The newest running `ctx.Camera.Preview` of any plugin, through Core's `CameraPreviewBridge` ([Camera preview](modules.md#camera-preview)). Source-checked and built, not live-verified. MCP: `progenitor_camera_preview`.
+
+| Arguments | Result |
+|---|---|
+| `{}` | `{active: false}` with no preview. Otherwise `active`, `held`, `point` and `anchor` (the orbit anchor last written; the point itself with no offset), `yaw`, `screenOffset`, `wantedScreenX` (0.5 + offset), `landedTicks` (ticks the orbit write has been in place; the camera is measured from the second), `screenX` (where the point projects now on `Camera.main`, as a share of the screen width), `viewport` (`x`, `y`, depth), `error` (`screenX - wantedScreenX`), and the framing's last measurement: `measured`, `camera` (its name), `fov`, `aspect`, `rect` (viewport x and width on the screen), `depth`, `viewportTarget`, `lookAtViewportX`, `oneMeterRightViewportX`, `lateral` (meters right of the look-at line), `pinholeLateral` (what an ideal fov-and-aspect camera would need, for comparison) and `rightAgreement` (the camera's right axis against the yaw model, about 1). |
+
+Checks with an offset of 0.15, a moment after the preview starts: `measured` true and `error` within about 0.01 at any yaw (it may trail by a little while the camera turns). A steady `error` with `measured` true means the orbit camera does not look at its anchor (the one assumption left). `lookAtViewportX` away from 0.5 only shows an off-center projection (lens shift), which the measurement already handles. `measured` false for more than a second means every reading was refused: `landedTicks` 0 (the orbit write never landed) or a `depth` far from the 6 m orbit (not the preview's camera). `lateral` against `pinholeLateral` and `rightAgreement` against 1 say which assumption of the first version did not hold on that screen.
+
+```
+→ {"id":1,"token":"...","op":"camera_preview","args":{}}
+```
+
 ## `locate`
 
 Client, main thread. `ctx.Hud.Locate` pings through Core's `HudLocateBridge`, the same presenter plugins use ([Locate](ui.md#locate)). Source-checked and built, not live-verified. MCP: `progenitor_locate`.

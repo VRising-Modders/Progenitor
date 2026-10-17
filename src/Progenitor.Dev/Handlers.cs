@@ -39,7 +39,7 @@ internal sealed class Handlers
         "capture", "perf", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "build_search", "materials", "servants", "inventory_stamp", "dye", "remote_install",
         "ui_input", "ui_read", "display", "screenshot", "console",
         "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release",
-        "freeze_hold", "time", "photo", "locate", "container_preview", "setting", "join_ui", "messages_record", "item_catalog",
+        "freeze_hold", "time", "photo", "locate", "container_preview", "camera_preview", "setting", "join_ui", "messages_record", "item_catalog",
         "join_admin", "server_desc", "server_rules", "world_backups", "server_browser", "auto_update", "chat_tabs", "chat_history",
     };
 
@@ -136,6 +136,7 @@ internal sealed class Handlers
             // Client, main thread: a ctx.Hud.Locate ping at a world point, and every ping's last drawn frame (HudLocateBridge).
             case "locate": return Ops.LocateOps.Run(args);
             case "container_preview": return Ops.ContainerPreviewOps.Run(args);
+            case "camera_preview": return Progenitor.Cameras.CameraPreviewBridge.Readback();
             // Both sides, read-only: ctx.Items.Catalog() of this process (count, build time, filtered rows).
             case "item_catalog": return Ops.ItemCatalogOps.Run(args);
             // Client-side observation window over the game's own sequencer/beam draw. Takes no
@@ -208,7 +209,7 @@ internal sealed class Handlers
             case "dump": return Ops.FreezeDump.Run(args);
             // Main thread. Bounded synthetic occupancy for watchdog validation. Requires synthetic=true.
             case "freeze_hold": return Ops.FreezeHoldOps.Run(args);
-            case "ops": return new { ops = new[] { "ping", "logs", "bridge_status", "bridge_users", "dump", "freeze_hold", "reload", "users", "worlds", "command", "chat_observe", "broadcast", "ghost", "core_reload", "reload_status", "query", "get", "set", "components", "spawn", "entity", "prefab", "buff", "heal", "damage", "kill", "downed", "respawn", "create_character", "wake", "headless", "bot", "bot_look", "bot_cast", "bot_inventory", "bot_path", "bot_daytime", "bot_quests", "bot_event", "bot_cost", "bot_territories", "bot_use", "bot_recipes", "bot_blueprints", "bot_canplace", "bot_prefabs", "bot_threats", "bot_station", "bot_exit_graveyard", "bot_repair", "equip", "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore", "players", "status", "save", "world_save", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles", "time", "photo", "locate", "container_preview", "item_catalog", "capture", "perf", "perf_status", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "ui_input", "ui_read", "display", "screenshot", "console", "build_search", "materials", "servants", "inventory_stamp", "dye", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release", "install_local", "remote_install", "setting", "messages_record", "ops" } };
+            case "ops": return new { ops = new[] { "ping", "logs", "bridge_status", "bridge_users", "dump", "freeze_hold", "reload", "users", "worlds", "command", "chat_observe", "broadcast", "ghost", "core_reload", "reload_status", "query", "get", "set", "components", "spawn", "entity", "prefab", "buff", "heal", "damage", "kill", "downed", "respawn", "create_character", "wake", "headless", "bot", "bot_look", "bot_cast", "bot_inventory", "bot_path", "bot_daytime", "bot_quests", "bot_event", "bot_cost", "bot_territories", "bot_use", "bot_recipes", "bot_blueprints", "bot_canplace", "bot_prefabs", "bot_threats", "bot_station", "bot_exit_graveyard", "bot_repair", "equip", "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore", "players", "status", "save", "world_save", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles", "time", "photo", "locate", "container_preview", "camera_preview", "item_catalog", "capture", "perf", "perf_status", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "ui_input", "ui_read", "display", "screenshot", "console", "build_search", "materials", "servants", "inventory_stamp", "dye", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release", "install_local", "remote_install", "setting", "messages_record", "ops" } };
             default: throw new ArgumentException($"unknown op '{op}'");
         }
     }

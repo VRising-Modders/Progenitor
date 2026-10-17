@@ -88,6 +88,12 @@ internal sealed class CameraDirector
     /// <summary>True while a free or orbit shot is being written every frame.</summary>
     internal bool IsShotActive => _kind != ShotKind.None;
 
+    /// <summary>
+    /// CAMOFFSET1: the current shot has been written into the camera of its mode at least once since that mode was
+    /// requested (a new mode request clears it), so the game's camera on screen is this shot's camera, not the one before.
+    /// </summary>
+    internal bool ShotLanded => _kind != ShotKind.None && _landed;
+
     /// <summary>The mode this director last asked for successfully.</summary>
     internal CameraMode RequestedMode => _requested;
 
