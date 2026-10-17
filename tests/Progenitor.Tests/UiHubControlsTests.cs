@@ -672,15 +672,15 @@ public sealed class UiHubControlsTests : IDisposable
     public void Scans_back_off_after_misses_and_come_back_when_one_learns_an_icon()
     {
         Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
-        UiBuildingIcons.ScanDone(learnt: false);
+        UiBuildingIcons.ScanDone(learned: false);
         Assert.Equal(2 * UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
-        UiBuildingIcons.ScanDone(learnt: false);
+        UiBuildingIcons.ScanDone(learned: false);
         Assert.Equal(4 * UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
-        for (int i = 0; i < 20; i++) UiBuildingIcons.ScanDone(learnt: false);
+        for (int i = 0; i < 20; i++) UiBuildingIcons.ScanDone(learned: false);
         Assert.Equal(UiBuildingIcons.MaxScanEveryFrames, UiBuildingIcons.ScanInterval);
         Assert.True(UiBuildingIcons.MayScan(1000));
         Assert.False(UiBuildingIcons.MayScan(1000 + UiBuildingIcons.MaxScanEveryFrames - 1));
-        UiBuildingIcons.ScanDone(learnt: true);
+        UiBuildingIcons.ScanDone(learned: true);
         Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
 
         int v = UiBuildingIcons.Version;
@@ -689,6 +689,133 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.Equal(v + 1, UiBuildingIcons.Version);
         UiBuildingIcons.Note(7, sprite); // the same sprite again: nothing new learnt
         Assert.Equal(v + 1, UiBuildingIcons.Version);
+    }
+
+    // The four buildings of the Core 2026.10.84 report (client prefab ids).
+    private const int MineralsChestT02 = -1155345803; // TM_Castle_Container_Specialized_Minerals_T02
+    private const int WoodChest = -251472465;         // TM_Stash_Chest_Wood_General
+    private const int SmallFurnace = -1150411622;     // TM_RefinementStation_Furnace_Small
+    private const int Fabricator = -465055967;        // TM_RefinementStation_Fabricator
+
+    [Fact]
+    public void Each_reported_building_keeps_its_own_blueprint_icon_and_reads_back_its_source()
+    {
+        var sprites = new Dictionary<int, object>
+        {
+            [MineralsChestT02] = new(), [WoodChest] = new(), [SmallFurnace] = new(), [Fabricator] = new(),
+        };
+        foreach (var prefab in sprites.Keys) Assert.Equal("none", UiBuildingIcons.SourceName(prefab));
+        foreach (var (prefab, sprite) in sprites) UiBuildingIcons.Note(prefab, sprite);
+        foreach (var (prefab, sprite) in sprites)
+        {
+            Assert.Same(sprite, UiBuildingIcons.Get(prefab));
+            Assert.Equal("blueprint", UiBuildingIcons.SourceName(prefab));
+        }
+
+        Assert.Equal(4, sprites.Values.Distinct().Count());
+        Assert.Equal("none", UiBuildingIcons.SourceName(-12345));
+    }
+
+    [Fact]
+    public void Missed_buildings_wait_for_the_next_scan_until_an_icon_is_learned_and_Clear_forgets_everything()
+    {
+        UiBuildingIcons.Want(SmallFurnace, frame: 100);
+        UiBuildingIcons.Want(Fabricator, frame: 200);
+        UiBuildingIcons.Want(0, frame: 200);
+        // The most recently asked first.
+        Assert.Equal(new[] { Fabricator, SmallFurnace }, UiBuildingIcons.WaitingNow(300));
+        UiBuildingIcons.Note(SmallFurnace, new object());
+        Assert.Equal(new[] { Fabricator }, UiBuildingIcons.WaitingNow(300));
+        UiBuildingIcons.Want(SmallFurnace, frame: 300); // known now: not waiting again
+        Assert.Equal(new[] { Fabricator }, UiBuildingIcons.WaitingNow(300));
+
+        UiBuildingIcons.ScanCursor = 40;
+        UiBuildingIcons.Clear();
+        Assert.Empty(UiBuildingIcons.WaitingNow(300));
+        Assert.Equal(0, UiBuildingIcons.ScanCursor);
+        Assert.Equal(0, UiBuildingIcons.Count);
+        Assert.Equal(BuildingIconSource.None, UiBuildingIcons.Source(SmallFurnace));
+    }
+
+    [Fact]
+    public void A_building_nobody_asks_for_leaves_the_waiting_list_and_a_scan_takes_a_bounded_number()
+    {
+        UiBuildingIcons.Want(MineralsChestT02, frame: 1000);
+        UiBuildingIcons.Want(WoodChest, frame: 1000 + UiBuildingIcons.WaitingExpiryFrames);
+        Assert.Equal(2, UiBuildingIcons.WaitingNow(1000 + UiBuildingIcons.WaitingExpiryFrames).Length);
+        // One frame past the expiry, the chest nobody asked for again is gone.
+        Assert.Equal(new[] { WoodChest }, UiBuildingIcons.WaitingNow(1001 + UiBuildingIcons.WaitingExpiryFrames));
+        UiBuildingIcons.Want(MineralsChestT02, frame: 2000 + UiBuildingIcons.WaitingExpiryFrames); // asked again: back
+        Assert.Equal(2, UiBuildingIcons.WaitingCount);
+
+        UiBuildingIcons.Clear();
+        for (int i = 1; i <= UiBuildingIcons.MaxWaiting + 10; i++) UiBuildingIcons.Want(-i, frame: i);
+        Assert.Equal(UiBuildingIcons.MaxWaiting, UiBuildingIcons.WaitingCount);
+        var now = UiBuildingIcons.WaitingNow(UiBuildingIcons.MaxWaiting);
+        Assert.Equal(UiBuildingIcons.MaxBuildingsPerScan, now.Length);
+        Assert.Equal(-UiBuildingIcons.MaxWaiting, now[0]);
+
+        // A full list makes room by dropping the expired.
+        UiBuildingIcons.Want(-9999, frame: UiBuildingIcons.MaxWaiting + UiBuildingIcons.WaitingExpiryFrames + 1);
+        Assert.Equal(new[] { -9999 }, UiBuildingIcons.WaitingNow(UiBuildingIcons.MaxWaiting + UiBuildingIcons.WaitingExpiryFrames + 1));
+    }
+
+    [Fact]
+    public void A_scan_that_stops_part_way_keeps_the_interval_and_a_full_pass_that_misses_doubles_it()
+    {
+        Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+        UiBuildingIcons.ScanDone(learned: false, fullPass: false);
+        Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+        UiBuildingIcons.ScanDone(learned: false, fullPass: true);
+        Assert.Equal(2 * UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+        UiBuildingIcons.ScanDone(learned: true, fullPass: false);
+        Assert.Equal(UiBuildingIcons.ScanEveryFrames, UiBuildingIcons.ScanInterval);
+    }
+
+    [Fact]
+    public void A_drawn_building_icon_whose_sprite_was_unloaded_is_drawn_again()
+    {
+        var sprite = new object();
+        _runtime.Buildings[SmallFurnace] = sprite;
+        var panel = NewPanel(gameWindow: true);
+        var table = (UiDataTableHandle)panel.DataTable("d", new[] { new UiTableColumn("name", "Building") });
+        table.SetRows(new[] { new UiTableRow("furnace") { BuildingPrefab = SmallFurnace }.Text("name", "Furnace") });
+        panel.Show();
+        Assert.Same(sprite, Row("d:row0").Images[UiDataTableLayout.CellIcon]);
+        Assert.Equal(0, table.WaitingBuilding);
+        Assert.NotEmpty(_runtime.Ticks); // the drawn icon is watched
+
+        // The game unloads the sprite: within one check the row drops it and waits for the icon again.
+        _runtime.Buildings.Remove(SmallFurnace);
+        for (int i = 0; i < UiBuildingIconWatch.CheckEveryFrames; i++)
+            foreach (var t in _runtime.Ticks.ToArray()) t();
+        Assert.Equal(SmallFurnace, table.WaitingBuilding);
+
+        // It comes back as a new sprite: the row draws that one.
+        var again = new object();
+        _runtime.Buildings[SmallFurnace] = again;
+        UiBuildingIcons.Note(SmallFurnace, again);
+        foreach (var t in _runtime.Ticks.ToArray()) t();
+        Assert.Same(again, Row("d:row0").Images[UiDataTableLayout.CellIcon]);
+        Assert.Equal(0, table.WaitingBuilding);
+    }
+
+    [Fact]
+    public void The_icon_watch_checks_every_60_frames_only_while_a_building_icon_is_drawn()
+    {
+        var watch = new UiBuildingIconWatch(4);
+        Assert.False(watch.Due());
+        var sprite = new object();
+        watch.Drawn(1, Fabricator, sprite);
+        watch.Drawn(9, Fabricator, sprite); // out of range: ignored
+        for (int i = 1; i < UiBuildingIconWatch.CheckEveryFrames; i++) Assert.False(watch.Due());
+        Assert.True(watch.Due());
+        Assert.False(watch.Stale(_ => sprite));
+        Assert.True(watch.Stale(_ => null));
+        Assert.True(watch.Stale(_ => new object()));
+        watch.BeginRender();
+        Assert.False(watch.Any);
+        Assert.False(watch.Stale(_ => null));
     }
 
     [Fact]

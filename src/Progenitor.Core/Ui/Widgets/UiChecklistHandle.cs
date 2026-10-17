@@ -700,12 +700,16 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private int _waitingBuilding;
     private int _iconVersion;
     private IDisposable? _iconTick;
+    private UiBuildingIconWatch? _iconWatch;
+
+    /// <summary>HUB1: the building icons drawn rows show, checked now and then for a sprite the game unloaded.</summary>
+    private UiBuildingIconWatch IconWatch => _iconWatch ??= new UiBuildingIconWatch(_images.Length);
 
     internal int WaitingBuilding => _waitingBuilding;
 
     private void SyncIconTick()
     {
-        if (_waitingBuilding == 0 || IsDisposed)
+        if ((_waitingBuilding == 0 && _iconWatch is not { Any: true }) || IsDisposed)
         {
             var t = _iconTick;
             _iconTick = null;
@@ -721,7 +725,16 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     internal void IconTick()
     {
-        if (IsDisposed || _waitingBuilding == 0) return;
+        if (IsDisposed) return;
+        // A drawn building icon whose sprite the game unloaded (or that changed) draws again: dropped or resolved anew.
+        if (_iconWatch != null && _iconWatch.Due() && Visible && Panel.State == UiHandleState.Shown
+            && WidgetRuntime.Current is { } watchRuntime && _iconWatch.Stale(watchRuntime.BuildingIcon))
+        {
+            Render();
+            return;
+        }
+
+        if (_waitingBuilding == 0) return;
         if (UiBuildingIcons.Version != _iconVersion)
         {
             Render();
@@ -882,6 +895,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             _renderedLines = lines;
             _renderedTop = _viewport.Top;
             _waitingBuilding = 0;
+            IconWatch.BeginRender();
             _iconVersion = UiBuildingIcons.Version;
 
             RenderSearch();
@@ -1045,6 +1059,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
                 try { icon = WidgetRuntime.Current?.BuildingIcon(entry.BuildingPrefab); }
                 catch { icon = null; }
                 if (icon == null) _waitingBuilding = entry.BuildingPrefab;
+                else IconWatch.Drawn(slot, entry.BuildingPrefab, icon);
             }
         }
 

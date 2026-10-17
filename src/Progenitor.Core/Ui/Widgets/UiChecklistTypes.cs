@@ -99,7 +99,7 @@ public sealed class UiChecklistEntry
     /// <summary>
     /// A castle building's prefab id (a chest, a station) whose build-menu icon the row shows when <see cref="Icon"/> is null
     /// and <see cref="ItemPrefab"/> is 0 (<see cref="UiTableRow.BuildingPrefab"/>'s rule: an aligned blank until the game has
-    /// drawn that building in its build menu this session); 0 for none.
+    /// that building's blueprint icon loaded); 0 for none.
     /// </summary>
     public int BuildingPrefab { get; set; }
 

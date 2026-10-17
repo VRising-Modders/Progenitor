@@ -309,8 +309,8 @@ public sealed class UiTableRow
 
     /// <summary>
     /// HUB1: a castle building's prefab id (a chest, a station, a prison cell) whose icon from the game's build menu the row
-    /// shows when <see cref="Icon"/> is null and <see cref="ItemPrefab"/> is 0; 0 for none. Until the game has drawn that
-    /// building in its build menu this session, the row keeps an empty, aligned icon place (<see cref="UiBuildingIcons"/>).
+    /// shows when <see cref="Icon"/> is null and <see cref="ItemPrefab"/> is 0; 0 for none: the building's own blueprint
+    /// icon. Until the game has that icon loaded, the row keeps an empty, aligned icon place (<see cref="UiBuildingIcons"/>).
     /// </summary>
     public int BuildingPrefab { get; set; }
 

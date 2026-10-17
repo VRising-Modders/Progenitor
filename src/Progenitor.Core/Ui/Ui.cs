@@ -692,6 +692,9 @@ public static partial class Ui
 
         // P7: the widget backends' process-wide state (tooltip, HUD notices, Locate pings, a world pick, a drag).
         try { UiKeyHints.Reset(); UiBuildingIcons.Clear(); } catch { /* HUB1: the key hints and building icons go with Core */ }
+#if !PROGENITOR_TESTS
+        try { UnityBuildingIcons.Clear(); } catch { /* HUB1: the blueprint icon ids go with Core too */ }
+#endif
         try { UiWidgetLifetime.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget teardown threw: " + e.Message); }
 
