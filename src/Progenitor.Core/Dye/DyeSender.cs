@@ -94,7 +94,8 @@ internal static unsafe class DyeSender
 
         var keys = has && palettes ? ReadPalettes(em, entity, log) : null;
         return new DyeItem(entity.Index, entity.Version, present: true, has,
-            has ? data.ActiveTransmogIndex : (byte)0, has ? data.NumColorOptions : (byte)0, keys, slot.HideEquipment);
+            has ? data.ActiveTransmogIndex : (byte)0, has ? data.NumColorOptions : (byte)0, keys, slot.HideEquipment,
+            broken: slot.IsBroken);
     }
 
     /// <summary>

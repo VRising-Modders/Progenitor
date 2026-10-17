@@ -187,150 +187,94 @@ public class DyeAllTests : IDisposable
     }
 
     [Fact]
-    public void A_transmog_is_dyed_with_its_cosmetic_type_and_the_covered_piece_with_its_stat_type()
+    public void A_shown_transmog_is_dyed_with_its_cosmetic_type_and_the_gear_under_it_keeps_its_color()
     {
-        var slots = Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20)));
-        var plan = DyePlanner.Plan(slots, new DyeColor(2, null), includeCovered: true);
-        // The covered piece goes first: the server re-keys the shown (transmog) slot from whichever item an
-        // event names, so the transmog's own event must be the last word on what is shown.
-        Assert.Equal(new[] { (1, 10), (12, 20) }, plan.Targets.Select(t => (t.EquipmentType, t.Item.Index)).ToArray());
-        Assert.DoesNotContain(plan.Targets, t => t.Restore);
-
-        var visibleOnly = DyePlanner.Plan(slots, new DyeColor(2, null), includeCovered: false);
-        Assert.Equal(new[] { (12, 20) }, visibleOnly.Targets.Select(t => (t.EquipmentType, t.Item.Index)).ToArray());
+        var plan = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20))), new DyeColor(2, null));
+        var target = Assert.Single(plan.Targets);
+        Assert.Equal((DyeEquipmentTypes.CosmeticChest, 20, 2), (target.EquipmentType, target.Item.Index, (int)target.NewIndex));
+        Assert.DoesNotContain(plan.Targets, t => t.EquipmentType == DyeEquipmentTypes.Chest);
     }
 
     [Fact]
-    public void A_transmog_that_keeps_its_color_is_sent_its_own_index_after_the_covered_piece()
+    public void A_transmog_that_keeps_its_color_sends_nothing_for_its_slot_and_the_gear_is_not_dyed_instead()
     {
-        // Already that color: the covered chest is dyed, then the transmog is sent its current index back.
+        // Already that color.
         var already = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10, active: 0), Dyeable(20, active: 2))),
             new DyeColor(2, null));
-        Assert.Equal(new[] { (1, 10, 2, false), (12, 20, 2, true) },
-            already.Targets.Select(t => (t.EquipmentType, t.Item.Index, (int)t.NewIndex, t.Restore)).ToArray());
-        Assert.Contains(already.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticChest && s.Reason == DyeSkipReason.AlreadyThatColor);
-        Assert.Contains("chest (transmog) kept at 2", already.Describe(), StringComparison.Ordinal);
+        Assert.Empty(already.Targets);
+        Assert.Equal(new[] { (DyeEquipmentTypes.CosmeticChest, DyeSkipReason.AlreadyThatColor) },
+            already.Skipped.Where(s => s.Reason != DyeSkipReason.Empty).Select(s => (s.EquipmentType, s.Reason)).ToArray());
 
-        // Index past the transmog's colors: the gear still takes it; the transmog keeps index 1.
+        // Index past the transmog's colors, though the gear under it has that many.
         var shortList = DyePlanner.Plan(Slots((DyeEquipmentTypes.Legs, Dyeable(11, colors: 20), Dyeable(21, active: 1, colors: 4))),
             new DyeColor(9, null));
-        Assert.Equal(new[] { (5, 9, false), (14, 1, true) },
-            shortList.Targets.Select(t => (t.EquipmentType, (int)t.NewIndex, t.Restore)).ToArray());
+        Assert.Empty(shortList.Targets);
+        Assert.Contains(shortList.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticLegs && s.Reason == DyeSkipReason.IndexOutOfRange);
 
-        // Palette missing on the transmog (palette matching on): restored too.
+        // The transmog has no colors.
+        var plain = DyePlanner.Plan(Slots((DyeEquipmentTypes.Cloak, Dyeable(13), Plain(23))), new DyeColor(4, null));
+        Assert.Empty(plain.Targets);
+        Assert.Contains(plain.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticCloak && s.Reason == DyeSkipReason.NotDyeable);
+
+        // Palette missing on the transmog (palette matching on).
         var source = new[] { new DyePaletteKey(111, 0, 10) };
         var other = new[] { new DyePaletteKey(222, 0, 10) };
         var missing = DyePlanner.Plan(Slots((DyeEquipmentTypes.Gloves, Dyeable(12, colors: 10, palettes: source),
             Dyeable(22, active: 3, colors: 10, palettes: other))), new DyeColor(5, source));
-        Assert.Equal(new[] { (9, 5, false), (16, 3, true) },
-            missing.Targets.Select(t => (t.EquipmentType, (int)t.NewIndex, t.Restore)).ToArray());
+        Assert.Empty(missing.Targets);
+        Assert.Contains(missing.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticGloves && s.Reason == DyeSkipReason.PaletteMissing);
     }
 
     [Fact]
-    public void A_covered_piece_is_left_alone_when_the_transmog_could_not_be_put_back()
+    public void A_hidden_slot_keeps_its_color()
     {
-        // The transmog has no colors: no event can restore its shown color.
-        var plain = DyePlanner.Plan(Slots((DyeEquipmentTypes.Cloak, Dyeable(13), Plain(23))), new DyeColor(4, null));
-        Assert.Empty(plain.Targets);
-        Assert.Contains(plain.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Cloak && s.Reason == DyeSkipReason.TransmogWouldChange);
-        Assert.Contains(plain.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticCloak && s.Reason == DyeSkipReason.NotDyeable);
+        // Gear hidden with the X cell, no transmog.
+        var gear = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10, hidden: true), DyeItem.None)), new DyeColor(4, null));
+        Assert.Empty(gear.Targets);
+        Assert.Contains(gear.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Chest && s.Reason == DyeSkipReason.Hidden);
 
-        // The transmog is hidden and keeps its color: a restore would show it again.
-        var hidden = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20, active: 4, hidden: true))),
+        // Transmog hidden with the X cell: neither it nor the gear under it is dyed.
+        var transmog = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20, active: 1, hidden: true))),
             new DyeColor(4, null));
-        Assert.Empty(hidden.Targets);
-        Assert.Contains(hidden.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Chest && s.Reason == DyeSkipReason.TransmogWouldChange);
-
-        // A hidden transmog that is dyed anyway (its own swatch event shows it, as the game's click does).
-        var dyed = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20, active: 1, hidden: true))),
-            new DyeColor(4, null));
-        Assert.Equal(new[] { (1, 10, 4, false), (12, 20, 4, false) },
-            dyed.Targets.Select(t => (t.EquipmentType, t.Item.Index, (int)t.NewIndex, t.Restore)).ToArray());
+        Assert.Empty(transmog.Targets);
+        Assert.Contains(transmog.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticChest && s.Reason == DyeSkipReason.Hidden);
+        Assert.DoesNotContain(transmog.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Chest);
     }
 
     [Fact]
-    public void A_hidden_gear_piece_under_a_transmog_is_left_alone_and_the_transmog_is_still_dyed()
+    public void Hidden_gear_under_a_shown_transmog_does_not_stop_the_transmog()
     {
-        // The player hid the chest gear, then put a transmog on: the gear's own event would un-hide it.
         var plan = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10, hidden: true), Dyeable(20, active: 1))),
             new DyeColor(4, null));
         var target = Assert.Single(plan.Targets);
-        Assert.Equal((DyeEquipmentTypes.CosmeticChest, 20, 4, false), (target.EquipmentType, target.Item.Index, (int)target.NewIndex, target.Restore));
-        Assert.Contains(plan.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Chest && s.Reason == DyeSkipReason.CoveredHidden);
-
-        // Hidden gear and a transmog that keeps its color: nothing at all.
-        var none = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10, hidden: true), Dyeable(20, active: 4))),
-            new DyeColor(4, null));
-        Assert.Empty(none.Targets);
-        Assert.Contains(none.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Chest && s.Reason == DyeSkipReason.CoveredHidden);
+        Assert.Equal((DyeEquipmentTypes.CosmeticChest, 20, 4), (target.EquipmentType, target.Item.Index, (int)target.NewIndex));
     }
 
     [Fact]
-    public void A_gear_piece_skipped_for_its_own_reason_leaves_only_the_transmog_event()
+    public void A_broken_piece_shows_the_default_model_and_keeps_its_color()
     {
-        // Index past the gear's colors.
-        var range = DyePlanner.Plan(Slots((DyeEquipmentTypes.Legs, Dyeable(11, colors: 4), Dyeable(21, active: 0, colors: 20))),
-            new DyeColor(9, null));
-        var t1 = Assert.Single(range.Targets);
-        Assert.Equal((DyeEquipmentTypes.CosmeticLegs, 9, false), (t1.EquipmentType, (int)t1.NewIndex, t1.Restore));
-        Assert.Contains(range.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Legs && s.Reason == DyeSkipReason.IndexOutOfRange);
+        var broken = new DyeItem(10, 1, present: true, hasTransmog: true, 0, 20, broken: true);
+        var plan = DyePlanner.Plan(Slots((DyeEquipmentTypes.Legs, broken, DyeItem.None)), new DyeColor(4, null));
+        Assert.Empty(plan.Targets);
+        Assert.Contains(plan.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Legs && s.Reason == DyeSkipReason.Broken);
 
-        // Palette missing on the gear (palette matching on).
-        var source = new[] { new DyePaletteKey(111, 0, 10) };
-        var other = new[] { new DyePaletteKey(222, 0, 10) };
-        var missing = DyePlanner.Plan(Slots((DyeEquipmentTypes.Gloves, Dyeable(12, colors: 10, palettes: other),
-            Dyeable(22, active: 0, colors: 10, palettes: source))), new DyeColor(5, source));
-        var t2 = Assert.Single(missing.Targets);
-        Assert.Equal((DyeEquipmentTypes.CosmeticGloves, 5, false), (t2.EquipmentType, (int)t2.NewIndex, t2.Restore));
-        Assert.Contains(missing.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Gloves && s.Reason == DyeSkipReason.PaletteMissing);
+        // Broken gear under a shown transmog: the transmog shows, so it is dyed.
+        var covered = DyePlanner.Plan(Slots((DyeEquipmentTypes.Legs, broken, Dyeable(20))), new DyeColor(4, null));
+        Assert.Equal(DyeEquipmentTypes.CosmeticLegs, Assert.Single(covered.Targets).EquipmentType);
     }
 
     [Fact]
-    public void A_hidden_transmog_without_covered_pieces_follows_the_games_click()
+    public void A_transmog_still_waiting_for_sync_owns_its_slot_and_nothing_is_sent_there()
     {
-        // Dyed: the transmog's own event, as a click on that swatch would send.
-        var dyed = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20, active: 1, hidden: true))),
-            new DyeColor(4, null), includeCovered: false);
-        var target = Assert.Single(dyed.Targets);
-        Assert.Equal((DyeEquipmentTypes.CosmeticChest, 20, 4, false), (target.EquipmentType, target.Item.Index, (int)target.NewIndex, target.Restore));
-
-        // Already that color: nothing, and no restore (no gear event went first).
-        var same = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20, active: 4, hidden: true))),
-            new DyeColor(4, null), includeCovered: false);
-        Assert.Empty(same.Targets);
-    }
-
-    [Fact]
-    public void A_transmog_still_waiting_for_sync_counts_as_covering_its_slot()
-    {
-        // The server already sees the transmog (SlotId set); a gear event would re-key it from the gear's palettes.
-        foreach (bool includeCovered in new[] { true, false })
-        {
-            var plan = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), DyeItem.Pending())),
-                new DyeColor(4, null), includeCovered);
-            Assert.Empty(plan.Targets);
-            Assert.Contains(plan.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticChest && s.Reason == DyeSkipReason.TransmogNotSynced);
-        }
+        // The game already shows the transmog (SlotId set), but its item cannot be named yet; the gear is not shown.
+        var plan = DyePlanner.Plan(Slots((DyeEquipmentTypes.Chest, Dyeable(10), DyeItem.Pending())), new DyeColor(4, null));
+        Assert.Empty(plan.Targets);
+        Assert.Contains(plan.Skipped, s => s.EquipmentType == DyeEquipmentTypes.CosmeticChest && s.Reason == DyeSkipReason.TransmogNotSynced);
 
         Assert.True(DyeItem.Pending().Slotted);
         Assert.False(DyeItem.Pending().Present);
         Assert.False(DyeItem.None.Slotted);
         Assert.True(Dyeable(1).Slotted);
-    }
-
-    [Fact]
-    public void A_covered_piece_that_needs_nothing_sends_only_the_transmog()
-    {
-        var plan = DyePlanner.Plan(Slots((DyeEquipmentTypes.Footgear, Dyeable(14, active: 6), Dyeable(24, active: 1))),
-            new DyeColor(6, null));
-        var target = Assert.Single(plan.Targets);
-        Assert.Equal((DyeEquipmentTypes.CosmeticFootgear, false), (target.EquipmentType, target.Restore));
-        Assert.Contains(plan.Skipped, s => s.EquipmentType == DyeEquipmentTypes.Footgear && s.Reason == DyeSkipReason.AlreadyThatColor);
-
-        // Both already that color: nothing at all is sent.
-        var none = DyePlanner.Plan(Slots((DyeEquipmentTypes.Footgear, Dyeable(14, active: 6), Dyeable(24, active: 6))),
-            new DyeColor(6, null));
-        Assert.Empty(none.Targets);
     }
 
     [Fact]
@@ -343,13 +287,38 @@ public class DyeAllTests : IDisposable
     }
 
     [Fact]
-    public void Choose_follows_the_picker_rule()
+    public void Visible_follows_the_games_render_rule()
     {
-        Assert.True(DyePlanner.Choose(new DyeSlot(5, Dyeable(1), Dyeable(2)), out int t1, out var i1));
+        // Transmog set: it shows, whatever the gear is.
+        Assert.Null(DyePlanner.Visible(new DyeSlot(5, Dyeable(1), Dyeable(2)), out int t1, out var i1));
         Assert.Equal((14, 2), (t1, i1.Index));
-        Assert.True(DyePlanner.Choose(new DyeSlot(5, Dyeable(1), DyeItem.None), out int t2, out var i2));
-        Assert.Equal((5, 1), (t2, i2.Index));
-        Assert.False(DyePlanner.Choose(new DyeSlot(5, DyeItem.None, DyeItem.None), out _, out _));
+        Assert.Null(DyePlanner.Visible(new DyeSlot(5, Dyeable(1, hidden: true), Dyeable(2)), out int t2, out var i2));
+        Assert.Equal((14, 2), (t2, i2.Index));
+        Assert.Equal(DyeSkipReason.Hidden, DyePlanner.Visible(new DyeSlot(5, Dyeable(1), Dyeable(2, hidden: true)), out int t3, out _));
+        Assert.Equal(14, t3);
+
+        // No transmog: the gear, unless hidden.
+        Assert.Null(DyePlanner.Visible(new DyeSlot(5, Dyeable(1), DyeItem.None), out int t4, out var i4));
+        Assert.Equal((5, 1), (t4, i4.Index));
+        Assert.Equal(DyeSkipReason.Hidden, DyePlanner.Visible(new DyeSlot(5, Dyeable(1, hidden: true), DyeItem.None), out _, out _));
+        Assert.Equal(DyeSkipReason.Empty, DyePlanner.Visible(new DyeSlot(5, DyeItem.None, DyeItem.None), out int t5, out _));
+        Assert.Equal(5, t5);
+    }
+
+    [Fact]
+    public void One_hold_dyes_each_slot_by_what_it_shows()
+    {
+        var slots = Slots(
+            (DyeEquipmentTypes.Chest, Dyeable(10), Dyeable(20)),                    // transmog shows
+            (DyeEquipmentTypes.Legs, Dyeable(11), DyeItem.None),                    // gear shows
+            (DyeEquipmentTypes.Footgear, Dyeable(12, hidden: true), DyeItem.None),  // hidden
+            (DyeEquipmentTypes.Gloves, Dyeable(13), Dyeable(23, hidden: true)),     // hidden transmog
+            (DyeEquipmentTypes.Cloak, Dyeable(14, hidden: true), Dyeable(24)));     // transmog over hidden gear
+        var plan = DyePlanner.Plan(slots, new DyeColor(7, null));
+        Assert.Equal(new[] { (12, 20), (5, 11), (15, 24) },
+            plan.Targets.Select(t => (t.EquipmentType, t.Item.Index)).ToArray());
+        Assert.Equal(new[] { (4, DyeSkipReason.Hidden), (16, DyeSkipReason.Hidden) },
+            plan.Skipped.Select(s => (s.EquipmentType, s.Reason)).ToArray());
     }
 
     [Fact]

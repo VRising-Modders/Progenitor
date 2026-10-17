@@ -5809,8 +5809,9 @@ The live check:
 ## Dye all
 
 A built-in client feature, **on by default**, with no plugin API. In the game's color picker in
-**Character > Equipment**, **hold** a color swatch: a ring fills over it, and when it completes every worn piece and
-every transmog takes that color. A normal **click** works as it does in the game and colors only the selected piece.
+**Character > Equipment**, **hold** a color swatch: a ring fills over it, and when it completes every piece the character visibly wears takes
+that color: the transmog where one shows, otherwise the worn piece, and nothing in a slot the player hid
+([Which pieces](#which-pieces)). A normal **click** works as it does in the game and colors only the selected piece.
 The game's key-hint row at the bottom of the inventory says so: next to the game's own *[left mouse] Set Color*,
 Core adds *Hold [left mouse] Set All*.
 
@@ -5871,7 +5872,7 @@ Core's own client cfg, which is never server-synced.
 | (cfg only) | `MatchPalettes` | `false` | Experimental, see [Indexes and palettes](#indexes-and-palettes). |
 | (cfg only) | `LegacySettingsImported` | `false` | Set once the former mod's cfg was looked for. |
 
-A hold is always 1 second, and a piece under a transmog is always dyed. **Also dye pieces under transmog** and **Hold time** were drawn on this page and then removed (2026-10-08): they are not settings, and an old `HoldSeconds` or `IncludeCovered` value is not read. Gear the player hid with the X cell is still left alone. See [Under a transmog](#under-a-transmog).
+A hold is always 1 second and dyes only what shows ([Which pieces](#which-pieces)). **Also dye pieces under transmog** and **Hold time** were drawn on this page and then removed (2026-10-08): they are not settings, and an old `HoldSeconds` or `IncludeCovered` value is not read.
 
 **Settings from the former mod.** On the first Core install with this feature, `BepInEx/config/progenitor.dyeall.cfg`
 is read once if it exists: `[Dye all] Enabled` and `MatchPalettes`
@@ -5917,89 +5918,46 @@ Uninstalling the old mod (or turning it off on its page) is the supported state.
 | Cancel | Releasing early, moving off the swatch, the panel closing (or the cell hiding, or its data changing), switching the feature off, standing down or Core uninstall cancels with nothing sent. | |
 | Apply | Reads the local character's `Equipment`, picks the pieces, and sends one `ChangeTransmogColorEvent` per piece through the client-to-server event recipe (event + `NetworkEventType` + `SendNetworkEventTag`, fields written at the offsets `Progenitor.Layout` declares, which the interop struct must match). No game method is called. | `ChangeTransmogColorEvent` (client dump 156747), EventId `-695231661` |
 
-**Which pieces.** The picker serves chest, legs, boots, gloves and cloak. For each, the cosmetic (transmog) piece when
-one is equipped, sent with the cosmetic equipment type (12 to 16), otherwise the stat piece, and the stat piece under a transmog too ([Under a transmog](#under-a-transmog)). A piece is skipped with no `TransmogData`, zero
-colors, the index already worn, or an index at or past its `NumColorOptions`. Headgear, weapon, magic source and bag are
-never colored.
+### Which pieces
 
-### Under a transmog
+The picker serves chest, legs, boots, gloves and cloak; headgear, weapon, magic source and bag are never colored. A hold
+dyes at most **one piece per slot: the one that shows** (changed 2026-10-17, decided: "only apply to the things that
+are visible"). **Status: source-checked, built and game-free tested (`DyeAllTests`); the new skips are not
+live-verified** (see the [live check](#live-check-core-version-not-run)). The transmog-only send itself is the event
+the game's click sends for a transmog, and was verified live on 2026-10-08 (Steam client, isolated test server): a
+send of only `chest (transmog)->12` left the gear under it at its own color and the transmog read 12.
 
-Added 2026-10-08 (decided: Dye all also dyes the pieces hidden under transmog). **Status: source-checked against
-the server metadata and native code, built, game-free tested (`DyeAllTests`) and live-verified on 2026-10-08 except recipe
-step 4 (whether the gear shows the color at once when the transmog comes off) and the hidden cases ([live
-results](#under-a-transmog-live-results)).**
+The rule is the game's own render rule, which the wearable code already follows: a slot shows its transmog when the
+cosmetic slot's `SlotId` is set, otherwise the stat piece; then that piece's `HideEquipment` (the picker's X cell) or
+`IsBroken` means the slot shows the default model instead. Everything comes from the typed `Equipment` read Dye all
+already makes; nothing new is read.
 
-**How the game stores it.** The color lives on each **item entity**: `TransmogData.ActiveTransmogIndex` (with
-`NumColorOptions`). A transmog is a separate item in the matching cosmetic slot of the character's `Equipment`
-(`ChestCosmeticSlot` and so on) with its own `TransmogData`, so the gear under it keeps its own color. Each
-`EquipmentSlot` also caches the shown palette key (`TransmogKey`, `TransmogIndex`) and the X cell's `HideEquipment`.
-Equipping an item rebuilds its slot key from the item's `TransmogData` (`Equipment.SetEquipped`).
-
-**What the event does under a transmog.** The server's handler stores the new index on the item the event names, then
-updates the slot key (`TransmogEventsSystem.UpdateTransmogColorForEquipmentSlot`). That write picks
-the slot by what is **shown**: for a stat type or its cosmetic type alike, it writes the cosmetic slot whenever a
-transmog is equipped, with the key looked up in the palettes of the item the event named, and clears that event type's
-`HideEquipment`. So the game's own event, sent for the stat piece under a transmog, does color the real gear, but also
-re-keys the transmog's shown color from the gear's palettes.
-
-**What Dye all sends.** For each covered slot, the stat piece first and the transmog right after it, so the transmog's
-own event is the last word on what is shown:
-
-| Transmog in that slot | Sent |
+| What the slot shows | Sent (skip reason in the log) |
 |---|---|
-| Takes the new color | stat piece → new color, then transmog → new color |
-| Keeps its color (already that color, index past its colors, palette missing) | stat piece → new color, then transmog → its own current index (logged as `… (transmog) kept at N`) |
-| Has no colors, or keeps its color while its model is hidden with the X cell (a restore would show it) | nothing for the stat piece (`TransmogWouldChange`); the transmog as above |
-| Stat piece already that color, or skipped for its own reason (palette missing, index past its colors) | the transmog only, as without the setting |
-| Stat piece hidden with the X cell (its event would clear the hide flag and show it when the transmog comes off) | nothing for the stat piece (`CoveredHidden`); the transmog as above |
-| Transmog equipped but its entity still waits for sync on the client | nothing for the slot (`TransmogNotSynced`); the next dye-all catches up |
+| A transmog | the transmog, with its cosmetic equipment type (12 to 16). The gear under it keeps its own color. |
+| A transmog the player hid with the X cell | nothing (`Hidden`), neither for the transmog nor for the gear under it |
+| A transmog whose entity still waits for sync on the client | nothing (`TransmogNotSynced`); a later hold catches up |
+| The worn piece (no transmog) | the worn piece, with its stat type |
+| The worn piece, hidden with the X cell | nothing (`Hidden`) |
+| The worn piece, broken | nothing (`Broken`) |
+| Nothing | nothing (`Empty`) |
 
-"Covered" is the server's own test: the transmog slot's `SlotId` is nonzero, which is true before the client can use
-the transmog's entity. Dye all always sends this plan. There is no setting that dyes only the shown piece.
+A shown piece is also skipped with no `TransmogData` or zero colors (`NotDyeable`), the index already worn
+(`AlreadyThatColor`), an index at or past its `NumColorOptions` (`IndexOutOfRange`), or, with `MatchPalettes`, a
+palette it lacks (`PaletteMissing`). The gear under a transmog is never dyed in its place. A hidden gear piece under a
+shown transmog does not matter: the transmog is what shows, so it is dyed.
 
-**Event order.** Confirmed: the server handles color events one at a time, re-reading `Equipment` for each. **Not
-verified**: that one client's events are handled in the order they were sent. The plan depends on it (the stat
-event before the transmog's); step 3 of the recipe below checks the outcome.
+**Why a hidden slot is left alone.** The server's handler stores the new index on the item the event names, re-keys
+the slot that shows it from that item's own palettes (`TransmogEventsSystem.UpdateTransmogColorForEquipmentSlot`), and
+clears the hide flag of the event's slot. An event for a hidden piece would therefore show it again. An event for a
+shown piece changes nothing but its color.
 
-**Not proven.** That a removed transmog shows the new color at once: the gear's color is stored on the item, and the
-stat slot's cached key is rebuilt when the item is equipped, but no event rewrites that key while a transmog covers it,
-so the gear may show its old color until it is re-equipped. The live recipe below checks both.
-
-<a id="under-a-transmog-live-results"></a>**Live results (2026-10-08, Steam client on the isolated test server,
-Core from this branch).** The character wore `Item_Chest_T09_Dracula_Scholar` as the chest with
-`Item_Chest_T09_Dracula_Warrior` as its transmog (equipped through the game's `EquipItemEvent`, cosmetic for the
-transmog); both started at index 0 of 31.
-
-- **Setting on, color 7:** `chest->7, chest (transmog)->7` (the stat piece first). Both items' `ActiveTransmogIndex` read
-  7, and `ChestCosmeticSlot` read index 7. Both chests carry the same palette key, so this run cannot show whether the
-  events were handled out of order. The covered `ArmorChestSlot` kept its cached index 0, as expected while covered.
-- **Setting off, color 12:** only `chest (transmog)->12` was sent. The gear stayed 7 and the transmog read 12.
-- **Setting on, the transmog's own color 12:** `chest->12, chest (transmog) kept at 12`. Both items read 12 and
-  `ChestCosmeticSlot` read index 12 (the restore re-keyed it).
-- **Not run:** step 4 (taking the transmog off needs the game in front), a hidden stat piece or hidden transmog, and a
-  transmog waiting for sync.
-
-**Live recipe.** Isolated test server and Steam client only. Wear a dyeable chest with a dyeable chest
-transmog over it (and ideally one slot without a transmog). There is no dye key; the check is a hold on a swatch, as in
-the [live check](#live-check-core-version-not-run).
-
-1. Read the starting colors on the server: `get` the character's `Equipment` (note the `ArmorChestSlot` and
-   `ChestCosmeticSlot` entities and `TransmogIndex`) and `get` `TransmogData` on both items.
-2. In Character > Equipment, hold a swatch neither piece wears. Client log: `Dye all (hold): color N, sent …: chest->N,
-   chest (transmog)->N, …` (the chest before its transmog).
-3. Read back: both items' `TransmogData.ActiveTransmogIndex` is N. On the character's `Equipment`,
-   `ChestCosmeticSlot.TransmogIndex` is N and `ChestCosmeticSlot.TransmogKey` is the transmog's own palette key for N
-   (compare with the transmog item's `TransmogAssetKeyBlobData` rows), not the chest's. A chest-palette key here means
-   the events were handled out of order. Capture the character: the transmog shows the swatch color.
-4. Unequip the chest transmog in game (foreground, a fresh yes) and capture: record whether the chest shows color N at
-   once or only after re-equipping it. Re-read `ArmorChestSlot.TransmogIndex`.
-5. Put the transmog back and hold the swatch it already wears: the log shows `chest (transmog) kept at …` and a capture
-   shows the transmog unchanged.
-6. Leave the client at the title screen. Covered dyeing is not a setting, so there is no off step.
+**Before 2026-10-17** a hold also dyed the gear under a transmog (sent first, then the transmog with its new color or
+its own index back) and dyed hidden pieces. That plan is gone; its research is in the internal research notes.
 
 **The server.** `TransmogEventsSystem` requires the event's character to be the sender, the item to
 have `TransmogData` and be equipped in that slot, and `NewIndex < NumColorOptions`; there is no rate limit and no
-per-color unlock check. One dye-all is at most ten events in one frame. **Nothing new is needed on the server**: it is
+per-color unlock check. One dye-all is at most five events in one frame. **Nothing new is needed on the server**: it is
 the game's own event, which the game's server accepts with or without Progenitor.
 
 ### Indexes and palettes
@@ -6019,7 +5977,8 @@ equipped check, as they do for the game's picker.
 
 Steam client on the isolated test server, never the live server. Check the client is free (not joining, not in use)
 before a Core hot swap, and that no old `Progenitor.DyeAll.dll` is left in the client's `BepInEx/progenitor-reload`
-(or deliberately leave one for step 4). Wear at least two dyeable pieces, ideally one with a transmog over it.
+(or deliberately leave one for step 5). Wear a dyeable chest with a dyeable chest transmog over it, dyeable legs
+with no transmog, and dyeable boots hidden with the picker's X cell.
 
 1. Deploy Core to the client (`./tools/deploy.ps1 -Projects Progenitor.Core -Side client -NoBuild` after a Debug build).
    Client log: `Dye all: no progenitor.dyeall.cfg …` or `Dye all: copied N setting(s) …`, then
@@ -6031,12 +5990,16 @@ before a Core hot swap, and that no old `Progenitor.DyeAll.dll` is left in the c
 3. The gesture (foreground, needs a fresh yes): open Character > Equipment, select a dyeable slot. Within two seconds
    of the first open (a quarter second on later opens) the key-hint row at the bottom reads
    *[left mouse] Set Color  Hold [left mouse] Set All*. A click colors only the selected piece. A 1 s hold fills the ring, pulses, logs
-   `Dye all (hold): color M, sent …`, and every worn piece takes the color. Release early: `Dye all: hold canceled (Released).`
-   Read back on the server with `get` on each worn item's `TransmogData`.
-4. Former mod (optional): with an old `Progenitor.DyeAll.dll` in the reload folder, the log shows the stand-down line,
+   `Dye all (hold): color M, sent …`, and every piece that shows takes the color. Release early: `Dye all: hold canceled (Released).`
+4. Only what shows: hold a swatch none of the pieces wears. Expect the log `… chest (transmog)->M, legs->M, boots skipped
+   (Hidden) …` and no `chest->M`. Read back on the server with `get` on each item's `TransmogData`: the transmog and the
+   legs read M; the chest gear under the transmog and the hidden boots keep their old index, and the boots stay hidden
+   (`ArmorFootgearSlot.HideEquipment` true). Then hide the chest transmog with its X cell and hold another swatch: the
+   log reads `chest (transmog) skipped (Hidden)`, and neither chest item changes.
+5. Former mod (optional): with an old `Progenitor.DyeAll.dll` in the reload folder, the log shows the stand-down line,
    only one ring and one key tip appear, and its Mods page reads *Now part of Progenitor; you can uninstall this mod.*
    Turn it off on its page: `… Progenitor's copy is active.` within a quarter second.
-5. Remove any old Dye all DLL you placed, disconnect and leave the client at the title screen.
+6. Show the pieces you hid again, remove any old Dye all DLL you placed, disconnect and leave the client at the title screen.
 
 ## Share a map location
 
