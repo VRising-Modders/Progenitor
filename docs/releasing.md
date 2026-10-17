@@ -42,7 +42,7 @@ After the switch, open the Security tab once as an outside reader would and conf
 
 1. Confirm `main` is green and the [roadmap](roadmap.md) and [api.md](api.md) match what ships.
 2. Versions are computed from git ([versioning.md](versioning.md)); do not edit version numbers by hand. Build the package with `powershell -File tools/package.ps1` (never `-IncludeDev` for a public release: the dev bridge must not ship).
-3. Inspect the zip's file list: Bootstrap, Core and the preloader, and no `Progenitor.Dev.dll`, token or opt-in marker.
+3. Inspect both zips' file lists: Bootstrap, Core and the preloader, and no `Progenitor.Dev.dll`, token or opt-in marker. `packaging/out/Progenitor-<version>.zip` is the manual install; its only root entry is `BepInEx/`. `packaging/out/Progenitor-<version>-thunderstore.zip` is the same tree plus the Thunderstore root files.
 4. Create a **signed, annotated tag** on the release commit and push it:
 
    ```
@@ -50,6 +50,6 @@ After the switch, open the Security tab once as an outside reader would and conf
    git push origin v<version>
    ```
 
-5. Create the GitHub release from the tag with the changelog (`packaging/thunderstore/CHANGELOG.md`) and attach the package zip.
-6. Publish the same zip to Thunderstore as `VRising_Modders-Progenitor`. The package layout, dependencies and checks are in [publishing.md](publishing.md); Progenitor's own package files are under `packaging/thunderstore/`.
+5. Create the GitHub release from the tag with the changelog (`packaging/thunderstore/CHANGELOG.md`) and attach `Progenitor-<version>.zip` (the manual install players download), `Progenitor-<version>-thunderstore.zip` and `SHA256SUMS`.
+6. Publish `Progenitor-<version>-thunderstore.zip` to Thunderstore as `VRising_Modders-Progenitor`. The package layout, dependencies and checks are in [publishing.md](publishing.md); Progenitor's own package files are under `packaging/thunderstore/`.
 7. Install the published package with a mod manager into a clean profile and confirm it loads on a client and on a test server you run yourself.

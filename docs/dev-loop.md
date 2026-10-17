@@ -419,7 +419,7 @@ describe the code you just wrote.
 | `*.token` (bridge token) | `Progenitor.Dev` at runtime | **never** | **never** — asserted | n/a |
 | `access.txt` / `tools/accessgen` output | repo-side generator; the access layer is **generated code compiled into Core**, so nothing is needed at runtime | **never** | **never** — asserted | n/a |
 | `tools/enc`, `tools/driftmap` build output | `dotnet build` of those tool projects | **never** | **never** — asserted | n/a |
-| `packaging/out/SHA256SUMS` | `package.ps1`, for the zip this run produced | n/a — deploy never reads or writes it | written beside the zip; every row pastes into `progenitor-allow.txt` | `Assert-NotForbidden` |
+| `packaging/out/SHA256SUMS` | `package.ps1`, for the two zips this run produced (manual install and Thunderstore) | n/a — deploy never reads or writes it | written beside the zip; every row pastes into `progenitor-allow.txt` | `Assert-NotForbidden` |
 
 The shared [path fence](../tools/common/Fence.ps1) resolves supported drive/share mappings, aliases and links before comparing directory boundaries. Unrecognized paths fail closed. Never work around a refusal by changing the spelling of the live-server path. Packaging asserts that runtime-owned and developer-only artifacts are absent; address-table deployment selects the client/server build tables, not every JSON file in that folder.
 
@@ -433,7 +433,7 @@ Status: source-checked, not live-verified.
 &./tools/deploy.ps1 -Projects Progenitor.Preloader -Side client
 ```
 
-Deploy copies it to `BepInEx/patchers/` (created if missing, behind the same live-server fence) **only while that side's process is stopped**. BepInEx loads patchers before the chainloader and nothing promotes a `.next` there, so there is no staging: for a running side, deploy prints a warning and skips that side. Stop the game or test server, deploy again, and the patcher takes effect at the next start. `-WhatIf` lists the planned copy as usual. `package.ps1` does not package the preloader yet.
+Deploy copies it to `BepInEx/patchers/` (created if missing, behind the same live-server fence) **only while that side's process is stopped**. BepInEx loads patchers before the chainloader and nothing promotes a `.next` there, so there is no staging: for a running side, deploy prints a warning and skips that side. Stop the game or test server, deploy again, and the patcher takes effect at the next start. `-WhatIf` lists the planned copy as usual. `package.ps1` packages it at `BepInEx/patchers/Progenitor.Preloader.dll` in both release zips.
 
 ## What needs a process restart
 
