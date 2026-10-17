@@ -816,6 +816,10 @@ internal static class ChatTabs
         if (TabsSetting != null) TabsSetting.Value = ChatTab.Save(Set.Tabs);
         if (ActiveSetting != null) ActiveSetting.Value = Set.Active;
         _built = "";
+        // The row is rebuilt now, not on the next frame, so a read right after the move (the bridge's chat_tabs move
+        // reply) shows the new order.
+        BuildIfNeeded();
+        Paint();
         Plugin.Logger?.LogInfo("Chat: moved tab " + Set.Tabs[Math.Max(0, Math.Min(Set.Tabs.Count - 1, to))].Name + " from " + from + " to " + to + ".");
         return true;
     }

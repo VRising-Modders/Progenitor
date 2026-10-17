@@ -134,6 +134,8 @@ public static partial class ModsMenu
     private static bool _awaitingNativeFrame;
     public static bool IsOpen =>
         _awaitingNativeFrame || Strip.IsOpen || Sidebar.IsOpen || Owned.IsOpen || SettingsPanel.IsMenuHostedOpen;
+    /// <summary>A framework dialog is on screen (over the workspace or over the HUD); the bridge's label-only <c>widget_click</c> reaches it.</summary>
+    public static bool DialogOpen => UiDialog.Current is { IsOpen: true };
     /// <summary>True while in-game open is waiting for a native frame before drawing panes.</summary>
     internal static bool AwaitingNativeFrame => _awaitingNativeFrame;
 #if PROGENITOR_TESTS

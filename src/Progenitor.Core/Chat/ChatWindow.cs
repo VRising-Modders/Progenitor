@@ -291,6 +291,10 @@ internal static class ChatWindow
         ChatInputTokens.Position = () => ChatGameData.TryLocalPosition(out float x, out float z) ? (true, x, z) : (false, 0f, 0f);
         ChatInputTokens.ItemIdByPrefabName = ChatGameData.ItemIdByPrefabName;
 
+        // The chat history is written when the client leaves the server, not when the next world loads.
+        Progenitor.Networking.Handshake.ClientConnectionEnded -= OnConnectionEnded;
+        Progenitor.Networking.Handshake.ClientConnectionEnded += OnConnectionEnded;
+
         Plugin.Frame += Watchdog;
         _frameHooked = true;
         _installed = true;
@@ -354,6 +358,7 @@ internal static class ChatWindow
     {
         if (!_installed) return;
         _installed = false;
+        try { Progenitor.Networking.Handshake.ClientConnectionEnded -= OnConnectionEnded; } catch { /* teardown */ }
         ChatFormat.ModTokenFinder = null;
         ChatView.OpenModLink = null;
         ChatFormat.ItemNameResolver = null;
@@ -389,6 +394,13 @@ internal static class ChatWindow
         try { GameInputBlocker.RemoveChatGuard(force: true); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Chat: click guard removal threw: " + e.Message); }
         ForgetWorld();
+    }
+
+    /// <summary>The client left the server: the chat view writes this server's history now (raised again for one leave; idempotent).</summary>
+    private static void OnConnectionEnded()
+    {
+        try { ChatView.OnLeftServer(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: saving the history on leaving the server threw: " + e.Message); }
     }
 
     private static void ForgetWorld()

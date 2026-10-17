@@ -636,7 +636,7 @@ Every modal dialog Progenitor shows uses one layout, `DialogLayout` (`src/Progen
 | Facts | (no game equivalent) | Unchanged: a muted label column and a bright value, no separators |
 
 - **Art source.** The sprites are parts of the settings kit's ladder (`SettingsArtLadder`, `SettingsArtDonors`), copied into Progenitor-owned textures on idle frames once a scene settles. The donors are every `CommonPopup` and its prefab; D1 found them resident and live at the title and in a world. A part that is not ready draws the kit's flat look.
-- **Readback.** `dialogs.art` gives each part's source: `frame`, `titleRule`, `button`, `buttonHover`, `buttonPressed`, `buttonDisabled` as `{source, donor, sprite, copy}`, and `overlay`.
+- **Readback.** `dialogs.art` gives each part's source: `frame`, `titleRule`, `button`, `buttonHover`, `buttonPressed`, `buttonDisabled`, and a form's check lines' `check` (the checkbox frame) and `checkMark` as `{source, donor, sprite, copy}`, and `overlay`. A check line draws the kit's box while either reads `kit` or `unresolved`, and the game's checkbox otherwise.
 - **Text input.** A Prompt's text field keeps the kit input box.
 
 ### Layout rules

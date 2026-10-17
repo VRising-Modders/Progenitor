@@ -30,6 +30,30 @@ internal enum UiSyntheticNav
 }
 
 /// <summary>
+/// The synthetic pointer's press edges for a reader that samples buttons itself instead of receiving the driver's
+/// pointer events (the chat log's link and line clicks): the buttons that went down since the last sample, derived from
+/// the held state. Sample once a frame; while the synthetic input is inactive nothing is pressed and the state is
+/// forgotten, so a lease that starts with a button held does not replay an old press. Game-free.
+/// </summary>
+internal sealed class UiSyntheticPressEdges
+{
+    private UiSyntheticButtons _seen;
+
+    internal UiSyntheticButtons Sample(bool active, UiSyntheticButtons held)
+    {
+        if (!active)
+        {
+            _seen = UiSyntheticButtons.None;
+            return UiSyntheticButtons.None;
+        }
+
+        var went = held & ~_seen;
+        _seen = held;
+        return went;
+    }
+}
+
+/// <summary>
 /// BRIDGEUI1: synthetic input at the UI kit's own input layer, for the dev bridge's <c>ui_input</c> op. While a lease is
 /// held, the kit's samplers (<c>UnityUiRuntime.SamplePointer</c>, <c>PrimaryPointerHeld</c>, <c>HeldClickModifiers</c>,
 /// the shown-input pump's wheel, click and typed-key reads, and NAV1's <c>SampleNav</c>) read this state instead of the

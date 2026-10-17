@@ -370,6 +370,9 @@ internal static class SettingsArtLadder
             ["buttonHover"] = art[SettingsArtPart.PopupButtonHover].Readback(),
             ["buttonPressed"] = art[SettingsArtPart.PopupButtonPressed].Readback(),
             ["buttonDisabled"] = art[SettingsArtPart.PopupButtonDisabled].Readback(),
+            // A form's check lines: the game's checkbox frame and mark (the kit's box when these read kit).
+            ["check"] = art[SettingsArtPart.CheckboxFrame].Readback(),
+            ["checkMark"] = art[SettingsArtPart.CheckboxMark].Readback(),
             // The blocker has no sprite in the game either: black at 0.8.
             ["overlay"] = "game-blocker-black-0.8",
         };

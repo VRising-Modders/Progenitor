@@ -95,10 +95,9 @@ internal static class ChatView
     private static Transform? _gameNode;
     private static int _drawnVersion = -1;
     private static ChatTab? _drawnTab;
-    private static string _host = "";
+    private static readonly ChatHistorySession History = new();
     private static string _serverName = "";
     private static string _ownName = "";
-    private static bool _restored;
     private static bool _warned;
 
     private sealed class ChatLineSlot
@@ -185,7 +184,10 @@ internal static class ChatView
 
     // ---- world lifetime ------------------------------------------------------------------------------------
 
-    /// <summary>A new client world: save the old server's log, start this server's (its history restored on attach).</summary>
+    /// <summary>
+    /// A new client world: start this server's log (its history restored on attach). The previous server's log was
+    /// written when the client left it (<see cref="OnLeftServer"/>); this writes it only when that leave was never seen.
+    /// </summary>
     internal static void OnWorldChanged()
     {
         Leave();
@@ -193,12 +195,18 @@ internal static class ChatView
         Log.Clear();
         Scroll.Follow();
         Restoring.Reset();
-        _restored = false;
+        History.Reset();
         _ownName = "";
-        _host = "";
         _serverName = "";
         Sent.Clear();
     }
+
+    /// <summary>
+    /// The client left the server (a disconnect, a kick, the walk to the main menu): write the history now, with the
+    /// "Left" divider, and close it, so nothing writes the previous server's file at the title or at the next world's
+    /// load. The lines stay on screen until the world goes.
+    /// </summary>
+    internal static void OnLeftServer() => Leave();
 
     /// <summary>Core unload or the view turned off: save, mark the session end, put the game's view back.</summary>
     internal static void Uninstall()
@@ -210,12 +218,14 @@ internal static class ChatView
         Log.Clear();
         Scroll.Follow();
         Restoring.Reset();
-        _restored = false;
+        History.Reset();
     }
 
     /// <summary>
-    /// Leaving the world or unloading: finish the history read and any background write (both are short; waited for
-    /// without a time limit so no background work outlives this world or this Core), then save on this thread.
+    /// Leaving the server or unloading: finish the history read and any background write (both are short; waited for
+    /// without a time limit so no background work outlives this world or this Core), then save on this thread. A leave
+    /// (<paramref name="marker"/>) adds the "Left" divider and closes the history, so it is written once; an unload
+    /// without the marker (a Core swap) writes without closing, and writes nothing once the history was closed.
     /// </summary>
     private static void Leave(bool marker = true)
     {
@@ -223,9 +233,10 @@ internal static class ChatView
         {
             if (_loadTask != null) PollLoad(wait: true);
             FinishRunningSave();
-            if (!_restored || _host.Length == 0) return;
+            string host = marker ? History.Close(Networking.Handshake.ClientConnectionSerial) : History.SaveHost;
+            if (host.Length == 0) return;
             if (marker) Log.AddMarker(ChatLog.LeftText(DateTime.Now), DateTime.UtcNow);
-            SaveNow();
+            SaveNow(host);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Chat: saving the chat history threw: " + e.Message); }
         finally
@@ -249,17 +260,18 @@ internal static class ChatView
     /// </summary>
     private static void RestoreHistory()
     {
-        if (_restored) return;
-        _restored = true;
-        try { _host = Networking.ServerModPause.CurrentHost() ?? ""; } catch { _host = ""; }
+        if (History.Opened) return;
+        string host;
+        try { host = Networking.ServerModPause.CurrentHost() ?? ""; } catch { host = ""; }
+        History.Open(host);
         try { _serverName = Networking.ServerModPause.CurrentServerName() ?? ""; } catch { _serverName = ""; }
         int keep = ChatLog.ClampCapacity(HistoryLines?.Value ?? ChatLog.DefaultCapacity);
         Log.Capacity = keep;
-        if ((KeepHistory?.Value ?? true) && _host.Length > 0)
+        if ((KeepHistory?.Value ?? true) && host.Length > 0)
         {
             try
             {
-                string path = HistoryPath(_host);
+                string path = HistoryPath(host);
                 if (File.Exists(path))
                 {
                     _loadStarted = Stopwatch.GetTimestamp();
@@ -301,7 +313,7 @@ internal static class ChatView
         Scroll.Follow();
     }
 
-    private static bool SavesHistory => (KeepHistory?.Value ?? true) && _host.Length > 0;
+    private static bool SavesHistory => (KeepHistory?.Value ?? true) && History.SaveHost.Length > 0;
 
     /// <summary>
     /// Each frame: once the schedule says so, copy the lines (plain values, on this thread) and write them on a
@@ -320,21 +332,21 @@ internal static class ChatView
         // Marked saved before the copy: a line arriving during the write marks it dirty again; a failed write does too.
         SaveSchedule.Saved();
         if (!SavesHistory) return;
-        string path = HistoryPath(_host);
+        string path = HistoryPath(History.SaveHost);
         var lines = Log.Snapshot(Log.Capacity);
         _saveTask = Task.Run(() => ChatHistoryFile.WriteAtomic(path, lines));
     }
 
     /// <summary>Leaving or unloading: write on this thread (any background write has finished). Saved only once written.</summary>
-    private static void SaveNow()
+    private static void SaveNow(string host)
     {
-        if (!SavesHistory)
+        if (!(KeepHistory?.Value ?? true) || host.Length == 0)
         {
             SaveSchedule.Saved();
             return;
         }
 
-        ChatHistoryFile.WriteAtomic(HistoryPath(_host), Log.Snapshot(Log.Capacity));
+        ChatHistoryFile.WriteAtomic(HistoryPath(host), Log.Snapshot(Log.Capacity));
         SaveSchedule.Saved();
         _saveWarned = false;
     }
@@ -580,6 +592,8 @@ internal static class ChatView
                 return;
             }
 
+            // Left the server and joined again in the same world: the closed log was the last session's; start anew.
+            if (History.RejoinedAt(Networking.Handshake.ClientConnectionSerial)) OnWorldChanged();
             RestoreHistory();
             PollLoad();
             ApplyCapacity();
@@ -596,6 +610,8 @@ internal static class ChatView
             KeepFontSize();
             UpdateNote();
             EndFlash(now: false);
+            // ui_input's synthetic clicks: their press edges come from the held state, sampled every frame.
+            _synthPressed = SynthClicks.Sample(UiSyntheticInput.Active, UiSyntheticInput.Buttons);
             if (chatShown && pointerOverLog)
             {
                 HandleClicks();
@@ -1106,10 +1122,14 @@ internal static class ChatView
 
     // ---- clicks --------------------------------------------------------------------------------------------
 
+    private static readonly UiSyntheticPressEdges SynthClicks = new();
+    private static UiSyntheticButtons _synthPressed;
+
     private static void HandleClicks()
     {
-        bool left = UnityInputRuntime.MouseButtonPressedThisFrame(0);
-        bool right = UnityInputRuntime.MouseButtonPressedThisFrame(1);
+        // The device's press, or the bridge's synthetic one (ui_input click at the pointer the samplers already read).
+        bool left = UnityInputRuntime.MouseButtonPressedThisFrame(0) || (_synthPressed & UiSyntheticButtons.Left) != 0;
+        bool right = UnityInputRuntime.MouseButtonPressedThisFrame(1) || (_synthPressed & UiSyntheticButtons.Right) != 0;
         if (!left && !right) return;
         if (!UnityUiRuntime.TrySamplePointerScreenAnyFocus(out float x, out float y)) return;
         var point = new Vector3(x, y, 0f);

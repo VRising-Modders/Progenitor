@@ -77,6 +77,12 @@ public static partial class Handshake
     /// saw it. With a handshake result other than ok, a join is between its connect and its answer.
     /// </summary>
     internal static bool ClientConnectionHeld => _heldClientConnection;
+
+    /// <summary>
+    /// How many connections this Core generation has seen the client take (connecting or connected after not), so a
+    /// reader can tell a new join from the one it saw leave even when the client world survives the leave.
+    /// </summary>
+    internal static int ClientConnectionSerial { get; private set; }
     private static bool _onDisconnectScreen;
 #endif
 
@@ -353,6 +359,7 @@ public static partial class Handshake
             ServerModPause.OnClientFrame(state == ClientState.Running);
             if (_heldClientConnection && ended)
                 NotifyClientConnectionEnded();
+            if (held && !_heldClientConnection) ClientConnectionSerial++;
             _heldClientConnection = held;
             // Error is the disconnect screen the deny panel occupies. Idle after that
             // is the main menu: dismiss, do not leave the overlay over the next world.

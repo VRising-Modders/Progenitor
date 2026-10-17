@@ -250,6 +250,21 @@ internal static class ModsUiArgs
         || (action is "keys" && !IsKeyConflictOp(op));
 
     /// <summary>
+    /// A <c>widget_click</c> that names a dialog's control by its label alone (no pane, no index) goes to the open
+    /// dialog first, so it is allowed with the workspace closed while a dialog is open over the HUD (a chat tab's
+    /// editor, a key-conflict prompt). Anything else still needs the open workspace.
+    /// </summary>
+    internal static bool RefusedWithWorkspaceClosed(Request request, bool dialogOpen)
+    {
+        if (!RequiresOpenWorkspace(request.Action, request.Op)) return false;
+        return !(dialogOpen && TargetsDialog(request));
+    }
+
+    /// <summary>A label-only <c>widget_click</c>: the form <see cref="ModsMenu.ClickVisibleWidget"/> sends to the open dialog.</summary>
+    internal static bool TargetsDialog(Request request) =>
+        request.Action == "widget_click" && request.Pane == null && request.Index == null && !string.IsNullOrWhiteSpace(request.Label);
+
+    /// <summary>
     /// KEYS4: <c>keys op=conflict</c> / <c>conflict-choose</c> read and answer the key-conflict dialog,
     /// which can be on screen over the HUD with the workspace closed.
     /// </summary>
@@ -1880,7 +1895,7 @@ internal static partial class ModsUiOps
         bool ok;
         try
         {
-            if (ModsUiArgs.RequiresOpenWorkspace(request.Action, request.Op) && !ModsMenu.IsOpen)
+            if (!ModsMenu.IsOpen && ModsUiArgs.RefusedWithWorkspaceClosed(request, ModsMenu.DialogOpen))
             {
                 return ModsUiResult.Envelope(
                     false, request.Action, before, status(false),
