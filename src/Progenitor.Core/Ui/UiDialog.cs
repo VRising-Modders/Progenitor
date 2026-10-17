@@ -721,6 +721,7 @@ internal sealed class UiDialog : IDisposable
             list.Add(new Dictionary<string, object?>
             {
                 ["index"] = i, ["row"] = DialogForm.CheckRow(i), ["label"] = checks[i].Label, ["on"] = checks[i].On,
+                ["color"] = checks[i].Color,
             });
         return list;
     }

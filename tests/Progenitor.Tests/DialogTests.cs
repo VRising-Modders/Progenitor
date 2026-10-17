@@ -416,6 +416,58 @@ public sealed class DialogTests : IDisposable
 
     private static DialogCheck Check(string label, bool on, string key = "") => new() { Label = label, On = on, Key = key };
 
+    private static CellSpec LabelCell(CellRowSpec row) => row.Cells.Single(c => c.Key == DialogForm.CellLabel);
+
+    [Fact]
+    public void Form_check_without_a_color_keeps_the_normal_label_color()
+    {
+        var check = Check("Blood", true);
+        Assert.Equal("", check.Color);
+        var label = LabelCell(DialogForm.CheckRowSpec(0, check));
+        Assert.Null(label.TextColor);
+        Assert.Equal(CellTone.Normal, label.Tone);
+        Assert.Equal("", new DialogCheck { Label = "x", Color = "blue" }.Color);
+        Assert.Equal("", new DialogCheck { Label = "x", Color = "#12345" }.Color);
+    }
+
+    [Fact]
+    public void Form_check_color_reaches_its_label_and_survives_a_flip()
+    {
+        var check = new DialogCheck { Label = "Global", Color = " #7ab8f5 " };
+        Assert.Equal("#7AB8F5", check.Color);
+        Assert.Equal("#7AB8F5", check.With(true).Color);
+        Assert.Equal("#7AB8F5", DialogForm.Flip(new[] { check }, 0)[0].Color);
+
+        var color = LabelCell(DialogForm.CheckRowSpec(0, check)).TextColor;
+        Assert.NotNull(color);
+        Assert.Equal(PaletteColor.Hex(0x7AB8F5), color!.Value);
+        // A disabled box draws the disabled tone, not its color.
+        Assert.Null(LabelCell(DialogForm.CheckRowSpec(0, check, enabled: false)).TextColor);
+    }
+
+    [Fact]
+    public void Form_check_color_too_dark_for_the_dialog_is_lifted()
+    {
+        var dark = DialogForm.ReadableLabel("#202040");
+        Assert.NotNull(dark);
+        Assert.True(dark!.Value.ContrastAgainst(MenuPalette.PaneFill) >= DialogForm.MinLabelContrast);
+        Assert.True(dark.Value.B > dark.Value.R);
+        Assert.Null(DialogForm.ReadableLabel(""));
+    }
+
+    [Fact]
+    public void Form_passes_check_colors_to_its_rows()
+    {
+        var dialog = UiDialogs.Form(_owner, Guid, Plain, "Tab", new DialogFormOptions
+        {
+            Checks = new[] { new DialogCheck { Label = "Global", Color = "#7AB8F5" }, Check("Plain", false) },
+        }, _ => { });
+        var view = dialog.View!;
+        Assert.Equal(PaletteColor.Hex(0x7AB8F5), view.CheckRows[0].Cells.Single(c => c.Key == DialogForm.CellLabel).TextColor);
+        Assert.Null(view.CheckRows[1].Cells.Single(c => c.Key == DialogForm.CellLabel).TextColor);
+        Assert.Equal("#7AB8F5", dialog.Content.Checks[0].Color);
+    }
+
     private UiDialog Form(Action<DialogFormResult> onSave, bool blood = true, bool gems = false, Func<DialogFormResult, string?>? validate = null) =>
         UiDialogs.Form(_owner, Guid, Plain, "Edit stall", new DialogFormOptions
         {

@@ -697,7 +697,7 @@ Shortened from `SampleDialogs.Facts` (**Dialogs → Facts dialog**). The readbac
 
 ### Form dialog (FORMDIALOG1)
 
-**Status: source-checked, built and game-free tested (`DialogTests` `A_form_*`, `ChatTabFormTests`, `UiNavTests.Tab_walks_a_dialogs_field_and_stops_and_Up_from_the_first_stop_returns_to_the_field`), not live-verified.** Decided 2026-10-17 from the user's review of the chat tab editor: changing what a tab shows must not need a Next step, the channel choices are check boxes like the game's Options menu, and Save is set apart from them.
+**Status: source-checked, built and game-free tested (`DialogTests` `A_form_*` and `Form_*`, `ChatTabFormTests`, `UiNavTests.Tab_walks_a_dialogs_field_and_stops_and_Up_from_the_first_stop_returns_to_the_field`), not live-verified.** Decided 2026-10-17 from the user's review of the chat tab editor: changing what a tab shows must not need a Next step, the channel choices are check boxes like the game's Options menu, and Save is set apart from them.
 
 ```
                     Edit tab
@@ -726,12 +726,14 @@ ctx.Dialogs.Form("Form dialog", new DialogFormOptions
         new DialogCheck { Label = "Blood", On = true, Key = "blood" },
         new DialogCheck { Label = "Weapons", Key = "weapons" },
         new DialogCheck { Label = "Gems", On = true, Key = "gems" },
+        new DialogCheck { Label = "Rare finds", Key = "rare", Color = "#B48CF0" },
     },
     RequireOne = true,
     NoneHint = "Turn on at least one stall.",
     Validate = r => r.Text.Trim().Length == 0 ? "Enter a name." : null,
     OnCancel = () => Say("cancel"),
-}, r => Say("\"" + r.Text + "\" blood=" + r.IsOn("blood") + " weapons=" + r.IsOn("weapons") + " gems=" + r.IsOn(2)));
+}, r => Say("\"" + r.Text + "\" blood=" + r.IsOn("blood") + " weapons=" + r.IsOn("weapons") + " gems=" + r.IsOn(2)
+    + " rare=" + r.IsOn("rare")));
 ```
 
 From `samples/Progenitor.ControlsSample/Plugin.cs` (`ControlsDialogs`, kind `Form`; compile-checked with the sample's build): the Controls sample's **All controls** page (Dialogs) and the Gallery's Feedback tab, **Form**.
@@ -741,12 +743,13 @@ From `samples/Progenitor.ControlsSample/Plugin.cs` (`ControlsDialogs`, kind `For
 | Edge | Every part starts on one left edge, the facts block's 24-unit inset inside the 560-unit content row: the field's caption, the heading, the boxes. The buttons stay the dialog's centered popup pair, Cancel left, Save right in the accent. |
 | Field | `dialog-input`: the caption (17 px, muted) in a column as wide as its estimate × 1.3 plus the facts' label pad (at least 56), then the field (the Prompt's `field` cell) filling the row. The error line `dialog-error/error` starts under the field, left-aligned, in the error tone. The field has the keyboard when the dialog opens. |
 | Heading | `dialog-checks-heading/heading`: 17 px, muted, 6 units under the field. |
-| Boxes | `dialog-check-<i>`: one 30-unit line per box, 2 apart: the `check` cell (`CellKind.Check`, 24 units: the game's `Checkbox_Normal` frame and checkmark from the settings art, the kit's framed box until that art is ready, tried again on later frames until the art arrives or its source is final) and the `label` cell (17 px, bright, left). The whole line is the click target. |
+| Boxes | `dialog-check-<i>`: one 30-unit line per box, 2 apart: the `check` cell (`CellKind.Check`, 24 units: the game's `Checkbox_Normal` frame and checkmark from the settings art, the kit's framed box until that art is ready, tried again on later frames until the art arrives or its source is final) and the `label` cell (17 px, bright, left; in the box's `Color` when it has one). The whole line is the click target. |
+| Label color | `DialogCheck.Color`: `#RRGGBB` (trimmed, uppercased; anything else is ignored), empty by default (the bright label). A color under 4.5:1 against the dialog's ground (`MenuPalette.PaneFill`, the captions' rule `MinCaptionContrast`) is mixed toward white in 10% steps until it reaches it (`DialogForm.ReadableLabel`). A disabled box draws the disabled tone. The chat tab editor colors each channel's label in that channel's chat color and **Mentions of me** in the mention gold `#E8B33F`. |
 | Hint | `dialog-checks-hint/hint`: with `requireOne`, shown in the error tone while no box is checked, when Save is grayed. |
 
 - **Keys.** Enter saves (validated, as a Prompt's submit), unless the player moved the keyboard focus onto a box or a button: then Enter presses that one (on a box it flips it, on Cancel it cancels, on Save it saves). The focus a dialog opens with does not count, so typing a name and pressing Enter saves; a `danger` confirmation's main answer is never pressed by Enter. Escape cancels. Tab and Shift+Tab walk the field, each box and the buttons, in reading order, and wrap around; Down leaves the one-line field for the first box, and Up from the first box goes back into the field. Tab and Down stay with an input method while it is composing text in the field. Space on a focused box (A on a controller) flips it; arrows move between boxes and buttons. These keys are read by the framework's own input layer (the typed-key pump and `UiNav`, sampled every frame), like every dialog's Enter, and apply to every dialog with a one-line field (a Prompt too).
 - **State.** Nothing is written until Save. A framework dialog that steps in front puts the form back in the queue with its text and boxes as the player left them.
-- **Bridge.** `widget_click` with a box's label or row key flips it through the line's own click slot. `mods_ui status` → `dialog.checks [{index, row, label, on}]`, `checksHeading`, `checksOk`, `checksHint` (the hint while shown) and `mainEnabled`.
+- **Bridge.** `widget_click` with a box's label or row key flips it through the line's own click slot. `mods_ui status` → `dialog.checks [{index, row, label, on, color}]`, `checksHeading`, `checksOk`, `checksHint` (the hint while shown) and `mainEnabled`.
 
 ### Behavior
 

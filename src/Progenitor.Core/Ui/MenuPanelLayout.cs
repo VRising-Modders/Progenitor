@@ -2063,6 +2063,19 @@ internal sealed class CellSpec
 
     internal CellTone Tone { get; set; }
 
+    /// <summary>
+    /// FORMDIALOG1: a text color drawn instead of <see cref="Tone"/>'s while the cell shows its own tone (a form check's
+    /// <c>DialogCheck.Color</c>); null: the tone's color.
+    /// </summary>
+    internal PaletteColor? TextColor { get; set; }
+
+    /// <summary>This cell with <see cref="TextColor"/> set (null: the tone's color).</summary>
+    internal CellSpec WithTextColor(PaletteColor? color)
+    {
+        TextColor = color;
+        return this;
+    }
+
     internal CellWrap Wrap { get; set; }
 
     /// <summary>Dropped from the right when the row is too narrow (the mock's Author / Released columns).</summary>

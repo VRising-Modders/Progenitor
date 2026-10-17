@@ -1315,7 +1315,8 @@ internal static class ChatTabs
     {
         // A tab closed (or the tabs read again) while its editor is open, or a full row for a new one, is refused under
         // the field (ChatTabForm.Refusal) rather than dropped silently; Save checks again in case the row changed since.
-        var options = ChatTabForm.Options(tab);
+        // Each channel's box is labeled in the color the log draws that channel in (Mentions of me: the mention gold).
+        var options = ChatTabForm.Options(tab, ChatView.LineHex);
         options.Validate = r => ChatTabForm.Refusal(Set.Tabs, tab, isNew, r.Text, r.States);
         return UiDialogs.Form(typeof(ChatTabs), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter,
             ChatTabForm.Title(isNew), options, r =>
