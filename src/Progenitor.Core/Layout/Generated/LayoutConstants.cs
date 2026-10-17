@@ -2,7 +2,7 @@
 //     tools/layoutgen v1 — DO NOT EDIT BY HAND.
 //     source:       src/Progenitor.Core/Layout/layout.txt
 //     declarations: sha256:3f5c5b993958895038a433d24a961650bf8be445b9e167770a5d69976881909d
-//     build:        ba52da1af
+//     build:        f6f1d5c64
 //     game:         client=2026-08-25T21:04:30Z/247473480 server=2026-08-25T21:04:30Z/248598344  (GameAssembly.dll last-write/size the metadata behind these values was checked against)
 //     measured:     client server  (sides the run that last wrote game: measured; any other side there was carried forward from the previous header)
 //     resolved:     true  (whether the game's metadata confirmed these values when this file was written)
