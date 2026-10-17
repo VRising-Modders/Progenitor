@@ -268,8 +268,9 @@ internal sealed class VanillaTabStripLogGate
 ///
 /// <para>The donor's frame and state images keep the donor's anchors, position and size in the same
 /// way, so a caption centered on the tab's rect can still sit off the art the player sees. Images
-/// that make up the frame (<see cref="IsFrameArt"/>) are stretched over the tab as well, and a
-/// caption is judged against the visible art box (<see cref="ArtBox"/>), not the tab's rect.</para>
+/// that make up the frame (<see cref="IsFrameArt"/>) are refitted to the new tab in proportion to
+/// where they sat in the donor tab (<see cref="Proportional"/>), and a caption is judged against
+/// the visible art box (<see cref="ArtBox"/>), not the tab's rect.</para>
 /// </summary>
 internal static class VanillaTabCaption
 {
@@ -313,38 +314,89 @@ internal static class VanillaTabCaption
         return Math.Abs(tx) <= tolerance;
     }
 
-    /// <summary>The share of the largest image's width and height an image must reach to count as the tab's frame art.</summary>
+    /// <summary>The share of the largest visible image's width or height an image must reach to count as the tab's frame art.</summary>
     internal const float FrameShare = .6f;
 
     /// <summary>
-    /// An image <paramref name="width"/> by <paramref name="height"/> is part of the tab's frame art
-    /// (its frame or a state overlay of it), not a small decoration such as an icon or badge: at
-    /// least <see cref="FrameShare"/> of the largest image in the tab both ways.
+    /// An image <paramref name="width"/> by <paramref name="height"/> is part of the tab's frame art,
+    /// not a decoration such as an icon or badge. <paramref name="maxWidth"/> and
+    /// <paramref name="maxHeight"/> are the largest visible image's sides. When the button names its
+    /// state graphics (<paramref name="buttonHasTargets"/>), frame art is one of those
+    /// (<paramref name="graphicTarget"/>) spanning at least <see cref="FrameShare"/> of the largest in
+    /// either direction, which keeps underlines, top rules and end caps. Without named targets an
+    /// image must reach that share both ways.
     /// </summary>
-    internal static bool IsFrameArt(float width, float height, float maxWidth, float maxHeight)
-        => maxWidth > 0f && maxHeight > 0f && width >= maxWidth * FrameShare && height >= maxHeight * FrameShare;
+    internal static bool IsFrameArt(float width, float height, float maxWidth, float maxHeight, bool graphicTarget, bool buttonHasTargets)
+    {
+        if (!(maxWidth > 0f) || !(maxHeight > 0f)) return false;
+        bool wide = width >= maxWidth * FrameShare, tall = height >= maxHeight * FrameShare;
+        return buttonHasTargets ? graphicTarget && (wide || tall) : wide && tall;
+    }
 
     /// <summary>
-    /// The visible art box of a tab: the screen rect of the largest visible image in it (the frame
-    /// the player sees). <see cref="ScreenRect.Unknown"/> when nothing visible is drawn. A caption
-    /// is judged against this box, not the tab's rect: art that does not fill its tab moves what
-    /// the player reads as the tab's center.
+    /// The visible art box of a tab: the screen rect of the largest visible frame image (the frame
+    /// the player sees); without one, the largest other visible image; the tab's own root image only
+    /// when nothing else draws (the root follows the tab's rect, so judging against it would repeat
+    /// the tab-rect check). <see cref="ScreenRect.Unknown"/> when nothing visible is drawn.
     /// </summary>
-    internal static ScreenRect ArtBox(IReadOnlyList<(ScreenRect Rect, bool Visible)> images)
+    internal static ScreenRect ArtBox(IReadOnlyList<(ScreenRect Rect, bool Visible, bool Root, bool Frame)> images)
     {
-        var best = ScreenRect.Unknown;
-        float bestArea = 0f;
-        if (images == null) return best;
-        foreach (var (rect, visible) in images)
-        {
-            if (!visible || !rect.IsKnown) continue;
-            float area = (rect.MaxX - rect.MinX) * (rect.MaxY - rect.MinY);
-            if (area <= bestArea) continue;
-            bestArea = area;
-            best = rect;
-        }
+        if (images == null) return ScreenRect.Unknown;
+        var frame = Largest(images, i => !i.Root && i.Frame);
+        if (frame.IsKnown) return frame;
+        var other = Largest(images, i => !i.Root);
+        return other.IsKnown ? other : Largest(images, i => i.Root);
 
-        return best;
+        static ScreenRect Largest(IReadOnlyList<(ScreenRect Rect, bool Visible, bool Root, bool Frame)> list,
+            Func<(ScreenRect Rect, bool Visible, bool Root, bool Frame), bool> take)
+        {
+            var best = ScreenRect.Unknown;
+            float bestArea = -1f;
+            foreach (var image in list)
+            {
+                if (!image.Visible || !image.Rect.IsKnown || !take(image)) continue;
+                float area = (image.Rect.MaxX - image.Rect.MinX) * (image.Rect.MaxY - image.Rect.MinY);
+                if (area <= bestArea) continue;
+                bestArea = area;
+                best = image.Rect;
+            }
+
+            return best;
+        }
+    }
+
+    /// <summary>
+    /// A component type (by name) that moves or sizes a rect on its own: an animator, a layout
+    /// group, a content size fitter or an aspect ratio fitter. Enabled on a frame image's chain, it
+    /// would fight the refit, so that image is left as the donor drew it and reported.
+    /// </summary>
+    internal static bool IsLayoutDriver(string? typeName)
+        => typeName is "Animator" or "Animation" or "ContentSizeFitter" or "AspectRatioFitter"
+            || (typeName != null && typeName.EndsWith("LayoutGroup", StringComparison.Ordinal));
+
+    /// <summary>The furthest a frame image may reach past its donor tab, in donor tab sizes, before its measured box is distrusted.</summary>
+    internal const float MaxSpill = 1f;
+
+    /// <summary>
+    /// An image's box as fractions of its donor tab (0 = the tab's left or bottom edge, 1 = its
+    /// right or top edge), from both rects in the same space (y up). Used as the image's anchors in
+    /// the new tab, with zero offsets, so its insets, spill past the edges and height scale with
+    /// the tab instead of keeping the donor's size. Null when the donor tab has no usable size
+    /// (read before its layout ran), the box is empty or non-finite, or it reaches more than
+    /// <see cref="MaxSpill"/> tab sizes past an edge: the caller then fills the tab.
+    /// </summary>
+    internal static (float MinX, float MinY, float MaxX, float MaxY)? Proportional(
+        float tabMinX, float tabMinY, float tabWidth, float tabHeight,
+        float minX, float minY, float maxX, float maxY)
+    {
+        if (!Fin(tabMinX) || !Fin(tabMinY) || !Fin(tabWidth) || !Fin(tabHeight) || tabWidth < 1f || tabHeight < 1f) return null;
+        if (!Fin(minX) || !Fin(minY) || !Fin(maxX) || !Fin(maxY) || maxX - minX < .01f || maxY - minY < .01f) return null;
+        float x0 = (minX - tabMinX) / tabWidth, x1 = (maxX - tabMinX) / tabWidth;
+        float y0 = (minY - tabMinY) / tabHeight, y1 = (maxY - tabMinY) / tabHeight;
+        if (x0 < -MaxSpill || y0 < -MaxSpill || x1 > 1f + MaxSpill || y1 > 1f + MaxSpill) return null;
+        return (x0, y0, x1, y1);
+
+        static bool Fin(float v) => !float.IsNaN(v) && !float.IsInfinity(v);
     }
 
     /// <summary>

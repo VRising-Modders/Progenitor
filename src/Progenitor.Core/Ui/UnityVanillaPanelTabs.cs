@@ -44,8 +44,9 @@ internal sealed partial class UnityUiRuntime
         readonly List<TextMeshProUGUI> _labels = new();
         Dictionary<string, object?>? _captionDonor;
         int _captionFixes;
-        // Each tab's frame art (and the objects between it and the tab), stretched over the tab by AdoptArt.
-        readonly List<List<RectTransform>> _art = new();
+        // Each tab's frame art (and the objects between it and the tab), refitted to the tab by AdoptArt.
+        readonly List<TabArt> _art = new();
+        bool _artDriverLogged;
         List<object?>? _artDonor;
         int _artFixes;
         readonly List<HiddenNative> _content = new();
@@ -206,7 +207,13 @@ internal sealed partial class UnityUiRuntime
                     AdoptCaption(label, button);
                     _labels.Add(label);
                     if (i == 0) _artDonor = DescribeImages(button, label, null, rt);
-                    _art.Add(AdoptArt(button, label));
+                    var art = AdoptArt(button, label, _tabDonorRect);
+                    _art.Add(art);
+                    if (art.Refused.Count > 0 && !_artDriverLogged)
+                    {
+                        _artDriverLogged = true;
+                        Plugin.Logger?.LogWarning("Ui: panel tab art left as the donor drew it, driven by " + string.Join(", ", art.Refused));
+                    }
                     var widget = new PanelButtonWidget(button, label, FindClickEvent(button), rt.sizeDelta);
                     ushort slot = UiSlotTable.Alloc(this);
                     int index = i;
@@ -483,9 +490,9 @@ internal sealed partial class UnityUiRuntime
                 try { if (PlaceCaption(label, go.GetComponent<RectTransform>())) _captionFixes++; }
                 catch { /* a caption that cannot be read is left as it is */ }
                 if (i >= _art.Count) continue;
-                foreach (var art in _art[i])
+                foreach (var fit in _art[i].Fits)
                 {
-                    try { if (Alive(art) && Stretch(art)) _artFixes++; }
+                    try { if (Alive(fit.Rect) && ApplyFit(fit)) _artFixes++; }
                     catch { /* art that cannot be read is left as it is */ }
                 }
             }
@@ -532,6 +539,7 @@ internal sealed partial class UnityUiRuntime
                     ["artDy"] = Round1(artDy),
                     ["tabTextDx"] = Round1(tabTx),
                     ["art"] = art,
+                    ["artDrivers"] = i < _art.Count ? _art[i].Drivers : null,
                     ["caption"] = RectDict(caption),
                     ["glyphs"] = RectDict(text),
                     ["captionDx"] = Round1(rx),
@@ -565,61 +573,216 @@ internal sealed partial class UnityUiRuntime
             catch { return ScreenRect.Unknown; }
         }
 
-        /// <summary>
-        /// Stretch the tab's frame art over the tab (<see cref="VanillaTabCaption.IsFrameArt"/>): the
-        /// donor tab's frame and state images keep the donor's own anchors, position and size, so in
-        /// a tab of another size they draw off the tab's center while the caption is centered on
-        /// the tab. Every object between an art image and the tab is stretched too. Small images
-        /// (icons, badges) are left as they are. Returns what was stretched, to keep it there.
-        /// </summary>
-        static List<RectTransform> AdoptArt(GameObject tab, TextMeshProUGUI label)
+        /// <summary>One refitted rect of a tab's art: kept at these anchors with zero offsets.</summary>
+        readonly struct ArtFit
         {
-            var stretched = new List<RectTransform>();
+            internal ArtFit(RectTransform rect, Vector2 min, Vector2 max, bool frame)
+            { Rect = rect; Min = min; Max = max; Frame = frame; }
+
+            internal RectTransform Rect { get; }
+            internal Vector2 Min { get; }
+            internal Vector2 Max { get; }
+
+            /// <summary>A frame image (<see cref="VanillaTabCaption.IsFrameArt"/>), not an object between one and the tab.</summary>
+            internal bool Frame { get; }
+        }
+
+        /// <summary>What <see cref="AdoptArt"/> did to one tab's art.</summary>
+        sealed class TabArt
+        {
+            internal readonly List<ArtFit> Fits = new();
+
+            /// <summary>Every animator or layout driver on a frame image's chain: "Type on path", with " (off)" when disabled.</summary>
+            internal readonly List<string> Drivers = new();
+
+            /// <summary>The enabled drivers that kept a frame image as the donor drew it.</summary>
+            internal readonly List<string> Refused = new();
+
+            internal bool IsFrame(IntPtr pointer) => Fits.Exists(f => f.Frame && f.Rect.Pointer == pointer);
+        }
+
+        /// <summary>
+        /// Refit the tab's frame art to the tab (<see cref="VanillaTabCaption.IsFrameArt"/>, judged on
+        /// the button's state graphics against the largest image that draws). The donor tab's frame
+        /// and state images keep the donor's own anchors, position and size, so in a tab of another
+        /// size they draw off the tab's center while the caption is centered on the tab. Each frame
+        /// image is anchored where it sat in the donor tab, in proportion
+        /// (<see cref="VanillaTabCaption.Proportional"/>), so its insets, spill and height scale with
+        /// the tab; it fills the tab when the donor could not be measured. Objects between a frame
+        /// image and the tab (or the frame image it sits in) fill their parent. A frame image whose
+        /// chain has an enabled animator or layout driver is left alone and reported. Other images
+        /// (icons, badges) keep their place.
+        /// </summary>
+        static TabArt AdoptArt(GameObject tab, TextMeshProUGUI label, RectTransform? donor)
+        {
+            var art = new TabArt();
             try
             {
+                var root = tab.transform;
+                var targets = GraphicTargets(tab);
                 var images = tab.GetComponentsInChildren<Image>(true);
-                if (images == null) return stretched;
-                var pieces = new List<(RectTransform Rect, float W, float H)>();
+                if (images == null) return art;
+                bool donorOk = donor != null && Alive(donor) && donor.rect.width >= 1f && donor.rect.height >= 1f;
+                var tabRect = tab.GetComponent<RectTransform>();
+                var pieces = new List<(Image Image, Rect Box, bool Measured)>();
                 float maxW = 0f, maxH = 0f;
                 foreach (var image in images)
                 {
-                    if (image == null || image.transform.Pointer == tab.transform.Pointer) continue;
-                    if (image.transform.IsChildOf(label.transform)) continue;
-                    var r = image.rectTransform;
-                    var size = r.rect.size;
-                    var scale = r.localScale;
-                    float w = Math.Abs(size.x * scale.x), h = Math.Abs(size.y * scale.y);
-                    pieces.Add((r, w, h));
-                    maxW = Math.Max(maxW, w);
-                    maxH = Math.Max(maxH, h);
+                    if (image == null || image.transform.Pointer == root.Pointer || image.transform.IsChildOf(label.transform)) continue;
+                    bool measured = false;
+                    Rect box = default;
+                    if (donorOk)
+                    {
+                        var twin = donor!.transform.Find(PathUnder(image.transform, root));
+                        var twinRect = twin != null ? twin.GetComponent<RectTransform>() : null;
+                        if (twinRect != null) { box = BoxIn(twinRect, donor); measured = true; }
+                    }
+                    if (!measured) box = BoxIn(image.rectTransform, tabRect);
+                    pieces.Add((image, box, measured));
+                    if (!WouldDraw(image, root)) continue;
+                    maxW = Math.Max(maxW, box.width);
+                    maxH = Math.Max(maxH, box.height);
                 }
 
-                foreach (var (r, w, h) in pieces)
+                var frames = new List<(Image Image, Rect Box, bool Measured)>();
+                foreach (var piece in pieces)
+                    if (VanillaTabCaption.IsFrameArt(piece.Box.width, piece.Box.height, maxW, maxH,
+                            targets.Contains(piece.Image.Pointer), targets.Count > 0))
+                        frames.Add(piece);
+
+                foreach (var (image, box, measured) in frames)
                 {
-                    if (!VanillaTabCaption.IsFrameArt(w, h, maxW, maxH)) continue;
-                    for (var t = r.transform; t != null && t.Pointer != tab.transform.Pointer; t = t.parent)
+                    string? driver = Drivers(image.transform, root, art.Drivers);
+                    if (driver != null) { if (!art.Refused.Contains(driver)) art.Refused.Add(driver); continue; }
+                    // The reference box: the frame image this one sits in, else the donor tab.
+                    Transform? reference = null;
+                    Rect refBox = donorOk ? donor!.rect : default;
+                    bool refMeasured = donorOk;
+                    for (var t = image.transform.parent; t != null && t.Pointer != root.Pointer; t = t.parent)
+                    {
+                        var at = t;
+                        int index = frames.FindIndex(f => f.Image.transform.Pointer == at.Pointer);
+                        if (index < 0) continue;
+                        reference = t;
+                        refBox = frames[index].Box;
+                        refMeasured = frames[index].Measured;
+                        break;
+                    }
+
+                    for (var t = image.transform.parent; t != null && t.Pointer != root.Pointer
+                        && (reference == null || t.Pointer != reference.Pointer); t = t.parent)
                     {
                         var link = t.GetComponent<RectTransform>();
-                        if (link == null || stretched.Exists(x => x.Pointer == link.Pointer)) continue;
-                        Stretch(link);
-                        stretched.Add(link);
+                        if (link != null && !art.Fits.Exists(f => f.Rect.Pointer == link.Pointer))
+                            art.Fits.Add(new ArtFit(link, Vector2.zero, Vector2.one, false));
                     }
+
+                    var share = measured && refMeasured
+                        ? VanillaTabCaption.Proportional(refBox.xMin, refBox.yMin, refBox.width, refBox.height,
+                            box.xMin, box.yMin, box.xMax, box.yMax)
+                        : null;
+                    var min = share.HasValue ? new Vector2(share.Value.MinX, share.Value.MinY) : Vector2.zero;
+                    var max = share.HasValue ? new Vector2(share.Value.MaxX, share.Value.MaxY) : Vector2.one;
+                    var own = image.rectTransform;
+                    art.Fits.RemoveAll(f => f.Rect.Pointer == own.Pointer);
+                    art.Fits.Add(new ArtFit(own, min, max, true));
                 }
+
+                foreach (var fit in art.Fits) ApplyFit(fit);
             }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: panel tab art could not be fitted: " + e.Message);
             }
 
-            return stretched;
+            return art;
         }
 
-        /// <summary>Fill the parent exactly: stretched anchors, no offsets, centered pivot, unrotated, unit scale (a mirror flip is kept). True when anything moved.</summary>
-        static bool Stretch(RectTransform r)
+        /// <summary>The native objects of every state graphic the tab's buttons name (target graphic and target settings).</summary>
+        static HashSet<IntPtr> GraphicTargets(GameObject tab)
         {
+            var set = new HashSet<IntPtr>();
+            try
+            {
+                foreach (var button in tab.GetComponentsInChildren<SimpleStunButton>(true))
+                {
+                    if (button == null) continue;
+                    if (button.targetGraphic != null) set.Add(button.targetGraphic.Pointer);
+                    var settings = button.TargetSettings;
+                    if (settings == null) continue;
+                    foreach (var target in settings)
+                    {
+                        if (target == null || target.GraphicTargets == null) continue;
+                        foreach (var graphic in target.GraphicTargets)
+                            if (graphic != null) set.Add(graphic.Pointer);
+                    }
+                }
+            }
+            catch { /* no named targets: the both-ways size rule decides */ }
+
+            return set;
+        }
+
+        /// <summary>A rect's box in <paramref name="space"/>'s local units (y up), from its world corners.</summary>
+        static Rect BoxIn(RectTransform r, RectTransform? space)
+        {
+            var corners = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>(4);
+            r.GetWorldCorners(corners);
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            for (int k = 0; k < 4; k++)
+            {
+                Vector3 p = space != null ? space.InverseTransformPoint(corners[k]) : corners[k];
+                minX = Math.Min(minX, p.x); maxX = Math.Max(maxX, p.x);
+                minY = Math.Min(minY, p.y); maxY = Math.Max(maxY, p.y);
+            }
+
+            return Rect.MinMaxRect(minX, minY, maxX, maxY);
+        }
+
+        /// <summary>The image would draw once its tab is shown: enabled, not clear, and active up to (not including) the tab, which is still inactive while it is built.</summary>
+        static bool WouldDraw(Image image, Transform tab)
+        {
+            if (!image.enabled || image.color.a <= .01f) return false;
+            for (var t = image.transform; t != null && t.Pointer != tab.Pointer; t = t.parent)
+                if (!t.gameObject.activeSelf) return false;
+            return true;
+        }
+
+        /// <summary>
+        /// Record every animator or layout driver (<see cref="VanillaTabCaption.IsLayoutDriver"/>) on
+        /// the chain from <paramref name="from"/> up to and including the tab; return the first
+        /// enabled one, or null.
+        /// </summary>
+        static string? Drivers(Transform from, Transform tab, List<string> report)
+        {
+            string? enabled = null;
+            for (var t = from; t != null; t = t.parent)
+            {
+                foreach (var behaviour in t.GetComponents<Behaviour>())
+                {
+                    if (behaviour == null) continue;
+                    string type;
+                    try { type = behaviour.GetIl2CppType().Name; } catch { continue; }
+                    if (!VanillaTabCaption.IsLayoutDriver(type)) continue;
+                    bool on = behaviour.enabled;
+                    string where = type + " on " + PathUnder(t, tab);
+                    string entry = where + (on ? "" : " (off)");
+                    if (!report.Contains(entry)) report.Add(entry);
+                    if (on && enabled == null) enabled = where;
+                }
+                if (t.Pointer == tab.Pointer) break;
+            }
+
+            return enabled;
+        }
+
+        /// <summary>Keep a fitted rect at its anchors: zero offsets, centered pivot, unrotated, unit scale (a mirror flip is kept). True when anything moved.</summary>
+        static bool ApplyFit(ArtFit fit)
+        {
+            var r = fit.Rect;
             bool moved = false;
-            if (Moved(r.anchorMin, Vector2.zero)) { r.anchorMin = Vector2.zero; moved = true; }
-            if (Moved(r.anchorMax, Vector2.one)) { r.anchorMax = Vector2.one; moved = true; }
+            if (Moved(r.anchorMin, fit.Min)) { r.anchorMin = fit.Min; moved = true; }
+            if (Moved(r.anchorMax, fit.Max)) { r.anchorMax = fit.Max; moved = true; }
             if (Moved(r.pivot, new Vector2(.5f, .5f))) { r.pivot = new Vector2(.5f, .5f); moved = true; }
             if (Moved(r.offsetMin, Vector2.zero)) { r.offsetMin = Vector2.zero; moved = true; }
             if (Moved(r.offsetMax, Vector2.zero)) { r.offsetMax = Vector2.zero; moved = true; }
@@ -634,7 +797,7 @@ internal sealed partial class UnityUiRuntime
                 => VanillaTabCaption.Drifted(now.x, wanted.x) || VanillaTabCaption.Drifted(now.y, wanted.y);
         }
 
-        static List<object?> DescribeImages(GameObject tab, TextMeshProUGUI label, List<RectTransform>? art, RectTransform tabRect)
+        static List<object?> DescribeImages(GameObject tab, TextMeshProUGUI label, TabArt? art, RectTransform tabRect)
             => DescribeImages(tab, label, art, tabRect, out _);
 
         /// <summary>
@@ -643,11 +806,11 @@ internal sealed partial class UnityUiRuntime
         /// and size, its screen rect and its center's offset from the tab's center. <paramref name="artBox"/>
         /// is the visible art box (<see cref="VanillaTabCaption.ArtBox"/>).
         /// </summary>
-        static List<object?> DescribeImages(GameObject tab, TextMeshProUGUI label, List<RectTransform>? art,
+        static List<object?> DescribeImages(GameObject tab, TextMeshProUGUI label, TabArt? art,
             RectTransform tabRect, out ScreenRect artBox)
         {
             var list = new List<object?>();
-            var boxes = new List<(ScreenRect Rect, bool Visible)>();
+            var boxes = new List<(ScreenRect Rect, bool Visible, bool Root, bool Frame)>();
             artBox = ScreenRect.Unknown;
             try
             {
@@ -664,11 +827,14 @@ internal sealed partial class UnityUiRuntime
                         var screen = ScreenRectOf(r);
                         var drawn = DrawnRect(image, screen);
                         bool visible = Draws(image);
-                        boxes.Add((drawn, visible));
+                        bool isRoot = image.transform.Pointer == tab.transform.Pointer;
+                        bool frame = art != null && art.IsFrame(r.Pointer);
+                        boxes.Add((drawn, visible, isRoot, frame));
                         var (dx, dy) = VanillaTabCaption.Offset(tabScreen, drawn);
                         d["path"] = PathUnder(image.transform, tab.transform);
                         d["visible"] = visible;
-                        d["stretched"] = art != null && art.Exists(x => x.Pointer == r.Pointer);
+                        d["frame"] = frame;
+                        d["fitted"] = art != null && art.Fits.Exists(f => f.Rect.Pointer == r.Pointer);
                         d["rect"] = RectDict(screen);
                         d["drawn"] = RectDict(drawn);
                         d["dx"] = float.IsNaN(dx) ? null : Math.Round(dx, 1);
@@ -708,8 +874,9 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>
         /// The part of an image's screen rect its sprite draws (<see cref="VanillaTabCaption.Drawn"/>):
-        /// minus the sprite's packing padding, scaled with the sprite for a simple image and by the
-        /// image's pixels per unit for a sliced or tiled one, as the image builds its mesh.
+        /// minus the sprite's packing padding, scaled with the sprite for a simple or filled image and
+        /// by the image's pixels per unit times its multiplier for a sliced one, as the image builds
+        /// its mesh. A tiled image covers its whole rect.
         /// </summary>
         static ScreenRect DrawnRect(Image image, ScreenRect screen)
         {
@@ -723,6 +890,8 @@ internal sealed partial class UnityUiRuntime
                 float w = screen.MaxX - screen.MinX, h = screen.MaxY - screen.MinY;
                 if (rect.width <= .01f || rect.height <= .01f) return screen;
                 float sx, sy;
+                // A tiled image repeats the sprite's drawn region across the whole rect.
+                if (image.type == Image.Type.Tiled) return screen;
                 if (image.type == Image.Type.Simple || image.type == Image.Type.Filled)
                 {
                     var sr = sprite.rect;
@@ -732,7 +901,8 @@ internal sealed partial class UnityUiRuntime
                 }
                 else
                 {
-                    float ppu = image.pixelsPerUnit;
+                    // As the sliced mesh is built: padding over pixels per unit times the image's multiplier.
+                    float ppu = image.pixelsPerUnit * image.pixelsPerUnitMultiplier;
                     if (ppu <= .0001f) return screen;
                     sx = w / rect.width / ppu;
                     sy = h / rect.height / ppu;
@@ -972,7 +1142,7 @@ internal sealed partial class UnityUiRuntime
             foreach (var (_, slot) in _buttons) { _runtime.Unwire(slot); UiSlotTable.Release(slot); }
             _buttons.Clear();
             _labels.Clear(); _captionDonor = null; _captionFixes = 0;
-            _art.Clear(); _artDonor = null; _artFixes = 0;
+            _art.Clear(); _artDonor = null; _artFixes = 0; _artDriverLogged = false;
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
             _tabDonorRect = null; _stripRect = null; _height = null; _bonusAnchor = null; _masks.Clear();

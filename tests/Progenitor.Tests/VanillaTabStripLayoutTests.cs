@@ -251,30 +251,63 @@ public sealed class VanillaTabStripLayoutTests
     }
 
     [Theory]
-    [InlineData(146f, 40f, true)]   // the frame itself
-    [InlineData(122.5f, 31f, true)] // a state overlay nearly as big
-    [InlineData(24f, 24f, false)]   // an icon
-    [InlineData(146f, 4f, false)]   // a thin underline
-    public void FrameArtIsWhatNearlyFillsTheLargestImage(float w, float h, bool frame)
-        => Assert.Equal(frame, VanillaTabCaption.IsFrameArt(w, h, 146f, 40f));
+    [InlineData(146f, 40f, true, true)]    // the frame itself
+    [InlineData(122.5f, 31f, true, true)]  // a state overlay nearly as big
+    [InlineData(146f, 4f, true, true)]     // an underline or top rule: wide enough one way
+    [InlineData(20f, 40f, true, true)]     // an end cap: tall enough one way
+    [InlineData(24f, 20f, true, false)]    // a small state graphic
+    [InlineData(146f, 40f, false, false)]  // frame-sized, but not one of the button's state graphics
+    public void FrameArtIsAStateGraphicSpanningTheFrameOneWay(float w, float h, bool target, bool frame)
+        => Assert.Equal(frame, VanillaTabCaption.IsFrameArt(w, h, 146f, 40f, target, buttonHasTargets: true));
+
+    [Theory]
+    [InlineData(146f, 40f, true)]
+    [InlineData(146f, 4f, false)]  // without named targets a thin line is not trusted as frame
+    [InlineData(24f, 24f, false)]
+    public void WithoutNamedTargetsFrameArtMustFillBothWays(float w, float h, bool frame)
+        => Assert.Equal(frame, VanillaTabCaption.IsFrameArt(w, h, 146f, 40f, graphicTarget: false, buttonHasTargets: false));
 
     [Fact]
-    public void NoImagesMeansNoFrameArt()
-        => Assert.False(VanillaTabCaption.IsFrameArt(10f, 10f, 0f, 0f));
+    public void NoVisibleImagesMeansNoFrameArt()
+        => Assert.False(VanillaTabCaption.IsFrameArt(10f, 10f, 0f, 0f, true, true));
+
+    [Theory]
+    [InlineData("Animator", true)]
+    [InlineData("Animation", true)]
+    [InlineData("HorizontalLayoutGroup", true)]
+    [InlineData("GridLayoutGroup", true)]
+    [InlineData("ContentSizeFitter", true)]
+    [InlineData("AspectRatioFitter", true)]
+    [InlineData("LayoutElement", false)]
+    [InlineData("Image", false)]
+    [InlineData(null, false)]
+    public void LayoutDriversAreNamed(string? type, bool driver)
+        => Assert.Equal(driver, VanillaTabCaption.IsLayoutDriver(type));
 
     [Fact]
-    public void ArtBoxIsTheLargestVisibleImage()
+    public void ArtBoxPrefersTheLargestVisibleFrameImage()
     {
         var frame = R(2164, 600, 146, 31);
-        var images = new (ScreenRect, bool)[]
+        var images = new (ScreenRect, bool, bool, bool)[]
         {
-            (R(2164, 600, 190.3f, 38), false), // the tab's clear hit image: draws nothing
-            (frame, true),
-            (R(2200, 605, 20, 20), true),      // an icon
-            (ScreenRect.Unknown, true),
+            (R(2164, 600, 190.3f, 38), true, true, false), // the tab's own root image: follows the tab rect
+            (R(2150, 590, 220, 60), true, false, false),   // a larger glow that is not frame art
+            (frame, true, false, true),
+            (R(2170, 600, 160, 38), false, false, true),   // a hidden state overlay
+            (R(2200, 605, 20, 20), true, false, false),    // an icon
+            (ScreenRect.Unknown, true, false, true),
         };
         Assert.Equal(frame, VanillaTabCaption.ArtBox(images));
-        Assert.False(VanillaTabCaption.ArtBox(Array.Empty<(ScreenRect, bool)>()).IsKnown);
+        Assert.False(VanillaTabCaption.ArtBox(Array.Empty<(ScreenRect, bool, bool, bool)>()).IsKnown);
+    }
+
+    [Fact]
+    public void ArtBoxUsesTheRootImageOnlyWhenNothingElseDraws()
+    {
+        var root = R(0, 0, 190, 38);
+        var icon = R(10, 10, 20, 20);
+        Assert.Equal(icon, VanillaTabCaption.ArtBox(new (ScreenRect, bool, bool, bool)[] { (root, true, true, false), (icon, true, false, false) }));
+        Assert.Equal(root, VanillaTabCaption.ArtBox(new (ScreenRect, bool, bool, bool)[] { (root, true, true, false), (icon, false, false, false) }));
     }
 
     [Fact]
@@ -286,11 +319,42 @@ public sealed class VanillaTabStripLayoutTests
         var caption = R(2170, 600, 178.3f, 38);
         var glyphs = R(2218, 610, 82.4f, 18);
         Assert.True(VanillaTabCaption.Centered(tab, caption, glyphs));
-        var art = VanillaTabCaption.ArtBox(new (ScreenRect, bool)[] { (R(2164, 600, 146, 38), true) });
+        var art = VanillaTabCaption.ArtBox(new (ScreenRect, bool, bool, bool)[]
+            { (tab, true, true, false), (R(2164, 600, 146, 38), true, false, true) });
         Assert.False(VanillaTabCaption.Centered(art, caption, glyphs));
-        // Once the art is stretched over the tab, the two agree.
-        art = VanillaTabCaption.ArtBox(new (ScreenRect, bool)[] { (tab, true) });
+        // Once the art is refitted to the tab, the two agree.
+        art = VanillaTabCaption.ArtBox(new (ScreenRect, bool, bool, bool)[] { (tab, true, true, false), (tab, true, false, true) });
         Assert.True(VanillaTabCaption.Centered(art, caption, glyphs));
+    }
+
+    [Fact]
+    public void ProportionalKeepsInsetsAndSpillAsShares()
+    {
+        // A donor tab 146 x 40 at (0,0); its frame inset 4 on each side and spilling 6 below.
+        var share = VanillaTabCaption.Proportional(0, 0, 146, 40, 4, -6, 142, 40);
+        Assert.NotNull(share);
+        var (x0, y0, x1, y1) = share!.Value;
+        Assert.Equal(4f / 146f, x0, 4);
+        Assert.Equal(-6f / 40f, y0, 4);
+        Assert.Equal(142f / 146f, x1, 4);
+        Assert.Equal(1f, y1, 4);
+        // Equal shares in from each side: the frame stays centered on a tab of any width.
+        Assert.Equal(x0, 1f - x1, 4);
+    }
+
+    [Theory]
+    [InlineData(0f, 40f)]  // the donor read before its layout ran
+    [InlineData(146f, 0f)]
+    [InlineData(float.NaN, 40f)]
+    public void ProportionalRefusesAnUnusableDonorTab(float w, float h)
+        => Assert.Null(VanillaTabCaption.Proportional(0, 0, w, h, 4, 0, 100, 40));
+
+    [Fact]
+    public void ProportionalRefusesAnEmptyOrFarBox()
+    {
+        Assert.Null(VanillaTabCaption.Proportional(0, 0, 146, 40, 10, 10, 10, 30));      // no width
+        Assert.Null(VanillaTabCaption.Proportional(0, 0, 146, 40, 400, 0, 500, 40));     // more than a tab past the edge
+        Assert.NotNull(VanillaTabCaption.Proportional(0, 0, 146, 40, -146, 0, 292, 40)); // exactly one tab of spill each way
     }
 
     [Fact]
