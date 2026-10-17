@@ -388,7 +388,7 @@ window.HELP = {
 <tr><td>Clicking chat doesn't attack</td><td>On</td><td>Clicks on the box never attack, turn the camera or build.</td></tr></tbody></table>
 <p>Moved attack to a keyboard key? That key does nothing while the pointer is over the box.</p>` },
         { id: "move", title: "Move and resize",
-          html: `<ul><li><strong>Move:</strong> drag the tab line (empty space, not a tab name).</li>
+          html: `<ul><li><strong>Move:</strong> drag the tab row's empty space (not a tab, <strong>+</strong> or <strong>&equiv;</strong>).</li>
 <li><strong>Resize:</strong> drag the <strong>&#9701;</strong> corner at the top right.</li>
 <li><strong>Reset:</strong> <strong>&equiv;</strong> &rsaquo; <strong>Reset position and size</strong>.</li>
 <li><strong>Lock / Unlock position</strong> in the same menu stops both.</li></ul>
@@ -397,12 +397,13 @@ window.HELP = {
 <tr><td>Text size</td><td class="num">0</td><td>0 keeps the game's size; up to 40.</td></tr>
 <tr><td>Background opacity</td><td class="num">-1</td><td>-1 keeps the game's; 0 to 100 percent. Quick choices in <strong>&equiv;</strong>.</td></tr></tbody></table>` },
         { id: "tabs", title: "Tabs",
-          html: `<p>The tab line: <strong>All</strong>, your tabs (<strong>Clan</strong> to start), <strong>+</strong> and <strong>&equiv;</strong>. Up to six tabs.</p>
-<ul><li><strong>Show:</strong> click a tab. A one-channel tab (Global, Local or Clan) also sends to that channel.</li>
+          html: `<p>The tab row: <strong>All</strong>, your tabs (<strong>Clan</strong> to start), <strong>+</strong> and <strong>&equiv;</strong>. Up to six tabs. It looks like the game's menu tabs: gray at rest, brighter with a soft glow and underline under the pointer, and the shown tab white with the full glow and underline.</p>
+<ul><li><strong>Show:</strong> click a tab (it switches when you let go). A one-channel tab (Global, Local or Clan) also sends to that channel.</li>
+<li><strong>Reorder:</strong> drag a tab left or right and drop it where the marker shows. Without dragging: right-click the tab (or <strong>&equiv;</strong>) &rsaquo; <strong>Move left</strong> / <strong>Move right</strong>. All can move too. The order is saved and comes back next time.</li>
 <li><strong>Add:</strong> <strong>+</strong> or <strong>New tab</strong>: Whispers, System and mods, Mentions, Clan, Local, or <strong>Custom</strong>.</li>
 <li><strong>Rename and filter:</strong> right-click the tab (or <strong>&equiv;</strong>) &rsaquo; <strong>Edit this tab</strong>: a name (up to 16 characters), then <strong>Show messages from</strong>: Global, Local, Clan, Whispers, System and mods, Mentions of me.</li>
-<li><strong>Remove:</strong> <strong>Close this tab</strong>. All can't be edited or closed. Tabs can't be reordered.</li>
-<li><strong>Unread:</strong> a gold dot on the tab.</li></ul>` },
+<li><strong>Remove:</strong> <strong>Close this tab</strong>. All can't be edited or closed.</li>
+<li><strong>Unread:</strong> the game's "new" star on the tab (a gold dot until the game's art has loaded).</li></ul>` },
         { id: "colors", title: "Channel colors",
           html: `<p><strong>&equiv;</strong> &rsaquo; <strong>Colors</strong> opens a panel above the chat box: one row per channel with the game's color and ten swatches.</p>
 <ul><li>A click recolors that channel's lines and the line you type, and is saved at once.</li><li><strong>Use the game's colors</strong> resets all; <strong>Done</strong> or a click outside closes it.</li></ul>
