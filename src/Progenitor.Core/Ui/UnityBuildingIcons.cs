@@ -1,10 +1,8 @@
 #if !PROGENITOR_TESTS
 using System;
 using System.Collections.Generic;
-using Il2CppInterop.Runtime;
 using Progenitor.Ecs;
 using ProjectM;
-using ProjectM.UI;
 using Stunlock.Core;
 using Unity.Collections;
 using Unity.Entities;
@@ -15,17 +13,15 @@ namespace Progenitor.Ui;
 /// <summary>
 /// HUB1: the game side of <see cref="UiBuildingIcons"/>. Read only: it loads no asset and requests no streaming.
 ///
-/// <para><b>Blueprint icons.</b> A blueprint's icon asset id is <c>ManagedBlueprintData.Icon</c> (an <c>AssetGuid</c>;
+/// <para>A blueprint's icon asset id is <c>ManagedBlueprintData.Icon</c> (an <c>AssetGuid</c>;
 /// <c>ManagedDataRegistry.TryGet</c> over that reference type, as the build-menu search reads its names). The build
 /// menu resolves a blueprint's sprite through its UI asset loader, which finds the loaded section holding the asset and
 /// reads the section's <c>ManagedAssetReferences.AssetLookup</c> (<c>Dictionary&lt;AssetGuid, Object&gt;</c>, an
-/// instantiation the game uses). This reads the same dictionaries on every loaded section, the way the model loader
+/// instantiation the game uses). This reads the same dictionaries on the loaded sections, the way the model loader
 /// reads them, with <c>ContainsKey</c> and the indexer only; no generic over a game value type is added.</para>
 ///
-/// <para><b>Build-menu cells.</b> <c>BuildMenu_StructureEntry</c>: each drawn cell's building, loading flag and sprite.
-/// A cell's <c>ImageFadeIn.SetSprite</c> ignores a null sprite, so a cell whose sprite has not arrived keeps the one
-/// it showed before; cells only name icons for blueprints without an icon asset id
-/// (<see cref="UiBuildingIcons.AcceptsCell"/>).</para>
+/// <para>The build menu's cells are not read: a cell's icon setter ignores a null sprite, so a cell whose sprite has not
+/// arrived keeps the one it showed before while it already names the new building.</para>
 /// </summary>
 internal static class UnityBuildingIcons
 {
@@ -39,63 +35,60 @@ internal static class UnityBuildingIcons
         NoIconKey.Clear();
     }
 
-    /// <summary>One scan: resolve the waiting buildings by their blueprint icons, then read the build menu's cells.</summary>
-    internal static void Scan(World world)
+    /// <summary>
+    /// One bounded scan on <paramref name="frame"/>: look the waiting buildings' blueprint icon ids up in the loaded asset
+    /// sections, resuming at <see cref="UiBuildingIcons.ScanCursor"/>. Returns whether it went over every section.
+    /// </summary>
+    internal static bool Scan(World world, int frame)
     {
         ManagedDataRegistry? registry = null;
         try { registry = world.GetExistingSystemManaged<GameDataSystem>()?.ManagedDataRegistry; }
         catch { registry = null; }
 
-        var waiting = UiBuildingIcons.WaitingNow();
+        var waiting = UiBuildingIcons.WaitingNow(frame);
         var keyed = new List<(int Prefab, AssetGuid Key)>(waiting.Length);
         foreach (int prefab in waiting)
             if (TryKey(registry, prefab, out var key)) keyed.Add((prefab, key));
-        if (keyed.Count > 0) ResolveFromLoadedAssets(world, keyed);
-
-        HarvestBuildMenuCells(registry);
+        return keyed.Count == 0 || ResolveFromLoadedAssets(world, keyed);
     }
 
     /// <summary>
-    /// <paramref name="prefab"/>'s blueprint icon id, telling the cache whether it has one. A building without
-    /// <c>ManagedBlueprintData</c> is asked again on a later scan (game data may come up after the first one).
+    /// <paramref name="prefab"/>'s blueprint icon id. A blueprint whose icon id is empty has none (remembered); a building
+    /// without <c>ManagedBlueprintData</c> is asked again on a later scan (game data may come up after the first one).
     /// </summary>
     private static bool TryKey(ManagedDataRegistry? registry, int prefab, out AssetGuid key)
     {
         if (IconKeys.TryGetValue(prefab, out key)) return true;
         key = default;
-        if (NoIconKey.Contains(prefab)) return false;
-        if (registry == null) return false;
-        ManagedBlueprintData? data = null;
+        if (NoIconKey.Contains(prefab) || registry == null) return false;
+        ManagedBlueprintData? data;
         try
         {
             if (!registry.TryGet<ManagedBlueprintData>(new PrefabGUID(prefab), out data)) data = null;
         }
         catch { data = null; }
 
-        if (data == null)
-        {
-            UiBuildingIcons.NoteKey(prefab, hasBlueprintKey: false);
-            return false;
-        }
-
+        if (data == null) return false;
         AssetGuid icon;
         try { icon = data.Icon; }
         catch { return false; }
         if ((icon._a | icon._b | icon._c | icon._d) == 0)
         {
             NoIconKey.Add(prefab);
-            UiBuildingIcons.NoteKey(prefab, hasBlueprintKey: false);
             return false;
         }
 
         IconKeys[prefab] = icon;
-        UiBuildingIcons.NoteKey(prefab, hasBlueprintKey: true);
         key = icon;
         return true;
     }
 
-    /// <summary>Look each waiting blueprint's icon id up in the loaded asset sections; a sprite found is its icon.</summary>
-    private static void ResolveFromLoadedAssets(World world, List<(int Prefab, AssetGuid Key)> keyed)
+    /// <summary>
+    /// Look each waiting blueprint's icon id up in the loaded asset sections, at most
+    /// <see cref="UiBuildingIcons.MaxLookupsPerScan"/> lookups, from the cursor on. Returns whether the pass reached the
+    /// end of the list (or found every icon).
+    /// </summary>
+    private static bool ResolveFromLoadedAssets(World world, List<(int Prefab, AssetGuid Key)> keyed)
     {
         var em = world.EntityManager;
         var type = ComponentIndex.Of<ManagedAssetReferences>(ComponentType.AccessMode.ReadOnly);
@@ -109,11 +102,16 @@ internal static class UnityBuildingIcons
             var entities = query.ToEntityArray(Allocator.TempJob);
             try
             {
+                int count = entities.Length;
+                int at = UiBuildingIcons.ScanCursor;
+                if (at < 0 || at >= count) at = 0;
+                int budget = UiBuildingIcons.MaxLookupsPerScan;
                 int left = keyed.Count;
                 var found = new bool[keyed.Count];
-                foreach (var e in entities)
+                while (at < count && left > 0 && budget > 0)
                 {
-                    if (left == 0) break;
+                    var e = entities[at++];
+                    budget -= 2;
                     Il2CppSystem.Object? boxed;
                     try { boxed = em.GetComponentObject<Il2CppSystem.Object>(e, type); }
                     catch { continue; }
@@ -122,54 +120,34 @@ internal static class UnityBuildingIcons
                     for (int i = 0; i < keyed.Count; i++)
                     {
                         if (found[i]) continue;
+                        budget--;
                         try
                         {
                             if (!lookup.ContainsKey(keyed[i].Key)) continue;
+                            budget -= 2;
                             var sprite = lookup[keyed[i].Key]?.TryCast<Sprite>();
                             if (sprite == null || !UnityUiRuntime.Alive(sprite)) continue;
-                            UiBuildingIcons.Note(keyed[i].Prefab, sprite, BuildingIconSource.Blueprint);
+                            UiBuildingIcons.Note(keyed[i].Prefab, sprite);
                             found[i] = true;
                             left--;
                         }
                         catch { /* one unreadable entry does not stop the scan */ }
                     }
                 }
+
+                bool fullPass = at >= count || left == 0;
+                UiBuildingIcons.ScanCursor = at >= count ? 0 : at;
+                return fullPass;
             }
             finally { entities.Dispose(); }
         }
         catch (Exception e)
         {
             Plugin.Logger?.LogWarning("Ui: building icons: loaded-asset scan threw: " + e.Message);
+            UiBuildingIcons.ScanCursor = 0;
+            return true;
         }
         finally { query.Dispose(); }
-    }
-
-    /// <summary>
-    /// Read every build-menu cell the game has drawn (found with the non-generic <c>Resources.FindObjectsOfTypeAll</c>):
-    /// its building, loading flag and sprite, kept only for a blueprint without an icon id of its own.
-    /// </summary>
-    private static void HarvestBuildMenuCells(ManagedDataRegistry? registry)
-    {
-        var type = Il2CppType.Of<BuildMenu_StructureEntry>();
-        if (type == null) return;
-        var all = Resources.FindObjectsOfTypeAll(type);
-        if (all == null) return;
-        for (int i = 0; i < all.Length; i++)
-        {
-            try
-            {
-                var entry = all[i] == null ? null : all[i].TryCast<BuildMenu_StructureEntry>();
-                if (entry == null || !UnityUiRuntime.Alive(entry)) continue;
-                int guid = entry.PrefabGuid.GuidHash;
-                if (guid == 0) continue;
-                if (!UiBuildingIcons.KeyKnown(guid)) TryKey(registry, guid, out _);
-                if (!UiBuildingIcons.AcceptsCell(guid, entry.IsLoading)) continue;
-                var image = entry.Icon != null ? entry.Icon.CurrentImage : null;
-                var sprite = image != null ? image.sprite : null;
-                if (sprite != null && UnityUiRuntime.Alive(sprite)) UiBuildingIcons.Note(guid, sprite, BuildingIconSource.BuildMenu);
-            }
-            catch { /* one unreadable cell does not stop the scan */ }
-        }
     }
 }
 #endif

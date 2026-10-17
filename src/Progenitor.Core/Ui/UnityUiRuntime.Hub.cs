@@ -384,14 +384,15 @@ internal sealed partial class UnityUiRuntime
 
             var icon = UiBuildingIcons.Get(prefab, o => o is Sprite s && Alive(s));
             if (icon != null) return icon;
-            UiBuildingIcons.Want(prefab);
             int frame;
             try { frame = Time.frameCount; }
             catch { frame = 0; }
+            UiBuildingIcons.Want(prefab, frame);
             if (!UiBuildingIcons.MayScan(frame)) return null;
             int before = UiBuildingIcons.Version;
-            try { UnityBuildingIcons.Scan(world); }
-            finally { UiBuildingIcons.ScanDone(UiBuildingIcons.Version != before); }
+            bool fullPass = true;
+            try { fullPass = UnityBuildingIcons.Scan(world, frame); }
+            finally { UiBuildingIcons.ScanDone(UiBuildingIcons.Version != before, fullPass); }
             return UiBuildingIcons.Get(prefab, o => o is Sprite s && Alive(s));
         }
         catch { return null; }

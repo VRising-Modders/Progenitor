@@ -29,8 +29,8 @@ public sealed partial class PluginCastles
 
     /// <summary>
     /// Where the icon <see cref="BuildingIcon"/> returns for <paramref name="prefabGuid"/> came from: <c>"blueprint"</c>
-    /// (the building's own blueprint icon), <c>"build-menu"</c> (a build-menu cell, for a blueprint that names no icon
-    /// asset) or <c>"none"</c> (no icon yet). Reads the cache only: call <see cref="BuildingIcon"/> first.
+    /// (the building's own blueprint icon) or <c>"none"</c> (no icon yet, or a blueprint that names no icon asset).
+    /// Reads the cache only: call <see cref="BuildingIcon"/> first.
     /// </summary>
     public string BuildingIconSource(int prefabGuid)
     {
