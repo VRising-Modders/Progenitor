@@ -141,7 +141,7 @@ Client and server · Requires Progenitor. Trade items with other players through
 **README requirement block.** Paste one near the top of `README.md`:
 
 ```markdown
-> **Requires Progenitor.** This mod is built on [Progenitor](https://thunderstore.io/c/v-rising/p/VRising_Modders/Progenitor/), a modding framework for V Rising. Mod managers install it for you; for a manual install, install Progenitor first.
+> **Requires Progenitor.** This mod is built on [Progenitor](https://thunderstore.io/c/v-rising/p/VRising_Modders/Progenitor/), a modding framework for V Rising. Install Progenitor first; its Install Mods tab can then install this mod.
 ```
 
 ```markdown
