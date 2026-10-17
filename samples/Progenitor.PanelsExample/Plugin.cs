@@ -19,6 +19,8 @@ namespace Progenitor.PanelsExample;
 /// <item><description>Player inventory: <c>Stash</c> beside the sort button.</description></item>
 /// <item><description>Castle heart window (also reachable as <c>ThronePanel</c>): <c>Castles</c> left, <c>Fuel</c> right.</description></item>
 /// <item><description>Item tooltip: one line naming the hovered item and its stack.</description></item>
+/// <item><description>Recipe tooltip: a muted line under the product naming the recipe, product and
+/// station, and one line per requirement under the requirement list (the first one green).</description></item>
 /// <item><description>The game's sort (key or button): every <see cref="InventorySortUsed"/> is logged with
 /// the client's hour of day (<c>ctx.Time.GetTimeOfDay</c>), and a second sort of the same inventory
 /// within <see cref="DoubleSortMs"/> is logged as a double sort.</description></item>
@@ -73,6 +75,39 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
             if (e.Change == VanillaPanelChange.Closed) return;
             line[0] = "Example: item " + e.Target.ItemGuid + " x" + e.Target.ItemAmount;
             tooltip.SetRows(line);
+        }));
+
+        // The recipe tooltip (workstation, refinement station, crafting tab): one line under the
+        // product's description and one line per requirement under the requirement list, rebuilt on
+        // every hovered recipe. A real mod would look the counts up here (ask its server once per hover).
+        var recipeBody = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipBody, ctx.Owner, ctx.Guid);
+        var recipeNeeds = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, ctx.Owner, ctx.Guid);
+        ctx.Track(recipeBody);
+        ctx.Track(recipeNeeds);
+        var recipeLog = ctx.Log;
+        ctx.Track(recipeBody.OnPanel(e =>
+        {
+            if (e.Change == VanillaPanelChange.Closed) return;
+            var t = e.Target;
+            recipeLog.LogInfo("Panels example: recipe " + t);
+            recipeBody.SetRows(new VanillaRow[]
+            {
+                new("Example: recipe " + t.RecipeGuid + " makes " + t.ItemAmount + " x " + t.ItemGuid
+                    + (t.HasNetworkId ? " at station " + t.NetworkIdIndex : " (crafting tab)"), LabelTone.Muted),
+            });
+        }));
+        ctx.Track(recipeNeeds.OnPanel(e =>
+        {
+            if (e.Change == VanillaPanelChange.Closed) return;
+            var t = e.Target;
+            var rows = new VanillaRow[t.Requirements.Count];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var need = t.Requirements[i];
+                rows[i] = new VanillaRow("Example: needs " + need.Amount + " x " + need.ItemGuid, i == 0 ? LabelTone.Ok : LabelTone.Normal);
+            }
+
+            recipeNeeds.SetRows(rows);
         }));
 
         // The game's sort, key or button: no input is read, the framework reports the request.

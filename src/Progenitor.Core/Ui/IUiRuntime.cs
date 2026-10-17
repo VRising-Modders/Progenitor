@@ -630,6 +630,13 @@ internal interface IUiRuntime
     IRuntimeWidget? CloneDonorRow(VanillaUiSite site, IRuntimeWidget container, string text) => null;
 
     /// <summary>
+    /// Color a row <see cref="CloneDonorRow"/> made: <see cref="LabelTone.Normal"/> is the donor's own
+    /// color, the other tones the framework's label colors. Writes only when the tone changed. A row
+    /// of another kind is left alone. Must never throw.
+    /// </summary>
+    void StyleAttachRow(IRuntimeWidget row, LabelTone tone) { }
+
+    /// <summary>
     /// P6: create the mod-owned container for a panel site at <paramref name="anchor"/>, using the
     /// panel instance the most recent sample resolved. Edge anchors parent it beside the panel
     /// (ignored by any vanilla layout group, positioned by <see cref="FitAttachContainer"/>); inline

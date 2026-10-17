@@ -95,6 +95,20 @@ public interface IVanillaAttachHandle : IDisposable
     void SetRows(IReadOnlyList<string> rows);
 
     /// <summary>
+    /// <see cref="SetRows(IReadOnlyList{string})"/> with a color per row: each
+    /// <see cref="VanillaRow"/> is plain text in the site's own text style, and its
+    /// <see cref="LabelTone"/> picks the color (<see cref="LabelTone.Normal"/> keeps the game's own).
+    /// A <c>string</c> converts to a <see cref="LabelTone.Normal"/> row. Pass an empty list, not
+    /// <c>null</c>, to clear: <c>null</c> matches both overloads.
+    /// </summary>
+    void SetRows(IReadOnlyList<VanillaRow> rows)
+    {
+        var texts = new string[rows?.Count ?? 0];
+        for (int i = 0; i < texts.Length; i++) texts[i] = rows![i].Text;
+        SetRows(texts);
+    }
+
+    /// <summary>
     /// P6: where on the panel this attachment sits, after <see cref="VanillaPanelAnchor.Default"/>
     /// was resolved to the site's default. <see cref="VanillaPanelAnchor.Default"/> for the map card.
     /// </summary>

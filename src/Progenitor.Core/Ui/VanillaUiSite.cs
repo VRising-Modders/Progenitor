@@ -124,6 +124,23 @@ public enum VanillaUiSite
     /// <see cref="VanillaPanelAnchor.TooltipBody"/>. Refresh: <c>SystemHooks.After&lt;InventoryMenuMapper&gt;</c>.
     /// </summary>
     InventoryTooltip = 6,
+
+    /// <summary>
+    /// The recipe tooltip: the window's <c>FakeTooltip</c> while it is shown over a hovered recipe
+    /// entry of that window's <c>RecipesParent</c>. Three windows: the crafting workstation
+    /// (<c>WorkstationSubMenu</c>, entries <c>WorkstationRecipeGridSelectionEntry</c>), the refinement
+    /// station (<c>RefinementstationSubMenu</c>, rows <c>RefinementstationRecipeEntry</c>) and the
+    /// character menu's crafting tab (<c>InventorySubMenu.RecipesParent</c>, no station). The target
+    /// carries the recipe (<see cref="VanillaPanelTarget.RecipeGuid"/>, the entry's <c>EntryId</c>), the
+    /// station and its <c>NetworkId</c>, the product (<see cref="VanillaPanelTarget.ItemGuid"/> /
+    /// <see cref="VanillaPanelTarget.ItemAmount"/>, the recipe's first <c>RecipeOutputBuffer</c> row) and
+    /// <see cref="VanillaPanelTarget.Requirements"/> (its <c>RecipeRequirementBuffer</c> rows, in order).
+    /// A new hovered recipe is a <see cref="VanillaPanelChange.TargetChanged"/>. Rows only, cloned from
+    /// the tooltip's <c>Description</c>. Anchors: <see cref="VanillaPanelAnchor.TooltipBody"/> (under the
+    /// product's description) and <see cref="VanillaPanelAnchor.TooltipRequirements"/> (under the
+    /// requirement list). Refresh: the shared mapper scan.
+    /// </summary>
+    RecipeTooltip = 7,
 }
 
 /// <summary>
@@ -230,13 +247,22 @@ internal static class VanillaUiSites
         anchors: new[] { VanillaPanelAnchor.TooltipBody },
         buttons: false);
 
+    private static readonly VanillaUiSiteInfo Recipe = new(
+        VanillaUiSite.RecipeTooltip,
+        key: "RecipeTooltip",
+        donor: "Description",
+        system: "WorkstationMenuMapper",
+        allowIgnoreLayout: true,
+        anchors: new[] { VanillaPanelAnchor.TooltipBody, VanillaPanelAnchor.TooltipRequirements },
+        buttons: false);
+
     /// <summary>
     /// A cast integer is a legal <c>enum</c> value in C#, so an undefined one would otherwise
     /// reach the resolver as a site nobody has read. Refuse at the door, the way
     /// <c>Ui.CaptureInput</c> refuses an undefined <c>UiCaptureMode</c>.
     /// </summary>
     internal static bool IsDefined(VanillaUiSite site) =>
-        site >= VanillaUiSite.MapWarEventInfo && site <= VanillaUiSite.InventoryTooltip;
+        site >= VanillaUiSite.MapWarEventInfo && site <= VanillaUiSite.RecipeTooltip;
 
     /// <summary>True for the P6 panel sites (everything but the map card).</summary>
     internal static bool IsPanel(VanillaUiSite site) => IsDefined(site) && site != VanillaUiSite.MapWarEventInfo;
@@ -248,6 +274,7 @@ internal static class VanillaUiSites
         VanillaUiSite.InventoryPanel => Inventory,
         VanillaUiSite.CastleHeartPanel => CastleHeart,
         VanillaUiSite.InventoryTooltip => Tooltip,
+        VanillaUiSite.RecipeTooltip => Recipe,
         _ => MapWarEvent,
     };
 
@@ -291,6 +318,14 @@ internal static class VanillaUiSites
     /// </summary>
     internal static HookOptions WatchOptions(VanillaUiSite site) => new() { OnlyWhenSystemRuns = false };
 
+    /// <summary>The tooltip sites: rebuilt on every hover, rows only, per-hover edges not logged.</summary>
+    internal static bool IsTooltip(VanillaUiSite site) =>
+        site == VanillaUiSite.InventoryTooltip || site == VanillaUiSite.RecipeTooltip;
+
+    /// <summary>Whether <paramref name="anchor"/> puts the container into a tooltip's text column.</summary>
+    internal static bool IsTooltipAnchor(VanillaPanelAnchor anchor) =>
+        anchor == VanillaPanelAnchor.TooltipBody || anchor == VanillaPanelAnchor.TooltipRequirements;
+
     /// <summary>Whether <paramref name="anchor"/> is one of the column anchors placed by Progenitor.</summary>
     internal static bool IsEdge(VanillaPanelAnchor anchor) =>
         anchor == VanillaPanelAnchor.LeftEdge || anchor == VanillaPanelAnchor.RightEdge;
@@ -303,6 +338,7 @@ internal static class VanillaUiSites
         VanillaPanelAnchor.BesideRename => "rename",
         VanillaPanelAnchor.BesideSort => "sort",
         VanillaPanelAnchor.TooltipBody => "tooltip",
+        VanillaPanelAnchor.TooltipRequirements => "requirements",
         _ => "",
     };
 }
