@@ -276,11 +276,22 @@ internal static class ChatInputTokens
     /// On send (Enter): a line that is exactly <c>/loc</c> (any case, trailing spaces ignored) becomes <c>[loc:x,z]</c>
     /// at this player's position. Anything else, <c>/local</c> included, is left alone.
     /// </summary>
+    internal static bool IsLocWord(string? text) =>
+        !string.IsNullOrEmpty(text) && string.Equals(text!.TrimEnd(), LocWord, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The fallback when the game handled Enter before Progenitor's send key: the chat lost focus with its input
+    /// emptied, the line was exactly <c>/loc</c>, and it was not cancelled (Escape). The game sends nothing for an
+    /// unknown <c>/loc</c> (it only shows its local "no such command" line), so sending the token then is never a
+    /// second copy of the same line.
+    /// </summary>
+    internal static bool SendAfterGame(string? lineBefore, string? lineNow, bool canceled) =>
+        !canceled && string.IsNullOrEmpty(lineNow) && IsLocWord(lineBefore);
+
     internal static bool TryExpandOnSend(string? text, out string expanded)
     {
         expanded = text ?? "";
-        if (string.IsNullOrEmpty(text) || Position == null) return false;
-        if (!string.Equals(text!.TrimEnd(), LocWord, StringComparison.OrdinalIgnoreCase)) return false;
+        if (Position == null || !IsLocWord(text)) return false;
         var (ok, x, z) = Position();
         if (!ok) return false;
         expanded = ChatTokens.Location(x, z);

@@ -22,10 +22,34 @@ namespace Progenitor.Ui;
 /// </summary>
 internal static unsafe class MapMarkerSender
 {
+    // At most one marker event waits per frame: a second request in the same frame replaces the first, so a burst
+    // of calls (a mod in a loop, repeated clicks) sends only the last.
+    private static Entity _pending = Entity.Null;
+    private static int _pendingFrame = -1;
+    private static World? _pendingWorld;
+
+    private static void DropPendingThisFrame(World world, EntityManager em)
+    {
+        int frame = UnityEngine.Time.frameCount;
+        if (_pending != Entity.Null && _pendingFrame == frame && ReferenceEquals(_pendingWorld, world)
+            && em.Exists(_pending)
+            && em.HasComponent(_pending, ComponentIndex.Of<SendNetworkEventTag>(ComponentType.AccessMode.ReadOnly)))
+            em.DestroyEntity(_pending);
+        _pending = Entity.Null;
+    }
+
+    private static void NotePending(World world, Entity ev)
+    {
+        _pending = ev;
+        _pendingFrame = UnityEngine.Time.frameCount;
+        _pendingWorld = world;
+    }
+
     internal static bool Set(float x, float z, out string why)
     {
         why = "";
-        if (!TryClientWorld(out var em, out why)) return false;
+        if (!TryClientWorld(out var world, out var em, out why)) return false;
+        DropPendingThisFrame(world, em);
         int actual = (int)Marshal.OffsetOf<SetMapMarkerEvent>(nameof(SetMapMarkerEvent.Position));
         if (actual != Layout.SetMapMarkerEventPositionOffset)
         {
@@ -50,6 +74,7 @@ internal static unsafe class MapMarkerSender
             {
                 EventId = Layout.SetMapMarkerEventId, IsAdminEvent = false, IsDebugEvent = false,
             });
+            NotePending(world, ev);
             return true;
         }
         catch
@@ -62,7 +87,8 @@ internal static unsafe class MapMarkerSender
     internal static bool Clear(out string why)
     {
         why = "";
-        if (!TryClientWorld(out var em, out why)) return false;
+        if (!TryClientWorld(out var world, out var em, out why)) return false;
+        DropPendingThisFrame(world, em);
         var ev = em.CreateEntity(
             ComponentIndex.Of<DeleteMapMarkerEvent>(ComponentType.AccessMode.ReadWrite),
             ComponentIndex.Of<NetworkEventType>(ComponentType.AccessMode.ReadWrite),
@@ -73,6 +99,7 @@ internal static unsafe class MapMarkerSender
             {
                 EventId = Layout.DeleteMapMarkerEventId, IsAdminEvent = false, IsDebugEvent = false,
             });
+            NotePending(world, ev);
             return true;
         }
         catch
@@ -83,11 +110,11 @@ internal static unsafe class MapMarkerSender
     }
 
     /// <summary>A client world with this player's character in it (the server reads the sender from the connection).</summary>
-    private static bool TryClientWorld(out EntityManager em, out string why)
+    private static bool TryClientWorld(out World world, out EntityManager em, out string why)
     {
         em = default;
         why = "";
-        var world = Worlds.Client;
+        world = Worlds.Client!;
         if (world == null || !world.IsCreated)
         {
             why = "no client world";

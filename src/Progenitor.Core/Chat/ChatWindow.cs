@@ -690,6 +690,7 @@ internal static class ChatWindow
         else if (_wasFocused)
         {
             string now = window.ChatInputField?.text ?? "";
+            SendLocAfterGame(window, _focusedText, now);
             if (now.Length == 0 && _focusedText.Trim().Length > 0)
             {
                 EnsureRecallLoaded();
@@ -760,16 +761,49 @@ internal static class ChatWindow
     {
         try
         {
-            var field = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>()?._ChatWindow?.ChatInputField;
-            if (field != null && ChatInputTokens.TryExpandOnSend(field.text, out string token))
+            var system = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>();
+            var field = system?._ChatWindow?.ChatInputField;
+            string line = field?.text ?? "";
+            if (system != null && field != null && ChatInputTokens.TryExpandOnSend(line, out string token))
             {
-                SetLine(field, token);
+                // Empty the input so the game's Enter sends nothing, and send the token ourselves (as long lines do).
+                field.text = "";
+                _focusedText = "";
+                EnsureRecallLoaded();
+                Recall.Push(line);
+                SaveRecall();
+                QueueLine(system, token);
                 return;
             }
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Chat: /loc on send threw: " + e.Message); }
 
         SendLong();
+    }
+
+    /// <summary>One line on the channel the input would have sent it to, through the long-part queue (in order).</summary>
+    private static void QueueLine(ClientChatSystem system, string text)
+    {
+        LongParts.Enqueue((text, system._DefaultMode, system._WhisperUser));
+        Plugin.Logger?.LogInfo("Chat: /loc sent as " + text + ".");
+    }
+
+    /// <summary>
+    /// The game handled Enter on <c>/loc</c> before the send key ran (<see cref="ChatInputTokens.SendAfterGame"/>):
+    /// send the location now.
+    /// </summary>
+    private static void SendLocAfterGame(HUDChatWindow window, string lineBefore, string lineNow)
+    {
+        try
+        {
+            var field = window.ChatInputField;
+            bool canceled = field != null && field.wasCanceled;
+            if (!ChatInputTokens.SendAfterGame(lineBefore, lineNow, canceled)) return;
+            if (!ChatInputTokens.TryExpandOnSend(lineBefore, out string token)) return;
+            var system = Worlds.Client?.GetExistingSystemManaged<ClientChatSystem>();
+            if (system != null) QueueLine(system, token);
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: /loc after send threw: " + e.Message); }
     }
 
     /// <summary>

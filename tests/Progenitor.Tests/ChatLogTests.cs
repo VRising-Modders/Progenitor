@@ -268,7 +268,7 @@ public sealed class ChatTokenTests
     [Theory]
     [InlineData(0f, 10f, "north")]
     [InlineData(10f, 0f, "east")]
-    [InlineData(-10f, -10f, "south-west")]
+    [InlineData(-10f, -10f, "southwest")]
     [InlineData(0.1f, 0.1f, "here")]
     public void Directions_follow_the_compass(float dx, float dz, string expected) =>
         Assert.Equal(expected, ChatTokens.Direction(dx, dz));
@@ -330,7 +330,18 @@ public sealed class ChatTokenTests
     }
 
     [Theory]
-    [InlineData(187, 187, true, 100f, 100f, "Set a map marker here? (123 m north-east)")]
+    [InlineData("/loc", "", false, true)]     // the game took Enter first and emptied the line
+    [InlineData("/LOC ", "", false, true)]
+    [InlineData("/loc", "", true, false)]     // Escape: nothing is sent
+    [InlineData("/loc", "/loc", false, false)] // still in the input (focus moved away without sending)
+    [InlineData("/local", "", false, false)]
+    [InlineData("", "", false, false)]         // Progenitor's key already sent it and emptied the line
+    [InlineData("hello", "", false, false)]
+    public void Loc_fallback_sends_only_when_the_game_took_a_bare_loc(string before, string now, bool canceled, bool expected) =>
+        Assert.Equal(expected, ChatInputTokens.SendAfterGame(before, now, canceled));
+
+    [Theory]
+    [InlineData(187, 187, true, 100f, 100f, "Set a map marker here? (123 m northeast)")]
     [InlineData(100, -400, true, 100f, 100f, "Set a map marker here? (500 m south)")]
     [InlineData(10, 20, true, 10.2f, 19.9f, "Set a map marker here? (you are here)")]
     [InlineData(10, 20, false, 0f, 0f, "Set a map marker here?")]
