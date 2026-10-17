@@ -19,7 +19,7 @@ Never deploy Progenitor.Dev, and never point these tools, at the live dedicated 
 | Page | Contents |
 |---|---|
 | [Development bridge](bridge.md) | Wire protocol, bridge users and the bridge queue, logging policy, ports, token, the opt-in gate, calling without MCP, main-thread ops |
-| [Bridge operations: core, entities and samples](bridge-ops.md) | `ping`, `logs`, `reload`, `core_reload`, users, worlds, commands, ghost users, entity ops, `.debug` tools, Sample commands |
+| [Bridge operations: core, entities and samples](bridge-ops.md) | `ping`, `logs`, `reload`, `core_reload`, users, worlds, commands, ghost users, stress castles (`stress_populate`, `stress_clear`, `stress_status`), entity ops, `.debug` tools, Sample commands |
 | [Bridge operations: players, world and capture](bridge-ops-player.md) | `heal`, `protect`, `time`, `photo`, `teleport`, `give`, `unlock`, `inspect`, snapshots, saves, `connect`, `host`, `capture`, `perf` |
 | [Bridge operations: Mods workspace UI](bridge-ops-ui.md) | `mods_ui`, the game menu, text-field and date-time picker tests, `setting`, focus-free UI input (`ui_input`, `ui_read`, `display`, `screenshot`), `locate` (HUD Locate pings) |
 | [Bridge operations: server info and join flow](bridge-ops-join.md) | `messages_record`, `server_rules`, `world_backups`, `server_desc`, `server_browser`, `join_ui`, `join_admin` and their acceptance recipes |

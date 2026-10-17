@@ -161,6 +161,53 @@ internal static class BotTerritories
         };
     }
 
+    // ---- stress_populate discovery: the same reads, one territory per call -------------------
+
+    /// <summary>Every castle territory entity (disabled included), for <see cref="ReadForStress"/>.</summary>
+    internal static List<Entity> TerritoryEntities(EntityManager em) =>
+        Query.Entities(em, includeDisabled: true, includeSystems: false,
+            ComponentIndex.Of<CastleTerritory>(ComponentType.AccessMode.ReadOnly));
+
+    /// <summary>The castle hearts by territory entity (index, version), as <see cref="Run"/> keys them.</summary>
+    internal static Dictionary<(int, int), CastlePlot> PlotsByTerritory(World world)
+    {
+        var map = new Dictionary<(int, int), CastlePlot>();
+        foreach (var plot in CastleReader.Plots(world))
+            if (plot.TerritoryEntity != Entity.Null)
+                map[(plot.TerritoryEntity.Index, plot.TerritoryEntity.Version)] = plot;
+        return map;
+    }
+
+    /// <summary>
+    /// One territory for the stress planner: bounds, buildable mask, claimed, region and the heart
+    /// pivot nearest the buildable centroid (the <c>spot:"centre"</c> rule). Null when unreadable.
+    /// A debug territory comes back with region <c>Debug</c> so the planner refuses it.
+    /// </summary>
+    internal static Ops.StressTerritory? ReadForStress(EntityManager em, Entity e, Dictionary<(int, int), CastlePlot> plots)
+    {
+        var row = ReadTerritory(em, e);
+        if (row == null) return null;
+        if (row.Debug) return new Ops.StressTerritory { Index = row.Index, Region = "Debug" };
+        plots.TryGetValue((e.Index, e.Version), out row.Plot);
+        Measure(row, 0, 0, 0, 0);
+        var t = new Ops.StressTerritory
+        {
+            Index = row.Index,
+            Claimed = row.Claimed,
+            ClaimedBy = row.Plot?.OwnerName,
+            Region = row.Region,
+            MinX = row.MinX, MinY = row.MinY, MaxX = row.MaxX, MaxY = row.MaxY,
+            Mask = row.Mask,
+        };
+        if (!row.Claimed && FindHeartPivot(row, row.CentroidX, row.CentroidY, out int hx, out int hy, out _))
+        {
+            t.HasPivot = true;
+            t.PivotX = hx;
+            t.PivotY = hy;
+        }
+        return t;
+    }
+
     private static unsafe Row? ReadTerritory(EntityManager em, Entity e)
     {
         var typeIndex = ComponentIndex.IndexOf<CastleTerritory>();
