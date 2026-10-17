@@ -275,7 +275,7 @@ a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--r
   </header>
   <nav class="toc" id="toc" aria-label="Contents"></nav>
   <main id="main" tabindex="-1">
-    <div class="crumb"><span class="label" id="crumbLeft"></span><span class="label" id="crumbRight"></span></div>
+    <div class="crumb"><span class="label" id="crumbLeft"></span></div>
     <article class="card" id="card" aria-live="polite"></article>
     <nav class="pager" aria-label="Page">
       <button class="btn" id="prevBtn" type="button"><span class="dir">&larr; Previous</span><span class="ttl" id="prevTitle"></span></button>
@@ -491,7 +491,6 @@ window.HELP = {
     var ch = page.chapter, list = path(), i = list.indexOf(page);
     document.title = page.title + " · " + (H.title || "Help");
     $("crumbLeft").textContent = (hasRoles && role && ch.role ? roleById[role].title + " · " : "") + ch.title;
-    $("crumbRight").textContent = "page " + (i + 1) + " of " + list.length;
     var inCh = ch.pages.indexOf(page);
     $("counter").textContent = (inCh + 1) + " / " + ch.pages.length;
     $("counterSub").textContent = ch.title;
