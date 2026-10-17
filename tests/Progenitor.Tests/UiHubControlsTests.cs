@@ -82,6 +82,47 @@ public sealed class UiHubControlsTests : IDisposable
         Assert.Equal(CellTone.ChipOff, Row("game:tabs").Cells().Single(c => c.Key == "tab1").Tone);
     }
 
+    [Theory]
+    [InlineData(640f)]
+    [InlineData(1040f)]
+    [InlineData(1440f)]
+    [InlineData(1920f)]
+    public void Game_tabs_stand_on_the_strips_baseline_at_every_window_width(float window)
+    {
+        var panel = NewPanel(gameWindow: true);
+        panel.Tabs("t", new[] { "Find", "Chests", "About" }, new UiTabsOptions());
+        var spec = Row("t:tabs").Spec;
+        // The game tab row draws the baseline; a chip row does not.
+        Assert.Equal(CellRowSkin.GameTabStrip, spec.Skin);
+        NewPanel().Tabs("c", new[] { "Find", "Chests" }, new UiTabsOptions());
+        Assert.Equal(CellRowSkin.Kit, Row("c:tabs").Spec.Skin);
+
+        // Every tab fits the row at this window's content width, so the baseline (the whole row) runs under all of them.
+        float rowWidth = DialogLayout.ContentRowWidth(DialogLayout.FrameWidthFor(window, 3840f));
+        var placed = MenuPanelLayout.CellColumns(rowWidth, spec).Where(p => p.Key.StartsWith("tab", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, placed.Count);
+        Assert.All(placed, p => Assert.True(p.Visible, p.Key + " dropped at " + window));
+
+        // Vertically: each tab's bottom edge is the row's bottom edge, and the 2-unit baseline's bottom row is that same
+        // row, so the tabs cover the line and the selected tab's fill runs into it (the workspace strip's measured geometry).
+        foreach (float rowHeight in new[] { spec.Height, 48f, 53f, 64f })
+        {
+            foreach (var tab in spec.Cells.Where(c => c.Skin == CellSkin.GameTab))
+            {
+                float h = Math.Min(tab.HeightOverride, rowHeight);
+                float top = UiTabsLayout.GameTabTop(rowHeight, h);
+                var (lineTop, lineHeight) = UiTabsLayout.Baseline(rowHeight);
+                Assert.Equal(rowHeight, top + h, 3);
+                Assert.Equal(rowHeight, lineTop + lineHeight, 3);
+                Assert.Equal(UiTabsLayout.BaselineHeight, lineHeight);
+                Assert.True(top <= lineTop, "the tab covers its baseline");
+            }
+        }
+
+        // The default row: the tab fills it exactly (no gap above or below the art).
+        Assert.Equal(0f, UiTabsLayout.GameTabTop(spec.Height, UnityUiRuntimeMetrics.RowHeight));
+    }
+
     [Fact]
     public void A_game_tab_is_as_wide_as_its_caption_and_grows_by_its_badge()
     {

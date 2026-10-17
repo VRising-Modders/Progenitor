@@ -133,7 +133,7 @@ internal static class UiDataTableLayout
 
     /// <summary>
     /// Whether <paramref name="text"/> is cut by its column (a fixed-width text column; the fill column only ever grows):
-    /// the row's tooltip then shows the value whole. Text cells never wrap: every body line is one fixed-height row.
+    /// with <see cref="UiDataTableOptions.OverflowTooltips"/> the row's tooltip then shows the value whole. Text cells never wrap: every body line is one fixed-height row.
     /// </summary>
     internal static bool IsCut(IReadOnlyList<UiTableColumn> columns, UiTableColumn column, string text)
     {

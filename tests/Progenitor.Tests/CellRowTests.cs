@@ -660,6 +660,7 @@ public sealed class CellRowTests : IDisposable
 
         /// <summary>SETTINGS1 stage 2: the cells this row was built with (text, kind, alignment as specified).</summary>
         public IReadOnlyList<CellSpec> Cells() => _spec.Cells;
+        public CellRowSpec Spec => _spec;
 
         public IRuntimeWidget? CellWidget(string key) => _widgets.TryGetValue(key, out var w) ? w : null;
         public void ApplyCell(CellSpec spec) => Applied.Add(spec.Key);

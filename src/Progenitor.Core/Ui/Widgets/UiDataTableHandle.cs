@@ -708,8 +708,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             // Inherited and own values differ by words as well as by tone (the style guide: never color alone).
             var cell = row[col.Key];
             if (cell is { Inherited: true }) body.Add(UiDataTableLayout.InheritedLine(col, cell));
-            // A value its column cuts short is read whole here.
-            else if (UiDataTableLayout.IsCut(_model.Columns, col, UiDataTableModel.Display(cell, col)))
+            // A value its column cuts short is read whole here, when the caller asked for it (OverflowTooltips).
+            else if (_options.OverflowTooltips && UiDataTableLayout.IsCut(_model.Columns, col, UiDataTableModel.Display(cell, col)))
                 body.Add(col.Caption + ": " + UiDataTableModel.Display(cell, col));
         }
 
@@ -1554,7 +1554,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             }
 
             int sel = _model.Selected.Count;
-            if (sel > 0) status += " · " + sel + " selected";
+            // A single-select table shows its one selected row by the band; the count is only news with several.
+            if (sel > 0 && _options.MultiSelect) status += " · " + sel + " selected";
             int waiting = _model.Pending.Count;
             if (waiting > 0) status += " · " + waiting + " waiting";
         }

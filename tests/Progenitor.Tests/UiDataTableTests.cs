@@ -1343,11 +1343,43 @@ public sealed class UiDataTableTests : IDisposable
     }
 
     [Fact]
+    public void Overflow_tooltips_are_off_by_default_and_a_row_tooltip_still_shows()
+    {
+        Assert.False(new UiDataTableOptions().OverflowTooltips);
+        var rows = Sample();
+        rows[0].Text("note", "A very long note that no 120-unit column can hold");
+        rows[1].Text("note", "Another very long note that no 120-unit column can hold");
+        rows[1].Tooltip = "Kept in the castle";
+        var (_, handle) = NewTable(rows);
+        handle.HoverSlotForTests(0, true); // only a cut value: no box repeating the row
+        Assert.Null(_runtime.Tooltip);
+        handle.HoverSlotForTests(1, true); // the row's own tooltip, without the cut value
+        Assert.Equal("Kept in the castle", _runtime.Tooltip!.Value.Body);
+    }
+
+    [Fact]
+    public void A_single_select_status_line_has_no_selected_count_and_multi_select_keeps_it()
+    {
+        var (single, _) = NewTable(Many(8), Options(multi: false, visible: 4));
+        single.SetSelected(new[] { "r001" });
+        Assert.Single(single.Selected);
+        Assert.Equal("Showing 1–4 of 8", single.StatusText);
+        Assert.DoesNotContain("selected", single.StatusText);
+
+        var (multi, _) = NewTable(Many(8), Options(multi: true, visible: 4));
+        multi.SetSelected(new[] { "r001" });
+        Assert.Single(multi.Selected);
+        Assert.Equal("Showing 1–4 of 8 · 1 selected", multi.StatusText);
+    }
+
+    [Fact]
     public void A_value_its_column_cuts_is_read_whole_in_the_row_tooltip()
     {
         var rows = Sample();
         rows[0].Text("note", "A very long note that no 120-unit column can hold");
-        var (_, handle) = NewTable(rows);
+        var options = Options();
+        options.OverflowTooltips = true;
+        var (_, handle) = NewTable(rows, options);
         handle.HoverSlotForTests(0, true);
         Assert.Contains("Note: A very long note that no 120-unit column can hold", _runtime.Tooltip!.Value.Body);
         handle.HoverSlotForTests(1, true); // "nb" fits: no tooltip

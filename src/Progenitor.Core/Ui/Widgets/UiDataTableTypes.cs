@@ -418,6 +418,15 @@ public sealed class UiDataTableOptions
     /// <summary>The muted line drawn while the table has no rows.</summary>
     public string EmptyText { get; set; } = "Nothing to show.";
 
+    /// <summary>
+    /// A row's hover tooltip also repeats each value its text column cuts short (<c>Chest: Large wooden chest of …</c>).
+    /// Off by default: the kit's tooltips are asked for (a row's <see cref="UiTableRow.Tooltip"/>, a control's
+    /// <c>Tooltip</c>), and an automatic box over the row it repeats is noise; give the column the width of its longest
+    /// value instead. A row's own <see cref="UiTableRow.Tooltip"/>, its inherited values and its refused edits always
+    /// show.
+    /// </summary>
+    public bool OverflowTooltips { get; set; }
+
     /// <summary>Tests: the clock edits time out by, in seconds. Null: the process clock.</summary>
     internal Func<double>? Clock { get; set; }
 }
@@ -525,7 +534,7 @@ public interface IUiDataTable : IUiHandle
     /// <summary>The edits waiting for an answer.</summary>
     IReadOnlyList<UiTableEdit> PendingEdits { get; }
 
-    /// <summary>The footer line ("Showing 13–24 of 600 · 3 selected").</summary>
+    /// <summary>The footer line ("Showing 13–24 of 600 · 3 selected"; the selected count only with <see cref="UiDataTableOptions.MultiSelect"/>).</summary>
     string StatusText { get; }
 
     /// <summary>The last refusal's reason (orange line under the table); empty when none.</summary>

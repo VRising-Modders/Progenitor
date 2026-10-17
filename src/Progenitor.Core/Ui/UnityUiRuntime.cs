@@ -15475,6 +15475,19 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             catch { /* no rule */ }
         }
 
+        /// <summary>
+        /// The game window tab strip's baseline (<see cref="CellRowSkin.GameTabStrip"/>): a line across the whole row at its
+        /// bottom edge (<see cref="UiTabsLayout.Baseline"/>), in the tab frame's steel. Anchored to the row's bottom and
+        /// both sides, so it spans the row at every window width without placing.
+        /// </summary>
+        private void BuildTabBaseline()
+        {
+            var (_, h) = UiTabsLayout.Baseline(_spec.Height);
+            var line = BandChild(GameObject, UiTabsLayout.BaselineName, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(0.5f, 0f), Vector2.zero, new Vector2(0f, h));
+            try { if (line != null) line.color = ToColor(MenuPalette.TabBaseline); } catch { /* */ }
+        }
+
         public GameObject GameObject { get; }
 
         public float Height => _spec.FitWrap ? FittedHeight() : _spec.Height;
@@ -15609,6 +15622,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             }
 
             if (!_header && _spec.Skin == CellRowSkin.CategoryHeading) BuildHeadingRule();
+            // Before the cells, so every tab draws over it: the tabs stand on the line, the selected one runs into it.
+            if (!_header && _spec.Skin == CellRowSkin.GameTabStrip) BuildTabBaseline();
             if (!_header && _spec.Section != CellSection.None) BuildSection();
             if (!_header) BuildTiles();
 
@@ -18304,6 +18319,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     if (h >= rowHeight) h = Math.Min(rowHeight, UnityUiRuntimeMetrics.RowHeight * 0.75f);
                     top = Math.Max(0f, rowHeight - h - CellTopPad);
                 }
+                // A game window tab stands on the strip's baseline: its bottom edge on the row's bottom edge.
+                else if (cell.Spec.Skin == CellSkin.GameTab) top = UiTabsLayout.GameTabTop(rowHeight, h);
                 else top = (rowHeight - h) * .5f;
                 PlaceTop(cell.Go, p.X, top, p.Width, h);
                 // MODPAGE2 (live 2026-10-09): an expanded chevron is turned a quarter; turned about the top-center pivot
