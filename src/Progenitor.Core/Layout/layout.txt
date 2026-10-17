@@ -812,13 +812,31 @@ offset ServantCoffinstationStateOffset               = 0x68 : ServantCoffinstati
 enum   ServantCoffinStateServantAlive                = 7    : ServantCoffinState.ServantAlive
 enum   ServantCoffinStateServantRevivable            = 8    : ServantCoffinState.ServantRevivable
 enum   ServantCoffinStateReviving                    = 9    : ServantCoffinState.Reviving
-offset ServantPowerGearLevelOffset                   = 0x0  : ServantPower.GearLevel
+offset ServantPowerGearLevelOffset                   = 0x0  : ServantPower.GearLevel                      # float; the success cap writes it for one update and restores it
 offset ServantPowerExpertiseOffset                   = 0x4  : ServantPower.Expertise
 size   PerksBufferStride                             = 4    : PerksBuffer                                 # PrefabGUID @0x0
 offset ServantMissionSettingsMissionBuffOffset       = 0x8  : ServantMissionSettingsSingleton.MissionBuff # PrefabGUID of the buff the send applies
 offset ServantMissionSettingMissionLengthOffset      = 0x8  : ServantMissionSetting.MissionLength         # float seconds
 size   ServantMissionSettingStride                   = 0x14 : ServantMissionSetting
 offset MissionDataServantSlotsOffset                 = 0x8  : MissionData.ServantSlots                    # int, on the mission prefab
+# The success chance the game rolls at the return (ctx.Servants.Chance, ServantChanceLogic): the
+# mission's difficulty, each matching perk's power and loot bonus, the party bonus per other servant
+# and the length choice's success bonus. Raw reads only, on prefabs and the settings singleton.
+offset MissionDataMissionDifficultyOffset            = 0x4  : MissionData.MissionDifficulty               # int, on the mission prefab
+offset PerkDataLootValueOffset                       = 0x0  : PerkData.LootValue                          # float, on the perk prefab
+offset PerkDataPowerValueOffset                      = 0x8  : PerkData.PowerValue                         # int, subtracted from the mission difficulty
+offset ServantMissionSettingSuccessRateBonusOffset   = 0x4  : ServantMissionSetting.SuccessRateBonus      # float, added only when the party is short
+offset ServantMissionSettingsStaticPartyBonusOffset  = 0x4  : ServantMissionSettingsSingleton.StaticPartyBonus  # int, per other servant of the party
+# The "Hunt in X started." notice the game's send raises to allied users: one network event entity
+# (NetworkEventType + this component + SendNetworkEventTag + SendEventToUsers), the shape chat uses.
+offset ServantMissionStartedEventMissionIdOffset     = 0x0  : ServantMissionStartedEvent.MissionId        # PrefabGUID, the only field
+# The game's save in flight (the success cap never forces a roll while it is set): the save system
+# keeps its scheduled serialization jobs' handle in this Nullable<JobHandle> until a later update
+# completes and finalizes them (its IsSaving reads the Nullable's hasValue, the first byte). Read raw
+# from the managed system object; _Initialized pins the field's 0x18-byte span.
+offset SerializePersistenceSystemV2WriteToDiskDependencyOffset = 0x198 : SerializePersistenceSystemV2._WriteToDiskDependency  # Nullable<JobHandle>: bool hasValue @+0, JobHandle @+8
+offset SerializePersistenceSystemV2InitializedOffset           = 0x1B0 : SerializePersistenceSystemV2._Initialized
+match  ServantMissionStartedEventId                 = -1997647067 : /EventId_ServantMissionStartedEvent = (-?\d+);/ in NetworkEvents
 offset MapZoneDataZoneIndexOffset                    = 0x1  : MapZoneData.ZoneIndex                       # byte; MapZoneId.ZoneId is this + 1
 offset MapZoneDataChunkCoordinateOffset              = 0x44 : MapZoneData.ChunkCoordinate                 # TerrainChunk: sbyte X, sbyte Y
 offset MapZoneDataServantMissionAssetOffset          = 0x48 : MapZoneData.ServantMissionAsset             # PrefabGUID

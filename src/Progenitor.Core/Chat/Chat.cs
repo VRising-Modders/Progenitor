@@ -201,6 +201,9 @@ public static class Chat
         return n;
     }
 
+    /// <summary>A user entity's connected-user slot (0..127, the <c>SendEventToUsers</c> bit), for other server notices.</summary>
+    internal static bool TryConnectedIndex(EntityManager em, Entity entity, out int index) => TryReadConnectedIndex(em, entity, out index);
+
     private static bool TryReadConnectedIndex(EntityManager em, Entity entity, out int index)
     {
         index = -1;

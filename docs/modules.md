@@ -2663,7 +2663,7 @@ ctx.Events.On<ServantsReturned>(ev =>
 | Hunt record | A castle heart carries an `ActiveServantMission` buffer (networked, so every client's throne map shows it): mission prefab, start (`DateTime.UtcNow` ticks), length in seconds, the length choice (`MissiontDataId`, an index into the game's mission settings), up to three servants and their count. |
 | Send | The client's `SendOnMissionEvent` is handled by `ServantMissionActionSystem`. In order it checks: the sender's progression is readable and has discovered the zone (skipped by the "all progression unlocked" debug setting); the zone has a mission; the servants exist, are not on a hunt, not dead, carry nothing, and are not injured; the sender could interact with the throne and every servant's coffin is connected to the throne's heart; the heart has no hunt on that mission yet (one hunt per zone and castle) and no hunt naming those servants; no more servants than the mission's `MissionData.ServantSlots`; the length choice exists. Any failure drops the event silently. |
 | Send writes | One row added to the heart's record (length = the setting's length, times 1e-5 with the "servant timers disabled" debug setting); the mission buff (`ServantMissionSettingsSingleton.MissionBuff`) applied to each servant, whose server script sets `ServantData.IsOnMission` (and clears it when the buff goes); a "mission started" notice to the sender's allies. **No success chance or injury is rolled at the send.** |
-| Return | `ServantMissionUpdateSystem` finishes every hunt whose start plus length has passed: it rolls each servant's success there (`GetMissionSuccessChanceForServant_Server`), destroys the servants that failed or injures them (coffin `InjuryEndTimeTicks`, `Injury`), adds randomized loot to the survivors' inventories, summons them back to their coffins, removes the row, removes the mission buff and notifies allies. |
+| Return | `ServantMissionUpdateSystem` finishes every hunt whose start plus length has passed: it rolls each servant's success there (`GetMissionSuccessChanceForServant_Server`, [Success chance](#success-chance)), destroys the servants that failed (coffin revivable; no injury is rolled on this build), adds randomized loot to the survivors' inventories, summons them back to their coffins, removes the row, removes the mission buff and notifies allies. |
 | Throne list | `ServantInfoEventSystem_Server` answers a player who opens a throne with every coffin connected to the throne's heart that holds a living, revivable or reviving servant. State: revivable or reviving coffin is `Dead`; an injury still running is `Injured`; named by the heart's record is `AwayOnHunt`; carrying items is `HasItems`; otherwise `Free`. Proficiency is `round(gear level × 10) + 100 + round(expertise × 100)`. |
 
 ### Send and resend
@@ -2688,15 +2688,112 @@ Differences from the throne send, by design:
 - **Discovery** is checked for `ServantSendRequest.User` (default: the heart's owner) against any zone
   of the mission; `CheckDiscovered = false` skips it. `Resend` skips it, because the game accepted
   the zone for the first send.
-- **The "mission started" notice** to allies is not sent (it is a client notice only); a mod that wants
-  one sends its own from `ServantsSent`.
-- **The success chance is never touched.** The game rolls it at the return, as for any hunt.
-  Progenitor patches no success-chance method: their list parameter breaks the hook trampoline.
+- **The "mission started" notice** (`ServantMissionStartedEvent{MissionId}`, which a client prints
+  as "Hunt in X started.") goes to every connected user whose character is allied with the castle
+  heart (the game's check: `Team.IsAllies`), plus `ServantSendRequest.User` when connected. The game's
+  send raises it to the sender's allied users. Progenitor creates the same network event entity
+  chat messages use (`NetworkEventType` with the event id, the event component, `SendNetworkEventTag`,
+  `SendEventToUsers` with one bit per user) and writes the event's one field raw at its declared
+  offset; `Announce = false` skips it. A failure is logged and never fails the send. Source-checked,
+  not live-verified.
+- **The success chance is the game's** unless the send set a cap ([Success cap](#success-cap)). The
+  game rolls it at the return, as for any hunt. Progenitor patches no success-chance method: their
+  list parameter breaks the hook trampoline.
 
 `Resend(returned)` sends the servants that came back unhurt, from the same heart, on the same
 mission and length choice. A servant that still carries its loot is refused (`ServantHasItems`), as
 the game would: move the loot first (`ctx.Inventory.TransferAll(servant.Inventory, chest)`). A return
 from an earlier world load is refused.
+
+### Success chance
+
+The game rolls each servant's success when the hunt returns, not at the send, and stores no chance
+(source-checked: `ServantMissionUpdateSystem` calls `GetMissionSuccessChanceForServant_Server` per
+servant, then `NextFloat() <= chance`; a failure destroys the servant, sets its coffin to revivable
+and gives no loot; there is no injury roll at the return on this build). Progenitor computes the
+same number with the game-free `ServantChanceLogic` (unit-tested against the formula), fed with raw
+reads at the [layout constants](#layout-constants): the servant's live `ServantPower` (gear level,
+expertise) and first two `PerksBuffer` perks, the mission prefab's `MissionData.MissionDifficulty`
+and `PerksBuffer`, each perk prefab's `PerkData` (`LootValue`, `PowerValue`), the settings
+singleton's `StaticPartyBonus` and the length choice's `SuccessRateBonus`.
+
+| Step | The game's computation (source-checked) |
+|---|---|
+| Proficiency | `round(gear level × 10) + 100 + round(expertise × 100)`, from the servant's live `ServantPower` (not the coffin's copy). The rounding is the runtime's `Math.Round(double)`: an exact .5 goes to the even integer (22.5 to 22, 37.5 to 38). |
+| Perks | For every servant of the party, each of the mission's perks is matched against the servant's first, then second perk. A match whose perk is not used yet counts once for the whole party: `PowerValue` comes off the difficulty, `LootValue` adds to the loot bonus (which starts at 1). |
+| Party bonus | `StaticPartyBonus` once for each other servant of the party (the throne's "+n"). |
+| Chance | `x = proficiency + party bonus - (difficulty - perk reduction)`; `x >= 0` is 100%; otherwise `1 - x² / 15000 + SuccessRateBonus`, clamped to 0..1. The length choice's bonus only matters when the party is short. |
+
+`Chance(ServantChanceRequest)` answers for a prospective party, zone and length, and says whether
+`Send` would accept it now (the same checks, nothing written). `Missions` carries the live chances
+of every hunt out (`ServantMission.Chances`), `Send` returns them (`ServantSendResult.Chances`), and
+`ServantsReturned` carries the chance read just before the game rolled it (`ReturnedServant.Chance`;
+read in the same hook that snapshots the due rows, so only while something is subscribed). Between
+the send and the return the chance changes only if a servant's `ServantPower`, perks or the game data
+change. The throne shows the same number (its hunt menu calls the client form of the same function
+with the selected servants), which is the live check. `ServantChance.MaxSuccess` is the hunt's cap
+(null when none) and `Applied` is `min(Vanilla, MaxSuccess)`.
+
+### Success cap
+
+**Experimental; source-checked and game-free tested (`ServantCapTests`), not live-verified.**
+`ServantSendRequest.MaxSuccess` (or `Resend(returned, maxSuccess)`) caps each servant's success
+chance for that hunt at a value from 0 to 1, for example a lower chance on repeat hunts.
+**A capped hunt can kill a servant the game would have brought home; that is the intended
+trade-off.** A cap at or above the vanilla chance changes nothing; hunts the game's own throne sends
+are never capped.
+
+```csharp
+ctx.Events.On<ServantsReturned>(ev =>
+{
+    foreach (var s in ev.Servants)
+        if (s.Outcome != ServantOutcome.Dead) ctx.Inventory.TransferAll(s.Inventory, stash);
+    var again = ctx.Servants.Resend(ev, maxSuccess: 0.75f);   // repeat hunts: at most 75%
+    foreach (var c in again.Chances) ctx.Log.LogInfo($"{c.Servant}: {c.Vanilla:P0} -> {c.Applied:P0}");
+});
+```
+
+How it works. The cap is applied inside the before/after hooks Progenitor already has on
+`ServantMissionUpdateSystem`, the system that rolls the return, with data writes only; no game
+method is called or patched. The before-hook is registered at the lowest priority and the
+after-hook at the highest, so no other hook on that system sees a forced value (a plugin that
+orders itself explicitly against Progenitor's id can still change that order).
+
+| Step | What happens |
+|---|---|
+| Record | On a capped send the cap goes into the cap book and the server store (`ServerSave`, store `progenitor.servants`, key `cap:<world id>:<mission>:<start ticks>`, territory as a cross-check), flushed to disk before `Send` returns. The server store is machine-wide (shared by hosted games, kept across wipes), so every key carries the world's id, a random id kept in the world's own `ModSave` store `progenitor.servants` (a wipe or another save gets a new one); a book loads, expires and sweeps only its own world's keys. The book is Core's, so a plugin unload or a Core swap does not lose it. A capped send made before both stores are loaded is refused (`WriteFailed`, nothing written). A cap is dropped when the game finishes its hunt, or ten minutes after the hunt's end once no castle's record holds it (an orphan after a rollback). The Dev bridge's `finish` (method `row`) moves a hunt's start, and its cap moves with it. |
+| Which row | The game finishes at most one row per castle heart per update: the first due row in record order (`FindFinishedMissionsJob` stops at it; with the servant timers off, always row 0). Progenitor picks that row the same way and draws vetoes only for it. |
+| Veto | For the capped row the game finishes this update (due by Progenitor's clock, which the game reads after it), each servant's vanilla chance `c` is computed from the same live inputs ([Success chance](#success-chance)). With probability `1 - cap/c` Progenitor writes that servant's `ServantPower.GearLevel` = -10000 (proficiency about -99,900, so the game's chance clamps to 0). Its overall success is then `(1 - q) · c = cap`. The vetoed servant fails the game's way: destroyed, coffin revivable, no loot, the game's "was killed" line to allies. The others are untouched: the veto changes only that servant's proficiency, not the party bonus or perks. The game's roll can still pass a forced failure with probability about 1.2e-7. |
+| Hold | A capped row the game may or may not finish this update is held for that update instead: its length is raised by three seconds and restored after. That covers a capped row due only within the two-second clock slack, a capped row after an uncapped row that is due only within the slack (the game may finish either), and every capped row while a save is in flight. A held row reads as not due, so the game's walk goes on to the next row. No servant is ever written in an update that does not finish its hunt, except when the system is skipped or the update stalls: a skipped update still runs the after-hook (registered to run whether or not the system runs), and a stalled one is restored by the guards below. |
+| Saves | The game's save (`SerializePersistenceSystemV2.TriggerSave`) schedules its serialization jobs and keeps their handle in `_WriteToDiskDependency` (its `IsSaving`) until a later update completes and finalizes them; those jobs hold no `ServantPower` handle, so a raw write does not wait for them. Progenitor reads that flag raw at its declared offset (checked once against the runtime's own field offset) and never vetoes while it is set: the capped row is held. If the flag cannot be read, capped hunts finish uncapped with an error line. A held row's raised length could be captured by a save in flight; that hunt then ends at most three seconds later after a restart. |
+| Restore | After the update every write is undone and read back (`servants: restored … read back`). If that hook does not run (the update threw), the restore runs after `UpdateGroup` (which catches its systems' exceptions), before `PersistenceGroup` of the next frame, on the next frame, before the next update, and at Core unload; each of those is a **late restore**, logged as an error and counted in `CapStatus.LateRestores`. A restore writes only when the target is the same servant (world-load epoch and network id) and still reads the value written; otherwise it logs and leaves it. A restore that throws is retried by the next guard (three tries). |
+| Pending-restore record | Before each gear write, a record (world id, process, world-load epoch, entity, network id, castle territory, coffin name, the original value) goes into the same store, flushed. A successful restore marks it restored and keeps it until a save that **started after the restore** has completed (watched after each update of the save system); one that did not read back keeps it unrestored. Once per world load, after the world finished loading, Core acts on this world's records: in the same process and world load (a Core swap) it restores the entity after validating it; otherwise (a restart) it restores only a servant whose gear level reads exactly -10000 and whose castle and coffin name match one record, keeps that record until the next save, and drops records that match no servant (the loaded world does not hold the forced value). |
+| Load gate | Cap expiry and the record sweep run only once the world has finished loading (a load completed in this Core generation, or Core was installed into a running world); the hooks fire earlier, while the world is still being built. Vetoes and holds do not wait for it. |
+| Book not loaded | While the server store or the world's store is not loaded yet, every due hunt is held update by update for up to 30 seconds, then released to the game uncapped with an error line. A world in which no capped send was ever made has no id and no caps, and is never held. With the game's servant timers off a hunt cannot be held; it finishes uncapped with a warning. Without the game's servant mission settings the game finishes nothing, and the cap does nothing. |
+
+The game's own recompute (source-checked): `ServantPowerSystem` sets `GearLevel` from the
+servant's equipment, but its query has a change filter on `ServantEquipment`, so it runs only for
+chunks whose equipment changed. A forced value therefore does not heal by itself each frame; it
+would heal when equipment in that chunk changes, and probably after a load (freshly loaded chunks
+count as changed; inferred, live check owed). The restore does not rely on it.
+
+Downtime: a hunt that ended while the server was down resolves on the first update after the
+world loads, and the cap applies there once both stores are loaded; until then the hunt is held,
+at most 30 seconds (inferred, the live check below verifies it). Limits: the cap uses Progenitor's
+replica of the chance; if the replica disagreed with the game's number, the overall success would
+be `cap / c_replica · c_game` (the parity check below compares them). Hunts sent by the throne, and
+by another mod outside `ctx.Servants`, have no cap.
+
+### Mission names
+
+The server cannot name a mission: the name is `ManagedMissionData.Name`, a client-only managed
+component, read through the game's string table. `MissionDisplayName(missionGuid)` does that on the
+client, through the `GameDataSystem.ManagedDataRegistry` route item names in chat already take,
+and returns null on the server. For a server mod, `MissionToken(missionGuid)` gives the chat token
+`[mission:<guid>]`, which Progenitor clients draw as the name ([chat.md](chat.md), hunt names) and
+vanilla clients show as written. A notice can read
+`$"{s.Name} came back from {ctx.Servants.MissionToken(ev.MissionGuid)} ({s.Chance?.Vanilla:P0})"`.
+Source-checked and unit-tested (token parsing, rendering); not live-verified.
 
 ### Returns
 
@@ -2769,6 +2866,10 @@ returns castles the player owns or the player's clan owns, each confirmed with `
 - A return seen but not yet published (the half second to five seconds `ServantsReturned` waits) is
   lost when Core is swapped or unloaded in that window, and so is the throne list a player was
   shown; the hunt itself is unaffected.
+- Inferred, not observed: that the chance computed before the update equals the one the game rolls
+  (the same inputs, read the same frame; the throne comparison above checks the formula); that a
+  `SendEventToUsers` mask with several bits carries the started notice the way the game's per-user
+  sends do (chat uses one bit per event).
 - `ServantsSent` covers Progenitor's sends only. The game's own sends show up in `Missions` and, when
   they finish, in `ServantsReturned`.
 - Servant entities and coffins are session ids. Persist the heart's `ContainerId`, the territory
@@ -2824,7 +2925,37 @@ with empty inventories, and a second castle B of the same player or clan with at
    heart=<B>`; `.servants hunts` standing in B lists the hunt and B's throne map shows it.
    `.servants status` counts one swap and one routed send. `.servants swap off`, reopen the throne:
    only A's servants.
-10. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
+10. Chance parity: with the server bridge, `servants` `action: chance` for a 1-, 2- and 3-servant
+    party of free servants on one zone, on several length slots, with and without a servant whose
+    perk matches the mission's, a short party and a certain one. Sit on the throne, pick the same
+    servants, zone and length: the hunt menu's % equals `chances[].percent` (rounded to whole
+    percent) and its "+n" equals `partyBonus`. Send one: `servants list` shows the same chances
+    under `hunts[].chances`, and the return's `ReturnedServant.Chance` (Sample watch log) matches.
+11. Hunt started notice: send with `.servants send …` while a clan member is online: both clients
+    print "Hunt in <zone> started."; a player of another clan does not. `chances` and `announced`
+    are in the bridge `send` reply.
+12. Mission names (client): a mod or the client bridge calls `ctx.Servants.MissionDisplayName` for
+    three missions; each equals the name in the vanilla hunt chat lines. A server line containing
+    `[mission:<guid>]` draws as that name on a Progenitor client and as the raw token on a vanilla one.
+13. Cap statistics, with the game's servant timers off (bridge `servants timers off:true`) and a
+    certain party (every servant at 100%): bridge `send` with `maxSuccess` 1.0: no deaths, no
+    `FORCED FAILURE`. `maxSuccess` 0.0: every servant dies, the "was killed" line, a `servants: cap 0%
+    … FORCED FAILURE` and a `servants: restored … read back` line per servant, and
+    `ReturnedServant.CapForcedFailure` true. `maxSuccess` 0.5 over N sends: successes binomial
+    (N=40: 13–27 at 95%). Revives cost time; budget it.
+14. Restore: after each return, `servants list` shows the survivors' `gearLevel` as before the send;
+    `servants caps` reads `lateRestores: 0` and `outstanding: 0`; a client never shows the negative
+    gear level.
+15. Downtime: send a `maxSuccess` 0.0 hunt on a long length slot with timers on, save, stop the test
+    server normally, wait past the hunt's end, start it again. The servant is dead and the log shows
+    `servants: cap book loaded (1 …)` before `servants: cap 0% on mission …` on the first update.
+    Control: an uncapped hunt across the same restart returns as vanilla.
+16. Save in flight: with timers on, send a `maxSuccess` 0.0 hunt on the shortest slot and trigger a
+    world save (bridge `world_save`) a second before it is due. Debug log: `held mission … (a save is in
+    flight)` until the save finalizes, then `servants: cap 0% …`; after the next save completes,
+    `pending cap restore record(s) dropped`. Two capped hunts of one castle due together: one is
+    finished per update (two `cap …` lines on consecutive updates).
+17. Clean up: turn servant timers back on if you turned them off, `.servants watch off`, remove the
     Sample from the test server's reload folder and confirm the clean unload (`servants: list
     provider unregistered` if the swap was left on).
 

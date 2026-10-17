@@ -1140,6 +1140,16 @@ internal static class ChatView
             return;
         }
 
+        if (span.Kind == ChatSpanKind.Mission)
+        {
+            int id = int.TryParse(span.Target, out int parsed) ? parsed : 0;
+            string? name = ChatGameData.MissionName(id);
+            UiDialogs.Notice(typeof(ChatView), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter, name ?? "Unknown hunt",
+                name == null ? "Mission " + span.Target + " is not a servant hunt this game knows." : "A servant hunt zone.",
+                "OK", null);
+            return;
+        }
+
         if (span.Kind == ChatSpanKind.Mod)
         {
             if (!ChatPolicy.Current.AllowModLinks) return;

@@ -50,6 +50,28 @@ internal static unsafe partial class ServantRuntime
     // Rows snapshotted before the update system ran, per heart, for the hearts with a hunt due.
     private static readonly Dictionary<CastleId, List<MissionRow>> Due = new();
 
+    /// <summary>What Progenitor read about one due row just before the game rolled it.</summary>
+    private sealed class RowRoll
+    {
+        public List<ServantChance> Chances = new();
+
+        /// <summary>The servants whose roll the success cap forced to fail.</summary>
+        public HashSet<CastleId> Forced = new();
+
+        /// <summary>When it was read (UTC ticks): a roll whose return is never published ages out.</summary>
+        public long Ticks = DateTime.UtcNow.Ticks;
+    }
+
+    private const long ReturnRollMaxAgeTicks = 60 * ServantLogic.TicksPerSecond;
+
+    // Capped rows vetoed this update: their caps go once the game finished them.
+    private static readonly List<(Entity Heart, MissionRow Row)> CapDue = new();
+
+    // The rolls of the due rows, read in BeforeUpdate (this update only), and of the finished rows
+    // waiting for their publish (consumed by BuildReturn).
+    private static readonly Dictionary<(CastleId Heart, (int, long, CastleId) Key), RowRoll> DueRolls = new();
+    private static readonly Dictionary<(CastleId Heart, (int, long, CastleId) Key), RowRoll> ReturnRolls = new();
+
     // Pending list swaps: user index -> request facts (Before the info system), applied After.
     private static readonly Dictionary<int, (CastleId User, CastleId Heart, byte[] Throne, IReadOnlyList<CastleId> Hearts)> PendingSwaps = new();
 
@@ -76,8 +98,12 @@ internal static unsafe partial class ServantRuntime
         if (!Plugin.IsServerProcess || _installed) return;
         Lists.Log = line => Plugin.Logger?.LogInfo(line);
         Lists.Unregistered = () => PendingSwaps.Clear(); // holds the provider's lists: never past its unregistration
-        _updBefore = SystemHooks.Before<ServantMissionUpdateSystem>(BeforeUpdate);
-        _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate);
+        // Before runs last and After first among every hook on this system, so no other hook ever
+        // sees a servant whose gear level the success cap forced for this update (int priority, higher first).
+        _updBefore = SystemHooks.Before<ServantMissionUpdateSystem>(BeforeUpdate, int.MinValue);
+        // The after-hook runs even when the system is skipped (another plugin's Skip, a disabled system),
+        // so a write of the success cap can never stay live for the rest of the update group.
+        _updAfter = SystemHooks.After<ServantMissionUpdateSystem>(AfterUpdate, int.MaxValue, options: new HookOptions { OnlyWhenSystemRuns = false });
         _actBefore = SystemHooks.Before<ServantMissionActionSystem>(BeforeAction);
         _infoBefore = SystemHooks.Before<ServantInfoEventSystem_Server>(BeforeInfo);
         _infoAfter = SystemHooks.After<ServantInfoEventSystem_Server>(AfterInfo);
@@ -87,14 +113,19 @@ internal static unsafe partial class ServantRuntime
             catch (Exception ex) { Plugin.Logger?.LogWarning("servants: dropping a disconnected player's list failed: " + ex.Message); }
         }, priority: 1900);
         Plugin.Frame += Tick;
+        try { InstallCaps(); }
+        catch (Exception e) { Plugin.Logger?.LogError("servants: the success cap could not install; capped hunts are held up to the timeout, then finish uncapped: " + e.Message); }
         _installed = true;
-        Plugin.Logger?.LogInfo("Servants: installed (server; returns, sends and the experimental throne list hook)");
+        Plugin.Logger?.LogInfo("Servants: installed (server; returns, sends, success caps and the experimental throne list hook)");
     }
 
     internal static void Uninstall()
     {
         if (!_installed) return;
         _installed = false;
+        try { UninstallCaps(); }
+        catch (Exception e) { Plugin.Logger?.LogError("servants: uninstalling the success cap threw: " + e.Message); }
+        CapDue.Clear();
         Plugin.Frame -= Tick;
         foreach (var h in new[] { _updBefore, _updAfter, _actBefore, _infoBefore, _infoAfter })
         {
@@ -108,6 +139,8 @@ internal static unsafe partial class ServantRuntime
         Lists.Unregistered = null;
         MissionHearts.Clear();
         Due.Clear();
+        DueRolls.Clear();
+        ReturnRolls.Clear();
         PendingSwaps.Clear();
         Confirm.Clear();
         PendingReturns.Clear();
@@ -408,6 +441,8 @@ internal static unsafe partial class ServantRuntime
             LengthSeconds = r.LengthSeconds,
             EndsUtc = ServantLogic.Utc(ServantLogic.CompletionTicks(r.StartTicks, r.LengthSeconds)),
             Servants = new List<CastleId>(r.Servants()),
+            Chances = ChancesFor(world, em, r.MissionGuid, r.DataSlot, r.Servants(), CapOf(r, heart), out _),
+            MaxSuccess = CapOf(r, heart),
             Epoch = WorldEpoch.Current,
         };
     }
@@ -420,8 +455,10 @@ internal static unsafe partial class ServantRuntime
     /// script marks it as on a hunt). Validated first with the game's checks; nothing is written
     /// on a refusal.
     /// </summary>
-    internal static ServantSendResult Send(World world, ServantSendRequest req, string by, bool dryRun = false)
+    internal static ServantSendResult Send(World world, ServantSendRequest req, string by, bool dryRun = false, bool log = true)
     {
+        if (!ServantCapMath.IsValidCap(req.MaxSuccess))
+            throw new ArgumentOutOfRangeException(nameof(req), "ServantSendRequest.MaxSuccess must be null or between 0 and 1");
         var em = world.EntityManager;
         int epoch = WorldEpoch.Current;
         if (req.Epoch != 0 && req.Epoch != epoch)
@@ -507,7 +544,7 @@ internal static unsafe partial class ServantRuntime
         var plan = ServantLogic.PlanSend(f);
         if (!plan.Ok || plan.Row == null)
         {
-            Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " mission=" + req.MissionGuid
+            if (log) Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " mission=" + req.MissionGuid
                 + " slot=" + req.DataSlot + " (" + plan.Refusal + "): " + plan.Reason);
             return new ServantSendResult
             {
@@ -521,7 +558,11 @@ internal static unsafe partial class ServantRuntime
         foreach (var sf in facts)
             if (AiRuntime.FindBuff(em, sf.Servant.ToEntity(), buff) != Entity.Null)
                 return Fail(req, ServantSendRefusal.ServantBusy, "servant " + sf.Servant
-                    + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false);
+                    + " still carries the mission buff of its last hunt (the game removes it a moment after the return); try again shortly", by, log: false, quiet: !log);
+
+        // A capped send needs the cap book of this world (its server store and the world's own id).
+        if (req.MaxSuccess != null && !dryRun && !CapBookWritable())
+            return Fail(req, ServantSendRefusal.WriteFailed, "the success cap cannot be recorded yet (Progenitor's server store or this world's store is not loaded); nothing was written", by, log: true);
 
         // Validation only (a routed throne send checks every heart before it writes any).
         if (dryRun)
@@ -530,6 +571,9 @@ internal static unsafe partial class ServantRuntime
                 Ok = true, Heart = req.Heart, MissionGuid = plan.Row.MissionGuid, Zone = f.Zone, DataSlot = plan.Row.DataSlot,
                 LengthSeconds = plan.Row.LengthSeconds, Servants = new List<CastleId>(plan.Row.Servants()),
             };
+
+        // The chances at the send, read before any write (the send changes none of their inputs).
+        var chances = ChancesFor(world, em, plan.Row.MissionGuid, plan.Row.DataSlot, plan.Row.Servants(), req.MaxSuccess, out _);
 
         // The buff first: if the game does not spawn it for every servant, nothing is in the record
         // yet and the buffs that did go on are taken off again. The buff spawns synchronously on
@@ -582,8 +626,15 @@ internal static unsafe partial class ServantRuntime
         }
 
         _heartsDirty = true;
+        // The cap goes into the book (and the server store, flushed) before anything else can run:
+        // the row cannot finish before this call returns.
+        if (req.MaxSuccess is float cap) RecordCap(row, TerritoryOf(heart), cap);
         var sent = new List<CastleId>(row.Servants());
         Confirm.Add((DateTime.UtcNow.Ticks + ConfirmAfterTicks, sent, buff, req.Heart, row));
+        // The game's send ends with this notice to the sender's allies; a vanilla client prints it.
+        int announced = req.Announce
+            ? AnnounceStarted(world, em, heart, row.MissionGuid, req.User.IsNone ? Entity.Null : req.User.ToEntity())
+            : 0;
         var result = new ServantSendResult
         {
             Ok = true,
@@ -595,19 +646,24 @@ internal static unsafe partial class ServantRuntime
             StartedUtc = ServantLogic.Utc(row.StartTicks),
             Servants = sent,
             BuffApplied = true,
+            Chances = chances,
+            MaxSuccess = req.MaxSuccess,
+            Announced = announced > 0,
         };
         Plugin.Logger?.LogInfo("servants: sent by=" + by + " heart=" + req.Heart + " mission=" + row.MissionGuid
             + (f.MissionName.Length > 0 ? " (" + f.MissionName + ")" : "") + " zone=" + f.Zone + " slot=" + row.DataSlot
-            + " length=" + row.LengthSeconds + "s servants=" + string.Join(",", sent));
+            + " length=" + row.LengthSeconds + "s servants=" + string.Join(",", sent)
+            + " chances=[" + string.Join(", ", chances) + "]" + (req.MaxSuccess is float c2 ? " cap=" + c2.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) : "")
+            + " notice=" + announced + " user(s)");
         try { EventBus.Publish(new ServantsSent { Result = result, By = by }); }
         catch (Exception e) { Plugin.Logger?.LogWarning("servants: ServantsSent handler threw: " + e.Message); }
         return result;
     }
 
-    private static ServantSendResult Fail(ServantSendRequest req, ServantSendRefusal refusal, string why, string by, bool log)
+    private static ServantSendResult Fail(ServantSendRequest req, ServantSendRefusal refusal, string why, string by, bool log, bool quiet = false)
     {
         if (log) Plugin.Logger?.LogWarning("servants: send failed by=" + by + " heart=" + req.Heart + ": " + why);
-        else Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " (" + refusal + "): " + why);
+        else if (!quiet) Plugin.Logger?.LogInfo("servants: send refused by=" + by + " heart=" + req.Heart + " (" + refusal + "): " + why);
         return new ServantSendResult { Ok = false, Refusal = refusal, Reason = why, Heart = req.Heart, MissionGuid = req.MissionGuid, DataSlot = req.DataSlot, Servants = req.Servants };
     }
 
@@ -648,7 +704,7 @@ internal static unsafe partial class ServantRuntime
     }
 
     /// <summary>Send the servants of a return that came back unhurt on the same hunt again.</summary>
-    internal static ServantSendResult Resend(World world, ServantsReturned returned, string by)
+    internal static ServantSendResult Resend(World world, ServantsReturned returned, string by, float? maxSuccess = null)
     {
         var survivors = ServantLogic.Survivors(returned.Servants);
         if (survivors.Count == 0)
@@ -661,6 +717,7 @@ internal static unsafe partial class ServantRuntime
             DataSlot = returned.DataSlot,
             CheckDiscovered = false,
             Epoch = returned.Epoch == 0 ? WorldEpoch.Current : returned.Epoch,
+            MaxSuccess = maxSuccess,
         }, by);
     }
 
@@ -668,6 +725,7 @@ internal static unsafe partial class ServantRuntime
 
     private static void Tick()
     {
+        if (Journal.Count > 0) GuardRestore("on the next frame");
         if (_timerRestore != null) TickTimerRestore();
         if (Confirm.Count == 0 && PendingReturns.Count == 0) return;
         var world = Worlds.Server;
@@ -732,7 +790,21 @@ internal static unsafe partial class ServantRuntime
 
     private static void BeforeUpdate(SystemHookContext hook)
     {
+        // Anything a previous update left (its after-hook did not run and no guard caught it yet).
+        GuardRestore("before the next update");
         Due.Clear();
+        DueRolls.Clear();
+        CapDue.Clear();
+        BeforeUpdateReturns(hook);
+        try { BeforeUpdateCaps(hook); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogError("servants: the success cap step threw; this update's writes are undone after it: " + e.Message);
+        }
+    }
+
+    private static void BeforeUpdateReturns(SystemHookContext hook)
+    {
         if (EventBus.SubscriberCount<ServantsReturned>() == 0) return;
         try
         {
@@ -751,6 +823,14 @@ internal static unsafe partial class ServantRuntime
                 foreach (var r in rows)
                     if (ServantLogic.IsDue(r, now, DueSlackTicks, timers)) { Due[CastleId.From(heart)] = rows; break; }
             }
+            // The chance of each due row, from the same live inputs the game's return reads next.
+            foreach (var kv in Due)
+                foreach (var r in kv.Value)
+                {
+                    if (!ServantLogic.IsDue(r, now, DueSlackTicks, timers)) continue;
+                    var roll = RollOf(kv.Key, r);
+                    roll.Chances = ChancesFor(hook.World, em, r.MissionGuid, r.DataSlot, r.Servants(), null, out _);
+                }
         }
         catch (Exception e)
         {
@@ -759,8 +839,19 @@ internal static unsafe partial class ServantRuntime
         }
     }
 
+    private static RowRoll RollOf(CastleId heart, MissionRow row)
+    {
+        if (!DueRolls.TryGetValue((heart, row.Key), out var roll)) DueRolls[(heart, row.Key)] = roll = new RowRoll();
+        return roll;
+    }
+
     private static void AfterUpdate(SystemHookContext hook)
     {
+        // First and always: undo every temporary write of the success cap.
+        try { AfterUpdateCaps(hook); }
+        catch (Exception e) { Plugin.Logger?.LogError("servants: the after-update restore threw; the guards retry it: " + e.Message); }
+        try { CapRowsGone(hook.World.EntityManager); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("servants: dropping finished hunts' caps failed: " + e.Message); }
         if (Due.Count == 0) return;
         var world = hook.World;
         var em = world.EntityManager;
@@ -780,6 +871,17 @@ internal static unsafe partial class ServantRuntime
             Plugin.Logger?.LogWarning("servants: return check failed: " + e.Message);
         }
         Due.Clear();
+        foreach (var (heart, row) in finished)
+            if (DueRolls.TryGetValue((CastleId.From(heart), row.Key), out var roll))
+                ReturnRolls[(CastleId.From(heart), row.Key)] = roll;
+        DueRolls.Clear();
+        if (ReturnRolls.Count > 0)
+        {
+            long cut = DateTime.UtcNow.Ticks - ReturnRollMaxAgeTicks;
+            var stale = new List<(CastleId, (int, long, CastleId))>();
+            foreach (var kv in ReturnRolls) if (kv.Value.Ticks < cut) stale.Add(kv.Key);
+            foreach (var k in stale) ReturnRolls.Remove(k);
+        }
         if (finished.Count == 0) return;
         _heartsDirty = true;
         long now = DateTime.UtcNow.Ticks;
@@ -929,6 +1031,8 @@ internal static unsafe partial class ServantRuntime
     {
         var servants = new List<ReturnedServant>();
         var current = CurrentRows(em, heart);
+        ReturnRolls.TryGetValue((CastleId.From(heart), row.Key), out var roll);
+        ReturnRolls.Remove((CastleId.From(heart), row.Key));
         foreach (var id in row.Servants())
         {
             coffins.TryGetValue(id, out var coffin);
@@ -940,7 +1044,8 @@ internal static unsafe partial class ServantRuntime
             var loot = new List<ServantLoot>();
             int stacks = -1;
             if (ServantLogic.OutcomeOf(f, now) != ServantOutcome.Dead) stacks = ItemStacks(s, out _, out loot);
-            servants.Add(ServantLogic.Returned(id, CastleId.From(s), CastleId.From(coffin), name, f, now, WorldEpoch.Current, loot, stacks));
+            var returned = ServantLogic.Returned(id, CastleId.From(s), CastleId.From(coffin), name, f, now, WorldEpoch.Current, loot, stacks);
+            servants.Add(ServantChanceLogic.WithRoll(returned, id, roll?.Chances, roll != null && roll.Forced.Contains(id)));
         }
         var castle = Progenitor.Castles.Castles.ForHeart(CastleId.From(heart));
         var zones = ZonesFor(em, row.MissionGuid);
@@ -1186,6 +1291,8 @@ internal static unsafe partial class ServantRuntime
                     DataSlot = slot,
                     User = userId,
                     CheckDiscovered = true,
+                    // One throne send, one "Hunt in X started." notice, however many hearts it spans.
+                    Announce = requests.Count == 0,
                 };
                 var check = Send(world, req, "progenitor.throne", dryRun: true);
                 if (!check.Ok) { refusal = "heart " + heart + ": " + check.Reason; break; }

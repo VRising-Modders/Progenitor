@@ -139,6 +139,8 @@
          registry are game-free; ServantRuntime.cs and PluginServants.cs are not on this list. -->
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantTypes.cs" Link="Linked\ServantTypes.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantLogic.cs" Link="Linked\ServantLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Servants\ServantChanceLogic.cs" Link="Linked\ServantChanceLogic.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Servants\ServantCapLogic.cs" Link="Linked\ServantCapLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Servants\ServantListRegistry.cs" Link="Linked\ServantListRegistry.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleServants.cs" Link="Linked\SampleServants.cs" />
     <!-- Milestone P3 spike: ctx.MaterialSource. Game-free halves only; the Plugin*, *Runtime and

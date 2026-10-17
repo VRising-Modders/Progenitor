@@ -64,6 +64,20 @@ public static class ServantBridge
         return ServantRuntime.Send(ServantRuntime.RequireWorld("Send"), request, By);
     }
 
+    /// <summary><c>ctx.Servants.CapStatus</c>.</summary>
+    public static ServantCapStatus CapStatus()
+    {
+        ServantRuntime.RequireWorld("CapStatus");
+        return ServantRuntime.CapStatus();
+    }
+
+    /// <summary><c>ctx.Servants.Chance</c>: a prospective send's chances, no writes.</summary>
+    public static ServantChanceResult Chance(ServantChanceRequest request)
+    {
+        if (request == null) throw new ArgumentNullException(nameof(request));
+        return ServantRuntime.Chance(ServantRuntime.RequireWorld("Chance"), request, By);
+    }
+
     /// <summary>
     /// Make the castle's active hunts (or the one on <paramref name="missionGuid"/>, 0 for all) end
     /// now; the game returns them on its next update and rolls each servant's success there, as

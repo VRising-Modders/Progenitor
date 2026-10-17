@@ -183,8 +183,142 @@ public sealed class ServantMission
     /// <summary>The servants on the hunt (1 to 3).</summary>
     public IReadOnlyList<CastleId> Servants { get; init; } = Array.Empty<CastleId>();
 
+    /// <summary>
+    /// Each servant's success chance as the game would roll it if the hunt returned now, in
+    /// <see cref="Servants"/> order (a servant whose power cannot be read is left out). Empty when
+    /// the mission or the settings could not be read.
+    /// </summary>
+    public IReadOnlyList<ServantChance> Chances { get; init; } = Array.Empty<ServantChance>();
+
+    /// <summary>
+    /// The success cap a Progenitor send set on this hunt (<see cref="ServantSendRequest.MaxSuccess"/>),
+    /// null when the hunt is vanilla (or the cap book is not loaded yet).
+    /// </summary>
+    public float? MaxSuccess { get; init; }
+
     /// <summary>The world-load epoch the ids were read in.</summary>
     public int Epoch { get; init; }
+}
+
+/// <summary>
+/// One servant's success chance on one hunt, computed the way the game computes it when the hunt
+/// returns (<c>ServantHelper.GetMissionSuccessChanceForServant</c>), which is also the number the
+/// throne's hunt menu shows. The chance is per servant: the party bonus and the perks are shared,
+/// each servant's own proficiency is not.
+///
+/// <para>Formula: <c>x = Proficiency + PartyBonus - (MissionDifficulty - PerkReduction)</c>;
+/// <c>x &gt;= 0</c> is 1 (certain); otherwise <c>1 - x² / 15000 + SuccessRateBonus</c>, clamped to
+/// 0..1. A party at or above the difficulty is certain on every length choice.</para>
+/// </summary>
+public sealed class ServantChance
+{
+    /// <summary>The servant.</summary>
+    public CastleId Servant { get; init; }
+
+    /// <summary>The game's chance, 0..1, as the throne shows it.</summary>
+    public float Vanilla { get; init; }
+
+    /// <summary>
+    /// The success cap on this hunt (<see cref="ServantSendRequest.MaxSuccess"/>), null when no cap
+    /// is applied (the game's chance stands).
+    /// </summary>
+    public float? MaxSuccess { get; init; }
+
+    /// <summary>
+    /// The chance the servant actually has: <c>min(Vanilla, MaxSuccess)</c>, or
+    /// <see cref="Vanilla"/> when there is no cap.
+    /// </summary>
+    public float Applied { get; init; }
+
+    /// <summary>The servant's hunt proficiency (from its gear level and expertise).</summary>
+    public int Proficiency { get; init; }
+
+    /// <summary>The party bonus, the throne's "+n": the game's static party bonus once per other servant of the party.</summary>
+    public int PartyBonus { get; init; }
+
+    /// <summary>The mission's difficulty before perks (<c>MissionData.MissionDifficulty</c>).</summary>
+    public int MissionDifficulty { get; init; }
+
+    /// <summary>
+    /// What the party's perks take off the difficulty: each of the mission's perks that some
+    /// servant of the party has counts once (<c>PerkData.PowerValue</c>).
+    /// </summary>
+    public int PerkReduction { get; init; }
+
+    /// <summary>The difficulty the chance is computed against: <see cref="MissionDifficulty"/> minus <see cref="PerkReduction"/>.</summary>
+    public int EffectiveDifficulty => MissionDifficulty - PerkReduction;
+
+    /// <summary>The loot multiplier the matching perks give (1 plus each matching perk's <c>PerkData.LootValue</c>).</summary>
+    public float PerkLootBonus { get; init; }
+
+    /// <summary>The length choice's success bonus (<c>ServantMissionSetting.SuccessRateBonus</c>); it matters only when the party is short.</summary>
+    public float SuccessRateBonus { get; init; }
+
+    /// <summary><c>servant 87% (cap 75% -> 75%)</c>.</summary>
+    public override string ToString() =>
+        Servant + " " + Pct(Vanilla) + (MaxSuccess == null ? "" : " (cap " + Pct(MaxSuccess.Value) + " -> " + Pct(Applied) + ")");
+
+    private static string Pct(float v) => (v * 100f).ToString("0.#", CultureInfo.InvariantCulture) + "%";
+}
+
+/// <summary>A prospective send for <c>ctx.Servants.Chance</c>: the same fields as <see cref="ServantSendRequest"/>.</summary>
+public sealed class ServantChanceRequest
+{
+    /// <summary>The castle heart the servants belong to.</summary>
+    public CastleId Heart { get; init; }
+
+    /// <summary>One to three servants of that heart: the party.</summary>
+    public IReadOnlyList<CastleId> Servants { get; init; } = Array.Empty<CastleId>();
+
+    /// <summary>The zone's mission prefab GUID hash.</summary>
+    public int MissionGuid { get; init; }
+
+    /// <summary>The hunt length choice.</summary>
+    public int DataSlot { get; init; }
+
+    /// <summary>A cap to preview (0..1); null for none. Only fills <see cref="ServantChance.MaxSuccess"/> and <see cref="ServantChance.Applied"/>.</summary>
+    public float? MaxSuccess { get; init; }
+
+    /// <summary>Whose map discovery the send check reads; none means the heart's owner.</summary>
+    public CastleId User { get; init; }
+
+    /// <summary>Check the discovery, as <see cref="ServantSendRequest.CheckDiscovered"/> (default true).</summary>
+    public bool CheckDiscovered { get; init; } = true;
+
+    /// <summary>The world-load epoch the ids were read in; 0 means the current epoch.</summary>
+    public int Epoch { get; init; }
+}
+
+/// <summary>What <c>ctx.Servants.Chance</c> found.</summary>
+public sealed class ServantChanceResult
+{
+    /// <summary>True when the chances could be computed (<see cref="Chances"/> holds one per servant).</summary>
+    public bool Ok { get; init; }
+
+    /// <summary>
+    /// Why a <c>Send</c> of this request would be refused right now, or
+    /// <see cref="ServantSendRefusal.None"/> when it would be accepted. The chances are filled
+    /// even for some refusals (a servant still carrying loot, for example) whenever they can be read.
+    /// </summary>
+    public ServantSendRefusal Refusal { get; init; }
+
+    /// <summary>The refusal's sentence, or why the chances could not be read; "" otherwise.</summary>
+    public string Reason { get; init; } = "";
+
+    /// <summary>True when a <c>Send</c> of this request would be accepted now.</summary>
+    public bool WouldSend => Refusal == ServantSendRefusal.None;
+
+    /// <summary>The castle heart.</summary>
+    public CastleId Heart { get; init; }
+
+    /// <summary>The mission.</summary>
+    public int MissionGuid { get; init; }
+
+    /// <summary>The hunt length choice.</summary>
+    public int DataSlot { get; init; }
+
+    /// <summary>Each servant's chance, in the request's order.</summary>
+    public IReadOnlyList<ServantChance> Chances { get; init; } = Array.Empty<ServantChance>();
 }
 
 /// <summary>An item that came back with a servant.</summary>
@@ -251,6 +385,53 @@ public sealed class ReturnedServant
     /// again before the publish (<see cref="Loot"/> is then empty).
     /// </summary>
     public bool LootIsHaul { get; init; }
+
+    /// <summary>
+    /// The servant's success chance as computed just before the game rolled it; null when it could
+    /// not be read, or when the return was due before anything subscribed.
+    /// </summary>
+    public ServantChance? Chance { get; init; }
+
+    /// <summary>
+    /// True when the hunt's success cap decided this servant's roll: Progenitor forced the game's
+    /// roll to fail (<see cref="ServantSendRequest.MaxSuccess"/>). The servant then failed the
+    /// game's way (<see cref="Outcome"/> is <see cref="ServantOutcome.Dead"/>, except with a chance
+    /// of about one in eight million that the game's roll passes anyway).
+    /// </summary>
+    public bool CapForcedFailure { get; init; }
+}
+
+/// <summary>The success cap's state in this server process (<c>ctx.Servants.CapStatus</c>).</summary>
+public sealed class ServantCapStatus
+{
+    /// <summary>True once the cap book is loaded from the server store (caps are enforced).</summary>
+    public bool Ready { get; init; }
+
+    /// <summary>Capped hunts in the book.</summary>
+    public int Caps { get; init; }
+
+    /// <summary>Rolls the cap forced to fail since Core loaded.</summary>
+    public long ForcedFailures { get; init; }
+
+    /// <summary>Temporary writes undone since Core loaded.</summary>
+    public long Restores { get; init; }
+
+    /// <summary>Of those, undone later than the update's own after-hook (each one is logged as an error).</summary>
+    public long LateRestores { get; init; }
+
+    /// <summary>Temporary writes outstanding now (0 outside the update).</summary>
+    public int Outstanding { get; init; }
+
+    /// <summary>Rows held while the book was not readable, and rows released uncapped after the hold timed out.</summary>
+    public long Held { get; init; }
+
+    /// <inheritdoc cref="Held"/>
+    public long ReleasedUncapped { get; init; }
+
+    /// <summary>One line for logs.</summary>
+    public override string ToString() =>
+        "servant caps: ready=" + Ready + " caps=" + Caps + " forced=" + ForcedFailures + " restores=" + Restores
+        + " late=" + LateRestores + " outstanding=" + Outstanding + " held=" + Held + " releasedUncapped=" + ReleasedUncapped;
 }
 
 /// <summary>
@@ -409,6 +590,25 @@ public sealed class ServantSendRequest
     /// another epoch is refused. 0 means the current epoch.
     /// </summary>
     public int Epoch { get; init; }
+
+    /// <summary>
+    /// Raise the game's "Hunt in X started." notice to the connected users allied with the castle,
+    /// as the throne's own send does (default true). Clients show it as a chat line.
+    /// </summary>
+    public bool Announce { get; init; } = true;
+
+    /// <summary>
+    /// A cap on each servant's success chance for this hunt, 0..1; null (the default) leaves the
+    /// game's chance. When a servant's chance is above the cap, Progenitor makes the game's own roll
+    /// fail with probability <c>1 - cap / chance</c> at the return, so the servant succeeds with
+    /// probability exactly <c>cap</c>. A forced failure is the game's own failure: the servant dies
+    /// (revivable at its coffin), brings no loot, and allied players get the game's "was killed"
+    /// line. <b>A capped hunt can kill a servant the game would have brought home; that is the
+    /// intended trade-off.</b> A cap at or above the chance changes nothing. The cap is kept in
+    /// Progenitor's server store, so it holds across a restart and a Core swap. Experimental, not
+    /// live-verified (<c>docs/modules.md</c>, Servants, Success cap).
+    /// </summary>
+    public float? MaxSuccess { get; init; }
 }
 
 /// <summary>What a send did.</summary>
@@ -451,6 +651,15 @@ public sealed class ServantSendResult
     /// warning naming the servant.
     /// </summary>
     public bool BuffApplied { get; init; }
+
+    /// <summary>Each servant's success chance at the send, in <see cref="Servants"/> order (empty when unreadable).</summary>
+    public IReadOnlyList<ServantChance> Chances { get; init; } = Array.Empty<ServantChance>();
+
+    /// <summary>The success cap recorded for the hunt (<see cref="ServantSendRequest.MaxSuccess"/>), null when none.</summary>
+    public float? MaxSuccess { get; init; }
+
+    /// <summary>True when the "Hunt in X started." notice was raised to at least one allied user.</summary>
+    public bool Announced { get; init; }
 
     internal static ServantSendResult Refused(ServantSendRefusal refusal, string reason) =>
         new() { Ok = false, Refusal = refusal, Reason = reason };

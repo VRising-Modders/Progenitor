@@ -16,7 +16,8 @@ namespace Progenitor.Servants;
 ///
 /// <para><b>Status: experimental.</b> Source-checked against the game's metadata and code and
 /// game-free tested; not live-verified (<c>docs/modules.md</c>, Servants). Server only and main
-/// thread only: on the client every member throws <see cref="InvalidOperationException"/>.</para>
+/// thread only: on the client every member throws <see cref="InvalidOperationException"/>, except
+/// <see cref="MissionDisplayName"/> (client only) and <see cref="MissionToken"/> (either side).</para>
 /// </summary>
 public sealed class PluginServants
 {
@@ -46,12 +47,16 @@ public sealed class PluginServants
     /// empty inventory, of this heart; one hunt per zone and castle; the mission's slots; the hunt
     /// length choice; the zone discovered by the user) and refused with a reason; on success the
     /// heart's hunt record gets the row the game's send writes and each servant gets the mission
-    /// buff. Never synthesizes the client's throne event; never touches the success chance (the
-    /// game rolls it when the hunt returns).
+    /// buff, and the users allied with the castle get the game's "Hunt in X started." notice
+    /// (<see cref="ServantSendRequest.Announce"/>). Never synthesizes the client's throne event;
+    /// the result carries each servant's success chance (<see cref="ServantSendResult.Chances"/>),
+    /// which the game rolls when the hunt returns.
     /// </summary>
     public ServantSendResult Send(ServantSendRequest request)
     {
         if (request == null) throw new ArgumentNullException(nameof(request));
+        if (!ServantCapMath.IsValidCap(request.MaxSuccess))
+            throw new ArgumentOutOfRangeException(nameof(request), "ServantSendRequest.MaxSuccess must be null or between 0 and 1");
         return ServantRuntime.Send(World(nameof(Send)), request, _ctx.Guid);
     }
 
@@ -88,6 +93,64 @@ public sealed class PluginServants
         if (returned == null) throw new ArgumentNullException(nameof(returned));
         return ServantRuntime.Resend(World(nameof(Resend)), returned, _ctx.Guid);
     }
+
+    /// <summary>
+    /// <see cref="Resend(ServantsReturned)"/> with a success cap on the new hunt
+    /// (<see cref="ServantSendRequest.MaxSuccess"/>, 0..1; null for none). <b>A capped hunt can kill
+    /// a servant the game would have brought home; that is the intended trade-off.</b>
+    /// Experimental, not live-verified.
+    /// </summary>
+    public ServantSendResult Resend(ServantsReturned returned, float? maxSuccess)
+    {
+        if (returned == null) throw new ArgumentNullException(nameof(returned));
+        if (!ServantCapMath.IsValidCap(maxSuccess)) throw new ArgumentOutOfRangeException(nameof(maxSuccess), "maxSuccess must be null or between 0 and 1");
+        return ServantRuntime.Resend(World(nameof(Resend)), returned, _ctx.Guid, maxSuccess);
+    }
+
+    /// <summary>The success cap's state in this server process: book loaded, caps, forced failures, restores (late ones are errors).</summary>
+    public ServantCapStatus CapStatus
+    {
+        get
+        {
+            World(nameof(CapStatus));
+            return ServantRuntime.CapStatus();
+        }
+    }
+
+    /// <summary>
+    /// The success chance of a prospective send, per servant, as the game would roll it at the
+    /// return and as the throne's hunt menu shows it (<see cref="ServantChance"/>), plus whether
+    /// <see cref="Send(ServantSendRequest)"/> would accept the request now (the same checks, no
+    /// writes). The chances are filled whenever they can be read, even when the send would be
+    /// refused for another reason (a servant still carrying loot, for example).
+    /// </summary>
+    public ServantChanceResult Chance(ServantChanceRequest request)
+    {
+        if (request == null) throw new ArgumentNullException(nameof(request));
+        if (request.MaxSuccess is float cap && !(cap >= 0f && cap <= 1f))
+            throw new ArgumentOutOfRangeException(nameof(request), "MaxSuccess must be between 0 and 1");
+        return ServantRuntime.Chance(World(nameof(Chance)), request, _ctx.Guid);
+    }
+
+    /// <summary>
+    /// Client only: a mission's localized name as the game's own hunt notices print it
+    /// (<c>ManagedMissionData.Name</c> through the game's string table), for example
+    /// "Fishing Lake"; null when the id is not a servant mission, on the server (which has no string
+    /// table), or before the client's game data is loaded. Main thread.
+    /// </summary>
+    public string? MissionDisplayName(int missionGuid)
+    {
+        _ctx.EnsureAttached();
+        if (Plugin.IsServerProcess || missionGuid == 0) return null;
+        return Progenitor.Chat.ChatGameData.MissionName(missionGuid);
+    }
+
+    /// <summary>
+    /// The chat token <c>[mission:&lt;guid&gt;]</c> for a mission. Progenitor's chat shows it as the
+    /// mission's localized name; a client without Progenitor shows the token as written, so send it
+    /// only to players that run Progenitor, or write the name yourself for others. Either side.
+    /// </summary>
+    public string MissionToken(int missionGuid) => Progenitor.Chat.ChatTokens.Mission(missionGuid);
 
     /// <summary>
     /// Experimental. Register the one provider that chooses, per player, whose servants a castle
