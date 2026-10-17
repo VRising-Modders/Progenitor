@@ -259,6 +259,30 @@ Progenitor.Bootstrap is older than per-server mod pause (...)` once and showing 
 for an update and restart. Source-checked and game-free tested (`ServerModPauseTests`,
 `PluginUnloadReasonTests`); not live-verified.
 
+## Hot-load messages
+
+When Core or a reload-folder plugin loads, reloads or unloads while the process runs, Progenitor says so in one short System chat line once the burst settles. Source-checked and game-free tested (`HotLoadNoticeTests`); not live-verified.
+
+| Side | Line | Where | Setting (default on) |
+|---|---|---|---|
+| Client | `Progenitor updated to 2026.10.85.` `Satisvampory reloaded (2.0.0).` `HuntsAndRifts removed.` | This client's Progenitor chat only, while in a world (`ChatView.AddHotLoadLine`); dropped at the title screen or with Progenitor's chat lines off | `[Chat] HotLoadMessages` in `progenitor.ui.cfg` (Your settings → Chat, **Show mod reload messages**); off also hides the server's lines |
+| Server | `Server: Satisvampory reloaded (2.0.0).` | `Chat.Broadcast` System line with no speaker, to every connected player | `[HotLoad] Announce` in the server's `progenitor.cfg` (Server tab → Chat, **Announce mod reloads**; admin channel `hot-load-announce`, lock word `chat`) |
+
+- **Source.** `ProgenitorPlugin.Load` and `Unload` report plugins whose assembly is in a collectible load context (the reload folder) to `Reload/HotLoadNoticeLive.cs`; chainloader plugins never reload and are not reported. Core swaps come from Bootstrap's `CoreReloadStatus.FormatLastReload()` (read by name; no Bootstrap change) and `CoreLoader.IsReloading`.
+- **Sentences.** `<name> added (<v>)`, `reloaded (<v>)`, `updated to <v>`, `removed`, `failed to load`, `failed to reload`, and `failed to update; the previous version keeps running` (a failed load followed by the previous version loading again, as the auto-update rollback does; also a Core swap whose outcome is `refused`, `failed` or `restored`). Several changes join into one line; past 300 characters the rest read `N more mods changed.`
+- **Coalescing.** The line is sent after 1 s without a change. A batch that includes a Core swap waits at least 5 s from the swap, so plugins a deploy copies after the swap join the same line. While a swap runs, plugin unloads say nothing and plugin loads are named only when their version changed.
+- **Not announced.** The loads of a fresh process (until 20 s after Core loaded and 5 s without a load), a client's join (connected, handshake not yet `ok`), a per-server pause and the load that ends it (`PluginUnloadReason.Suspend`), process exit, dry-run swaps, and a repeat of the same refused swap (same outcome and reason).
+- **Across a Core swap.** The outgoing generation leaves its state (Core version, running plugin versions, an unsent line) as plain text in the AppDomain data key `progenitor.hotload.notices`; the incoming generation reads it, names the swap, and clears the key. Nothing typed crosses the swap.
+- **Hiding server lines.** With `[Chat] HotLoadMessages` off, a client's Progenitor chat drops a System line with no sender that starts with `Server: ` and holds only hot-load sentences (`HotLoadNoticeText.IsServerNotice`). The game's own chat lines (Progenitor's chat lines off) still show it.
+
+**Acceptance procedure — not run** (isolated test server and an authorized test client, both on this build):
+1. Restart both processes. Expected: no hot-load line at start or at join; the log shows `HotLoad: installed (process start …)`.
+2. In a world, redeploy a sample plugin to the client's reload folder. Expected: `<name> reloaded (<v>).` in chat about 1 s after the reload; log `HotLoad: … (shown in chat)`.
+3. Redeploy it to the server. Expected: every connected player sees `Server: <name> reloaded (<v>).`; server log `HotLoad: … (sent to N players)`.
+4. Deploy Core with the Dev bridge to one side. Expected: one line naming Progenitor (and Dev only if its version changed), after the swap completes.
+5. Delete the sample from the reload folder: `<name> removed.` Turn **Show mod reload messages** off and repeat on the server: no line on that client. Turn **Announce mod reloads** off: no broadcast, log `not announced`.
+6. Remove the sample from both reload folders afterwards.
+
 ## When a reload does not complete
 
 | Observation | Next step |

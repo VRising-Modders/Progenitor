@@ -66,6 +66,37 @@ internal static class ChatView
     internal static ConfigEntry<string>? Colors;
     internal static ConfigEntry<string>? MutedPlayers;
 
+    /// <summary><c>[Chat] HotLoadMessages</c>: hot-load lines, this client's own and the server's (docs/hot-reload.md).</summary>
+    internal static ConfigEntry<bool>? HotLoadMessages;
+
+    internal static bool HotLoadMessagesOn => HotLoadMessages?.Value ?? true;
+
+    /// <summary>
+    /// A hot-load line of this client (<c>HotLoadNoticeLive</c>): a System line in Progenitor's chat, the way the server's
+    /// own System lines read. False with why when it is not shown (the setting, the chat view off, no world).
+    /// </summary>
+    internal static bool AddHotLoadLine(string text, out string why)
+    {
+        why = "";
+        if (string.IsNullOrEmpty(text)) { why = "empty"; return false; }
+        if (!HotLoadMessagesOn) { why = "[Chat] HotLoadMessages is off"; return false; }
+        if (!On) { why = "Progenitor's chat lines are off"; return false; }
+        var world = Worlds.Client;
+        if (world == null || !world.IsCreated) { why = "not in a world"; return false; }
+        RestoreHistory();
+        PollLoad();
+        var fresh = new ChatRecord
+        {
+            Kind = ChatKind.System,
+            Text = text,
+            Full = "[" + ChatFormat.ChannelLabel(ChatKind.System) + "] " + UiRichText.Literal(text),
+            TimeUtc = DateTime.UtcNow,
+            Source = ChatLinkSource.Server,
+        };
+        if (!Restoring.TryHold(fresh, false)) Commit(fresh, fromAttach: false);
+        return true;
+    }
+
     /// <summary>Line objects built at most (the window drawn).</summary>
     internal const int DefaultVisibleLines = 120;
 
@@ -490,6 +521,8 @@ internal static class ChatView
         try { hasSender = entry.From.Type != NetworkIdType.None; }
         catch { hasSender = true; }
         if (self && user.Length > 0) _ownName = user;
+        // A server's hot-load line, with [Chat] HotLoadMessages off (from the server only: a System line with no sender).
+        if (kind == ChatKind.System && !hasSender && !HotLoadMessagesOn && Progenitor.Reload.HotLoadNoticeText.IsServerNotice(text)) return;
         // CHAT7: a muted player's lines stay out of the view (the game's hidden lines still have them).
         if (!self && user.Length > 0 && ChatMute.Contains(ChatMute.Parse(MutedPlayers?.Value), user)) return;
 
