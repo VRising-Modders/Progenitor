@@ -360,6 +360,20 @@ internal static class UiNav
         Skipped.Add(h, SkipMark);
     }
 
+    /// <summary>
+    /// A control the navigation passes over for now (<paramref name="skip"/>), or takes again (false): a data table's
+    /// filler row while it is a filler. Unlike <see cref="Skip"/> it is reversible and leaves the control's hook alone.
+    /// </summary>
+    internal static void SetSkipped(IUiHandle? handle, bool skip)
+    {
+        if (handle is not UiHandle h) return;
+        Skipped.Remove(h);
+        if (skip) Skipped.Add(h, SkipMark);
+    }
+
+    /// <summary>Whether <paramref name="handle"/> is passed over by the navigation (<see cref="Skip"/>, <see cref="SetSkipped"/>).</summary>
+    internal static bool IsSkipped(IUiHandle? handle) => handle is UiHandle h && Skipped.TryGetValue(h, out _);
+
     private static readonly ConditionalWeakTable<UiHandle, Func<NavCommand, bool>> Steers = new();
     private static readonly ConditionalWeakTable<UiHandle, Func<float, bool>> StickScrolls = new();
 

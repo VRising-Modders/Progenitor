@@ -1711,6 +1711,11 @@ internal sealed class TableRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunti
 
     public void SetCellTextColor(IRuntimeCellRow row, string cellKey, PaletteColor? color) => TextColors[row.Text + "/" + cellKey] = color;
 
+    /// <summary>The rows last made inert (a data table's filler rows) or a row again, by row key.</summary>
+    public readonly Dictionary<string, bool> Inert = new();
+
+    public void SetRowInert(IRuntimeCellRow row, bool inert) => Inert[row.Text] = inert;
+
     public int Released;
 
     public void ReleaseCellField(IRuntimeCellRow row, string cellKey)

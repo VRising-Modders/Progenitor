@@ -25,6 +25,7 @@ internal static class UiDataTableLayout
     internal const string CellDetail = UiWidgetLayout.CellDetail;
     internal const string CellExpand = UiWidgetLayout.CellExpand;
     internal const string CellExpandPad = "expand-pad";
+    internal const string CellCheckPad = "check-pad";
     internal const string CellStatus = "status";
     internal const string CellColumns = "columns";
     internal const string CellReason = "reason";
@@ -66,6 +67,12 @@ internal static class UiDataTableLayout
         UiRowActionIcon.Check => UiDrawnMark.CheckMark,
         _ => UiDrawnMark.LocateMark,
     };
+
+    /// <summary>
+    /// Whether the player may hide a column (the chooser offers it) and a narrow row may drop it:
+    /// <see cref="UiTableColumn.Hideable"/>, ignored on an actions column, which is always shown.
+    /// </summary>
+    internal static bool Hideable(UiTableColumn column) => column.Hideable && column.Kind != UiTableColumnKind.Actions;
 
     /// <summary>The table's actions column (the first one), or null.</summary>
     internal static UiTableColumn? ActionsColumn(IReadOnlyList<UiTableColumn> columns)
@@ -234,8 +241,13 @@ internal static class UiDataTableLayout
         int fill = FillIndex(columns);
         var cells = new List<CellSpec>(columns.Count * 2 + 6);
         if (multi)
+        {
             cells.Add(new CellSpec(CellKind.Button, CellCheck) { MinWidth = UiWidgetLayout.IconButtonWidth, Skin = CellSkin.Quiet }
                 .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
+            // A filler row draws this blank instead of the check cell (no dead click or navigation stop), as wide.
+            cells.Add(new CellSpec(CellKind.Muted, CellCheckPad) { MinWidth = UiWidgetLayout.IconButtonWidth, Visible = false }
+                .With(text: "", width: CellWidth.Px(UiWidgetLayout.IconButtonWidth)));
+        }
         cells.Add(new CellSpec(CellKind.Image, CellIcon) { MinWidth = UiWidgetLayout.IconSize, Skin = CellSkin.IconWell }
             .With(width: CellWidth.Px(UiWidgetLayout.IconSize)));
         cells.Add(new CellSpec(CellKind.Muted, CellIconPad) { MinWidth = UiWidgetLayout.IconSize, Visible = false }
@@ -246,7 +258,7 @@ internal static class UiDataTableLayout
             bool isFill = i == fill;
             float w = WidthOf(col, isFill) + (NeedsLeftJustify(columns, col) ? LeftTextLead : 0f);
             var align = AlignOf(i, fill);
-            bool optional = col.Hideable && !isFill;
+            bool optional = Hideable(col) && !isFill;
             if (col.Kind == UiTableColumnKind.Actions)
             {
                 // Each place is a pair, as the icon and the expander: the box-less icon button (its face a drawn mark,
@@ -303,7 +315,7 @@ internal static class UiDataTableLayout
             bool isFill = i == fill;
             float w = WidthOf(col, isFill) + (NeedsLeftJustify(columns, col) ? LeftTextLead : 0f);
             var cell = new CellSpec(CellKind.Text, ViewKey(col.Key)) { MinWidth = w, SmallCaps = true, FontSizeOverride = InstallColumns.HeaderFontSize }
-                .With(text: col.Caption, width: WidthSpec(col, isFill, w), align: AlignOf(i, fill), optional: col.Hideable && !isFill);
+                .With(text: col.Caption, width: WidthSpec(col, isFill, w), align: AlignOf(i, fill), optional: Hideable(col) && !isFill);
             if (col.Sortable && col.Kind != UiTableColumnKind.Actions) cell.SortKey = col.Key;
             cells.Add(cell);
         }

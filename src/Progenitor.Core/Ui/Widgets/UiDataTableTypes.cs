@@ -14,7 +14,7 @@ public enum UiTableColumnKind
 
     /// <summary>
     /// A column of small icon buttons per row: each row's <see cref="UiTableRow.Actions"/>, raising
-    /// <see cref="IUiDataTable.OnRowAction"/>. Never sorts, holds no cells, is always shown unless made hideable, and has
+    /// <see cref="IUiDataTable.OnRowAction"/>. Never sorts, holds no cells, is always shown (<see cref="UiTableColumn.Hideable"/> is ignored: the column chooser never offers it), and has
     /// room for <see cref="UiTableColumn.ActionSlots"/> buttons. One per table.
     /// </summary>
     Actions = 2,
@@ -493,7 +493,8 @@ public sealed class UiDataTableOptions
     /// <summary>
     /// The fewest body rows the table draws (0 to 30, at most the rows in use; 0 by default): with fewer lines, blank
     /// filler rows below them keep the table's height, so a tab with two rows is as tall as one with ten. A filler row
-    /// takes no click, selection or tooltip. Scrolling past <see cref="VisibleRows"/> is unchanged.
+    /// takes no click, selection, tooltip or hover wash, has no check cell, and the navigation passes over it. Scrolling
+    /// past <see cref="VisibleRows"/> is unchanged.
     /// </summary>
     public int MinRows { get; set; }
 

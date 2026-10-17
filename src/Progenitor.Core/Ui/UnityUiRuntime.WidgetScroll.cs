@@ -487,6 +487,21 @@ internal sealed partial class UnityUiRuntime : IWidgetCellField
         if (enterCommits && !EnterLeavesField(field)) EnterLeavesFields.Add(field);
     }
 
+    /// <summary>
+    /// A data table's filler row: its row button (the one the hover and press tints live on) stops being interactable,
+    /// so uGUI draws its normal (unhovered) fill and raises no click; no <c>CanvasGroup</c>, so nothing is dimmed.
+    /// </summary>
+    public void SetRowInert(IRuntimeCellRow row, bool inert)
+    {
+        if (row is not UnityCellRow cells || !cells.Alive) return;
+        try
+        {
+            var button = cells.GameObject.GetComponent<Button>();
+            if (button != null) button.interactable = !inert;
+        }
+        catch { /* the row keeps its tints; the table still ignores its clicks */ }
+    }
+
     /// <summary>The colors header captions had before a sort turned them gold, to put back.</summary>
     private static readonly Dictionary<TextMeshProUGUI, Color> CaptionColors = new();
 

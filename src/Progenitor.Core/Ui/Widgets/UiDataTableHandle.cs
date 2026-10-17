@@ -37,6 +37,12 @@ internal interface IWidgetCellField
     /// header caption turns gold while its column sorts). A later rewrite of the cell restores its own tone; ask again.
     /// </summary>
     void SetCellTextColor(IRuntimeCellRow row, string cellKey, PaletteColor? color) { }
+
+    /// <summary>
+    /// A filler row (<see cref="UiDataTableOptions.MinRows"/>) while <paramref name="inert"/>: the row's own button stops
+    /// taking clicks and drawing its hover wash, without the grayed look of a disabled row; false makes it a row again.
+    /// </summary>
+    void SetRowInert(IRuntimeCellRow row, bool inert) { }
 }
 
 /// <summary>
@@ -526,7 +532,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _actionMarks.SetLit(slotRow, cell, on);
         if (!on)
         {
-            HideTooltip();
+            // Back on the row (moving onto a row's own button does not leave it): its own tooltip again.
+            if (_hoveredSlot == slot) HoverSlot(slot, true);
+            else HideTooltip();
             return;
         }
 
@@ -550,6 +558,37 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
     /// <summary>Tests and readback: the filler rows drawn under the lines now.</summary>
     internal int Fillers => _fillers;
+
+    /// <summary>The slot row the pointer is on (its row hover), or -1.</summary>
+    private int _hoveredSlot = -1;
+
+    /// <summary>Which slots are fillers now (null: never one yet).</summary>
+    private bool?[]? _fillerNow;
+
+    /// <summary>
+    /// Make slot <paramref name="slot"/> a filler (<see cref="UiDataTableOptions.MinRows"/>) or a row again: a filler is
+    /// passed over by the navigation (<see cref="UiNav.SetSkipped"/>) and its row button takes no click and draws no hover
+    /// wash (<see cref="IWidgetCellField.SetRowInert"/>). Written only when it changes.
+    /// </summary>
+    private void SetFiller(int slot, bool filler)
+    {
+        _fillerNow ??= new bool?[_slots.Count];
+        bool was = _fillerNow[slot] == true;
+        _fillerNow[slot] = filler;
+        if (was == filler) return;
+        UiNav.SetSkipped(_slots[slot], filler);
+        if (WidgetRuntime.Current is IWidgetCellField field && RuntimeRowOf(_slots[slot]) is { } row)
+        {
+            try { field.SetRowInert(row, filler); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' filler row: " + e.Message); }
+        }
+    }
+
+    /// <summary>Tests: whether slot <paramref name="slot"/> is a filler now.</summary>
+    internal bool IsFillerSlot(int slot) => _fillerNow is { } f && f[slot] == true;
+
+    /// <summary>Tests: slot <paramref name="slot"/>'s row.</summary>
+    internal IUiCellRow SlotAt(int slot) => _slots[slot];
 
     // ---- Events ------------------------------------------------------------------------------
 
@@ -778,6 +817,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
     private void HoverSlot(int slot, bool on)
     {
+        if (on) _hoveredSlot = slot;
+        else if (_hoveredSlot == slot) _hoveredSlot = -1;
         if (!on)
         {
             HideTooltip();
@@ -1110,7 +1151,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 ["caption"] = c.Caption,
                 ["kind"] = c.Kind switch { UiTableColumnKind.Number => "number", UiTableColumnKind.Actions => "actions", _ => "text" },
                 ["hidden"] = _model.IsHidden(c.Key),
-                ["hideable"] = c.Hideable,
+                ["hideable"] = UiDataTableLayout.Hideable(c),
                 ["sortable"] = c.Sortable,
                 ["editable"] = IsEditable(c),
                 ["subtotal"] = c.Subtotal.ToString().ToLowerInvariant(),
@@ -1259,12 +1300,14 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                     if (i < fillTo)
                     {
                         RenderFiller(i, icons, expander);
+                        SetFiller(i, true);
                         TrySetVisible(_slots[i], true);
                     }
                     else TrySetVisible(_slots[i], false);
                     continue;
                 }
 
+                SetFiller(i, false);
                 RenderSlot(i, lines[index], icons, expander);
                 TrySetVisible(_slots[i], true);
             }
@@ -1491,6 +1534,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         if (_multi)
         {
             Write(slot, UiDataTableLayout.CellCheck, "", CellTone.Gold, true);
+            Write(slot, UiDataTableLayout.CellCheckPad, "", CellTone.Muted, false);
             // Every row reads as selectable: an empty box, or the box with its check when selected; other lines draw none.
             _checkMarks.Set(row, UiDataTableLayout.CellCheck,
                 !isRow ? UiDrawnMark.None : selected ? UiDrawnMark.CheckBoxMark : UiDrawnMark.CheckEmptyMark);
@@ -1612,7 +1656,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         var row = _slots[slot];
         if (_multi)
         {
-            Write(slot, UiDataTableLayout.CellCheck, "", CellTone.Gold, true);
+            // No check cell on a filler (a dead click and navigation stop): the blank as wide keeps the columns.
+            Write(slot, UiDataTableLayout.CellCheck, "", CellTone.Gold, false);
+            Write(slot, UiDataTableLayout.CellCheckPad, "", CellTone.Muted, true);
             _checkMarks.Set(row, UiDataTableLayout.CellCheck, UiDrawnMark.None);
         }
 

@@ -324,6 +324,35 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void Down_from_a_tables_last_row_passes_over_its_filler_rows()
+    {
+        UiApi.SetRuntimeForTests(new TableRuntimeFake());
+        using var panel = Panel();
+        var table = panel.DataTable("t", new[] { new UiTableColumn("name", "Name") },
+            new UiDataTableOptions { VisibleRows = 8, MinRows = 8, ColumnChooser = false });
+        table.SetRows(new[] { new UiTableRow("a").Text("name", "Iron"), new UiTableRow("b").Text("name", "Wood") });
+        var after = panel.Button("After");
+        var handle = (UiDataTableHandle)table;
+        Assert.Equal(6, handle.Fillers);
+        var fillers = Enumerable.Range(2, 6).Select(i => (UiHandle)handle.SlotAt(i)).ToList();
+        Surface(Children(panel));
+
+        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(1), "")); // row 2
+        UiNav.Execute(NavCommand.Down);
+        Assert.DoesNotContain(UiNav.Focus.Handle, fillers);
+        Assert.Same(after, UiNav.Focus.Handle);
+        UiNav.Execute(NavCommand.Up);
+        Assert.Same(handle.SlotAt(1), UiNav.Focus.Handle); // and back up onto the last row, not a filler
+
+        // A filler that becomes a row is a stop again.
+        table.SetRows(new[] { new UiTableRow("a").Text("name", "Iron"), new UiTableRow("b").Text("name", "Wood"), new UiTableRow("c").Text("name", "Ash") });
+        Surface(Children(panel));
+        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(1), ""));
+        UiNav.Execute(NavCommand.Down);
+        Assert.Same(handle.SlotAt(2), UiNav.Focus.Handle);
+    }
+
+    [Fact]
     public void A_toggle_flips_on_A_and_on_left_or_right()
     {
         using var panel = Panel();

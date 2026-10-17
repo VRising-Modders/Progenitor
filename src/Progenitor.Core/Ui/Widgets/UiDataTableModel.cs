@@ -87,7 +87,7 @@ internal sealed class UiDataTableModel
                 throw new ArgumentException("A table has at most one actions column ('" + c.Key + "' is the second).", nameof(columns));
             _byKey[c.Key] = c;
             _columns.Add(c);
-            if (c.Hidden && c.Hideable) _hidden.Add(c.Key);
+            if (c.Hidden && UiDataTableLayout.Hideable(c)) _hidden.Add(c.Key);
         }
 
         if (_columns.Count == 0) throw new ArgumentException("A table needs at least one column.", nameof(columns));
@@ -329,7 +329,7 @@ internal sealed class UiDataTableModel
     internal bool SetVisible(string column, bool visible)
     {
         var c = Column(column);
-        if (c == null || !c.Hideable) return false;
+        if (c == null || !UiDataTableLayout.Hideable(c)) return false;
         return visible ? _hidden.Remove(c.Key) : _hidden.Add(c.Key);
     }
 
@@ -340,7 +340,7 @@ internal sealed class UiDataTableModel
         foreach (var k in columns ?? Array.Empty<string>())
         {
             var c = Column(k);
-            if (c != null && c.Hideable) next.Add(c.Key);
+            if (c != null && UiDataTableLayout.Hideable(c)) next.Add(c.Key);
         }
 
         if (next.SetEquals(_hidden)) return false;
@@ -353,7 +353,7 @@ internal sealed class UiDataTableModel
     internal List<UiTableColumn> ChooserColumns()
     {
         var list = new List<UiTableColumn>();
-        foreach (var c in _columns) if (c.Hideable) list.Add(c);
+        foreach (var c in _columns) if (UiDataTableLayout.Hideable(c)) list.Add(c);
         return list;
     }
 

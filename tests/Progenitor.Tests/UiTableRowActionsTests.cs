@@ -254,18 +254,54 @@ public sealed class UiTableRowActionsTests : IDisposable
     }
 
     [Fact]
-    public void A_hidden_actions_column_hides_every_place_and_its_buttons_do_nothing()
+    public void An_actions_column_made_hideable_is_still_always_shown_and_never_in_the_chooser()
     {
         var (table, _) = NewTable(columns: Columns(hideableActions: true));
+        Assert.False(table.SetColumnVisible(Act, false));
+        table.HiddenColumns = new[] { Act, "plot" };
+        Assert.Equal(new[] { "plot" }, table.HiddenColumns);
+        Assert.True(Cell(Row("t:row0"), A(0)).Visible);
+        Assert.True(Cell(Row("t:header"), "c:" + Act).Visible);
+        Assert.DoesNotContain(_runtime.Rows.SelectMany(r => r.Cells()), c => c.Key == UiDataTableLayout.ChipKey(Act));
+        var columns = (List<Dictionary<string, object?>>)table.Describe()["columns"]!;
+        Assert.Equal(false, columns.Single(c => (string)c["key"]! == Act)["hideable"]);
+        // A narrow row never drops it either.
+        Assert.All(UiDataTableLayout.RowCells(Columns(hideableActions: true), multi: false).Where(c => c.Key.StartsWith("a:", StringComparison.Ordinal)),
+            c => Assert.False(c.Optional));
+    }
+
+    [Fact]
+    public void A_click_after_scrolling_raises_the_action_of_the_row_now_in_that_slot()
+    {
+        var rows = Enumerable.Range(0, 20).Select(i => R("r" + i.ToString("00"), "Chest " + i, first: i == 0, last: i == 19)).ToList();
+        var (table, _) = NewTable(rows, new UiDataTableOptions { VisibleRows = 5 });
         var got = new List<string>();
-        table.OnRowAction((row, action) => got.Add(action));
-        Assert.True(table.SetColumnVisible(Act, false));
-        var row0 = Row("t:row0");
-        Assert.All(Enumerable.Range(0, 4), a => Assert.False(Cell(row0, A(a)).Visible));
-        Assert.All(Enumerable.Range(0, 4), a => Assert.False(Cell(row0, Pad(a)).Visible));
-        Assert.False(Cell(Row("t:header"), "c:" + Act).Visible);
-        ((UiDataTableHandle)table).ActionSlot(0, 3);
-        Assert.Empty(got);
+        table.OnRowAction((row, action) => got.Add(row + "/" + action));
+        table.TopIndex = 12;
+        Click(Row("t:row0"), A(3)); // slot 0 now draws r12
+        Click(Row("t:row4"), A(2)); // slot 4 draws r16
+        Assert.True(table.ScrollTo("r19"));
+        Click(Row("t:row4"), A(2)); // r19: its down is disabled
+        Click(Row("t:row4"), A(1));
+        Assert.Equal(new[] { "r12/remove", "r16/down", "r19/up" }, got);
+    }
+
+    [Fact]
+    public void Leaving_an_action_button_for_the_row_shows_the_rows_own_tooltip_again()
+    {
+        var rows = Three();
+        rows[0].Tooltip = "Linked to the furnace";
+        var (_, handle) = NewTable(rows);
+        handle.HoverSlotForTests(0, true);
+        Assert.Equal("Linked to the furnace", _runtime.Tooltip?.Body);
+        handle.HoverAction(0, 2, true);
+        Assert.Equal("Move down", _runtime.Tooltip?.Title);
+        handle.HoverAction(0, 2, false); // still in the row
+        Assert.Equal("Linked to the furnace", _runtime.Tooltip?.Body);
+        handle.HoverSlotForTests(0, false);
+        handle.HoverAction(0, 2, true);
+        handle.HoverAction(0, 2, false); // the row was left first: nothing comes back
+        Assert.Null(_runtime.Tooltip);
     }
 
     [Fact]
@@ -362,6 +398,39 @@ public sealed class UiTableRowActionsTests : IDisposable
         Assert.Equal(6, handle.Fillers);
         Assert.True(Row("t:row5").Visible);
         Assert.Equal("Nothing to show.", table.StatusText);
+    }
+
+    [Fact]
+    public void A_filler_is_inert_skipped_by_the_navigation_and_has_no_check_cell_until_it_is_a_row_again()
+    {
+        var (table, handle) = NewTable(Three().Take(2), new UiDataTableOptions { VisibleRows = 8, MinRows = 8, MultiSelect = true });
+        for (int i = 2; i < 8; i++)
+        {
+            var filler = Row("t:row" + i);
+            Assert.True(handle.IsFillerSlot(i));
+            Assert.True(_runtime.Inert["t:row" + i]); // no click, no hover wash
+            Assert.True(UiNav.IsSkipped(handle.SlotAt(i)));
+            Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(i)));
+            Assert.False(Cell(filler, UiDataTableLayout.CellCheck).Visible);
+            Assert.True(Cell(filler, UiDataTableLayout.CellCheckPad).Visible); // the blank keeps the columns
+        }
+
+        // The table was built empty (all fillers), then the rows came: those slots are rows again.
+        Assert.False(_runtime.Inert["t:row0"]);
+        Assert.False(UiNav.IsSkipped(handle.SlotAt(0)));
+        Assert.True(Cell(Row("t:row0"), UiDataTableLayout.CellCheck).Visible);
+        Assert.False(Cell(Row("t:row0"), UiDataTableLayout.CellCheckPad).Visible);
+        Click(Row("t:row4"), UiDataTableLayout.CellCheck);
+        Assert.Empty(table.Selected);
+
+        // More rows: the slot is a row again, with its click, wash, stop and check cell.
+        table.SetRows(Three());
+        Assert.False(handle.IsFillerSlot(2));
+        Assert.False(_runtime.Inert["t:row2"]);
+        Assert.False(UiNav.IsSkipped(handle.SlotAt(2)));
+        Assert.True(Cell(Row("t:row2"), UiDataTableLayout.CellCheck).Visible);
+        Assert.False(Cell(Row("t:row2"), UiDataTableLayout.CellCheckPad).Visible);
+        Assert.True(_runtime.Inert["t:row3"]);
     }
 
     [Fact]
