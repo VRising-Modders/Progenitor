@@ -36,8 +36,8 @@ namespace Progenitor.Chat;
 /// link asks first; a mod link opens the Mods menu); right on a line copies it.</para>
 ///
 /// <para><b>Large history, cheaply.</b> Only one window of at most <see cref="DefaultVisibleLines"/> lines is built
-/// as UI, whatever the history size (<see cref="ChatScrollWindow"/>: scrolling to the top or bottom pages it by
-/// <see cref="PageLines"/> lines and keeps the line being read in place). A redraw reuses each line object that still
+/// as UI, whatever the history size (<see cref="ChatScrollWindow"/>: scrolling to the top pages it back by
+/// <see cref="PageLines"/> lines and keeps the line being read in place; scrolling to the bottom jumps to the newest). A redraw reuses each line object that still
 /// shows the same line: a new line costs one formatted line, one text set and one sibling move
 /// (<see cref="ChatSlotOrder"/>), and each line is formatted once (<see cref="ChatRecord.RenderText"/>). Tabs filter
 /// incrementally (<see cref="ChatLog.Filtered"/>). The history is written on a background thread a few seconds after
@@ -69,11 +69,8 @@ internal static class ChatView
     /// <summary>Line objects built at most (the window drawn).</summary>
     internal const int DefaultVisibleLines = 120;
 
-    /// <summary>Lines one page moves the window when the player scrolls past its top or bottom.</summary>
+    /// <summary>Lines one page moves the window back when the player scrolls past its top.</summary>
     internal const int PageLines = 40;
-
-    /// <summary>How long leaving the server or an unload waits for a history read or write still running.</summary>
-    private const int WaitMilliseconds = 2000;
 
     /// <summary>The mod-link opener (package, version) → status; set by the mod-link module.</summary>
     internal static Func<string, string?, string>? OpenModLink { get; set; }
@@ -87,8 +84,8 @@ internal static class ChatView
     private static long _loadStarted;
     private static bool _saveWarned;
 
-    /// <summary>Lines that arrived while the history was being read, with whether the attach read them (deduplicated then).</summary>
-    private static readonly List<(ChatRecord Record, bool FromAttach)> Pending = new();
+    /// <summary>The join-time history read and the lines held while it runs (game-free, ChatRecord ordering tested).</summary>
+    private static readonly ChatRestore Restoring = new();
 
     private static ChatTab _tab = ChatTab.All();
 
@@ -190,17 +187,14 @@ internal static class ChatView
     internal static void OnWorldChanged()
     {
         Leave();
-        FinishRunningSave();
-        AbandonLoad();
         Detach();
         Log.Clear();
         Scroll.Follow();
+        Restoring.Reset();
         _restored = false;
         _ownName = "";
         _host = "";
         _serverName = "";
-        _continued = false;
-        RestoredTail.Clear();
     }
 
     /// <summary>Core unload or the view turned off: save, mark the session end, put the game's view back.</summary>
@@ -209,37 +203,33 @@ internal static class ChatView
         // A Core swap or unload is not leaving the server: save without the divider, so the next generation continues
         // the same session instead of showing "Left" and "Joined".
         Leave(marker: false);
-        FinishRunningSave();
-        AbandonLoad();
         Detach();
         Log.Clear();
         Scroll.Follow();
+        Restoring.Reset();
         _restored = false;
     }
 
+    /// <summary>
+    /// Leaving the world or unloading: finish the history read and any background write (both are short; waited for
+    /// without a time limit so no background work outlives this world or this Core), then save on this thread.
+    /// </summary>
     private static void Leave(bool marker = true)
     {
-        if (!_restored || _host.Length == 0)
-        {
-            AbandonLoad();
-            return;
-        }
-
         try
         {
-            // A read still running: wait for it, so the save below never writes over history it has not read yet.
-            PollLoad(wait: true);
-            if (_loadTask != null)
-            {
-                Plugin.Logger?.LogWarning("Chat: the chat history was still being read when leaving; this session's lines are not saved.");
-                AbandonLoad();
-                return;
-            }
-
+            if (_loadTask != null) PollLoad(wait: true);
+            FinishRunningSave();
+            if (!_restored || _host.Length == 0) return;
             if (marker) Log.AddMarker(ChatLog.LeftText(DateTime.Now), DateTime.UtcNow);
             SaveNow();
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Chat: saving the chat history threw: " + e.Message); }
+        finally
+        {
+            _loadTask = null;
+            Restoring.Abandon();
+        }
     }
 
     private static string HistoryPath(string host)
@@ -270,6 +260,7 @@ internal static class ChatView
                 if (File.Exists(path))
                 {
                     _loadStarted = Stopwatch.GetTimestamp();
+                    Restoring.Begin();
                     _loadTask = Task.Run(() => ChatLog.Deserialize(File.ReadAllBytes(path), keep));
                     return;
                 }
@@ -280,7 +271,7 @@ internal static class ChatView
         FinishRestore(null);
     }
 
-    /// <summary>Apply a finished history read (checked each frame); with <paramref name="wait"/>, wait a little for it first.</summary>
+    /// <summary>Apply a finished history read (checked each frame); with <paramref name="wait"/>, wait for it first.</summary>
     private static void PollLoad(bool wait = false)
     {
         var task = _loadTask;
@@ -288,8 +279,7 @@ internal static class ChatView
         if (!task.IsCompleted)
         {
             if (!wait) return;
-            try { task.Wait(WaitMilliseconds); } catch { /* the fault is read below */ }
-            if (!task.IsCompleted) return;
+            try { task.Wait(); } catch { /* the fault is read below */ }
         }
 
         _loadTask = null;
@@ -302,58 +292,20 @@ internal static class ChatView
         FinishRestore(restored);
     }
 
-    /// <summary>A read that will not be applied (leaving the world, unload): forget it and the lines waiting for it.</summary>
-    private static void AbandonLoad()
-    {
-        _loadTask = null;
-        Pending.Clear();
-    }
-
     private static void FinishRestore(List<ChatRecord>? restored)
     {
-        if (restored != null && restored.Count > 0)
-        {
-            RestoredTail.Clear();
-            for (int i = Math.Max(0, restored.Count - 60); i < restored.Count; i++)
-                if (restored[i].Kind != ChatKind.Session) RestoredTail.Add(TailKey(restored[i].Kind, restored[i].User, restored[i].Text));
-            // Saved by an unload (no "Left" after the last "Joined"): the same session goes on.
-            _continued = LastDividerIsJoined(restored);
-            Log.Restore(restored);
-            Scroll.Follow();
-        }
-
-        if (!_continued) Log.AddMarker(ChatLog.JoinedText(_serverName, DateTime.Now), DateTime.UtcNow);
-        // The lines that arrived while the history was read, after it, in order.
-        foreach (var (record, fromAttach) in Pending) Commit(record, fromAttach);
-        Pending.Clear();
-    }
-
-    /// <summary>The saved lines' last dividers, newest last, from an earlier generation of this same session.</summary>
-    private static readonly HashSet<string> RestoredTail = new();
-    private static bool _continued;
-
-    private static string TailKey(ChatKind kind, string user, string text) => ((int)kind) + "|" + user + "|" + text;
-
-    private static bool LastDividerIsJoined(List<ChatRecord> restored)
-    {
-        for (int i = restored.Count - 1; i >= 0; i--)
-        {
-            if (restored[i].Kind != ChatKind.Session) continue;
-            return restored[i].Text.StartsWith("Joined ", StringComparison.Ordinal);
-        }
-
-        return false;
+        Restoring.Finish(Log, restored, _serverName, DateTime.Now, DateTime.UtcNow, (record, fromAttach) => Commit(record, fromAttach));
+        Scroll.Follow();
     }
 
     private static bool SavesHistory => (KeepHistory?.Value ?? true) && _host.Length > 0;
 
     /// <summary>
     /// Each frame: once the schedule says so, copy the lines (plain values, on this thread) and write them on a
-    /// background thread. One write at a time; a write still running defers the next.
+    /// background thread. One write at a time; a write still running defers the next, and a failed one is tried again.
     /// </summary>
     private static void SaveWhenDue()
     {
-        if (_loadTask != null || !SaveSchedule.Due(Now)) return;
         if (_saveTask != null)
         {
             if (!_saveTask.IsCompleted) return;
@@ -361,6 +313,8 @@ internal static class ChatView
             _saveTask = null;
         }
 
+        if (_loadTask != null || !SaveSchedule.Due(Now)) return;
+        // Marked saved before the copy: a line arriving during the write marks it dirty again; a failed write does too.
         SaveSchedule.Saved();
         if (!SavesHistory) return;
         string path = HistoryPath(_host);
@@ -368,30 +322,43 @@ internal static class ChatView
         _saveTask = Task.Run(() => ChatHistoryFile.WriteAtomic(path, lines));
     }
 
-    /// <summary>Leaving or unloading: finish a running write, then write on this thread.</summary>
+    /// <summary>Leaving or unloading: write on this thread (any background write has finished). Saved only once written.</summary>
     private static void SaveNow()
     {
-        FinishRunningSave();
-        SaveSchedule.Saved();
-        if (!SavesHistory) return;
+        if (!SavesHistory)
+        {
+            SaveSchedule.Saved();
+            return;
+        }
+
         ChatHistoryFile.WriteAtomic(HistoryPath(_host), Log.Snapshot(Log.Capacity));
+        SaveSchedule.Saved();
+        _saveWarned = false;
     }
 
-    /// <summary>Wait (a little) for a background write still running, so none outlives the world or this Core.</summary>
+    /// <summary>Wait for a background write still running (it is short), so none outlives the world or this Core.</summary>
     private static void FinishRunningSave()
     {
         var running = _saveTask;
         _saveTask = null;
         if (running == null) return;
-        try { running.Wait(WaitMilliseconds); } catch { /* reported below */ }
+        try { running.Wait(); } catch { /* reported below */ }
         ObserveSave(running);
     }
 
+    /// <summary>A finished background write: a failure is logged once until a write succeeds again, and retried.</summary>
     private static void ObserveSave(Task task)
     {
-        if (!task.IsFaulted || _saveWarned) return;
+        if (task.Status == TaskStatus.RanToCompletion)
+        {
+            _saveWarned = false;
+            return;
+        }
+
+        SaveSchedule.MarkDirty(Now);
+        if (_saveWarned) return;
         _saveWarned = true;
-        Plugin.Logger?.LogWarning("Chat: saving the chat history threw (logged once): " + task.Exception?.GetBaseException().Message);
+        Plugin.Logger?.LogWarning("Chat: saving the chat history threw (logged once until a save works): " + task.Exception?.GetBaseException().Message);
     }
 
     /// <summary>
@@ -438,7 +405,7 @@ internal static class ChatView
             ["lineObjectsShown"] = shown,
             ["filterChecks"] = Log.FilterChecks,
             ["loading"] = _loadTask != null,
-            ["pending"] = Pending.Count,
+            ["pending"] = Restoring.Held,
             ["saveDirty"] = SaveSchedule.Dirty,
             ["saving"] = _saveTask != null && !_saveTask.IsCompleted,
             ["keepHistory"] = SavesHistory,
@@ -527,14 +494,8 @@ internal static class ChatView
             Source = ChatRecord.SourceOf(kind, hasSender),
         };
 
-        ChatRecord? record;
-        if (_loadTask != null)
-        {
-            // The history is still being read: this line follows it once it is in.
-            Pending.Add((fresh, window == null));
-            record = fresh;
-        }
-        else record = Commit(fresh, window == null);
+        // While the history is still being read, the line is held and follows it once it is in.
+        var record = Restoring.TryHold(fresh, window == null) ? fresh : Commit(fresh, window == null);
 
         if (record != null && mention && record.Repeat == 1 && (MentionSound?.Value ?? true) && window != null)
         {
@@ -547,7 +508,7 @@ internal static class ChatView
     private static ChatRecord? Commit(ChatRecord fresh, bool fromAttach)
     {
         // After a Core swap the game's own lines (read once on attach) are already in the restored log.
-        if (fromAttach && _continued && RestoredTail.Contains(TailKey(fresh.Kind, fresh.User, fresh.Text))) return null;
+        if (Restoring.IsDuplicate(fresh, fromAttach)) return null;
         // CHAT9: a long message's later part joins its line (when the server allows long messages).
         var record = (ChatPolicy.Current.AllowLongMessages ? Log.TryJoin(fresh) : null)
             ?? Log.Add(fresh, collapse: CollapseRepeats?.Value ?? true);
@@ -892,9 +853,9 @@ internal static class ChatView
     }
 
     /// <summary>
-    /// The log scrolled to the top of the window with older lines left, or to its bottom with newer ones: page the window
-    /// and keep the line at that edge where it was on screen. Not while a mouse button is held (a drag on the scroll bar
-    /// owns the log then).
+    /// The log scrolled to the top of the window with older lines left: page the window back and keep the top line where it
+    /// was on screen. Scrolled to the bottom of an older window: jump to the newest lines. Not while a mouse button is held
+    /// (a drag on the scroll bar owns the log then).
     /// </summary>
     private static void PageAtEdges(int optionsKey)
     {
@@ -907,8 +868,15 @@ internal static class ChatView
         {
             // At the newest line: nothing to do (the resting state, so it costs one read a frame).
             if (Scroll.Following || UnityInputRuntime.AnyMouseButtonHeld()) return;
-            var newer = Log.Filtered(_tab);
-            if (Scroll.PageForward(newer)) AnchoredDraw(scroll, newer, optionsKey, LastShown());
+            // Scrolled back down after reading older lines: straight to the newest lines, however far behind.
+            Scroll.Follow();
+            if (Draw(Log.Filtered(_tab), optionsKey))
+            {
+                Canvas.ForceUpdateCanvases();
+                scroll.verticalNormalizedPosition = 0f;
+            }
+
+            scroll.velocity = Vector2.zero;
             return;
         }
 
@@ -941,13 +909,6 @@ internal static class ChatView
     {
         foreach (var slot in Lines)
             if (slot.Record != null && slot.Active) return slot;
-        return null;
-    }
-
-    private static ChatLineSlot? LastShown()
-    {
-        for (int i = Lines.Count - 1; i >= 0; i--)
-            if (Lines[i].Record != null && Lines[i].Active) return Lines[i];
         return null;
     }
 

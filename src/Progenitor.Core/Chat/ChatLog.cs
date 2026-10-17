@@ -191,6 +191,7 @@ internal sealed class ChatLog
         _records.PushBack(record);
         foreach (var f in _filters)
         {
+            if (Stale(f)) continue;
             FilterChecks++;
             if (f.Tab.Shows(record)) f.Matches.PushBack(record);
         }
@@ -229,13 +230,26 @@ internal sealed class ChatLog
         last.Rev++;
         foreach (var f in _filters)
         {
-            if (ReferenceEquals(f.Matches.Last, last)) continue;
+            if (Stale(f) || ReferenceEquals(f.Matches.Last, last)) continue;
             FilterChecks++;
             if (f.Tab.Shows(last)) f.Matches.PushBack(last);
         }
 
         Version++;
     }
+
+    /// <summary>
+    /// A tab whose channels were edited since its list was built: it is no longer kept up to date (its scope is marked
+    /// unknown) and <see cref="Filtered"/> scans it again on the next read, even when the edit was undone before then.
+    /// </summary>
+    private static bool Stale(TabFilter f)
+    {
+        if (f.Scope == f.Tab.Scope) return false;
+        f.Scope = Unbuilt;
+        return true;
+    }
+
+    private const ChatScope Unbuilt = (ChatScope)(-1);
 
     /// <summary>A divider line: <c>Joined Night Garden · 21:04</c> / <c>Left the server · 23:10</c>.</summary>
     internal ChatRecord AddMarker(string text, DateTime utc) =>
@@ -283,7 +297,7 @@ internal sealed class ChatLog
                 _filters.RemoveAt(oldest);
             }
 
-            found = new TabFilter { Tab = tab, Scope = (ChatScope)(-1) };
+            found = new TabFilter { Tab = tab, Scope = Unbuilt };
             _filters.Add(found);
         }
 

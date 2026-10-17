@@ -94,6 +94,8 @@ internal static class ChatHistoryFile
         using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16))
         {
             Write(fs, lines);
+            // On disk before the move, so a crash right after it never leaves an empty or partial file in its place.
+            fs.Flush(flushToDisk: true);
         }
 
         File.Move(tmp, path, overwrite: true);
@@ -150,8 +152,8 @@ internal static class ChatHistorySetting
 ///
 /// <para><b>Following</b> (the default) shows the newest lines and takes each new one. Scrolling up away from the
 /// bottom <see cref="Pin"/>s the window to the newest line drawn, so new lines no longer move what is being read.
-/// Reaching the top pages back (<see cref="PageBack"/>); reaching the bottom pages forward (<see cref="PageForward"/>)
-/// and follows again once the newest line is in the window. Switching tabs follows again.</para>
+/// Reaching the top pages back (<see cref="PageBack"/>); reaching the bottom of an older window jumps straight to the
+/// newest lines (<see cref="Follow"/>), however far back it was. Switching tabs follows again.</para>
 /// </summary>
 internal sealed class ChatScrollWindow
 {
@@ -198,17 +200,6 @@ internal sealed class ChatScrollWindow
         if (start <= 0 || count == 0) return false;
         int end = start + count - 1 - Math.Min(Page, start);
         EndSeq = lines[end].Seq;
-        return true;
-    }
-
-    /// <summary>Newer lines exist: move the window forward by up to a page, following again at the newest. False when following.</summary>
-    internal bool PageForward(IReadOnlyList<ChatRecord> lines)
-    {
-        if (EndSeq == null) return false;
-        var (start, count) = Resolve(lines);
-        int end = start + count - 1 + Page;
-        if (end >= lines.Count - 1) Follow();
-        else EndSeq = lines[end].Seq;
         return true;
     }
 }
@@ -282,5 +273,96 @@ internal static class ChatSlotOrder
         var keep = new bool[n];
         for (int k = len > 0 ? tails[len - 1] : -1; k >= 0; k = prev[k]) keep[k] = true;
         return keep;
+    }
+}
+
+/// <summary>
+/// The join-time history read and the lines that arrive during it, game-free. While the file is read on a background
+/// thread (<see cref="Begin"/>), new lines are held (<see cref="TryHold"/>); <see cref="Finish"/> then puts, in order,
+/// the restored lines, the <c>Joined</c> divider (unless the saved history continues this session) and the held lines.
+///
+/// <para><b>Same session after a Core swap.</b> History saved by an unload ends in a <c>Joined</c> divider with no
+/// <c>Left</c> after it: the session goes on, no new divider is added, and the game's own lines read again at attach
+/// (<c>fromAttach</c>) that are already among the last <see cref="TailLines"/> saved lines are skipped
+/// (<see cref="IsDuplicate"/>).</para>
+/// </summary>
+internal sealed class ChatRestore
+{
+    internal const int TailLines = 60;
+
+    private readonly HashSet<string> _tail = new(StringComparer.Ordinal);
+    private readonly List<(ChatRecord Record, bool FromAttach)> _held = new();
+
+    /// <summary>The history is being read; lines are held.</summary>
+    internal bool Reading { get; private set; }
+
+    /// <summary>The saved history continues this session (no new divider; attach lines deduplicated).</summary>
+    internal bool Continued { get; private set; }
+
+    internal int Held => _held.Count;
+
+    internal void Begin() => Reading = true;
+
+    /// <summary>Hold a line while the history is read; false when nothing is being read (commit it now).</summary>
+    internal bool TryHold(ChatRecord record, bool fromAttach)
+    {
+        if (!Reading) return false;
+        _held.Add((record, fromAttach));
+        return true;
+    }
+
+    /// <summary>A line read again at attach that the restored history already has.</summary>
+    internal bool IsDuplicate(ChatRecord record, bool fromAttach) =>
+        fromAttach && Continued && _tail.Contains(Key(record.Kind, record.User, record.Text));
+
+    /// <summary>
+    /// Apply the read (<paramref name="restored"/> null or empty: none), then the divider, then the held lines through
+    /// <paramref name="commit"/> (which may skip one, <see cref="IsDuplicate"/>).
+    /// </summary>
+    internal void Finish(ChatLog log, List<ChatRecord>? restored, string serverName, DateTime localNow, DateTime utcNow,
+        Action<ChatRecord, bool> commit)
+    {
+        Reading = false;
+        if (restored != null && restored.Count > 0)
+        {
+            _tail.Clear();
+            for (int i = Math.Max(0, restored.Count - TailLines); i < restored.Count; i++)
+                if (restored[i].Kind != ChatKind.Session) _tail.Add(Key(restored[i].Kind, restored[i].User, restored[i].Text));
+            Continued = LastDividerIsJoined(restored);
+            log.Restore(restored);
+        }
+
+        if (!Continued) log.AddMarker(ChatLog.JoinedText(serverName, localNow), utcNow);
+        var held = _held.ToArray();
+        _held.Clear();
+        foreach (var (record, fromAttach) in held) commit(record, fromAttach);
+    }
+
+    /// <summary>A read that will not be applied: drop it and the held lines.</summary>
+    internal void Abandon()
+    {
+        Reading = false;
+        _held.Clear();
+    }
+
+    /// <summary>A new server: forget everything.</summary>
+    internal void Reset()
+    {
+        Abandon();
+        Continued = false;
+        _tail.Clear();
+    }
+
+    private static string Key(ChatKind kind, string user, string text) => ((int)kind) + "|" + user + "|" + text;
+
+    private static bool LastDividerIsJoined(List<ChatRecord> restored)
+    {
+        for (int i = restored.Count - 1; i >= 0; i--)
+        {
+            if (restored[i].Kind != ChatKind.Session) continue;
+            return restored[i].Text.StartsWith("Joined ", StringComparison.Ordinal);
+        }
+
+        return false;
     }
 }

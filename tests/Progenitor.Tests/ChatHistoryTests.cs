@@ -124,6 +124,66 @@ public sealed class ChatHistoryTests
     }
 
     [Fact]
+    public void A_tab_edited_off_and_back_on_between_reads_is_scanned_again()
+    {
+        var log = new ChatLog();
+        var tab = new ChatTab { Name = "T", Scope = ChatScope.Clan };
+        log.Add(Line(1, ChatKind.Team), true);
+        Assert.Single(log.Filtered(tab));
+        // Edited to Global, lines arrive, edited back to Clan: no read in between.
+        tab.Scope = ChatScope.Global;
+        log.Add(Line(2, ChatKind.Global), true);
+        log.Add(Line(3, ChatKind.Team), true);
+        log.Add(Line(4, ChatKind.Global), true);
+        tab.Scope = ChatScope.Clan;
+        log.Add(Line(5, ChatKind.Team), true);
+        Assert.Equal(BruteForce(log, tab), log.Filtered(tab));
+        Assert.Equal(3, log.Filtered(tab).Count);
+        // Once read again it is kept up to date as before.
+        long before = log.FilterChecks;
+        log.Add(Line(6, ChatKind.Team), true);
+        Assert.Equal(1, log.FilterChecks - before);
+        Assert.Equal(BruteForce(log, tab), log.Filtered(tab));
+    }
+
+    [Fact]
+    public void Lines_held_during_the_history_read_follow_the_history_and_the_divider_in_order()
+    {
+        var log = new ChatLog();
+        var restore = new ChatRestore();
+        restore.Begin();
+        var early = Line(100, ChatKind.Global);
+        Assert.True(restore.TryHold(early, fromAttach: false));
+        Assert.Equal(1, restore.Held);
+        Assert.Empty(log.Records);
+        var saved = new List<ChatRecord> { Line(1, ChatKind.Global), new() { Kind = ChatKind.Session, Text = "Left the server · 20:00", TimeUtc = T0 } };
+        restore.Finish(log, saved, "Night Garden", new DateTime(2026, 10, 17, 21, 4, 0), T0, (r, a) => { if (!restore.IsDuplicate(r, a)) log.Add(r, true); });
+        Assert.False(restore.Reading);
+        Assert.False(restore.Continued);
+        Assert.Equal(new[] { saved[0].Text, "Left the server · 20:00", "Joined Night Garden · 21:04", early.Text }, log.Records.Select(r => r.Text));
+        Assert.False(restore.TryHold(Line(101), fromAttach: false));
+    }
+
+    [Fact]
+    public void After_a_Core_swap_the_session_goes_on_and_attach_lines_already_saved_are_skipped()
+    {
+        var log = new ChatLog();
+        var restore = new ChatRestore();
+        restore.Begin();
+        var again = Line(1, ChatKind.Global);
+        var fresh = Line(2, ChatKind.Global);
+        restore.TryHold(new ChatRecord { Kind = again.Kind, User = again.User, Text = again.Text, TimeUtc = again.TimeUtc }, fromAttach: true);
+        restore.TryHold(fresh, fromAttach: true);
+        var saved = new List<ChatRecord> { new() { Kind = ChatKind.Session, Text = "Joined X · 20:00", TimeUtc = T0 }, again };
+        restore.Finish(log, saved, "X", DateTime.Now, DateTime.UtcNow, (r, a) => { if (!restore.IsDuplicate(r, a)) log.Add(r, false); });
+        Assert.True(restore.Continued);
+        Assert.Equal(new[] { "Joined X · 20:00", again.Text, fresh.Text }, log.Records.Select(r => r.Text));
+        restore.Reset();
+        Assert.False(restore.Continued);
+        Assert.False(restore.IsDuplicate(again, fromAttach: true));
+    }
+
+    [Fact]
     public void A_repeat_that_brings_a_mention_joins_the_mentions_tab()
     {
         var log = new ChatLog();
@@ -156,7 +216,7 @@ public sealed class ChatHistoryTests
     // ---- the paged window --------------------------------------------------------------------------------
 
     [Fact]
-    public void Window_follows_pins_pages_back_and_forward_and_follows_again()
+    public void Window_follows_pins_pages_back_and_jumps_to_the_newest()
     {
         var log = Full(1000);
         var lines = log.Filtered(ChatTab.All());
@@ -174,12 +234,9 @@ public sealed class ChatHistoryTests
         Assert.Equal((0, 120), w.Resolve(lines));
         Assert.False(w.PageBack(lines));
 
-        // Forward a page at a time, then following again within a page of the newest.
-        Assert.True(w.PageForward(lines));
-        Assert.Equal((40, 120), w.Resolve(lines));
-        while (!w.Following) Assert.True(w.PageForward(lines));
+        // Back at the bottom, however far back: straight to the newest lines.
+        w.Follow();
         Assert.Equal((890, 120), w.Resolve(lines));
-        Assert.False(w.PageForward(lines));
     }
 
     [Fact]
