@@ -11,23 +11,27 @@ A zip lands on your Desktop. If the game crashed, start it again first; the logs
 
 ## 2. Ask an AI assistant
 
-Open a chat with an AI assistant (ChatGPT, Gemini, Grok, Claude or another), paste the prompt below, and attach the zip or the files in it.
+Open ChatGPT, Gemini, Grok, Claude or another assistant, paste the prompt below and add your question. For a problem, also attach the zip. Its `mods.md` lists your mods and their links.
+
+No zip? Each mod's page in the Mods menu shows its version, and **Store page** opens its Thunderstore page. Paste the names, versions and links.
 
 <a id="ai-starter-prompt"></a>
 ```text
-Help me fix a problem with V Rising mods that use Progenitor
-(https://github.com/VRising-Modders/Progenitor).
+I play, run a server or make mods for V Rising with Progenitor
+(https://github.com/VRising-Modders/Progenitor). Help me with my question
+about Progenitor or a mod that uses it.
 
-1. Read the repository's llms.txt, SUPPORT.md and the player pages in
-   docs/guide/progenitor-guide.html, then the docs they link to.
-2. Ask me for my V Rising version, my Progenitor version (Mods > Progenitor),
-   the mods I use, and whether I play on a server or in a private game.
-3. Read the logs I attach (BepInEx LogOutput.log, Player.log, the mod list).
-4. Tell me the likely cause, then give me steps a player can follow in the
-   game or the game folder. No code changes unless I ask.
-5. If it looks like a bug in Progenitor or a mod, help me write a short bug report.
+- First read the repository's llms.txt and the Help Guide pages for my role
+  (docs/guide/progenitor-guide.html).
+- For other mods, use the mod list (mods.md in the log zip, or the list
+  I paste) and each mod's linked page or repository.
+- Answer questions directly. Ask for my Progenitor and V Rising versions,
+  mod list or logs only when you need them, e.g. for a problem or crash.
+- For a problem: the likely cause, then steps I can follow in the game or
+  the game folder. If it looks like a bug, help me write a short report for
+  the Progenitor Discord channel or GitHub.
 
-My problem: <describe what happened and what you expected>
+My question:
 ```
 
 ## 3. Report a bug

@@ -12,13 +12,20 @@ Don't write generic helpers that get instantiated with Progenitor types (e.g. `T
 - [AI starter prompt](docs/ai-starter-prompt.md)
 - [Mod template](templates/progenitor-mod): `dotnet new install templates/progenitor-mod`, then `dotnet new progenitor-mod -n MyMod`
 
-## Helping a player with a problem
+## Helping someone with Progenitor or a mod on it
 
-- Read [SUPPORT.md](SUPPORT.md) and the player pages of [the Help Guide](docs/guide/progenitor-guide.html). Ask for the V Rising and Progenitor versions, the mod list, and the log zip (Mods > Progenitor > Get help > Collect logs).
-- Diagnose from the logs and give steps a player can follow in the game or the game folder.
-- A likely bug: help them write a short report (versions, steps, expected vs actual, the relevant log lines, checked for private details) for the [Progenitor channel](https://discord.com/channels/978094827830915092/1112888087836631090) on the V Rising Mod Community Discord or a GitHub bug report.
+- Read the Help Guide pages for their role (player, server admin or mod developer): [the Help Guide](docs/guide/progenitor-guide.html). Answer questions directly.
+- Ask for the V Rising and Progenitor versions, the mod list or the log zip (Mods > Progenitor > Get help > Collect logs) only when the answer needs them, e.g. for a problem or crash. [SUPPORT.md](SUPPORT.md) has the prompt and the bug report steps.
+- Other mods: the zip's `mods.md` lists each installed mod with its version, author, whether it is built on Progenitor, and its Thunderstore page, website or repository and help page. Read those pages (and the mod's own `llms.txt` when it has one).
+- A problem: give the likely cause, then steps they can follow in the game or the game folder. A likely bug: help them write a short report (versions, steps, expected vs actual, the relevant log lines, checked for private details) for the [Progenitor channel](https://discord.com/channels/978094827830915092/1112888087836631090) on the V Rising Mod Community Discord or a GitHub bug report.
 - Advanced users may fork, fix and open a pull request; it is reviewed before merging. See [CONTRIBUTING.md](CONTRIBUTING.md).
-- Logs have IDs, IPs and known player names removed, but the player should look through them before sharing them with anyone, an AI included.
+- Logs have IDs, IPs and known player names removed, but the user should look through them before sharing them with anyone, an AI included.
+
+## Making your mod easy for AI assistants
+
+- Set `website_url` in your Thunderstore `manifest.json` to your repository or site; the log zip's `mods.md` lists it beside your Thunderstore page.
+- Ship an `llms.txt` at your repository root (what the mod does, its settings, keys and commands, known problems, where to report bugs), or a README section with the same.
+- Embed a help page (`help/index.html`, the template has one) so the Mods page's Help button opens it.
 
 ## Docs
 

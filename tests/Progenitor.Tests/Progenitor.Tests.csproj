@@ -1025,6 +1025,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Support\SupportActions.cs" Link="Linked\Support\SupportActions.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Support\ServerLogsTransfer.cs" Link="Linked\Support\ServerLogsTransfer.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Support\SupportDiagnosis.cs" Link="Linked\Support\SupportDiagnosis.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Support\SupportModList.cs" Link="Linked\Support\SupportModList.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModProblems.cs" Link="Linked\ModProblems.cs" />    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSwitch.cs" Link="Linked\ModSwitch.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsListLayout.cs" Link="Linked\ModsListLayout.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ModList.cs" Link="Linked\ModsMenu.ModList.cs" />

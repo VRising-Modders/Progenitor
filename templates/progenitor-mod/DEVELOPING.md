@@ -31,3 +31,5 @@ Copy `ProgenitorMod/bin/Debug/net6.0/ProgenitorMod.dll` to `BepInEx/progenitor-r
 ## Publish
 
 Bump the version in `<Version>` in `ProgenitorMod.csproj`, `thunderstore/manifest.json` and the help page (`version:` in `help/index.html`) together; a test fails when the help page and `<Version>` differ. Change `Peers` only when wire compatibility changes (a removed or retyped field: a new major range). Add a `CHANGELOG.md` section, then follow the Progenitor repository's [publishing guide](https://github.com/VRising-Modders/Progenitor/blob/main/docs/publishing.md) and run its `tools/publish-check.ps1`.
+
+Set `website_url` in `thunderstore/manifest.json` to your repository; a player's log zip (`mods.md`) lists it, and AI assistants read it from there. Add an `llms.txt` at the repository root (or a README section): what the mod does, its settings, keys and commands, and where to report bugs.
