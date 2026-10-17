@@ -148,6 +148,17 @@ node tools/mcp/call.mjs client mouse "@$bridgeArgs"
 
 Source-checked against `src/Progenitor.Dev/Ops/MouseInjectOps.cs`, built, and game-free tested (argument parsing and the event bytes against the mouse state layout in `BridgeMouseInjectTests`). **Verified live 2026-10-07** on the Steam client (3840x1080) in a world on the test server: `click` at coordinates and at `target:"chat"`, with `background:true`, reported `positionReached` and `pressReached`. The game acted on the injected left clicks (the player's cast counter rose by one per click away from the chat box). Not run live: `move` alone, the other buttons, and `release` while a button is held.
 
+## `chat_tabs`
+
+Client, main thread. CHAT12: the chat tab row as drawn ([chat.md](chat.md#tab-row-look-and-reordering-chat12)). Reflection into Core's `Progenitor.Chat.ChatTabs`. No MCP wrapper; use `call.mjs`.
+
+| Arguments | Does |
+|---|---|
+| `{"action":"read"}` | `art` (`menu`, `resident`, `kit` or `unresolved`) with `artFont`, `artGlow`, `artLine`, `artStar`; `active`, `hovered`, `drag`, `saved` (`[Chat] Tabs`); `items`, each `kind` (`tab`, `add`, `menu`), `caption`, `state` (`Normal`, `Hover`, `Active`, `Dragged`), for tabs `index` and `unread`, `font`, `fontSize` and its screen rect (`minX`..`maxY`, `centerX`, `centerY`, the `mouse` op's coordinates). |
+| `{"action":"move","from":2,"to":0}` | Moves a tab as the quick menu's Move left / right does, saves the order, and replies with `moved` and the read. |
+
+Aim a `mouse` `move`, `click` or `drag` at an item's center to test hover, selection and reordering. Source-checked and built; not run live.
+
 ## `nav`
 
 Client, main thread. NAV1 [controller and keyboard navigation](ui.md#controller-and-keyboard-navigation-nav1): read the focus, take one step, or press a button on a virtual gamepad.

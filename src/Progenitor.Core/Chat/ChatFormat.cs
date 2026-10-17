@@ -375,44 +375,13 @@ internal static class ChatFormat
 }
 
 /// <summary>
-/// CHAT6: the tab strip's text, game-free. Each tab is a <c>&lt;link="t:n"&gt;</c>; the active one bold and bright, the
-/// others muted; a tab with unread lines gets a dot. Then <c>+</c> (new tab, <c>&lt;link="add"&gt;</c>) and the gear
-/// (quick menu, <c>&lt;link="menu"&gt;</c>).
+/// CHAT6: the tab row's words, game-free: the menu glyph and the tab editor's "Show messages from" lines. The row
+/// itself (CHAT12) is drawn by <c>ChatTabs</c> from <see cref="ChatTabRow"/>.
 /// </summary>
 internal static class ChatTabStrip
 {
-    internal const string ActiveHex = "#FFFFFF";
-    internal const string UnreadHex = "#E8B33F";
-    internal const string AddId = "add";
-    internal const string MenuId = "menu";
-
-    /// <summary>The gear: a plain glyph every TMP font in the game has (⚙ is missing from some).</summary>
+    /// <summary>The menu button: a plain glyph every TMP font in the game has (the gear is missing from some).</summary>
     internal const string MenuGlyph = "≡";
-
-    internal static string Render(IReadOnlyList<ChatTab> tabs, int active, IReadOnlyList<bool> unread, bool showAdd)
-    {
-        var sb = new StringBuilder(64 + tabs.Count * 48);
-        for (int i = 0; i < tabs.Count; i++)
-        {
-            if (i > 0) sb.Append("   ");
-            sb.Append("<link=\"t:").Append(i.ToString(CultureInfo.InvariantCulture)).Append("\">");
-            if (i == active) sb.Append("<b><color=").Append(ActiveHex).Append(">").Append(UiRichText.Literal(tabs[i].Name)).Append("</color></b>");
-            else sb.Append("<color=").Append(ChatFormat.MutedHex).Append(">").Append(UiRichText.Literal(tabs[i].Name)).Append("</color>");
-            if (i != active && i < unread.Count && unread[i]) sb.Append("<color=").Append(UnreadHex).Append("> •</color>");
-            sb.Append("</link>");
-        }
-
-        if (showAdd) sb.Append("   <link=\"").Append(AddId).Append("\"><color=").Append(ChatFormat.MutedHex).Append(">+</color></link>");
-        sb.Append("   <link=\"").Append(MenuId).Append("\"><color=").Append(ChatFormat.MutedHex).Append(">").Append(MenuGlyph).Append("</color></link>");
-        return sb.ToString();
-    }
-
-    /// <summary>The tab index a strip link names (<c>t:2</c> → 2), or -1.</summary>
-    internal static int TabOf(string? linkId)
-    {
-        if (linkId == null || !linkId.StartsWith("t:", StringComparison.Ordinal)) return -1;
-        return int.TryParse(linkId.Substring(2), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) ? n : -1;
-    }
 
     /// <summary>The "Show messages from" choices, in the order the tab editor lists them.</summary>
     internal static readonly (ChatScope Scope, string Label)[] ScopeChoices =

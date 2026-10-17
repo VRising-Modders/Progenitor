@@ -13,17 +13,21 @@ using UnityEngine.UI;
 namespace Progenitor.Chat;
 
 /// <summary>
-/// CHAT6: the chat box's tab strip, quick menu, move, resize and background opacity.
+/// CHAT6: the chat box's tab row, quick menu, move, resize and background opacity.
 ///
 /// <list type="bullet">
-/// <item><b>Tabs.</b> A line of text above the chat log, made from the game's own line prefab: <b>All</b> (fixed), then
-/// the player's tabs (default <b>Clan</b>), <b>+</b> and the menu glyph. Left-click a tab to show it; typing in a
-/// single-channel tab sends to that channel. A dot marks a tab with unread lines. Right-click a tab, or click the menu
-/// glyph, for the quick menu.</item>
-/// <item><b>Quick menu</b> (framework dialogs): Edit this tab, Close this tab, New tab, Colors (<see cref="ChatColorPanel"/>), Background opacity, Lock /
-/// Unlock position, Reset position and size, All chat settings. It stores no copies of the settings.</item>
-/// <item><b>Move</b> by dragging the strip (not on a tab name); <b>resize</b> by dragging the corner grip; both are
-/// stored in <c>[Chat]</c> and put back by Reset. The box is kept on screen.</item>
+/// <item><b>Tabs</b> (CHAT12). A row above the chat log drawn like the game's own menu tabs (the full-screen menu's
+/// top bar, through <see cref="ChatTabArt"/>): the font, the soft highlight and the underline. A tab at rest is gray;
+/// under the pointer it brightens with a fainter highlight and underline; the shown tab is white with the full
+/// highlight and underline. A tab with unread lines carries the game's new-unlock star. Then <b>+</b> and the menu
+/// glyph, which hover the same way. Left-click a tab to show it; typing in a single-channel tab sends to that channel.
+/// Press and drag a tab sideways to move it (<see cref="ChatTabRow"/>); the order is saved in <c>[Chat] Tabs</c>.
+/// Right-click a tab, or click the menu glyph, for the quick menu.</item>
+/// <item><b>Quick menu</b> (framework dialogs): Edit this tab, Move left / right, Close this tab, New tab, Colors
+/// (<see cref="ChatColorPanel"/>), Background opacity, Lock / Unlock position, Reset position and size, All chat
+/// settings. It stores no copies of the settings.</item>
+/// <item><b>Move</b> by dragging the row (not on a tab); <b>resize</b> by dragging the corner grip; both are stored in
+/// <c>[Chat]</c> and put back by Reset. The box is kept on screen.</item>
 /// </list>
 /// </summary>
 internal static class ChatTabs
@@ -49,9 +53,8 @@ internal static class ChatTabs
     private static IntPtr _windowPtr;
     private static HUDChatWindow? _window;
     private static GameObject? _strip;
-    private static TextMeshProUGUI? _stripText;
+    private static RectTransform? _stripRect;
     private static GameObject? _grip;
-    private static string _drawn = "";
     private static RectTransform? _moveTarget;
     private static Vector2 _gamePosition;
     /// <summary>
@@ -66,7 +69,11 @@ internal static class ChatTabs
     private static Graphic? _background;
     private static float _gameAlpha = -1f;
 
-    private enum Drag { None, Move, Resize }
+    /// <summary>The chat's own line font, for the row when the game's menu font is not found or lacks a glyph.</summary>
+    private static TMP_FontAsset? _chatFont;
+    private static float _chatFontSize;
+
+    private enum Drag { None, Move, Resize, TabPress, TabDrag }
     private static Drag _drag;
     private static Vector2 _dragStartPointer;
     private static Vector2 _dragStartValue;
@@ -76,6 +83,39 @@ internal static class ChatTabs
 
     /// <summary>How far (canvas units) a move may go each way before part of the box leaves the screen.</summary>
     private static Vector2 _moveMin, _moveMax;
+
+    // ---- the row's items ---------------------------------------------------------------------------------
+
+    private const int AddItem = -2;
+    private const int MenuItem = -3;
+
+    private sealed class Item
+    {
+        internal int Tab;               // the tab index, or AddItem / MenuItem
+        internal GameObject Go = null!;
+        internal RectTransform Rect = null!;
+        internal Image? Glow;
+        internal TextMeshProUGUI Caption = null!;
+        internal Image? Line;
+        internal Image? Star;
+        internal TextMeshProUGUI? Dot;
+        internal float Left;
+        internal float Width;
+        internal float TextWidth;
+        internal ChatTabItemState Drawn = (ChatTabItemState)(-1);
+        internal bool DrawnUnread;
+        internal int DrawnArt = -1;
+    }
+
+    private static readonly List<Item> _items = new();
+    private static Image? _marker;
+
+    /// <summary>The row is rebuilt when this changes: the tab names, the art, the font size, the row width.</summary>
+    private static string _built = "";
+    private static int _hovered = -1;
+    private static int _pressItem = -1;
+    private static float _grabOffset;
+    private static int _dropSlot = -1;
 
     internal static IReadOnlyList<ChatTab> Tabs => _tabs;
 
@@ -88,20 +128,16 @@ internal static class ChatTabs
         ChatView.ActiveTab = _tabs[_active];
     }
 
-    /// <summary>A new line in the log: tabs that show it and are not the active one get the unread dot.</summary>
+    /// <summary>A new line in the log: tabs that show it and are not the active one get the unread mark.</summary>
     internal static void NoteNew(ChatRecord r)
     {
         EnsureLoaded();
         if (r.Kind == ChatKind.Session || r.Transient) return;
-        bool changed = false;
         for (int i = 0; i < _tabs.Count && i < _unread.Length; i++)
         {
             if (i == _active || _unread[i] || !_tabs[i].Shows(r)) continue;
             _unread[i] = true;
-            changed = true;
         }
-
-        if (changed) _drawn = "";
     }
 
     // ---- per frame -----------------------------------------------------------------------------------------
@@ -110,13 +146,9 @@ internal static class ChatTabs
     {
         EnsureLoaded();
         if (_strip == null || _windowPtr != window.Pointer || _strip.Pointer == IntPtr.Zero) Attach(window, hudParent);
-        if (_stripText == null) return;
-        if (_drawn.Length == 0)
-        {
-            string text = ChatTabStrip.Render(_tabs, _active, _unread, _tabs.Count < ChatTab.MaxTabs);
-            _stripText.text = text;
-            _drawn = text;
-        }
+        if (_stripRect == null) return;
+        ChatTabArt.Refresh();
+        BuildIfNeeded();
 
         // The game moves the window into the clan menu and back; the stored position and size are for the HUD only.
         bool inHud = hudParent != null && window.transform.parent != null && window.transform.parent.Pointer == hudParent.Pointer;
@@ -129,7 +161,8 @@ internal static class ChatTabs
         ApplyLayout();
         ChatColorPanel.Update(window, chatShown);
         if (chatShown) HandleInput();
-        else _drag = Drag.None;
+        else CancelDrag();
+        Paint();
     }
 
     private static bool _inHud = true;
@@ -140,30 +173,28 @@ internal static class ChatTabs
         var scroll = window.ScrollView;
         if (scroll == null || window.ChatMessagePrefab == null) return;
         var host = scroll.transform;
-        var strip = UnityEngine.Object.Instantiate(window.ChatMessagePrefab.gameObject, host)?.TryCast<GameObject>();
-        if (strip == null) return;
-        strip.name = StripName;
-        var layout = strip.AddComponent<LayoutElement>();
-        layout.ignoreLayout = true;
-        var rect = strip.transform.TryCast<RectTransform>();
-        if (rect != null)
+
+        try
         {
-            rect.anchorMin = new Vector2(0f, 1f);
-            rect.anchorMax = new Vector2(1f, 1f);
-            rect.pivot = new Vector2(0f, 0f);
-            rect.anchoredPosition = new Vector2(0f, 4f);
-            rect.sizeDelta = new Vector2(0f, 24f);
+            var lineText = window.ChatMessagePrefab.gameObject.GetComponent<TextMeshProUGUI>();
+            _chatFont = lineText != null ? lineText.font : null;
+            _chatFontSize = lineText != null ? lineText.fontSize : 0f;
+        }
+        catch
+        {
+            _chatFont = null;
+            _chatFontSize = 0f;
         }
 
-        var text = strip.GetComponent<TextMeshProUGUI>();
-        if (text == null)
-        {
-            UnityEngine.Object.Destroy(strip);
-            return;
-        }
-        text.richText = true;
-        text.enableWordWrapping = false;
-        text.color = Color.white;
+        var strip = new GameObject(StripName);
+        strip.transform.SetParent(host, false);
+        var rect = strip.AddComponent<RectTransform>();
+        strip.AddComponent<LayoutElement>().ignoreLayout = true;
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0f, 0f);
+        rect.anchoredPosition = new Vector2(0f, 3f);
+        rect.sizeDelta = new Vector2(0f, ChatTabRow.Height);
 
         var grip = UnityEngine.Object.Instantiate(window.ChatMessagePrefab.gameObject, host)?.TryCast<GameObject>();
         if (grip != null)
@@ -184,18 +215,17 @@ internal static class ChatTabs
             var gt = grip.GetComponent<TextMeshProUGUI>();
             if (gt != null)
             {
-                gt.text = "<color=" + ChatFormat.MutedHex + ">◢</color>";
                 gt.text = "<color=" + ChatFormat.MutedHex + ">◥</color>";
                 gt.alignment = TextAlignmentOptions.TopRight;
             }
         }
 
         _strip = strip;
-        _stripText = text;
+        _stripRect = rect;
         _grip = grip;
         _window = window;
         _windowPtr = window.Pointer;
-        _drawn = "";
+        _built = "";
         _appliedValid = false;
 
         // Move the HUD anchor the game positions the window under (it never sets a position itself, research
@@ -227,10 +257,14 @@ internal static class ChatTabs
             if (_strip != null && _strip.Pointer != IntPtr.Zero) UnityEngine.Object.Destroy(_strip);
             if (_grip != null && _grip.Pointer != IntPtr.Zero) UnityEngine.Object.Destroy(_grip);
         }
-        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: detaching the tab strip threw: " + e.Message); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: detaching the tab row threw: " + e.Message); }
 
         _strip = null;
-        _stripText = null;
+        _stripRect = null;
+        _items.Clear();
+        _marker = null;
+        _built = "";
+        _hovered = -1;
         _grip = null;
         _window = null;
         _windowPtr = IntPtr.Zero;
@@ -240,6 +274,8 @@ internal static class ChatTabs
         _background = null;
         _gameAlpha = -1f;
         _drag = Drag.None;
+        _pressItem = -1;
+        _dropSlot = -1;
     }
 
     private static bool _appliedValid;
@@ -265,7 +301,273 @@ internal static class ChatTabs
         }
     }
 
-    /// <summary>Whether the screen point is over the strip or the grip (the click guard covers both).</summary>
+    // ---- building the row ------------------------------------------------------------------------------------
+
+    private static float RowWidth()
+    {
+        try { return _stripRect != null ? _stripRect.rect.width : 0f; }
+        catch { return 0f; }
+    }
+
+    /// <summary>The key the row was built for: tab names, how many can still be added, the art and the row's width.</summary>
+    private static string BuildKey(float width)
+    {
+        var sb = new System.Text.StringBuilder(64);
+        foreach (var t in _tabs) sb.Append(t.Name).Append('\u0001');
+        sb.Append(_tabs.Count < ChatTab.MaxTabs ? '+' : '-').Append(ChatTabArt.Version).Append('|')
+            .Append(Mathf.RoundToInt(width)).Append('|').Append(Mathf.RoundToInt(_chatFontSize));
+        return sb.ToString();
+    }
+
+    private static void BuildIfNeeded()
+    {
+        if (_drag == Drag.TabDrag || _strip == null) return;
+        float width = RowWidth();
+        string key = BuildKey(width);
+        if (key == _built) return;
+        _built = key;
+        try { Build(width); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Chat: building the tab row threw: " + e.Message); }
+    }
+
+    /// <summary>Make one item per tab, then + and the menu glyph, laid out left to right.</summary>
+    private static void Build(float rowWidth)
+    {
+        for (int i = 0; i < _items.Count; i++)
+            if (_items[i].Go != null && _items[i].Go.Pointer != IntPtr.Zero) UnityEngine.Object.Destroy(_items[i].Go);
+        _items.Clear();
+        if (_marker != null && _marker.Pointer != IntPtr.Zero) UnityEngine.Object.Destroy(_marker.gameObject);
+        _marker = null;
+        _hovered = -1;
+
+        float size = ChatTabRow.FontSize(_chatFontSize);
+        for (int pass = 0; pass < 2; pass++)
+        {
+            for (int i = 0; i < _tabs.Count; i++) _items.Add(MakeItem(i, _tabs[i].Name, size));
+            if (_tabs.Count < ChatTab.MaxTabs) _items.Add(MakeItem(AddItem, "+", size));
+            _items.Add(MakeItem(MenuItem, ChatTabStrip.MenuGlyph, size));
+
+            var widths = new float[_items.Count];
+            for (int i = 0; i < _items.Count; i++) widths[i] = _items[i].Width;
+            var lefts = ChatTabRow.Layout(widths);
+            float total = lefts.Length == 0 ? 0f : lefts[lefts.Length - 1] + widths[widths.Length - 1];
+            // A row wider than the chat box gets a smaller caption once (never below the minimum).
+            if (pass == 0 && rowWidth > 1f && total > rowWidth && size > ChatTabRow.MinFontSize)
+            {
+                size = Math.Max(ChatTabRow.MinFontSize, (float)Math.Floor(size * rowWidth / total));
+                for (int i = 0; i < _items.Count; i++) UnityEngine.Object.Destroy(_items[i].Go);
+                _items.Clear();
+                continue;
+            }
+
+            for (int i = 0; i < _items.Count; i++)
+            {
+                _items[i].Left = lefts[i];
+                _items[i].Rect.anchoredPosition = new Vector2(lefts[i], 0f);
+            }
+
+            break;
+        }
+
+        _marker = MakeMarker();
+    }
+
+    private static Item MakeItem(int tab, string text, float size)
+    {
+        bool art = ChatTabArt.Found;
+        var go = new GameObject(tab >= 0 ? "tab" : tab == AddItem ? "add" : "menu");
+        go.transform.SetParent(_strip!.transform, false);
+        var rect = go.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 0.5f);
+        rect.anchorMax = new Vector2(0f, 0.5f);
+        rect.pivot = new Vector2(0f, 0.5f);
+
+        var item = new Item { Tab = tab, Go = go, Rect = rect };
+
+        // Behind the caption: the game's soft glow (or, in the kit look, a flat tint over the whole item).
+        item.Glow = MakeImage(go.transform, "glow", art ? ChatTabArt.Glow : null, art ? ChatTabArt.GlowType : Image.Type.Simple);
+
+        var captionGo = new GameObject("caption");
+        captionGo.transform.SetParent(go.transform, false);
+        var cr = captionGo.AddComponent<RectTransform>();
+        cr.anchorMin = Vector2.zero;
+        cr.anchorMax = Vector2.one;
+        cr.offsetMin = Vector2.zero;
+        cr.offsetMax = Vector2.zero;
+        var caption = captionGo.AddComponent<TextMeshProUGUI>();
+        var font = FontFor(text);
+        if (font != null) caption.font = font;
+        if (art && font != null && font == ChatTabArt.Font && ChatTabArt.FontMaterial != null) caption.fontSharedMaterial = ChatTabArt.FontMaterial;
+        caption.fontStyle = art ? ChatTabArt.FontStyle : FontStyles.Normal;
+        caption.characterSpacing = art ? ChatTabArt.CharacterSpacing : 0f;
+        caption.enableAutoSizing = false;
+        caption.fontSize = tab >= 0 ? size : size + 2f;
+        caption.enableWordWrapping = false;
+        caption.overflowMode = TextOverflowModes.Overflow;
+        caption.richText = false;
+        caption.alignment = TextAlignmentOptions.Center;
+        caption.raycastTarget = false;
+        caption.text = text;
+        item.Caption = caption;
+
+        float textWidth;
+        try { textWidth = caption.GetPreferredValues(text).x; }
+        catch { textWidth = text.Length * size * 0.6f; }
+        item.TextWidth = textWidth;
+        item.Width = Mathf.Ceil(textWidth + 2f * ChatTabRow.Pad);
+        rect.sizeDelta = new Vector2(item.Width, ChatTabRow.Height);
+
+        if (item.Glow != null)
+        {
+            var gr = item.Glow.rectTransform;
+            gr.anchorMin = gr.anchorMax = new Vector2(0.5f, 0.5f);
+            gr.pivot = new Vector2(0.5f, 0.5f);
+            gr.anchoredPosition = Vector2.zero;
+            gr.sizeDelta = art && ChatTabArt.Glow != null
+                ? new Vector2(item.Width * ChatTabArt.GlowRatio.x, ChatTabRow.Height * ChatTabArt.GlowRatio.y)
+                : new Vector2(item.Width, ChatTabRow.Height);
+            gr.SetAsFirstSibling();
+        }
+
+        // Under the caption: the game's underline, as wide as the words.
+        item.Line = MakeImage(go.transform, "line", art ? ChatTabArt.Line : null, art ? ChatTabArt.LineType : Image.Type.Simple);
+        if (item.Line != null)
+        {
+            var lr = item.Line.rectTransform;
+            lr.anchorMin = lr.anchorMax = new Vector2(0.5f, 0f);
+            lr.pivot = new Vector2(0.5f, 0f);
+            float h = art ? Mathf.Max(2f, Mathf.Round(caption.fontSize * ChatTabArt.LineRatio)) : 2f;
+            lr.sizeDelta = new Vector2(Mathf.Ceil(textWidth + 6f), h);
+            lr.anchoredPosition = new Vector2(0f, 1f);
+        }
+
+        if (tab >= 0)
+        {
+            // Unread: the game's new-unlock star at the top right, or a gold dot in the kit look.
+            if (art && ChatTabArt.Star != null)
+            {
+                item.Star = MakeImage(go.transform, "unread", ChatTabArt.Star, Image.Type.Simple);
+                if (item.Star != null)
+                {
+                    var sr = item.Star.rectTransform;
+                    sr.anchorMin = sr.anchorMax = new Vector2(1f, 1f);
+                    sr.pivot = new Vector2(0.5f, 0.5f);
+                    float s = Mathf.Round(size * 0.8f);
+                    sr.sizeDelta = new Vector2(s, s);
+                    sr.anchoredPosition = new Vector2(-ChatTabRow.Pad * 0.5f, -s * 0.35f);
+                    item.Star.preserveAspect = true;
+                }
+            }
+            else
+            {
+                var dotGo = new GameObject("unread");
+                dotGo.transform.SetParent(go.transform, false);
+                var dr = dotGo.AddComponent<RectTransform>();
+                dr.anchorMin = dr.anchorMax = new Vector2(1f, 1f);
+                dr.pivot = new Vector2(0.5f, 0.5f);
+                dr.sizeDelta = new Vector2(12f, 12f);
+                dr.anchoredPosition = new Vector2(-ChatTabRow.Pad * 0.5f, -5f);
+                var dot = dotGo.AddComponent<TextMeshProUGUI>();
+                if (_chatFont != null) dot.font = _chatFont;
+                dot.fontSize = size;
+                dot.alignment = TextAlignmentOptions.Center;
+                dot.raycastTarget = false;
+                dot.enableWordWrapping = false;
+                dot.text = "•";
+                dot.color = UnreadColor;
+                item.Dot = dot;
+            }
+        }
+
+        return item;
+    }
+
+    private static readonly Color UnreadColor = new(0.91f, 0.70f, 0.25f, 1f);
+
+    /// <summary>The game's menu font when it has the caption's glyphs, else the chat's own font.</summary>
+    private static TMP_FontAsset? FontFor(string text)
+    {
+        var font = ChatTabArt.Found ? ChatTabArt.Font : null;
+        if (font == null) return _chatFont;
+        try
+        {
+            foreach (char c in text)
+                if (!char.IsWhiteSpace(c) && !font.HasCharacter(c, true, false)) return _chatFont ?? font;
+        }
+        catch { /* keep the menu font */ }
+        return font;
+    }
+
+    private static Image? MakeImage(Transform parent, string name, Sprite? sprite, Image.Type type)
+    {
+        var go = new GameObject(name);
+        go.transform.SetParent(parent, false);
+        go.AddComponent<RectTransform>();
+        var image = go.AddComponent<Image>();
+        image.raycastTarget = false;
+        if (sprite != null)
+        {
+            image.sprite = sprite;
+            image.type = type;
+        }
+
+        image.color = new Color(1f, 1f, 1f, 0f);
+        return image;
+    }
+
+    /// <summary>The insertion marker while a tab is dragged: the game's underline stood upright, or a thin bar.</summary>
+    private static Image? MakeMarker()
+    {
+        bool art = ChatTabArt.Found;
+        var marker = MakeImage(_strip!.transform, "drop", art ? ChatTabArt.Line : null, art ? ChatTabArt.LineType : Image.Type.Simple);
+        if (marker == null) return null;
+        var mr = marker.rectTransform;
+        mr.anchorMin = mr.anchorMax = new Vector2(0f, 0.5f);
+        mr.pivot = new Vector2(0.5f, 0.5f);
+        if (art)
+        {
+            mr.sizeDelta = new Vector2(ChatTabRow.Height - 2f, 3f);
+            mr.localEulerAngles = new Vector3(0f, 0f, 90f);
+        }
+        else mr.sizeDelta = new Vector2(2f, ChatTabRow.Height - 4f);
+        marker.gameObject.SetActive(false);
+        return marker;
+    }
+
+    // ---- painting -------------------------------------------------------------------------------------------
+
+    /// <summary>Each frame: give every item the look of its state; only items whose state changed are touched.</summary>
+    private static void Paint()
+    {
+        int dragged = _drag == Drag.TabDrag ? _pressItem : -1;
+        int art = ChatTabArt.Version;
+        var colors = ChatTabArt.Found ? ChatTabArt.Colors ?? new ChatTabDonorColors() : null;
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var item = _items[i];
+            var state = ChatTabRow.StateOf(i, _tabs.Count, _active, _hovered, dragged);
+            bool unread = item.Tab >= 0 && item.Tab != _active && item.Tab < _unread.Length && _unread[item.Tab];
+            if (state == item.Drawn && unread == item.DrawnUnread && art == item.DrawnArt) continue;
+            item.Drawn = state;
+            item.DrawnUnread = unread;
+            item.DrawnArt = art;
+            var style = ChatTabRow.Style(state, colors);
+            float a = style.ItemAlpha;
+            try
+            {
+                item.Caption.color = new Color(style.CaptionR, style.CaptionG, style.CaptionB, style.CaptionA * a);
+                if (item.Glow != null) item.Glow.color = new Color(1f, 1f, 1f, style.GlowAlpha * a);
+                if (item.Line != null) item.Line.color = new Color(1f, 1f, 1f, style.LineAlpha * a);
+                if (item.Star != null) item.Star.gameObject.SetActive(unread);
+                if (item.Dot != null) item.Dot.gameObject.SetActive(unread);
+            }
+            catch { /* the item keeps its last look */ }
+        }
+    }
+
+    // ---- pointer ------------------------------------------------------------------------------------------------
+
+    /// <summary>Whether the screen point is over the row or the grip (the click guard covers both).</summary>
     internal static bool PointerOver(Vector2 point) =>
         Contains(_strip, point) || Contains(_grip, point) || ChatColorPanel.Contains(point);
 
@@ -276,15 +578,55 @@ internal static class ChatTabs
         return rect != null && RectTransformUtility.RectangleContainsScreenPoint(rect, point, null);
     }
 
+    /// <summary>The item under the screen point, or -1.</summary>
+    private static int ItemAt(Vector2 point)
+    {
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var r = _items[i].Rect;
+            if (r != null && r.Pointer != IntPtr.Zero && RectTransformUtility.RectangleContainsScreenPoint(r, point, null)) return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>The screen point in the row's own units (its left edge is 0).</summary>
+    private static float RowX(Vector2 point)
+    {
+        if (_stripRect == null) return 0f;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_stripRect, point, null, out var local)) return 0f;
+        // The row's pivot is its left edge, so local x is already measured from it.
+        return local.x;
+    }
+
+    private static void CancelDrag()
+    {
+        if (_drag == Drag.TabDrag || _drag == Drag.TabPress) EndTabDrag(drop: false);
+        _drag = Drag.None;
+        _hovered = -1;
+    }
+
     private static void HandleInput()
     {
         if (!UnityUiRuntime.TrySamplePointerScreenAnyFocus(out float x, out float y)) return;
         var point = new Vector2(x, y);
         // The colors panel handles its own clicks.
-        if (_drag == Drag.None && ChatColorPanel.Contains(point)) return;
+        if (_drag == Drag.None && ChatColorPanel.Contains(point))
+        {
+            _hovered = -1;
+            return;
+        }
+
         if (_drag != Drag.None)
         {
-            if (!UnityInputRuntime.MouseButtonHeld(0))
+            bool held = UnityInputRuntime.MouseButtonHeld(0);
+            if (_drag == Drag.TabPress || _drag == Drag.TabDrag)
+            {
+                TabDragStep(point, held);
+                return;
+            }
+
+            if (!held)
             {
                 _drag = Drag.None;
                 KeepOnScreen();
@@ -310,6 +652,9 @@ internal static class ChatTabs
             return;
         }
 
+        int over = ItemAt(point);
+        _hovered = over;
+
         bool left = UnityInputRuntime.MouseButtonPressedThisFrame(0);
         bool right = UnityInputRuntime.MouseButtonPressedThisFrame(1);
         if (!left && !right) return;
@@ -324,19 +669,26 @@ internal static class ChatTabs
             return;
         }
 
-        if (!Contains(_strip, point) || _stripText == null) return;
-        int link = TMP_TextUtilities.FindIntersectingLink(_stripText, new Vector3(x, y, 0f), null);
-        string id = link >= 0 ? _stripText.textInfo.linkInfo[link].GetLinkID() : "";
-        int tab = ChatTabStrip.TabOf(id);
+        if (!Contains(_strip, point)) return;
+        int tab = over >= 0 ? _items[over].Tab : -1;
         if (right)
         {
             OpenMenu(tab >= 0 ? tab : _active);
             return;
         }
 
-        if (tab >= 0) Select(tab);
-        else if (id == ChatTabStrip.AddId) NewTab();
-        else if (id == ChatTabStrip.MenuId) OpenMenu(_active);
+        if (tab >= 0)
+        {
+            // A press on a tab: a click selects it on release, a drag past the threshold moves it.
+            _drag = Drag.TabPress;
+            _pressItem = over;
+            _dragStartPointer = point;
+            _grabOffset = RowX(point) - _items[over].Left;
+            return;
+        }
+
+        if (over >= 0 && _items[over].Tab == AddItem) NewTab();
+        else if (over >= 0 && _items[over].Tab == MenuItem) OpenMenu(_active);
         else if (!(Locked?.Value ?? false))
         {
             _drag = Drag.Move;
@@ -344,6 +696,155 @@ internal static class ChatTabs
             _dragStartValue = new Vector2(OffsetX?.Value ?? 0f, OffsetY?.Value ?? 0f);
             MoveRange();
         }
+    }
+
+    /// <summary>One frame of a press on a tab: becomes a drag past the threshold; a release clicks or drops.</summary>
+    private static void TabDragStep(Vector2 point, bool held)
+    {
+        if (_pressItem < 0 || _pressItem >= _items.Count || _items[_pressItem].Tab < 0)
+        {
+            _drag = Drag.None;
+            _pressItem = -1;
+            return;
+        }
+
+        if (_drag == Drag.TabPress)
+        {
+            float scale = CanvasScale();
+            if (!held)
+            {
+                int tab = _items[_pressItem].Tab;
+                _drag = Drag.None;
+                _pressItem = -1;
+                Select(tab);
+                return;
+            }
+
+            if (!ChatTabRow.PassedThreshold(_dragStartPointer.x / scale, _dragStartPointer.y / scale, point.x / scale, point.y / scale)) return;
+            _drag = Drag.TabDrag;
+            try { _items[_pressItem].Rect.SetAsLastSibling(); } catch { /* drawn under its neighbors */ }
+        }
+
+        if (!held)
+        {
+            EndTabDrag(drop: true);
+            return;
+        }
+
+        // The tab follows the pointer along the row; the marker shows where it would land.
+        var item = _items[_pressItem];
+        float x = RowX(point);
+        float rowWidth = RowWidth();
+        float leftEdge = Mathf.Clamp(x - _grabOffset, -item.Width * 0.5f, Mathf.Max(0f, rowWidth - item.Width * 0.5f));
+        try { item.Rect.anchoredPosition = new Vector2(leftEdge, 0f); } catch { /* */ }
+
+        TabLayout(out var lefts, out var widths);
+        int slot = ChatTabRow.DropSlot(lefts, widths, leftEdge + item.Width * 0.5f);
+        int from = item.Tab;
+        _dropSlot = ChatTabRow.TargetIndex(from, slot) == from ? -1 : slot;
+        if (_marker != null)
+        {
+            try
+            {
+                bool show = _dropSlot >= 0;
+                if (_marker.gameObject.activeSelf != show) _marker.gameObject.SetActive(show);
+                if (show)
+                {
+                    _marker.rectTransform.anchoredPosition = new Vector2(ChatTabRow.MarkerX(lefts, widths, _dropSlot), 0f);
+                    _marker.color = new Color(1f, 1f, 1f, 0.9f);
+                    _marker.rectTransform.SetAsLastSibling();
+                }
+            }
+            catch { /* no marker this frame */ }
+        }
+    }
+
+    /// <summary>The tabs' resting layout (the + and menu items excluded).</summary>
+    private static void TabLayout(out float[] lefts, out float[] widths)
+    {
+        int n = Math.Min(_tabs.Count, _items.Count);
+        lefts = new float[n];
+        widths = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            lefts[i] = _items[i].Left;
+            widths[i] = _items[i].Width;
+        }
+    }
+
+    private static void EndTabDrag(bool drop)
+    {
+        int from = _pressItem >= 0 && _pressItem < _items.Count ? _items[_pressItem].Tab : -1;
+        int slot = _dropSlot;
+        _drag = Drag.None;
+        _pressItem = -1;
+        _dropSlot = -1;
+        if (_marker != null && _marker.Pointer != IntPtr.Zero) _marker.gameObject.SetActive(false);
+        if (drop && from >= 0 && slot >= 0 && MoveTab(from, ChatTabRow.TargetIndex(from, slot))) return;
+        // Not moved: put every item back where it was.
+        _built = "";
+    }
+
+    /// <summary>Move a tab in the row and save the order; the shown tab and the unread marks go with their tabs.</summary>
+    internal static bool MoveTab(int from, int to)
+    {
+        if (!ChatTabRow.Move(_tabs, _unread, ref _active, from, to)) return false;
+        if (TabsSetting != null) TabsSetting.Value = ChatTab.Save(_tabs);
+        if (ActiveSetting != null) ActiveSetting.Value = _active;
+        _built = "";
+        Plugin.Logger?.LogInfo("Chat: moved tab " + _tabs[Math.Max(0, Math.Min(_tabs.Count - 1, to))].Name + " from " + from + " to " + to + ".");
+        return true;
+    }
+
+    /// <summary>The row as drawn, for the Dev bridge's <c>chat_tabs</c> read.</summary>
+    internal static Dictionary<string, object?> Describe()
+    {
+        var items = new List<object?>();
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var item = _items[i];
+            var d = new Dictionary<string, object?>
+            {
+                ["kind"] = item.Tab >= 0 ? "tab" : item.Tab == AddItem ? "add" : "menu",
+                ["caption"] = item.Caption != null && item.Caption.Pointer != IntPtr.Zero ? item.Caption.text : "",
+                ["state"] = item.Drawn.ToString(),
+            };
+            if (item.Tab >= 0)
+            {
+                d["index"] = item.Tab;
+                d["unread"] = item.DrawnUnread;
+            }
+
+            if (TryScreenRect(item.Go, out var min, out var max))
+            {
+                d["minX"] = min.x; d["minY"] = min.y; d["maxX"] = max.x; d["maxY"] = max.y;
+                d["centerX"] = (min.x + max.x) * 0.5f; d["centerY"] = (min.y + max.y) * 0.5f;
+            }
+
+            try
+            {
+                d["font"] = item.Caption != null && item.Caption.font != null ? item.Caption.font.name : "";
+                d["fontSize"] = item.Caption != null ? item.Caption.fontSize : 0f;
+            }
+            catch { /* */ }
+            items.Add(d);
+        }
+
+        return new Dictionary<string, object?>
+        {
+            ["ok"] = true,
+            ["attached"] = _stripRect != null,
+            ["art"] = ChatTabArt.Source,
+            ["artFont"] = ChatTabArt.Font != null ? ChatTabArt.Font.name : "",
+            ["artGlow"] = ChatTabArt.Glow != null ? ChatTabArt.Glow.name : "",
+            ["artLine"] = ChatTabArt.Line != null ? ChatTabArt.Line.name : "",
+            ["artStar"] = ChatTabArt.Star != null ? ChatTabArt.Star.name : "",
+            ["active"] = _active,
+            ["hovered"] = _hovered,
+            ["drag"] = _drag.ToString(),
+            ["saved"] = TabsSetting?.Value ?? "",
+            ["items"] = items,
+        };
     }
 
     private static float CanvasScale()
@@ -454,7 +955,6 @@ internal static class ChatTabs
         _unread[index] = false;
         ChatView.ActiveTab = _tabs[index];
         if (ActiveSetting != null) ActiveSetting.Value = index;
-        _drawn = "";
         int channel = _tabs[index].SendChannel();
         if (channel < 0) return;
         try
@@ -483,13 +983,36 @@ internal static class ChatTabs
     {
         var options = new List<string>();
         var actions = new List<Action>();
-        bool editable = tab > 0 && tab < _tabs.Count;
+        bool exists = tab >= 0 && tab < _tabs.Count;
+        bool editable = exists && !_tabs[tab].Fixed;
         if (editable)
         {
             options.Add("Edit this tab");
             actions.Add(() => EditTab(tab));
+        }
+
+        // The keyboard and controller way to reorder (the mouse drags the tab).
+        if (exists && tab > 0)
+        {
+            options.Add("Move left");
+            actions.Add(() => MoveTab(tab, tab - 1));
+        }
+
+        if (exists && tab < _tabs.Count - 1)
+        {
+            options.Add("Move right");
+            actions.Add(() => MoveTab(tab, tab + 1));
+        }
+
+        if (editable)
+        {
             options.Add("Close this tab");
-            actions.Add(() => { _tabs.RemoveAt(tab); if (_active >= tab) _active = Math.Max(0, _active - 1); SaveTabs(); });
+            actions.Add(() =>
+            {
+                _tabs.RemoveAt(tab);
+                _active = ChatTabRow.ActiveAfterClose(_active, tab, _tabs.Count);
+                SaveTabs();
+            });
         }
 
         if (_tabs.Count < ChatTab.MaxTabs)
@@ -561,7 +1084,7 @@ internal static class ChatTabs
 
     private static void EditTab(int index)
     {
-        if (index <= 0 || index >= _tabs.Count) return;
+        if (index < 0 || index >= _tabs.Count || _tabs[index].Fixed) return;
         NameTab(_tabs[index], isNew: false);
     }
 

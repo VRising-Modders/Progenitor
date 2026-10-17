@@ -159,6 +159,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatCommandHintsWire.cs" Link="Linked\ChatCommandHintsWire.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatPolicy.cs" Link="Linked\ChatPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatLog.cs" Link="Linked\ChatLog.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Chat\ChatTabRow.cs" Link="Linked\ChatTabRow.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ChatFormat.cs" Link="Linked\ChatFormat.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ModLinkToken.cs" Link="Linked\ModLinkToken.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Chat\ServerChatLogic.cs" Link="Linked\ServerChatLogic.cs" />
