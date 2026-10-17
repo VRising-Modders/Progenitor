@@ -48,7 +48,7 @@ public class VanillaPanelTests : IDisposable
         foreach (var site in new[]
                  {
                      VanillaUiSite.ContainerPanel, VanillaUiSite.StationPanel, VanillaUiSite.InventoryPanel,
-                     VanillaUiSite.CastleHeartPanel, VanillaUiSite.InventoryTooltip,
+                     VanillaUiSite.CastleHeartPanel, VanillaUiSite.InventoryTooltip, VanillaUiSite.RecipeTooltip,
                  })
         {
             Assert.True(VanillaUiSites.IsDefined(site));
@@ -56,7 +56,7 @@ public class VanillaPanelTests : IDisposable
         }
 
         Assert.False(VanillaUiSites.IsPanel(VanillaUiSite.MapWarEventInfo));
-        Assert.False(VanillaUiSites.IsDefined((VanillaUiSite)7));
+        Assert.False(VanillaUiSites.IsDefined((VanillaUiSite)8));
     }
 
     [Theory]
@@ -66,6 +66,7 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.InventoryPanel)]
     [InlineData(VanillaUiSite.CastleHeartPanel)]
     [InlineData(VanillaUiSite.InventoryTooltip)]
+    [InlineData(VanillaUiSite.RecipeTooltip)]
     public void Every_site_watch_runs_on_frames_its_mapper_skips(VanillaUiSite site)
     {
         // Every driving mapper (the map card's included) updates only while its queries match. A
@@ -110,6 +111,10 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, true, VanillaPanelAnchor.RightEdge)]
     [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.TooltipBody)]
+    [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipRequirements, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.TooltipBody)]
+    [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, true, VanillaPanelAnchor.TooltipRequirements)]
+    [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     public void Anchors_resolve_per_site(VanillaUiSite site, VanillaPanelAnchor asked, bool ok, VanillaPanelAnchor resolved)
@@ -525,6 +530,121 @@ public class VanillaPanelTests : IDisposable
         _client.Fire(VanillaUiSite.InventoryTooltip, Open(31, new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0, itemGuid: 9, itemAmount: 37)));
         Assert.Equal(new[] { "In storage: 37" }, _client.RowTexts);
         h.Dispose();
+    }
+
+    private static VanillaPanelTarget Recipe(int recipe, int product = 500, int amount = 1, VanillaPanelKind kind = VanillaPanelKind.Workstation, params VanillaRecipeRequirement[] needs) =>
+        new(kind, kind == VanillaPanelKind.Character ? 0 : 812, kind == VanillaPanelKind.Character ? 0 : 3,
+            kind == VanillaPanelKind.Character ? 0 : 40, kind == VanillaPanelKind.Character ? 0 : 1, kind == VanillaPanelKind.Character ? 0 : 1,
+            recipe, kind == VanillaPanelKind.RefinementStation ? recipe : product, kind == VanillaPanelKind.RefinementStation ? 0 : amount,
+            product, amount, needs);
+
+    [Fact]
+    public void Each_hovered_recipe_is_a_new_target_with_its_product_and_requirements()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, _owner, "example.recipes");
+        var seen = new List<VanillaPanelEvent>();
+        h.OnPanel(seen.Add);
+
+        var glass = new VanillaRecipeRequirement(301, 3);
+        var plank = new VanillaRecipeRequirement(302, 8);
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, glass, plank)));
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, glass, plank)));
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(61, Recipe(9002, 501, 2, VanillaPanelKind.Workstation, plank)));
+        _client.Fire(VanillaUiSite.RecipeTooltip, VanillaSiteSample.Absent);
+
+        Assert.Equal(new[] { VanillaPanelChange.Opened, VanillaPanelChange.TargetChanged, VanillaPanelChange.Closed }, seen.Select(e => e.Change).ToArray());
+        var first = seen[0].Target;
+        Assert.Equal(9001, first.RecipeGuid);
+        Assert.Equal(new VanillaRecipeRequirement(500, 1), first.Product);
+        Assert.Equal(new[] { glass, plank }, first.Requirements.ToArray());
+        Assert.Equal(812, first.EntityIndex);
+        Assert.True(first.HasNetworkId);
+        Assert.Equal(9002, seen[1].Target.RecipeGuid);
+        Assert.Equal(9001, seen[1].Previous.RecipeGuid);
+        Assert.Equal(9002, seen[2].Previous.RecipeGuid);
+
+        // Per-hover edges are the plugin's to log, as on the item tooltip; the attach line is said once.
+        Assert.DoesNotContain(Lines, l => l.StartsWith("Ui: panel RecipeTooltip"));
+        Assert.Single(Lines, l => l.StartsWith("Ui: attached RecipeTooltip anchor=requirements"));
+        Assert.Equal(new[] { VanillaPanelAnchor.TooltipRequirements }, _client.BuiltAnchors.ToArray());
+        h.Dispose();
+    }
+
+    [Fact]
+    public void The_crafting_tab_target_has_no_station()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, _owner, "example.recipes");
+        Assert.Equal(VanillaPanelAnchor.TooltipBody, h.Anchor);
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(62, Recipe(9003, kind: VanillaPanelKind.Character)));
+        Assert.Equal(VanillaPanelKind.Character, h.Target.Kind);
+        Assert.False(h.Target.HasEntity);
+        Assert.False(h.Target.HasNetworkId);
+        Assert.Empty(h.Target.Requirements);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void Toned_rows_carry_their_color_and_a_plain_SetRows_resets_it()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipBody, _owner, "example.recipes");
+        h.OnPanel(e =>
+        {
+            if (e.Change == VanillaPanelChange.Closed) return;
+            h.SetRows(new VanillaRow[] { "Network: 12 Glass", new("Not enough Planks", LabelTone.Warn) });
+        });
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(63, Recipe(9004)));
+
+        Assert.Equal(new[] { "Network: 12 Glass", "Not enough Planks" }, _client.RowTexts);
+        Assert.Equal(new[] { LabelTone.Normal, LabelTone.Warn }, _client.RowTones);
+        int writes = _client.ToneWrites;
+
+        // The same tones again write nothing; a plain string list is all Normal.
+        h.SetRows(new VanillaRow[] { "Network: 12 Glass", new("Not enough Planks", LabelTone.Warn) });
+        Assert.Equal(writes, _client.ToneWrites);
+        h.SetRows(new[] { "a", "b", "c" });
+        Assert.Equal(new[] { LabelTone.Normal, LabelTone.Normal, LabelTone.Normal }, _client.RowTones);
+
+        var described = (string[])((VanillaAttachHandle)h).Readback().Describe()["rowTones"]!;
+        Assert.Equal(new[] { "normal", "normal", "normal" }, described);
+
+        h.ClearRows();
+        Assert.Empty(_client.RowTexts);
+        Assert.Equal(0, h.RowCount);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void The_recipe_tooltip_hands_back_disabled_buttons()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, _owner, "example.recipes");
+        Assert.True(h.Enabled);
+        Assert.False(h.Button("x").Enabled);
+        h.Dispose();
+    }
+
+    [Fact]
+    public void Recipe_targets_compare_by_value_and_print_their_recipe()
+    {
+        var a = Recipe(9001, 500, 1, VanillaPanelKind.RefinementStation, new VanillaRecipeRequirement(301, 3));
+        var b = Recipe(9001, 500, 1, VanillaPanelKind.RefinementStation, new VanillaRecipeRequirement(301, 3));
+        var c = Recipe(9001, 500, 1, VanillaPanelKind.RefinementStation, new VanillaRecipeRequirement(301, 4));
+        Assert.Equal(a, b);
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+        Assert.NotEqual(a, c);
+        Assert.NotEqual(a, Recipe(9001, 500, 1, VanillaPanelKind.RefinementStation));
+        Assert.Equal("kind=RefinementStation entity=812:3 net=40:1 recipe=9001 item=9001x0 makes=500x1 needs=301x3", a.ToString());
+        Assert.Equal(new VanillaRecipeRequirement(500, 1), a.Product);
+        Assert.Equal(9001, a.ItemGuid);
+        Assert.Equal("kind=Workstation entity=812:3 net=40:1 recipe=9001 item=500x1 needs=301x3", Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3)).ToString());
+
+        // The public constructor copies the list; the old constructor carries no recipe.
+        var list = new List<VanillaRecipeRequirement> { new(301, 3) };
+        var d = new VanillaPanelTarget(VanillaPanelKind.Workstation, 1, 1, 0, 0, 0, 9001, 500, 1, 500, 1, list);
+        list[0] = new VanillaRecipeRequirement(999, 9);
+        Assert.Equal(301, d.Requirements[0].ItemGuid);
+        var item = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0, itemGuid: 9, itemAmount: 2);
+        Assert.Equal(0, item.RecipeGuid);
+        Assert.Empty(item.Requirements);
     }
 
     [Fact]
@@ -1016,6 +1136,7 @@ public class VanillaPanelTests : IDisposable
         {
             if (RefuseAnchors.Contains(anchor)) return null;
             ContainerBuilds++;
+            BuiltAnchors.Add(anchor);
             var c = new FakeWidget(containerName, false);
             _containers.Add(c);
             return c;
@@ -1043,6 +1164,29 @@ public class VanillaPanelTests : IDisposable
             c.Children.Add(r);
             return r;
         }
+
+        public int ToneWrites { get; private set; }
+
+        public void StyleAttachRow(IRuntimeWidget row, LabelTone tone)
+        {
+            if (row is not FakeWidget w || w.Tone == tone) return;
+            w.Tone = tone;
+            ToneWrites++;
+        }
+
+        public List<LabelTone> RowTones
+        {
+            get
+            {
+                var list = new List<LabelTone>();
+                foreach (var c in _containers)
+                    if (c.Alive) foreach (var r in c.Children) if (r.Alive && !r.IsButton) list.Add(r.Tone);
+                return list;
+            }
+        }
+
+        /// <summary>The anchors containers were built for, in build order.</summary>
+        public List<VanillaPanelAnchor> BuiltAnchors { get; } = new();
 
         public VanillaFitResult FitAttachContainer(
             VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons)
@@ -1124,6 +1268,8 @@ public class VanillaPanelTests : IDisposable
             internal object? Click { get; set; }
 
             internal List<FakeWidget> Children { get; } = new();
+
+            internal LabelTone Tone { get; set; }
 
             public string Text { get; set; }
 

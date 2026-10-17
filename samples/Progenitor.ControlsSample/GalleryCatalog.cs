@@ -296,6 +296,8 @@ internal static class GalleryCatalog
             "Use it to put a button on the castle heart's window.", "Game panels tab, a note", "Progenitor.PanelsExample (Castles, Fuel)", "The game's own button."),
         E("attach-tooltip", Panels, "Item tooltip line", "Ui.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipBody, ...)",
             "Use it to add a line of the mod's own to an item's tooltip.", "Game panels tab, a note", "Progenitor.PanelsExample (tooltip line)", "Body, left-aligned, in the tooltip."),
+        E("attach-recipe", Panels, "Recipe tooltip rows", "Ui.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, ...)",
+            "Use it to add lines of the mod's own to a recipe's tooltip in a station or the crafting tab.", "Game panels tab, a note", "Progenitor.PanelsExample (recipe rows)", "Body, in the tooltip; a LabelTone color per row."),
         E("attach-map", Panels, "Map rows", "Ui.AttachToVanilla(VanillaUiSite.MapWarEventInfo, ...)",
             "Use it to add rows beside the map's war event info.", "Game panels tab, a note", "Progenitor.Sample SampleRifts.cs", "Body, left-aligned."),
     };

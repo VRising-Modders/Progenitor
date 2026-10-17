@@ -447,6 +447,7 @@ internal sealed class GalleryDemo
             case "attach-inventory":
             case "attach-heart":
             case "attach-tooltip":
+            case "attach-recipe":
             case "attach-map":
                 CallLines(panel, tab, e.Control, e.Sample);
                 break;

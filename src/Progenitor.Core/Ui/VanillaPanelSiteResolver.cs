@@ -551,6 +551,7 @@ internal sealed partial class UnityUiRuntime
                 case VanillaUiSite.CastleHeartPanel:
                 case VanillaUiSite.InventoryPanel:
                 case VanillaUiSite.InventoryTooltip:
+                case VanillaUiSite.RecipeTooltip:
                     break;
                 default:
                     return null;
@@ -633,6 +634,9 @@ internal sealed partial class UnityUiRuntime
         PlacementSaid.Clear();
         AnchorStatus.Clear();
         _hovered = null;
+        RecipeGridCaches.Clear();
+        _hoveredRecipe = null;
+        RecipeHover.Clear();
         _scanFrame = -1;
         _scanWorld = null;
         _containerMapper = null;
@@ -664,6 +668,7 @@ internal sealed partial class UnityUiRuntime
             VanillaUiSite.CastleHeartPanel => SampleCastleHeart(view, world),
             VanillaUiSite.InventoryPanel => SampleInventory(view, world),
             VanillaUiSite.InventoryTooltip => SampleTooltip(view, world),
+            VanillaUiSite.RecipeTooltip => SampleRecipeTooltip(view, world),
             _ => Miss(view),
         };
     }
@@ -868,6 +873,270 @@ internal sealed partial class UnityUiRuntime
         return Finish(VanillaUiSite.InventoryTooltip, view, world, kind, inContainerHalf ? window.Target : Entity.Null, guid, amount);
     }
 
+    // ---- the recipe tooltip
+
+    /// <summary>
+    /// <see cref="VanillaUiSite.RecipeTooltip"/>: a window's own <c>FakeTooltip</c> shown while one of
+    /// its recipe entries is hovered. The windows, in the order they are asked (the game shows one at
+    /// a time): the workstation (<c>WorkstationSubMenu.RecipesParent</c>), the refinement station
+    /// (<c>RefinementstationSubMenu.RecipesParent</c>) and the character menu's crafting tab
+    /// (<c>InventorySubMenu.RecipesParent</c>, no station). Only field reads: the entry's
+    /// <c>IsHovered</c> and <c>EntryId</c>, never the entry's <c>Requirements</c> list or the window's
+    /// <c>GridSelectionGroup</c> (interop generics over game value types). The product and the
+    /// requirements come from the recipe prefab's buffers (<see cref="ReadRecipe"/>), once per hover.
+    /// </summary>
+    private static VanillaSiteSample SampleRecipeTooltip(PanelView view, World world)
+    {
+        FakeTooltip? tooltip = null;
+        GridSelectionEntry? hovered = null;
+        int recipe = 0;
+        VanillaPanelKind kind = VanillaPanelKind.None;
+        Entity station = Entity.Null;
+
+        if (_workstation.SubShown && _workstation.Target != Entity.Null)
+        {
+            var sub = _workstation.Sub!.TryCast<WorkstationSubMenu>();
+            if (sub != null && Shown(sub.FakeTooltip))
+            {
+                hovered = HoveredRecipeIn(sub.RecipesParent);
+                if (hovered != null)
+                {
+                    tooltip = sub.FakeTooltip;
+                    kind = VanillaPanelKind.Workstation;
+                    station = _workstation.Target;
+                }
+            }
+        }
+
+        if (hovered == null && _refinement.SubShown && _refinement.Target != Entity.Null)
+        {
+            var sub = _refinement.Sub!.TryCast<RefinementstationSubMenu>();
+            if (sub != null && Shown(sub.FakeTooltip))
+            {
+                hovered = HoveredRecipeIn(sub.RecipesParent);
+                if (hovered != null)
+                {
+                    tooltip = sub.FakeTooltip;
+                    kind = VanillaPanelKind.RefinementStation;
+                    station = _refinement.Target;
+                }
+            }
+        }
+
+        // The crafting tab belongs to the inventory half (InventorySubMenu.RecipesParent), so it is
+        // asked of whichever inventory is shown; its recipes are the character's own, never a station's.
+        if (hovered == null && ActiveInventory(out var shown, out _))
+        {
+            var inv = shown.Inventory!;
+            if (Shown(inv.FakeTooltip) && Shown(inv.RecipesParent))
+            {
+                hovered = HoveredRecipeIn(inv.RecipesParent);
+                if (hovered != null)
+                {
+                    tooltip = inv.FakeTooltip;
+                    kind = VanillaPanelKind.Character;
+                }
+            }
+        }
+
+        if (hovered == null || tooltip == null) return Miss(view);
+        recipe = RecipeIdOf(hovered);
+        if (recipe == 0) return Miss(view);
+
+        long entryKey = hovered.Pointer.ToInt64();
+        int worldKey = RuntimeHelpers.GetHashCode(world);
+        if (!RecipeHover.Holds(entryKey, recipe, worldKey))
+        {
+            ReadRecipe(world, recipe, out int product, out int amount, out var requirements);
+            RecipeHover.Store(entryKey, recipe, worldKey, product, amount, requirements);
+        }
+
+        view.Reset();
+        view.Panel = tooltip.gameObject;
+        view.Tooltip = tooltip;
+        view.BodyDonor = TmpOf(tooltip.Description);
+
+        ReadNetworkId(world, station, out int n0, out int n1, out int n2);
+        VanillaRecipeTooltip.Subject(kind, recipe, RecipeHover.ProductGuid, RecipeHover.ProductAmount, out int item, out int itemAmount);
+        var target = VanillaPanelTarget.ForRecipe(
+            kind, station.Index, station.Version, n0, n1, n2,
+            recipe, item, itemAmount, RecipeHover.ProductGuid, RecipeHover.ProductAmount, RecipeHover.Requirements);
+        return Finish(VanillaUiSite.RecipeTooltip, view, target);
+    }
+
+    /// <summary>The one hover the recipe site last read the buffers for.</summary>
+    private static readonly VanillaRecipeHoverMemo RecipeHover = new();
+
+    /// <summary>The recipe an entry shows: <c>EntryId</c> of a workstation or crafting-tab entry, or of a refinement row.</summary>
+    private static int RecipeIdOf(GridSelectionEntry entry)
+    {
+        try
+        {
+            var w = entry.TryCast<WorkstationRecipeGridSelectionEntry>();
+            if (w != null) return w.EntryId.GuidHash;
+            var r = entry.TryCast<RefinementstationRecipeEntry>();
+            if (r != null) return r.EntryId.GuidHash;
+        }
+        catch { /* an entry Unity destroyed this frame reads as no recipe */ }
+        return 0;
+    }
+
+    /// <summary>
+    /// The product (first output row with an item) and the requirement rows of
+    /// <paramref name="recipeGuid"/>'s prefab, through the raw buffer reader the station API already
+    /// uses (<c>AiRuntime.Buffer</c>, strides from <c>RecipeBufferLayout</c>). All zero / null when
+    /// the prefab or a buffer is missing.
+    /// </summary>
+    private static unsafe void ReadRecipe(World world, int recipeGuid, out int product, out int amount, out VanillaRecipeRequirement[]? requirements)
+    {
+        product = 0;
+        amount = 0;
+        requirements = null;
+        try
+        {
+            if (!PrefabLookup.TryGetEntity(world, new Stunlock.Core.PrefabGUID(recipeGuid), out var prefab)) return;
+            var em = world.EntityManager;
+            var rows = new List<VanillaRecipeRequirement>();
+
+            byte* outRaw = Progenitor.Ai.AiRuntime.Buffer<ProjectM.RecipeOutputBuffer>(em, prefab, Progenitor.Content.RecipeBufferLayout.OutputStride, false, out int outLength);
+            for (int i = 0; outRaw != null && i < outLength && i < Progenitor.Content.RecipeBufferLayout.MaxElements; i++)
+            {
+                Progenitor.Content.RecipeBufferLayout.TryReadOutput(outRaw, i, out int g, out int a);
+                rows.Add(new VanillaRecipeRequirement(g, a));
+            }
+
+            VanillaRecipeTooltip.TryProduct(rows, out product, out amount);
+
+            rows.Clear();
+            byte* req = Progenitor.Ai.AiRuntime.Buffer<ProjectM.RecipeRequirementBuffer>(em, prefab, Progenitor.Content.RecipeBufferLayout.RequirementStride, false, out int reqLength);
+            for (int i = 0; req != null && i < reqLength && i < Progenitor.Content.RecipeBufferLayout.MaxElements; i++)
+            {
+                Progenitor.Content.RecipeBufferLayout.TryReadRequirement(req, i, out int g, out int a);
+                rows.Add(new VanillaRecipeRequirement(g, a));
+            }
+
+            requirements = VanillaRecipeTooltip.Requirements(rows);
+        }
+        catch (Exception e)
+        {
+            // The target still names the recipe; only its product and requirements are missing.
+            Degraded(VanillaUiSite.RecipeTooltip, "recipe buffers: " + e.GetType().Name);
+        }
+    }
+
+    /// <summary>The requirement block of a recipe tooltip (<c>FakeTooltip.RecipeRequiredItems</c>), or null.</summary>
+    private static Transform? RecipeBlockOf(FakeTooltip? tooltip)
+    {
+        try
+        {
+            if (!Alive(tooltip)) return null;
+            var block = tooltip!.RecipeRequiredItems;
+            return Alive(block) ? block.transform : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The sibling index right after <paramref name="reference"/> and any Progenitor container already there.</summary>
+    private static int TooltipSlotAfter(Transform reference)
+    {
+        try
+        {
+            var parent = reference.parent;
+            if (parent == null) return -1;
+            return VanillaRecipeTooltip.SlotAfter(reference.GetSiblingIndex(), parent.childCount, i =>
+            {
+                var c = parent.GetChild(i);
+                return c != null ? SafeObjectName(c.gameObject) : "";
+            });
+        }
+        catch { return -1; }
+    }
+
+    // ---- hovered recipe entry: cached per grid, rebuilt only when the grid's child count changes
+
+    private sealed class RecipeGridCache
+    {
+        internal int ChildCount = -1;
+        internal readonly List<GridSelectionEntry> Entries = new();
+    }
+
+    private static readonly Dictionary<IntPtr, RecipeGridCache> RecipeGridCaches = new();
+    private static GridSelectionEntry? _hoveredRecipe;
+
+    /// <summary>
+    /// The hovered recipe entry among <paramref name="grid"/>'s children: a
+    /// <c>WorkstationRecipeGridSelectionEntry</c> or a <c>RefinementstationRecipeEntry</c> (both
+    /// <c>GridSelectionEntry</c>, whose <c>IsHovered</c> is a plain field read).
+    /// </summary>
+    private static GridSelectionEntry? HoveredRecipeIn(Component? grid)
+    {
+        if (!Alive(grid)) return null;
+
+        try
+        {
+            if (Alive(_hoveredRecipe) && _hoveredRecipe!.IsHovered && _hoveredRecipe.transform.parent != null
+                && _hoveredRecipe.transform.parent.Pointer == grid!.transform.Pointer
+                && _hoveredRecipe.gameObject.activeInHierarchy)
+                return _hoveredRecipe;
+        }
+        catch { _hoveredRecipe = null; }
+
+        var t = grid!.transform;
+        if (!RecipeGridCaches.TryGetValue(t.Pointer, out var cache))
+        {
+            if (RecipeGridCaches.Count > 16) RecipeGridCaches.Clear();
+            cache = new RecipeGridCache();
+            RecipeGridCaches[t.Pointer] = cache;
+        }
+
+        int n = t.childCount;
+        if (cache.ChildCount != n)
+        {
+            cache.ChildCount = n;
+            cache.Entries.Clear();
+            for (int i = 0; i < n; i++)
+            {
+                var child = t.GetChild(i);
+                if (child == null) continue;
+                var entry = child.GetComponent<GridSelectionEntry>();
+                if (Alive(entry)) cache.Entries.Add(entry);
+            }
+        }
+
+        // The frame this runs on most is "tooltip shown over something that is not a recipe" (a station
+        // bonus, an output slot): every entry is read and none is hovered. So the per-entry cost is the
+        // one field read (IsHovered, pointer arithmetic on the entry's own object), and the Unity
+        // liveness check is paid only by the hovered entry. A hovered state can change on any pointer
+        // move (OnPointerEnter/Exit, OnDisable) and nothing cheaper than this read observes it, so a
+        // "none hovered" answer is not cached across frames.
+        for (int i = 0; i < cache.Entries.Count; i++)
+        {
+            var entry = cache.Entries[i];
+            bool hovered;
+            try { hovered = entry.IsHovered; }
+            catch
+            {
+                cache.ChildCount = -1;
+                continue;
+            }
+
+            if (!hovered) continue;
+            if (!Alive(entry))
+            {
+                cache.ChildCount = -1;
+                continue;
+            }
+
+            if (entry.gameObject.activeInHierarchy)
+            {
+                _hoveredRecipe = entry;
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
     // ---- hovered slot: cached per grid, rebuilt only when the grid's child count changes
 
     private sealed class GridCache
@@ -943,11 +1212,18 @@ internal sealed partial class UnityUiRuntime
     {
         ReadNetworkId(world, target, out int n0, out int n1, out int n2);
         var panelTarget = new VanillaPanelTarget(kind, target.Index, target.Version, n0, n1, n2, itemGuid, itemAmount);
+        return Finish(site, view, panelTarget);
+    }
 
+    /// <summary>The common tail for a target that is already built (the recipe tooltip's).</summary>
+    private static VanillaSiteSample Finish(VanillaUiSite site, PanelView view, in VanillaPanelTarget panelTarget)
+    {
         // A missing donor withholds what needs it; it never makes the site absent. The tooltip line
-        // needs the body text; a panel's buttons need the bar button and a caption style.
+        // needs the body text; a panel's buttons need the bar button and a caption style. The recipe
+        // tooltip's requirement anchor needs the requirement block too, but only that anchor: its
+        // container build says so (BuildPanelContainer), and TooltipBody keeps working.
         bool donor;
-        if (site == VanillaUiSite.InventoryTooltip)
+        if (VanillaUiSites.IsTooltip(site))
         {
             donor = Alive(view.BodyDonor) && Alive(view.Tooltip!.DescriptionFrame);
             if (!donor) Degraded(site, Alive(view.BodyDonor) ? "FakeTooltip.DescriptionFrame" : "FakeTooltip.Description");
@@ -1183,6 +1459,16 @@ internal sealed partial class UnityUiRuntime
                     var frame = view.Tooltip != null ? view.Tooltip.DescriptionFrame : null;
                     host = Alive(frame) ? frame!.transform.parent : null;
                     if (host == null) missing = "FakeTooltip.DescriptionFrame";
+                    // The item tooltip's line is the column's last; the recipe tooltip's rows go right
+                    // under the product's description, above the requirement list (both are
+                    // InformationEntries children on 1.1.13.0).
+                    if (host != null && site == VanillaUiSite.RecipeTooltip) siblingIndex = TooltipSlotAfter(frame!.transform);
+                    break;
+                case VanillaPanelAnchor.TooltipRequirements:
+                    var block = RecipeBlockOf(view.Tooltip);
+                    host = block != null ? block.parent : null;
+                    if (host == null) missing = "FakeTooltip.RecipeRequiredItems";
+                    else siblingIndex = TooltipSlotAfter(block!);
                     break;
                 default:
                     host = null;
@@ -1201,7 +1487,7 @@ internal sealed partial class UnityUiRuntime
 
             // BesideSort never joins the bar (VanillaPanelAnchors.PlanInline with besideSort): a
             // grid recenters its row, so a fifth cell would move all four game buttons.
-            var mode = VanillaUiSites.IsEdge(anchor) || anchor == VanillaPanelAnchor.TooltipBody
+            var mode = VanillaUiSites.IsEdge(anchor) || VanillaUiSites.IsTooltipAnchor(anchor)
                 ? InlineMode.None
                 : PlanInline(host, anchor == VanillaPanelAnchor.BesideSort);
             if (mode == InlineMode.GridCell || mode == InlineMode.Group)
@@ -1228,11 +1514,11 @@ internal sealed partial class UnityUiRuntime
             // button's measured height can read 0 before its first layout and 24 after.
             SetAnchorStatus(site, anchor, "ok host=" + SafeObjectName(parentT.gameObject)
                 + (mode == InlineMode.Positioned ? " group=" + SafeObjectName(group.gameObject) : "")
-                + " mode=" + (VanillaUiSites.IsEdge(anchor) ? "column" : anchor == VanillaPanelAnchor.TooltipBody ? "tooltip" : VanillaPanelAnchors.ModeWord(mode))
+                + " mode=" + (VanillaUiSites.IsEdge(anchor) ? "column" : VanillaUiSites.IsTooltipAnchor(anchor) ? "tooltip" : VanillaPanelAnchors.ModeWord(mode))
                 + (anchor == VanillaPanelAnchor.BesideSort ? " sort=" + view.SortSource : "")
                 + (anchor == VanillaPanelAnchor.BesideRename ? " via=" + view.RenameSource : "")
-                + (anchor == VanillaPanelAnchor.TooltipBody ? "" : " donor=" + view.DonorSource),
-                anchor == VanillaPanelAnchor.TooltipBody ? "" : " button=" + Mathf.RoundToInt(size.x) + "x" + Mathf.RoundToInt(size.y));
+                + (VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " donor=" + view.DonorSource),
+                VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " button=" + Mathf.RoundToInt(size.x) + "x" + Mathf.RoundToInt(size.y));
             host = parentT;
             float tooltipWidth = 0f;
             if (VanillaUiSites.IsEdge(anchor))
@@ -1257,7 +1543,7 @@ internal sealed partial class UnityUiRuntime
                 column.childForceExpandHeight = false;
                 column.spacing = GroupSpacing(view.Bar, VanillaPanelPlacement.DefaultSpacing);
             }
-            else if (anchor == VanillaPanelAnchor.TooltipBody)
+            else if (VanillaUiSites.IsTooltipAnchor(anchor))
             {
                 var column = go.AddComponent<VerticalLayoutGroup>();
                 column.childAlignment = TextAnchor.UpperLeft;
@@ -1343,7 +1629,7 @@ internal sealed partial class UnityUiRuntime
     private static Vector2 ButtonSizeFor(PanelView view, VanillaPanelAnchor anchor, InlineMode mode, Transform host, GameObject? reference)
     {
         var donor = DonorButtonSize(view);
-        if (VanillaUiSites.IsEdge(anchor) || anchor == VanillaPanelAnchor.TooltipBody) return donor;
+        if (VanillaUiSites.IsEdge(anchor) || VanillaUiSites.IsTooltipAnchor(anchor)) return donor;
         switch (mode)
         {
             case InlineMode.GridCell:
@@ -1444,7 +1730,7 @@ internal sealed partial class UnityUiRuntime
     public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon)
     {
         if (container is not PanelContainerWidget host || !host.Alive) return null;
-        if (host.Anchor == VanillaPanelAnchor.TooltipBody) return null;
+        if (VanillaUiSites.IsTooltipAnchor(host.Anchor)) return null;
         if (!PanelViews.TryGetValue(site, out var view) || view == null || !view.Live) return null;
         var donor = view.ButtonDonor;
         if (!Alive(donor)) return ButtonFailed(site, "no button donor");
@@ -1699,7 +1985,7 @@ internal sealed partial class UnityUiRuntime
             try { tmp.raycastTarget = false; } catch { /* */ }
             try { tmp.text = text ?? ""; } catch { /* */ }
             tmp.enableWordWrapping = true;
-            tmp.alignment = host.Anchor == VanillaPanelAnchor.TooltipBody ? tmp.alignment : TextAlignmentOptions.Left;
+            tmp.alignment = VanillaUiSites.IsTooltipAnchor(host.Anchor) ? tmp.alignment : TextAlignmentOptions.Left;
 
             foreach (var behaviour in clone.GetComponentsInChildren<MonoBehaviour>(true))
             {
@@ -1729,7 +2015,7 @@ internal sealed partial class UnityUiRuntime
         if (!PanelViews.TryGetValue(site, out var view) || view == null || !view.Live || !Alive(view.Panel))
             return VanillaFitResult.Unknown;
 
-        if (anchor == VanillaPanelAnchor.TooltipBody)
+        if (VanillaUiSites.IsTooltipAnchor(anchor))
         {
             var verdict = VanillaPanelPlacement.CheckTooltip(host.HostLaidOut);
             if (verdict.Fit == VanillaFit.Fits) ClampTooltip(view);
@@ -2070,6 +2356,7 @@ internal sealed partial class UnityUiRuntime
                 + Describe("caption", view.CaptionDonor)
                 + Describe("body", view.BodyDonor)
                 + (view.Tooltip != null ? Describe("tooltipFrame", view.Tooltip.DescriptionFrame != null ? view.Tooltip.DescriptionFrame.transform : null) : "")
+                + (site == VanillaUiSite.RecipeTooltip ? Describe("requirements", RecipeBlockOf(view.Tooltip)) : "")
                 + Describe("obstacle", view.Obstacle != null ? view.Obstacle.transform : null));
         }
         catch (Exception e)
@@ -2573,6 +2860,30 @@ internal sealed partial class UnityUiRuntime
             _go = null;
             _tmp = null;
         }
+
+        private LabelTone _tone = LabelTone.Normal;
+        private Color? _donorColor;
+
+        /// <summary>
+        /// Give the row its tone: the donor's own color (read on the first tone change) for
+        /// <see cref="LabelTone.Normal"/>, else the framework's label color. A repeat is no write.
+        /// </summary>
+        internal void SetTone(LabelTone tone)
+        {
+            if (tone == _tone || !Alive || _tmp == null) return;
+            try
+            {
+                _donorColor ??= _tmp.color;
+                _tmp.color = tone == LabelTone.Normal ? _donorColor.Value : ToColor(MenuPalette.LabelColor(tone));
+                _tone = tone;
+            }
+            catch { /* a row Unity is destroying keeps its old color for its last frame */ }
+        }
+    }
+
+    public void StyleAttachRow(IRuntimeWidget row, LabelTone tone)
+    {
+        if (row is PanelRowWidget panelRow) panelRow.SetTone(tone);
     }
 }
 #endif

@@ -95,6 +95,25 @@ public interface IVanillaAttachHandle : IDisposable
     void SetRows(IReadOnlyList<string> rows);
 
     /// <summary>
+    /// <see cref="SetRows(IReadOnlyList{string})"/> with a color per row: each
+    /// <see cref="VanillaRow"/> is plain text in the site's own text style, and its
+    /// <see cref="LabelTone"/> picks the color (<see cref="LabelTone.Normal"/> keeps the game's own).
+    /// A <c>string</c> converts to a <see cref="LabelTone.Normal"/> row. Pass a typed list or array
+    /// (<c>new VanillaRow[] { ... }</c>, <c>List&lt;VanillaRow&gt;</c>): an untyped <c>null</c> or
+    /// <c>[]</c> matches both <c>SetRows</c> overloads and does not compile. To remove every row, call
+    /// <see cref="ClearRows"/>.
+    /// </summary>
+    void SetRows(IReadOnlyList<VanillaRow> rows)
+    {
+        var texts = new string[rows?.Count ?? 0];
+        for (int i = 0; i < texts.Length; i++) texts[i] = rows![i].Text;
+        SetRows(texts);
+    }
+
+    /// <summary>Remove every row (the same as an empty <see cref="SetRows(IReadOnlyList{string})"/>).</summary>
+    void ClearRows() => SetRows(Array.Empty<string>());
+
+    /// <summary>
     /// P6: where on the panel this attachment sits, after <see cref="VanillaPanelAnchor.Default"/>
     /// was resolved to the site's default. <see cref="VanillaPanelAnchor.Default"/> for the map card.
     /// </summary>

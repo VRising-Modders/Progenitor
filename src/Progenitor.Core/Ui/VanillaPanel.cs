@@ -39,8 +39,84 @@ public enum VanillaPanelAnchor
     /// </summary>
     BesideSort = 4,
 
-    /// <summary>The item tooltip's own text column, after the description (<see cref="VanillaUiSite.InventoryTooltip"/>).</summary>
+    /// <summary>
+    /// The tooltip's own text column. On <see cref="VanillaUiSite.InventoryTooltip"/> the rows are the
+    /// column's last lines; on <see cref="VanillaUiSite.RecipeTooltip"/> they sit right under the
+    /// product's description, above the requirement list.
+    /// </summary>
     TooltipBody = 5,
+
+    /// <summary>
+    /// <see cref="VanillaUiSite.RecipeTooltip"/> only: rows right under the recipe's requirement list
+    /// (the "0/3 Glass" lines), in the tooltip's own text style.
+    /// </summary>
+    TooltipRequirements = 6,
+}
+
+/// <summary>
+/// One row of a vanilla attachment with its <see cref="LabelTone"/>: plain text in the site's own
+/// font (the tooltip's description style on the tooltip sites). <see cref="LabelTone.Normal"/> keeps
+/// the game's own text color; the other tones use the framework's label colors. Game-free.
+/// </summary>
+public readonly struct VanillaRow : IEquatable<VanillaRow>
+{
+    /// <summary>A row of <paramref name="text"/> in <paramref name="tone"/>.</summary>
+    public VanillaRow(string text, LabelTone tone = LabelTone.Normal)
+    {
+        _text = text;
+        Tone = tone;
+    }
+
+    private readonly string? _text;
+
+    /// <summary>The row's text. Never null (a default row is empty).</summary>
+    public string Text => _text ?? "";
+
+    /// <summary>The row's color.</summary>
+    public LabelTone Tone { get; }
+
+    /// <summary>A plain row: the game's own text color.</summary>
+    public static implicit operator VanillaRow(string text) => new(text);
+
+    public bool Equals(VanillaRow other) => Tone == other.Tone && string.Equals(Text, other.Text, StringComparison.Ordinal);
+
+    public override bool Equals(object? obj) => obj is VanillaRow r && Equals(r);
+
+    public override int GetHashCode() => HashCode.Combine(Text, Tone);
+
+    public override string ToString() => Tone == LabelTone.Normal ? Text : Text + " [" + LabelTones.Name(Tone) + "]";
+}
+
+/// <summary>
+/// One requirement line of a recipe as <see cref="VanillaUiSite.RecipeTooltip"/> reports it: the
+/// item's <c>PrefabGUID</c> and the amount the recipe asks for. Game-free.
+/// </summary>
+public readonly struct VanillaRecipeRequirement : IEquatable<VanillaRecipeRequirement>
+{
+    /// <summary>A requirement of <paramref name="amount"/> x item <paramref name="itemGuid"/>.</summary>
+    public VanillaRecipeRequirement(int itemGuid, int amount)
+    {
+        ItemGuid = itemGuid;
+        Amount = amount;
+    }
+
+    /// <summary>The required item's <c>PrefabGUID</c>.</summary>
+    public int ItemGuid { get; }
+
+    /// <summary>
+    /// The amount the recipe itself asks for (its <c>RecipeRequirementBuffer</c> row). A station's
+    /// resource bonus can make the tooltip show less.
+    /// </summary>
+    public int Amount { get; }
+
+    public bool Equals(VanillaRecipeRequirement other) => ItemGuid == other.ItemGuid && Amount == other.Amount;
+
+    public override bool Equals(object? obj) => obj is VanillaRecipeRequirement r && Equals(r);
+
+    public override int GetHashCode() => HashCode.Combine(ItemGuid, Amount);
+
+    public override string ToString() =>
+        ItemGuid.ToString(CultureInfo.InvariantCulture) + "x" + Amount.ToString(CultureInfo.InvariantCulture);
 }
 
 /// <summary>
@@ -116,7 +192,7 @@ public enum VanillaPanelKind
 
 /// <summary>
 /// What a vanilla panel is showing: the client entity it was opened on, that entity's
-/// <c>NetworkId</c>, and for the tooltip site the hovered item.
+/// <c>NetworkId</c>, and for the tooltip sites the hovered item or recipe.
 ///
 /// <para><b>Mapping to the server.</b> The client entity is only meaningful in the client world.
 /// The <c>NetworkId</c> is what the game itself uses to name the same object on both sides
@@ -147,7 +223,72 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
         NetworkId2 = networkId2;
         ItemGuid = itemGuid;
         ItemAmount = itemAmount;
+        RecipeGuid = 0;
+        ProductGuid = 0;
+        ProductAmount = 0;
+        _requirements = null;
     }
+
+    /// <summary>
+    /// Create a <see cref="VanillaUiSite.RecipeTooltip"/> target: the window and its station (none
+    /// for the character crafting tab), the hovered recipe, the item the tooltip describes
+    /// (<paramref name="itemGuid"/> x <paramref name="itemAmount"/>), the recipe's product
+    /// (<paramref name="productGuid"/> x <paramref name="productAmount"/>, its output row 0) and its
+    /// requirements in the order the tooltip lists them. The list is copied.
+    /// </summary>
+    public VanillaPanelTarget(
+        VanillaPanelKind kind,
+        int entityIndex,
+        int entityVersion,
+        int networkId0,
+        int networkId1,
+        int networkId2,
+        int recipeGuid,
+        int itemGuid,
+        int itemAmount,
+        int productGuid,
+        int productAmount,
+        IReadOnlyList<VanillaRecipeRequirement>? requirements)
+        : this(kind, entityIndex, entityVersion, networkId0, networkId1, networkId2, itemGuid, itemAmount)
+    {
+        RecipeGuid = recipeGuid;
+        ProductGuid = productGuid;
+        ProductAmount = productAmount;
+        _requirements = requirements == null || requirements.Count == 0 ? null : Copy(requirements);
+    }
+
+    /// <summary>
+    /// The resolver's form: <paramref name="owned"/> is taken as is, not copied (the resolver keeps one
+    /// array per hovered recipe, so a frame that samples the same hover allocates nothing). It is never
+    /// written after this call.
+    /// </summary>
+    internal static VanillaPanelTarget ForRecipe(
+        VanillaPanelKind kind, int entityIndex, int entityVersion, int networkId0, int networkId1, int networkId2,
+        int recipeGuid, int itemGuid, int itemAmount, int productGuid, int productAmount, VanillaRecipeRequirement[]? owned) =>
+        new(kind, entityIndex, entityVersion, networkId0, networkId1, networkId2, recipeGuid, itemGuid, itemAmount,
+            productGuid, productAmount, owned, owned: true);
+
+    private VanillaPanelTarget(
+        VanillaPanelKind kind, int entityIndex, int entityVersion, int networkId0, int networkId1, int networkId2,
+        int recipeGuid, int itemGuid, int itemAmount, int productGuid, int productAmount,
+        VanillaRecipeRequirement[]? requirements, bool owned)
+        : this(kind, entityIndex, entityVersion, networkId0, networkId1, networkId2, itemGuid, itemAmount)
+    {
+        _ = owned;
+        RecipeGuid = recipeGuid;
+        ProductGuid = productGuid;
+        ProductAmount = productAmount;
+        _requirements = requirements == null || requirements.Length == 0 ? null : requirements;
+    }
+
+    private static VanillaRecipeRequirement[] Copy(IReadOnlyList<VanillaRecipeRequirement> list)
+    {
+        var copy = new VanillaRecipeRequirement[list.Count];
+        for (int i = 0; i < copy.Length; i++) copy[i] = list[i];
+        return copy;
+    }
+
+    private readonly VanillaRecipeRequirement[]? _requirements;
 
     /// <summary>The window the panel belongs to.</summary>
     public VanillaPanelKind Kind { get; }
@@ -174,11 +315,43 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
     /// <summary>The id's type (<c>NetworkIdType</c>: 0 none, 1 normal, 2 static map object), padding cleared.</summary>
     public int NetworkId2 { get; }
 
-    /// <summary>For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered item's <c>PrefabGUID</c>, else 0.</summary>
+    /// <summary>
+    /// For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered item's <c>PrefabGUID</c>. For
+    /// <see cref="VanillaUiSite.RecipeTooltip"/>: the <c>PrefabGUID</c> the game's tooltip describes. At a
+    /// workstation and in the crafting tab that is the product (<see cref="ProductGuid"/>); at a
+    /// refinement station it is the recipe itself (<see cref="RecipeGuid"/>), which is what that window
+    /// passes to its tooltip. Else 0.
+    /// </summary>
     public int ItemGuid { get; }
 
-    /// <summary>For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered stack's amount, else 0.</summary>
+    /// <summary>
+    /// For <see cref="VanillaUiSite.InventoryTooltip"/>: the hovered stack's amount. For
+    /// <see cref="VanillaUiSite.RecipeTooltip"/>: <see cref="ProductAmount"/> when <see cref="ItemGuid"/>
+    /// is the product, 0 when it is the recipe (refinement station). Else 0.
+    /// </summary>
     public int ItemAmount { get; }
+
+    /// <summary>For <see cref="VanillaUiSite.RecipeTooltip"/>: the hovered recipe's <c>PrefabGUID</c>, else 0.</summary>
+    public int RecipeGuid { get; }
+
+    /// <summary>
+    /// For <see cref="VanillaUiSite.RecipeTooltip"/>: the recipe's product, its <c>RecipeOutputBuffer</c>
+    /// row 0 (0 when that row is missing). The same at every station. Else 0.
+    /// </summary>
+    public int ProductGuid { get; }
+
+    /// <summary>For <see cref="VanillaUiSite.RecipeTooltip"/>: how many of <see cref="ProductGuid"/> one craft makes, else 0.</summary>
+    public int ProductAmount { get; }
+
+    /// <summary>
+    /// For <see cref="VanillaUiSite.RecipeTooltip"/>: the recipe's requirements in the order the
+    /// tooltip lists them (the recipe's own order). Empty for every other site. Never null.
+    /// </summary>
+    public IReadOnlyList<VanillaRecipeRequirement> Requirements =>
+        (IReadOnlyList<VanillaRecipeRequirement>?)_requirements ?? Array.Empty<VanillaRecipeRequirement>();
+
+    /// <summary>For <see cref="VanillaUiSite.RecipeTooltip"/>: the product as a requirement-shaped pair.</summary>
+    public VanillaRecipeRequirement Product => new(ProductGuid, ProductAmount);
 
     /// <summary>The <c>NetworkId</c>'s <c>Normal_Index</c>.</summary>
     public int NetworkIdIndex => NetworkId0;
@@ -199,14 +372,30 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
     public bool Equals(VanillaPanelTarget other) =>
         Kind == other.Kind && EntityIndex == other.EntityIndex && EntityVersion == other.EntityVersion
         && NetworkId0 == other.NetworkId0 && NetworkId1 == other.NetworkId1 && NetworkId2 == other.NetworkId2
-        && ItemGuid == other.ItemGuid && ItemAmount == other.ItemAmount;
+        && ItemGuid == other.ItemGuid && ItemAmount == other.ItemAmount
+        && RecipeGuid == other.RecipeGuid && ProductGuid == other.ProductGuid && ProductAmount == other.ProductAmount
+        && SameRequirements(_requirements, other._requirements);
+
+    private static bool SameRequirements(VanillaRecipeRequirement[]? a, VanillaRecipeRequirement[]? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        int na = a?.Length ?? 0;
+        int nb = b?.Length ?? 0;
+        if (na != nb) return false;
+        for (int i = 0; i < na; i++)
+            if (!a![i].Equals(b![i])) return false;
+        return true;
+    }
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => obj is VanillaPanelTarget t && Equals(t);
 
     /// <inheritdoc />
     public override int GetHashCode() =>
-        HashCode.Combine(Kind, EntityIndex, EntityVersion, NetworkId0, NetworkId1, NetworkId2, ItemGuid, ItemAmount);
+        HashCode.Combine(
+            HashCode.Combine(Kind, EntityIndex, EntityVersion, NetworkId0, NetworkId1, NetworkId2, ItemGuid, ItemAmount),
+            HashCode.Combine(RecipeGuid, ProductGuid, ProductAmount),
+            _requirements?.Length ?? 0);
 
     /// <summary>Equality operator.</summary>
     public static bool operator ==(VanillaPanelTarget a, VanillaPanelTarget b) => a.Equals(b);
@@ -216,7 +405,9 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
 
     /// <summary>
     /// One grep-friendly line: <c>kind=Container entity=812:3 net=40:1</c>, plus
-    /// <c>item=&lt;guid&gt;x&lt;amount&gt;</c> for a tooltip.
+    /// <c>item=&lt;guid&gt;x&lt;amount&gt;</c> for a tooltip, and for a recipe tooltip
+    /// <c>recipe=&lt;guid&gt;</c> before the item, <c>makes=&lt;guid&gt;x&lt;amount&gt;</c> when the product is not the item
+    /// (refinement station) and <c>needs=&lt;guid&gt;x&lt;amount&gt;,...</c> after it.
     /// </summary>
     public override string ToString()
     {
@@ -226,9 +417,19 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
                 ? NetworkIdIndex.ToString(CultureInfo.InvariantCulture) + ":"
                   + NetworkIdGeneration.ToString(CultureInfo.InvariantCulture)
                 : "none");
+        if (RecipeGuid != 0) s += " recipe=" + RecipeGuid.ToString(CultureInfo.InvariantCulture);
         if (ItemGuid != 0)
             s += " item=" + ItemGuid.ToString(CultureInfo.InvariantCulture) + "x"
                 + ItemAmount.ToString(CultureInfo.InvariantCulture);
+        if (ProductGuid != 0 && (ProductGuid != ItemGuid || ProductAmount != ItemAmount))
+            s += " makes=" + ProductGuid.ToString(CultureInfo.InvariantCulture) + "x"
+                + ProductAmount.ToString(CultureInfo.InvariantCulture);
+        if (_requirements != null)
+        {
+            s += " needs=";
+            for (int i = 0; i < _requirements.Length; i++) s += (i > 0 ? "," : "") + _requirements[i];
+        }
+
         return s;
     }
 }
@@ -239,7 +440,7 @@ public enum VanillaPanelChange
     /// <summary>The panel opened. <see cref="VanillaPanelEvent.Target"/> is what it shows.</summary>
     Opened = 1,
 
-    /// <summary>The panel is still open but shows something else (another container, another hovered item).</summary>
+    /// <summary>The panel is still open but shows something else (another container, another hovered item or recipe).</summary>
     TargetChanged = 2,
 
     /// <summary>The panel closed. <see cref="VanillaPanelEvent.Previous"/> is what it showed.</summary>

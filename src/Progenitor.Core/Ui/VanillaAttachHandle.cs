@@ -82,6 +82,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
     private readonly object _gate = new();
     private readonly List<string> _texts = new();
+
+    /// <summary>Each row's <see cref="LabelTone"/>, parallel to <see cref="_texts"/>.</summary>
+    private readonly List<LabelTone> _tones = new();
     private readonly List<IRuntimeWidget?> _rows = new();
 
     /// <summary>
@@ -278,6 +281,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         {
             index = _texts.Count;
             _texts.Add(text ?? "");
+            _tones.Add(LabelTone.Normal);
             _rows.Add(null);
             _fitDirty = true;
             if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
@@ -292,23 +296,53 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         lock (_gate)
         {
             int n = rows?.Count ?? 0;
-            if (n != _texts.Count) _fitDirty = true;
-            while (_texts.Count > n)
-            {
-                int last = _texts.Count - 1;
-                ReleaseRowLocked(last);
-                _texts.RemoveAt(last);
-                _rows.RemoveAt(last);
-            }
-
+            ResizeRowsLocked(n);
             for (int i = 0; i < n; i++)
             {
-                string t = rows![i] ?? "";
-                if (i < _texts.Count) _texts[i] = t;
-                else { _texts.Add(t); _rows.Add(null); }
+                _texts[i] = rows![i] ?? "";
+                _tones[i] = LabelTone.Normal;
             }
 
             if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
+        }
+    }
+
+    public void SetRows(IReadOnlyList<VanillaRow> rows)
+    {
+        if (IsDisposed) return;
+        lock (_gate)
+        {
+            int n = rows?.Count ?? 0;
+            ResizeRowsLocked(n);
+            for (int i = 0; i < n; i++)
+            {
+                var r = rows![i];
+                _texts[i] = r.Text;
+                _tones[i] = r.Tone;
+            }
+
+            if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
+        }
+    }
+
+    /// <summary>Grow or shrink the row lists to <paramref name="n"/>; a dropped row's clone is released.</summary>
+    private void ResizeRowsLocked(int n)
+    {
+        if (n != _texts.Count) _fitDirty = true;
+        while (_texts.Count > n)
+        {
+            int last = _texts.Count - 1;
+            ReleaseRowLocked(last);
+            _texts.RemoveAt(last);
+            _tones.RemoveAt(last);
+            _rows.RemoveAt(last);
+        }
+
+        while (_texts.Count < n)
+        {
+            _texts.Add("");
+            _tones.Add(LabelTone.Normal);
+            _rows.Add(null);
         }
     }
 
@@ -333,6 +367,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             if (Volatile.Read(ref _disposed) != 0) return;
             DestroyContainerLocked();
             _texts.Clear();
+            _tones.Clear();
             _rows.Clear();
             ids = _buttonIds.ToArray();
             _captions.Clear();
@@ -557,8 +592,8 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
         // The tooltip site rebuilds on every hover, so its attach line is said once per handle
         // rather than once per build: a line per hovered item would bury the log it explains.
-        if (Site == VanillaUiSite.InventoryTooltip && _saidTooltipAttach) return;
-        if (Site == VanillaUiSite.InventoryTooltip) _saidTooltipAttach = true;
+        if (VanillaUiSites.IsTooltip(Site) && _saidTooltipAttach) return;
+        if (VanillaUiSites.IsTooltip(Site)) _saidTooltipAttach = true;
 
         Plugin.Logger?.LogInfo(
             "Ui: attached " + VanillaUiSites.Key(Site)
@@ -579,7 +614,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     /// </summary>
     internal static string LayoutWordFor(VanillaPanelAnchor anchor) =>
         VanillaUiSites.IsEdge(anchor) ? "column"
-        : anchor == VanillaPanelAnchor.TooltipBody ? "tooltip"
+        : VanillaUiSites.IsTooltipAnchor(anchor) ? "tooltip"
         : "group";
 
     private static string FitWord(VanillaFit fit) =>
@@ -679,7 +714,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
         // Open and close of a window are said once each; the tooltip's per-hover edges and a
         // station's target changes are the plugin's to log if it wants them.
-        if (Site != VanillaUiSite.InventoryTooltip && edge.Value != VanillaPanelChange.TargetChanged)
+        if (!VanillaUiSites.IsTooltip(Site) && edge.Value != VanillaPanelChange.TargetChanged)
         {
             Plugin.Logger?.LogInfo(
                 "Ui: panel " + VanillaUiSites.Key(Site) + " " + (edge.Value == VanillaPanelChange.Opened ? "opened " + current : "closed " + previous)
@@ -783,6 +818,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
                 ButtonsShown = _buttonShown.ToArray(),
                 Buttons = _buttons.ToArray(),
                 Rows = _texts.ToArray(),
+                RowTones = _tones.ToArray(),
                 Container = attached ? _container : null,
             };
         }
@@ -864,6 +900,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             if (_rows[i] is { Alive: true } live)
             {
                 WriteRow(live, _texts[i]);
+                ToneRow(live, ToneAt(i));
                 continue;
             }
 
@@ -881,7 +918,26 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             // check: an instrument that reports success on a component rather than on a working
             // control is worse than no instrument.
             _rows[i] = row is { Alive: true } ? row : null;
-            if (_rows[i] != null) WriteRow(_rows[i]!, _texts[i]);
+            if (_rows[i] != null)
+            {
+                WriteRow(_rows[i]!, _texts[i]);
+                ToneRow(_rows[i]!, ToneAt(i));
+            }
+        }
+    }
+
+    private LabelTone ToneAt(int index) => index >= 0 && index < _tones.Count ? _tones[index] : LabelTone.Normal;
+
+    /// <summary>
+    /// Give a row its color. The runtime keeps the donor's own color for <see cref="LabelTone.Normal"/>
+    /// and writes only when the tone changed, so a sync that repeats the same tones costs nothing.
+    /// </summary>
+    private void ToneRow(IRuntimeWidget row, LabelTone tone)
+    {
+        try { _runtime.StyleAttachRow(row, tone); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " row tone threw: " + e.Message);
         }
     }
 
@@ -1092,6 +1148,8 @@ internal sealed class VanillaAttachReadback
 
     internal string[] Rows { get; init; } = Array.Empty<string>();
 
+    internal LabelTone[] RowTones { get; init; } = Array.Empty<LabelTone>();
+
     internal IRuntimeWidget? Container { get; init; }
 
     /// <summary>The game-free part of the readback.</summary>
@@ -1129,6 +1187,7 @@ internal sealed class VanillaAttachReadback
             ["withheld"] = Withheld,
             ["buttons"] = buttons,
             ["rows"] = new List<string>(Rows),
+            ["rowTones"] = Array.ConvertAll(RowTones, t => LabelTones.Name(t)),
         };
     }
 }
