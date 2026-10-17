@@ -30,7 +30,7 @@ namespace Progenitor.Sample;
 /// <item><description><c>.items moveall &lt;from&gt; &lt;to&gt; [keepbar]</c> (<c>keepbar</c> leaves
 /// bag slots 0–7, the action bar, in place), <c>.items add|remove &lt;c&gt;
 /// &lt;item&gt; &lt;amount&gt;</c>, <c>.items name &lt;c&gt; "&lt;text&gt;"</c>, <c>.items id
-/// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items stamp &lt;c&gt;</c> (<c>ctx.Inventory.ChangeStamp</c> and <c>AnyChangedSince</c> since the last <c>.items stamp</c> of that container), <c>.items heart</c>, <c>.items clan</c>.</description></item>
+/// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items heart</c>, <c>.items clan</c>.</description></item>
 /// </list>
 /// A container token is <c>#n</c> (from <c>.items chests</c>), a stable id <c>c-…</c>, an entity
 /// <c>index:version</c>, <c>bag</c> (your character) or <c>heart</c> (the castle's heart); append
@@ -42,13 +42,13 @@ internal static class SampleInventory
     internal const string Area = "items";
 
     internal const string UsageReply =
-        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | stamp <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
+        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
 
     /// <summary>The verbs this file handles (the grant/equip verbs stay in <see cref="SampleItems"/>).</summary>
     internal static bool Handles(string? verb) => (verb ?? "").Trim().ToLowerInvariant() switch
     {
         "chests" or "slots" or "count" or "free" or "move" or "moveslot" or "moveall" or "add" or "remove"
-            or "name" or "id" or "net" or "resolve" or "watch" or "stamp" or "heart" or "clan" => true,
+            or "name" or "id" or "net" or "resolve" or "watch" or "heart" or "clan" => true,
         _ => false,
     };
 
@@ -197,21 +197,6 @@ internal static class SampleInventory
         + " total_before=" + (r.SourceBefore + r.TargetBefore) + " total_after=" + (r.SourceAfter + r.TargetAfter)
         + " steps=" + r.Steps + " compensated=" + r.Compensated;
 
-    /// <summary>
-    /// The <c>.items stamp</c> reply: the stamp and clock now, and against the previous
-    /// <c>.items stamp</c> of the same container (<paramref name="previousStamp"/> 0 = none) whether
-    /// the stamp is equal and what <c>AnyChangedSince(previous clock)</c> said.
-    /// </summary>
-    internal static string StampReply(string label, long stamp, long clock, long previousStamp, long previousClock, bool changedSince)
-    {
-        var ci = CultureInfo.InvariantCulture;
-        string head = label + " stamp=0x" + stamp.ToString("X16", ci) + " clock=" + clock.ToString(ci);
-        if (previousStamp == 0) return head + " | first stamp of this container";
-        return head + " | since clock " + previousClock.ToString(ci) + ": stamp "
-            + (stamp == previousStamp ? "equal (slots unchanged)" : "differs (slots may have changed)")
-            + ", AnyChangedSince=" + (changedSince ? "true" : "false");
-    }
-
     /// <summary>Non-empty slots as <c>#slot name xN</c>, capped, plus the free-slot count.</summary>
     internal static string SlotsReply(string label, IReadOnlyList<InventorySlot> slots, Func<int, string> name, int max = 12)
     {
@@ -235,7 +220,6 @@ internal static class SampleInventory
 
 #if !PROGENITOR_TESTS
     private static readonly Dictionary<string, IInventoryWatch> Watches = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, (long Stamp, long Clock)> LastStamps = new(StringComparer.Ordinal);
 
     /// <summary>Log the P-a events so the live acceptance can see them.</summary>
     internal static void Attach(PluginContext ctx)
@@ -250,7 +234,6 @@ internal static class SampleInventory
     {
         foreach (var w in Watches.Values) w.Dispose();
         Watches.Clear();
-        LastStamps.Clear();
     }
 
     internal static void Handle(ICommandContext ctx, string verb, string a, string b, string c, string d)
@@ -352,20 +335,6 @@ internal static class SampleInventory
                 var moved = inv.TransferSlot(first, slot, target, slotAmount);
                 ctx.Reply(MoveSlotReply(firstLabel, slot, targetLabel, moved.Item == 0 ? "(empty)" : ItemName(world, moved.Item), moved));
                 SampleLog.Info(Area, "moveslot slot=" + slot + " " + MoveLog(firstLabel, targetLabel, moved.Item, moved));
-                return;
-            }
-            case "stamp":
-            {
-                // A poller's loop in one command: take the clock, compare with the last look, stamp.
-                string key = first.ToString();
-                LastStamps.TryGetValue(key, out var last);
-                bool changed = last.Stamp != 0 && inv.AnyChangedSince(new[] { first }, last.Clock);
-                long clock = inv.Clock;
-                long stamp = inv.ChangeStamp(first);
-                LastStamps[key] = (stamp, clock);
-                string line = StampReply(firstLabel, stamp, clock, last.Stamp, last.Clock, changed);
-                ctx.Reply(line);
-                SampleLog.Info(Area, "stamp " + line);
                 return;
             }
             case "watch":

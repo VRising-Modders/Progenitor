@@ -49,63 +49,12 @@ internal static class InventoryRuntime
     internal static InventoryWatchHub Hub =>
         _hub ?? throw new InvalidOperationException("ctx.Inventory runs on the server side only.");
 
-    internal static InventoryStamps Stamps =>
-        _stamps ?? throw new InvalidOperationException("ctx.Inventory runs on the server side only.");
-
-    /// <summary>
-    /// Process slot that carries the stamp clock across Core reloads, so a <c>since</c> a plugin took
-    /// from the previous generation's <c>Clock</c> is never ahead of this one's (a plain string; nothing
-    /// collectible is stored).
-    /// </summary>
-    private const string ClockProcessKey = "progenitor.inventory.stamp-clock";
-
-    private static InventoryStamps? _stamps;
-
-    internal const string ConfigSection = "Inventory";
-    internal const string WatchStampsKey = "WatchUsesChangeStamps";
-    internal const string WatchStampsDescription =
-        "Experimental, server only. When true, ctx.Inventory.Watch skips its fingerprint while the container's change stamp "
-        + "is unchanged (every 8th check still fingerprints). Off until the change stamps are verified live. Default false.";
-
-    private static BepInEx.Configuration.ConfigEntry<bool>? _watchStamps;
-
-    /// <summary><c>[Inventory] WatchUsesChangeStamps</c>; false when unbound.</summary>
-    internal static bool WatchUsesStamps
-    {
-        get
-        {
-            try { return _watchStamps?.Value ?? false; }
-            catch { return false; }
-        }
-    }
-
-    private static void BindConfig(BepInEx.Configuration.ConfigFile file)
-    {
-        try
-        {
-            if (_watchStamps != null || file == null) return;
-            _watchStamps = Progenitor.Config.ConfigHelper.Bind(file, ConfigSection, WatchStampsKey, false, WatchStampsDescription);
-            Plugin.Logger?.LogInfo("Inventory: bound [" + ConfigSection + "] " + WatchStampsKey + " = " + _watchStamps.Value + ".");
-        }
-        catch (Exception e)
-        {
-            Plugin.Logger?.LogWarning("Inventory: binding [" + ConfigSection + "] " + WatchStampsKey + " threw (" + e.Message + "); watches keep fingerprinting.");
-        }
-    }
-
     internal static void Install()
     {
         if (!Plugin.IsServerProcess) return;
         _backend = new UnityInventoryBackend();
         _engine = new InventoryEngine(_backend, line => Plugin.Logger?.LogError(line));
-        _stamps = new InventoryStamps(new UnityInventoryStampSource(), line => Plugin.Logger?.LogError(line));
-        try { _stamps.TrySeedClock(AppDomain.CurrentDomain.GetData(ClockProcessKey) as string); }
-        catch { /* no slot: the clock starts from the store's own value */ }
-        Progenitor.Config.SharedConfig.BindWhenAvailable("[" + ConfigSection + "] " + WatchStampsKey, BindConfig);
-        // Watches use the stamps only when the config says so; a watch is not a stamp user, so it
-        // never turns the audit on by itself.
-        _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line),
-            c => WatchUsesStamps && _stamps != null ? _stamps.Stamp(c, user: false) : 0);
+        _hub = new InventoryWatchHub(_backend, line => Plugin.Logger?.LogWarning(line));
         _engine.Touched = c => _hub?.Poke(c);
         _book = new ContainerIdRegistry();
         _netIds = new NetworkIdResolver(new ServerNetworkIdSource());
@@ -131,20 +80,11 @@ internal static class InventoryRuntime
         if (_hooked) Plugin.Frame -= Tick;
         ModSave.BeforeSave -= Flush;
         _hooked = false;
-        _watchStamps = null;
         CastleContainerRows.IdResolver = null;
         CastleContainerRows.HeartIdResolver = null;
         try { Flush(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Inventory: saving container ids on unload threw: " + e.Message); }
         _hub?.Clear();
-        if (_stamps != null)
-        {
-            try { AppDomain.CurrentDomain.SetData(ClockProcessKey, _stamps.EncodeClock()); }
-            catch { /* best effort: the next generation then starts from the store's value and old `since`s read as changed */ }
-            _stamps.Clear();
-            _stamps = null;
-        }
-        ChunkVersions.Reset();
         _ready?.Dispose();
         _ready = null;
         _store = null;
@@ -161,14 +101,13 @@ internal static class InventoryRuntime
     }
 
     internal static string DescribePins() =>
-        _engine == null ? "" : "inventory watches=" + (_hub?.Count ?? 0) + " ids=" + (_book?.Count ?? 0) + " stamps=" + (_stamps?.Entries ?? 0);
+        _engine == null ? "" : "inventory watches=" + (_hub?.Count ?? 0) + " ids=" + (_book?.Count ?? 0);
 
     private static void Tick()
     {
         try
         {
             long now = Environment.TickCount64;
-            _stamps?.Tick();
             _hub?.Tick(now);
             if (_book is { Dirty: true }) Flush();
             if (now < _nextUpkeep) return;

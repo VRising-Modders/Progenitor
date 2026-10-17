@@ -119,30 +119,6 @@ public struct FakeNativeArray<T> : IDisposable // TypeDefIndex: 107
 	internal Allocator m_AllocatorLabel; // 0x0
 }
 
-// Namespace: Fake.Space
-internal struct AutoProperties // TypeDefIndex: 110
-{
-	// Fields
-	private void* m_Data; // 0x0
-	private int <Capacity>k__BackingField; // 0x8
-	private int <Count>k__BackingField; // 0xC
-	private readonly int ComponentCount; // 0x10
-}
-
-// Namespace: Fake.Space
-internal static class Holder // TypeDefIndex: 111
-{
-	// Methods
-}
-
-// Namespace: Fake.Space
-[IsReadOnly]
-public struct Holder<T> // TypeDefIndex: 112
-{
-	// Fields
-	private readonly void* _buffer; // 0x0
-}
-
 // Namespace: Fake.One
 public struct Twice // TypeDefIndex: 108
 {
@@ -190,24 +166,6 @@ public struct Twice // TypeDefIndex: 109
         Assert.Equal(4, Resolve("offset A = 4 : SmallElement.Second"));
         Assert.Equal(8, Resolve("offset A = 8 : SmallElement.Third"));
         Assert.Equal(2, Resolve("offset A = 2 : CappedString.bytes"));
-    }
-
-    [Fact]
-    public void An_auto_property_backing_field_is_a_field_queried_by_its_compiler_name()
-    {
-        Assert.Equal(8, Resolve("offset A = 8 : AutoProperties.<Capacity>k__BackingField"));
-        Assert.Equal(0xC, Resolve("offset A = 0xC : AutoProperties.<Count>k__BackingField"));
-        Assert.Equal(0x10, Resolve("offset A = 0x10 : AutoProperties.ComponentCount"));
-        Assert.Equal(0x18, Resolve("size A = 0x18 : AutoProperties"));
-        Assert.Contains("Capacity", Refuse("offset A = 8 : AutoProperties.Capacity"), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void A_generic_struct_is_told_from_a_static_class_of_the_same_name_by_its_parameter_list()
-    {
-        Assert.Contains("2 times", Refuse("offset A = 0 : Fake.Space.Holder._buffer"), StringComparison.Ordinal);
-        Assert.Equal(0, Resolve("offset A = 0 : Fake.Space.Holder<T>._buffer"));
-        Assert.Equal(0, Resolve("offset A = 0 : Holder<T>._buffer"));
     }
 
     [Fact]

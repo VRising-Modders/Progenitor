@@ -2262,85 +2262,6 @@ The game does create `InventoryChangedEvent` entities on its add, remove and mov
 system consumes them and whether every inventory writer creates one is not established, so the
 watch does not depend on them.
 
-With `[Inventory] WatchUsesChangeStamps = true` in `BepInEx/config/progenitor.cfg` (server,
-default `false` until the stamps are verified live), a due check whose
-[change stamp](#change-stamps) equals the one taken with the last fingerprint skips the
-fingerprint; every 8th due check fingerprints anyway, and a poke always does. A watch alone never
-turns the stamp audit on.
-
-### Change stamps
-
-For polling many containers cheaply (a logistics mod looking at a few hundred chests every
-frame), `ctx.Inventory` hands out a stamp of each inventory's slots and a clock:
-
-```csharp
-// Once per tick: re-read only when something may have changed since the last look.
-long now = ctx.Inventory.Clock;
-if (ctx.Inventory.AnyChangedSince(watched, lastLook))
-{
-    ctx.Inventory.ChangeStamps(watched, stamps);          // one batch
-    for (int i = 0; i < watched.Count; i++)
-        if (stamps[i] != known[i]) { Reread(watched[i]); known[i] = stamps[i]; }
-}
-lastLook = now;
-```
-
-| Member | Contract |
-|---|---|
-| `long ChangeStamp(InventoryRef)` | Compare for **equality only**. Equal: the slots did not change. Unequal: they **may** have. Never 0. |
-| `void ChangeStamps(IReadOnlyList<InventoryRef>, Span<long>)` | The same, as one batch. Throws `ArgumentException` when the span is shorter than the list. |
-| `long Clock` | A 64-bit count that only grows, also across Core reloads and world loads. Reading it completes no jobs and reads no container. |
-| `bool AnyChangedSince(IReadOnlyList<InventoryRef>, long since)` | True when any container may have changed at or after `since` (a `Clock` value). Every container in the list is refreshed, so one call caches them all. |
-
-- **False positives only.** The stamp is the game's change version of `InventoryBuffer` on the
-  container's storage chunk, read raw, plus the world epoch, the entity that holds the slots, the
-  chunk and its archetype (and, for a player, servant or station, the owner chunk's
-  `InventoryInstanceElement` version). The version is per chunk, so a write to another inventory
-  in the same chunk, a read-write buffer access that wrote nothing, or a move between chunks also
-  changes the stamp. A reference seen for the first time, an owner that now resolves to another
-  inventory, a stale reference and any read that fails its checks (a fresh value every call)
-  all read as changed. A `since` the clock never handed out reads as changed.
-- **Expected idle churn.** Containers that share a storage chunk with entities whose other
-  components the game writes regularly can change stamp together with no slot change. On the test
-  server (2026-10-17) a chest and the castle heart changed together about every 10 s while idle.
-  Treat a changed stamp as "re-read", never as "something moved".
-- **Slots only.** Item type, amount, stack override and item entity of each slot. Not item-entity
-  state (durability, jewel stats), not the `RestrictedInventory` rule.
-- **Server, main thread, never from inside a native inventory hook** (a Harmony patch on an
-  inventory system or utility): the store may be mid-change there. On the client every member
-  throws `InvalidOperationException`, like the rest of `ctx.Inventory`.
-- **In-flight jobs.** Each batch completes the jobs writing `InventoryBuffer` (and, when a
-  container's slots live on a separate entity, `InventoryInstanceElement`) through
-  `EntityManager.GetBufferRawRO` on the first entity a raw read has just confirmed alive with that
-  buffer, then reads the version again. A completion that fails makes the whole batch's answers
-  fresh ("changed").
-- **Self-test.** The first raw read after Core loads is compared with the interop's
-  `EntityManager.GetChunk` (chunk, archetype, store). A mismatch, or `GetChunk` throwing three
-  times in a row, disables the raw reads for the process with one
-  `ChunkVersions: raw change-version reads DISABLED` error line; every stamp is then fresh.
-- **Idle.** Until something stamps or reads `Clock` (a plugin, the dev bridge, or `Watch` with the
-  setting on), the server does no raw read at all. After 3600 frames with no such call it stops
-  again and forgets its cache; the next call resumes the clock with a jump, so every container
-  reads as changed once (a false positive).
-- **Audit.** While a stamp user other than `Watch` (a plugin, the dev bridge) has called in the
-  last 3600 frames, the server re-hashes the raw rows of four recently stamped containers every
-  frame. Content that changed under an unchanged stamp is a miss: logged once as
-  `Inventory: CHANGE STAMP MISS`, counted, and folded into that container's stamp so a poller
-  still sees it. The dev bridge `inventory_stamp` op reports the count.
-- **Cost.** Per batch: one or two `GetBufferRawRO` calls (the job completion above). Per
-  reference after its first call: about twenty raw reads and no other game call. The first call
-  resolves the owner's inventory with the same lookups `Read` uses; the result is cached while the
-  raw reads agree with it. While the audit runs it also forces that job completion every frame.
-
-Progenitor's own inventory reads take the buffer read-only (`GetBuffer<InventoryBuffer>(e, true)`),
-so `ctx.Inventory.Read` does not change stamps (`ReadOnlyBufferReadsTests` pins every such call).
-Another mod's `GetBuffer<InventoryBuffer>(e)` does: the interop default is `isReadOnly = false`,
-which marks the chunk changed even when nothing is written. Pass `true` when you only read.
-
-**Experimental**: source-checked and unit-tested (`InventoryStampTests`). **Partly verified live** on the isolated test server (2026-10-17, bridge `inventory_stamp`, 5 containers): the self-test passed, no audit misses, stamps stable at idle with `changedSince` false, a batch took about 25–45 µs, and a stamp changed on `.items add` and `.items remove` and stayed equal across a read-only `.items slots`. Not yet run: panel drag-drop, sort, take-all, station crafting, servant returns, `Watch` with the setting on.
-The read chain and its offsets are in `src/Progenitor.Core/Layout/layout.txt` ("Ecs: chunk change
-versions"). Live check steps: [dev bridge `inventory_stamp`](bridge-ops-client.md#inventory_stamp).
-
 ### Stable container ids
 
 `ContainerId` (`c-` plus 32 hex digits) names a placed container, station or heart across
@@ -2435,7 +2356,7 @@ world yet).
 `moveslot <from> <slot> <to> <amount>`, `moveall <from> <to> [keepbar]` (`keepbar` skips bag
 slots 0–7), `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `net <c>` (the
 container's network id words), `resolve <index> <generation> [type]` (what a request handler does
-with a client's words: the entity and id, or the refusal), `watch <c>`, `stamp <c>` (the change stamp and clock, and against the previous `.items stamp` of that container whether the stamp is equal and what `AnyChangedSince` said), `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
+with a client's words: the entity and id, or the refusal), `watch <c>`, `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
 `index:version` entity, `bag` or `heart`; append `/out` for a refinement station's output. Items are
 a spawnable name or a GUID hash. Every action logs a `Sample items: …` line; the sample also logs
 `PlayerReady` and `PlayerTerritoryChanged`.

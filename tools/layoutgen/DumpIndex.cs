@@ -44,14 +44,10 @@ public sealed class DumpIndex
         @"^(?<mods>[\w\[\]\s,<>\.]*?)\b(?<kind>struct|class|enum|interface)\s+(?<name>[A-Za-z_][\w\.]*)(?<generic><[^>]*>)?\s*(?::[^/]*)?//\s*TypeDefIndex:",
         RegexOptions.Compiled);
 
-    /// <summary>
-    /// An instance field line: <c>public float3 PositionValue; // 0x8</c>. The name may also be a
-    /// compiler-generated auto-property backing field,
-    /// <c>private int &lt;Capacity&gt;k__BackingField; // 0x8</c>, queried by that exact spelling.
-    /// </summary>
+    /// <summary>An instance field line: <c>public float3 PositionValue; // 0x8</c>.</summary>
     private static readonly Regex FieldLine = new(
         @"^\s+(?<mods>(?:public|private|internal|protected|readonly|static|volatile|unsafe|const|fixed|new|\s)*)"
-        + @"(?<type>[^\s].*?)\s+(?<name>[A-Za-z_@][\w]*|<[A-Za-z_][\w]*>k__BackingField)\s*;\s*//\s*0x(?<offset>[0-9A-Fa-f]+)\s*$",
+        + @"(?<type>[^\s].*?)\s+(?<name>[A-Za-z_@][\w]*)\s*;\s*//\s*0x(?<offset>[0-9A-Fa-f]+)\s*$",
         RegexOptions.Compiled);
 
     /// <summary>An enum member: <c>public const AiTargettingMode Entity = 3;</c>.</summary>
@@ -70,26 +66,16 @@ public sealed class DumpIndex
             var m = TypeDeclaration.Match(line);
             if (!m.Success) continue;
             var name = m.Groups["name"].Value;
-            Index(name, i);
-            // A generic declaration is also indexed with its parameter list (SharedStatic<T>), so a
-            // query can tell it from a non-generic type of the same name in the same namespace
-            // (Unity.Burst declares both a static class SharedStatic and a struct SharedStatic<T>).
-            var generic = m.Groups["generic"].Value;
-            if (generic.Length > 0) Index(name + generic, i);
-        }
-    }
-
-    private void Index(string name, int line)
-    {
-        if (!_byName.TryGetValue(name, out var list)) _byName[name] = list = new List<int>();
-        list.Add(line);
-        // Also index the leaf of a nested spelling (Outer.Nested), so a query may use either.
-        int dot = name.LastIndexOf('.');
-        if (dot > 0)
-        {
-            var leaf = name.Substring(dot + 1);
-            if (!_byName.TryGetValue(leaf, out var leaves)) _byName[leaf] = leaves = new List<int>();
-            leaves.Add(line);
+            if (!_byName.TryGetValue(name, out var list)) _byName[name] = list = new List<int>();
+            list.Add(i);
+            // Also index the leaf of a nested spelling (Outer.Nested), so a query may use either.
+            int dot = name.LastIndexOf('.');
+            if (dot > 0)
+            {
+                var leaf = name.Substring(dot + 1);
+                if (!_byName.TryGetValue(leaf, out var leaves)) _byName[leaf] = leaves = new List<int>();
+                leaves.Add(i);
+            }
         }
     }
 

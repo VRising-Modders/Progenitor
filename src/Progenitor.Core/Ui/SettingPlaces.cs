@@ -265,8 +265,6 @@ internal static class SettingPlaces
         yield return Cfg("Install", "LocalIndexPath", CfgOnly, Shared);
         yield return Cfg("Install", "DefaultTarget", CfgOnly, Shared);
         yield return Cfg("Install", "TreatLocalServerAsRemote", CfgOnly, Shared);
-        // Experimental server switch for ctx.Inventory.Watch (change stamps); off until verified live.
-        yield return Cfg("Inventory", "WatchUsesChangeStamps", CfgOnly, Shared);
 
         // Progenitor on this PC: Progenitor's page, Your settings (the Core keybinds follow the rule in Resolve).
         yield return Cfg("PhotoMode", "Enabled", PhotoMode, UiFile);

@@ -218,78 +218,13 @@ public sealed class PluginInventory
         return InventoryRuntime.Engine.TransferAll(from, to, filter, sourceSlots);
     }
 
-    // ---- change stamps -------------------------------------------------------------------------
-
-    /// <summary>
-    /// A cheap stamp of the inventory's slot contents. Compare two stamps for <b>equality only</b>:
-    /// equal means the slots have not changed since the first was taken; unequal means they
-    /// <b>may</b> have (false positives, never false negatives). The game tracks changes per storage
-    /// chunk, so a write to another inventory in the same chunk, a read-write access that wrote
-    /// nothing or a move to another chunk also changes it, and anything that cannot be read (a gone
-    /// owner, a stale reference, another world) gives a fresh value every call. Covers the slots
-    /// only: not item-entity state such as durability, and not the restriction rule. Never 0, so
-    /// 0 works as "no stamp yet". Costs a few raw memory reads after the first call for a reference;
-    /// meant for polling hundreds of containers every frame. Server, main thread; never call it
-    /// from inside a native inventory hook (the store may be mid-change). <b>Experimental</b>:
-    /// source-checked and unit-tested, not live-verified.
-    /// </summary>
-    public long ChangeStamp(InventoryRef container)
-    {
-        Require(nameof(ChangeStamp));
-        return InventoryRuntime.Stamps.Stamp(container);
-    }
-
-    /// <summary>
-    /// <see cref="ChangeStamp"/> for each of <paramref name="containers"/>, into
-    /// <paramref name="stamps"/> (at least as long), as one batch: in-flight inventory jobs are
-    /// completed once rather than per container. Throws <see cref="ArgumentException"/> when the
-    /// span is too short.
-    /// </summary>
-    public void ChangeStamps(IReadOnlyList<InventoryRef> containers, Span<long> stamps)
-    {
-        Require(nameof(ChangeStamps));
-        InventoryRuntime.Stamps.Stamps(containers, stamps);
-    }
-
-    /// <summary>
-    /// The server's change clock now, a 64-bit count that only grows (across Core reloads too). Take
-    /// it before reading containers and pass it to <see cref="AnyChangedSince"/> later. Reading it
-    /// completes no jobs and reads no container.
-    /// </summary>
-    public long Clock
-    {
-        get
-        {
-            Require(nameof(Clock));
-            return InventoryRuntime.Stamps.Clock;
-        }
-    }
-
-    /// <summary>
-    /// True when any of <paramref name="containers"/> may have changed at or after
-    /// <paramref name="since"/> (a <see cref="Clock"/> value): the same false-positives-only rule
-    /// as <see cref="ChangeStamp"/>, with the same coverage. Also true for a reference seen for the
-    /// first time, one whose owner now resolves to a different inventory, one that cannot be read,
-    /// and a <paramref name="since"/> this clock never handed out. Server, main thread, never from
-    /// inside a native inventory hook. <b>Experimental</b>: source-checked and unit-tested, not
-    /// live-verified.
-    /// </summary>
-    public bool AnyChangedSince(IReadOnlyList<InventoryRef> containers, long since)
-    {
-        Require(nameof(AnyChangedSince));
-        return InventoryRuntime.Stamps.AnyChangedSince(containers, since);
-    }
-
     // ---- watches -------------------------------------------------------------------------------
 
     /// <summary>
     /// Call <paramref name="handler"/> on the main thread when the contents change, or once with
     /// <see cref="InventoryChangeKind.Gone"/> when the inventory goes away. Checked every
     /// <paramref name="interval"/> (default 500 ms, minimum 100 ms) by fingerprint, and on the
-    /// next frame after a <c>ctx.Inventory</c> write touches it. With the experimental server
-    /// setting <c>[Inventory] WatchUsesChangeStamps</c> (default false), a check whose
-    /// <see cref="ChangeStamp"/> is unchanged skips the fingerprint, except every 8th, which
-    /// fingerprints anyway. Tracked: unload stops it.
+    /// next frame after a <c>ctx.Inventory</c> write touches it. Tracked: unload stops it.
     /// </summary>
     public IInventoryWatch Watch(InventoryRef container, Action<InventoryChange> handler, TimeSpan? interval = null)
     {
