@@ -3110,6 +3110,7 @@ public static partial class Handshake
         RefreshRequests.Clear();
         lock (SoftReasks) SoftReasks.Clear();
         InPlaceTold.Reset();
+        HandshakeInPlaceMask.Shared.Reset();
         RequirementWatch.Reset();
         TestRequirementCompareScheduled = null;
         SessionMemory.Clear();
@@ -3457,21 +3458,18 @@ public static partial class Handshake
                 includeDisabled: true,
                 includeSystems: false,
                 ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly));
-            int kept = 0;
+            var users = new List<(int Index, ulong PlatformId, bool Connected, HandshakeAnswerWatch.Status Status)>();
             for (int i = 0; i < entities.Count; i++)
             {
                 try
                 {
                     var user = em.GetComponentData<User>(entities[i]);
-                    if (!user.IsConnected) continue;
-                    if (!HandshakeReask.RememberAcrossSwap(AnswerWatch.GetStatus(user.Index))) continue;
-                    if (SessionMemory.Contains(user.Index, user.PlatformId)) continue;
-                    SessionMemory.Remember(user.Index, user.PlatformId);
-                    kept++;
+                    users.Add((user.Index, user.PlatformId, user.IsConnected, AnswerWatch.GetStatus(user.Index)));
                 }
-                catch (Exception e) { Plugin.Logger?.LogWarning("Handshake: remembering a let-in user across the swap: " + e.Message); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Handshake: reading a user before the swap: " + e.Message); }
             }
 
+            int kept = HandshakeReask.RememberLetIn(users, SessionMemory);
             if (kept > 0)
                 Plugin.Logger?.LogInfo($"Handshake: {kept} connected user(s) let in without an answer are remembered across this Core swap; their re-ask is soft.");
         }
@@ -3600,6 +3598,7 @@ public static partial class Handshake
             try { SessionMemory.Forget(ev.UserIndex); }
             catch { /* the slot is best effort */ }
             InPlaceTold.Forget(ev.UserIndex);
+            HandshakeInPlaceMask.Shared.Clear(ev.UserIndex);
         }
 
         try { AskUser(ev, alreadyRetried: false, rearmLog: false); }
@@ -4257,6 +4256,7 @@ public static partial class Handshake
                 else
                 {
                     InPlaceTold.Clear(user.Index);
+                    HandshakeInPlaceMask.Shared.Clear(user.Index);
                     Plugin.Logger?.LogInfo($"Handshake: {name} ok ({requiredCount} mod(s) match)");
                 }
                 if (world != null) CustomEvents.SendToUser(world, userEntity, ResultEventId, Result.Create(true, "ok"));
@@ -4312,17 +4312,22 @@ public static partial class Handshake
                 return;
             }
 
-            // NOKICK1 (live 2026-10-17): a player already admitted this session is never disconnected by a handshake
-            // answer. A server change (a Core swap, a server plugin hot-loaded) re-asks them, and a mod they lack is told
-            // in place (the notice in the game's look, with Open Install Mods when they can install it), only the
-            // features that need it are missing for them (the feature table: ctx.Peers / ctx.Messages report the mod as
-            // absent), and it is enforced at their next join. Before, a soft re-ask after a Core swap that loaded a new
-            // ServerMustHave plugin judged the answer as a join and kicked them. Joins keep every rule below.
-            if (HandshakeReask.MismatchOutcome(wasAlreadyOk, rememberedOk, softReask, requirementResend) == HandshakeMismatchOutcome.KeepInPlace)
+            // NOKICK1 (live 2026-10-17): an answer to a SERVER-initiated ask never disconnects the player. A server change
+            // (a Core swap: the soft re-ask; a server plugin's Require or hot-load: the requirement re-send) re-asks them,
+            // and a mod they lack or run at another version is told in place (the notice in the game's look, with Open
+            // Install Mods when they can install it), masked for them on this server (ctx.Peers / ctx.Messages read it as
+            // absent), and enforced at their next join. Before, a soft re-ask after a Core swap that loaded a new
+            // ServerMustHave plugin judged the answer as a join and kicked them. A join, and a re-answer after a
+            // client-side change (a required mod hot-unloaded, the client's own Core swapped), keep every rule below.
+            if (HandshakeReask.MismatchOutcome(softReask, requirementResend) == HandshakeMismatchOutcome.KeepInPlace)
             {
                 Plugin.Logger?.LogWarning(HandshakeReask.KeptAfterRequirementChangeLine(name, problems));
+                // The mask goes on before the acceptance, so nothing a plugin sends on the ok reaches a mod they lack.
+                HandshakeInPlaceDecision? shortfall = null;
+                try { shortfall = HandshakeInPlace.Decide(user.Index, failedIds, server, answered, InPlaceTold, HandshakeInPlaceMask.Shared); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Handshake: judging what " + name + " lacks threw: " + e.Message); }
                 AcceptAnswer(inPlace: true);
-                try { TellShortfallInPlace(user.Index, name, failedIds, server, answered); }
+                try { if (shortfall != null) TellShortfallInPlace(user.Index, name, shortfall); }
                 catch (Exception e) { Plugin.Logger?.LogWarning("Handshake: telling " + name + " about the mods they lack threw: " + e.Message); }
                 return;
             }
@@ -4380,19 +4385,18 @@ public static partial class Handshake
     /// mid-session notice (action <c>warn</c>: a popup in the game's look on a client that declared PolicyRecheck, with
     /// Open Install Mods for a mod it has no copy of; else one System chat line). Nobody is disconnected by it.
     /// </summary>
-    private static void TellShortfallInPlace(int userIndex, string name, IReadOnlyList<string> failedIds, IReadOnlyList<ModRecord> server,
-        IReadOnlyList<ModRecord> answered)
+    private static void TellShortfallInPlace(int userIndex, string name, HandshakeInPlaceDecision shortfall)
     {
-        var items = HandshakeInPlace.Items(failedIds, server, answered);
-        var fresh = InPlaceTold.Fresh(userIndex, items);
-        if (fresh.Count == 0)
+        if (shortfall.Masked.Count > 0)
+            Plugin.Logger?.LogInfo("Handshake: " + string.Join(", ", shortfall.Masked) + " read as absent for " + name + " until their next join or a clean answer");
+        if (shortfall.Fresh.Count == 0)
         {
-            Plugin.Logger?.LogInfo("Handshake: " + name + (items.Count == 0 ? ": no mod row to name in a notice" : " was already told about these mods") + "; no new notice");
+            Plugin.Logger?.LogInfo("Handshake: " + name + (shortfall.Items.Count == 0 ? ": no mod row to name in a notice" : " was already told about these mods") + "; no new notice");
             return;
         }
 
         var d = new RecheckDecision { Notice = RecheckNoticeKind.Warn, Trigger = "server-change" };
-        d.NoticeItems.AddRange(fresh);
+        d.NoticeItems.AddRange(shortfall.Fresh);
         SendRecheckNotice(userIndex, name, d);
     }
 
@@ -4616,6 +4620,7 @@ public static partial class Handshake
         catch { /* best effort */ }
         lock (SoftReasks) SoftReasks.Remove(ev.User.Index);
         InPlaceTold.Forget(ev.User.Index);
+        HandshakeInPlaceMask.Shared.Clear(ev.User.Index);
         RequirementWatch.Forget(ev.User.Index);
         try { AnswerWatch.OnDisconnect(ev.User.Index); }
         catch (Exception e) { Plugin.Logger?.LogError($"Handshake.OnPlayerDisconnected: {e}"); }

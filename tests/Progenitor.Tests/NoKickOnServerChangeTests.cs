@@ -12,8 +12,9 @@ namespace Progenitor.Tests;
 /// NOKICK1 (live 2026-10-17): a dev deploy put a sample plugin that declares ServerMustHave on the test server only, then
 /// hot-swapped the server's Core. The new generation soft re-asked the connected player ("no answer never disconnects
 /// them"), the answer lacked the sample, the judgment treated it as a join (no install window left: the carried join's
-/// window counts as spent) and kicked them. A server-side change must never kick an already-connected player: the
-/// shortfall is told in place and enforced at their next join; joins keep every rule.
+/// window counts as spent) and kicked them. A server-initiated change must never kick an already-connected player: the
+/// shortfall is told in place, masked for them, and enforced at their next join. Joins, and re-answers caused by a
+/// client-side change, keep every existing rule.
 /// </summary>
 public sealed class NoKickOnServerChangeTests
 {
@@ -22,25 +23,42 @@ public sealed class NoKickOnServerChangeTests
     private sealed class Slot
     {
         public string? Value;
-        public HandshakeSessionMemory Generation() => new(() => Value, v => Value = v);
+        public HandshakeSessionMemory Memory() => new(() => Value, v => Value = v);
+        public HandshakeInPlaceTold Told() => new(() => Value, v => Value = v);
     }
 
     private static Handshake.ModRecord Must(string guid, string version, NetworkVersionRule rule = NetworkVersionRule.Exact) =>
         Handshake.ModRecord.CreateDeclared(guid, version, NetworkCompatibilityLevel.ServerMustHave, rule);
 
     [Fact]
-    public void A_join_is_refused_and_every_kind_of_admitted_player_is_kept_in_place()
+    public void Only_a_server_initiated_ask_keeps_the_player_in_place()
     {
-        // A fresh join: nothing says they were admitted.
-        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(false, false, false, false));
-        // Ok in this generation (a re-answer after a server plugin hot-load).
-        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(true, false, false, false));
-        // Carried across a Core swap by the session memory.
-        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(false, true, false, false));
-        // A soft re-ask is waiting on them.
-        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(false, false, true, false));
-        // The answer is to a requirement re-send (only ok users get one).
-        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(false, false, false, true));
+        // The soft re-ask after a server Core swap (a remembered user answering while it waits).
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: true, requirementResend: false));
+        // The requirement re-send after a server plugin's Require or hot-load.
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: true));
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: true, requirementResend: true));
+        // A join, or a re-answer the client started: the existing flow (install window, refusal).
+        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: false));
+    }
+
+    [Fact]
+    public void A_client_side_change_keeps_the_existing_flow_even_for_an_ok_remembered_player()
+    {
+        // The client hot-unloaded a required mod (or swapped its own Core to a mismatched version) and re-answered: the
+        // player is ok in this generation and remembered, but nothing on the server asked, so no soft re-ask is pending
+        // and no re-send is owed.
+        var slot = new Slot();
+        slot.Memory().Remember(0, Steam);
+        Assert.True(slot.Memory().Contains(0, Steam));
+        var server = new List<Handshake.ModRecord> { Must("example.required", "1.0.0") };
+        Assert.NotEmpty(Handshake.Compare.Evaluate(server, new List<Handshake.ModRecord>()));
+        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: false));
+
+        // The client's own Core swap asks for a refresh; the refresh is answered without a re-send being owed.
+        var watch = new HandshakeRequirementWatch();
+        watch.NoteSent(0, "stamp");
+        Assert.False(watch.TakeResendAnswer(0));
     }
 
     [Fact]
@@ -48,50 +66,46 @@ public sealed class NoKickOnServerChangeTests
     {
         var slot = new Slot();
         // Generation 1: the player joined and answered fine.
-        slot.Generation().Remember(0, Steam);
+        slot.Memory().Remember(0, Steam);
 
         // Generation 2 (the swap that also loaded the sample): the re-ask is soft ...
-        var gen2 = slot.Generation();
+        var gen2 = slot.Memory();
         bool remembered = gen2.Contains(0, Steam);
         Assert.Equal(HandshakeAskKind.SoftReask, HandshakeReask.KindFor(reask: true, rememberedAnswered: remembered));
         // ... the answer lacks the newly required sample ...
         var server = new List<Handshake.ModRecord> { Must("example.sample", "2026.10.51") };
         var answered = new List<Handshake.ModRecord>();
-        var problems = Handshake.Compare.Evaluate(server, answered, out var failed);
-        Assert.NotEmpty(problems);
-        // ... and the player stays connected (the status in the new generation is not ok yet: before the fix this kicked).
-        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace,
-            HandshakeReask.MismatchOutcome(wasAlreadyOk: false, rememberedThisSession: remembered, softReaskPending: true, requirementResend: false));
-        // They are told which mod, with Open Install Mods when they have no copy.
-        var items = HandshakeInPlace.Items(failed, server, answered);
-        var item = Assert.Single(items);
+        Assert.NotEmpty(Handshake.Compare.Evaluate(server, answered, out var failed));
+        // ... and the player stays connected (before the fix this kicked).
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: true, requirementResend: false));
+        var item = Assert.Single(HandshakeInPlace.Items(failed, server, answered));
         Assert.Equal(ClientModProblem.KindMissing, item.Kind);
         Assert.True(item.Added);
         Assert.False(item.KickWorthy);
 
-        // Their next join is a join: the memory is forgotten and the join rules apply to the same answer.
+        // Their next join is a join: the memory is forgotten, no soft re-ask is pending, the join rules apply.
         gen2.Forget(0);
-        bool afterJoin = gen2.Contains(0, Steam);
-        Assert.Equal(HandshakeAskKind.Join, HandshakeReask.KindFor(reask: false, rememberedAnswered: afterJoin));
-        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(false, afterJoin, false, false));
+        Assert.Equal(HandshakeAskKind.Join, HandshakeReask.KindFor(reask: false, rememberedAnswered: gen2.Contains(0, Steam)));
+        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: false));
     }
 
     [Fact]
-    public void A_server_plugin_hot_loaded_without_a_swap_keeps_ok_players_and_new_joins_are_judged_in_full()
+    public void A_server_plugin_hot_loaded_without_a_swap_keeps_ok_players_through_the_re_send()
     {
-        var server = new List<Handshake.ModRecord> { Must("example.part", "1.0.0") };
-        var problems = Handshake.Compare.Evaluate(server, new List<Handshake.ModRecord>(), out _);
-        Assert.NotEmpty(problems);
-        // The re-send's answer from a player whose handshake was ok.
-        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(true, true, false, requirementResend: true));
-        // A player joining after the load.
-        Assert.Equal(HandshakeMismatchOutcome.Refuse, HandshakeReask.MismatchOutcome(false, false, false, false));
+        var watch = new HandshakeRequirementWatch();
+        watch.NoteSent(0, "before");
+        Assert.True(watch.IsStale(0, "after"));
+        watch.NoteResendSent(0);
+        bool owed = watch.TakeResendAnswer(0);
+        Assert.True(owed);
+        Assert.Equal(HandshakeMismatchOutcome.KeepInPlace, HandshakeReask.MismatchOutcome(softReaskPending: false, requirementResend: owed));
+        // The next answer owes nothing: a later client-side change is judged as before.
+        Assert.False(watch.TakeResendAnswer(0));
     }
 
     [Fact]
     public void Only_a_required_row_fails_an_answer_a_mod_that_runs_without_its_client_part_never_does()
     {
-        // Required (ServerMustHave): missing fails. NoNeedForSync (what a Limited or Optional counterpart declares): missing is fine.
         var required = new List<Handshake.ModRecord> { Must("example.required", "1.0.0") };
         var recommended = new List<Handshake.ModRecord>
         {
@@ -147,7 +161,6 @@ public sealed class NoKickOnServerChangeTests
         Assert.Equal(ClientPolicyNoticeText.OpenKindInstall, content.OpenKind);
         Assert.Equal("example.sample", content.OpenKey);
 
-        // On the wire it is the client mod policy's warn notice, which every client with that stage reads.
         byte[] packet = ClientPolicyNoticeWire.Encode(RecheckNoticeKind.Warn, 0, items, 1);
         Assert.True(ClientPolicyNoticeWire.TryDecode(packet, out var notice));
         Assert.Equal(RecheckNoticeKind.Warn, notice.Kind);
@@ -157,7 +170,7 @@ public sealed class NoKickOnServerChangeTests
     [Fact]
     public void Each_problem_is_told_once_until_it_is_fixed_or_the_player_joins_again()
     {
-        var told = new HandshakeInPlaceTold();
+        var told = new Slot().Told();
         var a = new RecheckItem { Key = "a", Kind = ClientModProblem.KindMissing, Added = true };
         var b = new RecheckItem { Key = "b", Kind = ClientModProblem.KindMissing, Added = true };
 
@@ -176,35 +189,107 @@ public sealed class NoKickOnServerChangeTests
     }
 
     [Fact]
+    public void What_was_told_survives_a_core_swap_so_the_popup_is_not_repeated()
+    {
+        string? slot = null;
+        var item = new RecheckItem { Key = "example.sample", Kind = ClientModProblem.KindMissing, Added = true };
+        var gen1 = new HandshakeInPlaceTold(() => slot, v => slot = v);
+        Assert.Single(gen1.Fresh(3, new[] { item }));
+
+        // A new Core generation over the same process string: the same problem says nothing new.
+        var gen2 = new HandshakeInPlaceTold(() => slot, v => slot = v);
+        Assert.Empty(gen2.Fresh(3, new[] { item }));
+        Assert.Equal(1, gen2.Outstanding(3));
+
+        // The encoding round-trips and skips what it cannot hold.
+        var decoded = HandshakeInPlaceTold.Decode("3=missing:a,older:b;bad;-1=x;4=");
+        Assert.Equal(new[] { 3 }, decoded.Keys.ToArray());
+        Assert.Equal(2, decoded[3].Count);
+        Assert.Equal("", HandshakeInPlaceTold.Encode(new Dictionary<int, HashSet<string>> { [1] = new() { "a;b" } }));
+    }
+
+    [Fact]
+    public void A_version_mismatched_mod_is_masked_so_the_server_part_sees_it_as_absent()
+    {
+        var mask = new HandshakeInPlaceMask();
+        var told = new Slot().Told();
+        var server = new List<Handshake.ModRecord> { Must("example.missing", "1.0.0"), Must("example.versioned", "2.0.0") };
+        var answered = new List<Handshake.ModRecord> { Handshake.ModRecord.Undeclared("example.versioned", "1.0.0") };
+        var failed = new List<string> { "example.missing", "example.versioned", ProgenitorExact.RowId };
+
+        var d = HandshakeInPlace.Decide(5, failed, server, answered, told, mask);
+        Assert.Equal(3, d.Items.Count);
+        Assert.Equal(3, d.Fresh.Count);
+        Assert.Equal(new[] { "example.missing", "example.versioned" }, d.Masked.ToArray());
+        Assert.True(mask.IsMasked(5, "EXAMPLE.VERSIONED"));
+        Assert.False(mask.IsMasked(5, ProgenitorExact.RowId));
+        Assert.False(mask.IsMasked(6, "example.versioned"));
+
+        // The client's table lists the mismatched mod; the peer view reads it as absent while it is masked.
+        var table = new FeatureTable();
+        var row = new FeatureTableMod("example.versioned", "1.0.0");
+        row.Features["feature"] = 1;
+        table.Mods["example.versioned"] = row;
+        var view = new PeerTableView("example.versioned", () => table, masked: g => mask.IsMasked(5, g));
+        Assert.Null(view.ModVersion("example.versioned"));
+        Assert.False(view.Has("feature"));
+        Assert.False(view.Has("example.versioned", "feature"));
+        var unmasked = new PeerTableView("example.versioned", () => table);
+        Assert.Equal("1.0.0", unmasked.ModVersion("example.versioned"));
+        Assert.True(unmasked.Has("feature"));
+
+        // A second judgment of the same answer tells nothing new; a clean answer clears the mask.
+        Assert.Empty(HandshakeInPlace.Decide(5, failed, server, answered, told, mask).Fresh);
+        mask.Clear(5);
+        Assert.Null(new PeerTableView("example.versioned", () => table, masked: g => mask.IsMasked(5, g)).ModVersion("missing.mod"));
+        Assert.Equal("1.0.0", new PeerTableView("example.versioned", () => table, masked: g => mask.IsMasked(5, g)).ModVersion("example.versioned"));
+    }
+
+    [Fact]
     public void Players_let_in_without_an_answer_are_remembered_across_a_swap_so_their_re_ask_is_soft()
     {
-        Assert.True(HandshakeReask.RememberAcrossSwap(HandshakeAnswerWatch.Status.Unverified));
-        foreach (var s in new[]
+        var slot = new Slot();
+        var memory = slot.Memory();
+        memory.Remember(1, 11);
+        var users = new List<(int, ulong, bool, HandshakeAnswerWatch.Status)>
         {
-            HandshakeAnswerWatch.Status.None, HandshakeAnswerWatch.Status.Pending, HandshakeAnswerWatch.Status.Mismatch,
-            HandshakeAnswerWatch.Status.Timeout, HandshakeAnswerWatch.Status.AwaitingInstall, HandshakeAnswerWatch.Status.AwaitingReport,
-        })
-            Assert.False(HandshakeReask.RememberAcrossSwap(s));
-        // Ok users are remembered when they answer; the soft re-ask never disconnects on no answer.
+            (0, 10, true, HandshakeAnswerWatch.Status.Unverified),   // let in: remembered
+            (1, 11, true, HandshakeAnswerWatch.Status.Ok),           // answered: already remembered
+            (2, 12, true, HandshakeAnswerWatch.Status.Pending),      // mid-join: asked as a join
+            (3, 13, false, HandshakeAnswerWatch.Status.Unverified),  // offline: nothing
+            (4, 14, true, HandshakeAnswerWatch.Status.AwaitingInstall),
+        };
+        Assert.Equal(1, HandshakeReask.RememberLetIn(users, memory));
+        var next = slot.Memory();
+        Assert.True(next.Contains(0, 10));
+        Assert.True(next.Contains(1, 11));
+        Assert.False(next.Contains(2, 12));
+        Assert.False(next.Contains(3, 13));
+        Assert.False(next.Contains(4, 14));
+        Assert.Equal(HandshakeAskKind.SoftReask, HandshakeReask.KindFor(reask: true, rememberedAnswered: next.Contains(0, 10)));
+        Assert.Equal(0, HandshakeReask.RememberLetIn(users, next)); // idempotent
+        // The soft re-ask never disconnects on no answer.
         Assert.Equal(HandshakeReaskStep.KeepConnected, HandshakeReask.After(HandshakeReask.RetryDelays.Count - 1, answered: false, connected: true));
     }
 
     /// <summary>The live glue, source-checked (it needs the server world).</summary>
     [Fact]
-    public void The_handshake_keeps_admitted_players_before_any_refusal_and_the_in_place_path_never_kicks()
+    public void The_handshake_keeps_server_initiated_answers_before_any_refusal_and_the_in_place_path_never_kicks()
     {
         string handshake = Source("src/Progenitor.Core/Networking/Handshake.cs").Replace("\r\n", "\n");
         int ok = handshake.IndexOf("if (problems.Count == 0)\n            {\n                // CLIENTPOLICY1", StringComparison.Ordinal);
-        int keep = handshake.IndexOf("HandshakeReask.MismatchOutcome(wasAlreadyOk, rememberedOk, softReask, requirementResend) == HandshakeMismatchOutcome.KeepInPlace", StringComparison.Ordinal);
+        int keep = handshake.IndexOf("HandshakeReask.MismatchOutcome(softReask, requirementResend) == HandshakeMismatchOutcome.KeepInPlace", StringComparison.Ordinal);
         int note = handshake.IndexOf("RefusedJoins.Note(user.Index, failedIds, server, answered, user.PlatformId);", StringComparison.Ordinal);
         int defer = handshake.IndexOf("if (TryDeferKick(world, userEntity, user.Index, name, problems, failedIds, server, answered, clientCaps, localFixes))", StringComparison.Ordinal);
         Assert.True(ok > 0 && ok < keep, "the clean answer is accepted first");
-        Assert.True(keep > 0 && keep < note && note < defer, "an admitted player is kept before the refusal path and the install window");
+        Assert.True(keep > 0 && keep < note && note < defer, "a server-initiated answer is kept before the refusal path and the install window");
 
         int end = handshake.IndexOf("return;\n            }", keep, StringComparison.Ordinal);
         string inPlace = handshake.Substring(keep, end - keep);
-        Assert.Contains("AcceptAnswer(inPlace: true);", inPlace);
-        Assert.Contains("TellShortfallInPlace(user.Index, name, failedIds, server, answered);", inPlace);
+        int decide = inPlace.IndexOf("HandshakeInPlace.Decide(user.Index, failedIds, server, answered, InPlaceTold, HandshakeInPlaceMask.Shared)", StringComparison.Ordinal);
+        int accept = inPlace.IndexOf("AcceptAnswer(inPlace: true);", StringComparison.Ordinal);
+        Assert.True(decide > 0 && decide < accept, "the mask goes on before the acceptance");
+        Assert.Contains("TellShortfallInPlace(user.Index, name, shortfall);", inPlace);
         Assert.DoesNotContain("Kick", inPlace.Replace("HandshakeReask.KeptAfterRequirementChangeLine", ""), StringComparison.Ordinal);
         Assert.DoesNotContain("Disconnect", inPlace, StringComparison.Ordinal);
         Assert.DoesNotContain("SessionMemory.Forget", inPlace, StringComparison.Ordinal);
@@ -213,10 +298,22 @@ public sealed class NoKickOnServerChangeTests
         Assert.Contains("Notice = RecheckNoticeKind.Warn", tell);
         Assert.DoesNotContain("Disconnect", tell.Replace("RecheckNoticeKind.Disconnect", ""), StringComparison.Ordinal);
 
-        // The told set is forgotten at a join and a leave; the let-in users are remembered before the tables go.
-        Assert.Contains("InPlaceTold.Forget(ev.UserIndex);", handshake);
-        Assert.Contains("InPlaceTold.Forget(ev.User.Index);", handshake);
+        // Told and mask are forgotten at a join and a leave and cleared by a clean answer; let-in users are remembered
+        // before the tables go, through the game-free helper.
+        Assert.Contains("InPlaceTold.Forget(ev.UserIndex);\n            HandshakeInPlaceMask.Shared.Clear(ev.UserIndex);", handshake);
+        Assert.Contains("InPlaceTold.Forget(ev.User.Index);\n        HandshakeInPlaceMask.Shared.Clear(ev.User.Index);", handshake);
+        Assert.Contains("InPlaceTold.Clear(user.Index);\n                    HandshakeInPlaceMask.Shared.Clear(user.Index);", handshake);
         Assert.Contains("RememberLetInBeforeSwap();\n        AnswerWatch.Clear();", handshake);
+        Assert.Contains("int kept = HandshakeReask.RememberLetIn(users, SessionMemory);", handshake);
+
+        // The server's send gates and peer view read the mask.
+        string compat = Source("src/Progenitor.Core/Networking/ModCompatNet.cs");
+        string exchange = Source("src/Progenitor.Core/Networking/ExchangeNet.cs");
+        string plugin = Source("src/Progenitor.Core/Plugins/PluginCompat.cs");
+        Assert.Contains("listsMod: HandshakeInPlaceMask.ListsMod(table, user.Index, modGuid));", compat);
+        Assert.Contains("if (_server && HandshakeInPlaceMask.Shared.IsMasked(peer, modGuid)) return null;", compat);
+        Assert.Contains("listsMod: HandshakeInPlaceMask.ListsMod(table, userIndex, modGuid));", exchange);
+        Assert.Contains("masked: g => HandshakeInPlaceMask.Shared.IsMasked(index, g)", plugin);
     }
 
     private static string Between(string text, string start, string end)

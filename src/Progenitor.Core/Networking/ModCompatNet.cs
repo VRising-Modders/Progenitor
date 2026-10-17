@@ -395,6 +395,8 @@ internal static unsafe class ModCompatNet
     /// <summary>The peer's version of <paramref name="modGuid"/> from its table, or null when the table does not list it.</summary>
     internal static string? PeerModVersion(int peer, string modGuid)
     {
+        // NOKICK1: a mod a player kept in place runs at a version this server does not accept reads as absent.
+        if (_server && HandshakeInPlaceMask.Shared.IsMasked(peer, modGuid)) return null;
         var t = PeerTables.Get(peer);
         return t != null && t.Mods.TryGetValue(modGuid, out var row) ? row.Version : null;
     }
@@ -580,7 +582,7 @@ internal static unsafe class ModCompatNet
             connected: user.IsConnected && Handshake.UserAnswerStatus(user.Index) == "ok",
             hasMessagesBit: (Handshake.CapsOf(user.Index) & Handshake.Capability.ModMessages) != 0,
             tableKnown: table != null,
-            listsMod: table != null && table.Mods.ContainsKey(modGuid));
+            listsMod: HandshakeInPlaceMask.ListsMod(table, user.Index, modGuid));
         var result = ModMessageGate.Decide(state, payloadBytes);
         if (result != SendResult.Sent) return result;
         var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
