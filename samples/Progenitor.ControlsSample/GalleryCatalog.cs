@@ -249,7 +249,7 @@ internal static class GalleryCatalog
             "Use it to let the player pick one of a few options in a popup.", "Feedback tab, Choose", ControlsPage + " (Dialogs)", "Options' captions centered."),
         E("prompt", Feedback, "Prompt dialog", "ctx.Dialogs.Prompt(title, body, initial, onSubmit)",
             "Use it to ask for a line of text in a popup, such as a name.", "Feedback tab, Prompt", ControlsPage + " (Dialogs)", "Typed text Body, left-aligned; error Error."),
-        E("form", Feedback, "Form dialog", "ctx.Dialogs.Form(title, caption, initial, heading, checks, onSave)",
+        E("form", Feedback, "Form dialog", "ctx.Dialogs.Form(title, options, onSave)",
             "Use it to edit a name and a few on/off choices together in a popup.", "Feedback tab, Form", ControlsPage + " (Dialogs)",
             "Caption, heading and box labels left on one edge; boxes the game's checkbox; Save and Cancel centered."),
         E("tooltip", Feedback, "Tooltip", "handle.Tooltip(text)",

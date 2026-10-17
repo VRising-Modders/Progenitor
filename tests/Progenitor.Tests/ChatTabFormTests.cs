@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Progenitor.Chat;
 using Progenitor.Ui;
@@ -61,6 +62,34 @@ public sealed class ChatTabFormTests
         var all = ChatTab.All();
         Assert.False(ChatTabForm.Apply(all, "Mine", new[] { true, false, false, false, false, false }));
         Assert.Equal(ChatTab.AllName, all.Name);
+    }
+
+    /// <summary>
+    /// Review of PR #63: a Save that cannot be kept is refused under the field, never dropped silently: the edited tab
+    /// was closed (or the tabs were read again) while its editor was open, or a new tab finds the row full.
+    /// </summary>
+    [Fact]
+    public void A_save_the_row_cannot_take_is_refused_with_a_reason()
+    {
+        var tab = new ChatTab { Name = "Trade", Scope = ChatScope.Global };
+        var on = new[] { true, false, false, false, false, false };
+        var tabs = new List<ChatTab> { ChatTab.All(), tab };
+        Assert.Null(ChatTabForm.Refusal(tabs, tab, isNew: false, "Trade", on));
+        // The same name and scope in a different object: the tabs were read again.
+        Assert.Equal(ChatTabForm.TabGone, ChatTabForm.Refusal(new List<ChatTab> { ChatTab.All(), new ChatTab { Name = "Trade" } }, tab, false, "Trade", on));
+        Assert.Equal(ChatTabForm.TabGone, ChatTabForm.Refusal(new List<ChatTab> { ChatTab.All() }, tab, false, "Trade", on));
+
+        var full = Enumerable.Range(0, ChatTab.MaxTabs).Select(i => new ChatTab { Name = "T" + i }).ToList();
+        Assert.Equal(ChatTabForm.RowFull, ChatTabForm.Refusal(full, ChatTabForm.Fresh(6), isNew: true, "New", on));
+        Assert.Null(ChatTabForm.Refusal(tabs, ChatTabForm.Fresh(2), isNew: true, "New", on));
+        Assert.Equal(ChatTabForm.NameRequired, ChatTabForm.Refusal(tabs, tab, false, " ", on));
+
+        var options = ChatTabForm.Options(tab);
+        Assert.Equal("Trade", options.Initial);
+        Assert.Equal(ChatTab.MaxNameLength, options.MaxLength);
+        Assert.True(options.RequireOne);
+        Assert.Equal(6, options.Checks.Count);
+        Assert.True(options.Checks[0].On);
     }
 
     [Fact]

@@ -581,8 +581,8 @@ internal sealed class UiDialog : IDisposable
     private Action<int>? _pick;
     private Action<string>? _submit;
     private Func<string, string?>? _validate;
-    private Action<string, IReadOnlyList<bool>>? _save;
-    private Func<string, IReadOnlyList<bool>, string?>? _validateForm;
+    private Action<DialogFormResult>? _save;
+    private Func<DialogFormResult, string?>? _validateForm;
     private IUiPanel? _panel;
     private UiDialogView? _view;
     private string _text;
@@ -927,7 +927,7 @@ internal sealed class UiDialog : IDisposable
     /// FORMDIALOG1: a form's Save: <paramref name="handler"/> gets the text and every box's state, after
     /// <paramref name="validate"/> (error text under the field, or null to accept). Replaces <see cref="OnSubmit"/>.
     /// </summary>
-    internal UiDialog OnSave(Action<string, IReadOnlyList<bool>>? handler, Func<string, IReadOnlyList<bool>, string?>? validate)
+    internal UiDialog OnSave(Action<DialogFormResult>? handler, Func<DialogFormResult, string?>? validate)
     {
         _save = handler;
         _validateForm = validate;
@@ -1007,12 +1007,15 @@ internal sealed class UiDialog : IDisposable
 
         // Enter typed into another field (the game's chat, a search box) is that field's.
         if (typingElsewhere) return false;
-        // A destructive confirmation needs a click on its button.
-        if (open.Content.Danger) return false;
         long now;
         try { now = Clock(); }
         catch { now = open._shownAt + EnterGraceMs; }
         if (now - open._shownAt < EnterGraceMs) return false;
+        // FORMDIALOG1: the keyboard focus the player moved onto a box or a button takes Enter (Cancel cancels, a box
+        // flips); a destructive main answer still needs a click, so Enter on it presses nothing.
+        if (open._view != null && UiNav.PressFocusAmong(open._view.Rows, open.Content.Danger ? open.Content.MainKey : null)) return true;
+        // A destructive confirmation needs a click on its button.
+        if (open.Content.Danger) return false;
         var c = open.Content;
         switch (c.Shape)
         {
@@ -1671,13 +1674,13 @@ internal sealed class UiDialog : IDisposable
             return;
         }
 
-        var states = CheckStates;
+        var result = new DialogFormResult(text, Content.Checks);
         string? error = null;
         if (Content.MaxLength > 0 && text.Length > Content.MaxLength)
             error = UiDialogs.TooLong(Content.MaxLength);
         if (error == null && (_validate != null || _validateForm != null))
         {
-            try { error = _validateForm != null ? _validateForm(text, states) : _validate!(text); }
+            try { error = _validateForm != null ? _validateForm(result) : _validate!(text); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: dialog '" + Content.Title + "' validation threw: " + e.Message);
@@ -1695,7 +1698,7 @@ internal sealed class UiDialog : IDisposable
         var save = _save;
         if (save != null)
         {
-            Answer(() => save(text, states));
+            Answer(() => save(result));
             return;
         }
 
@@ -1985,40 +1988,38 @@ internal static class UiDialogs
     }
 
     /// <summary>
-    /// FORMDIALOG1: a form: a one-line field with <paramref name="caption"/> on its left, the check boxes under
-    /// <paramref name="heading"/>, and <paramref name="save"/> / <paramref name="cancel"/>. Save and Enter validate (the
-    /// field's error line, as a Prompt's) and, with <paramref name="requireOne"/>, wait for one box to be checked (Save is
-    /// grayed and a hint says so); <paramref name="onSave"/> gets the text and each box's state.
+    /// FORMDIALOG1: a form (<see cref="DialogFormOptions"/>): a one-line field with its caption on the left, the check
+    /// boxes under their heading, and Save / Cancel. Save and Enter validate (the field's error line, as a Prompt's) and,
+    /// with <see cref="DialogFormOptions.RequireOne"/>, wait for one box to be checked (Save is grayed and a hint says so);
+    /// <paramref name="onSave"/> gets the text and every box's state. Throws for no box or more than ten.
     /// </summary>
     internal static UiDialog Form(
-        object owner, string pluginId, string footer,
-        string title, string caption, string initial, string placeholder, int maxLength,
-        string heading, IReadOnlyList<DialogCheck> checks, bool requireOne, string? noneHint,
-        Action<string, IReadOnlyList<bool>> onSave, Func<string, IReadOnlyList<bool>, string?>? validate,
-        string save, string cancel, Action? onCancel)
+        object owner, string pluginId, string footer, string title, DialogFormOptions options, Action<DialogFormResult> onSave)
     {
         if (onSave == null) throw new ArgumentNullException(nameof(onSave));
-        if (checks != null && checks.Count > DialogLayout.MaxListOptions)
-            throw new ArgumentException(
-                "At most " + DialogLayout.MaxListOptions + " check boxes; a longer list belongs on a page.", nameof(checks));
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        string? countProblem = DialogForm.CountProblem(options.Checks);
+        if (countProblem != null) throw new ArgumentException(countProblem, nameof(options));
+        string initial = options.Initial ?? "";
+        int maxLength = options.MaxLength > 0 ? options.MaxLength : 0;
         var content = new DialogContent
         {
             Shape = UiDialogShape.Prompt,
             Title = title ?? "",
-            InputCaption = caption ?? "",
-            MainCaption = string.IsNullOrWhiteSpace(save) ? "Save" : save,
+            InputCaption = options.Caption ?? "",
+            MainCaption = string.IsNullOrWhiteSpace(options.Save) ? "Save" : options.Save,
             MainTone = CellTone.Gold,
-            CancelCaption = string.IsNullOrWhiteSpace(cancel) ? "Cancel" : cancel,
-            InputInitial = maxLength > 0 && (initial ?? "").Length > maxLength ? initial!.Substring(0, maxLength) : initial ?? "",
-            InputPlaceholder = placeholder ?? "",
-            MaxLength = maxLength > 0 ? maxLength : 0,
-            Checks = DialogForm.Clean(checks),
-            ChecksHeading = heading ?? "",
-            ChecksRequireOne = requireOne,
-            ChecksHint = string.IsNullOrWhiteSpace(noneHint) ? DialogForm.DefaultNoneHint : noneHint!,
+            CancelCaption = string.IsNullOrWhiteSpace(options.Cancel) ? "Cancel" : options.Cancel,
+            InputInitial = maxLength > 0 && initial.Length > maxLength ? initial.Substring(0, maxLength) : initial,
+            InputPlaceholder = options.Placeholder ?? "",
+            MaxLength = maxLength,
+            Checks = DialogForm.Clean(options.Checks),
+            ChecksHeading = options.Heading ?? "",
+            ChecksRequireOne = options.RequireOne,
+            ChecksHint = string.IsNullOrWhiteSpace(options.NoneHint) ? DialogForm.DefaultNoneHint : options.NoneHint,
             Footer = footer,
         };
-        return Queue(owner, pluginId, content, "form").OnSave(onSave, validate).OnNo(onCancel);
+        return Queue(owner, pluginId, content, "form").OnSave(onSave, options.Validate).OnNo(options.OnCancel);
     }
 
     private static UiDialog Queue(object owner, string pluginId, DialogContent content, string kind)

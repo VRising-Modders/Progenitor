@@ -456,6 +456,39 @@ internal static class ChatTabForm
     internal const string NameRequired = "Enter a name.";
     internal const string NoneHint = "Turn on at least one channel.";
     internal const string SaveCaption = "Save";
+    internal const string TabGone = "This tab was closed. Cancel and open it again.";
+    internal const string RowFull = "The tab row is full: close a tab first.";
+
+    /// <summary>The form for <paramref name="tab"/>: its name in the field, a box per channel, one channel required.</summary>
+    internal static DialogFormOptions Options(ChatTab tab) => new()
+    {
+        Caption = NameCaption,
+        Initial = tab?.Name ?? "",
+        Placeholder = Placeholder,
+        MaxLength = ChatTab.MaxNameLength,
+        Heading = Heading,
+        Checks = Checks(tab?.Scope ?? ChatScope.None),
+        RequireOne = true,
+        NoneHint = NoneHint,
+        Save = SaveCaption,
+    };
+
+    /// <summary>
+    /// Why Save is refused for <paramref name="tab"/> in the row <paramref name="tabs"/>, shown under the field: the tab
+    /// was closed (or the tabs were read again) while its editor was open, a new tab no longer has a free place, or
+    /// <see cref="Problem"/>. Null: save.
+    /// </summary>
+    internal static string? Refusal(IReadOnlyList<ChatTab> tabs, ChatTab tab, bool isNew, string? name, IReadOnlyList<bool>? states)
+    {
+        if (!isNew)
+        {
+            bool there = false;
+            for (int i = 0; tabs != null && i < tabs.Count; i++) there |= ReferenceEquals(tabs[i], tab);
+            if (!there) return TabGone;
+        }
+        else if (tabs != null && tabs.Count >= ChatTab.MaxTabs) return RowFull;
+        return Problem(name, states);
+    }
 
     /// <summary>The dialog's title for a new tab or an existing one.</summary>
     internal static string Title(bool isNew) => isNew ? NewTitle : EditTitle;
@@ -465,7 +498,7 @@ internal static class ChatTabForm
     {
         var choices = ChatTabStrip.ScopeChoices;
         var checks = new DialogCheck[choices.Length];
-        for (int i = 0; i < choices.Length; i++) checks[i] = new DialogCheck(choices[i].Label, (scope & choices[i].Scope) != 0);
+        for (int i = 0; i < choices.Length; i++) checks[i] = new DialogCheck { Label = choices[i].Label, On = (scope & choices[i].Scope) != 0 };
         return checks;
     }
 

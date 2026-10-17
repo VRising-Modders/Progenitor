@@ -547,6 +547,7 @@ internal static class UiNav
         if (!string.Equals(surface.Key, _surface, StringComparison.Ordinal)) Enter(surface);
         SetFocus(target);
         Mark();
+        _steppedSurface = _surface;
         return true;
     }
 
@@ -563,8 +564,14 @@ internal static class UiNav
             return true;
         }
 
-        if (!_focus.IsEmpty && Within(command)) return true;
-        if (command is NavCommand.Up or NavCommand.Down or NavCommand.Left or NavCommand.Right && TrySteer(command)) return true;
+        bool direction = command is NavCommand.Up or NavCommand.Down or NavCommand.Left or NavCommand.Right;
+        if (!_focus.IsEmpty && Within(command))
+        {
+            if (direction) _steppedSurface = _surface;
+            return true;
+        }
+
+        if (direction && TrySteer(command)) return true;
 
         switch (command)
         {
@@ -572,7 +579,9 @@ internal static class UiNav
             case NavCommand.Down:
             case NavCommand.Left:
             case NavCommand.Right:
-                return Move(surface, command);
+                bool stepped = Move(surface, command);
+                if (stepped) _steppedSurface = _surface;
+                return stepped;
             case NavCommand.Submit:
                 return Submit(surface);
             case NavCommand.Cancel:
@@ -1163,6 +1172,32 @@ internal static class UiNav
 
         SetFocus(target);
         Mark();
+        _steppedSurface = _surface;
+        return true;
+    }
+
+    /// <summary>FORMDIALOG1: the surface on which the player last moved the focus themselves (a direction, Tab, the bridge's focus).</summary>
+    private static string _steppedSurface = "";
+
+    /// <summary>
+    /// FORMDIALOG1: Enter in a dialog presses the stop the player moved the keyboard focus to (Cancel cancels, a box
+    /// flips), instead of the dialog's main answer. Only a marked focus the player put on one of <paramref name="rows"/>
+    /// on this screen counts: the focus a dialog starts with (its dismissal) does not, so typing a name and pressing Enter
+    /// still saves. <paramref name="blockedPart"/> is a cell Enter must not press (a destructive main answer): then
+    /// nothing is pressed. True when the focus was on the rows (pressed or blocked), false to let the dialog answer.
+    /// </summary>
+    internal static bool PressFocusAmong(IReadOnlyList<IUiHandle> rows, string? blockedPart)
+    {
+        if (!_marked || _focus.IsEmpty || _focus.Handle.IsDisposed || rows == null) return false;
+        if (_surface.Length == 0 || !string.Equals(_steppedSurface, _surface, StringComparison.Ordinal)) return false;
+        bool mine = false;
+        foreach (var r in rows)
+            if (ReferenceEquals(r, _focus.Handle)) mine = true;
+        if (!mine || _focus.Handle is not UiCellRowHandle row) return false;
+        string part = _focus.Part;
+        if (!string.IsNullOrEmpty(blockedPart) && string.Equals(part, blockedPart, StringComparison.Ordinal)) return true;
+        if (part.Length == 0) row.TryInvokeRow(out _);
+        else row.TryInvokeCell(part, out _);
         return true;
     }
 
@@ -1305,6 +1340,7 @@ internal static class UiNav
         try { if (_marked) MarkOff(); } catch { /* */ }
         _focus = default;
         _surface = "";
+        _steppedSurface = "";
         _pane = 0;
         _marked = false;
         _active = false;

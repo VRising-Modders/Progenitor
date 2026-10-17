@@ -4,28 +4,109 @@ using System.Collections.Generic;
 namespace Progenitor.Ui;
 
 /// <summary>
-/// FORMDIALOG1: one check box of a form dialog (<see cref="PluginDialogs.Form"/>): its label and whether it starts
-/// checked. The dialog draws it as the game's Options checkbox with the label after it; a click anywhere on the line,
-/// or the controller's A on it, flips it.
+/// FORMDIALOG1: one check box of a form dialog (<see cref="DialogFormOptions.Checks"/>): its label, whether it starts
+/// checked, and an optional key the result is read by (<see cref="DialogFormResult.IsOn(string)"/>). The dialog draws it as
+/// the game's Options checkbox with the label after it; a click anywhere on the line, or Space, Enter or the
+/// controller's A on it, flips it.
 /// </summary>
-public readonly struct DialogCheck
+public sealed class DialogCheck
 {
-    public DialogCheck(string label, bool on)
-    {
-        Label = (label ?? "").Trim();
-        On = on;
-    }
+    private readonly string _label = "";
+    private readonly string _key = "";
 
-    /// <summary>The words after the box.</summary>
-    public string Label { get; }
+    /// <summary>The words after the box (trimmed).</summary>
+    public string Label { get => _label; init => _label = (value ?? "").Trim(); }
 
-    /// <summary>Checked.</summary>
-    public bool On { get; }
+    /// <summary>Checked when the dialog opens.</summary>
+    public bool On { get; init; }
 
-    /// <summary>The same check, checked or not.</summary>
-    public DialogCheck With(bool on) => new(Label, on);
+    /// <summary>A name for the box in <see cref="DialogFormResult.IsOn(string)"/> (trimmed); empty: its label is used.</summary>
+    public string Key { get => _key; init => _key = (value ?? "").Trim(); }
+
+    /// <summary>The same box, checked or not.</summary>
+    public DialogCheck With(bool on) => new() { Label = Label, On = on, Key = Key };
 
     public override string ToString() => (On ? "[x] " : "[ ] ") + Label;
+}
+
+/// <summary>
+/// FORMDIALOG1: what <see cref="PluginDialogs.Form"/> shows besides its title: the field, the check boxes, the buttons
+/// and the rules Save follows. Every member has a default; give at least one box in <see cref="Checks"/>.
+/// </summary>
+public sealed class DialogFormOptions
+{
+    /// <summary>The words left of the text field (<c>Name</c>); empty: the field alone, centered.</summary>
+    public string Caption { get; set; } = "";
+
+    /// <summary>The field's text when the dialog opens (cut to <see cref="MaxLength"/>).</summary>
+    public string Initial { get; set; } = "";
+
+    /// <summary>The field's hint while it is empty.</summary>
+    public string Placeholder { get; set; } = "";
+
+    /// <summary>The field's length cap; 0: none.</summary>
+    public int MaxLength { get; set; }
+
+    /// <summary>The small heading over the boxes (<c>Show messages from</c>); empty: none.</summary>
+    public string Heading { get; set; } = "";
+
+    /// <summary>One to ten boxes, in order.</summary>
+    public IReadOnlyList<DialogCheck> Checks { get; set; } = Array.Empty<DialogCheck>();
+
+    /// <summary>Save waits until at least one box is checked: grayed, with <see cref="NoneHint"/> under the boxes.</summary>
+    public bool RequireOne { get; set; }
+
+    /// <summary>The line under the boxes while none is checked and one must be; empty: <c>Turn on at least one.</c></summary>
+    public string NoneHint { get; set; } = "";
+
+    /// <summary>Run on Save and Enter: an error to show under the field (the dialog stays open), or null to accept.</summary>
+    public Func<DialogFormResult, string?>? Validate { get; set; }
+
+    /// <summary>The main button's caption.</summary>
+    public string Save { get; set; } = "Save";
+
+    /// <summary>The dismissal's caption.</summary>
+    public string Cancel { get; set; } = "Cancel";
+
+    /// <summary>Run on Cancel and Escape.</summary>
+    public Action? OnCancel { get; set; }
+
+    /// <summary>Whether the footer names this mod; null: <see cref="PluginDialogs.ShowModVersion"/>.</summary>
+    public bool? ShowModVersion { get; set; }
+}
+
+/// <summary>FORMDIALOG1: a form's answer: the text and each box's state, read by index or by key.</summary>
+public sealed class DialogFormResult
+{
+    private readonly DialogCheck[] _checks;
+
+    internal DialogFormResult(string text, IReadOnlyList<DialogCheck>? checks)
+    {
+        Text = text ?? "";
+        _checks = new DialogCheck[checks?.Count ?? 0];
+        for (int i = 0; i < _checks.Length; i++) _checks[i] = checks![i];
+    }
+
+    /// <summary>The field's text, as typed (not trimmed).</summary>
+    public string Text { get; }
+
+    /// <summary>How many boxes the form has.</summary>
+    public int Count => _checks.Length;
+
+    /// <summary>Box <paramref name="index"/> is checked; false out of range.</summary>
+    public bool IsOn(int index) => index >= 0 && index < _checks.Length && _checks[index].On;
+
+    /// <summary>The box whose <see cref="DialogCheck.Key"/> (or, without one, label) is <paramref name="key"/>, ignoring case, is checked; false when none is.</summary>
+    public bool IsOn(string key)
+    {
+        string want = (key ?? "").Trim();
+        foreach (var c in _checks)
+            if (string.Equals(c.Key.Length > 0 ? c.Key : c.Label, want, StringComparison.OrdinalIgnoreCase)) return c.On;
+        return false;
+    }
+
+    /// <summary>Every box's state, in order.</summary>
+    public IReadOnlyList<bool> States => DialogForm.States(_checks);
 }
 
 /// <summary>
@@ -97,14 +178,23 @@ internal static class DialogForm
         return copy;
     }
 
-    /// <summary>Labels trimmed; an unlabeled check is kept (its index still counts) and drawn blank.</summary>
+    /// <summary>
+    /// A copy the caller cannot change under the dialog; a null entry is an unchecked box with no label (its index still
+    /// counts) and an unlabeled box is drawn blank.
+    /// </summary>
     internal static IReadOnlyList<DialogCheck> Clean(IReadOnlyList<DialogCheck>? checks)
     {
         if (checks == null || checks.Count == 0) return Array.Empty<DialogCheck>();
         var copy = new DialogCheck[checks.Count];
-        for (int i = 0; i < checks.Count; i++) copy[i] = new DialogCheck(checks[i].Label, checks[i].On);
+        for (int i = 0; i < checks.Count; i++) copy[i] = checks[i] ?? new DialogCheck();
         return copy;
     }
+
+    /// <summary>Why a form cannot be opened with <paramref name="checks"/> (none, or more than ten), or null.</summary>
+    internal static string? CountProblem(IReadOnlyList<DialogCheck>? checks) =>
+        checks == null || checks.Count == 0 ? "At least one check box is required."
+        : checks.Count > DialogLayout.MaxListOptions ? "At most " + DialogLayout.MaxListOptions + " check boxes; a longer list belongs on a page."
+        : null;
 
     /// <summary>The field caption's column: its estimated width with the facts' slack and pad, at least the facts' floor.</summary>
     internal static float CaptionWidth(string? caption, float rowWidth = DialogLayout.RowWidth)

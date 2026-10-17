@@ -1112,14 +1112,15 @@ internal static class ChatTabs
     /// </summary>
     private static UiDialog OpenTabForm(ChatTab tab, bool isNew)
     {
+        // A tab closed (or the tabs read again) while its editor is open, or a full row for a new one, is refused under
+        // the field (ChatTabForm.Refusal) rather than dropped silently; Save checks again in case the row changed since.
+        var options = ChatTabForm.Options(tab);
+        options.Validate = r => ChatTabForm.Refusal(Set.Tabs, tab, isNew, r.Text, r.States);
         return UiDialogs.Form(typeof(ChatTabs), SettingsPanel.PluginId, Progenitor.Ui.Ui.FrameworkFooter,
-            ChatTabForm.Title(isNew), ChatTabForm.NameCaption, tab.Name, ChatTabForm.Placeholder, ChatTab.MaxNameLength,
-            ChatTabForm.Heading, ChatTabForm.Checks(tab.Scope), requireOne: true, ChatTabForm.NoneHint,
-            (name, states) =>
+            ChatTabForm.Title(isNew), options, r =>
             {
-                if (!isNew && !Set.Tabs.Contains(tab)) return;
-                if (isNew && Set.Tabs.Count >= ChatTab.MaxTabs) return;
-                if (!ChatTabForm.Apply(tab, name, states)) return;
+                if (ChatTabForm.Refusal(Set.Tabs, tab, isNew, r.Text, r.States) != null) return;
+                if (!ChatTabForm.Apply(tab, r.Text, r.States)) return;
                 if (isNew)
                 {
                     Set.Tabs.Add(tab);
@@ -1127,8 +1128,7 @@ internal static class ChatTabs
                 }
 
                 SaveTabs();
-            },
-            ChatTabForm.Problem, ChatTabForm.SaveCaption, "Cancel", null);
+            });
     }
 
     /// <summary>

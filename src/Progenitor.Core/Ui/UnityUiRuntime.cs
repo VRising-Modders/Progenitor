@@ -5148,12 +5148,14 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
 
         // FORMDIALOG1: in an open dialog, Tab and Shift+Tab walk its one-line field, its check boxes and its buttons, and
         // Down leaves the one-line field for the first of them (Up from the first comes back: UiNav). Not while a field
-        // outside the dialog has the keyboard (the game's chat), nor in a multi-line field, where the keys are the text's.
+        // outside the dialog has the keyboard (the game's chat), nor in a multi-line field, where the keys are the text's,
+        // nor while an input method composes text in the field (its candidate list takes Tab and Down). The edges were
+        // sampled for this frame already (SampleTypeEdges); these reads return them.
         if (UiDialog.Current is { IsOpen: true } && !TypingOutsideDialog(field) && !(field != null && IsMultiline(field)))
         {
             bool tabEdge = TypeKeyDown(keyboard, UiKey.Tab, frame);
             bool downEdge = field != null && TypeKeyDown(keyboard, UiKey.DownArrow, frame);
-            if (tabEdge || downEdge)
+            if ((tabEdge || downEdge) && !(field != null && ImeComposing()))
             {
                 bool back = tabEdge && (KeyHeld(keyboard, Key.LeftShift) || KeyHeld(keyboard, Key.RightShift));
                 try { UiNav.TabStep(back ? -1 : 1, fromField: field != null); }
@@ -5475,7 +5477,31 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
     {
         for (int i = 0; i < TypedSampleKeys.Length; i++)
             TypeKeyDown(keyboard, TypedSampleKeys[i], frame);
+        // FORMDIALOG1: the dialog walk's keys are sampled every frame too (real and synthetic), never dispatched here, so
+        // a press is an edge whether or not a dialog was open on the frames before it.
+        for (int i = 0; i < DialogWalkKeys.Length; i++)
+            TypeKeyDown(keyboard, DialogWalkKeys[i], frame);
     }
+
+    /// <summary>FORMDIALOG1: Tab and Down, read by the dialog walk in <see cref="PumpTypedKeys"/>.</summary>
+    private static readonly UiKey[] DialogWalkKeys = { UiKey.Tab, UiKey.DownArrow };
+
+    /// <summary>
+    /// FORMDIALOG1: an input method is composing text (a candidate string is open), so Tab and Down belong to it, not to
+    /// the dialog walk. Read from the text composition string, not a key; a runtime where it cannot be read reads as none.
+    /// </summary>
+    private static bool ImeComposing()
+    {
+        if (_imeUnreadable) return false;
+        try { return !string.IsNullOrEmpty(UnityEngine.Input.compositionString); }
+        catch
+        {
+            _imeUnreadable = true;
+            return false;
+        }
+    }
+
+    private static bool _imeUnreadable;
 
     private static bool TypeKeyDown(Keyboard? keyboard, UiKey ui, int frame)
     {
@@ -16374,7 +16400,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     }
                     cell.Go = go;
                     // The art arrives on idle frames: until it does the kit's box is drawn, and the paint is tried again.
-                    if (!PaintCheck(cell)) RetrySkinLater(go, () => PaintCheck(cell));
+                    if (!CheckSkinDone(cell)) RetrySkinLater(go, () => CheckSkinDone(cell));
                     break;
                 }
                 case CellKind.ScrollText:
@@ -17009,6 +17035,15 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         /// kit's framed box and a filled square), the mark shown while the text is <see cref="CellLayout.CheckOn"/>, the
         /// whole box half-transparent in the disabled tone. True when the game's art drew (no retry needed).
         /// </summary>
+        /// <summary>
+        /// FORMDIALOG1: paint the check cell, and whether a retry is still worth it: done when the game's art drew, or when
+        /// the art's source is final (the kit's look, or nothing found once the world's preparation is over).
+        /// </summary>
+        private static bool CheckSkinDone(Cell cell) =>
+            PaintCheck(cell)
+            || (GameArt.SettingsArtDonors.PartFinal(GameArt.SettingsArtPart.CheckboxFrame)
+                && GameArt.SettingsArtDonors.PartFinal(GameArt.SettingsArtPart.CheckboxMark));
+
         private static bool PaintCheck(Cell cell)
         {
             bool on = string.Equals(cell.Spec.Text, CellLayout.CheckOn, StringComparison.Ordinal);
@@ -18014,7 +18049,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 case CellKind.Switch: PaintSwitch(cell); break;
                 case CellKind.Diamond: PaintDiamond(cell); break;
                 case CellKind.Check:
-                    if (!PaintCheck(cell) && cell.Go != null) RetrySkinLater(cell.Go, () => PaintCheck(cell));
+                    if (!CheckSkinDone(cell) && cell.Go != null) RetrySkinLater(cell.Go, () => CheckSkinDone(cell));
                     break;
                 case CellKind.Button: PaintButton(cell); break;
                 case CellKind.Image: break;

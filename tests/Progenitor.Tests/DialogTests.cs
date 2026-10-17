@@ -414,10 +414,21 @@ public sealed class DialogTests : IDisposable
 
     // ---- Form (FORMDIALOG1) --------------------------------------------------------------------
 
-    private UiDialog Form(Action<string, IReadOnlyList<bool>> onSave, bool blood = true, bool gems = false, Func<string, IReadOnlyList<bool>, string?>? validate = null) =>
-        UiDialogs.Form(_owner, Guid, Plain, "Edit stall", "Name", "Night market", "stall", 24, "Show stalls for",
-            new[] { new DialogCheck("Blood", blood), new DialogCheck(" Weapons ", false), new DialogCheck("Gems", gems) },
-            requireOne: true, "Turn on at least one stall.", onSave, validate, "Save", "Cancel", null);
+    private static DialogCheck Check(string label, bool on, string key = "") => new() { Label = label, On = on, Key = key };
+
+    private UiDialog Form(Action<DialogFormResult> onSave, bool blood = true, bool gems = false, Func<DialogFormResult, string?>? validate = null) =>
+        UiDialogs.Form(_owner, Guid, Plain, "Edit stall", new DialogFormOptions
+        {
+            Caption = "Name",
+            Initial = "Night market",
+            Placeholder = "stall",
+            MaxLength = 24,
+            Heading = "Show stalls for",
+            Checks = new[] { Check("Blood", blood), Check(" Weapons ", false, "arms"), Check("Gems", gems) },
+            RequireOne = true,
+            NoneHint = "Turn on at least one stall.",
+            Validate = validate,
+        }, onSave);
 
     private static void ClickRow(IUiCellRow row) =>
         UiSlotTable.BootstrapDispatch(((UiHandle)row).WidgetId, (byte)UiSlotKind.Click, 0f, false, null);
@@ -431,7 +442,7 @@ public sealed class DialogTests : IDisposable
     [Fact]
     public void A_form_is_one_dialog_with_the_field_the_boxes_and_a_Save_set_apart()
     {
-        var form = Form((_, _) => { });
+        var form = Form(_ => { });
         var view = form.View!;
         var field = view.Input!.Cells;
         Assert.Equal("Name", field.Single(c => c.Key == DialogForm.CellCaption).Text);
@@ -451,7 +462,7 @@ public sealed class DialogTests : IDisposable
         float Left(CellRowSpec spec, string key) => MenuPanelLayout.CellColumns(DialogLayout.RowWidth, spec).Single(p => p.Key == key).Left;
         float edge = Left(DialogForm.CaptionedFieldRowSpec("f", "Name", new CellSpec(CellKind.Input, "field")), DialogForm.CellCaption);
         Assert.Equal(edge, Left(DialogForm.HeadingRowSpec("Show stalls for"), DialogForm.CellHeading), 1);
-        Assert.Equal(edge, Left(DialogForm.CheckRowSpec(0, new DialogCheck("Blood", true)), DialogForm.CellCheck), 1);
+        Assert.Equal(edge, Left(DialogForm.CheckRowSpec(0, Check("Blood", true)), DialogForm.CellCheck), 1);
 
         // Order on the panel: field, error, heading, boxes, hint, then the buttons.
         var keys = view.Rows.Select(r => r is IUiCellRow c ? c.Key : "").Where(k => k.Length > 0).ToList();
@@ -473,7 +484,7 @@ public sealed class DialogTests : IDisposable
     public void A_form_flips_boxes_by_their_line_and_waits_for_one_checked()
     {
         int saves = 0;
-        var form = Form((_, _) => saves++);
+        var form = Form(_ => saves++);
         var view = form.View!;
         CellTone SaveTone() => view.Buttons!.Cells.Single(c => c.Key == UiDialogs.CellMain).Tone;
 
@@ -503,8 +514,9 @@ public sealed class DialogTests : IDisposable
     {
         string? name = null;
         bool[]? states = null;
-        var form = Form((n, s) => { name = n; states = s.ToArray(); },
-            validate: (n, s) => n.Trim().Length == 0 ? "Enter a name." : s.Count != 3 ? "three boxes" : null);
+        bool armsByKey = false, gemsByLabel = true;
+        var form = Form(r => { name = r.Text; states = r.States.ToArray(); armsByKey = r.IsOn("ARMS"); gemsByLabel = r.IsOn("gems"); },
+            validate: r => r.Text.Trim().Length == 0 ? "Enter a name." : r.Count != 3 ? "three boxes" : null);
         _runtime.Type(UiDialogs.InputRow, UiDialogs.CellField, "  ");
         Assert.True(_runtime.Click(UiDialogs.ButtonsRow, UiDialogs.CellMain));
         Assert.True(form.IsOpen);
@@ -520,6 +532,61 @@ public sealed class DialogTests : IDisposable
         Assert.Null(UiDialog.Current);
         Assert.Equal("Trade", name);
         Assert.Equal(new[] { true, true, false }, states);
+        Assert.True(armsByKey);
+        Assert.False(gemsByLabel);
+    }
+
+    /// <summary>
+    /// Enter presses the stop the player moved the keyboard focus to: on Cancel it cancels, on a box it flips the box and
+    /// the dialog stays. The focus the dialog starts with (Cancel) does not take Enter: typing a name and pressing Enter
+    /// saves. A destructive confirmation's main answer is not pressed by Enter even when focused.
+    /// </summary>
+    [Fact]
+    public void Enter_presses_the_focused_stop_and_otherwise_saves()
+    {
+        UiNav.Reset();
+        try
+        {
+            int saves = 0, cancels = 0;
+            var form = UiDialogs.Form(_owner, Guid, Plain, "Edit stall", new DialogFormOptions
+            {
+                Caption = "Name", Initial = "Night market", Checks = new[] { Check("Blood", true), Check("Gems", false) },
+                OnCancel = () => cancels++,
+            }, _ => saves++);
+            Later();
+            Assert.True(UiNav.FocusOn((UiHandle)form.View!.CheckRows[1], ""));
+            Assert.True(UiDialog.NotifyEnter());
+            Assert.True(form.IsOpen);
+            Assert.True(form.Content.Checks[1].On);
+            Assert.Equal(0, saves);
+
+            Assert.True(UiNav.FocusOn((UiHandle)form.View.Buttons!, UiDialogs.CellCancel));
+            Assert.True(UiDialog.NotifyEnter());
+            Assert.Null(UiDialog.Current);
+            Assert.Equal((0, 1), (saves, cancels));
+
+            // A fresh dialog: its starting focus (Cancel) was not chosen by the player, so Enter saves.
+            UiNav.Reset();
+            UiDialogs.Form(_owner, Guid, Plain, "Edit stall", new DialogFormOptions
+            {
+                Caption = "Name", Initial = "Night market", Checks = new[] { Check("Blood", true) },
+            }, _ => saves++);
+            Later();
+            UiNav.Execute(NavCommand.Down); // the first press only shows the marker where the dialog put it
+            Assert.True(UiDialog.NotifyEnter());
+            Assert.Equal(1, saves);
+
+            // Danger: Enter on the focused main answer presses nothing.
+            UiNav.Reset();
+            int yes = 0;
+            var danger = Confirm(yes: () => yes++, danger: true);
+            Later();
+            Assert.True(UiNav.FocusOn((UiHandle)danger.View!.Buttons!, UiDialogs.CellMain));
+            UiDialog.NotifyEnter();
+            Assert.True(danger.IsOpen);
+            Assert.Equal(0, yes);
+        }
+        finally { UiNav.Reset(); }
     }
 
     /// <summary>
@@ -529,7 +596,7 @@ public sealed class DialogTests : IDisposable
     [Fact]
     public void A_form_box_answers_the_bridge_by_label_and_survives_a_framework_dialog()
     {
-        var form = Form((_, _) => { });
+        var form = Form(_ => { });
         Assert.True(form.TryClickForBridge("weapons", out var detail));
         Assert.Equal(DialogForm.CheckRow(1), detail["label"]);
         Assert.True(form.Content.Checks[1].On);
@@ -545,12 +612,13 @@ public sealed class DialogTests : IDisposable
     [Fact]
     public void A_form_needs_one_to_ten_boxes()
     {
-        var eleven = Enumerable.Range(0, 11).Select(i => new DialogCheck("Box " + i, false)).ToArray();
-        Assert.Throws<ArgumentException>(() => UiDialogs.Form(_owner, Guid, Plain, "T", "Name", "", "", 0, "", eleven, false, null,
-            (_, _) => { }, null, "Save", "Cancel", null));
-        Assert.Equal("[x] Blood", new DialogCheck(" Blood ", true).ToString());
-        Assert.False(DialogForm.Satisfied(new[] { new DialogCheck("a", false) }, requireOne: true));
-        Assert.True(DialogForm.Satisfied(new[] { new DialogCheck("a", false) }, requireOne: false));
+        var eleven = Enumerable.Range(0, 11).Select(i => Check("Box " + i, false)).ToArray();
+        Assert.Throws<ArgumentException>(() => UiDialogs.Form(_owner, Guid, Plain, "T", new DialogFormOptions { Checks = eleven }, _ => { }));
+        Assert.Throws<ArgumentException>(() => UiDialogs.Form(_owner, Guid, Plain, "T", new DialogFormOptions(), _ => { }));
+        Assert.Null(DialogForm.CountProblem(new[] { Check("a", false) }));
+        Assert.Equal("[x] Blood", Check(" Blood ", true).ToString());
+        Assert.False(DialogForm.Satisfied(new[] { Check("a", false) }, requireOne: true));
+        Assert.True(DialogForm.Satisfied(new[] { Check("a", false) }, requireOne: false));
         Assert.True(DialogForm.Satisfied(Array.Empty<DialogCheck>(), requireOne: true));
     }
 

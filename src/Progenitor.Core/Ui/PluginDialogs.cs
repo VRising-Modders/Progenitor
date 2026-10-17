@@ -122,27 +122,22 @@ public sealed class PluginDialogs
     }
 
     /// <summary>
-    /// FORMDIALOG1: a small form: a one-line text field with <paramref name="caption"/> on its left, then
-    /// <paramref name="checks"/> as the game's checkboxes under the <paramref name="heading"/>, then
-    /// <paramref name="cancel"/> (left) and <paramref name="save"/> (right). A click anywhere on a box's line flips it.
-    /// <paramref name="save"/> and Enter validate: <paramref name="validate"/> gets the text and every box's state and
-    /// returns an error to show under the field (the dialog stays open) or null to accept; with
-    /// <paramref name="requireOne"/> Save is grayed while no box is checked and <paramref name="noneHint"/> (default
-    /// <c>Turn on at least one.</c>) shows under the boxes. <paramref name="onSave"/> gets the text and each box's state,
-    /// in the order given; <paramref name="cancel"/> and Escape run <paramref name="onCancel"/>. One to ten boxes.
+    /// FORMDIALOG1: a small form: a one-line text field with <see cref="DialogFormOptions.Caption"/> on its left, then
+    /// <see cref="DialogFormOptions.Checks"/> as the game's checkboxes under <see cref="DialogFormOptions.Heading"/>, then
+    /// Cancel (left) and Save (right). A click anywhere on a box's line flips it. Save validates
+    /// (<see cref="DialogFormOptions.Validate"/>: an error under the field, or null), and Enter does too unless the
+    /// keyboard focus is on a box or a button, which Enter then presses. With <see cref="DialogFormOptions.RequireOne"/>
+    /// Save is grayed while no box is checked. <paramref name="onSave"/> gets the text and each box's state; Cancel and
+    /// Escape run <see cref="DialogFormOptions.OnCancel"/>. One to ten boxes, or <see cref="ArgumentException"/>.
     /// </summary>
-    public IDisposable Form(
-        string title, string caption, string initial, string heading, IReadOnlyList<DialogCheck> checks,
-        Action<string, IReadOnlyList<bool>> onSave, Func<string, IReadOnlyList<bool>, string?>? validate = null,
-        bool requireOne = false, string noneHint = "", string placeholder = "", int maxLength = 0,
-        string save = "Save", string cancel = "Cancel", Action? onCancel = null, bool? showModVersion = null)
+    public IDisposable Form(string title, DialogFormOptions options, Action<DialogFormResult> onSave)
     {
         if (onSave == null) throw new ArgumentNullException(nameof(onSave));
-        if (checks == null || checks.Count == 0) throw new ArgumentException("At least one check box is required.", nameof(checks));
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        string? countProblem = DialogForm.CountProblem(options.Checks);
+        if (countProblem != null) throw new ArgumentException(countProblem, nameof(options));
         if (ServerSide()) return Noop.Instance;
-        return UiDialogs.Form(
-            _ctx.Owner, _ctx.Guid, Footer(showModVersion), title, caption, initial, placeholder, maxLength,
-            heading, checks, requireOne, noneHint, onSave, validate, save, cancel, onCancel);
+        return UiDialogs.Form(_ctx.Owner, _ctx.Guid, Footer(options.ShowModVersion), title, options, onSave);
     }
 
     private string Footer(bool? showModVersion) =>

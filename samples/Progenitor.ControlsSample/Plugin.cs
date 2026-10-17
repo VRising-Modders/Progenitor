@@ -230,11 +230,23 @@ internal static class ControlsDialogs
                     maxLength: 40, onCancel: () => Say("cancel"));
                 break;
             case "Form":
-                ctx.Dialogs.Form("Form dialog", "Name", "Night market", "Show stalls for",
-                    new[] { new DialogCheck("Blood", true), new DialogCheck("Weapons", false), new DialogCheck("Gems", true) },
-                    (name, on) => Say("\"" + name + "\" " + string.Join(",", on)),
-                    validate: (name, _) => (name ?? "").Trim().Length == 0 ? "Enter a name." : null,
-                    requireOne: true, noneHint: "Turn on at least one stall.", maxLength: 24, onCancel: () => Say("cancel"));
+                ctx.Dialogs.Form("Form dialog", new DialogFormOptions
+                {
+                    Caption = "Name",
+                    Initial = "Night market",
+                    MaxLength = 24,
+                    Heading = "Show stalls for",
+                    Checks = new[]
+                    {
+                        new DialogCheck { Label = "Blood", On = true, Key = "blood" },
+                        new DialogCheck { Label = "Weapons", Key = "weapons" },
+                        new DialogCheck { Label = "Gems", On = true, Key = "gems" },
+                    },
+                    RequireOne = true,
+                    NoneHint = "Turn on at least one stall.",
+                    Validate = r => r.Text.Trim().Length == 0 ? "Enter a name." : null,
+                    OnCancel = () => Say("cancel"),
+                }, r => Say("\"" + r.Text + "\" blood=" + r.IsOn("blood") + " weapons=" + r.IsOn("weapons") + " gems=" + r.IsOn(2)));
                 break;
             default:
                 Say("unknown kind");
