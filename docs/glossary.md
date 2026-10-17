@@ -26,8 +26,8 @@ See [dev-loop.md](dev-loop.md), [bridge.md](bridge.md) and [modules.md → Hot r
 
 `BepInEx/progenitor-reload/`. The folder both reloaders scan; a `*.dll` that settles there is loaded
 into its own collectible ALC and unloaded again when the file changes or disappears. This — not
-`BepInEx/plugins/` — is where a Progenitor plugin goes. `BepInEx/plugins/` holds
-`Progenitor.Bootstrap.dll` only, and `BepInEx/progenitor-core/` holds `Progenitor.dll`.
+`BepInEx/plugins/` — is where a Progenitor plugin goes. Progenitor itself is one folder,
+`BepInEx/plugins/Progenitor/`: `Progenitor.Bootstrap.dll`, and Core as `progenitor-core/Progenitor.core`.
 
 ### allowlist
 

@@ -102,7 +102,7 @@ public sealed class ServerInstallMenuTests : IDisposable
         Assert.Equal("true", on.GetProperty("value").GetString());
         MainThread.Drain();
         Assert.True(File.Exists(ServerInstallLedger.PathFor(_server)));
-        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
+        Assert.True(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
         toggle = Row(ConfigurationPane.ServerInstallToggle);
         Assert.Equal("true", toggle.GetProperty("value").GetString());
         Assert.Equal("installed", toggle.GetProperty("serverInstall").GetProperty("state").GetString());
@@ -146,8 +146,8 @@ public sealed class ServerInstallMenuTests : IDisposable
         Assert.Equal("not-installed", toggle.GetProperty("serverInstall").GetProperty("state").GetString());
         Assert.False(toggle.GetProperty("serverInstall").GetProperty("promptOpen").GetBoolean());
         Assert.False(File.Exists(ServerInstallLedger.PathFor(_server)));
-        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor.Bootstrap.dll")));
-        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-core")));
+        Assert.False(File.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "Progenitor.Bootstrap.dll")));
+        Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "plugins", "Progenitor", "progenitor-core")));
         Assert.False(Directory.Exists(Path.Combine(_server, "BepInEx", "progenitor-pending")));
         Assert.Equal("not Progenitor's bytes", File.ReadAllText(reloadFile));
         // Revert: an instance-held prompt flag fails the heading Row after the first off click

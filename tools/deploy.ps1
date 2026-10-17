@@ -5,16 +5,31 @@
 .DESCRIPTION
   Copies built DLLs to the client and test-server BepInEx trees.
 
-  - Progenitor.Bootstrap.dll -> BepInEx/plugins (chainloader; restart)
-  - Progenitor.Preloader.dll -> BepInEx/patchers (preloader patcher; only while the process is
-                                stopped, picked up at the next start; not in the default -Projects)
-  - Progenitor.dll           -> BepInEx/progenitor-core (loaded by Bootstrap; in-process watch swap)
-  - address tables           -> BepInEx/progenitor-core/addresslib (read by Bootstrap before Core loads)
+  The single-folder layout: everything Progenitor itself ships lives in BepInEx/plugins/Progenitor
+  (<home> below), exactly as a player's install does.
+
+  - Progenitor.Bootstrap.dll -> <home>/Progenitor.Bootstrap.dll (chainloader; restart)
+  - Progenitor.Preloader.dll -> <home>/Progenitor.Preloader.patcher (always; Bootstrap copies it to
+                                BepInEx/patchers at its next start when that copy is older) and,
+                                while the process is stopped, BepInEx/patchers directly so the next
+                                start already runs it; not in the default -Projects
+  - Progenitor.dll           -> <home>/progenitor-core/Progenitor.core (loaded by Bootstrap from
+                                bytes; in-process watch swap; never a .dll under plugins)
+  - address tables           -> <home>/progenitor-core/addresslib (read by Bootstrap before Core loads)
   - everything else          -> BepInEx/progenitor-reload (live)
 
   If the target process is running, Bootstrap is staged as Progenitor.Bootstrap.dll.next
-  (promoted on quit). Core is staged as BepInEx/progenitor-core/Progenitor.dll.next;
-  Bootstrap watches that file and swaps generations in-process (docs/dev-loop.md).
+  (promoted on quit). Core is staged as <home>/progenitor-core/Progenitor.core.next;
+  Bootstrap watches that file and swaps generations in-process (docs/dev-loop.md). A file that is
+  not there yet (the first deploy into a tree) is written in place, never staged: nothing would
+  promote a .next beside a missing file.
+
+  THE THREE-LOCATION LAYOUT (BepInEx/plugins/Progenitor.Bootstrap.dll, BepInEx/progenitor-core).
+  A stopped side has the old Bootstrap and the old Core images (Progenitor.dll, .next, .prev)
+  removed once the single-folder copies are in place. A running side has the old Bootstrap renamed
+  to Progenitor.Bootstrap.dll.removed (a loaded file can be renamed, not deleted) so the next start
+  runs the new one; its plugins are withheld, because the running process still loads Core from the
+  old folder and no swap can follow. Restart that side.
 
   DEPLOY ORDERING (roadmap M2.13, jobs FDEP1 and FDEP2, evidence 202 and 219). When this run
   stages a new Core against a RUNNING process, the plugin DLLs are HELD until that swap has
@@ -606,13 +621,84 @@ function Remove-StaleChainloaderCore([string]$pluginsDir, [string]$sideName, [bo
 function Copy-RestartOnly([string]$src, [string]$dest, [string]$sideName, [string]$procName, [bool]$running, [string]$project) {
   $destDir = Split-Path $dest -Parent
   Invoke-DeployNewDir $destDir
-  if ($running) {
+  # A .next is only promoted beside a live file; the first copy into a tree is written in place.
+  if ($running -and (Test-Path -LiteralPath $dest)) {
     Invoke-DeployCopy $src "$dest.next" $sideName $project "staged (.next; $procName is running)"
     if (-not $plan) { Write-Host "[$sideName] $(Split-Path $src -Leaf) staged as .next ($procName is running)" }
   } else {
     if (Test-Path "$dest.next") { Invoke-DeployRemove "$dest.next" }
     Invoke-DeployCopy $src $dest $sideName $project "$procName not running"
     if (-not $plan) { Write-Host "[$sideName] $(Split-Path $src -Leaf) deployed" }
+  }
+}
+
+function Copy-ShippedPreloader([string]$src, [string]$homeDir, [string]$sideName, [string]$project) {
+  # The copy a player's install ships: beside Bootstrap, under a name no BepInEx scan loads. Nothing
+  # holds it, so it is always written; Bootstrap places it in BepInEx/patchers at its next start.
+  Invoke-DeployNewDir $homeDir
+  Invoke-DeployCopy $src (Join-Path $homeDir "Progenitor.Preloader.patcher") $sideName $project "shipped preloader"
+  if (-not $plan) { Write-Host "[$sideName] $(Split-Path $src -Leaf) -> plugins/Progenitor/Progenitor.Preloader.patcher" }
+}
+
+function Remove-LegacyLayout($t) {
+  <#
+    The three-location layout, once this tree has the single-folder copies: the plugins-root Bootstrap
+    and the BepInEx/progenitor-core Core images. A stopped side loses both. A running side has the old
+    Bootstrap renamed aside (the next start then runs the single-folder one) and the old Core left for
+    the running process; Bootstrap reports that folder as ignored from the next start on.
+  #>
+  $legacyBoot = Join-Path $t.Dir "Progenitor.Bootstrap.dll"
+  $legacyCoreDir = Join-Path (Split-Path $t.Dir -Parent) "progenitor-core"
+  $homeBoot = Join-Path $t.Home "Progenitor.Bootstrap.dll"
+  $homeCore = Join-Path $t.Core $t.CoreFile
+  if ((Test-Path -LiteralPath $homeBoot) -or $plan) {
+    foreach ($p in @($legacyBoot, "$legacyBoot.next", "$legacyBoot.prev")) {
+      if (-not (Test-Path -LiteralPath $p)) { continue }
+      if ($plan) { Write-Host "[plan][$($t.Name)] would remove the three-location $(Split-Path $p -Leaf) from plugins"; continue }
+      try {
+        if ($t.Running -and $p -eq $legacyBoot) {
+          $aside = "$p.removed"
+          if (Test-Path -LiteralPath $aside) { Remove-Item -LiteralPath $aside -Force }
+          Move-Item -LiteralPath $p -Destination $aside -Force
+          Write-Warning ("[$($t.Name)] renamed the running three-location Bootstrap to $(Split-Path $aside -Leaf); " +
+            "restart this side to run plugins/Progenitor/Progenitor.Bootstrap.dll")
+        } else {
+          Remove-Item -LiteralPath $p -Force
+          Write-Host "[$($t.Name)] removed the three-location $(Split-Path $p -Leaf) from plugins"
+        }
+      } catch {
+        Write-Warning "[$($t.Name)] could not remove the three-location $(Split-Path $p -Leaf): $_"
+      }
+    }
+  }
+  if ($t.Running) { return }
+  # The old Core goes only once nothing can load it any more (PR #48 review H1): the single-folder
+  # Bootstrap AND Core are in place and the plugins-root Bootstrap is gone. A Core-only deploy into a
+  # tree that still runs the three-location Bootstrap must leave that Bootstrap its Core.
+  $homeReady = (Test-Path -LiteralPath $homeBoot) -and (Test-Path -LiteralPath $homeCore)
+  $legacyBootLeft = (Test-Path -LiteralPath $legacyBoot) -and -not $plan
+  $legacyCoreLeft = @(@("Progenitor.dll", "Progenitor.dll.next", "Progenitor.dll.prev") |
+    Where-Object { Test-Path -LiteralPath (Join-Path $legacyCoreDir $_) }).Count -gt 0
+  if (-not $legacyCoreLeft) { return }
+  if (-not $homeReady -or $legacyBootLeft) {
+    if (-not $plan -and (Test-Path -LiteralPath $homeCore)) {
+      Write-Warning ("[$($t.Name)] kept the three-location BepInEx\progenitor-core: " +
+        $(if ($legacyBootLeft) { "plugins\Progenitor.Bootstrap.dll is still the Bootstrap this side starts" }
+          else { "there is no plugins\Progenitor\Progenitor.Bootstrap.dll yet" }) +
+        ". Deploy Progenitor.Bootstrap too (-Projects Progenitor.Bootstrap,Progenitor.Core) to move this side to the single-folder layout.")
+    }
+    return
+  }
+  foreach ($name in @("Progenitor.dll", "Progenitor.dll.next", "Progenitor.dll.prev")) {
+    $p = Join-Path $legacyCoreDir $name
+    if (-not (Test-Path -LiteralPath $p)) { continue }
+    if ($plan) { Write-Host "[plan][$($t.Name)] would remove the three-location progenitor-core\$name"; continue }
+    try {
+      Remove-Item -LiteralPath $p -Force
+      Write-Host "[$($t.Name)] removed the three-location progenitor-core\$name (Core lives in plugins/Progenitor/progenitor-core)"
+    } catch {
+      Write-Warning "[$($t.Name)] could not remove the three-location progenitor-core\${name}: $_"
+    }
   }
 }
 
@@ -677,6 +763,8 @@ function Get-CoreStatus([hashtable]$t, [int]$TimeoutSeconds = 0) {
     # IL2CPP types. Never unloaded in place; a coreBound one makes every Core swap refuse. Empty on
     # an older Bootstrap (the field is absent).
     ProcessLifetime = @()
+    # reload.layout.coreFile: the Core file the running Bootstrap resolved at start ("" when absent).
+    LayoutCoreFile = ""
     Error = ""
   }
   $call = Join-Path $PSScriptRoot "mcp\call.mjs"
@@ -743,6 +831,9 @@ function Get-CoreStatus([hashtable]$t, [int]$TimeoutSeconds = 0) {
       # ProcessHost at ping time). Absent on an older Bootstrap: false, and the deadline catches it.
       $status.HostingPrivateGame = [bool]$reload.watch.hostingPrivateGame
       $status.HostedChild = [bool]$reload.watch.hostedChild
+      # Single-folder install: where the RUNNING Bootstrap resolved Core (reload.layout.coreFile).
+      # Empty on a Bootstrap built before it, which is always the three-location layout.
+      if ($null -ne $reload.layout) { $status.LayoutCoreFile = [string]$reload.layout.coreFile }
       # The watcher's own clock, if this Bootstrap puts one on the wire (R69 finding 7): the moment
       # the park was taken, else the moment of the last watcher scan. Either answers the only
       # question the wait's park branch needs -- did the watcher look at the file AFTER we staged --
@@ -891,7 +982,7 @@ function Step-CoreSwapWait($s, [bool]$expired) {
   $nextGone = -not (Test-Path $s.NextFile)
 
   if ($nextGone) {
-    $fresh = @(Get-ChildItem -Path $t.Core -Filter "Progenitor.dll.failed-*" -ErrorAction SilentlyContinue |
+    $fresh = @(Get-ChildItem -Path $t.Core -Filter "$($t.CoreFile).failed-*" -ErrorAction SilentlyContinue |
       Where-Object { $s.FailedBefore -notcontains $_.Name })
     if ($fresh) {
       Complete-CoreSwapWait $s $false ("[$($s.Name)] the watcher QUARANTINED the staged Core as $($fresh[-1].Name) " +
@@ -1134,8 +1225,8 @@ function Wait-CoreSwaps([object[]]$sides, [datetime]$deadline) {
     $states += [pscustomobject]@{
       T = $t
       Name = $t.Name
-      NextFile = (Join-Path $t.Core "Progenitor.dll.next")
-      FailedBefore = @(Get-ChildItem -Path $t.Core -Filter "Progenitor.dll.failed-*" -ErrorAction SilentlyContinue |
+      NextFile = (Join-Path $t.Core "$($t.CoreFile).next")
+      FailedBefore = @(Get-ChildItem -Path $t.Core -Filter "$($t.CoreFile).failed-*" -ErrorAction SilentlyContinue |
         ForEach-Object { $_.Name })
       Started = $started
       LastPoll = [datetime]::MinValue
@@ -1293,9 +1384,11 @@ if ($Side -ne "server") {
   $targets += @{
     Name = "client"
     Dir = (Join-Path $GameDir "BepInEx\plugins")
+    Home = (Join-Path $GameDir "BepInEx\plugins\Progenitor")
     Patchers = (Join-Path $GameDir "BepInEx\patchers")
     Reload = (Join-Path $GameDir "BepInEx\progenitor-reload")
-    Core = (Join-Path $GameDir "BepInEx\progenitor-core")
+    Core = (Join-Path $GameDir "BepInEx\plugins\Progenitor\progenitor-core")
+    CoreFile = "Progenitor.core"
     Config = (Join-Path $GameDir "BepInEx\config")
     Proc = "VRising"
     Under = $GameDir
@@ -1305,9 +1398,11 @@ if ($Side -ne "client") {
   $targets += @{
     Name = "server"
     Dir = (Join-Path $TestRoot "server\BepInEx\plugins")
+    Home = (Join-Path $TestRoot "server\BepInEx\plugins\Progenitor")
     Patchers = (Join-Path $TestRoot "server\BepInEx\patchers")
     Reload = (Join-Path $TestRoot "server\BepInEx\progenitor-reload")
-    Core = (Join-Path $TestRoot "server\BepInEx\progenitor-core")
+    Core = (Join-Path $TestRoot "server\BepInEx\plugins\Progenitor\progenitor-core")
+    CoreFile = "Progenitor.core"
     Config = (Join-Path $TestRoot "server\BepInEx\config")
     Proc = "VRisingServer"
     Under = $TestRoot
@@ -1321,7 +1416,7 @@ if ($Side -ne "client") {
 # forward-slash, trailing-slash, \\?\, admin-share, 8.3 or junction spelling of the live tree
 # is refused too (R40 finding 4; the parameters themselves were fenced at the top of the file).
 foreach ($t in $targets) {
-  foreach ($root in @($t.Under, $t.Dir, $t.Patchers, $t.Reload, $t.Core, $t.Config)) {
+  foreach ($root in @($t.Under, $t.Dir, $t.Home, $t.Patchers, $t.Reload, $t.Core, $t.Config)) {
     Assert-NotLiveServerPath $root
   }
 }
@@ -1417,7 +1512,7 @@ foreach ($t in $targets) {
   # against, announced by a line that told them the opposite. So the built Core is compared
   # against the PENDING .next when one exists, and against the live copy otherwise.
   if ($stagesCore -and $t.Running -and $coreDll) {
-    $liveCore = Join-Path $t.Core "Progenitor.dll"
+    $liveCore = Join-Path $t.Core $t.CoreFile
     $nextCore = "$liveCore.next"
     $t.CoreUnchanged = Test-SameFileBytes $coreDll.FullName $liveCore
     $tag = "$(if ($plan) { '[plan]' })[$($t.Name)]"
@@ -1476,6 +1571,21 @@ foreach ($t in $targets) {
     }
     continue
   }
+  # THE THREE-LOCATION LAYOUT IS RUNNING. No single-folder Core is live in this tree yet, or an
+  # earlier deploy renamed the running three-location Bootstrap aside (the .removed marker stays until
+  # a single-folder Bootstrap starts and deletes it): the running process loaded Core from
+  # BepInEx/progenitor-core and its watcher looks there, so no swap can follow. Only a restart loads
+  # the single-folder Core, so the plugins built against it are withheld. The bridge's reload.layout
+  # (read below) catches the rest.
+  if (-not (Test-Path -LiteralPath (Join-Path $t.Core $t.CoreFile)) -or
+      (Test-Path -LiteralPath (Join-Path $t.Dir "Progenitor.Bootstrap.dll.removed"))) {
+    if (-not $plan) {
+      Write-Warning ("[$($t.Name)] $($t.Proc) is running the three-location layout (no plugins\Progenitor\progenitor-core\" +
+        "$($t.CoreFile) yet). The single-folder Core is written in place and loads at the next start; restart this side.")
+      $t.WithholdReason = "this side still runs the three-location layout; only a restart loads the single-folder Core"
+    }
+    continue
+  }
   # Nothing this run does will move the generation when the built Core equals the live one (the
   # watcher skips it): the plugins match the running Core, so they go in straight away.
   if ($t.CoreUnchanged) { continue }
@@ -1503,6 +1613,19 @@ foreach ($t in $targets) {
     Write-Warning ("[$($t.Name)] cannot read the Core generation from the bridge ($($before.Error)), so this run " +
       "cannot see whether or when the staged Core swaps.")
     $t.WithholdReason = "the bridge did not answer, so the Core swap cannot be observed"
+    continue
+  }
+  # The running Bootstrap watches the .next beside the Core IT resolved (PR #48 review M3). One that
+  # resolved another file (or predates reload.layout, so is three-location) never sees this run's
+  # stage: withhold now instead of waiting out the hold.
+  $wantCore = [System.IO.Path]::GetFullPath((Join-Path $t.Core $t.CoreFile))
+  $runningCore = ""
+  if ($before.LayoutCoreFile) { try { $runningCore = [System.IO.Path]::GetFullPath($before.LayoutCoreFile) } catch { $runningCore = "" } }
+  if (-not [string]::Equals($runningCore, $wantCore, [System.StringComparison]::OrdinalIgnoreCase)) {
+    Write-Warning ("[$($t.Name)] the running Bootstrap loads Core from " +
+      $(if ($runningCore) { $runningCore } else { "the three-location folder (it reports no reload.layout)" }) +
+      ", not $wantCore, so it will not see this run's staged Core. Restart this side.")
+    $t.WithholdReason = "the running Bootstrap resolved another Core folder; only a restart loads the single-folder Core"
     continue
   }
   if (-not $before.WatchEnabled) {
@@ -1592,7 +1715,7 @@ foreach ($entry in $resolvedProjects) {
     if (-not (Test-Path $t.Dir)) { continue }
 
     if ($dll.Name -eq "Progenitor.Bootstrap.dll") {
-      Copy-RestartOnly $dll.FullName (Join-Path $t.Dir $dll.Name) $t.Name $t.Proc $t.Running $proj
+      Copy-RestartOnly $dll.FullName (Join-Path $t.Home $dll.Name) $t.Name $t.Proc $t.Running $proj
       continue
     }
     if ($dll.Name -eq "Progenitor.Preloader.dll") {
@@ -1604,6 +1727,7 @@ foreach ($entry in $resolvedProjects) {
         Write-Warning "[client] a hosted VRisingServer.exe under $GameDir is running and shares BepInEx/patchers through a junction."
         $inUse = $true
       }
+      Copy-ShippedPreloader $dll.FullName $t.Home $t.Name $proj
       Copy-Preloader $dll.FullName $t.Patchers $t.Name $t.Proc $inUse $proj
       continue
     }
@@ -1617,13 +1741,18 @@ foreach ($entry in $resolvedProjects) {
       # The moment this run staged, so the wait can tell OUR swap from one that was already
       # running (R66 finding 3). Taken before the copy, so a slow copy cannot exclude our own swap.
       if ($t.Running -and -not $plan) { $t.StagedAtUtc = (Get-Date).ToUniversalTime() }
-      Copy-RestartOnly $dll.FullName (Join-Path $t.Core $dll.Name) $t.Name $t.Proc $t.Running $proj
+      Copy-RestartOnly $dll.FullName (Join-Path $t.Core $t.CoreFile) $t.Name $t.Proc $t.Running $proj
       continue
     }
 
     if ($t.HoldPlugins -or $t.WithholdReason) { $t.Deferred.Add(@{ Dll = $dll; Proj = $proj }) | Out-Null; continue }
     Copy-PluginToReload $t $dll $proj
   }
+}
+
+# The three-location layout, once the single-folder copies are in place (see the header).
+foreach ($t in $targets) {
+  if (Test-Path $t.Dir) { Remove-LegacyLayout $t }
 }
 
 # Sides the pre-check already decided cannot release their plugins (a hosted game, a refusal,

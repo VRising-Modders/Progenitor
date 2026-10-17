@@ -38,6 +38,21 @@ public sealed class Patcher : BasePatcher
     /// <inheritdoc />
     public override void Initialize()
     {
+        // Single-folder install: Bootstrap placed this copy; with Progenitor gone it does nothing and steps aside.
+        try
+        {
+            string bep = Paths.BepInExRootPath;
+            if (!string.IsNullOrEmpty(bep) && !ProgenitorPresence.BootstrapInstalled(bep))
+            {
+                string own = "";
+                try { own = typeof(Patcher).Assembly.Location ?? ""; }
+                catch { own = ""; }
+                Log.LogInfo(ProgenitorPresence.Retire(bep, own));
+                return;
+            }
+        }
+        catch { /* the game must start */ }
+
         // SUPPORT1: this session's copy of the log first, so a crashed session survives the next start.
         try { Log.LogInfo(SessionLogListener.Attach()); }
         catch { /* the game must start */ }

@@ -7,23 +7,31 @@
   when -IncludeDev) in Release, then assembles two zips from one staged tree:
 
     packaging/out/Progenitor-<version>.zip               the manual install: its only root
-                                                         entry is BepInEx/, so a player extracts
-                                                         it into the folder that holds VRising.exe
-                                                         (or VRisingServer.exe) in one step
+                                                         entry is BepInEx/plugins/Progenitor/, so a
+                                                         player extracts it into the folder that
+                                                         holds VRising.exe (or VRisingServer.exe),
+                                                         or copies the Progenitor folder into
+                                                         BepInEx/plugins, in one step
     packaging/out/Progenitor-<version>-thunderstore.zip  the Thunderstore package: the same
                                                          BepInEx/ tree plus manifest.json,
                                                          README.md, CHANGELOG.md, icon.png and
                                                          PROGENITOR_GUIDE.md at the root
 
-  Thunderstore metadata comes from packaging/thunderstore/. Both zips carry
+  Thunderstore metadata comes from packaging/thunderstore/. Both zips carry ONE folder, the
+  single-folder install:
 
-    BepInEx/plugins/Progenitor.Bootstrap.dll
-    BepInEx/patchers/Progenitor.Preloader.dll
-    BepInEx/progenitor-core/Progenitor.dll
+    BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll
+    BepInEx/plugins/Progenitor/Progenitor.Preloader.patcher
+    BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core
+    BepInEx/plugins/Progenitor/progenitor-core/addresslib/*.json
+    BepInEx/plugins/Progenitor/progenitor-core/docs/guide/progenitor-guide.html
 
-  The preloader patcher carries out the Mods menu's next-start plugin actions and keeps the
-  per-session logs (BepInEx/progenitor-logs) that Get help -> Collect logs bundles. All three
-  DLLs are asserted present in the finished zip.
+  Core is not a .dll and the preloader is not a .dll there, so no BepInEx scan or resolver loads
+  either from plugins/. Bootstrap copies the preloader to BepInEx/patchers/Progenitor.Preloader.dll
+  at its first start (it runs from the next one); the preloader carries out the Mods menu's
+  next-start plugin actions and keeps the per-session logs (BepInEx/progenitor-logs) that Get help
+  -> Collect logs bundles. The three images are asserted present, and nothing outside
+  BepInEx/plugins/Progenitor/ is allowed in the BepInEx tree of either zip.
 
   When -IncludeDev is passed, also includes
 
@@ -224,10 +232,9 @@ function Assert-NoInstallScripts {
 function New-GameFolderZip {
   <#
     The manual-install zip: one copy, extracted into the folder that holds VRising.exe (or
-    VRisingServer.exe). Its only root entry is BepInEx/, taken from the staged tree, so the
-    extract lands every file at the path the mod-manager package already uses
-    (BepInEx/plugins, BepInEx/patchers, BepInEx/progenitor-core) and nothing else lands in the
-    game folder. No code reads it differently: it is the same files at the same paths.
+    VRisingServer.exe). Its only root entry is BepInEx/, taken from the staged tree, and everything
+    in it is under BepInEx/plugins/Progenitor/, so the extract lands one folder and nothing else
+    lands in the game folder. Copying that folder into BepInEx/plugins by hand is the same install.
 
     Entries are written one by one with '/' separators (Windows PowerShell's CreateFromDirectory
     writes '\', which some extractors turn into file names). The finished zip is then asserted:
@@ -265,6 +272,10 @@ function New-GameFolderZip {
       throw "packaging assertion failed: the game-folder zip has entries outside BepInEx/: $($outside -join ', ')"
     }
     Assert-NoInstallScripts -Names $names -Where $ZipPath
+    $stray = Get-OutsideHomeEntries -Names $names
+    if ($stray.Count -gt 0) {
+      throw "packaging assertion failed: the game-folder zip has BepInEx entries outside BepInEx/plugins/Progenitor/: $($stray -join ', ')"
+    }
     foreach ($entry in $Required) {
       if ($names -notcontains $entry) {
         throw "packaging assertion failed: the game-folder zip has no $entry"
@@ -273,6 +284,36 @@ function New-GameFolderZip {
   } finally {
     $check.Dispose()
   }
+}
+
+function Get-RequiredEntries {
+  # The single-folder install's three images; both zips must carry them at exactly these paths.
+  return @(
+    "BepInEx/plugins/Progenitor/Progenitor.Bootstrap.dll",
+    "BepInEx/plugins/Progenitor/Progenitor.Preloader.patcher",
+    "BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core"
+  )
+}
+
+function Get-OutsideHomeEntries {
+  <#
+    BepInEx/ entries (files, '/'-separated) that are not inside BepInEx/plugins/Progenitor/. The single-folder install
+    places nothing else; Bootstrap branches out to BepInEx/patchers by itself at start. Root files of the Thunderstore
+    zip (manifest.json, README.md, ...) are not BepInEx/ entries and are not reported. The Dev bridge in
+    BepInEx/progenitor-reload is allowed for an -IncludeDev package.
+  #>
+  param([string[]]$Names)
+  $bad = New-Object System.Collections.Generic.List[string]
+  foreach ($n in @($Names)) {
+    if (-not $n) { continue }
+    $p = $n.Replace('\', '/')
+    if ($p.EndsWith("/")) { continue }
+    if (-not $p.StartsWith("BepInEx/", [System.StringComparison]::Ordinal)) { continue }
+    if ($p.StartsWith("BepInEx/plugins/Progenitor/", [System.StringComparison]::Ordinal)) { continue }
+    if ($p.StartsWith("BepInEx/progenitor-reload/", [System.StringComparison]::Ordinal)) { continue }
+    $bad.Add($p)
+  }
+  return ,$bad.ToArray()
 }
 
 function Get-ProgenitorVersion {
@@ -397,16 +438,16 @@ if (Test-Path -LiteralPath $icon) {
   Write-Warning "icon.png is missing (see packaging/thunderstore/ICON.txt). Thunderstore will reject a zip without a 256x256 PNG."
 }
 
-$pluginsDir = Join-Path $stage "BepInEx\plugins"
-New-Item -ItemType Directory -Force -Path $pluginsDir | Out-Null
-Copy-Item -LiteralPath $bootstrapDll -Destination (Join-Path $pluginsDir "Progenitor.Bootstrap.dll") -Force
-# The preloader patcher; BepInEx loads BepInEx/patchers before the chainloader.
-$patchersDir = Join-Path $stage "BepInEx\patchers"
-New-Item -ItemType Directory -Force -Path $patchersDir | Out-Null
-Copy-Item -LiteralPath $preloaderDll -Destination (Join-Path $patchersDir "Progenitor.Preloader.dll") -Force
-$coreDir = Join-Path $stage "BepInEx\progenitor-core"
+# The single-folder install: everything under BepInEx/plugins/Progenitor (src/Progenitor.Core/SelfUpdate/InstallLayout.cs).
+$homeDir = Join-Path $stage "BepInEx\plugins\Progenitor"
+New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
+Copy-Item -LiteralPath $bootstrapDll -Destination (Join-Path $homeDir "Progenitor.Bootstrap.dll") -Force
+# The preloader patcher, under a name no scan loads; Bootstrap copies it to BepInEx/patchers at start.
+Copy-Item -LiteralPath $preloaderDll -Destination (Join-Path $homeDir "Progenitor.Preloader.patcher") -Force
+# Core, under a name BepInEx never treats as an assembly; Bootstrap loads it from bytes.
+$coreDir = Join-Path $homeDir "progenitor-core"
 New-Item -ItemType Directory -Force -Path $coreDir | Out-Null
-Copy-Item -LiteralPath $coreDll -Destination (Join-Path $coreDir "Progenitor.dll") -Force
+Copy-Item -LiteralPath $coreDll -Destination (Join-Path $coreDir "Progenitor.core") -Force
 # Address-library tables ship next to Core so Bootstrap can resolve its detour sites from disk.
 $tablesSrc = Join-Path $PSScriptRoot "addresslib"
 # {client,server}-<build>.json only. tools/addresslib is a build-output folder (its .gitignore
@@ -423,7 +464,7 @@ if ($tables) {
   Write-Warning "no address tables under tools/addresslib; the package resolves detours by prefix scan only"
 }
 
-# The Progenitor guide, when the repository has it: BepInEx/progenitor-core/docs/guide/progenitor-guide.html is the
+# The Progenitor guide, when the repository has it: <home>/progenitor-core/docs/guide/progenitor-guide.html is the
 # file the Mods menu's Help guide tile and Progenitor's Help button open (ModHelp.ProgenitorGuidePath). The guide is one
 # self-contained HTML file; nothing else in docs/guide is copied.
 $guideSrc = Join-Path $repo "docs\guide\progenitor-guide.html"
@@ -477,6 +518,7 @@ Assert-NoDeveloperArtefacts -Root $stage
 Assert-NoInstallScripts -Names @(Get-ChildItem -LiteralPath $stage -Recurse -File | ForEach-Object { $_.FullName }) -Where "the staged tree"
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
+$requiredEntries = Get-RequiredEntries
 $compression = [System.IO.Compression.CompressionLevel]::Optimal
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zipPath, $compression, $false)
 
@@ -490,12 +532,16 @@ try {
   if ($IncludeDev -and -not ($zip.Entries | Where-Object { $_.Name -eq "Progenitor.Dev.dll" })) {
     throw "packaging assertion failed: -IncludeDev was passed but $zipPath has no Progenitor.Dev.dll"
   }
-  # The public layout: these three DLLs at exactly these paths. Windows PowerShell's CreateFromDirectory writes '\'
-  # separators, so entry names are compared with '/'.
-  foreach ($requiredEntry in @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll")) {
+  # The public layout: these three images at exactly these paths, and every BepInEx/ entry inside the one folder.
+  # Windows PowerShell's CreateFromDirectory writes '\' separators, so entry names are compared with '/'.
+  foreach ($requiredEntry in $requiredEntries) {
     if (-not ($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $requiredEntry })) {
       throw "packaging assertion failed: $zipPath has no $requiredEntry"
     }
+  }
+  $stray = Get-OutsideHomeEntries -Names @($zip.Entries | ForEach-Object { $_.FullName })
+  if ($stray.Count -gt 0) {
+    throw "packaging assertion failed: $zipPath has BepInEx entries outside BepInEx/plugins/Progenitor/: $($stray -join ', ')"
   }
   # ...and the developer-only artifacts, on the artifact itself. Same list as
   # Assert-NoDeveloperArtefacts, matched against zip entry paths (which use '/').
@@ -515,7 +561,6 @@ try {
 # The manual-install zip (one copy into the game folder): the same staged BepInEx/ tree, already asserted above, and
 # nothing else at its root. The Thunderstore zip stays as it is: Thunderstore needs manifest.json, README.md and
 # icon.png at the root, which a player extracting into the game folder should not get.
-$requiredEntries = @("BepInEx/plugins/Progenitor.Bootstrap.dll", "BepInEx/patchers/Progenitor.Preloader.dll", "BepInEx/progenitor-core/Progenitor.dll")
 New-GameFolderZip -Stage $stage -ZipPath $manualZipPath -Required $requiredEntries
 
 Remove-Item -LiteralPath $stage -Recurse -Force
@@ -561,10 +606,10 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllLines($sumsPath, $sums, $utf8NoBom)
 
 Write-Host "wrote $zipPath"
-Write-Host "wrote $manualZipPath (manual install: extract into the folder that holds VRising.exe or VRisingServer.exe)"
+Write-Host "wrote $manualZipPath (manual install: extract into the folder that holds VRising.exe or VRisingServer.exe, or copy its Progenitor folder into BepInEx/plugins)"
 Write-Host "wrote $sumsPath (zip + every zip entry, sha256)"
 if ($IncludeDev) {
   Write-Host "included BepInEx/progenitor-reload/Progenitor.Dev.dll (-IncludeDev)"
 } else {
-  Write-Host "public layout: BepInEx/plugins/Progenitor.Bootstrap.dll + BepInEx/patchers/Progenitor.Preloader.dll + BepInEx/progenitor-core/Progenitor.dll (asserted; Dev omitted, asserted)"
+  Write-Host "public layout: one folder, BepInEx/plugins/Progenitor/ (Progenitor.Bootstrap.dll, Progenitor.Preloader.patcher, progenitor-core/Progenitor.core; asserted; Dev omitted, asserted)"
 }

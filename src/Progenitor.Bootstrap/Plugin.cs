@@ -12,8 +12,9 @@ namespace Progenitor.Bootstrap;
 /// <summary>
 /// Process-lifetime BepInEx plugin. Owns the pieces that cannot live in a collectible Core
 /// (injected <c>FrameTicker</c>, log ring, main-thread queue, plugin ALC host, self-update,
-/// native receive detours, clone/tombstone snapshot) and loads Core from
-/// <c>BepInEx/progenitor-core/</c> into a collectible ALC. Guid is
+/// native receive detours, clone/tombstone snapshot) and loads Core from its folder
+/// (<see cref="CoreLayout"/>; <c>BepInEx/plugins/Progenitor/progenitor-core/</c> in the single-folder
+/// layout) into a collectible ALC. Guid is
 /// <c>progenitor</c> so consumer <c>[BepInDependency("progenitor")]</c> is
 /// satisfied without a sample change: the chainloader waits for this plugin. Harmony id stays
 /// <see cref="HarmonyId"/> so Core <c>UnpatchSelf</c> cannot remove the backup tick patches.
@@ -39,12 +40,22 @@ public sealed class Plugin : BasePlugin
         HeadlessClient.TryInstall(IsServerProcess, Log.LogInfo);
         try
         {
+            // Single-folder install: where Core lives is decided once, here, before anything reads a
+            // Progenitor file (the uninstall check, the start-loop guard, the first Core read).
+            string bootstrapPath = BootstrapPath();
+            bool hostedChild = IsHostedChildProcess();
+            var home = CoreLayout.ResolveAtStart(Paths.BepInExRootPath, bootstrapPath, hostedChild, Log.LogWarning);
+            if (home.Found)
+                Log.LogInfo("Layout: Core is " + home.CoreFile + (home.Legacy ? " (the three-location folder)." : "."));
             // Job MODS2: an uninstall the player asked for on the Configuration tab is honored
             // here — before BindDiagnostics, before any patch and before CoreLoader, because the
             // files being removed are the ones this process would otherwise load. An applied
             // request returns from Load: this process runs without Progenitor.
             if (UninstallAtStart.HonourIfRequested(Paths.BepInExRootPath, Log.LogInfo))
                 return;
+            // ...then branch out: the preloader into BepInEx/patchers, and a legacy plugins-root
+            // Bootstrap left by the three-location layout removed. See LayoutAtStart.
+            LayoutAtStart.Run(Paths.BepInExRootPath, bootstrapPath, hostedChild, Log.LogInfo, Log.LogWarning);
             // WORLDRESTORE1: a world restore an admin asked for is applied here, in a server process, before any patch and
             // before Core: GameBootstrap.Start has not resolved the save to load yet. Also logs the phase 0 timing line.
             if (IsServerProcess) WorldRestoreAtStart.Run(Paths.BepInExRootPath, Log.LogInfo);
@@ -111,6 +122,18 @@ public sealed class Plugin : BasePlugin
         }
     }
 
+    private static string BootstrapPath()
+    {
+        try { return typeof(Plugin).Assembly.Location ?? ""; }
+        catch { return ""; }
+    }
+
+    private static bool IsHostedChildProcess()
+    {
+        try { return CoreWatchPolicy.IsHostedChild(Environment.CommandLine); }
+        catch { return false; }
+    }
+
     /// <summary>
     /// Same rule as Core: decided once from the executable name so dedicated and hosted play
     /// get the same answer.
@@ -165,7 +188,7 @@ public sealed class Plugin : BasePlugin
             CoreWatchPolicy.ConfigSection,
             CoreWatchPolicy.ConfigKey,
             CoreWatchPolicy.DefaultWatchCore,
-            "When true, Bootstrap watches BepInEx/progenitor-core/Progenitor.dll.next and, once two scans see the same length and write time, runs the same Core swap as the bridge core_reload op (reason=watch). Default FALSE: this is an automatic code-loading path, so it is opt-in for developers rather than on for everyone (set it to true here, as tools/deploy.ps1 does for our own trees). Ignored on a hosted child and on a client that is hosting a private game (the child keeps the copied Core). Refused while a swap is already in flight; a refused request retries on the next stable scan. An image whose SHA-256 is not in BepInEx/config/progenitor-allow.txt is quarantined and never loaded when that file exists.");
+            "When true, Bootstrap watches Core's staged copy (BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core.next) and, once two scans see the same length and write time, runs the same Core swap as the bridge core_reload op (reason=watch). Default FALSE: this is an automatic code-loading path, so it is opt-in for developers rather than on for everyone (set it to true here, as tools/deploy.ps1 does for our own trees). Ignored on a hosted child and on a client that is hosting a private game (the child keeps the copied Core). Refused while a swap is already in flight; a refused request retries on the next stable scan. An image whose SHA-256 is not in BepInEx/config/progenitor-allow.txt is quarantined and never loaded when that file exists.");
         ProcessHost.WatchCore = watchCore.Value;
         watchCore.SettingChanged += (_, _) =>
         {

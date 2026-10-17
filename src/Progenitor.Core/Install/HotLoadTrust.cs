@@ -57,7 +57,7 @@ internal static class HotLoadTrust
             string bep = Path.GetFullPath(serverBepInExRoot!);
             string? root = Path.GetDirectoryName(bep.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             if (string.IsNullOrEmpty(root)) return new LocalServerRuntime(false, false, false);
-            bool core = File.Exists(Path.Combine(bep, "progenitor-core", "Progenitor.dll"))
+            bool core = Progenitor.SelfUpdate.InstallLayout.HomeFor(bep).Found
                 || File.Exists(Path.Combine(bep, "plugins", "Progenitor.dll"));
             bool allow = File.Exists(Path.Combine(bep, "config", AllowFileName));
             bool running = ServerInstall.FindRunningServer(root!) != null;

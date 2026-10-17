@@ -707,6 +707,7 @@ internal static partial class SelfUpdates
             }
 
             SelfFiles.CopyTables(SelfPaths.Absolute(root!, newDir), SelfPaths.Tables(root!));
+            StageShippedPreloader(root!, image);
             string answer;
             try { answer = RequestSwap?.Invoke("self-update " + release.Version) ?? "no swap seam"; }
             catch (Exception e) { answer = "threw: " + e.Message; }
@@ -733,6 +734,7 @@ internal static partial class SelfUpdates
             return "failed: " + berr;
         }
 
+        StageShippedPreloader(root!, image);
         try { Notice?.Invoke(1, 0, "Progenitor " + release.Version + " starts at the next launch."); }
         catch { /* */ }
         return "staged: Progenitor " + release.Version + " starts at the next launch (" + why + ")";
@@ -751,6 +753,23 @@ internal static partial class SelfUpdates
 
     /// <summary>The running Core's handshake protocol (<c>Networking.Handshake.ProtocolVersion</c>).</summary>
     internal static int HandshakeProtocol() => Progenitor.Networking.Handshake.ProtocolVersion;
+
+    /// <summary>
+    /// Single-folder install: the release's preloader goes beside the running Bootstrap as
+    /// <c>Progenitor.Preloader.patcher</c> (nothing loads that name), and Bootstrap copies it to
+    /// <c>BepInEx/patchers</c> at the next start when it is newer. Best effort: a failure keeps the previous preloader.
+    /// </summary>
+    private static void StageShippedPreloader(string root, SelfImage image)
+    {
+        if (image.Preloader.Length == 0) return;
+        try
+        {
+            string? dir = Path.GetDirectoryName(SafeBootstrapPath(root));
+            if (string.IsNullOrEmpty(dir)) return;
+            SelfFiles.WriteAtomic(Path.Combine(dir!, InstallLayout.ShippedPreloaderFileName), image.Preloader, out _);
+        }
+        catch { /* the previous preloader stays */ }
+    }
 
     private static string SafeBootstrapPath(string root)
     {

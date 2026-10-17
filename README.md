@@ -34,9 +34,11 @@ Progenitor is one Thunderstore package, tagged **Client + Server**, published as
 
 1. Quit the game (or stop the server).
 2. Download `Progenitor-<version>.zip` from the GitHub release.
-3. Extract it into the folder that holds `VRising.exe` (for a dedicated server, the folder that holds `VRisingServer.exe`). Allow it to replace files when you update.
+3. Copy the `Progenitor` folder into `BepInEx/plugins` (or extract the zip into the folder that holds `VRising.exe`; for a dedicated server, the folder that holds `VRisingServer.exe`). Allow it to replace files when you update.
 
-The zip holds a single `BepInEx` folder, so the extract adds `BepInEx/plugins/Progenitor.Bootstrap.dll`, `BepInEx/patchers/Progenitor.Preloader.dll` and `BepInEx/progenitor-core/` (Core, its address tables and the help guide) in one step, at the same paths as the Thunderstore package. It contains no other mod's files and no BepInEx files or settings. To remove Progenitor, use **Remove Progenitor from this PC** in the Mods menu, or delete those three items while the game is closed. The menu removal leaves `BepInEx/patchers/Progenitor.Preloader.dll`; on its own it needs no other Progenitor file: it keeps copies of the session logs and carries out any Mods-menu plugin request still pending, and you can delete it while the game is closed. **Never put `Progenitor.Dev.dll` on a public server**: it is the development bridge, and release packages do not include it.
+Everything Progenitor ships is in that one folder, `BepInEx/plugins/Progenitor/`: `Progenitor.Bootstrap.dll`, Core (`progenitor-core/Progenitor.core`, with its address tables and the help guide) and the preloader (`Progenitor.Preloader.patcher`). At its first start Progenitor copies the preloader to `BepInEx/patchers/Progenitor.Preloader.dll` by itself; it runs from the next start (it keeps the session logs and carries out the Mods menu's next-start plugin requests). The zip contains no other mod's files and no BepInEx files or settings. To remove Progenitor, use **Remove Progenitor from this PC** in the Mods menu, or delete the `Progenitor` folder while the game is closed; the preloader then does nothing at the next start and renames itself out of the way.
+
+**Upgrading from an earlier layout** (Bootstrap directly in `BepInEx/plugins`, Core in `BepInEx/progenitor-core`): copy the new folder in as above. At the first start the new Bootstrap runs, deletes the old `BepInEx/plugins/Progenitor.Bootstrap.dll`, and ignores `BepInEx/progenitor-core` (the log says so); delete that folder afterward. **Never put `Progenitor.Dev.dll` on a public server**: it is the development bridge, and release packages do not include it.
 
 ### Reporting a problem
 

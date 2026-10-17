@@ -332,9 +332,9 @@ window.HELP = {
         { id: "install", title: "Install Progenitor",
           html: `<ol><li>Quit the game.</li>
 <li>Download <code>Progenitor-&lt;version&gt;.zip</code> from the <a href="https://github.com/VRising-Modders/Progenitor/releases">release page</a>.</li>
-<li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
+<li>Copy the <code>Progenitor</code> folder into <code>BepInEx/plugins</code> (or extract the zip into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>).</li>
 <li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
-<p>To update, extract the new zip the same way and let it replace the files. The zip holds only a <code>BepInEx</code> folder and never changes BepInEx's own files or settings.</p>` },
+<p>To update, do the same with the new zip and let it replace the files. Everything Progenitor ships is in that one folder; it never changes BepInEx's own files or settings.</p>` },
         { id: "open", title: "Open the Mods menu",
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
 <p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
@@ -405,7 +405,7 @@ My problem: <describe what happened and what you expected>` } }
       id: "admins", role: "admins", title: "Getting Started", pages: [
         { id: "install", title: "Install on a server",
           html: `<ol><li>Copy everything inside <code>BepInExPack_V_Rising</code> into the server folder, next to <code>VRisingServer.exe</code>.</li>
-<li>With the server stopped, extract <code>Progenitor-&lt;version&gt;.zip</code> into the same folder. It is one package for client and server; update the same way.</li>
+<li>With the server stopped, copy the <code>Progenitor</code> folder from <code>Progenitor-&lt;version&gt;.zip</code> into the server's <code>BepInEx/plugins</code> (or extract the zip into the folder with <code>VRisingServer.exe</code>). It is one package for client and server; update the same way.</li>
 <li>Start the server once; the first start is slow while BepInEx generates its files.</li></ol>
 <p>A private game hosted from a client loads the client's mods; no separate install.</p>`,
           callout: { title: "Never on a public server", warn: true, text: "<code>Progenitor.Dev.dll</code>, the [[dev-bridge|dev bridge]]. Release packages leave it out." } },
@@ -459,8 +459,7 @@ My problem: <describe what happened and what you expected>` } }
           callout: { title: "Game elsewhere?", text: "Set <code>VRISING_GAME_DIR</code>. See the README, Building from source." } },
         { id: "folders", title: "Where the files go",
           html: `<table><thead><tr><th class="label">Folder</th><th class="label">Holds</th></tr></thead><tbody>
-<tr><td><code>BepInEx/plugins/</code></td><td>[[bootstrap|Bootstrap]] only</td></tr>
-<tr><td><code>BepInEx/progenitor-core/</code></td><td>[[core|Core]], <code>Progenitor.dll</code></td></tr>
+<tr><td><code>BepInEx/plugins/Progenitor/</code></td><td>Progenitor: [[bootstrap|Bootstrap]], and [[core|Core]] in <code>progenitor-core/</code></td></tr>
 <tr><td><code>BepInEx/progenitor-reload/</code></td><td><strong>Your mod</strong> (the [[reload-folder|reload folder]])</td></tr></tbody></table>` },
         { id: "create-mod", title: "Create your first mod",
           html: `<p>Recommended: the starter template. It sets up the build, plugin class, a setting, a keybind and a help page.</p>{{code}}`,
@@ -630,8 +629,8 @@ window.Show();` },
     { id: "restore-point", term: "Restore point", def: "A world backup or wipe archive an admin can put back; the restore runs at the next server start and backs up the current world first." },
     { id: "bepinex", term: "BepInEx", def: "The plugin loader V Rising mods run on, installed as BepInExPack_V_Rising." },
     { id: "plugin", term: "Plugin", def: "A mod's DLL and main class, which subclasses <code>ProgenitorPlugin&lt;TContext&gt;</code> and registers its work in <code>OnLoad</code>." },
-    { id: "core", term: "Core", def: "<code>Progenitor.dll</code> in <code>BepInEx/progenitor-core</code>, the framework itself, which can be swapped while the game runs." },
-    { id: "bootstrap", term: "Bootstrap", def: "<code>Progenitor.Bootstrap.dll</code> in <code>BepInEx/plugins</code>, loaded once per process to load Core; changing it needs a restart." },
+    { id: "core", term: "Core", def: "<code>Progenitor.core</code> in <code>BepInEx/plugins/Progenitor/progenitor-core</code>, the framework itself, which can be swapped while the game runs. Mods compile against <code>Progenitor.dll</code>." },
+    { id: "bootstrap", term: "Bootstrap", def: "<code>Progenitor.Bootstrap.dll</code> in <code>BepInEx/plugins/Progenitor</code>, loaded once per process to load Core; changing it needs a restart." },
     { id: "generation", term: "Generation", def: "One loaded copy of Core or a plugin; each hot reload makes a new one, and static fields do not carry over." },
     { id: "hot-reload", term: "Hot reload", def: "Replacing a mod or Core in the running game: the old version unloads and the new one loads, with no restart." },
     { id: "reload-folder", term: "Reload folder", def: "<code>BepInEx/progenitor-reload/</code>, checked once a second; each DLL there is loaded, and reloaded when it changes." },

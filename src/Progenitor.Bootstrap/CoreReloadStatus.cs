@@ -233,6 +233,10 @@ public static class CoreReloadStatus
                         ? ""
                         : _timestampUtc.ToString("o", CultureInfo.InvariantCulture),
                 },
+                // Single-folder install: where this Bootstrap resolved Core at start (InstallLayout). Absent on a
+                // Bootstrap built before it, which is always the three-location layout. tools/deploy.ps1 reads it so
+                // a deploy never stages a Core.next the running watcher does not look at.
+                layout = LayoutDump(),
                 pinDiag = JoinPins(),
                 // Job FINJ1: reload-folder plugins that registered their own IL2CPP types. They are never
                 // unloaded in place; restartPending names a change only a restart picks up, and a
@@ -242,6 +246,18 @@ public static class CoreReloadStatus
                 waitingPlugins = WaitingDump(),
             };
         }
+    }
+
+    private static object LayoutDump()
+    {
+        var home = Progenitor.SelfUpdate.InstallLayout.Current;
+        return new
+        {
+            coreFile = home?.CoreFile ?? "",
+            coreFolder = home?.Folder ?? "",
+            legacy = home?.Legacy ?? false,
+            found = home?.Found ?? false,
+        };
     }
 
     private static string JoinPins()

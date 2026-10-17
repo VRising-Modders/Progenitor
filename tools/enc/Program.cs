@@ -72,14 +72,18 @@ internal static class Program
         string game = Environment.GetEnvironmentVariable("VRISING_GAME_DIR")
             ?? @"C:\Program Files (x86)\Steam\steamapps\common\VRising";
         refs.Add(Path.GetDirectoryName(baseline) ?? ".");
-        // Job FENC8: the plugin compiles against the FRAMEWORK, and Progenitor.dll is not deployed
-        // next to the plugin — it sits in BepInEx/progenitor-core, beside the reload folder the
-        // plugins live in. Without both of these every source file that says `using Progenitor`
+        // Job FENC8: the plugin compiles against the FRAMEWORK, and Core is not deployed next to the
+        // plugin — it sits in BepInEx/plugins/Progenitor/progenitor-core (the three-location layout:
+        // BepInEx/progenitor-core), away from the reload folder the plugins live in. Without both of these every source file that says `using Progenitor`
         // fails with CS0234 and no delta can ever be emitted. The reload folder itself is here for
         // the same reason at one remove: a plugin may reference a sibling plugin.
         refs.Add(outDir);
         string? bepinex = Path.GetDirectoryName(outDir.TrimEnd('\\', '/'));
-        if (!string.IsNullOrEmpty(bepinex)) refs.Add(Path.Combine(bepinex!, "progenitor-core"));
+        if (!string.IsNullOrEmpty(bepinex))
+        {
+            refs.Add(Path.Combine(bepinex!, "plugins", "Progenitor", "progenitor-core"));
+            refs.Add(Path.Combine(bepinex!, "progenitor-core"));
+        }
         refs.Add(Path.Combine(game, "BepInEx", "interop"));
         refs.Add(Path.Combine(game, "BepInEx", "unity-libs"));
         refs.Add(Path.Combine(game, "BepInEx", "core"));

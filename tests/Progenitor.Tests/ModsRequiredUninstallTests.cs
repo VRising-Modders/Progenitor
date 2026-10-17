@@ -240,9 +240,10 @@ public sealed class ModsRequiredUninstallTests : IDisposable
         Assert.True(outcome.Honoured);
         Assert.False(File.Exists(mod));
         Assert.False(File.Exists(core));
-        // Live DLL: scheduled for the next reboot, still on disk, counted as left.
-        Assert.True(File.Exists(bootstrap));
-        Assert.Equal(new[] { bootstrap }, scheduled);
+        // Live DLL: renamed out of the *.dll scan, scheduled for the next reboot, still on disk, counted as left.
+        Assert.False(File.Exists(bootstrap));
+        Assert.True(File.Exists(bootstrap + ".removed"));
+        Assert.Equal(new[] { bootstrap + ".removed" }, scheduled);
         Assert.Equal(1, outcome.Left);
         Assert.Equal(2, outcome.Deleted);
         // Nothing the marker did not name.

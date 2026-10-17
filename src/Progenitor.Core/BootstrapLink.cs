@@ -470,6 +470,43 @@ internal static class BootstrapLink
         }
     }
 
+    private const string LayoutTypeName = "Progenitor.Bootstrap.CoreLayout";
+
+    /// <summary>
+    /// Single-folder install: take the Core location Bootstrap resolved at its start
+    /// (<c>CoreLayout.ResolvedFolder</c> / <c>ResolvedCoreFile</c>, read by name), so this Core's
+    /// copy of <see cref="Progenitor.SelfUpdate.InstallLayout"/> answers exactly what Bootstrap's does.
+    /// A loaded Bootstrap that publishes nothing predates the single-folder layout and loaded Core
+    /// from the legacy folder (<see cref="Progenitor.SelfUpdate.InstallLayout.ForCore"/>). Never throws.
+    /// </summary>
+    internal static void AdoptInstallLayout(string? bepInExRoot)
+    {
+        if (string.IsNullOrWhiteSpace(bepInExRoot)) return;
+        try
+        {
+            var host = _hostType ?? FindHostType();
+            string? folder = null, file = null, bootstrapPath = null;
+            if (host != null)
+            {
+                try { bootstrapPath = host.Assembly.Location; }
+                catch { bootstrapPath = null; }
+                var layout = host.Assembly.GetType(LayoutTypeName);
+                folder = layout?.GetProperty("ResolvedFolder", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string;
+                file = layout?.GetProperty("ResolvedCoreFile", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string;
+            }
+
+            var home = Progenitor.SelfUpdate.InstallLayout.ForCore(
+                bepInExRoot!, host != null, folder, file,
+                Progenitor.SelfUpdate.InstallLayout.SafeFileExists,
+                Progenitor.SelfUpdate.InstallLayout.SafeDirectoryExists);
+            Progenitor.SelfUpdate.InstallLayout.SetCurrent(bepInExRoot!, home, bootstrapPath);
+        }
+        catch
+        {
+            // InstallLayout then resolves the tree on disk on every call.
+        }
+    }
+
     private static Type? FindHostType()
     {
         foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())

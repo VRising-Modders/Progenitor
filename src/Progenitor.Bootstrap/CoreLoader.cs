@@ -11,7 +11,7 @@ using Progenitor.Ui;
 namespace Progenitor.Bootstrap;
 
 /// <summary>
-/// Loads <c>BepInEx/progenitor-core/Progenitor.dll</c> with <see cref="AssemblyLoadContext.LoadFromStream"/>
+/// Loads Core (<c>BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core</c>, see <see cref="CoreLayout"/>) with <see cref="AssemblyLoadContext.LoadFromStream"/>
 /// into a collectible ALC (one generation at a time) and invokes <c>Progenitor.Runtime.Install(host)</c>.
 /// <see cref="RequestReload"/> queues an in-process Uninstall → ALC unload → Load → Install
 /// and returns immediately; <see cref="TickReload"/> runs it on FrameTicker ticks.
@@ -92,7 +92,7 @@ public static class CoreLoader
 
     /// <summary>
     /// First load from disk into a collectible ALC. Called from Bootstrap <c>Load</c>.
-    /// A missing file logs <see cref="CoreLayout.MissingLog"/> and does not scan plugins.
+    /// A missing file logs every path tried (<see cref="CoreLayout.MissingLogPrefix"/>) and does not scan plugins.
     /// Promotes <c>Progenitor.dll.next</c> before the first read, even when the
     /// Step E watcher is off — a protocol bump restarts both processes with Core
     /// staged as <c>.next</c> and must take effect this launch.
@@ -405,7 +405,7 @@ public static class CoreLoader
         // Checked before the ALC is created so a refused image never reaches LoadFromStream.
         string coreHash = ReloadAllowPolicy.Sha256Hex(bytes);
         long coreSize = bytes.LongLength;
-        var coreAllow = ReloadAllowStore.Decide(CoreLayout.FileName, coreHash);
+        var coreAllow = CoreLayout.DecideCoreRow(ReloadAllowStore.Decide, CoreLayout.FileName, coreHash);
         if (!ReloadAllowPolicy.MayLoad(coreAllow))
         {
             error = ReloadAllowPolicy.FormatRefusedCore(CoreLayout.FileName, coreHash, coreSize, coreAllow);
@@ -722,13 +722,13 @@ public static class CoreLoader
         }
         catch (Exception e)
         {
-            error = $"{CoreLayout.MissingLog} ({e.Message})";
+            error = $"{CoreLayout.MissingLogPrefix} Core's path could not be resolved ({e.Message}). Bootstrap will not load plugins.";
             return false;
         }
 
         if (!File.Exists(path))
         {
-            error = CoreLayout.MissingLog;
+            error = Progenitor.SelfUpdate.InstallLayout.FormatMissing(Progenitor.SelfUpdate.InstallLayout.HomeFor(Paths.BepInExRootPath));
             return false;
         }
 
@@ -824,7 +824,10 @@ public static class CoreLoader
         if (string.IsNullOrEmpty(nextPath) || !File.Exists(nextPath))
             return null;
         DateTime utc = DateTime.UtcNow;
-        string name = CoreWatchPolicy.FailedFileName(utc);
+        string liveLeaf = Path.GetFileName(nextPath);
+        if (liveLeaf.EndsWith(CoreWatchPolicy.NextSuffix, StringComparison.OrdinalIgnoreCase))
+            liveLeaf = liveLeaf.Substring(0, liveLeaf.Length - CoreWatchPolicy.NextSuffix.Length);
+        string name = CoreWatchPolicy.FailedFileName(liveLeaf, utc);
         string dest;
         try
         {
@@ -1018,7 +1021,7 @@ public static class CoreLoader
         }
 
         DateTime utc = DateTime.UtcNow;
-        string name = CoreWatchPolicy.FailedFileName(utc);
+        string name = CoreWatchPolicy.FailedFileName(Path.GetFileName(path), utc);
         string dest = CoreWatchPolicy.QuarantinePath(path, utc);
         bool restored = false;
         bool mayRestore = CoreReloadPolicy.MayRestoreLastGood(

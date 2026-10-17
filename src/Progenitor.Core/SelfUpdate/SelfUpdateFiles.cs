@@ -38,10 +38,11 @@ internal static class SelfPaths
     public static string Store(string root) => Path.Combine(root, StoreFolder, StoreSub);
     public static string State(string root) => Path.Combine(Store(root), StateFileName);
     public static string Record(string root) => Path.Combine(root, RecordFileName);
-    public static string CoreDll(string root) => Path.Combine(root, CoreFolder, CoreFile);
+    /// <summary>The live Core image of this tree (<see cref="InstallLayout.CoreFile"/>). <see cref="CoreFile"/> is the kept-release name.</summary>
+    public static string CoreDll(string root) => InstallLayout.CoreFile(root);
     public static string CoreNext(string root) => CoreDll(root) + NextSuffix;
-    public static string Tables(string root) => Path.Combine(root, CoreFolder, TablesFolder);
-    public static string DefaultBootstrap(string root) => Path.Combine(root, "plugins", BootstrapFile);
+    public static string Tables(string root) => InstallLayout.Tables(root);
+    public static string DefaultBootstrap(string root) => InstallLayout.BootstrapFile(root);
 
     /// <summary>A kept release's folder from its path relative to the BepInEx root (as the journal stores it).</summary>
     public static string Absolute(string root, string relative) =>

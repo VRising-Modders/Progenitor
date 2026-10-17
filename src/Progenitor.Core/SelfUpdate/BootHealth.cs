@@ -142,6 +142,21 @@ internal static class BootHealth
 
     internal static string Line(string text) => "AutoUpdate: progenitor " + text;
 
+    /// <summary>
+    /// False when the kept Core, or the kept Bootstrap when it would be staged, is an assembly built before the
+    /// single-folder layout. A missing or unreadable kept file is not judged here; the restore reports it.
+    /// </summary>
+    internal static bool PreviousFitsLayout(string corePath, string? bootstrapPath)
+    {
+        try
+        {
+            if (File.Exists(corePath) && InstallLayout.PredatesSingleFolder(File.ReadAllBytes(corePath))) return false;
+            return bootstrapPath == null || !File.Exists(bootstrapPath)
+                || !InstallLayout.PredatesSingleFolder(File.ReadAllBytes(bootstrapPath));
+        }
+        catch { return true; }
+    }
+
     private static string Place(string root, SelfJournal j, string disk, Action<string>? info, Action<string>? error)
     {
         if (!string.Equals(disk, j.NewCore, StringComparison.OrdinalIgnoreCase))
@@ -212,6 +227,24 @@ internal static class BootHealth
         string core = Path.Combine(dir, SelfPaths.CoreFile);
         string boot = Path.Combine(dir, SelfPaths.BootstrapFile);
         var kept = SelfFiles.ReadKept(dir);
+        // PR #48 review H2: a previous copy from before the single-folder layout cannot be put back into it (its
+        // Bootstrap looks for Core only in BepInEx/progenitor-core). Nothing is touched; the player is told how.
+        if (!PreviousFitsLayout(core, j.NewBootstrap.Length > 0 && File.Exists(boot) ? boot : null))
+        {
+            string note = "the previous copy (" + j.Previous + ") was not restored: " + InstallLayout.CrossLayoutRefusal;
+            error?.Invoke(Line(j.Version + ": " + why + "; " + note + "."));
+            SelfFiles.EditState(root, s =>
+            {
+                s.AddFailed(j.Version, why, DateTime.UtcNow);
+                if (s.Journal == null) return true;
+                s.Journal.State = SelfJournal.Failed;
+                s.Journal.Note = why + "; " + note;
+                s.Journal.Utc = DateTime.UtcNow;
+                return true;
+            }, out _);
+            return "refused: " + note;
+        }
+
         bool coreOk = false;
         try
         {

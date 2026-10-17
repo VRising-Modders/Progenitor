@@ -238,7 +238,7 @@ A refused plugin DLL remains on disk but is not loaded; a refused staged Core or
 
 ### Core and Bootstrap compatibility
 
-Bootstrap loads Core from `BepInEx/progenitor-core/`. Automatic Core watching uses `[Reload] WatchCore`, which defaults to `false`; development deployment tools can enable it. A staged image must be stable across scans and pass the same validation as an explicit `core_reload` request. Hosted children do not watch; a client hosting a live private-game child refuses this automatic swap. Watch refusals and collection failures are not successful deployments.
+Bootstrap loads Core from `BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core` (resolution and legacy fallbacks: [hot-reload.md](hot-reload.md#where-core-lives)). Automatic Core watching uses `[Reload] WatchCore`, which defaults to `false`; development deployment tools can enable it. A staged image must be stable across scans and pass the same validation as an explicit `core_reload` request. Hosted children do not watch; a client hosting a live private-game child refuses this automatic swap. Watch refusals and collection failures are not successful deployments.
 
 Bootstrap and Core must agree on their protocol. The source constants are `CoreLayout.ProtocolVersion` and `BootstrapLink.ProtocolVersion` (both currently `4`). Maintainers must bump both together when changing the install/uninstall contract, host interfaces, shared slot names/signatures or shared memory layout. A mismatch refuses installation and can leave the process without Core until compatible files are installed.
 

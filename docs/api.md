@@ -1240,7 +1240,7 @@ Purpose lines are the first sentence of each type's own doc comment.
 | `CoreImagePolicy` | Game-free rules for a staged Progenitor.dll.next: read the bytes first, reject a truncated or non-PE image (and a PE that is not Core), and only then rotate the live file. | tests |
 | `CoreLayout` | On-disk layout for the Core assembly. | Bootstrap-Core boundary |
 | `CoreLoadContext` | Collectible Core ALC. | Bootstrap-Core boundary |
-| `CoreLoader` | Loads BepInEx/progenitor-core/Progenitor.dll with LoadFromStream into a collectible ALC (one generation at a time) and invokes Progenitor.Runtime.Install(host). | Bootstrap-Core boundary |
+| `CoreLoader` | Loads Core (BepInEx/plugins/Progenitor/progenitor-core/Progenitor.core; legacy BepInEx/progenitor-core/Progenitor.dll) with LoadFromStream into a collectible ALC (one generation at a time) and invokes Progenitor.Runtime.Install(host). | Bootstrap-Core boundary |
 | `CoreReloadCollect` | Microsoft unloadability helpers for a collectible Core generation. | tests |
 | `RetiringContexts` | Tracks unloading plugin contexts through finalization before Core retirement. | Bootstrap internals |
 | `CoreReloadFrameDriver` | Frame-driven Core swap. | tests |
@@ -1255,7 +1255,7 @@ Purpose lines are the first sentence of each type's own doc comment.
 | `CoreReloadStatus` | Last Core-swap snapshot for the bridge core_reload {"status":true} / reload_status payload and for ping-style dumps. | tests |
 | `CoreWatchDecision` | Result of Decide. | tests |
 | `CoreWatchInspectDecision` | Result of InspectStaged. | tests |
-| `CoreWatchPolicy` | Game-free decisions for Step E: watch BepInEx/progenitor-core/Progenitor.dll.next and, once the file is complete and unchanged for one second, run the same cascade as the bridge core_reload op with reason WatchReason. | tests |
+| `CoreWatchPolicy` | Game-free decisions for Step E: watch Core's staged copy (Progenitor.core.next in Core's folder) and, once the file is complete and unchanged for one second, run the same cascade as the bridge core_reload op with reason WatchReason. | tests |
 | `CoreWatchPolicy.FileStamp` | Length plus last-write of one .next scan. | tests |
 | `DeltaApply` | Reads the .delta container tools/enc writes, decides whether it may be applied, and applies it. | tests |
 | `DeltaHeader` | The parsed head of a .delta container: which plugin, which baseline image, which generation, which methods, and where the three payload spans start. | tests |

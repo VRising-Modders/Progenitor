@@ -61,7 +61,7 @@ function Promote-Staged([string]$current, [string]$label) {
 }
 
 function Remove-StaleChainloaderCore([string]$pluginsDir) {
-  # Core lives in progenitor-core/; a leftover plugins copy would steal the Progenitor identity.
+  # Core is never a Progenitor.dll under plugins/; a leftover copy would steal the Progenitor identity.
   $stale = Join-Path $pluginsDir "Progenitor.dll"
   foreach ($p in @($stale, "$stale.next", "$stale.prev")) {
     if (Test-Path $p) {
@@ -77,6 +77,11 @@ function Start-TestServer {
   # forced stop never runs the in-game promote-at-exit, and promoting Bootstrap from inside the
   # old copy is one launch too late. Same Move-Item + log line for each restart-only DLL.
   $pluginsDir = Join-Path $serverDir "BepInEx\plugins"
+  # The single-folder install (BepInEx/plugins/Progenitor).
+  $homeDir = Join-Path $pluginsDir "Progenitor"
+  Promote-Staged (Join-Path $homeDir "progenitor-core\Progenitor.core") "Progenitor.core.next"
+  Promote-Staged (Join-Path $homeDir "Progenitor.Bootstrap.dll") "Progenitor.Bootstrap.dll.next"
+  # The three-location layout, until a single-folder Bootstrap's first start retires it.
   $coreDir = Join-Path $serverDir "BepInEx\progenitor-core"
   Promote-Staged (Join-Path $coreDir "Progenitor.dll") "Progenitor.dll.next"
   Promote-Staged (Join-Path $pluginsDir "Progenitor.Bootstrap.dll") "Progenitor.Bootstrap.dll.next"

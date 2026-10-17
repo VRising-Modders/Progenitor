@@ -63,7 +63,7 @@ public class CoreWatchPolicyTests
         Assert.Equal("watch", CoreWatchPolicy.WatchReason);
         Assert.Equal("Reload", CoreWatchPolicy.ConfigSection);
         Assert.Equal("WatchCore", CoreWatchPolicy.ConfigKey);
-        Assert.Equal("Progenitor.dll.next", CoreWatchPolicy.NextFileName);
+        Assert.Equal("Progenitor.core.next", CoreWatchPolicy.NextFileName);
         Assert.Equal(1.0, CoreWatchPolicy.SettleSeconds);
         Assert.Equal(1.0, CoreWatchPolicy.ScanIntervalSeconds);
         Assert.Equal("Core watch: Progenitor.dll.next settled; requesting reload.", CoreWatchPolicy.FormatSettled());

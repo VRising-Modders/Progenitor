@@ -59,6 +59,9 @@ internal static class UninstallAtStart
     internal const string BootstrapDllName = "Progenitor.Bootstrap.dll";
     internal const string PluginsFolder = "plugins";
 
+    /// <summary>The single-folder home under <see cref="PluginsFolder"/> (<c>InstallLayout.HomeFolderName</c>).</summary>
+    internal const string HomeFolderName = "Progenitor";
+
     internal const string LogPrefix = "Progenitor uninstall: ";
     internal const string RefusalOutsideRoot = "the request named a path outside BepInEx; nothing was removed";
     internal const string RefusalUnreadable = "the request could not be read; nothing was removed";
@@ -134,19 +137,28 @@ internal static class UninstallAtStart
             {
                 // This process is running from it: delete-on-reboot is the only honest answer, and
                 // the file is still on disk either way, so it counts as left rather than deleted.
-                ScheduleDelete(abs);
+                // PR #48 review L6: it is renamed out of the *.dll scan first (a loaded file can be
+                // renamed), so the next start does not load it even when the reboot delete is refused.
+                string aside = abs + ".removed";
+                string scheduled = TryRenameAside(abs) ? aside : abs;
+                ScheduleDelete(scheduled);
                 left++;
                 continue;
             }
 
             if (!Exists(abs)) { deleted++; continue; }
             TryDelete(abs);
+            // The preloader is loaded by now, so it cannot be deleted; renamed out of the *.dll scan
+            // it no longer runs from the next start.
+            if (Exists(abs) && IsPatcherDll(rel)) TryRenameAside(abs);
             if (Exists(abs)) left++;
             else deleted++;
         }
 
         for (int i = 0; i < OwnedFolders.Count; i++)
             RemoveEmptyTree(Path.Combine(root, OwnedFolders[i]));
+        // The single-folder home (BepInEx/plugins/Progenitor), emptied once its files are gone.
+        RemoveEmptyTree(Path.Combine(root, PluginsFolder, HomeFolderName));
 
         WriteDone(root, requestedUtc, deleted, left);
         TryDelete(Path.Combine(root, FileName));
@@ -273,11 +285,37 @@ internal static class UninstallAtStart
     private static string Absolute(string root, string relative) =>
         Path.Combine(root, Normalize(relative).Replace('/', Path.DirectorySeparatorChar));
 
-    private static bool IsBootstrapDll(string relative) =>
-        string.Equals(
-            Normalize(relative),
-            PluginsFolder + "/" + BootstrapDllName,
-            StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// A Bootstrap image anywhere under <c>plugins/</c>: the legacy <c>plugins/Progenitor.Bootstrap.dll</c> or the
+    /// single-folder <c>plugins/Progenitor/Progenitor.Bootstrap.dll</c>. The running one cannot be deleted.
+    /// </summary>
+    internal static bool IsBootstrapDll(string relative)
+    {
+        string rel = Normalize(relative);
+        if (!rel.StartsWith(PluginsFolder + "/", StringComparison.OrdinalIgnoreCase)) return false;
+        int slash = rel.LastIndexOf('/');
+        return string.Equals(rel.Substring(slash + 1), BootstrapDllName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPatcherDll(string relative)
+    {
+        string rel = Normalize(relative);
+        return rel.StartsWith("patchers/", StringComparison.OrdinalIgnoreCase)
+            && rel.EndsWith(".dll", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryRenameAside(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return false;
+            string aside = path + ".removed";
+            if (File.Exists(aside)) File.Delete(aside);
+            File.Move(path, aside);
+            return true;
+        }
+        catch { return false; /* reported as left */ }
+    }
 
     private static bool Exists(string path)
     {

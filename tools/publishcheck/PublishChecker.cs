@@ -65,7 +65,7 @@ internal static class PublishChecker
     private static readonly Regex DependencyRule = new(@"^([A-Za-z0-9_]+)-([A-Za-z0-9_]+)-(\d+\.\d+\.\d+)$", RegexOptions.CultureInvariant);
     private static readonly Regex AvoidWords = new(@"\b(official|verified|approved)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
-    private static readonly string[] FrameworkFiles = { "Progenitor.dll", "Progenitor.Bootstrap.dll", "Progenitor.Preloader.dll" };
+    private static readonly string[] FrameworkFiles = { "Progenitor.dll", "Progenitor.core", "Progenitor.Bootstrap.dll", "Progenitor.Preloader.dll", "Progenitor.Preloader.patcher" };
 
     public static PublishReport CheckPath(string path)
     {

@@ -14,7 +14,7 @@ Only the **latest release** receives security fixes. Progenitor is pre-release s
 
 In scope:
 
-- **Bootstrap** (`Progenitor.Bootstrap.dll`), **Core** (`Progenitor.dll`) and the **preloader** (`Progenitor.Preloader.dll`): the code in a release package that runs on players' clients and on servers. Examples: a client that can make a server run code or write files it should not, a server that can do the same to a connecting client, a way around admin checks for server-wide settings, unsafe handling of downloaded mod packages, or private data left in a log bundle.
+- **Bootstrap** (`Progenitor.Bootstrap.dll`), **Core** (`Progenitor.dll`, shipped as `Progenitor.core`) and the **preloader** (`Progenitor.Preloader.dll`, shipped as `Progenitor.Preloader.patcher`): the code in a release package that runs on players' clients and on servers. Examples: a client that can make a server run code or write files it should not, a server that can do the same to a connecting client, a way around admin checks for server-wide settings, unsafe handling of downloaded mod packages, or private data left in a log bundle.
 - The packaging and install tooling under `tools/` and `packaging/`, where a flaw could put something unsafe into a release.
 
 Out of scope, or by design:
