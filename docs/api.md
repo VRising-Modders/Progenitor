@@ -16,7 +16,7 @@ the module doc's own evidence supports:
 | **parked** | Works, and further work on it is stopped by decision. |
 
 **Only the rows in the tables below are contract.** `public` in the source is not the boundary: the
-four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **974** public types, including types outside the contract tables. Those types are
+four assemblies (Core, Bootstrap, Dev and the test library Progenitor.Testing) declare **979** public types, including types outside the contract tables. Those types are
 implementation that is public for a stated reason — the test project compiles it, Bootstrap and
 Core must agree on a shape across an assembly boundary they are forbidden to reference, the Dev
 bridge needs it, or a generator emitted it — and it carries no compatibility promise. Every one of
@@ -869,6 +869,12 @@ acceptance procedure: [modules.md](modules.md#camera).
 | `Puppet` `Of(GameObject)` / `Root` / `BoneNames` / `Has` / `Bone` / `TryGetBone` / `RestLocalRotation` / `SetLocalRotation` / `SetRotationFromRest` / `SetWorldRotation` / `AimAt(bone, child, direction)` / `SetLocalPosition` / `ResetPose` / `Dress(GameObject)` / `SetMaterial(renderer, Material)` / `SetColor(renderer, property, Color)` | landed; verified live | A posable copy: its bones by name with the creation pose as rest. `Dress` rebinds an equipment copy's skinned meshes to the puppet's bones by name and returns a `DressResult` (`SkinnedMeshes`, `Attachments`, `MissingBones`); equipment ships with empty material slots, filled with `SetMaterial` and tinted through the property block with `SetColor`. `AimAt` turns a bone in world space so it points at a direction. Made by `ModelHandle.InstantiatePuppet`, which still owns the GameObject. | unit test `ModelsTests` (binding); `samples/Progenitor.FilmExample` |
 | `ModelCatalog` `Load(path)` / `Parse(json)` / `TryFind` / `Names` / `Count` / `BuildStamp` / `Empty` | landed | Prefab name to `ModelSection`, from the JSON `tools/catalog/model-sections.mjs` writes for one game build. Parsed with `JsonDocument` only. | unit test `ModelsTests` |
 | `CameraMode` | landed | `None`, `TopDown`, `Orbit`, `Free`, `Static`; the game's `ProjectM.CameraType` values, checked by `layoutgen`. | unit test `CameraTests` |
+| `ctx.Camera.Preview(UnitVec3 point, float yawDegrees, float seconds = 5, Action? ended = null, int compressedHeight = -1)` / `Preview(UnitVec3 point, float yawDegrees, CameraPreviewOptions options)` | landed; timed preview verified live, hold and safety ends not live-verified | Client fixed-point orbit preview with a temporary render origin and the native HUD hidden. `CameraPreviewOptions` `Seconds` (more than 0, at most 10), `Hold`, `Ended(CameraPreviewEndReason)`, `CompressedHeight`. Every preview ends on Dispose, Escape when it is topmost, damage, death, the character moving more than 1.5 m, a client world change, another shot taking the camera, and unload. [Camera preview](modules.md#camera-preview). | `SampleCamera.cs` (`.shot preview [hold]`); unit test `CameraPreviewHoldTests` |
+| `PluginCamera.CameraPreview` `Active` / `IsHeld` / `EndReason` / `Hold()` / `Rotate(degrees)` / `Dispose()` / `MaxHoldSeconds` / `MoveLimitMeters` | landed; hold not live-verified | The running preview. `Hold()` removes the short timeout and keeps the current orbit and rotation; a held preview still ends on every safety rule and after `MaxHoldSeconds` (600) from the last `Hold()`. | `SampleCamera.cs` (`.shot preview hold`, `.shot hold`); unit test `CameraPreviewHoldTests` |
+| `CameraPreviewEndReason` / `CameraPreviewOptions` | landed | `None`, `Disposed`, `Timeout`, `HoldLimit`, `Escape`, `Damaged`, `Died`, `Moved`, `WorldChanged`, `CameraTaken`, `Replaced`, `Unloaded` (no `ended` call), `Failed`. | unit test `CameraPreviewHoldTests` |
+| `ctx.Camera.Observe(Entity user, Entity target, float seconds = 8)` / `Observe(Entity user, Entity target, CameraObserveOptions options)` | landed; timed lease verified live, renewal not live-verified | Server streaming origin at an authorized target for one user, without moving the real character. The first overload still returns `IDisposable` (the object is a `CameraObservation`). `CameraObserveOptions` `Seconds` (more than 0, at most 10), `Hold`, `Ended(CameraObservationEndReason)`. [Camera preview](modules.md#camera-preview). | `SampleCamera.cs` (`.shot preview`); unit test `CameraPreviewHoldTests` |
+| `PluginCamera.CameraObservation` `Active` / `IsHeld` / `EndReason` / `SecondsLeft` / `Renew(seconds)` / `Hold()` / `Dispose()` / `MaxRenewSeconds` / `LeaveDistanceMeters` | landed; not live-verified | A renewable lease that always has a deadline: `Renew` sets it at most `MaxRenewSeconds` (600) from now, `Hold` is `Renew(600)`. It ends on Dispose, expiry, disconnect, the character going away or moving more than 10 m, another writer of the streaming origin, a newer `Observe` for the user, and unload. | `SampleCamera.cs`; unit test `CameraPreviewHoldTests` |
+| `CameraObservationEndReason` / `CameraObserveOptions` | landed | `None`, `Disposed`, `Expired`, `Disconnected`, `LeftArea`, `Superseded`, `Replaced`, `Unloaded` (plugin or Core unload, or the server world gone; no `Ended` call), `Failed`, `CharacterGone` (the character the lease started with is gone, a respawn for example). | unit test `CameraPreviewHoldTests` |
 
 ## Input
 
@@ -1166,7 +1172,7 @@ Custom item ownership is retained for framework-managed quarantine after permane
 
 ## Appendix: framework-internal public types
 
-The four assemblies declare 974 public types. This appendix accounts for types outside the contract tables.
+The four assemblies declare 979 public types. This appendix accounts for types outside the contract tables.
 They are `public` for a stated reason and **carry no compatibility promise**: a name here can move namespace, change shape or become `internal` in any
 commit, with no deprecation window and no row anywhere else in this file. Nothing in this appendix
 is a thing to build a plugin against — if a mod needs one of these, that is a request for an API
@@ -1827,9 +1833,11 @@ Example: `SamplePlayerDirectory.cs` (`.players`, `.players name <displayName>`, 
 `UnitSpawnOptions` supports `LifetimeSeconds`, `TeamValue`, `FactionIndex`, `StripVBlood`, `Stats`, and a `Configure` callback. Handles expose `TrySetLifetime`, `TrySetTeam`, `TryStripVBlood`, and `TrySetStats`. These write the spawned entity only — not the shared prefab (`Content.Edit` / `PrefabRegistry.Edit`). A lifetime is stamped on the entity and enforced across plugin unload, Core swaps, world loads and restarts ([lifetime across reload and restart](modules.md#lifetime-across-reload-and-restart)).
 
 
-### Timed camera preview
+### Camera preview
 
 `PluginCamera.Observe(user, target, seconds)` leases a server streaming origin without moving the real character. Pair it with client `PluginCamera.Preview(point, yaw, seconds, ended, compressedHeight)`, which returns a `CameraPreview` orbit lease with manual rotation and automatic timeout. Dispose restores the player camera and render origin; unload releases the observer. Callers authorize targets, pair lease cleanup across the network, and capture gameplay input during preview. Remote ground-floor streaming and timeout restoration were verified live; upstairs visibility and interruption cases remain under qualification.
+
+A preview can stay open until the player ends it: `CameraPreview.Hold()` (or `CameraPreviewOptions.Hold`) on the client and `CameraObservation.Hold()` / `Renew(seconds)` (or `CameraObserveOptions.Hold`) on the server. Both sides cap a hold at ten minutes, and both end on the safety rules in the rows above. Contract and the live check: [Camera preview](modules.md#camera-preview). The hold and the safety ends are source-checked and game-free tested, not live-verified.
 
 `PluginCastles.TryGetBuildingPosition` reads the actual world position of a building, including elevation. Server-only; landed.
 

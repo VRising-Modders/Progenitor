@@ -53,11 +53,11 @@ These commands are the author-facing examples for facades that previously had no
 | `.stations list` / `recipes` / `toggle` / `status` | `ctx.Stations` | `SampleStations.cs` |
 | `.protect on\|alive\|off` | `ctx.Debug` | `SampleDebugProtect.cs` |
 | `.players` | `ctx.Players` | `SamplePlayerDirectory.cs` |
-| `.shot` | `ctx.Camera` | `SampleCamera.cs` |
+| `.shot` (`preview [hold]` / `hold` / `end` pair the server `Observe` lease with the client `Preview`) | `ctx.Camera` | `SampleCamera.cs` |
 | `.form` | `PlayerForms` (experimental, not a `ctx` property) | `SampleForms.cs` |
 | `.triggers on\|off\|status` | `ctx.Triggers` | `SampleTriggers.cs` |
 
-Status: source-checked. Game-free tests are `SampleAuthorFacadeTests`. **Not live-verified.** `.form begin` is expected to be refused until a form profile is qualified; the sample still calls `TryBegin` and tracks any handle. `.shot` results are client log lines (`Sample camera:`), because `ctx.Camera` throws on the server.
+Status: source-checked. Game-free tests are `SampleAuthorFacadeTests`. **Not live-verified.** `.form begin` is expected to be refused until a form profile is qualified; the sample still calls `TryBegin` and tracks any handle. `.shot` results are client log lines (`Sample camera:`), because the shot calls throw on the server; `.shot preview` also logs the server lease (`server lease ended: …`).
 
 ## Feature negotiation (`.compat`)
 

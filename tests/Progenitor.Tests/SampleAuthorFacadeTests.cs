@@ -178,4 +178,35 @@ public class SampleAuthorFacadeTests
         Assert.Contains(".shot mode", SampleCamera.UsageReply);
         Assert.Contains("your client", SampleCamera.SentReply("orbit"));
     }
+
+    [Fact]
+    public void Shot_parse_covers_preview_hold_and_end()
+    {
+        Assert.True(SampleCamera.TryParse("preview", "", "", "", "", "", "", out var timed));
+        Assert.Equal((int)SampleCamera.Kind.Preview, timed.Kind);
+        Assert.Equal(0, timed.Hold);
+
+        Assert.True(SampleCamera.TryParse("preview", "HOLD", "", "", "", "", "", out var held));
+        Assert.Equal((int)SampleCamera.Kind.Preview, held.Kind);
+        Assert.Equal(1, held.Hold);
+
+        Assert.True(SampleCamera.TryParse("hold", "", "", "", "", "", "", out var hold));
+        Assert.Equal((int)SampleCamera.Kind.Hold, hold.Kind);
+        Assert.True(SampleCamera.TryParse("end", "", "", "", "", "", "", out var end));
+        Assert.Equal((int)SampleCamera.Kind.End, end.Kind);
+
+        Assert.False(SampleCamera.TryParse("preview", "forever", "", "", "", "", "", out _));
+        Assert.False(SampleCamera.TryParse("hold", "10", "", "", "", "", "", out _));
+        Assert.Contains(".shot preview [hold]", SampleCamera.UsageReply);
+    }
+
+    [Fact]
+    public void A_stale_preview_ended_report_does_not_match_the_running_lease()
+    {
+        // Preview 1 is replaced by preview 2; the client's late "1 ended (Replaced)" must leave lease 2 running.
+        Assert.False(SampleCamera.ReportMatches(runningSequence: 2, reportedSequence: 1));
+        Assert.True(SampleCamera.ReportMatches(runningSequence: 2, reportedSequence: 2));
+        // A preview the server never numbered (no character) matches nothing.
+        Assert.False(SampleCamera.ReportMatches(runningSequence: 0, reportedSequence: 0));
+    }
 }

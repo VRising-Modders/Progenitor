@@ -5234,6 +5234,90 @@ A focus that cannot be written leaves that frame to the game's own target and ne
 
 **Residual.** With the target moved to the look-at point, the frame was still slightly warmer than the game camera's (+6.3 red, +3.2 green, +1.4 blue). The cause is **not established**; it was not measured separately. The leading candidate is the anchor's position: the fix put it at the shot's look-at point, while the game camera puts it at the player's feet. The anchor therefore sat at a different place, and possibly a different height, and `_g_CameraZoom` was that point's distance rather than the player's. The remaining candidates are inputs outside `HybridCameraSystem` that depend on the camera type; none has been found in the native code read so far. Step 10 of the live test tells the two apart.
 
+### Camera preview
+
+A preview shows the player a distant spot (a storage room, say) without moving their character. It is two leases that the mod pairs across the network:
+
+- **Server:** `ctx.Camera.Observe(user, target, …)` writes a secondary streaming origin for that user at the target, so the server sends the client what is there. The real character is not moved. The lease makes one anchor entity (not saved) and one system hook, and releases both when it ends. The caller authorizes the target.
+- **Client:** `ctx.Camera.Preview(point, yaw, …)` orbits the point at 6 m and 35° pitch, points the client's render origin at it (so streamed rooms draw), and hides the native HUD. Right-drag or `Rotate` turns it; rotation is automatic until the player turns it. The preview moves only the camera. The caller blocks gameplay input and shows its own controls.
+
+**Holding a preview open.** A timed preview lasts at most 10 seconds. To keep one open (a "Keep open" button), call `Hold()` on both handles. That keeps the current orbit and rotation (nothing restarts) and removes the short timeout. A hold still has a cap of ten minutes from the last `Hold()` on both sides (`CameraPreview.MaxHoldSeconds`, `CameraObservation.MaxRenewSeconds`); calling `Hold()` again restarts it. On the server, `Renew(seconds)` sets the lease's deadline to at most ten minutes from now, for a mod that would rather send a heartbeat.
+
+**Number each preview.** Both messages carry a sequence number the server hands out. Re-running a preview ends the old one on the client with `Replaced`, and that "ended" report reaches the server after the server already started the new lease. Without the number the server would end the new lease; with it, the stale report is ignored.
+
+```csharp
+// Server: start the lease and tell the client which preview this is.
+var lease = ctx.Camera.Observe(user, roomEntity, new CameraObserveOptions { Seconds = 8 });
+int sequence = ++_nextSequence;
+_leases[user] = (lease, sequence);
+ctx.Net.SendToUser(user, StartPreviewEventId, new StartPreview { Sequence = sequence /* , point, yaw */ });
+// on KeepOpen { Sequence } from that user:     if it is the running one, lease.Hold();
+// on PreviewEnded { Sequence } from that user: if it is the running one, lease.Dispose(); otherwise ignore it
+
+// Client: start a 5 s preview, and hold it when the player clicks "Keep open".
+int mine = message.Sequence;
+_preview = ctx.Camera.Preview(roomCenter, yawDegrees: 30, new CameraPreviewOptions
+{
+    Seconds = 5,
+    Ended = reason =>
+    {
+        CloseMyPreviewControls();                                                   // and unblock input
+        ctx.Net.SendToServer(PreviewEndedEventId, new PreviewEnded { Sequence = mine }); // the server ends that lease
+    },
+});
+keepOpenButton.OnClick(() => { if (_preview.Hold()) ctx.Net.SendToServer(KeepOpenEventId, new KeepOpen { Sequence = mine }); });
+returnButton.OnClick(() => _preview.Dispose());                                   // Ended runs with Disposed
+```
+
+The Sample does exactly this (`SampleCamera.cs`: `Packet.Sequence`, `EndReport.Sequence`, `ReportMatches`).
+
+**When a preview ends.** Every preview, timed or held, ends on the first of these. `ended` (or `CameraPreviewOptions.Ended`) runs once with the reason, except on unload; `EndReason` keeps it.
+
+| Reason | When |
+|---|---|
+| `Disposed` | The caller disposed the handle (a Return button). |
+| `Escape` | The player pressed Escape and nothing above the preview takes it. A framework dialog or open dropdown, a key capture, the focused chat box and an open game menu each take the press first. A shown Progenitor panel (the caller's own controls) does not: Escape ends the preview, and the caller closes its controls in `ended`. While the preview owns Escape it holds the close key, so the same press does not open the system menu. |
+| `Damaged` / `Died` | The player's character lost health or died. A drop that only follows a lower maximum (gear or a buff taken off clamps health to the new maximum) is not damage. |
+| `Moved` | The character moved more than 1.5 m from where it stood (`MoveLimitMeters`): a step, knockback or a teleport. A caller that does not block movement gets this on the first step. |
+| `WorldChanged` | The client world ended or changed (disconnect, leaving, a new world), or the local character is gone. |
+| `CameraTaken` | Another shot, `SetMode`, `Reset` or another plugin took the camera. |
+| `Replaced` | A newer `Preview` from the same plugin. |
+| `Timeout` / `HoldLimit` | The timed seconds, or ten minutes after the last `Hold()`. |
+| `Failed` | A game read or the camera write failed. The preview ends rather than risk a stuck camera. |
+| `Unloaded` | The plugin or Core unloaded. `ended` is not called. |
+
+Escape reaches the framework through Bootstrap's forwarding, which a preview keeps on while it runs, and through the same consumed-Escape path the world pick uses (`Ui.PushEscape`). Nothing polls a key. Plain Escape is not a rebindable mod key, so it is not a `ctx.Keybinds` entry. Ending a preview restores the render origin, the HUD and the top-down camera if this plugin still owns it.
+
+**When a server lease ends.** A lease always has a deadline, so one nobody renews ends by itself. `CameraObserveOptions.Ended` runs once with the reason, except on unload.
+
+| Reason | When |
+|---|---|
+| `Disposed` | The caller disposed it. |
+| `Expired` | The deadline passed without `Renew` or `Hold`. |
+| `Disconnected` | The user disconnected, or the user entity is gone. |
+| `CharacterGone` | The user is connected but the character the lease started with is gone (a respawn, for example). |
+| `LeftArea` | The user's real character moved more than 10 m from where it stood (`LeaveDistanceMeters`). |
+| `Superseded` | Something else wrote that user's streaming origin. |
+| `Replaced` | A newer `Observe` for the same user. |
+| `Failed` | A game read or write failed. Ordinary visibility is restored. |
+| `Unloaded` | The plugin or Core unloaded, or the server world went away. `Ended` is not called. |
+
+Pair the two ends: when the client preview ends, tell the server so it disposes the lease. If that message is lost (the client plugin unloaded, for example), the lease still ends on disconnect, when the player walks away, or at its deadline, at most ten minutes later.
+
+**Compatibility.** The original `Preview(point, yaw, seconds, ended, compressedHeight)` and `Observe(user, target, seconds)` are unchanged in signature; `Observe` still returns `IDisposable` (the object is a `PluginCamera.CameraObservation`). Behavior changes: every preview now also ends on Escape, damage, death and movement; `ended` now also runs when another shot takes the camera; and `Preview` now throws `InvalidOperationException` when the client world has no local character (it needs the character for the safety ends).
+
+**Verification.** The end rules, the Escape precedence and the lease clock are game-free tested (`CameraPreviewHoldTests`). The timed preview's remote streaming and timeout restoration were verified live before this change. The hold, the safety ends and lease renewal are source-checked and built against the installed game, **not live-verified**. The Sample's `.shot preview [hold]`, `.shot hold` and `.shot end` drive both halves (`SampleCamera.cs`).
+
+**Live check (not run).** On the isolated test server and a free test client, with the Sample deployed to both:
+
+1. `.shot preview`. Expect the orbit for 5 s, then the normal camera, and `Sample camera: preview ended: Timeout` on the client and `client preview ended (Timeout): lease ended` on the server.
+2. `.shot preview hold`. Wait 20 s: the preview stays. Right-drag to turn it, then press Escape. Expect it to end (`Escape`) and the system menu to stay closed. The server log says the lease ended.
+3. `.shot preview`, then `.shot hold` within 5 s. Expect no camera jump and the rotation to continue, then the preview still open after 15 s. `.shot end` ends both.
+4. `.shot preview hold`, then take damage (an enemy, or the sun), then repeat and press a movement key, then repeat and open the chat box and press Escape (the chat closes, the preview stays; a second Escape ends it). Expect `Damaged`, `Moved`, then `Escape`.
+5. `.shot preview hold`, then disconnect. Expect the server log `server lease ended: Disconnected`, and after reconnecting the normal camera.
+6. `.shot preview hold`, then reload the Sample on the client: the camera returns and nothing is reported (`Unloaded`). The server lease ends at its deadline or with `.shot end`.
+7. Remove the Sample from both reload folders and restore the title-screen idle state per the standing rules.
+
 ### Live test (acceptance procedure, not run)
 
 Use the isolated test server and a test client that nobody is playing on. Drive `ctx.Camera` from a small client plugin or a scratch snippet.
