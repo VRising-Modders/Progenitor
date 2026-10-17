@@ -2128,7 +2128,13 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
             foreach (var pair in _tileStates) states[pair.Key.ToString(System.Globalization.CultureInfo.InvariantCulture)] = pair.Value.ToString().ToLowerInvariant();
             row["tileStates"] = states;
         }
-        if (_spec.Skin != CellRowSkin.Kit) row["skin"] = _spec.Skin == CellRowSkin.GameEntry ? "game-entry" : "category-heading";
+        if (_spec.Skin != CellRowSkin.Kit)
+            row["skin"] = _spec.Skin switch
+            {
+                CellRowSkin.GameEntry => "game-entry",
+                CellRowSkin.GameTabStrip => "game-tab-strip",
+                _ => "category-heading",
+            };
         if (_header)
         {
             row["sortedKey"] = _sortedKey;

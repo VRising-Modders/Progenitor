@@ -170,7 +170,9 @@ internal sealed class UiTabsHandle : UiComposedHandle, IUiTabs
 
         _selected = Clamp(selected);
         _termOn = new bool[_captions.Length];
-        _row = Part(panel.CellRow(new CellRowSpec(RowKey("tabs"), UiTabsLayout.Cells(_captions, _selected, GameTabs), plain: true)));
+        // Game tabs stand on the strip's baseline, as the game's window tabs stand on theirs (the row draws it).
+        _row = Part(panel.CellRow(new CellRowSpec(RowKey("tabs"), UiTabsLayout.Cells(_captions, _selected, GameTabs), plain: true,
+            skin: GameTabs ? CellRowSkin.GameTabStrip : CellRowSkin.Kit)));
         for (int i = 0; i < _captions.Length; i++)
         {
             int tab = i;
@@ -483,6 +485,29 @@ internal static class UiTabsLayout
 
     /// <summary>HUB1: the pad either side of a game tab's caption, together.</summary>
     internal const float GameTabPad = 48f;
+
+    /// <summary>
+    /// The strip's baseline: the line the game's window tabs stand on (the Mods workspace's tabs on the pane's top trim,
+    /// the inventory's on its tab divider). Measured on the workspace strip at 3840x1080: a 2-unit line whose bottom row is
+    /// the tabs' bottom row, so the tabs cover it and the selected tab's fill runs into it.
+    /// </summary>
+    internal const float BaselineHeight = 2f;
+
+    /// <summary>The baseline object's name under the tab row (readback and captures).</summary>
+    internal const string BaselineName = "tab-baseline";
+
+    /// <summary>
+    /// A game tab's top in a row <paramref name="rowHeight"/> tall, for a tab <paramref name="tabHeight"/> tall: its bottom
+    /// edge on the row's bottom edge (the baseline), never centered, so a taller row never lifts it off the line.
+    /// </summary>
+    internal static float GameTabTop(float rowHeight, float tabHeight) => Math.Max(0f, rowHeight - Math.Min(tabHeight, rowHeight));
+
+    /// <summary>The baseline's top and height in a row <paramref name="rowHeight"/> tall: flush with the row's bottom edge, full width.</summary>
+    internal static (float Top, float Height) Baseline(float rowHeight)
+    {
+        float h = Math.Min(BaselineHeight, Math.Max(0f, rowHeight));
+        return (rowHeight - h, h);
+    }
 
     /// <summary>HUB1: the most a least content height may ask for.</summary>
     internal const float MaxMinHeight = 2000f;

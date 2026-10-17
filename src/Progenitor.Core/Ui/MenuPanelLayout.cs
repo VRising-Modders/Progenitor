@@ -1964,6 +1964,12 @@ internal enum CellRowSkin
 
     /// <summary>A category heading with the game's thin underline under its title (borrowed; none when not found).</summary>
     CategoryHeading = 2,
+
+    /// <summary>
+    /// The game's window tab strip (<see cref="CellSkin.GameTab"/> cells): a baseline across the whole row at its bottom
+    /// edge, drawn under the tabs, which stand on it (<see cref="UiTabsLayout.GameTabTop"/>, <see cref="UiTabsLayout.Baseline"/>).
+    /// </summary>
+    GameTabStrip = 3,
 }
 
 /// <summary>How a cell's width is asked for.</summary>

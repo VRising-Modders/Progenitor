@@ -352,6 +352,12 @@ internal static class MenuPalette
     /// </summary>
     internal static readonly PaletteColor RowSeparator = new(0.428f, 0.637f, 0.709f, 0.16f);
 
+    /// <summary>
+    /// The line a game window tab strip stands on (<see cref="CellRowSkin.GameTabStrip"/>): the steel of the game tab's
+    /// own frame (its top border, rgb(56, 64, 71) measured at 3840x1080), so the tabs' frames and the line read as one.
+    /// </summary>
+    internal static readonly PaletteColor TabBaseline = PaletteColor.Hex(0x384047);
+
     /// <summary>The plate inside a selected filter chip's game sprite: warm gold, like a chosen tab's glow.</summary>
     internal static readonly PaletteColor ChipOnPlate = PaletteColor.Hex(0xc8962e, 0.42f);
 
