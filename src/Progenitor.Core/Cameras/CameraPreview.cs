@@ -148,23 +148,32 @@ public sealed partial class PluginCamera
             return true;
         }
 
+        /// <summary>
+        /// One frame of the preview. The whole body is guarded: a tick that throws ends the preview (Failed) instead of
+        /// stopping the reschedule and leaving a held preview open with no safety checks.
+        /// </summary>
         private void Tick()
         {
             if (!Active) return;
-            if (_ownsHud) PhotoHud.Reassert();
-            var elapsed = _clock.Elapsed.TotalSeconds;
-            CameraPreviewEndReason reason;
-            try { reason = _policy.Decide(elapsed, Sample()); }
-            catch { reason = CameraPreviewEndReason.Failed; }
-            if (reason != CameraPreviewEndReason.None) { End(reason, notify: true); return; }
-            HoldCloseKey(CameraPreviewEscape.HoldsCloseKey(EscapeOwnerNow()));
-            if (Progenitor.Inputs.UnityInputRuntime.TrySamplePointer(out var right, out var dx, out _, out _) && right && dx != 0)
-            { _manual = true; _yaw += dx * 0.15f; }
-            if (!_manual) _yaw += (float)(elapsed - _previous) * 8;
-            _previous = elapsed;
-            try { _camera.Orbit(_point, 6, _yaw, 35); }
-            catch { End(CameraPreviewEndReason.Failed, notify: true); return; }
-            MainThread.PostDelayed(0.033, Tick, _camera._ctx.Owner);
+            try
+            {
+                if (_ownsHud) PhotoHud.Reassert();
+                var elapsed = _clock.Elapsed.TotalSeconds;
+                var reason = _policy.Decide(elapsed, Sample());
+                if (reason != CameraPreviewEndReason.None) { End(reason, notify: true); return; }
+                HoldCloseKey(CameraPreviewEscape.HoldsCloseKey(EscapeOwnerNow()));
+                if (Progenitor.Inputs.UnityInputRuntime.TrySamplePointer(out var right, out var dx, out _, out _) && right && dx != 0)
+                { _manual = true; _yaw += dx * 0.15f; }
+                if (!_manual) _yaw += (float)(elapsed - _previous) * 8;
+                _previous = elapsed;
+                _camera.Orbit(_point, 6, _yaw, 35);
+                MainThread.PostDelayed(0.033, Tick, _camera._ctx.Owner);
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Camera: preview tick threw: " + e.Message);
+                End(CameraPreviewEndReason.Failed, notify: true);
+            }
         }
 
         private CameraPreviewSample Sample()
@@ -179,6 +188,7 @@ public sealed partial class PluginCamera
             s.CharacterRead = true;
             s.Dead = health.IsDead || _character.Has<Dead>(em);
             s.Health = health.Value;
+            s.MaxHealth = health.MaxHealth.Value;
             s.MovedMeters = math.distance(at.Value.xz, _standing.xz);
             return s;
         }

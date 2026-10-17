@@ -50,10 +50,12 @@ public enum CameraObservationEndReason
     Superseded = 5,
     /// <summary>A newer <c>Observe</c> for the same user replaced it.</summary>
     Replaced = 6,
-    /// <summary>The plugin (or Core) unloaded, or the server world went away. <c>Ended</c> is not called on unload.</summary>
+    /// <summary>The plugin (or Core) unloaded, or the server world went away. <c>Ended</c> is not called for this reason.</summary>
     Unloaded = 7,
     /// <summary>A game read or write failed; the lease ended and restored ordinary visibility.</summary>
     Failed = 8,
+    /// <summary>The user is still connected but the character the lease started with is gone (a respawn, for example).</summary>
+    CharacterGone = 9,
 }
 
 /// <summary>
@@ -101,6 +103,8 @@ internal struct CameraPreviewSample
     public bool CharacterRead;
     public bool Dead;
     public float Health;
+    /// <summary>The character's maximum health, or 0 when unknown.</summary>
+    public float MaxHealth;
     /// <summary>Horizontal distance in meters from where the character stood when the preview started.</summary>
     public float MovedMeters;
 }
@@ -126,6 +130,7 @@ internal sealed class CameraPreviewPolicy
     private readonly double _timedSeconds;
     private double _holdStartedAt = double.NaN;
     private float _lastHealth = float.NaN;
+    private float _lastMax = float.NaN;
 
     internal CameraPreviewPolicy(double timedSeconds, bool hold, double now)
     {
@@ -148,6 +153,13 @@ internal sealed class CameraPreviewPolicy
         IsHeld ? _holdStartedAt + MaxHoldSeconds - now : StartedAt + _timedSeconds - now;
 
     /// <summary>
+    /// A drop that only follows a lower maximum (gear or a buff taken off clamps the value to the new maximum) is not
+    /// damage: the maximum fell and the value sits at it.
+    /// </summary>
+    internal static bool ClampedToLowerMax(float health, float max, float lastMax) =>
+        float.IsFinite(max) && max > 0 && float.IsFinite(lastMax) && max < lastMax - DamageEpsilon && health >= max - DamageEpsilon;
+
+    /// <summary>
     /// The reason this tick ends the preview, or <see cref="CameraPreviewEndReason.None"/> to keep going. The order is
     /// fixed: the camera, the world, death, damage, movement, then time. Anything unreadable ends it.
     /// </summary>
@@ -157,9 +169,11 @@ internal sealed class CameraPreviewPolicy
         if (!s.SameWorld || !s.CharacterRead) return CameraPreviewEndReason.WorldChanged;
         if (s.Dead || !(s.Health > 0)) return CameraPreviewEndReason.Died;
         if (!float.IsFinite(s.Health) || !float.IsFinite(s.MovedMeters)) return CameraPreviewEndReason.Failed;
-        float last = _lastHealth;
+        float last = _lastHealth, lastMax = _lastMax;
         _lastHealth = s.Health;
-        if (!float.IsNaN(last) && s.Health < last - DamageEpsilon) return CameraPreviewEndReason.Damaged;
+        _lastMax = s.MaxHealth;
+        if (!float.IsNaN(last) && s.Health < last - DamageEpsilon && !ClampedToLowerMax(s.Health, s.MaxHealth, lastMax))
+            return CameraPreviewEndReason.Damaged;
         if (s.MovedMeters > MoveLimitMeters) return CameraPreviewEndReason.Moved;
         if (Remaining(now) <= 0) return IsHeld ? CameraPreviewEndReason.HoldLimit : CameraPreviewEndReason.Timeout;
         return CameraPreviewEndReason.None;
@@ -258,7 +272,7 @@ internal sealed class CameraObservationPolicy
     {
         if (!s.UserConnected) return CameraObservationEndReason.Disconnected;
         if (!s.OriginOurs) return CameraObservationEndReason.Superseded;
-        if (!s.CharacterRead) return CameraObservationEndReason.Disconnected;
+        if (!s.CharacterRead) return CameraObservationEndReason.CharacterGone;
         if (!float.IsFinite(s.MovedMeters)) return CameraObservationEndReason.Failed;
         if (s.MovedMeters > LeaveDistanceMeters) return CameraObservationEndReason.LeftArea;
         return Expired(now) ? CameraObservationEndReason.Expired : CameraObservationEndReason.None;

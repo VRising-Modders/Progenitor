@@ -159,7 +159,7 @@ public sealed partial class PluginCamera
         private void OnTimer(int generation)
         {
             if (!Active || generation != _timerGeneration) return;
-            if (!_world.IsCreated) { End(CameraObservationEndReason.Unloaded, notify: true); return; }
+            if (!_world.IsCreated) { End(CameraObservationEndReason.Unloaded, notify: false); return; }
             if (Check(_world.EntityManager, writeProxy: false)) PostTimer();
         }
 

@@ -27,7 +27,9 @@ namespace Progenitor.Sample;
 /// <para><c>.shot preview [hold]</c> pairs the server's <c>Observe</c> lease (on the caller's own character, so
 /// it needs no authorization beyond being that player) with the client's <c>Preview</c>; <c>.shot hold</c>
 /// keeps both open (<c>CameraObservation.Hold</c>, <c>CameraPreview.Hold</c>) and <c>.shot end</c> ends both.
-/// When the client's preview ends for any reason it tells the server (<c>SmSe</c>), which ends the lease.
+/// When the client's preview ends for any reason it tells the server (<c>SmSe</c>) with the preview's sequence
+/// number, and the server ends the lease only if that number is still the running one: a re-run preview ends the
+/// old one with <c>Replaced</c>, and that late report must not end the new lease.
 /// The sample does not block gameplay input, so walking ends the preview (<c>Moved</c>).</para>
 ///
 /// <para>Named <c>.shot</c> so it does not share a command with NecroArmyExample's <c>.camera</c>
@@ -79,13 +81,23 @@ internal static class SampleCamera
         public float X, Y, Z;
         public int Focus;
         public int Hold;
+        /// <summary>The server's number for this preview and its lease (<see cref="Kind.Preview"/> only).</summary>
+        public int Sequence;
     }
+
+    /// <summary>
+    /// Whether a client's "preview ended" report is about the lease that is running now. The server numbers each preview;
+    /// a report for an older number (the preview a re-run replaced) is stale and leaves the new lease alone.
+    /// </summary>
+    internal static bool ReportMatches(int runningSequence, int reportedSequence) =>
+        runningSequence != 0 && runningSequence == reportedSequence;
 
 #if !PROGENITOR_TESTS
     /// <summary>Wire form of the client's "preview ended" report: the <see cref="CameraPreviewEndReason"/>.</summary>
     internal struct EndReport
     {
         public int Reason;
+        public int Sequence;
     }
 #endif
 
@@ -157,8 +169,11 @@ internal static class SampleCamera
     /// <summary>Client: the running preview, if any.</summary>
     private static PluginCamera.CameraPreview? _preview;
 
-    /// <summary>Server: each user's observation lease. Leases end themselves; this only finds them again.</summary>
-    private static readonly System.Collections.Generic.Dictionary<Entity, PluginCamera.CameraObservation> Leases = new();
+    /// <summary>Server: each user's observation lease and its preview number. Leases end themselves; this only finds them again.</summary>
+    private static readonly System.Collections.Generic.Dictionary<Entity, (PluginCamera.CameraObservation Lease, int Sequence)> Leases = new();
+
+    /// <summary>Server: the last preview number handed out.</summary>
+    private static int _sequence;
 
     internal static void Attach(PluginContext ctx)
     {
@@ -186,8 +201,9 @@ internal static class SampleCamera
     }
 
     /// <summary>Server, <c>.shot preview</c>: lease the caller's streaming origin at their own character.</summary>
-    internal static string StartLease(PluginContext ctx, Entity user, bool hold)
+    internal static string StartLease(PluginContext ctx, Entity user, bool hold, out int sequence)
     {
+        sequence = 0;
         var em = Progenitor.Worlds.Server!.EntityManager;
         var character = em.GetComponentData<User>(user).LocalCharacter._Entity;
         if (character == Entity.Null || !em.Exists(character)) return "no character";
@@ -196,20 +212,29 @@ internal static class SampleCamera
             Hold = hold,
             Ended = reason => SampleLog.Info(Area, "server lease ended: " + reason),
         });
-        Leases[user] = lease;
+        sequence = ++_sequence;
+        Leases[user] = (lease, sequence);
         return "lease " + (hold ? "held" : "timed") + ", " + lease.SecondsLeft.ToString("0", CultureInfo.InvariantCulture) + " s left";
     }
 
     /// <summary>Server, <c>.shot hold</c>: keep the lease for its full cap.</summary>
     internal static string HoldLease(Entity user) =>
-        Leases.TryGetValue(user, out var lease) && lease.Hold() ? "lease held" : "no running lease";
+        Leases.TryGetValue(user, out var running) && running.Lease.Hold() ? "lease held" : "no running lease";
 
-    /// <summary>Server, <c>.shot end</c> or the client's report: end the lease.</summary>
+    /// <summary>Server, <c>.shot end</c>: end the user's lease, whichever preview it belongs to.</summary>
     internal static string EndLease(Entity user)
     {
-        if (!Leases.Remove(user, out var lease) || !lease.Active) return "no running lease";
-        lease.Dispose();
+        if (!Leases.Remove(user, out var running) || !running.Lease.Active) return "no running lease";
+        running.Lease.Dispose();
         return "lease ended";
+    }
+
+    /// <summary>Server, the client's report: end the lease only if the report is about it.</summary>
+    internal static string EndReportedLease(Entity user, int sequence)
+    {
+        if (!Leases.TryGetValue(user, out var running) || !ReportMatches(running.Sequence, sequence))
+            return "stale report for preview " + sequence + "; the running lease stays";
+        return EndLease(user);
     }
 
     private static unsafe void OnEndReport(int eventId, Entity userEntity, User user, byte* payload, int length)
@@ -217,7 +242,8 @@ internal static class SampleCamera
         try
         {
             if (!CustomEvents.TryRead<EndReport>(payload, length, out var report)) return;
-            SampleLog.Info(Area, "client preview ended (" + (CameraPreviewEndReason)report.Reason + "): " + EndLease(userEntity));
+            SampleLog.Info(Area, "client preview " + report.Sequence + " ended (" + (CameraPreviewEndReason)report.Reason + "): "
+                + EndReportedLease(userEntity, report.Sequence));
         }
         catch (Exception e)
         {
@@ -308,13 +334,14 @@ internal static class SampleCamera
                     SampleLog.Info(Area, "preview: no local character in the client world");
                     return;
                 }
+                int sequence = packet.Sequence;
                 _preview = camera.Preview(new UnitVec3(here.x, here.y, here.z), packet.Yaw, new CameraPreviewOptions
                 {
                     Hold = packet.Hold != 0,
                     Ended = reason =>
                     {
                         SampleLog.Info(Area, "preview ended: " + reason);
-                        ctx.Net.SendToServer(EndEventId, new EndReport { Reason = (int)reason });
+                        ctx.Net.SendToServer(EndEventId, new EndReport { Reason = (int)reason, Sequence = sequence });
                     },
                 });
                 SampleLog.Info(Area, "Preview at " + here + " held=" + _preview.IsHeld);
@@ -407,7 +434,8 @@ internal static class SampleCameraCommands
             }
 
             string lease = "";
-            if (packet.Kind == (int)SampleCamera.Kind.Preview) lease = SampleCamera.StartLease(plugin, ctx.UserEntity, packet.Hold != 0) + ". ";
+            if (packet.Kind == (int)SampleCamera.Kind.Preview)
+                lease = SampleCamera.StartLease(plugin, ctx.UserEntity, packet.Hold != 0, out packet.Sequence) + ". ";
             else if (packet.Kind == (int)SampleCamera.Kind.Hold) lease = SampleCamera.HoldLease(ctx.UserEntity) + ". ";
             else if (packet.Kind == (int)SampleCamera.Kind.End) lease = SampleCamera.EndLease(ctx.UserEntity) + ". ";
             bool sent = plugin.Net.SendToUser(ctx.UserEntity, SampleCamera.EventId, packet);

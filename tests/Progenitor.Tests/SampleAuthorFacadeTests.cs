@@ -199,4 +199,14 @@ public class SampleAuthorFacadeTests
         Assert.False(SampleCamera.TryParse("hold", "10", "", "", "", "", "", out _));
         Assert.Contains(".shot preview [hold]", SampleCamera.UsageReply);
     }
+
+    [Fact]
+    public void A_stale_preview_ended_report_does_not_match_the_running_lease()
+    {
+        // Preview 1 is replaced by preview 2; the client's late "1 ended (Replaced)" must leave lease 2 running.
+        Assert.False(SampleCamera.ReportMatches(runningSequence: 2, reportedSequence: 1));
+        Assert.True(SampleCamera.ReportMatches(runningSequence: 2, reportedSequence: 2));
+        // A preview the server never numbered (no character) matches nothing.
+        Assert.False(SampleCamera.ReportMatches(runningSequence: 0, reportedSequence: 0));
+    }
 }

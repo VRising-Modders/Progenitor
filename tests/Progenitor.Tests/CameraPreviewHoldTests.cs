@@ -125,6 +125,40 @@ public class CameraPreviewHoldTests
         Assert.Equal(CameraPreviewEndReason.Failed, p.Decide(1, Fine(100, float.NaN)));
     }
 
+    private static CameraPreviewSample WithMax(float health, float max)
+    {
+        var s = Fine(health);
+        s.MaxHealth = max;
+        return s;
+    }
+
+    [Fact]
+    public void A_lower_maximum_that_clamps_health_is_not_damage()
+    {
+        var p = new CameraPreviewPolicy(5, hold: true, now: 0);
+        Assert.Equal(CameraPreviewEndReason.None, p.Decide(1, WithMax(300, 300)));
+        // Gear taken off: the maximum falls to 250 and health is clamped to it.
+        Assert.Equal(CameraPreviewEndReason.None, p.Decide(2, WithMax(250, 250)));
+        // A hit afterwards is damage.
+        Assert.Equal(CameraPreviewEndReason.Damaged, p.Decide(3, WithMax(240, 250)));
+    }
+
+    [Fact]
+    public void A_hit_in_the_same_tick_as_a_lower_maximum_is_still_damage()
+    {
+        var p = new CameraPreviewPolicy(5, hold: true, now: 0);
+        p.Decide(1, WithMax(300, 300));
+        Assert.Equal(CameraPreviewEndReason.Damaged, p.Decide(2, WithMax(200, 250)));
+    }
+
+    [Fact]
+    public void An_unknown_maximum_leaves_every_drop_as_damage()
+    {
+        var p = new CameraPreviewPolicy(5, hold: true, now: 0);
+        p.Decide(1, WithMax(300, 0));
+        Assert.Equal(CameraPreviewEndReason.Damaged, p.Decide(2, WithMax(250, 0)));
+    }
+
     // ---- client preview: Escape --------------------------------------------------------------
 
     [Theory]
@@ -213,7 +247,7 @@ public class CameraPreviewHoldTests
     }
 
     [Fact]
-    public void A_lease_ends_on_disconnect_supersession_or_leaving_the_area()
+    public void A_lease_ends_on_disconnect_supersession_a_lost_character_or_leaving_the_area()
     {
         var p = new CameraObservationPolicy(8, hold: true, now: 0);
         var s = Here(100);
@@ -222,7 +256,7 @@ public class CameraPreviewHoldTests
         s.UserConnected = true; s.OriginOurs = false;
         Assert.Equal(CameraObservationEndReason.Superseded, p.Decide(1, s));
         s.OriginOurs = true; s.CharacterRead = false;
-        Assert.Equal(CameraObservationEndReason.Disconnected, p.Decide(1, s));
+        Assert.Equal(CameraObservationEndReason.CharacterGone, p.Decide(1, s));
         Assert.Equal(CameraObservationEndReason.None, p.Decide(1, Here(CameraObservationPolicy.LeaveDistanceMeters)));
         Assert.Equal(CameraObservationEndReason.LeftArea, p.Decide(1, Here(CameraObservationPolicy.LeaveDistanceMeters + 0.1f)));
         Assert.Equal(CameraObservationEndReason.Failed, p.Decide(1, Here(float.NaN)));
