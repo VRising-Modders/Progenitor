@@ -349,23 +349,45 @@ internal static class StressOps
             }
         }
 
+        /// <summary>Every User's index and name, online or offline (disabled included). False when a User could not be read.</summary>
+        private bool ReadUsedIdentity(out HashSet<int> indexes, out HashSet<string> names, out int unreadable)
+        {
+            indexes = new HashSet<int>();
+            names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            unreadable = 0;
+            foreach (var e in Users())
+            {
+                if (!TryUser(e, out var u)) { unreadable++; continue; }
+                indexes.Add(u.Index);
+                try { names.Add(u.CharacterName.ToString()); } catch { }
+            }
+            return unreadable == 0;
+        }
+
+        public StressOutcome ReserveOwnerIndexes(IReadOnlyList<StressOwnerPlan> owners)
+        {
+            if (!ReadUsedIdentity(out var used, out var names, out int unreadable))
+                return StressOutcome.Refuse("owner_index", $"{unreadable} User entit(ies) could not be read, so their User.Index is unknown");
+            if (!StressIndexPlan.TryAllocate(used, owners.Count, out var picked, out var why))
+                return StressOutcome.Refuse("owner_index", why);
+            for (int i = 0; i < owners.Count; i++) owners[i].UserIndex = picked[i];
+            _usedIndexes = used;
+            _usedNames = names;
+            Plugin.Logger?.LogInfo($"stress owner indexes reserved: {string.Join(",", picked)} (existing users {used.Count})");
+            return StressOutcome.Done(string.Join(",", picked));
+        }
+
         public StressOutcome CreateOwner(StressOwnerPlan owner)
         {
-            if (_usedIndexes == null || _usedNames == null)
-            {
-                _usedIndexes = new HashSet<int>();
-                _usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var e in Users())
-                {
-                    if (!TryUser(e, out var u)) continue;
-                    _usedIndexes.Add(u.Index);
-                    try { _usedNames.Add(u.CharacterName.ToString()); } catch { }
-                }
-            }
+            if (_usedIndexes == null || _usedNames == null || owner.UserIndex < 0)
+                return StressOutcome.Refuse("owner_index", "no User.Index was reserved for " + owner.Name);
             if (_usedNames.Contains(owner.Name))
                 return StressOutcome.Refuse("name_in_use", "a user named " + owner.Name + " already exists");
-            int index = StressIdentity.IndexFloor;
-            while (_usedIndexes.Contains(index)) index++;
+            // Re-read right before the write: a player who joined since the reservation got max + 1.
+            if (!ReadUsedIdentity(out var nowUsed, out _, out _) || nowUsed.Contains(owner.UserIndex)
+                || MaxOf(nowUsed) > StressIndexPlan.MaxOwnerIndex)
+                return StressOutcome.Refuse("owner_index", $"User.Index {owner.UserIndex} reserved for {owner.Name} is no longer safe (taken, a user is unreadable, or a user now holds an index above {StressIndexPlan.MaxOwnerIndex})");
+            int index = owner.UserIndex;
 
             var entity = GhostOps.CreateOfflineUser(_em, index, owner.PlatformId, owner.Name, out var readback);
             // The owner's own team, the way the server gives one to a new user; ClaimCastle needs it.
@@ -441,6 +463,13 @@ internal static class StressOps
                 return StressOutcome.Refuse("destroy_failed", "see the server log");
             Plugin.Logger?.LogInfo($"stress owner removed {target.Name} entity {target.Entity} platformId {target.PlatformId}");
             return StressOutcome.Done(target.HasCharacter ? "user and character" : "user");
+        }
+
+        private static int MaxOf(HashSet<int> set)
+        {
+            int max = -1;
+            foreach (int i in set) if (i > max) max = i;
+            return max;
         }
 
         private List<Entity> Users() =>

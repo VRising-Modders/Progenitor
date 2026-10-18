@@ -384,8 +384,19 @@ public class DevStressPlanTests
             }
         }
 
+        public List<int> UsedIndexes { get; } = new();
+
+        public StressOutcome ReserveOwnerIndexes(IReadOnlyList<StressOwnerPlan> owners)
+        {
+            if (!StressIndexPlan.TryAllocate(UsedIndexes, owners.Count, out var picked, out var why))
+                return StressOutcome.Refuse("owner_index", why);
+            for (int i = 0; i < owners.Count; i++) owners[i].UserIndex = picked[i];
+            return StressOutcome.Done();
+        }
+
         public StressOutcome CreateOwner(StressOwnerPlan owner)
         {
+            Assert.True(owner.UserIndex > 0, "owner index reserved before the write");
             Writes++;
             Users[owner.PlatformId] = owner.Name;
             return StressOutcome.Done();
@@ -462,6 +473,68 @@ public class DevStressPlanTests
         Assert.Equal("done", status["phase"]);
         Assert.NotNull(status["plot"]);
         Assert.Empty((System.Collections.IDictionary)status["missing"]!);
+    }
+
+    // ---- owner User.Index -----------------------------------------------------------------------
+
+    [Fact]
+    public void Owner_indexes_fill_holes_below_the_highest_user_first_then_follow_it()
+    {
+        // Real users 0..9 and 12, 15: holes 10, 11, 13, 14 are used before 16, 17, ...
+        var used = Enumerable.Range(0, 10).Concat(new[] { 12, 15 }).ToList();
+        Assert.True(StressIndexPlan.TryAllocate(used, 6, out var picked, out var why), why);
+        Assert.Equal(new[] { 10, 11, 13, 14, 16, 17 }, picked);
+        Assert.Empty(picked.Intersect(used));
+        Assert.Equal(picked.Length, picked.Distinct().Count());
+    }
+
+    [Fact]
+    public void Forty_owners_fit_beside_a_typical_save_and_leave_headroom_for_real_players()
+    {
+        var used = Enumerable.Range(0, 30).ToList();
+        Assert.True(StressIndexPlan.TryAllocate(used, 40, out var picked, out var why), why);
+        Assert.Equal(Enumerable.Range(30, 40), picked);
+        Assert.True(picked.Max() + StressIndexPlan.RealPlayerHeadroom < StressIndexPlan.MaskWidth);
+    }
+
+    [Fact]
+    public void Owner_indexes_never_use_zero_and_start_at_one_on_an_empty_world()
+    {
+        Assert.True(StressIndexPlan.TryAllocate(Array.Empty<int>(), 3, out var picked, out _));
+        Assert.Equal(new[] { 1, 2, 3 }, picked);
+        Assert.True(StressIndexPlan.TryAllocate(new[] { 5 }, 2, out picked, out _));
+        Assert.Equal(new[] { 1, 2 }, picked);
+    }
+
+    [Fact]
+    public void Owner_indexes_fail_closed_when_the_mask_range_would_be_exceeded()
+    {
+        Assert.Equal(111, StressIndexPlan.MaxOwnerIndex);
+        var used = Enumerable.Range(0, 100).ToList();
+        Assert.False(StressIndexPlan.TryAllocate(used, 20, out var picked, out var why));
+        Assert.Empty(picked);
+        Assert.Contains("only 12 safe", why); // 100..111
+        Assert.True(StressIndexPlan.TryAllocate(used, 12, out picked, out _));
+        Assert.Equal(111, picked.Max());
+
+        // A leftover synthetic user (ghost 10001, an older stress owner 20001) already sits far above the mask.
+        Assert.False(StressIndexPlan.TryAllocate(new[] { 0, 1, 20001 }, 1, out _, out why));
+        Assert.Contains("20001", why);
+        Assert.False(StressIndexPlan.TryAllocate(new[] { -1 }, 1, out _, out _));
+        Assert.True(StressIndexPlan.TryAllocate(new[] { 0, 1 }, 0, out picked, out _));
+        Assert.Empty(picked);
+    }
+
+    [Fact]
+    public void Job_refuses_before_any_write_when_owner_indexes_are_not_safe()
+    {
+        var world = new FakeWorld(Small());
+        world.UsedIndexes.AddRange(Enumerable.Range(0, 110));
+        var job = StressJob.Populate(Args("{\"seed\":4,\"owners\":4,\"clans\":0,\"confirm\":\"stress\"}"), world);
+        RunToEnd(job);
+        Assert.Equal("refused", job.Phase);
+        Assert.StartsWith("owner_index:", job.Reason);
+        Assert.Equal(0, world.Writes);
     }
 
     [Fact]
