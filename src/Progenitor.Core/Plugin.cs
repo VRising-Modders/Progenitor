@@ -139,6 +139,10 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"InventorySort.Install: {e.Message}"); }
         // Container preview (ctx.Inventory.Preview): the Core-owned 'PrCp' channel. Server: authorization and the
         // shared streaming lease; client: the container window, with its hooks only while a preview owns it.
+        // The shared world-save guard and the streaming-origin records first: the container preview and every
+        // ctx.Camera.Observe lease rely on them (the game saves User.ProxySyncPosition and the inventory sync lists).
+        try { Persistence.WorldSaveGuard.Install(); Cameras.ObservationGuard.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"WorldSaveGuard.Install: {e.Message}"); }
         try { Inventory.ContainerPreviewServer.Install(); Inventory.ContainerPreviewClient.Install(); }
         catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Install: {e.Message}"); }
         // ctx.Servants: hunt returns, sends and the experimental throne list hook. Server only;
@@ -483,6 +487,8 @@ public sealed class Plugin
         // Any shared streaming-origin lease still running (plugins end their own on unload): restore the users' origins.
         try { Cameras.SharedObservation.EndAll(); }
         catch (Exception e) { Logger?.LogWarning($"SharedObservation.EndAll: {e.Message}"); }
+        try { Cameras.ObservationGuard.Uninstall(); Persistence.WorldSaveGuard.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"WorldSaveGuard.Uninstall: {e.Message}"); }
         try { Castles.Castles.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"Castles.Uninstall: {e.Message}"); }
         // Abilities: the no-cooldowns Plugin.Frame handler and its hold table.

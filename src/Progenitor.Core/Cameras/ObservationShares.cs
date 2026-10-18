@@ -139,3 +139,72 @@ internal sealed class ObservationShareBook<THolder> where THolder : class
         return -1;
     }
 }
+
+/// <summary>
+/// One held streaming-origin lease, persisted in Core's mod save while it runs: the user's platform id, the lease point,
+/// and the user's streaming origin before the lease. The game saves <c>User.ProxySyncPosition</c> with the world and does
+/// not reset it on reconnect (live 2026-10-17), so a crash during a lease would leave the user's origin at the lease
+/// point for good, and every later lease would be refused as "another view".
+/// </summary>
+internal sealed class ObservationLeaseRecord
+{
+    public ulong Platform { get; set; }
+    public float X { get; set; }
+    public float Y { get; set; }
+    public float Z { get; set; }
+    public float OriginalX { get; set; }
+    public float OriginalY { get; set; }
+    public float OriginalZ { get; set; }
+}
+
+/// <summary>The persisted document of <see cref="ObservationLeaseRecord"/>s: at most one per user.</summary>
+internal sealed class ObservationLeaseRecords
+{
+    internal const string StoreId = "progenitor.observation";
+    internal const string Key = "leases";
+
+    public List<ObservationLeaseRecord> Records { get; set; } = new();
+
+    internal ObservationLeaseRecord? For(ulong platform) => Records.Find(r => r != null && r.Platform == platform);
+
+    /// <summary>Record (or replace) the user's lease.</summary>
+    internal void Put(ObservationLeaseRecord record)
+    {
+        Records.RemoveAll(r => r == null || r.Platform == record.Platform);
+        Records.Add(record);
+    }
+
+    internal bool Remove(ulong platform) => Records.RemoveAll(r => r == null || r.Platform == platform) > 0;
+}
+
+/// <summary>What to do about a user's streaming origin that a lease record names, game-free.</summary>
+internal enum ObservationProxyRepair
+{
+    /// <summary>Leave the origin as it is and drop the record (not ours: it moved, or a lease runs).</summary>
+    Leave = 0,
+    /// <summary>The origin still sits at the recorded lease point and no lease runs: put the recorded original back.</summary>
+    Restore = 1,
+}
+
+/// <summary>The streaming-origin repair rules, game-free.</summary>
+internal static class ObservationProxyRules
+{
+    /// <summary>An origin within this many meters of a recorded lease point is that lease's leftover.</summary>
+    internal const float SameOriginMeters = 0.01f;
+
+    internal static bool AtPoint(float px, float py, float pz, ObservationLeaseRecord r)
+    {
+        float dx = px - r.X, dy = py - r.Y, dz = pz - r.Z;
+        float d2 = dx * dx + dy * dy + dz * dz;
+        return float.IsFinite(d2) && d2 <= SameOriginMeters * SameOriginMeters;
+    }
+
+    internal static bool IsZero(float x, float y, float z) => x == 0 && y == 0 && z == 0;
+
+    /// <summary>
+    /// The startup sweep (and a lease start that finds the origin taken): restore only when no lease of this run holds the
+    /// user and the origin still sits where the record says a lease of an earlier run left it.
+    /// </summary>
+    internal static ObservationProxyRepair Decide(bool leaseRunning, bool originAtRecordedPoint) =>
+        !leaseRunning && originAtRecordedPoint ? ObservationProxyRepair.Restore : ObservationProxyRepair.Leave;
+}

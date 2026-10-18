@@ -77,7 +77,7 @@ internal static unsafe class ContainerPreviewClient
     }
 
     /// <summary>Start a preview; a running one closes (<see cref="ContainerPreviewCloseReason.Replaced"/>).</summary>
-    internal static ContainerPreviewHandle Open(ContainerId container, ContainerPreviewOptions options, object? owner, bool hudGate = true)
+    internal static ContainerPreviewHandle Open(ContainerId container, ContainerPreviewOptions options, object? owner, bool hudGate = true, bool syncInventory = true)
     {
         if (!_installed) throw new InvalidOperationException("The container preview is not installed (client side only).");
         if (container.IsNone) throw new ArgumentException("No container id.", nameof(container));
@@ -85,18 +85,18 @@ internal static unsafe class ContainerPreviewClient
         if (world == null || !world.IsCreated) throw new InvalidOperationException("No client world (join a game first).");
         _current?.Close(ContainerPreviewCloseReason.Replaced, "", notify: true);
         int sequence = _sequence = _sequence == int.MaxValue ? 1 : _sequence + 1;
-        var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate };
+        var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate, SyncInventory = syncInventory };
         _current = handle;
-        if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds))
+        if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds, syncInventory))
             handle.Close(ContainerPreviewCloseReason.Failed, "The preview request could not be sent.", notify: true);
         return handle;
     }
 
-    internal static bool SendRequest(string kind, int sequence, ContainerId container, double seconds)
+    internal static bool SendRequest(string kind, int sequence, ContainerId container, double seconds, bool syncInventory = true)
     {
         try
         {
-            var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket { Kind = kind, Sequence = sequence, Container = container.ToString(), Seconds = seconds });
+            var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket { Kind = kind, Sequence = sequence, Container = container.ToString(), Seconds = seconds, SyncInventory = syncInventory });
             return CustomEvents.SendToServer(ContainerPreviewWire.EventId, bytes);
         }
         catch (Exception e)
@@ -247,7 +247,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private IDisposable? _hudHook, _mapperHook, _sendHook, _escape;
     private bool _capturing;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
-    private bool _targetGoneSeen;
+    private Entity _windowTarget = Entity.Null;
+    private bool _inventorySeen;
     private double _guardSince;
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
     private EventDropQueries? _drop;
@@ -267,6 +268,9 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// opened. The Dev bridge's <c>hudGate</c>; always true for plugin previews.
     /// </summary>
     internal bool HudGate { get; init; } = true;
+
+    /// <summary>E1b only: false asks the server not to put the user in the chest's inventory sync lists. The Dev bridge's <c>syncInventory</c>; always true for plugin previews.</summary>
+    internal bool SyncInventory { get; init; } = true;
     internal Entity Target => _target;
     internal int DroppedEvents { get; private set; }
 
@@ -315,6 +319,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (step == ContainerPreviewStep.OpenWindow)
         {
             ArmWindow();
+            _windowTarget = _target;
             ContainerPreviewClient.WriteOpen(_world, _target);
         }
         if (Machine.Phase == ContainerPreviewPhase.Open) ApplyUi();
@@ -329,13 +334,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         var em = world!.EntityManager;
 
         if (_target != Entity.Null && (!em.Exists(_target) || !SameWords(em, _target, _targetWords))) { _target = Entity.Null; _inventory = Entity.Null; }
-        if (_target == Entity.Null && Machine.Phase == ContainerPreviewPhase.Waiting && now >= _nextLookup)
+        if (_target == Entity.Null && now >= _nextLookup)
         {
             _nextLookup = now + 0.1;
             _target = ContainerPreviewClient.FindByNetworkId(em, _netIndex, _netGeneration);
             if (_target != Entity.Null) ContainerPreviewClient.TryWords(em, _target, out _targetWords.Item1, out _targetWords.Item2, out _targetWords.Item3);
         }
-        s.TargetFound = _target != Entity.Null && !_targetGoneSeen;
+        s.TargetFound = _target != Entity.Null;
         if (s.TargetFound)
         {
             if (_inventory == Entity.Null || !em.Exists(_inventory))
@@ -348,10 +353,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
                 }
             }
             s.InventoryReady = _inventory != Entity.Null;
+            if (s.InventoryReady) _inventorySeen = true;
         }
 
         var window = ContainerPreviewClient.ReadWindow(world);
         s.WindowIsOurs = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target && _target != Entity.Null && window.Interact == Entity.Null;
+        s.ContainerMenuOpen = window.Menu == Layout.HUDMenuTypeContainerMenu;
+        s.TargetReplaced = _windowTarget != Entity.Null && _target != Entity.Null && _target != _windowTarget;
         s.OtherMenuOpen = window.Menu > 0 && !s.WindowIsOurs;
         return s;
     }
@@ -385,7 +393,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             c.Skip = ContainerPreviewHudGate.ShouldSkip(
                 Machine.OwnsWindow, Machine.Phase == ContainerPreviewPhase.Opening,
                 window.Menu == Layout.HUDMenuTypeContainerMenu,
-                window.Target == _target && _target != Entity.Null,
+                (_windowTarget != Entity.Null ? window.Target == _windowTarget : window.Target == _target && _target != Entity.Null),
                 window.Interact == Entity.Null,
                 LocalGoToMenuCount(c.World));
         }
@@ -422,14 +430,20 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private void BeforeMapper(SystemHookContext c)
     {
         // Also after the close, until the window is confirmed gone (FinishMapperGuard): the mapper must never read a destroyed chest.
-        if (c.World != _world || _mapperHook == null || _target == Entity.Null) return;
+        if (c.World != _world || _mapperHook == null || _windowTarget == Entity.Null) return;
         try
         {
-            if (c.World.EntityManager.Exists(_target)) return;
+            var em = c.World.EntityManager;
+            if (em.Exists(_windowTarget))
+            {
+                // The chest is here but its inventory left (a save suspension, the server letting go): hold the window as
+                // it was rather than let the mapper read a missing inventory. The machine closes after a grace period.
+                if (Machine.OwnsWindow && _inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;
+                return;
+            }
+            // The chest left this client (a save suspension takes the streaming origin away for a moment, or it is gone):
+            // hold the window; the machine waits a grace period for it to come back, then closes.
             c.Skip = true;
-            if (_targetGoneSeen) return;
-            _targetGoneSeen = true;
-            Dev.MainThread.Post(() => Close(ContainerPreviewCloseReason.TargetGone, "", notify: true));
         }
         catch (Exception e) { WarnOnce("mapper gate", e); }
     }
@@ -561,7 +575,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
                 // Close only the window this preview opened: the container menu, still on our target (or not bound
                 // yet), with no interaction behind it. A real menu the player opened is left alone.
                 if (window.Menu == Layout.HUDMenuTypeContainerMenu && window.Interact == Entity.Null
-                    && (window.Target == _target || window.Target == Entity.Null || reason == ContainerPreviewCloseReason.TargetGone))
+                    && (window.Target == _windowTarget || window.Target == Entity.Null || reason == ContainerPreviewCloseReason.TargetGone))
                     ContainerPreviewClient.CloseMenu(_world);
             }
         }
@@ -609,7 +623,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             if (alive)
             {
                 var window = ContainerPreviewClient.ReadWindow(_world);
-                onTarget = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target;
+                onTarget = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _windowTarget;
             }
             done = ContainerPreviewMachine.MapperGuardDone(alive, onTarget, ContainerPreviewClient.Now - _guardSince);
         }
@@ -647,11 +661,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["networkId"] = _netType == 0 ? null : NetworkIdWords.Format(_netIndex, _netGeneration),
         ["target"] = _target == Entity.Null ? null : _target.Index + ":" + _target.Version,
         ["inventory"] = _inventory == Entity.Null ? null : _inventory.Index + ":" + _inventory.Version,
+        ["inventoryMissing"] = Machine.InventoryMissing,
         ["hooks"] = _hudHook != null,
         ["hiddenUi"] = _hidden.Count,
         ["droppedEvents"] = DroppedEvents,
         ["keepOpen"] = _options.KeepOpen,
         ["hudGate"] = HudGate,
+        ["syncInventory"] = SyncInventory,
         ["owner"] = _owner?.GetType().Name,
     };
 

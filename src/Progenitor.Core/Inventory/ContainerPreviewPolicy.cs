@@ -155,6 +155,10 @@ internal struct ContainerPreviewSample
     public bool InventoryReady;
     /// <summary>The game's open HUD menu is the container window, showing this target, with no interaction behind it.</summary>
     public bool WindowIsOurs;
+    /// <summary>The game's open HUD menu is the container window (whatever it shows).</summary>
+    public bool ContainerMenuOpen;
+    /// <summary>The chest is on this client again, but as another entity than the one the window was opened on.</summary>
+    public bool TargetReplaced;
     /// <summary>The game has some HUD menu open that is not ours.</summary>
     public bool OtherMenuOpen;
 }
@@ -187,11 +191,21 @@ internal sealed class ContainerPreviewMachine
     /// <summary>What each renewal asks the server for: three missed renewals before the server lets go.</summary>
     internal const double RenewGrantSeconds = 180;
 
+    /// <summary>
+    /// How long an open preview waits when the chest's inventory entity leaves the client (longer than the server's save
+    /// suspension takes in the normal case) before it closes; meanwhile the window is held as it was.
+    /// </summary>
+    internal const double InventoryGraceSeconds = 20;
+
+    /// <summary>True while an open preview's inventory is missing (the client holds the window's mapper).</summary>
+    internal bool InventoryMissing => !double.IsNaN(_inventoryMissingSince);
+
     private readonly ContainerPreviewOptions _options;
     private readonly double _startedAt;
     private double _waitingSince;
     private double _openingSince;
     private double _nextRenew = double.PositiveInfinity;
+    private double _inventoryMissingSince = double.NaN;
 
     internal ContainerPreviewMachine(ContainerPreviewOptions options, double now)
     {
@@ -280,9 +294,27 @@ internal sealed class ContainerPreviewMachine
 
             case ContainerPreviewPhase.Open:
                 if (!s.SameWorld) return Closed(ContainerPreviewCloseReason.WorldChanged, "");
-                if (!s.TargetFound) return Closed(ContainerPreviewCloseReason.TargetGone, "");
-                if (!s.WindowIsOurs) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
                 if (now >= Deadline) return Closed(ContainerPreviewCloseReason.Timeout, "");
+                // The chest came back as another entity (it left the client, a save took the origin away for a moment): the
+                // window is bound to the destroyed one. Reopening over an open container window is not a proven path, so end now.
+                if (s.TargetReplaced) return Closed(ContainerPreviewCloseReason.TargetGone, "The container left this client.");
+                if (!s.TargetFound || !s.InventoryReady)
+                {
+                    // The player closed the window (or opened another menu) meanwhile.
+                    if (!s.ContainerMenuOpen) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
+                    // The chest or its contents left this client (a world save takes the streaming origin and the sync
+                    // entries out for a moment, or the server let go): the window stays as it was, its mapper held, for a
+                    // grace period, then the preview closes.
+                    if (double.IsNaN(_inventoryMissingSince)) _inventoryMissingSince = now;
+                    else if (now - _inventoryMissingSince >= InventoryGraceSeconds)
+                        return Closed(ContainerPreviewCloseReason.TargetGone,
+                            s.TargetFound ? "The container's contents stopped arriving." : "The container left this client.");
+                    return ContainerPreviewStep.None;
+                }
+                _inventoryMissingSince = double.NaN;
+                // Back (or never gone): the window must still be the container window on this chest. A chest that came back
+                // as another entity is not the one the window shows, so the preview ends.
+                if (!s.WindowIsOurs) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
                 return ContainerPreviewStep.None;
 
             default:
@@ -421,6 +453,13 @@ internal static class ContainerPreviewAuthorization
         if (!f.HasNetworkId) return "That container has no network id yet.";
         return null;
     }
+
+    /// <summary>
+    /// The refusal when the server's world-save hook is not in place: the inventory sync must be taken out around every
+    /// world save, and without the hook the server never hears of one.
+    /// </summary>
+    internal const string SaveHookRefusal =
+        "This server cannot share container contents right now: its world-save hook is not in place (see the server log).";
 
     /// <summary>The lease seconds the server grants for a requested length: clamped to (0, 600], 30 when unusable.</summary>
     internal static double GrantSeconds(double requested) =>

@@ -32,8 +32,8 @@ test('container preview tool sends open, status, close and bag to the container_
   await tool.handler(tool.schema.parse({}));
   assert.deepEqual(plain(calls[0]), ['client', 'container_preview', {}]);
   const id = 'c-' + '0123456789abcdef'.repeat(2);
-  await tool.handler(tool.schema.parse({ action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false }));
-  assert.deepEqual(plain(calls[1]), ['client', 'container_preview', { action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false }]);
+  await tool.handler(tool.schema.parse({ action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false, syncInventory: false }));
+  assert.deepEqual(plain(calls[1]), ['client', 'container_preview', { action: 'open', id, keepOpen: true, hideBag: false, replicationTimeout: 8, dropEvents: false, hudGate: false, syncInventory: false }]);
   await tool.handler(tool.schema.parse({ side: 'server' }));
   assert.deepEqual(plain(calls[2]), ['server', 'container_preview', {}]);
   await tool.handler(tool.schema.parse({ action: 'close' }));
@@ -49,6 +49,21 @@ test('container preview tool schema rejects unknown actions and out-of-range len
   assert.equal(tool.schema.safeParse({ action: 'open', id: 'c-x', seconds: 601 }).success, false);
   assert.equal(tool.schema.safeParse({ action: 'open', id: 'c-x', replicationTimeout: 31 }).success, false);
   assert.equal(tool.schema.safeParse({ action: 'bag', mode: 'hidden' }).success, false);
+});
+
+test('container preview guard goes to the server bridge and takes the queue slot', async () => {
+  const { tool, calls } = load();
+  await tool.handler(tool.schema.parse({ side: 'server', action: 'guard', on: false }));
+  assert.deepEqual(plain(calls[0]), ['server', 'container_preview', { action: 'guard', on: false }]);
+  assert.equal(isReadOnlyOp('container_preview', { action: 'guard', on: false }), false);
+});
+
+test('container preview proxy_reset goes to the server with the platform id as a string', async () => {
+  const { tool, calls } = load();
+  await tool.handler(tool.schema.parse({ side: 'server', action: 'proxy_reset', user: '76561198000000001' }));
+  assert.deepEqual(plain(calls[0]), ['server', 'container_preview', { action: 'proxy_reset', user: '76561198000000001' }]);
+  assert.equal(tool.schema.safeParse({ side: 'server', action: 'proxy_reset', user: 'abc' }).success, false);
+  assert.equal(isReadOnlyOp('container_preview', { action: 'proxy_reset', user: '1' }), false);
 });
 
 test('container preview status reads without the queue slot; open, close and bag take it', () => {

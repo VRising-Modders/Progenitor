@@ -13,7 +13,7 @@ namespace Progenitor.Inventory;
 /// </summary>
 internal static class ContainerPreviewTestBridge
 {
-    public static Dictionary<string, object?> Open(string id, bool keepOpen, double seconds, bool hideBag, double replicationTimeout, bool dropEvents, bool hudGate)
+    public static Dictionary<string, object?> Open(string id, bool keepOpen, double seconds, bool hideBag, double replicationTimeout, bool dropEvents, bool hudGate, bool syncInventory)
     {
         if (Plugin.IsServerProcess) throw new InvalidOperationException("container_preview open runs on the client");
         if (!ContainerId.TryParse(id, out var container)) throw new ArgumentException("args.id must be a container id (c- plus 32 hex digits)");
@@ -27,7 +27,7 @@ internal static class ContainerPreviewTestBridge
         };
         var problem = options.Problem();
         if (problem != null) throw new ArgumentException(problem);
-        var handle = ContainerPreviewClient.Open(container, options, typeof(ContainerPreviewTestBridge), hudGate);
+        var handle = ContainerPreviewClient.Open(container, options, typeof(ContainerPreviewTestBridge), hudGate, syncInventory);
         var result = handle.Describe();
         result["requested"] = "open";
         return result;
@@ -76,6 +76,31 @@ internal static class ContainerPreviewTestBridge
         return new Dictionary<string, object?> { ["bagHide"] = mode, ["note"] = "applies to the next preview that opens" };
     }
 
+    /// <summary>E1b persistence read only: turn the world-save guard of the inventory sync off or on (server).</summary>
+    public static Dictionary<string, object?> Guard(bool on)
+    {
+        if (!Plugin.IsServerProcess) throw new InvalidOperationException("container_preview guard runs on the server");
+        ContainerPreviewServer.SaveGuardEnabled = on;
+        Plugin.Logger?.LogWarning("ContainerPreview: save guard turned " + (on ? "on" : "off") + " by the Dev bridge.");
+        var result = ServerStatus();
+        result["requested"] = "guard";
+        return result;
+    }
+
+    /// <summary>
+    /// Dev-only one-off repair (server): put a user's streaming origin (<c>User.ProxySyncPosition</c>) back to zero, for an
+    /// origin left over from before the lease records existed. Refused while a lease of this run holds that user.
+    /// </summary>
+    public static Dictionary<string, object?> ProxyReset(string platform)
+    {
+        if (!Plugin.IsServerProcess) throw new InvalidOperationException("container_preview proxy_reset runs on the server");
+        if (!ulong.TryParse((platform ?? "").Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out ulong id) || id == 0)
+            throw new ArgumentException("args.user must be the user's platform id (a SteamID64)");
+        var result = ObservationGuard.ResetToZero(id);
+        result["requested"] = "proxy_reset";
+        return result;
+    }
+
     public static Dictionary<string, object?> ServerStatus()
     {
         var leases = new List<Dictionary<string, object?>>();
@@ -85,11 +110,20 @@ internal static class ContainerPreviewTestBridge
                 ["user"] = lease.User.Index + ":" + lease.User.Version,
                 ["point"] = new[] { lease.Point.x, lease.Point.y, lease.Point.z },
                 ["holders"] = lease.HolderCount,
+                ["proxySuspended"] = lease.ProxySuspended,
             });
         return new Dictionary<string, object?>
         {
             ["side"] = "server",
             ["previews"] = ContainerPreviewServer.Describe(),
+            ["syncReleasing"] = ContainerPreviewServer.SyncBookkeeping.Releasing,
+            ["syncSweepPending"] = ContainerPreviewServer.SyncBookkeeping.SweepPending,
+            ["syncRecords"] = ContainerPreviewServer.SyncBookkeeping.Records,
+            ["saveGuard"] = ContainerPreviewServer.SaveGuardEnabled,
+            ["saveSuspended"] = ContainerPreviewServer.SaveSuspended,
+            ["worldSaveHookArmed"] = Persistence.ModSave.WorldSaveHookArmed,
+            ["observationRecords"] = ObservationGuard.RecordCount,
+            ["observationSweepPending"] = ObservationGuard.SweepPending,
             ["leases"] = leases,
         };
     }
