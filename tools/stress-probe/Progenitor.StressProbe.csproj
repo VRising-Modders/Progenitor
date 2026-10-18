@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Progenitor.StressProbe</AssemblyName>
+    <ReferenceGame>true</ReferenceGame>
+    <BepInExPluginGuid>progenitor.stress-probe</BepInExPluginGuid>
+    <BepInExPluginName>Progenitor Stress Probe</BepInExPluginName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Progenitor" HintPath="$(StressProbeCore)" Private="false" />
+    <Reference Include="Progenitor.Dev" HintPath="$(StressProbeDev)" Private="false" />
+    <Compile Include="../../src/Progenitor.Dev/Ops/StressPlace.cs" Link="StressPlace.cs" />
+  </ItemGroup>
+  <Target Name="RequireProbeCore" BeforeTargets="ResolveReferences" Condition="!Exists('$(StressProbeCore)')">
+    <Error Text="Set StressProbeCore to the reviewed Core DLL deployed on the isolated test server." />
+  </Target>
+</Project>

@@ -1,5 +1,7 @@
 # Progenitor roadmap
 
+Server test castles: scoped one-territory generation, Castle API inventory discovery and real heart fueling passed on one copied-save plot. The adapter refuses occupied plots. Offline ownership, clans, individual clearing checks, save reload and bulk population remain unqualified; this is not yet a complete stress-population backend. [Qualification harness](../tools/stress-probe/README.md).
+
 **Reviewed 2026-09-10 against source, offline tests and internal reviews R86 and R87.** The framework foundations are usable; the complete product is not done. The 2026-09-10 batch is **implemented offline** in this tree: nothing from it is in a reviewed candidate, and none of it is live-accepted. M2–M4 contain qualified historical work alongside unfinished acceptance gates. M5 has a useful offline catalog and five researched recipes, not a complete asset-loading browser.
 
 This is the current status and scope. [The specification](spec.html) describes intended behavior; [the API reference](api.md) documents individual contracts. Detailed investigations and the previous roadmap are kept in the internal research notes. Item numbers are retained for existing references.
