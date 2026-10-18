@@ -230,6 +230,7 @@ Every action but `status`, `open` and `close` needs the build menu open. Refused
 | Args | Does |
 |---|---|
 | `{}` or `{"action":"status","cells":40}` | `open`, `attached`, `enabled`, `clearOnClose`, `focused`, `guard` (`build-search` while the box has the keyboard), `holdEngaged`, `exclusiveHolds`, `query`, `words`, `total`, `visible`, `hidden`, `countText`, `clearShown`, `lastError`; the all-tabs results (`allTabs`, `resultCells`, `resultsMatched`, `resultsNote`, `blobCopies`: private blob copies not yet freed); the breadcrumb (`breadcrumbs`, `crumb`, `crumbShown`, `crumbHoveredGuid`, `crumbHost`, `indexFailure`); and up to `cells` (0 to 500) cells: `index`, `active`, `hiddenBySearch`, `name` (the localized name), `searchable` (the normalized text the query is matched against). |
+| `{"action":"recent"}` | Selects the build menu's **Recent** category through the same handler as its button (it does nothing while the box has text) and returns `status`. The row follows on the next mapper update: read `status` again. Unit-tested; not live-verified. |
 | `{"action":"open"}` / `{"action":"close"}` | Opens or closes the game's build menu with no input or focus, the way the B key does: open creates the `OpenMenuEvent` {CharacterInfo, init entity} plus `CharacterMenu.InitData` {Building} the key creates; close calls `HUDMenuManager.CloseMenu` when the character menu (which hosts the build menu) is the open HUD menu, and does nothing otherwise. Unlike the key, open skips the build-menu progression requirement. The change shows on the next frame: read `status`. Live 2026-10-04, no input or focus: open showed Castle > Foundation with the box; close closed it; a second close and a second open reported "not open" / "already open"; open, search, close and reopen came back unfiltered with the blob restored. |
 | `{"action":"hover","index":0}` | Shows row cell 0's tooltip without moving the mouse: sets the cell's `GridSelectionEntry.IsHovered` (the flag the game's own pointer-enter sets) and clears it on every other cell; `-1` clears all. The real pointer clears it on its next enter or exit. Live 2026-10-04. |
 | `{"action":"select","index":0}` | Picks row cell 0 as a click does: sends the entry's own pointer-down (or pointer-click, by the entry's `SelectOnMouseDown`) with a left-button event, so the game enters placement for that piece. Refuses a disabled or hidden cell. Returns `status` plus `selected`. Used to place a piece with the [material sources](modules.md#material-sources) test without the mouse; source-checked, run on 2026-10-13. |
@@ -237,6 +238,13 @@ Every action but `status`, `open` and `close` needs the build menu open. Refused
 | `{"action":"clear"}` | What the x button does: empties the query and keeps the keyboard in the box. |
 | `{"action":"focus"}` / `{"action":"blur"}` | Gives or takes the keyboard, as a click on the box or elsewhere does. |
 | `{"action":"type","text":"wall","keys":["Escape"]}` | With focus, queues `text` and then `keys` (chords in [`mods_ui type`](bridge-ops-ui.md#mods_ui-text-field-tests-texttest1) syntax) for the typed-key pump, one item a frame. Escape and Enter reach the box's own handlers, as the physical keys do. Read back with `status` a few frames later. |
+
+`status` also reports Recent and Copy building: `recentSelected`, `recentCount` (the `RecentCount` setting),
+`recentBlueprints` (blueprint ids, newest first), `categoryTabsDisabled` (the category buttons are disabled for a
+search), `copyBuildingKey`, `copyBuildingIcon` (the game graphic the hint borrowed, or empty for text),
+`copyMouseMapping`, `copyPending` (a copy waiting for its tab to draw) and `selectedBlueprint` (the item picked for
+placement, 0 for none). Press Copy building with `keybind_press`, plugin `progenitor`, bind `CopyBuilding`, while
+pointing at a placed building. These fields are unit-tested; not live-verified on the current main.
 
 From bash: `node tools/mcp/call.mjs client build_search '{"action":"status"}'`. There is no MCP wrapper.
 

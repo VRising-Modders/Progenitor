@@ -36,6 +36,7 @@ internal static class BuildSearchOps
         return action switch
         {
             "status" => Call("Status", Int(args, "cells") ?? 40),
+            "recent" => Call("RecentTab"),
             "set" => Call("Set", Str(args, "text") ?? throw new ArgumentException("args.text is required for set")),
             "clear" => Call("Clear"),
             "focus" => Call("Focus", true),
@@ -45,7 +46,7 @@ internal static class BuildSearchOps
             "close" => Call("CloseMenu"),
             "hover" => Call("Hover", Int(args, "index") ?? throw new ArgumentException("args.index is required for hover (-1 for none)")),
             "select" => Call("Select", Int(args, "index") ?? throw new ArgumentException("args.index is required for select")),
-            _ => throw new ArgumentException("args.action must be status, open, close, hover, select, set, clear, focus, blur or type"),
+            _ => throw new ArgumentException("args.action must be status, recent, open, close, hover, select, set, clear, focus, blur or type"),
         };
     }
 

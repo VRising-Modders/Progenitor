@@ -503,6 +503,7 @@ internal static class KeybindConflictPrompt
         {
             KeybindScope.Menu => "menus",
             KeybindScope.Window => "menus and windows",
+            KeybindScope.Build => "build mode",
             KeybindScope.Map => "map",
             KeybindScope.Photo => "photo mode",
             KeybindScope.Chat => "chat",

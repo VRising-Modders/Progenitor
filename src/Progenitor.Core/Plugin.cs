@@ -225,6 +225,8 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"DebugTools.Install: {e.Message}"); }
         try { Progenitor.Ui.BuildMenuSearch.Install(); }
         catch (Exception e) { Logger?.LogWarning($"BuildMenuSearch.Install: {e.Message}"); }
+        try { Ui.BuildRecentObserver.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"BuildRecentObserver.Install: {e.Message}"); }
         // SUPPORT1: Get help's [Support] OutputFolder (Core's ui cfg, client only); the page row reads it.
         try { Progenitor.Support.SupportLive.Install(); }
         catch (Exception e) { Logger?.LogWarning($"SupportLive.Install: {e.Message}"); }
@@ -422,6 +424,8 @@ public sealed class Plugin
         try { Ai.ApiSpawnMarker.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ApiSpawnMarker.Uninstall: {e.Message}"); }
         // The build-menu search first: it holds an exclusive input hold while its box has focus.
+        try { Ui.BuildRecentObserver.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"BuildRecentObserver.Uninstall: {e.Message}"); }
         try { Progenitor.Ui.BuildMenuSearch.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"BuildMenuSearch.Uninstall: {e.Message}"); }
         // Photo mode next: it holds a camera shot, an input lease, hidden HUD canvases and (on the

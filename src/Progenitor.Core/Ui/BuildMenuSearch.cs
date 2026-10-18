@@ -43,7 +43,7 @@ namespace Progenitor.Ui;
 /// and keeps the filter; the clear button (x) empties the query. Closing the build menu clears it when
 /// <c>ClearOnClose</c> is on (the default).</para>
 /// </summary>
-internal static class BuildMenuSearch
+internal static partial class BuildMenuSearch
 {
     internal const string Section = "BuildSearch";
     internal const string Placeholder = "Search buildings";
@@ -141,6 +141,9 @@ internal static class BuildMenuSearch
 
     internal static bool Enabled => _enabled?.Value ?? true;
 
+    /// <summary>Runtime gate for Core's build-scoped keys; the native menu must still be visible.</summary>
+    internal static bool IsBuildScopeOpen => Enabled && _open && Alive(_menu) && _menu!.gameObject.activeInHierarchy;
+
     /// <summary>BUILDSEARCH2: the tooltip breadcrumb, independent of the search box.</summary>
     internal static bool Breadcrumbs => _breadcrumbs?.Value ?? true;
 
@@ -159,6 +162,7 @@ internal static class BuildMenuSearch
                     "Clear the search when the build menu closes, so it always opens unfiltered.");
                 _breadcrumbs = file.Bind(Section, "Breadcrumbs", true,
                     "Show where an item lives in the build menu's tooltip: Category > Tag, and the group for an item inside a group.");
+                InstallBuildTools(file);
                 // Progenitor's own settings page (Mods menu > Progenitor): both are switches that take
                 // effect at once. Turning Enabled off removes the box and shows every item again.
                 SettingLeases.Add(SettingsCatalog.RegisterSetting(SettingsPanel.PluginId, _enabled, new SettingPresentation
@@ -203,6 +207,9 @@ internal static class BuildMenuSearch
         catch (Exception e)
         {
             Plugin.Logger?.LogWarning("BuildSearch: BuildMenuMapper hook install threw: " + e.Message);
+            try { _hook?.Dispose(); } catch { }
+            _hook = null;
+            ReleaseBuildTools();
             DisposeSettingLeases();
             return;
         }
@@ -233,6 +240,7 @@ internal static class BuildMenuSearch
 
         Detach("uninstall");
         BuildMenuCrumb.Release();
+        ReleaseBuildTools();
         BuildMenuIndex.Forget();
         DisposeSettingLeases();
         try { _hold?.Drop(); } catch { /* */ }
@@ -316,6 +324,7 @@ internal static class BuildMenuSearch
             Place();
             CheckResultsShown(mapper);
             ApplyFilter(world);
+            UpdateBuildTools(world, mapper, menu!);
         }
         catch (Exception e)
         {
@@ -357,6 +366,7 @@ internal static class BuildMenuSearch
         if (_open == open) return;
         _open = open;
         if (open) return;
+        CloseBuildTools();
         _keptQuery = (_clearOnClose?.Value ?? true) ? "" : ReadQuery();
         Detach("closed");
     }
@@ -544,9 +554,18 @@ internal static class BuildMenuSearch
             var parent = _root.transform.parent;
             if (groupRt == null || rt == null || parent == null) return;
             var rect = groupRt.rect;
-            Vector3 topWorld = groupRt.TransformPoint(new Vector3(rect.center.x, rect.yMax, 0f));
-            Vector3 local = parent.InverseTransformPoint(topWorld);
-            var want = new Vector2(local.x, local.y + GapAboveRow);
+            Vector3 left = parent.InverseTransformPoint(groupRt.TransformPoint(new Vector3(rect.xMin, rect.yMax, 0f)));
+            Vector3 right = parent.InverseTransformPoint(groupRt.TransformPoint(new Vector3(rect.xMax, rect.yMax, 0f)));
+            var selector = _menu?.VariationSelectionGroup;
+            bool shown = Alive(selector) && selector!.gameObject.activeInHierarchy;
+            var selectorRt = shown ? selector!.GetComponent<RectTransform>() : null;
+            Vector3 selectorCorner = selectorRt == null ? default : parent.InverseTransformPoint(
+                selectorRt.TransformPoint(new Vector3(selectorRt.rect.xMin, selectorRt.rect.yMax, 0)));
+            float width = Math.Min(FieldWidth, Math.Max(160, right.x - left.x - CountWidth - 26));
+            rt.sizeDelta = new Vector2(width, FieldHeight);
+            var placement = BuildSearchPlacement.Place(left.x, right.x, left.y, width, CountWidth,
+                shown && selectorRt != null, selectorCorner.x, selectorCorner.y);
+            var want = new Vector2(placement.X, placement.Y);
             // anchoredPosition is relative to the anchor (the parent's center): convert.
             var parentRt = parent.GetComponent<RectTransform>();
             if (parentRt != null) want -= parentRt.rect.center;
@@ -618,6 +637,13 @@ internal static class BuildMenuSearch
 
         var entries = _group.Entries;
         int count = Math.Min(_group.DataCount, entries == null ? 0 : entries.Count);
+        if (_recentSelected && (!BuildMenuSwap.Active || _jumpCategory >= 0))
+        {
+            for (int i = 0; i < count; i++) if (Alive(entries![i])) SetCellShown(entries[i], false);
+            _visible = _total = 0;
+            SyncCount();
+            return;
+        }
         if (BuildMenuSwap.Active)
         {
             // BUILDSEARCH3: the row IS the results (from every tab); nothing to hide.
@@ -701,7 +727,7 @@ internal static class BuildMenuSearch
     private static void SyncCount()
     {
         if (_count == null) return;
-        string text = _words.Length == 0 ? ""
+        string text = _recentSelected ? (_visible == 0 ? "No recent matches" : _visible + " recent") : _words.Length == 0 ? ""
             // "48 of 212 found" only when the cap cut the row; cells the game drops (not unlocked) are not
             // results the player can reach, so they are not counted.
             : BuildMenuSwap.Active
@@ -812,7 +838,7 @@ internal static class BuildMenuSearch
         {
             var world = ctx?.World;
             if (world == null || !world.IsCreated) return;
-            if (!Enabled || !_open || _field == null || BuildSearchMatch.QueryChars(_words) < BuildSearchResults.MinQueryChars)
+            if (!Enabled || !_open || _field == null || (!_recentSelected && BuildSearchMatch.QueryChars(_words) < BuildSearchResults.MinQueryChars))
             {
                 RestoreResults("no query");
                 _resultsNote = _words.Length == 0 ? "" : "type " + BuildSearchResults.MinQueryChars + " letters to search every tab";
@@ -839,6 +865,12 @@ internal static class BuildMenuSearch
 
             int category = mapper._SelectedCategoryIndex;
             int tag = mapper._SelectedTagIndex;
+            if (_recentSelected && _jumpCategory < 0 && _recentCategory >= 0 &&
+                (category != _recentCategory || tag != _recentTag))
+            {
+                LeaveRecent();
+                return;
+            }
             if (category < 0 || category >= index.Blob.CategoryCount || tag < 0 || tag >= index.Blob.TagCounts[category].Length)
             {
                 RestoreResults("tab out of range");
@@ -846,9 +878,16 @@ internal static class BuildMenuSearch
             }
 
             string query = string.Join(" ", _words);
-            var cells = ResultsFor(world, index, query, out int matched);
-            string key = query + "|" + category + "|" + tag + "|" + index.BlobData.ToInt64();
-            if (cells.Count == 0 || string.Equals(key, _emptyResultsKey, StringComparison.Ordinal))
+            _recentQueryKey = Recent.Revision + ":" + query + "|" + index.BlobData.ToInt64();
+            if (_recentSelected && _recentEmptyKey == _recentQueryKey && frame < _recentEmptyUntil)
+            {
+                RestoreResults("recent has no unlocked match");
+                return;
+            }
+            int matched;
+            var cells = _recentSelected ? RecentCells(world, index, out matched) : ResultsFor(world, index, query, out matched);
+            string key = (_recentSelected ? "recent:" + Recent.Revision + ":" : "") + query + "|" + category + "|" + tag + "|" + index.BlobData.ToInt64();
+            if (cells.Count == 0 || (!_recentSelected && string.Equals(key, _emptyResultsKey, StringComparison.Ordinal)))
             {
                 RestoreResults("no results");
                 _resultsNote = cells.Count == 0 ? "no match in any tab" : "no unlocked match in any tab";
@@ -910,7 +949,13 @@ internal static class BuildMenuSearch
         int backTag = _jumpCategory >= 0 ? _jumpTag : _beforeTag;
         _jumpCategory = -1;
         _jumpTag = -1;
-        _emptyResultsKey = BuildMenuSwap.LiveKey;
+        if (!_recentSelected) _emptyResultsKey = BuildMenuSwap.LiveKey;
+        if (_recentSelected)
+        {
+            _recentEmptyKey = _recentQueryKey;
+            // Recheck periodically: progression may unlock a blueprint without changing the composition.
+            _recentEmptyUntil = SafeFrame() + 120;
+        }
         RestoreResults("nothing unlocked matches");
         _resultsNote = "no unlocked match in any tab";
         if (backCategory < 0) return;
@@ -946,6 +991,7 @@ internal static class BuildMenuSearch
 
     private static void Detach(string why)
     {
+        CloseBuildTools();
         RestoreResults(why);
         _emptyResultsKey = "";
         _jumpCategory = -1;
@@ -1022,6 +1068,15 @@ internal static class BuildMenuSearch
             ["enabled"] = Enabled,
             ["clearOnClose"] = _clearOnClose?.Value ?? true,
             ["open"] = _open,
+            ["recentSelected"] = _recentSelected,
+            ["recentCount"] = _recentCount?.Value ?? BuildRecentHistory.DefaultCount,
+            ["recentBlueprints"] = Recent.Items,
+            ["copyBuildingKey"] = _copyBind?.Chord.ToString(),
+            ["copyBuildingIcon"] = BuildMenuCopyHint.KeyIconName,
+            ["copyMouseMapping"] = BuildMenuCopyHint.DescribeMouseMapping(_toolsWorld),
+            ["copyPending"] = _copyGuid,
+            ["selectedBlueprint"] = Alive(_group?.SelectedStructure) ? _group!.SelectedStructure.PrefabGuid.GuidHash : 0,
+            ["categoryTabsDisabled"] = SearchTabs.Count > 0,
             ["attached"] = _root != null,
             ["parent"] = _root == null ? "" : SafeName(_root.transform.parent?.gameObject),
             ["query"] = query,
@@ -1185,6 +1240,7 @@ internal static class BuildMenuSearch
 /// </summary>
 internal static class BuildSearchTestBridge
 {
+    public static Dictionary<string, object?> RecentTab() => BuildMenuSearch.ShowRecentForTest();
     public static Dictionary<string, object?> Status(int maxCells) => BuildMenuSearch.Describe(maxCells);
 
     public static Dictionary<string, object?> Set(string text) => BuildMenuSearch.SetQuery(text);

@@ -55,6 +55,9 @@ internal enum KeybindScope
     /// forward buttons) and the Alt+Left / Alt+Right tab-history keys.
     /// </summary>
     Window = 5,
+
+    /// <summary>Core only: active in the build menu. Shares PTT like Map, but still meets gameplay.</summary>
+    Build = 6,
 }
 
 /// <summary>
@@ -416,6 +419,11 @@ internal static class KeybindArbiter
             // A key the game reads on every screen (Push To Talk) is reported, and both fire.
             KeybindScope.Map => game.Source == KeybindSource.Game && EnforceGameWins
                 && (IsGameMapKey(game) || IsGameMenuKey(game)),
+            // Building still allows gameplay. Only the every-screen PTT sharing rule is soft;
+            // actual building, menu and ordinary gameplay actions retain priority.
+            KeybindScope.Build => game.Source == KeybindSource.Game && EnforceGameWins
+                && !IsEveryScreenGameKey(game)
+                && (game.Mode.Length == 0 || IsGameBuildKey(game) || IsGameMenuKey(game)),
             // Photo keys act only while photo mode holds the character's input: no game key is live then.
             KeybindScope.Photo => false,
             // CHAT2: a chat key shares the game's in-chat keys (Tab cycles the channel) on purpose: both stay
@@ -435,6 +443,9 @@ internal static class KeybindArbiter
 
     private static bool IsGameMapKey(KeybindClaim c) =>
         c.Source == KeybindSource.Game && string.Equals(c.Mode, GameKeybindCatalog.InTheMap, StringComparison.Ordinal);
+
+    private static bool IsGameBuildKey(KeybindClaim c) =>
+        c.Source == KeybindSource.Game && string.Equals(c.Mode, GameKeybindCatalog.WhileBuilding, StringComparison.Ordinal);
 
     /// <summary>
     /// MAPTP1: game actions read on every screen, the full-screen map included (the game's input asset binds
@@ -476,7 +487,10 @@ internal static class KeybindArbiter
         if (a == KeybindScope.Window || b == KeybindScope.Window) return a == b;
         return a == b
             || (a == KeybindScope.Map && b == KeybindScope.Menu)
-            || (a == KeybindScope.Menu && b == KeybindScope.Map);
+            || (a == KeybindScope.Menu && b == KeybindScope.Map)
+            // Build keys act in the build menu, where gameplay keys and the menu's own keys stay live.
+            || (a == KeybindScope.Build && (b == KeybindScope.Gameplay || b == KeybindScope.Menu))
+            || (b == KeybindScope.Build && (a == KeybindScope.Gameplay || a == KeybindScope.Menu));
     }
 
     /// <summary>KEYS4: whether <paramref name="c"/> can clash with a mod key of <paramref name="scope"/>.</summary>
@@ -488,6 +502,7 @@ internal static class KeybindArbiter
             KeybindScope.Gameplay => true,
             KeybindScope.Menu or KeybindScope.Window => IsGameMenuKey(c),
             KeybindScope.Map => IsGameMapKey(c) || IsGameMenuKey(c) || IsEveryScreenGameKey(c),
+            KeybindScope.Build => c.Mode.Length == 0 || IsGameBuildKey(c) || IsGameMenuKey(c) || IsEveryScreenGameKey(c),
             KeybindScope.Chat => IsGameChatKey(c),
             _ => false,
         };
@@ -1020,7 +1035,7 @@ internal static class KeybindArbiter
             if (active)
             {
                 var modOthers = others.FindAll(o => o.Source != KeybindSource.Game);
-                reason = JoinSentences(JoinSentences(WinnerSentence(c, modOthers), SoftGameSentence(soft)), sharedText);
+                reason = JoinSentences(JoinSentences(WinnerSentence(c, modOthers), SoftGameSentence(soft, c.Scope)), sharedText);
             }
             else reason = JoinSentences(LoserSentence(c, winner, rule), sharedText);
             verdicts.Add(new KeybindVerdict(c, active, active ? null : winner, rule, others, reason));
@@ -1154,7 +1169,7 @@ internal static class KeybindArbiter
     }
 
     /// <summary>A warning-only game clash: <c>Also used by the game while building (Place).</c></summary>
-    internal static string SoftGameSentence(IReadOnlyList<KeybindClaim> soft)
+    internal static string SoftGameSentence(IReadOnlyList<KeybindClaim> soft, KeybindScope scope = KeybindScope.Gameplay)
     {
         if (soft == null || soft.Count == 0) return "";
         var parts = new List<string>();
@@ -1164,6 +1179,9 @@ internal static class KeybindArbiter
             if (!parts.Contains(p)) parts.Add(p);
         }
 
+        if ((scope == KeybindScope.Build || scope == KeybindScope.Map) && soft.All(IsEveryScreenGameKey))
+            return "Also used by " + JoinNames(parts) + "; both remain active in "
+                + (scope == KeybindScope.Build ? "Build mode." : "the world map.");
         bool anyMode = soft.Any(g => g.Mode.Length > 0);
         return "Also used by " + JoinNames(parts) + (anyMode
             ? "; both fire there, and Progenitor does not stop either until that is checked in game."
