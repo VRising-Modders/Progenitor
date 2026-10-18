@@ -53,15 +53,14 @@ A cfg with synced entries usually also holds the plugin's own non-synced entries
 
 | Rule | Behavior |
 |---|---|
-| Debounce | Saved `ConfigSync.LocalSaveDebounceSeconds` (**1.5 s**) after the last change to the file; a burst of changes is one save. |
-| What is written | The same save as an explicit `ConfigFile.Save()` during the hold (`ConfigSync.TrySaveHeldFile`): locked keys are parked orphans holding the player's own pre-join values, so a server value never reaches disk. When a locked key could not be parked, nothing is saved and a warning names the key. |
-| Not a trigger | A write by sync itself (join snapshot, later push, default lock, revert of a refused write, restore). |
+| Debounce | One pending save per file, written `ConfigSync.LocalSaveDebounceSeconds` (**1.5 s**) after the last change, and at most `ConfigSync.LocalSaveMaxWaitSeconds` (**10 s**) after the first, so a plugin writing every frame is still saved. |
+| What is written | The same save as an explicit `ConfigFile.Save()` during the hold (`ConfigSync.TrySaveHeldFile`): locked keys are parked orphans holding the player's own pre-join values, so a server value never reaches disk. When a locked key could not be parked, nothing is saved, with one warning per file per session. |
+| Not a trigger | A write by sync itself to a synced entry (join snapshot, later push, default lock, revert of a refused write, restore). A plugin's write to its own entry made while an apply runs is saved after the apply. |
 | Left to the mod | A file whose `SaveOnConfigSet` was already off before the hold. |
-| Flush | A pending save is written at once on disconnect (and a new client world), when the last synced entry on the file unregisters (plugin unload or hot reload), on Core unload, and on process exit (`Application.quitting`, with `AppDomain.ProcessExit` as a backstop). A forced kill runs none of these. |
+| Flush | A pending save is written at once on disconnect or a new client world, when the file's last synced entry unregisters (plugin unload or hot reload), on Core unload, and on a normal quit (Bootstrap's quit slot). A forced kill runs none of these. |
+| Server value left live | When a restore gives up and cannot park the player's value, that file keeps `SaveOnConfigSet` off for the rest of the Core generation and nothing saves it, because its live row still holds the server's value. |
 
-This is what makes the "explicit `Save()` is safe during a hold" claim load-bearing: it is now a save path that runs in every joined session. `ConfigSyncLocalSaveTests` asserts it on bytes read from disk: a local change during a hold reaches disk only after the debounce, with the synced key at its pre-join local; join snapshots, later pushes and refused writes schedule nothing and never reach disk; three changes inside the debounce make one save; a pending save is flushed by `RestoreLocal`, by a plugin unregister while joined (the session lock stays), by `FlushLocalSaves` and by Core `Uninstall`.
-
-Status: source-checked and game-free tested (`ConfigSyncLocalSaveTests`); not live-verified.
+Status: source-checked and game-free tested (`ConfigSyncLocalSaveTests`, and `ConfigHelperTests` for a value left live); not live-verified.
 
 Acceptance procedure — not run:
 
@@ -107,7 +106,7 @@ Client:
 - `ConfigSync: re-attached {plugin}/{section}/{key} to the locked server value after plugin reload`
 - `ConfigSync: refused write to {plugin}/{section}/{key} while locked to the server value`
 - `ConfigSync: restored {n} local setting(s) after disconnect`
-- `ConfigSync: saved '{path}' for a local setting change while its synced settings are locked ({debounce|disconnect|plugin unload|unload|process exit}); synced keys keep this client's own values on disk` (once per file)
-- `ConfigSync: a local setting change in '{path}' was not saved ({reason}): {why}`
+- `ConfigSync: saved '{path}' for a local setting change while its synced settings are locked ({debounce|max wait|disconnect|plugin unload|unload|process exit}); synced keys keep this client's own values on disk` (once per file)
+- `ConfigSync: a local setting change in '{path}' was not saved ({reason}): {why}` (once per file per session)
 
 Administrator edits from the client (opt-in per entry; authorized by the server's admin list or `adminauth`, rate limited and audited to `BepInEx/progenitor-settings.log`) are described under [Settings rows](mods-menu.md#settings-rows). Not provided: a separate config-editor plugin UI.

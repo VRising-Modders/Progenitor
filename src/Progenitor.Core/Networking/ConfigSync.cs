@@ -89,18 +89,37 @@ public static class ConfigSync
     internal const double LocalSaveDebounceSeconds = 1.5;
 
     /// <summary>
-    /// LOCALSAVE1: held files with an unsaved change to an unlocked entry, each with the generation of
-    /// its newest change. Only the posted save carrying that generation runs; older posts are stale.
+    /// LOCALSAVE1: the longest a held file waits from its first unsaved change, so a plugin that
+    /// writes every frame still gets saved.
     /// </summary>
-    private static readonly Dictionary<ConfigFile, int> PendingLocalSaves = new();
+    internal const double LocalSaveMaxWaitSeconds = 10.0;
+
+    /// <summary>LOCALSAVE1: one held file's unsaved local change. The posted save names it by <see cref="Id"/>.</summary>
+    private sealed class PendingLocalSave
+    {
+        public int Id;
+        public double FirstChange;
+        public double LastChange;
+        public bool Posted;
+    }
+
+    /// <summary>
+    /// LOCALSAVE1: held files with an unsaved change to an unlocked entry. At most one posted save per
+    /// file; it carries only the id, so a queued post never holds a plugin's <see cref="ConfigFile"/>.
+    /// </summary>
+    private static readonly Dictionary<ConfigFile, PendingLocalSave> PendingLocalSaves = new();
 
     /// <summary>LOCALSAVE1: cfg paths whose first local save has been logged.</summary>
     private static readonly HashSet<string> LocalSaveLogged = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>LOCALSAVE1: cfg paths whose refused local save, or failed park, has been logged this session.</summary>
+    private static readonly HashSet<string> LocalSaveWarned = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly HashSet<string> ParkFailureWarned = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Owner token for the posted local saves, dropped by <see cref="Uninstall"/>.</summary>
     private static readonly object LocalSaveOwner = new();
 
-    private static int _localSaveGeneration;
+    private static int _localSaveIds;
 
     /// <summary>
     /// Seconds between a failed restore and the next attempt (R54 #2). The retry rides
@@ -538,6 +557,8 @@ public static class ConfigSync
             SchemaDriftOnce.Clear();
             SnapshotMarked.Clear();
             SnapshotSeen.Clear();
+            LocalSaveWarned.Clear();
+            ParkFailureWarned.Clear();
         }
 
         int n = 0;
@@ -969,51 +990,10 @@ public static class ConfigSync
             ServerRunsPlugin = id => Progenitor.Plugins.ModRegistry.TryGet(id, out var entry)
                 && (entry.Outcome == Progenitor.Plugins.ModLoadOutcome.Loaded || entry.Outcome == Progenitor.Plugins.ModLoadOutcome.Loading);
         }
-        AttachProcessExit();
 #endif
         _installed = true;
     }
 
-#if !PROGENITOR_TESTS
-    private static readonly EventHandler ProcessExitHandler = OnProcessExit;
-    private static bool _processExitAttached;
-
-    /// <summary>
-    /// LOCALSAVE1: a quit while joined saves a local change still waiting for its debounce. Removed
-    /// again by <see cref="Uninstall"/> so the process-lifetime event never roots a collectible Core.
-    /// <c>Application.quitting</c> reaches <see cref="FlushLocalSaves"/> earlier through the hosted
-    /// launcher's quit callback; this is the backstop when that slot is not attached.
-    /// </summary>
-    private static void AttachProcessExit()
-    {
-        if (_processExitAttached) return;
-        try
-        {
-            AppDomain.CurrentDomain.ProcessExit += ProcessExitHandler;
-            _processExitAttached = true;
-        }
-        catch (Exception e)
-        {
-            LogWarning("ConfigSync: could not subscribe to ProcessExit; a local change made in the last "
-                + LocalSaveDebounceSeconds.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)
-                + " s before a quit is saved only if the session ends first: " + e.Message);
-        }
-    }
-
-    private static void DetachProcessExit()
-    {
-        if (!_processExitAttached) return;
-        try { AppDomain.CurrentDomain.ProcessExit -= ProcessExitHandler; }
-        catch { /* teardown */ }
-        _processExitAttached = false;
-    }
-
-    private static void OnProcessExit(object? sender, EventArgs e)
-    {
-        try { FlushLocalSaves("process exit"); }
-        catch { /* the process is going down; nothing may throw into the runtime's exit path */ }
-    }
-#endif
 
     /// <summary>
     /// C3 (review fix): whether this server runs a plugin itself (live: a Progenitor plugin loaded here). A handshake row
@@ -1058,9 +1038,6 @@ public static class ConfigSync
         {
             LogWarning("ConfigSync: dropping pending local saves threw: " + e.Message);
         }
-#if !PROGENITOR_TESTS
-        DetachProcessExit();
-#endif
         ConfigFile[] files;
         ConfigEntryBase[] entries;
         KeyValuePair<ConfigFile, FileSaveHold>[] strandedHolds;
@@ -1088,6 +1065,8 @@ public static class ConfigSync
             SnapshotSeen.Clear();
             PendingLocalSaves.Clear();
             LocalSaveLogged.Clear();
+            LocalSaveWarned.Clear();
+            ParkFailureWarned.Clear();
         }
         // R53 #4, part (b). SaveHolds is a Core static and dies with this ALC; the ConfigFile it
         // describes is a BepInEx process-lifetime object. Clearing the record without honoring
@@ -1661,8 +1640,7 @@ public static class ConfigSync
                     + "' is kept on disk as an orphan row; the live entry still holds the server value."
                 : "The operator's value for this key was never read, so nothing is written to disk"
                     + " and the live entry still holds the server value.")
-            + " The lock and this file's SaveOnConfigSet hold are released so '"
-            + (file?.ConfigFilePath ?? "?") + "' autosaves again for every other entry in it.");
+            + " The lock is released.");
 
         bool parkedOk = false;
         if (file != null && slot!.Entry != null && localValueWasRead)
@@ -1687,7 +1665,16 @@ public static class ConfigSync
         // SAVEHOLD1: the live row still holds the server value and nothing parks it, so a page write's
         // explicit save of this file (TrySaveHeldFile) must not run for the rest of this generation.
         if (file != null && !parkedOk)
+        {
             lock (Gate) ServerValueLeftLive.Add(file);
+            LogError("ConfigSync: SaveOnConfigSet stays off on '" + file.ConfigFilePath
+                + "' for this generation: the live entry of " + slot.Key + " holds the server value, and an autosave would write it.");
+        }
+        else if (file != null)
+        {
+            LogInfo("ConfigSync: '" + file.ConfigFilePath
+                + "' autosaves again once no other key in it is locked.");
+        }
 
         ClearLock(slot);
     }
@@ -1822,20 +1809,29 @@ public static class ConfigSync
     {
         try
         {
-            if (_applying) return;
             var changed = e?.ChangedSetting;
             if (changed == null) return;
 
             Slot? slot;
-            bool found;
-            lock (Gate) found = TryFindSlot(changed, out slot) && slot != null;
+            bool found, sessionLocked;
+            lock (Gate)
+            {
+                found = TryFindSlot(changed, out slot) && slot != null;
+                sessionLocked = !found && HasSessionLock(changed);
+            }
 
             if (!found)
             {
-                // LOCALSAVE1: a non-synced entry on a file whose auto-save the lock holds off.
-                ScheduleLocalSave(changed.ConfigFile ?? sender as ConfigFile);
+                // LOCALSAVE1: a non-synced entry on a file whose auto-save the lock holds off. A write made
+                // while a sync apply runs is a plugin reacting to it (sync writes only synced entries), so it
+                // is scheduled too; the posted save waits until the apply is over.
+                if (!sessionLocked)
+                    ScheduleLocalSave(changed.ConfigFile ?? sender as ConfigFile);
                 return;
             }
+
+            // A synced entry changed while a sync apply runs: sync's own write.
+            if (_applying) return;
 
             if (slot!.Locked)
             {
@@ -1857,30 +1853,38 @@ public static class ConfigSync
     /// <summary>
     /// LOCALSAVE1: an unlocked entry changed on a file whose <c>SaveOnConfigSet</c> this class holds
     /// off. Without this the change stayed in memory until the session ended, so a plugin reload, a
-    /// crash or a quit while joined lost it. The save is debounced
-    /// (<see cref="LocalSaveDebounceSeconds"/> after the last change) and runs through
+    /// crash or a quit while joined lost it. The save runs <see cref="LocalSaveDebounceSeconds"/> after
+    /// the last change, or <see cref="LocalSaveMaxWaitSeconds"/> after the first, through
     /// <see cref="TrySaveHeldFile"/>, which writes the parked pre-join locals for the locked keys and
-    /// refuses when a park failed. Not scheduled for a change made by sync itself (the caller returns
-    /// on <c>_applying</c>) or for a file whose mod had turned <c>SaveOnConfigSet</c> off before the
-    /// hold: that mod saves on its own terms.
+    /// refuses when a park failed. A file whose mod had turned <c>SaveOnConfigSet</c> off before the
+    /// hold is left to that mod.
     /// </summary>
     private static void ScheduleLocalSave(ConfigFile? file)
     {
-        if (file == null || _applying) return;
-        int gen;
+        if (file == null) return;
+        double now = Now();
+        int id;
         lock (Gate)
         {
             if (!SaveHolds.TryGetValue(file, out var hold) || hold == null) return;
             if (!hold.PreviousSaveOnConfigSet) return;
-            gen = ++_localSaveGeneration;
-            PendingLocalSaves[file] = gen;
+            if (!PendingLocalSaves.TryGetValue(file, out var pending))
+            {
+                pending = new PendingLocalSave { Id = ++_localSaveIds, FirstChange = now };
+                PendingLocalSaves[file] = pending;
+            }
+            pending.LastChange = now;
+            if (pending.Posted) return;
+            pending.Posted = true;
+            id = pending.Id;
         }
-        PostLocalSave(file, gen, LocalSaveDebounceSeconds);
+        PostLocalSave(id, LocalSaveDebounceSeconds);
     }
 
-    private static void PostLocalSave(ConfigFile file, int gen, double seconds)
+    /// <summary>The closure holds only the id; <see cref="RunLocalSave"/> finds the file in <see cref="PendingLocalSaves"/>.</summary>
+    private static void PostLocalSave(int id, double seconds)
     {
-        Action run = () => RunLocalSave(file, gen);
+        Action run = () => RunLocalSave(id);
         try
         {
 #if PROGENITOR_TESTS
@@ -1894,36 +1898,64 @@ public static class ConfigSync
         }
         catch (Exception e)
         {
-            LogWarning("ConfigSync: posting the local save of '" + SafePath(file) + "' threw: " + e.Message
-                + "; it is saved when the session ends");
+            lock (Gate)
+            {
+                foreach (var pending in PendingLocalSaves.Values)
+                    if (pending.Id == id) pending.Posted = false;
+            }
+            LogWarning("ConfigSync: posting a local save threw: " + e.Message + "; it is saved with the next change or when the session ends");
         }
     }
 
     /// <summary>
-    /// The posted debounce. Does nothing when a newer change re-posted (the generation moved) or the
-    /// save already happened (a flush, or a settings-page save). Waits one more interval when a
-    /// server value is being applied right now.
+    /// The posted save. Reposts while the file is still changing (until the max wait) and while a sync
+    /// apply runs; otherwise saves. Does nothing when the change was already saved (a flush, or a
+    /// settings-page save).
     /// </summary>
-    private static void RunLocalSave(ConfigFile file, int gen)
+    private static void RunLocalSave(int id)
     {
         try
         {
+            ConfigFile? file = null;
+            double now = Now();
+            double wait = 0;
+            bool maxWait = false;
             lock (Gate)
             {
-                if (!PendingLocalSaves.TryGetValue(file, out int current) || current != gen) return;
+                PendingLocalSave? pending = null;
+                foreach (var kv in PendingLocalSaves)
+                {
+                    if (kv.Value.Id != id) continue;
+                    file = kv.Key;
+                    pending = kv.Value;
+                    break;
+                }
+                if (file == null || pending == null) return;
+
+                double waited = now - pending.FirstChange;
+                double quiet = now - pending.LastChange;
+                maxWait = waited >= LocalSaveMaxWaitSeconds;
+                if (!maxWait && quiet < LocalSaveDebounceSeconds)
+                    wait = Math.Min(LocalSaveDebounceSeconds - quiet, LocalSaveMaxWaitSeconds - waited);
+                if (wait <= 0 && (_applying || _suppressSaveDepth > 0))
+                    wait = 0.1;
+                if (wait > 0)
+                    wait = Math.Max(wait, 0.05);
+                else
+                    pending.Posted = false;
             }
 
-            if (_applying || _suppressSaveDepth > 0)
+            if (wait > 0)
             {
-                PostLocalSave(file, gen, LocalSaveDebounceSeconds);
+                PostLocalSave(id, wait);
                 return;
             }
 
-            SavePendingLocal(file, "debounce");
+            SavePendingLocal(file, maxWait ? "max wait" : "debounce");
         }
         catch (Exception e)
         {
-            LogError("ConfigSync: the local save of '" + SafePath(file) + "' threw: " + e.Message);
+            LogError("ConfigSync: a posted local save threw: " + e.Message);
         }
     }
 
@@ -2007,7 +2039,10 @@ public static class ConfigSync
         string path = SafePath(file);
         if (!saved)
         {
-            LogWarning("ConfigSync: a local setting change in '" + path + "' was not saved (" + reason + "): " + why);
+            bool warn;
+            lock (Gate) warn = LocalSaveWarned.Add(path);
+            if (warn)
+                LogWarning("ConfigSync: a local setting change in '" + path + "' was not saved (" + reason + "): " + why);
             return false;
         }
 
@@ -2548,6 +2583,9 @@ public static class ConfigSync
         FileSaveHold? hold;
         lock (Gate)
         {
+            // A give-up whose park failed left a live row holding the server's value: an autosave would write
+            // it into the cfg, so the hold (and SaveOnConfigSet off) stays, as DropUnreferencedHolds does.
+            if (ServerValueLeftLive.Contains(file)) return;
             if (!SaveHolds.TryGetValue(file, out hold)) return;
             SaveHolds.Remove(file);
         }
@@ -2682,7 +2720,10 @@ public static class ConfigSync
             if (!live) continue;
             why = "the synced key " + lockedDefinitions[i] + " could not be parked, so a save now would write "
                 + "the server's value into this cfg; the change is saved when the session ends";
-            LogWarning("ConfigSync: not saving '" + file.ConfigFilePath + "' for a local write: " + why);
+            bool warn;
+            lock (Gate) warn = ParkFailureWarned.Add(SafePath(file));
+            if (warn)
+                LogWarning("ConfigSync: not saving '" + file.ConfigFilePath + "' for a local write: " + why);
             return false;
         }
 
@@ -2733,6 +2774,15 @@ public static class ConfigSync
         }
         ParkLockedForSave(slot);
         LogInfo("ConfigSync: re-attached " + slot.Key + " to the locked server value after plugin reload");
+    }
+
+    /// <summary>Caller holds <see cref="Gate"/>. True when <paramref name="entry"/> is a session lock's entry (sync owns its writes).</summary>
+    private static bool HasSessionLock(ConfigEntryBase entry)
+    {
+        foreach (var session in SessionLocks.Values)
+            if (ReferenceEquals(session.Entry, entry) || SameDefinition(session.Entry, entry))
+                return true;
+        return false;
     }
 
     /// <summary>

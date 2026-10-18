@@ -843,10 +843,6 @@ public static class HostedServerLauncher
 
     private static void OnQuittingCompleteDeferredUninstall()
     {
-        // LOCALSAVE1: this is Core's Application.quitting callback; a local setting change still waiting
-        // for its debounced save while joined reaches the cfg before the process goes down.
-        try { Networking.ConfigSync.FlushLocalSaves("process exit"); }
-        catch { /* process is dying */ }
         try { Uninstall(); }
         catch (Exception e)
         {
@@ -927,7 +923,7 @@ public static class HostedServerLauncher
     {
         try { BootstrapLink.SetLifetimeFrame(OnFrameCompleteDeferredUninstall); }
         catch (Exception e) { Plugin.Logger?.LogError($"Hosted: SetLifetimeFrame threw: {e}"); }
-        try { BootstrapLink.SetLifetimeQuitting(OnQuittingCompleteDeferredUninstall); }
+        try { LifetimeQuit.SetHosted(OnQuittingCompleteDeferredUninstall); }
         catch (Exception e) { Plugin.Logger?.LogError($"Hosted: SetLifetimeQuitting threw: {e}"); }
     }
 
@@ -966,7 +962,7 @@ public static class HostedServerLauncher
         {
             try { BootstrapLink.SetLifetimeFrame(null); }
             catch (Exception e) { Plugin.Logger?.LogError($"Hosted: clear LifetimeFrame threw: {e}"); }
-            try { BootstrapLink.SetLifetimeQuitting(null); }
+            try { LifetimeQuit.SetHosted(null); }
             catch (Exception e) { Plugin.Logger?.LogError($"Hosted: clear LifetimeQuitting threw: {e}"); }
         }
         else

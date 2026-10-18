@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using BepInEx.Configuration;
 using Progenitor.Config;
 using Progenitor.Networking;
@@ -23,6 +24,7 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
     private readonly string _dir;
     private readonly ConfigFile _file;
     private readonly List<(double Seconds, Action Run)> _posted = new();
+    private double _now = 100.0;
 
     public ConfigSyncLocalSaveTests()
     {
@@ -34,6 +36,7 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
         Handshake.ResetTables();
         Handshake.UninstallClientServerContextWatch();
         WorldEpoch.ResetForTests();
+        ConfigSync.TestClock = () => _now;
         ConfigSync.TestPostLocalSave = (seconds, run, _) => _posted.Add((seconds, run));
     }
 
@@ -50,6 +53,13 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
     }
 
     private string Disk() => File.ReadAllText(_file.ConfigFilePath);
+
+    /// <summary>Advance the clock and run the newest posted save, as the frame queue would.</summary>
+    private void RunLatestAt(double seconds)
+    {
+        _now += seconds;
+        _posted[^1].Run();
+    }
 
     /// <summary>A synced Count (local 3, server 9) and a non-synced LocalOnly (1) in one cfg, joined.</summary>
     private (ConfigEntry<int> Count, ConfigEntry<int> Local) Join()
@@ -77,8 +87,8 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
         Assert.DoesNotContain("Count = 99", disk, StringComparison.Ordinal);
     }
 
-    private static int SavedLines() =>
-        ConfigSync.TestLogs.Count(l => l.StartsWith("ConfigSync: saved '", StringComparison.Ordinal));
+    private static int LinesStartingWith(string prefix) =>
+        ConfigSync.TestLogs.Count(l => l.StartsWith(prefix, StringComparison.Ordinal));
 
     [Fact]
     public void A_local_change_while_joined_reaches_disk_after_the_debounce()
@@ -93,7 +103,7 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
         Assert.Equal(ConfigSync.LocalSaveDebounceSeconds, _posted[0].Seconds);
         Assert.Equal(1, ConfigSync.PendingLocalSaveCount);
 
-        _posted[0].Run();
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
         AssertLocalOnDisk(Disk(), 7);
         Assert.Equal(0, ConfigSync.PendingLocalSaveCount);
 
@@ -104,12 +114,13 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
         Assert.False(_file.SaveOnConfigSet);
 
         // Logged once per file, not once per save.
-        Assert.Equal(1, SavedLines());
+        Assert.Equal(1, LinesStartingWith("ConfigSync: saved '"));
         Assert.Contains(ConfigSync.TestLogs, l => l.Contains("(debounce)", StringComparison.Ordinal));
         local.Value = 8;
-        _posted[^1].Run();
+        Assert.Equal(2, _posted.Count);
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
         AssertLocalOnDisk(Disk(), 8);
-        Assert.Equal(1, SavedLines());
+        Assert.Equal(1, LinesStartingWith("ConfigSync: saved '"));
     }
 
     [Fact]
@@ -138,33 +149,82 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
             snapshot: false);
         Assert.Single(_posted);
 
-        _posted[0].Run();
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
         AssertLocalOnDisk(Disk(), 7);
         Assert.Equal(9, count.Value);
     }
 
     [Fact]
-    public void Several_changes_inside_the_debounce_make_one_save()
+    public void A_plugin_write_made_inside_a_sync_apply_is_saved_after_it()
+    {
+        var count = ConfigSync.Bind(_file, "example.mod", "General", "Count", 3, "n", pluginVersion: "1.0.0");
+        var local = _file.Bind("General", "LocalOnly", 1);
+        _file.Save();
+        // The plugin mirrors the synced value into one of its own settings when it changes.
+        count.SettingChanged += (_, _) => local.Value = count.Value + 100;
+
+        ConfigSync.ApplyRecords(
+            new[] { new ConfigSyncRecord("example.mod", "General", "Count", "9") },
+            snapshot: true);
+        Assert.Equal(109, local.Value);
+        Assert.Single(_posted);
+
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
+        AssertLocalOnDisk(Disk(), 109);
+    }
+
+    [Fact]
+    public void Changes_inside_the_debounce_keep_one_post_and_make_one_save()
     {
         var (_, local) = Join();
         local.Value = 4;
+        _now += 0.5;
         local.Value = 5;
+        _now += 0.5;
         local.Value = 6;
-        Assert.Equal(3, _posted.Count);
+        Assert.Single(_posted);
 
+        // The post fires 1.5 s after the first change, 0.5 s after the last: it waits the rest.
         int saves = _file.SaveCount;
-        _posted[0].Run();
-        _posted[1].Run();
+        RunLatestAt(0.5);
         Assert.Equal(saves, _file.SaveCount);
+        Assert.Equal(2, _posted.Count);
+        Assert.Equal(1.0, _posted[1].Seconds, 3);
 
-        _posted[2].Run();
+        RunLatestAt(1.0);
         Assert.Equal(saves + 1, _file.SaveCount);
         AssertLocalOnDisk(Disk(), 6);
 
-        // A stale or repeated post after the save writes nothing.
-        _posted[2].Run();
+        // A repeated post after the save writes nothing.
+        _posted[1].Run();
         _posted[0].Run();
         Assert.Equal(saves + 1, _file.SaveCount);
+    }
+
+    [Fact]
+    public void A_writer_that_never_stops_is_saved_at_the_max_wait()
+    {
+        var (_, local) = Join();
+        double start = _now;
+        int saves = _file.SaveCount;
+        int value = 10;
+        local.Value = value;
+        // A per-frame writer: a change every 0.25 s, and each post runs when it is due.
+        while (_file.SaveCount == saves && _now - start < 30)
+        {
+            double due = _posted[^1].Seconds;
+            for (double t = 0; t < due; t += 0.25)
+            {
+                _now += 0.25;
+                local.Value = ++value;
+            }
+            _posted[^1].Run();
+        }
+
+        Assert.Equal(saves + 1, _file.SaveCount);
+        Assert.InRange(_now - start, ConfigSync.LocalSaveMaxWaitSeconds, ConfigSync.LocalSaveMaxWaitSeconds + 1.0);
+        Assert.Contains(ConfigSync.TestLogs, l => l.Contains("(max wait)", StringComparison.Ordinal));
+        AssertLocalOnDisk(Disk(), value);
     }
 
     [Fact]
@@ -181,7 +241,7 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
         Assert.Contains(ConfigSync.TestLogs, l => l.Contains("(disconnect)", StringComparison.Ordinal));
 
         int saves = _file.SaveCount;
-        _posted[0].Run();
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
         Assert.Equal(saves, _file.SaveCount);
     }
 
@@ -209,7 +269,7 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
     }
 
     [Fact]
-    public void A_pending_save_is_flushed_on_Core_unload_and_on_process_exit()
+    public void A_pending_save_is_flushed_on_quit_and_on_Core_unload()
     {
         var (count, local) = Join();
         local.Value = 7;
@@ -224,6 +284,27 @@ public sealed class ConfigSyncLocalSaveTests : IDisposable
         ConfigSync.Uninstall();
         Assert.Equal(0, ConfigSync.PendingLocalSaveCount);
         AssertLocalOnDisk(Disk(), 8);
+    }
+
+    [Fact]
+    public void A_failed_park_saves_nothing_and_warns_once_per_file()
+    {
+        var (count, local) = Join();
+        // Put the locked row back into the file's live entries, as a park that failed would leave it.
+        var entries = (Dictionary<ConfigDefinition, ConfigEntryBase>)typeof(ConfigFile)
+            .GetProperty("Entries", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(_file)!;
+        entries[count.Definition] = count;
+        var beforeChange = Disk();
+
+        local.Value = 7;
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
+        local.Value = 8;
+        RunLatestAt(ConfigSync.LocalSaveDebounceSeconds);
+
+        Assert.Equal(beforeChange, Disk());
+        Assert.Equal(1, LinesStartingWith("ConfigSync: not saving '"));
+        Assert.Equal(1, LinesStartingWith("ConfigSync: a local setting change in '"));
     }
 
     [Fact]
