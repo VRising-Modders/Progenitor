@@ -11,7 +11,7 @@ Deploy it to both sides. The client half is the panels. The server half only ans
 | Player inventory | beside sort | `Stash` |
 | Castle heart (also `ThronePanel`) | left edge, right edge | `Castles`, `Fuel` |
 | Item tooltip | tooltip body | `Example: item <guid> x<amount>` |
-| Recipe tooltip (workstation, refinement station, crafting tab) | tooltip body; under the requirement list | `Example: recipe <guid> makes <n> x <guid>, tooltip shows <guid> at station <id>` (muted); one `Example: needs <n> x <guid>` per requirement (the first green). Each hovered recipe also logs `Panels example: recipe <target>`. |
+| Recipe tooltip (workstation, refinement station, crafting tab) | tooltip body; under the requirement list; under the title | `Example: recipe <guid> makes <n> x <guid>, tooltip shows <guid> at station <id>` (muted); one `Example: needs <n> x <guid>` per requirement (the first green); `Example: header, <Workstation\|RefinementStation\|Character>` (muted) right under the title, above the description. Each hovered recipe also logs `Panels example: recipe <target>`. |
 
 It also subscribes to `InventorySortUsed` ([docs/api.md](../../docs/api.md#inventory)): every use of the game's sort, by key or button, logs `Panels example: sort Single Own net=… seq=… since=… at day … hh:mm …` with the client's own hour of day (`ctx.Time.GetTimeOfDay()` on the client), and two sorts of the same inventory within 400 ms log `Panels example: double sort Own (… ms apart)`.
 

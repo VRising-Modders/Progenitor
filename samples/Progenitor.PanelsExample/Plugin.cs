@@ -20,7 +20,8 @@ namespace Progenitor.PanelsExample;
 /// <item><description>Castle heart window (also reachable as <c>ThronePanel</c>): <c>Castles</c> left, <c>Fuel</c> right.</description></item>
 /// <item><description>Item tooltip: one line naming the hovered item and its stack.</description></item>
 /// <item><description>Recipe tooltip: a muted line under the product naming the recipe, product and
-/// station, and one line per requirement under the requirement list (the first one green).</description></item>
+/// station, one line per requirement under the requirement list (the first one green), and one muted line
+/// under the title naming the window the recipe is shown in.</description></item>
 /// <item><description>The game's sort (key or button): every <see cref="InventorySortUsed"/> is logged with
 /// the client's hour of day (<c>ctx.Time.GetTimeOfDay</c>), and a second sort of the same inventory
 /// within <see cref="DoubleSortMs"/> is logged as a double sort.</description></item>
@@ -108,6 +109,15 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
             }
 
             recipeNeeds.SetRows(rows);
+        }));
+
+        // The recipe tooltip's header: one muted line right under the title, above the description.
+        var recipeHeader = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipHeader, ctx.Owner, ctx.Guid);
+        ctx.Track(recipeHeader);
+        ctx.Track(recipeHeader.OnPanel(e =>
+        {
+            if (e.Change == VanillaPanelChange.Closed) return;
+            recipeHeader.SetRows(new VanillaRow[] { new("Example: header, " + e.Target.Kind, LabelTone.Muted) });
         }));
 
         // The game's sort, key or button: no input is read, the framework reports the request.

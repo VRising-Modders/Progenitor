@@ -82,6 +82,52 @@ internal static class VanillaRecipeTooltip
         while (i < childCount && UiOwnership.IsOwned(nameAt(i) ?? "")) i++;
         return i;
     }
+
+    /// <summary>The largest title inset a header row accepts; a wider reading is a rect not laid out yet.</summary>
+    internal const float MaxHeaderInset = 200f;
+
+    /// <summary>
+    /// The left inset a <see cref="VanillaPanelAnchor.TooltipHeader"/> container gives its rows so they start where
+    /// the title's text starts: the distance from the container's left edge to the title's, both in world space,
+    /// divided by the container's world scale. False (keep the current inset) when the scale is not positive or
+    /// the distance is outside 0..<see cref="MaxHeaderInset"/>, which is what an unlaid rect reads.
+    /// </summary>
+    internal static bool TryHeaderInset(float titleLeft, float rowLeft, float scale, out float inset)
+    {
+        inset = 0f;
+        if (!(scale > 0f) || float.IsNaN(titleLeft) || float.IsNaN(rowLeft)) return false;
+        float d = (titleLeft - rowLeft) / scale;
+        if (float.IsNaN(d) || d < 0f || d > MaxHeaderInset) return false;
+        inset = d;
+        return true;
+    }
+
+    /// <summary>
+    /// The game's own entries on either side of a container at <paramref name="index"/> among
+    /// <paramref name="childCount"/> siblings, skipping Progenitor's containers (readback: <c>after</c> and
+    /// <c>before</c>). Empty when there is none on that side.
+    /// </summary>
+    internal static void Neighbors(int index, int childCount, Func<int, string?> nameAt, out string after, out string before)
+    {
+        after = "";
+        before = "";
+        if (nameAt == null || index < 0 || index >= childCount) return;
+        for (int i = index - 1; i >= 0; i--)
+        {
+            string n = nameAt(i) ?? "";
+            if (UiOwnership.IsOwned(n)) continue;
+            after = n;
+            break;
+        }
+
+        for (int i = index + 1; i < childCount; i++)
+        {
+            string n = nameAt(i) ?? "";
+            if (UiOwnership.IsOwned(n)) continue;
+            before = n;
+            break;
+        }
+    }
 }
 
 /// <summary>
