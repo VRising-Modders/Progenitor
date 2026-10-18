@@ -139,7 +139,26 @@ internal sealed partial class UnityUiRuntime
     /// the end of its text column), else one under the window's inventory half, else a live entry of such a row,
     /// else the full-screen menu's hint row (the row the world map shows).
     /// </summary>
+    private static readonly Dictionary<VanillaUiSite, InputContextEntry> KeyHintDonors = new();
+
+    /// <summary>The key-hint donor for <paramref name="site"/>, found once and kept while it is alive (<see cref="FindKeyHintDonor"/>).</summary>
     private static InputContextEntry? KeyHintDonorFor(VanillaUiSite site)
+    {
+        if (KeyHintDonors.TryGetValue(site, out var known) && Alive(known)) return known;
+        KeyHintDonors.Remove(site);
+        var found = FindKeyHintDonor(site);
+        if (found != null) KeyHintDonors[site] = found;
+        return found;
+    }
+
+    /// <summary>Core unload: forget the key-hint donors and the measured indent steps.</summary>
+    internal static void ClearRowCaches()
+    {
+        KeyHintDonors.Clear();
+        IndentSteps.Clear();
+    }
+
+    private static InputContextEntry? FindKeyHintDonor(VanillaUiSite site)
     {
         var roots = new List<Component?>();
         roots.Add(MeasureTooltipOf(site));
@@ -242,7 +261,7 @@ internal sealed partial class UnityUiRuntime
                 try { UnityEngine.Object.DestroyImmediate(entry); } catch { /* */ }
             }
 
-            // Nothing of the game's may drive the copy: behaviours other than text, image and layout are switched off,
+            // Nothing of the game's may drive the copy: behaviors other than text, image and layout are switched off,
             // and the root's own size fitter too (the container's column lays the row out).
             foreach (var b in go.GetComponentsInChildren<MonoBehaviour>(true))
             {
@@ -319,10 +338,43 @@ internal sealed partial class UnityUiRuntime
         catch { return null; }
     }
 
-    public void ApplyKeyHint(IRuntimeWidget row, VanillaKeyHintParts parts)
+    public void ApplyKeyHint(IRuntimeWidget row, VanillaKeyHintParts parts, int keysVersion)
     {
-        if (row is KeyHintRowWidget hint) hint.Apply(parts);
+        if (row is KeyHintRowWidget hint) hint.Apply(parts, keysVersion);
     }
+
+    public void PlaceAttachRow(IRuntimeWidget row, IRuntimeWidget? previous, IRuntimeWidget? next)
+    {
+        try
+        {
+            var t = RowTransform(row);
+            if (t == null || t.parent == null) return;
+            var p = RowTransform(previous);
+            var n = RowTransform(next);
+            if (p != null && p.parent != null && p.parent.Pointer == t.parent.Pointer)
+            {
+                int at = p.GetSiblingIndex();
+                int now = t.GetSiblingIndex();
+                int want = now > at ? at + 1 : at;
+                if (now != want) t.SetSiblingIndex(want);
+            }
+            else if (n != null && n.parent != null && n.parent.Pointer == t.parent.Pointer)
+            {
+                int at = n.GetSiblingIndex();
+                int now = t.GetSiblingIndex();
+                int want = now > at ? at : at - 1;
+                if (now != want) t.SetSiblingIndex(want);
+            }
+        }
+        catch { /* the row stays where it is */ }
+    }
+
+    private static Transform? RowTransform(IRuntimeWidget? row) => row switch
+    {
+        PanelRowWidget text => text.RowTransform,
+        KeyHintRowWidget hint => hint.RowTransform,
+        _ => null,
+    };
 
     /// <summary>
     /// The game's own glyph for one control path, for the device the player is on: <c>ControlsVisualMapping
@@ -361,6 +413,8 @@ internal sealed partial class UnityUiRuntime
         private UiDestroyVerdict _verdict = UiDestroyVerdict.Failed;
         private bool _drawn;
         private bool _complete;
+        private int _version = int.MinValue;
+        private int _retries;
         private LabelTone _tone = LabelTone.Normal;
         private Color? _labelColor;
         private int? _basePad;
@@ -382,6 +436,8 @@ internal sealed partial class UnityUiRuntime
 
         internal VanillaUiSite Site { get; }
 
+        internal Transform? RowTransform => UnityUiRuntime.Alive(_go) ? _go!.transform : null;
+
         internal float FontSize
         {
             get { try { return _action != null ? _action.fontSize : 0f; } catch { return 0f; } }
@@ -395,12 +451,16 @@ internal sealed partial class UnityUiRuntime
         /// Draw <paramref name="parts"/>: the Hold word, the glyphs (the game's sprite for each control path, a
         /// <c>+</c> between two) or, when a glyph cannot be had, the key as text on the entry's own key text; then the
         /// label. A repeat of a complete draw is no write; a draw that fell back to text is tried again (the game's
-        /// glyph table loads with its first hint row).
+        /// glyph table loads with its first hint row), at most <see cref="VanillaKeyHint.MaxGlyphRetries"/> times until
+        /// the parts or the keybinds' version change.
         /// </summary>
-        internal void Apply(VanillaKeyHintParts parts)
+        internal void Apply(VanillaKeyHintParts parts, int keysVersion)
         {
             if (!Alive) return;
-            if (_drawn && _complete && parts.Equals(Parts)) return;
+            if (!VanillaKeyHint.ShouldDraw(_drawn, _complete, Parts, parts, _version, keysVersion, _retries)) return;
+            bool retry = _drawn && parts.Equals(Parts) && keysVersion == _version;
+            _retries = retry ? _retries + 1 : 0;
+            _version = keysVersion;
             try
             {
                 if (_interaction != null)
@@ -448,7 +508,8 @@ internal sealed partial class UnityUiRuntime
                     if (_image != null) _image.gameObject.SetActive(false);
                     if (_comboImage != null) _comboImage.gameObject.SetActive(false);
                     if (_comboText != null) _comboText.gameObject.SetActive(false);
-                    string shown = parts.KeyText;
+                    // The game's own key text when it gave one for every path, else the chord's words.
+                    string shown = VanillaKeyHint.FallbackText(parts, firstText, secondText);
                     if (_keyText != null)
                     {
                         _keyText.text = shown;

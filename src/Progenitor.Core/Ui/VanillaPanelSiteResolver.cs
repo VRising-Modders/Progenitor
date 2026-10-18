@@ -699,6 +699,7 @@ internal sealed partial class UnityUiRuntime
         AnchorStatus.Clear();
         _hovered = null;
         RecipeGridCaches.Clear();
+        ClearRowCaches();
         _hoveredRecipe = null;
         RecipeHover.Clear();
         _scanFrame = -1;
@@ -3462,6 +3463,8 @@ internal sealed partial class UnityUiRuntime
         {
             get { try { return Alive && _tmp != null ? _tmp.fontSize : 0f; } catch { return 0f; } }
         }
+
+        internal Transform? RowTransform => UnityUiRuntime.Alive(_go) ? _go!.transform : null;
 
         private Vector4? _baseMargin;
         private float _indentPx;

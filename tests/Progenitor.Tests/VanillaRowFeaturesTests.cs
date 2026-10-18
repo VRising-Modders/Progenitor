@@ -150,6 +150,50 @@ public class VanillaRowFeaturesTests
         Assert.Equal("text:Alt", VanillaKeyHint.GlyphWord("", "Alt"));
     }
 
+    [Fact]
+    public void Resolve_says_where_the_key_came_from_and_an_unbound_bind_has_no_key()
+    {
+        var binds = new List<IKeybindInfo> { new Bind("example.recipes", "storage", KeyChord.None) };
+        var unbound = VanillaKeyHint.Resolve("storage", "Show", false, "example.recipes", binds, false, out var source);
+        Assert.Equal(VanillaKeyHintSource.UnboundBind, source);
+        Assert.False(unbound.HasKey);
+        Assert.Equal("Show", unbound.Text);
+
+        // Without the plugin's id the bind id is read as a chord, and "storage" is none.
+        var other = VanillaKeyHint.Resolve("storage", "Show", false, "other.mod", binds, false, out source);
+        Assert.Equal(VanillaKeyHintSource.Written, source);
+        Assert.Equal("storage", other.KeyText);
+
+        VanillaKeyHint.Resolve("Alt", "Show", false, "example.recipes", binds, false, out source);
+        Assert.Equal(VanillaKeyHintSource.Chord, source);
+        VanillaKeyHint.Resolve(" ", "Show", false, "example.recipes", binds, false, out source);
+        Assert.Equal(VanillaKeyHintSource.None, source);
+    }
+
+    [Fact]
+    public void The_text_fallback_prefers_the_games_own_key_text()
+    {
+        var one = VanillaKeyHint.Parts(KeyChord.Alt, "", "x", false);
+        Assert.Equal("Left Alt", VanillaKeyHint.FallbackText(one, "Left Alt", null));
+        Assert.Equal(one.KeyText, VanillaKeyHint.FallbackText(one, "", null));
+        var two = VanillaKeyHint.Parts(new KeyChord(UiKey.F, KeyModifiers.Shift), "", "x", false);
+        Assert.Equal("Shift + F", VanillaKeyHint.FallbackText(two, "Shift", "F"));
+        Assert.Equal(two.KeyText, VanillaKeyHint.FallbackText(two, "Shift", ""));
+    }
+
+    [Fact]
+    public void Glyph_retries_are_capped_until_the_parts_or_the_keybinds_change()
+    {
+        var p = VanillaKeyHint.Parts(KeyChord.Alt, "", "x", false);
+        var q = VanillaKeyHint.Parts(new KeyChord(UiKey.F8), "", "x", false);
+        Assert.True(VanillaKeyHint.ShouldDraw(false, false, default, p, 0, 0, 0));
+        Assert.False(VanillaKeyHint.ShouldDraw(true, true, p, p, 3, 3, 0));
+        Assert.True(VanillaKeyHint.ShouldDraw(true, false, p, p, 3, 3, VanillaKeyHint.MaxGlyphRetries - 1));
+        Assert.False(VanillaKeyHint.ShouldDraw(true, false, p, p, 3, 3, VanillaKeyHint.MaxGlyphRetries));
+        Assert.True(VanillaKeyHint.ShouldDraw(true, false, p, p, 3, 4, VanillaKeyHint.MaxGlyphRetries));
+        Assert.True(VanillaKeyHint.ShouldDraw(true, true, p, q, 3, 3, 0));
+    }
+
     // ---------------------------------------------------------------- footer slot
 
     private static readonly string[] Column =

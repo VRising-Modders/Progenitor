@@ -60,6 +60,25 @@ internal readonly struct VanillaKeyHintParts : IEquatable<VanillaKeyHintParts>
     public override string ToString() => Text;
 }
 
+/// <summary>Where a key-hint row's key came from (<see cref="VanillaKeyHint.Resolve"/>).</summary>
+internal enum VanillaKeyHintSource
+{
+    /// <summary>No key was given.</summary>
+    None = 0,
+
+    /// <summary>A bind of the attaching plugin, bound.</summary>
+    Bind = 1,
+
+    /// <summary>A bind of the attaching plugin with no key: the row shows no key.</summary>
+    UnboundBind = 2,
+
+    /// <summary>A key chord as written that parses (<c>Alt</c>, <c>Shift + F</c>).</summary>
+    Chord = 3,
+
+    /// <summary>Neither a bind of the plugin nor a chord: drawn as written, as text, and logged once.</summary>
+    Written = 4,
+}
+
 /// <summary>
 /// The game-free rules of a key-hint row: which chord it names (a bind of the row's plugin by id, following a
 /// remap and the controller, or a chord as written) and how that chord becomes glyphs. The Unity half draws them
@@ -93,6 +112,56 @@ internal static class VanillaKeyHint
         }
 
         return KeyChord.TryParse(k, out var chord) ? chord : KeyChord.None;
+    }
+
+    /// <summary>
+    /// The parts a key-hint row shows for <paramref name="key"/>: a bind of <paramref name="pluginId"/> (bound: its
+    /// chord; unbound: no key at all, never the bind's id), else a chord as written, else the key as written, as text.
+    /// <paramref name="source"/> says which, so the caller can log a key that is neither a bind nor a chord.
+    /// </summary>
+    internal static VanillaKeyHintParts Resolve(
+        string? key, string? label, bool hold, string? pluginId, IReadOnlyList<IKeybindInfo>? binds, bool controllerActive,
+        out VanillaKeyHintSource source)
+    {
+        string k = (key ?? "").Trim();
+        var chord = Chord(k, pluginId, binds, controllerActive, out bool fromBind);
+        if (fromBind)
+        {
+            source = chord.IsBound ? VanillaKeyHintSource.Bind : VanillaKeyHintSource.UnboundBind;
+            return Parts(chord, "", label, hold);
+        }
+
+        source = k.Length == 0 ? VanillaKeyHintSource.None : chord.IsBound ? VanillaKeyHintSource.Chord : VanillaKeyHintSource.Written;
+        return Parts(chord, k, label, hold);
+    }
+
+    /// <summary>
+    /// The fallback key text when a glyph cannot be drawn: the game's own text for each control path when the game
+    /// gave one for every path (joined by <c> + </c>), else the chord's own words.
+    /// </summary>
+    internal static string FallbackText(VanillaKeyHintParts parts, string? firstGameText, string? secondGameText)
+    {
+        string a = (firstGameText ?? "").Trim();
+        string b = (secondGameText ?? "").Trim();
+        if (parts.HasGlyphs && a.Length > 0 && (parts.SecondPath.Length == 0 || b.Length > 0))
+            return parts.SecondPath.Length == 0 ? a : a + " + " + b;
+        return parts.KeyText;
+    }
+
+    /// <summary>How many times a draw that fell back to text is tried again before it waits for a keybind change.</summary>
+    internal const int MaxGlyphRetries = 10;
+
+    /// <summary>
+    /// Whether a row drawn with <paramref name="last"/> needs drawing for <paramref name="parts"/>: always when the parts
+    /// changed or the keybinds' version moved; a complete draw never again; a text fallback again while it has retries
+    /// left (<see cref="MaxGlyphRetries"/>, counted since the last parts or version change).
+    /// </summary>
+    internal static bool ShouldDraw(bool drawn, bool complete, VanillaKeyHintParts last, VanillaKeyHintParts parts,
+        int lastVersion, int version, int retries)
+    {
+        if (!drawn || !parts.Equals(last) || version != lastVersion) return true;
+        if (complete) return false;
+        return retries < MaxGlyphRetries;
     }
 
     /// <summary>

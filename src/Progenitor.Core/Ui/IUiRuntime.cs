@@ -649,8 +649,18 @@ internal interface IUiRuntime
     /// </summary>
     IRuntimeWidget? CloneKeyHintRow(VanillaUiSite site, IRuntimeWidget container) => null;
 
-    /// <summary>Draw <paramref name="parts"/> on a <see cref="CloneKeyHintRow"/> row. Writes only what changed. Must never throw.</summary>
-    void ApplyKeyHint(IRuntimeWidget row, VanillaKeyHintParts parts) { }
+    /// <summary>
+    /// Draw <paramref name="parts"/> on a <see cref="CloneKeyHintRow"/> row (<see cref="VanillaKeyHint.ShouldDraw"/>:
+    /// <paramref name="keysVersion"/> is the keybinds' version, whose change re-arms the glyph retries). Writes only
+    /// what changed. Must never throw.
+    /// </summary>
+    void ApplyKeyHint(IRuntimeWidget row, VanillaKeyHintParts parts, int keysVersion) { }
+
+    /// <summary>
+    /// Put a row just rebuilt at its own place among its container's rows: right after <paramref name="previous"/>
+    /// (the row before it), else right before <paramref name="next"/>. Must never throw.
+    /// </summary>
+    void PlaceAttachRow(IRuntimeWidget row, IRuntimeWidget? previous, IRuntimeWidget? next) { }
 
     /// <summary>Whether the game is showing controller glyphs now (the player is on a controller).</summary>
     bool ControllerGlyphsActive => false;
