@@ -1235,13 +1235,21 @@ internal static partial class BuildMenuSearch
 
 /// <summary>
 /// The Dev bridge's <c>build_search</c> op reaches the build-menu search through this type by
-/// reflection (Core grants the Dev assembly no internals), like <c>JoinFlowTestBridge</c>. Client only,
+/// reflection (Core grants the Dev assembly no internals), like <c>JoinFlowTestBridge</c>. Client only (RecentDiagnostics: both sides),
 /// main thread.
 /// </summary>
 internal static class BuildSearchTestBridge
 {
     public static Dictionary<string, object?> RecentTab() => BuildMenuSearch.ShowRecentForTest();
-    public static Dictionary<string, object?> Status(int maxCells) => BuildMenuSearch.Describe(maxCells);
+    public static Dictionary<string, object?> Status(int maxCells)
+    {
+        var r = BuildMenuSearch.Describe(maxCells);
+        r["recentObserver"] = BuildRecentObserver.Diagnostics();
+        return r;
+    }
+
+    /// <summary>The Recent pipeline's per-stage counters on this side (client or server).</summary>
+    public static Dictionary<string, object?> RecentDiagnostics() => BuildRecentObserver.Diagnostics();
 
     public static Dictionary<string, object?> Set(string text) => BuildMenuSearch.SetQuery(text);
 

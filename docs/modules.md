@@ -6768,10 +6768,16 @@ at once when the menu closes.
 The server says which placements finished: a server running this Core sends each confirmed build back to its
 builder on the Core-reserved event `'PrRb'` (versioned; both sides drop a malformed packet). On a server without it,
 Recent stays empty and the rest of the menu is unchanged. A building the game turns into another piece when placed,
-and wallpapers, are not recorded. To tell a new structure from one already standing, the server compares only the
-structures still being spawned when the placement request arrives (at most 512 in one frame; a larger burst skips
-that frame's requests), never every structure in the world, so populated servers are covered. A client's hello
-counts for 30 seconds from when it arrived. Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
+and wallpapers, are not recorded. The server records each placement request of a player
+whose client said hello, then, every frame while one is pending, checks the structures being spawned that frame:
+the piece must belong to that player and match the request's blueprint, position (within 0.001 units) and rotation
+exactly, and must not have been spawning already when the request arrived. Only structures still being spawned are
+compared (at most 512 in a frame; a larger burst is skipped), never every structure in the world, so populated
+servers are covered. A building sequence is not required: a piece whose blueprint has none spawns no sequence.
+Hellos are taken in every frame and count for 30 seconds from when they arrived, so a client that reloaded Core is
+recognized by its new hello within 10 seconds. The Dev bridge's [`build_search` diagnostics](bridge-ops-client.md#build_search)
+shows each stage's counters on both sides (built and unit-tested; not live-verified; a live placement on
+2026-10-18 recorded nothing before this change). Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
 `ReceiveSlotPolicy.CoreProtocolIds`; adding it is a Bootstrap change.
 
 **Copy building.** With the build menu open, point at a building and press **Copy building** (default Middle

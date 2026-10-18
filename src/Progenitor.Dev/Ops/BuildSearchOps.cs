@@ -20,6 +20,9 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{"action":"set","text":"wall"}</c>: write the query through the field's own edit path.</item>
 /// <item><c>{"action":"clear"}</c>: what the x button does (empty the query, keep focus).</item>
 /// <item><c>{"action":"focus"}</c> / <c>{"action":"blur"}</c>: give or take the keyboard, as a click does.</item>
+/// <item><c>{"action":"diagnostics"}</c>: the Recent pipeline's per-stage counters, on the client <b>or the
+/// server</b> (the only action the server side accepts): hellos, peers, requests, candidates and each rejection
+/// reason, packets sent and received, records added. <c>status</c> carries the client's as <c>recentObserver</c>.</item>
 /// <item><c>{"action":"type","text":"wall","keys":["Escape"]}</c>: with focus, queue text and then chords
 /// (<c>mods_ui type</c> syntax) for the typed-key pump, one a frame; read back with <c>status</c>.</item>
 /// </list>
@@ -30,9 +33,10 @@ internal static class BuildSearchOps
 
     public static object Run(JsonElement args)
     {
-        if (Progenitor.Plugin.IsServerProcess)
-            throw new InvalidOperationException("build_search runs on the client side only");
         string action = Str(args, "action")?.Trim().ToLowerInvariant() ?? "status";
+        if (action == "diagnostics") return Call("RecentDiagnostics");
+        if (Progenitor.Plugin.IsServerProcess)
+            throw new InvalidOperationException("build_search runs on the client side only (except diagnostics)");
         return action switch
         {
             "status" => Call("Status", Int(args, "cells") ?? 40),
@@ -46,7 +50,7 @@ internal static class BuildSearchOps
             "close" => Call("CloseMenu"),
             "hover" => Call("Hover", Int(args, "index") ?? throw new ArgumentException("args.index is required for hover (-1 for none)")),
             "select" => Call("Select", Int(args, "index") ?? throw new ArgumentException("args.index is required for select")),
-            _ => throw new ArgumentException("args.action must be status, recent, open, close, hover, select, set, clear, focus, blur or type"),
+            _ => throw new ArgumentException("args.action must be status, diagnostics, recent, open, close, hover, select, set, clear, focus, blur or type"),
         };
     }
 
