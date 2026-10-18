@@ -7835,6 +7835,9 @@ On a player character, measured 2026-09-25: slot 0 primary attack, 1 and 4 the w
 
 ## Models
 
+`ModelHandle.Preview()` shows an owned static model surface once the handle is Ready. See
+[model preview](model-preview.md) for ownership, the bounded Dev/MCP operation and qualification limits.
+
 `ctx.Models` (`Progenitor.Models.PluginModels`, client only) streams in a game presentation prefab that is not loaded right now, keeps it loaded while held, and makes owned copies of it. The first use is hybrid character models (`HYB_*`), such as `HYB_NPCDracula_Evolved`, which the game only loads during Dracula's boss fight.
 
 ```csharp

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Progenitor.Effects;
@@ -102,7 +103,7 @@ internal sealed class ContentResidencyScan
 
 internal readonly struct ContentInstantiateResult
 {
-    public ContentInstantiateResult(bool ok, string? reason, bool hosted, string? cloneName, bool? particlePlaying, string? unsupported)
+    public ContentInstantiateResult(bool ok, string? reason, bool hosted, string? cloneName, bool? particlePlaying, string? unsupported, IDisposable? ownership = null)
     {
         Ok = ok;
         Reason = reason;
@@ -110,6 +111,7 @@ internal readonly struct ContentInstantiateResult
         CloneName = cloneName;
         ParticlePlaying = particlePlaying;
         Unsupported = unsupported;
+        Ownership = ownership;
     }
 
     public bool Ok { get; }
@@ -118,6 +120,8 @@ internal readonly struct ContentInstantiateResult
     public string? CloneName { get; }
     public bool? ParticlePlaying { get; }
     public string? Unsupported { get; }
+    /// <summary>Owned preview resources; the acquisition disposes these before releasing its files.</summary>
+    public IDisposable? Ownership { get; }
 
     public static ContentInstantiateResult Fail(string reason) =>
         new(false, reason, false, null, null, null);

@@ -38,7 +38,7 @@ internal sealed class Handlers
         "status", "save", "world_save", "core_reload", "reload_status", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles",
         "capture", "perf", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "build_search", "materials", "servants", "inventory_stamp", "inventory_moves", "dye", "remote_install",
         "ui_input", "ui_read", "display", "screenshot", "console",
-        "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release",
+        "model_preview", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release",
         "freeze_hold", "time", "photo", "locate", "container_preview", "camera_preview", "setting", "join_ui", "messages_record", "item_catalog",
         "join_admin", "server_desc", "server_rules", "world_backups", "server_browser", "auto_update", "chat_tabs", "chat_history",
     };
@@ -200,6 +200,7 @@ internal sealed class Handlers
             case "catalog_residency": return Ops.CatalogAssetOps.Residency(args);
             case "catalog_load": return Ops.CatalogAssetOps.Load(args);
             case "catalog_status": return Ops.CatalogAssetOps.Status(args);
+            case "model_preview": return Ops.ModelPreviewOps.Run(args);
             case "catalog_preview": return Ops.CatalogAssetOps.Preview(args);
             case "catalog_release": return Ops.CatalogAssetOps.Release(args);
             // Socket thread. Never takes the one-op gate. Liveness probe after a main-thread timeout.
@@ -211,7 +212,7 @@ internal sealed class Handlers
             case "dump": return Ops.FreezeDump.Run(args);
             // Main thread. Bounded synthetic occupancy for watchdog validation. Requires synthetic=true.
             case "freeze_hold": return Ops.FreezeHoldOps.Run(args);
-            case "ops": return new { ops = new[] { "ping", "logs", "bridge_status", "bridge_users", "dump", "freeze_hold", "reload", "users", "worlds", "command", "chat_observe", "broadcast", "ghost", "core_reload", "reload_status", "query", "get", "set", "components", "spawn", "entity", "prefab", "buff", "heal", "damage", "kill", "downed", "respawn", "create_character", "wake", "headless", "bot", "bot_look", "bot_cast", "bot_inventory", "bot_path", "bot_daytime", "bot_quests", "bot_event", "bot_cost", "bot_territories", "bot_use", "bot_recipes", "bot_blueprints", "bot_canplace", "bot_prefabs", "bot_threats", "bot_station", "bot_exit_graveyard", "bot_repair", "equip", "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore", "players", "status", "save", "world_save", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles", "time", "photo", "locate", "container_preview", "camera_preview", "item_catalog", "capture", "perf", "perf_status", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "ui_input", "ui_read", "display", "screenshot", "console", "build_search", "materials", "servants", "inventory_stamp", "inventory_moves", "dye", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release", "install_local", "remote_install", "setting", "messages_record", "ops" } };
+            case "ops": return new { ops = new[] { "ping", "logs", "bridge_status", "bridge_users", "dump", "freeze_hold", "reload", "users", "worlds", "command", "chat_observe", "broadcast", "ghost", "core_reload", "reload_status", "query", "get", "set", "components", "spawn", "entity", "prefab", "buff", "heal", "damage", "kill", "downed", "respawn", "create_character", "wake", "headless", "bot", "bot_look", "bot_cast", "bot_inventory", "bot_path", "bot_daytime", "bot_quests", "bot_event", "bot_cost", "bot_territories", "bot_use", "bot_recipes", "bot_blueprints", "bot_canplace", "bot_prefabs", "bot_threats", "bot_station", "bot_exit_graveyard", "bot_repair", "equip", "teleport", "give", "unlock", "engage", "protect", "bind", "inspect", "tree", "snapshot", "restore", "players", "status", "save", "world_save", "store", "connect", "host", "host_capture", "disconnect", "quit", "castles", "time", "photo", "locate", "container_preview", "camera_preview", "item_catalog", "capture", "perf", "perf_status", "mods_ui", "keybind_press", "map", "key", "mouse", "nav", "ui_input", "ui_read", "display", "screenshot", "console", "build_search", "materials", "servants", "inventory_stamp", "inventory_moves", "dye", "model_preview", "catalog_residency", "catalog_load", "catalog_status", "catalog_preview", "catalog_release", "install_local", "remote_install", "setting", "messages_record", "ops" } };
             default: throw new ArgumentException($"unknown op '{op}'");
         }
     }

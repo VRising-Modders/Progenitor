@@ -402,6 +402,78 @@ public class AssetAcquisitionTests : IDisposable
     }
 
     [Fact]
+    public void Preview_replacement_disposes_previous_before_creating_next_and_release_disposes_before_files()
+    {
+        GrantOptIn();
+        var fake = new FakeLoader();
+        AssetAcquisition.UseLoader(fake);
+        var handle = AssetAcquisition.Acquire(AssetAcquisitionRequest.Lantern(), owner: this);
+
+        Assert.True(AssetAcquisition.Preview(handle, hostMenu: true).Ok);
+        Assert.True(handle.Visible);
+        Assert.True(AssetAcquisition.Preview(handle, hostMenu: false).Ok);
+        Assert.Equal(new[] { "preview:1", "dispose:1", "preview:2" }, fake.Events);
+        Assert.All(fake.PreviewRequests, request =>
+        {
+            Assert.Equal(handle.ArchiveId, request.ArchiveId);
+            Assert.Equal(handle.PathId, request.PathId);
+        });
+
+        handle.Dispose();
+        handle.Dispose();
+        Assert.False(handle.Visible);
+        Assert.Equal("dispose:2", fake.Events[3]);
+        Assert.StartsWith("unload:", fake.Events[4]);
+        Assert.Equal(1, fake.Events.Count(e => e == "dispose:1"));
+        Assert.Equal(1, fake.Events.Count(e => e == "dispose:2"));
+        Assert.Equal(fake.Loads.AsEnumerable().Reverse(), fake.Unloads);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Failed_preview_replacement_clears_visibility_and_releases_any_returned_ownership(bool throws)
+    {
+        GrantOptIn();
+        var fake = new FakeLoader();
+        AssetAcquisition.UseLoader(fake);
+        var handle = AssetAcquisition.Acquire(AssetAcquisitionRequest.Lantern(), owner: this);
+        Assert.True(AssetAcquisition.Preview(handle, hostMenu: true).Ok);
+        fake.FailPreview = !throws;
+        fake.ThrowPreview = throws;
+
+        Assert.False(AssetAcquisition.Preview(handle, hostMenu: true).Ok);
+        Assert.False(handle.Visible);
+        Assert.Equal(new[] { "preview:1", "dispose:1", "preview:2" }, fake.Events.Take(3));
+        if (!throws) Assert.Equal("dispose:2", fake.Events[3]);
+        handle.Dispose();
+        Assert.Equal(1, fake.Events.Count(e => e == "dispose:1"));
+        Assert.Equal(throws ? 0 : 1, fake.Events.Count(e => e == "dispose:2"));
+    }
+
+    [Fact]
+    public void Shared_acquisitions_keep_independent_previews_until_owner_cleanup()
+    {
+        GrantOptIn();
+        var fake = new FakeLoader();
+        AssetAcquisition.UseLoader(fake);
+        var a = AssetAcquisition.Acquire(AssetAcquisitionRequest.Lantern(), owner: this);
+        var b = AssetAcquisition.Acquire(AssetAcquisitionRequest.Lantern(), owner: this);
+        Assert.True(AssetAcquisition.Preview(a, hostMenu: true).Ok);
+        Assert.True(AssetAcquisition.Preview(b, hostMenu: true).Ok);
+
+        a.Dispose();
+        Assert.Equal(new[] { "preview:1", "preview:2", "dispose:1" }, fake.Events);
+        Assert.True(b.Visible);
+        Assert.Empty(fake.Unloads);
+        Assert.Equal(1, AssetAcquisition.RemoveAll(this));
+        Assert.Equal("dispose:2", fake.Events[3]);
+        Assert.StartsWith("unload:", fake.Events[4]);
+        Assert.False(AssetAcquisition.Preview(a, hostMenu: true).Ok);
+        Assert.Equal(2, fake.PreviewRequests.Count);
+    }
+
+    [Fact]
     public void RemoveAll_disposes_owner_handles()
     {
         GrantOptIn();
@@ -446,6 +518,10 @@ public class AssetAcquisitionTests : IDisposable
         public List<string> Loads { get; } = new();
         public List<string> Unloads { get; } = new();
         public List<string> Unmounts { get; } = new();
+        public List<string> Events { get; } = new();
+        public List<(string ArchiveId, ulong PathId)> PreviewRequests { get; } = new();
+        public bool FailPreview { get; set; }
+        public bool ThrowPreview { get; set; }
 
         public ContentLoadStepResult Mount(string archiveId, string diskPath)
         {
@@ -467,19 +543,34 @@ public class AssetAcquisitionTests : IDisposable
         public ContentUnloadStepResult UnloadFile(string archiveId)
         {
             Unloads.Add(archiveId);
+            Events.Add("unload:" + archiveId);
             return ContentUnloadStepResult.Done(waitVerified: true);
         }
 
         public ContentUnloadStepResult Unmount(string archiveId)
         {
             Unmounts.Add(archiveId);
+            Events.Add("unmount:" + archiveId);
             return ContentUnloadStepResult.Done(waitVerified: true);
         }
 
         public ContentResidencyScan ScanResidency(string name, string? archiveId) =>
             new() { NameCount = 0, ScanApi = "FindObjectsOfTypeAll" };
 
-        public ContentInstantiateResult InstantiatePreview(string archiveId, ulong pathId, string pluginId, bool hostMenu) =>
-            new(true, null, hosted: hostMenu, cloneName: "clone", particlePlaying: true, unsupported: hostMenu ? null : null);
+        public ContentInstantiateResult InstantiatePreview(string archiveId, ulong pathId, string pluginId, bool hostMenu)
+        {
+            PreviewRequests.Add((archiveId, pathId));
+            int id = PreviewRequests.Count;
+            Events.Add("preview:" + id);
+            if (ThrowPreview) throw new InvalidOperationException("preview failed");
+            return new(!FailPreview, FailPreview ? AssetAcquisitionReasons.LoadError : null,
+                hosted: hostMenu, cloneName: "clone", particlePlaying: true, unsupported: null,
+                ownership: new FakePreview(Events, id));
+        }
+    }
+
+    sealed class FakePreview(List<string> events, int id) : IDisposable
+    {
+        public void Dispose() => events.Add("dispose:" + id);
     }
 }

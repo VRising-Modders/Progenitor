@@ -344,9 +344,18 @@ public static class AssetAcquisition
             if (loader == null)
                 return AssetPreviewResult.Fail(AssetAcquisitionReasons.LoadError);
 
-            var result = loader.InstantiatePreview(ArchiveId, PathId, PluginId, hostMenu);
+            DisposePreview();
+            ContentInstantiateResult result;
+            try { result = loader.InstantiatePreview(ArchiveId, PathId, PluginId, hostMenu); }
+            catch { return AssetPreviewResult.Fail(AssetAcquisitionReasons.LoadError); }
+            _preview = result.Ownership;
             if (!result.Ok)
+            {
+                DisposePreview();
                 return AssetPreviewResult.Fail(result.Reason ?? AssetAcquisitionReasons.LoadError);
+            }
+            if (_preview == null)
+                return AssetPreviewResult.Fail(AssetAcquisitionReasons.LoadError);
 
             Visible = true;
             return new AssetPreviewResult(true, result.Hosted, result.CloneName, result.ParticlePlaying, result.Unsupported);
@@ -381,6 +390,14 @@ public static class AssetAcquisition
             SharedLedger.AddFile(id);
         }
 
+        void DisposePreview()
+        {
+            var preview = _preview;
+            _preview = null;
+            Visible = false;
+            try { preview?.Dispose(); } catch { /* continue releasing owned resources */ }
+        }
+
         void Unwind(IContentArchiveLoader? loader)
         {
             string[] files;
@@ -391,8 +408,7 @@ public static class AssetAcquisition
                 archives = _ownedArchives.ToArray();
             }
 
-            try { _preview?.Dispose(); } catch { /* */ }
-            _preview = null;
+            DisposePreview();
 
             for (int i = files.Length - 1; i >= 0; i--)
             {

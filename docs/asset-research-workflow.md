@@ -49,8 +49,12 @@ The [offline indexer](../tools/catalog/README.md) inventories shipped archives a
 generated inventory does not certify playback, gameplay, customization or safe teardown. The
 recipe layer associates recipes with inventory rows by name only (`inferred`, never `known`); the
 Wendigo ring's presentation objects have no inventory association at all. Still out of scope:
-loading, preview, possession, archive mounting, runtime availability, an in-game asset browser,
+general archive loading, possession, archive mounting, runtime availability, an in-game asset browser,
 and Styx/NPC work. Searching never launches the game.
+
+For mesh/skinned presentation models, the separate [model preview](model-preview.md) path uses
+the existing model-section loader. It is implemented with live qualification pending; it does not
+establish arbitrary archive loading or reconstruct gameplay-driven effects.
 
 The complete implementation brief is `<local-evidence>\Progenitor-asset-catalog-agent-handoff.md` (kept outside the repository). Build on that brief and M5 rather than creating another competing inventory. Import these recipes with their actual evidence scopes, including the failed Styx melee case; do not mark every discovered asset usable.
 

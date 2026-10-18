@@ -184,6 +184,7 @@ public sealed class ModelHandle : IDisposable
 {
     private readonly string _owner;
     private readonly List<GameObject> _instances = new();
+    private readonly List<ModelPreview> _previews = new();
     private ModelLoad? _load;
     private string? _serverReason;
 
@@ -217,7 +218,11 @@ public sealed class ModelHandle : IDisposable
         }
     }
 
-    internal void Start() => _load = ModelFrame.Acquire(Section, PrefabName);
+    internal void Start()
+    {
+        _load = ModelFrame.Acquire(Section, PrefabName);
+        _load.BeforeLeavingReady = ClosePreviews;
+    }
 
     internal void FailServerSide() => _serverReason = ModelLoadReasons.ServerSide;
 
@@ -248,9 +253,27 @@ public sealed class ModelHandle : IDisposable
     /// </summary>
     public Puppet InstantiatePuppet(string? name = null) => Puppet.Of(Instantiate(name));
 
+    /// <summary>Shows a static, camera-framed copy with its original materials. Client/main thread only, Ready required.
+    /// Dispose the returned preview to close it. Disposing this model also closes all its previews.</summary>
+    public ModelPreview Preview()
+    {
+        var prefab = Prefab ?? throw new InvalidOperationException("model must be Ready before previewing");
+        var preview = new ModelPreview(Progenitor.Effects.UnityModelPreview.Create(prefab));
+        _previews.RemoveAll(p => !p.IsOpen);
+        _previews.Add(preview);
+        return preview;
+    }
+
     /// <summary>Destroys the copies and ends the hold. Idempotent.</summary>
+    private void ClosePreviews()
+    {
+        foreach (var preview in _previews) preview.Dispose();
+        _previews.Clear();
+    }
+
     public void Dispose()
     {
+        ClosePreviews();
         foreach (var go in _instances)
         {
             try { if (go != null) UnityObject.Destroy(go); }
@@ -260,6 +283,7 @@ public sealed class ModelHandle : IDisposable
         if (_load != null)
         {
             var result = ModelFrame.Release(_load);
+            _load.BeforeLeavingReady = null;
             if (result == ModelReleaseResult.KeptForGame)
                 Plugin.Logger?.LogInfo("Models: " + PrefabName + " released; a game unit uses it, so its section stays requested.");
             _load = null;
@@ -366,6 +390,8 @@ internal static class ModelFrame
     /// <summary>Core uninstall: copies destroyed, holds released, requests this generation added removed.</summary>
     internal static void Uninstall()
     {
+        ModelPreviewBridge.Close();
+        Progenitor.Effects.UnityModelPreview.DisposeAll();
         try { SceneryFrame.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Models: showing scenery on uninstall threw: " + e.Message); }
         try { ModelInstances.DestroyAllRoots(); }
