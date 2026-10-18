@@ -547,16 +547,35 @@ internal sealed class StressIsland
     public List<StressCastleSpot> Castles { get; } = new();
     /// <summary>Territories that get the island's raws.</summary>
     public List<int> Suppliers { get; } = new();
+    /// <summary>The clan this owner was planned for when that clan does not exist yet; empty otherwise.</summary>
+    public string PlannedClan { get; set; } = "";
 }
 
 internal static class StressIslands
 {
-    /// <summary>Clans are one island each; every castle-share and solo owner is one island of its own castles.</summary>
-    public static List<StressIsland> Build(StressGrouping g, StressSupply supply, double supplierShare)
+    /// <summary>
+    /// Clans are one island each; every castle-share and solo owner is one island of its own castles. A planned
+    /// clan that does not exist in the world (<paramref name="clanMade"/> false; null = all exist) is no island:
+    /// each of its members is labeled by its own castles instead, castle-share with 3+ castles, else solo.
+    /// </summary>
+    public static List<StressIsland> Build(StressGrouping g, StressSupply supply, double supplierShare, Func<StressOwnerGroup, bool>? clanMade = null)
     {
         var list = new List<StressIsland>();
         foreach (var c in g.Clans)
-            list.Add(Make(c.Name, StressGroupKind.Clan, c.Castles, supply, supplierShare));
+        {
+            if (clanMade == null || clanMade(c))
+            {
+                list.Add(Make(c.Name, StressGroupKind.Clan, c.Castles, supply, supplierShare));
+                continue;
+            }
+            foreach (var m in c.Members)
+            {
+                bool share = m.Castles.Count >= StressGroupPlanner.MinShareCastles;
+                var island = Make((share ? "share:" : "solo:") + m.Name, share ? StressGroupKind.Share : StressGroupKind.Solo, m.Castles, supply, supplierShare);
+                island.PlannedClan = c.Name;
+                list.Add(island);
+            }
+        }
         foreach (var m in g.Share.Members)
             list.Add(Make("share:" + m.Name, StressGroupKind.Share, m.Castles, supply, supplierShare));
         foreach (var m in g.Solo.Members)
@@ -576,7 +595,7 @@ internal static class StressIslands
         {
             var castles = i.Castles.Where(c => keep.Contains(c.Territory)).ToList();
             if (castles.Count == 0) continue;
-            var r = new StressIsland { Id = i.Id, Kind = i.Kind, Supply = i.Supply };
+            var r = new StressIsland { Id = i.Id, Kind = i.Kind, Supply = i.Supply, PlannedClan = i.PlannedClan };
             r.Castles.AddRange(castles);
             r.Suppliers.AddRange(i.Supply == StressSupply.Local ? castles.Select(c => c.Territory) : PickSuppliers(castles, supplierShare));
             list.Add(r);
@@ -794,5 +813,79 @@ internal static class StressSpotFinder
             }
         }
         return null;
+    }
+}
+
+/// <summary>An item as the game's item data describes it (the item catalog row).</summary>
+internal sealed class StressItemInfo
+{
+    public int Guid { get; set; }
+    public string Name { get; set; } = "";
+    public int MaxAmount { get; set; }
+    /// <summary><c>ItemData.ItemCategory</c> flags.</summary>
+    public long Category { get; set; }
+    /// <summary><c>ItemData.ItemType</c>: 0 stackable.</summary>
+    public int ItemType { get; set; }
+}
+
+/// <summary>
+/// Recipe inputs to the items stress_refine may put in a chest. A recipe input can be a wildcard, a
+/// <c>FakeItem_*</c> prefab such as <c>FakeItem_AnyFlower</c> that stands for any item of a group; it is never
+/// given. Its <c>ItemData.ItemCategory</c> names the group (the game's category flags include Flower, Gem and
+/// Fish), so it resolves to a real stackable item carrying all of those category bits, the first by prefab name.
+/// An input that is not a giveable item (no item data, a max stack of 0 or less, another wildcard) is skipped
+/// with a note.
+/// </summary>
+internal static class StressItemResolver
+{
+    public const string WildcardPrefix = "FakeItem_";
+
+    public static bool IsWildcard(StressItemInfo item) => item.Name.StartsWith(WildcardPrefix, StringComparison.Ordinal);
+
+    /// <summary>Null when <paramref name="item"/> may be given into a chest, else why not.</summary>
+    public static string? NotGiveable(StressItemInfo? item)
+    {
+        if (item == null) return "not an item (no item data)";
+        if (IsWildcard(item)) return item.Name + " is a recipe wildcard, not an item";
+        if (item.MaxAmount <= 0) return item.Name + " has max stack " + item.MaxAmount;
+        return null;
+    }
+
+    /// <summary>The item to give for recipe input <paramref name="guid"/>, or null (with <paramref name="note"/>).</summary>
+    public static StressItemInfo? Resolve(int guid, IReadOnlyDictionary<int, StressItemInfo> items, out string note)
+    {
+        note = "";
+        if (!items.TryGetValue(guid, out var item)) { note = $"input {guid} skipped: not an item (no item data)"; return null; }
+        if (!IsWildcard(item))
+        {
+            var why = NotGiveable(item);
+            if (why != null) { note = "input skipped: " + why; return null; }
+            return item;
+        }
+        if (item.Category == 0) { note = $"input {item.Name} skipped: a wildcard with no item category to match"; return null; }
+        var match = items.Values
+            .Where(i => !IsWildcard(i) && i.ItemType == 0 && i.MaxAmount > 0 && (i.Category & item.Category) == item.Category)
+            .OrderBy(i => i.Name, StringComparer.Ordinal).ThenBy(i => i.Guid)
+            .FirstOrDefault();
+        if (match == null) { note = $"input {item.Name} skipped: no stackable item has its category {item.Category}"; return null; }
+        note = $"{item.Name} resolved to {match.Name} (category {item.Category})";
+        return match;
+    }
+
+    /// <summary>
+    /// <paramref name="need"/> with every input resolved: wildcards replaced by their item, unresolvable or
+    /// ungiveable inputs dropped. <paramref name="notes"/> gets one line per wildcard or skipped input.
+    /// </summary>
+    public static Dictionary<int, long> ResolveNeed(IReadOnlyDictionary<int, long> need, IReadOnlyDictionary<int, StressItemInfo> items, ICollection<string> notes)
+    {
+        var resolved = new Dictionary<int, long>();
+        foreach (var kv in need.OrderBy(k => k.Key))
+        {
+            var item = Resolve(kv.Key, items, out var note);
+            if (note.Length > 0 && !notes.Contains(note)) notes.Add(note);
+            if (item == null) continue;
+            resolved[item.Guid] = (resolved.TryGetValue(item.Guid, out long n) ? n : 0) + kv.Value;
+        }
+        return resolved;
     }
 }

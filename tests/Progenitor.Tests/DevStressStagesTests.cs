@@ -287,6 +287,57 @@ public class DevStressStagesTests
         Assert.Empty(none);
     }
 
+    private static Dictionary<int, StressItemInfo> Items(params StressItemInfo[] items) => items.ToDictionary(i => i.Guid);
+
+    [Fact]
+    public void Items_WildcardResolvesToARealItemOfItsCategory()
+    {
+        const long Flower = 16, Gem = 4;
+        var items = Items(
+            new StressItemInfo { Guid = -2101941878, Name = "FakeItem_AnyFlower", MaxAmount = 1, Category = Flower },
+            new StressItemInfo { Guid = 11, Name = "Item_Ingredient_Plant_Thistle", MaxAmount = 250, Category = Flower },
+            new StressItemInfo { Guid = 12, Name = "Item_Ingredient_Plant_Bloodrose", MaxAmount = 250, Category = Flower },
+            new StressItemInfo { Guid = 13, Name = "Item_Weapon_FlowerSword", MaxAmount = 1, Category = Flower, ItemType = 2 },
+            new StressItemInfo { Guid = 20, Name = "FakeItem_AnyGem", MaxAmount = 1, Category = Gem },
+            new StressItemInfo { Guid = 30, Name = "Item_Ingredient_Wood_Standard", MaxAmount = 1000, Category = 32 },
+            new StressItemInfo { Guid = 40, Name = "Item_Broken", MaxAmount = 0 });
+
+        var flower = StressItemResolver.Resolve(-2101941878, items, out var note);
+        Assert.Equal(12, flower!.Guid); // a stackable flower, first by name; never the wildcard or the sword
+        Assert.Contains("resolved to Item_Ingredient_Plant_Bloodrose", note);
+        Assert.Null(StressItemResolver.Resolve(20, items, out var gem)); // no real gem in this table
+        Assert.Contains("skipped", gem);
+        Assert.Equal(30, StressItemResolver.Resolve(30, items, out _)!.Guid);
+        Assert.Null(StressItemResolver.Resolve(40, items, out var broken));
+        Assert.Contains("max stack 0", broken);
+        Assert.Null(StressItemResolver.Resolve(999, items, out var missing));
+        Assert.Contains("not an item", missing);
+
+        var notes = new List<string>();
+        var need = StressItemResolver.ResolveNeed(new Dictionary<int, long> { [-2101941878] = 40, [12] = 5, [20] = 3, [30] = 100 }, items, notes);
+        Assert.Equal(new Dictionary<int, long> { [12] = 45, [30] = 100 }, need);
+        Assert.Equal(2, notes.Count);
+        Assert.DoesNotContain(need.Keys, k => StressItemResolver.NotGiveable(items.TryGetValue(k, out var i) ? i : null) != null);
+
+        Assert.NotNull(StressItemResolver.NotGiveable(items[-2101941878]));
+        Assert.NotNull(StressItemResolver.NotGiveable(null));
+        Assert.Null(StressItemResolver.NotGiveable(items[30]));
+    }
+
+    [Fact]
+    public void Islands_PlannedClanThatIsNotMadeIsLabeledByOwner()
+    {
+        var g = StressGroupPlanner.Plan(World140(), Groups, null, 18, out _);
+        var islands = StressIslands.Build(g, StressSupply.Auto, 1.0 / 3.0, clanMade: _ => false);
+        Assert.DoesNotContain(islands, i => i.Kind == StressGroupKind.Clan);
+        Assert.Equal(40, islands.Count);
+        var fromClans = islands.Where(i => i.PlannedClan.Length > 0).ToList();
+        Assert.Equal(20, fromClans.Count);
+        Assert.All(fromClans, i => Assert.Equal(i.Castles.Count >= 3 ? StressGroupKind.Share : StressGroupKind.Solo, i.Kind));
+        Assert.All(fromClans.Where(i => i.Kind == StressGroupKind.Share), i => Assert.Equal(StressSupply.Spread, i.Supply));
+        Assert.Equal(4, StressIslands.Build(g, StressSupply.Auto, 1.0 / 3.0, clanMade: _ => true).Count(i => i.Kind == StressGroupKind.Clan));
+    }
+
     [Fact]
     public void Clan_MembersByPlatformId()
     {

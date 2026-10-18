@@ -66,7 +66,7 @@ internal static class StressStageOps
                 var g = StressGroupPlanner.Plan(collected.Owners, a.Groups, a.Share, a.Seed, out var refusal);
                 if (refusal != null) { deferred.SetException(new InvalidOperationException("owner_groups: " + refusal)); return; }
                 var reply = DescribeGrouping(a, collected, g);
-                reply["islands"] = DescribeIslands(StressIslands.Build(g, StressSupply.Auto, new StressStageArgs().Suppliers), collected);
+                reply["islands"] = DescribeIslands(StressIslands.Build(g, StressSupply.Auto, new StressStageArgs().Suppliers, ClanMade), collected);
                 deferred.SetResult(reply);
             }
             catch (Exception e) { deferred.SetException(e); }
@@ -282,7 +282,8 @@ internal static class StressStageOps
         var collected = Collect(world, a.Seed, null);
         return PlanThen(world, collected, a, g =>
         {
-            var islands = StressIslands.Build(g, a.Supply, a.Suppliers);
+            // A planned clan counts as an island only once it exists: every member in one clan entity.
+            var islands = StressIslands.Build(g, a.Supply, a.Suppliers, ClanMade);
             if (!a.AllPlots)
                 islands = StressIslands.Restrict(islands, a.Plots, a.Suppliers);
 
@@ -323,6 +324,8 @@ internal static class StressStageOps
             job.Add("plan", () =>
             {
                 var islandRows = new List<object>();
+                var itemTable = ItemTable();
+                var itemNotes = new List<string>();
                 int recipeWrites = 0, grantSteps = 0;
                 foreach (var island in islands)
                 {
@@ -350,6 +353,7 @@ internal static class StressStageOps
                                     });
                             }
                         }
+                        need = StressItemResolver.ResolveNeed(need, itemTable, itemNotes);
                         localNeed[c.Territory] = need;
                         StressRefineMath.Add(islandNeed, need);
                     }
@@ -383,12 +387,13 @@ internal static class StressStageOps
                             grantSteps++;
                             var chests = stock.Select(s => read.ChestEntities[s.Entity]).ToList();
                             if (!a.DryRun)
-                                job.Add($"stock {t} {item} x{amount}", () => Stock(world, chests, item, amount));
+                                job.Add($"stock {t} {item} x{amount}", () => Stock(world, chests, item, amount, itemTable));
                         }
                     }
                     islandRows.Add(new Dictionary<string, object?>
                     {
                         ["island"] = island.Id,
+                        ["plannedClan"] = island.PlannedClan.Length > 0 ? island.PlannedClan + " (not made)" : null,
                         ["kind"] = island.Kind.ToString().ToLowerInvariant(),
                         ["supply"] = island.Supply.ToString().ToLowerInvariant(),
                         ["territories"] = island.Castles.Select(c => c.Territory).ToList(),
@@ -398,6 +403,7 @@ internal static class StressStageOps
                     });
                 }
                 plan["islands"] = islandRows;
+                plan["itemNotes"] = itemNotes;
                 plan["recipeWrites"] = recipeWrites;
                 plan["stockSteps"] = grantSteps;
                 return $"{islands.Count} island(s), {recipeWrites} recipe switch(es), {grantSteps} stock step(s)";
@@ -737,8 +743,24 @@ internal static class StressStageOps
         return $"user {Fmt(user)} role {role}";
     }
 
-    private static string Stock(World world, List<Entity> chests, int item, long amount)
+    /// <summary>The game's item data (the item catalog: ItemData of every item prefab) by GUID.</summary>
+    private static Dictionary<int, StressItemInfo> ItemTable()
     {
+        var table = new Dictionary<int, StressItemInfo>();
+        foreach (var e in Progenitor.Items.ItemCatalogBridge.Entries())
+            table[e.PrefabGuid] = new StressItemInfo { Guid = e.PrefabGuid, Name = e.PrefabName, MaxAmount = e.MaxAmount, Category = e.ItemCategory, ItemType = e.ItemType };
+        return table;
+    }
+
+    /// <summary>A planned clan exists when every member is in the same clan entity.</summary>
+    private static bool ClanMade(StressOwnerGroup clan) =>
+        clan.Members.Count > 0 && clan.Members.All(m => m.ExistingClan.Length > 0 && m.ExistingClan == clan.Members[0].ExistingClan);
+
+    private static string Stock(World world, List<Entity> chests, int item, long amount, IReadOnlyDictionary<int, StressItemInfo> items)
+    {
+        // Never give a recipe wildcard or anything without item data, whatever the plan says.
+        var why = StressItemResolver.NotGiveable(items.TryGetValue(item, out var info) ? info : null);
+        if (why != null) throw new InvalidOperationException("refused: " + why);
         long left = amount;
         var guid = new PrefabGUID(item);
         int used = 0;
@@ -1095,6 +1117,7 @@ internal static class StressStageOps
             ["supply"] = i.Supply.ToString().ToLowerInvariant(),
             ["territories"] = i.Castles.Select(x => x.Territory).ToList(),
             ["rawCastles"] = i.Suppliers.ToList(),
+            ["plannedClan"] = i.PlannedClan.Length > 0 ? i.PlannedClan + " (not made)" : null,
         }).ToList();
 
     private static List<object> ItemRows(World world, IReadOnlyDictionary<int, long> items) =>
