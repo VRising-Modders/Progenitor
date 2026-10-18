@@ -288,8 +288,47 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         else Render();
     }
 
-    /// <summary>The body rows the open filter's chips took (<see cref="UiChecklistOptions.KeepHeight"/>), given back when it closes.</summary>
+    /// <summary>
+    /// The slot rows the open filter's chips keep out of use (<see cref="UiChecklistOptions.KeepHeight"/>): the rows in use
+    /// with the chips closed (<see cref="ClosedSlots"/>) less those in use now; 0 while the chips are closed. Recomputed by
+    /// every <see cref="UseSlots"/>, so a new row count (a fill answer, a refresh) never leaves a stale count behind.
+    /// </summary>
     private int _chipTaken;
+
+    /// <summary>The slot rows the body uses with the filter's chips closed.</summary>
+    internal int ClosedSlots => _viewport.Slots + _chipTaken;
+
+    /// <summary>Whether the open filter's chips take their rows from the body now.</summary>
+    private bool ChipsReserved => _filterOpen && _options.KeepHeight && _chipRows.Count > 0;
+
+    /// <summary>
+    /// The body's height in rows with <see cref="UiChecklistOptions.KeepHeight"/>: its rows in use with the chips closed, no
+    /// more than the lines the entries make unfiltered and fully unfolded (so a short or empty list stays short), less the
+    /// open chips' rows. The lines a fold, a filter or a search hide are made up by filler rows up to this.
+    /// </summary>
+    internal int BodyTarget()
+    {
+        if (!_options.KeepHeight) return 0;
+        int target = Math.Min(ClosedSlots, _model.FullLineCount());
+        if (ChipsReserved) target -= _chipRows.Count;
+        return Math.Max(0, Math.Min(target, _viewport.Slots));
+    }
+
+    /// <summary>
+    /// Use <paramref name="closed"/> slot rows with the chips closed (clamped to the rows built); while the chips are open
+    /// and reserved, use as many fewer as they take from the body's height (<see cref="BodyTarget"/>; at least the
+    /// viewport's fewest), and recompute <see cref="_chipTaken"/>. True when the rows in use changed.
+    /// </summary>
+    private bool UseSlots(int closed)
+    {
+        closed = Math.Min(_viewport.Built, UiTableViewport.ClampSlots(closed));
+        int now = closed;
+        if (ChipsReserved) now = Math.Min(closed, _model.FullLineCount()) - _chipRows.Count;
+        bool changed = _viewport.SetSlots(now);
+        _chipTaken = ChipsReserved ? Math.Max(0, closed - _viewport.Slots) : 0;
+        if (changed && WidgetRuntime.Current is { } runtime) AttachBar(runtime);
+        return changed;
+    }
 
     /// <summary>
     /// Open or close the filter's chips. With <see cref="UiChecklistOptions.KeepHeight"/> the chips' rows come out of the
@@ -298,22 +337,9 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private void SetFilterOpen(bool open)
     {
         if (_filterOpen == open) return;
+        int closed = ClosedSlots;
         _filterOpen = open;
-        if (!_options.KeepHeight) return;
-        int before = _viewport.Slots;
-        bool changed;
-        if (open)
-        {
-            changed = _viewport.SetSlots(before - _chipRows.Count);
-            _chipTaken = before - _viewport.Slots;
-        }
-        else
-        {
-            changed = _viewport.SetSlots(before + _chipTaken);
-            _chipTaken = 0;
-        }
-
-        if (changed && WidgetRuntime.Current is { } runtime) AttachBar(runtime);
+        UseSlots(closed);
     }
 
     public IReadOnlyList<UiChecklistEntry> Shown => new List<UiChecklistEntry>(_model.Shown);
@@ -848,8 +874,10 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     internal bool ApplyFill(int rows)
     {
-        if (rows < 0 || IsDisposed || !_viewport.SetSlots(rows)) return false;
-        if (WidgetRuntime.Current is { } runtime) AttachBar(runtime);
+        if (rows < 0 || IsDisposed) return false;
+        // The answer counts the open chips among the panel's other rows: with them closed, the body has their rows too.
+        int closed = ChipsReserved ? rows + _chipRows.Count : rows;
+        if (!UseSlots(closed)) return false;
         Render();
         return true;
     }
@@ -948,6 +976,8 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             ["previewIcon"] = _previewIcon is { } pi ? UiDataTableLayout.MarkOf(pi).Name : "",
             ["keepHeight"] = _options.KeepHeight,
             ["fillers"] = _fillers,
+            ["bodyTarget"] = BodyTarget(),
+            ["fullLines"] = _model.FullLineCount(),
             ["bodyRows"] = ShownSlots(),
             ["chipRows"] = _filterOpen ? _chipRows.Count : 0,
             ["room"] = Room(),
@@ -991,6 +1021,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         try
         {
             var lines = _model.Lines();
+            if (ChipsReserved) UseSlots(ClosedSlots); // a refresh changed the lines the chips' rows come out of
             _viewport.SetCount(lines.Count);
             if (!ReferenceEquals(lines, _renderedLines) || _viewport.Top != _renderedTop) HideTooltip();
             _renderedLines = lines;
@@ -1003,7 +1034,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             bool icons = AnyIcon();
             RenderHeader(icons);
             // KeepHeight: blank filler rows under the lines keep the body at all its rows (a fold, a filter, a search).
-            _fillers = _options.KeepHeight ? _viewport.Fillers(_viewport.Slots) : 0;
+            _fillers = _options.KeepHeight ? _viewport.Fillers(BodyTarget()) : 0;
             int fillTo = _viewport.Shown + _fillers;
             for (int i = 0; i < _slots.Count; i++)
             {

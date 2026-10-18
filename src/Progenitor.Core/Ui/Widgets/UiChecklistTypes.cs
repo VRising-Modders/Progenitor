@@ -228,11 +228,12 @@ public sealed class UiChecklistOptions
     public bool FillHeight { get; set; }
 
     /// <summary>
-    /// True (the default): the list keeps its height. The body always draws all its rows (<see cref="VisibleRows"/>, or as
-    /// many as fill the window with <see cref="FillHeight"/>): rows the lines do not fill (a folded section, a filter, a
-    /// search, a short list) draw blank, take no click and are passed over by the controller, and opening the filter's
-    /// chips takes their rows from the body. So a fold, a filter or a search never resizes the window; the list scrolls
-    /// inside it. False: the body is only as tall as its lines.
+    /// True (the default): the list keeps its height. The body draws all its rows (<see cref="VisibleRows"/>, or as many as
+    /// fill the window with <see cref="FillHeight"/>), but no more than the lines its entries make unfiltered and fully
+    /// unfolded, so a short or empty list stays short. Rows the lines do not fill (a folded section, a filter, a search)
+    /// draw blank, take no click and are passed over by the controller, and opening the filter's chips takes their rows
+    /// from the body. So a fold, a filter or a search never resizes the window; the list scrolls inside it. A refresh
+    /// (<see cref="IUiChecklist.SetEntries"/>) with more or fewer entries may. False: the body is only as tall as its lines.
     /// </summary>
     public bool KeepHeight { get; set; } = true;
 
@@ -391,7 +392,7 @@ public interface IUiChecklist : IUiHandle
     /// <summary>
     /// Readback: <c>{kind: checklist, key, query, filter, filters, sort, columns, top, lines, entries, shown, visibleRows,
     /// slots, selected, groups, collapsed, status, confirm, canConfirm, filterOpen, suspended, preview, previewIcon,
-    /// keepHeight, fillers, bodyRows, chipRows, room}</c>.
+    /// keepHeight, fillers, bodyTarget, fullLines, bodyRows, chipRows, room}</c>.
     /// </summary>
     Dictionary<string, object?> Describe();
 }

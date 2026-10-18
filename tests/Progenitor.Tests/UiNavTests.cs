@@ -328,19 +328,22 @@ public sealed class UiNavTests : IDisposable
     {
         UiApi.SetRuntimeForTests(new TableRuntimeFake());
         using var panel = Panel();
-        var entries = Enumerable.Range(0, 3).Select(i => new UiChecklistEntry("e" + i, "Chest " + i)).ToList();
+        // Lines: #A a0 a1 a2 #B b0 b1 b2 (8) in 6 rows; folding A leaves 5 lines and one filler (slot 5).
+        var entries = Enumerable.Range(0, 6).Select(i => new UiChecklistEntry("e" + i, "Chest " + i) { Section = i < 3 ? "A" : "B" }).ToList();
         var list = panel.Checklist("cl", entries, new UiChecklistOptions { Preview = true, VisibleRows = 6 });
         var handle = (UiChecklistHandle)list;
         Surface(Children(panel));
         var row = (UiHandle)handle.SlotAt(1);
         Assert.Contains(UiNav.Stops(row), t => t.Part == UiChecklistLayout.CellView);
         Assert.True(UiNav.FocusOn(row, UiChecklistLayout.CellView));
-        Assert.Equal(3, handle.Fillers);
-        Assert.All(Enumerable.Range(3, 3), i => Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(i))));
-        // Down from the last entry passes over the fillers.
-        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(2), ""));
+        list.SetGroupCollapsed("A", true);
+        Surface(Children(panel));
+        Assert.Equal(1, handle.Fillers);
+        Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(5)));
+        // Down from the last entry passes over the filler.
+        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(4), ""));
         UiNav.Execute(NavCommand.Down);
-        Assert.DoesNotContain(UiNav.Focus.Handle, Enumerable.Range(3, 3).Select(i => (UiHandle)handle.SlotAt(i)));
+        Assert.NotSame(handle.SlotAt(5), UiNav.Focus.Handle);
     }
 
     [Fact]

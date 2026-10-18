@@ -1030,6 +1030,77 @@ public sealed class UiChecklistTests : IDisposable
     }
 
     [Fact]
+    public void A_short_or_empty_list_stays_short_and_still_keeps_its_height_on_a_filter()
+    {
+        // 3 entries, no sections: 3 lines in 12 rows. The body is 3 rows, not 12.
+        var entries = new List<UiChecklistEntry>
+        {
+            E("c1", "Wooden chest", "", "chests", 12), E("c2", "Iron chest", "", "chests", 40), E("s1", "Smithy", "", "stations", 18),
+        };
+        var o = Options();
+        o.VisibleRows = 12;
+        var (list, handle, _) = NewList(entries, o);
+        Assert.Equal(3, list.Describe()["fullLines"]);
+        Assert.Equal(3, list.Describe()["bodyRows"]);
+        Assert.Equal(0, handle.Fillers);
+        Assert.False(Row("cl:row3").Visible);
+        list.Filter = "stations";
+        Assert.Equal(3, list.Describe()["bodyRows"]);
+        Assert.Equal(2, handle.Fillers);
+        list.Query = "nothing matches";
+        Assert.Equal(3, list.Describe()["bodyRows"]);
+        list.Query = "";
+        list.Filter = "";
+
+        // A refresh with more entries grows the body to them (up to its rows); none leaves it empty.
+        list.SetEntries(Many(5));
+        Assert.Equal(7, list.Describe()["bodyRows"]); // 5 entries and 2 headings
+        list.SetEntries(Array.Empty<UiChecklistEntry>());
+        Assert.Equal(0, list.Describe()["bodyRows"]);
+        Assert.Equal(0, handle.Fillers);
+    }
+
+    [Fact]
+    public void The_chips_of_a_short_list_come_out_of_its_height_not_its_unused_rows()
+    {
+        var o = Options();
+        o.VisibleRows = 12;
+        var (list, _, _) = NewList(Many(8), o); // 8 entries and 2 headings: 10 lines in 12 rows
+        int chips = _runtime.Rows.Count(r => r.Text.StartsWith("cl:filters", StringComparison.Ordinal));
+        Assert.Equal(10, list.Describe()["bodyRows"]);
+        list.FilterOpen = true;
+        Assert.Equal(10, (int)list.Describe()["bodyRows"]! + (int)list.Describe()["chipRows"]!);
+        list.FilterOpen = false;
+        Assert.Equal(12, list.VisibleRows);
+        Assert.Equal(10, list.Describe()["bodyRows"]);
+        Assert.True(chips >= 1);
+    }
+
+    [Fact]
+    public void A_new_fill_count_while_the_chips_are_open_is_what_closing_them_restores()
+    {
+        var o = Options();
+        o.FillHeight = true;
+        var (list, handle, _) = NewList(Many(60), o);
+        int chips = _runtime.Rows.Count(r => r.Text.StartsWith("cl:filters", StringComparison.Ordinal));
+        Assert.True(handle.ApplyFill(20));
+        list.FilterOpen = true;
+        Assert.Equal(20 - chips, list.VisibleRows);
+        Assert.Equal(20, handle.ClosedSlots);
+        // The window got shorter meanwhile (a resized screen): the fill answer, read with the chips shown, is 10.
+        Assert.True(handle.ApplyFill(10));
+        Assert.Equal(10, list.VisibleRows);
+        Assert.Equal(10 + chips, handle.ClosedSlots);
+        list.FilterOpen = false;
+        Assert.Equal(10 + chips, list.VisibleRows); // not the stale 20
+        // And taller again while open.
+        list.FilterOpen = true;
+        Assert.True(handle.ApplyFill(25));
+        list.FilterOpen = false;
+        Assert.Equal(25 + chips, list.VisibleRows);
+    }
+
+    [Fact]
     public void The_icon_preview_rows_fit_every_checked_width_and_the_header_lines_up()
     {
         var columns = new UiChecklistModel(Options()).Columns;
