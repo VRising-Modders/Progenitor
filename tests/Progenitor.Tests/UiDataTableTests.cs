@@ -1639,7 +1639,24 @@ internal sealed class TableRuntimeFake : CellRowTests.PlainRuntime, IWidgetRunti
         return row;
     }
 
-    public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null) => Tooltip = (title, body);
+    public void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null)
+    {
+        Tooltip = (title, body);
+        TooltipBelow = false;
+        TooltipMuted = false;
+    }
+
+    /// <summary>The shown box was asked to stay off its anchor's sides, and to draw its body muted.</summary>
+    public bool TooltipBelow, TooltipMuted;
+
+    public void ShowTooltipStyled(ScreenRect anchor, string title, string body, Func<bool>? stillShown, bool below, bool muted)
+    {
+        ShowTooltip(anchor, title, body, stillShown);
+        TooltipBelow = below;
+        TooltipMuted = muted;
+    }
+
+    public string TooltipSide => Tooltip == null ? "" : TooltipBelow ? "below" : "right";
 
     public void HideTooltip() => Tooltip = null;
 

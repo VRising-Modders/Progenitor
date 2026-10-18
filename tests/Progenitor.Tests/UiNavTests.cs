@@ -366,9 +366,19 @@ public sealed class UiNavTests : IDisposable
         Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(0), cell));
         UiNav.Execute(NavCommand.Submit);
         Assert.Equal(new[] { "a=blocked" }, asked);
-        // While it waits the cell is no stop (its button is hidden), and a filler never was one.
-        Assert.DoesNotContain(UiNav.Stops((UiHandle)handle.SlotAt(0)), t => t.Part == cell);
-        Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(2)));
+        // While it waits the focus stays on the cell (still a stop), and a second press asks nothing.
+        UiNav.Tick(default, 1.0);
+        Assert.Same(handle.SlotAt(0), UiNav.Focus.Handle);
+        Assert.Equal(cell, UiNav.Focus.Part);
+        UiNav.Execute(NavCommand.Submit);
+        Assert.Single(asked);
+        // The answer: the focus is still there, and the next press asks for the next option.
+        table.PendingEdits[0].Resolve();
+        UiNav.Tick(default, 2.0);
+        Assert.Equal(cell, UiNav.Focus.Part);
+        UiNav.Execute(NavCommand.Submit);
+        Assert.Equal(new[] { "a=blocked", "a=allowed" }, asked);
+        Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(2))); // a filler never was one
     }
 
     [Fact]

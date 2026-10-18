@@ -96,7 +96,8 @@ public sealed class UiTableChoice
 /// One small icon button on a data table row (<see cref="UiTableRow.Actions"/>), drawn in the table's
 /// <see cref="UiTableColumnKind.Actions"/> column. A click (or A on a controller) raises
 /// <see cref="IUiDataTable.OnRowAction"/> with the row's id and <see cref="Id"/>; a disabled one is drawn faint and does
-/// nothing. Hovering it shows <see cref="Tooltip"/>.
+/// nothing. Hovering an enabled one shows <see cref="Tooltip"/>; a disabled one shows only its
+/// <see cref="DisabledReason"/>, muted, when one is given.
 /// </summary>
 public sealed class UiRowAction
 {
@@ -116,8 +117,15 @@ public sealed class UiRowAction
     /// <summary>The button's face.</summary>
     public UiRowActionIcon Icon { get; }
 
-    /// <summary>Hover text (<c>Move up</c>); empty for none. Shown for a disabled button too.</summary>
+    /// <summary>Hover text (<c>Move up</c>) of an enabled button; empty for none. A disabled button does not show it.</summary>
     public string Tooltip { get; set; }
+
+    /// <summary>
+    /// Why a disabled button does nothing (<c>Already the first row.</c>): its hover tooltip, in the muted text color,
+    /// under the button's <see cref="Tooltip"/> as the title when that is set. Empty (the default): a disabled button
+    /// shows no tooltip. Ignored while <see cref="Enabled"/>.
+    /// </summary>
+    public string DisabledReason { get; set; } = "";
 
     /// <summary>False: drawn faint and a click does nothing (the first row's up, the last row's down).</summary>
     public bool Enabled { get; set; }

@@ -215,6 +215,9 @@ internal sealed class GalleryHub : IDisposable
                 .Action("up", UiRowActionIcon.Up, "Move up", enabled: i > 0)
                 .Action("down", UiRowActionIcon.Down, "Move down", enabled: i < _order.Count - 1)
                 .Action("remove", UiRowActionIcon.Remove, "Remove from the list");
+            // A disabled arrow says why in its muted tooltip (no reason: no tooltip at all).
+            row.Actions[1].DisabledReason = "Already the first row.";
+            row.Actions[2].DisabledReason = "Already the last row.";
             row.BuildingPrefab = _prefabByName(b.Prefab);
             rows.Add(row);
         }

@@ -92,7 +92,7 @@ public sealed class UiTableChoiceTests : IDisposable
         Assert.Equal(CellTone.Ok, Cell(row0, Button).Tone);
         Assert.Equal(CellSkin.Choice, Cell(row0, Button).Skin);
         Assert.Equal(("check", MenuPalette.TextColor(CellTone.Ok)), _runtime.MarkOf(row0, Button));
-        Assert.Equal(UiMarkSide.Before, _runtime.SideOf(row0, Button));
+        Assert.Equal(UiMarkSide.Leading, _runtime.SideOf(row0, Button)); // keeps its room; a number's spinner does not
 
         var row1 = Row("t:row1");
         Assert.Equal("Blocked", Cell(row1, Button).Text);
@@ -118,14 +118,17 @@ public sealed class UiTableChoiceTests : IDisposable
         Assert.False(edit.Clear);
         Assert.Equal(UiTableEditState.Pending, edit.State);
 
-        // The pending look: the asked-for words in the pending tone after the spinner, no click target.
+        // The pending look: the asked-for words in the pending tone after the spinner, on the button (it stays a
+        // navigation stop), and a press does nothing until the answer.
         var row0 = Row("t:row0");
-        Assert.False(Cell(row0, Button).Visible);
-        Assert.True(Cell(row0, View).Visible);
-        Assert.Equal("Blocked", Cell(row0, View).Text);
-        Assert.Equal(CellTone.Pending, Cell(row0, View).Tone);
-        Assert.StartsWith("spinner:", handle.CellMarkAt(0, View));
-        Assert.Equal("", handle.CellMarkAt(0, Button));
+        Assert.True(Cell(row0, Button).Visible);
+        Assert.False(Cell(row0, View).Visible);
+        Assert.Equal("Blocked", Cell(row0, Button).Text);
+        Assert.Equal(CellTone.Pending, Cell(row0, Button).Tone);
+        Assert.StartsWith("spinner:", handle.CellMarkAt(0, Button));
+        Assert.Contains(UiNav.Stops((UiHandle)handle.SlotAt(0)), t => t.Part == Button);
+        Click(row0, Button);
+        Assert.Single(edits);
         Assert.Contains("1 waiting", table.StatusText);
         Assert.Null(table.Edit("a", Rule, "")); // a second ask while it waits is refused
         Assert.Equal("Waiting for the server to answer the last change.", table.StatusReason);
@@ -136,8 +139,7 @@ public sealed class UiTableChoiceTests : IDisposable
         Assert.True(Cell(row0, Button).Visible);
         Assert.Equal("Blocked", Cell(row0, Button).Text);
         Assert.Equal(CellTone.Orange, Cell(row0, Button).Tone);
-        Assert.Equal("block", handle.CellMarkAt(0, Button));
-        Assert.Equal("", handle.CellMarkAt(0, View)); // the spinner went with the answer
+        Assert.Equal("block", handle.CellMarkAt(0, Button)); // the spinner went with the answer
         Assert.Empty(table.PendingEdits);
     }
 
@@ -237,14 +239,15 @@ public sealed class UiTableChoiceTests : IDisposable
         // Slot 0 now draws r12, which does not wait: the button is back, in r12's words.
         Assert.True(Cell(Row("t:row0"), Button).Visible);
         Assert.Equal("Allowed", Cell(Row("t:row0"), Button).Text);
-        Assert.Equal("", handle.CellMarkAt(0, View));
+        Assert.Equal(CellTone.Ok, Cell(Row("t:row0"), Button).Tone);
+        Assert.Equal("check", handle.CellMarkAt(0, Button));
         Click(Row("t:row0"), Button);
         Click(Row("t:row1"), Button); // r13
         Assert.Equal(new[] { "r00=blocked", "r12=blocked", "r13=allowed" }, asked);
         table.TopIndex = 0;
-        Assert.Equal("Blocked", Cell(Row("t:row0"), View).Text); // r00 still waits when it comes back
-        Assert.Equal(CellTone.Pending, Cell(Row("t:row0"), View).Tone);
-        Assert.StartsWith("spinner:", handle.CellMarkAt(0, View));
+        Assert.Equal("Blocked", Cell(Row("t:row0"), Button).Text); // r00 still waits when it comes back
+        Assert.Equal(CellTone.Pending, Cell(Row("t:row0"), Button).Tone);
+        Assert.StartsWith("spinner:", handle.CellMarkAt(0, Button));
     }
 
     [Fact]
@@ -255,7 +258,7 @@ public sealed class UiTableChoiceTests : IDisposable
         table.OnEdit(e => edit = e);
         Click(Row("t:row2"), Button);
         table.SetRows(Three());
-        Assert.Equal(CellTone.Pending, Cell(Row("t:row2"), View).Tone);
+        Assert.Equal(CellTone.Pending, Cell(Row("t:row2"), Button).Tone);
         edit!.Resolve();
         Assert.Equal("blocked", table.Rows[2][Rule]!.Choice);
         Assert.Equal("Blocked", Cell(Row("t:row2"), Button).Text);
@@ -369,7 +372,7 @@ public sealed class UiTableChoiceTests : IDisposable
         var s0 = (Dictionary<string, object?>)((Dictionary<string, object?>)slots[0]["choices"]!)[Rule]!;
         Assert.Equal("allowed", s0["choice"]);
         Assert.Equal(true, s0["pending"]);
-        Assert.Equal(View, s0["cell"]);
+        Assert.Equal(Button, s0["cell"]); // a waiting cell is still the button (an inert stop)
         var s1 = (Dictionary<string, object?>)((Dictionary<string, object?>)slots[1]["choices"]!)[Rule]!;
         Assert.Equal(Button, s1["cell"]);
         var pending = Assert.Single((List<Dictionary<string, object?>>)d["pending"]!);

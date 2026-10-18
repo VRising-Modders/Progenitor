@@ -66,6 +66,12 @@ internal enum UiMarkSide
 
     /// <summary>Centered in the cell (an icon button whose text is empty: the mark is the button's face).</summary>
     Center = 2,
+
+    /// <summary>
+    /// Before the text, which keeps the mark's room in its margin so the words move over rather than under it (a data
+    /// table choice cell's icon or spinner, left-justified). <see cref="Before"/> takes no room of its own.
+    /// </summary>
+    Leading = 3,
 }
 
 /// <summary>
@@ -291,7 +297,7 @@ internal static class UiDrawnMarkArt
         float half = width / 2f;
         float x;
         if (side == UiMarkSide.Center) return (rectMinX + rectMaxX) / 2f;
-        if (side == UiMarkSide.Before)
+        if (side == UiMarkSide.Before || side == UiMarkSide.Leading)
         {
             if (float.IsNaN(textMinX) || float.IsInfinity(textMinX)) textMinX = rectMaxX;
             x = textMinX - Gap - half;

@@ -16,8 +16,8 @@ namespace Progenitor.Ui;
 /// slot is an <c>Image</c> child of the cell's text, tinted, never a raycast target, so it is clipped, scaled, hidden and
 /// destroyed with the text. One shared frame tick re-places every shown slot from the text's bounds (cached objects
 /// only, no scene search) and stops when no slot is left. A mark after right-justified text widens the text's right
-/// margin by its own width, so the caption moves left rather than under the mark; a mark before left-justified text widens
-/// its left margin the same way. The <c>drawn-marks</c> teardown
+/// margin by its own width, so the caption moves left rather than under the mark; a leading mark (a choice cell's) before
+/// left-justified text widens its left margin the same way. The <c>drawn-marks</c> teardown
 /// destroys every slot and frees the textures at the Core unload.</para>
 /// </summary>
 internal sealed partial class UnityUiRuntime : IWidgetMarks
@@ -211,9 +211,10 @@ internal sealed partial class UnityUiRuntime : IWidgetMarks
             float height = UiDrawnMarkArt.Height(view.Mark, tmp.fontSize);
             float width = UiDrawnMarkArt.Width(view.Mark, tmp.fontSize);
             if (view.Side == UiMarkSide.After && rightJustified) margin.z += term + width + UiDrawnMarkArt.Gap;
-            // A mark before left-justified text (a data table choice's icon) keeps its room at the text's left, so the
-            // words move right rather than under the mark.
-            if (view.Side == UiMarkSide.Before && !rightJustified) margin.x += width + UiDrawnMarkArt.Gap;
+            // A leading mark before left-justified text (a data table choice's icon or spinner) keeps its room at the
+            // text's left, so the words move right rather than under the mark. A plain Before mark (a number's spinner)
+            // keeps its earlier layout.
+            if (view.Side == UiMarkSide.Leading && !rightJustified) margin.x += width + UiDrawnMarkArt.Gap;
             if (tmp.margin != margin) tmp.margin = margin;
 
             Rect rect = tmp.rectTransform.rect;

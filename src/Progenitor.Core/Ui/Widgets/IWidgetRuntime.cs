@@ -21,6 +21,20 @@ internal interface IWidgetRuntime
     /// </summary>
     void ShowTooltip(ScreenRect anchor, string title, string body, Func<bool>? stillShown = null);
 
+    /// <summary>
+    /// <see cref="ShowTooltip"/> in the same box, kept off the anchor's sides when <paramref name="below"/> (under it,
+    /// else over it: a small button in a row, so the box never covers the next cell), and with the body in the muted
+    /// text color when <paramref name="muted"/> (why a disabled control does nothing).
+    /// </summary>
+    void ShowTooltipStyled(ScreenRect anchor, string title, string body, Func<bool>? stillShown, bool below, bool muted) =>
+        ShowTooltip(anchor, title, body, stillShown);
+
+    /// <summary>
+    /// The side the box up now was placed on (<c>right</c>, <c>left</c>, <c>below</c>, <c>above</c>, <c>clamped</c>), as
+    /// <see cref="UiTooltipLayout.PlaceIn"/> returned it; empty when no box is up or the runtime cannot say.
+    /// </summary>
+    string TooltipSide => "";
+
     /// <summary>Hide the tooltip. No-op when none is shown.</summary>
     void HideTooltip();
 

@@ -195,6 +195,25 @@ internal abstract class UiComposedHandle : IUiHandle
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget '" + Key + "' tooltip threw: " + e.Message); }
     }
 
+    /// <summary>
+    /// As <see cref="ShowTooltip(ScreenRect, string, string, Func{bool})"/>, under or over the anchor (never beside it)
+    /// when <paramref name="below"/>, the body muted when <paramref name="muted"/>.
+    /// </summary>
+    protected void ShowTooltipStyled(ScreenRect anchor, string title, string body, Func<bool> anchorAlive, bool below, bool muted)
+    {
+        if (_disposed || (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(body)) || !anchor.IsKnown) return;
+        anchorAlive ??= () => true;
+        var runtime = WidgetRuntime.Current;
+        if (runtime == null) return;
+        try
+        {
+            runtime.ShowTooltipStyled(anchor, title ?? "", body ?? "", () => !_disposed && _visible && Panel.State == UiHandleState.Shown && anchorAlive(),
+                below, muted);
+            _tooltipShown = true;
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: widget '" + Key + "' tooltip threw: " + e.Message); }
+    }
+
     protected void HideTooltip()
     {
         if (!_tooltipShown) return;

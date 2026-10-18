@@ -71,6 +71,29 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
         if (TooltipShown) _tipNeedsPanel = false;
     }
 
+    public void ShowTooltipStyled(ScreenRect anchor, string title, string body, Func<bool>? stillShown, bool below, bool muted)
+    {
+        _tipBelow = below;
+        _tipMuted = muted;
+        try { ShowTooltip(anchor, title, body, stillShown); }
+        finally
+        {
+            _tipBelow = false;
+            _tipMuted = false;
+        }
+    }
+
+    /// <summary>The box being shown draws its body in the muted text color (a disabled control's reason).</summary>
+    private static bool _tipMuted;
+
+    /// <summary>The side the shown box was placed on, as <see cref="UiTooltipLayout.PlaceIn"/> returned it.</summary>
+    private static string _tipSide = "";
+
+    /// <summary>The side the box up now was placed on (<c>right</c>, <c>left</c>, <c>below</c>, <c>above</c>, <c>clamped</c>); empty when none is up.</summary>
+    internal static string TooltipPlacedSide => TooltipShown ? _tipSide : "";
+
+    string IWidgetRuntime.TooltipSide => TooltipPlacedSide;
+
     /// <summary>The box being shown goes under (or over) its anchor, never beside it (<see cref="UiTooltipLayout.PlaceIn"/>).</summary>
     private static bool _tipBelow;
 
@@ -97,6 +120,7 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             float inner = UiTooltipLayout.MaxWidth - 2f * UiTooltipLayout.Pad;
             titleTmp.text = UiRichText.Literal(title ?? "");
             bodyTmp.text = UiRichText.Literal(body ?? "");
+            try { bodyTmp.color = ToColor(_tipMuted ? MenuPalette.Muted : MenuPalette.Text); } catch { /* */ }
             titleTmp.gameObject.SetActive(!string.IsNullOrWhiteSpace(title));
             bodyTmp.gameObject.SetActive(!string.IsNullOrWhiteSpace(body));
 
@@ -126,6 +150,7 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
             var box = _tipBox!;
             box.sizeDelta = new Vector2(size.Width, size.Height);
             box.anchoredPosition = new Vector2(place.X, place.Y);
+            _tipSide = place.Side.ToString().ToLowerInvariant();
             if (!_tipRoot!.activeSelf) _tipRoot.SetActive(true);
             _tipStillShown = stillShown;
             _tipNeedsPanel = true;

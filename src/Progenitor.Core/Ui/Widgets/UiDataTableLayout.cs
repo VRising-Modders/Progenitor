@@ -77,6 +77,19 @@ internal static class UiDataTableLayout
         _ => UiDrawnMark.LocateMark,
     };
 
+    /// <summary>
+    /// What a row action's hover shows: an enabled one its <see cref="UiRowAction.Tooltip"/> as the title; a disabled
+    /// one only its <see cref="UiRowAction.DisabledReason"/>, muted, under the tooltip as its title when that is set, and
+    /// nothing at all without a reason.
+    /// </summary>
+    internal static (bool Shown, string Title, string Body, bool Muted) ActionTooltip(UiRowAction action)
+    {
+        string tip = (action.Tooltip ?? "").Trim();
+        if (action.Enabled) return (tip.Length > 0, tip, "", false);
+        string why = (action.DisabledReason ?? "").Trim();
+        return why.Length == 0 ? (false, "", "", false) : (true, tip, why, true);
+    }
+
     /// <summary>The drawn mark before a choice's words, or none.</summary>
     internal static UiDrawnMark MarkOf(UiTableChoice? choice) => choice?.Icon is { } icon ? MarkOf(icon) : UiDrawnMark.None;
 

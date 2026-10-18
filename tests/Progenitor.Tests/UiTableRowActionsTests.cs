@@ -227,16 +227,47 @@ public sealed class UiTableRowActionsTests : IDisposable
         var (_, handle) = NewTable();
         handle.HoverAction(0, 0, true);
         Assert.Equal("Find in the world", _runtime.Tooltip?.Title);
+        Assert.True(_runtime.TooltipBelow); // the game-styled box under the button, never beside it over the next cell
+        Assert.False(_runtime.TooltipMuted);
         handle.HoverAction(0, 0, false);
         Assert.Null(_runtime.Tooltip);
-        handle.HoverAction(0, 1, true); // a disabled button still says what it is
-        Assert.Equal("Move up", _runtime.Tooltip?.Title);
+        handle.HoverAction(0, 1, true); // a disabled button with no reason shows nothing
+        Assert.Null(_runtime.Tooltip);
         handle.HoverAction(0, 1, false);
         // Through the button cell's own pointer slot, as the runtime's trigger delivers it.
         UiSlotTable.BootstrapDispatch(Row("t:row2").WiredIdOf(A(3)), (byte)UiSlotKind.PointerEnter, 0f, false, null);
         Assert.Equal("Remove", _runtime.Tooltip?.Title);
         UiSlotTable.BootstrapDispatch(Row("t:row2").WiredIdOf(A(3)), (byte)UiSlotKind.PointerExit, 0f, false, null);
         Assert.Null(_runtime.Tooltip);
+    }
+
+    [Fact]
+    public void A_disabled_action_shows_only_its_reason_muted_and_the_readback_says_so()
+    {
+        var rows = Three();
+        rows[0].Actions[1].DisabledReason = "Already the first row.";
+        var (table, handle) = NewTable(rows);
+        handle.HoverAction(0, 1, true);
+        Assert.Equal(("Move up", "Already the first row."), _runtime.Tooltip);
+        Assert.True(_runtime.TooltipMuted);
+        Assert.True(_runtime.TooltipBelow);
+        var tip = (Dictionary<string, object?>)table.Describe()["actionTooltip"]!;
+        Assert.Equal(0, tip["slot"]);
+        Assert.Equal(1, tip["place"]);
+        Assert.Equal("Move up", tip["title"]);
+        Assert.Equal("Already the first row.", tip["body"]);
+        Assert.Equal("muted", tip["style"]);
+        Assert.Equal("below", tip["placement"]);
+        Assert.Equal("below", tip["side"]); // the side the runtime reports it placed the box on
+        var actions = (List<Dictionary<string, object?>>)((List<Dictionary<string, object?>>)table.Describe()["slots"]!)[0]["actions"]!;
+        Assert.Equal("Already the first row.", actions[1]["disabledReason"]);
+        handle.HoverAction(0, 1, false);
+        Assert.Null(table.Describe()["actionTooltip"]);
+
+        // An enabled action ignores its reason; a reason without a tooltip is the body alone.
+        Assert.Equal((true, "Move up", "", false), UiDataTableLayout.ActionTooltip(new UiRowAction("up", UiRowActionIcon.Up, "Move up") { DisabledReason = "x" }));
+        Assert.Equal((true, "", "Nothing to find.", true), UiDataTableLayout.ActionTooltip(new UiRowAction("l", UiRowActionIcon.Locate, "", enabled: false) { DisabledReason = "Nothing to find." }));
+        Assert.False(UiDataTableLayout.ActionTooltip(new UiRowAction("r", UiRowActionIcon.Remove, "Remove", enabled: false)).Shown);
     }
 
     [Fact]

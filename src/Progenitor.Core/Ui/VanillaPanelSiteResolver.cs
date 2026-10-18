@@ -2775,6 +2775,7 @@ internal sealed partial class UnityUiRuntime
                             ["title"] = tipTitle,
                             ["body"] = tipBody,
                             ["placement"] = "below",
+                            ["side"] = tipped.TooltipUp ? UnityUiRuntime.TooltipPlacedSide : "",
                             ["boxBody"] = UnityUiRuntime.TooltipBody,
                             ["watch"] = tipped.TooltipWatch,
                             ["hovered"] = tipped.Hovered,
