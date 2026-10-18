@@ -59,7 +59,8 @@ internal static class KeybindRemapGuard
         if (ReservedChords.Find(chord, out var hit))
             return new RemapRefusal(reset ? ReservedChords.ResetReason(chord)! : ReservedChords.Reason(chord)!, null, hit.By);
         // KEYS8: a bare left or right click, or a click in a scope where it presses something of the game's or ours.
-        if (MouseChords.Refusal(chord, scope) is { } click) return new RemapRefusal(click, null, ReservedBy.None);
+        if (MouseChords.Refusal(chord, scope, source == KeybindSource.Progenitor ? ownerId : null, actionId) is { } click)
+            return new RemapRefusal(click, null, ReservedBy.None);
 
         // Fail closed (KEYS2 review): a check that cannot run refuses the key; it never allows a possible clash.
         KeybindClaim? holder;
@@ -93,7 +94,8 @@ internal static class KeybindRemapGuard
         if (moving == null || !chord.IsBound) return null;
         if (moving.Comparable && moving.Chord == chord) return null;
         if (ReservedChords.Find(chord, out var hit)) return new RemapRefusal(ReservedChords.Reason(chord)!, null, hit.By);
-        if (MouseChords.Refusal(chord, moving.Scope) is { } click) return new RemapRefusal(click, null, ReservedBy.None);
+        if (MouseChords.Refusal(chord, moving.Scope, moving.Source == KeybindSource.Progenitor ? moving.OwnerId : null, moving.ActionId) is { } click)
+            return new RemapRefusal(click, null, ReservedBy.None);
         bool game = moving.Source == KeybindSource.Game;
         try
         {

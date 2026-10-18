@@ -589,7 +589,8 @@ window.HELP = {
 <tr><td>Navigate back / forward</td><td>Mouse Back / Forward</td><td>Back and forward in menus and window tabs.</td></tr>
 <tr><td>Navigate back / forward keys</td><td><span class="kbd">Alt+Left</span> / <span class="kbd">Alt+Right</span></td><td>The same, on the keyboard.</td></tr>
 <tr><td>Photo mode</td><td><span class="kbd">Ctrl+Shift+F9</span></td><td>Enters or leaves [[photo-mode|photo mode]].</td></tr>
-<tr><td>Chat keys</td><td><span class="kbd">Tab</span>, <span class="kbd">Up</span>, <span class="kbd">Down</span>, <span class="kbd">Enter</span></td><td>Complete, recall, send long lines (chat only).</td></tr></tbody></table>
+<tr><td>Chat keys</td><td><span class="kbd">Tab</span>, <span class="kbd">Up</span>, <span class="kbd">Down</span>, <span class="kbd">Enter</span></td><td>Complete, recall, send long lines (chat only).</td></tr>
+<tr><td>Teleport to map point</td><td><span class="kbd">Ctrl+Shift+Left click</span></td><td>[[admin|Admins]] with the debug buff: hold it over the open map for a second to go there (map only).</td></tr></tbody></table>
 <p>Also on <strong>Mods &rsaquo; Progenitor &rsaquo; Keys</strong>.</p>` }
       ]
     },
@@ -842,7 +843,8 @@ LockedInGame = server-rules, updates` } }
 <tr><td><code>.help</code></td><td>Everyone</td><td>The commands you can use.</td></tr>
 <tr><td><code>.progenitor</code></td><td>Everyone</td><td>Version and loaded mods.</td></tr>
 <tr><td><code>.progenitor logs</code></td><td>Admins</td><td>Saves the server's log zip in <code>BepInEx/progenitor-support</code>.</td></tr>
-<tr><td><code>.stop-server</code></td><td>Admins</td><td>Saves the world and stops the server.</td></tr></tbody></table>` },
+<tr><td><code>.stop-server</code></td><td>Admins</td><td>Saves the world and stops the server.</td></tr>
+<tr><td><code>.debug on</code> / <code>.debug off</code></td><td>Admins</td><td>The debug buff: no blood drain, no damage, the whole map shown. With it on, hold <span class="kbd">Ctrl+Shift+Left click</span> over the open map for a second to teleport there.</td></tr></tbody></table>` },
         { id: "save-safety", title: "Removing a content mod",
           html: `<p>A world saved with a content mod still loads after you remove the mod: Progenitor drops what the mod added and logs a warning. If that is more than the limits below, the world fails to load, as it would without Progenitor.</p>
 <p>Settings: <code>[SaveSafety]</code> in <code>progenitor.cfg</code> (<code>DropUnknownPrefabs</code> on, <code>MaxDropPercent</code> 0.5, <code>MaxDropEntities</code> 5000). Applies after a restart.</p>` }

@@ -28,17 +28,20 @@ namespace Progenitor.Debugging;
 /// what the map draws, never the exploration the server stores, so taking the buff off (or dying with it
 /// removed, a Core swap, a disconnect) restores the player's own exploration by construction:
 /// nothing was written. There is therefore no snapshot to persist.</item>
-/// <item><b>Teleporting on the map.</b> An authenticated game admin uses the game's own admin map
-/// teleport, Ctrl+Shift+left click on the map (<c>MapMenuMapper.OnMapClicked</c> sends
-/// <c>PlayerTeleportDebugEvent</c>, which the server accepts only from an <c>AdminUser</c> with
-/// <c>Level</c> Admin and <c>AuthMethod</c> Authenticated, or with <c>EveryoneIsAdmin</c>). That
-/// gesture is not routed through Progenitor. For a wearer the game does not treat as an
-/// authenticated admin, Progenitor's own hold stays available but <b>unbound by default</b>
-/// (decided 2026-10-06): bind <c>TeleportToMapPoint</c> in the Keybinds tab (a Core map-scope
-/// keybind, so it never touches gameplay). Holding it over the open map fills a ring around the cursor
+/// <item><b>Teleporting on the map.</b> Progenitor's map-scope hold <c>TeleportToMapPoint</c> defaults to
+/// Ctrl+Shift+left click (decided 2026-10-18; it was unbound from 2026-10-06), the same chord as the game's own
+/// admin map teleport (<c>MapMenuMapper.OnMapClicked</c> sends <c>PlayerTeleportDebugEvent</c>, which the server
+/// accepts only from an <c>AdminUser</c> with <c>Level</c> Admin and <c>AuthMethod</c> Authenticated, or with
+/// <c>EveryoneIsAdmin</c>). The keybind rules exempt this one bind from the map's Ctrl+Shift+left click refusal
+/// (<see cref="MouseChords.IsGameTeleportTwin"/>). Holding it over the open map fills a ring around the cursor
 /// over <c>[DebugMap] HoldSeconds</c> (1 s). When it completes, the point under the cursor <b>at that
 /// moment</b> goes to the server. Releasing early, moving off the map or closing the map cancels and sends
-/// nothing. The map stays open afterwards, as the game's own admin map teleport leaves it.</item>
+/// nothing. The map stays open afterwards, as the game's own admin map teleport leaves it.
+/// <b>One teleport per gesture:</b> the server's state says whether the wearer is game-authenticated
+/// (<c>User.IsAdmin</c>, set by <c>adminauth</c>); then the game's own handler teleports on the click, and the client
+/// does not start its hold while the key is the game's chord (<see cref="SkipHold"/>). Under the server's
+/// <c>EveryoneIsAdmin</c> the flag is not set, so such a player gets the game's teleport and, a second later,
+/// Progenitor's to the same spot.</item>
 /// <item><b>The server</b> re-checks admin (the admin list, <c>adminauth</c> or the private-game host), character and buff, finds the nearest valid spot within
 /// <c>[DebugMap] SearchRadius</c> (100 m) — ground under the point, on the world grid, and with
 /// <c>[DebugMap] WalkableCheck</c> (default off, not live-verified) a standable pathfinding tile — teleports
@@ -51,15 +54,9 @@ namespace Progenitor.Debugging;
 internal static unsafe class DebugMap
 {
     internal const string Section = "DebugMap";
-    internal const string KeybindId = "TeleportToMapPoint";
+    internal const string KeybindId = TeleportKeybindId;
     private const string KeybindText = "Teleport to map point";
     private const int PushPeriodFrames = 30;
-
-    /// <summary>
-    /// The map teleport's default key: unbound (decided 2026-10-06). Authenticated admins
-    /// use the game's Ctrl+Shift+click instead, and an unbound Core key clashes with nothing.
-    /// </summary>
-    internal static readonly KeyChord DefaultTeleportKey = KeyChord.None;
 
     /// <summary>
     /// An "on" state is sent again this often (frames): a state pushed while the client was still loading
@@ -143,14 +140,16 @@ internal static unsafe class DebugMap
     internal static DebugMapState CurrentState(EntityManager em, Entity userEntity, Entity character)
     {
         bool isAdmin = false;
+        bool gameAuthenticated = false;
         try
         {
             var u = em.GetComponentData<User>(userEntity);
             isAdmin = IsAdmin(u);
+            gameAuthenticated = u.IsAdmin;
         }
         catch { isAdmin = false; }
         bool has = character != Entity.Null && em.Exists(character);
-        return StateFor(has, has && DebugBuff.HoldsBuff(em, character), isAdmin);
+        return StateFor(has, has && DebugBuff.HoldsBuff(em, character), isAdmin, gameAuthenticated);
     }
 
     /// <summary>Whether <paramref name="userEntity"/>'s client was sent <paramref name="state"/> already.</summary>
@@ -225,7 +224,7 @@ internal static unsafe class DebugMap
             Sent[userEntity] = (state, _frame);
             if (repeat) return;
             Log("state user=" + userEntity.Index + ":" + userEntity.Version + " reveal=" + state.Reveal
-                + " teleport=" + state.CanTeleport + " (" + why + ")");
+                + " teleport=" + state.CanTeleport + " gameTeleports=" + state.GameTeleports + " (" + why + ")");
         }
     }
 
@@ -413,6 +412,7 @@ internal static unsafe class DebugMap
         private static int _revealCheck;
         private static ulong _queriedWorld = ulong.MaxValue;
         private static bool _attached;
+        private static IKeybindHandle? _key;
 
         private static double Now => Clock.Elapsed.TotalSeconds;
 
@@ -431,11 +431,12 @@ internal static unsafe class DebugMap
                     "Client: how long to hold the debug-buff map teleport key over the map before it fires. Clamped to "
                     + HoldMachine.MinHoldSeconds.ToString(CultureInfo.InvariantCulture) + ".."
                     + HoldMachine.MaxHoldSeconds.ToString(CultureInfo.InvariantCulture) + " seconds.");
-                registrations.Add(Keybinds.RegisterScoped(DebugTools.Owner, SettingsPanel.PluginId, KeybindId, file,
+                _key = Keybinds.RegisterScoped(DebugTools.Owner, SettingsPanel.PluginId, KeybindId, file,
                     DefaultTeleportKey,
                     KeybindText + " (debug buff): hold over the open map to teleport there.",
                     Press, null, Release,
-                    allowWhileCaptured: false, allowWhenChatUnknown: true, KeybindScope.Map));
+                    allowWhileCaptured: false, allowWhenChatUnknown: true, KeybindScope.Map);
+                registrations.Add(_key);
             }
             else
             {
@@ -445,7 +446,8 @@ internal static unsafe class DebugMap
             Progenitor.Plugin.Frame += OnFrame;
             _attached = true;
             registrations.Add(new Disposer(Detach));
-            Log("client: map teleport key '" + KeybindId + "' registered unbound by default; authenticated admins use the game's Ctrl+Shift+click on the map.");
+            Log("client: map teleport key '" + KeybindId + "' is " + (_key?.Chord.ToString() ?? "not registered")
+                + "; hold it over the map. An admin authenticated with adminauth is teleported by the game's own Ctrl+Shift+left click instead.");
         }
 
         private static void Detach()
@@ -459,6 +461,7 @@ internal static unsafe class DebugMap
             _state = DebugMapState.None;
             _queriedWorld = ulong.MaxValue;
             _holdSeconds = null;
+            _key = null;
             _ring?.Dispose();
             _ring = null;
         }
@@ -469,13 +472,13 @@ internal static unsafe class DebugMap
             {
                 if (eventId != StateEventId) return;
                 if (!CustomEvents.TryRead<StateMsg>(payload, length, out var msg) || msg.Magic != Magic) return;
-                var state = new DebugMapState(msg.Reveal != 0, msg.CanTeleport != 0);
+                var state = msg.State;
                 _stateWorld = WorldSequence();
                 if (state == _state) return;
                 _state = state;
                 if (state.Reveal) _reveal ??= WorldMap.RevealAll(DebugTools.Owner);
                 else DropReveal();
-                Log("state reveal=" + state.Reveal + " teleport=" + state.CanTeleport
+                Log("state reveal=" + state.Reveal + " teleport=" + state.CanTeleport + " gameTeleports=" + state.GameTeleports
                     + " flag=" + (WorldMap.RevealFlag?.ToString() ?? "?"));
             }
             catch (Exception e)
@@ -512,6 +515,9 @@ internal static unsafe class DebugMap
             try
             {
                 if (!_state.CanTeleport) return;
+                // One teleport per gesture: the game's own handler already moves a game-authenticated admin on this click.
+                // (A controller press of the same bind is skipped too; the bind cannot tell which input fired it.)
+                if (_key != null && SkipHold(_state, _key.Chord)) return;
                 bool onMap = WorldMap.TryReadPointer(out var p) && p.OnMap && p.MapRect != null;
                 double hold = HoldMachine.ClampHold(_holdSeconds?.Value ?? HoldMachine.DefaultHoldSeconds);
                 if (!Machine.Press(_state, onMap, hold, Now)) return;

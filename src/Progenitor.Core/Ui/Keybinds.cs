@@ -792,9 +792,9 @@ public static class Keybinds
 
         // KEYS8: a bare left or right click (or a click in a scope where it presses something) never becomes a
         // bind. A cfg value on one falls back to the default; a default on one is registered unbound.
-        if (MouseChords.Refusal(chord, scope) is { } clickRefusal)
+        if (MouseChords.Refusal(chord, scope, plugin, key) is { } clickRefusal)
         {
-            var instead = chord != defaultKey && MouseChords.Allowed(defaultKey, scope) && !ReservedChords.IsReserved(defaultKey)
+            var instead = chord != defaultKey && MouseChords.Allowed(defaultKey, scope, plugin, key) && !ReservedChords.IsReserved(defaultKey)
                 ? defaultKey
                 : KeyChord.None;
             Plugin.Logger?.LogWarning(ClickChordRefusedLog(label, chord, clickRefusal, instead));
@@ -1115,7 +1115,7 @@ public static class Keybinds
         if (!chord.IsBound) return null;
         string? reserved = reset ? ReservedChords.ResetReason(chord) : ReservedChords.Reason(chord);
         if (reserved != null) return reserved;
-        string? click = MouseChords.Refusal(chord, target.Scope);
+        string? click = MouseChords.Refusal(chord, target.Scope, target.PluginId, target.Id);
         if (click != null) return click;
         if (target.AllowWhenChatUnknown && !MayBindWhenChatUnknown(chord))
         {
@@ -2375,7 +2375,7 @@ public static class Keybinds
         if (reserved != null) return reserved;
         // KEYS8: the tab's capture does not know the row's scope yet (its own check does), so only the bare-click
         // rule, which holds in every scope, applies to it here.
-        string? click = MouseChords.Refusal(pressed, rebinding != null ? ScopeOf(rebinding) : KeybindScope.Gameplay);
+        string? click = MouseChords.Refusal(pressed, rebinding != null ? ScopeOf(rebinding) : KeybindScope.Gameplay, rebinding?.PluginId, rebinding?.Id);
         if (click != null) return click;
         if (rebinding == null || pressed == rebinding.Chord) return null;
         // Fail closed: a check that cannot run refuses the key rather than allowing a possible clash.

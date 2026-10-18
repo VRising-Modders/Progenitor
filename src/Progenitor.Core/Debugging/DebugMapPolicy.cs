@@ -32,14 +32,17 @@ internal static class DebugMapPolicy
     /// <summary>First field of every message; a packet without it is not ours.</summary>
     internal const int Magic = 0x4D415054; // 'MAPT'
 
-    /// <summary>The state message. 8 bytes.</summary>
+    /// <summary>
+    /// The state message. 8 bytes. <see cref="GameTeleports"/> was a reserved byte until 2026-10-18, so a server from
+    /// before then sends 0 there (the client then always sends its own request) and an older client ignores it.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct StateMsg
     {
         public int Magic;
         public byte Reveal;
         public byte CanTeleport;
-        public byte Reserved0;
+        public byte GameTeleports;
         public byte Reserved1;
 
         internal static StateMsg For(DebugMapState state) => new()
@@ -47,7 +50,10 @@ internal static class DebugMapPolicy
             Magic = DebugMapPolicy.Magic,
             Reveal = state.Reveal ? (byte)1 : (byte)0,
             CanTeleport = state.CanTeleport ? (byte)1 : (byte)0,
+            GameTeleports = state.GameTeleports ? (byte)1 : (byte)0,
         };
+
+        internal DebugMapState State => new(Reveal != 0, CanTeleport != 0, CanTeleport != 0 && GameTeleports != 0);
     }
 
     /// <summary>The state query. 4 bytes.</summary>
@@ -84,8 +90,11 @@ internal static class DebugMapPolicy
 
     // ---- who may ---------------------------------------------------------------------------------
 
-    /// <summary>What the debug buff currently gives a player.</summary>
-    internal readonly record struct DebugMapState(bool Reveal, bool CanTeleport)
+    /// <summary>
+    /// What the debug buff currently gives a player. <paramref name="GameTeleports"/>: the wearer is an admin the game
+    /// itself authenticated (<c>adminauth</c>), so the game's own Ctrl+Shift+left click on the map already teleports them.
+    /// </summary>
+    internal readonly record struct DebugMapState(bool Reveal, bool CanTeleport, bool GameTeleports = false)
     {
         internal static readonly DebugMapState None = new(false, false);
     }
@@ -93,10 +102,41 @@ internal static class DebugMapPolicy
     /// <summary>
     /// The state for a connected player: the map is revealed for anyone wearing the debug buff (an admin
     /// put it there, through <c>.debug on</c> or the Dev bridge); teleporting additionally needs the
-    /// wearer to be an admin now. No character, no state.
+    /// wearer to be an admin now. No character, no state. <paramref name="gameAuthenticated"/> is the game's own
+    /// admin flag (<c>User.IsAdmin</c>, set by <c>adminauth</c>); it only marks a teleporting wearer.
     /// </summary>
-    internal static DebugMapState StateFor(bool hasCharacter, bool holdsBuff, bool isAdmin) =>
-        hasCharacter && holdsBuff ? new DebugMapState(true, isAdmin) : DebugMapState.None;
+    internal static DebugMapState StateFor(bool hasCharacter, bool holdsBuff, bool isAdmin, bool gameAuthenticated = false) =>
+        hasCharacter && holdsBuff ? new DebugMapState(true, isAdmin, isAdmin && gameAuthenticated) : DebugMapState.None;
+
+    // ---- the key ---------------------------------------------------------------------------------
+
+    /// <summary>The map teleport's keybind id, in Core's <c>[Keybinds]</c> section.</summary>
+    internal const string TeleportKeybindId = "TeleportToMapPoint";
+
+    /// <summary>
+    /// The map teleport's default key (decided 2026-10-18): Ctrl+Shift+left click, the game's own admin map teleport
+    /// gesture, so every admin wearing the debug buff teleports the same way. The keybind rules let this one bind share
+    /// the game's chord (<see cref="Progenitor.Ui.MouseChords.IsGameTeleportTwin"/>).
+    /// </summary>
+    internal static readonly Progenitor.Ui.KeyChord DefaultTeleportKey =
+        new(Progenitor.Ui.UiKey.MouseLeft, Progenitor.Ui.KeyModifiers.Ctrl | Progenitor.Ui.KeyModifiers.Shift);
+
+    /// <summary>
+    /// True when the game's own gesture fires on <paramref name="chord"/>: the left button with Ctrl and Shift held
+    /// (Alt or not; the game checks only Ctrl and Shift).
+    /// </summary>
+    internal static bool IsGameTeleportChord(Progenitor.Ui.KeyChord chord) =>
+        chord.IsBound && chord.Key == Progenitor.Ui.UiKey.MouseLeft
+        && (chord.Modifiers & (Progenitor.Ui.KeyModifiers.Ctrl | Progenitor.Ui.KeyModifiers.Shift))
+            == (Progenitor.Ui.KeyModifiers.Ctrl | Progenitor.Ui.KeyModifiers.Shift);
+
+    /// <summary>
+    /// One teleport per gesture: true when the client's hold must not start because the game teleports this player on
+    /// the same click (a game-authenticated admin whose key is the game's chord). The game's teleport lands on the click
+    /// at once; a second request a second later would only repeat it. Every other admin, and any other key, holds.
+    /// </summary>
+    internal static bool SkipHold(DebugMapState state, Progenitor.Ui.KeyChord chord) =>
+        state.GameTeleports && IsGameTeleportChord(chord);
 
     /// <summary>Teleport outcomes; the numbers are on the wire.</summary>
     internal enum Result
@@ -318,7 +358,7 @@ internal static class DebugMapPolicy
             + " (client-side view of the whole map; your exploration is not changed"
             + (pushed ? ")" : "; not yet sent to your client)"),
         "  map teleport: " + (state.CanTeleport ? "on" : "OFF")
-            + " (authenticated admins: Ctrl+Shift+click the map, the game's own teleport; otherwise hold the Teleport to map point key, unbound by default, or .debug tp <x> <z>; nearest valid spot within "
+            + " (hold the Teleport to map point key, Ctrl+Shift+left click by default, over the map for HoldSeconds, 1 s by default; an admin authenticated with adminauth teleports on the click itself, the game's own teleport; or .debug tp <x> <z>; nearest valid spot within "
             + M(radius) + " m, walkable-tile check " + (walkCheck ? "on" : "off") + ")",
     };
 }
