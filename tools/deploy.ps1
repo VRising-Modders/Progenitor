@@ -540,10 +540,22 @@ function Copy-ProgenitorGuide($t) {
   if (-not (Test-Path -LiteralPath $src)) { return }
   $destDir = Join-Path $t.Core "docs\guide"
   $final = Join-Path $destDir "progenitor-guide.html"
-  if ($plan) { Add-PlanRow $t.Name "guide" $src $final "Progenitor guide"; return }
+  # Its screenshots (the pages' shot fields) ship beside it, as package.ps1 ships them.
+  $imgSrc = Join-Path (Split-Path $src -Parent) "img"
+  $images = @(if (Test-Path -LiteralPath $imgSrc) { Get-ChildItem -LiteralPath $imgSrc -File | Where-Object { $_.Extension -in '.webp', '.png', '.jpg' } })
+  if ($plan) {
+    Add-PlanRow $t.Name "guide" $src $final "Progenitor guide"
+    foreach ($img in $images) { Add-PlanRow $t.Name "guide" $img.FullName (Join-Path $destDir "img\$($img.Name)") "guide screenshot" }
+    return
+  }
   Invoke-DeployNewDir $destDir
   try {
     Copy-Item -LiteralPath $src -Destination $final -Force
+    if ($images.Count -gt 0) {
+      $imgDest = Join-Path $destDir "img"
+      Invoke-DeployNewDir $imgDest
+      foreach ($img in $images) { Copy-Item -LiteralPath $img.FullName -Destination (Join-Path $imgDest $img.Name) -Force }
+    }
     Write-Host "[$($t.Name)] Progenitor guide -> progenitor-core/docs/guide"
   } catch {
     Write-Warning "[$($t.Name)] Progenitor guide not updated: $($_.Exception.Message)"

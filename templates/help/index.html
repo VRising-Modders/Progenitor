@@ -190,6 +190,13 @@ main { padding: 30px 36px 18px; min-width: 0; }
 .callout .label { display: block; margin-bottom: 3px; color: #e07a7f; }
 .callout p { margin: 0; }
 
+/* Screenshot */
+.shot { margin: 6px 0 16px; }
+.shot a { display: block; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; background: #000; }
+.shot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
+
 /* Code */
 .code { position: relative; margin: 2px 0 16px; background: var(--code-bg); border: 1px solid var(--rule-soft); border-radius: 2px; }
 .code .lang { position: absolute; left: 12px; top: 7px; font: 600 11px/1 var(--sans); letter-spacing: 0.12em; text-transform: uppercase; color: #6f6467; }
@@ -296,8 +303,9 @@ a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--r
 /*
   The content of this help page. Edit only this block (see templates/help/README.md).
   Page fields: id, title, lede (optional), html, code (optional {lang, text}), callout (optional
-  {title, text, warn}). In html, [[term-id|words]] links a glossary term. Keep a page to a heading
-  plus about 60 words or 3-5 bullets, one code block and one callout at most.
+  {title, text, warn}), shot (optional screenshot {src, alt, caption}; src relative to this page, for
+  example img/name.webp). In html, [[term-id|words]] links a glossary term. Keep a page to a heading
+  plus about 60 words or 3-5 bullets, one code block, one callout and one screenshot at most.
 */
 window.HELP = {
   id: "example-mod",
@@ -452,6 +460,7 @@ window.HELP = {
           return '<div class="gl-entry" id="term-' + g.id + '" data-id="' + g.id + '"><dt>' + esc(g.term) + "</dt><dd>" + g.def + "</dd></div>";
         }).join("") + "</dl>";
     }
+    if (d.shot) body += '<figure class="shot"><a href="' + esc(d.shot.src) + '" target="_blank" rel="noopener" title="Open full size"><img src="' + esc(d.shot.src) + '" alt="' + esc(d.shot.alt || "") + '" loading="lazy"></a>' + (d.shot.caption ? "<figcaption>" + terms(d.shot.caption) + "</figcaption>" : "") + "</figure>";
     if (d.callout) body += '<div class="callout' + (d.callout.warn ? " warn" : "") + '"><span class="label">' + esc(d.callout.title || "Tip") + "</span><p>" + terms(d.callout.text) + "</p></div>";
     return h + body;
   }
@@ -635,7 +644,7 @@ window.HELP = {
   // ---- Search across every page ----
   var search = $("search"), results = $("results"), active = -1;
   var index = pages.map(function (p) {
-    var d = p.data, text = plain((d.lede || "") + " " + (d.html || "") + " " + (d.callout ? d.callout.title + " " + d.callout.text : "")) + " " + (d.code ? d.code.text : "");
+    var d = p.data, text = plain((d.lede || "") + " " + (d.html || "") + " " + (d.callout ? d.callout.title + " " + d.callout.text : "") + " " + (d.shot && d.shot.caption ? d.shot.caption : "")) + " " + (d.code ? d.code.text : "");
     if (d.glossary) text += " " + (H.glossary || []).map(function (g) { return g.term + " " + plain(g.def); }).join(" ");
     return { page: p, text: text.replace(/\s+/g, " ").trim() };
   });
