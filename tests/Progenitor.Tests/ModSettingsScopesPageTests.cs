@@ -166,7 +166,7 @@ public sealed class ModSettingsScopesPageTests : IDisposable
         Open();
         var rows = PageRows();
 
-        Assert.Equal(new[] { "Your settings", "Server settings" }, ScopeHeadings(rows));
+        Assert.Equal(new[] { "Your preferences", "Server settings" }, ScopeHeadings(rows));
         // "Personal" and "Server" restate the scope headings and draw no subheading; "Demo" does.
         var subheadings = All(rows, ModSettingsView.RowSection).Select(s => s.GetProperty("title").GetString()).ToArray();
         Assert.Equal(new[] { "Demo" }, subheadings);
@@ -175,7 +175,7 @@ public sealed class ModSettingsScopesPageTests : IDisposable
         Assert.Equal("Personal", Setting(rows, HintsId).GetProperty("section").GetString());
         Assert.Equal("server-wide", Setting(rows, LimitId).GetProperty("scopeSection").GetString());
         Assert.Equal("server", Setting(rows, LimitId).GetProperty("owner").GetString());
-        Assert.Equal("", Scope(rows, "Your settings").GetProperty("line").GetString());
+        Assert.Equal(SettingsScopeContext.DevicePersonalLine, Scope(rows, "Your preferences").GetProperty("line").GetString());
         Assert.Equal("Applies to everyone on Progenitor Forms Test", Scope(rows, "Server settings").GetProperty("line").GetString());
         // The line is drawn as its own muted row under the heading, and the scope heading carries the red rule.
         Assert.Equal("Applies to everyone on Progenitor Forms Test",
@@ -188,7 +188,7 @@ public sealed class ModSettingsScopesPageTests : IDisposable
     {
         Register(withServer: false);
         Open();
-        Assert.Equal(new[] { "Your settings" }, ScopeHeadings(PageRows()));
+        Assert.Equal(new[] { "Your preferences" }, ScopeHeadings(PageRows()));
 
         ModsMenu.Close();
         ModSettingsPages.ResetForTests();
@@ -307,7 +307,7 @@ public sealed class ModSettingsScopesPageTests : IDisposable
         Assert.Contains(LimitId, view.HiddenByShowIf);
         var server = All(rows, ModSettingsScopes.RowScopeSection).Where(s => s.GetProperty("heading").GetString() == "Server settings").ToList();
         Assert.True(server.Count == 0 || server[0].GetProperty("shown").GetInt32() == 0);
-        Assert.Contains("Your settings", ScopeHeadings(rows));
+        Assert.Contains("Your preferences", ScopeHeadings(rows));
     }
 
     /// <summary>

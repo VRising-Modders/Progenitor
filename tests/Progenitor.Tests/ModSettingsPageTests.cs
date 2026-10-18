@@ -429,7 +429,7 @@ public sealed class ModSettingsPageTests : IDisposable
         // scope section, so it is not drawn (its rows keep their order and their readback section).
         Assert.Equal(new[] { ModSettingsLayout.GeneralTitle }, sections.ToArray());
         Assert.Equal("Personal", SettingRow(rows, id + "/Personal/ShowHints").GetProperty("section").GetString());
-        Assert.Equal(SettingScopeSections.YourHeading,
+        Assert.Equal("Your preferences",
             Row(rows, ModSettingsScopes.RowScopeSection).GetProperty(ModSettingsScopes.RowScopeSection).GetProperty("heading").GetString());
 
         var search = Row(rows, ModSettingsView.RowSearch).GetProperty(ModSettingsView.RowSearch);

@@ -191,6 +191,7 @@ public sealed class Plugin
         Ai.InertClones.Install();
         Networking.Handshake.Install();
         Networking.ServerSettings.Install();
+        Networking.ScopedSettings.Install();
         // Job SERVERINST4: the graceful Stop server channel (reserved id 'PrsQ'). Server side
         // registers the OnReceiveFromClient handler and the save/quit seams; client side registers
         // the reply handler and the request/poll seams. Context-owned on both sides: Uninstall drops
@@ -385,6 +386,7 @@ public sealed class Plugin
         try { Progenitor.Install.ClientAutoUpdate.Reset(); }
         catch (Exception e) { Logger?.LogWarning($"ClientAutoUpdate.Reset: {e.Message}"); }
         Networking.ServerSettings.Uninstall();
+        Networking.ScopedSettings.Uninstall();
         // DYEALL: before Ui, so its swatch watches, ring and palette line go while Ui is still installed.
         try { Dye.DyeAllFeature.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"DyeAllFeature.Uninstall: {e.Message}"); }

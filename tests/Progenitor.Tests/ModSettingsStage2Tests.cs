@@ -900,7 +900,7 @@ public sealed class ModSettingsStage2Tests : IDisposable
         // its title size, middle-aligned, not muted; the red rule is drawn under it by the runtime.
         var scope = _runtime.CellRow(ModSettingsScopes.ScopeKeyPrefix + "0")!;
         var title = scope.Cells().Single(c => c.Key == ModSettingsView.CellTitle);
-        Assert.Equal(SettingScopeSections.YourHeading, title.Text);
+        Assert.Equal("Your preferences", title.Text);
         Assert.Equal(CellKind.Text, title.Kind);
         Assert.Equal(ModSettingsRowGrid.HeaderFontSize, title.FontSize);
         // Middle-aligned: a bottom-aligned cell is capped at 30 units and cut the title away (live round C).

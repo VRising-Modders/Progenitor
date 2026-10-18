@@ -62,6 +62,8 @@ internal enum ModSettingsItemKind
 /// </summary>
 internal sealed class ModSettingOptions
 {
+    internal ModSettingOptions Copy() => (ModSettingOptions)MemberwiseClone();
+    internal string CompatibilityReason { get; set; } = "";
     internal string? Label { get; set; }
 
     internal string? Help { get; set; }
@@ -277,6 +279,7 @@ internal sealed class ModSettingsSection
 
     /// <summary>Settings scopes: the scope section the view draws this (sub)section under.</summary>
     internal SettingScope Scope { get; set; } = SettingScope.Personal;
+    internal SettingOwner Owner { get; set; } = SettingOwner.Client;
 
     /// <summary>Settings scopes: the author's title before a scope-restating one was dropped (search and readback).</summary>
     internal string SourceTitle { get; set; } = "";

@@ -20,6 +20,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsWire.cs" Link="Linked\ScopedSettingsWire.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsSnapshot.cs" Link="Linked\ScopedSettingsSnapshot.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\PlayerSettingsStore.cs" Link="Linked\PlayerSettingsStore.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\PlayerSettingsStores.cs" Link="Linked\PlayerSettingsStores.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsClient.cs" Link="Linked\ScopedSettingsClient.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ScopedSettingsRows.cs" Link="Linked\ScopedSettingsRows.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.Scoped.cs" Link="Linked\ModSettingsView.Scoped.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ScopedSettings.cs" Link="Linked\ModsMenu.ScopedSettings.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\CharacterStatPresentation.cs" Link="Linked\CharacterStatPresentation.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\CharacterSheetSnapshot.cs" Link="Linked\CharacterSheetSnapshot.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Content\DefinitionPriorityQueue.cs" Link="Linked\DefinitionPriorityQueue.cs" />
@@ -966,6 +974,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsCatalog.cs" Link="Linked\SettingsCatalog.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsCatalog.Bindings.cs" Link="Linked\SettingsCatalog.Bindings.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingsPanel.cs" Link="Linked\SettingsPanel.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.Search.cs" Link="Linked\ModsMenu.Search.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.cs" Link="Linked\ModsMenu.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsLanding.cs" Link="Linked\ModsLanding.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\TitleLogsTile.cs" Link="Linked\TitleLogsTile.cs" />

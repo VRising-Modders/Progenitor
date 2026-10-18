@@ -7,38 +7,20 @@ using ProjectM.Network;
 using Progenitor.Commands;
 using Progenitor.Dev;
 using Progenitor.Ecs;
-using Progenitor.Events;
 using Progenitor.Networking;
 using Progenitor.Plugins;
+using Progenitor.Players;
+using Progenitor.Ui;
 using Progenitor.WorldState;
 using Unity.Entities;
 
 namespace Progenitor.SampleServerLed;
 
 /// <summary>
-/// A mostly-server mod with an optional client part (docs/mod-settings.md, "Counterparts"; the
-/// README beside this file has the join matrix and the acceptance procedure).
-///
-/// <list type="bullet">
-/// <item><b>Server part (the mod).</b> Announces to every connected player every
-/// <c>[Server] AnnounceMinutes</c> minutes, starting with <c>[Server] Greeting</c>. <c>.serverled
-/// status</c> reports what it does for the caller; <c>.serverled announce</c> (admin) announces now.
-/// No unit, item or world state is touched.</item>
-/// <item><b>Client part (optional).</b> Sends this player's preferences (receive or not, chat line or
-/// popup) to the server as a versioned message (<c>ctx.Messages</c>), and shows popup announcements.
-/// Vanilla clients and clients without it join and get chat lines.</item>
-/// </list>
-///
-/// <para><b>Negotiation.</b> The server part offers the feature <c>prefs</c> and the client part
-/// <c>popups</c> (<see cref="ServerLedMessages"/>). The client sends preferences only to a server whose
-/// part offers <c>prefs</c>; the server sends a popup only to a client that offers <c>popups</c>, and a
-/// chat line otherwise.</para>
-///
-/// <para><b>Declaration.</b> <c>[Counterpart(Optional, ClientExtras = …)]</c> lowers the
-/// <c>ServerMustHave</c> row to <c>NoNeedForSync</c> on both sides: the server never refuses a client
-/// without the client part, and the client part is never refused or paused on a server without the
-/// server part. Two sides that both run it work together across every 1.x
-/// (<see cref="ServerLedDeclaration.Peers"/>); a Progenitor older than ranges holds them to major.minor.</para>
+/// Server announcements with persistent personal preferences and an optional popup client.
+/// Receive and Delivery are server-owned PlayerSetting values, keyed by platform account.
+/// Core publishes their controls and handles personal writes; this sample sends only announcements.
+/// The optional counterpart declaration allows players without the popup client to join.
 /// </summary>
 [BepInPlugin(ServerLedDeclaration.Guid, ServerLedDeclaration.Name, ServerLedDeclaration.Version)]
 [BepInDependency("progenitor")]
@@ -52,21 +34,19 @@ public sealed class Plugin : ProgenitorPlugin<ServerLedContext>
     protected override void OnLoad(ServerLedContext ctx)
     {
         var entries = ServerLedEntries.Bind(new ContextBinder(ctx), ctx.IsClient);
+        // Core owns the handles and persistence. No client cfg entries or custom preference packets.
+        PlayerSetting<bool> receive = ctx.Settings.PerPlayer("ForServer", "ReceiveAnnouncements", true,
+            description: "Receive this server's announcements.");
+        PlayerSetting<string> delivery = ctx.Settings.PerPlayer("ForServer", "Delivery", ServerLedPolicy.DeliveryChat,
+            description: "Chat, or Popup when your client has the optional sample installed.",
+            acceptableValues: new AcceptableValueList<string>(ServerLedPolicy.DeliveryChoices));
         Func<string>? serverPart = ctx.IsClient
             ? () => ServerLedPolicy.PresenceText(ctx.Handshake.ServerPart)
             : null;
         ctx.Settings.Page(page => ServerLedSettings.Build(page, entries, serverPart));
 
-        if (ctx.IsServer) new ServerHalf(ctx, entries).Attach();
+        if (ctx.IsServer) new ServerHalf(ctx, entries, receive, delivery).Attach();
         else new ClientHalf(ctx, entries).Attach();
-    }
-
-    /// <inheritdoc />
-    protected override void OnUnload(ServerLedContext ctx, PluginUnloadReason reason)
-    {
-        // While the context can still send: tell the server part this client part is going, so it
-        // falls back to a chat line at once instead of after the stale window.
-        ClientHalf.Active?.SayGoodbye();
     }
 }
 
@@ -81,12 +61,17 @@ internal sealed class ContextBinder : IEntryBinder
     internal ContextBinder(PluginContext ctx) => _ctx = ctx;
 
     public ConfigEntry<int> Int(string section, string key, int value, string description, bool synced, int min, int max) =>
-        _ctx.Bind(section, key, value, description, synced, new AcceptableValueRange<int>(min, max));
+        synced
+            ? _ctx.Bind(section, key, value, scope: SettingScope.ServerWide, description: description,
+                acceptableValues: new AcceptableValueRange<int>(min, max))
+            : _ctx.Bind(section, key, value, description, acceptableValues: new AcceptableValueRange<int>(min, max));
 
     public ConfigEntry<string> Text(string section, string key, string value, string description, bool synced, string[]? choices = null) =>
-        choices == null
-            ? _ctx.Bind(section, key, value, description, synced)
-            : _ctx.Bind(section, key, value, description, synced, new AcceptableValueList<string>(choices));
+        synced
+            ? _ctx.Bind(section, key, value, scope: SettingScope.ServerWide, description: description,
+                acceptableValues: choices == null ? null : new AcceptableValueList<string>(choices))
+            : _ctx.Bind(section, key, value, description,
+                acceptableValues: choices == null ? null : new AcceptableValueList<string>(choices));
 
     public ConfigEntry<bool> Flag(string section, string key, bool value, string description) =>
         _ctx.Bind(section, key, value, description);
@@ -108,7 +93,7 @@ internal sealed class OnDispose : IDisposable
 }
 
 /// <summary>
-/// The server part: the announcement loop, the per-player preference table and the commands. Every
+/// The server part: the announcement loop, persisted per-account preferences and the commands. Every
 /// registration is tracked on the context; the loop stops on unload.
 /// </summary>
 internal sealed class ServerHalf
@@ -117,17 +102,20 @@ internal sealed class ServerHalf
 
     private readonly ServerLedContext _ctx;
     private readonly ServerLedEntries _entries;
-    private readonly ServerLedPolicy.PrefsTable _prefs = new();
+    private readonly PlayerSetting<bool> _receive;
+    private readonly PlayerSetting<string> _delivery;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly DateTime _processStart;
     private double _lastAnnounce;
     private int _sequence;
     private bool _stopped;
 
-    internal ServerHalf(ServerLedContext ctx, ServerLedEntries entries)
+    internal ServerHalf(ServerLedContext ctx, ServerLedEntries entries, PlayerSetting<bool> receive, PlayerSetting<string> delivery)
     {
         _ctx = ctx;
         _entries = entries;
+        _receive = receive;
+        _delivery = delivery;
         try { _processStart = Process.GetCurrentProcess().StartTime; }
         catch { _processStart = DateTime.Now; }
     }
@@ -141,10 +129,6 @@ internal sealed class ServerHalf
     {
         _active = this;
         _ctx.Track(new OnDispose(Stop));
-        // Clients ask for this before they send preferences; unload withdraws it (tracked).
-        _ctx.Features.Offer(ServerLedMessages.FeaturePrefs);
-        _ctx.Messages.On<PrefsMessage>(OnPrefs);
-        _ctx.Events.On<PlayerDisconnected>(OnLeft);
         _ctx.Commands.Register(typeof(ServerLedCommands));
         _lastAnnounce = Now;
         MainThread.PostDelayed(ServerLedPolicy.TickSeconds, Tick, _ctx.Owner);
@@ -155,7 +139,6 @@ internal sealed class ServerHalf
     private void Stop()
     {
         _stopped = true;
-        _prefs.Clear();
         if (ReferenceEquals(_active, this)) _active = null;
     }
 
@@ -196,13 +179,12 @@ internal sealed class ServerHalf
         string text = ServerLedPolicy.AnnouncementText(_entries.Greeting.Value, connected.Count, uptime);
         // The popup carries the chat line's exact text, never a client-side recomposition.
         var message = new AnnounceMessage { Sequence = sequence, Text = text };
-        double now = Now;
 
         int chat = 0, popup = 0, skipped = 0;
         foreach (var (entity, user) in connected)
         {
             bool showsPopups = _ctx.Peers.Of(entity).Has(ServerLedMessages.FeaturePopups);
-            switch (ServerLedPolicy.RouteFor(_prefs.For(user.Index, now), showsPopups))
+            switch (ServerLedPolicy.RouteFor(Preferences(user.PlatformId), showsPopups))
             {
                 case ServerLedPolicy.Route.Popup:
                     // Anything but Sent (the client part just unloaded, the connection is going) falls back to the chat line.
@@ -224,49 +206,13 @@ internal sealed class ServerHalf
     }
 
     /// <summary>The <c>.serverled status</c> lines for the caller.</summary>
-    internal IReadOnlyList<string> Status(int userIndex) =>
-        ServerLedPolicy.StatusLines(_entries.AnnounceMinutes.Value, _entries.Greeting.Value, _prefs.For(userIndex, Now), _prefs.CountAt(Now));
+    internal IReadOnlyList<string> Status(ulong platformId) =>
+        ServerLedPolicy.StatusLines(_entries.AnnounceMinutes.Value, _entries.Greeting.Value, Preferences(platformId));
 
-    private void OnPrefs(Entity userEntity, PrefsMessage message, MessageInfo info)
-    {
-        try
-        {
-            if (_stopped) return;
-            var world = _ctx.World;
-            if (world == null || userEntity == Entity.Null) return;
-            var user = world.EntityManager.GetComponentData<User>(userEntity);
-            double now = Now;
-            string sender = user.CharacterName.ToString();
-            var verdict = ServerLedPolicy.Admit(message, Handshake.UserAnswerStatus(user.Index), _prefs.SecondsSince(user.Index, now));
-            if (verdict != ServerLedPolicy.Verdict.Ok)
-            {
-                // A heartbeat that arrives early is not worth a line; every other refusal is.
-                if (verdict != ServerLedPolicy.Verdict.TooSoon) _ctx.Log.LogInfo(ServerLedPolicy.RefusedLine(sender, verdict));
-                return;
-            }
-
-            if (message.Kind == ServerLedPolicy.KindGone)
-            {
-                if (_prefs.Forget(user.Index))
-                    _ctx.Log.LogInfo("Server-led sample: " + sender + "'s client part unloaded; using the server defaults.");
-                return;
-            }
-
-            var prefs = ServerLedPolicy.FromMessage(message);
-            bool changed = _prefs.Set(user.Index, prefs, now);
-            if (changed) _ctx.Log.LogInfo(ServerLedPolicy.AcceptedLine(sender, prefs, changed));
-        }
-        catch (Exception e)
-        {
-            _ctx.Log.LogError("Server-led sample: preference receive threw: " + e);
-        }
-    }
-
-    private void OnLeft(PlayerDisconnected ev)
-    {
-        try { if (ev != null) _prefs.Forget(ev.User.Index); }
-        catch (Exception e) { _ctx.Log.LogError("Server-led sample: disconnect handler threw: " + e); }
-    }
+    private ServerLedPolicy.PlayerPrefs Preferences(ulong platformId) =>
+        ServerLedPolicy.PreferencesFor(platformId,
+            id => _receive.For(new PlayerAccountId(id)),
+            id => _delivery.For(new PlayerAccountId(id)));
 }
 
 /// <summary><c>.serverled status</c> and <c>.serverled announce</c>. Server only.</summary>
@@ -278,7 +224,7 @@ internal static class ServerLedCommands
     {
         var half = ServerHalf.Active;
         if (half == null) { ctx.Reply("Server-led sample: not running."); return; }
-        foreach (string line in half.Status(ctx.User.Index)) ctx.Reply(line);
+        foreach (string line in half.Status(ctx.User.PlatformId)) ctx.Reply(line);
     }
 
     [Command("announce", adminOnly: true, description: "Send the server-led sample's announcement now.")]
@@ -291,21 +237,17 @@ internal static class ServerLedCommands
 }
 
 /// <summary>
-/// The optional client part: sends this player's preferences to the server part (only when it offers
-/// <c>prefs</c> and the join is accepted), and shows popup announcements (it offers <c>popups</c>).
+/// The optional client part shows popup announcements and logs server-part availability.
+/// Core's scoped settings page handles personal preference edits, even without this client part.
 /// </summary>
 internal sealed class ClientHalf
 {
     /// <summary>Process-wide key of the join whose check line was written; survives Core swaps and plugin reloads (a plain string).</summary>
     private const string JoinCheckSlot = "progenitor.sampleserverled.joincheck";
 
-    private static ClientHalf? _active;
 
     private readonly ServerLedContext _ctx;
     private readonly ServerLedEntries _entries;
-    private readonly Stopwatch _clock = Stopwatch.StartNew();
-    private PrefsMessage? _lastSent;
-    private double _lastSendAt;
     private CounterpartPresence _lastPresence = CounterpartPresence.Unknown;
     private IDisposable? _popup;
     private bool _stopped;
@@ -316,37 +258,17 @@ internal sealed class ClientHalf
         _entries = entries;
     }
 
-    private double Now => _clock.Elapsed.TotalSeconds;
-
     internal void Attach()
     {
-        _active = this;
         _ctx.Track(new OnDispose(() =>
         {
             _stopped = true;
             ClosePopup();
-            if (ReferenceEquals(_active, this)) _active = null;
         }));
         // The server sends popups only to clients that offer this; unload withdraws it (tracked).
         _ctx.Features.Offer(ServerLedMessages.FeaturePopups);
         _ctx.Messages.On<AnnounceMessage>((from, message, info) => OnAnnounce(message));
         MainThread.PostDelayed(1.0, Poll, _ctx.Owner);
-    }
-
-    /// <summary>The attached client part, for <c>Plugin.OnUnload</c>.</summary>
-    internal static ClientHalf? Active => _active;
-
-    /// <summary>Send the goodbye message when the server part has this player's preferences. Never throws.</summary>
-    internal void SayGoodbye()
-    {
-        try
-        {
-            if (_lastSent == null) return;
-            if (!_ctx.Peer.Has(ServerLedMessages.FeaturePrefs)) return;
-            if (!string.Equals(Handshake.LastClientResult, "ok", StringComparison.Ordinal)) return;
-            if (_ctx.Messages.SendToServer(ServerLedPolicy.GoneMessage()) == SendResult.Sent) _lastSent = null;
-        }
-        catch (Exception e) { _ctx.Log.LogWarning("Server-led sample: goodbye message threw: " + e.Message); }
     }
 
     private void Poll()
@@ -355,7 +277,6 @@ internal sealed class ClientHalf
         try
         {
             var presence = _ctx.Handshake.ServerPart;
-            bool accepted = string.Equals(Handshake.LastClientResult, "ok", StringComparison.Ordinal);
             if (presence != _lastPresence)
             {
                 _lastPresence = presence;
@@ -370,22 +291,11 @@ internal sealed class ClientHalf
                 }
             }
 
-            // Ask the server part, not only the handshake: it reads preferences when it offers "prefs".
-            // A new join (or a server part that went away) starts over: the server forgot this player.
-            bool serverTakesPrefs = _ctx.Peer.Has(ServerLedMessages.FeaturePrefs);
-            if (!serverTakesPrefs || !accepted) _lastSent = null;
 
-            var current = ServerLedPolicy.ToMessage(_entries.ReceiveAnnouncements!.Value, _entries.Delivery!.Value);
-            if (ServerLedPolicy.ShouldSend(serverTakesPrefs, accepted, current, _lastSent, Now - _lastSendAt)
-                && _ctx.Messages.SendToServer(current) == SendResult.Sent)
-            {
-                _lastSent = current;
-                _lastSendAt = Now;
-            }
         }
         catch (Exception e)
         {
-            _ctx.Log.LogError("Server-led sample: preference poll threw: " + e);
+            _ctx.Log.LogError("Server-led sample: availability poll threw: " + e);
         }
 
         if (!_stopped) MainThread.PostDelayed(1.0, Poll, _ctx.Owner);

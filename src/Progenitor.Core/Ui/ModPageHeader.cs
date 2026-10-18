@@ -96,6 +96,8 @@ internal sealed class ModFrameworkFacts
 
     internal bool OnClient { get; init; } = true;
 
+    internal bool SharesServerSettings { get; init; }
+
     internal bool Paused { get; init; }
 
     internal bool Resuming { get; init; }
@@ -437,6 +439,7 @@ internal sealed class ModFrameworkLine
             return ModSwitch.WordOf(facts.SwitchPending);
         if (status == ModRunStatus.Disabled && facts.OffBecause.Length > 0)
             return Progenitor.Plugins.ModSwitchWords.OffBecauseWord(facts.OffBecause);
+        if (status == ModRunStatus.NotOnClient && facts.SharesServerSettings) return "Runs on this server";
         return WordOf(status, facts.PageState, facts.Resuming);
     }
 

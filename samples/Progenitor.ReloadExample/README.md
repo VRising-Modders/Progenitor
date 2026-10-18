@@ -30,3 +30,9 @@ Prerequisites: an isolated test server with compatible Progenitor Bootstrap/Core
 5. Remove only `Progenitor.ReloadExample.dll` from the verified test server's `BepInEx/progenitor-reload` folder. Expect unload reason `Removal`; `.reloadhello` should no longer be registered, and a subsequent connection should produce no new example join line.
 
 Build this project explicitly before every deployment: it is outside the solution, and `-Projects` controls copying, not the solution build. Record the deployed hashes, runtime/build, new log ranges, command replies and cleanup result in the external research repository. A single command reply does not prove event-subscription cleanup. Restore the source message to `v1` after testing if the exercise changes are not intended for review.
+
+## Server-delivered settings
+
+The example also declares two personal server-owned settings (Receive hints and Detail), and the server-wide Hint interval. Install this DLL only on the isolated server; a connected Progenitor client should see **Your settings on this server** and **Server settings** without the sample DLL. Changing a personal value writes only that account's override to `BepInEx/config/progenitor-players/progenitor.reloadexample.json`. A non-admin can edit those preferences but only read Hint interval. An admin can edit the interval within 1–120; its change uses the existing settings audit log.
+
+Reset personal settings restores both personal defaults without changing Hint interval. Unload removes the remote controls; reload restores them with their saved values. These controls demonstrate settings storage; they do not schedule hints. [Settings API](../../docs/settings-scopes.md).

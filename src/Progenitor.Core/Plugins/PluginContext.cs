@@ -141,7 +141,10 @@ public class PluginContext
             if (synced) ConfigSync.ThrowIfNotSyncable(typeof(T));
             var plain = Config.Bind(section, key, defaultValue, description, synced: false);
             if (synced)
+            {
                 Track(ConfigSync.Register(Guid, Version, plain));
+                if (IsServer && ScopedSettings.PublishLegacy(Guid, Name, Version, plain) is { } published) Track(published);
+            }
             return plain;
         }
 
@@ -165,9 +168,34 @@ public class PluginContext
         if (synced) ConfigSync.ThrowIfNotSyncable(typeof(T));
         var entry = Config.Bind(section, key, defaultValue, description, synced: false);
         if (synced)
+        {
             Track(ConfigSync.Register(Guid, Version, entry));
+            if (IsServer && ScopedSettings.PublishLegacy(Guid, Name, Version, entry) is { } published) Track(published);
+        }
         return entry;
     }
+
+    /// <summary>Bind a declared scope without changing the binary signature of the legacy synced overload.</summary>
+    public ConfigEntry<T> Bind<T>(string section, string key, T defaultValue, Progenitor.Ui.SettingScope scope,
+        string? description = null, AcceptableValueBase? acceptableValues = null)
+    {
+        if (scope != Progenitor.Ui.SettingScope.Personal && scope != Progenitor.Ui.SettingScope.ServerWide)
+            throw new ArgumentOutOfRangeException(nameof(scope));
+        if (scope == Progenitor.Ui.SettingScope.Personal && IsServer)
+            throw new ArgumentException("A personal setting on the server needs ctx.Settings.PerPlayer so each account has its own value.", nameof(scope));
+        var entry = Bind(section, key, defaultValue, description, scope == Progenitor.Ui.SettingScope.ServerWide, acceptableValues);
+        if (scope == Progenitor.Ui.SettingScope.ServerWide)
+        {
+            Track(ServerSettings.Register(Guid, entry));
+            if (IsServer) Track(ScopedSettings.Publish(Guid, Name, Version, entry));
+        }
+        return entry;
+    }
+
+    /// <summary>Scope-explicit bind with a description preceding the named scope.</summary>
+    public ConfigEntry<T> Bind<T>(string section, string key, T defaultValue, string? help,
+        Progenitor.Ui.SettingScope scope, AcceptableValueBase? acceptableValues = null) =>
+        Bind(section, key, defaultValue, scope, help, acceptableValues);
 
     /// <summary>Event-bus subscriptions recorded for undo.</summary>
     public PluginEvents Events { get { EnsureAttached(); return _events!; } }

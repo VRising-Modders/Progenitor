@@ -5,10 +5,7 @@ using Progenitor.Ui.GameArt;
 
 namespace Progenitor.Ui;
 
-// Settings scopes, step 4 (docs/settings-scopes.md, decided 2026-10-03): the mod page's
-// Settings in the two-section model, for the settings a client already knows — its own cfg rows
-// (Personal, client-owned) and the synced rows ConfigSync knows (Server-wide). Server-owned Personal
-// values and settings of mods this client lacks need the settings manifest (step 5).
+// Settings are grouped by scope and owner; server manifests also describe mods absent on this client.
 
 /// <summary>
 /// What the page knows about the joined server, read when the page is built and again on each
@@ -35,6 +32,14 @@ internal sealed class SettingsScopeContext
     public string ServerAddress { get; init; } = "";
 
     /// <summary><c>Applies to everyone on …</c> under Server settings.</summary>
+    public const string DevicePersonalLine = "Only affects you. Saved on this device.";
+
+    public string PersonalServerLine => "Only affects you on "
+        + Progenitor.Install.ServerIdentity.Connected(ServerName, ServerAddress).ShortName + ". Saved by this server.";
+
+    public string LineFor(SettingScope scope, SettingOwner owner) => scope == SettingScope.ServerWide
+        ? ServerLine : owner == SettingOwner.Server ? PersonalServerLine : DevicePersonalLine;
+
     public string ServerLine => SettingScopeSections.ServerLine(Connection != SettingConnection.NotConnected, ServerName, ServerAddress);
 
     /// <summary>What changes the control a row is drawn with (admin or not): a change rebuilds the page.</summary>
@@ -75,11 +80,12 @@ internal sealed class SettingsScopeContext
 /// <summary>One scope section as the view draws it: its heading, its line and its author subsections.</summary>
 internal sealed class ScopeDrawGroup
 {
-    public ScopeDrawGroup(SettingScope scope) => Scope = scope;
+    public ScopeDrawGroup(SettingScope scope, SettingOwner owner = SettingOwner.Client) { Scope = scope; Owner = scope == SettingScope.ServerWide ? SettingOwner.Server : owner; }
+    public SettingOwner Owner { get; }
 
     public SettingScope Scope { get; }
 
-    public string Heading => Scope == SettingScope.ServerWide ? SettingScopeSections.ServerHeading : SettingScopeSections.YourHeading;
+    public string Heading => Scope == SettingScope.ServerWide ? SettingScopeSections.ServerHeading : Owner == SettingOwner.Server ? "Your settings on this server" : "Your preferences";
 
     public List<ModSettingsSection> Sections { get; } = new();
 }
@@ -101,6 +107,7 @@ internal static class ModSettingsScopes
     internal static SettingScope ScopeOf(ModSettingsItem item)
     {
         if (item == null) return SettingScope.Personal;
+        if (item.Admin is { Manifest: true } remote) return remote.Personal ? SettingScope.Personal : SettingScope.ServerWide;
         if (item.Row is { } row)
         {
             bool synced;
@@ -113,7 +120,7 @@ internal static class ModSettingsScopes
     }
 
     /// <summary>
-    /// Split the page's sections into <b>Your settings</b> then <b>Server settings</b>. Each author section
+    /// Split the page into client Personal, server Personal, then Server-wide settings. Each author section
     /// becomes a subsection of the scope its items belong to (a section with both is split, keeping the
     /// item order); a title that only restates the scope (<see cref="SettingScopeSections.IsRedundant"/>)
     /// draws no subheading. A divider goes with the scope of the item before it. A subsection holding
@@ -121,34 +128,30 @@ internal static class ModSettingsScopes
     /// </summary>
     internal static List<ScopeDrawGroup> Regroup(IReadOnlyList<ModSettingsSection>? sections)
     {
-        var personal = new ScopeDrawGroup(SettingScope.Personal);
-        var server = new ScopeDrawGroup(SettingScope.ServerWide);
-        if (sections != null)
+        var groups = new List<ScopeDrawGroup>
         {
-            foreach (var section in sections)
+            new(SettingScope.Personal, SettingOwner.Client),
+            new(SettingScope.Personal, SettingOwner.Server),
+            new(SettingScope.ServerWide, SettingOwner.Server),
+        };
+        foreach (var section in sections ?? Array.Empty<ModSettingsSection>())
+        {
+            var buckets = new[] { new List<ModSettingsItem>(), new List<ModSettingsItem>(), new List<ModSettingsItem>() };
+            int last = 0;
+            foreach (var item in section.Items)
             {
-                if (section == null) continue;
-                var mine = new List<ModSettingsItem>();
-                var theirs = new List<ModSettingsItem>();
-                var last = SettingScope.Personal;
-                foreach (var item in section.Items)
-                {
-                    if (item == null) continue;
-                    var scope = item.Kind == ModSettingsItemKind.Divider ? last : ScopeOf(item);
-                    last = scope;
-                    (scope == SettingScope.ServerWide ? theirs : mine).Add(item);
-                }
-
-                Add(personal, section, mine, SettingScope.Personal);
-                Add(server, section, theirs, SettingScope.ServerWide);
+                if (item.Kind != ModSettingsItemKind.Divider)
+                    last = ScopeOf(item) == SettingScope.ServerWide ? 2 : OwnerOf(item) == SettingOwner.Server ? 1 : 0;
+                buckets[last].Add(item);
             }
+            for (int i = 0; i < groups.Count; i++) Add(groups[i], section, buckets[i], groups[i].Scope);
         }
-
-        var groups = new List<ScopeDrawGroup>(2);
-        if (personal.Sections.Count > 0) groups.Add(personal);
-        if (server.Sections.Count > 0) groups.Add(server);
+        groups.RemoveAll(g => g.Sections.Count == 0);
         return groups;
     }
+
+    internal static SettingOwner OwnerOf(ModSettingsItem item) =>
+        item.Admin != null || ScopeOf(item) == SettingScope.ServerWide ? SettingOwner.Server : SettingOwner.Client;
 
     private static void Add(ScopeDrawGroup group, ModSettingsSection source, List<ModSettingsItem> items, SettingScope scope)
     {
@@ -156,13 +159,12 @@ internal static class ModSettingsScopes
         foreach (var item in items) meaningful |= item.Kind != ModSettingsItemKind.Divider;
         if (!meaningful) return;
         string title = SettingScopeSections.IsRedundant(source.Title) ? "" : source.Title;
-        group.Sections.Add(new ModSettingsSection(title, source.Kind, items) { Scope = scope, SourceTitle = source.Title });
+        group.Sections.Add(new ModSettingsSection(title, source.Kind, items) { Scope = scope, Owner = group.Owner, SourceTitle = source.Title });
     }
 
     /// <summary>
-    /// The availability facts of one item. Personal items are client-owned (step 4 knows no server-owned
-    /// Personal value yet); Server-wide items are the server's, and today's evidence stands in for the
-    /// settings manifest: a ConfigSync lock proves the server runs the mod at a compatible version and
+    /// The availability facts of one item. Manifest rows carry explicit server ownership; legacy synced rows
+    /// retain the handshake evidence path: a ConfigSync lock proves the server runs the mod at a compatible version and
     /// sent its value; on a joined Progenitor server with no lock, a server part the handshake named
     /// means the versions differ (the snapshot skipped it), and one it did not name is absent.
     /// </summary>
@@ -176,7 +178,7 @@ internal static class ModSettingsScopes
         var facts = new SettingAvailabilityFacts
         {
             Scope = scope,
-            Owner = scope == SettingScope.ServerWide ? SettingOwner.Server : SettingOwner.Client,
+            Owner = OwnerOf(item),
             Connection = context.Connection,
             ServerSharesSettings = context.Connection == SettingConnection.Progenitor ? SettingEvidence.Yes : SettingEvidence.Unknown,
             ManifestArrived = context.Connection == SettingConnection.Progenitor,
@@ -198,6 +200,15 @@ internal static class ModSettingsScopes
             else if (partEvidence == SettingEvidence.Yes) facts = facts with { Compatible = false };
         }
 
+        if (item.Admin is { Manifest: true })
+            facts = facts with
+            {
+                Connection = ScopedSettings.ClientReady ? SettingConnection.Progenitor : SettingConnection.NotConnected,
+                ManifestArrived = ScopedSettings.ClientReady,
+                ServerPart = SettingEvidence.Yes,
+                ServerSharesSettings = SettingEvidence.Yes,
+                CanEditServerWide = ScopedSettings.ClientCanEditServerWide,
+            };
         return facts;
     }
 
@@ -207,6 +218,7 @@ internal static class ModSettingsScopes
     /// </summary>
     internal static bool OptedIn(ModSettingsItem item)
     {
+        if (item?.Admin is { Manifest: true }) return true;
         if (item?.Row is not { } row) return false;
         try { return ServerSettings.IsEditable(row.RowId); }
         catch { return false; }

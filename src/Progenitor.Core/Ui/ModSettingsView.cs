@@ -61,7 +61,7 @@ internal sealed partial class ModSettingsView
     internal const string OpenKeybindsCaption = "Open in Keybinds";
 
     internal const string SearchCaption = "Search settings";
-    internal const string ResetAllCaption = "Reset all";
+    internal const string ResetAllCaption = "Reset personal settings";
     /// <summary>The reset link's glyph: Latin-1, the pair of the store link's <c>»</c>, so the game font has it.</summary>
     internal const string ResetGlyph = "«";
     internal const string ResetTooltipPrefix = "Reset to ";
@@ -513,6 +513,7 @@ internal sealed partial class ModSettingsView
             {
                 var item = _sections[i].Items[j];
                 if (item.Row != null && ModSettingsLayout.IsPendingRestart(item.Row, item.Options)) return true;
+                if (item.Admin is { Manifest: true } remote && remote.PendingNow()) return true;
             }
 
         return false;
@@ -546,6 +547,17 @@ internal sealed partial class ModSettingsView
     /// <c>config-section-&lt;n&gt;</c>.
     /// </summary>
     internal bool Embedded { get; set; }
+    internal bool SearchResult { get; set; }
+    internal Action<string>? ShowInMod { get; set; }
+
+    internal IUiHandle? RevealSearchItem(string id)
+    {
+        var binding = Find(id);
+        if (binding == null) return null;
+        foreach (var section in _sections)
+            if (section.Items.Exists(item => item.Id == id)) SetDrawerOpen(GroupNavCaption(section), true);
+        return binding.Main;
+    }
 
     /// <summary>
     /// The Server tab (requested 2026-10-06, "why do all the settings under server have server chips?"): every row there is a
@@ -605,7 +617,8 @@ internal sealed partial class ModSettingsView
     private string ScopeHeadingText(ScopeDrawGroup group) =>
         group.Scope == SettingScope.ServerWide && ServerScopeHeading.Length > 0 ? ServerScopeHeading : group.Heading;
 
-    private string ScopeLineText() => _context.ServerLine + ServerScopeLineSuffix;
+    private string ScopeLineText(ScopeDrawGroup group) => _context.LineFor(group.Scope, group.Owner)
+        + (group.Scope == SettingScope.ServerWide ? ServerScopeLineSuffix : "");
 
     /// <summary>The left-list caption of a section (the Server rules group is listed as <b>Server rules</b>).</summary>
     internal static string GroupNavCaption(ModSettingsSection section) =>
@@ -617,7 +630,7 @@ internal sealed partial class ModSettingsView
         panel.SettingsDescriptionMode(true);
         try
         {
-            if (!Embedded) BuildHeader(panel, add);
+            if (!Embedded && !SearchResult) BuildHeader(panel, add);
 
             _noMatches = panel.Note(NoMatches);
             _noMatches.Visible = false;
@@ -656,9 +669,7 @@ internal sealed partial class ModSettingsView
         {
             var heading = panel.CellRow(ModSettingsScopes.HeadingRow(index, ScopeHeadingText(group)));
             heading.SectionRule();
-            IUiHandle? lineRow = null;
-            if (group.Scope == SettingScope.ServerWide)
-                lineRow = panel.CellRow(ModSettingsScopes.LineRow(index, ScopeLineText()));
+            IUiHandle? lineRow = panel.CellRow(ModSettingsScopes.LineRow(index, ScopeLineText(group)));
             _scopeHeadings.Add((group, heading, lineRow));
             add(heading, ModSettingsScopes.RowScopeSection, (Func<object?>)(() => DescribeScope(group)));
         }
@@ -675,17 +686,18 @@ internal sealed partial class ModSettingsView
         foreach (var section in group.Sections)
         {
             titles.Add(section.Title);
-            rows += section.Rows.Count;
+            rows += section.Items.Count;
         }
 
         foreach (var binding in _bindings)
-            if (binding.Section.Scope == group.Scope && binding.Visible && binding.Item.Kind != ModSettingsItemKind.Divider) shown++;
+            if (binding.Section.Scope == group.Scope && binding.Section.Owner == group.Owner && binding.Visible && binding.Item.Kind != ModSettingsItemKind.Divider) shown++;
         var context = ReadContext();
         var d = new Dictionary<string, object?>
         {
             ["scope"] = SettingScopes.Word(group.Scope),
+            ["owner"] = SettingScopes.Word(group.Owner),
             ["heading"] = ScopeHeadingText(group),
-            ["line"] = group.Scope == SettingScope.ServerWide ? context.ServerLine + ServerScopeLineSuffix : "",
+            ["line"] = context.LineFor(group.Scope, group.Owner) + (group.Scope == SettingScope.ServerWide ? ServerScopeLineSuffix : ""),
             ["sections"] = titles,
             ["rows"] = rows,
             ["shown"] = shown,
@@ -769,7 +781,15 @@ internal sealed partial class ModSettingsView
                 for (int j = 0; j < section.Items.Count; j++)
                 {
                     var item = section.Items[j];
-                    try { AddItem(panel, section, item, add); }
+                    try
+                    {
+                        AddItem(panel, section, item, add);
+                        if (ShowInMod != null)
+                        {
+                            string itemId = item.Id;
+                            panel.Button("Show in mod").OnClick(() => ShowInMod?.Invoke(itemId));
+                        }
+                    }
                     catch (Exception e)
                     {
                         Plugin.Logger?.LogWarning("Ui: settings row " + item.Id + " threw: " + e.Message);
@@ -998,7 +1018,7 @@ internal sealed partial class ModSettingsView
         add(row, RowDrawn, (Func<object?>)(() => (object?)_panel?.SettingsDrawn() ?? new Dictionary<string, object?> { ["runtime"] = "none" }));
         add(row, RowResetAll, (Func<object?>)(() => new Dictionary<string, object?>
         {
-            ["resettable"] = ResettableRows().Count,
+            ["resettable"] = PersonalResetCount,
             ["hidden"] = HiddenByShowIf,
             ["pendingRestart"] = AnyPendingRestart(),
         }));
@@ -1007,7 +1027,7 @@ internal sealed partial class ModSettingsView
     /// <summary><b>Reset all</b>: ask the owner (which opens the dialog) when anything differs from its default.</summary>
     internal void PressResetAll()
     {
-        if (ResettableRows().Count == 0)
+        if (PersonalResetCount == 0)
         {
             Plugin.Logger?.LogInfo("Ui: settings reset-all for " + _pluginId + ": nothing differs from its default.");
             return;
@@ -1141,6 +1161,12 @@ internal sealed partial class ModSettingsView
                 else if (binding.LockedBy != null && result.State != SettingRowState.Grayed) why = ServerSettingsLock.NoteFor(binding.LockedBy);
             }
 
+            if (options.CompatibilityReason.Length > 0)
+            {
+                enabled = false;
+                why = options.CompatibilityReason;
+            }
+
             // PENDING1: a status row repaints its line and tone whenever the page is re-evaluated (a rules answer).
             if (binding.Item.Options.StatusTone != null)
             {
@@ -1272,7 +1298,7 @@ internal sealed partial class ModSettingsView
             SetVisible(line, any);
             if (line is IUiCellRow lineRow && !lineRow.IsDisposed)
             {
-                try { lineRow.SetCell(ModSettingsScopes.CellScopeLine, ScopeLineText(), visible: true); }
+                try { lineRow.SetCell(ModSettingsScopes.CellScopeLine, ScopeLineText(group), visible: true); }
                 catch (Exception e) { Plugin.Logger?.LogWarning("Ui: settings scope line rewrite threw: " + e.Message); }
             }
         }
@@ -1288,7 +1314,7 @@ internal sealed partial class ModSettingsView
     }
 
     /// <summary>The arrow shows with its row (dim at the default; <see cref="ResetState"/>).</summary>
-    private static bool ResetShown(ItemBinding binding) => binding.Item.Row != null;
+    private static bool ResetShown(ItemBinding binding) => binding.Item.Row != null || binding.Item.Admin is { Manifest: true, DefaultValue: not null };
 
     private static void SetVisible(IUiHandle? handle, bool visible)
     {
@@ -1369,6 +1395,7 @@ internal sealed partial class ModSettingsView
         DescriptionChanged = null;
         _panel = null;
         Search = null;
+        ShowInMod = null;
         ResetAll = null;
         Back = null;
         PendingRestartChanged = null;
@@ -1493,8 +1520,10 @@ internal sealed partial class ModSettingsView
     {
         var scope = section?.Scope ?? SettingScope.Personal;
         d["scopeSection"] = SettingScopes.Word(scope);
-        d["owner"] = SettingScopes.Word(scope == SettingScope.ServerWide ? SettingOwner.Server : SettingOwner.Client);
-        d["adminOnly"] = binding?.AdminOnly ?? false;
+        d["owner"] = SettingScopes.Word(section?.Owner ?? SettingOwner.Client);
+        d["adminOnly"] = binding?.Item.Admin is { Manifest: true } remote
+            ? !remote.Personal && remote.ReadOnlyNow() == SettingAvailability.AdminOnlyReason
+            : binding?.AdminOnly ?? false;
         d["hideWhenAlone"] = binding?.Item.Options.WhenAlone == AloneBehavior.Hide;
         // Live 2026-10-06: the caption the runtime draws in the name column (null: the runtime cannot tell). A row whose
         // field is drawn with an empty caption is the inline-Apply regression; live checks assert captionShown.
@@ -1828,7 +1857,7 @@ internal sealed partial class ModSettingsView
         IUiPanel panel, ModSettingsSection section, ModSettingsItem item, SettingsRow row, Action<IUiHandle, string, object?> add)
     {
         var options = item.Options;
-        var control = ModSettingsLayout.DrawnControl(row, options);
+        var control = options.CompatibilityReason.Length > 0 ? SettingControl.ReadOnly : ModSettingsLayout.DrawnControl(row, options);
         // Settings scopes: a Server-wide row an admin could edit is read-only for everyone else —
         // `Admin only · <value>` — instead of an Apply the server would refuse.
         bool adminOnly = control == SettingControl.ServerRequest && !_context.CanEditServerWide;
@@ -2219,7 +2248,11 @@ internal sealed partial class ModSettingsView
     /// steel blue when changed. A row that can never be reset here has none.
     /// </summary>
     private static SettingsResetState ResetState(ItemBinding binding) =>
-        binding.Item.Row is not { } row || !ModSettingsLayout.CanEverReset(row) ? SettingsResetState.None
+        binding.Item.Admin is { Manifest: true } remote
+            ? remote.DefaultValue == null ? SettingsResetState.None
+                : binding.Enabled && !binding.RequestPending && !remote.ViewOnlyNow() && remote.ReadOnlyNow() == null
+                    && remote.SafeRead() != null && remote.SafeRead() != remote.DefaultValue ? SettingsResetState.Changed : SettingsResetState.Default
+        : binding.Item.Row is not { } row || !ModSettingsLayout.CanEverReset(row) ? SettingsResetState.None
         : binding.Enabled && ModSettingsLayout.CanReset(row) ? SettingsResetState.Changed
         : SettingsResetState.Default;
 
@@ -3235,7 +3268,7 @@ internal static class ModSettingsCopy
 
     internal static string ResetAllBody(int count) =>
         (count == 1 ? "1 setting goes" : count + " settings go")
-        + " back to the value the mod ships with. Server-owned settings are not changed.";
+        + " back to the value the mod ships with. Server-wide settings are not changed.";
 }
 
 /// <summary>

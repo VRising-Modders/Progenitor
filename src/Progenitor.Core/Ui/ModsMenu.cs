@@ -146,7 +146,7 @@ public static partial class ModsMenu
 #endif
 
     /// <summary>Word drawn inside the empty sidebar search field. Also the widget identity <c>mods_ui rects</c> matches.</summary>
-    public const string SearchPlaceholder = MenuRowStyle.SearchPlaceholder;
+    public const string SearchPlaceholder = "Search mods and settings";
     public const string SearchRowName = MenuRowStyle.SearchRowName;
     public const string SearchHintWordName = MenuRowStyle.SearchHintWordName;
     public const string SearchHintGlyphName = MenuRowStyle.SearchHintGlyphName;
@@ -913,7 +913,8 @@ public static partial class ModsMenu
     /// </summary>
     internal static string SidebarSignature() => ModsListKey.Compose(
         ModMenuInventory.Generation, ListGeneration, ModProblems.Version, CurrentInstallLedgerStamp(),
-        _search, (int)_listFilter, _serverExpanded, _requiredExpanded, SidebarRowWidth()) + ";restart=" + RestartListKey();
+        _search, (int)_listFilter, _serverExpanded, _requiredExpanded, SidebarRowWidth()) + ";restart=" + RestartListKey()
+        + ";settings=" + Networking.ScopedSettings.ClientRevision + ":" + Networking.ScopedSettings.ClientReady;
 
     /// <summary>
     /// Show the kept Mods list when it still draws what would be built now: the list hidden by Escape
@@ -1243,7 +1244,7 @@ public static partial class ModsMenu
             long t = Stopwatch.GetTimestamp();
             Ui.PinMenuRows(panel, MenuRowPin.Top);
             Ui.StyleMenuRow(panel, MenuRowTone.Search);
-            var search = panel.Input(MenuRowStyle.SearchPlaceholder, _search);
+            var search = panel.Input(SearchPlaceholder, _search);
             search.OnChanged(OnSearchFieldChanged);
             _sidebarSearchInput = search;
             float rowWidth = SidebarRowWidth();
@@ -1563,7 +1564,7 @@ public static partial class ModsMenu
             restart.OnClick("restart", () => JoinFlowClient.PressRestartButton());
         }
         string requirement = "", explanation = "";
-        foreach (var item in ModMenuInventory.Snapshot().Rows)
+        foreach (var item in ScopedSettingsRows.Inventory(ModMenuInventory.Snapshot().Rows))
         {
             if (!string.Equals(item.Id, pluginId, StringComparison.OrdinalIgnoreCase)) continue;
             // Live (HotDemo, 2026-10-03): "Server requirement unknown." stood under a mod the server had
@@ -1572,7 +1573,8 @@ public static partial class ModsMenu
             // request named the mod; the side cells carry what the server has.
             requirement = ModMenuInventory.IsUnknownRequirement(item.Requirement) ? "" : item.Requirement;
             // Server-only rows keep their "loading is unconfirmed" reason (docs/mods-menu.md).
-            if (sidebarRow?.Provenance == ModProvenance.Server) explanation = item.Explanation;
+            if (sidebarRow?.Provenance == ModProvenance.Server
+                || (!ModMenuInventory.IsLocalLocation(item.Location) && ScopedSettingsRows.Has(pluginId))) explanation = item.Explanation;
             break;
         }
 
@@ -1687,7 +1689,7 @@ public static partial class ModsMenu
 
         // Three homes: the Server tab's groups of Progenitor's registration are drawn there, not on its page.
         if (progenitor && page != null) page = ProgenitorPage.SectionsFor(page, serverTab: false);
-        return ModSettingsLayout.Build(page, groups, catalog);
+        return ScopedSettingsRows.Merge(pluginId, ModSettingsLayout.Build(page, groups, catalog));
     }
 
     /// <summary>
@@ -1727,6 +1729,7 @@ public static partial class ModsMenu
     {
         // Three homes: a join, a leave or the handshake's answer redraws the Server tab when what it shows changed.
         if (NoteServerTabScopeChanged(reason)) return true;
+        if (_showingSearch) { UpdateSearchResults(); return true; }
         var page = _modPage;
         string? id = _selected;
         if (!IsOpen || page == null || string.IsNullOrEmpty(id)) return false;
@@ -1795,8 +1798,8 @@ public static partial class ModsMenu
         {
             Connection = SettingsScopeContext.ConnectionOf(connected, handshakeOk, requestSeen),
             ServerPart = part,
-            CanEditServerWide = canEdit,
-            ServerName = name,
+            CanEditServerWide = Networking.ScopedSettings.ClientReady ? Networking.ScopedSettings.ClientCanEditServerWide : canEdit,
+            ServerName = Networking.ScopedSettings.ClientReady ? Networking.ScopedSettings.ClientServerName : name,
             ServerAddress = address,
         };
     }
@@ -1809,6 +1812,7 @@ public static partial class ModsMenu
     {
         // Three homes: the Server tab follows the server's answers as the mod page does.
         if (NoteServerTabScopeChanged(reason)) return true;
+        if (_showingSearch) { UpdateSearchResults(); return true; }
         var page = _modPage;
         string? id = _selected;
         if (!IsOpen || page?.SettingsView is not { } view || string.IsNullOrEmpty(id)) return false;
@@ -1900,6 +1904,7 @@ public static partial class ModsMenu
     internal static void NotifySettingsPageChanged(string pluginId)
     {
         _ = pluginId;
+        _settingsSectionsRevision++;
         if (IsOpen) QueueDirectoryRefresh();
     }
 
@@ -1910,6 +1915,8 @@ public static partial class ModsMenu
     /// </summary>
     internal static void NotifySettingsPageRemoved(string pluginId)
     {
+        _settingsSectionsRevision++;
+        if (_showingSearch) Close(ReasonLifecycle("plugin-unload"));
         if (string.Equals(_resetAllPlugin, pluginId, StringComparison.OrdinalIgnoreCase)) CloseResetAllDialog();
         if (IsOpen && string.Equals(_selected, pluginId, StringComparison.OrdinalIgnoreCase))
             Close(ReasonLifecycle("plugin-unload"));
@@ -1941,7 +1948,7 @@ public static partial class ModsMenu
         if (view == null) return;
         string pluginId = view.PluginId;
         // SETTINGS1 stage 2: grayed and show-if-hidden rows are not part of it (as their own links).
-        int count = view.ResettableRows().Count;
+        int count = view.PersonalResetCount;
         if (count == 0) return;
         var factory = ModPagePane.DialogFactory;
         if (factory == null)
@@ -1989,16 +1996,19 @@ public static partial class ModsMenu
         }
 
         var rows = view.ResettableRows();
+        int remote = view.ResetRemotePersonal();
         int done = 0;
         for (int i = 0; i < rows.Count; i++)
         {
             var result = ModSettingsLayout.Reset(rows[i]);
+            if (remote > 0) view.Refresh(rows[i], result.Error);
             if (result.State == SettingWriteState.Accepted || result.State == SettingWriteState.Pending) done++;
             else Plugin.Logger?.LogWarning("Ui: settings reset of " + rows[i].RowId + " refused: " + result.Error);
         }
 
         Plugin.Logger?.LogInfo("Ui: settings reset-all for " + pluginId + ": " + done + " of " + rows.Count + " reset.");
-        if (IsOpen) OpenMod(pluginId, ReasonUserButton);
+        if (IsOpen && remote == 0) OpenMod(pluginId, ReasonUserButton);
+        else view.Reevaluate();
         return true;
     }
 
@@ -2163,6 +2173,7 @@ public static partial class ModsMenu
         try
         {
             TryChangeSearch("");
+            _showingSearch = false;
             Open(ReasonUserButton);
         }
         finally { _resetListOnBegin = false; }
@@ -2318,6 +2329,7 @@ public static partial class ModsMenu
                 // INSTALLUX2 item 4: after the tab's own build, not before — the rebuild has to be
                 // the last word or the build above would redraw the stale list over it.
                 RefreshModsAfterInstallChange();
+                if (_search.Length > 0) UpdateSearchResults();
                 return;
         }
     }
@@ -4153,7 +4165,7 @@ public static partial class ModsMenu
     }
 
     private static void ClosePanel() { var panel = Owned.Take(); panel?.Dispose(); }
-    private static void CloseContent() { ClosePanel(); SettingsPanel.Close(); }
+    private static void CloseContent() { ReleaseSearchViews(); ClosePanel(); SettingsPanel.Close(); }
     public static void Close(string? reason = null, [CallerMemberName] string caller = "")
     {
         _closeCalls++;
@@ -4192,6 +4204,7 @@ public static partial class ModsMenu
         _settingsQuery = "";
         _settingsQueryPlugin = "";
         // SEARCHCLEAR1: each open starts with an empty Mods search and Install search.
+        _showingSearch = false;
         ResetSearchesForClose();
         ConfigurationPane.ResetOtherServersOpen();
         try { ModPagePane.CloseOwnDialog(); }
@@ -4246,6 +4259,8 @@ public static partial class ModsMenu
     {
         if (_lifecycleWatch) return;
         NativeModsEntry.InstallLifecycleWatch();
+        Plugin.Frame += TickScopedSettings;
+        Networking.ScopedSettings.ClientValueChanged += OnScopedSettingValue;
         _lifecycleWatch = true;
     }
 
@@ -4253,6 +4268,8 @@ public static partial class ModsMenu
     {
         if (!_lifecycleWatch) return;
         NativeModsEntry.UninstallLifecycleWatch();
+        Plugin.Frame -= TickScopedSettings;
+        Networking.ScopedSettings.ClientValueChanged -= OnScopedSettingValue;
         _lifecycleWatch = false;
         LifecycleCloseCount = 0;
     }
@@ -4261,6 +4278,7 @@ public static partial class ModsMenu
     {
         if (!Mods.TryGetValue(mod.PluginId, out var current) || !ReferenceEquals(current, mod)) return;
         Mods.Remove(mod.PluginId);
+        if (_showingSearch) Close(ReasonLifecycle("plugin-unload"));
         BumpListGeneration("removed:" + mod.PluginId);
         // The shell owns these widgets, but their callbacks may belong to the departing mod.
         // Close synchronously before its load context can be collected; reopen is explicit.
@@ -4675,6 +4693,8 @@ public static partial class ModsMenu
     {
         string next = (text ?? "").Trim();
         if (next == _search) return false;
+        // A search session starts or ends: settings sections are read fresh for the next one.
+        if (next.Length == 0 || _search.Length == 0) SearchSectionCache.Clear();
         _search = next;
         SearchFilterChanges++;
         return true;
@@ -4683,17 +4703,13 @@ public static partial class ModsMenu
     private static void CommitSearch(string? text, bool rebuildNow, string reason)
     {
         if (!TryChangeSearch(text)) return;
-        if (rebuildNow)
-        {
-            CancelSearchRebuild();
-            RebuildSidebar(reason);
-            return;
-        }
-
-        _ = reason;
+        CancelSearchRebuild();
+        if (_sidebarSearchInput != null && _sidebarSearchInput.Value != _search) _sidebarSearchInput.Value = _search;
         RefilterCatalogRows();
+        // Typing rebuilds the results pane once it pauses; a programmatic search or a cleared one shows at once.
+        if (rebuildNow || _search.Length == 0) { CancelSearchResults(); UpdateSearchResults(); }
+        else QueueSearchResults();
     }
-
     /// <summary>
     /// Show or hide already-built catalog rows. Must not rebuild the sidebar:
     /// the search field stays focused and its handle identity is unchanged.
@@ -4707,7 +4723,7 @@ public static partial class ModsMenu
             for (int i = 0; i < _catalogRows.Count; i++)
             {
                 var row = _catalogRows[i];
-                bool match = MatchesSearch(row.Id, row.Name, _search);
+                bool match = MatchesModOrSettings(row.Id, row.Name);
                 try { row.Button.Visible = match; }
                 catch { /* */ }
                 if (match) shown++;
@@ -4822,7 +4838,7 @@ public static partial class ModsMenu
             {
                 var placeholder = field.placeholder != null ? field.placeholder.TryCast<TMP_Text>() : null;
                 if (placeholder != null
-                    && (string.Equals(placeholder.text, MenuRowStyle.SearchPlaceholder, StringComparison.Ordinal)
+                    && (string.Equals(placeholder.text, SearchPlaceholder, StringComparison.Ordinal)
                         || string.Equals(placeholder.text, InstallModsCopy.SearchPlaceholder, StringComparison.Ordinal)))
                     return field;
             }
@@ -4832,7 +4848,7 @@ public static partial class ModsMenu
             for (int j = 0; j < labels.Length; j++)
             {
                 if (labels[j] == null) continue;
-                if (string.Equals(labels[j].text, MenuRowStyle.SearchPlaceholder, StringComparison.Ordinal)
+                if (string.Equals(labels[j].text, SearchPlaceholder, StringComparison.Ordinal)
                     || string.Equals(labels[j].text, "Search", StringComparison.Ordinal))
                     return field;
             }
@@ -5433,7 +5449,7 @@ public static partial class ModsMenu
         var names = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            foreach (var row in InventorySnapshot().Rows) names[row.Id] = row.DisplayName;
+            foreach (var row in ScopedSettingsRows.Inventory(InventorySnapshot().Rows)) names[row.Id] = row.DisplayName;
         }
         catch { /* inventory is optional evidence */ }
         try
@@ -5441,6 +5457,7 @@ public static partial class ModsMenu
             foreach (var row in SettingsCatalog.Rows()) names.TryAdd(row.PluginId, row.PluginId);
         }
         catch { }
+        foreach (var remote in ScopedSettingsRows.Records) names.TryAdd(remote.PluginId, remote.ModName);
         names.Remove("progenitor.scratch");
         names[SettingsPanel.PluginId] = "Progenitor";
         foreach (var mod in Mods.Values) names[mod.PluginId] = mod.Name;
@@ -5729,14 +5746,14 @@ public static partial class ModsMenu
     private static ModsSidebarModel CurrentSidebarModel(bool applySearch = true)
     {
         IReadOnlyList<ModMenuInventoryRow> rows = Array.Empty<ModMenuInventoryRow>();
-        try { rows = InventorySnapshot().Rows; }
+        try { rows = ScopedSettingsRows.Inventory(InventorySnapshot().Rows); }
         catch { /* inventory is optional evidence */ }
         return ModMenuInventory.BuildSidebar(
             CatalogEntries(),
             rows,
             CurrentLedger(),
             LoaderVersion(),
-            applySearch ? (id, name) => MatchesSearch(id, name, _search) : null,
+            applySearch ? (id, name) => MatchesModOrSettings(id, name) : null,
             CurrentReloadFiles());
     }
 
@@ -6334,7 +6351,7 @@ public static partial class ModsMenu
 
         // SETTINGS1 stage 2: a settings page (ctx.Settings.Page) is settings, even one with only
         // buttons and info lines.
-        if (ModSettingsPages.Has(pluginId)) return true;
+        if (ModSettingsPages.Has(pluginId) || ScopedSettingsRows.Has(pluginId)) return true;
 
         try
         {
@@ -7723,6 +7740,7 @@ public static partial class ModsMenu
     internal static void ResetSearchesForClose()
     {
         CancelSearchRebuild();
+        CancelSearchResults();
         TryChangeSearch("");
         // The kept Mods list (parked or hidden) is shown again by the next open; its box shows the empty search.
         try { if (_sidebarSearchInput is { IsDisposed: false } box && box.Value.Length > 0) box.Value = ""; }
@@ -7749,7 +7767,9 @@ public static partial class ModsMenu
 
         TryChangeSearch("");
         CancelSearchRebuild();
+        CancelSearchResults();
         RebuildSidebar(ReasonUserButton);
+        UpdateSearchResults();
 #if !PROGENITOR_TESTS
         RestoreSearchFocus();
 #endif
@@ -8383,6 +8403,7 @@ public static partial class ModsMenu
         _awaitingNativeFrame = false;
         ModsWorkspaceFrame.ResetFirstShow();
         // SEARCHCLEAR1: an Escape that hides the workspace closes it as far as the search goes.
+        _showingSearch = false;
         ResetSearchesForClose();
         LogTransition(
             "hide",

@@ -1,5 +1,7 @@
 # Mod settings on the mod page
 
+Current scope grouping supersedes the earlier two-section layout below: **Your preferences**, **Your settings on this server**, and **Server settings**. Server-delivered rows need no local mod DLL and use the same controls. See [settings scopes](settings-scopes.md) for the current contract and qualification.
+
 Roadmap M3.1a (job SETTINGS1). This page is the design of a mod's page in the [Mods workspace](mods-menu.md): the framework-owned status bar, the mod's own header area, and the mod's settings drawn on the page in sections. It covers all three stages; each section says what is delivered and what is planned.
 
 **Status:** stages 1, 2 and 3 are **source-checked and game-free tested, not live-verified** (`tests/Progenitor.Tests/ModSettingsPageTests.cs`, `ModSettingsStage2Tests.cs`, `ModPageTests.cs`, `ModStage3Tests.cs`, `PluginFileActionsTests.cs`, full suite green). Nothing on this page has been observed in the game with the stage 2 or stage 3 code; neither [acceptance procedure](#acceptance-procedure-stages-1-and-2-not-run) ([stage 3](#acceptance-procedure-stage-3-not-run)) has been run. Planned, not in any stage yet: game UI sounds and transitions. Keyboard and controller navigation is NAV1 ([ui.md](ui.md#controller-and-keyboard-navigation-nav1); verified live at the title screen, not in a world).
