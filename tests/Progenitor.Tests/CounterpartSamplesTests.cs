@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using BepInEx.Configuration;
+using Progenitor.Config;
 using Progenitor.Install;
 using Progenitor.Networking;
 using Progenitor.Plugins;
@@ -319,13 +320,11 @@ public sealed class CounterpartSamplesTests : IDisposable
     // ---- C. settings: scopes and grayed rows -------------------------------------------------------
 
     /// <summary>
-    /// The server-led page: three sections in order; the server options are server-scoped, synced and
-    /// opted into administrator edits, and need the server part; the client options for the server need
-    /// the server part and declare no scope; of the client options for the client only the join check
-    /// works without the server part. Offline every needs-server-part row is grayed with its fallback.
+    /// The cfg page contains server options and local popup options, but no duplicate personal
+    /// server controls. Those come from Core's manifest. Local server-dependent rows gray offline.
     /// </summary>
     [Fact]
-    public void Server_led_page_has_three_scoped_sections_grayed_offline()
+    public void Server_led_cfg_page_has_no_duplicate_personal_server_rows()
     {
         ServerSettings.Install();
         var file = File("serverled");
@@ -335,7 +334,7 @@ public sealed class CounterpartSamplesTests : IDisposable
         string id = ServerLedDeclaration.Guid;
 
         var sections = registration.Sections();
-        Assert.Equal(new[] { ServerLedSettings.SectionServer, ServerLedSettings.SectionForServer, ServerLedSettings.SectionForClient },
+        Assert.Equal(new[] { ServerLedSettings.SectionServer, ServerLedSettings.SectionForClient },
             sections.Select(s => s.Title).ToArray());
 
         Assert.True(ServerSettings.IsEditable(id + "/Server/AnnounceMinutes"));
@@ -360,8 +359,8 @@ public sealed class CounterpartSamplesTests : IDisposable
 
         Expect("Server/AnnounceMinutes", "server", true, ServerLedSettings.FallbackServer);
         Expect("Server/Greeting", "server", true, ServerLedSettings.FallbackServer);
-        Expect("ForServer/ReceiveAnnouncements", "", true, ServerLedSettings.FallbackForServer);
-        Expect("ForServer/Delivery", "", true, ServerLedSettings.FallbackForServer);
+        Assert.DoesNotContain("ForServer/ReceiveAnnouncements", rows.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ForServer/Delivery", rows.GetRawText(), StringComparison.Ordinal);
         Expect("Client/PopupSeconds", "local", true, ServerLedSettings.FallbackPopup);
         Expect("Client/LogAnnouncements", "local", true, ServerLedSettings.FallbackPopup);
         Expect("Client/JoinCheck", "local", false, "");
@@ -371,7 +370,7 @@ public sealed class CounterpartSamplesTests : IDisposable
         registration.Dispose();
         var serverFile = File("serverled-server");
         var serverEntries = ServerLedEntries.Bind(new ServerLedBinder(serverFile, "test.serverled.server", _syncs), isClient: false);
-        Assert.Null(serverEntries.ReceiveAnnouncements);
+        Assert.Null(serverEntries.PopupSeconds);
         var serverPage = ModSettingsPages.Register(_owner, "test.serverled.server", page => ServerLedSettings.Build(page, serverEntries, null));
         Assert.Equal(new[] { ServerLedSettings.SectionServer }, serverPage.Sections().Select(s => s.Title).ToArray());
         Assert.Equal(2, serverPage.ServerEditCount);
@@ -394,17 +393,15 @@ public sealed class CounterpartSamplesTests : IDisposable
         var panel = UiApi.Panel("ServerLed", _owner, "example.ui.test");
         view.Build(panel, (_, _, _) => { });
 
-        Assert.False(_runtime.InteractableOf("toggle", "Receive announcements"));
-        Assert.Contains(ModSettingsLayout.ServerPartMissingReason, _runtime.HelpOf("toggle", "Receive announcements"), StringComparison.Ordinal);
-        Assert.Contains(ServerLedSettings.FallbackForServer, _runtime.HelpOf("toggle", "Receive announcements"), StringComparison.Ordinal);
+        Assert.Contains(ModSettingsLayout.ServerPartMissingReason, _runtime.HelpOf("toggle", "Log announcements"), StringComparison.Ordinal);
+        Assert.Contains(ServerLedSettings.FallbackPopup, _runtime.HelpOf("toggle", "Log announcements"), StringComparison.Ordinal);
         Assert.False(_runtime.InteractableOf("toggle", "Log announcements"));
         Assert.True(_runtime.InteractableOf("toggle", "Join check"));
 
         state = ServerPartState.Running;
         view.Reevaluate();
-        Assert.True(_runtime.InteractableOf("toggle", "Receive announcements"));
         Assert.True(_runtime.InteractableOf("toggle", "Log announcements"));
-        Assert.DoesNotContain(ServerLedSettings.FallbackForServer, _runtime.HelpOf("toggle", "Receive announcements"), StringComparison.Ordinal);
+        Assert.DoesNotContain(ServerLedSettings.FallbackPopup, _runtime.HelpOf("toggle", "Log announcements"), StringComparison.Ordinal);
         Assert.True(_runtime.InteractableOf("toggle", "Join check"));
 
         view.Release();
@@ -470,94 +467,59 @@ public sealed class CounterpartSamplesTests : IDisposable
 
     // ---- D. the server-led server honors each player's preferences ----------------------------------
 
-    /// <summary>
-    /// Per-player preferences on the server: a player without the client part gets the chat line; one
-    /// whose client part chose Popup gets the message while that client offers <c>popups</c>, and the
-    /// chat line once it does not; one who turned announcements off gets nothing; an invalid, early or
-    /// pre-handshake message changes nothing; a disconnect returns the slot to the defaults.
-    /// </summary>
+    /// <summary>The sample reads real persisted values using full platform IDs. Reopening the
+    /// store models a reload; removing the popup client changes routing, not saved preferences.</summary>
     [Fact]
-    public void Server_led_server_applies_each_players_preferences()
+    public void Server_led_server_applies_persisted_preferences_per_platform_account()
     {
-        var table = new ServerLedPolicy.PrefsTable();
-        const int noClientPart = 1, popup = 2, off = 3;
+        var store = new PlayerSettingsStore(_dir, ServerLedDeclaration.Guid);
+        const ulong popup = ulong.MaxValue, off = ulong.MaxValue - 1, fresh = 7;
+        store.Set(popup, "ForServer/Delivery", "Popup", "Chat");
+        store.Set(off, "ForServer/ReceiveAnnouncements", "false", "true");
+        ServerLedPolicy.PlayerPrefs Read(ulong id) => ServerLedPolicy.PreferencesFor(id,
+            account => bool.Parse(store.Get(account, "ForServer/ReceiveAnnouncements", "true")),
+            account => store.Get(account, "ForServer/Delivery", "Chat"));
 
-        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(table.For(noClientPart, 20), clientShowsPopups: false));
+        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(Read(fresh), false));
+        Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(Read(popup), true));
+        Assert.Equal(ServerLedPolicy.Route.Skip, ServerLedPolicy.RouteFor(Read(off), true));
+        Assert.Equal(ServerLedPolicy.Route.Skip, ServerLedPolicy.RouteFor(Read(off), false));
+        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(Read(popup), false));
 
-        bool Receive(int user, PrefsMessage message, double now, string status = "ok")
-        {
-            var verdict = ServerLedPolicy.Admit(message, status, table.SecondsSince(user, now));
-            if (verdict != ServerLedPolicy.Verdict.Ok) return false;
-            table.Set(user, ServerLedPolicy.FromMessage(message), now);
-            return true;
-        }
+        store = new PlayerSettingsStore(_dir, ServerLedDeclaration.Guid);
+        Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(Read(popup), true));
+        Assert.Equal(ServerLedPolicy.Route.Skip, ServerLedPolicy.RouteFor(Read(off), false));
+        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(Read(fresh), true));
+        store.Set(off, "ForServer/ReceiveAnnouncements", "true", "true");
+        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(Read(off), false));
+        Assert.Contains("server-owned per-account", ServerLedPolicy.StatusLines(10, "Hello", Read(popup))[1], StringComparison.Ordinal);
 
-        Assert.True(Receive(popup, ServerLedPolicy.ToMessage(true, "Popup"), 10));
-        Assert.True(Receive(off, ServerLedPolicy.ToMessage(false, "Chat"), 10));
-        Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(table.For(popup, 20), clientShowsPopups: true));
-        Assert.Equal(ServerLedPolicy.Route.Skip, ServerLedPolicy.RouteFor(table.For(off, 20), clientShowsPopups: true));
-        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(table.For(noClientPart, 20), clientShowsPopups: true));
-        Assert.Equal(2, table.CountAt(20));
-        // A Popup preference from a client that no longer offers popups (its part unloaded, its table not
-        // known yet) gets the chat line, not a message nobody shows.
-        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(table.For(popup, 20), clientShowsPopups: false));
-
-        // Refusals change nothing.
-        PrefsMessage Chat() => ServerLedPolicy.ToMessage(true, "Chat");
-        Assert.False(Receive(popup, Chat(), 11));                                         // too soon after the last one
-        Assert.False(Receive(popup, Chat(), 20, status: "pending"));                      // handshake not passed
-        Assert.False(Receive(popup, new PrefsMessage { Kind = 5 }, 20));                  // a kind this version does not know
-        Assert.False(Receive(popup, new PrefsMessage { Delivery = 7 }, 20));              // a delivery this version does not know
-        Assert.Equal(ServerLedPolicy.Verdict.BadValue, ServerLedPolicy.Admit(null, "ok", null));
-        Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(table.For(popup, 20), clientShowsPopups: true));
-
-        // A later, valid change is honored; a disconnect returns the slot to the defaults.
-        Assert.True(Receive(popup, Chat(), 20));
-        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(table.For(popup, 20), clientShowsPopups: true));
-        Assert.True(table.Forget(off));
-        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(table.For(off, 20), clientShowsPopups: true));
-        Assert.False(table.For(off, 20).FromClient);
-
-        // The defaults can never pick a popup: that needs the client part.
-        Assert.Equal(ServerLedPolicy.Route.Chat,
-            ServerLedPolicy.RouteFor(new ServerLedPolicy.PlayerPrefs(true, ServerLedPolicy.WirePopup, fromClient: false), clientShowsPopups: true));
-
-        // The status reply says where the caller's preferences came from.
-        var lines = ServerLedPolicy.StatusLines(10, "Hello", table.For(popup, 20), table.CountAt(20));
-        Assert.Contains("sent by your client part", lines[1], StringComparison.Ordinal);
-        Assert.Contains("server defaults", ServerLedPolicy.StatusLines(10, "Hello", table.For(noClientPart, 20), 1)[1], StringComparison.Ordinal);
-
-        // The plugin asks each player's client before it routes, and falls back to the chat line when the
-        // popup's send does not go out.
         string plugin = SourcePin.ReadFile("samples", "Progenitor.SampleServerLed", "Plugin.cs");
+        SourcePin.AssertUncommented(plugin, "RouteFor(Preferences(user.PlatformId), showsPopups)");
+        SourcePin.AssertUncommented(plugin, "id => _receive.For(new PlayerAccountId(id))");
+        SourcePin.AssertUncommented(plugin, "id => _delivery.For(new PlayerAccountId(id))");
+        SourcePin.AssertUncommented(plugin, "half.Status(ctx.User.PlatformId)");
         SourcePin.AssertUncommented(plugin, "bool showsPopups = _ctx.Peers.Of(entity).Has(ServerLedMessages.FeaturePopups);");
         SourcePin.AssertUncommented(plugin, "if (_ctx.Messages.SendTo(entity, message) == SendResult.Sent) popup++;");
         SourcePin.AssertUncommented(plugin, "else if (_ctx.Chat.SendTo(entity, text)) chat++;");
-        SourcePin.AssertUncommented(plugin, "_ctx.Features.Offer(ServerLedMessages.FeaturePrefs);");
-        SourcePin.AssertUncommented(plugin, "_ctx.Features.Offer(ServerLedMessages.FeaturePopups);");
     }
 
-    /// <summary>
-    /// The client part sends only to a server part that offers <c>prefs</c> on an accepted join; it
-    /// sends on the first chance, on a change (at most every 3 s) and as a heartbeat every 60 s.
-    /// </summary>
     [Fact]
-    public void Server_led_client_sends_only_to_a_server_part_that_takes_prefs()
+    public void Server_led_uses_Core_personal_settings_without_cfg_or_custom_push()
     {
-        var chat = ServerLedPolicy.ToMessage(true, "Chat");
-        var popup = ServerLedPolicy.ToMessage(true, "Popup");
-        Assert.False(ServerLedPolicy.ShouldSend(serverTakesPrefs: false, true, chat, null, 999));
-        Assert.False(ServerLedPolicy.ShouldSend(serverTakesPrefs: true, false, chat, null, 999));
-        Assert.True(ServerLedPolicy.ShouldSend(serverTakesPrefs: true, true, chat, null, 0));
-        Assert.False(ServerLedPolicy.ShouldSend(serverTakesPrefs: true, true, chat, chat, 30));
-        Assert.True(ServerLedPolicy.ShouldSend(serverTakesPrefs: true, true, chat, chat, 60));
-        Assert.False(ServerLedPolicy.ShouldSend(serverTakesPrefs: true, true, popup, chat, 1));
-        Assert.True(ServerLedPolicy.ShouldSend(serverTakesPrefs: true, true, popup, chat, 3));
-        Assert.Equal(ServerLedPolicy.WireChat, ServerLedPolicy.WireDelivery("nonsense"));
-
         string plugin = SourcePin.ReadFile("samples", "Progenitor.SampleServerLed", "Plugin.cs");
-        SourcePin.AssertUncommented(plugin, "bool serverTakesPrefs = _ctx.Peer.Has(ServerLedMessages.FeaturePrefs);");
-        SourcePin.AssertUncommented(plugin, "&& _ctx.Messages.SendToServer(current) == SendResult.Sent)");
+        SourcePin.AssertUncommented(plugin, "PlayerSetting<bool> receive = ctx.Settings.PerPlayer(\"ForServer\", \"ReceiveAnnouncements\", true,");
+        SourcePin.AssertUncommented(plugin, "PlayerSetting<string> delivery = ctx.Settings.PerPlayer(\"ForServer\", \"Delivery\", ServerLedPolicy.DeliveryChat,");
+        SourcePin.AssertUncommented(plugin, "acceptableValues: new AcceptableValueList<string>(ServerLedPolicy.DeliveryChoices)");
+        SourcePin.AssertUncommented(plugin, "scope: SettingScope.ServerWide, description: description");
+        SourcePin.AssertUncommented(plugin, "_ctx.Features.Offer(ServerLedMessages.FeaturePopups);");
+        Assert.DoesNotContain("SendToServer", plugin, StringComparison.Ordinal);
+        Assert.DoesNotContain("PrefsMessage", plugin, StringComparison.Ordinal);
+        Assert.DoesNotContain("FeaturePrefs", plugin, StringComparison.Ordinal);
+        Assert.DoesNotContain("SayGoodbye", plugin, StringComparison.Ordinal);
+        string settings = SourcePin.ReadFile("samples", "Progenitor.SampleServerLed", "ServerLedSettings.cs");
+        Assert.DoesNotContain("ReceiveAnnouncements", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("entries.Delivery", settings, StringComparison.Ordinal);
     }
 
     /// <summary>The announcement schedule, its text, and the popup showing exactly that text.</summary>
@@ -663,40 +625,15 @@ public sealed class CounterpartSamplesTests : IDisposable
         Assert.Null(table.SecondsSince(4, 12));
     }
 
-    /// <summary>
-    /// Review: a Popup preference must not outlive the client part. Without a message for two and a half
-    /// heartbeats the server uses its defaults (a chat line); a goodbye message (sent on unload) drops
-    /// them at once, even right after a heartbeat. What this would catch: a player whose client part was
-    /// switched off getting no announcements at all.
-    /// </summary>
     [Fact]
-    public void Server_led_popup_preference_expires_and_goodbye_returns_the_chat_line()
+    public void Server_led_unidentified_players_do_not_read_a_persisted_account()
     {
-        var table = new ServerLedPolicy.PrefsTable();
-        const int user = 7;
-        var popup = ServerLedPolicy.ToMessage(true, "Popup");
-        Assert.Equal(ServerLedPolicy.Verdict.Ok, ServerLedPolicy.Admit(popup, "ok", null));
-        table.Set(user, ServerLedPolicy.FromMessage(popup), 100);
-
-        Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(table.For(user, 100 + ServerLedPolicy.HeartbeatSeconds), clientShowsPopups: true));
-        Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(table.For(user, 100 + ServerLedPolicy.StaleSeconds), clientShowsPopups: true));
-        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(table.For(user, 101 + ServerLedPolicy.StaleSeconds), clientShowsPopups: true));
-        Assert.Equal(0, table.CountAt(101 + ServerLedPolicy.StaleSeconds));
-        Assert.True(ServerLedPolicy.StaleSeconds >= 2 * ServerLedPolicy.HeartbeatSeconds);
-
-        // A heartbeat renews it; a goodbye right after (inside the rate limit) is still accepted.
-        table.Set(user, ServerLedPolicy.FromMessage(popup), 400);
-        var gone = ServerLedPolicy.GoneMessage();
-        Assert.Equal(ServerLedPolicy.KindGone, gone.Kind);
-        Assert.Equal(ServerLedPolicy.Verdict.Ok, ServerLedPolicy.Admit(gone, "ok", table.SecondsSince(user, 400.5)));
-        Assert.Equal(ServerLedPolicy.Verdict.TooSoon, ServerLedPolicy.Admit(popup, "ok", table.SecondsSince(user, 400.5)));
-        Assert.Equal(ServerLedPolicy.Verdict.NotHandshaken, ServerLedPolicy.Admit(gone, null, null));
-
-        // The plugin forgets the player on a goodbye, and the client part sends one from OnUnload.
-        string plugin = SourcePin.ReadFile("samples", "Progenitor.SampleServerLed", "Plugin.cs");
-        SourcePin.AssertUncommented(plugin, "if (message.Kind == ServerLedPolicy.KindGone)");
-        SourcePin.AssertUncommented(plugin, "ClientHalf.Active?.SayGoodbye();");
-        SourcePin.AssertUncommented(plugin, "RouteFor(_prefs.For(user.Index, now), showsPopups)");
+        var prefs = ServerLedPolicy.PreferencesFor(0,
+            _ => throw new InvalidOperationException("Must not read account zero"),
+            _ => throw new InvalidOperationException("Must not read account zero"));
+        Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(prefs, true));
+        Assert.Equal(ServerLedPolicy.Route.Chat,
+            ServerLedPolicy.RouteFor(new ServerLedPolicy.PlayerPrefs(true, "unknown-choice"), true));
     }
 
     /// <summary>

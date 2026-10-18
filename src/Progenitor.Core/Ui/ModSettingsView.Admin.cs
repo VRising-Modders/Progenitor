@@ -34,7 +34,7 @@ internal sealed partial class ModSettingsView
         {
             // Live 2026-10-06: a player who is not an admin reads the row as every other server row does: "Admin only ·
             // <value>" in the control column (the password only Set / Not set), never a grayed control.
-            var info = panel.Info(caption, () => AdminOnlyPrefix + AdminShown(binding, spec), 1);
+            var info = panel.Info(caption, () => (spec.Personal || (spec.Manifest && spec.ReadOnlyNow() != SettingAvailability.AdminOnlyReason) ? "" : AdminOnlyPrefix) + AdminShown(binding, spec), 1);
             binding.Editor = "readonly";
             binding.Sync = () => SyncAdmin(binding, spec, _ => { });
             handle = info;
@@ -144,7 +144,7 @@ internal sealed partial class ModSettingsView
 
                 void Press()
                 {
-                    string typed = spec.WriteOnly ? input.Value ?? "" : UiCommitText.Trim(input.Value ?? "");
+                    string typed = spec.WriteOnly || spec.Manifest ? input.Value ?? "" : UiCommitText.Trim(input.Value ?? "");
                     int max = spec.MaxNowValue();
                     if (spec.Kind == AdminSettingKind.Number
                         && (!int.TryParse(typed, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
@@ -176,7 +176,7 @@ internal sealed partial class ModSettingsView
                     if (input.IsDisposed) return;
                     if (spec.WriteOnly) return;
                     if (string.Equals(input.Value ?? "", lastShown, StringComparison.Ordinal)) Show(shown);
-                    else lastShown = shown ?? "";
+                    else binding.ServerShown = lastShown; // Keep the displayed baseline while a draft is in progress.
                 });
                 handle = input;
                 break;
@@ -185,6 +185,18 @@ internal sealed partial class ModSettingsView
 
         binding.Handles.Insert(0, handle);
         binding.Main = handle;
+        if (spec.Manifest && spec.DefaultValue != null && !binding.BuiltViewOnly)
+        {
+            var reset = panel.GutterLink(handle, ResetGlyph, ResetTooltipPrefix + spec.DefaultValue);
+            reset.OnClick(() => ResetRemote(binding, spec));
+            binding.Reset = reset;
+            add(reset, RowSettingReset, (Func<object?>)(() => new Dictionary<string, object?>
+            {
+                ["id"] = spec.SettingId,
+                ["visible"] = !reset.IsDisposed && reset.Visible,
+                ["state"] = ResetStateName(ResetState(binding)),
+            }));
+        }
         _bindings.Add(binding);
         WatchHover(panel, binding);
         add(handle, RowSetting, (Func<object?>)(() => DescribeAdmin(binding, spec)));
@@ -260,7 +272,7 @@ internal sealed partial class ModSettingsView
     private void SendAdmin(ItemBinding binding, AdminSettingSpec spec, string value, Action<string?> shown)
     {
         string current = binding.ServerShown ?? "";
-        if (binding.RequestPending || !binding.Enabled || binding.ServerShown == null)
+        if (binding.RequestPending || !binding.Enabled || spec.ViewOnlyNow() || spec.ReadOnlyNow() != null || binding.ServerShown == null)
         {
             string why = binding.RequestPending ? "a request is already waiting for the server"
                 : !binding.Enabled ? binding.Why
@@ -397,7 +409,11 @@ internal sealed partial class ModSettingsView
             WriteHelp(binding);
         }
 
-        try { spec.Send(value, Done); }
+        try
+        {
+            if (spec.SendExpected != null) _requests.Add(spec.SendExpected(value, binding.ServerShown, Done));
+            else spec.Send(value, Done);
+        }
         catch (Exception e) { Done(false, e.Message); }
     }
 
@@ -442,9 +458,12 @@ internal sealed partial class ModSettingsView
             ["lockedBy"] = lockedBy,
             ["requestPending"] = binding.RequestPending,
             ["status"] = binding.Status,
-            ["store"] = SettingPlaces.StoreJoinAdmin,
+            ["store"] = spec.Manifest ? (spec.Personal ? "server-player" : "server-config") : SettingPlaces.StoreJoinAdmin,
+            ["default"] = spec.DefaultValue,
+            ["bounds"] = spec.Bounds,
             ["confirmOpen"] = AdminConfirm != null,
             ["pending"] = spec.PendingNow(),
+            ["needsRestart"] = binding.Item.Options.NeedsRestart,
             ["readOnlyReason"] = spec.ReadOnlyNow() ?? "",
             ["note"] = spec.NoteNow() ?? "",
             ["writeOnly"] = spec.WriteOnly,
@@ -480,7 +499,7 @@ internal sealed partial class ModSettingsView
             else d["field"] = input.Value ?? "";
         }
         AddScopeReadback(d, binding.Section, binding);
-        SettingPlaces.AddReadback(d, spec.SettingId, SettingPlaces.PluginId, keybind: false);
+        if (!spec.Manifest) SettingPlaces.AddReadback(d, spec.SettingId, SettingPlaces.PluginId, keybind: false);
         return d;
     }
 }

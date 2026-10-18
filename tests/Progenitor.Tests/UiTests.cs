@@ -678,7 +678,7 @@ public class UiTests : IDisposable
                 if (search)
                 {
                     // Same strings Unity assigns to the hint TMPs. Not the container caption.
-                    w.PlaceholderText = MenuRowStyle.SearchPlaceholder;
+                    w.PlaceholderText = text;
                     w.GlyphText = MenuRowStyle.PickSearchGlyph(null);
                     w.HasSearchGlyphIcon = string.IsNullOrEmpty(w.GlyphText);
                 }
@@ -1225,7 +1225,7 @@ public class UiTests : IDisposable
 
         public bool TryReadSearchField(out string text, out bool focused)
         {
-            var w = FindWidget("input", MenuRowStyle.SearchPlaceholder);
+            var w = FindWidget("input", ModsMenu.SearchPlaceholder);
             if (w == null)
             {
                 text = "";
@@ -1259,7 +1259,7 @@ public class UiTests : IDisposable
         /// </summary>
         public bool FocusSearchField()
         {
-            var w = FindWidget("input", MenuRowStyle.SearchPlaceholder);
+            var w = FindWidget("input", ModsMenu.SearchPlaceholder);
             if (w == null) return false;
             _ownedFocus = w;
             _eventSystemFocus = true;
@@ -1272,7 +1272,7 @@ public class UiTests : IDisposable
         public bool LeaveSearchField()
         {
             LeaveSearchCalls++;
-            var w = FindWidget("input", MenuRowStyle.SearchPlaceholder);
+            var w = FindWidget("input", ModsMenu.SearchPlaceholder);
             if (w == null || !ReferenceEquals(_ownedFocus, w)) return false;
             ClearOwnedFocus();
             return true;

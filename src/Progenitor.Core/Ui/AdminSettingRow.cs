@@ -59,6 +59,12 @@ internal sealed class AdminSettingSpec
 {
     /// <summary>The setting id (<see cref="SettingPlaces.JoinAdminId"/>): readback <c>settingId</c>, <c>home</c>, <c>alsoAt</c>.</summary>
     internal string SettingId { get; init; } = "";
+    internal bool Manifest { get; init; }
+    internal bool Personal { get; init; }
+    internal string PluginId { get; init; } = "";
+    internal string? DefaultValue { get; init; }
+    internal string Bounds { get; init; } = "";
+    internal Func<string, string?, Action<bool, string>, IDisposable>? SendExpected { get; init; }
 
     /// <summary>The cell-row and readback key (the operation word).</summary>
     internal string Key { get; init; } = "";

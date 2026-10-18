@@ -27,6 +27,12 @@ internal static class ServerSettingsTestBridge
     /// <summary>The stored value of <paramref name="rowId"/> (<c>plugin/Section/Key</c>) on this side, with its limits.</summary>
     public static Dictionary<string, object?> Get(string rowId)
     {
+        if (!Plugin.IsServerProcess && ScopedSettings.ReadClient(rowId) is { } remote)
+        {
+            var result = new Dictionary<string, object?> { ["ok"] = true, ["side"] = "client", ["row"] = rowId, ["source"] = "server-manifest" };
+            Describe(result, remote);
+            return result;
+        }
         if (!TrySplit(rowId, out string plugin, out string section, out string key))
             return Error("args.row must be <plugin guid>/<Section>/<Key>");
         if (!ConfigSync.TryFindEntry(plugin, section, key, out var entry) || entry == null)
@@ -110,11 +116,14 @@ internal static class ServerSettingsTestBridge
         Tickets[id] = ticket;
         try
         {
-            ticket.Lease = ServerSettings.RequestCore(rowId ?? "", value ?? "", expected, result =>
+            void Completed(ServerSettingResult result)
             {
                 ticket.Done = true;
                 ticket.Result = result;
-            }, clientCheck: !skipClientCheck);
+            }
+            ticket.Lease = ScopedSettings.ReadClient(rowId ?? "") != null
+                ? ScopedSettings.Request(rowId ?? "", value ?? "", expected, Completed)
+                : ServerSettings.RequestCore(rowId ?? "", value ?? "", expected, Completed, clientCheck: !skipClientCheck);
         }
         catch (Exception e)
         {

@@ -3,14 +3,15 @@ using System.Collections.Generic;
 using System.Linq;
 using Progenitor.SampleServerLed;
 using Progenitor.Testing;
+using Progenitor.Networking;
 using Xunit;
 
 namespace Progenitor.SampleTests.ServerLed;
 
 /// <summary>
-/// The server-led sample's messages (<c>samples/Progenitor.SampleServerLed/ServerLedMessages.cs</c>, linked as source)
-/// against its fixtures: what 1.0.0 sends, replayed through today's types and validation, with unknown fields
-/// added, and its declared range <c>&gt;=1.0.0 &lt;2.0.0</c> checked against the recorded versions.
+/// Frozen 1.0.0 fixtures: the announcement still uses the production type. Preference packets
+/// replay through a test-only legacy schema, not a runtime handler. This does not verify the new
+/// Core personal-settings protocol or claim old clients can edit the new server preferences.
 /// </summary>
 public sealed class ServerLedReplayTests
 {
@@ -18,16 +19,16 @@ public sealed class ServerLedReplayTests
     private const string Mod = "progenitor.sampleserverled";
     private const string Current = "1.0.0";
 
-    /// <summary>The range <c>ServerLedDeclaration.Peers</c> declares (pinned against the source below).</summary>
+    /// <summary>The archived release range, used only for its frozen replay evidence.</summary>
     private const string Peers = ">=1.0.0 <2.0.0";
 
     /// <summary>What 1.0.0 sends: preferences (both deliveries, announcements off), the goodbye and one announcement.</summary>
     private static readonly SampleMessage[] Sent =
     {
-        new(Current, new PrefsMessage { Kind = ServerLedMessages.KindPrefs, Receive = true, Delivery = ServerLedMessages.WirePopup }, "to-server"),
-        new(Current, new PrefsMessage { Kind = ServerLedMessages.KindPrefs, Receive = true, Delivery = ServerLedMessages.WireChat }, "to-server"),
-        new(Current, new PrefsMessage { Kind = ServerLedMessages.KindPrefs, Receive = false, Delivery = ServerLedMessages.WireChat }, "to-server"),
-        new(Current, new PrefsMessage { Kind = ServerLedMessages.KindGone }, "to-server"),
+        new(Current, new LegacyPrefsMessage { Kind = LegacyPrefsWire.KindPrefs, Receive = true, Delivery = LegacyPrefsWire.WirePopup }, "to-server"),
+        new(Current, new LegacyPrefsMessage { Kind = LegacyPrefsWire.KindPrefs, Receive = true, Delivery = LegacyPrefsWire.WireChat }, "to-server"),
+        new(Current, new LegacyPrefsMessage { Kind = LegacyPrefsWire.KindPrefs, Receive = false, Delivery = LegacyPrefsWire.WireChat }, "to-server"),
+        new(Current, new LegacyPrefsMessage { Kind = LegacyPrefsWire.KindGone }, "to-server"),
         new(Current, new AnnounceMessage { Sequence = 3, Text = "Welcome. This server runs the server-led sample. · 2 players online · server up 1 h 5 min." }, "to-client"),
     };
 
@@ -41,18 +42,18 @@ public sealed class ServerLedReplayTests
         Assert.All(fixtures.All, f => Assert.Equal("test", f.Source));
     }
 
-    /// <summary>Every recorded preference passes the server's value check; the kinds and deliveries all arrive.</summary>
+    /// <summary>Archived preferences still satisfy their historical value check.</summary>
     [Fact]
-    public void Recorded_preferences_replay_through_the_servers_validation()
+    public void Archived_preferences_replay_through_the_legacy_value_check()
     {
         var seen = new List<string>();
-        MessageCompat.Replay<PrefsMessage>(Fixtures(), (m, f) =>
+        MessageCompat.Replay<LegacyPrefsMessage>(Fixtures(), (m, f) =>
         {
-            Assert.True(ServerLedMessages.IsValid(m), f + ": refused by the value check");
+            Assert.True(LegacyPrefsWire.IsValid(m), f + ": refused by the value check");
             seen.Add(m.Kind + "/" + m.Receive + "/" + m.Delivery);
         }).ThrowIfFailed();
-        Assert.Contains(ServerLedMessages.KindGone + "/True/0", seen);
-        Assert.Contains("0/True/" + ServerLedMessages.WirePopup, seen);
+        Assert.Contains(LegacyPrefsWire.KindGone + "/True/0", seen);
+        Assert.Contains("0/True/" + LegacyPrefsWire.WirePopup, seen);
         Assert.Contains("0/False/0", seen);
     }
 
@@ -68,20 +69,22 @@ public sealed class ServerLedReplayTests
     [Fact]
     public void Every_message_skips_fields_a_newer_version_adds()
     {
-        MessageCompat.AssertSkipsUnknownFields(new PrefsMessage { Receive = false, Delivery = ServerLedMessages.WirePopup });
-        MessageCompat.AssertSkipsUnknownFields(new PrefsMessage { Kind = ServerLedMessages.KindGone }, seed: 7);
+        MessageCompat.AssertSkipsUnknownFields(new LegacyPrefsMessage { Receive = false, Delivery = LegacyPrefsWire.WirePopup });
+        MessageCompat.AssertSkipsUnknownFields(new LegacyPrefsMessage { Kind = LegacyPrefsWire.KindGone }, seed: 7);
         MessageCompat.AssertSkipsUnknownFields(new AnnounceMessage { Sequence = 9, Text = "Grüße · 1 player online." });
     }
 
     /// <summary>
-    /// Every recorded message has a type here, and the declared range is backed: each fixture from a version inside it
-    /// reads with today's types and today's messages stay readable by it.
+    /// Every archived message still has a decoder here. This checks the frozen release's
+    /// contract; only AnnounceMessage remains a production message.
     /// </summary>
     [Fact]
-    public void The_declared_range_is_backed_by_the_recorded_versions()
+    public void The_archived_1_0_0_contract_remains_readable()
     {
-        var types = MessageTypes.In(typeof(PrefsMessage).Assembly, typeof(PrefsMessage).Namespace);
-        Assert.Equal(new[] { typeof(AnnounceMessage), typeof(PrefsMessage) }, types.ToArray());
+        // The production sample only owns announcements now; legacy preferences stay in tests.
+        var productionTypes = MessageTypes.In(typeof(AnnounceMessage).Assembly, typeof(AnnounceMessage).Namespace);
+        Assert.Equal(new[] { typeof(AnnounceMessage) }, productionTypes.ToArray());
+        var types = new[] { typeof(AnnounceMessage), typeof(LegacyPrefsMessage) };
         var fixtures = Fixtures();
         MessageCompat.ReplayAll(fixtures, types).ThrowIfFailed();
         // 1.0.0 is the first release: no older version exists to back the range yet, so it is allowed and said to be unproven.
@@ -90,8 +93,23 @@ public sealed class ServerLedReplayTests
         Assert.False(MessageCompat.CheckRange(Peers, Current, fixtures, types).Ok);
         Assert.Equal(new[] { Current }, range.Versions.ToArray());
 
-        string declaration = SampleFixtures.RepoFile("samples/Progenitor.SampleServerLed/ServerLedPolicy.cs");
-        Assert.Contains("internal const string Peers = \"" + Peers + "\";", declaration, StringComparison.Ordinal);
-        Assert.Contains("internal const string Version = \"" + Current + "\";", declaration, StringComparison.Ordinal);
+
     }
+}
+
+// Frozen historical wire shape. Never shipped by the sample or registered by Plugin.cs.
+[ModMessage("prefs")]
+internal sealed class LegacyPrefsMessage
+{
+    [Field(1)] public int Kind;
+    [Field(2)] public bool Receive = true;
+    [Field(3)] public int Delivery;
+}
+
+internal static class LegacyPrefsWire
+{
+    internal const int KindPrefs = 0, KindGone = 1, WireChat = 0, WirePopup = 1;
+    internal static bool IsValid(LegacyPrefsMessage? message) => message != null
+        && message.Kind is KindPrefs or KindGone
+        && (message.Kind == KindGone || message.Delivery is WireChat or WirePopup);
 }

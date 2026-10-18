@@ -752,7 +752,7 @@ public sealed class ModsMenuTests : IDisposable
         Assert.Contains("\"totalRows\":", openJson);
         Assert.Contains("\"listScroll\":", openJson);
 
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "zEd"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "zEd"));
         string filtered = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"zEd\"", filtered);
         Assert.Contains("\"id\":\"zed.mod\"", filtered);
@@ -786,18 +786,18 @@ public sealed class ModsMenuTests : IDisposable
         using var fixture = ModsMenu.Register(new object(), "zed.mod", "Fixture");
         ModsMenu.Open();
 
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "f"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "f"));
         string afterF = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"f\"", afterF);
         Assert.Contains("\"id\":\"zed.mod\"", afterF);
         Assert.DoesNotContain("\"id\":\"alpha.mod\"", afterF);
 
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "fi"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "fi"));
         string afterFi = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"fi\"", afterFi);
         Assert.Contains("\"id\":\"zed.mod\"", afterFi);
 
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "fix"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "fix"));
         string afterFix = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"fix\"", afterFix);
         Assert.Contains("\"id\":\"zed.mod\"", afterFix);
@@ -813,13 +813,13 @@ public sealed class ModsMenuTests : IDisposable
         var panel = ModsMenu.SidebarHeldForTests;
         Assert.NotNull(panel);
 
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "f"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "f"));
         Assert.Same(panel, ModsMenu.SidebarHeldForTests);
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "fi"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "fi"));
         Assert.Same(panel, ModsMenu.SidebarHeldForTests);
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "fix"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "fix"));
         Assert.Same(panel, ModsMenu.SidebarHeldForTests);
-        Assert.Equal("fix", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("fix", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         string commit = SourcePin.MethodBody(
             SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "ModsMenu.cs"),
@@ -868,7 +868,7 @@ public sealed class ModsMenuTests : IDisposable
         SourcePin.AssertUncommented(menu, "Ui.PinMenuRows(panel, MenuRowPin.Content)");
         SourcePin.AssertUncommented(menu, "Ui.PinMenuRows(panel, MenuRowPin.Bottom)");
         SourcePin.AssertUncommented(menu, "Ui.StyleMenuRow(panel, MenuRowTone.Search)");
-        SourcePin.AssertUncommented(menu, "panel.Input(MenuRowStyle.SearchPlaceholder, _search)");
+        SourcePin.AssertUncommented(menu, "panel.Input(SearchPlaceholder, _search)");
         SourcePin.AssertUncommented(addInput, "AttachSearchHints(");
         SourcePin.AssertUncommented(addInput, "BringSearchHintToFront(");
         SourcePin.AssertUncommented(runtime, "SyncSearchHint(field)");
@@ -984,36 +984,36 @@ public sealed class ModsMenuTests : IDisposable
     {
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
-        Assert.False(_runtime.WidgetCaretDrawable("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0f, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
+        Assert.False(_runtime.WidgetCaretDrawable("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0f, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
 
         var keys = new[] { UiKey.B, UiKey.L, UiKey.O, UiKey.O, UiKey.D };
         float previousX = -1f;
         int expectedCaret = 0;
         foreach (var key in keys)
         {
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
             expectedCaret++;
-            Assert.True(_runtime.WidgetCaretDrawable("input", MenuRowStyle.SearchPlaceholder));
-            Assert.True(_runtime.WidgetCaretBlinkOn("input", MenuRowStyle.SearchPlaceholder));
-            Assert.Equal(expectedCaret, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-            float x = _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder);
+            Assert.True(_runtime.WidgetCaretDrawable("input", ModsMenu.SearchPlaceholder));
+            Assert.True(_runtime.WidgetCaretBlinkOn("input", ModsMenu.SearchPlaceholder));
+            Assert.Equal(expectedCaret, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+            float x = _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder);
             Assert.Equal(expectedCaret * UiTests.FakeUiRuntime.FakeCaretAdvance, x);
             Assert.True(x > previousX);
             previousX = x;
-            Assert.True(_runtime.WidgetCaretFitsInField("input", MenuRowStyle.SearchPlaceholder));
-            Assert.True(_runtime.WidgetCaretOnTextLine("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.WidgetCaretFitsInField("input", ModsMenu.SearchPlaceholder));
+            Assert.True(_runtime.WidgetCaretOnTextLine("input", ModsMenu.SearchPlaceholder));
         }
 
-        Assert.Equal("blood", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(5 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("blood", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(5 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
         Assert.Empty(_runtime.RenderedPlaceholders("input"));
-        Assert.True(_runtime.WidgetCaretFitsInField("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.WidgetCaretFitsInField("input", ModsMenu.SearchPlaceholder));
 
         _runtime.ClearOwnedFocus();
-        Assert.False(_runtime.WidgetCaretDrawable("input", MenuRowStyle.SearchPlaceholder));
-        Assert.False(_runtime.WidgetCaretBlinkOn("input", MenuRowStyle.SearchPlaceholder));
+        Assert.False(_runtime.WidgetCaretDrawable("input", ModsMenu.SearchPlaceholder));
+        Assert.False(_runtime.WidgetCaretBlinkOn("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1022,44 +1022,44 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.A, UiKey.B, UiKey.C, UiKey.D })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.Equal(4 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.Equal(4 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftArrow));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftArrow));
-        Assert.Equal(2, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(2 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
-        Assert.True(_runtime.WidgetCaretDrawable("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftArrow));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftArrow));
+        Assert.Equal(2, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(2 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
+        Assert.True(_runtime.WidgetCaretDrawable("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Backspace));
-        Assert.Equal("acd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(1, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Backspace));
+        Assert.Equal("acd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(1, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Delete));
-        Assert.Equal("ad", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(1, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Delete));
+        Assert.Equal("ad", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(1, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Home));
-        Assert.Equal(0f, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.End));
-        Assert.Equal(2 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Home));
+        Assert.Equal(0f, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.End));
+        Assert.Equal(2 * UiTests.FakeUiRuntime.FakeCaretAdvance, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.A, ctrl: true));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Backspace));
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0f, _runtime.WidgetCaretX("input", MenuRowStyle.SearchPlaceholder));
-        Assert.True(_runtime.WidgetCaretDrawable("input", MenuRowStyle.SearchPlaceholder));
-        Assert.True(_runtime.WidgetCaretFitsInField("input", MenuRowStyle.SearchPlaceholder));
-        Assert.True(_runtime.WidgetCaretOnTextLine("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Contains("Search", _runtime.RenderedPlaceholders("input"));
-        Assert.Equal(6, _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.A, ctrl: true));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Backspace));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0f, _runtime.WidgetCaretX("input", ModsMenu.SearchPlaceholder));
+        Assert.True(_runtime.WidgetCaretDrawable("input", ModsMenu.SearchPlaceholder));
+        Assert.True(_runtime.WidgetCaretFitsInField("input", ModsMenu.SearchPlaceholder));
+        Assert.True(_runtime.WidgetCaretOnTextLine("input", ModsMenu.SearchPlaceholder));
+        Assert.Contains(ModsMenu.SearchPlaceholder, _runtime.RenderedPlaceholders("input"));
+        Assert.Equal(ModsMenu.SearchPlaceholder.Length, _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder));
         Assert.True(MenuRowStyle.HintGraphicIsDrawable(
             assigned: true, active: true, graphicEnabled: true,
             alpha: MenuRowStyle.SearchPlaceholderA, rectW: 282f, rectH: 20f,
             hintSiblingIndex: 2, fillSiblingIndex: -1,
-            meshCount: _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder)));
+            meshCount: _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder)));
     }
 
     [Fact]
@@ -1073,22 +1073,22 @@ public sealed class ModsMenuTests : IDisposable
         int expectedCaret = 0;
         foreach (var key in keys)
         {
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
             expectedCaret++;
-            Assert.Equal(expectedCaret, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-            Assert.Equal(0, _runtime.WidgetNativeCaret("input", MenuRowStyle.SearchPlaceholder));
+            Assert.Equal(expectedCaret, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+            Assert.Equal(0, _runtime.WidgetNativeCaret("input", ModsMenu.SearchPlaceholder));
         }
 
-        Assert.Equal("blood", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(5, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.NotEqual(0, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.NotEqual("doolb", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("blood", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(5, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.NotEqual(0, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.NotEqual("doolb", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
         string json = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"blood\"", json);
         Assert.Contains("\"id\":\"blood.mod\"", json);
         Assert.DoesNotContain("\"id\":\"alpha.mod\"", json);
-        Assert.DoesNotContain("bb", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.DoesNotContain("dd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.DoesNotContain("bb", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.DoesNotContain("dd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1097,18 +1097,18 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.A, UiKey.B, UiKey.C, UiKey.D })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.Equal("abcd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(4, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.Equal("abcd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(4, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftArrow));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftArrow));
-        Assert.Equal(2, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftArrow));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftArrow));
+        Assert.Equal(2, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.X, shift: true));
-        Assert.Equal("abXcd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(3, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0, _runtime.WidgetNativeCaret("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.X, shift: true));
+        Assert.Equal("abXcd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(3, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0, _runtime.WidgetNativeCaret("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1117,14 +1117,14 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.A, UiKey.B, UiKey.C, UiKey.D })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftArrow));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftArrow));
-        Assert.Equal(2, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftArrow));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftArrow));
+        Assert.Equal(2, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Backspace));
-        Assert.Equal("acd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(1, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Backspace));
+        Assert.Equal("acd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(1, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1133,14 +1133,14 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.A, UiKey.B })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Home));
-        Assert.Equal(0, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal("ab", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Home));
+        Assert.Equal(0, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal("ab", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Backspace));
-        Assert.Equal("ab", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Backspace));
+        Assert.Equal("ab", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1149,16 +1149,16 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.A, UiKey.B, UiKey.C, UiKey.D })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Home));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.RightArrow, shift: true));
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.RightArrow, shift: true));
-        Assert.Equal(2, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0, _runtime.WidgetAnchor("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Home));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.RightArrow, shift: true));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.RightArrow, shift: true));
+        Assert.Equal(2, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0, _runtime.WidgetAnchor("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Backspace));
-        Assert.Equal("cd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(0, _runtime.WidgetCaret("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Backspace));
+        Assert.Equal("cd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(0, _runtime.WidgetCaret("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1171,8 +1171,8 @@ public sealed class ModsMenuTests : IDisposable
 
         int before = ModsMenu.SearchFilterChanges;
         foreach (var key in new[] { UiKey.B, UiKey.L, UiKey.O, UiKey.O, UiKey.D })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.Equal("blood", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.Equal("blood", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
         Assert.True(_runtime.TryReadSearchField(out _, out bool focused));
         Assert.True(focused);
         int afterType = ModsMenu.SearchFilterChanges;
@@ -1185,10 +1185,10 @@ public sealed class ModsMenuTests : IDisposable
         Assert.False(_runtime.EventSystemFocused);
 
         Assert.True(ModsMenu.IsOpen);
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
         Assert.Equal(afterType + 1, ModsMenu.SearchFilterChanges);
-        Assert.Contains("Search", _runtime.RenderedPlaceholders("input"));
-        Assert.Equal(6, _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Contains(ModsMenu.SearchPlaceholder, _runtime.RenderedPlaceholders("input"));
+        Assert.Equal(ModsMenu.SearchPlaceholder.Length, _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder));
         Assert.Contains(_log.Infos, line =>
             line == UiSearchEscape.Format(
                 UiSearchEscape.Decision.Clear, focused: true, length: 5, alreadyCleared: false));
@@ -1232,7 +1232,7 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         Assert.True(ModsMenu.IsOpen);
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         PressEscapeLikeClient();
 
@@ -1250,12 +1250,12 @@ public sealed class ModsMenuTests : IDisposable
     {
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Z));
-        Assert.Equal("z", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Z));
+        Assert.Equal("z", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         PressEscapeLikeClient();
         Assert.True(ModsMenu.IsOpen);
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
         // The clear rebuilds the list; live, RestoreSearchFocus gives the rebuilt box focus again.
         Assert.True(_runtime.FocusSearchField());
 
@@ -1289,7 +1289,7 @@ public sealed class ModsMenuTests : IDisposable
         using var beta = ModsMenu.Register(new object(), "beta.mod", "Beta");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.U, UiKey.P, UiKey.D })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
         Assert.Equal("upd", ModsMenu.ModsSearchForTests);
 
         // The user report (2026-10-09): text typed for something else stayed in the search, and the
@@ -1298,7 +1298,7 @@ public sealed class ModsMenuTests : IDisposable
         Assert.Equal("", ModsMenu.ModsSearchForTests);
         ModsMenu.Open();
         Assert.Equal("", ModsMenu.ModsSearchForTests);
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1306,7 +1306,7 @@ public sealed class ModsMenuTests : IDisposable
     {
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Z));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Z));
         _runtime.ClearOwnedFocus();
 
         PressEscapeLikeClient();
@@ -1316,7 +1316,7 @@ public sealed class ModsMenuTests : IDisposable
 
         ModsMenu.Open();
         Assert.Equal("", ModsMenu.ModsSearchForTests);
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1324,7 +1324,7 @@ public sealed class ModsMenuTests : IDisposable
     {
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Z));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Z));
         Assert.Equal("z", ModsMenu.ModsSearchForTests);
 
         ModsMenu.SelectWorkspaceTab(ModsTab.Preferences);
@@ -1338,7 +1338,7 @@ public sealed class ModsMenuTests : IDisposable
     {
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Z));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Z));
         _runtime.ClearOwnedFocus();
         Assert.True(_runtime.TryReadSearchField(out string text, out bool focused));
         Assert.Equal("z", text);
@@ -1357,8 +1357,8 @@ public sealed class ModsMenuTests : IDisposable
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
         foreach (var key in new[] { UiKey.A, UiKey.B, UiKey.C, UiKey.D, UiKey.E })
-            Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, key));
-        Assert.Equal("abcde", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+            Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, key));
+        Assert.Equal("abcde", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         var repeat = new UiKeyRepeat();
         void Pump(bool held, bool edge, long nowMs)
@@ -1374,31 +1374,31 @@ public sealed class ModsMenuTests : IDisposable
             else
                 repeat.Reset(UiKey.Backspace);
             if (fire)
-                Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.Backspace));
+                Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.Backspace));
         }
 
         Pump(held: true, edge: true, nowMs: 0);
-        Assert.Equal("abcd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("abcd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         Pump(held: true, edge: false, nowMs: 399);
-        Assert.Equal("abcd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("abcd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         Pump(held: true, edge: false, nowMs: UiKeyRepeat.InitialDelayMs);
-        Assert.Equal("abc", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("abc", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         Pump(held: true, edge: false, nowMs: UiKeyRepeat.InitialDelayMs + UiKeyRepeat.RepeatIntervalMs);
-        Assert.Equal("ab", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("ab", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         Pump(held: false, edge: false, nowMs: 600);
-        Assert.Equal("ab", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("ab", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         Pump(held: true, edge: false, nowMs: 1000);
-        Assert.Equal("ab", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("ab", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         _runtime.ClearOwnedFocus();
         repeat.Reset();
         Pump(held: true, edge: false, nowMs: 1400);
-        Assert.Equal("ab", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("ab", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1406,16 +1406,16 @@ public sealed class ModsMenuTests : IDisposable
     {
         using var alpha = ModsMenu.Register(new object(), "alpha.mod", "Alpha");
         ModsMenu.Open();
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.B));
-        Assert.Equal("b", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.B));
+        Assert.Equal("b", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.LeftCtrl, ctrl: true));
-        Assert.Equal("b", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.DoesNotContain("5", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.LeftCtrl, ctrl: true));
+        Assert.Equal("b", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.DoesNotContain("5", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
-        Assert.True(_runtime.TypeTextKey(MenuRowStyle.SearchPlaceholder, UiKey.A, ctrl: true));
-        Assert.Equal("b", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.DoesNotContain("a", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.True(_runtime.TypeTextKey(ModsMenu.SearchPlaceholder, UiKey.A, ctrl: true));
+        Assert.Equal("b", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.DoesNotContain("a", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1462,14 +1462,14 @@ public sealed class ModsMenuTests : IDisposable
         ModsMenu.Open();
 
         int beforeType = ModsMenu.SearchFilterChanges;
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "zEd"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "zEd"));
         Assert.Equal(beforeType + 1, ModsMenu.SearchFilterChanges);
         string filtered = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"zEd\"", filtered);
         Assert.Contains("\"id\":\"zed.mod\"", filtered);
         Assert.DoesNotContain("\"id\":\"alpha.mod\"", filtered);
         Assert.Empty(_runtime.RenderedPlaceholders("input"));
-        Assert.Equal(0, _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal(0, _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder));
 
         ModsMenu.ListScrollForTests = 0.4f;
         int afterFilter = ModsMenu.SearchFilterChanges;
@@ -1478,15 +1478,15 @@ public sealed class ModsMenuTests : IDisposable
             Assert.Equal(1, clickDoc.RootElement.GetProperty("invoked").GetInt32());
 
         Assert.Equal(afterFilter + 1, ModsMenu.SearchFilterChanges);
-        Assert.Equal("", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Contains("Search", _runtime.RenderedPlaceholders("input"));
-        Assert.Equal(6, _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder));
-        Assert.Equal(MenuRowStyle.SearchPlaceholder.Length, _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
+        Assert.Contains(ModsMenu.SearchPlaceholder, _runtime.RenderedPlaceholders("input"));
+        Assert.Equal(ModsMenu.SearchPlaceholder.Length, _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder));
+        Assert.Equal(ModsMenu.SearchPlaceholder.Length, _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder));
         Assert.True(MenuRowStyle.HintGraphicIsDrawable(
             assigned: true, active: true, graphicEnabled: true,
             alpha: MenuRowStyle.SearchPlaceholderA, rectW: 282f, rectH: 20f,
             hintSiblingIndex: 1, fillSiblingIndex: -1,
-            meshCount: _runtime.PlaceholderMeshCount("input", MenuRowStyle.SearchPlaceholder)));
+            meshCount: _runtime.PlaceholderMeshCount("input", ModsMenu.SearchPlaceholder)));
 
         string restored = JsonSerializer.Serialize(ModsMenu.DescribeWorkspace());
         Assert.Contains("\"search\":\"\"", restored);
@@ -1500,20 +1500,20 @@ public sealed class ModsMenuTests : IDisposable
         Assert.Equal("overview", doc.RootElement.GetProperty("page").GetString());
         Assert.Equal(1.0, doc.RootElement.GetProperty("listScroll").GetProperty("position").GetDouble());
 
-        Assert.True(_runtime.FireText(MenuRowStyle.SearchPlaceholder, "zEd"));
+        Assert.True(_runtime.FireText(ModsMenu.SearchPlaceholder, "zEd"));
         int afterRetype = ModsMenu.SearchFilterChanges;
         ModsMenu.OpenMod("zed.mod");
         Assert.Equal(afterRetype, ModsMenu.SearchFilterChanges);
-        Assert.Equal("zEd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("zEd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         ModsMenu.RefreshDirectory();
         Assert.Equal(afterRetype, ModsMenu.SearchFilterChanges);
-        Assert.Equal("zEd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("zEd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
 
         using var extra = ModsMenu.Register(new object(), "extra.mod", "Extra");
         ModsMenu.RefreshDirectory();
         Assert.Equal(afterRetype, ModsMenu.SearchFilterChanges);
-        Assert.Equal("zEd", _runtime.WidgetValue("input", MenuRowStyle.SearchPlaceholder));
+        Assert.Equal("zEd", _runtime.WidgetValue("input", ModsMenu.SearchPlaceholder));
     }
 
     [Fact]
@@ -1541,7 +1541,7 @@ public sealed class ModsMenuTests : IDisposable
         // Container caption is not what draws. The empty field's hint TMP is.
         Assert.DoesNotContain("Search", _runtime.WidgetTexts("input"));
         Assert.DoesNotContain("Search mods", _runtime.WidgetTexts("input"));
-        Assert.Contains("Search", _runtime.RenderedPlaceholders("input"));
+        Assert.Contains(ModsMenu.SearchPlaceholder, _runtime.RenderedPlaceholders("input"));
         Assert.Equal(new[] { "(icon)" }, _runtime.RenderedGlyphs("input"));
         Assert.True(MenuRowStyle.SearchHintVisible(""));
         Assert.False(MenuRowStyle.SearchHintVisible("zEd"));

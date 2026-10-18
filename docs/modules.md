@@ -1454,6 +1454,28 @@ An entry with no bounds, bounds that cannot be read or questioned, or an incomin
 
 `PluginContext.Config.Bind` does **not** start a watch — it is only a thin bind over this plugin's `GUID.cfg`. It refuses the shared Progenitor file (that bind belongs on `ConfigHelper`). Call `ConfigHelper.Watch(ctx.Config.File)` (or bind through `ConfigHelper`) if you want live reloads; you do **not** have to drop it again, because Core drops `ctx.Config.File` from the reload registry when your context is torn down (FCFG13, above). `ConfigHelper.DropWatchedFile(file)` is still there for a `ConfigFile` that is not `ctx.Config.File` and for dropping one before unload. `UninstallAll` drops every watch; plugin-file entries stay valid.
 
+### Scoped settings
+
+A setting belongs to one of three groups on the mod's page: **Your preferences** (this client's cfg), **Your settings on this server** (a value the server saves for each player account) and **Server settings** (the server's cfg, edited by admins). A server can publish the last two for a mod the client does not have installed; the client needs only Progenitor. Contract, limits and storage: [settings scopes](settings-scopes.md).
+
+```csharp
+// Server-wide: published to joined clients, admins edit it in the Mods menu.
+ctx.Bind("Rules", "Hint interval", 10, scope: SettingScope.ServerWide,
+    description: "How often hints may appear for everyone on this server.",
+    acceptableValues: new AcceptableValueRange<int>(1, 120));
+
+// Per player: the server keeps one value per account, the player edits their own.
+var receive = ctx.Settings.PerPlayer("Hints", "Receive hints", true, "Show hints just for you on this server.");
+bool on = receive.For(userEntity);   // server; the client reads receive.Mine once receive.HasMine
+```
+
+- `scope: SettingScope.Personal` on the server throws; use `PerPlayer`. The legacy `synced: true` overload keeps its signature and stays read-only unless the author opts into admin edits.
+- Values are stored in `BepInEx/config/progenitor-players/<modGuid>.json` (non-default overrides only, atomic writes) and survive plugin and Core reloads and world wipes.
+- Unload releases the registration, callbacks and pending requests; the saved values stay.
+- Examples: `samples/Progenitor.ReloadExample` (server only) and `samples/Progenitor.SampleServerLed` (both sides).
+
+Status: game-free tested on current main. Live-verified on the isolated client/server pair on the 2026-10-15 build before the port; the port has not been run live.
+
 ## Localization
 
 `Progenitor.Localization.Localization`. Owns strings the game looks up by `LocalizationKey` (item names, tooltips). Vanilla keys are Unity asset GUIDs; a mod string has no asset, so the GUID is MD5 of the UTF-8 key packed into `AssetGuid`'s four ints — stable across launches.

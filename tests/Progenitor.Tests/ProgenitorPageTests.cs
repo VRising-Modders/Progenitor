@@ -168,7 +168,7 @@ public sealed class ProgenitorPageTests : IDisposable
         Assert.Equal(subheadings.Append(ProgenitorPage.OnThisServerTitle).ToArray(), ProgenitorPage.NavGroups.ToArray());
         // On this server: the scope heading, with the edit rule on its line, and the link to the Server tab (everyone sees it).
         var scopes = All(rows, ModSettingsScopes.RowScopeSection).Select(s => s.GetProperty("heading").GetString()).ToArray();
-        Assert.Equal(new[] { SettingScopeSections.YourHeading, ProgenitorPage.OnThisServerTitle }, scopes);
+        Assert.Equal(new[] { "Your preferences", ProgenitorPage.OnThisServerTitle }, scopes);
         var link = All(rows, ConfigurationPane.RowPageLink).Single();
         Assert.Equal(SettingsLinks.TargetServerTab, link.GetProperty("target").GetString());
         Assert.Equal(ProgenitorPage.LinkServerText, link.GetProperty("label").GetString());

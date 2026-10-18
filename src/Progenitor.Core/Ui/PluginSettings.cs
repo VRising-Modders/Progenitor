@@ -42,4 +42,13 @@ public sealed class PluginSettings
         _ctx.Track(registration);
         return registration;
     }
+
+    /// <summary>Publish a personal preference whose value the server keeps separately for each player.</summary>
+    public PlayerSetting<T> PerPlayer<T>(string section, string key, T defaultValue, string description = "",
+        BepInEx.Configuration.AcceptableValueBase? acceptableValues = null, Func<T, string?>? validate = null)
+    {
+        var setting = new PlayerSetting<T>(_ctx, section, key, defaultValue, description, acceptableValues, validate);
+        _ctx.Track(setting);
+        return setting;
+    }
 }

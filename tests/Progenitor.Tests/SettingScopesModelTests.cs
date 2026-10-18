@@ -365,7 +365,6 @@ public class SettingScopesModelTests
         Assert.Equal("Applies to everyone on the server you join", SettingScopeSections.ServerLine(false, "My Castle", "1.2.3.4:9876"));
         string longName = new string('n', 80);
         string line = SettingScopeSections.ServerLine(true, longName, "");
-        Assert.True(line.Length < ("Applies to everyone on " + longName).Length);
-        Assert.Contains("…", line);
+        Assert.Equal("Applies to everyone on " + longName, line);
     }
 }

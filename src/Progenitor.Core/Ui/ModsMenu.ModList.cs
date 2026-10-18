@@ -466,6 +466,7 @@ public static partial class ModsMenu
         {
             PluginId = pluginId,
             OnClient = onClient,
+            SharesServerSettings = !onClient && ScopedSettingsRows.Has(pluginId),
             Paused = paused,
             Resuming = resuming,
             PageState = pageState,
@@ -568,7 +569,7 @@ public static partial class ModsMenu
         var handle = panel.CellRow(ModsListLayout.EntryRow(entry, rowWidth, shareable: share.Length > 0));
         bool selected = string.Equals(_selected, id, StringComparison.OrdinalIgnoreCase);
         handle.SetSelected(selected);
-        handle.OnRowClick(() => OpenMod(id, ReasonUserButton));
+        handle.OnRowClick(() => { if (_search.Length > 0) OpenSearchMod(id); else OpenMod(id, ReasonUserButton); });
         if (share.Length > 0)
         {
             var h = handle;

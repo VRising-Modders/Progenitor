@@ -344,6 +344,9 @@ public static partial class Handshake
         /// sends RefineView views only to a client that declared it; an older client would drop each one as malformed.
         /// </summary>
         MaterialRefineView = 536870912,
+
+        /// <summary>Server-delivered setting definitions and personal preferences (PrSt).</summary>
+        ScopedSettings = 1073741824,
     }
 
     /// <summary>This Core's version for a refusal's text, or empty when it cannot be read.</summary>
@@ -373,7 +376,7 @@ public static partial class Handshake
         | Capability.CommandHints | Capability.PolicyRuleUpdates | Capability.ModFeatures | Capability.ModMessages
         | Capability.ItemStatSync | Capability.ItemLedgerChunks | Capability.ItemDefinitionPriority
         | Capability.VersionRanges | Capability.ProgenitorExact | Capability.ModExchange | Capability.MaterialCharacterCraft
-        | Capability.MaterialRefineView;
+        | Capability.MaterialRefineView | Capability.ScopedSettings;
 
     /// <summary>
     /// Reserved row carrying <see cref="Capability"/>. Reserved like
@@ -4289,6 +4292,7 @@ public static partial class Handshake
                     SendPolicyRuleTo(world, userEntity, clientCaps);
                     // Mod compatibility C1: this server's feature table, to a client that declared ModFeatures.
                     ModCompatNet.OnHandshakeOk(world, userEntity, clientCaps);
+                    ScopedSettings.OnHandshakeOk(world, userEntity, clientCaps);
                     // Initial prefab definitions precede the answer; capabilities are known now.
                     if (world != null)
                         Progenitor.Content.PrefabRegistry.SendItemStatsToUser(world, userEntity);

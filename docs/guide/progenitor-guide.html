@@ -527,12 +527,13 @@ window.HELP = {
         { id: "landing", title: "The Mods tab", shot: { src: "img/menu-landing.webp", alt: "The Mods tab with no mod picked: tiles for Your settings, Server settings, Preferences, Collect logs and the Help guide" },
           html: `<p>With no mod picked, tiles lead to <strong>Your settings</strong>, <strong>Server settings</strong>, <strong>Preferences</strong>, <strong>Collect logs</strong> and the <strong>Help guide</strong> (this page).</p>
 <ul><li>The list: <strong>Installed</strong>, <strong>On this server</strong>, <strong>Required by Progenitor</strong>. Filter chips: All, Needs attention, Disabled.</li>
+<li><strong>Search mods and settings</strong> at the top of the list finds mods by name and settings by name, group or help. Matching settings show grouped by mod and can be changed right there; <strong>Open mod</strong> opens the page, <strong>Show in mod</strong> jumps to the setting. Clear the search to go back where you were.</li>
 <li>The diamond beside a mod shows how it's doing: green is running, amber needs a look, red failed, gray is off, hollow is waiting. <strong>Update</strong> means a newer version is out.</li></ul>` },
         { id: "mod-page", title: "A mod's page",
           html: `<ol><li><strong>The bar:</strong> the on/off switch, its status, version, conflicts, <strong>Help</strong> (when the mod has a guide) and <strong>Uninstall</strong>.</li>
 <li><strong>Problems</strong>, with <strong>Retry</strong> and <strong>Copy report</strong>.</li>
 <li><strong>Details:</strong> where it installs, its store page and <strong>Share in chat</strong> ([[mod-link|mod link]]), updates, kept versions and <strong>Roll back</strong>.</li>
-<li><strong>Settings:</strong> Your settings, then [[server-setting|Server settings]]. Each row has a reset arrow; <strong>Restart</strong> marks one that applies at the next start; <strong>Reset all</strong> asks first.</li>
+<li><strong>Settings:</strong> <strong>Your preferences</strong> (saved on this PC), <strong>Your settings on this server</strong> (saved by the server, just for you), then [[server-setting|Server settings]] (everyone on the server; admins change them). A mod that runs only on the server can still show its settings here. Each row has a reset arrow; <strong>Restart</strong> marks one that applies at the next start; <strong>Reset personal settings</strong> asks first and leaves server settings alone.</li>
 <li><strong>About</strong>: the mod's description.</li></ol>
 <p>Long pages get a search box.</p>` },
         { id: "switch", title: "Turn a mod off",
@@ -981,7 +982,8 @@ ctx.Settings.Page(page => page
         .Toggle(showHints));` },
           html: `{{code}}<ul><li>The row shows on your Mods page, with reset and help.</li><li><strong>Pick defaults that work</strong>; most players never open settings.</li><li>One <code>Page</code> call holds all rows.</li></ul>` },
         { id: "server-settings", title: "Player and server settings",
-          html: `<p>[[mod-settings|Player settings]] change one game. Server settings apply to everyone: bind them [[synced-setting|synced]] and admins edit them in game.</p>{{code}}<p>Non-admins see server rows read-only. Player settings in the same cfg still save as they change while a server holds the synced ones; the file keeps the player's own values for those.</p>`,
+          html: `<p>[[mod-settings|Player settings]] change one game. Server settings apply to everyone: bind them [[synced-setting|synced]] and admins edit them in game.</p>{{code}}<p>Non-admins see server rows read-only. Player settings in the same cfg still save as they change while a server holds the synced ones; the file keeps the player's own values for those.</p>
+<p>A server-only mod can publish settings without a client DLL: <code>ctx.Bind(..., scope: SettingScope.ServerWide)</code> for everyone, and <code>ctx.Settings.PerPlayer(...)</code> for a value the server keeps for each player, which that player edits under <strong>Your settings on this server</strong>. Read it on the server with <code>For(userEntity)</code>. See <code>Progenitor.ReloadExample</code>.</p>`,
           code: { lang: "c#", text: `var maxStack = ctx.Bind("Server", "MaxStack", 99, "Largest stack.",
     synced: true, acceptableValues: new AcceptableValueRange<int>(1, 999));
 
@@ -1158,7 +1160,7 @@ My question:` } },
     { id: "ctx", term: "ctx (plugin context)", def: "The object passed to <code>OnLoad</code> through which every registration goes, so unload can reverse it." },
     { id: "unload-reason", term: "Unload reason", def: "Why a plugin unloads (<code>Swap</code>, <code>Removal</code>, <code>Shutdown</code>, <code>Unknown</code>); only <code>Removal</code> should sweep saved state." },
     { id: "keybind", term: "Keybind", def: "A key registered with <code>ctx.Keybinds</code>, shown in the Keybinds tab, remappable and conflict-checked." },
-    { id: "mod-settings", term: "Mod settings (player and server)", def: "Player settings change one player's game; server settings belong to the server and apply to everyone on it." },
+    { id: "mod-settings", term: "Mod settings (player and server)", def: "Player settings change one player's game, saved on their PC or, for settings on this server, by the server just for them; server settings belong to the server and apply to everyone on it." },
     { id: "synced-setting", term: "Synced setting", def: "An entry bound with <code>ctx.Bind(..., synced: true)</code> whose server value is sent to clients for the session." },
     { id: "sides", term: "Server part and client part", def: "The same mod DLL loaded on the server and on each client; <code>ctx.IsServer</code> and <code>ctx.IsClient</code> tell them apart." },
     { id: "handshake", term: "Handshake", def: "The join-time check where client and server compare mods and versions, so a missing required mod gets a clear message." },

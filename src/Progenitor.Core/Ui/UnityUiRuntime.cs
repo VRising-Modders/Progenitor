@@ -1218,7 +1218,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 return new UnityWidget(host, go, null, null, null, null, null, null);
             if (searchField)
             {
-                AttachSearchHints(control, field, initial);
+                AttachSearchHints(control, field, initial, text);
                 PaintSearchField(control, field);
                 BringSearchHintToFront(control);
                 // SEARCHCLEAR1: the clear button at the right while the box has text.
