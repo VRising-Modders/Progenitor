@@ -177,6 +177,63 @@ public class CameraPreviewHoldTests
         Assert.Equal(expected == CameraPreviewEscapeOwner.Preview, CameraPreviewEscape.HoldsCloseKey(owner));
     }
 
+    // ---- client preview with a container preview's window ------------------------------------
+
+    [Theory]
+    // The container window is a game menu, but the container preview's: it takes the first Escape, and the camera
+    // preview holds the close key meanwhile so the game's Back neither closes it nor opens the system menu.
+    [InlineData(false, false, false, true, true, (int)CameraPreviewEscapeOwner.ContainerPreview)]
+    [InlineData(false, false, false, false, true, (int)CameraPreviewEscapeOwner.ContainerPreview)]
+    // Dialogs, key captures and the chat box still come first.
+    [InlineData(true, false, false, true, true, (int)CameraPreviewEscapeOwner.Dialog)]
+    [InlineData(false, true, false, true, true, (int)CameraPreviewEscapeOwner.KeyCapture)]
+    [InlineData(false, false, true, true, true, (int)CameraPreviewEscapeOwner.Chat)]
+    // Once the container window is closed, the next Escape is the camera preview's.
+    [InlineData(false, false, false, false, false, (int)CameraPreviewEscapeOwner.Preview)]
+    // Another game menu (not the container preview's) still takes it, without the close key.
+    [InlineData(false, false, false, true, false, (int)CameraPreviewEscapeOwner.GameMenu)]
+    public void A_container_preview_window_takes_the_first_Escape(
+        bool dialog, bool capture, bool chat, bool menu, bool containerWindow, int expectedOwner)
+    {
+        var expected = (CameraPreviewEscapeOwner)expectedOwner;
+        var owner = CameraPreviewEscape.Decide(true, dialog, capture, chat, menu, containerWindow);
+        Assert.Equal(expected, owner);
+        bool holds = expected is CameraPreviewEscapeOwner.Preview or CameraPreviewEscapeOwner.ContainerPreview;
+        Assert.Equal(holds, CameraPreviewEscape.HoldsCloseKey(owner));
+    }
+
+    [Theory]
+    [InlineData(true, true, true, true)]
+    [InlineData(false, true, true, false)]  // photo mode hid the HUD: the camera preview does not touch it
+    [InlineData(true, false, true, false)]  // no container window of ours
+    [InlineData(true, true, false, false)]  // the container preview belongs to another client world
+    public void The_container_window_is_kept_only_for_this_clients_preview(bool ownsHud, bool owns, bool sameWorld, bool keep)
+    {
+        Assert.Equal(keep, CameraPreviewHud.KeepContainerWindow(ownsHud, owns, sameWorld));
+    }
+
+    [Fact]
+    public void Only_the_canvas_that_holds_the_window_is_kept()
+    {
+        var holds = new[] { false, false, true, true };
+        Assert.Equal(2, CameraPreviewHud.CanvasToKeep(true, holds));
+        Assert.Equal(-1, CameraPreviewHud.CanvasToKeep(false, holds));
+        Assert.Equal(-1, CameraPreviewHud.CanvasToKeep(true, new[] { false, false }));
+        Assert.Equal(-1, CameraPreviewHud.CanvasToKeep(true, System.Array.Empty<bool>()));
+    }
+
+    [Fact]
+    public void Every_other_canvas_stays_hidden_and_none_is_spared_without_a_window()
+    {
+        int kept = CameraPreviewHud.CanvasToKeep(true, new[] { false, true, false });
+        Assert.True(CameraPreviewHud.Reasserts(0, kept));
+        Assert.False(CameraPreviewHud.Reasserts(1, kept));
+        Assert.True(CameraPreviewHud.Reasserts(2, kept));
+        // The container preview closed: the canvas is hidden again on the next frame.
+        int none = CameraPreviewHud.CanvasToKeep(false, new[] { false, true, false });
+        for (int i = 0; i < 3; i++) Assert.True(CameraPreviewHud.Reasserts(i, none));
+    }
+
     [Fact]
     public void With_no_preview_Escape_is_not_ours()
     {

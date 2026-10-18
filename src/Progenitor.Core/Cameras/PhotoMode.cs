@@ -716,7 +716,11 @@ internal static unsafe class PhotoMode
     }
 }
 
-/// <summary>Hides the game HUD's canvases (under <c>HUDCanvas(Clone)</c>) and puts each back as it was.</summary>
+/// <summary>
+/// Hides the game HUD's canvases (under <c>HUDCanvas(Clone)</c>) and puts each back as it was. One hidden canvas can be
+/// left shown (<see cref="Keep"/>): the camera preview keeps the one that holds the game's container window while this
+/// client's container preview owns it (<see cref="CameraPreviewHud"/>).
+/// </summary>
 internal static class PhotoHud
 {
     /// <summary>Canvases that carry nameplates, health bars and floating combat text.</summary>
@@ -724,11 +728,15 @@ internal static class PhotoHud
 
     private static readonly List<(UnityEngine.Canvas Canvas, bool WasEnabled)> Hidden = new();
 
+    /// <summary>The index in <see cref="Hidden"/> left shown, or -1.</summary>
+    private static int _kept = -1;
+
     internal static bool IsHidden => Hidden.Count > 0;
 
     internal static void Hide(bool nameplates)
     {
         if (IsHidden) return;
+        _kept = -1;
         foreach (var o in UnityEngine.Resources.FindObjectsOfTypeAll(Il2CppInterop.Runtime.Il2CppType.Of<UnityEngine.Canvas>()))
         {
             var c = o.TryCast<UnityEngine.Canvas>();
@@ -743,11 +751,53 @@ internal static class PhotoHud
         Plugin.Logger?.LogInfo("PhotoMode: HUD hidden (" + Hidden.Count + " canvases" + (nameplates ? ", nameplates included" : "") + ").");
     }
 
-    /// <summary>The game turns some canvases back on as panels open; keep them off while hidden.</summary>
+    /// <summary>
+    /// Leave the hidden canvas that holds <paramref name="part"/> as it was before the hide (null: keep none, so a
+    /// previously kept canvas is hidden again). Returns the kept canvas's name, or null.
+    /// </summary>
+    internal static string? Keep(UnityEngine.Transform? part)
+    {
+        if (!IsHidden) return null;
+        var holds = new bool[Hidden.Count];
+        if (part != null)
+        {
+            for (int i = 0; i < Hidden.Count; i++)
+            {
+                try { var c = Hidden[i].Canvas; holds[i] = c != null && part.IsChildOf(c.transform); }
+                catch { holds[i] = false; }
+            }
+        }
+        int want = CameraPreviewHud.CanvasToKeep(part != null, holds);
+        if (want != _kept)
+        {
+            int was = _kept;
+            _kept = want;
+            if (was >= 0 && was < Hidden.Count)
+            {
+                try { var c = Hidden[was].Canvas; if (c != null) c.enabled = false; } catch { /* destroyed */ }
+                Plugin.Logger?.LogInfo("PhotoMode: HUD canvas '" + NameAt(was) + "' hidden again (no container window to keep).");
+            }
+            if (want >= 0)
+            {
+                try { var c = Hidden[want].Canvas; if (c != null) c.enabled = Hidden[want].WasEnabled; } catch { /* destroyed */ }
+                Plugin.Logger?.LogInfo("PhotoMode: HUD canvas '" + NameAt(want) + "' left shown (it holds the container window).");
+            }
+        }
+        return want >= 0 ? NameAt(want) : null;
+    }
+
+    private static string NameAt(int i)
+    {
+        try { var c = Hidden[i].Canvas; return c == null ? "(destroyed)" : c.gameObject.name ?? ""; }
+        catch { return "(destroyed)"; }
+    }
+
+    /// <summary>The game turns some canvases back on as panels open; keep them off while hidden (all but the kept one).</summary>
     internal static void Reassert()
     {
         for (int i = 0; i < Hidden.Count; i++)
         {
+            if (!CameraPreviewHud.Reasserts(i, _kept)) continue;
             var c = Hidden[i].Canvas;
             if (c != null && c.enabled) c.enabled = false;
         }
@@ -761,6 +811,32 @@ internal static class PhotoHud
         }
         if (Hidden.Count > 0) Plugin.Logger?.LogInfo("PhotoMode: HUD restored.");
         Hidden.Clear();
+        _kept = -1;
+    }
+
+    /// <summary>The readback: every canvas the hide took, whether it is enabled now, and which one is left shown.</summary>
+    internal static Dictionary<string, object?> Describe()
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        for (int i = 0; i < Hidden.Count; i++)
+        {
+            bool? enabled = null;
+            try { var c = Hidden[i].Canvas; if (c != null) enabled = c.enabled; } catch { /* destroyed */ }
+            rows.Add(new Dictionary<string, object?>
+            {
+                ["name"] = NameAt(i),
+                ["wasEnabled"] = Hidden[i].WasEnabled,
+                ["enabled"] = enabled,
+                ["kept"] = i == _kept,
+            });
+        }
+        return new Dictionary<string, object?>
+        {
+            ["hidden"] = IsHidden,
+            ["canvasCount"] = Hidden.Count,
+            ["canvases"] = rows,
+            ["kept"] = _kept >= 0 && _kept < Hidden.Count ? NameAt(_kept) : null,
+        };
     }
 }
 
