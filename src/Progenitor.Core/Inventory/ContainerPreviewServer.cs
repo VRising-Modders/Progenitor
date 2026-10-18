@@ -345,7 +345,8 @@ internal static unsafe class ContainerPreviewServer
     private static void Open(World world, Entity userEntity, User user, ContainerPreviewPacket request)
     {
         var em = world.EntityManager;
-        var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected, Mode = Mode, IsPvE = IsPvE() };
+        var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected, Mode = Mode, IsPvE = IsPvE(), ClientOpensStations = request.Stations };
+        int window = 0;
         facts.RateOk = facts.UserConnected && Opens.TryTake(user.PlatformId, Now);
         // Connected, the server's setting, the rate token: before any lookup (the network-id resolve below included).
         if (ContainerPreviewAuthorization.RequestRefusal(facts) is { } early)
@@ -380,7 +381,10 @@ internal static unsafe class ContainerPreviewServer
             if (facts.Found)
             {
                 facts.HasInventory = UnityInventoryBackend.HasInventory(em, container);
-                facts.HasOwnMenu = HasOwnMenu(em, container);
+                // STATIONPREVIEW1: a lone crafting, refining or salvage station opens its own window for a client that can.
+                window = ContainerPreviewMenus.WindowFor(HasOwnMenu(em, container), StationMenusOf(em, container),
+                    HasOtherOwnMenu(em, container), request.Stations);
+                facts.HasOwnMenu = window == 0;
                 var castle = CastleOf(world, container);
                 facts.InCastle = castle != null;
                 facts.Relation = castle != null ? PluginCastles.RelationOf(world, userEntity, castle) : CastleRelation.None;
@@ -459,7 +463,7 @@ internal static unsafe class ContainerPreviewServer
         }
         Plugin.Logger?.LogInfo("ContainerPreview: user " + user.PlatformId + " previews " + id + " (" + container.Index + ":" + container.Version
             + ", " + holder.Policy.Deadline.ToString("0") + ", inventory sync " + (holder.Sync == null ? "off" : holder.Sync.HeldCount + " entities") + ").");
-        Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType, id.ToString());
+        Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType, id.ToString(), window);
     }
 
     /// <summary>
@@ -496,7 +500,32 @@ internal static unsafe class ContainerPreviewServer
         || e.Has<ResearchStation>(em) || e.Has<Salvagestation>(em) || e.Has<UnitSpawnerstation>(em)
         || e.Has<PrisonCell>(em) || e.Has<ServantCoffinstation>(em) || e.Has<ServantEquipment>(em)
         || e.Has<Forge_Shared>(em) || e.Has<FusionForge_Shared>(em) || e.Has<BloodMixer_Shared>(em) || e.Has<JewelCraftingStation>(em)
-        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em);
+        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em)
+        || e.Has<LightningRodStation>(em);
+
+    /// <summary>
+    /// STATIONPREVIEW1: the windows of the previewable stations the model is (<see cref="ContainerPreviewMenus.PreviewableStations"/>,
+    /// same order).
+    /// </summary>
+    private static List<int> StationMenusOf(EntityManager em, Entity e)
+    {
+        var menus = new List<int>(1);
+        if (e.Has<Salvagestation>(em)) menus.Add(ContainerPreviewMenus.SalvagestationMenu);
+        if (e.Has<Refinementstation>(em)) menus.Add(ContainerPreviewMenus.RefinementstationMenu);
+        if (e.Has<WorkstationRecipesBuffer>(em)) menus.Add(ContainerPreviewMenus.WorkstationMenu);
+        return menus;
+    }
+
+    /// <summary>
+    /// STATIONPREVIEW1: an own-menu component other than a previewable station's (<see cref="ContainerPreviewMenus.OtherOwnMenuComponents"/>;
+    /// a source test keeps the two lists equal).
+    /// </summary>
+    private static bool HasOtherOwnMenu(EntityManager em, Entity e) =>
+        e.Has<CastleHeart>(em) || e.Has<ResearchStation>(em) || e.Has<UnitSpawnerstation>(em)
+        || e.Has<PrisonCell>(em) || e.Has<ServantCoffinstation>(em) || e.Has<ServantEquipment>(em)
+        || e.Has<Forge_Shared>(em) || e.Has<FusionForge_Shared>(em) || e.Has<BloodMixer_Shared>(em) || e.Has<JewelCraftingStation>(em)
+        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em)
+        || e.Has<LightningRodStation>(em);
 
     /// <summary>The server's setting now (the default until the shared cfg binds).</summary>
     internal static ContainerPreviewMode Mode
@@ -568,12 +597,13 @@ internal static unsafe class ContainerPreviewServer
         }
     }
 
-    private static void Reply(World world, int userIndex, int sequence, bool ok, string message, int index, int generation, int type, string container = "")
+    private static void Reply(World world, int userIndex, int sequence, bool ok, string message, int index, int generation, int type,
+        string container = "", int menuType = 0)
     {
         Send(world, userIndex, new ContainerPreviewPacket
         {
             Kind = ContainerPreviewWire.KindReply, Sequence = sequence, Ok = ok, Message = ContainerPreviewWire.Clip(message),
-            NetIndex = index, NetGeneration = generation, NetType = type, Container = container ?? "",
+            NetIndex = index, NetGeneration = generation, NetType = type, Container = container ?? "", MenuType = menuType,
         });
     }
 

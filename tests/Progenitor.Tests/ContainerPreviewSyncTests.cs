@@ -424,7 +424,8 @@ public class ContainerPreviewSyncTests
     {
         string client = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewClient.cs");
         string mapper = SourcePin.MethodBody(client, "private void BeforeMapper(");
-        Assert.Contains("_inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;", mapper);
+        // STATIONPREVIEW1: every inventory instance, not only the first.
+        Assert.Contains("_inventorySeen && !ContainerPreviewInventories.Ready(_inventories.Count, AllPresent(em))) c.Skip = true;", mapper);
         Assert.Contains("if (em.Exists(_windowTarget))", mapper);
         Assert.DoesNotContain("Close(", mapper);   // a chest that left during a save may come back: the machine decides
     }

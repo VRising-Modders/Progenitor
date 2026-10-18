@@ -82,7 +82,8 @@ public class ContainerPreviewLayoutTests
     public void The_resolver_applies_the_preview_to_every_container_kind_target_and_keeps_it_for_the_readback()
     {
         string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
-        Assert.Contains("if (kind == VanillaPanelKind.Container) panelTarget = VanillaPanelPreview.Apply(panelTarget, Progenitor.Inventory.ContainerPreviewClient.PreviewWindow(world), emptyIsWindow: site != VanillaUiSite.InventoryTooltip);", resolver);
+        // STATIONPREVIEW1: every panel kind (Apply matches the preview window's own kind).
+        Assert.Contains("if (kind != VanillaPanelKind.None) panelTarget = VanillaPanelPreview.Apply(panelTarget, Progenitor.Inventory.ContainerPreviewClient.PreviewWindow(world), emptyIsWindow: site != VanillaUiSite.InventoryTooltip);", resolver);
         Assert.Contains("LastContainerPanelTarget = panelTarget;", resolver);
         string client = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewClient.cs");
         Assert.Contains("[\"panelTarget\"] = PanelTargetReadback(),", client);
@@ -110,8 +111,8 @@ public class ContainerPreviewLayoutTests
         Assert.Contains("parts = container!.WindowParts();", preview);
         string client = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewClient.cs");
         string parts = SourcePin.MethodBody(client, "internal List<Transform> WindowParts(");
-        Assert.Contains("mapper._InventorySubMenu", parts);
-        Assert.Contains("mapper._ContainerSubMenu", parts);
+        Assert.Contains("var bag = window.Bag;", parts); // STATIONPREVIEW1: the halves of whichever window the preview opened
+        Assert.Contains("var sub = window.Sub;", parts);
     }
 
     // ---- camera framing ----------------------------------------------------------------------------------

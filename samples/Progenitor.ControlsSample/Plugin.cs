@@ -57,7 +57,7 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         hub.AfterReturn = () =>
         {
             if (atOpen is not { IsOpen: true }) return; // the hub was not opened over a chest or station
-            // Walked away meanwhile: the same chest opens from afar instead (the preview's rules apply; stations cannot).
+            // Walked away meanwhile: the same chest or station opens from afar instead (the preview's rules apply).
             ctx.Inventory.ReopenLast(atOpen, new Progenitor.Inventory.ContainerReopenOptions
             {
                 RemoteIfAway = true,

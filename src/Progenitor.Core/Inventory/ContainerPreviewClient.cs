@@ -118,10 +118,12 @@ internal static unsafe class ContainerPreviewClient
     {
         try
         {
+            // STATIONPREVIEW1: this client opens station windows too (the server opens nothing else for an older one).
             var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket
             {
                 Kind = kind, Sequence = sequence, Container = container.IsNone ? "" : container.ToString(), Seconds = seconds,
                 SyncInventory = syncInventory, NetIndex = netIndex, NetGeneration = netGeneration, NetType = netType,
+                Stations = kind == ContainerPreviewWire.KindOpen,
             });
             return CustomEvents.SendToServer(ContainerPreviewWire.EventId, bytes);
         }
@@ -148,8 +150,9 @@ internal static unsafe class ContainerPreviewClient
         {
             if (world.IsCreated)
             {
-                var window = ReadWindow(world);
-                bool shown = window.Menu == Layout.HUDMenuTypeContainerMenu;
+                int closingMenu = ContainerPreviewMenus.MenuOf(_closing.Kind);
+                var window = ContainerPreviewWindows.ReadWindow(world, closingMenu);
+                bool shown = window.Menu == closingMenu;
                 bool same = window.Target.Index == _closing.WindowIndex && window.Target.Version == _closing.WindowVersion;
                 if (ContainerPreviewMachine.HoldsClosingView(shown, same, window.Interact != Entity.Null)) return _closing;
             }
@@ -322,6 +325,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private double _nextLookup;
     private IDisposable? _hudHook, _mapperHook, _sendHook, _escape;
     private bool _capturing;
+    /// <summary>STATIONPREVIEW1: the window this preview opens (the server's answer; the container window until then).</summary>
+    private int _menuType = ContainerPreviewMenus.ContainerMenu;
     private long _shownAtArm;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
     private Entity _windowTarget = Entity.Null;
@@ -360,7 +365,10 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// </summary>
     internal Progenitor.Ui.VanillaPreviewWindow PanelView() => new(
         Machine.OwnsWindow, _windowTarget.Index, _windowTarget.Version, _target.Index, _target.Version,
-        _netIndex, _netGeneration, _netType, Container);
+        _netIndex, _netGeneration, _netType, Container, ContainerPreviewMenus.KindOf(_menuType));
+
+    /// <summary>STATIONPREVIEW1: the window this preview opens (<c>HUDMenuType</c>).</summary>
+    internal int MenuType => _menuType;
 
     /// <summary>
     /// Every part of the open container window a hidden HUD must leave shown: the container half and its parent, and the
@@ -371,13 +379,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     {
         var parts = new List<Transform>(3);
         if (!Machine.OwnsWindow || !_world.IsCreated) return parts;
-        var mapper = ContainerPreviewClient.ReadWindow(_world).Mapper;
-        if (mapper == null) return parts;
-        var sub = mapper._ContainerSubMenu;
+        var window = ContainerPreviewWindows.ReadWindow(_world, _menuType);
+        if (!window.Present) return parts;
+        var sub = window.Sub;
         if (sub != null) { parts.Add(sub.transform); if (sub.transform.parent != null) parts.Add(sub.transform.parent); }
         if (!_options.HidePlayerInventory)
         {
-            var bag = mapper._InventorySubMenu;
+            var bag = window.Bag;
             if (bag != null) parts.Add(bag.transform);
         }
         return parts;
@@ -460,7 +468,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     internal Transform? WindowPart()
     {
         if (!Machine.OwnsWindow || !_world.IsCreated) return null;
-        var sub = ContainerPreviewClient.ReadWindow(_world).Mapper?._ContainerSubMenu;
+        var sub = ContainerPreviewWindows.ReadWindow(_world, _menuType).Sub;
         return sub == null ? null : sub.transform;
     }
 
@@ -488,6 +496,14 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         _netIndex = p.NetIndex; _netGeneration = p.NetGeneration; _netType = p.NetType;
         // REOPEN2: a preview asked by network id learns its stable id from the server's answer.
         if (Container.IsNone && ContainerId.TryParse(p.Container, out var resolved)) Container = resolved;
+        // STATIONPREVIEW1: the window the server chose (0 from an older server: the container window).
+        int menu = p.MenuType == 0 ? ContainerPreviewMenus.ContainerMenu : p.MenuType;
+        if (!ContainerPreviewMenus.IsPreviewWindow(menu))
+        {
+            Close(ContainerPreviewCloseReason.Failed, "The server asked for a window this client cannot open.", notify: true);
+            return;
+        }
+        _menuType = menu;
         if (!NetworkIdWords.Validate(_netIndex, _netGeneration, _netType, out var why))
         {
             Close(ContainerPreviewCloseReason.Failed, "The server sent an unusable network id: " + why, notify: true);
@@ -522,7 +538,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         {
             ArmWindow();
             _windowTarget = _target;
-            ContainerPreviewClient.WriteOpen(_world, _target);
+            ContainerPreviewWindows.WriteOpen(_world, _target, _menuType);
         }
         if (Machine.Phase == ContainerPreviewPhase.Open) ApplyUi();
     }
@@ -535,7 +551,12 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (!s.SameWorld || Machine.Phase == ContainerPreviewPhase.Requesting) return s;
         var em = world!.EntityManager;
 
-        if (_target != Entity.Null && (!em.Exists(_target) || !SameWords(em, _target, _targetWords))) { _target = Entity.Null; _inventory = Entity.Null; }
+        if (_target != Entity.Null && (!em.Exists(_target) || !SameWords(em, _target, _targetWords)))
+        {
+            _target = Entity.Null;
+            _inventory = Entity.Null;
+            ForgetInventories();
+        }
         if (_target == Entity.Null && now >= _nextLookup)
         {
             _nextLookup = now + 0.1;
@@ -545,22 +566,15 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         s.TargetFound = _target != Entity.Null;
         if (s.TargetFound)
         {
-            if (_inventory == Entity.Null || !em.Exists(_inventory))
-            {
-                _inventory = Entity.Null;
-                if (UnityInventoryBackend.TryInventoryEntity(em, _target, 0, out var inv, out _))
-                {
-                    _inventory = inv;
-                    ContainerPreviewClient.TryWords(em, inv, out _inventoryWords.Item1, out _inventoryWords.Item2, out _inventoryWords.Item3);
-                }
-            }
-            s.InventoryReady = _inventory != Entity.Null;
+            // STATIONPREVIEW1: every inventory instance (a furnace's input and output), not just the first.
+            RefreshInventories(em);
+            s.InventoryReady = ContainerPreviewInventories.Ready(_inventories.Count, AllPresent(em));
             if (s.InventoryReady) _inventorySeen = true;
         }
 
-        var window = ContainerPreviewClient.ReadWindow(world);
-        s.WindowIsOurs = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target && _target != Entity.Null && window.Interact == Entity.Null;
-        s.ContainerMenuOpen = window.Menu == Layout.HUDMenuTypeContainerMenu;
+        var window = ContainerPreviewWindows.ReadWindow(world, _menuType);
+        s.WindowIsOurs = window.Menu == _menuType && window.Target == _target && _target != Entity.Null && window.Interact == Entity.Null;
+        s.ContainerMenuOpen = window.Menu == _menuType;
         s.TargetReplaced = _windowTarget != Entity.Null && _target != Entity.Null && _target != _windowTarget;
         s.OtherMenuOpen = window.Menu > 0 && !s.WindowIsOurs;
         // Only worth reading while it can matter: the chest is ready and the player's own window is in the way.
@@ -582,7 +596,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     {
         _shownAtArm = Ui.UiPanelHandle.LastShownSequence;
         _hudHook = SystemHooks.Before<InteractSystemHUD>(BeforeInteractHud);
-        _mapperHook = SystemHooks.Before<ContainerMenuMapper>(BeforeMapper);
+        _mapperHook = ContainerPreviewWindows.HookMapper(_menuType, BeforeMapper);
         if (_options.DropItemEvents) _sendHook = SystemHooks.Before<SerializeAndSendClientEventsSystem>(BeforeSend);
         try
         {
@@ -598,10 +612,10 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (c.World != _world || !Machine.OwnsWindow || !HudGate) return;
         try
         {
-            var window = ContainerPreviewClient.ReadWindow(c.World);
+            var window = ContainerPreviewWindows.ReadWindow(c.World, _menuType);
             c.Skip = ContainerPreviewHudGate.ShouldSkip(
                 Machine.OwnsWindow, Machine.Phase == ContainerPreviewPhase.Opening,
-                window.Menu == Layout.HUDMenuTypeContainerMenu,
+                window.Menu == _menuType,
                 (_windowTarget != Entity.Null ? window.Target == _windowTarget : window.Target == _target && _target != Entity.Null),
                 window.Interact == Entity.Null,
                 LocalGoToMenuCount(c.World));
@@ -647,7 +661,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             {
                 // The chest is here but its inventory left (a save suspension, the server letting go): hold the window as
                 // it was rather than let the mapper read a missing inventory. The machine closes after a grace period.
-                if (Machine.OwnsWindow && _inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;
+                if (Machine.OwnsWindow && _inventorySeen && !ContainerPreviewInventories.Ready(_inventories.Count, AllPresent(em))) c.Skip = true;
                 return;
             }
             // The chest left this client (a save suspension takes the streaming origin away for a moment, or it is gone):
@@ -664,9 +678,61 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         try
         {
             _drop ??= new EventDropQueries();
-            DroppedEvents += _drop.Drop(c.World, _targetWords, _inventoryWords);
+            DroppedEvents += _drop.Drop(c.World, _targetWords, _inventoryWords, _otherInventoryWords.Count == 0 ? null : _otherInventoryWords);
         }
         catch (Exception e) { WarnOnce("event filter", e); }
+    }
+
+    /// <summary>STATIONPREVIEW1: the target's inventory per instance (Entity.Null where it has not arrived), and their words.</summary>
+    private readonly List<Entity> _inventories = new();
+    private readonly List<(int, int, int)> _otherInventoryWords = new();
+
+    /// <summary>The target changed or left: forget its inventories (the filter's words with them).</summary>
+    private void ForgetInventories()
+    {
+        _inventories.Clear();
+        _otherInventoryWords.Clear();
+    }
+
+    /// <summary>
+    /// Every inventory instance of the target, looked up again where missing; no instance is skipped because an earlier
+    /// one has not arrived. Instance 0 is <see cref="_inventory"/>; the others' network id words feed the event filter.
+    /// </summary>
+    private void RefreshInventories(EntityManager em)
+    {
+        int count = UnityInventoryBackend.InventoryCount(em, _target);
+        bool changed = count != _inventories.Count;
+        while (_inventories.Count < count) _inventories.Add(Entity.Null);
+        if (_inventories.Count > count) _inventories.RemoveRange(count, _inventories.Count - count);
+        for (int i = 0; i < count; i++)
+        {
+            var known = _inventories[i];
+            if (known != Entity.Null && em.Exists(known)) continue;
+            _inventories[i] = UnityInventoryBackend.TryInventoryEntity(em, _target, i, out var inv, out _) ? inv : Entity.Null;
+            changed |= _inventories[i] != known;
+        }
+        var first = count > 0 ? _inventories[0] : Entity.Null;
+        if (first != _inventory)
+        {
+            _inventory = first;
+            _inventoryWords = default;
+            if (first != Entity.Null) ContainerPreviewClient.TryWords(em, first, out _inventoryWords.Item1, out _inventoryWords.Item2, out _inventoryWords.Item3);
+        }
+        if (!changed) return;
+        _otherInventoryWords.Clear();
+        for (int i = 1; i < _inventories.Count; i++)
+        {
+            var inv = _inventories[i];
+            if (inv != Entity.Null && inv != _target && ContainerPreviewClient.TryWords(em, inv, out int a, out int b, out int c)) _otherInventoryWords.Add((a, b, c));
+        }
+    }
+
+    /// <summary>Whether each known instance is present now (for <see cref="ContainerPreviewInventories.Ready"/>).</summary>
+    private IReadOnlyList<bool> AllPresent(EntityManager em)
+    {
+        var present = new bool[_inventories.Count];
+        for (int i = 0; i < present.Length; i++) present[i] = _inventories[i] != Entity.Null && em.Exists(_inventories[i]);
+        return present;
     }
 
     private bool OnEscape()
@@ -695,6 +761,14 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// </summary>
     private void ApplyUi()
     {
+        if (_menuType != ContainerPreviewMenus.ContainerMenu)
+        {
+            // STATIONPREVIEW1: a station window keeps its buttons (their events are dropped and refused); the bag as asked.
+            if (!_options.HidePlayerInventory) return;
+            var stationBag = ContainerPreviewWindows.ReadWindow(_world, _menuType).Bag;
+            if (stationBag != null) Hide(stationBag.gameObject, ContainerPreviewClient.BagHideByAlpha);
+            return;
+        }
         var mapper = ContainerPreviewClient.ReadWindow(_world).Mapper;
         if (mapper == null) return;
         var sub = mapper._ContainerSubMenu;
@@ -792,10 +866,10 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             bool worldAlive = _world.IsCreated && reason != ContainerPreviewCloseReason.WorldChanged;
             if (hadWindow && worldAlive && reason != ContainerPreviewCloseReason.WindowClosed)
             {
-                var window = ContainerPreviewClient.ReadWindow(_world);
-                // Close only the window this preview opened: the container menu, still on our target (or not bound
+                var window = ContainerPreviewWindows.ReadWindow(_world, _menuType);
+                // Close only the window this preview opened: its menu, still on our target (or not bound
                 // yet), with no interaction behind it. A real menu the player opened is left alone.
-                if (window.Menu == Layout.HUDMenuTypeContainerMenu && window.Interact == Entity.Null
+                if (window.Menu == _menuType && window.Interact == Entity.Null
                     && (window.Target == _windowTarget || window.Target == Entity.Null || reason == ContainerPreviewCloseReason.TargetGone))
                     ContainerPreviewClient.CloseMenu(_world);
             }
@@ -852,8 +926,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             bool onTarget = false;
             if (alive)
             {
-                var window = ContainerPreviewClient.ReadWindow(_world);
-                onTarget = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _windowTarget;
+                var window = ContainerPreviewWindows.ReadWindow(_world, _menuType);
+                onTarget = window.Menu == _menuType && window.Target == _windowTarget;
             }
             done = ContainerPreviewMachine.MapperGuardDone(alive, onTarget, ContainerPreviewClient.Now - _guardSince);
         }
@@ -901,6 +975,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["keepOpen"] = _options.KeepOpen,
         ["hudGate"] = HudGate,
         ["syncInventory"] = SyncInventory,
+        ["menuType"] = _menuType,
         ["returnToOpenWindow"] = _options.ReturnToOpenWindow,
         ["tookPlayerWindow"] = Machine.TookPlayerWindow,
         ["owner"] = _owner?.GetType().Name,
@@ -937,6 +1012,20 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             Add<EquipItemFromInventoryEvent>(Layout.EquipItemFromInventoryEventFromInventoryOffset);
             Add<ToggleRefiningEvent>(Layout.ToggleRefiningEventStationOffset);
             Add<InteractEvents_Client.RenameInteractable>(Layout.RenameInteractableIdOffset);
+            // STATIONPREVIEW1: the station windows' own events, each naming the station at 0x0. The game's server refuses
+            // all but the share button's without an interaction; the share event it takes from anyone, so it is dropped
+            // here for the previewed station like the rest (research note "remote station window").
+            AddStation();
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private void AddStation()
+        {
+            Add<StartCraftItemEvent>(Layout.StartCraftItemEventWorkstationOffset);
+            Add<StopCraftItemEvent>(Layout.StopCraftItemEventWorkstationOffset);
+            Add<ToggleRefiningRecipeEvent>(Layout.ToggleRefiningRecipeEventStationOffset);
+            Add<ToggleSalvageEvent>(Layout.ToggleSalvageEventStationOffset);
+            Add<ShareRefinementEvent>(Layout.ShareRefinementEventStationOffset);
         }
 
         private void Add<T>(params int[] offsets)
@@ -954,7 +1043,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         }
 
         /// <summary>Destroy every event naming either id; returns how many.</summary>
-        internal int Drop(World world, (int, int, int) target, (int, int, int) inventory)
+        internal int Drop(World world, (int, int, int) target, (int, int, int) inventory, List<(int, int, int)>? others = null)
         {
             if (target == default && inventory == default) return 0;
             var em = world.EntityManager;
@@ -978,7 +1067,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
                         {
                             int* net = (int*)(p + o);
                             var words = InventorySortFilter.Normalize(net[0], net[1], net[2]);
-                            if (words == default || (words != target && words != inventory)) continue;
+                            if (words == default || (words != target && words != inventory && (others == null || !others.Contains(words)))) continue;
                             (doomed ??= new List<Entity>()).Add(entities[i]);
                             break;
                         }

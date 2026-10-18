@@ -2077,6 +2077,8 @@ What changes on screen while a preview owns the window:
   own messages need no game permission; the chest's own slots stay read-only. Not live-verified.
 - Escape closes the preview and the window after framework dialogs, key captures and the focused chat box
   (the same precedence as the world pick).
+- A crafting, refining or salvage station (The Devourer) opens in its own window, with the mods' station tabs attached
+  and given the preview's target (STATIONPREVIEW1; not live-verified; [modules.md](modules.md#container-preview)).
 - With the player's own chest or station window open, the preview takes its place once the previewed chest is ready and
   opens it again the game's way when the preview ends on its own, not after `Dispose` or Escape
   (`ContainerPreviewOptions.ReturnToOpenWindow`, default true;

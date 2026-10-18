@@ -715,11 +715,15 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
 internal readonly struct VanillaPreviewWindow
 {
     internal VanillaPreviewWindow(bool ownsWindow, int windowIndex, int windowVersion, int targetIndex, int targetVersion,
-        int net0, int net1, int net2, Progenitor.Inventory.ContainerId container)
+        int net0, int net1, int net2, Progenitor.Inventory.ContainerId container, VanillaPanelKind kind = VanillaPanelKind.Container)
     {
         OwnsWindow = ownsWindow; WindowIndex = windowIndex; WindowVersion = windowVersion;
         TargetIndex = targetIndex; TargetVersion = targetVersion; Net0 = net0; Net1 = net1; Net2 = net2; Container = container;
+        Kind = kind;
     }
+
+    /// <summary>STATIONPREVIEW1: which window the preview opened (the container window, or a station's).</summary>
+    internal VanillaPanelKind Kind { get; }
 
     /// <summary>The preview opened the container window and has not closed.</summary>
     internal bool OwnsWindow { get; }
@@ -752,7 +756,7 @@ internal static class VanillaPanelPreview
     /// </param>
     internal static VanillaPanelTarget Apply(in VanillaPanelTarget target, in VanillaPreviewWindow preview, bool emptyIsWindow)
     {
-        if (target.Kind != VanillaPanelKind.Container || !preview.OwnsWindow || preview.Container.IsNone) return target;
+        if (target.Kind == VanillaPanelKind.None || target.Kind != preview.Kind || !preview.OwnsWindow || preview.Container.IsNone) return target;
         bool onWindow = (target.HasEntity && target.EntityIndex == preview.WindowIndex && target.EntityVersion == preview.WindowVersion)
             || (target.HasEntity && target.EntityIndex == preview.TargetIndex && target.EntityVersion == preview.TargetVersion)
             || (!target.HasEntity && emptyIsWindow);
