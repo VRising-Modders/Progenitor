@@ -52,6 +52,11 @@ internal sealed partial class UnityUiRuntime
         // Each trim with the donor row image and row it copies, re-placed until the row is laid out.
         readonly List<(RectTransform Trim, RectTransform Donor, RectTransform Row)> _trims = new();
         int _trimMoves;
+        // The top of the window's own content under the strip (root units), measured while the native view shows.
+        float? _contentTop;
+        string _contentBy = "";
+        float? _bonusBottom;
+        bool _slotKept;
         // The donor tab's own caption, read live for the readback.
         TextMeshProUGUI? _donorCaption;
         List<object?>? _artDonor;
@@ -305,7 +310,25 @@ internal sealed partial class UnityUiRuntime
                 bonusBottom = _root!.InverseTransformPoint(_corners[0]).y;
             }
 
-            var placement = VanillaTabStripLayout.Place(_anchorTop, bonusBottom, VisibleTop(), _tabHeight);
+            var visibleTop = VisibleTop();
+            _bonusBottom = bonusBottom;
+            var placement = VanillaTabStripLayout.Place(_anchorTop, bonusBottom, visibleTop, _tabHeight);
+            // Measured in this window: its own content must start under the strip. While the native view
+            // shows, read the top of its content under the strip; content reaching into the strip first
+            // gets back the hidden game tab row's layout slot (hiding it had given the slot to the
+            // content after it), and only then is the strip raised, never past the bonus row.
+            bool custom = _selected > 0 && _selected < _captions.Length;
+            if (!custom) MeasureContent(placement.Top);
+            if (_contentTop.HasValue && _contentTop.Value - placement.Bottom > VanillaTabStripLayout.Tolerance && !_slotKept)
+            {
+                _slotKept = true;
+                foreach (var row in _nativeTabs) row.KeepSlot();
+                Plugin.Logger?.LogInfo("Ui: panel tabs on " + _kind + ": the window's content reached " + Math.Round(_contentTop.Value - placement.Bottom, 1)
+                    + " units into the strip (" + _contentBy + "); the game tab row keeps its layout slot");
+            }
+            float? ceiling = bonusBottom;
+            if (visibleTop.HasValue && (!ceiling.HasValue || visibleTop.Value < ceiling.Value)) ceiling = visibleTop;
+            placement = VanillaTabStripLayout.ClearContent(placement, _contentTop, ceiling);
             bool moved = Math.Abs(placement.Top - _placement.Top) > .5f || Math.Abs(placement.Height - _placement.Height) > .5f;
             _placement = placement;
             _top = placement.Top;
@@ -314,6 +337,56 @@ internal sealed partial class UnityUiRuntime
             if (_layoutParent != null && _strip!.transform.GetSiblingIndex() != _layoutParent.childCount - 1)
                 _strip.transform.SetAsLastSibling();
             return moved;
+        }
+
+        /// <summary>
+        /// The top edge (root units) of the highest native content element that shows and starts
+        /// under <paramref name="stripTop"/>: the content a station's own view draws under the tab row.
+        /// </summary>
+        void MeasureContent(float stripTop)
+        {
+            float? top = null;
+            string by = "";
+            foreach (var item in _content)
+            {
+                var go = item.Go;
+                if (!Alive(go) || !go.activeInHierarchy || item.Hidden) continue;
+                var rect = go.GetComponent<RectTransform>();
+                if (rect == null || rect.rect.height < 1f) continue;
+                rect.GetWorldCorners(_corners);
+                float y = _root!.InverseTransformPoint(_corners[1]).y;
+                if (y > stripTop + VanillaTabStripLayout.Tolerance) continue;
+                if (top == null || y > top) { top = y; by = go.name; }
+            }
+
+            _contentTop = top;
+            _contentBy = by;
+        }
+
+        Dictionary<string, object?>? NativeRowDict()
+        {
+            if (_root == null) return null;
+            var row = NativeRow();
+            return row == null ? null : new Dictionary<string, object?>
+            {
+                ["top"] = Math.Round(row.Value.Top, 1),
+                ["bottom"] = Math.Round(row.Value.Bottom, 1),
+            };
+        }
+
+        /// <summary>The hidden game tab row's rect in root units (top, bottom), or null.</summary>
+        (float Top, float Bottom)? NativeRow()
+        {
+            foreach (var row in _nativeTabs)
+            {
+                if (!Alive(row.Go)) continue;
+                var rect = row.Go.GetComponent<RectTransform>();
+                if (rect == null) continue;
+                rect.GetWorldCorners(_corners);
+                return (_root!.InverseTransformPoint(_corners[1]).y, _root.InverseTransformPoint(_corners[0]).y);
+            }
+
+            return null;
         }
 
         /// <summary>The enabled masks (RectMask2D, Mask) on the strip's parent chain, cached once per strip.</summary>
@@ -436,6 +509,14 @@ internal sealed partial class UnityUiRuntime
                 ["top"] = _flow ? null : Math.Round(_placement.Top, 1),
                 ["panelTop"] = _flow ? null : Math.Round(_placement.PanelTop, 1),
                 ["clamped"] = !_flow && _placement.Clamped,
+                ["stripBottom"] = _flow ? null : Math.Round(_placement.Bottom, 1),
+                ["contentTop"] = _contentTop.HasValue ? Math.Round(_contentTop.Value, 1) : null,
+                ["contentBy"] = _contentBy,
+                ["contentOverlap"] = _flow || !_contentTop.HasValue ? null : Math.Round(Math.Max(0f, _contentTop.Value - _placement.Bottom), 1),
+                ["raised"] = !_flow && _placement.Raised,
+                ["bonusBottom"] = _bonusBottom.HasValue ? Math.Round(_bonusBottom.Value, 1) : null,
+                ["nativeRow"] = NativeRowDict(),
+                ["nativeRowSlot"] = _nativeTabs.Count == 0 ? null : _slotKept ? "kept" : "collapsed",
                 ["masks"] = _masks.Count,
                 ["clip"] = _check.State,
                 ["clipBy"] = _check.By,
@@ -1282,6 +1363,7 @@ internal sealed partial class UnityUiRuntime
             _labels.Clear(); _captionDonor = null; _captionFixes = 0;
             _art.Clear(); _artDonor = null; _artFixes = 0; _artDriverLogged = false;
             _trimRects.Clear(); _donorCaption = null; _trims.Clear(); _trimMoves = 0;
+            _contentTop = null; _contentBy = ""; _bonusBottom = null; _slotKept = false;
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
             _tabDonorRect = null; _stripRect = null; _height = null; _bonusAnchor = null; _masks.Clear();
@@ -1305,8 +1387,14 @@ internal sealed partial class UnityUiRuntime
             readonly float _alpha;
             readonly bool _interactable, _blocks;
             bool _hidden;
+            internal readonly GameObject Go;
+
+            /// <summary>Hide without taking the object out of its parent's layout, so the content after it keeps its place.</summary>
+            internal bool KeepLayout { get; private set; }
+
             internal HiddenNative(GameObject go)
             {
+                Go = go;
                 _layout = go.GetComponent<LayoutElement>();
                 _ownLayout = _layout == null;
                 if (_ownLayout) _layout = go.AddComponent<LayoutElement>();
@@ -1317,7 +1405,16 @@ internal sealed partial class UnityUiRuntime
                 _alpha = _group.alpha; _interactable = _group.interactable; _blocks = _group.blocksRaycasts;
             }
             internal void Hide()
-            { if (Alive(_group)) { _layout.ignoreLayout = true; _group.alpha = 0; _group.interactable = false; _group.blocksRaycasts = false; _hidden = true; } }
+            { if (Alive(_group)) { _layout.ignoreLayout = !KeepLayout || _ignoreLayout; _group.alpha = 0; _group.interactable = false; _group.blocksRaycasts = false; _hidden = true; } }
+
+            /// <summary>From now on hide in place: the object's layout slot is given back at once.</summary>
+            internal void KeepSlot()
+            {
+                KeepLayout = true;
+                if (Alive(_layout)) _layout.ignoreLayout = _ignoreLayout;
+            }
+
+            internal bool Hidden => _hidden;
             internal void Restore()
             { if (_hidden && Alive(_group)) { _layout.ignoreLayout = _ignoreLayout; _group.alpha = _alpha; _group.interactable = _interactable; _group.blocksRaycasts = _blocks; _hidden = false; } }
             public void Dispose() { Restore(); if (_ownLayout && Alive(_layout)) UnityEngine.Object.Destroy(_layout); if (_owned && Alive(_group)) UnityEngine.Object.Destroy(_group); }

@@ -6,12 +6,20 @@ namespace Progenitor.Ui;
 /// <summary>Where <see cref="VanillaTabStripLayout.Place"/> put a station window's tab strip, in the window root's local units (y up).</summary>
 internal readonly struct VanillaTabStripPlacement
 {
-    internal VanillaTabStripPlacement(float top, float height, bool clamped)
+    internal VanillaTabStripPlacement(float top, float height, bool clamped, bool raised = false, float overlap = 0f)
     {
         Top = top;
         Height = height;
         Clamped = clamped;
+        Raised = raised;
+        Overlap = overlap;
     }
+
+    /// <summary>The top was moved up so the strip ends above the window's own content (<see cref="VanillaTabStripLayout.ClearContent"/>).</summary>
+    internal bool Raised { get; }
+
+    /// <summary>How far the window's content still reaches into the strip from below, in root units; 0 when clear.</summary>
+    internal float Overlap { get; }
 
     /// <summary>The strip's top edge (its pivot is the top center).</summary>
     internal float Top { get; }
@@ -136,6 +144,27 @@ internal static class VanillaTabStripLayout
         }
 
         return new VanillaTabStripPlacement(top, height, clamped);
+    }
+
+    /// <summary>
+    /// Keep the strip off the window's own content. <paramref name="contentTop"/> is the top edge
+    /// of the highest native content under the strip (measured in this window, root units, y up;
+    /// null when none is measured). When it reaches into the strip, the strip is raised to stand on
+    /// it, but never above <paramref name="ceiling"/> (the bonus row's bottom or the visible area's
+    /// top, whichever is lower). What still overlaps is reported in
+    /// <see cref="VanillaTabStripPlacement.Overlap"/>. A clear strip is returned unchanged.
+    /// </summary>
+    internal static VanillaTabStripPlacement ClearContent(VanillaTabStripPlacement placement, float? contentTop, float? ceiling)
+    {
+        if (!contentTop.HasValue || !Finite(contentTop.Value)) return placement;
+        float overlap = contentTop.Value - placement.Bottom;
+        if (overlap <= Tolerance) return placement;
+        float top = contentTop.Value + placement.Height;
+        if (ceiling.HasValue && Finite(ceiling.Value) && top > ceiling.Value) top = Math.Max(placement.Top, ceiling.Value);
+        bool raised = top > placement.Top + Tolerance;
+        if (!raised) top = placement.Top;
+        float left = Math.Max(0f, contentTop.Value - (top - placement.Height));
+        return new VanillaTabStripPlacement(top, placement.Height, placement.Clamped, raised, left <= Tolerance ? 0f : left);
     }
 
     /// <summary>

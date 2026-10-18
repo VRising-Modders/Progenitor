@@ -383,6 +383,57 @@ public sealed class VanillaTabStripLayoutTests
         Assert.True(VanillaTabCaption.Drifted(float.NaN, 0f));
     }
 
+    // The Blood Press readback (live, Core 2026.10.93): placed strip, top 779, 49 high, panel top
+    // 724, so the strip's bottom is 730, the bonus row's bottom 799 (top = bonus bottom - 20).
+    // The recipe list reached into the strip.
+
+    [Fact]
+    public void BloodPressStripIsPlacedUnderTheBonusRow()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        Assert.Equal(779f, p.Top);
+        Assert.Equal(730f, p.Bottom);
+        Assert.Equal(724f, p.PanelTop);
+        Assert.False(p.Raised);
+        Assert.Equal(0f, p.Overlap);
+    }
+
+    [Fact]
+    public void ContentUnderTheStripLeavesItWhereItIs()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        Assert.Equal(p.Top, VanillaTabStripLayout.ClearContent(p, 724f, 799f).Top);
+        Assert.Equal(p.Top, VanillaTabStripLayout.ClearContent(p, 730.5f, 799f).Top); // touching, within tolerance
+        Assert.Equal(p.Top, VanillaTabStripLayout.ClearContent(p, null, 799f).Top);
+    }
+
+    [Fact]
+    public void ContentReachingIntoTheStripRaisesItOntoTheContent()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        var clear = VanillaTabStripLayout.ClearContent(p, 740f, 799f);
+        Assert.True(clear.Raised);
+        Assert.Equal(789f, clear.Top);
+        Assert.Equal(740f, clear.Bottom);
+        Assert.Equal(0f, clear.Overlap);
+    }
+
+    [Fact]
+    public void TheStripIsNeverRaisedIntoTheBonusRowAndReportsWhatStillOverlaps()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        // The first recipe row's top at 770: standing on it would put the strip's top at 819, past the bonus row.
+        var clear = VanillaTabStripLayout.ClearContent(p, 770f, 799f);
+        Assert.True(clear.Raised);
+        Assert.Equal(799f, clear.Top);
+        Assert.Equal(20f, clear.Overlap, 3);
+        // A strip already at its ceiling is not moved, and the overlap is reported.
+        var stuck = VanillaTabStripLayout.ClearContent(p, 770f, 779f);
+        Assert.False(stuck.Raised);
+        Assert.Equal(779f, stuck.Top);
+        Assert.Equal(40f, stuck.Overlap, 3);
+    }
+
     // The prison cell readback (live, Core 2026.10.93): a 190.3 x 49 tab whose own image draws
     // Tab_Normal (320 x 94, simple, preserve aspect), with the baseline trims TabDivider (bottom 0,
     // 8 high) and TabGradient (bottom 2.4, 8 high) drawn over the tabs' bottom edge.
