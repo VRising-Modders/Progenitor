@@ -281,6 +281,64 @@ node tools/mcp/call.mjs server stress_status "@$bridgeArgs"
 node tools/mcp/call.mjs server stress_clear "@$bridgeArgs"
 ```
 
+### Staged ops on existing stress castles: `stress_owner_groups`, `stress_clan`, `stress_refine`, `stress_stations`, `stress_stage_status`
+
+These work on castles a seed's stress owners already hold (on the Moo World copy: 140 generated castles, owners `Stress01`..`Stress40`). Castles of other owners are never touched. Same gate as `stress_populate`; a write needs `confirm:"stress"`, a `dryRun` does not. Work runs a few steps per frame under `budgetMs` (default 4); each op reads back on a later frame. The reply comes when the job ends (or after 25 s; then read `stress_stage_status`). MCP: `progenitor_stress` with `action` `groups`, `clan`, `refine`, `stations`, `stage`.
+
+**Status:** planners are game-free and unit-tested (`DevStressStagesTests`), the MCP mapping is tested, Dev builds. **Not run live.**
+
+**`stress_owner_groups`** (read only). Args: `seed`, `groups` (clan sizes, default `[8, 6, 4, 2]`), `share` (castle-share owners, default half of the owners outside clans). Owners keep their castles; this only decides which owner is in which group:
+
+- **solo**: the owners whose own castles lie closest together;
+- **castle-share**: owners with 3 or more castles, each owner's castles one island;
+- **clans**: the rest, chosen to spread each clan across the map and to mix neighbors, by a deterministic hill climb over swaps. Score: 0.55 x mean clan spread + 0.35 x neighbor mixing + 0.10 x castle-share own spread. A clan's spread is its castles' mean pairwise and mean nearest-other-member distance over the map diagonal, plus the share of regions it covers. Mixing is the share of each plot's 4 nearest other-owner plots in a different group.
+
+The reply lists, per group, members (name, platform id, user index, castle count, own spread), `castlesPerOwner`, every castle's `territory`, `x`, `z` (world meters, territory center) and `region`, and `spread` (`meanPairDistance`, `minPairDistance`, `meanNearestDistance`, `regions`, `score`). It also has `mixing`, `score`, `mapDiagonal` and `islands` (per island its territories and `rawCastles`, see `stress_refine`). The same seed and castles give the same grouping, and the other staged ops use it.
+
+**`stress_clan`**. Args: `seed`, `groups`, `share`, `clan` (one clan ordinal, to prove one clan first), `experiment:true` (required unless `dryRun`), `confirm`. For each planned clan it uses the server's clan create step: an instance of the clan team prefab, then `ClanTeam` name `StressClanNN`, motto, a random clan GUID, the next team value and the leader's network id. Each member then joins through the game's add-member routine `TeamUtility.AddUserToClan`, called through its generated wrapper, which is why the `experiment` opt-in exists. That routine links the member's team and the clan team both ways, copies the clan's team data, sets `User.ClanEntity` and raises the game's team events. The op writes `User.ClanEntity` back and sets the role through the game's `ClanSystem_Server.SetClanRole`. The first member is leader, and `ClanRole` is added first because offline owners lack it. The game's character clan name step is skipped: it needs the user's controller, which offline owners lack. A clan is refused before any write when a member is connected, already in a clan or has no own team. It is also refused when it is bigger than the server's live `ClanSize` setting: the invite path enforces that limit and the add-member routine does not.
+
+A member is also refused (`status_shape`) unless it has a `Controller` whose controlled character exists and has `Health`. The game's clan status system looks these up for every clan member inside a Burst job, and a missing component aborts the server. That happened live on 2026-10-18 with a stress owner, which has no `Controller` and no character. Stress owners therefore cannot join a clan in this build. The refusal stays until the status job's reads are known to be guarded.
+
+`members` (platform ids as strings, leader first) builds one clan of exactly those users instead of the seed's grouping, named `name` (default `StressClanH1`). Use it for the headless clients' users, which are real users with characters. The same create and join steps run, with the same refusals, except that connected members are allowed: the game's own create and accept paths run for connected users. For a user with a `Controller`, the clan name is also set on the character through the game's `ClanUtility.SetCharacterClanName`. The job stops at the first failed step.
+
+Castle teams are **not** added to the clan's allies, because the game's join path does not add them: a castle stays allied to its owner's team, and clan access goes through that team. The readback lists, per member: `clanEntity`, team allies, team data against the clan's, role, and per castle `alliedToOwner` and `castleTeamInClanAllies`. `stress_clear` keeps clan members, because removing a member has no proven path.
+
+**`stress_refine`**. Args: `seed`, `groups`, `share`, `plots` (`"stress"` (the default) or territory indices; the grouping always sees every castle of the seed), `hours` (default 1), `supply` (`"spread"`, `"local"` or `"auto"`, the default: spread for clan and castle-share islands, local for solo owners), `suppliers` (the share of a spread island's castles that get raws, default 1/3 and at least one, farthest apart first), `emptyChests` (chests per castle left empty for products, default 3), `speed` (extra refining speed factor, default 1), `confirm`, `dryRun`.
+
+- Every unlocked refinement recipe of every station in the selected castles is switched on through `ctx.Stations.SetRecipeEnabled`. That makes the same writes as the station window's checkbox: the recipe row, its linked rows and the station's update flag.
+- Raw inputs for `hours` are added to chests through the `give` item path. A station runs one recipe at a time, so its time is split over its runnable recipes. Batches per recipe = ceil(time x server refinement rate x speed / recipe duration), and each batch takes the recipe inputs x the server refinement cost.
+- With `spread`, an island's whole need goes only to its raw castles, so factories pull raws across plots. The other castles' chests get none. With `local`, each castle gets what its own stations use.
+- A recipe input that is a wildcard (a `FakeItem_*` prefab such as `FakeItem_AnyFlower`) is never given. It resolves to a real stackable item that carries all of the wildcard's item category bits, the first by prefab name. An input that cannot be resolved, or has no item data or a max stack of 0, is skipped and listed in `itemNotes`. Every stock step checks the item again before the give.
+- A planned clan counts as one island only once it exists, with every member in the same clan. Until then, each of its members is its own island: castle-share with 3 or more castles, else solo, with `plannedClan` naming the clan it was planned for.
+- Chests are filled emptiest first. The `emptyChests` emptiest chests of every castle get nothing.
+
+The plan lists per island its territories, `rawCastles`, the item `need` and, per raw castle, the stocking chests, the kept-empty chests and the items. The readback lists per castle the recipes on out of those unlocked, locked recipes, empty chests, and for raw castles each planned item against what the chests now hold. Locked recipes are left alone: unlocking is a progression change, not the window's checkbox.
+
+**`stress_stations`**. Args: `seed`, `plots`, `perCastle` (default 15), `experiment`, `limit` (default 1), `confirm`, `dryRun`. It reads each castle's refinement stations and plans the top-up to `perCastle`: the station kinds already in use, round-robin, fewest first. No proven path places a building for an offline owner, because the build event needs the owner's character.
+
+**Experiment** (`experiment:true`, `plots` with 1 to 3 castles, `confirm`): it places up to `limit` stations per castle with the writes the castle generator makes for a room object. That is an instance of the station prefab, `Translation`, and `CastleHeartConnection` set to the castle's heart, with no rotation.
+
+- The spot is a free block of the castle's existing floors, at the height of the floor under an unrotated station of the same kind in that castle, and the size of that station. It must not overlap any other building on that height; `margin` (0 to 3, default 0) keeps more free tiles around each one. No floor is added and nothing is replaced. Footprints come from the game's tile bounds, whose upper end is exclusive.
+- Each planned station gets a `reason` and `detail` under `plan.castles[].placements`: `spot`, `no_template` (no unrotated station of that kind on a floor), `no_floor_at_height` or `no_free_spot` (floor tiles and free tiles counted). `plan.spotReasons` totals them, and a note says why when nothing was placed.
+- The castle's buildings are read from one query of placed tile models, filtered 1500 per frame, so a large castle does not cost one long tick.
+- With the experiment, only station kinds the castle has a template for are planned, repeated round-robin to reach `perCastle`. A template from another castle is not used. A castle with no template kind at all reports `no_template`.
+- `batch:true` lifts the 1 to 3 plot cap once one castle is proven: every castle of the seed (or any `plots` list) in one job. Planning runs one castle per step, and placement one station per step. Readback runs a few rows per frame. Above 300 readback rows, the reply lists only the rows with a failed check (up to 200) and the per-castle rows, with `readbackRows` and `readbackProblems` counts.
+- The position copies that station's offset from its own footprint.
+- The readback for each placed station reports `heartConnected`, `team` against the heart's `castleTeam`, `inventories` (expect 2), `status` (`noOwner` should be false), `listedInCastle`, `footprint`, `overlaps`, `listedAsStation` and `structureRevisionChanged`.
+
+The experiment proves whether the game registers the tiles, gives the castle team and keeps the station across a save reload. Removing a placed station has no proven path.
+
+**`stress_stage_status`**: the running or last staged job: `op`, `phase` (`running`, `planned`, `done`, `done_with_failures`, `stopped`, `cancelled`), `steps`, `done`, `failed`, `maxTickMs`, `plan`, `notes`, step `rows` and `readback`.
+
+```
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":18}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_owner_groups "@$bridgeArgs"
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":18,"clan":1,"dryRun":true}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_clan "@$bridgeArgs"
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":18,"plots":[12],"supply":"local","dryRun":true}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_refine "@$bridgeArgs"
+```
+
 ## `ops`
 
 The list of ops this build knows. Useful as a smoke test that does not touch the world.

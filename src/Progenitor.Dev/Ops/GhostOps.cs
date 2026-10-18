@@ -526,7 +526,7 @@ public static unsafe class GhostOps
     // user, then the user's TeamReference base value = the team (ModificationsRegistry.SetBaseValue,
     // which for a field with no registered modification just stores the value). No team event.
 
-    private static int TeamReferenceEntityOffset => Layout.TeamReferenceValueOffset + Layout.ModifiableEntityValueOffset;
+    internal static int TeamReferenceEntityOffset => Layout.TeamReferenceValueOffset + Layout.ModifiableEntityValueOffset;
 
     /// <summary>
     /// Give an offline synthetic user (a <c>stress_populate</c> owner) its own team the way the server
@@ -686,7 +686,7 @@ public static unsafe class GhostOps
         return true;
     }
 
-    private static bool TryReadEntityField<T>(EntityManager em, Entity entity, int offset, out Entity value)
+    internal static bool TryReadEntityField<T>(EntityManager em, Entity entity, int offset, out Entity value)
     {
         value = Entity.Null;
         var type = ComponentIndex.Of<T>(ComponentType.AccessMode.ReadOnly);
@@ -715,7 +715,7 @@ public static unsafe class GhostOps
     }
 
     /// <summary>The <c>TeamAllies</c> rows through the non-generic raw buffer read, at the metadata stride.</summary>
-    private static bool TryReadAllies(EntityManager em, Entity team, List<Entity> into)
+    internal static bool TryReadAllies(EntityManager em, Entity team, List<Entity> into)
     {
         var type = ComponentIndex.Of<TeamAllies>(ComponentType.AccessMode.ReadOnly);
         if (team == Entity.Null || !em.Exists(team) || !em.HasComponent(team, type)) return false;

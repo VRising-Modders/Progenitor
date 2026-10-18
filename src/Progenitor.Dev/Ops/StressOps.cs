@@ -220,13 +220,13 @@ internal static class StressOps
         MainThread.PostDelayed(0, Tick, TickOwner);
     }
 
-    private static void RequireServer(string op)
+    internal static void RequireServer(string op)
     {
         if (!Progenitor.Plugin.IsServerProcess)
             throw new InvalidOperationException(op + " runs on the server only");
     }
 
-    private static World RequireIdle()
+    internal static World RequireIdle()
     {
         var running = s_job;
         if (running != null && !running.Finished)
@@ -238,7 +238,7 @@ internal static class StressOps
     }
 
     /// <summary>The test-server and save gate; a dry run skips only the confirm word.</summary>
-    private static void RequireGate(string? confirm, bool dryRun)
+    internal static void RequireGate(string? confirm, bool dryRun)
     {
         var inputs = new StressGateInputs
         {

@@ -43,6 +43,29 @@ test('stress tool maps each action to its server op and passes the arguments thr
   assert.match(tool.description, /never claims/);
 });
 
+test('stress tool maps the staged actions to their server ops', async () => {
+  const { tool, calls } = load();
+  await tool.handler(tool.schema.parse({ action: 'groups', seed: 18, groups: [8, 6, 4, 2] }));
+  assert.deepEqual(calls[0], ['server', 'stress_owner_groups', { seed: 18, groups: [8, 6, 4, 2] }]);
+  await tool.handler(tool.schema.parse({ action: 'clan', seed: 18, clan: 1, experiment: true, confirm: 'stress' }));
+  assert.deepEqual(calls[1], ['server', 'stress_clan', { seed: 18, clan: 1, experiment: true, confirm: 'stress' }]);
+  await tool.handler(tool.schema.parse({ action: 'refine', seed: 18, plots: 'stress', hours: 1, supply: 'spread', emptyChests: 3, dryRun: true }));
+  assert.deepEqual(calls[2], ['server', 'stress_refine', { seed: 18, plots: 'stress', hours: 1, supply: 'spread', emptyChests: 3, dryRun: true }]);
+  await tool.handler(tool.schema.parse({ action: 'stations', seed: 18, plots: [4], perCastle: 20, dryRun: true }));
+  assert.deepEqual(calls[3], ['server', 'stress_stations', { seed: 18, plots: [4], perCastle: 20, dryRun: true }]);
+  await tool.handler(tool.schema.parse({ action: 'stage' }));
+  assert.deepEqual(calls[4], ['server', 'stress_stage_status', {}]);
+  assert.match(tool.description, /ClanSize is refused/);
+  await tool.handler(tool.schema.parse({ action: 'stations', seed: 18, plots: [12], experiment: true, limit: 1, confirm: 'stress' }));
+  assert.deepEqual(calls[5], ['server', 'stress_stations', { seed: 18, plots: [12], experiment: true, limit: 1, confirm: 'stress' }]);
+  await tool.handler(tool.schema.parse({ action: 'clan', seed: 18, members: ['76561198000000001', '76561198000000002'], name: 'HeadlessClan', experiment: true, confirm: 'stress' }));
+  assert.deepEqual(calls[6], ['server', 'stress_clan', { seed: 18, members: ['76561198000000001', '76561198000000002'], name: 'HeadlessClan', experiment: true, confirm: 'stress' }]);
+  assert.equal(tool.schema.safeParse({ action: 'clan', members: ['abc'] }).success, false);
+  assert.equal(tool.schema.safeParse({ action: 'refine', supply: 'far' }).success, false);
+  assert.equal(tool.schema.safeParse({ action: 'groups', groups: [1] }).success, false);
+  assert.equal(tool.schema.safeParse({ action: 'stations', perCastle: 40 }).success, false);
+});
+
 test('stress tool schema rejects bad values', () => {
   const { tool } = load();
   assert.equal(tool.schema.safeParse({ action: 'fill' }).success, false);

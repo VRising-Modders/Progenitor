@@ -166,6 +166,7 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
             Ops.GhostOps.Shutdown();
             // Stops a stress job between steps; its owners stay in the save until stress_clear.
             Ops.StressOps.Shutdown();
+            Ops.StressStageOps.Shutdown();
             Ops.TimeOps.Shutdown();
             Ops.WakeOps.Shutdown();
             Ops.CatalogAssetOps.Shutdown();

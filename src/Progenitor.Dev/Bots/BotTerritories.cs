@@ -163,6 +163,14 @@ internal static class BotTerritories
 
     // ---- stress_populate discovery: the same reads, one territory per call -------------------
 
+    /// <summary>The territory's world region (<c>TerritoryWorldRegion</c>, the raw read <see cref="ReadTerritory"/> makes); empty when absent.</summary>
+    internal static unsafe string RegionOf(EntityManager em, Entity territory)
+    {
+        if (territory == Entity.Null || !em.Exists(territory) || !territory.Has<TerritoryWorldRegion>(em)) return "";
+        int* r = (int*)em.GetComponentDataRawRO(territory, ComponentIndex.IndexOf<TerritoryWorldRegion>());
+        return r == null ? "" : ((WorldRegionType)(*r)).ToString();
+    }
+
     /// <summary>Every castle territory entity (disabled included), for <see cref="ReadForStress"/>.</summary>
     internal static List<Entity> TerritoryEntities(EntityManager em) =>
         Query.Entities(em, includeDisabled: true, includeSystems: false,
