@@ -5,9 +5,10 @@ namespace Progenitor.ControlsSample;
 
 /// <summary>
 /// The gallery's docked panel: a plain floating game window docked to the left edge (<c>panel.Dock(UiDock.Left)</c>),
-/// vertically centered, the way a preview's controls or a Find panel sit beside the scene. Its buttons move it to the
-/// other edge, hang it from the top, and widen it to 30% of the screen, so the placement can be seen live; the other
-/// windows (the gallery's own Basic window, say) keep clear of it. Every action writes a log line. Game-free: the panel
+/// vertically centered, the way a preview's controls or a Find panel sit beside the scene. Its buttons move it round the
+/// edges (left, right, top, bottom), step its alignment along the edge (center and top on a side; start, center and end
+/// on the top or bottom), and widen it to 30% of the screen, so the placement can be seen live; the other windows (the
+/// gallery's own Basic window, say) keep clear of a side dock. Every action writes a log line. Game-free: the panel
 /// comes from the plugin.
 /// </summary>
 internal sealed class GalleryDocked : IDisposable
@@ -47,7 +48,30 @@ internal sealed class GalleryDocked : IDisposable
     }
 
     private string Describe() =>
-        _side + (_options.Align == UiDockAlign.Top ? ", top" : ", centered") + (_options.WidthFraction > 0f ? ", 30% wide" : "");
+        _side + ", " + _options.Align.ToString().ToLowerInvariant() + (_options.WidthFraction > 0f ? ", 30% wide" : "");
+
+    private static bool Strip(UiDock side) => side is UiDock.Top or UiDock.Bottom;
+
+    /// <summary>The next edge round the screen: left, right, top, bottom. The alignment is kept when the new edge takes it.</summary>
+    internal void NextEdge()
+    {
+        _side = _side switch { UiDock.Left => UiDock.Right, UiDock.Right => UiDock.Top, UiDock.Top => UiDock.Bottom, _ => UiDock.Left };
+        if (Strip(_side) && _options.Align == UiDockAlign.Top) _options.Align = UiDockAlign.Start;
+        if (!Strip(_side) && _options.Align is UiDockAlign.Start or UiDockAlign.End) _options.Align = UiDockAlign.Center;
+        Apply();
+    }
+
+    /// <summary>The next alignment along the edge: center and top on a side; start, center and end on the top or bottom.</summary>
+    internal void NextAlign()
+    {
+        _options.Align = Strip(_side)
+            ? _options.Align switch { UiDockAlign.Start => UiDockAlign.Center, UiDockAlign.Center => UiDockAlign.End, _ => UiDockAlign.Start }
+            : _options.Align == UiDockAlign.Top ? UiDockAlign.Center : UiDockAlign.Top;
+        Apply();
+    }
+
+    /// <summary>The edge and alignment it is docked with (tests).</summary>
+    internal (UiDock Side, UiDockAlign Align) Placement => (_side, _options.Align);
 
     private void Apply()
     {
@@ -60,14 +84,10 @@ internal sealed class GalleryDocked : IDisposable
         var p = _panel().GameWindow();
         p.ContentAlignment = "left";
         p.Dock(_side, _options);
-        p.Text("Docked to a screen edge: it stays there while other windows open and close, and they keep clear of it.", UiTextStyle.Muted);
+        p.Text("Docked to a screen edge: it stays there while other windows open and close, and they keep clear of a side dock.", UiTextStyle.Muted);
         p.BeginInline();
-        p.Button("Other edge").OnClick(() => { _side = _side == UiDock.Left ? UiDock.Right : UiDock.Left; Apply(); });
-        p.Button("Top or center").OnClick(() =>
-        {
-            _options.Align = _options.Align == UiDockAlign.Top ? UiDockAlign.Center : UiDockAlign.Top;
-            Apply();
-        });
+        p.Button("Next edge").OnClick(NextEdge);
+        p.Button("Align").OnClick(NextAlign);
         p.Button("Width").OnClick(() => { _options.WidthFraction = _options.WidthFraction > 0f ? 0f : 0.3f; Apply(); });
         p.EndInline();
         p.Button("Close").Centered().OnClick(() => { Window?.Hide(); Say("closed"); });

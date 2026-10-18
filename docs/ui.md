@@ -284,23 +284,26 @@ A panel therefore **may** move when another panel opens or closes. The narrower 
 
 ### Docked panels (DOCK1)
 
-Status: source-checked, built and game-free tested (`UiDockTests`); **not live-verified**. Gallery: Windows tab, **Docked panel** (`samples/Progenitor.ControlsSample/GalleryDocked.cs`).
+Status: source-checked, built and game-free tested (`UiDockTests`), `Left`/`Right` and `Top`/`Bottom` alike; **not live-verified**. Gallery: Windows tab, **Docked panel** (`samples/Progenitor.ControlsSample/GalleryDocked.cs`).
 
-`panel.Dock(UiDock.Left, margin)` (or `UiDock.Right`) puts a floating panel or window against a screen edge, so the middle of the screen stays clear: a preview's controls beside the previewed object, a Find panel on the left while the game's chest window is open on the right. `panel.Dock(side, new UiDockOptions { ... })` takes the options. `UiDock.None` undocks it.
+`panel.Dock(UiDock.Left, margin)` (or `UiDock.Right`) puts a floating panel or window against a screen edge, so the middle of the screen stays clear: a preview's controls beside the previewed object, a Find panel on the left while the game's chest window is open on the right. `UiDock.Top` and `UiDock.Bottom` put it against the top or bottom edge as a strip. `panel.Dock(side, new UiDockOptions { ... })` takes the options. `UiDock.None` undocks it.
 
 | Option | Default | Effect |
 |---|---|---|
-| `Margin` | 16 | Panel units between the screen edge and the frame (0 to 480). |
-| `Align` | `Center` | `Center`: vertically centered on the screen. `Top`: hung from the top margin, growing down. |
+| `Margin` | 16 | Panel units between the docked edge and the frame (0 to 480): horizontal for `Left`/`Right`, vertical for `Top`/`Bottom`. |
+| `Align` | `Center` | Where along the edge it sits. `Left`/`Right`: `Center` (vertically centered), `Top` or `Start` (hung from the top margin, growing down), `End` (standing on the bottom margin, growing up). `Top`/`Bottom`: `Start` (left end), `Center` (on the screen's center line), `End` (right end); `Top` is refused there. |
+| `Offset` | 0 | `Top`/`Bottom` only: panel units right (negative: left) of the aligned place, -1920 to 1920; the frame stays inside the screen. Refused on `Left`/`Right` unless 0. |
 | `Width` | 0 | A game window's frame width in panel units; 0 keeps its own (`GameWindow(width)`, else 640). |
 | `WidthFraction` | 0 | A game window's frame width as a share of the screen width (0.3 is 30%), at most 0.9; it wins over `Width` and follows a resolution change. |
 
 The rules:
 
-- **Width.** A docked frame is never narrower than the kit's 640 frame (the rows are laid out for it) and never wider than 90% of the screen, so 30% is 640 at 1920 wide and 768 at 2560. `Width` and `WidthFraction` apply to a game window (`UiLook.GameWindow`); an ordinary kit panel keeps 640 and a standard window keeps its preset's width.
-- **It stays put.** Its place is computed from its dock, the other docked panels on its side and the canvas alone, so other panels opening and closing never move it. The runtime checks the canvas size every 15 frames while a docked panel is on screen and lays it out again when it changed. Its height is capped to the screen between the margins (under the Mods workspace's tab strip while the workspace is shown).
-- **The others keep clear.** A docked panel never joins the window row or the panel flow. Both are laid out on the canvas the docked panels leave, with a 24-unit gap from the docked frame, and centered on it. When what is left could not hold one 640 frame (a 640 dock on a 1280-wide screen), the docks are ignored for the others: a panel over a docked one is better than a panel off the screen.
-- **Several on one side** line up from the edge inward in slot order (the longest-open at the edge), 24 units apart, clamped inside the screen.
+- **Width.** A docked frame is never narrower than the kit's 640 frame (the rows are laid out for it) and never wider than 90% of the screen, so 30% is 640 at 1920 wide and 768 at 2560. `Width` and `WidthFraction` apply to a game window (`UiLook.GameWindow`); an ordinary kit panel keeps 640 and a standard window keeps its preset's width. A strip follows the same rules, and its height is the panel's own (at least the kit's 200).
+- **It stays put.** Its place is computed from its dock, the other docked panels on its edge and the canvas alone, so other panels opening and closing never move it. The runtime checks the canvas size every 15 frames while a docked panel is on screen and lays it out again when it changed. Its height is capped to the screen between the margins (under the Mods workspace's tab strip while the workspace is shown).
+- **The others keep clear of a side dock.** A docked panel never joins the window row or the panel flow. Both are laid out on the canvas the left and right docks leave, with a 24-unit gap from the docked frame, and centered on it. When what is left could not hold one 640 frame (a 640 dock on a 1280-wide screen), the docks are ignored for the others: a panel over a docked one is better than a panel off the screen. A top or bottom strip reserves nothing: the row, the flow and the side docks are placed exactly as without it, so a strip can cover a centered window.
+- **Several on one edge.** On a side they line up from the edge inward in slot order (the longest-open at the edge), 24 units apart, clamped inside the screen. On the top or bottom, strips with the same alignment form one row along the edge, 24 units apart: `Start` from the left margin rightward, `End` from the right margin leftward (the longest-open at the edge), `Center` as one row centered on the screen. Each then moves by its own `Offset`. Strips with another edge or alignment do not move it.
+- **Ultrawide.** Panel units follow the game's canvas reference size, so on 16:9 through 32:9 only the canvas width changes. A side dock and a `Start` or `End` strip keep their distance from their edge; a `Center` strip keeps its center on the screen's center line; the vertical place is the same at every aspect.
+- **Screen edges only.** Dock places a panel against the screen, never against a game window's rect. To put controls inside or beside a game window, attach them to it ([Vanilla panel sites](#vanilla-panel-sites-p6)).
 - **Precedence.** Dock replaces `Ui.TopPanel` and a wide game window's centering while the panel is docked. Dialogs, Mods workspace panes and self-placed panels are never docked.
 
 Pair a left-docked panel with a camera preview's framing offset (`CameraPreviewOptions.ScreenOffset`, [modules.md](modules.md#camera-preview)) so the previewed object sits in the open part of the screen:
@@ -312,6 +315,28 @@ controls.Dock(UiDock.Left, new UiDockOptions { Margin = 24f, Align = UiDockAlign
 controls.Show();
 _preview = ctx.Camera.Preview(point, yawDegrees: 30, new CameraPreviewOptions { Hold = true, ScreenOffset = 0.15f });
 ```
+
+**A strip over the container window's center gap (recommended placement).** During a remote chest preview ([container preview](modules.md#container-preview)), dock the strip to the top (or bottom) edge with `Center` alignment. The game's container menu sets its inventory half and its container half, each 620 units wide, 448 units apart in one centered row, so the gap's center line is the screen's center line on 16:9 through 32:9 and at every height. A centered strip tracks it through a resolution change with no further code; the gap is not a rect the dock can target, and does not need to be. Use `Offset` only to line the strip up with something off center.
+
+```csharp
+var strip = Ui.Panel("Chest tools", ctx.Owner, ctx.Guid).GameWindow();
+strip.Dock(UiDock.Top, new UiDockOptions { Margin = 24f, Align = UiDockAlign.Center });
+strip.BeginInline();
+strip.Button("Next chest").OnClick(ShowNextChest);
+strip.Button("Close").OnClick(() => _chest?.Dispose());
+strip.EndInline();
+_chest = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true, HidePlayerInventory = false });
+strip.Show();
+```
+
+What this placement does not change: the frame is still at least 640 wide and 200 tall, which is wider than the 448-unit gap, so a centered strip overlaps each half's inner edge by 96 units wherever the two are at the same height. It sits clear of the windows only where they leave room above or below them. The centering of the menu row on the screen comes from the shipped layout and is still to be checked live; the live check is below.
+
+Live check for `Top`/`Bottom` (not run). Client only, on an idle client in a world, with the Controls sample deployed:
+
+1. Gallery, Windows tab, **Docked panel**: open it, then **Next edge** twice (Left, Right, Top). `ui_read` the panel rect: its top edge sits 24 units under the canvas top and its center x is 0. **Align** steps Start, Center, End: the frame's left edge is 16 units from the left, then centered, then its right edge 16 from the right. **Next edge** again (Bottom): its bottom edge is 24 above the canvas bottom. Open the gallery's Basic window as well: the window row does not move for the strip.
+2. Change the game resolution (`mods_ui resolution`) to an ultrawide mode (2560x1080 or 3440x1440; 32:9 when a display offers it) while the strip is shown, wait one second, and read the rect again: same vertical place, still centered (or still against its end), nothing off screen.
+3. Container gap: open a container preview with `HidePlayerInventory = false` and show the recipe strip above. `mods_ui rects` (or a capture) gives the two halves' rects: record whether the gap's center is x 0 at 16:9 and at the ultrawide mode, and how far the strip overlaps each half.
+4. Clean up: close the strip and the preview, disconnect to the title screen, remove the Controls sample from the client's reload folder.
 
 ## Keybinds: edges come from held state
 
