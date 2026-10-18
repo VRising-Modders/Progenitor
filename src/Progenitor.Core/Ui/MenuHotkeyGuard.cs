@@ -294,6 +294,7 @@ internal static class MenuHotkeyGuard
     {
         SetFocusedField(null);
         _closeHeld = false;
+        _interactHeld = false;
     }
 
     // ---- KEYS3 polish: the game's menu must not close on an Escape a capture or a dialog took ----
@@ -337,6 +338,35 @@ internal static class MenuHotkeyGuard
     {
         if (!held) _closeHoldLogged = false;
         _closeHeld = held;
+    }
+
+    // ---- RETURN1: the game's chest window must not close on a letter typed into a Progenitor field ----
+
+    /// <summary>
+    /// The game's <c>ButtonInputAction.Interact</c> (client metadata). <c>ContainerMenuMapper.HandleInput</c> closes the
+    /// chest window on its key release (keyboard), ahead of the 599 mask.
+    /// </summary>
+    internal const int InteractAction = 1;
+
+    /// <summary>True while a Progenitor field has the keyboard over the game's chest or station window (<see cref="GameWindowUnderPanel.HoldsInteract"/>).</summary>
+    internal static bool InteractHeld => _interactHeld;
+
+    private static volatile bool _interactHeld;
+
+    private static volatile bool _interactHoldLogged;
+
+    internal static void SetInteractHeld(bool held)
+    {
+        if (!held) _interactHoldLogged = false;
+        _interactHeld = held;
+    }
+
+    /// <summary>True the first time the Interact hold was applied since it was last released (one log line per hold).</summary>
+    internal static bool NoteInteractHoldApplied()
+    {
+        if (_interactHoldLogged) return false;
+        _interactHoldLogged = true;
+        return true;
     }
 
     /// <summary>

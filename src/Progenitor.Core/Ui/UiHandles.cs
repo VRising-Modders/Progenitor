@@ -436,6 +436,12 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// </summary>
     internal bool GridControls { get; set; }
 
+    /// <summary>
+    /// RETURN1: the panel is mounted in a chest or station window's tab (<see cref="IVanillaPanelTabs.Mount"/>): it belongs
+    /// to that game window, so an Escape that a Progenitor window over the game window takes does not hide it.
+    /// </summary>
+    internal bool MountedInTab { get; set; }
+
     /// <summary>HUB1: <see cref="UiLook.GameWindow(IUiPanel)"/> was called on this panel (its tabs are the game's window tabs).</summary>
     internal bool IsGameWindow { get; set; }
 
@@ -1041,6 +1047,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     }
 
     private static long s_shownSequence;
+
+    /// <summary>RETURN1: the newest <see cref="ShownSequence"/> handed out (a panel shown after this point has a larger one).</summary>
+    internal static long LastShownSequence => Interlocked.Read(ref s_shownSequence);
 
     /// <summary>NAV1: when this panel was last shown (higher is newer); 0 before its first show.</summary>
     internal long ShownSequence { get; private set; }

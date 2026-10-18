@@ -371,6 +371,42 @@ internal sealed partial class UnityUiRuntime
     }
 
     /// <summary>
+    /// The chest, station or castle heart window shown now, through the same once-a-frame mapper scan the panel sites use
+    /// (<c>ctx.Inventory.LastWindow</c> remembers it). <paramref name="interactBuff"/> is the container window's
+    /// interaction (<c>ContainerMenuMapper._InteractBuff</c>; <see cref="Entity.Null"/> for a remote preview's window) and
+    /// is left null for the other windows, which only open through an interaction. False when none of them is shown.
+    /// </summary>
+    internal static bool TryOpenInteractWindow(World world, out VanillaPanelKind kind, out Entity target, out Entity interactBuff)
+    {
+        kind = VanillaPanelKind.None;
+        target = Entity.Null;
+        interactBuff = Entity.Null;
+        EnsureScan(world);
+        if (_container.SubShown && _container.Target != Entity.Null)
+        {
+            kind = VanillaPanelKind.Container;
+            target = _container.Target;
+            try { interactBuff = _containerMapper == null ? Entity.Null : _containerMapper._InteractBuff; }
+            catch { interactBuff = Entity.Null; }
+            return true;
+        }
+        if (_heart.SubShown && _heart.Target != Entity.Null)
+        {
+            kind = VanillaPanelKind.CastleHeart;
+            target = _heart.Target;
+            return true;
+        }
+        for (int i = 0; i < StationScans.Length; i++)
+        {
+            if (!StationScans[i].SubShown || StationScans[i].Target == Entity.Null) continue;
+            kind = VanillaStationWindows.Covered[i].Kind;
+            target = StationScans[i].Target;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Run one station window's reader. A throw (a type or member the game removed: the JIT raises it
     /// when the reader is first compiled) drops that window for the generation with one warning; the
     /// scan and every other site go on.

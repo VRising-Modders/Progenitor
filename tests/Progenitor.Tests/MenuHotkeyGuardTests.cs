@@ -687,7 +687,9 @@ public class MenuHotkeyGuardTests : IDisposable
         SourcePin.AssertStatementExactly(source, "if (target == HotkeyMaskTarget.Guard)");
         SourcePin.AssertStatementExactly(source, "MaskGuard(blockInputState);");
         // KEYS3 polish (live P2, 2026-09-30): the guard also runs while the close hold is on.
-        SourcePin.AssertStatementExactly(source, "if (!hotkeysBlocked && !closeHeld) return;");
+        // RETURN1: and while the Interact hold is on (a Progenitor field over the game's chest or station window).
+        SourcePin.AssertStatementExactly(source, "if (!hotkeysBlocked && !closeHeld && !interactHeld) return;");
+        SourcePin.AssertStatementExactly(source, "if (interactHeld)");
         SourcePin.AssertStatementExactly(source, "if (!hotkeysBlocked) return;");
         SourcePin.AssertStatementExactly(
             source, "if (MenuHotkeyGuard.NoteMaskApplied(Environment.TickCount64))");

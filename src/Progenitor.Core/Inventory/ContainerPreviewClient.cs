@@ -84,10 +84,13 @@ internal static unsafe class ContainerPreviewClient
         if (container.IsNone) throw new ArgumentException("No container id.", nameof(container));
         var world = Worlds.Client;
         if (world == null || !world.IsCreated) throw new InvalidOperationException("No client world (join a game first).");
+        // A preview that took the place of the player's window hands the return on to the one replacing it.
+        bool inheritReturn = _current?.Machine.TookPlayerWindow == true;
         _current?.Close(ContainerPreviewCloseReason.Replaced, "", notify: true);
         ReleaseClosingView();
         int sequence = _sequence = _sequence == int.MaxValue ? 1 : _sequence + 1;
         var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate, SyncInventory = syncInventory };
+        if (inheritReturn) handle.Machine.InheritPlayerWindow();
         _current = handle;
         if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds, syncInventory))
             handle.Close(ContainerPreviewCloseReason.Failed, "The preview request could not be sent.", notify: true);
@@ -298,6 +301,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private double _nextLookup;
     private IDisposable? _hudHook, _mapperHook, _sendHook, _escape;
     private bool _capturing;
+    private long _shownAtArm;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
     private Entity _windowTarget = Entity.Null;
     private bool _inventorySeen;
@@ -481,6 +485,16 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         var sample = Sample(now);
         var step = Machine.Step(now, sample);
         if (step == ContainerPreviewStep.Closed) { Finish(notify: true, tellServer: true); return; }
+        if (step == ContainerPreviewStep.CloseOtherWindow)
+        {
+            // The game's own close: the window's mapper ends the player's interaction as Escape would. It is opened
+            // again the game's way when this preview ends (Finish).
+            Plugin.Logger?.LogInfo("ContainerPreview: taking the place of the player's open window ("
+                + (ContainerReturnClient.LastWindow()?.ToString() ?? "?") + "); it opens again when the preview ends.");
+            ContainerReturnClient.NoteFlowClose();
+            ContainerPreviewClient.CloseMenu(_world);
+            return;
+        }
         if (step == ContainerPreviewStep.OpenWindow)
         {
             ArmWindow();
@@ -526,6 +540,12 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         s.ContainerMenuOpen = window.Menu == Layout.HUDMenuTypeContainerMenu;
         s.TargetReplaced = _windowTarget != Entity.Null && _target != Entity.Null && _target != _windowTarget;
         s.OtherMenuOpen = window.Menu > 0 && !s.WindowIsOurs;
+        // Only worth reading while it can matter: the chest is ready and the player's own window is in the way.
+        if (s.OtherMenuOpen && s.TargetFound && s.InventoryReady && _options.ReturnToOpenWindow && !Machine.TookPlayerWindow)
+        {
+            try { s.OtherMenuReturnable = ContainerReturnClient.LastWindow()?.IsOpen == true; }
+            catch { s.OtherMenuReturnable = false; }
+        }
         return s;
     }
 
@@ -537,6 +557,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// <summary>Install the hooks and take Escape just before the open is written.</summary>
     private void ArmWindow()
     {
+        _shownAtArm = Ui.UiPanelHandle.LastShownSequence;
         _hudHook = SystemHooks.Before<InteractSystemHUD>(BeforeInteractHud);
         _mapperHook = SystemHooks.Before<ContainerMenuMapper>(BeforeMapper);
         if (_options.DropItemEvents) _sendHook = SystemHooks.Before<SerializeAndSendClientEventsSystem>(BeforeSend);
@@ -633,6 +654,12 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         try { capture = Keybinds.EscapeBelongsToCapture; } catch { /* */ }
         try { chat = Keybinds.ChatFocusNow == ChatFocus.Focused; } catch { /* */ }
         if (ContainerPreviewEscape.Decide(true, dialog, capture, chat) != ContainerPreviewEscapeOwner.Preview) return false;
+        // RETURN1: a Progenitor window opened over the preview's window after it (a hub) is above it: that one closes
+        // first (the framework's sweep), and the 498 hold keeps this window. A panel docked before the preview (Find) is
+        // below it: the preview closes first, as before.
+        bool newerOnTop = false;
+        try { newerOnTop = Ui.Ui.EscapeHidesAPanelOverGameWindow(_shownAtArm); } catch { /* */ }
+        if (newerOnTop) return false;
         Close(ContainerPreviewCloseReason.Escape, "", notify: true);
         return true;
     }
@@ -777,9 +804,18 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         Plugin.Logger?.LogInfo("ContainerPreview: " + Container + " closed (" + reason + (Machine.Message.Length > 0 ? ": " + Machine.Message : "")
             + (DroppedEvents > 0 ? ", " + DroppedEvents + " item events dropped" : "") + ").");
         var closed = _closed; _closed = null;
-        if (!notify || reason == ContainerPreviewCloseReason.Unloaded || closed == null) return;
-        try { closed(new ContainerPreviewClosed(Container, reason, Machine.Message)); }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: Closed handler threw: " + e.Message); }
+        if (notify && reason != ContainerPreviewCloseReason.Unloaded && closed != null)
+        {
+            try { closed(new ContainerPreviewClosed(Container, reason, Machine.Message)); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: Closed handler threw: " + e.Message); }
+        }
+        // Back where the player was: the window this preview took the place of opens again, the game's way. After the
+        // Closed handlers, and not when one of them started another preview (that one returns when it ends).
+        if (Machine.TookPlayerWindow && ContainerReturnRules.ReturnsAfterPreview(reason) && ContainerPreviewClient.Current == null)
+        {
+            try { ContainerReturnClient.ReopenLast(null, "the preview of " + Container + " ended (" + reason + ")", anyAge: true); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: the return threw: " + e.Message); }
+        }
     }
 
     /// <summary>One frame of the post-close mapper guard (<see cref="ContainerPreviewMachine.MapperGuardDone"/>); true when it is gone.</summary>
@@ -842,6 +878,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["keepOpen"] = _options.KeepOpen,
         ["hudGate"] = HudGate,
         ["syncInventory"] = SyncInventory,
+        ["returnToOpenWindow"] = _options.ReturnToOpenWindow,
+        ["tookPlayerWindow"] = Machine.TookPlayerWindow,
         ["owner"] = _owner?.GetType().Name,
     };
 

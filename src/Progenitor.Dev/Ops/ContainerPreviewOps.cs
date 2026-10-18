@@ -20,6 +20,9 @@ namespace Progenitor.Dev.Ops;
 /// leaves the game's interact-HUD auto-close alone, to observe it closing the window. <c>syncInventory: false</c> (E1b only) does
 /// not put the user in the chest's inventory sync lists, so the inventory stays away as in E1.</item>
 /// <item><c>{"action":"close"}</c> (client): what Dispose does.</item>
+/// <item><c>{"action":"reopen"}</c> (client): what <c>ctx.Inventory.ReopenLast</c> does (RETURN1); the client status's
+/// <c>return</c> names the remembered window and the last outcome. <c>open</c> takes <c>returnToWindow</c> (default
+/// true): with the player's own chest or station window open, the preview takes its place and opens it again at the end.</item>
 /// <item><c>{"action":"bag","mode":"inactive"|"alpha"}</c> (client): how the next preview hides the bag panel (E5).</item>
 /// <item><c>{"action":"guard","on":false}</c> (server, E1b persistence read only): leave the inventory sync entries in
 /// world saves; back on by itself after one world save, after 5 minutes, and at every Core install.</item>
@@ -45,12 +48,14 @@ internal static class ContainerPreviewOps
                 Num(args, "replicationTimeout") ?? 5,
                 Bool(args, "dropEvents") ?? true,
                 Bool(args, "hudGate") ?? true,
-                Bool(args, "syncInventory") ?? true),
+                Bool(args, "syncInventory") ?? true,
+                Bool(args, "returnToWindow") ?? true),
             "close" => Call("Close"),
+            "reopen" => Call("Reopen"),
             "guard" => Call("Guard", Bool(args, "on") ?? throw new ArgumentException("args.on (true or false) is required for guard")),
             "proxy_reset" => Call("ProxyReset", Str(args, "user") ?? throw new ArgumentException("args.user (the platform id, as a string) is required for proxy_reset")),
             "bag" => Call("BagMode", Str(args, "mode")?.Trim().ToLowerInvariant() ?? throw new ArgumentException("args.mode (inactive or alpha) is required for bag")),
-            _ => throw new ArgumentException("args.action must be status, open, close, bag, guard or proxy_reset"),
+            _ => throw new ArgumentException("args.action must be status, open, close, reopen, bag, guard or proxy_reset"),
         };
     }
 

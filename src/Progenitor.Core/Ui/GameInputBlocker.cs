@@ -1291,7 +1291,8 @@ internal sealed unsafe class GameInputBlocker : IUiInputBlocker
     {
         bool hotkeysBlocked = MenuHotkeyGuard.HotkeysBlocked;
         bool closeHeld = MenuHotkeyGuard.CloseHeld;
-        if (!hotkeysBlocked && !closeHeld) return;
+        bool interactHeld = MenuHotkeyGuard.InteractHeld;
+        if (!hotkeysBlocked && !closeHeld && !interactHeld) return;
 
         try
         {
@@ -1314,7 +1315,21 @@ internal sealed unsafe class GameInputBlocker : IUiInputBlocker
                     Plugin.Logger?.LogInfo(
                         "Ui: menu-hotkey guard took Back/Menu_Close ahead of FullscreenMenuMapper (order "
                         + UiInputCapture.HotkeyGuardOrder + " < " + UiInputCapture.HudMenuOrder
-                        + ") while a key capture or a dialog owns Escape.");
+                        + ") while a key capture, a dialog or a Progenitor window over a game window owns Escape.");
+            }
+
+            // RETURN1: a Progenitor field has the keyboard over the game's chest or station window, whose input handler
+            // (502) closes a chest window on Interact's key release. Both lists, as for the hotkeys; whether BlockKey also
+            // takes a later context's InputsUp is the open question KEY3 names, so the live check reads the window.
+            if (interactHeld)
+            {
+                state.BlockKey((ButtonInputAction)MenuHotkeyGuard.InteractAction);
+                state.BlockKeyDown((ButtonInputAction)MenuHotkeyGuard.InteractAction);
+                if (MenuHotkeyGuard.NoteInteractHoldApplied())
+                    Plugin.Logger?.LogInfo(
+                        "Ui: menu-hotkey guard took Interact ahead of the game's chest and station windows (order "
+                        + UiInputCapture.HotkeyGuardOrder + " < " + UiInputCapture.HudMenuOrder
+                        + ") while a Progenitor field has the keyboard.");
             }
 
             if (!hotkeysBlocked) return;

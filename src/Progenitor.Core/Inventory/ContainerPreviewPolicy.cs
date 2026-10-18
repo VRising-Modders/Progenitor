@@ -89,6 +89,15 @@ public sealed record ContainerPreviewOptions
     /// </summary>
     public bool DropItemEvents { get; init; } = true;
 
+    /// <summary>
+    /// When the player has a chest, station or castle heart window open (opened at the object), the preview takes its
+    /// place once the previewed chest is ready, and when the preview ends it opens that window again the game's way
+    /// (<c>ctx.Inventory.ReopenLast</c>): the player is back where they were, if they still stand where they stood. On by
+    /// default. Off: the preview waits for that window to close and otherwise ends with
+    /// <see cref="ContainerPreviewCloseReason.OpenFailed"/>, as before 2026-10-18.
+    /// </summary>
+    public bool ReturnToOpenWindow { get; init; } = true;
+
     /// <summary>Null when the options are usable, else the sentence to throw.</summary>
     internal string? Problem()
     {
@@ -170,6 +179,11 @@ internal struct ContainerPreviewSample
     public bool TargetReplaced;
     /// <summary>The game has some HUD menu open that is not ours.</summary>
     public bool OtherMenuOpen;
+    /// <summary>
+    /// That other menu is the chest, station or heart window the player opened at the object (the one
+    /// <c>ctx.Inventory.ReopenLast</c> remembers), so the preview may take its place and open it again afterwards.
+    /// </summary>
+    public bool OtherMenuReturnable;
 }
 
 /// <summary>What a tick asks the runtime to do.</summary>
@@ -180,6 +194,11 @@ internal enum ContainerPreviewStep
     OpenWindow = 1,
     /// <summary>The preview closed this tick (<see cref="ContainerPreviewMachine.CloseReason"/>).</summary>
     Closed = 2,
+    /// <summary>
+    /// Close the player's own chest or station window now, so the preview can take its place; it is opened again when
+    /// the preview ends (<see cref="ContainerPreviewOptions.ReturnToOpenWindow"/>).
+    /// </summary>
+    CloseOtherWindow = 3,
 }
 
 /// <summary>
@@ -258,6 +277,18 @@ internal sealed class ContainerPreviewMachine
 
     internal string Message { get; private set; } = "";
 
+    /// <summary>True once the preview closed the player's own window to take its place (it opens it again when it ends).</summary>
+    internal bool TookPlayerWindow { get; private set; }
+
+    /// <summary>
+    /// This preview replaced one that had taken the place of the player's window: it opens that window again when it
+    /// ends, unless <see cref="ContainerPreviewOptions.ReturnToOpenWindow"/> is off.
+    /// </summary>
+    internal void InheritPlayerWindow()
+    {
+        if (_options.ReturnToOpenWindow) TookPlayerWindow = true;
+    }
+
     /// <summary>True when the preview wrote the open and has not closed: the window, if shown, is the preview's.</summary>
     internal bool OwnsWindow => Phase is ContainerPreviewPhase.Opening or ContainerPreviewPhase.Open;
 
@@ -309,6 +340,14 @@ internal sealed class ContainerPreviewMachine
             case ContainerPreviewPhase.Waiting:
                 if (!s.SameWorld) return Closed(ContainerPreviewCloseReason.WorldChanged, "");
                 if (now >= Deadline) return Closed(ContainerPreviewCloseReason.Timeout, "");
+                // The player's own chest or station window is open: take its place once the chest is ready (never before,
+                // so a refused or failed preview leaves it alone). Once only; it closes on a later frame.
+                if (s.TargetFound && s.InventoryReady && s.OtherMenuOpen && s.OtherMenuReturnable
+                    && _options.ReturnToOpenWindow && !TookPlayerWindow)
+                {
+                    TookPlayerWindow = true;
+                    return ContainerPreviewStep.CloseOtherWindow;
+                }
                 if (s.TargetFound && s.InventoryReady && !s.OtherMenuOpen)
                 {
                     Phase = ContainerPreviewPhase.Opening;

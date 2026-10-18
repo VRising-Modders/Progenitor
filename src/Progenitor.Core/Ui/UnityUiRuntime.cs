@@ -5113,11 +5113,19 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         try
         {
             // NAV1: also while B on a workspace page means back to the list (UiNav.HoldsGameClose).
+            // RETURN1: also while a Progenitor window that Escape closes is shown over the game's chest or station window,
+            // whose own input handler (order 502) closes it on Menu_Close: the first Escape is the Progenitor window's.
+            int gameMenu = GameWindowUnderPanel.MenuTypeNow();
+            // The window test only runs with a game window open (it reads the pointer for hover-captured panels).
+            bool overGameWindow = GameWindowUnderPanel.IsInteractWindow(gameMenu) && GameWindowUnderPanel.HoldsClose(gameMenu, Ui.EscapeHidesAPanelOverGameWindow());
             MenuHotkeyGuard.SetCloseHeld(MenuHotkeyGuard.NextCloseHold(
-                Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose,
+                Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose || overGameWindow,
                 escapeHeld, MenuHotkeyGuard.CloseHeld));
+            // RETURN1: a chest window also closes on Interact's key release; typing that letter in a Progenitor field over
+            // it must not close it.
+            MenuHotkeyGuard.SetInteractHeld(GameWindowUnderPanel.HoldsInteract(gameMenu, field != null));
         }
-        catch { MenuHotkeyGuard.SetCloseHeld(false); }
+        catch { MenuHotkeyGuard.SetCloseHeld(false); MenuHotkeyGuard.SetInteractHeld(false); }
         if (escapeEdge)
         {
             ModsMenu.TryClearSearchOnEscape();
