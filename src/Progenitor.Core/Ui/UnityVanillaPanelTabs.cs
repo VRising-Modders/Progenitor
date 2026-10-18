@@ -33,7 +33,7 @@ internal sealed partial class UnityUiRuntime
         return list;
     }
 
-    private sealed class NativePanelTabs : IRuntimeVanillaTabs
+    private sealed partial class NativePanelTabs : IRuntimeVanillaTabs
     {
         readonly UnityUiRuntime _runtime;
         readonly VanillaUiSite _site;
@@ -225,6 +225,7 @@ internal sealed partial class UnityUiRuntime
                     _buttons.Add((button, slot));
                     if (!_runtime.TryWire(slot, UiSlotKind.Click, widget)) { Release(); return; }
                     Activate(button);
+                    WatchTab(i, button);
                 }
                 var trims = new List<Transform>();
                 for (int i = 0; i < _strip.transform.childCount; i++)
@@ -243,6 +244,7 @@ internal sealed partial class UnityUiRuntime
             if (!_flow && _root != null && _strip != null) moved |= PlaceStrip();
             foreach (var item in _nativeTabs) item.Hide();
             ApplySelection();
+            KeepTabStates();
             KeepCaptions();
             PlacePanel();
             if (VanillaTabStripLayout.CheckDue(moved, Time.frameCount, _checkFrame)) SelfCheck();
@@ -428,6 +430,7 @@ internal sealed partial class UnityUiRuntime
                 ["artDonor"] = _artDonor,
                 ["artFixes"] = _artFixes,
                 ["stripArt"] = shown ? StripArt() : null,
+                ["tabStates"] = TabStates(),
             };
         }
 
@@ -1136,6 +1139,7 @@ internal sealed partial class UnityUiRuntime
         void Release()
         {
             ParkPanel();
+            ReleaseTabStates();
             foreach (var item in _content) item.Dispose();
             foreach (var item in _nativeTabs) item.Dispose();
             _content.Clear(); _nativeTabs.Clear();
