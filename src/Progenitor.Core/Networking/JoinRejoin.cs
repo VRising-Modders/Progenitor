@@ -423,14 +423,46 @@ internal enum RelaunchMode
 /// </summary>
 internal static class RelaunchCommand
 {
+    /// <summary>
+    /// The broker's one-line script: it asks Windows (<c>Win32_Process.Create</c>, hidden window) to create the helper
+    /// from <paramref name="fileName"/> and <paramref name="arguments"/>, prints the helper's process id and exits 0
+    /// (exit 1 with the reason on standard error). It travels on the broker's command line, which Windows passes as
+    /// Unicode, so a non-ASCII install path arrives intact; it contains no double quote (the helper's command line
+    /// gets its double quotes from <c>[char]34</c>), so <see cref="Arguments"/> can wrap it exactly.
+    /// </summary>
     internal static string BrokerScript(string fileName, string arguments) =>
-        "$ErrorActionPreference='Stop';try{" +
+        "$ErrorActionPreference='Stop';try{[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)}catch{};try{" +
         "$startup=New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0};" +
-        "$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=" +
-        Quote("\"" + fileName + "\" " + arguments) +
-        ";ProcessStartupInformation=$startup};" +
+        "$line=" + QuoteWithDoubleQuotes("\"" + fileName + "\" " + arguments) + ";" +
+        "$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=$line;ProcessStartupInformation=$startup};" +
         "if($result.ReturnValue -ne 0){throw ('Create failed: '+$result.ReturnValue)};" +
         "Write-Output $result.ProcessId;exit 0}catch{[Console]::Error.WriteLine($_);exit 1}";
+
+    /// <summary>The broker's <c>powershell.exe</c> arguments (<see cref="BrokerScript"/> as an inline command).</summary>
+    internal static string BrokerArguments(string fileName, string arguments) => Arguments(BrokerScript(fileName, arguments));
+
+    /// <summary>How long the game waits for the broker's answer before it kills the broker and reports a manual start.</summary>
+    public const int BrokerTimeoutSeconds = 15;
+
+    /// <summary>The restart log keeps at most this many lines: the helper trims it when it starts, leaving room for its run.</summary>
+    public const int LogMaxLines = 200;
+
+    // The most lines one restart adds (the helper's steps and the game's broker line).
+    private const int LogLinesPerRun = 8;
+
+    // A PowerShell expression for a string that may contain double quotes: single-quoted pieces joined by [char]34.
+    private static string QuoteWithDoubleQuotes(string value)
+    {
+        var parts = (value ?? "").Split('"');
+        var sb = new StringBuilder("(");
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (i > 0) sb.Append("+[char]34+");
+            sb.Append(Quote(parts[i]));
+        }
+
+        return sb.Append(')').ToString();
+    }
 
     public const string SteamRunUrl = "steam://run/1604030";
 
@@ -461,11 +493,16 @@ internal static class RelaunchCommand
         var inv = CultureInfo.InvariantCulture;
         var sb = new StringBuilder();
         sb.Append("$ErrorActionPreference='SilentlyContinue';");
-        sb.Append("$log=").Append(Quote(logPath ?? "")).Append(";function Note($message){if($log){Add-Content -LiteralPath $log -Value ((Get-Date -Format o)+' '+$message)}};Note 'helper started';");
+        // The log keeps the last LogMaxLines lines; the clock is read directly so it never depends on Get-Date.
+        sb.Append("$log=").Append(Quote(logPath ?? "")).Append(';');
+        sb.Append("if($log -and (Test-Path -LiteralPath $log)){$k=@(Get-Content -LiteralPath $log -Encoding UTF8 -Tail ")
+            .Append((LogMaxLines - LogLinesPerRun).ToString(inv)).Append(");Set-Content -LiteralPath $log -Value $k -Encoding UTF8};");
+        sb.Append("function Note($message){if($log){Add-Content -LiteralPath $log -Encoding UTF8 -Value ([DateTime]::UtcNow.ToString('o')+' '+$message)}};Note 'helper started';");
         sb.Append("$p=Get-Process -Id ").Append(pid.ToString(inv)).Append(';');
         // The same process only: a reused id has another start time.
         sb.Append("if($p -and [math]::Abs($p.StartTime.ToUniversalTime().Ticks-").Append(startTicksUtc.ToString(inv))
-            .Append(") -lt 20000000){if(-not $p.WaitForExit(").Append((WaitSeconds * 1000).ToString(inv)).Append(")){exit 2}};");
+            .Append(") -lt 20000000){if(-not $p.WaitForExit(").Append((WaitSeconds * 1000).ToString(inv))
+            .Append(")){Note 'the game was still running after ").Append(WaitSeconds.ToString(inv)).Append(" s; nothing started (exit 2)';exit 2}};");
         sb.Append("Start-Sleep -Seconds ").Append(SettleSeconds.ToString(inv)).Append(';');
         sb.Append("Note 'process wait completed; waiting for Steam';");
         sb.Append("$exe=").Append(exe).Append(';');
@@ -475,13 +512,14 @@ internal static class RelaunchCommand
         sb.Append("function SteamIdle{try{$r=Get-ItemProperty -Path ").Append(Quote(SteamAppKey)).Append(" -Name Running -ErrorAction Stop;return ($null -ne $r.Running -and $r.Running -eq 0)}catch{return $false}};");
         sb.Append("function Launching{-not (SteamIdle)};");
         sb.Append("$deadline=(Get-Date).AddSeconds(").Append(SteamExitSeconds.ToString(inv)).Append(");");
-        sb.Append("while(-not (SteamIdle)){if((Get-Date) -ge $deadline){Note 'Steam wait timed out';exit 4};Start-Sleep -Seconds 2};");
-        sb.Append("if(Up){exit 3};");
+        sb.Append("while(-not (SteamIdle)){if((Get-Date) -ge $deadline){Note 'Steam wait timed out; nothing started (exit 4)';exit 4};Start-Sleep -Seconds 2};");
+        sb.Append("if(Up){Note 'the game is already running; nothing started (exit 3)';exit 3};");
         sb.Append("Note 'Steam idle; requesting launch';");
         sb.Append("Start-Process ").Append(u).Append(';');
         sb.Append("$t=(Get-Date).AddSeconds(").Append(AppearSeconds.ToString(inv)).Append(");");
         sb.Append("while((Get-Date) -lt $t -and -not (Up)){Start-Sleep -Seconds 2};");
-        sb.Append("if($exe.Length -gt 0 -and -not (Up) -and -not (Launching)){Start-Process ").Append(u).Append('}');
+        sb.Append("if(Up){Note 'the game started'}elseif($exe.Length -gt 0 -and -not (Launching)){Note 'the game did not appear; asking Steam a second time';Start-Process ")
+            .Append(u).Append("}else{Note 'the game did not appear yet; no second request (Steam still reports it launching)'}");
         return sb.ToString();
     }
 

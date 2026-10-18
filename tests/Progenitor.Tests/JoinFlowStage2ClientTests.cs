@@ -93,11 +93,10 @@ public sealed class JoinFlowStage2ClientTests : IDisposable
             Script = RelaunchCommand.Script(4242, 1, @"C:\Games\VRising\VRising.exe"),
         };
 
-        public bool Start(RelaunchPlan plan, out string error)
+        public void Start(RelaunchPlan plan, Action<bool, string> done)
         {
-            error = "";
             Calls.Add("start");
-            return true;
+            done(true, "");
         }
 
         public void Quit(double delaySeconds) => Calls.Add("quit");

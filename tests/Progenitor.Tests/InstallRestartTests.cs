@@ -75,11 +75,10 @@ public sealed class InstallRestartTests : IDisposable
             Arguments = RelaunchCommand.Arguments(RelaunchCommand.Script(4242, 1, @"C:\Games\VRising\VRising.exe")),
         };
 
-        public bool Start(RelaunchPlan plan, out string error)
+        public void Start(RelaunchPlan plan, Action<bool, string> done)
         {
-            error = StartWorks ? "" : "denied";
             Calls.Add("start");
-            return StartWorks;
+            done(StartWorks, StartWorks ? "" : "denied");
         }
 
         public void Quit(double delaySeconds) => Calls.Add("quit");

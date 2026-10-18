@@ -35,3 +35,9 @@ Live client test on 2026-10-15, base commit above plus working changes: invoked 
 - **Symptom:** no relaunch until a helper times out, or Steam says already running.
 - **Cause:** the helper was started directly by the game; a hidden window does not establish independent lifetime. A fixed delay also does not prove Steam has cleared the session.
 - **Fix:** use an independent Windows-owned helper, require explicit Steam idle, and inspect real Steam process logs. Simulated registry tests alone cannot verify process ownership.
+
+### Standard input garbles non-ASCII paths
+
+- **Symptom:** with an install path such as `D:\Игры\...`, the helper never sees the game (its path check fails) and the log path is wrong.
+- **Cause:** Windows PowerShell decodes a `-Command -` script on standard input with the console code page, not UTF-8; setting `[Console]::InputEncoding` inside the script cannot fix a line that was already decoded.
+- **Fix:** pass the broker's script on its command line (Windows passes it as Unicode), build the helper's double quotes with `[char]34`, and wait for the broker off the main thread; on timeout kill the broker tree. Game-free tested 2026-10-18 with a stubbed process creation; not live-verified.

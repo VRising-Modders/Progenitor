@@ -697,11 +697,7 @@ public sealed class JoinTurnOnClientTests : IDisposable
     {
         public RelaunchPlan Plan() => new() { Mode = RelaunchMode.Automatic, FileName = "ps", Arguments = "", Script = "" };
 
-        public bool Start(RelaunchPlan plan, out string error)
-        {
-            error = "";
-            return true;
-        }
+        public void Start(RelaunchPlan plan, Action<bool, string> done) => done(true, "");
 
         public void Quit(double delaySeconds) { }
     }

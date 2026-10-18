@@ -262,15 +262,6 @@ internal static partial class JoinFlowClient
     private static string StartAndQuit(RelaunchPlan? plan, bool manual)
     {
         var relauncher = Relauncher;
-        bool started = false;
-        string error = "";
-        if (!manual && plan != null && relauncher != null)
-        {
-            try { started = relauncher.Start(plan, out error); }
-            catch (Exception e) { error = e.Message; }
-            if (!started) Plugin.Logger?.LogWarning("Install restart: the relauncher did not start (" + error + "); quitting for a manual start");
-        }
-
         if (relauncher == null)
         {
             Plugin.Logger?.LogWarning("Install restart: no relauncher here; nothing quits");
@@ -278,8 +269,19 @@ internal static partial class JoinFlowClient
             return "restarting is not available here";
         }
 
-        relauncher.Quit(0);
-        return started ? "quitting" : "quitting-manual";
+        if (manual || plan == null)
+        {
+            relauncher.Quit(0);
+            return "quitting-manual";
+        }
+
+        // Off the main thread: the frames keep running until the relauncher answers, then the game quits.
+        return BeginRelaunch(relauncher, plan, (started, error) =>
+        {
+            if (!started) Plugin.Logger?.LogWarning("Install restart: the relauncher did not start (" + error + "); quitting for a manual start");
+            relauncher.Quit(0);
+            return started ? "quitting" : "quitting-manual";
+        });
     }
 
     private static void TickInstallRestart(double now)
