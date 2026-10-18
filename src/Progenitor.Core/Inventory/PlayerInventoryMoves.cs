@@ -102,7 +102,8 @@ public sealed class PlayerInventoryMove
         InventoryRef counterpartInventory,
         ContainerId counterpartContainer,
         bool ambiguous,
-        int requests)
+        int requests,
+        bool incomplete = false)
     {
         Sequence = sequence;
         UtcTime = utcTime;
@@ -121,8 +122,9 @@ public sealed class PlayerInventoryMove
         Counterpart = counterpart;
         CounterpartInventory = counterpartInventory;
         CounterpartContainer = counterpartContainer;
-        Ambiguous = ambiguous;
+        Ambiguous = ambiguous || incomplete;
         Requests = requests;
+        Incomplete = incomplete;
     }
 
     /// <summary>Grows by one per raised move in this Core generation (gaps mean moves dropped by the queue cap).</summary>
@@ -189,6 +191,14 @@ public sealed class PlayerInventoryMove
     /// <summary>How many requests of that update named this inventory (two fast clicks in one frame are one move with 2).</summary>
     public int Requests { get; }
 
+    /// <summary>
+    /// True when the server could not observe every request of that update: more than 64 requests
+    /// (the rest were not read), a request naming an inventory that did not resolve, or the
+    /// per-update inventory cap. The amounts are still the container's real change, but an unseen
+    /// request (possibly another player's) may have made it, so <see cref="Ambiguous"/> is also true.
+    /// </summary>
+    public bool Incomplete { get; }
+
 #if !PROGENITOR_TESTS
     /// <summary>The acting user entity. Only meaningful in the world load the move happened in.</summary>
     public Unity.Entities.Entity User => new() { Index = UserIndex, Version = UserVersion };
@@ -214,6 +224,7 @@ public sealed class PlayerInventoryMove
             sb.Append('(').Append(CounterpartContainer.IsNone ? CounterpartInventory.ToString() : CounterpartContainer.ToString()).Append(')');
         if (Requests > 1) sb.Append(" requests=").Append(Requests.ToString(c));
         if (Ambiguous) sb.Append(" ambiguous");
+        if (Incomplete) sb.Append(" incomplete");
         return sb.ToString();
     }
 }
@@ -405,8 +416,9 @@ internal readonly struct PendingPlayerMove
 {
     internal PendingPlayerMove(long user, long character, PlayerInventoryMoveKind kind, InventoryRef inventory, int item, int amount,
         PlayerInventoryMoveDirection direction, int before, int after, PlayerInventoryCounterpart counterpart, InventoryRef counterpartInventory,
-        bool ambiguous, int requests, DateTime utc)
+        bool ambiguous, int requests, DateTime utc, bool incomplete = false)
     {
+        Incomplete = incomplete;
         User = user;
         Character = character;
         Kind = kind;
@@ -435,6 +447,7 @@ internal readonly struct PendingPlayerMove
     internal PlayerInventoryCounterpart Counterpart { get; }
     internal InventoryRef CounterpartInventory { get; }
     internal bool Ambiguous { get; }
+    internal bool Incomplete { get; }
     internal int Requests { get; }
     internal DateTime Utc { get; }
 }
@@ -502,6 +515,12 @@ internal sealed class PlayerMoveBatch
     /// <summary>Inventories whose rows could not be read before or after.</summary>
     internal int Unread { get; private set; }
 
+    /// <summary>True when this update had requests the batch could not observe (cap, an unresolved side): every move it emits is marked incomplete and ambiguous.</summary>
+    internal bool Incomplete { get; private set; }
+
+    /// <summary>Record that a request of this update was not (fully) observed.</summary>
+    internal void MarkIncomplete() => Incomplete = true;
+
     /// <summary>Start a batch (clears any earlier one that never got its after-read).</summary>
     internal void Begin(object owner, PlayerInventoryMoveKind kind)
     {
@@ -521,13 +540,18 @@ internal sealed class PlayerMoveBatch
         _byKey.Clear();
         Owner = null;
         Open = false;
+        Incomplete = false;
     }
 
     /// <summary>The inventory's index in this batch (added once per key); -1 when the batch is full.</summary>
     internal int AddInventory(long key, InventoryRef inventory)
     {
         if (_byKey.TryGetValue(key, out int at)) return at;
-        if (_inventories.Count >= MaxInventories) return -1;
+        if (_inventories.Count >= MaxInventories)
+        {
+            Incomplete = true;
+            return -1;
+        }
         var inv = _invPool.Count > 0 ? _invPool.Pop() : new Inv();
         inv.Key = key;
         inv.Ref = inventory;
@@ -548,7 +572,13 @@ internal sealed class PlayerMoveBatch
     /// </summary>
     internal bool AddRequest(long user, long character, MoveSideRole roleA, IReadOnlyList<int>? sideA, MoveSideRole roleB, IReadOnlyList<int>? sideB)
     {
-        if (_requests.Count >= MaxRequests) return false;
+        if (_requests.Count >= MaxRequests)
+        {
+            Incomplete = true;
+            return false;
+        }
+
+        if (roleA == MoveSideRole.Unknown || roleB == MoveSideRole.Unknown) Incomplete = true;
         var r = _requestPool.Count > 0 ? _requestPool.Pop() : new Request();
         r.User = user;
         r.Character = character;
@@ -629,7 +659,7 @@ internal sealed class PlayerMoveBatch
 
     private PendingPlayerMove Make(Request first, Inv inv, ItemMoveDelta d, PlayerInventoryMoveDirection direction, int amount,
         PlayerInventoryCounterpart counterpart, InventoryRef other, bool ambiguous, DateTime utc) =>
-        new(first.User, first.Character, Kind, inv.Ref, d.Item, amount, direction, d.Before, d.After, counterpart, other, ambiguous, _touching.Count, utc);
+        new(first.User, first.Character, Kind, inv.Ref, d.Item, amount, direction, d.Before, d.After, counterpart, other, ambiguous || Incomplete, _touching.Count, utc, Incomplete);
 
     /// <summary>The request's other side, seen from inventory <paramref name="index"/>.</summary>
     private void Counterpart(Request r, int index, out PlayerInventoryCounterpart counterpart, out InventoryRef other)
@@ -788,6 +818,9 @@ internal sealed class PlayerMoveHub
     internal int Drain(Func<InventoryRef, ContainerId> idOf, Action<PlayerInventoryMove>? log = null)
     {
         int n = 0;
+        if (_pending.Count == 0) return 0;
+        // One snapshot per drain: a handler may dispose its own subscription (checked through Active below).
+        var subs = _subs.ToArray();
         while (_pending.Count > 0)
         {
             var p = _pending.Dequeue();
@@ -796,14 +829,12 @@ internal sealed class PlayerMoveHub
                 p.Kind, p.Inventory, Safe(idOf, p.Inventory), p.Item, p.Amount, p.Direction, p.Before, p.After,
                 p.Counterpart, p.CounterpartInventory,
                 p.Counterpart == PlayerInventoryCounterpart.OtherInventory ? Safe(idOf, p.CounterpartInventory) : ContainerId.None,
-                p.Ambiguous, p.Requests);
+                p.Ambiguous, p.Requests, p.Incomplete);
             _ring[_ringNext] = move;
             _ringNext = (_ringNext + 1) % RingSize;
             if (_ringCount < RingSize) _ringCount++;
             n++;
             log?.Invoke(move);
-            // Snapshot: a handler may dispose its own subscription.
-            var subs = _subs.ToArray();
             foreach (var s in subs)
             {
                 if (!s.Active) continue;

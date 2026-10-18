@@ -397,6 +397,86 @@ public class PlayerInventoryMoveTests
         var m = Run(b).Single();
         Assert.Equal(PlayerInventoryCounterpart.Unknown, m.Counterpart);
         Assert.Equal(1, b.Unread);
+        // The unresolved side could have been another observed inventory: never credit it as exact.
+        Assert.True(m.Incomplete);
+        Assert.True(m.Ambiguous);
+    }
+
+    [Fact]
+    public void A_truncated_update_marks_every_move_incomplete_and_ambiguous()
+    {
+        // 64 requests of user A were read; user B's request (past the cap) also changed the chest.
+        var b = new PlayerMoveBatch();
+        b.Begin(this, PlayerInventoryMoveKind.Move);
+        int c = b.AddInventory(1000, Chest);
+        int c2 = b.AddInventory(1001, Chest2);
+        Assert.True(b.AddRequest(UserA, CharA, MoveSideRole.OwnPlayer, null, MoveSideRole.Inventory, new[] { c }));
+        for (int i = 1; i < PlayerMoveBatch.MaxRequests; i++)
+            Assert.True(b.AddRequest(UserA, CharA, MoveSideRole.OwnPlayer, null, MoveSideRole.Inventory, new[] { c2 }));
+        Assert.False(b.Incomplete);
+        Assert.False(b.AddRequest(UserB, CharB, MoveSideRole.OwnPlayer, null, MoveSideRole.Inventory, new[] { c }));
+        Assert.True(b.Incomplete);
+        b.SetRows(c, false, new[] { Empty });
+        b.SetRows(c, true, new[] { R(Ore, 9) });
+        b.SetRows(c2, false, new[] { Empty });
+        b.SetRows(c2, true, new[] { R(Wood, 1) });
+        var moves = Run(b);
+        Assert.Equal(2, moves.Count);
+        Assert.All(moves, m => { Assert.True(m.Incomplete); Assert.True(m.Ambiguous); });
+        Assert.False(b.Incomplete); // cleared with the batch
+    }
+
+    [Fact]
+    public void A_runtime_marked_batch_is_incomplete_and_the_next_one_is_not()
+    {
+        var b = new PlayerMoveBatch();
+        b.Begin(this, PlayerInventoryMoveKind.MoveAll);
+        int c = b.AddInventory(1000, Chest);
+        b.AddRequest(UserA, CharA, MoveSideRole.Inventory, new[] { c }, MoveSideRole.OwnPlayer, null);
+        b.MarkIncomplete(); // the runtime truncated the event array or could not read a request
+        b.SetRows(c, false, new[] { R(Ore, 5) });
+        b.SetRows(c, true, new[] { Empty });
+        Assert.True(Run(b).Single().Incomplete);
+
+        b.Begin(this, PlayerInventoryMoveKind.MoveAll);
+        c = b.AddInventory(1000, Chest);
+        b.AddRequest(UserA, CharA, MoveSideRole.Inventory, new[] { c }, MoveSideRole.OwnPlayer, null);
+        b.SetRows(c, false, new[] { R(Ore, 5) });
+        b.SetRows(c, true, new[] { Empty });
+        var m = Run(b).Single();
+        Assert.False(m.Incomplete);
+        Assert.False(m.Ambiguous);
+    }
+
+    [Fact]
+    public void The_inventory_cap_marks_the_batch_incomplete()
+    {
+        var b = new PlayerMoveBatch();
+        b.Begin(this, PlayerInventoryMoveKind.Move);
+        for (int i = 0; i < PlayerMoveBatch.MaxInventories; i++) b.AddInventory(1000 + i, Chest);
+        Assert.False(b.Incomplete);
+        Assert.Equal(-1, b.AddInventory(9999, Chest2));
+        Assert.True(b.Incomplete);
+    }
+
+    [Fact]
+    public void Incomplete_reaches_the_public_move()
+    {
+        var hub = new PlayerMoveHub();
+        PlayerInventoryMove? got = null;
+        hub.Subscribe(m => got = m);
+        hub.Enqueue(new List<PendingPlayerMove>
+        {
+            new(UserA, CharA, PlayerInventoryMoveKind.Move, Chest, Ore, 2, PlayerInventoryMoveDirection.In,
+                0, 2, PlayerInventoryCounterpart.OwnInventory, InventoryRef.None, true, 1, T0, incomplete: true),
+        });
+        hub.Drain(_ => ContainerId.None);
+        Assert.True(got!.Incomplete);
+        Assert.True(got.Ambiguous);
+        Assert.Contains("incomplete", got.ToString());
+        Assert.True(new PlayerInventoryMove(1, T0, 1, 1, 2, 1, PlayerInventoryMoveKind.Move, Chest, ContainerId.None, Ore, 1,
+            PlayerInventoryMoveDirection.In, 0, 1, PlayerInventoryCounterpart.None, InventoryRef.None, ContainerId.None,
+            ambiguous: false, requests: 1, incomplete: true).Ambiguous);
     }
 
     [Fact]

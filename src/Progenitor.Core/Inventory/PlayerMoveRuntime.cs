@@ -52,12 +52,20 @@ internal static unsafe class PlayerMoveRuntime
     internal static long Updates, Requests, Truncated, PlayerOnly, Unresolved, Unchanged, Unread, LostAfter;
     internal static string LastError = "";
 
+    // Resolver rebuild timing: a rebuild on a lookup miss runs inside the game's update (the hook); the
+    // prime runs from the frame tick once per world load while the hooks are in place.
+    internal static double HookRebuildMaxUs, PrimeLastUs;
+    private static int _primedEpoch = int.MinValue;
+
     internal static bool Installed => _hub != null;
 
     internal static PlayerMoveHub Hub =>
         _hub ?? throw new InvalidOperationException("ctx.Inventory runs on the server side only.");
 
     internal static bool HooksInstalled => Hooks.Count > 0;
+
+    internal static int ResolverRebuilds => _resolver?.Rebuilds ?? 0;
+    internal static int ResolverPrimes => _resolver?.Primes ?? 0;
 
     private sealed class Watcher
     {
@@ -95,6 +103,8 @@ internal static unsafe class PlayerMoveRuntime
         LastError = "";
         _failures = 0;
         _nextInstallTry = 0;
+        HookRebuildMaxUs = PrimeLastUs = 0;
+        _primedEpoch = int.MinValue;
     }
 
     private static void BuildWatchers()
@@ -189,6 +199,21 @@ internal static unsafe class PlayerMoveRuntime
             Batch.Clear();
         }
 
+        // Build the network-id map outside the game's update once per world load, so the first move
+        // does not pay the scan inside the hook. A miss later still rebuilds there (throttled, 250 ms).
+        if (Hooks.Count > 0 && _resolver != null)
+        {
+            int epoch = Progenitor.WorldState.WorldEpoch.Current;
+            var world = Worlds.Server;
+            if (epoch != _primedEpoch && world != null && world.IsCreated)
+            {
+                _primedEpoch = epoch;
+                long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                _resolver.Prime(epoch, Environment.TickCount64);
+                PrimeLastUs = Micros(t0);
+            }
+        }
+
         // A failed install is retried while something listens, at most every few seconds.
         if (_hub.Active && Hooks.Count == 0)
         {
@@ -211,6 +236,14 @@ internal static unsafe class PlayerMoveRuntime
     private static void Before(Watcher w, SystemHookContext hook)
     {
         if (_hub == null || !_hub.Active) return;
+        // A batch still open here never got its After (the system threw, or another hook skipped it).
+        // Drop it before any early return, so a later After of this system cannot diff stale rows.
+        if (Batch.Open)
+        {
+            LostAfter++;
+            Batch.Clear();
+        }
+
         try
         {
             var world = hook.World;
@@ -233,6 +266,7 @@ internal static unsafe class PlayerMoveRuntime
                     if (Batch.RequestCount >= PlayerMoveBatch.MaxRequests)
                     {
                         Truncated += events.Length - i;
+                        Batch.MarkIncomplete();
                         break;
                     }
 
@@ -299,9 +333,10 @@ internal static unsafe class PlayerMoveRuntime
 
     private static void ReadRequest(EntityManager em, Watcher w, Entity e)
     {
-        if (!e.TryRead(em, out FromCharacter from)) return;
+        // A request that cannot be read could have touched an observed inventory: the batch is then incomplete.
+        if (!e.TryRead(em, out FromCharacter from)) { Batch.MarkIncomplete(); return; }
         byte* p = (byte*)w.Raw(em, e, w.Need);
-        if (p == null) return;
+        if (p == null) { Batch.MarkIncomplete(); return; }
         Requests++;
         var character = from.Character;
         SideA.Clear();
@@ -313,6 +348,7 @@ internal static unsafe class PlayerMoveRuntime
         if (SideA.Count == 0 && SideB.Count == 0)
         {
             if (roleA != MoveSideRole.Unknown && roleB != MoveSideRole.Unknown) PlayerOnly++;
+            else Batch.MarkIncomplete();
             return;
         }
 
@@ -326,9 +362,13 @@ internal static unsafe class PlayerMoveRuntime
         var (n0, n1, n2) = InventorySortFilter.Normalize(raw[0], raw[1], raw[2]);
         if (n2 != NetworkIdWords.TypeNormal) return MoveSideRole.Unknown;
         if (IsOwnPlayer(em, character, n0, n1)) return MoveSideRole.OwnPlayer;
-        if (_resolver == null
-            || !_resolver.TryResolve(n0, n1, n2, Progenitor.WorldState.WorldEpoch.Current, Environment.TickCount64, out int ei, out int ev, out _))
-            return MoveSideRole.Unknown;
+        if (_resolver == null) return MoveSideRole.Unknown;
+        int rebuilds = _resolver.Rebuilds;
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        bool hit = _resolver.TryResolve(n0, n1, n2, Progenitor.WorldState.WorldEpoch.Current, Environment.TickCount64, out int ei, out int ev, out _);
+        if (_resolver.Rebuilds != rebuilds)
+            HookRebuildMaxUs = Math.Max(HookRebuildMaxUs, Micros(t0));
+        if (!hit) return MoveSideRole.Unknown;
         var named = new Entity { Index = ei, Version = ev };
         if (!named.Exists(em)) return MoveSideRole.Unknown;
 
@@ -413,6 +453,9 @@ internal static unsafe class PlayerMoveRuntime
         return true;
     }
 
+    private static double Micros(long t0) =>
+        (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1_000_000.0 / System.Diagnostics.Stopwatch.Frequency;
+
     private static long Key(Entity e) => ((long)e.Index << 32) | (uint)e.Version;
 }
 
@@ -469,6 +512,18 @@ public sealed class PlayerInventoryMoveReport
     /// <summary>Subscriber calls that threw.</summary>
     public long HandlerErrors { get; internal set; }
 
+    /// <summary>Network-id map rebuilds since Core loaded (primes included).</summary>
+    public int Rebuilds { get; internal set; }
+
+    /// <summary>Rebuilds done from the frame tick, once per world load while the hooks are in place.</summary>
+    public int Primes { get; internal set; }
+
+    /// <summary>The slowest rebuild a lookup miss ran inside the game's update (inside the hook), microseconds.</summary>
+    public double HookRebuildMaxMicroseconds { get; internal set; }
+
+    /// <summary>How long the last prime took, microseconds.</summary>
+    public double PrimeMicroseconds { get; internal set; }
+
     /// <summary>The last hook failure, or "".</summary>
     public string LastError { get; internal set; } = "";
 
@@ -516,6 +571,10 @@ public static class PlayerInventoryMoveBridge
             Dropped = hub.Dropped,
             HandlerErrors = hub.HandlerErrors,
             LastError = PlayerMoveRuntime.LastError,
+            Rebuilds = PlayerMoveRuntime.ResolverRebuilds,
+            Primes = PlayerMoveRuntime.ResolverPrimes,
+            HookRebuildMaxMicroseconds = PlayerMoveRuntime.HookRebuildMaxUs,
+            PrimeMicroseconds = PlayerMoveRuntime.PrimeLastUs,
             Moves = hub.Recent(Math.Max(0, Math.Min(last, PlayerMoveHub.RingSize))),
         };
     }

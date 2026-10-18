@@ -2367,7 +2367,7 @@ ctx.Inventory.OnPlayerMove(m =>
 | `CountBefore`, `CountAfter` | The container's total of the item around the game's update. |
 | `Kind` | `Move` (drag, shift-click), `MoveAll` (take all, deposit all), `SmartMerge`, `Split`, `Sort`, `SortAll`, `Drop`, `Equip`. |
 | `Counterpart`, `CounterpartInventory`, `CounterpartContainer` | The other side the request named: `OwnInventory` (the bag), `OtherInventory` (another container, with its reference and id), `Ground`, `Equipment`, `OtherPlayer`, `Unknown`, or `None` (only this container). |
-| `Ambiguous`, `Requests` | See attribution below. |
+| `Ambiguous`, `Incomplete`, `Requests` | See attribution below. |
 | `Sequence`, `UtcTime` | Grows by one per raised move; when the server handled the request. |
 
 **How it works.** Each item request a client sends arrives on the server as one event entity
@@ -2378,6 +2378,13 @@ carrying `FromCharacter` and the inventories' `NetworkId`s. One server system ha
 main thread inside their own update (no scheduled job). A `SystemHooks.Before` on each reads the
 events and the slot rows of every non-player inventory they name; the `SystemHooks.After` reads the
 rows again. The difference is the move. Nothing is written, patched, skipped or delayed.
+
+**Hook order.** `HookOptions.Priority` runs higher values first in both phases. The Before is
+registered at -10000 (after every other plugin's Before, which may destroy or rewrite an event) and
+the After at +10000 (before any other plugin's After writes), so the pair brackets exactly the
+game's update. A plugin that changes these inventories in its own Before or After hook on one of
+these systems is therefore never reported as the player's move. A batch still open when any of
+the Before hooks next runs is dropped (`lostAfter`), so a skipped update is never compared later.
 
 - **Real amounts.** A request is not a success. A move the game refuses (no interaction with the
   container, PvP or relic rules, a full target) changes nothing and raises nothing; a partial move
@@ -2396,6 +2403,11 @@ rows again. The difference is the move. Nothing is written, patched, skipped or 
   when more than one user's request touched it, the record is `Ambiguous` and carries the first
   request's user, with the amount still exact for the container. When those requests name
   different other sides, `Counterpart` is `Unknown`.
+- **Incomplete updates.** When the server could not observe every request of an update (more
+  than 64 requests, a request it could not read, a side whose network id did not resolve, or the
+  32-inventory cap), every move of that update is `Incomplete` and `Ambiguous`: the amounts are
+  still the container's real change, but an unseen request, possibly another player's, may have
+  made it. A move log should not credit an `Incomplete` move to `User` as certain.
 - **Delivery.** Queued in the game's update and raised on the main thread from the next frame tick,
   never inside the game's update, so a handler may call the rest of `ctx.Inventory`. A throwing
   handler is logged and the others still run. Tracked: unload removes the subscription.
@@ -2405,10 +2417,14 @@ Limits, by design:
 
 1. Network ids resolve through the framework's own map (castle hearts, `InventoryOwner` entities
    and inventory entities with a network id), rebuilt at most every 250 ms on a miss. A container
-   placed less than that before its first use can miss once; the side reads `Unknown`, and the
-   container's change is then not observed.
+   placed less than that before its first use can miss once; the side reads `Unknown`, the
+   container's change is then not observed, and the update's other moves are `Incomplete`. The map
+   is built from the frame tick once per world load while the hooks are in place (`primes`), so a
+   rebuild inside the game's update happens only on a miss. **Its cost on a real server is not
+   measured yet**: the bridge reports `hookRebuildMaxMicroseconds` and `primeMicroseconds` for the
+   live run.
 2. At most 64 requests and 32 inventories per system update; the rest of a burst is counted
-   (`truncated` in the bridge op) and not observed.
+   (`truncated` in the bridge op) and not observed; that update's moves are `Incomplete`.
 3. At most 1024 moves wait for delivery; past that the oldest are dropped (gaps in `Sequence`).
 4. Inventories the game changes that the event does not name are not observed. Item moves made by
    mods, stations, servants and the game's own add paths are not player moves and are not raised;

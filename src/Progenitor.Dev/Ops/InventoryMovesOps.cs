@@ -90,6 +90,7 @@ internal static class InventoryMovesOps
                 counterpartContainer = m.CounterpartContainer.IsNone ? null : m.CounterpartContainer.ToString(),
                 requests = m.Requests,
                 ambiguous = m.Ambiguous,
+                incomplete = m.Incomplete,
             });
         }
 
@@ -111,6 +112,10 @@ internal static class InventoryMovesOps
             dropped = r.Dropped,
             handlerErrors = r.HandlerErrors,
             lastError = r.LastError,
+            rebuilds = r.Rebuilds,
+            primes = r.Primes,
+            hookRebuildMaxMicroseconds = Math.Round(r.HookRebuildMaxMicroseconds, 1),
+            primeMicroseconds = Math.Round(r.PrimeMicroseconds, 1),
             moves,
             note = "record:true hooks the item request systems even with no plugin subscribed and logs each move. Amounts are read back: a refused request adds to 'unchanged', not to moves.",
         };

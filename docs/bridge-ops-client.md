@@ -343,11 +343,11 @@ public `PlayerInventoryMoveBridge` (not a plugin API). Refused on the client. MC
 Each move: `seq`, `utc`, `user` and `character` (`index:version`), `kind`, `direction`, `item`
 (hash), `amount`, `container` (`c-…` or null), `castle`, `inventory` (`index:version`, `#1` for a
 station output), `countBefore`, `countAfter`, `counterpart`, `counterpartInventory`,
-`counterpartContainer`, `requests`, `ambiguous`. Counters: `updates` (handled system updates with
+`counterpartContainer`, `requests`, `ambiguous`, `incomplete`. Counters: `updates` (handled system updates with
 a request), `requests`, `truncated` (past 64 per update), `playerOnly` (named only the player's own
 inventories), `unresolved` (request sides whose network id did not resolve), `unchanged` (requests
 after which none of their containers had changed: refused or nothing to do), `unread`, `lostAfter`,
-`raised`, `dropped`, `handlerErrors`, `lastError`.
+`raised`, `dropped`, `handlerErrors`, `lastError`, and the network-id map's `rebuilds`, `primes` (built from the frame tick once per world load), `hookRebuildMaxMicroseconds` (the slowest rebuild a miss ran inside the game's update) and `primeMicroseconds`: record these on the live run, the rebuild cost is not measured yet.
 
 Live check: the steps in [modules.md, Player moves: live acceptance](modules.md#player-moves-live-acceptance-procedure-not-run).
 From bash: `node tools/mcp/call.mjs server inventory_moves '{"record":true,"clear":true}'`, move

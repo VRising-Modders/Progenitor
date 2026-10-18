@@ -86,6 +86,25 @@ public class NetworkIdResolverTests
     }
 
     [Fact]
+    public void Prime_BuildsTheMapSoTheFirstLookupDoesNotScan()
+    {
+        var (src, r) = Rig();
+        r.Prime(Epoch, _now);
+        Assert.Equal(1, src.Scans);
+        Assert.Equal(1, r.Primes);
+        Assert.Equal(1, r.Rebuilds);
+        _now += 1;
+        Assert.True(Resolve(r, 40, 1, 1, out int ei, out _, out _));
+        Assert.Equal(812, ei);
+        Assert.Equal(1, src.Scans);
+
+        // A prime for another epoch is used by that epoch's lookups; a throwing source leaves an empty map.
+        src.Throw = true;
+        r.Prime(Epoch + 1, _now);
+        Assert.Equal(0, r.Count);
+    }
+
+    [Fact]
     public void UnknownId_IsRefused_AndRebuildsAreThrottled()
     {
         var (src, r) = Rig();
