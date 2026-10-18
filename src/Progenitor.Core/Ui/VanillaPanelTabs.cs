@@ -64,6 +64,21 @@ internal static class VanillaPanelTabFallback
             if (!disabled[i]) return i;
         return 0;
     }
+
+    /// <summary>
+    /// Whether strip tab <paramref name="index"/> is disabled. The Redistribution tab (the index past
+    /// the captions) is the game's view too, so it follows tab zero: a click on it would select the
+    /// game's view, which a disabled tab zero refuses, and the strip would leave the plugin's tab.
+    /// </summary>
+    internal static bool IsOff(int index, IReadOnlyList<bool> disabled)
+        => index >= 0 && disabled.Count > 0 && (index < disabled.Count ? disabled[index] : disabled[0]);
+
+    /// <summary>
+    /// Strip tab <paramref name="index"/> is drawn selected: it is the selection and is enabled. With
+    /// every tab disabled the selection rests on tab zero, which is then not highlighted.
+    /// </summary>
+    internal static bool Highlights(int index, int selected, IReadOnlyList<bool> disabled)
+        => index == selected && !IsOff(index, disabled);
 }
 
 /// <summary>

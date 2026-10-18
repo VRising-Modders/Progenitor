@@ -242,6 +242,38 @@ public sealed class VanillaPanelTabsTests
         => Assert.Equal(expected, VanillaPanelTabFallback.Resolve(selected, disabled));
 
     [Fact]
+    public void TheRedistributionTabFollowsTheNativeTabSoItsClickCannotDesyncTheSelection()
+    {
+        // Two captions: strip index 2 is Redistribution. Its click would select the game's view (tab 0);
+        // with tab 0 disabled the plugin refuses that, so the strip must refuse the click too.
+        Assert.False(VanillaPanelTabFallback.IsOff(2, new[] { false, true }));
+        Assert.True(VanillaPanelTabFallback.IsOff(2, new[] { true, false }));
+        Assert.True(VanillaPanelTabFallback.IsOff(1, new[] { false, true }));
+        Assert.False(VanillaPanelTabFallback.IsOff(-1, new[] { true, true }));
+
+        // The plugin side agrees: a disabled tab 0 is never selected, so the strip never shows Redistribution
+        // while the plugin believes a custom tab is up.
+        var runtime = new Runtime();
+        using var tabs = new VanillaPanelTabs(runtime, VanillaUiSite.StationPanel, new[] { "Production", "Input" }, new object());
+        runtime.Frame!(Open(1, VanillaPanelKind.Workstation));
+        tabs.Selected = 1;
+        tabs.SetTabEnabled(0, false, "Managed by the mod");
+        runtime.Selected!(0);
+        Assert.Equal(1, tabs.Selected);
+        Assert.Equal(1, runtime.Host.Selected);
+    }
+
+    [Fact]
+    public void WithEveryTabDisabledNoTabIsHighlighted()
+    {
+        var all = new[] { true, true };
+        Assert.False(VanillaPanelTabFallback.Highlights(0, 0, all));
+        Assert.False(VanillaPanelTabFallback.Highlights(2, 2, all)); // Redistribution follows tab 0
+        Assert.True(VanillaPanelTabFallback.Highlights(1, 1, new[] { true, false }));
+        Assert.False(VanillaPanelTabFallback.Highlights(0, 1, new[] { false, false }));
+    }
+
+    [Fact]
     public void DisabledLookIsTheDonorsOnlyWhenItsDisabledStateDrawsDifferently()
     {
         var white = (1f, 1f, 1f, 1f);

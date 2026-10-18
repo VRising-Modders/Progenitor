@@ -219,6 +219,7 @@ internal sealed partial class UnityUiRuntime
                     int index = i;
                     UiSlotTable.BindClick(slot, () =>
                     {
+                        if (TabOff(index)) return;
                         if (index < _captions.Length) _changed(index);
                         else { _changed(0); Select(index); }
                     });
@@ -1077,7 +1078,7 @@ internal sealed partial class UnityUiRuntime
                 if (_routing._RoutingActive != routing) _routing.SetRoutingActive(routing);
             }
             for (int i = 0; i < _buttons.Count; i++)
-                PaintWorkspaceTab(_buttons[i].go, i == _selected ? MenuRowTone.Selected : MenuRowTone.Catalog);
+                PaintWorkspaceTab(_buttons[i].go, VanillaPanelTabFallback.Highlights(i, _selected, Off) ? MenuRowTone.Selected : MenuRowTone.Catalog);
         }
 
         public void Mount(IRuntimePanel panel)
