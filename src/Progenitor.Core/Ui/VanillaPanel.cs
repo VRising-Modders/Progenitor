@@ -61,6 +61,14 @@ public enum VanillaPanelAnchor
     /// line 0. Hidden while the recipe shown has no such line.
     /// </summary>
     TooltipRequirementLine = 7,
+
+    /// <summary>
+    /// <see cref="VanillaUiSite.RecipeTooltip"/> only: rows directly under the tooltip's title (the icon and name
+    /// band), above everything else the tooltip shows, the product's description included. The container is the
+    /// tooltip's own next row after its title band, the way the build menu's breadcrumb line sits, and its rows
+    /// start where the title's text starts.
+    /// </summary>
+    TooltipHeader = 8,
 }
 
 /// <summary>

@@ -1168,6 +1168,118 @@ internal sealed partial class UnityUiRuntime
     }
 
     /// <summary>
+    /// A tooltip container's place for <c>ui_read panels</c>: <c>host</c> (its parent), <c>index</c> (its sibling index),
+    /// <c>after</c> and <c>before</c> (the game's entries on either side, Progenitor's containers skipped) and, for
+    /// <see cref="VanillaPanelAnchor.TooltipHeader"/>, <c>inset</c> (the measured title inset, -1 before the first fit).
+    /// </summary>
+    private static void DescribeTooltipSlot(Dictionary<string, object?> d, PanelContainerWidget tip)
+    {
+        try
+        {
+            var t = tip.Transform;
+            var parent = t != null ? t.parent : null;
+            if (t == null || parent == null) return;
+            int index = t.GetSiblingIndex();
+            VanillaRecipeTooltip.Neighbors(index, parent.childCount, i =>
+            {
+                var c = parent.GetChild(i);
+                return c != null ? SafeObjectName(c.gameObject) : "";
+            }, out string after, out string before);
+            var slot = new Dictionary<string, object?>
+            {
+                ["host"] = SafeObjectName(parent.gameObject),
+                ["index"] = index,
+                ["after"] = after,
+                ["before"] = before,
+            };
+            if (tip.Anchor == VanillaPanelAnchor.TooltipHeader) slot["inset"] = Mathf.Round(tip.HeaderInset * 10f) / 10f;
+            d["tooltipSlot"] = slot;
+        }
+        catch { /* */ }
+    }
+
+    /// <summary>The tooltip's title band (<c>FakeTooltip.TooltipHeader</c>, the icon and name), or null.</summary>
+    private static Transform? HeaderOf(FakeTooltip? tooltip)
+    {
+        try
+        {
+            if (!Alive(tooltip)) return null;
+            var header = tooltip!.TooltipHeader;
+            return Alive(header) ? header.transform : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The title text of the tooltip's title band (<c>TooltipHeader.Header</c>), or null.</summary>
+    private static TextMeshProUGUI? HeaderTitleOf(FakeTooltip? tooltip)
+    {
+        try
+        {
+            if (!Alive(tooltip)) return null;
+            var header = tooltip!.TooltipHeader;
+            if (!Alive(header) || !Alive(header.Header)) return null;
+            var title = header.Header.Text;
+            return Alive(title) ? title : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The title band's own left padding (its layout group's), the header rows' first inset; 0 when unreadable.</summary>
+    private static float HeaderPadding(FakeTooltip? tooltip)
+    {
+        try
+        {
+            var header = HeaderOf(tooltip);
+            var group = header != null ? header.GetComponent<LayoutGroup>() : null;
+            return group != null && group.padding != null ? Mathf.Max(0, group.padding.left) : 0f;
+        }
+        catch { return 0f; }
+    }
+
+    /// <summary>Retained for <c>GetWorldCorners</c>: a managed array would be copied in and never read back.</summary>
+    private static Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>? _headerCorners;
+
+    /// <summary>Give <paramref name="column"/> the same left and right padding (written back through the setter, which marks the group dirty).</summary>
+    private static void SetSidePadding(VerticalLayoutGroup column, int px)
+    {
+        var pad = column.padding;
+        if (pad == null) return;
+        pad.left = px;
+        pad.right = px;
+        column.padding = pad;
+    }
+
+    /// <summary>
+    /// Start a header container's rows where the title's text starts, as the build menu's breadcrumb does: the
+    /// distance from the container's left edge to the title's, in world space, over the container's scale
+    /// (<see cref="VanillaRecipeTooltip.TryHeaderInset"/>). Written as the container's left and right padding,
+    /// only when it moved by more than half a unit, so a steady tooltip is never laid out again.
+    /// </summary>
+    private static void AlignHeader(PanelContainerWidget host, PanelView view)
+    {
+        try
+        {
+            var title = HeaderTitleOf(view.Tooltip);
+            var rt = host.Rect;
+            if (title == null || rt == null || !Alive(host.GameObject)) return;
+            var column = host.GameObject!.GetComponent<VerticalLayoutGroup>();
+            if (column == null) return;
+            _headerCorners ??= new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>(4);
+            title.rectTransform.GetWorldCorners(_headerCorners);
+            float titleLeft = _headerCorners[0].x;
+            rt.GetWorldCorners(_headerCorners);
+            float rowLeft = _headerCorners[0].x;
+            if (!VanillaRecipeTooltip.TryHeaderInset(titleLeft, rowLeft, rt.lossyScale.x, out float inset)) return;
+            host.HeaderInset = inset;
+            var pad = column.padding;
+            if (pad != null && Mathf.Abs(pad.left - inset) <= 0.5f) return;
+            SetSidePadding(column, Mathf.RoundToInt(inset));
+            LayoutRebuilder.MarkLayoutForRebuild(rt);
+        }
+        catch { /* the rows keep their last inset */ }
+    }
+
+    /// <summary>
     /// The transform of requirement line <paramref name="line"/>'s own row
     /// (<c>TooltipRecipeRequiredItems.RequiredItemsList[line]</c>, a <c>WorkstationRequirementEntry</c>), or null.
     /// </summary>
@@ -1689,6 +1801,15 @@ internal sealed partial class UnityUiRuntime
                     if (host == null) missing = "FakeTooltip.RecipeRequiredItems";
                     else siblingIndex = TooltipSlotAfter(block!);
                     break;
+                case VanillaPanelAnchor.TooltipHeader:
+                    // The tooltip's own next row after its title band (TooltipHeader), in the tooltip root's
+                    // vertical group: the place the build menu's breadcrumb line takes in the same FakeTooltip
+                    // shape. Above Tooltip_ReforgeCost and InformationEntries, so above the description.
+                    var headerT = HeaderOf(view.Tooltip);
+                    host = headerT != null ? headerT.parent : null;
+                    if (host == null) missing = "FakeTooltip.TooltipHeader";
+                    else siblingIndex = TooltipSlotAfter(headerT!);
+                    break;
                 case VanillaPanelAnchor.TooltipRequirementLine:
                     // Inside the requirement list (a vertical group of the game's pooled line rows),
                     // right after this line's own row and any Progenitor container already there. The
@@ -1786,16 +1907,29 @@ internal sealed partial class UnityUiRuntime
                 column.childForceExpandHeight = false;
                 column.spacing = 0f;
 
-                // The line never widens the tooltip: it wraps inside the description's width.
-                try
-                {
-                    var descRt = view.BodyDonor != null ? view.BodyDonor.rectTransform : null;
-                    if (descRt != null) tooltipWidth = descRt.rect.width;
-                }
-                catch { /* */ }
                 var element = go.AddComponent<LayoutElement>();
-                if (tooltipWidth > 1f) element.preferredWidth = tooltipWidth;
-                element.flexibleWidth = 0f;
+                if (anchor == VanillaPanelAnchor.TooltipHeader)
+                {
+                    // A row of the tooltip root, as wide as the title band (the root's own width: it fills it
+                    // and never asks for more), its rows inset to where the title's text starts. The first
+                    // guess is the title band's own left padding, so the first frame is already in place; the
+                    // fit measures the title and corrects it (AlignHeader).
+                    int inset = Mathf.RoundToInt(HeaderPadding(view.Tooltip));
+                    SetSidePadding(column, inset);
+                    element.flexibleWidth = 1f;
+                }
+                else
+                {
+                    // The line never widens the tooltip: it wraps inside the description's width.
+                    try
+                    {
+                        var descRt = view.BodyDonor != null ? view.BodyDonor.rectTransform : null;
+                        if (descRt != null) tooltipWidth = descRt.rect.width;
+                    }
+                    catch { /* */ }
+                    if (tooltipWidth > 1f) element.preferredWidth = tooltipWidth;
+                    element.flexibleWidth = 0f;
+                }
             }
             else
             {
@@ -2328,6 +2462,7 @@ internal sealed partial class UnityUiRuntime
 
         if (VanillaUiSites.IsTooltipAnchor(anchor))
         {
+            if (anchor == VanillaPanelAnchor.TooltipHeader) AlignHeader(host, view);
             var verdict = VanillaPanelPlacement.CheckTooltip(host.HostLaidOut);
             if (verdict.Fit == VanillaFit.Fits) ClampTooltip(view);
             return verdict;
@@ -2601,6 +2736,7 @@ internal sealed partial class UnityUiRuntime
             }
             catch { /* */ }
             d["rect"] = rect;
+            if (rb.Container is PanelContainerWidget tip && VanillaUiSites.IsTooltipAnchor(tip.Anchor)) DescribeTooltipSlot(d, tip);
             if (rb.Container is PanelContainerWidget placed && placed.Mode == InlineMode.Positioned)
             {
                 d["slot"] = placed.Slot == BesideSlot.After ? "after" : placed.Slot == BesideSlot.Above ? "above" : "none";
@@ -2676,7 +2812,7 @@ internal sealed partial class UnityUiRuntime
                 + Describe("caption", view.CaptionDonor)
                 + Describe("body", view.BodyDonor)
                 + (view.Tooltip != null ? Describe("tooltipFrame", view.Tooltip.DescriptionFrame != null ? view.Tooltip.DescriptionFrame.transform : null) : "")
-                + (site == VanillaUiSite.RecipeTooltip ? Describe("requirements", RecipeBlockOf(view.Tooltip)) : "")
+                + (site == VanillaUiSite.RecipeTooltip ? Describe("requirements", RecipeBlockOf(view.Tooltip)) + Describe("header", HeaderOf(view.Tooltip)) : "")
                 + Describe("obstacle", view.Obstacle != null ? view.Obstacle.transform : null));
         }
         catch (Exception e)
@@ -2820,6 +2956,9 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>The vanilla parent has a vertical layout group (the tooltip rule).</summary>
         internal bool HostLaidOut { get; }
+
+        /// <summary>A <see cref="VanillaPanelAnchor.TooltipHeader"/> container's measured title inset, or -1 before the first measure.</summary>
+        internal float HeaderInset { get; set; } = -1f;
 
         internal string Name { get; }
 

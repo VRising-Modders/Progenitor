@@ -119,6 +119,9 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirementLine, true, VanillaPanelAnchor.TooltipRequirementLine)]
     [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipRequirementLine, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipHeader, true, VanillaPanelAnchor.TooltipHeader)]
+    [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipHeader, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.TooltipHeader, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.TooltipRequirementLine, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
@@ -645,6 +648,43 @@ public class VanillaPanelTests : IDisposable
         Assert.Single(Lines, l => l.StartsWith("Ui: attached RecipeTooltip anchor=requirements"));
         Assert.Equal(new[] { VanillaPanelAnchor.TooltipRequirements }, _client.BuiltAnchors.ToArray());
         h.Dispose();
+    }
+
+    [Fact]
+    public void A_header_attachment_builds_its_own_container_with_rows_and_keeps_the_body_default()
+    {
+        var header = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipHeader, _owner, "example.recipes");
+        Assert.True(header.Enabled);
+        Assert.Equal(VanillaPanelAnchor.TooltipHeader, header.Anchor);
+        Assert.EndsWith("RecipeTooltip-header", header.ContainerName);
+        header.OnPanel(e =>
+        {
+            if (e.Change != VanillaPanelChange.Closed) header.SetRows(new VanillaRow[] { new("Made in: Workbench", LabelTone.Muted) });
+        });
+
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3))));
+        Assert.True(header.IsOpen);
+        Assert.Equal(new[] { VanillaPanelAnchor.TooltipHeader }, _client.BuiltAnchors.ToArray());
+        Assert.Single(Lines, l => l.StartsWith("Ui: attached RecipeTooltip anchor=header"));
+        var rb = ((VanillaAttachHandle)header).Readback().Describe();
+        Assert.Equal(new List<string> { "Made in: Workbench" }, rb["rows"]);
+        Assert.Equal(new[] { "muted" }, rb["rowTones"]);
+
+        // TooltipBody stays the site's default; the header is listed last.
+        Assert.Equal(new[] { "tooltip", "requirements", "line", "header" }, VanillaUiSites.AnchorKeys(VanillaUiSite.RecipeTooltip));
+        Assert.True(VanillaUiSites.IsTooltipAnchor(VanillaPanelAnchor.TooltipHeader));
+        header.Dispose();
+    }
+
+    [Fact]
+    public void The_header_container_sits_after_the_title_band_and_is_aligned_by_the_fit()
+    {
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("case VanillaPanelAnchor.TooltipHeader:", resolver);
+        Assert.Contains("var headerT = HeaderOf(view.Tooltip);", resolver);
+        Assert.Contains("else siblingIndex = TooltipSlotAfter(headerT!);", resolver);
+        Assert.Contains("if (anchor == VanillaPanelAnchor.TooltipHeader) AlignHeader(host, view);", resolver);
+        Assert.Contains("DescribeTooltipSlot(d, tip);", resolver);
     }
 
     [Fact]

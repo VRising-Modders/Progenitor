@@ -87,6 +87,50 @@ public class VanillaRecipeTooltipTests
         Assert.Equal(names.Count, VanillaRecipeTooltip.SlotAfter(names.Count - 2, names.Count, i => names[i]));
     }
 
+    // The tooltip root on 1.1.13.0: the title band, the reforge block, the entry column.
+    private static readonly string[] Root = { "TooltipHeader", "Tooltip_ReforgeCost", "InformationEntries" };
+
+    [Fact]
+    public void A_header_container_goes_right_after_the_title_band_and_stacks_after_earlier_ones()
+    {
+        Assert.Equal(1, VanillaRecipeTooltip.SlotAfter(0, Root.Length, i => Root[i]));
+        var names = new List<string>(Root);
+        names.Insert(1, "progenitor-ui-first.mod-RecipeTooltip-header");
+        Assert.Equal(2, VanillaRecipeTooltip.SlotAfter(0, names.Count, i => names[i]));
+    }
+
+    [Fact]
+    public void The_readback_names_the_games_entries_on_either_side()
+    {
+        var names = new List<string>(Root);
+        names.Insert(1, "progenitor-ui-first.mod-RecipeTooltip-header");
+        names.Insert(2, "progenitor-ui-second.mod-RecipeTooltip-header");
+        VanillaRecipeTooltip.Neighbors(2, names.Count, i => names[i], out string after, out string before);
+        Assert.Equal("TooltipHeader", after);
+        Assert.Equal("Tooltip_ReforgeCost", before);
+
+        VanillaRecipeTooltip.Neighbors(names.Count - 1, names.Count, i => names[i], out after, out before);
+        Assert.Equal("Tooltip_ReforgeCost", after);
+        Assert.Equal("", before);
+        VanillaRecipeTooltip.Neighbors(9, names.Count, i => names[i], out after, out before);
+        Assert.Equal("", after);
+        Assert.Equal("", before);
+    }
+
+    [Theory]
+    [InlineData(120f, 100f, 1f, true, 20f)]
+    [InlineData(140f, 100f, 2f, true, 20f)]
+    [InlineData(100f, 100f, 1f, true, 0f)]
+    [InlineData(90f, 100f, 1f, false, 0f)]
+    [InlineData(400f, 100f, 1f, false, 0f)]
+    [InlineData(120f, 100f, 0f, false, 0f)]
+    [InlineData(float.NaN, 100f, 1f, false, 0f)]
+    public void The_header_inset_is_the_title_distance_in_the_containers_units(float title, float row, float scale, bool ok, float inset)
+    {
+        Assert.Equal(ok, VanillaRecipeTooltip.TryHeaderInset(title, row, scale, out float got));
+        Assert.Equal(inset, got, 3);
+    }
+
     [Fact]
     public void The_memo_answers_one_hover_and_reads_again_for_anything_else()
     {
