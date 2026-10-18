@@ -2341,6 +2341,113 @@ which marks the chunk changed even when nothing is written. Pass `true` when you
 The read chain and its offsets are in `src/Progenitor.Core/Layout/layout.txt` ("Ecs: chunk change
 versions"). Live check steps: [dev bridge `inventory_stamp`](bridge-ops-client.md#inventory_stamp).
 
+### Player moves
+
+`ctx.Inventory.OnPlayerMove(handler)` raises one `PlayerInventoryMove` for each change a player
+makes by hand to a non-player inventory: dragging into or out of a chest, shift-click, take all,
+split, sort, smart merge, dropping from the window and equipping from it. Server only.
+**Experimental**: source-checked and game-free tested (`PlayerInventoryMoveTests`), **not
+live-verified** (procedure below). API rows: [api.md, Inventory](api.md#inventory).
+
+```csharp
+// A move log: who put what into or took what out of which castle chest.
+ctx.Inventory.OnPlayerMove(m =>
+{
+    if (!m.IsCastleContainer || m.Direction == PlayerInventoryMoveDirection.Within) return;
+    int signed = m.Direction == PlayerInventoryMoveDirection.In ? m.Amount : -m.Amount;
+    ctx.Log.LogInfo($"{m.UtcTime:O} user {m.User} {m.Container} item {m.Item} {signed:+0;-0}");
+});
+```
+
+| Field | What |
+|---|---|
+| `User`, `Character` (`UserIndex`/`UserVersion`, `CharacterIndex`/`CharacterVersion`) | The sender, from the event's `FromCharacter`. |
+| `Container`, `IsCastleContainer`, `Inventory` | The owner's `ContainerId` (a placed chest, station or heart; `None` for a servant or a world container) and the `InventoryRef` (owner plus instance; 1 is a refinement station's output). |
+| `Item`, `Amount`, `Direction` | Item `PrefabGUID` hash, units (always above 0), `In` / `Out` / `Within` seen from the container. |
+| `CountBefore`, `CountAfter` | The container's total of the item around the game's update. |
+| `Kind` | `Move` (drag, shift-click), `MoveAll` (take all, deposit all), `SmartMerge`, `Split`, `Sort`, `SortAll`, `Drop`, `Equip`. |
+| `Counterpart`, `CounterpartInventory`, `CounterpartContainer` | The other side the request named: `OwnInventory` (the bag), `OtherInventory` (another container, with its reference and id), `Ground`, `Equipment`, `OtherPlayer`, `Unknown`, or `None` (only this container). |
+| `Ambiguous`, `Requests` | See attribution below. |
+| `Sequence`, `UtcTime` | Grows by one per raised move; when the server handled the request. |
+
+**How it works.** Each item request a client sends arrives on the server as one event entity
+carrying `FromCharacter` and the inventories' `NetworkId`s. One server system handles each kind
+(`MoveItemBetweenInventoriesSystem`, `MoveAllItemsBetweenInventoriesSystem` and its V2,
+`SmartMergeItemsBetweenInventoriesSystem`, `SplitItemSystem` and its V2, `SortSingleInventorySystem`,
+`SortAllInventoriesSystem`, `DropInventoryItemSystem`, `EquipItemFromInventorySystem`), all on the
+main thread inside their own update (no scheduled job). A `SystemHooks.Before` on each reads the
+events and the slot rows of every non-player inventory they name; the `SystemHooks.After` reads the
+rows again. The difference is the move. Nothing is written, patched, skipped or delayed.
+
+- **Real amounts.** A request is not a success. A move the game refuses (no interaction with the
+  container, PvP or relic rules, a full target) changes nothing and raises nothing; a partial move
+  raises what arrived or left. The rows are read raw and read-only, so the reads do not change
+  [change stamps](#change-stamps).
+- **Per item.** Interchangeable units (no item entity) count by total. Gear and anything else with
+  its own item entity count by entity, so swapping one sword for another of the same prefab is an
+  `Out` and an `In`. When the total did not change but the slots did (a sort, a split, a drag
+  between two slots of the chest), the units that arrived at slots are `Within`.
+- **Which inventories.** The ones the event names. A station named by its owner is observed in all
+  its instances; one named by an inventory entity, just that one. The player's own character and
+  bag are recognized by their network ids and never reported, so a bag-only sort raises nothing.
+- **Attribution.** The game handles every request of one system update in one call, so the diff is
+  per update. Requests naming different containers are attributed exactly. Requests naming the
+  same container are one record per item with `Requests` above 1 (two fast clicks in one frame);
+  when more than one user's request touched it, the record is `Ambiguous` and carries the first
+  request's user, with the amount still exact for the container. When those requests name
+  different other sides, `Counterpart` is `Unknown`.
+- **Delivery.** Queued in the game's update and raised on the main thread from the next frame tick,
+  never inside the game's update, so a handler may call the rest of `ctx.Inventory`. A throwing
+  handler is logged and the others still run. Tracked: unload removes the subscription.
+- **Container ids** are looked up at delivery with `IdOf` (issuing one as `IdOf` does).
+
+Limits, by design:
+
+1. Network ids resolve through the framework's own map (castle hearts, `InventoryOwner` entities
+   and inventory entities with a network id), rebuilt at most every 250 ms on a miss. A container
+   placed less than that before its first use can miss once; the side reads `Unknown`, and the
+   container's change is then not observed.
+2. At most 64 requests and 32 inventories per system update; the rest of a burst is counted
+   (`truncated` in the bridge op) and not observed.
+3. At most 1024 moves wait for delivery; past that the oldest are dropped (gaps in `Sequence`).
+4. Inventories the game changes that the event does not name are not observed. Item moves made by
+   mods, stations, servants and the game's own add paths are not player moves and are not raised;
+   use [`Watch`](#watch) or [change stamps](#change-stamps) for those.
+5. A Before whose After never runs (the system threw, or another plugin's hook skipped it) is
+   dropped and counted (`lostAfter`).
+
+**Cost.** The hooks exist only while something listens (a subscription or the Dev bridge
+recorder), and fire only on frames where that system runs; such a run with no event costs one
+cached-query emptiness check. Per handled update: one entity array, a typed read and one or two id
+reads per request, two raw buffer reads per observed inventory. The event offsets are in
+`src/Progenitor.Core/Layout/layout.txt` ("Inventory: player item moves").
+
+#### Player moves: live acceptance (procedure, not run)
+
+Isolated test server with Core, the Dev bridge and `Progenitor.Sample`; an admin character in a
+castle with two chests and a refinement station.
+
+1. `node tools/mcp/call.mjs server inventory_moves '{"record":true,"clear":true}'`: `hooked` true.
+   `.items moves` in chat does the same through a plugin subscription (log lines
+   `Sample items: player move …`).
+2. Drag a stack of 20 Iron Ore from the bag into chest #1. `inventory_moves` lists one move:
+   `Move In`, the ore's hash, `amount` 20, `container` the chest's `c-…` id (`.items id #1`),
+   `castle` true, `counterpart` `OwnInventory`, `countAfter - countBefore` 20.
+3. Shift-click it back: `Move Out 20`. Take all with two item types in the chest: one `MoveAll Out`
+   per item. Smart merge (deposit onto matching stacks): `SmartMerge In` per item.
+4. Split a stack inside the chest: `Split Within` with the split amount. Sort the chest:
+   `Sort Within` rows, no `In`/`Out`.
+5. Partial: fill the bag, take a 50 stack that only partly fits: `Out` by what arrived in the bag.
+   Refused: from far away (or via the read-only container preview) drag out; no move, `unchanged`
+   grows.
+6. Swap two different weapons of one prefab between bag and chest: one `Out 1` and one `In 1`.
+   Drop a stack from the chest window onto the ground: `Drop Out`, `counterpart` `Ground`.
+7. Station output to bag: `Move Out` on the output (`inventory` ends in `#1`).
+8. Bag-only sort: no move, `playerOnly` grows. Two players moving into one chest in the same frame
+   is hard to produce by hand; the game-free tests cover the `ambiguous` rule.
+9. `{"record":false}` and `.items moves` again: `hooked` false. Clean up: remove the Sample from the
+   test server's reload folder and confirm the clean unload.
+
 ### Stable container ids
 
 `ContainerId` (`c-` plus 32 hex digits) names a placed container, station or heart across
@@ -2435,7 +2542,7 @@ world yet).
 `moveslot <from> <slot> <to> <amount>`, `moveall <from> <to> [keepbar]` (`keepbar` skips bag
 slots 0–7), `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `net <c>` (the
 container's network id words), `resolve <index> <generation> [type]` (what a request handler does
-with a client's words: the entity and id, or the refusal), `watch <c>`, `stamp <c>` (the change stamp and clock, and against the previous `.items stamp` of that container whether the stamp is equal and what `AnyChangedSince` said), `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
+with a client's words: the entity and id, or the refusal), `watch <c>`, `stamp <c>` (the change stamp and clock, and against the previous `.items stamp` of that container whether the stamp is equal and what `AnyChangedSince` said), `moves` (toggle a `Sample items: player move …` log line per [player move](#player-moves)), `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
 `index:version` entity, `bag` or `heart`; append `/out` for a refinement station's output. Items are
 a spawnable name or a GUID hash. Every action logs a `Sample items: …` line; the sample also logs
 `PlayerReady` and `PlayerTerritoryChanged`.

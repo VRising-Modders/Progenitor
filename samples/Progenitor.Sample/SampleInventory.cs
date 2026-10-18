@@ -30,7 +30,7 @@ namespace Progenitor.Sample;
 /// <item><description><c>.items moveall &lt;from&gt; &lt;to&gt; [keepbar]</c> (<c>keepbar</c> leaves
 /// bag slots 0–7, the action bar, in place), <c>.items add|remove &lt;c&gt;
 /// &lt;item&gt; &lt;amount&gt;</c>, <c>.items name &lt;c&gt; "&lt;text&gt;"</c>, <c>.items id
-/// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items stamp &lt;c&gt;</c> (<c>ctx.Inventory.ChangeStamp</c> and <c>AnyChangedSince</c> since the last <c>.items stamp</c> of that container), <c>.items heart</c>, <c>.items clan</c>.</description></item>
+/// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items stamp &lt;c&gt;</c> (<c>ctx.Inventory.ChangeStamp</c> and <c>AnyChangedSince</c> since the last <c>.items stamp</c> of that container), <c>.items moves</c> (toggle a log of players' container moves, <c>ctx.Inventory.OnPlayerMove</c>), <c>.items heart</c>, <c>.items clan</c>.</description></item>
 /// </list>
 /// A container token is <c>#n</c> (from <c>.items chests</c>), a stable id <c>c-…</c>, an entity
 /// <c>index:version</c>, <c>bag</c> (your character) or <c>heart</c> (the castle's heart); append
@@ -42,13 +42,13 @@ internal static class SampleInventory
     internal const string Area = "items";
 
     internal const string UsageReply =
-        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | stamp <c> | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
+        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | stamp <c> | moves | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
 
     /// <summary>The verbs this file handles (the grant/equip verbs stay in <see cref="SampleItems"/>).</summary>
     internal static bool Handles(string? verb) => (verb ?? "").Trim().ToLowerInvariant() switch
     {
         "chests" or "slots" or "count" or "free" or "move" or "moveslot" or "moveall" or "add" or "remove"
-            or "name" or "id" or "net" or "resolve" or "watch" or "stamp" or "heart" or "clan" => true,
+            or "name" or "id" or "net" or "resolve" or "watch" or "stamp" or "moves" or "heart" or "clan" => true,
         _ => false,
     };
 
@@ -236,6 +236,7 @@ internal static class SampleInventory
 #if !PROGENITOR_TESTS
     private static readonly Dictionary<string, IInventoryWatch> Watches = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, (long Stamp, long Clock)> LastStamps = new(StringComparer.Ordinal);
+    private static IDisposable? _moves;
 
     /// <summary>Log the P-a events so the live acceptance can see them.</summary>
     internal static void Attach(PluginContext ctx)
@@ -251,6 +252,8 @@ internal static class SampleInventory
         foreach (var w in Watches.Values) w.Dispose();
         Watches.Clear();
         LastStamps.Clear();
+        _moves?.Dispose();
+        _moves = null;
     }
 
     internal static void Handle(ICommandContext ctx, string verb, string a, string b, string c, string d)
@@ -276,6 +279,23 @@ internal static class SampleInventory
             case "clan":
                 Clan(ctx, plugin);
                 return;
+            case "moves":
+            {
+                // ctx.Inventory.OnPlayerMove: every change a player makes by hand to a container, as a move log.
+                if (_moves != null)
+                {
+                    _moves.Dispose();
+                    _moves = null;
+                    ctx.Reply("Stopped the move log.");
+                    return;
+                }
+
+                _moves = inv.OnPlayerMove(m => SampleLog.Info(Area, "player move " + m.Direction + " " + ItemName(world, m.Item) + " x" + m.Amount
+                    + " " + (m.IsCastleContainer ? m.Container.ToString() : m.Inventory.ToString()) + " by user " + m.User
+                    + " (" + m.Kind + ", " + m.CountBefore + " -> " + m.CountAfter + ", other " + m.Counterpart + (m.Ambiguous ? ", ambiguous" : "") + ")"));
+                ctx.Reply("Logging players' container moves to the server log (Sample items: player move …). Run again to stop.");
+                return;
+            }
             case "resolve":
             {
                 // What a request handler does with the words a client sent (VanillaPanelTarget or UiWorldPickResult).

@@ -128,6 +128,9 @@
     <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryWatchHub.cs" Link="Linked\InventoryWatchHub.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerId.cs" Link="Linked\ContainerId.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\NetworkIdResolver.cs" Link="Linked\NetworkIdResolver.cs" />
+    <!-- ctx.Inventory.OnPlayerMove: the diff, attribution and delivery hub; PlayerMoveRuntime.cs (the
+         hooks and raw reads) is not on this list. -->
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\PlayerInventoryMoves.cs" Link="Linked\PlayerInventoryMoves.cs" />
     <!-- ctx.Inventory.ChangeStamp: the stamp logic and the raw-read checks; ChunkVersions.cs and
          UnityInventoryStampSource.cs (the pointer walk and the game calls) are not on this list. -->
     <Compile Include="..\..\src\Progenitor.Core\Inventory\InventoryStamps.cs" Link="Linked\InventoryStamps.cs" />
@@ -839,6 +842,7 @@
     <Compile Include="..\..\src\Progenitor.Dev\Ops\MaterialEventArgs.cs" Link="Linked\MaterialEventArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\ServantArgs.cs" Link="Linked\ServantArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\InventoryStampArgs.cs" Link="Linked\InventoryStampArgs.cs" />
+    <Compile Include="..\..\src\Progenitor.Dev\Ops\InventoryMovesOps.cs" Link="Linked\InventoryMovesOps.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\BridgeJson.cs" Link="Linked\BridgeJson.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\GiveArgs.cs" Link="Linked\GiveArgs.cs" />
     <Compile Include="..\..\src\Progenitor.Dev\Ops\UnlockArgs.cs" Link="Linked\UnlockArgs.cs" />

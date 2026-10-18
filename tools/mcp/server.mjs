@@ -866,6 +866,14 @@ server.tool("progenitor_inventory_stamp", "Server only, read only. ctx.Inventory
   },
   async (args) => { try { return text(await bridge("server", "inventory_stamp", args)); } catch (e) { return fail(e); } });
 
+server.tool("progenitor_inventory_moves", "Server only. The ctx.Inventory.OnPlayerMove observer: item moves players make by hand in container windows (drag, shift-click, take all, split, sort, smart merge, drop, equip), amounts read back from the inventories. record:true hooks the item request systems even with no plugin subscribed and logs each move; record:false stops that. Returns the observer's counters (requests, unchanged = refused or no-op requests, unresolved ids, playerOnly) and the last moves (user, kind, direction In/Out/Within, item, amount, container id, count before/after, counterpart). Source-checked and unit-tested, not live-verified.",
+  {
+    record: z.boolean().optional().describe("true: turn the bridge recorder on; false: off; omit to leave it."),
+    last: z.number().int().min(0).max(256).optional().describe("How many recent moves to return (default 20)."),
+    clear: z.boolean().optional().describe("Forget the recent moves first."),
+  },
+  async (args) => { try { return text(await bridge("server", "inventory_moves", args)); } catch (e) { return fail(e); } });
+
 server.tool("progenitor_photo", "Photo mode (built-in, off by default): fly camera, HUD hide, admin-only world pause. on/off run on the client: on enters photo mode (enable:true first turns [PhotoMode] Enabled on in Core's ui cfg), off leaves it and resumes any pause it asked for. status (either side): enabled, active, paused, hudHidden, pose, speed, fov, holdsInput; on the server, serverPauses (users holding a pause). The pause itself is the P keybind (keybind_press PhotoModePause) and shows up in progenitor_time status as a 'photo mode: <name>' lease. Takes the camera and holds the character while active.",
   {
     side: z.enum(["client", "server"]).optional().describe("Default client. Use server only for status."),

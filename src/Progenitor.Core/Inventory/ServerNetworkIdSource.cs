@@ -18,9 +18,17 @@ namespace Progenitor.Inventory;
 /// <c>NativeParallelHashMap&lt;NetworkId, Entity&gt;</c>) is not called: reaching it needs a new
 /// generic interop instantiation over a game value type, which this framework does not create.
 /// The components it is filled from carry the same ids.</para>
+///
+/// <para>With <c>includeInventoryEntities</c> (the player-move observer) the scan also covers every
+/// inventory entity (<c>InventoryConnection</c>) that carries a network id, since an item event can
+/// name a station's or a bag's inventory entity rather than its owner.</para>
 /// </summary>
 internal sealed class ServerNetworkIdSource : INetworkIdSource
 {
+    private readonly bool _inventories;
+
+    internal ServerNetworkIdSource(bool includeInventoryEntities = false) => _inventories = includeInventoryEntities;
+
     public void Scan(List<NetworkIdEntry> into)
     {
         var world = Worlds.Server;
@@ -37,6 +45,13 @@ internal sealed class ServerNetworkIdSource : INetworkIdSource
             ComponentIndex.Of<NetworkId>(ComponentType.AccessMode.ReadOnly));
         for (int i = 0; i < owners.Count; i++)
             Add(em, owners[i], into);
+
+        if (!_inventories) return;
+        var inventories = Query.Entities(em, includeDisabled: true, includeSystems: false,
+            ComponentIndex.Of<InventoryConnection>(ComponentType.AccessMode.ReadOnly),
+            ComponentIndex.Of<NetworkId>(ComponentType.AccessMode.ReadOnly));
+        for (int i = 0; i < inventories.Count; i++)
+            Add(em, inventories[i], into);
     }
 
     public bool TryReadBack(int entityIndex, int entityVersion, out int index, out int generation, out int type)

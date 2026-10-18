@@ -726,6 +726,27 @@ dump server
 size   SyncToUserBufferStride                      = 8    : SyncToUserBuffer                        # one Entity
 offset SyncToUserBufferUserEntityOffset            = 0x0  : SyncToUserBuffer.UserEntity             # Entity {Index, Version}, the User entity
 
+# ---- Inventory: player item moves (src/Progenitor.Core/Inventory/PlayerMoveRuntime.cs; Dev inventory_moves) -------
+# Server only. The item events a client's inventory windows send, as the server reads them: a Before hook on the
+# server system that handles each kind reads the inventories' NetworkIds (12 bytes each) here, the sender from
+# FromCharacter (typed read), and an After hook diffs the named inventories' rows. Read only, never written.
+dump server
+offset ServerMoveItemEventFromInventoryOffset         = 0x0  : MoveItemBetweenInventoriesEvent.FromInventory        # NetworkId
+offset ServerMoveItemEventToInventoryOffset           = 0x10 : MoveItemBetweenInventoriesEvent.ToInventory          # NetworkId, after int FromSlot
+offset ServerMoveAllItemsEventFromInventoryOffset     = 0x0  : MoveAllItemsBetweenInventoriesEvent.FromInventory    # NetworkId
+offset ServerMoveAllItemsEventToInventoryOffset       = 0xC  : MoveAllItemsBetweenInventoriesEvent.ToInventory      # NetworkId
+offset ServerMoveAllItemsEventV2FromInventoryOffset   = 0x0  : MoveAllItemsBetweenInventoriesEventV2.FromInventory  # NetworkId
+offset ServerMoveAllItemsEventV2ToInventoryOffset     = 0xC  : MoveAllItemsBetweenInventoriesEventV2.ToInventory    # NetworkId
+offset ServerSmartMergeEventFromInventoryOffset       = 0x0  : SmartMergeItemsBetweenInventoriesEvent.FromInventory # NetworkId
+offset ServerSmartMergeEventToInventoryOffset         = 0xC  : SmartMergeItemsBetweenInventoriesEvent.ToInventory   # NetworkId
+offset ServerSplitItemEventInventoryOffset            = 0x0  : SplitItemEvent.Inventory                             # NetworkId
+offset ServerSplitItemEventV2FromInventoryOffset      = 0x8  : SplitItemEventV2.FromInventory                       # NetworkId, after ExpectedItemType and SplitOffAmount
+offset ServerSplitItemEventV2ToInventoryOffset        = 0x18 : SplitItemEventV2.ToInventory                         # NetworkId
+offset ServerSortSingleInventoryEventInventoryOffset  = 0x0  : SortSingleInventoryEvent.Inventory                   # NetworkId
+offset ServerSortAllInventoriesEventInventoryOffset   = 0x0  : SortAllInventoriesEvent.Inventory                    # NetworkId
+offset ServerDropInventoryItemEventInventoryOffset    = 0x0  : DropInventoryItemEvent.Inventory                     # NetworkId
+offset ServerEquipItemFromInventoryEventFromInventoryOffset = 0x0 : EquipItemFromInventoryEvent.FromInventory       # NetworkId
+
 # ---- Authored item stat bonuses (native equip transfer uses stride 0x24) ----------------------
 dump server
 size   ItemStatRowStride = 36 : ModifyUnitStatBuff_DOTS
