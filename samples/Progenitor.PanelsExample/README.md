@@ -6,7 +6,7 @@ Deploy it to both sides. The client half is the panels. The server half only ans
 
 | Window | Anchor | Button |
 |---|---|---|
-| Storage container | left edge (with a status row), right edge, beside rename | `Deposit`, `Output`, `Locate` |
+| Storage container | left edge (with a status row), right edge, beside rename | `Deposit`, `Output`, `Locate`, and a log icon button (`VanillaButtonIcon.Drawn("log")`) whose hover tooltip reads **Chest log** over *Deposits and withdrawals of this chest.* (`IUiButton.Tooltip(text, title)`); a click logs `Panels example: click chest log <target>` |
 | Workstation and refinement station | left edge, right edge | `Inputs`, `Outputs` |
 | Player inventory | beside sort | `Stash` |
 | Castle heart (also `ThronePanel`) | left edge, right edge | `Castles`, `Fuel` |

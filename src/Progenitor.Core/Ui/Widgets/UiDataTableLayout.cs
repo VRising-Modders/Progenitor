@@ -36,6 +36,12 @@ internal static class UiDataTableLayout
     /// <summary>An editable column's value box.</summary>
     internal static string EditKey(string column) => "e:" + column;
 
+    /// <summary>
+    /// A choice column's click target on a row that can change: a box-less button drawn as the option's words in their
+    /// tone (<see cref="CellSkin.Choice"/>), as wide as the view cell it replaces.
+    /// </summary>
+    internal static string ChoiceKey(string column) => "ch:" + column;
+
     /// <summary>A column chooser chip.</summary>
     internal static string ChipKey(string column) => "col:" + column;
 
@@ -66,8 +72,49 @@ internal static class UiDataTableLayout
         UiRowActionIcon.Chest => UiDrawnMark.ChestMark,
         UiRowActionIcon.Check => UiDrawnMark.CheckMark,
         UiRowActionIcon.View => UiDrawnMark.EyeMark,
+        UiRowActionIcon.Block => UiDrawnMark.BlockMark,
+        UiRowActionIcon.Log => UiDrawnMark.LogMark,
         _ => UiDrawnMark.LocateMark,
     };
+
+    /// <summary>
+    /// What a row action's hover shows: an enabled one its <see cref="UiRowAction.Tooltip"/> as the title; a disabled
+    /// one only its <see cref="UiRowAction.DisabledReason"/>, muted, under the tooltip as its title when that is set, and
+    /// nothing at all without a reason.
+    /// </summary>
+    internal static (bool Shown, string Title, string Body, bool Muted) ActionTooltip(UiRowAction action)
+    {
+        string tip = (action.Tooltip ?? "").Trim();
+        if (action.Enabled) return (tip.Length > 0, tip, "", false);
+        string why = (action.DisabledReason ?? "").Trim();
+        return why.Length == 0 ? (false, "", "", false) : (true, tip, why, true);
+    }
+
+    /// <summary>The drawn mark before a choice's words, or none.</summary>
+    internal static UiDrawnMark MarkOf(UiTableChoice? choice) => choice?.Icon is { } icon ? MarkOf(icon) : UiDrawnMark.None;
+
+    /// <summary>The room a choice icon takes before the words: the mark at the body text's size and its gap.</summary>
+    internal static float ChoiceIconRoom => UiDrawnMarkArt.IconHeight(CellLayout.TextFontSize) + UiDrawnMarkArt.Gap;
+
+    /// <summary>
+    /// The width a choice column's longest option needs: its words at the body size, the icon's room when it has one, and
+    /// the text's own margins, so no option is ever cut.
+    /// </summary>
+    internal static float ChoiceNeed(UiTableColumn column)
+    {
+        float need = 0f;
+        foreach (var c in column.Choices)
+        {
+            if (c == null) continue;
+            float w = CellLayout.EstimateTextWidth(c.Text, CellLayout.TextFontSize) + (c.Icon != null ? ChoiceIconRoom : 0f) + ChoiceTextPad;
+            if (w > need) need = w;
+        }
+
+        return (float)Math.Ceiling(need);
+    }
+
+    /// <summary>The text's side margins in a choice cell (both sides together) and a little air.</summary>
+    internal const float ChoiceTextPad = 8f;
 
     /// <summary>
     /// Whether the player may hide a column (the chooser offers it) and a narrow row may drop it:
@@ -169,7 +216,7 @@ internal static class UiDataTableLayout
 
     internal static bool NeedsLeftJustify(IReadOnlyList<UiTableColumn> columns, UiTableColumn column)
     {
-        if (column.Kind != UiTableColumnKind.Text) return false;
+        if (column.Kind != UiTableColumnKind.Text && column.Kind != UiTableColumnKind.Choice) return false;
         int fill = FillIndex(columns);
         for (int i = 0; i < columns.Count; i++)
             if (ReferenceEquals(columns[i], column)) return i > fill;
@@ -221,9 +268,10 @@ internal static class UiDataTableLayout
         // The buttons alone decide an actions column's width, so its header lines up with them exactly.
         if (column.Kind == UiTableColumnKind.Actions) return ActionsWidth(ActionSlotsOf(column));
         float need = HeaderNeed(column);
-        if (fill) return Math.Max(UiWidgetLayout.CaptionMinWidth, need);
+        if (fill) return Math.Max(Math.Max(UiWidgetLayout.CaptionMinWidth, need), column.Kind == UiTableColumnKind.Choice ? ChoiceNeed(column) : 0f);
         float floor = column.Editable && column.Kind == UiTableColumnKind.Number ? MinEditWidth
-            : column.Kind == UiTableColumnKind.Number ? MinNumberWidth : MinTextWidth;
+            : column.Kind == UiTableColumnKind.Number ? MinNumberWidth
+            : column.Kind == UiTableColumnKind.Choice ? Math.Max(MinTextWidth, ChoiceNeed(column)) : MinTextWidth;
         return Math.Max(Math.Max(column.Width, floor), need);
     }
 
@@ -288,6 +336,13 @@ internal static class UiDataTableLayout
                 // A single space keeps the field's hint object: an inherited value is drawn as the hint (gray).
                 cells.Add(new CellSpec(CellKind.Input, EditKey(col.Key)) { MinWidth = w, Skin = CellSkin.ValueBox, Visible = false, MaxLength = 18 }
                     .With(text: "", width: WidthSpec(col, isFill, w), align: align, optional: optional, placeholder: " "));
+            }
+
+            if (col.Editable && col.Kind == UiTableColumnKind.Choice)
+            {
+                // The click target that replaces the view cell on a row that can change: the same words, the same place.
+                cells.Add(new CellSpec(CellKind.Button, ChoiceKey(col.Key)) { MinWidth = w, Skin = CellSkin.Choice, Visible = false, FontSizeOverride = CellLayout.TextFontSize }
+                    .With(text: "", width: WidthSpec(col, isFill, w), align: align, optional: optional));
             }
         }
 

@@ -163,7 +163,8 @@ public readonly struct VanillaButtonIcon : IEquatable<VanillaButtonIcon>
 
     /// <summary>
     /// The framework's drawn mark shown when there is no game icon: <c>chest</c> (the default),
-    /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c>, <c>grip</c> or <c>locate</c>.
+    /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c>, <c>grip</c>, <c>locate</c>, <c>eye</c>, <c>block</c> (a circle with
+    /// a slash) or <c>log</c> (a page with lines, to sit beside the game's rename pencil).
     /// </summary>
     public string Mark { get; }
 

@@ -18,6 +18,14 @@ public enum UiTableColumnKind
     /// room for <see cref="UiTableColumn.ActionSlots"/> buttons. One per table.
     /// </summary>
     Actions = 2,
+
+    /// <summary>
+    /// One of a fixed, ordered list of options per row (<see cref="UiTableColumn.Choices"/>: Allowed or Blocked): the cell
+    /// shows the current option's text in its tone, after its icon when it has one, and sorts by the options' order. With
+    /// <see cref="UiTableColumn.Editable"/> a click (or A on a controller) on the cell asks for the next option in the
+    /// cycle through <see cref="IUiDataTable.OnEdit"/>, and the cell waits for the answer as an edited number does.
+    /// </summary>
+    Choice = 3,
 }
 
 /// <summary>The face of a row action button (<see cref="UiRowAction"/>): a drawn mark in the kit's glyph-button gold.</summary>
@@ -43,13 +51,53 @@ public enum UiRowActionIcon
 
     /// <summary>An eye: view or preview the row's thing (a checklist row's preview button).</summary>
     View = 6,
+
+    /// <summary>A circle with a slash across it: block or forbid the row's thing (a choice column's Blocked option).</summary>
+    Block = 7,
+
+    /// <summary>A page with lines across it: open the row's log, history or list.</summary>
+    Log = 8,
+}
+
+/// <summary>
+/// One option of a <see cref="UiTableColumnKind.Choice"/> column (<see cref="UiTableColumn.Choices"/>): its stable
+/// <see cref="Id"/> (what a row's <see cref="UiTableCell.Choice"/> and an edit's <see cref="UiTableEdit.NewChoice"/> name),
+/// the words the cell shows, their tone, and an optional drawn icon before them.
+/// </summary>
+public sealed class UiTableChoice
+{
+    /// <summary>The option <paramref name="id"/> shown as <paramref name="text"/> in <paramref name="tone"/>, after <paramref name="icon"/> when given.</summary>
+    public UiTableChoice(string id, string text, LabelTone tone = LabelTone.Normal, UiRowActionIcon? icon = null)
+    {
+        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("A choice needs an id.", nameof(id));
+        Id = id.Trim();
+        Text = string.IsNullOrEmpty(text) ? Id : text;
+        Tone = tone;
+        Icon = icon;
+    }
+
+    /// <summary>The caller's stable name for the option (<c>allowed</c>). Never shown.</summary>
+    public string Id { get; }
+
+    /// <summary>The words the cell shows (<c>Allowed</c>).</summary>
+    public string Text { get; }
+
+    /// <summary>The words' tone (the framework's status colors), such as <see cref="LabelTone.Ok"/> for Allowed and <see cref="LabelTone.Orange"/> for Blocked.</summary>
+    public LabelTone Tone { get; }
+
+    /// <summary>A drawn mark before the words, in their tone (<see cref="UiRowActionIcon.Check"/>, <see cref="UiRowActionIcon.Block"/>); null for none.</summary>
+    public UiRowActionIcon? Icon { get; }
+
+    /// <inheritdoc />
+    public override string ToString() => Id;
 }
 
 /// <summary>
 /// One small icon button on a data table row (<see cref="UiTableRow.Actions"/>), drawn in the table's
 /// <see cref="UiTableColumnKind.Actions"/> column. A click (or A on a controller) raises
 /// <see cref="IUiDataTable.OnRowAction"/> with the row's id and <see cref="Id"/>; a disabled one is drawn faint and does
-/// nothing. Hovering it shows <see cref="Tooltip"/>.
+/// nothing. Hovering an enabled one shows <see cref="Tooltip"/>; a disabled one shows only its
+/// <see cref="DisabledReason"/>, muted, when one is given.
 /// </summary>
 public sealed class UiRowAction
 {
@@ -69,8 +117,15 @@ public sealed class UiRowAction
     /// <summary>The button's face.</summary>
     public UiRowActionIcon Icon { get; }
 
-    /// <summary>Hover text (<c>Move up</c>); empty for none. Shown for a disabled button too.</summary>
+    /// <summary>Hover text (<c>Move up</c>) of an enabled button; empty for none. A disabled button does not show it.</summary>
     public string Tooltip { get; set; }
+
+    /// <summary>
+    /// Why a disabled button does nothing (<c>Already the first row.</c>): its hover tooltip, in the muted text color,
+    /// under the button's <see cref="Tooltip"/> as the title when that is set. Empty (the default): a disabled button
+    /// shows no tooltip. Ignored while <see cref="Enabled"/>.
+    /// </summary>
+    public string DisabledReason { get; set; } = "";
 
     /// <summary>False: drawn faint and a click does nothing (the first row's up, the last row's down).</summary>
     public bool Enabled { get; set; }
@@ -124,7 +179,7 @@ public sealed class UiTableColumn
     /// <summary>The header caption, drawn in the game's small caps.</summary>
     public string Caption { get; }
 
-    /// <summary>Text, number or the row actions.</summary>
+    /// <summary>Text, number, a choice or the row actions.</summary>
     public UiTableColumnKind Kind { get; }
 
     /// <summary>
@@ -134,6 +189,34 @@ public sealed class UiTableColumn
     /// do not apply, so each icon stays in its own column from row to row.
     /// </summary>
     public int ActionSlots { get; set; } = 4;
+
+    private IReadOnlyList<UiTableChoice> _choices = Array.Empty<UiTableChoice>();
+
+    /// <summary>
+    /// A <see cref="UiTableColumnKind.Choice"/> column's options, in cycle order: a click moves a cell to the next one and
+    /// the last wraps to the first; the column sorts in this order. Ids must differ. Ignored on other kinds.
+    /// </summary>
+    public IReadOnlyList<UiTableChoice> Choices
+    {
+        get => _choices;
+        set => _choices = value ?? Array.Empty<UiTableChoice>();
+    }
+
+    /// <summary>The option <paramref name="id"/> of a choice column, or null.</summary>
+    internal UiTableChoice? FindChoice(string? id)
+    {
+        int i = ChoiceIndex(id);
+        return i < 0 ? null : _choices[i];
+    }
+
+    /// <summary>The position of option <paramref name="id"/> in <see cref="Choices"/>, or -1.</summary>
+    internal int ChoiceIndex(string? id)
+    {
+        if (id == null) return -1;
+        for (int i = 0; i < _choices.Count; i++)
+            if (_choices[i] != null && string.Equals(_choices[i].Id, id, StringComparison.Ordinal)) return i;
+        return -1;
+    }
 
     /// <summary>
     /// The column's width in UI units, or 0 for the fill column (takes what the row has left, never under 120). The table
@@ -155,7 +238,8 @@ public sealed class UiTableColumn
 
     /// <summary>
     /// A number column the player edits in place: each cell is the game's value box. A commit raises
-    /// <see cref="IUiDataTable.OnEdit"/>; the cell waits for the answer. Ignored on a text column.
+    /// <see cref="IUiDataTable.OnEdit"/>; the cell waits for the answer. On a choice column a click on the cell asks for
+    /// the next option the same way. Ignored on a text column.
     /// </summary>
     public bool Editable { get; set; }
 
@@ -236,8 +320,15 @@ public sealed class UiTableCell
     /// <summary>The player may not edit this cell (a guest's view). Drawn as plain text.</summary>
     public bool Locked { get; set; }
 
+    /// <summary>
+    /// A choice column's current option (its <see cref="UiTableChoice.Id"/>); null or unknown: no option, drawn as the
+    /// cell's <see cref="Text"/> and sorted last. A known option's text and tone replace the cell's own.
+    /// </summary>
+    public string? Choice { get; set; }
+
     internal UiTableCell Copy() => new(Text)
     {
+        Choice = Choice,
         Value = Value,
         SortText = SortText,
         Tone = Tone,
@@ -301,6 +392,9 @@ public sealed class UiTableRow
     /// </summary>
     public UiTableRow Number(string column, double? value, string? text = null, bool inherited = false, string source = "") =>
         Set(column, new UiTableCell(text ?? "") { Value = value, Inherited = inherited, Source = source ?? "" });
+
+    /// <summary>Set a choice column's cell to option <paramref name="choice"/> (<see cref="UiTableCell.Choice"/>).</summary>
+    public UiTableRow Choice(string column, string choice) => Set(column, new UiTableCell("") { Choice = choice });
 
     /// <summary>
     /// The row's icon: a <c>UnityEngine.Sprite</c>, or null. <see cref="ItemPrefab"/> shows a game item's own icon instead.
@@ -415,7 +509,7 @@ public enum UiTableEditState
 }
 
 /// <summary>
-/// P7b: an inline edit of a number cell (<see cref="IUiDataTable.OnEdit"/>). The cell shows a spinner and takes no input
+/// P7b: an inline edit of a number cell, or a click on a choice cell (<see cref="IUiDataTable.OnEdit"/>). The cell shows a spinner and takes no input
 /// until the caller answers with <see cref="Resolve"/> or <see cref="Reject"/>; with no answer within
 /// <see cref="UiDataTableOptions.EditTimeout"/> the table rejects it itself ("No answer from the server"). Answer on the
 /// main thread. A second answer is ignored.
@@ -444,11 +538,17 @@ public sealed class UiTableEdit
     /// <summary>The edited column's key.</summary>
     public string Column { get; }
 
-    /// <summary>The value before the edit (null: none).</summary>
+    /// <summary>The value before the edit (null: none). On a choice column the old option's position in <see cref="UiTableColumn.Choices"/>.</summary>
     public double? OldValue { get; }
 
-    /// <summary>The value the player entered; null when <see cref="Clear"/>.</summary>
+    /// <summary>The value the player entered; null when <see cref="Clear"/>. On a choice column the new option's position.</summary>
     public double? NewValue { get; }
+
+    /// <summary>A choice column's option before the click (its id; null: none). Null on a number column.</summary>
+    public string? OldChoice { get; internal set; }
+
+    /// <summary>A choice column's option the player asked for (its id: the next one in the cycle). Null on a number column.</summary>
+    public string? NewChoice { get; internal set; }
 
     /// <summary>The player cleared the field: return the cell to its inherited value (remove the row's own value).</summary>
     public bool Clear { get; }
@@ -475,7 +575,7 @@ public sealed class UiTableEdit
     public bool Reject(string reason) => _complete(this, false, string.IsNullOrWhiteSpace(reason) ? "The change was refused." : reason);
 
     /// <inheritdoc />
-    public override string ToString() => RowId + "/" + Column + " " + (Clear ? "clear" : Text) + " " + State;
+    public override string ToString() => RowId + "/" + Column + " " + (NewChoice ?? (Clear ? "clear" : Text)) + " " + State;
 }
 
 /// <summary>P7b: what a data table offers. Every option has the common default.</summary>
@@ -642,7 +742,8 @@ public interface IUiDataTable : IUiHandle
     /// <summary>
     /// Commit <paramref name="text"/> into row <paramref name="rowId"/>'s editable cell <paramref name="column"/> as if the
     /// player typed it (a bulk edit over the selection, the bridge): raises <see cref="OnEdit"/> and returns the edit. Empty
-    /// text clears to the inherited value. Null when nothing changed or the edit is refused: the reason is in
+    /// text clears to the inherited value. On a choice column <paramref name="text"/> is the option's id, and empty asks
+    /// for the next option, as a click does. Null when nothing changed or the edit is refused: the reason is in
     /// <see cref="StatusReason"/> (not a number, the cell is locked or already waiting).
     /// </summary>
     UiTableEdit? Edit(string rowId, string column, string text);

@@ -1951,6 +1951,13 @@ internal enum CellSkin
     /// donor is reachable.
     /// </summary>
     GameTab = 13,
+
+    /// <summary>
+    /// A data table choice cell (<see cref="UiTableColumnKind.Choice"/>): a box-less button whose caption is drawn in its
+    /// cell tone's text color (the option's tone), left-aligned, not underlined, at the body text's size and margins, so
+    /// it reads exactly as the text cell it replaces; brighter under the pointer, darker pressed.
+    /// </summary>
+    Choice = 14,
 }
 
 /// <summary>KEYS3: how a cell row draws its selected state (<see cref="CellRowSpec.Skin"/>).</summary>

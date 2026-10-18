@@ -63,10 +63,12 @@ internal static class UiTooltipLayout
     /// <summary>
     /// As <see cref="Place"/>, kept inside the area <paramref name="areaMinX"/>..<paramref name="areaMaxY"/> (the hovered
     /// control's panel; NaN for none) on each axis where the box fits in it.
+    /// <paramref name="beside"/> false keeps it off the anchor's sides: under it, else over it (a title-row button's box
+    /// never covers the title beside it).
     /// </summary>
     internal static (float X, float Y, Side Side) PlaceIn(
         float minX, float minY, float maxX, float maxY, float width, float height, float canvasWidth, float canvasHeight,
-        float areaMinX, float areaMinY, float areaMaxX, float areaMaxY)
+        float areaMinX, float areaMinY, float areaMaxX, float areaMaxY, bool beside = true)
     {
         width = Finite(width);
         height = Finite(height);
@@ -81,7 +83,7 @@ internal static class UiTooltipLayout
 
         float xMax = r - width, yMax = t - height;
         bool wide = maxX - minX >= WideShare * (r - l);
-        if (!wide)
+        if (!wide && beside)
         {
             // Beside the anchor, top edges aligned: it never covers the anchor, so only the vertical clamp applies.
             float right = maxX + Gap;

@@ -13,8 +13,8 @@ namespace Progenitor.PanelsExample;
 ///
 /// <list type="bullet">
 /// <item><description>Container window: a <c>Deposit</c> button and a status row in the left
-/// column, an <c>Output</c> button in the right column and an <c>Options</c> button beside the
-/// rename button.</description></item>
+/// column, an <c>Output</c> button in the right column, and beside the rename button a <c>Locate</c>
+/// button and a log icon button (the drawn <c>log</c> mark) whose tooltip is its own title and body.</description></item>
 /// <item><description>Workstation and refinement windows: <c>Inputs</c> left, <c>Outputs</c> right.</description></item>
 /// <item><description>Player inventory: <c>Stash</c> beside the sort button.</description></item>
 /// <item><description>Castle heart window (also reachable as <c>ThronePanel</c>): <c>Castles</c> left, <c>Fuel</c> right.</description></item>
@@ -59,7 +59,13 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
             : "Container " + e.Target.NetworkIdIndex));
         Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.RightEdge, "Output");
         // Locate: the round trip through the server (Locate.cs). The only button that sends anything.
-        Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, "Locate", h => Locate.Send(ctx, h.Target));
+        var rename = Attach(ctx, VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, "Locate", h => Locate.Send(ctx, h.Target));
+        // An icon button beside the rename pencil: the drawn log mark (a page with lines). Its hover tooltip is the title
+        // and body given here, in the game-control tooltip under the button; without Tooltip it would be the caption.
+        var history = rename.Button("Log", VanillaButtonIcon.Drawn("log"));
+        ctx.Track(history.Tooltip("Deposits and withdrawals of this chest.", "Chest log"));
+        var historyLog = ctx.Log;
+        ctx.Track(history.OnClick(() => historyLog.LogInfo("Panels example: click chest log " + rename.Target)));
         Attach(ctx, VanillaUiSite.StationPanel, VanillaPanelAnchor.LeftEdge, "Inputs");
         Attach(ctx, VanillaUiSite.StationPanel, VanillaPanelAnchor.RightEdge, "Outputs");
         Attach(ctx, VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, "Stash");

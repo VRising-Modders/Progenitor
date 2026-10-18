@@ -347,6 +347,41 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void A_or_Space_on_a_tables_choice_cell_asks_for_the_next_option()
+    {
+        UiApi.SetRuntimeForTests(new TableRuntimeFake());
+        using var panel = Panel();
+        var choices = new[] { new UiTableChoice("allowed", "Allowed", LabelTone.Ok), new UiTableChoice("blocked", "Blocked", LabelTone.Orange) };
+        var table = panel.DataTable("t", new[]
+        {
+            new UiTableColumn("name", "Name"),
+            new UiTableColumn("rule", "Rule", UiTableColumnKind.Choice) { Editable = true, Choices = choices },
+        }, new UiDataTableOptions { VisibleRows = 4, MinRows = 4, ColumnChooser = false });
+        table.SetRows(new[] { new UiTableRow("a").Text("name", "Iron").Choice("rule", "allowed") });
+        var asked = new List<string>();
+        table.OnEdit(e => asked.Add(e.RowId + "=" + e.NewChoice));
+        var handle = (UiDataTableHandle)table;
+        Surface(Children(panel));
+        string cell = UiDataTableLayout.ChoiceKey("rule");
+        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(0), cell));
+        UiNav.Execute(NavCommand.Submit);
+        Assert.Equal(new[] { "a=blocked" }, asked);
+        // While it waits the focus stays on the cell (still a stop), and a second press asks nothing.
+        UiNav.Tick(default, 1.0);
+        Assert.Same(handle.SlotAt(0), UiNav.Focus.Handle);
+        Assert.Equal(cell, UiNav.Focus.Part);
+        UiNav.Execute(NavCommand.Submit);
+        Assert.Single(asked);
+        // The answer: the focus is still there, and the next press asks for the next option.
+        table.PendingEdits[0].Resolve();
+        UiNav.Tick(default, 2.0);
+        Assert.Equal(cell, UiNav.Focus.Part);
+        UiNav.Execute(NavCommand.Submit);
+        Assert.Equal(new[] { "a=blocked", "a=allowed" }, asked);
+        Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(2))); // a filler never was one
+    }
+
+    [Fact]
     public void Down_from_a_tables_last_row_passes_over_its_filler_rows()
     {
         UiApi.SetRuntimeForTests(new TableRuntimeFake());

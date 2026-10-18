@@ -8,8 +8,9 @@ namespace Progenitor.ControlsSample;
 /// The gallery's hub window: a plain floating game window (<c>Ui.Panel(...).GameWindow()</c>) with the hub controls
 /// together, as a mod's hub would use them: the game's window tabs (their height kept across tabs, a browser-style
 /// history), a Find tab with a row of compact dropdowns, a search box with its Find button, and a table of castle
-/// buildings with their build-menu icons that fills the window's height, at least eight rows tall, each row with its find,
-/// up, down and remove buttons; a centered Return button with a key hint.
+/// buildings with their build-menu icons that fills the window's height, at least eight rows tall, each row with a Rule
+/// choice (Allowed or Blocked; a click asks for the other and waits for the answer) and its find, up, down and remove
+/// buttons; a centered Return button with a key hint.
 /// Every control writes a log line. Game-free: the panel and the building ids come from the plugin.
 /// </summary>
 internal sealed class GalleryHub : IDisposable
@@ -111,12 +112,15 @@ internal sealed class GalleryHub : IDisposable
         {
             new UiTableColumn("name", "Building"),
             new UiTableColumn("count", "Count", UiTableColumnKind.Number),
+            // Rule: a click (or A on a controller) asks for the next option; the cell waits for OnEdit's answer.
+            new UiTableColumn(RuleKey, "Rule", UiTableColumnKind.Choice) { Editable = true, Width = 110, Choices = RuleChoices },
             // Each row's own commands: find, move up, move down, remove (UiTableRow.Action, raised by OnRowAction).
             new UiTableColumn(ActionsKey, "", UiTableColumnKind.Actions),
         };
         // MinRows: three buildings still draw a table eight rows tall (blank rows below them).
         Table = tabs.Add(0, p.DataTable(TableKey, columns, new UiDataTableOptions { FillHeight = true, MinRows = MinRows }));
         Table.OnRowAction(RowAction);
+        Table.OnEdit(RuleEdit);
         Table.SetRows(Rows());
 
         // Chests: a short tab, so the kept height shows (the window does not shrink).
@@ -155,6 +159,37 @@ internal sealed class GalleryHub : IDisposable
     /// <summary>Runs just before the window opens: the plugin takes the <c>ctx.Inventory.LastWindow</c> snapshot there.</summary>
     internal Action? BeforeOpen { get; set; }
 
+    /// <summary>The table's Rule column key.</summary>
+    internal const string RuleKey = "rule";
+
+    /// <summary>The Rule column's options, in cycle order: Allowed (a check, green) and Blocked (a block sign, orange).</summary>
+    internal static readonly UiTableChoice[] RuleChoices =
+    {
+        new("allowed", "Allowed", LabelTone.Ok, UiRowActionIcon.Check),
+        new("blocked", "Blocked", LabelTone.Orange, UiRowActionIcon.Block),
+    };
+
+    /// <summary>Each building's rule (by prefab name); the prison cell refuses a change, to show the rollback.</summary>
+    private readonly Dictionary<string, string> _rules = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A Rule click: the sample answers at once, as a server reply would later. The prison cell is refused (the cell goes
+    /// back to its rule and the reason shows under the table); every other building takes the new rule.
+    /// </summary>
+    internal void RuleEdit(UiTableEdit edit)
+    {
+        if (edit.Column != RuleKey) return;
+        Say("rule " + edit.RowId + " = " + edit.NewChoice);
+        if (edit.RowId == "TM_SpecialStation_PrisonCell")
+        {
+            edit.Reject("A prison cell's rule cannot be changed.");
+            return;
+        }
+
+        _rules[edit.RowId] = edit.NewChoice ?? "allowed";
+        edit.Resolve();
+    }
+
     /// <summary>The table's actions column key.</summary>
     internal const string ActionsKey = "actions";
 
@@ -175,10 +210,14 @@ internal sealed class GalleryHub : IDisposable
         {
             var b = Buildings[_order[i]];
             var row = new UiTableRow(b.Prefab).Text("name", b.Name).Number("count", b.Count)
+                .Choice(RuleKey, _rules.TryGetValue(b.Prefab, out var rule) ? rule : "allowed")
                 .Action("locate", UiRowActionIcon.Locate, "Find in the world")
                 .Action("up", UiRowActionIcon.Up, "Move up", enabled: i > 0)
                 .Action("down", UiRowActionIcon.Down, "Move down", enabled: i < _order.Count - 1)
                 .Action("remove", UiRowActionIcon.Remove, "Remove from the list");
+            // A disabled arrow says why in its muted tooltip (no reason: no tooltip at all).
+            row.Actions[1].DisabledReason = "Already the first row.";
+            row.Actions[2].DisabledReason = "Already the last row.";
             row.BuildingPrefab = _prefabByName(b.Prefab);
             rows.Add(row);
         }

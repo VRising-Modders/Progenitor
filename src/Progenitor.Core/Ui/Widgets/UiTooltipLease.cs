@@ -26,6 +26,8 @@ internal sealed class UiTooltipLease : IDisposable
     internal static IDisposable Attach(IUiHandle handle, string title, string text)
     {
         if (string.IsNullOrWhiteSpace(text) && string.IsNullOrWhiteSpace(title)) return Noop.Instance;
+        // A button attached to a game window is no kit control: its icon face shows the tooltip itself.
+        if (handle is VanillaAttachButton attached) return attached.IsDisposed ? Noop.Instance : attached.SetTooltip(title, text);
         if (handle is not UiHandle kit || kit.IsDisposed || !kit.Enabled || kit.Runtime == null) return Noop.Instance;
         var runtime = WidgetRuntime.Current;
         if (runtime == null) return Noop.Instance;

@@ -156,7 +156,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     private readonly Dictionary<string, IUiMarkView?> _headerMarks = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiDrawnMark> _headerMarkNow = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IUiMarkView?>[] _spinners;
-    private readonly Dictionary<string, UiDrawnMark>[] _spinnerNow;
+    private readonly Dictionary<string, (UiDrawnMark Mark, PaletteColor Color)>[] _spinnerNow;
 
     /// <summary>The table's actions column, or null; its buttons' faces are drawn marks (<see cref="UiIconMarks"/>).</summary>
     private readonly UiTableColumn? _actionsColumn;
@@ -204,7 +204,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _images = new object?[slots];
         _imageSet = new bool[slots];
         _spinners = new Dictionary<string, IUiMarkView?>[slots];
-        _spinnerNow = new Dictionary<string, UiDrawnMark>[slots];
+        _spinnerNow = new Dictionary<string, (UiDrawnMark Mark, PaletteColor Color)>[slots];
         _selectedNow = new bool?[slots];
         _slotRow = new string?[slots];
         _expandedNow = new bool?[slots];
@@ -215,7 +215,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             _written[i] = new Dictionary<string, string>(StringComparer.Ordinal);
             _hints[i] = new Dictionary<string, string>(StringComparer.Ordinal);
             _spinners[i] = new Dictionary<string, IUiMarkView?>(StringComparer.Ordinal);
-            _spinnerNow[i] = new Dictionary<string, UiDrawnMark>(StringComparer.Ordinal);
+            _spinnerNow[i] = new Dictionary<string, (UiDrawnMark Mark, PaletteColor Color)>(StringComparer.Ordinal);
             // The Mods list's entry rows: a light wash under the pointer, the gold entry band with its 3-unit stripe when
             // selected (ModsListLayout.RowFill), and NAV1's own frame for the controller focus — three distinct states.
             var row = Part(panel.CellRow(new CellRowSpec(
@@ -241,6 +241,14 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                     Lease(row.OnClick(cell, () => ActionSlot(slot, place)));
                     Lease(row.OnCellHover(cell, on => HoverAction(slot, place, on)));
                 }
+            }
+
+            foreach (var col in cols)
+            {
+                if (!IsChoice(col)) continue;
+                var choice = col;
+                // A click, or A on a controller (a visible button cell is a navigation stop), asks for the next option.
+                Lease(row.OnClick(UiDataTableLayout.ChoiceKey(choice.Key), () => ChoiceSlot(slot, choice)));
             }
 
             foreach (var col in cols)
@@ -317,7 +325,11 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 string cell = UiDataTableLayout.ViewKey(col.Key);
                 if (header != null) field.SetCellJustify(header, cell, CellAlign.Left, UiDataTableLayout.LeftTextLead);
                 foreach (var slot in _slots)
-                    if (RuntimeRowOf(slot) is { } row) field.SetCellJustify(row, cell, CellAlign.Left, UiDataTableLayout.LeftTextLead);
+                {
+                    if (RuntimeRowOf(slot) is not { } row) continue;
+                    field.SetCellJustify(row, cell, CellAlign.Left, UiDataTableLayout.LeftTextLead);
+                    if (IsChoice(col)) field.SetCellJustify(row, UiDataTableLayout.ChoiceKey(col.Key), CellAlign.Left, UiDataTableLayout.LeftTextLead);
+                }
             }
 
             foreach (var slot in _slots)
@@ -327,6 +339,9 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     }
 
     private static bool IsEditable(UiTableColumn c) => c.Editable && c.Kind == UiTableColumnKind.Number;
+
+    /// <summary>A choice column whose cells take a click (<see cref="UiTableColumn.Editable"/>): each slot has its button cell.</summary>
+    private static bool IsChoice(UiTableColumn c) => c.Editable && c.Kind == UiTableColumnKind.Choice;
 
     // ---- IUiDataTable ------------------------------------------------------------------------
 
@@ -532,6 +547,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         _actionMarks.SetLit(slotRow, cell, on);
         if (!on)
         {
+            _actionTip = null;
             // Back on the row (moving onto a row's own button does not leave it): its own tooltip again.
             if (_hoveredSlot == slot) HoverSlot(slot, true);
             else HideTooltip();
@@ -539,13 +555,40 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         }
 
         var (_, action) = ActionAt(slot, place);
-        if (action == null || string.IsNullOrWhiteSpace(action.Tooltip) || !Visible)
+        var tip = action == null ? default : UiDataTableLayout.ActionTooltip(action);
+        if (action == null || !tip.Shown || !Visible)
         {
+            _actionTip = null;
             HideTooltip();
             return;
         }
 
-        ShowTooltip(RectOf(slotRow, cell), action.Tooltip.Trim(), "", () => slotRow.Visible && RectOf(slotRow, cell).IsKnown);
+        // The game-styled box under the button (over it when there is no room), never beside it: it would cover the
+        // next button or cell of the row.
+        ShowTooltipStyled(RectOf(slotRow, cell), tip.Title, tip.Body, () => slotRow.Visible && RectOf(slotRow, cell).IsKnown, below: true, muted: tip.Muted);
+        _actionTip = (slot, place, tip.Title, tip.Body, tip.Muted);
+    }
+
+    /// <summary>The action tooltip shown last (slot, place, title, body, muted), for the readback; null when none.</summary>
+    private (int Slot, int Place, string Title, string Body, bool Muted)? _actionTip;
+
+    /// <summary>Readback: the row action tooltip up now (<c>{slot, place, title, body, style, placement, side}</c>), or null.</summary>
+    private Dictionary<string, object?>? DescribeActionTip()
+    {
+        if (_actionTip is not { } t) return null;
+        string side = "";
+        try { side = WidgetRuntime.Current?.TooltipSide ?? ""; }
+        catch { /* */ }
+        return new Dictionary<string, object?>
+        {
+            ["slot"] = t.Slot,
+            ["place"] = t.Place,
+            ["title"] = t.Title,
+            ["body"] = t.Body,
+            ["style"] = t.Muted ? "muted" : "normal",
+            ["placement"] = "below",
+            ["side"] = side,
+        };
     }
 
     /// <summary>Tests and readback: the mark drawn on slot <paramref name="slot"/>'s action place <paramref name="place"/>.</summary>
@@ -659,6 +702,18 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             SetGroupCollapsed(line.Value.Group, !_model.IsCollapsed(line.Value.Group));
         else if (line.Value.Kind == UiTableLineKind.Row)
             SetExpanded(line.Value.Row!.Id, !_model.IsExpanded(line.Value.Row.Id));
+    }
+
+    /// <summary>
+    /// A click (A on a controller) on slot <paramref name="slot"/>'s choice cell of <paramref name="column"/>: the row drawn
+    /// there now asks for its next option through <see cref="OnEdit"/>, and the cell waits for the answer.
+    /// </summary>
+    internal void ChoiceSlot(int slot, UiTableColumn column)
+    {
+        if (!Live || column == null || _model.IsHidden(column.Key)) return;
+        var line = LineAtSlot(slot);
+        if (line is not { Kind: UiTableLineKind.Row } l || l.Row == null || !_model.CanChoose(l.Row, column)) return;
+        StartEdit(l.Row.Id, column.Key, "");
     }
 
     /// <summary>A keystroke in slot <paramref name="slot"/>'s value box of <paramref name="column"/>: kept as a draft until the field is left.</summary>
@@ -789,6 +844,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         Sync();
         if (!_viewport.Wheel(notch)) return false;
         HideTooltip();
+        _actionTip = null;
         Render();
         return true;
     }
@@ -1162,11 +1218,18 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             {
                 ["key"] = c.Key,
                 ["caption"] = c.Caption,
-                ["kind"] = c.Kind switch { UiTableColumnKind.Number => "number", UiTableColumnKind.Actions => "actions", _ => "text" },
+                ["kind"] = c.Kind switch
+                {
+                    UiTableColumnKind.Number => "number",
+                    UiTableColumnKind.Actions => "actions",
+                    UiTableColumnKind.Choice => "choice",
+                    _ => "text",
+                },
                 ["hidden"] = _model.IsHidden(c.Key),
                 ["hideable"] = UiDataTableLayout.Hideable(c),
                 ["sortable"] = c.Sortable,
-                ["editable"] = IsEditable(c),
+                ["editable"] = IsEditable(c) || IsChoice(c),
+                ["choices"] = c.Kind == UiTableColumnKind.Choice ? DescribeChoices(c) : null,
                 ["subtotal"] = c.Subtotal.ToString().ToLowerInvariant(),
             });
         var sort = new List<Dictionary<string, object?>>();
@@ -1193,6 +1256,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 ["buildingPrefab"] = line.Row?.BuildingPrefab ?? 0,
                 ["iconSource"] = line.Row is { BuildingPrefab: not 0 } r ? UiBuildingIcons.SourceName(r.BuildingPrefab) : null,
                 ["actions"] = DescribeActions(line),
+                ["choices"] = DescribeSlotChoices(line),
             });
         }
 
@@ -1205,6 +1269,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 ["old"] = e.OldValue,
                 ["new"] = e.NewValue,
                 ["clear"] = e.Clear,
+                ["oldChoice"] = e.OldChoice,
+                ["newChoice"] = e.NewChoice,
                 ["state"] = e.State.ToString().ToLowerInvariant(),
             });
         var collapsed = new List<string>();
@@ -1237,9 +1303,52 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             ["status"] = StatusText,
             ["reason"] = _model.Reason,
             ["chooserOpen"] = _chooserOpen,
+            ["actionTooltip"] = DescribeActionTip(),
             ["scrollBar"] = _bar != null,
             ["rowKeys"] = RowKey("row") + "<n>",
         };
+    }
+
+    /// <summary>A choice column's options for the readback: <c>[{id, text, tone, icon}]</c>.</summary>
+    private static List<Dictionary<string, object?>> DescribeChoices(UiTableColumn column)
+    {
+        var list = new List<Dictionary<string, object?>>();
+        foreach (var c in column.Choices)
+        {
+            if (c == null) continue;
+            list.Add(new Dictionary<string, object?>
+            {
+                ["id"] = c.Id,
+                ["text"] = c.Text,
+                ["tone"] = c.Tone.ToString().ToLowerInvariant(),
+                ["icon"] = UiDataTableLayout.MarkOf(c).Name,
+            });
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// A slot's choice cells for the readback, by column: <c>{choice, pending, cell}</c> (the option id, whether it waits
+    /// for an answer, and the cell <c>mods_ui widget_click</c> reaches: the button, or the view cell when it takes no click).
+    /// </summary>
+    private Dictionary<string, object?> DescribeSlotChoices(UiTableLine line)
+    {
+        var d = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (line.Kind != UiTableLineKind.Row || line.Row == null) return d;
+        foreach (var c in _model.Columns)
+        {
+            if (c.Kind != UiTableColumnKind.Choice || _model.IsHidden(c.Key)) continue;
+            bool pending = _model.PendingAt(line.Row.Id, c.Key) != null;
+            d[c.Key] = new Dictionary<string, object?>
+            {
+                ["choice"] = line.Row[c.Key]?.Choice,
+                ["pending"] = pending,
+                ["cell"] = IsChoice(c) && (pending || _model.CanChoose(line.Row, c)) ? UiDataTableLayout.ChoiceKey(c.Key) : UiDataTableLayout.ViewKey(c.Key),
+            };
+        }
+
+        return d;
     }
 
     /// <summary>A slot's drawn actions for the readback: <c>[{id, icon, enabled, cell}]</c> (the cell is the button's key).</summary>
@@ -1258,6 +1367,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 ["icon"] = UiDataTableLayout.MarkOf(action.Icon).Name,
                 ["enabled"] = action.Enabled,
                 ["tooltip"] = action.Tooltip,
+                ["disabledReason"] = action.DisabledReason,
                 ["cell"] = UiDataTableLayout.ActionKey(_actionsColumn.Key, a),
             });
         }
@@ -1295,7 +1405,11 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             ReleaseMovedFields(lines);
 
             // The row tooltip describes what was under the pointer; any change of the window or the body hides it.
-            if (!ReferenceEquals(lines, _renderedLines) || _viewport.Top != _renderedTop) HideTooltip();
+            if (!ReferenceEquals(lines, _renderedLines) || _viewport.Top != _renderedTop)
+            {
+                HideTooltip();
+                _actionTip = null;
+            }
             _renderedLines = lines;
             _renderedTop = _viewport.Top;
 
@@ -1426,22 +1540,32 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
     }
 
     /// <summary>The waiting spinner before a pending value (slot <paramref name="slot"/>, column view cell <paramref name="cell"/>).</summary>
-    private void SpinnerMark(int slot, string cell, UiDrawnMark mark)
+    private void SpinnerMark(int slot, string cell, UiDrawnMark mark) => CellMark(slot, cell, mark, MenuPalette.TextColor(CellTone.Pending));
+
+    /// <summary>
+    /// The mark before a cell's text in slot <paramref name="slot"/>: the waiting spinner, or a choice's icon in its
+    /// option's tone. Written only when the mark or its color changed; none attaches nothing.
+    /// </summary>
+    private void CellMark(int slot, string cell, UiDrawnMark mark, PaletteColor color, UiMarkSide side = UiMarkSide.Before)
     {
         var now = _spinnerNow[slot];
-        if (now.TryGetValue(cell, out var was) && was.Equals(mark)) return;
+        if (now.TryGetValue(cell, out var was) && was.Mark.Equals(mark) && (mark.IsNone || was.Color.Equals(color))) return;
         if (!now.ContainsKey(cell) && mark.IsNone) return;
-        now[cell] = mark;
+        now[cell] = (mark, color);
         var views = _spinners[slot];
         if (!views.TryGetValue(cell, out var view))
         {
-            view = AttachMark(_slots[slot], cell, UiMarkSide.Before);
+            view = AttachMark(_slots[slot], cell, side);
             views[cell] = view;
         }
 
-        try { view?.Set(mark, MenuPalette.TextColor(CellTone.Pending)); }
-        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' spinner: " + e.Message); }
+        try { view?.Set(mark, color); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: data table '" + Key + "' mark: " + e.Message); }
     }
+
+    /// <summary>Tests and readback: the mark drawn before slot <paramref name="slot"/>'s cell <paramref name="cell"/> (its name; empty for none).</summary>
+    internal string CellMarkAt(int slot, string cell) =>
+        _spinnerNow[slot].TryGetValue(cell, out var m) ? m.Mark.Name : "";
 
     private IUiMarkView? AttachMark(IUiCellRow row, string cell, UiMarkSide side)
     {
@@ -1470,7 +1594,7 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
 
     /// <summary>Tests: the spinner mark a slot's view cell shows (its name; empty for none).</summary>
     internal string SpinnerAt(int slot, string column) =>
-        _spinnerNow[slot].TryGetValue(UiDataTableLayout.ViewKey(column), out var m) ? m.Name : "";
+        _spinnerNow[slot].TryGetValue(UiDataTableLayout.ViewKey(column), out var m) ? m.Mark.Name : "";
 
     private void WriteHeader(string key, string text, bool visible)
     {
@@ -1600,6 +1724,12 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 }
 
                 Write(slot, UiDataTableLayout.ViewKey(col.Key), null, CellTone.Normal, false);
+                if (col.Kind == UiTableColumnKind.Choice)
+                {
+                    HideChoice(slot, col);
+                    continue;
+                }
+
                 if (!IsEditable(col)) continue;
                 Write(slot, UiDataTableLayout.EditKey(col.Key), null, CellTone.Normal, false);
                 SpinnerMark(slot, UiDataTableLayout.ViewKey(col.Key), UiDrawnMark.None);
@@ -1693,6 +1823,8 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
             string view = UiDataTableLayout.ViewKey(col.Key);
             bool shown = !_model.IsHidden(col.Key);
             Write(slot, view, "", CellTone.Normal, shown);
+            // A filler's choice place is the blank view cell: no button (no dead click or navigation stop), no icon.
+            if (col.Kind == UiTableColumnKind.Choice) HideChoice(slot, col);
             if (!IsEditable(col)) continue;
             Write(slot, UiDataTableLayout.EditKey(col.Key), null, CellTone.Normal, false);
             SpinnerMark(slot, view, UiDrawnMark.None);
@@ -1724,6 +1856,18 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
         string view = UiDataTableLayout.ViewKey(col.Key);
         string edit = UiDataTableLayout.EditKey(col.Key);
         bool editable = IsEditable(col);
+        if (col.Kind == UiTableColumnKind.Choice)
+        {
+            if (line.Kind == UiTableLineKind.Row && !_model.IsHidden(col.Key))
+            {
+                RenderChoice(slot, line.Row!, col);
+                return;
+            }
+
+            // Not a row (a group header, a subtotal, the total) or hidden: the view cell alone, as a text column's.
+            HideChoice(slot, col);
+        }
+
         bool spinning = editable && line.Kind == UiTableLineKind.Row && !_model.IsHidden(col.Key)
             && _model.PendingAt(line.Row!.Id, col.Key) != null;
         if (editable && !spinning) SpinnerMark(slot, view, UiDrawnMark.None);
@@ -1808,6 +1952,72 @@ internal sealed class UiDataTableHandle : UiComposedHandle, IUiDataTable
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// A choice cell on a data row. Waiting: the asked-for option's words in the pending tone after the turning spinner,
+    /// no click. A row that can change: the button cell (<see cref="UiDataTableLayout.ChoiceKey"/>) with the option's
+    /// words and icon in its tone. Locked, or a column that does not take clicks: the same words and icon as plain text.
+    /// </summary>
+    private void RenderChoice(int slot, UiTableRow row, UiTableColumn col)
+    {
+        string view = UiDataTableLayout.ViewKey(col.Key);
+        string button = UiDataTableLayout.ChoiceKey(col.Key);
+        bool clickable = IsChoice(col);
+        var cell = row[col.Key];
+        var pending = _model.PendingAt(row.Id, col.Key);
+        if (pending != null)
+        {
+            // Waiting: the asked-for words in the pending tone after the spinner, on the button itself, so the
+            // controller's focus stays on the cell (the button stays a navigation stop; a press does nothing until the
+            // answer: ChoiceSlot asks CanChoose).
+            var asked = col.FindChoice(pending.NewChoice);
+            string words = asked?.Text ?? pending.NewChoice ?? "";
+            var spinner = UiDrawnMark.Spinner(_spinnerFrame < 0 ? 0 : _spinnerFrame);
+            var pendingColor = MenuPalette.TextColor(CellTone.Pending);
+            if (clickable)
+            {
+                Write(slot, view, null, CellTone.Normal, false);
+                CellMark(slot, view, UiDrawnMark.None, default, UiMarkSide.Leading);
+                Write(slot, button, words, CellTone.Pending, true);
+                CellMark(slot, button, spinner, pendingColor, UiMarkSide.Leading);
+                return;
+            }
+
+            CellMark(slot, button, UiDrawnMark.None, default, UiMarkSide.Leading);
+            Write(slot, view, words, CellTone.Pending, true);
+            CellMark(slot, view, spinner, pendingColor, UiMarkSide.Leading);
+            return;
+        }
+
+        var current = col.FindChoice(cell?.Choice);
+        string text = UiDataTableModel.Display(cell, col);
+        var tone = current != null ? LabelTones.ToCellTone(current.Tone) : ToneOf(cell);
+        var mark = UiDataTableLayout.MarkOf(current);
+        var color = MenuPalette.TextColor(tone);
+        if (clickable && _model.CanChoose(row, col))
+        {
+            Write(slot, view, null, CellTone.Normal, false);
+            CellMark(slot, view, UiDrawnMark.None, default, UiMarkSide.Leading);
+            Write(slot, button, text, tone, true);
+            CellMark(slot, button, mark, color, UiMarkSide.Leading);
+            return;
+        }
+
+        if (clickable) Write(slot, button, null, CellTone.Normal, false);
+        CellMark(slot, button, UiDrawnMark.None, default, UiMarkSide.Leading);
+        Write(slot, view, text, tone, true);
+        CellMark(slot, view, mark, color, UiMarkSide.Leading);
+    }
+
+    /// <summary>A choice column's button hidden and its marks cleared (a line that is not a row, a drawer line, a filler, a hidden column).</summary>
+    private void HideChoice(int slot, UiTableColumn col)
+    {
+        string view = UiDataTableLayout.ViewKey(col.Key);
+        string button = UiDataTableLayout.ChoiceKey(col.Key);
+        if (IsChoice(col)) Write(slot, button, null, CellTone.Normal, false);
+        CellMark(slot, view, UiDrawnMark.None, default, UiMarkSide.Leading);
+        CellMark(slot, button, UiDrawnMark.None, default, UiMarkSide.Leading);
     }
 
     private static CellTone ToneOf(UiTableCell? cell) =>

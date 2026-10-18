@@ -110,6 +110,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private readonly List<string> _captions = new();
     private readonly List<VanillaButtonIcon> _icons = new();
     private readonly List<bool> _buttonShown = new();
+
+    /// <summary>Each button's <c>Tooltip(text, title)</c>, or null while none is set (its caption is the tooltip).</summary>
+    private readonly List<VanillaButtonTooltip?> _tooltips = new();
     private readonly List<ushort> _buttonIds = new();
     private readonly List<IRuntimeWidget?> _buttons = new();
     private VanillaFit _fit = VanillaFit.Unknown;
@@ -240,6 +243,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _captions.Add(caption ?? "");
             _icons.Add(icon);
             _buttonShown.Add(true);
+            _tooltips.Add(null);
             _buttonIds.Add(id);
             _buttons.Add(null);
             _fitDirty = true;
@@ -394,6 +398,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _captions.Clear();
             _icons.Clear();
             _buttonShown.Clear();
+            _tooltips.Clear();
             _buttonIds.Clear();
             _buttons.Clear();
             _panelHandlers.Clear();
@@ -811,6 +816,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
             _buttons[i] = button;
             if (!_buttonShown[i]) button.Visible = false;
+            PushTooltipLocked(i);
         }
     }
 
@@ -840,6 +846,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
                 Withheld = attached ? "" : (Enabled ? _withheld : "disabled"),
                 Captions = _captions.ToArray(),
                 ButtonsShown = _buttonShown.ToArray(),
+                Tooltips = _tooltips.ToArray(),
                 Buttons = _buttons.ToArray(),
                 Rows = _texts.ToArray(),
                 RowTones = _tones.ToArray(),
@@ -869,6 +876,35 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _captions[index] = caption ?? "";
             if (index < _buttons.Count && _buttons[index] is { Alive: true } w) WriteRow(w, _captions[index]);
         }
+    }
+
+    /// <summary>
+    /// <c>IUiButton.Tooltip(text, title)</c> on button <paramref name="index"/>: kept across rebuilds and shown by its icon
+    /// face; null clears it (the caption is the tooltip again).
+    /// </summary>
+    internal void SetTooltipAt(int index, VanillaButtonTooltip? tooltip)
+    {
+        if (IsDisposed) return;
+        lock (_gate)
+        {
+            if (index < 0 || index >= _tooltips.Count) return;
+            _tooltips[index] = tooltip;
+            PushTooltipLocked(index);
+        }
+    }
+
+    /// <summary>The tooltip set on button <paramref name="index"/>, or null.</summary>
+    internal VanillaButtonTooltip? TooltipAt(int index)
+    {
+        lock (_gate) return index >= 0 && index < _tooltips.Count ? _tooltips[index] : null;
+    }
+
+    private void PushTooltipLocked(int index)
+    {
+        if (index >= _buttons.Count || _buttons[index] is not { Alive: true } w) return;
+        var t = index < _tooltips.Count ? _tooltips[index] : null;
+        try { _runtime.SetPanelButtonTooltip(w, t?.Title ?? "", t?.Body ?? "", t != null); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button tooltip: " + e.Message); }
     }
 
     internal bool ButtonShownAt(int index)
@@ -1168,6 +1204,8 @@ internal sealed class VanillaAttachReadback
 
     internal bool[] ButtonsShown { get; init; } = Array.Empty<bool>();
 
+    internal VanillaButtonTooltip?[] Tooltips { get; init; } = Array.Empty<VanillaButtonTooltip?>();
+
     internal IRuntimeWidget?[] Buttons { get; init; } = Array.Empty<IRuntimeWidget?>();
 
     internal string[] Rows { get; init; } = Array.Empty<string>();
@@ -1194,6 +1232,7 @@ internal sealed class VanillaAttachReadback
                 ["wanted"] = i < ButtonsShown.Length && ButtonsShown[i],
                 ["built"] = built,
                 ["shown"] = built && w!.Visible,
+                ["tooltip"] = VanillaButtonTooltip.Describe(Captions[i], i < Tooltips.Length ? Tooltips[i] : null),
             });
         }
 
@@ -1315,6 +1354,35 @@ internal sealed class VanillaAttachButton : IUiButton
     /// </summary>
     public void Dispose() { }
 
+    /// <summary>
+    /// <c>IUiButton.Tooltip(text, title)</c>: the icon face's hover tooltip shows <paramref name="title"/> over
+    /// <paramref name="text"/> instead of the caption. The lease clears it again (unless a later call replaced it).
+    /// </summary>
+    internal IDisposable SetTooltip(string title, string text)
+    {
+        var tip = new VanillaButtonTooltip(title, text);
+        _owner.SetTooltipAt(_index, tip);
+        return new TooltipLease(this, tip);
+    }
+
+    private sealed class TooltipLease : IDisposable
+    {
+        private VanillaAttachButton? _button;
+        private readonly VanillaButtonTooltip _tip;
+
+        internal TooltipLease(VanillaAttachButton button, VanillaButtonTooltip tip)
+        {
+            _button = button;
+            _tip = tip;
+        }
+
+        public void Dispose()
+        {
+            var b = Interlocked.Exchange(ref _button, null);
+            if (b != null && ReferenceEquals(b._owner.TooltipAt(b._index), _tip)) b._owner.SetTooltipAt(b._index, null);
+        }
+    }
+
     private sealed class ClickLease : IDisposable
     {
         private VanillaAttachButton? _button;
@@ -1382,4 +1450,43 @@ internal sealed class VanillaAttachRow : IUiLabel
     /// the next rebuild would put the row back.
     /// </summary>
     public void Dispose() { }
+}
+
+/// <summary>
+/// The hover tooltip of a P6 button's icon face, game-free: what <c>IUiButton.Tooltip(text, title)</c> set, or, with none
+/// set, the button's caption. It is drawn in the framework's game-control tooltip (<see cref="Style"/>): the game's frame
+/// sprite, the title in the game's gold and the body in the body text, the same box the disabled game-window tabs and the
+/// chat's controls use, placed under the button so it never covers the window's title.
+/// </summary>
+internal sealed class VanillaButtonTooltip
+{
+    internal VanillaButtonTooltip(string title, string body)
+    {
+        Title = (title ?? "").Trim();
+        Body = (body ?? "").Trim();
+    }
+
+    internal string Title { get; }
+
+    internal string Body { get; }
+
+    /// <summary>The readback's name for the box's look.</summary>
+    internal const string Style = "game-control";
+
+    /// <summary>
+    /// What the face's tooltip shows: the set title and body (<c>tooltip</c>), or, with none set (or one with no words),
+    /// the caption as its title (<c>caption</c>).
+    /// </summary>
+    internal static (string Title, string Body, string Source) Resolve(string caption, VanillaButtonTooltip? tip)
+    {
+        if (tip != null && (tip.Title.Length > 0 || tip.Body.Length > 0)) return (tip.Title, tip.Body, "tooltip");
+        return (caption ?? "", "", "caption");
+    }
+
+    /// <summary>The readback: <c>{source, style, title, body}</c>.</summary>
+    internal static Dictionary<string, object?> Describe(string caption, VanillaButtonTooltip? tip)
+    {
+        var (title, body, source) = Resolve(caption, tip);
+        return new Dictionary<string, object?> { ["source"] = source, ["style"] = Style, ["title"] = title, ["body"] = body };
+    }
 }
