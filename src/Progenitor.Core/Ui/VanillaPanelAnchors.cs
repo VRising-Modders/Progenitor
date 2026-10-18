@@ -242,7 +242,7 @@ internal static class VanillaPanelAnchors
             var b = buttons![i];
             if (b == null || !b.IsButton || b.Parent == null) continue;
             if (group == null) group = b.Parent;
-            else if (!ReferenceEquals(b.Parent, group)) continue;
+            else if (!Equals(b.Parent, group)) continue;
             if (b.Active && !reference.Found) reference = new AnchorPick(b, TitleButtonFields[i]);
             if (!inactive.Found) inactive = new AnchorPick(b, TitleButtonFields[i]);
         }

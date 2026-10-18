@@ -1667,7 +1667,7 @@ public class VanillaPanelTests : IDisposable
     [Fact]
     public void Two_edge_columns_on_one_heart_edge_get_their_attach_order_before_the_first_fit()
     {
-        // Satisvampory: two RightEdge handles on the castle heart, one plugin, two plugin ids, drew in one spot.
+        // Two RightEdge handles on the castle heart, one plugin under two plugin ids, used to draw in one spot.
         var first = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, _owner, "satis.storage");
         first.Button("Network");
         var second = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, _owner, "satis.logistics");
@@ -1738,7 +1738,14 @@ public class VanillaPanelTests : IDisposable
         Assert.Contains("abandon = level.AbandonButton;", resolver);
         Assert.Contains("expose = level.ExposeButton;", resolver);
         Assert.Contains("if (VanillaUiSites.IsInline(host.Anchor)) return null;", resolver);
-        string rows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelRows.cs");
+        // A greyed Abandon or Expose donor never gives a dead mod button.
+        Assert.Contains("if (own0 != null && !own0.interactable) own0.interactable = true;", resolver);
+        // The row is watched during an open: a button shown or hidden re-reads it and refits the containers on it.
+        Assert.Contains("if (showChanged) BumpStack(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons);", resolver);
+        Assert.Contains("return new VanillaFitResult(VanillaFit.Blocked, \"hidden:row\", default, retry: true);", resolver);
+        string anchors = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelAnchors.cs");
+        Assert.Contains("else if (!Equals(b.Parent, group)) continue;", anchors);
+        string rows =SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelRows.cs");
         Assert.Contains("if (VanillaUiSites.IsInline(host.Anchor)) return null;", rows);
     }
 

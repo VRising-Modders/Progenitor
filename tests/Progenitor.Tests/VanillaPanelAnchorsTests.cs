@@ -544,6 +544,63 @@ public class VanillaPanelAnchorsTests
         Assert.Equal("after", VanillaPanelAnchors.ModeWord(InlineMode.Positioned, before: false));
     }
 
+    /// <summary>
+    /// A node as the Unity half hands them out: a new wrapper object on every <see cref="IAnchorNode.Parent"/> and
+    /// <see cref="IAnchorNode.Child"/> call, equal (not the same object) when it wraps the same transform.
+    /// </summary>
+    private sealed class Wrapper : IAnchorNode
+    {
+        internal Wrapper(Node inner) => Inner = inner;
+
+        internal Node Inner { get; }
+
+        public string Name => Inner.Name;
+
+        public bool Active => Inner.Active;
+
+        public bool IsButton => Inner.IsButton;
+
+        public bool CloneSafe => Inner.CloneSafe;
+
+        public float Width => Inner.Width;
+
+        public float Height => Inner.Height;
+
+        public AnchorLayout Layout => Inner.Layout;
+
+        public IAnchorNode? Parent => Inner.Parent is Node p ? new Wrapper(p) : null;
+
+        public int ChildCount => Inner.ChildCount;
+
+        public IAnchorNode? Child(int index) => Inner.Child(index) is Node c ? new Wrapper(c) : null;
+
+        public override bool Equals(object? obj) => obj is Wrapper w && ReferenceEquals(w.Inner, Inner);
+
+        public override int GetHashCode() => Inner.GetHashCode();
+    }
+
+    [Fact]
+    public void The_heart_row_is_found_when_each_parent_read_is_a_new_wrapper()
+    {
+        // Both buttons' parents are fresh wrapper objects of one row: the second button still belongs to it.
+        var h = HeartRow();
+        h.Abandon.Active = false;
+        var abandon = new Wrapper(h.Abandon);
+        var expose = new Wrapper(h.Expose);
+        Assert.NotSame(abandon.Parent, expose.Parent);
+        var (group, reference) = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { abandon, expose });
+        Assert.Equal(new Wrapper(h.Row), group.Node);
+        Assert.Same(expose, reference.Node);
+        Assert.Equal("ExposeButton", reference.Source);
+
+        // A button in another group is not part of the row.
+        var other = new Node("Elsewhere", 100, 42, layout: AnchorLayout.HorizontalControlled);
+        var stray = other.Add(new Node("StrayButton", 42, 42, button: true));
+        var pick = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { abandon, new Wrapper(stray) });
+        Assert.Equal(new Wrapper(h.Row), pick.Group.Node);
+        Assert.Same(abandon, pick.Reference.Node); // the only row member, inactive: still the reference
+    }
+
     [Fact]
     public void A_hidden_first_button_makes_the_next_one_the_reference_and_no_buttons_is_no_row()
     {

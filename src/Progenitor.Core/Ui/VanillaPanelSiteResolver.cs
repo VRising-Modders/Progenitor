@@ -286,6 +286,28 @@ internal sealed partial class UnityUiRuntime
         internal float IconShare;
         internal Color IconColor = Color.white;
         internal int Frame;
+
+        /// <summary>The row's buttons as read (<see cref="VanillaPanelAnchors.TitleButtonFields"/> order) and what of the row was shown on the last read.</summary>
+        internal GameObject?[] Buttons = new GameObject?[2];
+        internal int Shown = -1;
+    }
+
+    /// <summary>
+    /// What of the heart's icon row is shown: bit 0 the row itself (the heart tab is up), bit 1 and up each button. The
+    /// game shows and hides Abandon and Expose while the window is open (who may use them, the castle list tab), so a
+    /// change re-reads the row's reference and makes the containers on it refit on the next frame.
+    /// </summary>
+    private static int TitleRowShown(TitleButtonsCache row)
+    {
+        int bits = 0;
+        try
+        {
+            if (Alive(row.Group) && row.Group!.gameObject.activeInHierarchy) bits |= 1;
+            for (int i = 0; i < row.Buttons.Length; i++)
+                if (Alive(row.Buttons[i]) && row.Buttons[i]!.activeInHierarchy) bits |= 2 << i;
+        }
+        catch { bits = -2; }
+        return bits;
     }
 
     /// <summary>
@@ -960,13 +982,18 @@ internal sealed partial class UnityUiRuntime
         int id;
         try { id = sub.GetInstanceID(); }
         catch { return; }
-        if (!TitleButtonRows.TryGetValue(id, out var row) || Stale(row.Group, row.Frame) || (row.Group != null && !Alive(row.Reference)))
+        bool known = TitleButtonRows.TryGetValue(id, out var row);
+        int shownBefore = known ? row!.Shown : -1;
+        bool showChanged = known && row!.Group != null && TitleRowShown(row) != shownBefore;
+        if (!known || Stale(row!.Group, row.Frame) || (row.Group != null && !Alive(row.Reference)) || showChanged)
         {
             if (TitleButtonRows.Count > 8) TitleButtonRows.Clear();
             row = new TitleButtonsCache { Frame = Time.frameCount };
             try
             {
                 HeartReader.TitleButtons(sub, out var abandon, out var expose);
+                row.Buttons[0] = Alive(abandon) ? abandon!.gameObject : null;
+                row.Buttons[1] = Alive(expose) ? expose!.gameObject : null;
                 var pick = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { TransformNode.Of(abandon), TransformNode.Of(expose) });
                 var group = GoOf(pick.Group.Node);
                 var reference = GoOf(pick.Reference.Node);
@@ -986,7 +1013,12 @@ internal sealed partial class UnityUiRuntime
                     Plugin.Logger?.LogWarning("Ui: site CastleHeartPanel icon row not read (" + TitleButtonsFields + "): " + e.GetType().Name + ": " + e.Message);
             }
 
+            row.Shown = TitleRowShown(row);
             TitleButtonRows[id] = row;
+
+            // A button or the row shown or hidden during an open: the containers on the row refit on the next frame
+            // (their reference moved, or the row went with the heart tab and they must hide with it).
+            if (showChanged) BumpStack(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons);
         }
 
         if (!Alive(row.Group) || !Alive(row.Reference)) return;
@@ -2499,6 +2531,16 @@ internal sealed partial class UnityUiRuntime
             if (clone == null) return ButtonFailed(site, "donor " + SafeObjectName(donor) + " refused by the clone gate (a state target outside its own subtree, or not a plain SimpleStunButton)");
             clone.name = host.Name + "-button";
 
+            // The clone keeps the donor's interactable flag through SilenceClone. The heart row's Abandon and Expose
+            // buttons are greyed (not interactable) when the player may not use them, and a clone of a greyed donor
+            // would be a dead mod button: the mod's button is always interactable.
+            try
+            {
+                var own0 = clone.GetComponent<SimpleStunButton>();
+                if (own0 != null && !own0.interactable) own0.interactable = true;
+            }
+            catch { /* ButtonOperable below refuses a clone that still cannot be used */ }
+
             // Buttons stack before rows in a column; in an inline group there are only buttons.
             clone.transform.SetSiblingIndex(host.Buttons.Count);
             var size = host.ButtonSize;
@@ -2982,6 +3024,16 @@ internal sealed partial class UnityUiRuntime
         }
 
         VanillaFitResult inlineVerdict;
+        if (host.Mode == InlineMode.Positioned && host.Anchor == VanillaPanelAnchor.BesideTitleButtons && !RowShown(group))
+        {
+            // The heart's row is not shown (the castle list tab, an enemy castle): neither is anything placed beside it,
+            // also when the cover check lifted the container out of the row's own subtree. Asked again when it shows.
+            FitScratch.Clear();
+            host.Settle.Reset();
+            NotePlaced(host, default);
+            return new VanillaFitResult(VanillaFit.Blocked, "hidden:row", default, retry: true);
+        }
+
         if (host.Mode == InlineMode.Positioned)
         {
             bool before = VanillaUiSites.PlacesBefore(host.Anchor);
@@ -3094,6 +3146,13 @@ internal sealed partial class UnityUiRuntime
             last = r;
             if (first.IsEmpty || r.X < first.X) first = r;
         }
+    }
+
+    /// <summary>The row is shown (active in the hierarchy).</summary>
+    private static bool RowShown(Transform group)
+    {
+        try { return group.gameObject.activeInHierarchy; }
+        catch { return false; }
     }
 
     /// <summary>The <c>slot=</c> word (geometry line and readback).</summary>
