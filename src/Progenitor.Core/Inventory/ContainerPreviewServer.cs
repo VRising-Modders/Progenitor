@@ -345,6 +345,15 @@ internal static unsafe class ContainerPreviewServer
     private static void Open(World world, Entity userEntity, User user, ContainerPreviewPacket request)
     {
         var em = world.EntityManager;
+        var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected, Mode = Mode, IsPvE = IsPvE() };
+        facts.RateOk = facts.UserConnected && Opens.TryTake(user.PlatformId, Now);
+        // Connected, the server's setting, the rate token: before any lookup (the network-id resolve below included).
+        if (ContainerPreviewAuthorization.RequestRefusal(facts) is { } early)
+        {
+            Plugin.Logger?.LogInfo("ContainerPreview: refused user " + user.PlatformId + " " + request.Container + ": " + early);
+            Reply(world, user.Index, request.Sequence, false, early, 0, 0, 0);
+            return;
+        }
         // REOPEN2: a client that knows the container only by its network id (ctx.Inventory.ReopenLast's remote fallback)
         // sends the words instead of the id. Resolved here with the same untrusted-words resolver mods use; every check
         // below then runs on the stable id exactly as for any other preview, the open gate included.
@@ -362,8 +371,6 @@ internal static unsafe class ContainerPreviewServer
                 return;
             }
         }
-        var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected, Mode = Mode, IsPvE = IsPvE() };
-        facts.RateOk = facts.UserConnected && Opens.TryTake(user.PlatformId, Now);
         facts.IdParsed = ContainerId.TryParse(request.Container, out var id);
         Entity container = Entity.Null;
         int netIndex = 0, netGeneration = 0, netType = 0;

@@ -50,6 +50,11 @@ public sealed partial class PluginInventory
     /// (<see cref="ContainerReopenResult.RemoteOpened"/>, or <see cref="ContainerReopenResult.RemoteFailed"/> with the
     /// server's sentence in <see cref="ContainerReopenFinished.Reason"/>). <see cref="ContainerReopenOptions.Done"/> gets
     /// the outcome, its reason and the remote preview. Opt-in. <b>Experimental</b>: not live-verified.
+    /// <para>When the remote fallback starts from the call itself (the player already moved away), <c>Done</c> can run
+    /// before this returns <see cref="ContainerReopenResult.Started"/>: at once with <see cref="ContainerReopenResult.RemoteFailed"/>
+    /// for a station's window, or with <see cref="ContainerReopenResult.RemoteOpened"/> / <see cref="ContainerReopenResult.RemoteFailed"/>
+    /// when the preview settles on its first look. Treat <c>Done</c> as the outcome, never the return value.
+    /// The plugin's unload closes a remote preview the fallback opened for it, also one kept open.</para>
     /// </summary>
     public ContainerReopenResult ReopenLast(ContainerWindowInfo? openWhenStarted, ContainerReopenOptions options) =>
         ReopenLast(openWhenStarted, null, options ?? throw new ArgumentNullException(nameof(options)));

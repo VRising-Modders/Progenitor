@@ -33,11 +33,56 @@ public sealed class ReopenRemoteAndPickModifierTests
     [Fact]
     public void The_remote_outcome_follows_the_preview()
     {
-        Assert.Null(ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Requesting, false));
-        Assert.Null(ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Waiting, false));
-        Assert.Equal(ContainerReopenResult.RemoteOpened, ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Open, false));
-        Assert.Equal(ContainerReopenResult.RemoteFailed, ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Closed, false));
-        Assert.Equal(ContainerReopenResult.RemoteOpened, ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Closed, true));
+        Assert.Null(ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Requesting));
+        Assert.Null(ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Waiting));
+        Assert.Equal(ContainerReopenResult.RemoteOpened, ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Open));
+        Assert.Equal(ContainerReopenResult.RemoteFailed, ContainerReturnRules.RemoteOutcome(ContainerPreviewState.Closed));
+    }
+
+    private sealed class FakePreview
+    {
+        public bool Closed;
+    }
+
+    [Fact]
+    public void A_plugins_unload_takes_every_remote_preview_opened_for_it_also_one_kept_open()
+    {
+        var tracked = new RemotePreviewsByOwner<FakePreview>();
+        object pluginA = new(), pluginB = new();
+        var a1 = new FakePreview();
+        var b1 = new FakePreview();
+        var a2 = new FakePreview();
+        tracked.Add(pluginA, a1); // reported RemoteOpened: the watch let go of it, the list still has it
+        tracked.Add(pluginB, b1);
+        tracked.Add(null, new FakePreview()); // Core's own: not a plugin's to close
+        tracked.Add(pluginA, a2);
+        Assert.Equal(3, tracked.Count);
+
+        // A preview that closed on its own is forgotten (it never pins its plugin).
+        a2.Closed = true;
+        tracked.Prune(p => p.Closed);
+        Assert.Equal(2, tracked.Count);
+
+        Assert.Equal(new[] { a1 }, tracked.TakeFor(pluginA));
+        Assert.Empty(tracked.TakeFor(pluginA));
+        Assert.Equal(1, tracked.Count);
+        Assert.Equal(new[] { b1 }, tracked.TakeAll());
+        Assert.Equal(0, tracked.Count);
+    }
+
+    [Fact]
+    public void The_cheap_refusals_come_before_any_lookup_in_the_same_order()
+    {
+        var off = new ContainerPreviewFacts { UserConnected = true, Mode = ContainerPreviewMode.Off, RateOk = true };
+        Assert.NotNull(ContainerPreviewAuthorization.RequestRefusal(off));
+        Assert.Equal(ContainerPreviewAuthorization.Refusal(off), ContainerPreviewAuthorization.RequestRefusal(off));
+        var flood = new ContainerPreviewFacts { UserConnected = true, Mode = ContainerPreviewMode.On, RateOk = false };
+        Assert.Equal(ContainerPreviewAuthorization.Refusal(flood), ContainerPreviewAuthorization.RequestRefusal(flood));
+        Assert.NotNull(ContainerPreviewAuthorization.RequestRefusal(new ContainerPreviewFacts { Mode = ContainerPreviewMode.On, RateOk = true }));
+        // Connected, allowed, a token: nothing yet about the container (the lookup decides the rest).
+        var ok = new ContainerPreviewFacts { UserConnected = true, Mode = ContainerPreviewMode.On, RateOk = true };
+        Assert.Null(ContainerPreviewAuthorization.RequestRefusal(ok));
+        Assert.NotNull(ContainerPreviewAuthorization.Refusal(ok));
     }
 
     [Fact]
@@ -94,6 +139,37 @@ public sealed class ReopenRemoteAndPickModifierTests
         Assert.Equal(KeyModifiers.Ctrl | KeyModifiers.Alt, m.At(1.0));
         m.Clear();
         Assert.Equal(KeyModifiers.None, m.At(1.0));
+    }
+
+    [Fact]
+    public void A_shift_still_held_from_the_last_pick_does_not_reach_the_next()
+    {
+        var m = new UiWorldPickModifiers();
+        m.Note(0.00, KeyModifiers.Shift);
+        Assert.Equal(KeyModifiers.Shift, m.Deliver(0.02, KeyModifiers.Shift));
+        // Shift let go slowly after the pick: still held for a few frames, then a plain press.
+        m.Note(0.04, KeyModifiers.Shift);
+        m.Note(0.06, KeyModifiers.Shift);
+        Assert.Equal(KeyModifiers.None, m.Deliver(0.08, KeyModifiers.None));
+        // Held across both picks, never let go: not the next press's either.
+        m.Note(0.10, KeyModifiers.Shift);
+        Assert.Equal(KeyModifiers.None, m.Deliver(0.12, KeyModifiers.Shift));
+        // Let go (one clean frame), pressed again: it counts.
+        m.Note(0.14, KeyModifiers.None);
+        m.Note(0.16, KeyModifiers.Shift);
+        Assert.Equal(KeyModifiers.Shift, m.Deliver(0.18, KeyModifiers.Shift));
+    }
+
+    [Fact]
+    public void A_frame_hitch_does_not_drop_the_shift_held_at_the_press()
+    {
+        var m = new UiWorldPickModifiers();
+        m.Note(0.0, KeyModifiers.None);
+        // No tick sampled for longer than the window (a hitch); Shift is held at the press itself.
+        Assert.Equal(KeyModifiers.Shift, m.Deliver(1.0, KeyModifiers.Shift));
+        // Arming a new pick starts fresh: a modifier already held counts.
+        m.Clear();
+        Assert.Equal(KeyModifiers.Ctrl, m.Deliver(2.0, KeyModifiers.Ctrl));
     }
 
     private sealed class Backend : IUiWorldPickBackend

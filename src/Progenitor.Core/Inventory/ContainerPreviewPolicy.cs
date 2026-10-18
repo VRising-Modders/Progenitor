@@ -518,9 +518,7 @@ internal static class ContainerPreviewAuthorization
     /// <summary>Null to allow, else the player-facing refusal. The order is fixed.</summary>
     internal static string? Refusal(in ContainerPreviewFacts f)
     {
-        if (!f.UserConnected) return "You are not connected.";
-        if (ContainerPreviewSettings.Refusal(f.Mode, f.IsPvE) is { } off) return off;
-        if (!f.RateOk) return "Too many preview requests; try again shortly.";
+        if (RequestRefusal(f) is { } early) return early;
         if (!f.IdParsed) return "That is not a container id.";
         if (!f.Found) return "That container no longer exists.";
         if (!f.HasInventory) return "That has no inventory.";
@@ -529,6 +527,19 @@ internal static class ContainerPreviewAuthorization
         if (f.Relation is not (CastleRelation.Owner or CastleRelation.ClanMember))
             return "Only the castle's owner and clan can preview its containers.";
         if (!f.HasNetworkId) return "That container has no network id yet.";
+        return null;
+    }
+
+    /// <summary>
+    /// The checks that need nothing about the container (the first three of <see cref="Refusal"/>, same order): the user
+    /// is connected, the server's setting allows previews, the rate token was taken. The server applies them before any
+    /// lookup, a network-id resolve included, so a refused or flooding client costs no lookup.
+    /// </summary>
+    internal static string? RequestRefusal(in ContainerPreviewFacts f)
+    {
+        if (!f.UserConnected) return "You are not connected.";
+        if (ContainerPreviewSettings.Refusal(f.Mode, f.IsPvE) is { } off) return off;
+        if (!f.RateOk) return "Too many preview requests; try again shortly.";
         return null;
     }
 

@@ -516,8 +516,11 @@ internal static unsafe class WorldPickBackend
             if (plan.Swallow) Swallow.Add(buffKey, now);
 
             UnityUiRuntime.ReadNetworkId(em, target, out int n0, out int n1, out int n2);
-            var held = PickModifiers.At(Now());
-            PickModifiers.Clear();
+            // A fresh sample first: a frame hitch between the last tick's sample and this press must not drop a held Shift.
+            var heldNow = KeyModifiers.None;
+            try { heldNow = Keybinds.HeldModifiers(); }
+            catch { /* the keyboard could not be read: no modifiers */ }
+            var held = PickModifiers.Deliver(Now(), heldNow);
             coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, plan.Suppressed, n0, n1, n2, held);
         }
     }

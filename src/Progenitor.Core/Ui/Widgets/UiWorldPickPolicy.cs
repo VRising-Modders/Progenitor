@@ -94,10 +94,21 @@ internal sealed class UiWorldPickModifiers
 
     private readonly System.Collections.Generic.List<(double At, KeyModifiers Held)> _samples = new();
 
+    /// <summary>
+    /// After a delivery: the modifiers of the press just delivered may still be held. Samples count again only from a
+    /// frame with none held, so a Shift let go slowly after one pick never reaches the next.
+    /// </summary>
+    private bool _awaitRelease;
+
     /// <summary>One frame's held modifiers.</summary>
     internal void Note(double now, KeyModifiers held)
     {
         Prune(now);
+        if (_awaitRelease)
+        {
+            if (held != KeyModifiers.None) return;
+            _awaitRelease = false;
+        }
         _samples.Add((now, held));
     }
 
@@ -110,8 +121,34 @@ internal sealed class UiWorldPickModifiers
         return all;
     }
 
-    /// <summary>A pick armed, or a pick delivered (a repeating pick's next press starts fresh).</summary>
-    internal void Clear() => _samples.Clear();
+    /// <summary>
+    /// A pick's Interact press is seen: note <paramref name="heldNow"/> (read at that moment), take the modifiers that
+    /// count (<see cref="At"/>), then <see cref="Delivered"/>.
+    /// </summary>
+    internal KeyModifiers Deliver(double now, KeyModifiers heldNow)
+    {
+        Note(now, heldNow);
+        var held = At(now);
+        Delivered();
+        return held;
+    }
+
+    /// <summary>A pick armed: start fresh (a modifier already held counts).</summary>
+    internal void Clear()
+    {
+        _samples.Clear();
+        _awaitRelease = false;
+    }
+
+    /// <summary>
+    /// A pick delivered: a repeating pick's next press starts fresh, and only from a frame with no modifier held (one
+    /// still held from this press is not the next press's). To pick again with Shift, let go and press it again.
+    /// </summary>
+    internal void Delivered()
+    {
+        _samples.Clear();
+        _awaitRelease = true;
+    }
 
     private void Prune(double now)
     {

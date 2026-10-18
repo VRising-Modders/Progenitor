@@ -3369,7 +3369,10 @@ every preview check on that: owner or clan, the Remote chest preview setting, th
 Only plain containers can be previewed: a station's window gives `RemoteFailed` at once ("Only chests and braziers can be
 opened from afar."), so a mod with a panel in a station's tab hides it on that outcome. Never after `ClosedByPlayer`, a
 window in the way or a busy input. `RemotePreview` sets the preview's options (default: kept open until closed);
-`RemoteStarted` hands the preview over as it starts (dispose it to close the window early).
+`RemoteStarted` hands the preview over as it starts (dispose it to close the window early). When the fallback starts
+from the call itself (the player already moved), `Done` can run before `ReopenLast` returns `Started` (a station's window
+gives `RemoteFailed` at once), so take the outcome from `Done`, not from the return value. The plugin's unload closes a
+remote preview the fallback opened for it, also one kept open after `RemoteOpened`.
 
 **Opt-in, not the default.** A remote window is a different thing from the player's own: read-only, a streaming lease, a
 server setting that may refuse it. So the plain `ReopenLast` never opens one; a mod's hub Return asks for it explicitly.

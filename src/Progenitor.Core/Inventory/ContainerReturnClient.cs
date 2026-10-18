@@ -73,7 +73,17 @@ internal static class ContainerReturnClient
         var job = _job;
         _job = null;
         job?.End(ContainerReopenResult.Cancelled);
+        var remote = _remote;
+        _remote = null;
+        remote?.Drop();
+        foreach (var h in RemoteOpened.TakeAll()) CloseQuiet(h);
         _last = null;
+    }
+
+    /// <summary>A remote fallback's preview closes for an unload: no Closed handlers run, and they are released.</summary>
+    private static void CloseQuiet(ContainerPreviewHandle handle)
+    {
+        try { handle.Close(ContainerPreviewCloseReason.Unloaded, "", notify: false); } catch { /* */ }
     }
 
     /// <summary>The remembered window, or null (<c>ctx.Inventory.LastWindow</c>).</summary>
@@ -116,8 +126,15 @@ internal static class ContainerReturnClient
         if (answer != ContainerReopenResult.Started)
         {
             Note(why, answer, last);
-            // REOPEN2: not where the window can be reopened: the same container from afar, if asked for.
-            if (remembered && sink.WantsRemote(answer) && StartRemote(last!, sink)) return ContainerReopenResult.Started;
+            // REOPEN2: not where the window can be reopened: the same container from afar, if asked for. A running
+            // reopen ends first (Cancelled), as when this call starts one of its own.
+            if (remembered && sink.WantsRemote(answer))
+            {
+                var running = _job;
+                _job = null;
+                running?.End(ContainerReopenResult.Cancelled);
+                if (StartRemote(last!, sink)) return ContainerReopenResult.Started;
+            }
             sink.Finish(answer);
             return answer;
         }
@@ -138,7 +155,10 @@ internal static class ContainerReturnClient
     /// </summary>
     internal static void NoteFlowClose() => _flowCloseAt = Now;
 
-    /// <summary>A plugin unloads: its running reopen ends without calling back into it, and its remote preview closes.</summary>
+    /// <summary>
+    /// A plugin unloads: its running reopen ends without calling back into it, and every remote preview the fallback
+    /// opened for it closes (also one kept open after RemoteOpened, which the watch no longer holds).
+    /// </summary>
     internal static void CancelFor(object owner)
     {
         var job = _job;
@@ -153,9 +173,13 @@ internal static class ContainerReturnClient
             _remote = null;
             remote.Drop();
         }
+        foreach (var h in RemoteOpened.TakeFor(owner)) CloseQuiet(h);
     }
 
     private static RemoteWatch? _remote;
+
+    /// <summary>REOPEN2: the remote previews opened for each plugin, until they close, so its unload closes them.</summary>
+    private static readonly RemotePreviewsByOwner<ContainerPreviewHandle> RemoteOpened = new();
 
     /// <summary>
     /// REOPEN2: open the remembered container remotely through the container preview (the server's own rules: owner or
@@ -174,6 +198,7 @@ internal static class ContainerReturnClient
         {
             var options = sink.Options?.RemotePreview ?? new ContainerPreviewOptions { KeepOpen = true };
             var handle = ContainerPreviewClient.OpenByNetworkId(last.N0, last.N1, last.N2, options, sink.Owner);
+            RemoteOpened.Add(sink.Owner, handle);
             _remote?.Cancel();
             _remote = new RemoteWatch(handle, sink);
             Plugin.Logger?.LogInfo("ContainerReturn: " + last.Describe() + " opened remotely instead (" + sink.Why + ").");
@@ -205,6 +230,7 @@ internal static class ContainerReturnClient
         try { _remote?.Poll(); }
         catch (Exception e) { WarnOnce("remote", e); }
         if (_remote is { Done: true }) _remote = null;
+        RemoteOpened.Prune(h => h.State == ContainerPreviewState.Closed);
         var running = _job;
         if (running == null) return;
         try { running.Tick(); }
@@ -313,7 +339,7 @@ internal static class ContainerReturnClient
         internal void Poll()
         {
             if (Done) return;
-            var outcome = ContainerReturnRules.RemoteOutcome(_handle.State, false);
+            var outcome = ContainerReturnRules.RemoteOutcome(_handle.State);
             if (outcome == null) return;
             Done = true;
             string reason = outcome == ContainerReopenResult.RemoteFailed ? _handle.Reason ?? "" : "";

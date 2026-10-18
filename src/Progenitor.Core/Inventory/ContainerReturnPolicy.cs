@@ -80,7 +80,11 @@ public sealed record ContainerReopenOptions
     /// <summary>The preview options for the remote fallback. Default: kept open until closed, the station layout.</summary>
     public ContainerPreviewOptions? RemotePreview { get; init; }
 
-    /// <summary>Runs once on the main thread with the outcome, its reason and the remote preview if one was started.</summary>
+    /// <summary>
+    /// Runs once on the main thread with the outcome, its reason and the remote preview if one was started. It can run
+    /// before <c>ReopenLast</c> returns <see cref="ContainerReopenResult.Started"/>, when the remote fallback starts and
+    /// settles within the call (a station's window: <see cref="ContainerReopenResult.RemoteFailed"/> at once).
+    /// </summary>
     public Action<ContainerReopenFinished>? Done { get; init; }
 
     /// <summary>Runs when the remote fallback starts, with its preview (dispose it to close the window early).</summary>
@@ -210,9 +214,9 @@ internal static class ContainerReturnRules
     /// REOPEN2: what a remote fallback's preview reports: <see cref="ContainerReopenResult.RemoteOpened"/> once its window
     /// shows, <see cref="ContainerReopenResult.RemoteFailed"/> when it closed before, null while it is still on its way.
     /// </summary>
-    internal static ContainerReopenResult? RemoteOutcome(ContainerPreviewState state, bool everOpen)
+    internal static ContainerReopenResult? RemoteOutcome(ContainerPreviewState state)
     {
-        if (everOpen || state == ContainerPreviewState.Open) return ContainerReopenResult.RemoteOpened;
+        if (state == ContainerPreviewState.Open) return ContainerReopenResult.RemoteOpened;
         if (state == ContainerPreviewState.Closed) return ContainerReopenResult.RemoteFailed;
         return null;
     }
@@ -254,6 +258,54 @@ internal static class ContainerReturnRules
         if (kind is VanillaPanelKind.None or VanillaPanelKind.Character) return false;
         if (kind == VanillaPanelKind.Container && (!hasInteraction || previewOwnsWindow)) return false;
         return true;
+    }
+}
+
+/// <summary>
+/// REOPEN2, game-free: the remote previews the fallback opened, by the plugin that asked. The watch lets go of a preview
+/// once it reports RemoteOpened, and the preview kept open is not one of the plugin's own <c>ctx.Inventory.Preview</c>
+/// opens; this list is what lets the plugin's unload close it (and release its handlers). Closed previews are pruned.
+/// </summary>
+internal sealed class RemotePreviewsByOwner<T> where T : class
+{
+    private readonly System.Collections.Generic.List<(object Owner, T Handle)> _open = new();
+
+    internal int Count => _open.Count;
+
+    /// <summary>A preview opened for <paramref name="owner"/> (Core's own, a null owner, is not tracked).</summary>
+    internal void Add(object? owner, T handle)
+    {
+        if (owner == null || handle == null) return;
+        _open.Add((owner, handle));
+    }
+
+    /// <summary>Remove and return every preview opened for <paramref name="owner"/>.</summary>
+    internal System.Collections.Generic.List<T> TakeFor(object owner)
+    {
+        var taken = new System.Collections.Generic.List<T>();
+        for (int i = _open.Count - 1; i >= 0; i--)
+        {
+            if (!ReferenceEquals(_open[i].Owner, owner)) continue;
+            taken.Insert(0, _open[i].Handle);
+            _open.RemoveAt(i);
+        }
+        return taken;
+    }
+
+    /// <summary>Forget previews that closed on their own (so a closed one never pins its plugin).</summary>
+    internal void Prune(Func<T, bool> closed)
+    {
+        for (int i = _open.Count - 1; i >= 0; i--)
+            if (closed(_open[i].Handle)) _open.RemoveAt(i);
+    }
+
+    /// <summary>Remove and return every tracked preview (Core unloads).</summary>
+    internal System.Collections.Generic.List<T> TakeAll()
+    {
+        var taken = new System.Collections.Generic.List<T>(_open.Count);
+        foreach (var e in _open) taken.Add(e.Handle);
+        _open.Clear();
+        return taken;
     }
 }
 
