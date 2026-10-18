@@ -157,6 +157,20 @@ public static unsafe class ModSave
     /// </summary>
     internal static event Action? BeforeSave;
 
+    /// <summary>
+    /// Core-internal: the game accepted a <b>world</b> save (<c>TriggerPersistenceSaveSystem.TriggerSave</c> returned true),
+    /// raised before <see cref="SaveAll"/>. Unlike <see cref="BeforeSave"/> it is not raised by the other <c>SaveAll</c>
+    /// callers (a disconnect flush, a diagnostic write), which write only Progenitor's own JSON. The game serializes the
+    /// world on a later frame; the save file's write stamp (<c>WorldSaveTrigger.NewestSaveWriteUtc</c>) shows when it landed.
+    /// </summary>
+    internal static event Action? BeforeWorldSave;
+
+    private static void RaiseBeforeWorldSave()
+    {
+        try { BeforeWorldSave?.Invoke(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning($"ModSave: a before-world-save handler threw: {e.Message}"); }
+    }
+
     public static void SaveAll()
     {
         if (!Plugin.IsServerProcess) return;
@@ -916,6 +930,7 @@ public static unsafe class ModSave
         try
         {
             TryCaptureFromWorld(Worlds.Server);
+            RaiseBeforeWorldSave();
             SaveAll();
         }
         catch (Exception e)
@@ -944,6 +959,7 @@ public static unsafe class ModSave
             try
             {
                 TryCaptureFromWorld(Worlds.Server);
+                RaiseBeforeWorldSave();
                 SaveAll();
             }
             catch (Exception e)

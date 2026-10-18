@@ -76,6 +76,17 @@ internal static class ContainerPreviewTestBridge
         return new Dictionary<string, object?> { ["bagHide"] = mode, ["note"] = "applies to the next preview that opens" };
     }
 
+    /// <summary>E1b persistence read only: turn the world-save guard of the inventory sync off or on (server).</summary>
+    public static Dictionary<string, object?> Guard(bool on)
+    {
+        if (!Plugin.IsServerProcess) throw new InvalidOperationException("container_preview guard runs on the server");
+        ContainerPreviewServer.SaveGuardEnabled = on;
+        Plugin.Logger?.LogWarning("ContainerPreview: save guard turned " + (on ? "on" : "off") + " by the Dev bridge.");
+        var result = ServerStatus();
+        result["requested"] = "guard";
+        return result;
+    }
+
     public static Dictionary<string, object?> ServerStatus()
     {
         var leases = new List<Dictionary<string, object?>>();
@@ -90,6 +101,10 @@ internal static class ContainerPreviewTestBridge
         {
             ["side"] = "server",
             ["previews"] = ContainerPreviewServer.Describe(),
+            ["syncReleasing"] = ContainerPreviewServer.SyncBookkeeping.Releasing,
+            ["syncSweepPending"] = ContainerPreviewServer.SyncBookkeeping.SweepPending,
+            ["syncRecords"] = ContainerPreviewServer.SyncBookkeeping.Records,
+            ["saveGuard"] = ContainerPreviewServer.SaveGuardEnabled,
             ["leases"] = leases,
         };
     }

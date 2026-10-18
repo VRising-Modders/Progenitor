@@ -21,6 +21,10 @@ namespace Progenitor.Dev.Ops;
 /// not put the user in the chest's inventory sync lists, so the inventory stays away as in E1.</item>
 /// <item><c>{"action":"close"}</c> (client): what Dispose does.</item>
 /// <item><c>{"action":"bag","mode":"inactive"|"alpha"}</c> (client): how the next preview hides the bag panel (E5).</item>
+/// <item><c>{"action":"guard","on":false}</c> (server, E1b persistence read only): leave the inventory sync entries in
+/// world saves; back on at every Core install.</item>
+/// <item><c>{"action":"guard","on":false}</c> (server, E1b persistence read only): leave the inventory sync entries in
+/// world saves; back on at every Core install.</item>
 /// </list>
 /// </summary>
 internal static class ContainerPreviewOps
@@ -43,8 +47,9 @@ internal static class ContainerPreviewOps
                 Bool(args, "hudGate") ?? true,
                 Bool(args, "syncInventory") ?? true),
             "close" => Call("Close"),
+            "guard" => Call("Guard", Bool(args, "on") ?? throw new ArgumentException("args.on (true or false) is required for guard")),
             "bag" => Call("BagMode", Str(args, "mode")?.Trim().ToLowerInvariant() ?? throw new ArgumentException("args.mode (inactive or alpha) is required for bag")),
-            _ => throw new ArgumentException("args.action must be status, open, close or bag"),
+            _ => throw new ArgumentException("args.action must be status, open, close, bag or guard"),
         };
     }
 

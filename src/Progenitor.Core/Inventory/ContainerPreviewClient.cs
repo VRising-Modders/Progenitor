@@ -248,6 +248,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private bool _capturing;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
     private bool _targetGoneSeen;
+    private bool _inventorySeen;
     private double _guardSince;
     private readonly HashSet<string> _warned = new(StringComparer.Ordinal);
     private EventDropQueries? _drop;
@@ -351,6 +352,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
                 }
             }
             s.InventoryReady = _inventory != Entity.Null;
+            if (s.InventoryReady) _inventorySeen = true;
         }
 
         var window = ContainerPreviewClient.ReadWindow(world);
@@ -428,7 +430,14 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (c.World != _world || _mapperHook == null || _target == Entity.Null) return;
         try
         {
-            if (c.World.EntityManager.Exists(_target)) return;
+            var em = c.World.EntityManager;
+            if (em.Exists(_target))
+            {
+                // The chest is here but its inventory left (a save suspension, the server letting go): hold the window as
+                // it was rather than let the mapper read a missing inventory. The machine closes after a grace period.
+                if (Machine.OwnsWindow && _inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;
+                return;
+            }
             c.Skip = true;
             if (_targetGoneSeen) return;
             _targetGoneSeen = true;
@@ -650,6 +659,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["networkId"] = _netType == 0 ? null : NetworkIdWords.Format(_netIndex, _netGeneration),
         ["target"] = _target == Entity.Null ? null : _target.Index + ":" + _target.Version,
         ["inventory"] = _inventory == Entity.Null ? null : _inventory.Index + ":" + _inventory.Version,
+        ["inventoryMissing"] = Machine.InventoryMissing,
         ["hooks"] = _hudHook != null,
         ["hiddenUi"] = _hidden.Count,
         ["droppedEvents"] = DroppedEvents,

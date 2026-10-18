@@ -2697,25 +2697,48 @@ both sides at that time. One preview runs at a time per client; a new `Open` clo
 
 **Inventory sync (server, for the lease).** Right after the lease starts, the server appends one copy of the
 user entity to the `SyncToUserBuffer` of each of the chest's inventory entities and of each slot item entity that
-has one (a weapon or a piece of armor). Once a second it adds a copy to items that entered the chest and removes
-its own copy from items that left. When the preview ends, for any reason (close, timeout, expiry, the player
-leaving the area, disconnect, access or setting change, failure, replacement, Core or plugin unload), it
-removes exactly the copies it added: one copy per entity, the last match, as the game's own interaction end does.
-It never clears a list. The list is a multiset that a real interaction with the same chest, or another
-player's, shares, so either order of ending is safe. The game's own item sync may add its own copy to an item
-that enters the chest while the user is listed; the preview leaves that copy alone (the game does the same
-after a real interaction, inferred). The edit is the raw buffer path Core uses for the respawn list: one
-`AddBufferElement` to append, and `SetBufferDataRaw` to write the list back with one copy removed. The element
-layout is a layout fact (`SyncToUserBufferStride` 8, `SyncToUserBufferUserEntityOffset` 0). Main thread only. A
-failed first write refuses the preview ("The server could not share that container's contents.") after
-removing whatever it added; a failed later refresh ends it the same way.
+has one (a weapon or a piece of armor). Once a second it takes a copy on items that entered the chest and releases
+its own copy from items that left. An entering item usually arrives already holding a copy of the user: the game's
+own item sync copies the inventory's list onto changed items. The preview then **adopts** that one copy as its
+own instead of adding a second, and releases it when the item leaves or the preview ends; at the lease start (and
+after a save put the entries back) it always appends, because a copy there belongs to a real interaction. When the
+preview ends, for any reason (close, timeout, expiry, the player leaving the area, disconnect, access or setting
+change, failure, replacement, Core or plugin unload), it releases exactly the copies it holds: one copy per
+entity, the last match, as the game's own interaction end does. It never clears a list. The list is a multiset that
+a real interaction with the same chest, or another player's, shares, so either order of ending is safe.
+
+The edit is the raw buffer path Core uses for the respawn list and the unlock prune: one `AddBufferElement` to
+append, and `SetBufferDataRaw` to write the list back with one copy removed. The element layout is a layout fact
+(`SyncToUserBufferStride` 8, `SyncToUserBufferUserEntityOffset` 0). **Every write is read back** (length and every
+entry) and a mismatch is a failure. An append that throws is checked before the retry with the unflagged type index,
+so a write that landed is never doubled. Removing the only entry writes zero rows; the unlock prune avoids such a
+write as unverified, and here its read-back (length 0) is the check. An entity is marked released only after its
+removal read back; a failed release is retried every second (also after the lease ended) and given up after 10
+tries with an error line. Main thread only. A failed first write refuses the preview ("The server could not share
+that container's contents.") after releasing whatever it took; a failed later refresh ends it the same way.
 
 **Open question: is `SyncToUserBuffer` saved?** Not known (the game rebuilds the bitmask it feeds after a
 load, which suggests that the mask is not saved; the list was not traced). If it is saved, a server crash during a
 preview would leave the user synced to that chest's contents: read-only data for the castle's own owner or
-clan member, no permission change. Mitigation: before every world save (`ModSave.BeforeSave`) the server takes
-all preview entries out, and puts them back 5 s later; the previewing client may see the window stop updating
-for those seconds. A load-time sweep of leftover entries is not built.
+clan member, no permission change. Two guards, both harmless if it is not saved:
+
+- **World saves.** When the game accepts a world save (the save trigger, `ModSave.BeforeWorldSave`; not the other
+  `ModSave.SaveAll` callers such as a disconnect flush, which write only Progenitor's own files), the server takes
+  every preview entry out. It puts them back once the save file's write stamp moved past the one read at the trigger
+  and stood still for 1 s, or after 60 s if it never moves. A second save during that time restarts the wait from
+  its own trigger. The previewing client's window holds its last contents meanwhile (below).
+- **Startup sweep.** Each preview that holds entries is recorded (chest id and player) in Progenitor's mod save
+  (`progenitor.containerpreview`), and the record is dropped when the preview released everything. After a load,
+  records left by a run that did not end cleanly are swept once the chest's id is bound (up to 2 min): one copy of
+  that player is removed from each of the chest's lists **only where one is present**, and never while that player is
+  connected (after a Core hot reload a connected player may be at that chest for real) or while a preview of this
+  run holds that pair.
+
+**The client when the inventory goes away.** If the chest's inventory entity leaves the client while the window is
+open (the save guard above, or the server letting go), the preview holds the window as it was: a
+`Before<ContainerMenuMapper>` skip keeps the game's mapper from reading the missing inventory, so nothing throws.
+`status` shows `inventoryMissing` true. If it comes back within 20 s the window updates again; otherwise the preview
+closes (`TargetGone`, "The container's contents stopped arriving.").
 
 Every close tells the server, so the lease goes at once, except a refusal (no lease was made), the server's
 own end, and a world change (the connection is gone). That includes an unload of the calling plugin or Core
@@ -2751,7 +2774,7 @@ window on this chest (or not bound yet) with no interaction behind it, so a menu
 is left alone. Every hook exists only from the open until the close, except the mapper guard, which waits for the window to be gone (above). A hook that throws logs one warning per preview, not one per frame.
 
 **Not in scope.** Stations, refiners and servant coffins (other menus); a fake interaction buff (it would make the window writable);
-a load-time sweep of leftover sync entries; docking the Find window itself
+docking the Find window itself
 (`panel.Dock(UiDock.Left, …)`, [ui.md](ui.md#docked-panels-dock1)).
 
 **Live plan (not run).** On the isolated test server and an idle test client, with the client in a castle
@@ -2780,14 +2803,31 @@ and the shared lease.
   4. Client within about 1 s: `status` shows an `inventory` entity and `phase` `Opening` or `Open`; on the client,
      the inventory's `InventoryBuffer` matches the server slot for slot and the weapon's item entity exists. Note
      whether the client copies carry `Disabled` (input for E2).
-  5. Move an item into the chest on the server (`.items add c-… <item> 1`, a weapon), wait 2 s: a new `synced` row.
-     Take it out (`.items remove`): the row goes and that item's list loses one copy.
-  6. Save during the preview (`progenitor_world_save`): server status shows `syncSuspended` true and no rows
-     right after, and the rows back after about 5 s.
-  7. `close`: server status shows no preview; `progenitor_components` on both entities: the step 1 lengths
-     again. Record what the client's inventory entity does (destroyed, disabled, or stops updating).
-  8. Cleanup as in E4: every list back to its step 1 contents (the persistence guard), the client at the title
-     screen, sample plugins removed from both reload folders.
+  5. Items moving. Add a weapon on the server (`.items add c-… <weapon> 1`), wait 2 s: a new `synced` row for its
+     item entity with `thisUser` **1** (the game's item-sync copy adopted, not doubled); `progenitor_components` on
+     that item shows the user once. Take it out (`.items remove`): its row goes and its list holds the user **zero**
+     times. The other rows are unchanged.
+  6. Save during the preview (`progenitor_world_save`). Right after: server status shows `syncSuspended` true and no
+     `synced` rows; on the client, `status` shows `inventoryMissing` true if the inventory left (it may not),
+     the window stays as it was, and the client log has no exception from the container mapper. Once the save file
+     is written (a few seconds): `syncSuspended` false, the rows back with `thisUser` 1, `inventoryMissing` false,
+     the window updating again (move an item on the server to see it). Two saves back to back: the rows come back
+     only after the second is written.
+  7. `close`: server status shows no preview, `syncReleasing` 0; `progenitor_components` on the inventory and the
+     weapon: exactly the step 1 lengths and entries. Record what the client's inventory entity does (destroyed,
+     disabled, or stops updating).
+  8. **Persistence read (settles the open question).** Open again with sync on and confirm a `synced` row with
+     `thisUser` 1. Turn the save guard off for this test only: `container_preview {"side":"server","action":"guard",
+     "on":false}`. Save with the entry present (`progenitor_world_save`; server status keeps `syncSuspended` false
+     and the rows). Wait until the save file is written, then end the test server **without** Core's cleanup: kill
+     its process (matched by its full path under `_testserver`, never the live server), so the entry is neither
+     released nor taken out. Restart the test server, **do not connect**, and read the inventory's and the weapon's
+     `SyncToUserBuffer` with `progenitor_components` as soon as the bridge answers: the user present means the list
+     is saved; absent means it is not. Then wait for the log line `startup sweep of c-…` (only if the record was
+     written: the mod save writes with the world save) and read the lists again: the copy is gone (or was never
+     there). Server status shows `syncSweepPending` 0 and `syncRecords` 0. Record both reads in the research note.
+  9. Cleanup as in E4: every list back to its step 1 contents, the guard back on (a restart turns it on), the
+     client at the title screen, sample plugins removed from both reload folders.
 - **E2 open and hold.** First `open {"id":"c-…","hudGate":false}`: the open is written but the interact-HUD
   skip is off, so the game should close the window at once (`closeReason` `WindowClosed` or `OpenFailed`;
   expected per the research, not yet observed). Then a normal open: the window appears filled

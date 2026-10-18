@@ -37,13 +37,44 @@ internal static unsafe class ContainerPreviewServer
 
     internal static int ActiveCount => ByUser.Count;
 
+    /// <summary>Dev bridge: ended previews whose releases still retry, records awaiting the startup sweep, persisted records.</summary>
+    internal static (int Releasing, int SweepPending, int Records) SyncBookkeeping => (Releasing.Count, SweepPending.Count, _records.Records.Count);
+
+    // Inventory sync: previews whose lease ended but whose releases still retry, the persisted records of previews that
+    // may hold entries (for a startup sweep after a run that did not end cleanly), and the records loaded for that sweep.
+    private static readonly List<ContainerPreviewSync> Releasing = new();
+    private static ContainerPreviewSyncRecords _records = new();
+    private static readonly List<ContainerPreviewSyncRecord> SweepPending = new();
+    private static Persistence.IModStore? _store;
+    private static IDisposable? _storeReady;
+    private static double _sweepSince = double.NaN;
+
     internal static void Install()
     {
         if (_installed || !Plugin.IsServerProcess) return;
         _installed = true;
+        SaveGuardEnabled = true;
         CustomEvents.OnReceiveFromClient(ContainerPreviewWire.EventId, OnRequest);
         Plugin.Frame += Tick;
-        Persistence.ModSave.BeforeSave += OnBeforeSave;
+        // Only a world save suspends the sync entries; the other ModSave.SaveAll callers write only Progenitor's JSON.
+        Persistence.ModSave.BeforeWorldSave += OnBeforeWorldSave;
+        try
+        {
+            _store = Persistence.ModSave.Store(ContainerPreviewSyncRecords.StoreId);
+            _storeReady = _store.WhenReady(store =>
+            {
+                if (!_installed) return;
+                var loaded = store.Get<ContainerPreviewSyncRecords>(ContainerPreviewSyncRecords.Key) ?? new ContainerPreviewSyncRecords();
+                SweepPending.Clear();
+                SweepPending.AddRange(loaded.Records ?? new List<ContainerPreviewSyncRecord>());
+                foreach (var r in _records.Records) loaded.Add(r.Container, r.Platform);   // this run's previews, if any started first
+                _records = loaded;
+                _sweepSince = Now;
+                if (SweepPending.Count > 0)
+                    Plugin.Logger?.LogInfo("ContainerPreview: " + SweepPending.Count + " inventory sync record(s) from an earlier run to sweep.");
+            });
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: the sync record store threw: " + e.Message); }
         try
         {
             Config.SharedConfig.BindWhenAvailable(
@@ -68,14 +99,33 @@ internal static unsafe class ContainerPreviewServer
         try { CustomEvents.RemoveClientHandler(ContainerPreviewWire.EventId); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: handler removal threw: " + e.Message); }
         Plugin.Frame -= Tick;
-        Persistence.ModSave.BeforeSave -= OnBeforeSave;
+        Persistence.ModSave.BeforeWorldSave -= OnBeforeWorldSave;
         foreach (var holder in new List<Holder>(ByUser.Values)) holder.End(CameraObservationEndReason.Unloaded, notify: false, message: "");
         ByUser.Clear();
+        // One last try for releases still pending; whatever is left keeps its record for the next run's sweep.
+        foreach (var sync in Releasing) { try { sync.Tick(Now); } catch { /* the record stays */ } }
+        Releasing.Clear();
+        PendingRecord.Clear();
+        SaveRecords();
+        _storeReady?.Dispose();
+        _storeReady = null;
+        _store = null;
+        SweepPending.Clear();
+        _records = new ContainerPreviewSyncRecords();
+        _sweepSince = double.NaN;
     }
 
-    /// <summary>A world save is starting: take every preview's sync entries out (whether the game saves them is unknown).</summary>
-    private static void OnBeforeSave()
+    /// <summary>The game accepted a world save: take every preview's sync entries out until the save file is written.</summary>
+    /// <summary>E1b persistence read only (Dev bridge <c>guard</c>): false leaves the entries in for world saves. Back on at every install.</summary>
+    internal static bool SaveGuardEnabled { get; set; } = true;
+
+    private static void OnBeforeWorldSave()
     {
+        if (!SaveGuardEnabled)
+        {
+            if (ByUser.Count > 0) Plugin.Logger?.LogWarning("ContainerPreview: save guard is off (Dev bridge); the inventory sync entries stay in this world save.");
+            return;
+        }
         double now = Now;
         foreach (var holder in ByUser.Values)
         {
@@ -83,6 +133,100 @@ internal static unsafe class ContainerPreviewServer
             catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: taking sync entries out for the save threw: " + e.Message); }
         }
     }
+
+    // ---- sync records and the startup sweep -----------------------------------------------------------
+
+    internal static void Record(ContainerId container, ulong platform)
+    {
+        if (_records.Add(container.ToString(), platform)) SaveRecords();
+    }
+
+    private static void Unrecord(ContainerId container, ulong platform)
+    {
+        if (_records.Remove(container.ToString(), platform)) SaveRecords();
+    }
+
+    private static void SaveRecords()
+    {
+        try { _store?.Set(ContainerPreviewSyncRecords.Key, _records); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: storing the sync records threw: " + e.Message); }
+    }
+
+    /// <summary>A sync whose lease ended releases its copies; one that could not keeps retrying from the tick.</summary>
+    private static void Finished(ContainerPreviewSync sync, ContainerId container, ulong platform)
+    {
+        if (sync.Done) { Unrecord(container, platform); return; }
+        Releasing.Add(sync);
+        PendingRecord[sync] = (container, platform);
+    }
+
+    private static readonly Dictionary<ContainerPreviewSync, (ContainerId Container, ulong Platform)> PendingRecord = new();
+
+    private static void RetryReleases(double now)
+    {
+        for (int i = Releasing.Count - 1; i >= 0; i--)
+        {
+            var sync = Releasing[i];
+            try { sync.Tick(now); } catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: release retry threw: " + e.Message); }
+            if (!sync.Done) continue;
+            Releasing.RemoveAt(i);
+            if (PendingRecord.Remove(sync, out var rec)) Unrecord(rec.Container, rec.Platform);
+        }
+    }
+
+    /// <summary>
+    /// Records from a run that did not end cleanly: remove one copy of that user from the chest's lists where one is left.
+    /// Harmless when the game does not save the lists (nothing to remove). Never touches a pair a preview of this run holds.
+    /// </summary>
+    private static void Sweep(World world, double now)
+    {
+        if (SweepPending.Count == 0 || double.IsNaN(_sweepSince) || !InventoryRuntime.Installed) return;
+        var em = world.EntityManager;
+        for (int i = SweepPending.Count - 1; i >= 0; i--)
+        {
+            var r = SweepPending[i];
+            if (IsActive(r)) { SweepPending.RemoveAt(i); continue; }
+            SyncSweepStep step;
+            Entity container = Entity.Null;
+            if (!ContainerId.TryParse(r.Container, out var id)) step = SyncSweepStep.Drop;
+            else step = ContainerPreviewSyncSweep.Decide(InventoryRuntime.Status(id), now - _sweepSince);
+            if (step == SyncSweepStep.Wait) continue;
+            if (step == SyncSweepStep.Sweep && InventoryRuntime.TryFind(id, out container, out _) && container.Exists(em))
+            {
+                try
+                {
+                    var user = UserByPlatform(em, r.Platform);
+                    // A connected user may be at that chest for real (after a Core hot reload, say): its copy is not ours to take.
+                    bool online = user != Entity.Null && em.GetComponentData<User>(user).IsConnected;
+                    int removed = user == Entity.Null || online ? 0 : ContainerPreviewSync.SweepOnce(world, user, container);
+                    Plugin.Logger?.LogInfo("ContainerPreview: startup sweep of " + r.Container + ": " + removed + " leftover sync entr" + (removed == 1 ? "y" : "ies") + " removed.");
+                }
+                catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: startup sweep of " + r.Container + " threw: " + e.Message); continue; }
+            }
+            SweepPending.RemoveAt(i);
+            if (!IsActive(r)) Unrecord(id, r.Platform);
+        }
+    }
+
+    private static bool IsActive(ContainerPreviewSyncRecord r)
+    {
+        foreach (var h in ByUser.Values)
+            if (h.Platform == r.Platform && string.Equals(h.Container.ToString(), r.Container, StringComparison.Ordinal)) return true;
+        foreach (var rec in PendingRecord.Values)
+            if (rec.Platform == r.Platform && string.Equals(rec.Container.ToString(), r.Container, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
+    private static Entity UserByPlatform(EntityManager em, ulong platform)
+    {
+        foreach (var e in Query.Entities(em, includeDisabled: true, includeSystems: false, ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly)))
+        {
+            try { if (em.GetComponentData<User>(e).PlatformId == platform) return e; }
+            catch { /* unreadable: skip */ }
+        }
+        return Entity.Null;
+    }
+
 
     /// <summary>Dev bridge status: every server-side preview.</summary>
     internal static List<Dictionary<string, object?>> Describe()
@@ -175,7 +319,8 @@ internal static unsafe class ContainerPreviewServer
 
         if (ByUser.TryGetValue(userEntity, out var previous)) previous.End(CameraObservationEndReason.Replaced, notify: false, message: "");
         container.TryRead<Translation>(em, out var at);
-        var holder = new Holder(userEntity, user.Index, request.Sequence, id, container, ContainerPreviewAuthorization.GrantSeconds(request.Seconds));
+        var holder = new Holder(userEntity, user.Index, request.Sequence, id, container, ContainerPreviewAuthorization.GrantSeconds(request.Seconds))
+            { Platform = user.PlatformId };
         try { SharedObservation.Acquire(world, userEntity, at.Value, holder); }
         catch (InvalidOperationException)
         {
@@ -187,6 +332,7 @@ internal static unsafe class ContainerPreviewServer
         if (request.SyncInventory)
         {
             holder.Sync = new ContainerPreviewSync(world, userEntity, container);
+            Record(id, user.PlatformId);
             try { holder.Sync.Refresh(); }
             catch (Exception e)
             {
@@ -244,13 +390,15 @@ internal static unsafe class ContainerPreviewServer
     /// <summary>Once a second: the container still exists and the user still has access; otherwise let go.</summary>
     private static void Tick()
     {
-        if (ByUser.Count == 0) return;
+        if (ByUser.Count == 0 && Releasing.Count == 0 && SweepPending.Count == 0) return;
         double now = Now;
         if (now < _nextCheck) return;
         _nextCheck = now + 1;
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
         var em = world.EntityManager;
+        RetryReleases(now);
+        Sweep(world, now);
         // An admin turning the setting off (or a PvE-only server becoming PvP) ends every running preview.
         string? settingOff = ContainerPreviewSettings.Refusal(Mode, IsPvE());
         foreach (var holder in new List<Holder>(ByUser.Values))
@@ -323,6 +471,7 @@ internal static unsafe class ContainerPreviewServer
         }
 
         internal Entity User { get; }
+        internal ulong Platform { get; init; }
         internal int UserIndex { get; }
         internal int Sequence { get; }
         internal ContainerId Container { get; }
@@ -359,7 +508,7 @@ internal static unsafe class ContainerPreviewServer
             _lease = null;
             if (ByUser.TryGetValue(User, out var current) && ReferenceEquals(current, this)) ByUser.Remove(User);
             // Every end path (unload, disconnect, expiry, failure, replacement, the 1 s checks) comes through here.
-            try { Sync?.End(); }
+            try { if (Sync != null) { Sync.End(); Finished(Sync, Container, Platform); } }
             catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: sync cleanup threw: " + e.Message); }
             Plugin.Logger?.LogInfo("ContainerPreview: " + Container + " ended (" + reason + (_message.Length > 0 ? ", " + _message : "") + ").");
             if (!notify || reason is CameraObservationEndReason.Disconnected or CameraObservationEndReason.Unloaded) return;

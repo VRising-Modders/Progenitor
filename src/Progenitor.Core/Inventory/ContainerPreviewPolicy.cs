@@ -187,11 +187,21 @@ internal sealed class ContainerPreviewMachine
     /// <summary>What each renewal asks the server for: three missed renewals before the server lets go.</summary>
     internal const double RenewGrantSeconds = 180;
 
+    /// <summary>
+    /// How long an open preview waits when the chest's inventory entity leaves the client (longer than the server's save
+    /// suspension takes in the normal case) before it closes; meanwhile the window is held as it was.
+    /// </summary>
+    internal const double InventoryGraceSeconds = 20;
+
+    /// <summary>True while an open preview's inventory is missing (the client holds the window's mapper).</summary>
+    internal bool InventoryMissing => !double.IsNaN(_inventoryMissingSince);
+
     private readonly ContainerPreviewOptions _options;
     private readonly double _startedAt;
     private double _waitingSince;
     private double _openingSince;
     private double _nextRenew = double.PositiveInfinity;
+    private double _inventoryMissingSince = double.NaN;
 
     internal ContainerPreviewMachine(ContainerPreviewOptions options, double now)
     {
@@ -283,6 +293,15 @@ internal sealed class ContainerPreviewMachine
                 if (!s.TargetFound) return Closed(ContainerPreviewCloseReason.TargetGone, "");
                 if (!s.WindowIsOurs) return Closed(ContainerPreviewCloseReason.WindowClosed, "");
                 if (now >= Deadline) return Closed(ContainerPreviewCloseReason.Timeout, "");
+                if (s.InventoryReady) _inventoryMissingSince = double.NaN;
+                else
+                {
+                    // The chest's contents left this client (the server took the sync entries out for a world save, or let go):
+                    // the window stays as it was, its mapper held, for a grace period, then the preview closes.
+                    if (double.IsNaN(_inventoryMissingSince)) _inventoryMissingSince = now;
+                    else if (now - _inventoryMissingSince >= InventoryGraceSeconds)
+                        return Closed(ContainerPreviewCloseReason.TargetGone, "The container's contents stopped arriving.");
+                }
                 return ContainerPreviewStep.None;
 
             default:

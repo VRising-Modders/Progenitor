@@ -51,6 +51,13 @@ test('container preview tool schema rejects unknown actions and out-of-range len
   assert.equal(tool.schema.safeParse({ action: 'bag', mode: 'hidden' }).success, false);
 });
 
+test('container preview guard goes to the server bridge and takes the queue slot', async () => {
+  const { tool, calls } = load();
+  await tool.handler(tool.schema.parse({ side: 'server', action: 'guard', on: false }));
+  assert.deepEqual(plain(calls[0]), ['server', 'container_preview', { action: 'guard', on: false }]);
+  assert.equal(isReadOnlyOp('container_preview', { action: 'guard', on: false }), false);
+});
+
 test('container preview status reads without the queue slot; open, close and bag take it', () => {
   assert.equal(isReadOnlyOp('container_preview', {}), true);
   assert.equal(isReadOnlyOp('container_preview', { action: 'status' }), true);
