@@ -143,6 +143,12 @@ internal sealed class BuildMenuRecentTab : IDisposable
         }, this));
     }
 
+    /// <summary>Hides the tab (the relocation menu has no Recent); the next <see cref="Update"/> shows it again.</summary>
+    internal void Hide()
+    {
+        if (UnityAlive.Of(_root) && _root!.activeSelf) _root.SetActive(false);
+    }
+
     public void Dispose()
     {
         _choose = null;

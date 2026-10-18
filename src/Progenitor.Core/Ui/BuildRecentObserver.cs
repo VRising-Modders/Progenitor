@@ -20,19 +20,24 @@ namespace Progenitor.Ui;
 /// Server-authoritative, exact-match Recent ingestion. Observes existing systems only.
 /// Creation writes UserOwner and a BuildingSequence targeting the new structure; the server
 /// sequence consumer runs after spawn playback and before SpawnTag removal. A pre-placement
-/// snapshot excludes existing targets. Unsupported transformations are omitted, never inferred.
+/// snapshot excludes existing targets: only structures still carrying SpawnTag can ever confirm, so
+/// the snapshot holds just those (a short-lived handful), never every structure in the world.
+/// Unsupported transformations are omitted, never inferred.
 /// No wallpaper coverage. Static/compile verification is not live verification.
 /// </summary>
 internal static unsafe class BuildRecentObserver
 {
     internal const int EventId = 0x50725262; // PrRb, Core-reserved; both directions versioned below.
-    private const int MaxEntities = 16384;
+    /// <summary>Most just-spawned structures (BlueprintData with SpawnTag) one placement frame snapshots.</summary>
+    private const int MaxSpawning = 512;
+    /// <summary>A peer's hello counts this long from when it arrived (the client sends one every 10 s).</summary>
+    private const long PeerLifetimeMs = 30000;
     private const int SequenceTargetOffset = 4;
     private const int NetworkedEntityWaitingOffset = 8;
     private static readonly BuildRecentCorrelation Correlation = new();
     private static readonly List<IDisposable> Hooks = new();
     private static readonly object Gate = new();
-    private static readonly Queue<(Wire Packet, Entity User, ulong Platform)> Inbox = new();
+    private static readonly Queue<(Wire Packet, Entity User, ulong Platform, long At)> Inbox = new();
     private static readonly Dictionary<ulong, Peer> Peers = new();
     private static readonly HashSet<(ulong, ulong)> Received = new();
     private static readonly Queue<(ulong, ulong)> ReceivedOrder = new();
@@ -41,7 +46,7 @@ internal static unsafe class BuildRecentObserver
     private static long _helloAt;
     private static bool _installed, _queries;
     private static int _warnings;
-    private static EntityQuery _requests, _abilities, _structures, _sequences;
+    private static EntityQuery _requests, _abilities, _spawning, _sequences;
     private sealed record Peer(ulong Nonce, ulong Platform, long At);
 
     // Managed wire struct only: not a game/native ABI. Pack and exact length are checked on receive.
@@ -96,7 +101,7 @@ internal static unsafe class BuildRecentObserver
         if (packet.Version != 1 || packet.Kind != 2 || packet.ClientNonce == 0
             || packet.ServerNonce == 0 || packet.Serial == 0 || packet.Blueprint == 0) return;
         lock (Gate)
-            if (packet.ClientNonce == _clientNonce && Inbox.Count < 256) Inbox.Enqueue((packet, Entity.Null, 0));
+            if (packet.ClientNonce == _clientNonce && Inbox.Count < 256) Inbox.Enqueue((packet, Entity.Null, 0, 0));
     }
 
     private static void ReceiveHello(int id, Entity userEntity, User user, byte* p, int length)
@@ -106,7 +111,12 @@ internal static unsafe class BuildRecentObserver
         if (packet.Version != 1 || packet.Kind != 1 || packet.ClientNonce == 0
             || packet.ServerNonce != 0 || packet.Serial != 0 || packet.Blueprint != 0) return;
         lock (Gate)
-            if (Inbox.Count < 256) Inbox.Enqueue((packet, userEntity, user.PlatformId));
+        {
+            // The placement hooks drain hellos only when they run; keep the newest ones and their arrival time,
+            // so a backlog never crowds out a fresh hello and a stale one still expires.
+            if (Inbox.Count >= 256) Inbox.Dequeue();
+            Inbox.Enqueue((packet, userEntity, user.PlatformId, Environment.TickCount64));
+        }
     }
 
     private static void ClientTick(SystemHookContext hook)
@@ -137,13 +147,15 @@ internal static unsafe class BuildRecentObserver
                 while (ReceivedOrder.Count > 512) Received.Remove(ReceivedOrder.Dequeue());
                 BuildMenuSearch.RecordBuilt(p.Blueprint);
             }
+            // The history file is written on a debounce, also while the build menu is closed.
+            BuildMenuSearch.FlushRecent();
         }
         catch (Exception e) { Warn(e); }
     }
 
-    private static List<(Wire Packet, Entity User, ulong Platform)> Drain(int kind)
+    private static List<(Wire Packet, Entity User, ulong Platform, long At)> Drain(int kind)
     {
-        var result = new List<(Wire, Entity, ulong)>();
+        var result = new List<(Wire, Entity, ulong, long)>();
         lock (Gate)
         {
             int n = Inbox.Count;
@@ -170,16 +182,19 @@ internal static unsafe class BuildRecentObserver
             _queries = true;
             _requests = Query.Build(em, false, false, C<BuildTileModelEvent>(), C<FromCharacter>());
             _abilities = Query.Build(em, false, false, C<AbilityPreCastFinishedEvent>());
-            _structures = Query.Build(em, true, false, C<BlueprintData>());
+            _spawning = Query.Build(em, true, false, C<BlueprintData>(), C<SpawnTag>());
             _sequences = Query.Build(em, true, false, C<SpawnSequenceForEntity>(), C<SpawnTag>());
         }
         long now = Environment.TickCount64;
-        foreach (var key in new List<ulong>(Peers.Keys)) if (now - Peers[key].At > 30000) Peers.Remove(key);
         foreach (var item in Drain(1))
         {
-            if (Peers.Count < 256 || Peers.ContainsKey(Key(item.User)))
-                Peers[Key(item.User)] = new(item.Packet.ClientNonce, item.Platform, now);
+            // A peer lives from its hello's arrival, not from when a placement hook happened to drain it.
+            ulong key = Key(item.User);
+            if (now - item.At > PeerLifetimeMs || (Peers.TryGetValue(key, out var seen) && seen.At > item.At)) continue;
+            if (Peers.Count < 256 || Peers.ContainsKey(key))
+                Peers[key] = new(item.Packet.ClientNonce, item.Platform, item.At);
         }
+        foreach (var key in new List<ulong>(Peers.Keys)) if (now - Peers[key].At > PeerLifetimeMs) Peers.Remove(key);
         Correlation.Prune(now);
         return true;
     }
@@ -191,10 +206,13 @@ internal static unsafe class BuildRecentObserver
             if (!Server(hook) || Peers.Count == 0) return;
             var em = hook.World.EntityManager;
             if (_requests.CalculateEntityCount() + _abilities.CalculateEntityCount() == 0) return;
-            if (_structures.CalculateEntityCount() > MaxEntities || _requests.CalculateEntityCount() > 128
-                || _abilities.CalculateEntityCount() > 128) { Correlation.Clear(); return; }
+            if (_requests.CalculateEntityCount() > 128 || _abilities.CalculateEntityCount() > 128) { Correlation.Clear(); return; }
+            // Confirm requires SpawnTag on the target, and only a newly created entity carries it, so the structures
+            // that could be mistaken for this placement's result are the ones spawning right now. A burst larger than
+            // the bound (a world load) skips these requests only; they are omitted, never guessed.
+            if (_spawning.CalculateEntityCount() > MaxSpawning) return;
             var existing = new HashSet<ulong>();
-            foreach (var entity in Entities(_structures)) existing.Add(Key(entity));
+            foreach (var entity in Entities(_spawning)) existing.Add(Key(entity));
             long now = Environment.TickCount64;
             foreach (var entity in Entities(_requests))
                 {
@@ -277,10 +295,10 @@ internal static unsafe class BuildRecentObserver
     private static void ResetServer()
     {
         if (_queries && _server != null && _server.IsCreated)
-            foreach (var q in new[] { _requests, _abilities, _structures, _sequences })
+            foreach (var q in new[] { _requests, _abilities, _spawning, _sequences })
                 try { q.Dispose(); } catch { }
         _queries = false; _server = null; _serverEpoch = 0; _serial = 0;
-        _requests = _abilities = _structures = _sequences = default;
+        _requests = _abilities = _spawning = _sequences = default;
         Peers.Clear(); Correlation.Clear();
     }
 

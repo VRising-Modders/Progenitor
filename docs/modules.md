@@ -6753,18 +6753,25 @@ closed did nothing, and the hint showed the game's middle-mouse graphic at 1920x
 
 ### Recent, Copy building and the box position
 
-**Recent.** A **Recent** category sits below the game's categories. It lists the last distinct items the player
+**Recent.** A **Recent** category sits below the game's categories (not in the castle relocation menu, which has
+no Recent). It lists the last distinct items the player
 built, newest first; building an item again moves it to the front. Only a finished placement counts: hovering,
 selecting, or a placement the game refuses adds nothing, and relocating a building is not a build. The list is
 kept on the client in `BepInEx/config/progenitor.build-history.cfg` (`[History] Blueprints`, blueprint
 identities only, never a world entity id), so it survives closing the menu, a Core reload and a restart, and is
 shared by every world. Typing in the box while Recent is selected filters the list; the count reads "3 recent" or
-"No recent matches". Items not yet unlocked are left out, as in any tab.
+"No recent matches". Items not yet unlocked are left out, as in any tab. The row is put in recency order by moving
+the game's cells, only when the history, the search or the cells change; leaving Recent or closing the menu puts
+every cell back in its original place. The history file is written at most once every 3 seconds after a change, and
+at once when the menu closes.
 
 The server says which placements finished: a server running this Core sends each confirmed build back to its
 builder on the Core-reserved event `'PrRb'` (versioned; both sides drop a malformed packet). On a server without it,
 Recent stays empty and the rest of the menu is unchanged. A building the game turns into another piece when placed,
-and wallpapers, are not recorded. Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
+and wallpapers, are not recorded. To tell a new structure from one already standing, the server compares only the
+structures still being spawned when the placement request arrives (at most 512 in one frame; a larger burst skips
+that frame's requests), never every structure in the world, so populated servers are covered. A client's hello
+counts for 30 seconds from when it arrived. Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
 `ReceiveSlotPolicy.CoreProtocolIds`; adding it is a Bootstrap change.
 
 **Copy building.** With the build menu open, point at a building and press **Copy building** (default Middle
@@ -6776,8 +6783,11 @@ with the game's mouse-button graphic for a mouse button and the key name otherwi
 when the key is unbound.
 
 The key is in the *build* keybind scope (`KeybindScope.Build`, Core only): it works only while the build menu is
-shown. It still conflicts with the game's gameplay actions, building keys and menu keys, and with mod gameplay,
-menu and build keys; Push To Talk (also Middle Mouse by default) is read on every screen, so that pair is a
+shown. It still conflicts with the game's gameplay actions, building keys and menu keys, with ordinary mods' key
+settings, and with mod menu and build keys. A Progenitor gameplay key on the same chord shares it by press instead:
+the build key acts while the build menu is open and the gameplay key gives way on that press; with the menu closed
+the gameplay key acts, so moving Copy building onto another mod's key never turns that key off in play (unit-tested;
+not live-verified). Push To Talk (also Middle Mouse by default) is read on every screen, so that pair is a
 warning and both act. The game's seven inventory actions in its General group (Drop Item, Split Item, Custom
 Split Item, Repair Item, Smart Take Items, Auto Transfer Items, Sort Items) now count as inventory keys for every
 mod key, so they are a warning rather than a conflict. See [Who gets a key](mods-menu.md#who-gets-a-key-first-installed).
