@@ -346,7 +346,8 @@ window.HELP = {
           html: `<p>Every mod built on Progenitor keeps its settings in the Mods menu.</p>
 <ul><li><strong>Mods</strong> tab &rsaquo; pick the mod: on/off switch, About, its settings and keys, and <strong>Help</strong> when it has a guide.</li>
 <li><strong>Keybinds</strong> tab: every mod's keys and the game's own, remappable; conflicts are marked.</li>
-<li>[[server-setting|Server settings]] follow the server while you are on it; only [[admin|admins]] change them. Yours come back when you leave.</li></ul>` },
+<li>[[server-setting|Server settings]] follow the server while you are on it; only [[admin|admins]] change them. Yours come back when you leave.</li>
+<li>Your own settings save as you change them, also while you are on a server.</li></ul>` },
         { id: "features", title: "What Progenitor adds",
           html: `<ul><li><a href="#chat/overview">A better chat box</a>: tabs, history, links, mentions.</li>
 <li><a href="#game/build-search">Build menu search</a> and <a href="#game/dye-all">Dye all</a> (hold a color swatch).</li>
@@ -935,7 +936,7 @@ ctx.Settings.Page(page => page
         .Toggle(showHints));` },
           html: `{{code}}<ul><li>The row shows on your Mods page, with reset and help.</li><li><strong>Pick defaults that work</strong>; most players never open settings.</li><li>One <code>Page</code> call holds all rows.</li></ul>` },
         { id: "server-settings", title: "Player and server settings",
-          html: `<p>[[mod-settings|Player settings]] change one game. Server settings apply to everyone: bind them [[synced-setting|synced]] and admins edit them in game.</p>{{code}}<p>Non-admins see server rows read-only.</p>`,
+          html: `<p>[[mod-settings|Player settings]] change one game. Server settings apply to everyone: bind them [[synced-setting|synced]] and admins edit them in game.</p>{{code}}<p>Non-admins see server rows read-only. Player settings in the same cfg still save as they change while a server holds the synced ones; the file keeps the player's own values for those.</p>`,
           code: { lang: "c#", text: `var maxStack = ctx.Bind("Server", "MaxStack", 99, "Largest stack.",
     synced: true, acceptableValues: new AcceptableValueRange<int>(1, 999));
 

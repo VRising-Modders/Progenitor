@@ -843,6 +843,10 @@ public static class HostedServerLauncher
 
     private static void OnQuittingCompleteDeferredUninstall()
     {
+        // LOCALSAVE1: this is Core's Application.quitting callback; a local setting change still waiting
+        // for its debounced save while joined reaches the cfg before the process goes down.
+        try { Networking.ConfigSync.FlushLocalSaves("process exit"); }
+        catch { /* process is dying */ }
         try { Uninstall(); }
         catch (Exception e)
         {
