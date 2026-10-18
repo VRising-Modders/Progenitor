@@ -345,7 +345,8 @@ public sealed class InstallSimpleViewTests : IDisposable
         admin.Rebuild();
         Assert.DoesNotContain(InstallModsPane.CellServerSettings, Keys(admin));
 
-        // Not an admin of the joined server (the Server settings rows' fact), a player, or not connected: no link.
+        // Not an admin of the joined server, or a player: the link still shows (the Server tab is read-only for them).
+        // Not connected: no link.
         adminThere = false;
         var notAdmin = new Rig(this, catalog, new Store(), p => { AsAdmin(p); Wire(p); });
         Assert.Contains(InstallModsPane.CellServerSettings, Keys(notAdmin));

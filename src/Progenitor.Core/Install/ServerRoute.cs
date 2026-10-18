@@ -132,6 +132,18 @@ internal readonly struct ServerRoute
         _ => "",
     };
 
+    /// <summary>
+    /// The server context line's management words (Simple view, Server tab): <c>Local management</c> or
+    /// <c>Remote management</c> only on that route kind; otherwise the route's reason, so a blocked route never reads as
+    /// managed. Empty with no route and no reason.
+    /// </summary>
+    public string ManagementLabel => Kind switch
+    {
+        ServerRouteKind.Local => ServerRouteCopy.LocalManagement,
+        ServerRouteKind.Remote => Block == ServerRouteBlock.None ? ServerRouteCopy.RemoteManagement : ServerRouteCopy.RemoteManagement + " · " + Reason,
+        _ => Reason,
+    };
+
     /// <summary>The help line under a blocked row's reason. Empty when there is nothing to do about it.</summary>
     public string Help => Block switch
     {
@@ -650,6 +662,8 @@ internal static class InstallStatusLabels
 internal static class ServerRouteCopy
 {
     public const string NoServer = "No local server is configured; installing to my client.";
+    public const string LocalManagement = "Local management";
+    public const string RemoteManagement = "Remote management";
     public const string NotProgenitor = "Server doesn't run Progenitor";
     public const string RemoteOff = "Server has remote installs off";
     public const string NotAdmin = "Server installs need you on this server's admin list";

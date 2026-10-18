@@ -380,4 +380,47 @@ public sealed class ServerRouteAndClientTests : IDisposable
         Assert.NotNull(client.RowFor(entry));
         Assert.Null(client.RowFor(InstallListViewTests.Listing("tovan-Other", "Other")));
     }
+
+    /// <summary>
+    /// Review of PR 132: the server context line (Simple view and the Server tab) said "Remote management" for every
+    /// connected route that was not local, even a blocked one. Only the remote route says it now; a blocked route names
+    /// its reason.
+    /// </summary>
+    [Theory]
+    [InlineData((int)ServerRouteKind.Local, (int)ServerRouteBlock.None, ServerRouteCopy.LocalManagement)]
+    [InlineData((int)ServerRouteKind.Remote, (int)ServerRouteBlock.None, ServerRouteCopy.RemoteManagement)]
+    [InlineData((int)ServerRouteKind.None, (int)ServerRouteBlock.NotProgenitor, ServerRouteCopy.NotProgenitor)]
+    [InlineData((int)ServerRouteKind.None, (int)ServerRouteBlock.RemoteOff, ServerRouteCopy.RemoteOff)]
+    [InlineData((int)ServerRouteKind.None, (int)ServerRouteBlock.Pending, ServerRouteCopy.Pending)]
+    [InlineData((int)ServerRouteKind.None, (int)ServerRouteBlock.NotAdmin, ServerRouteCopy.NotAdmin)]
+    [InlineData((int)ServerRouteKind.None, (int)ServerRouteBlock.None, "")]
+    public void The_server_context_says_remote_management_only_on_the_remote_route(int kindValue, int blockValue, string label)
+    {
+        var route = new ServerRoute((ServerRouteKind)kindValue, (ServerRouteBlock)blockValue);
+        Assert.Equal(label, route.ManagementLabel);
+
+        string connected = label.Length == 0 ? "Connected" : "Connected · " + label;
+        if (route.Kind != ServerRouteKind.Local)
+            Assert.Equal(connected, Progenitor.Ui.InstallModsPane.SimpleServerState(route, connected: true));
+        Assert.Equal(connected + " · Read-only access",
+            Progenitor.Ui.ServerTabPane.StatusLine(Progenitor.Ui.ServerTabState.Ready, route, canEdit: false));
+        if (route.Kind != ServerRouteKind.Remote)
+        {
+            Assert.DoesNotContain(ServerRouteCopy.RemoteManagement, Progenitor.Ui.InstallModsPane.SimpleServerState(route, connected: true));
+            Assert.DoesNotContain(ServerRouteCopy.RemoteManagement,
+                Progenitor.Ui.ServerTabPane.StatusLine(Progenitor.Ui.ServerTabState.NoProgenitor, route, canEdit: true));
+        }
+    }
+
+    [Fact]
+    public void An_unreachable_remote_route_is_remote_management_with_its_reason()
+    {
+        var route = new ServerRoute(ServerRouteKind.Remote, ServerRouteBlock.Unreachable, "dns");
+        Assert.Equal(ServerRouteCopy.RemoteManagement + " · " + route.Reason, route.ManagementLabel);
+        Assert.Equal("Connected · " + route.ManagementLabel, Progenitor.Ui.InstallModsPane.SimpleServerState(route, connected: true));
+        Assert.Equal("Disconnected · Connect to manage", Progenitor.Ui.InstallModsPane.SimpleServerState(
+            new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true), connected: false));
+        Assert.Equal("No server selected", Progenitor.Ui.InstallModsPane.SimpleServerState(
+            new ServerRoute(ServerRouteKind.None, ServerRouteBlock.NoServer), connected: false));
+    }
 }

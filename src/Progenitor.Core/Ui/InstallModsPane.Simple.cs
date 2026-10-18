@@ -60,29 +60,41 @@ internal sealed partial class InstallModsPane
     public const string CellViewAdvanced = "view-advanced";
 
     /// <summary>
-    /// Settings organization stage 8 (decision 7): the toolbar's <b>Server settings »</b> link, at the right of the Simple
-    /// search row while Simple acts on a server this player is an admin of. Clicked with <c>widget_click label=toolbar/server-settings</c>.
+    /// Settings organization stage 8 (decision 7): the toolbar's <b>Server settings »</b> link, in Simple's server context
+    /// row while connected (see <see cref="ServerSettingsLinkShown"/>). Clicked with <c>widget_click label=simple-server/server-settings</c>.
     /// </summary>
     public const string CellServerSettings = "server-settings";
 
-    /// <summary>Whether this player is an admin of the joined Progenitor server (live: the Server settings rows' fact). Null: never.</summary>
+    /// <summary>Whether this player is an admin of the joined Progenitor server (live: the Server settings rows' fact). Not a gate for the Server settings link.</summary>
     internal Func<bool>? ServerSettingsAdminProbe { get; set; }
 
     /// <summary>Three homes: opens the Server tab (live: <c>ModsMenu.OpenServerTabFromLink</c>). Null: no link.</summary>
     internal Action? OpenServerSettings { get; set; }
 
-    /// <summary>The link is drawn: the Simple view, acting on the connected server, for an admin there.</summary>
+    /// <summary>
+    /// The link is drawn: the Simple view while connected, for every player there. The Server tab shows read-only access
+    /// to a player who is not an admin and its own empty state on a server without Progenitor, so the link is not gated
+    /// on admin (<see cref="ServerSettingsAdminProbe"/> does not decide it).
+    /// </summary>
     internal bool ServerSettingsLinkShown => IsSimple && OpenServerSettings != null && PickerInputs?.Connected == true;
 
     internal IUiCellRow? SimpleServerRow { get; private set; }
+
+    /// <summary>
+    /// The server context row's second line. <c>Remote management</c> only on the remote route; a connected server with a
+    /// blocked route (no Progenitor, remote installs off, status pending, not an admin) names the route's reason instead.
+    /// </summary>
+    internal static string SimpleServerState(ServerRoute route, bool connected) =>
+        route.Block == ServerRouteBlock.Disconnected ? "Disconnected · Connect to manage"
+            : route.Kind == ServerRouteKind.Local ? ServerRouteCopy.LocalManagement
+            : connected ? "Connected" + (route.ManagementLabel is { Length: > 0 } management ? " · " + management : "")
+            : "No server selected";
 
     private void BuildSimpleServerContext(IUiPanel panel)
     {
         var route = CurrentRoute;
         bool connected = PickerInputs?.Connected == true;
-        string state = route.Block == ServerRouteBlock.Disconnected ? "Disconnected · Connect to manage"
-            : route.Kind == ServerRouteKind.Local ? "Local management"
-            : connected ? "Connected · Remote management" : "No server selected";
+        string state = SimpleServerState(route, connected);
         string name = PickedServer?.ShortName ?? ServerIdentityFor(route.Kind == ServerRouteKind.Remote).ShortName;
         var cells = new List<CellSpec>
         {

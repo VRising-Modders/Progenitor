@@ -172,6 +172,15 @@ internal sealed class ServerTabPane
         _ => ServerTabState.NotConnected,
     };
 
+    /// <summary>
+    /// The pinned line under the server's name: connection, the route's management words
+    /// (<see cref="Progenitor.Install.ServerRoute.ManagementLabel"/>: a blocked route names its reason) and access.
+    /// </summary>
+    internal static string StatusLine(ServerTabState state, Progenitor.Install.ServerRoute route, bool canEdit) =>
+        state == ServerTabState.NotConnected ? "Disconnected"
+            : "Connected" + (route.ManagementLabel is { Length: > 0 } management ? " · " + management : "")
+                + (state == ServerTabState.Ready ? (canEdit ? " · Admin access" : " · Read-only access") : " · " + EmptyLine(state));
+
     /// <summary>The empty state's one line, or empty when the tab shows its groups.</summary>
     internal static string EmptyLine(ServerTabState state) => state switch
     {
@@ -260,9 +269,7 @@ internal sealed class ServerTabPane
         var state = _builtState;
         AddReadback(title, RowHead, (Func<object?>)(() => Describe(state)));
         var route = RouteProbe?.Invoke() ?? default;
-        string status = state == ServerTabState.NotConnected ? "Disconnected"
-            : "Connected" + (route.Kind == Progenitor.Install.ServerRouteKind.Local ? " · Local management" : " · Remote management")
-                + (state == ServerTabState.Ready ? (context.CanEditServerWide ? " · Admin access" : " · Read-only access") : " · " + EmptyLine(state));
+        string status = StatusLine(state, route, context.CanEditServerWide);
         var statusRow = panel.Note(status);
         AddReadback(statusRow, "server-context", status);
         Ui.PinMenuRows(panel, MenuRowPin.Content);

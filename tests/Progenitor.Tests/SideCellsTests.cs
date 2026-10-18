@@ -64,6 +64,18 @@ public sealed class SideCellsTests
         Assert.Contains(SideButton.Install, d.Client.Buttons);
     }
 
+    /// <summary>Review of PR 132: a request still in flight when the player disconnects keeps its progress and Cancel.</summary>
+    [Fact]
+    public void A_server_step_in_flight_keeps_its_progress_and_cancel_after_a_disconnect()
+    {
+        var installing = new SideHalf { Busy = "Downloading…", BusyCancelable = true };
+        var d = D(Absent, installing,
+            route: new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true));
+        Assert.Equal("Downloading…", d.Server.Text);
+        Assert.Equal(SideCells.KindBusy, d.Server.Kind);
+        Assert.Equal(B(SideButton.CancelInstall), d.Server.Buttons);
+    }
+
     [Fact]
     public void Nothing_installed_offers_install_on_each_side_and_the_both_shortcut()
     {

@@ -3370,6 +3370,7 @@ internal sealed partial class InstallModsPane
         {
             if (!action.Enabled) return false;
             var decision = SideStatusRules.Decide(SideInputsOf(entry));
+            InstallTarget halfTarget;
             switch (decision.Action)
             {
                 case SideAction.InstallOnServer:
@@ -3377,18 +3378,21 @@ internal sealed partial class InstallModsPane
                     if (CurrentRoute.Kind == ServerRouteKind.Remote)
                         return OpenRemoteInstallPrompt(entry,
                             decision.Action == SideAction.UpdateServer || RemoteRowFor(entry) != null ? RemoteInstallOp.Update : RemoteInstallOp.Install);
-                    _targetOverride = InstallTarget.LocalServer;
+                    halfTarget = InstallTarget.LocalServer;
                     break;
                 case SideAction.InstallOnClient:
                 case SideAction.UpdateClient:
-                    _targetOverride = InstallTarget.Client;
+                    halfTarget = InstallTarget.Client;
                     break;
                 default:
                     return false;
             }
 
+            // Focusing another listing closes its prompt, which clears the override, so the side is set after it.
             if (!string.Equals(_state.OpenKey, entry.Key, StringComparison.OrdinalIgnoreCase)) FocusListing(entry.Key);
-            var halfTarget = _targetOverride;
+            // As BeginSideInstall: a refused side target is refused here, before the box names it or a download starts.
+            if (!TrySetTarget(halfTarget, _server, out var halfRefusal)) return RefuseSideTarget(halfRefusal);
+            _targetOverride = halfTarget;
             ApplyDefaultTarget(entry);
             OpenPrompt(entry, InstallPromptKind.Install);
             _targetOverride = halfTarget;
@@ -4319,18 +4323,21 @@ internal sealed partial class InstallModsPane
             : BeginSideInstall(entry, InstallTarget.Both, remoteAfter: false, update);
     }
 
+    /// <summary>A pressed side whose target is refused: no box, no download; the reason is the action error.</summary>
+    private bool RefuseSideTarget(string? refusal)
+    {
+        ClosePrompt();
+        ResetFlow();
+        _actionError = refusal;
+        RequestDetailRebuild();
+        return false;
+    }
+
     /// <summary>The local install flow with its target fixed to the pressed side (the setting is not read).</summary>
     private bool BeginSideInstall(CatalogEntry entry, InstallTarget target, bool remoteAfter, bool update = false)
     {
         if (!string.Equals(_state.OpenKey, entry.Key, StringComparison.OrdinalIgnoreCase)) FocusListing(entry.Key);
-        if (!TrySetTarget(target, _server, out var refusal))
-        {
-            ClosePrompt();
-            ResetFlow();
-            _actionError = refusal;
-            RequestDetailRebuild();
-            return false;
-        }
+        if (!TrySetTarget(target, _server, out var refusal)) return RefuseSideTarget(refusal);
         _targetOverride = target;
         _remoteAfterLocal = remoteAfter ? entry.Key : null;
         ApplyDefaultTarget(entry);
@@ -5915,6 +5922,10 @@ internal sealed partial class InstallModsPane
     {
         if (string.IsNullOrEmpty(_state.OpenKey))
             return new PlanCallResult(false, InstallReasons.UnknownEntry, null);
+        // A server target is re-checked at plan and confirm time: with TreatLocalServerAsRemote on, a player who
+        // disconnected after the box opened must not get a write into the local folder.
+        if (_target != InstallTarget.Client && CurrentRoute.Block == ServerRouteBlock.Disconnected)
+            return new PlanCallResult(false, CurrentRoute.Reason, null);
         // LOCALDETECT1 review: a server half on the route's own folder plans against the catalog's override root.
         if (_target != InstallTarget.Client && RouteLocalFolderWritable())
             return _catalog.Plan(_state.OpenKey!, _target);

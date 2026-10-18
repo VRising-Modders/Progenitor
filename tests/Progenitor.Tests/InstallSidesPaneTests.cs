@@ -621,6 +621,74 @@ public sealed class InstallSidesPaneTests : IDisposable
         Assert.NotEqual(InstallPromptKind.Install, rig.Pane.Prompt);
     }
 
+    /// <summary>
+    /// Review of PR 132: the row's one button on a mod missing on the server (the Sides action) refuses a refused server
+    /// target before the box opens or a download starts, as the side buttons do.
+    /// </summary>
+    [Fact]
+    public void The_rows_install_on_server_action_refuses_a_refused_target_before_the_box()
+    {
+        var catalog = new FakeCatalog();
+        var listing = Tagged("o-HotDemo", new[] { "Client", "Server", "Oakveil Update" });
+        var entry = listing.WithInspection(CatalogProvenance.ManifestVerified, listing.Manifest, PackageSide.Both, Array.Empty<PluginDependency>());
+        catalog.Entries.Add(entry);
+        string clientReload = Path.Combine(_root, "client", "BepInEx", "progenitor-reload", "progenitor.hotdemo.dll");
+        var rig = new Rig(this, catalog, pane =>
+        {
+            pane.ServerRouteProbe = () => new ServerRoute(ServerRouteKind.Local, ServerRouteBlock.None);
+            pane.HostedRouteFolderProbe = () => null;
+            pane.ServerWriteRootProbe = () => null;
+            pane.LedgerProbe = _ => false;
+        });
+        var pane = rig.Pane;
+        pane.SetInstalledQuery(new InstalledStateQuery(
+            files: new[] { new InstalledFile(clientReload, InstalledState.ReloadKind, "f0b8", InstalledState.ClientRoot, 8192) },
+            inventory: new[] { new InstalledInventoryRow("progenitor.hotdemo", "0.1.0", "Local") },
+            ledger: new[]
+            {
+                new InstalledLedgerRow("o-HotDemo", "f0b8", "0.1.0", "progenitor.hotdemo.dll",
+                    source: "package:o-HotDemo@0.1.0", category: ServerInstallLedger.CategoryMod, root: InstalledState.ClientRoot, filePath: clientReload,
+                    pluginId: "progenitor.hotdemo"),
+            }));
+        rig.Rebuild();
+        var action = pane.ActionFor(entry);
+        Assert.Equal(InstallListingState.Sides, action.State);
+        Assert.Equal(SideAction.InstallOnServer, SideStatusRules.Decide(pane.SideInputsOf(entry)).Action);
+
+        Assert.False(pane.OnInstallClick(entry.Key));
+        Assert.NotEqual(InstallPromptKind.Install, pane.Prompt);
+        Assert.Empty(catalog.Planned);
+        Assert.Equal(InstallReasons.NoConfiguredLocalServer, pane.ActionError);
+        Assert.Equal(InstallTarget.Client, pane.Target);
+    }
+
+    /// <summary>
+    /// Review of PR 132: with TreatLocalServerAsRemote on, a player who disconnects after the box opened gets no server
+    /// write: the plan and the confirm re-check the Disconnected block.
+    /// </summary>
+    [Fact]
+    public void A_disconnect_after_the_box_opened_refuses_the_server_plan()
+    {
+        var catalog = new FakeCatalog();
+        var entry = Tagged("o-b", new[] { "Client", "Server", "Oakveil Update" });
+        catalog.Entries.Add(entry);
+        var route = new ServerRoute(ServerRouteKind.Local, ServerRouteBlock.None);
+        var folder = ValidatedFolder();
+        var rig = new Rig(this, catalog, pane => pane.ServerRouteProbe = () => route, folder);
+        var pane = rig.Pane;
+        Assert.True(pane.OnSideClick(entry.Key, true, SideButton.Install));
+        Assert.Equal(InstallTarget.LocalServer, pane.Target);
+        int planned = catalog.Planned.Count;
+
+        route = new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true);
+        var plan = pane.PlanSelected(folder);
+        Assert.False(plan.Ok);
+        Assert.Equal("Connect to manage", plan.Error);
+        Assert.Equal(planned, catalog.Planned.Count);
+        Assert.False(pane.ConfirmExecute().Ok);
+        Assert.Equal(planned, catalog.Planned.Count);
+    }
+
     [Fact]
     public void The_both_shortcut_installs_both_halves_through_the_local_folder()
     {
