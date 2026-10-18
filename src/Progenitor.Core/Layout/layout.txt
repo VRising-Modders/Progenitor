@@ -572,6 +572,28 @@ offset UserTeamUserEntityOffset                  = 0x0  : UserTeam.UserEntity
 size   TeamAlliesStride                          = 8    : TeamAllies                        # one Entity
 offset TeamAlliesValueOffset                     = 0x0  : TeamAllies.Value
 
+# ---- Dev stress clans (src/Progenitor.Dev/Ops/StressStageOps.cs) --------------------------------
+# The server's clan create step (ClanSystem_Server, create request, read 2026-10-18): Instantiate the
+# RootPrefabCollection clan team prefab, SetComponentData<ClanTeam> {Name, Motto, a random v4 ClanGuid,
+# TeamValue = ++SpawnTeamSystem.LastCreatedTeamId, CreatedBy = LastEditedBy = the creator's NetworkId},
+# then TeamUtility.AddUserToClan, which sets User.ClanEntity on the caller's copy (the caller writes the
+# User back) and copies the clan's TeamData onto the member's team. stress_clan pokes ClanTeam field by
+# field and writes back only User.ClanEntity (NetworkedEntity: Entity @0, 4-byte _WaitingForSync @8).
+offset ClanTeamNameOffset                        = 0x0  : ClanTeam.Name                      # FixedString64Bytes
+offset ClanTeamMottoOffset                       = 0x40 : ClanTeam.Motto                     # FixedString64Bytes
+offset ClanTeamClanGuidOffset                    = 0x80 : ClanTeam.ClanGuid                  # 16 bytes
+offset ClanTeamTeamValueOffset                   = 0x90 : ClanTeam.TeamValue
+offset ClanTeamCreatedByOffset                   = 0x94 : ClanTeam.CreatedBy                 # NetworkId, 12 bytes
+offset ClanTeamLastEditedByOffset                = 0xA0 : ClanTeam.LastEditedBy              # NetworkId, 12 bytes; ends the struct at 0xAC
+size   NetworkIdSize                             = 12   : NetworkId
+offset UserClanEntityOffset                      = 0x1C : User.ClanEntity                    # NetworkedEntity
+offset ClanRoleValueOffset                       = 0x0  : ClanRole.Value                     # ClanRoleEnum, int
+offset TeamDataTeamValueOffset                   = 0x0  : ProjectM.TeamData.TeamValue
+enum   ClanRoleMember                            = 0    : ClanRoleEnum.Member
+enum   ClanRoleLeader                            = 2    : ClanRoleEnum.Leader
+# stress_refine reads a chest's first inventory (instance 0) to keep empty chests free for products.
+offset InventoryInstanceElementExternalInventoryEntityOffset = 0x10 : InventoryInstanceElement.ExternalInventoryEntity # NetworkedEntity, Entity first
+
 # ---- Clock: time of day (src/Progenitor.Core/Clock/TimeOfDayRuntime.cs) --------------------------
 # DayNightCycle is the server singleton the day/night systems read. DayNightCycleSystem.OnUpdate
 # (the server's native code, read 2026-09-25) writes, each frame,

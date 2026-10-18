@@ -281,6 +281,46 @@ node tools/mcp/call.mjs server stress_status "@$bridgeArgs"
 node tools/mcp/call.mjs server stress_clear "@$bridgeArgs"
 ```
 
+### Staged ops on existing stress castles: `stress_owner_groups`, `stress_clan`, `stress_refine`, `stress_stations`, `stress_stage_status`
+
+These work on castles a seed's stress owners already hold (on the Moo World copy: 140 generated castles, owners `Stress01`..`Stress40`). Castles of other owners are never touched. Same gate as `stress_populate`; a write needs `confirm:"stress"`, a `dryRun` does not. Work runs a few steps per frame under `budgetMs` (default 4); each op reads back on a later frame. The reply comes when the job ends (or after 25 s; then read `stress_stage_status`). MCP: `progenitor_stress` with `action` `groups`, `clan`, `refine`, `stations`, `stage`.
+
+**Status:** planners are game-free and unit-tested (`DevStressStagesTests`), the MCP mapping is tested, Dev builds. **Not run live.**
+
+**`stress_owner_groups`** (read only). Args: `seed`, `groups` (clan sizes, default `[8, 6, 4, 2]`), `share` (castle-share owners, default half of the owners outside clans). Owners keep their castles; this only decides which owner is in which group:
+
+- **solo**: the owners whose own castles lie closest together;
+- **castle-share**: owners with 3 or more castles, each owner's castles one island;
+- **clans**: the rest, chosen to spread each clan across the map and to mix neighbors, by a deterministic hill climb over swaps. Score: 0.55 x mean clan spread + 0.35 x neighbor mixing + 0.10 x castle-share own spread. A clan's spread is its castles' mean pairwise and mean nearest-other-member distance over the map diagonal, plus the share of regions it covers. Mixing is the share of each plot's 4 nearest other-owner plots in a different group.
+
+The reply lists, per group, members (name, platform id, user index, castle count, own spread), `castlesPerOwner`, every castle's `territory`, `x`, `z` (world meters, territory center) and `region`, and `spread` (`meanPairDistance`, `minPairDistance`, `meanNearestDistance`, `regions`, `score`). It also has `mixing`, `score`, `mapDiagonal` and `islands` (per island its territories and `rawCastles`, see `stress_refine`). The same seed and castles give the same grouping, and the other staged ops use it.
+
+**`stress_clan`**. Args: `seed`, `groups`, `share`, `clan` (one clan ordinal, to prove one clan first), `experiment:true` (required unless `dryRun`), `confirm`. For each planned clan it uses the server's clan create step: an instance of the clan team prefab, then `ClanTeam` name `StressClanNN`, motto, a random clan GUID, the next team value and the leader's network id. Each member then joins through the game's add-member routine `TeamUtility.AddUserToClan`, called through its generated wrapper, which is why the `experiment` opt-in exists. That routine links the member's team and the clan team both ways, copies the clan's team data, sets `User.ClanEntity` and raises the game's team events. The op writes `User.ClanEntity` back and sets `ClanRole` (the first member is leader). A clan whose member is connected, already in a clan or has no own team is refused before any write. The job stops at the first failed step.
+
+Castle teams are **not** added to the clan's allies, because the game's join path does not add them: a castle stays allied to its owner's team, and clan access goes through that team. Clans above the server's `ClanSize` are allowed (the invite path checks the limit; the add-member routine does not) and noted in the reply. The readback lists, per member: `clanEntity`, team allies, team data against the clan's, role, and per castle `alliedToOwner` and `castleTeamInClanAllies`. `stress_clear` keeps clan members, because removing a member has no proven path.
+
+**`stress_refine`**. Args: `seed`, `groups`, `share`, `plots` (`"stress"` (the default) or territory indices; the grouping always sees every castle of the seed), `hours` (default 1), `supply` (`"spread"`, `"local"` or `"auto"`, the default: spread for clan and castle-share islands, local for solo owners), `suppliers` (the share of a spread island's castles that get raws, default 1/3 and at least one, farthest apart first), `emptyChests` (chests per castle left empty for products, default 3), `speed` (extra refining speed factor, default 1), `confirm`, `dryRun`.
+
+- Every unlocked refinement recipe of every station in the selected castles is switched on through `ctx.Stations.SetRecipeEnabled`. That makes the same writes as the station window's checkbox: the recipe row, its linked rows and the station's update flag.
+- Raw inputs for `hours` are added to chests through the `give` item path. A station runs one recipe at a time, so its time is split over its runnable recipes. Batches per recipe = ceil(time x server refinement rate x speed / recipe duration), and each batch takes the recipe inputs x the server refinement cost.
+- With `spread`, an island's whole need goes only to its raw castles, so factories pull raws across plots. The other castles' chests get none. With `local`, each castle gets what its own stations use.
+- Chests are filled emptiest first. The `emptyChests` emptiest chests of every castle get nothing.
+
+The plan lists per island its territories, `rawCastles`, the item `need` and, per raw castle, the stocking chests, the kept-empty chests and the items. The readback lists per castle the recipes on out of those unlocked, locked recipes, empty chests, and for raw castles each planned item against what the chests now hold. Locked recipes are left alone: unlocking is a progression change, not the window's checkbox.
+
+**`stress_stations`**. Args: `seed`, `plots`, `perCastle` (default 15), `confirm`, `dryRun`. It reads each castle's refinement stations and plans the top-up to `perCastle`: the station kinds already in use, round-robin, fewest first. **Writes are refused**, because no proven path places a building for an offline owner in an existing castle. The build event needs the owner's character, and the castle generator only builds a whole castle on an empty territory. The reply's `missing` says what a placement path would need.
+
+**`stress_stage_status`**: the running or last staged job: `op`, `phase` (`running`, `planned`, `done`, `done_with_failures`, `stopped`, `cancelled`), `steps`, `done`, `failed`, `maxTickMs`, `plan`, `notes`, step `rows` and `readback`.
+
+```
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":18}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_owner_groups "@$bridgeArgs"
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":18,"clan":1,"dryRun":true}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_clan "@$bridgeArgs"
+[System.IO.File]::WriteAllText($bridgeArgs, '{"seed":18,"plots":[12],"supply":"local","dryRun":true}', [System.Text.UTF8Encoding]::new($false))
+node tools/mcp/call.mjs server stress_refine "@$bridgeArgs"
+```
+
 ## `ops`
 
 The list of ops this build knows. Useful as a smoke test that does not touch the world.
