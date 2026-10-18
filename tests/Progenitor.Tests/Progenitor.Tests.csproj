@@ -504,6 +504,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanel.cs" Link="Linked\VanillaPanel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaPanelAnchors.cs" Link="Linked\VanillaPanelAnchors.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaRecipeTooltip.cs" Link="Linked\VanillaRecipeTooltip.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaKeyHint.cs" Link="Linked\VanillaKeyHint.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Hooks\HookOptions.cs" Link="Linked\HookOptions.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\IVanillaAttachHandle.cs" Link="Linked\IVanillaAttachHandle.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\VanillaAttachHandle.cs" Link="Linked\VanillaAttachHandle.cs" />

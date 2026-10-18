@@ -120,7 +120,9 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirementLine, true, VanillaPanelAnchor.TooltipRequirementLine)]
     [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipRequirementLine, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipHeader, true, VanillaPanelAnchor.TooltipHeader)]
-    [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipHeader, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipHeader, true, VanillaPanelAnchor.TooltipHeader)]
+    [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipFooter, true, VanillaPanelAnchor.TooltipFooter)]
+    [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipFooter, true, VanillaPanelAnchor.TooltipFooter)]
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.TooltipHeader, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.TooltipRequirementLine, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.Default)]
@@ -670,10 +672,163 @@ public class VanillaPanelTests : IDisposable
         Assert.Equal(new List<string> { "Made in: Workbench" }, rb["rows"]);
         Assert.Equal(new[] { "muted" }, rb["rowTones"]);
 
-        // TooltipBody stays the site's default; the header is listed last.
-        Assert.Equal(new[] { "tooltip", "requirements", "line", "header" }, VanillaUiSites.AnchorKeys(VanillaUiSite.RecipeTooltip));
+        // TooltipBody stays the site's default.
+        Assert.Equal("tooltip", VanillaUiSites.AnchorKeys(VanillaUiSite.RecipeTooltip)[0]);
         Assert.True(VanillaUiSites.IsTooltipAnchor(VanillaPanelAnchor.TooltipHeader));
         header.Dispose();
+    }
+
+    [Fact]
+    public void Key_hint_rows_are_their_own_clones_with_parts_and_readback()
+    {
+        var footer = UiApi.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipFooter, _owner, "example.recipes");
+        Assert.True(footer.Enabled);
+        Assert.EndsWith("InventoryTooltip-footer", footer.ContainerName);
+        footer.SetRows(new VanillaRow[]
+        {
+            new("In storage: 12", LabelTone.Ok),
+            VanillaRow.KeyHint("Alt", "Show storage", hold: true),
+            new VanillaRow("per chest", LabelTone.Muted, 1),
+        });
+        _client.Fire(VanillaUiSite.InventoryTooltip, Open(71, new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0, 0, 0, 0, 301, 5)));
+
+        Assert.Equal(1, _client.LiveHints);
+        Assert.Equal(new[] { "In storage: 12", "per chest" }, _client.RowTexts.Where(t => t.Length > 0).ToArray());
+        var drawn = Assert.Single(_client.HintDraws);
+        Assert.Equal("<Keyboard>/leftAlt", drawn.FirstPath);
+        Assert.Equal("Hold", drawn.Prefix);
+        Assert.Equal("Show storage", drawn.Label);
+        Assert.Contains(_client.Indents, i => i.Level == 1);
+
+        var rb = ((VanillaAttachHandle)footer).Readback().Describe();
+        Assert.Equal(new[] { 0, 0, 1 }, rb["rowIndents"]);
+        var hints = (object?[])rb["rowKeyHints"]!;
+        Assert.Null(hints[0]);
+        var hint = (Dictionary<string, object?>)hints[1]!;
+        Assert.Equal("Alt", hint["key"]);
+        Assert.Equal("Show storage", hint["label"]);
+        Assert.Equal(true, hint["hold"]);
+        Assert.Equal("keyboard", hint["device"]);
+        Assert.Equal(new[] { "sprite:Glyph_<Keyboard>/leftAlt" }, hint["glyphs"]);
+        Assert.Equal(true, hint["drawn"]);
+
+        // A row that changes kind is rebuilt as the other clone; the same rows again draw nothing new.
+        footer.SetRows(new VanillaRow[] { VanillaRow.KeyHint("Alt", "Show storage", hold: true), "plain" });
+        Assert.Equal(1, _client.LiveHints);
+        Assert.Contains("plain", _client.RowTexts);
+        footer.Dispose();
+    }
+
+    private static BepInEx.Configuration.ConfigFile TempCfg() =>
+        new(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "progenitor-keyhint-" + Guid.NewGuid().ToString("N") + ".cfg"), saveOnInit: false);
+
+    private IKeybindHandle RegisterStorageBind(KeyChord keyboard, KeyChord pad)
+    {
+        var h = Keybinds.Register(_owner, "example.recipes", "storage", TempCfg(), keyboard, "Show storage.", () => { });
+        return pad.IsBound ? Keybinds.SetGamepadDefault(h, pad) : h;
+    }
+
+    [Fact]
+    public void A_key_hint_bind_shows_the_controller_chord_while_the_controller_is_in_use()
+    {
+        try
+        {
+            RegisterStorageBind(new KeyChord(UiKey.F9), KeyChord.Gamepad(UiKey.GamepadNorth));
+            var tip = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipFooter, _owner, "example.recipes");
+            tip.SetRows(new VanillaRow[] { VanillaRow.KeyHint("storage", "Show storage") });
+            _client.Controller = true;
+            var open = Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3)));
+            _client.Fire(VanillaUiSite.RecipeTooltip, open);
+            var pad = _client.HintDraws[^1];
+            Assert.True(pad.Gamepad);
+            Assert.Equal("<Gamepad>/buttonNorth", pad.FirstPath);
+
+            // Back on the keyboard: the refresh cadence (30 kept frames) draws the keyboard chord.
+            _client.Controller = false;
+            for (int i = 0; i < 31; i++) _client.Fire(VanillaUiSite.RecipeTooltip, open);
+            var keys = _client.HintDraws[^1];
+            Assert.False(keys.Gamepad);
+            Assert.Equal("<Keyboard>/f9", keys.FirstPath);
+            tip.Dispose();
+        }
+        finally { Keybinds.ResetForTests(); }
+    }
+
+    [Fact]
+    public void A_remap_redraws_at_once_and_an_unbound_bind_shows_no_key()
+    {
+        try
+        {
+            RegisterStorageBind(new KeyChord(UiKey.F9), KeyChord.None);
+            var tip = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipFooter, _owner, "example.recipes");
+            tip.SetRows(new VanillaRow[] { VanillaRow.KeyHint("storage", "Show storage") });
+            var open = Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3)));
+            _client.Fire(VanillaUiSite.RecipeTooltip, open);
+            Assert.Equal("<Keyboard>/f9", _client.HintDraws[^1].FirstPath);
+
+            // A remap bumps the keybinds' version: the next frame draws the new key, with that version.
+            Assert.True(Keybinds.Rebind("example.recipes", "storage", new KeyChord(UiKey.F8), checkConflicts: false));
+            int draws = _client.HintDraws.Count;
+            _client.Fire(VanillaUiSite.RecipeTooltip, open);
+            Assert.True(_client.HintDraws.Count > draws);
+            Assert.Equal("<Keyboard>/f8", _client.HintDraws[^1].FirstPath);
+            Assert.Equal(Keybinds.Version, _client.HintVersions[^1]);
+
+            // Unbound: no key at all, never the bind's id.
+            Assert.True(Keybinds.Rebind("example.recipes", "storage", KeyChord.None, checkConflicts: false));
+            _client.Fire(VanillaUiSite.RecipeTooltip, open);
+            var unbound = _client.HintDraws[^1];
+            Assert.False(unbound.HasKey);
+            Assert.Equal("Show storage", unbound.Text);
+            Assert.DoesNotContain(Lines, l => l.Contains("key hint 'storage'"));
+            tip.Dispose();
+        }
+        finally { Keybinds.ResetForTests(); }
+    }
+
+    [Fact]
+    public void A_key_that_is_neither_a_bind_nor_a_chord_is_shown_as_written_and_logged_once()
+    {
+        var tip = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipFooter, _owner, "example.recipes");
+        tip.SetRows(new VanillaRow[] { VanillaRow.KeyHint("Wheel up", "Zoom") });
+        var open = Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3)));
+        _client.Fire(VanillaUiSite.RecipeTooltip, open);
+        for (int i = 0; i < 31; i++) _client.Fire(VanillaUiSite.RecipeTooltip, open);
+        Assert.Equal("Wheel up", _client.HintDraws[^1].KeyText);
+        Assert.Single(Lines, l => l.Contains("key hint 'Wheel up' is neither a bind of example.recipes nor a key chord"));
+        tip.Dispose();
+    }
+
+    [Fact]
+    public void A_row_that_changes_kind_is_rebuilt_at_its_own_place()
+    {
+        var tip = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipFooter, _owner, "example.recipes");
+        tip.SetRows(new VanillaRow[] { "a", "b", "c" });
+        var open = Open(61, Recipe(9001, 500, 1, VanillaPanelKind.Workstation, new VanillaRecipeRequirement(301, 3)));
+        _client.Fire(VanillaUiSite.RecipeTooltip, open);
+        Assert.Equal(new[] { "a", "b", "c" }, _client.RowOrder.ToArray());
+
+        tip.SetRows(new VanillaRow[] { "a", VanillaRow.KeyHint("Alt", "Show"), "c" });
+        Assert.Equal(new[] { "a", "[hint] Show", "c" }, _client.RowOrder.ToArray());
+
+        tip.SetRows(new VanillaRow[] { VanillaRow.KeyHint("Alt", "First"), "b2", "c" });
+        Assert.Equal(new[] { "[hint] First", "b2", "c" }, _client.RowOrder.ToArray());
+        tip.Dispose();
+    }
+
+    [Fact]
+    public void Footer_and_inventory_header_anchors_resolve_where_the_layout_allows()
+    {
+        Assert.Equal(new[] { "tooltip", "header", "footer" }, VanillaUiSites.AnchorKeys(VanillaUiSite.InventoryTooltip));
+        Assert.Equal(new[] { "tooltip", "requirements", "line", "header", "footer" }, VanillaUiSites.AnchorKeys(VanillaUiSite.RecipeTooltip));
+        Assert.True(VanillaUiSites.IsTooltipAnchor(VanillaPanelAnchor.TooltipFooter));
+        Assert.False(VanillaUiSites.TryResolveAnchor(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.TooltipFooter, out _));
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("case VanillaPanelAnchor.TooltipFooter:", resolver);
+        Assert.Contains("else if (host != null) siblingIndex = TooltipSlotBeforeFooters(host);", resolver);
+        string rows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelRows.cs");
+        Assert.Contains("row.InputContextEntryPrefab", rows);
+        Assert.Contains("MeasureRequirementIconStep", rows);
     }
 
     [Fact]
@@ -1694,7 +1849,84 @@ public class VanillaPanelTests : IDisposable
             }
         }
 
-        private sealed class FakeWidget : IRuntimeWidget, IReleaseVerdict
+        public List<VanillaKeyHintParts> HintDraws { get; } = new();
+
+        public List<(IRuntimeWidget Row, int Level)> Indents { get; } = new();
+
+        public bool Controller { get; set; }
+
+        public bool ControllerGlyphsActive => Controller;
+
+        public IRuntimeWidget? CloneKeyHintRow(VanillaUiSite site, IRuntimeWidget container)
+        {
+            if (container is not FakeWidget c || !c.Alive) return null;
+            var r = new FakeHint();
+            c.Children.Add(r);
+            return r;
+        }
+
+        public List<int> HintVersions { get; } = new();
+
+        public void PlaceAttachRow(IRuntimeWidget row, IRuntimeWidget? previous, IRuntimeWidget? next)
+        {
+            foreach (var c in _containers)
+            {
+                if (row is not FakeWidget r || !c.Children.Contains(r)) continue;
+                c.Children.Remove(r);
+                int at = previous is FakeWidget p && c.Children.Contains(p) ? c.Children.IndexOf(p) + 1
+                    : next is FakeWidget n && c.Children.Contains(n) ? c.Children.IndexOf(n)
+                    : c.Children.Count;
+                c.Children.Insert(at, r);
+                return;
+            }
+        }
+
+        /// <summary>The live rows of the live container, in sibling order, as text (a key hint as <c>[hint] label</c>).</summary>
+        public List<string> RowOrder
+        {
+            get
+            {
+                var list = new List<string>();
+                foreach (var c in _containers)
+                    if (c.Alive)
+                        foreach (var r in c.Children)
+                            if (r.Alive && !r.IsButton) list.Add(r is FakeHint h ? "[hint] " + h.Parts.Label : r.Text);
+                return list;
+            }
+        }
+
+        public void ApplyKeyHint(IRuntimeWidget row, VanillaKeyHintParts parts, int keysVersion)
+        {
+            HintVersions.Add(keysVersion);
+            if (row is not FakeHint h) return;
+            HintDraws.Add(parts);
+            h.Parts = parts;
+            h.Glyphs = parts.HasGlyphs ? new[] { VanillaKeyHint.GlyphWord("Glyph_" + parts.FirstPath, "") } : new[] { VanillaKeyHint.GlyphWord(null, parts.KeyText) };
+        }
+
+        public void IndentAttachRow(IRuntimeWidget row, int level) => Indents.Add((row, level));
+
+        public int LiveHints
+        {
+            get
+            {
+                int n = 0;
+                foreach (var c in _containers)
+                    if (c.Alive) foreach (var r in c.Children) if (r.Alive && r is FakeHint) n++;
+                return n;
+            }
+        }
+
+        private sealed class FakeHint : FakeWidget, IKeyHintRowReadback
+        {
+            internal FakeHint() : base("", false) { }
+
+            public VanillaKeyHintParts Parts { get; set; }
+
+            public string[] Glyphs { get; set; } = new string[0];
+        }
+
+        private class FakeWidget : IRuntimeWidget, IReleaseVerdict
         {
             private bool _alive = true;
 

@@ -304,6 +304,12 @@ internal static class GalleryCatalog
             "Use it to add a line of the mod's own to an item's tooltip.", "Game panels tab, a note", "Progenitor.PanelsExample (tooltip line)", "Body, left-aligned, in the tooltip."),
         E("attach-recipe", Panels, "Recipe tooltip rows", "Ui.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, ...)",
             "Use it to add lines of the mod's own to a recipe's tooltip in a station or the crafting tab.", "Game panels tab, a note", "Progenitor.PanelsExample (recipe rows)", "Body, in the tooltip; a LabelTone color per row."),
+        E("attach-tooltip-ends", Panels, "Tooltip header and footer", "Ui.AttachToVanilla(VanillaUiSite.RecipeTooltip or InventoryTooltip, VanillaPanelAnchor.TooltipHeader or TooltipFooter, ...)",
+            "Use it to put a line right under a tooltip's title or at its very bottom.", "Game panels tab, a note", "Progenitor.PanelsExample (header and footer lines)", "Body, in the tooltip; header rows start where the title starts."),
+        E("attach-indent", Panels, "Indented tooltip row", "new VanillaRow(text, tone, indent) or new VanillaRow(text) { Indent = 1 }",
+            "Use it to line a row up under a requirement line's name, past its icon.", "Game panels tab, a note", "Progenitor.PanelsExample (per-line rows)", "Body, in the tooltip, inset one icon width per level."),
+        E("attach-keyhint", Panels, "Key hint row", "VanillaRow.KeyHint(bindIdOrKeyChord, label, hold: true)",
+            "Use it to tell the player which key does something, in the game's own key-hint look.", "Game panels tab, a note", "Progenitor.PanelsExample (Hold [Alt] footer)", "The game's key glyph and hint label (Body size), left-aligned."),
         E("attach-map", Panels, "Map rows", "Ui.AttachToVanilla(VanillaUiSite.MapWarEventInfo, ...)",
             "Use it to add rows beside the map's war event info.", "Game panels tab, a note", "Progenitor.Sample SampleRifts.cs", "Body, left-aligned."),
     };

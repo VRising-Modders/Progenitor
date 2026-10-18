@@ -20,8 +20,11 @@ namespace Progenitor.PanelsExample;
 /// <item><description>Castle heart window (also reachable as <c>ThronePanel</c>): <c>Castles</c> left, <c>Fuel</c> right.</description></item>
 /// <item><description>Item tooltip: one line naming the hovered item and its stack.</description></item>
 /// <item><description>Recipe tooltip: a muted line under the product naming the recipe, product and
-/// station, one line per requirement under the requirement list (the first one green), and one muted line
-/// under the title naming the window the recipe is shown in.</description></item>
+/// station, one line per requirement under the requirement list (the first one green), one muted line
+/// under the title naming the window the recipe is shown in, an indented line under each requirement line
+/// (lined up with the line's name, past its icon) and a footer: the key hint <i>Hold [Alt] Show storage</i>
+/// in the game's own hint style, plus one more line while the key is held.</description></item>
+/// <item><description>Item tooltip: a muted header line under the title and the same key-hint footer.</description></item>
 /// <item><description>The game's sort (key or button): every <see cref="InventorySortUsed"/> is logged with
 /// the client's hour of day (<c>ctx.Time.GetTimeOfDay</c>), and a second sort of the same inventory
 /// within <see cref="DoubleSortMs"/> is logged as a double sort.</description></item>
@@ -126,6 +129,43 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
             recipeHeader.SetRows(new VanillaRow[] { new("Example: header, " + e.Target.Kind, LabelTone.Muted) });
         }));
 
+        // Under each requirement line: one row indented one level, so it starts where the line's name starts.
+        for (int i = 0; i < 6; i++)   // the tooltip shows at most six requirement lines (0 to 5)
+        {
+            int lineIndex = i;
+            var under = UiApi.AttachToRequirementLine(lineIndex, ctx.Owner, ctx.Guid);
+            ctx.Track(under);
+            ctx.Track(under.OnPanel(e =>
+            {
+                if (e.Change == VanillaPanelChange.Closed) return;
+                var needs = e.Target.Requirements;
+                if (lineIndex >= needs.Count) { under.ClearRows(); return; }
+                under.SetRows(new VanillaRow[] { new("Example: line " + lineIndex + ", " + needs[lineIndex].ItemGuid, LabelTone.Muted, 1) });
+            }));
+        }
+
+        // Footers with a key hint in the game's own style. The key is a hold bind of this plugin (default Alt), so
+        // the glyph follows a remap in the Keybinds tab, and a controller button when one is bound and in use.
+        var recipeFooter = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipFooter, ctx.Owner, ctx.Guid);
+        var itemFooter = UiApi.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipFooter, ctx.Owner, ctx.Guid);
+        var itemHeader = UiApi.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipHeader, ctx.Owner, ctx.Guid);
+        ctx.Track(recipeFooter);
+        ctx.Track(itemFooter);
+        ctx.Track(itemHeader);
+        var held = new bool[1];
+        ctx.Keybinds.RegisterHold(StorageBind, KeyChord.Alt, "Panels example: show more in the tooltip footers while held",
+            onPressed: () => { held[0] = true; recipeFooter.Refresh(); itemFooter.Refresh(); },
+            onReleased: () => { held[0] = false; recipeFooter.Refresh(); itemFooter.Refresh(); });
+        VanillaRow[] FooterRows(VanillaPanelTarget t) => held[0]
+            ? new VanillaRow[] { VanillaRow.KeyHint(StorageBind, "Show storage", hold: true), new("Example: footer, held, " + t.Kind, LabelTone.Ok) }
+            : new VanillaRow[] { VanillaRow.KeyHint(StorageBind, "Show storage", hold: true) };
+        ctx.Track(recipeFooter.OnPanel(e => { if (e.Change != VanillaPanelChange.Closed) recipeFooter.SetRows(FooterRows(e.Target)); }));
+        ctx.Track(itemFooter.OnPanel(e => { if (e.Change != VanillaPanelChange.Closed) itemFooter.SetRows(FooterRows(e.Target)); }));
+        ctx.Track(itemHeader.OnPanel(e =>
+        {
+            if (e.Change != VanillaPanelChange.Closed) itemHeader.SetRows(new VanillaRow[] { new("Example: header, item " + e.Target.ItemGuid, LabelTone.Muted) });
+        }));
+
         // The game's sort, key or button: no input is read, the framework reports the request.
         var sortLog = ctx.Log;
         var time = ctx.Time;
@@ -139,6 +179,9 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
 
         ctx.Log.LogInfo("Panels example: loaded (tooltip enabled=" + tooltip.Enabled + ")");
     }
+
+    /// <summary>The hold bind the footers' key hint names (default Alt).</summary>
+    internal const string StorageBind = "ShowStorage";
 
     protected override void OnUnload(PanelsContext ctx, PluginUnloadReason reason) =>
         ctx.Log.LogInfo("Panels example: unloading, reason=" + reason);

@@ -85,7 +85,15 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
     /// <summary>Each row's <see cref="LabelTone"/>, parallel to <see cref="_texts"/>.</summary>
     private readonly List<LabelTone> _tones = new();
+
+    /// <summary>Each row as the plugin gave it (indent, key hint), parallel to <see cref="_texts"/>.</summary>
+    private readonly List<VanillaRow> _specs = new();
     private readonly List<IRuntimeWidget?> _rows = new();
+
+    // Key-hint rows follow a remap and a switch between keyboard and controller: they are drawn again when the
+    // keybinds change and otherwise every RefitEvery kept frames (the runtime writes only what changed).
+    private int _hintVersion = -1;
+    private int _hintFrames;
 
     /// <summary>
     /// Objects that outlived their <c>Release</c>, waiting for another frame. Only the widget is
@@ -307,6 +315,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             index = _texts.Count;
             _texts.Add(text ?? "");
             _tones.Add(LabelTone.Normal);
+            _specs.Add(new VanillaRow(text ?? ""));
             _rows.Add(null);
             _fitDirty = true;
             if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
@@ -326,6 +335,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             {
                 _texts[i] = rows![i] ?? "";
                 _tones[i] = LabelTone.Normal;
+                _specs[i] = new VanillaRow(_texts[i]);
             }
 
             if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
@@ -344,6 +354,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
                 var r = rows![i];
                 _texts[i] = r.Text;
                 _tones[i] = r.Tone;
+                _specs[i] = r;
             }
 
             if (Enabled && ContainerAliveLocked()) SyncRowsLocked();
@@ -360,6 +371,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             ReleaseRowLocked(last);
             _texts.RemoveAt(last);
             _tones.RemoveAt(last);
+            _specs.RemoveAt(last);
             _rows.RemoveAt(last);
         }
 
@@ -367,6 +379,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         {
             _texts.Add("");
             _tones.Add(LabelTone.Normal);
+            _specs.Add(new VanillaRow(""));
             _rows.Add(null);
         }
     }
@@ -393,6 +406,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             DestroyContainerLocked();
             _texts.Clear();
             _tones.Clear();
+            _specs.Clear();
             _rows.Clear();
             ids = _buttonIds.ToArray();
             _captions.Clear();
@@ -504,6 +518,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             switch (decision.Action)
             {
                 case VanillaAttachAction.Keep:
+                    RefreshHintsLocked();
                     if (IsPanel && ShouldRefitLocked())
                     {
                         // A button whose clone failed on the build (a donor not ready that frame) is
@@ -548,7 +563,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         {
             if (index >= _texts.Count) return;
             _texts[index] = text ?? "";
-            if (index < _rows.Count && _rows[index] is { Alive: true } w) WriteRow(w, _texts[index]);
+            if (index < _specs.Count && !_specs[index].IsKeyHint)
+                _specs[index] = new VanillaRow(_texts[index], _specs[index].Tone, _specs[index].Indent);
+            if (index < _rows.Count && _rows[index] is { Alive: true } w && w is not IKeyHintRowReadback) WriteRow(w, _texts[index]);
         }
     }
 
@@ -850,9 +867,26 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
                 Buttons = _buttons.ToArray(),
                 Rows = _texts.ToArray(),
                 RowTones = _tones.ToArray(),
+                RowIndents = _specs.ConvertAll(r => r.Indent).ToArray(),
+                RowHints = HintReadbackLocked(),
                 Container = attached ? _container : null,
             };
         }
+    }
+
+    /// <summary>Each row's key hint for the readback (null for a text row): the spec, the parts and the drawn glyphs.</summary>
+    private VanillaKeyHintReadback?[] HintReadbackLocked()
+    {
+        var list = new VanillaKeyHintReadback?[_specs.Count];
+        for (int i = 0; i < _specs.Count; i++)
+        {
+            var spec = _specs[i];
+            if (!spec.IsKeyHint) continue;
+            var drawn = i < _rows.Count ? _rows[i] as IKeyHintRowReadback : null;
+            list[i] = new VanillaKeyHintReadback(spec, drawn != null ? drawn.Parts : HintParts(spec, HintKeys()), drawn?.Glyphs ?? new string[0], drawn != null);
+        }
+
+        return list;
     }
 
     private bool MissingButtonsLocked()
@@ -955,17 +989,31 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             _rows.RemoveAt(last);
         }
 
+        var keys = HintKeys();
+        bool rebuilt = false;
         for (int i = 0; i < _texts.Count; i++)
         {
+            var spec = SpecAt(i);
+            bool replaced = false;
+            if (_rows[i] is { Alive: true } built && (built is IKeyHintRowReadback) != spec.IsKeyHint)
+            {
+                ReleaseRowLocked(i);   // the row changed kind: a key hint is another clone than a text row
+                replaced = true;
+            }
+
             if (_rows[i] is { Alive: true } live)
             {
-                WriteRow(live, _texts[i]);
-                ToneRow(live, ToneAt(i));
+                DrawRowLocked(live, i, spec, keys);
                 continue;
             }
 
             IRuntimeWidget? row = null;
-            try { row = _runtime.CloneDonorRow(Site, _container!, _texts[i]); }
+            try
+            {
+                row = spec.IsKeyHint
+                    ? _runtime.CloneKeyHintRow(Site, _container!)
+                    : _runtime.CloneDonorRow(Site, _container!, _texts[i]);
+            }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning(
@@ -978,12 +1026,139 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             // check: an instrument that reports success on a component rather than on a working
             // control is worse than no instrument.
             _rows[i] = row is { Alive: true } ? row : null;
-            if (_rows[i] != null)
+            if (_rows[i] == null) continue;
+            DrawRowLocked(_rows[i]!, i, spec, keys);
+            if (replaced || LaterRowLive(i)) rebuilt = true;
+        }
+
+        // A row rebuilt among live rows (a kind change, a clone that failed before) was appended at the container's end:
+        // put every row back at its own place, in order.
+        if (rebuilt)
+        {
+            for (int i = 0; i < _rows.Count; i++)
             {
-                WriteRow(_rows[i]!, _texts[i]);
-                ToneRow(_rows[i]!, ToneAt(i));
+                if (_rows[i] is not { Alive: true } r) continue;
+                IRuntimeWidget? previous = null, next = null;
+                for (int j = i - 1; j >= 0 && previous == null; j--) if (_rows[j] is { Alive: true } p) previous = p;
+                if (previous == null)
+                    for (int j = i + 1; j < _rows.Count && next == null; j++) if (_rows[j] is { Alive: true } n) next = n;
+                try { _runtime.PlaceAttachRow(r, previous, next); }
+                catch (Exception e)
+                {
+                    Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " row order threw: " + e.Message);
+                }
             }
         }
+
+        _hintVersion = keys.Version;
+        _hintFrames = 0;
+    }
+
+    private bool LaterRowLive(int index)
+    {
+        for (int j = index + 1; j < _rows.Count; j++) if (_rows[j] is { Alive: true }) return true;
+        return false;
+    }
+
+    private VanillaRow SpecAt(int index) => index >= 0 && index < _specs.Count ? _specs[index] : new VanillaRow(TextAt(index));
+
+    /// <summary>One read of the keybinds and the device for a whole sync or refresh: every key-hint row shares it.</summary>
+    private readonly struct HintInputs
+    {
+        internal HintInputs(IReadOnlyList<IKeybindInfo>? binds, bool controller, int version)
+        {
+            Binds = binds;
+            Controller = controller;
+            Version = version;
+        }
+
+        internal IReadOnlyList<IKeybindInfo>? Binds { get; }
+
+        internal bool Controller { get; }
+
+        internal int Version { get; }
+    }
+
+    private HintInputs HintKeys()
+    {
+        int version = KeybindsVersion();
+        bool any = false;
+        for (int i = 0; i < _specs.Count && !any; i++) any = _specs[i].IsKeyHint;
+        if (!any) return new HintInputs(null, false, version);
+        IReadOnlyList<IKeybindInfo>? binds = null;
+        try { binds = Keybinds.Snapshot(); }
+        catch { binds = null; }
+        bool controller = false;
+        try { controller = _runtime.ControllerGlyphsActive; }
+        catch { controller = false; }
+        return new HintInputs(binds, controller, version);
+    }
+
+    /// <summary>Write one row: its text (or its key hint), its tone and its indent.</summary>
+    private void DrawRowLocked(IRuntimeWidget row, int index, in VanillaRow spec, in HintInputs keys)
+    {
+        if (spec.IsKeyHint) HintRow(row, spec, keys);
+        else WriteRow(row, _texts[index]);
+        ToneRow(row, ToneAt(index));
+        try { _runtime.IndentAttachRow(row, spec.Indent); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " row indent threw: " + e.Message);
+        }
+    }
+
+    // Keys that were neither a bind of this plugin nor a chord, said once each.
+    private readonly HashSet<string> _saidWritten = new(StringComparer.Ordinal);
+
+    /// <summary>The parts a key-hint row shows now: its bind or chord resolved for this handle's plugin.</summary>
+    private VanillaKeyHintParts HintParts(in VanillaRow spec, in HintInputs keys)
+    {
+        var parts = VanillaKeyHint.Resolve(spec.Key, spec.Text, spec.Hold, PluginId, keys.Binds, keys.Controller, out var source);
+        if (source == VanillaKeyHintSource.Written && _saidWritten.Add(spec.Key))
+        {
+            Plugin.Logger?.LogInfo("Ui: attach " + VanillaUiSites.Key(Site) + " key hint '" + spec.Key + "' is neither a bind of "
+                + PluginId + " nor a key chord; it is shown as written. A bind id needs the pluginId of the plugin that registered it.");
+        }
+
+        return parts;
+    }
+
+    private void HintRow(IRuntimeWidget row, in VanillaRow spec, in HintInputs keys)
+    {
+        try { _runtime.ApplyKeyHint(row, HintParts(spec, keys), keys.Version); }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " key hint threw: " + e.Message);
+        }
+    }
+
+    /// <summary>
+    /// Draw the key-hint rows again when the keybinds changed (a remap: at once) or every <see cref="RefitEvery"/> kept
+    /// frames (a switch between keyboard and controller). One keybinds snapshot serves every row; the runtime writes only
+    /// what changed.
+    /// </summary>
+    private void RefreshHintsLocked()
+    {
+        int version = KeybindsVersion();
+        bool due = version != _hintVersion || ++_hintFrames >= RefitEvery;
+        if (!due) return;
+        _hintVersion = version;
+        _hintFrames = 0;
+        if (!ContainerAliveLocked()) return;
+        HintInputs? keys = null;
+        for (int i = 0; i < _rows.Count && i < _specs.Count; i++)
+        {
+            var spec = _specs[i];
+            if (!spec.IsKeyHint || _rows[i] is not { Alive: true } row) continue;
+            keys ??= HintKeys();
+            HintRow(row, spec, keys.Value);
+        }
+    }
+
+    private static int KeybindsVersion()
+    {
+        try { return Keybinds.Version; }
+        catch { return 0; }
     }
 
     private LabelTone ToneAt(int index) => index >= 0 && index < _tones.Count ? _tones[index] : LabelTone.Normal;
@@ -1212,6 +1387,12 @@ internal sealed class VanillaAttachReadback
 
     internal LabelTone[] RowTones { get; init; } = Array.Empty<LabelTone>();
 
+    /// <summary>Each row's indent level.</summary>
+    internal int[] RowIndents { get; init; } = Array.Empty<int>();
+
+    /// <summary>Each row's key hint, or null for a text row.</summary>
+    internal VanillaKeyHintReadback?[] RowHints { get; init; } = Array.Empty<VanillaKeyHintReadback?>();
+
     internal IRuntimeWidget? Container { get; init; }
 
     /// <summary>The requirement line of a per-line attachment, else -1.</summary>
@@ -1256,7 +1437,11 @@ internal sealed class VanillaAttachReadback
             ["buttons"] = buttons,
             ["rows"] = new List<string>(Rows),
             ["rowTones"] = Array.ConvertAll(RowTones, t => LabelTones.Name(t)),
+            ["rowIndents"] = RowIndents,
         };
+        bool anyHint = false;
+        foreach (var h in RowHints) anyHint |= h != null;
+        if (anyHint) result["rowKeyHints"] = Array.ConvertAll(RowHints, h => h?.Describe());
         if (RequirementLine >= 0)
         {
             result["requirementLine"] = RequirementLine;
@@ -1264,6 +1449,39 @@ internal sealed class VanillaAttachReadback
         }
         return result;
     }
+}
+
+/// <summary>One key-hint row for <c>ui_read panels</c>: what the plugin asked for and what is drawn. Game-free.</summary>
+internal sealed class VanillaKeyHintReadback
+{
+    internal VanillaKeyHintReadback(VanillaRow spec, VanillaKeyHintParts parts, string[] glyphs, bool drawn)
+    {
+        Spec = spec;
+        Parts = parts;
+        Glyphs = glyphs ?? new string[0];
+        Drawn = drawn;
+    }
+
+    internal VanillaRow Spec { get; }
+
+    internal VanillaKeyHintParts Parts { get; }
+
+    internal string[] Glyphs { get; }
+
+    internal bool Drawn { get; }
+
+    /// <summary><c>key</c> (as given), <c>chord</c> (the key shown), <c>label</c>, <c>hold</c>, <c>device</c>, <c>glyphs</c> (each <c>sprite:&lt;name&gt;</c> or <c>text:&lt;key&gt;</c>) and <c>text</c>.</summary>
+    internal Dictionary<string, object?> Describe() => new()
+    {
+        ["key"] = Spec.Key,
+        ["chord"] = Parts.KeyText,
+        ["label"] = Parts.Label,
+        ["hold"] = Spec.Hold,
+        ["device"] = Parts.Gamepad ? "gamepad" : "keyboard",
+        ["glyphs"] = Glyphs,
+        ["drawn"] = Drawn,
+        ["text"] = Parts.Text,
+    };
 }
 
 /// <summary>
