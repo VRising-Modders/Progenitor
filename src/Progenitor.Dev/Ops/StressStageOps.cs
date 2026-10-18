@@ -122,8 +122,9 @@ internal static class StressStageOps
                     else if (seen.IsConnected) why ??= m.Name + " is connected";
                     else if (OfflineUserTeamRules.Decide(seen).Action != OfflineUserTeamAction.Ready) why ??= m.Name + " has no own team (" + string.Join(", ", OfflineUserTeamRules.Missing(seen)) + ")";
                 }
-                if (clanSize > 0 && clan.Members.Count > clanSize)
-                    notes.Add($"{clan.Name} has {clan.Members.Count} members, above the server's ClanSize {clanSize}; the invite path enforces that limit, AddUserToClan does not");
+                // The live ClanSize setting bounds every clan, as the game's invite path does (the add-member routine does not check it).
+                if (clanSize <= 0) why ??= "the server's ClanSize setting could not be read";
+                else if (clan.Members.Count > clanSize) why ??= $"clan_size: {clan.Members.Count} members, above the server's ClanSize {clanSize}";
                 clanRows.Add(new Dictionary<string, object?> { ["clan"] = clan.Name, ["members"] = clan.Members.Count, ["refusal"] = why });
                 if (why != null || a.DryRun) continue;
 
@@ -148,9 +149,9 @@ internal static class StressStageOps
             plan["unproven"] = new[]
             {
                 "TeamUtility.AddUserToClan through its generated wrapper (ref User argument) on an offline user: source-checked, not live-verified",
-                "the clan's TeamData: the create step copies it to members in the same frame; whether SpawnTeamSystem later assigns it has not been read yet (readback compares clan and member TeamData)",
-                "ClanRole: written as a component on the user (the game calls ClanSystem_Server.SetClanRole, whose body has not been read yet)",
-                "ClanUtility.SetCharacterClanName is skipped: stress owners have no character",
+                "the clan's TeamData: the create step copies the clan prefab's value to members in the same frame; SpawnTeamSystem's cache update only reads team data (readback compares clan and member TeamData)",
+                "ClanSystem_Server.SetClanRole (EntityManager, Entity, ClanRoleEnum; a plain component write) through its generated wrapper, after adding ClanRole to the offline owner",
+                "ClanUtility.SetCharacterClanName is skipped: it needs the user's Controller, which offline owners lack, so it would do nothing",
                 "ClanMemberStatus is left to the game's clan status system",
                 "castle teams are not added to the clan's allies: the game's join path does not do that (each castle team stays allied to its owner's team only, which ClaimCastle asserts)",
             };
@@ -299,13 +300,13 @@ internal static class StressStageOps
 
     // ---- stress_stations -----------------------------------------------------------------------
 
-    private const string PlacementMissing =
+    private const string PlacementNote =
         "no proven path places a station for an offline owner in an existing castle: the build event needs the owner's " +
-        "character (CanBuildTileModels, in range, blueprint unlocked by the owner's progression), and the server's castle " +
-        "generator (GenerateCastleSystem, proven) only builds a whole castle on an empty territory. Needed: either a " +
-        "character for the offline owner that the build event accepts, or a verified equivalent of the generator's " +
-        "per-object writes (Instantiate the station prefab, Translation/Rotation, CastleHeartConnection) plus tile " +
-        "occupancy so stations do not overlap, then a readback that the station spawned its inventories and has the castle team";
+        "character (CanBuildTileModels, in range, blueprint unlocked by the owner's progression). experiment:true places " +
+        "with the per-object writes the server's castle generator makes for a room object (Instantiate the prefab, " +
+        "Translation, CastleHeartConnection = the heart; no rotation), at a free floor spot found from the castle's " +
+        "footprints and a same-prefab template's offset. Unproven: tile registration, team, inventories and save reload; " +
+        "the readback checks each";
 
     public static object StationsOp(JsonElement args)
     {
@@ -314,48 +315,207 @@ internal static class StressStageOps
         StressOps.RequireGate(a.Confirm, a.DryRun);
         var world = RequireIdle();
         var collected = Collect(world, a.Seed, a.AllPlots ? null : a.Plots);
-        var job = new StageJob("stations", a.Seed, dryRun: true, a.BudgetMs, stopOnFailure: false);
-        var current = new Dictionary<int, List<int>>();
-        var territories = collected.Owners.SelectMany(o => o.Castles).Select(c => c.Territory).OrderBy(t => t).ToList();
-        foreach (int t0 in territories)
+        bool place = a.Experiment && !a.DryRun;
+        var job = new StageJob("stations", a.Seed, dryRun: !place, a.BudgetMs, stopOnFailure: true);
+        foreach (var n in collected.Notes) job.Note(n);
+        if (!a.DryRun && !a.Experiment) job.Note("writes need experiment:true (and plots:[...] with 1-3 castles); this run only plans");
+        var reads = new Dictionary<int, StationCastle>();
+        foreach (int t0 in collected.Plots.Keys.OrderBy(t => t))
         {
             int t = t0;
             job.Add("read " + t, () =>
             {
-                var list = new List<int>();
-                foreach (var s in CastleApi.ForTerritory(t).Stations())
-                    if (s.IsRefinement) list.Add(s.Building.PrefabGuid);
-                current[t] = list;
-                return list.Count + " refinement station(s)";
+                reads[t] = ReadStationCastle(world, collected.Plots[t]);
+                return $"{reads[t].Refinement.Count} refinement station(s), {reads[t].Buildings.Count} building(s), {reads[t].FloorEntities.Count} floor(s)";
             });
         }
-        var plan = new Dictionary<string, object?> { ["seed"] = a.Seed, ["perCastle"] = a.PerCastle, ["writes"] = "refused: " + PlacementMissing };
+        var plan = new Dictionary<string, object?> { ["seed"] = a.Seed, ["perCastle"] = a.PerCastle, ["experiment"] = place, ["limit"] = a.Limit, ["note"] = PlacementNote };
+        var placed = new List<Placement>();
         job.Plan = plan;
         job.Add("plan", () =>
         {
-            var catalog = current.Values.SelectMany(v => v).GroupBy(g => g).OrderByDescending(x => x.Count()).ThenBy(x => x.Key).Select(x => x.Key).ToList();
+            var catalog = reads.Values.SelectMany(r => r.Refinement.Select(s => s.PrefabGuid.GuidHash)).GroupBy(g => g)
+                .OrderByDescending(x => x.Count()).ThenBy(x => x.Key).Select(x => x.Key).ToList();
             var rows = new List<object>();
             int total = 0;
-            foreach (var kv in current.OrderBy(k => k.Key))
+            foreach (var kv in reads.OrderBy(k => k.Key))
             {
-                var add = StressStationPlanner.Plan(kv.Value, a.PerCastle, catalog);
+                var castle = kv.Value;
+                var have = castle.Refinement.Select(s => s.PrefabGuid.GuidHash).ToList();
+                // Placement copies a same-prefab, unrotated template's offset, so it only offers kinds this castle has one of.
+                var kinds = place ? catalog.Where(g => castle.Template(g) != null).ToList() : catalog;
+                var add = StressStationPlanner.Plan(have, a.PerCastle, kinds);
                 total += add.Count;
-                rows.Add(new Dictionary<string, object?>
+                var row = new Dictionary<string, object?>
                 {
                     ["territory"] = kv.Key,
-                    ["refinementStations"] = kv.Value.Count,
-                    ["add"] = add.GroupBy(x => x).Select(x => new Dictionary<string, object?> { ["prefab"] = Name(world, x.Key), ["guid"] = x.Key, ["count"] = x.Count() }).ToList(),
-                });
+                    ["refinementStations"] = have.Count,
+                    ["structureRevision"] = castle.Revision,
+                    ["add"] = add.GroupBy(x => x).Select(x => (object)new Dictionary<string, object?> { ["prefab"] = Name(world, x.Key), ["guid"] = x.Key, ["count"] = x.Count() }).ToList(),
+                };
+                if (place)
+                {
+                    var spots = new List<object>();
+                    var occupied = castle.Occupied.ToList();
+                    foreach (int guid in add.Take(a.Limit))
+                    {
+                        var tpl = castle.Template(guid)!;
+                        var floors = castle.Buildings.Where(b => castle.FloorEntities.Contains(b.Entity) && b.OriginHeight == tpl.OriginHeight).Select(Rect).ToList();
+                        var size = Rect(tpl);
+                        var spot = StressSpotFinder.Find(floors, occupied, size.Width, size.Depth, margin: 1);
+                        if (spot is not StressRect r)
+                        {
+                            spots.Add(new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["spot"] = null, ["why"] = "no free floor block of that size" });
+                            continue;
+                        }
+                        occupied.Add(r);
+                        var pos = new Unity.Mathematics.float3(
+                            CastleGeometry.TileToWorld(r.MinX) + castle.TemplateOffsets[guid].x,
+                            castle.TemplateOffsets[guid].y,
+                            CastleGeometry.TileToWorld(r.MinY) + castle.TemplateOffsets[guid].z);
+                        var p = new Placement { Territory = kv.Key, PrefabGuid = guid, Spot = r, Position = pos, Heart = castle.Heart, RevisionBefore = castle.Revision };
+                        placed.Add(p);
+                        spots.Add(new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["tiles"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}", ["x"] = Math.Round(pos.x, 2), ["y"] = Math.Round(pos.y, 2), ["z"] = Math.Round(pos.z, 2) });
+                        job.Add($"place {kv.Key} {guid} at {r.MinX},{r.MinY}", () => PlaceStation(world, p));
+                    }
+                    row["placements"] = spots;
+                }
+                rows.Add(row);
             }
             plan["catalog"] = catalog.Select(c => Name(world, c)).ToList();
             plan["castles"] = rows;
             plan["stationsToAdd"] = total;
-            plan["missing"] = PlacementMissing;
-            return total + " station(s) would be added";
+            return place ? $"{placed.Count} placement(s) queued of {total} planned" : total + " station(s) would be added";
         });
-        if (!a.DryRun) job.Note("not a dry run, but stations cannot be placed yet: plan only, nothing written");
-        job.Readback = () => current.OrderBy(k => k.Key).Select(kv => (object)new Dictionary<string, object?> { ["territory"] = kv.Key, ["refinementStations"] = kv.Value.Count }).ToList();
+        job.Readback = () =>
+        {
+            var list = new List<object>();
+            foreach (var p in placed) list.Add(PlacementReadback(world, p, collected.Plots[p.Territory]));
+            foreach (var kv in reads.OrderBy(k => k.Key))
+            {
+                int now = 0;
+                foreach (var s in CastleApi.ForTerritory(kv.Key).Stations()) if (s.IsRefinement) now++;
+                list.Add(new Dictionary<string, object?> { ["territory"] = kv.Key, ["refinementStations"] = now, ["before"] = kv.Value.Refinement.Count });
+            }
+            return list;
+        };
         return Start(world, job);
+    }
+
+    private sealed class Placement
+    {
+        public int Territory;
+        public int PrefabGuid;
+        public StressRect Spot;
+        public Unity.Mathematics.float3 Position;
+        public Entity Heart;
+        public long RevisionBefore;
+        public Entity Placed;
+    }
+
+    private sealed class StationCastle
+    {
+        public Entity Heart;
+        public long Revision;
+        public List<CastleBuilding> Buildings { get; } = new();
+        public HashSet<Entity> FloorEntities { get; } = new();
+        public List<CastleBuilding> Refinement { get; } = new();
+        public List<StressRect> Occupied { get; } = new();
+        public Dictionary<int, Unity.Mathematics.float3> TemplateOffsets { get; } = new();
+        private readonly Dictionary<int, CastleBuilding> _templates = new();
+
+        public CastleBuilding? Template(int guid) => _templates.TryGetValue(guid, out var b) ? b : null;
+        public void AddTemplate(CastleBuilding b, Unity.Mathematics.float3 offset) { _templates[b.PrefabGuid.GuidHash] = b; TemplateOffsets[b.PrefabGuid.GuidHash] = offset; }
+    }
+
+    private static StressRect Rect(CastleBuilding b) => new(b.FootprintMinX, b.FootprintMinY, b.FootprintMaxX, b.FootprintMaxY);
+
+    private static StationCastle ReadStationCastle(World world, CastlePlot plot)
+    {
+        var em = world.EntityManager;
+        var c = new StationCastle { Heart = plot.HeartEntity, Revision = CastleApi.ForTerritory(plot.TerritoryIndex).StructureRevision };
+        foreach (var t in CastleReader.Tiles(world, plot)) if (t.FloorEntity != Entity.Null) c.FloorEntities.Add(t.FloorEntity);
+        c.Buildings.AddRange(CastleReader.Buildings(world, plot));
+        var refinement = ComponentIndex.Of<Refinementstation>(ComponentType.AccessMode.ReadOnly);
+        foreach (var b in c.Buildings)
+        {
+            if (!c.FloorEntities.Contains(b.Entity)) c.Occupied.Add(Rect(b));
+            if (!em.HasComponent(b.Entity, refinement)) continue;
+            c.Refinement.Add(b);
+            if (b.Rotation != 0 || c.Template(b.PrefabGuid.GuidHash) != null) continue;
+            if (!b.Entity.TryRead<Unity.Transforms.Translation>(em, out var tr)) continue;
+            c.AddTemplate(b, new Unity.Mathematics.float3(tr.Value.x - CastleGeometry.TileToWorld(b.FootprintMinX), tr.Value.y, tr.Value.z - CastleGeometry.TileToWorld(b.FootprintMinY)));
+        }
+        return c;
+    }
+
+    /// <summary>The castle generator's per-object writes for a room object, on one station.</summary>
+    private static unsafe string PlaceStation(World world, Placement p)
+    {
+        var em = world.EntityManager;
+        if (!em.Exists(p.Heart)) throw new InvalidOperationException("the castle heart is gone");
+        var prefabs = world.GetExistingSystemManaged<PrefabCollectionSystem>() ?? throw new InvalidOperationException("no PrefabCollectionSystem");
+        if (!prefabs._PrefabGuidToEntityMap.TryGetValue(new PrefabGUID(p.PrefabGuid), out var prefab) || !em.Exists(prefab))
+            throw new InvalidOperationException($"station prefab {p.PrefabGuid} is not in _PrefabGuidToEntityMap");
+        var e = em.Instantiate(prefab);
+        try
+        {
+            e.Write(em, new Unity.Transforms.Translation { Value = p.Position });
+            var hc = ComponentIndex.Of<ProjectM.CastleBuilding.CastleHeartConnection>(ComponentType.AccessMode.ReadWrite);
+            if (em.HasComponent(e, hc))
+            {
+                byte* h = (byte*)em.GetComponentDataRawRW(e, hc.TypeIndex);
+                if (h == null) throw new InvalidOperationException("CastleHeartConnection GetComponentDataRawRW returned null");
+                *(int*)(h + Layout.CastleHeartConnectionEntityOffset) = p.Heart.Index;
+                *(int*)(h + Layout.CastleHeartConnectionEntityOffset + 4) = p.Heart.Version;
+                h[Layout.CastleHeartConnectionEntityOffset + 8] = 0;
+            }
+            p.Placed = e;
+            Plugin.Logger?.LogInfo($"stress station placed {Name(world, p.PrefabGuid)} entity {Fmt(e)} territory {p.Territory} tiles {p.Spot.MinX},{p.Spot.MinY} heart {Fmt(p.Heart)}");
+            return $"entity {Fmt(e)}";
+        }
+        catch
+        {
+            try { if (em.Exists(e)) em.DestroyEntity(e); } catch { }
+            throw;
+        }
+    }
+
+    private static object PlacementReadback(World world, Placement p, CastlePlot plot)
+    {
+        var em = world.EntityManager;
+        var row = new Dictionary<string, object?> { ["territory"] = p.Territory, ["prefab"] = Name(world, p.PrefabGuid), ["entity"] = p.Placed == Entity.Null ? null : Fmt(p.Placed) };
+        if (p.Placed == Entity.Null || !em.Exists(p.Placed)) { row["exists"] = false; return row; }
+        row["exists"] = true;
+        GhostOps.TryReadEntityField<ProjectM.CastleBuilding.CastleHeartConnection>(em, p.Placed, Layout.CastleHeartConnectionEntityOffset, out var heart);
+        row["heartConnected"] = heart == p.Heart;
+        GhostOps.TryReadEntityField<TeamReference>(em, p.Placed, GhostOps.TeamReferenceEntityOffset, out var team);
+        GhostOps.TryReadEntityField<TeamReference>(em, p.Heart, GhostOps.TeamReferenceEntityOffset, out var castleTeam);
+        row["team"] = Fmt(team);
+        row["castleTeam"] = Fmt(castleTeam);
+        row["sameTeamAsHeart"] = team != Entity.Null && team == castleTeam;
+        var inst = ComponentIndex.Of<InventoryInstanceElement>(ComponentType.AccessMode.ReadOnly);
+        row["inventories"] = em.HasComponent(p.Placed, inst) ? em.GetBufferLength(p.Placed, inst.TypeIndex) : 0;
+        var progress = StationApi.Progress(world, p.Placed);
+        row["status"] = progress?.RawStatus;
+        row["noOwner"] = progress?.RawStatus == 5;
+        var building = CastleReader.Buildings(world, plot).FirstOrDefault(b => b.Entity == p.Placed);
+        row["listedInCastle"] = building != null;
+        if (building != null)
+        {
+            var r = Rect(building);
+            row["footprint"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}";
+            row["overlaps"] = CastleReader.Buildings(world, plot)
+                .Where(b => b.Entity != p.Placed && b.Kind != CastleLogic.BuildingKind.Decor && Rect(b).Overlaps(r))
+                .Select(b => b.PrefabName + " " + Fmt(b.Entity)).ToList();
+        }
+        bool station = false;
+        foreach (var s in CastleApi.ForTerritory(p.Territory).Stations())
+            if (s.Entity.Index == p.Placed.Index && s.Entity.Version == p.Placed.Version) station = true;
+        row["listedAsStation"] = station;
+        long rev = CastleApi.ForTerritory(p.Territory).StructureRevision;
+        row["structureRevisionChanged"] = rev != p.RevisionBefore;
+        return row;
     }
 
     // ---- status / shutdown ---------------------------------------------------------------------
@@ -394,8 +554,8 @@ internal static class StressStageOps
             guid[7] = (byte)((guid[7] & 0x0F) | 0x40);
             guid[8] = (byte)((guid[8] & 0x3F) | 0x80);
             for (int i = 0; i < 16; i++) p[Layout.ClanTeamClanGuidOffset + i] = guid[i];
-            int teamValue = spawnTeams.LastCreatedTeamId + 1;
-            spawnTeams.LastCreatedTeamId = teamValue;
+            // GetNewTeamId is ++LastCreatedTeamId, the increment the create step makes inline.
+            int teamValue = spawnTeams.GetNewTeamId();
             *(int*)(p + Layout.ClanTeamTeamValueOffset) = teamValue;
             var by = new byte[Layout.NetworkIdSize];
             var netType = ComponentIndex.Of<NetworkId>(ComponentType.AccessMode.ReadOnly);
@@ -438,11 +598,12 @@ internal static class StressStageOps
         *(int*)(p + Layout.UserClanEntityOffset + 4) = clan.Version;
         *(int*)(p + Layout.UserClanEntityOffset + 8) = 0;
 
+        // The game's routine: ClanSystem_Server.SetClanRole is SetComponentData<ClanRole>(user, role), so the
+        // component must exist first (a real user has it from the user prefab; the offline owner does not).
         if (!user.Has<ClanRole>(em)) user.Add<ClanRole>(em);
-        var roleType = ComponentIndex.Of<ClanRole>(ComponentType.AccessMode.ReadWrite);
-        int* r = (int*)em.GetComponentDataRawRW(user, roleType.TypeIndex);
-        if (r == null) throw new InvalidOperationException("ClanRole GetComponentDataRawRW returned null");
-        *(int*)((byte*)r + Layout.ClanRoleValueOffset) = role;
+        ProjectM.Gameplay.Clan.ClanSystem_Server.SetClanRole(em, user, (ClanRoleEnum)role);
+        // ClanUtility.SetCharacterClanName is not called: it only writes the name onto the character the user's
+        // Controller points at, and an offline owner has no Controller, so it would do nothing.
         Plugin.Logger?.LogInfo($"stress clan join user {Fmt(user)} clan {Fmt(clan)} role {role}");
         return $"user {Fmt(user)} role {role}";
     }
@@ -679,6 +840,7 @@ internal static class StressStageOps
             });
         }
         row["members"] = rows;
+        row["castleTeams"] = "owner-only allies, as the game's join path leaves them; clan reach goes through each owner's team";
         row["ok"] = allOk;
         return row;
     }

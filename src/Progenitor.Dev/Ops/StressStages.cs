@@ -51,6 +51,9 @@ internal sealed class StressStageArgs
     public double Speed { get; private set; } = 1;
     /// <summary>stress_clan: only this clan ordinal (1-based), to prove one clan first.</summary>
     public int? OnlyClan { get; private set; }
+    /// <summary>stress_stations experiment: stations placed per castle at most (default 1).</summary>
+    public int Limit { get; private set; } = 1;
+    public const int MaxExperimentPlots = 3;
     public bool DryRun { get; private set; }
     public string? Confirm { get; private set; }
     /// <summary>stress_clan: the explicit opt-in for the game's own clan routine (a native call).</summary>
@@ -105,6 +108,10 @@ internal sealed class StressStageArgs
         ParsePlots(args, a);
         a.PerCastle = OptInt(args, "perCastle", 1, MaxPerCastle) ?? 15;
         a.DryRun = Bool(args, "dryRun", false);
+        a.Experiment = Bool(args, "experiment", false);
+        a.Limit = OptInt(args, "limit", 1, MaxPerCastle) ?? 1;
+        if (a.Experiment && !a.DryRun && (a.AllPlots || a.Plots.Count > MaxExperimentPlots))
+            throw new ArgumentException($"experiment placement needs plots:[...] with 1..{MaxExperimentPlots} territories (prove it on one castle first)");
         a.Confirm = Str(args, "confirm");
         a.BudgetMs = Double(args, "budgetMs", StressArgs.DefaultBudgetMs, StressArgs.MinBudgetMs, StressArgs.MaxBudgetMs);
         return a;
@@ -702,5 +709,64 @@ internal static class StressStationPlanner
     {
         for (int i = 0; i < list.Count; i++) if (list[i] == value) return i;
         return int.MaxValue;
+    }
+}
+
+/// <summary>A tile rectangle, both ends inclusive.</summary>
+internal readonly struct StressRect
+{
+    public StressRect(int minX, int minY, int maxX, int maxY)
+    {
+        MinX = Math.Min(minX, maxX);
+        MinY = Math.Min(minY, maxY);
+        MaxX = Math.Max(minX, maxX);
+        MaxY = Math.Max(minY, maxY);
+    }
+
+    public int MinX { get; }
+    public int MinY { get; }
+    public int MaxX { get; }
+    public int MaxY { get; }
+    public int Width => MaxX - MinX + 1;
+    public int Depth => MaxY - MinY + 1;
+
+    public bool Overlaps(StressRect o, int margin = 0) =>
+        MinX - margin <= o.MaxX && o.MinX <= MaxX + margin && MinY - margin <= o.MaxY && o.MinY <= MaxY + margin;
+}
+
+/// <summary>
+/// Where a new station can stand in an existing castle (the stress_stations experiment): a
+/// <paramref name="width"/> x <paramref name="depth"/> tile block fully on the castle's floors and clear of every
+/// other building's footprint plus <paramref name="margin"/> tiles. Footprints are taken inclusive at both ends, so
+/// the test errs on the side of free space. Scans rows (y, then x) from the floors' low corner; deterministic.
+/// </summary>
+internal static class StressSpotFinder
+{
+    public static StressRect? Find(IReadOnlyList<StressRect> floors, IReadOnlyList<StressRect> occupied, int width, int depth, int margin)
+    {
+        if (floors.Count == 0 || width < 1 || depth < 1) return null;
+        var covered = new HashSet<(int, int)>();
+        foreach (var f in floors)
+            for (int x = f.MinX; x <= f.MaxX; x++)
+                for (int y = f.MinY; y <= f.MaxY; y++)
+                    covered.Add((x, y));
+        int minX = floors.Min(f => f.MinX), minY = floors.Min(f => f.MinY), maxX = floors.Max(f => f.MaxX), maxY = floors.Max(f => f.MaxY);
+        for (int y = minY; y + depth - 1 <= maxY; y++)
+        {
+            for (int x = minX; x + width - 1 <= maxX; x++)
+            {
+                var r = new StressRect(x, y, x + width - 1, y + depth - 1);
+                bool onFloor = true;
+                for (int tx = r.MinX; tx <= r.MaxX && onFloor; tx++)
+                    for (int ty = r.MinY; ty <= r.MaxY && onFloor; ty++)
+                        if (!covered.Contains((tx, ty))) onFloor = false;
+                if (!onFloor) continue;
+                bool clear = true;
+                foreach (var o in occupied)
+                    if (r.Overlaps(o, margin)) { clear = false; break; }
+                if (clear) return r;
+            }
+        }
+        return null;
     }
 }

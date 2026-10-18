@@ -288,6 +288,40 @@ public class DevStressStagesTests
     }
 
     [Fact]
+    public void Stations_ExperimentNeedsAFewNamedPlots()
+    {
+        var a = StressStageArgs.ParseStations(Json("{\"seed\":18,\"plots\":[12],\"experiment\":true,\"limit\":2,\"confirm\":\"stress\"}"));
+        Assert.True(a.Experiment);
+        Assert.Equal(2, a.Limit);
+        Assert.Throws<ArgumentException>(() => StressStageArgs.ParseStations(Json("{\"seed\":18,\"experiment\":true}")));
+        Assert.Throws<ArgumentException>(() => StressStageArgs.ParseStations(Json("{\"seed\":18,\"plots\":[1,2,3,4],\"experiment\":true}")));
+        // A dry run may plan the experiment anywhere.
+        Assert.True(StressStageArgs.ParseStations(Json("{\"seed\":18,\"experiment\":true,\"dryRun\":true}")).Experiment);
+    }
+
+    [Fact]
+    public void SpotFinder_FindsAFreeFloorBlock()
+    {
+        // Two 10 x 10 floors side by side; a chest occupies the low corner of the first.
+        var floors = new[] { new StressRect(0, 0, 9, 9), new StressRect(10, 0, 19, 9) };
+        var occupied = new List<StressRect> { new(0, 0, 2, 2) };
+        var spot = StressSpotFinder.Find(floors, occupied, 3, 3, margin: 1);
+        Assert.NotNull(spot);
+        var r = spot!.Value;
+        Assert.Equal((4, 0, 6, 2), (r.MinX, r.MinY, r.MaxX, r.MaxY)); // first column clear of the chest plus one tile
+        Assert.All(occupied, o => Assert.False(r.Overlaps(o, 1)));
+        // Off the floor edge is refused; a block wider than the floors is never found.
+        Assert.Null(StressSpotFinder.Find(floors, occupied, 21, 1, 0));
+        // A block may span two floors.
+        var wide = StressSpotFinder.Find(floors, new List<StressRect>(), 15, 2, 0);
+        Assert.Equal(0, wide!.Value.MinX);
+        Assert.Equal(14, wide.Value.MaxX);
+        // Fully occupied: nothing.
+        Assert.Null(StressSpotFinder.Find(floors, new List<StressRect> { new(0, 0, 19, 9) }, 1, 1, 0));
+        Assert.Null(StressSpotFinder.Find(Array.Empty<StressRect>(), occupied, 1, 1, 0));
+    }
+
+    [Fact]
     public void StationPlanner_TopsUpRoundRobin()
     {
         int[] catalog = { 100, 200, 300 };
