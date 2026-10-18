@@ -54,9 +54,17 @@ internal sealed partial class UnityUiRuntime
         int _trimMoves;
         // The top of the window's own content under the strip (root units), measured while the native view shows.
         float? _contentTop;
-        string _contentBy = "";
+        HiddenNative? _contentBy;
         float? _bonusBottom;
-        bool _slotKept;
+        // Settled readings of the window's own content, and whether the game tab row keeps its slot.
+        readonly VanillaContentReading _reading = new();
+        readonly VanillaRowSlot _slot = new();
+        bool _lastCustom;
+        // Each tab's RectTransform, in _buttons order (cached: read every frame).
+        readonly List<RectTransform> _tabRects = new();
+        // The game's own caption offset on the donor tab (share of its height), and ours in units.
+        float? _nativeShareDy;
+        float _nativeDy;
         // The donor tab's own caption, read live for the readback.
         TextMeshProUGUI? _donorCaption;
         List<object?>? _artDonor;
@@ -220,6 +228,7 @@ internal sealed partial class UnityUiRuntime
                     if (i == 0) _captionDonor = DescribeDonorCaption(label, button);
                     AdoptCaption(label, button);
                     _labels.Add(label);
+                    _tabRects.Add(rt);
                     if (i == 0) _artDonor = DescribeImages(button, label, null, rt);
                     var art = AdoptArt(button, label, _tabDonorRect);
                     _art.Add(art);
@@ -254,6 +263,8 @@ internal sealed partial class UnityUiRuntime
                 }
                 _stripRect = stripRect;
                 CollectMasks();
+                _reading.Restart(Time.frameCount);
+                ReadNativeCaption();
                 _check = new VanillaTabStripCheck("unchecked", "", 0f);
                 _checkFrame = -1000;
                 _logGate.Reset();
@@ -279,20 +290,21 @@ internal sealed partial class UnityUiRuntime
             // The baseline trims copy the donor row's geometry: read it again with the height, so a
             // row read before the game laid it out does not leave the trim over the tabs' bottom edge.
             PlaceTrims();
+            ReadNativeCaption();
             float measured = Alive(_tabDonorRect) ? _tabDonorRect!.rect.height : float.NaN;
             if (!_height.Read(measured, frame)) return false;
+            _reading.Restart(frame);
             float height = _tabHeight = _height.Height;
             _stripRect.sizeDelta = new Vector2(_stripRect.sizeDelta.x, height);
             var layout = _strip.GetComponent<LayoutElement>();
             if (layout != null) { layout.preferredHeight = height; layout.minHeight = height; }
-            foreach (var (go, _) in _buttons)
+            foreach (var rt in _tabRects)
             {
-                if (!Alive(go)) continue;
-                var rt = go.GetComponent<RectTransform>();
-                if (rt == null) continue;
+                if (!Alive(rt)) continue;
                 rt.sizeDelta = new Vector2(rt.sizeDelta.x, height);
                 rt.anchoredPosition = new Vector2(rt.anchoredPosition.x, -height * .5f);
             }
+            _nativeDy = VanillaTabCaption.NativeOffset(_nativeShareDy, height);
 
             return true;
         }
@@ -317,15 +329,29 @@ internal sealed partial class UnityUiRuntime
             // shows, read the top of its content under the strip; content reaching into the strip first
             // gets back the hidden game tab row's layout slot (hiding it had given the slot to the
             // content after it), and only then is the strip raised, never past the bonus row.
+            int frame = Time.frameCount;
             bool custom = _selected > 0 && _selected < _captions.Length;
-            if (!custom) MeasureContent(placement.Top);
-            if (_contentTop.HasValue && _contentTop.Value - placement.Bottom > VanillaTabStripLayout.Tolerance && !_slotKept)
+            // Returning to the native view restores its content: its layout settles again first.
+            if (custom != _lastCustom) { _lastCustom = custom; _reading.Restart(frame); }
+            if (!custom && _reading.Due(frame))
             {
-                _slotKept = true;
-                foreach (var row in _nativeTabs) row.KeepSlot();
-                Plugin.Logger?.LogInfo("Ui: panel tabs on " + _kind + ": the window's content reached " + Math.Round(_contentTop.Value - placement.Bottom, 1)
-                    + " units into the strip (" + _contentBy + "); the game tab row keeps its layout slot");
+                float? read = ReadContent(placement.Top, out var by);
+                if (_reading.Feed(read, frame)) _contentBy = by;
+                if (_reading.IsSettled && _reading.Settled.HasValue && _nativeTabs.Count > 0)
+                {
+                    var row = NativeRow();
+                    float rowHeight = row.HasValue ? row.Value.Top - row.Value.Bottom : float.NaN;
+                    float overlap = _reading.Settled.Value - placement.Bottom;
+                    if (_slot.Decide(overlap, rowHeight))
+                    {
+                        foreach (var hidden in _nativeTabs) hidden.SetKeepLayout(_slot.Kept);
+                        _reading.Restart(frame);
+                        Plugin.Logger?.LogInfo("Ui: panel tabs on " + _kind + ": content " + Math.Round(overlap, 1) + " units into the strip; the game tab row "
+                            + (_slot.Kept ? "keeps its layout slot" : _slot.Useless ? "gives its slot up again (keeping it did not help)" : "gives its slot up again (not needed)"));
+                    }
+                }
             }
+            _contentTop = _reading.Settled;
             float? ceiling = bonusBottom;
             if (visibleTop.HasValue && (!ceiling.HasValue || visibleTop.Value < ceiling.Value)) ceiling = visibleTop;
             placement = VanillaTabStripLayout.ClearContent(placement, _contentTop, ceiling);
@@ -343,24 +369,23 @@ internal sealed partial class UnityUiRuntime
         /// The top edge (root units) of the highest native content element that shows and starts
         /// under <paramref name="stripTop"/>: the content a station's own view draws under the tab row.
         /// </summary>
-        void MeasureContent(float stripTop)
+        float? ReadContent(float stripTop, out HiddenNative? by)
         {
             float? top = null;
-            string by = "";
-            foreach (var item in _content)
+            by = null;
+            for (int i = 0; i < _content.Count; i++)
             {
-                var go = item.Go;
-                if (!Alive(go) || !go.activeInHierarchy || item.Hidden) continue;
-                var rect = go.GetComponent<RectTransform>();
-                if (rect == null || rect.rect.height < 1f) continue;
+                var item = _content[i];
+                var rect = item.Rect;
+                if (rect == null || !Alive(rect) || item.Hidden || !rect.gameObject.activeInHierarchy) continue;
+                if (rect.rect.height < 1f) continue;
                 rect.GetWorldCorners(_corners);
                 float y = _root!.InverseTransformPoint(_corners[1]).y;
                 if (y > stripTop + VanillaTabStripLayout.Tolerance) continue;
-                if (top == null || y > top) { top = y; by = go.name; }
+                if (top == null || y > top) { top = y; by = item; }
             }
 
-            _contentTop = top;
-            _contentBy = by;
+            return top;
         }
 
         Dictionary<string, object?>? NativeRowDict()
@@ -377,11 +402,10 @@ internal sealed partial class UnityUiRuntime
         /// <summary>The hidden game tab row's rect in root units (top, bottom), or null.</summary>
         (float Top, float Bottom)? NativeRow()
         {
-            foreach (var row in _nativeTabs)
+            for (int i = 0; i < _nativeTabs.Count; i++)
             {
-                if (!Alive(row.Go)) continue;
-                var rect = row.Go.GetComponent<RectTransform>();
-                if (rect == null) continue;
+                var rect = _nativeTabs[i].Rect;
+                if (rect == null || !Alive(rect)) continue;
                 rect.GetWorldCorners(_corners);
                 return (_root!.InverseTransformPoint(_corners[1]).y, _root.InverseTransformPoint(_corners[0]).y);
             }
@@ -511,12 +535,13 @@ internal sealed partial class UnityUiRuntime
                 ["clamped"] = !_flow && _placement.Clamped,
                 ["stripBottom"] = _flow ? null : Math.Round(_placement.Bottom, 1),
                 ["contentTop"] = _contentTop.HasValue ? Math.Round(_contentTop.Value, 1) : null,
-                ["contentBy"] = _contentBy,
+                ["contentBy"] = _contentBy != null && Alive(_contentBy.Go) ? _contentBy.Go.name : null,
+                ["contentSettled"] = _reading.IsSettled,
                 ["contentOverlap"] = _flow || !_contentTop.HasValue ? null : Math.Round(Math.Max(0f, _contentTop.Value - _placement.Bottom), 1),
                 ["raised"] = !_flow && _placement.Raised,
                 ["bonusBottom"] = _bonusBottom.HasValue ? Math.Round(_bonusBottom.Value, 1) : null,
                 ["nativeRow"] = NativeRowDict(),
-                ["nativeRowSlot"] = _nativeTabs.Count == 0 ? null : _slotKept ? "kept" : "collapsed",
+                ["nativeRowSlot"] = _nativeTabs.Count == 0 ? null : _slot.Kept ? "kept" : _slot.Useless ? "collapsed (keeping did not help)" : "collapsed",
                 ["masks"] = _masks.Count,
                 ["clip"] = _check.State,
                 ["clipBy"] = _check.By,
@@ -525,7 +550,12 @@ internal sealed partial class UnityUiRuntime
                 ["tabCaptions"] = tabs,
                 ["captionDonor"] = _captionDonor,
                 ["captionFixes"] = _captionFixes,
-                ["captionBand"] = CaptionBandDict(),
+                ["nativeCaption"] = new Dictionary<string, object?>
+                {
+                    ["shareDy"] = _nativeShareDy.HasValue ? Math.Round(_nativeShareDy.Value, 3) : null,
+                    ["dy"] = Math.Round(_nativeDy, 1),
+                },
+                ["trims"] = TrimsDict(),
                 ["donorCaption"] = DonorCaptionNow(),
                 ["artDonor"] = _artDonor,
                 ["artFixes"] = _artFixes,
@@ -546,15 +576,17 @@ internal sealed partial class UnityUiRuntime
             t.SetAsLastSibling();
             label.enableAutoSizing = false;
             try { label.enableWordWrapping = false; } catch { /* */ }
-            PlaceCaption(label, tab.GetComponent<RectTransform>(), 0f, 0f);
+            PlaceCaption(label, tab.GetComponent<RectTransform>(), 0f);
         }
 
         /// <summary>
         /// Stretch the caption over its tab, <see cref="VanillaTabCaption.InsetFor"/> in from each
-        /// side, pivoted at its center, unrotated, unscaled, centered both ways and without margins.
-        /// Writes only what drifted; true when anything did.
+        /// side, pivoted at its center, unrotated, unscaled, centered both ways and without margins,
+        /// then moved <paramref name="dy"/> units up (down when negative) where the game's own caption
+        /// sits off center (<see cref="VanillaTabCaption.NativeOffset"/>). Writes only what drifted;
+        /// true when anything did.
         /// </summary>
-        static bool PlaceCaption(TextMeshProUGUI label, RectTransform? tab, float bandBottom, float bandTop)
+        static bool PlaceCaption(TextMeshProUGUI label, RectTransform? tab, float dy)
         {
             if (tab == null) return false;
             var c = label.rectTransform;
@@ -563,8 +595,8 @@ internal sealed partial class UnityUiRuntime
             if (Moved(c.anchorMin, Vector2.zero)) { c.anchorMin = Vector2.zero; fixedAny = true; }
             if (Moved(c.anchorMax, Vector2.one)) { c.anchorMax = Vector2.one; fixedAny = true; }
             if (Moved(c.pivot, new Vector2(.5f, .5f))) { c.pivot = new Vector2(.5f, .5f); fixedAny = true; }
-            if (Moved(c.offsetMin, new Vector2(inset, bandBottom))) { c.offsetMin = new Vector2(inset, bandBottom); fixedAny = true; }
-            if (Moved(c.offsetMax, new Vector2(-inset, -bandTop))) { c.offsetMax = new Vector2(-inset, -bandTop); fixedAny = true; }
+            if (Moved(c.offsetMin, new Vector2(inset, dy))) { c.offsetMin = new Vector2(inset, dy); fixedAny = true; }
+            if (Moved(c.offsetMax, new Vector2(-inset, dy))) { c.offsetMax = new Vector2(-inset, dy); fixedAny = true; }
             var p = c.localPosition;
             if (VanillaTabCaption.Drifted(p.z, 0f)) { c.localPosition = new Vector3(p.x, p.y, 0f); fixedAny = true; }
             if (c.localRotation != Quaternion.identity) { c.localRotation = Quaternion.identity; fixedAny = true; }
@@ -580,44 +612,22 @@ internal sealed partial class UnityUiRuntime
                 => VanillaTabCaption.Drifted(now.x, wanted.x) || VanillaTabCaption.Drifted(now.y, wanted.y);
         }
 
-        /// <summary>
-        /// The caption's vertical band in the tab, as insets (bottom, top) in canvas units: the part
-        /// of the tab the strip's baseline trim, drawn after the tabs, leaves visible
-        /// (<see cref="VanillaTabCaption.CoveredInsets"/>). Zero when no trim overlaps a tab edge.
-        /// </summary>
-        (float Bottom, float Top) CaptionBand()
-        {
-            if (_trimRects.Count == 0 || !(_tabHeight > 1f)) return (0f, 0f);
-            var bands = new List<(float Bottom, float Top)>();
-            foreach (var trim in _trimRects)
-            {
-                if (!Alive(trim) || !trim.gameObject.activeSelf) continue;
-                var image = trim.GetComponent<Image>();
-                if (image == null || !image.enabled || image.color.a <= .01f) continue;
-                // Anchored at the strip's bottom edge, pivot at its bottom: the tabs span 0 to the tab height.
-                float bottom = trim.anchoredPosition.y - trim.pivot.y * trim.rect.height;
-                bands.Add((bottom, bottom + trim.rect.height));
-            }
-
-            return VanillaTabCaption.CoveredInsets(0f, _tabHeight, bands);
-        }
-
         /// <summary>Put back any caption something moved since the last frame (counted in <c>captionFixes</c>).</summary>
         void KeepCaptions()
         {
-            var (bandBottom, bandTop) = CaptionBand();
-            int n = Math.Min(_labels.Count, _buttons.Count);
+            int n = Math.Min(_labels.Count, _tabRects.Count);
             for (int i = 0; i < n; i++)
             {
                 var label = _labels[i];
-                var go = _buttons[i].go;
-                if (!Alive(label) || !Alive(go)) continue;
-                try { if (PlaceCaption(label, go.GetComponent<RectTransform>(), bandBottom, bandTop)) _captionFixes++; }
+                var tab = _tabRects[i];
+                if (!Alive(label) || !Alive(tab)) continue;
+                try { if (PlaceCaption(label, tab, _nativeDy)) _captionFixes++; }
                 catch { /* a caption that cannot be read is left as it is */ }
                 if (i >= _art.Count) continue;
-                foreach (var fit in _art[i].Fits)
+                var fits = _art[i].Fits;
+                for (int k = 0; k < fits.Count; k++)
                 {
-                    try { if (Alive(fit.Rect) && ApplyFit(fit)) _artFixes++; }
+                    try { if (Alive(fits[k].Rect) && ApplyFit(fits[k])) _artFixes++; }
                     catch { /* art that cannot be read is left as it is */ }
                 }
             }
@@ -651,9 +661,13 @@ internal sealed partial class UnityUiRuntime
                     var trimImage = Alive(trim) ? trim.GetComponent<Image>() : null;
                     if (trimImage != null && Draws(trimImage)) covers.Add(DrawnRect(trimImage, ScreenRectOf(trim)));
                 }
-                var artBox = VanillaTabCaption.Uncovered(drawnBox, covers);
-                // Judged against the art the player sees, never the tab's rect alone.
-                bool centered = VanillaTabCaption.Centered(artBox, caption, text);
+                // Reported, not judged: what the baseline trims drawn over the art's edge leave of it.
+                var artVisible = VanillaTabCaption.Uncovered(drawnBox, covers);
+                var artBox = drawnBox;
+                // Judged against the art, never the tab's rect alone, and against where the game's own
+                // caption sits on the donor tab (0 where it is centered), scaled to the screen.
+                float expectedDy = _tabHeight > 0f ? _nativeDy * (tab.MaxY - tab.MinY) / _tabHeight : 0f;
+                bool centered = VanillaTabCaption.Placed(artBox, caption, text, expectedDy);
                 all &= centered;
                 var (rx, ry) = VanillaTabCaption.Offset(artBox, caption);
                 var (tx, ty) = VanillaTabCaption.Offset(artBox, text);
@@ -668,7 +682,8 @@ internal sealed partial class UnityUiRuntime
                     ["centered"] = centered,
                     ["tab"] = RectDict(tab),
                     ["artBox"] = RectDict(artBox),
-                    ["artDrawn"] = RectDict(drawnBox),
+                    ["artVisible"] = RectDict(artVisible),
+                    ["expectedDy"] = Math.Round(expectedDy, 1),
                     ["artDx"] = Round1(artDx),
                     ["artDy"] = Round1(artDy),
                     ["tabTextDx"] = Round1(tabTx),
@@ -1125,26 +1140,35 @@ internal sealed partial class UnityUiRuntime
             return moved;
         }
 
-        /// <summary>The caption band (<see cref="CaptionBand"/>) and the baseline trims it came from, for the readback.</summary>
-        Dictionary<string, object?> CaptionBandDict()
+        /// <summary>
+        /// The baseline trims for the readback: each one's bottom and height in the strip's units (from
+        /// the strip's bottom edge), the strip and tab heights (not assumed equal), and how many units
+        /// of the tabs' bottom edge each covers. Reported only: the caption follows the game's own
+        /// caption (<c>nativeCaption</c>), not the trims.
+        /// </summary>
+        Dictionary<string, object?> TrimsDict()
         {
-            var (bottom, top) = CaptionBand();
             var trims = new List<object?>();
+            float stripHeight = _stripRect != null && Alive(_stripRect) ? _stripRect.rect.height : float.NaN;
+            // Tabs hang from the strip's top edge: their bottom is the strip's height minus theirs above the strip's bottom.
+            float tabBottom = float.IsNaN(stripHeight) ? 0f : stripHeight - _tabHeight;
             foreach (var trim in _trimRects)
             {
                 if (!Alive(trim)) continue;
+                float bottom = trim.anchoredPosition.y - trim.pivot.y * trim.rect.height;
+                float covers = Math.Max(0f, Math.Min(bottom + trim.rect.height, tabBottom + _tabHeight) - Math.Max(bottom, tabBottom));
                 trims.Add(new Dictionary<string, object?>
                 {
                     ["name"] = trim.name,
-                    ["bottom"] = Math.Round(trim.anchoredPosition.y - trim.pivot.y * trim.rect.height, 1),
+                    ["bottom"] = Math.Round(bottom, 1),
                     ["height"] = Math.Round(trim.rect.height, 1),
+                    ["coversTabs"] = bottom <= tabBottom + .5f ? Math.Round(covers, 1) : 0d,
                 });
             }
 
             return new Dictionary<string, object?>
             {
-                ["bottom"] = Math.Round(bottom, 1),
-                ["top"] = Math.Round(top, 1),
+                ["stripHeight"] = float.IsNaN(stripHeight) ? null : Math.Round(stripHeight, 1),
                 ["tabHeight"] = Math.Round(_tabHeight, 1),
                 ["trims"] = trims,
                 ["trimMoves"] = _trimMoves,
@@ -1156,6 +1180,34 @@ internal sealed partial class UnityUiRuntime
         /// rect's center against the donor tab's center as shares of the donor tab's size (x right,
         /// y up), for comparing our caption with the game's. Null while the donor has no usable size.
         /// </summary>
+        /// <summary>
+        /// Read where the game's own caption sits on the live donor tab (share of its height, y up)
+        /// and the offset our captions follow (<see cref="VanillaTabCaption.NativeOffset"/>). Left
+        /// unchanged while the donor or its caption has no usable size (a donor read mid-layout).
+        /// Runs with the donor height reads, not every frame.
+        /// </summary>
+        void ReadNativeCaption()
+        {
+            try
+            {
+                if (!Alive(_donorCaption) || !Alive(_tabDonorRect)) return;
+                var donor = _tabDonorRect!;
+                var r = donor.rect;
+                var caption = _donorCaption!.rectTransform;
+                if (r.width < 1f || r.height < 1f || caption.rect.height < 1f) return;
+                caption.GetWorldCorners(_corners);
+                float minY = float.MaxValue, maxY = float.MinValue;
+                for (int k = 0; k < 4; k++)
+                {
+                    float y = donor.InverseTransformPoint(_corners[k]).y;
+                    minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                }
+                _nativeShareDy = ((minY + maxY) * .5f - r.center.y) / r.height;
+                _nativeDy = VanillaTabCaption.NativeOffset(_nativeShareDy, _tabHeight);
+            }
+            catch { /* the last reading stands */ }
+        }
+
         Dictionary<string, object?>? DonorCaptionNow()
         {
             if (!Alive(_donorCaption) || !Alive(_tabDonorRect)) return null;
@@ -1363,7 +1415,8 @@ internal sealed partial class UnityUiRuntime
             _labels.Clear(); _captionDonor = null; _captionFixes = 0;
             _art.Clear(); _artDonor = null; _artFixes = 0; _artDriverLogged = false;
             _trimRects.Clear(); _donorCaption = null; _trims.Clear(); _trimMoves = 0;
-            _contentTop = null; _contentBy = ""; _bonusBottom = null; _slotKept = false;
+            _contentTop = null; _contentBy = null; _bonusBottom = null; _lastCustom = false;
+            _reading.Reset(); _slot.Reset(); _tabRects.Clear(); _nativeShareDy = null; _nativeDy = 0f;
             if (_strip != null) TryDestroy(_strip, false);
             _strip = null; _root = null; _routing = null; _instance = 0;
             _tabDonorRect = null; _stripRect = null; _height = null; _bonusAnchor = null; _masks.Clear();
@@ -1388,6 +1441,7 @@ internal sealed partial class UnityUiRuntime
             readonly bool _interactable, _blocks;
             bool _hidden;
             internal readonly GameObject Go;
+            internal readonly RectTransform? Rect;
 
             /// <summary>Hide without taking the object out of its parent's layout, so the content after it keeps its place.</summary>
             internal bool KeepLayout { get; private set; }
@@ -1395,6 +1449,7 @@ internal sealed partial class UnityUiRuntime
             internal HiddenNative(GameObject go)
             {
                 Go = go;
+                Rect = go.GetComponent<RectTransform>();
                 _layout = go.GetComponent<LayoutElement>();
                 _ownLayout = _layout == null;
                 if (_ownLayout) _layout = go.AddComponent<LayoutElement>();
@@ -1407,11 +1462,12 @@ internal sealed partial class UnityUiRuntime
             internal void Hide()
             { if (Alive(_group)) { _layout.ignoreLayout = !KeepLayout || _ignoreLayout; _group.alpha = 0; _group.interactable = false; _group.blocksRaycasts = false; _hidden = true; } }
 
-            /// <summary>From now on hide in place: the object's layout slot is given back at once.</summary>
-            internal void KeepSlot()
+            /// <summary>Hide in place (keep: the object's layout slot is given back at once) or out of the layout again.</summary>
+            internal void SetKeepLayout(bool keep)
             {
-                KeepLayout = true;
-                if (Alive(_layout)) _layout.ignoreLayout = _ignoreLayout;
+                KeepLayout = keep;
+                if (!Alive(_layout)) return;
+                _layout.ignoreLayout = _hidden && !keep ? true : _ignoreLayout;
             }
 
             internal bool Hidden => _hidden;

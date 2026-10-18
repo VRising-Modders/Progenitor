@@ -497,4 +497,105 @@ public sealed class VanillaTabStripLayoutTests
         // A narrower image over the art (another tab's piece, an icon) hides no edge.
         Assert.Equal(tab, VanillaTabCaption.Uncovered(tab, new[] { R(2170, 858, 40, 8) }));
     }
+
+    [Theory]
+    [InlineData(0f, 49f, 0f)]          // the game centers its caption: no correction, whatever the trims
+    [InlineData(.005f, 49f, 0f)]       // under half a unit
+    [InlineData(.1f, 49f, 4.9f)]       // the game's caption sits a tenth of the tab high: ours too
+    [InlineData(-.1f, 40f, -4f)]
+    [InlineData(.4f, 49f, 0f)]         // further than a quarter off: a donor read mid-layout
+    [InlineData(float.NaN, 49f, 0f)]
+    [InlineData(.1f, 0f, 0f)]
+    public void CaptionsFollowTheGamesOwnCaptionOffset(float share, float height, float dy)
+        => Assert.Equal(dy, VanillaTabCaption.NativeOffset(float.IsNaN(share) ? null : share, height), 3);
+
+    [Fact]
+    public void UnknownGameCaptionMeansCentered()
+        => Assert.Equal(0f, VanillaTabCaption.NativeOffset(null, 49f));
+
+    [Fact]
+    public void PlacementIsJudgedAgainstTheGamesCaptionOffset()
+    {
+        var art = R(0, 0, 190, 49);
+        var caption = R(6, 0, 178, 49);
+        var glyphs = R(70, 15, 50, 19);
+        Assert.True(VanillaTabCaption.Placed(art, caption, glyphs, 0f));
+        // The caption is centered, but the game's sits 5 px higher: not placed like the game's.
+        Assert.False(VanillaTabCaption.Placed(art, caption, glyphs, 5f));
+        Assert.True(VanillaTabCaption.Placed(art, R(6, 5, 178, 49), R(70, 20, 50, 19), 5f));
+    }
+
+    [Fact]
+    public void ContentIsReadOnlyAfterTheRowWasHiddenAndTwoReadingsAgree()
+    {
+        var reading = new VanillaContentReading();
+        reading.Restart(100);                      // the strip is built and the game row hidden at frame 100
+        Assert.False(reading.Due(100));
+        Assert.False(reading.Due(101));
+        Assert.True(reading.Due(102));
+        Assert.False(reading.Feed(760f, 102));     // a first reading never counts
+        Assert.False(reading.IsSettled);
+        Assert.False(reading.Feed(745f, 103));     // still laying out
+        Assert.True(reading.Feed(745.3f, 104));    // two in a row agree: settled
+        Assert.Equal(745.3f, reading.Settled!.Value, 2);
+        Assert.False(reading.Due(105));            // then only every Interval frames
+        Assert.True(reading.Due(104 + VanillaContentReading.Interval));
+        Assert.False(reading.Feed(745.1f, 134));   // within half a unit: not a change (the value follows it)
+        Assert.True(reading.IsSettled);
+
+        // A change of layout starts over, but keeps the last settled value until a new one settles.
+        reading.Restart(200);
+        Assert.False(reading.IsSettled);
+        Assert.Equal(745.1f, reading.Settled!.Value, 2);
+        Assert.False(reading.Due(201));
+        Assert.False(reading.Feed(700f, 202));
+        Assert.True(reading.Feed(700f, 203));
+        Assert.Equal(700f, reading.Settled!.Value);
+
+        reading.Reset();
+        Assert.Null(reading.Settled);
+    }
+
+    [Fact]
+    public void ASettledValueThatMovesIsReadAgainUntilItSettles()
+    {
+        var reading = new VanillaContentReading();
+        reading.Restart(0);
+        reading.Feed(700f, 2);
+        reading.Feed(700f, 3);
+        Assert.True(reading.IsSettled);
+        Assert.False(reading.Feed(690f, 33));      // moved: unsettled, read every frame again
+        Assert.False(reading.IsSettled);
+        Assert.True(reading.Due(34));
+        Assert.True(reading.Feed(690f, 34));
+        Assert.Equal(690f, reading.Settled!.Value);
+    }
+
+    [Fact]
+    public void TheRowKeepsItsSlotOnlyWhileThatHelps()
+    {
+        // Blood Press: content 40 units into the strip; the game tab row is 32 high.
+        var slot = new VanillaRowSlot();
+        Assert.False(slot.Decide(-10f, 32f));      // clear: nothing to do
+        Assert.True(slot.Decide(40f, 32f));        // reaches in: keep the slot
+        Assert.True(slot.Kept);
+        Assert.False(slot.Decide(8f, 32f));        // it helped (40 -> 8): stays kept; the strip is raised for the rest
+        Assert.False(slot.Decide(-5f, 32f));       // clear by less than the row: collapsing would bring it back
+        Assert.True(slot.Decide(-40f, 32f));       // clear by more than the row: give the slot up
+        Assert.False(slot.Kept);
+        Assert.False(slot.Useless);
+    }
+
+    [Fact]
+    public void AKeptSlotThatDoesNotHelpIsGivenUpForGood()
+    {
+        var slot = new VanillaRowSlot();
+        Assert.True(slot.Decide(40f, 32f));
+        Assert.True(slot.Decide(40f, 32f));        // no change: the row's slot is not what overlaps
+        Assert.False(slot.Kept);
+        Assert.True(slot.Useless);
+        Assert.False(slot.Decide(40f, 32f));       // not tried again for this strip
+        slot.Reset();
+        Assert.True(slot.Decide(40f, 32f));        // a new strip may try again
+    }
 }
