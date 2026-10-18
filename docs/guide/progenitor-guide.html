@@ -566,7 +566,9 @@ window.HELP = {
           html: `<ul><li>One row per mod, with one button.</li>
 <li><strong>Show</strong> picks All, Installed or Updates. Click a column header to sort.</li>
 <li><em>Loads at next start</em> or <em>Removed at next start</em> means the change waits for a restart.</li>
-<li>The button acts on this PC, and on the joined server too when you are its [[admin|admin]].</li></ul>` },
+<li>The button acts on this PC, and on the joined server too when you are its [[admin|admin]].</li>
+<li>Under the search, a line names the server and whether you are connected. On a server, <strong>Server settings &raquo;</strong> opens the [[server-tab|Server]] tab.</li>
+<li>Simple picks your PC, the server or both from what the mod needs and what is already installed; the confirmation says where. For each side on its own, use Advanced.</li></ul>` },
         { id: "advanced", title: "Advanced view",
           html: `<ul><li>Separate <strong>Client</strong> and <strong>Server</strong> columns, each with its own button.</li>
 <li><strong>Server</strong> picker: the connected server, a server on this PC, private games, or none.</li>
@@ -726,7 +728,7 @@ window.HELP = {
 <li>All admins are equal: any admin may change any setting.</li>
 <li>To stop that, [[config-lock|lock]] groups in the server's <code>progenitor.cfg</code>: <code>[ServerSettings] LockedInGame</code>.</li></ul>` },
         { id: "server-tab", title: "The Server tab", shot: { src: "img/admins-server-tab.webp", alt: "The Server tab on a server, open at When players join" },
-          html: `<p>Join your server, open <strong>Mods</strong>, then the [[server-tab|Server]] tab. Admins edit; everyone else reads.</p>
+          html: `<p>Join your server, open <strong>Mods</strong>, then the [[server-tab|Server]] tab. Admins edit; everyone else reads. The top of the tab shows the server's full name and whether you have admin or read-only access; hover or pick a setting to read its help.</p>
 <ul><li><a href="#admins/joining/popup">Mods players need</a>: required and recommended client mods.</li>
 <li><a href="#admins/rules/rules">Server rules</a>, <a href="#admins/backups/backups">backups</a>, <a href="#admins/chat/allow">chat</a> and <a href="#admins/mods/updates">updates</a>.</li>
 <li>Each mod's server settings sit on its own page under <strong>Server settings</strong>.</li></ul>

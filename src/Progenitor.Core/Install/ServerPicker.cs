@@ -423,6 +423,8 @@ internal static class ServerPicker
             case ServerPickKind.Connected:
                 return connectedRoute;
             case ServerPickKind.LocalFolder:
+                if (connectedRoute.ForcedRemote && connectedRoute.Block == ServerRouteBlock.Disconnected)
+                    return connectedRoute;
                 return (configuredPath ?? "").Trim().Length > 0 && SameId(entry.Path, configuredPath)
                     ? new ServerRoute(ServerRouteKind.Local, ServerRouteBlock.None)
                     : new ServerRoute(ServerRouteKind.None, ServerRouteBlock.NoServer);

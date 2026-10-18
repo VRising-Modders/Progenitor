@@ -74,7 +74,12 @@ public static partial class ModsMenu
     {
         EnsureBindings();
         _serverPane?.Release();
-        var pane = new ServerTabPane(() => SettingsScopeContextFor(SettingsPanel.PluginId), LastServerFactsNow, JoinLastServerFromTab);
+        var pane = new ServerTabPane(() => SettingsScopeContextFor(SettingsPanel.PluginId), LastServerFactsNow, JoinLastServerFromTab)
+        {
+#if !PROGENITOR_TESTS
+            RouteProbe = () => CurrentRouteDecision().Route,
+#endif
+        };
         _serverPane = pane;
         var state = ServerTabPane.StateOf(SafeServerContext());
 

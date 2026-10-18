@@ -8,7 +8,8 @@ namespace Progenitor.Install;
 /// connected server that is the configured local folder's server is still handled through the
 /// remote-install route (<see cref="ServerRouteSelector.Decide"/> sets
 /// <see cref="ServerRoute.ForcedRemote"/>), so the remote wire, the admin list and the server's own
-/// Thunderstore fetch can be exercised against a server on this PC.
+/// Thunderstore fetch can be exercised against a server on this PC. While disconnected, server
+/// management stays disabled rather than falling back to its local folder.
 ///
 /// <para><b>Live edits (REMOTEUNREACH1).</b> BepInEx reads a <c>.cfg</c> once; an edit made while
 /// the game runs never reaches the bound entry, so live the switch only took effect after a Core hot

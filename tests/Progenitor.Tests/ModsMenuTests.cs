@@ -50,6 +50,44 @@ public sealed class ModsMenuTests : IDisposable
         Handshake.InstallClientServerContextWatch();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Install_side_uses_configured_folder_when_path_changes_after_config_binding(bool both)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "progenitor-install-target-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "server", LocalServerFolder.BepInExFolderName));
+        File.WriteAllBytes(Path.Combine(root, "server", LocalServerFolder.ServerExecutableName), new byte[] { 0 });
+        var file = new BepInEx.Configuration.ConfigFile(Path.Combine(root, "progenitor.cfg"), true);
+        try
+        {
+            ModsMenu.SetConfigFileForTests(file);
+            ModsMenu.BindModsConfig(file);
+            // The setting may be loaded or edited before the Install workspace opens.
+            ConfigurationPane.Bind(file).DedicatedServerPath.Value = Path.Combine(root, "server");
+            var catalog = new InstallSidesPaneTests.FakeCatalog();
+            var entry = new CatalogEntry(new ManifestMod("", "1.0.0", NetworkCompatibilityLevel.NoNeedForSync,
+                NetworkVersionRule.None, false, "o", "o-both"), CatalogProvenance.ManifestVerified,
+                InstallReasons.SourceThunderstore, InstallReasons.SourceLabelThunderstore, "2026-10-15T00:00:00Z",
+                side: PackageSide.Both, owner: "o", packageName: "both", categories: new[] { "Client", "Server", "Oakveil Update" });
+            catalog.Entries.Add(entry);
+            ModsMenu.SetInstallCatalogForTests(catalog);
+            ModsMenu.Open();
+            ModsMenu.SelectTab("install");
+            var pane = ModsMenu.InstallPaneForTests!;
+            pane.ServerRouteProbe = () => new ServerRoute(ServerRouteKind.Local, ServerRouteBlock.None);
+            Assert.True(both ? pane.OnBothClick(entry.Key) : pane.OnSideClick(entry.Key, true, SideButton.Install));
+            Assert.Equal(both ? InstallTarget.Both : InstallTarget.LocalServer, pane.Target);
+            pane.PromptNo();
+        }
+        finally
+        {
+            ModsMenu.Close();
+            ModsMenu.ResetTabBindingsForTests();
+            Directory.Delete(root, true);
+        }
+    }
+
     /// <summary>
     /// Live order of one physical Escape: EventSystem Cancel unfocuses, then
     /// <c>UiInputContext.Update</c> invokes 27 and 17 back-to-back. A test that

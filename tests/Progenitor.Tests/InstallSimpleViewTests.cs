@@ -326,18 +326,18 @@ public sealed class InstallSimpleViewTests : IDisposable
             p.OpenServerSettings = () => opened++;
         }
 
-        static string[] Keys(Rig r) => r.Pane.ToolbarRow!.Cells.Select(c => c.Key).ToArray();
+        static string[] Keys(Rig r) => r.Pane.IsSimple ? r.Pane.SimpleServerRow!.Cells.Select(c => c.Key).ToArray() : r.Pane.ToolbarRow!.Cells.Select(c => c.Key).ToArray();
 
         var admin = new Rig(this, catalog, new Store(), p => { AsAdmin(p); Wire(p); });
         Assert.Contains(InstallModsPane.CellServerSettings, Keys(admin));
-        var cell = admin.Pane.ToolbarRow!.Cells.Single(c => c.Key == InstallModsPane.CellServerSettings);
+        var cell = admin.Pane.SimpleServerRow!.Cells.Single(c => c.Key == InstallModsPane.CellServerSettings);
         Assert.Equal(InstallSimpleCopy.ServerSettingsLink, cell.Text);
         var link = admin.Pane.ServerSettingsLinkToWidget();
         Assert.Equal(true, link["shown"]);
         // Three homes: the link opens the Server tab.
         Assert.Equal(SettingsLinks.TargetServerTab, link["target"]);
         Assert.Equal(SettingsLinks.LandingTop, link["landing"]);
-        Assert.True(admin.Click(InstallModsPane.ToolbarKey + "/" + InstallModsPane.CellServerSettings));
+        Assert.True(admin.Click("simple-server/" + InstallModsPane.CellServerSettings));
         Assert.Equal(1, opened);
 
         // Advanced has its own server picker and no link.
@@ -345,15 +345,16 @@ public sealed class InstallSimpleViewTests : IDisposable
         admin.Rebuild();
         Assert.DoesNotContain(InstallModsPane.CellServerSettings, Keys(admin));
 
-        // Not an admin of the joined server (the Server settings rows' fact), a player, or not connected: no link.
+        // Not an admin of the joined server, or a player: the link still shows (the Server tab is read-only for them).
+        // Not connected: no link.
         adminThere = false;
         var notAdmin = new Rig(this, catalog, new Store(), p => { AsAdmin(p); Wire(p); });
-        Assert.DoesNotContain(InstallModsPane.CellServerSettings, Keys(notAdmin));
-        Assert.False(notAdmin.Pane.PressServerSettings());
+        Assert.Contains(InstallModsPane.CellServerSettings, Keys(notAdmin));
+        Assert.True(notAdmin.Pane.PressServerSettings());
         adminThere = true;
-        Assert.DoesNotContain(InstallModsPane.CellServerSettings, Keys(new Rig(this, catalog, new Store(), p => { AsPlayer(p); Wire(p); })));
+        Assert.Contains(InstallModsPane.CellServerSettings, Keys(new Rig(this, catalog, new Store(), p => { AsPlayer(p); Wire(p); })));
         Assert.DoesNotContain(InstallModsPane.CellServerSettings, Keys(new Rig(this, catalog, new Store(), p => { NotConnected(p); Wire(p); })));
-        Assert.Equal(1, opened);
+        Assert.Equal(2, opened);
 
         // Three homes: the live wiring opens the Server tab, for an admin of the joined server.
         string menu = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "ModsMenu.cs");

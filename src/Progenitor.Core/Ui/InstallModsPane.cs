@@ -3370,6 +3370,7 @@ internal sealed partial class InstallModsPane
         {
             if (!action.Enabled) return false;
             var decision = SideStatusRules.Decide(SideInputsOf(entry));
+            InstallTarget halfTarget;
             switch (decision.Action)
             {
                 case SideAction.InstallOnServer:
@@ -3377,18 +3378,21 @@ internal sealed partial class InstallModsPane
                     if (CurrentRoute.Kind == ServerRouteKind.Remote)
                         return OpenRemoteInstallPrompt(entry,
                             decision.Action == SideAction.UpdateServer || RemoteRowFor(entry) != null ? RemoteInstallOp.Update : RemoteInstallOp.Install);
-                    _targetOverride = InstallTarget.LocalServer;
+                    halfTarget = InstallTarget.LocalServer;
                     break;
                 case SideAction.InstallOnClient:
                 case SideAction.UpdateClient:
-                    _targetOverride = InstallTarget.Client;
+                    halfTarget = InstallTarget.Client;
                     break;
                 default:
                     return false;
             }
 
+            // Focusing another listing closes its prompt, which clears the override, so the side is set after it.
             if (!string.Equals(_state.OpenKey, entry.Key, StringComparison.OrdinalIgnoreCase)) FocusListing(entry.Key);
-            var halfTarget = _targetOverride;
+            // As BeginSideInstall: a refused side target is refused here, before the box names it or a download starts.
+            if (!TrySetTarget(halfTarget, _server, out var halfRefusal)) return RefuseSideTarget(halfRefusal);
+            _targetOverride = halfTarget;
             ApplyDefaultTarget(entry);
             OpenPrompt(entry, InstallPromptKind.Install);
             _targetOverride = halfTarget;
@@ -4072,7 +4076,8 @@ internal sealed partial class InstallModsPane
             if (busy.Length > 0) return new SideHalf { Busy = busy };
             var halves = HalvesOf(entry);
             string version = ServerVersionOf(entry);
-            bool serverOnly = _state.SessionServerOnly.Contains(entry.Key);
+            // A current file/ledger scan outranks an earlier install in this session.
+            bool serverOnly = _installedQuery == null && _state.SessionServerOnly.Contains(entry.Key);
             if (ServerRemovalPending(entry, halves))
                 return new SideHalf { State = HalfState.RemovalPending, Version = version, CanCancelUninstall = true, ProgenitorManaged = true };
             if (halves.Server == InstalledState.HalfPending || (serverOnly && halves.Server == InstalledState.HalfNone && _state.SessionPending.Contains(entry.Key)))
@@ -4318,10 +4323,21 @@ internal sealed partial class InstallModsPane
             : BeginSideInstall(entry, InstallTarget.Both, remoteAfter: false, update);
     }
 
+    /// <summary>A pressed side whose target is refused: no box, no download; the reason is the action error.</summary>
+    private bool RefuseSideTarget(string? refusal)
+    {
+        ClosePrompt();
+        ResetFlow();
+        _actionError = refusal;
+        RequestDetailRebuild();
+        return false;
+    }
+
     /// <summary>The local install flow with its target fixed to the pressed side (the setting is not read).</summary>
     private bool BeginSideInstall(CatalogEntry entry, InstallTarget target, bool remoteAfter, bool update = false)
     {
         if (!string.Equals(_state.OpenKey, entry.Key, StringComparison.OrdinalIgnoreCase)) FocusListing(entry.Key);
+        if (!TrySetTarget(target, _server, out var refusal)) return RefuseSideTarget(refusal);
         _targetOverride = target;
         _remoteAfterLocal = remoteAfter ? entry.Key : null;
         ApplyDefaultTarget(entry);
@@ -4645,7 +4661,7 @@ internal sealed partial class InstallModsPane
         return action.WithStatus(InstallStatusLabels.Route(route), (route.Reason + (route.Help.Length > 0 ? " " + route.Help : "")).Trim());
     }
 
-    /// <summary>Set <see cref="Target"/> from the setting for this listing. Never refuses: the fallback is the client.</summary>
+    /// <summary>Set <see cref="Target"/> from the setting for this listing. Only an inferred target may fall back to the client.</summary>
     private ResolvedInstallTarget ApplyDefaultTarget(CatalogEntry entry)
     {
         var resolved = _targetOverride is { } half
@@ -4654,10 +4670,10 @@ internal sealed partial class InstallModsPane
             : ResolvedTargetFor(entry);
         if (!TrySetTarget(resolved.Target, _server, out _))
         {
-            _target = InstallTarget.Client;
+            _target = _targetOverride ?? InstallTarget.Client;
             // LOCALDETECT1 review (live 2026-10-10): the box must say where the write goes. A server target this pane cannot
             // write is the client fallback in the box's words too, never "on <server>" over a client write.
-            if (resolved.LocalInstall && resolved.Target != InstallTarget.Client)
+            if (_targetOverride == null && resolved.LocalInstall && resolved.Target != InstallTarget.Client)
                 resolved = new ResolvedInstallTarget(InstallTarget.Client, true, resolved.Route, false, true);
         }
 
@@ -5239,9 +5255,11 @@ internal sealed partial class InstallModsPane
         _lastUninstallHalves = (UninstallHalfNothing, ok
             ? (pending ? UninstallHalfCancelled : now ? UninstallHalfUnloaded : UninstallHalfMarked)
             : UninstallHalfFailed);
-        if (ok && pending)
+        if (ok && (pending || now) && _state.SessionServerOnly.Contains(entry.Key))
         {
             _state.SessionPending.Remove(entry.Key);
+            _state.SessionInstalled.Remove(entry.Key);
+            _state.SessionHotLoaded.Remove(entry.Key);
             _state.SessionServerOnly.Remove(entry.Key);
         }
         ForgetLoadedPlugins();
@@ -5497,6 +5515,13 @@ internal sealed partial class InstallModsPane
     private bool ContinueAfterInspection()
     {
         _phase = InstallActionPhase.Inspected;
+        if (_targetOverride is { } requested && !TrySetTarget(requested, _server, out var refusal))
+        {
+            _actionError = refusal;
+            RefuseOpenInstallPrompt(refusal ?? InstallReasons.NoConfiguredLocalServer);
+            RequestDetailRebuild();
+            return false;
+        }
 
         // INSTALLUX1 item 2: the inspection is what makes a package's side knowable when the index
         // did not carry it (progenitor.json's `side`, or [BepInProcess]). The target was resolved
@@ -5794,6 +5819,12 @@ internal sealed partial class InstallModsPane
             return true;
         }
 
+        if (CurrentRoute.Block == ServerRouteBlock.Disconnected)
+        {
+            refusal = CurrentRoute.Reason;
+            return false;
+        }
+
         // LOCALDETECT1 review: the route's own local folder (the private game's, or the auto-detected server's) is a server
         // target too: the catalog writes there (its override root), so the configured folder is not required.
         if (RouteLocalFolderWritable())
@@ -5891,6 +5922,10 @@ internal sealed partial class InstallModsPane
     {
         if (string.IsNullOrEmpty(_state.OpenKey))
             return new PlanCallResult(false, InstallReasons.UnknownEntry, null);
+        // A server target is re-checked at plan and confirm time: with TreatLocalServerAsRemote on, a player who
+        // disconnected after the box opened must not get a write into the local folder.
+        if (_target != InstallTarget.Client && CurrentRoute.Block == ServerRouteBlock.Disconnected)
+            return new PlanCallResult(false, CurrentRoute.Reason, null);
         // LOCALDETECT1 review: a server half on the route's own folder plans against the catalog's override root.
         if (_target != InstallTarget.Client && RouteLocalFolderWritable())
             return _catalog.Plan(_state.OpenKey!, _target);
@@ -8719,7 +8754,7 @@ internal sealed partial class InstallModsPane
         });
         // JOINADMIN1: "Players joining" is no longer here; it is a row on Progenitor's page (Server settings).
         // Settings organization stage 8: Simple's link to those Server settings, for an admin acting on the server.
-        if (ServerSettingsLinkShown) cells.Add(ServerSettingsLinkCell());
+        // Simple draws server identity and its settings link together below the search row.
 
         // INSTALLSIMPLE1: Simple has no server picker.
         var picked = IsSimple ? null : PickedServer;
@@ -9141,7 +9176,11 @@ internal sealed partial class InstallModsPane
             _toolbar.OnClick(CellServerSettings, () => PressServerSettings());
             // INSTALLFILTERS1: the filter groups, wrapped whole onto as many rows as the width needs.
             _filterRows.Clear();
-            if (IsSimple) BuildSimpleFilters(panel);
+            if (IsSimple)
+            {
+                BuildSimpleServerContext(panel);
+                BuildSimpleFilters(panel);
+            }
             else foreach (var (rowKey, rowCells) in FilterRowsFor(ColumnRowWidth()))
             {
                 var row = panel.CellRow(new CellRowSpec(rowKey, rowCells));

@@ -50,6 +50,32 @@ public sealed class SideCellsTests
 
     private static SideButton[] B(params SideButton[] b) => b;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Disconnected_remote_target_hides_stale_server_state_and_actions(bool previouslyInstalled)
+    {
+        var d = D(Absent, previouslyInstalled ? Installed("1.0.0") : Absent,
+            route: new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true));
+        Assert.Equal("Connect to manage", d.Server.Text);
+        Assert.True(d.Server.Grayed);
+        Assert.Empty(d.Server.Buttons);
+        Assert.Equal(SideButton.None, d.Shortcut);
+        Assert.Contains(SideButton.Install, d.Client.Buttons);
+    }
+
+    /// <summary>Review of PR 132: a request still in flight when the player disconnects keeps its progress and Cancel.</summary>
+    [Fact]
+    public void A_server_step_in_flight_keeps_its_progress_and_cancel_after_a_disconnect()
+    {
+        var installing = new SideHalf { Busy = "Downloading…", BusyCancelable = true };
+        var d = D(Absent, installing,
+            route: new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true));
+        Assert.Equal("Downloading…", d.Server.Text);
+        Assert.Equal(SideCells.KindBusy, d.Server.Kind);
+        Assert.Equal(B(SideButton.CancelInstall), d.Server.Buttons);
+    }
+
     [Fact]
     public void Nothing_installed_offers_install_on_each_side_and_the_both_shortcut()
     {

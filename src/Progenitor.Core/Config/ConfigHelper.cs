@@ -127,7 +127,7 @@ public static class ConfigHelper
         + "the local dedicated server configured under [Mods] DedicatedServerPath: nothing is written to that folder or its ledger, "
         + "the Server column reads the server's own rows, admin rules apply, and install, update, uninstall and cancel go to the "
         + "server, which downloads from Thunderstore itself. Use it to exercise the remote route against a server on this PC. "
-        + "Other local server folders and the not-connected case are unchanged. Default false.";
+        + "Other local server folders remain local while connected. When disconnected, server management is disabled until you connect or turn this setting off. Default false.";
 
     private static ConfigEntry<bool>? _treatLocalServerAsRemote;
 

@@ -496,7 +496,10 @@ internal static class SideCells
 
         var half = input.Server ?? SideHalf.None;
         var route = input.Route;
+        // A request still in flight keeps its progress and Cancel, even after a disconnect.
         if (half.Busy.Length > 0) return BusyCell(half);
+        if (route.Block == ServerRouteBlock.Disconnected)
+            return new SideCell(KindNoServer, route.Reason, SideCellTone.Muted);
 
         // INSTALLSIDES2 item 3: not an admin. The states stay as an admin would read them; the buttons
         // an admin would get become one dim Admin only (or Authenticate as admin when adminauth can
