@@ -303,8 +303,9 @@ a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--r
 /*
   The Progenitor Help Guide's content. Edit only this block; the renderer around it is copied from
   templates/help/index.html by tools/help-guide/sync.mjs. Page fields: id, title, lede, html,
-  code {lang, text}, callout {title, text, warn}, soon. [[term-id|words]] links a glossary term.
-  Limits per page: a heading plus about 60 words or 3-5 bullets, one code block, one callout.
+  code {lang, text}, callout {title, text, warn}, shot {src: "img/<name>.webp", alt, caption}, soon.
+  [[term-id|words]] links a glossary term. Limits per page: a heading plus about 60 words or 3-5
+  bullets, one code block, one callout, one screenshot (images in docs/guide/img, always with alt text).
   Glossary definitions are one sentence. API names are checked against src/.
 */
 window.HELP = {
@@ -322,7 +323,7 @@ window.HELP = {
   chapters: [
     {
       id: "start", title: "Welcome", pages: [
-        { id: "welcome", title: "What Progenitor is", shot: { src: "img/welcome-castle.webp", alt: "A castle at night in V Rising, its halls lit by candles" },
+        { id: "welcome", title: "What Progenitor is", shot: { src: "img/welcome-castle.webp", alt: "A player's castle in V Rising seen from above, its walls and halls under fog" },
           html: `<p>[[progenitor|Progenitor]] is a mod manager and modding framework for V Rising, loaded through [[bepinex|BepInEx]]. Its in-game <strong>Mods</strong> menu installs, updates and turns off mods, and holds every mod's settings and keybinds. It also adds features of its own: a better chat box, build menu search, dye all and photo mode.</p>
 <p>Mods built on it can load, update and unload while the game runs, and clean up after themselves.</p>
 <p>For the fastest help, <a href="#help/ai-help">ask an AI assistant (ChatGPT, Gemini, Grok, Claude&hellip;) with our ready-made prompt &rarr;</a></p>` },

@@ -121,7 +121,7 @@ public sealed class HelpGuideCoverageTests
     }
 
     /// <summary>
-    /// Every screenshot a guide page names (<c>shot: { src: "img/..." }</c>) is a WebP, PNG or JPEG in docs/guide/img with
+    /// Every screenshot a guide page names (<c>shot: { src: "img/..." }</c>) is a .webp, .png or .jpg file in docs/guide/img with
     /// alt text, and package.ps1 and deploy.ps1 both copy that folder beside the guide.
     /// What this would catch: a page showing a broken image in the game because the file was renamed, never added, or
     /// not shipped with the guide.
