@@ -44,6 +44,9 @@ internal enum UiMarkShape
 
     /// <summary>A locate target: a ring with a center dot and four short ticks outside it (a table row's find button).</summary>
     Locate = 12,
+
+    /// <summary>An eye: an almond outline and a round pupil (view or preview the row's thing).</summary>
+    Eye = 13,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -98,7 +101,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     /// <summary>An icon button's mark: <see cref="UiMarkShape.Up"/>, <see cref="UiMarkShape.Down"/>, <see cref="UiMarkShape.Remove"/>, <see cref="UiMarkShape.Check"/> or <see cref="UiMarkShape.Grip"/>.</summary>
     internal static UiDrawnMark Icon(UiMarkShape shape) =>
         shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate
+            or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye
             ? new UiDrawnMark(shape, 0, 0)
             : None;
 
@@ -111,10 +114,11 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static readonly UiDrawnMark CheckBoxMark = Icon(UiMarkShape.CheckBox);
     internal static readonly UiDrawnMark ChestMark = Icon(UiMarkShape.Chest);
     internal static readonly UiDrawnMark LocateMark = Icon(UiMarkShape.Locate);
+    internal static readonly UiDrawnMark EyeMark = Icon(UiMarkShape.Eye);
 
     /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
     internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate;
+        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye;
 
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
@@ -134,6 +138,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.CheckBox => "check-box",
         UiMarkShape.Chest => "chest",
         UiMarkShape.Locate => "locate",
+        UiMarkShape.Eye => "eye",
         _ => "",
     };
 
@@ -171,6 +176,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "check-box":
             case "chest":
             case "locate":
+            case "eye":
                 if (colon >= 0) return false;
                 mark = Icon(head switch
                 {
@@ -182,6 +188,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
                     "check-box" => UiMarkShape.CheckBox,
                     "chest" => UiMarkShape.Chest,
                     "locate" => UiMarkShape.Locate,
+                    "eye" => UiMarkShape.Eye,
                     _ => UiMarkShape.Grip,
                 });
                 return true;
@@ -223,7 +230,7 @@ internal static class UiDrawnMarkArt
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
         UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
         UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
-            or UiMarkShape.Chest or UiMarkShape.Locate => (TextureHeight, TextureHeight),
+            or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -322,6 +329,8 @@ internal static class UiDrawnMarkArt
                 return Clamp01(Math.Max(Target(px, py), Strokes2(px, py, 0.05f,
                     new[] { 0.5f, 0.06f, 0.5f, 0.2f }, new[] { 0.5f, 0.8f, 0.5f, 0.94f },
                     new[] { 0.06f, 0.5f, 0.2f, 0.5f }, new[] { 0.8f, 0.5f, 0.94f, 0.5f })));
+            case UiMarkShape.Eye:
+                return Clamp01(Eye(px, py));
             default:
                 return 0f;
         }
@@ -367,6 +376,48 @@ internal static class UiDrawnMarkArt
         float ring = Smooth(n * 0.05f - Math.Abs(r - n * 0.28f));
         float dot = Smooth(n * 0.08f - r);
         return Math.Max(ring, dot);
+    }
+
+    /// <summary>Half the eye's width and its lids' height above and below the center, as shares of the texture.</summary>
+    internal const float EyeHalfWidth = 0.40f;
+
+    internal const float EyeLidHeight = 0.24f;
+
+    /// <summary>The pupil's radius, as a share of the texture.</summary>
+    internal const float EyePupil = 0.11f;
+
+    /// <summary>
+    /// The eye: two lid arcs meeting at the corners (<see cref="EyeHalfWidth"/> either side of the center), each
+    /// <see cref="EyeLidHeight"/> from the center line at its middle, drawn with the check box's stroke (0.06 of the side),
+    /// and a solid pupil of radius <see cref="EyePupil"/>.
+    /// </summary>
+    private static float Eye(float px, float py)
+    {
+        float n = TextureHeight;
+        float gx = px / n, gy = py / n;
+        const float w = EyeHalfWidth, h = EyeLidHeight, half = 0.03f;
+        float r = (w * w + h * h) / (2f * h); // the circle through both corners and the lid's middle
+        float d = Math.Min(LidDistance(gx, gy, 0.5f + h - r, r, upper: true), LidDistance(gx, gy, 0.5f - h + r, r, upper: false));
+        float outline = Smooth((half - d) * n);
+        float dx = gx - 0.5f, dy = gy - 0.5f;
+        float pupil = Smooth((EyePupil - (float)Math.Sqrt(dx * dx + dy * dy)) * n);
+        return Math.Max(outline, pupil);
+    }
+
+    /// <summary>The distance from (gx, gy) to one lid: the arc of the circle at (0.5, cy) of radius r on its side of the center line.</summary>
+    private static float LidDistance(float gx, float gy, float cy, float r, bool upper)
+    {
+        float dx = gx - 0.5f, dy = gy - cy;
+        float len = (float)Math.Sqrt(dx * dx + dy * dy);
+        if (len > 1e-5f)
+        {
+            float ny = cy + dy / len * r; // the nearest point of the whole circle
+            if (upper ? ny >= 0.5f : ny <= 0.5f) return Math.Abs(len - r);
+        }
+
+        // Off the arc: the nearer corner.
+        float ex = Math.Abs(gx - 0.5f) - EyeHalfWidth, ey = gy - 0.5f;
+        return (float)Math.Sqrt(ex * ex + ey * ey);
     }
 
     /// <summary>The share of the texture's height the order digit takes (the caption's cap height times about 0.7).</summary>

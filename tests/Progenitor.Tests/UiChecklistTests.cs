@@ -842,6 +842,222 @@ public sealed class UiChecklistTests : IDisposable
         }
     }
 
+    // ---- The icon preview button (PreviewIcon) -------------------------------------------------------------
+
+    [Fact]
+    public void The_preview_is_an_eye_icon_button_by_default_with_View_as_its_tooltip()
+    {
+        var (list, handle, _) = NewList();
+        var c1 = Row("cl:row1");
+        var view = Cell(c1, UiChecklistLayout.CellView);
+        Assert.Equal(CellKind.Button, view.Kind);
+        Assert.Equal("", view.Text); // no caption to cut: the face is a drawn mark
+        Assert.Equal(UiWidgetLayout.IconButtonWidth, view.MinWidth);
+        Assert.Equal(CellSkin.Quiet, view.Skin);
+        Assert.Equal(UiDrawnMark.EyeMark, handle.ViewMarkAt(1));
+        Assert.Equal(UiDrawnMark.None, handle.ViewMarkAt(0)); // a section line has none
+        Assert.False(Cell(Row("cl:row0"), UiChecklistLayout.CellView).Visible);
+        Assert.Equal(UiWidgetLayout.IconButtonWidth, Cell(Row("cl:header"), UiChecklistLayout.CellViewPad).MinWidth);
+        Assert.Equal("eye", list.Describe()["previewIcon"]);
+
+        // Click and right-click raise the preview as before.
+        var previews = new List<string>();
+        list.OnPreview(id => previews.Add(id));
+        Click(c1, UiChecklistLayout.CellView);
+        handle.RightClickForTests(2);
+        Assert.Equal(new[] { "c1", "c2" }, previews);
+        Assert.Empty(list.Selected);
+
+        // The hover: the mark brightens and the caption is the tooltip; back on the row, the row's own tooltip.
+        handle.HoverSlotForTests(3, true);
+        handle.HoverViewForTests(3, true);
+        Assert.Equal(("View", ""), _runtime.Tooltip);
+        Assert.Equal(UiIconMarks.Bright, handle.ViewMarkColorAt(3));
+        handle.HoverViewForTests(3, false);
+        Assert.Equal(("Locked chest", "Not your clan"), _runtime.Tooltip);
+        Assert.Equal(UiIconMarks.Normal, handle.ViewMarkColorAt(3));
+        handle.HoverSlotForTests(3, false);
+        handle.HoverViewForTests(3, true);
+        handle.HoverViewForTests(3, false); // the row was left first: nothing comes back
+        Assert.Null(_runtime.Tooltip);
+    }
+
+    [Fact]
+    public void PreviewIcon_null_keeps_the_text_button_and_another_icon_draws_its_own_mark()
+    {
+        var o = Options();
+        o.PreviewIcon = null;
+        o.PreviewCaption = "Show";
+        var (list, handle, _) = NewList(options: o);
+        var view = Cell(Row("cl:row1"), UiChecklistLayout.CellView);
+        Assert.Equal("Show", view.Text);
+        Assert.Equal(UiChecklistLayout.ViewWidth("Show"), view.MinWidth);
+        Assert.Equal(UiDrawnMark.None, handle.ViewMarkAt(1));
+        Assert.Equal("", list.Describe()["previewIcon"]);
+        _panels.ForEach(p => p.Dispose());
+        _panels.Clear();
+        _runtime.Rows.Clear();
+
+        var located = Options();
+        located.PreviewIcon = UiRowActionIcon.Locate;
+        var (_, h2, _) = NewList(options: located);
+        Assert.Equal(UiDrawnMark.LocateMark, h2.ViewMarkAt(1));
+    }
+
+    [Fact]
+    public void The_eye_mark_is_an_almond_outline_with_a_pupil_and_reads_back_by_name()
+    {
+        var mark = UiDrawnMark.EyeMark;
+        Assert.True(mark.IsIcon);
+        Assert.Equal("eye", mark.Name);
+        Assert.True(UiDrawnMark.TryParse("eye", out var parsed) && parsed.Equals(mark));
+        Assert.False(UiDrawnMark.TryParse("eye:1", out _));
+        Assert.Equal(UiDrawnMark.EyeMark, UiDataTableLayout.MarkOf(UiRowActionIcon.View));
+        int n = UiDrawnMarkArt.TextureHeight;
+        Assert.Equal((n, n), UiDrawnMarkArt.TextureSize(mark));
+        int c = n / 2;
+        Assert.True(UiDrawnMarkArt.Alpha(mark, c, c) > 0.9f); // the pupil
+        Assert.True(UiDrawnMarkArt.Alpha(mark, c, c + (int)(UiDrawnMarkArt.EyeLidHeight * n)) > 0.5f); // the upper lid's middle
+        Assert.True(UiDrawnMarkArt.Alpha(mark, c, c - (int)(UiDrawnMarkArt.EyeLidHeight * n) - 1) > 0.5f); // the lower lid's middle
+        Assert.True(UiDrawnMarkArt.Alpha(mark, c - (int)(UiDrawnMarkArt.EyeHalfWidth * n), c) > 0.4f); // a corner
+        Assert.True(UiDrawnMarkArt.Alpha(mark, c, c + (int)(0.17f * n)) < 0.1f); // between the pupil and the lid
+        Assert.True(UiDrawnMarkArt.Alpha(mark, c, n - 3) < 0.1f); // above the eye
+        Assert.True(UiDrawnMarkArt.Alpha(mark, 2, 2) < 0.1f); // the corner of the texture
+    }
+
+    // ---- A stable height (KeepHeight) ----------------------------------------------------------------------
+
+    [Fact]
+    public void Folding_a_section_keeps_every_body_row_with_blank_fillers_that_take_no_click_or_stop()
+    {
+        var (list, handle, _) = NewList();
+        Assert.Equal(6, list.Describe()["bodyRows"]);
+        Assert.Equal(0, handle.Fillers);
+
+        // Lines: #Storage c1 c2 c3 #Crafting s1 b1 s2 (8): folding Storage leaves 5 lines in 6 rows.
+        Assert.True(list.SetGroupCollapsed("Storage", true));
+        Assert.Equal(1, handle.Fillers);
+        Assert.Equal(6, list.Describe()["bodyRows"]);
+        Assert.All(Enumerable.Range(0, 6), i => Assert.True(Row("cl:row" + i).Visible));
+        var filler = Row("cl:row5");
+        Assert.True(handle.IsFillerSlot(5));
+        Assert.True(_runtime.Inert["cl:row5"]);
+        Assert.True(UiNav.IsSkipped(handle.SlotAt(5)));
+        Assert.False(Cell(filler, UiChecklistLayout.CellCheck).Visible);
+        Assert.False(Cell(filler, UiChecklistLayout.CellView).Visible);
+        Assert.Equal("", Cell(filler, "c:label").Text);
+        Assert.True(Cell(filler, "c:label").Visible); // the columns keep their places
+        Assert.False(filler.Selected);
+        handle.ClickSlot(5);
+        handle.HoverSlotForTests(5, true);
+        Assert.Empty(list.Selected);
+        Assert.Null(_runtime.Tooltip);
+        Assert.Equal(5, ((List<Dictionary<string, object?>>)list.Describe()["slots"]!).Count); // fillers are not lines
+
+        // A search and a filter keep the height too; unfolding gives the rows back.
+        list.Query = "furnace";
+        Assert.Equal(6, list.Describe()["bodyRows"]);
+        Assert.Equal(4, handle.Fillers); // #Crafting s2
+        list.Query = "";
+        list.Filter = "belts";
+        Assert.Equal(6, list.Describe()["bodyRows"]);
+        list.Filter = "";
+        Assert.True(list.SetGroupCollapsed("Storage", false));
+        Assert.Equal(0, handle.Fillers);
+        Assert.False(handle.IsFillerSlot(5));
+        Assert.False(_runtime.Inert["cl:row5"]);
+        Assert.False(UiNav.IsSkipped(handle.SlotAt(5)));
+        Assert.Equal("Iron chest", Cell(Row("cl:row2"), "c:label").Text);
+        Assert.True(Cell(Row("cl:row5"), UiChecklistLayout.CellCheck).Visible);
+        Assert.True((bool)list.Describe()["keepHeight"]!);
+    }
+
+    [Fact]
+    public void Without_KeepHeight_the_body_is_only_as_tall_as_its_lines()
+    {
+        var o = Options();
+        o.KeepHeight = false;
+        var (list, handle, _) = NewList(options: o);
+        list.SetGroupCollapsed("Storage", true);
+        Assert.Equal(0, handle.Fillers);
+        Assert.Equal(5, list.Describe()["bodyRows"]);
+        Assert.False(Row("cl:row5").Visible);
+        list.FilterOpen = true;
+        Assert.Equal(6, list.VisibleRows); // the chips take nothing
+    }
+
+    [Fact]
+    public void The_open_filter_takes_its_chip_rows_from_the_body_so_the_height_stays()
+    {
+        var (list, _, _) = NewList(Many(40), Options(visible: 8));
+        int chips = _runtime.Rows.Count(r => r.Text.StartsWith("cl:filters", StringComparison.Ordinal));
+        Assert.True(chips >= 1);
+        Assert.Equal(8, list.VisibleRows);
+        list.FilterOpen = true;
+        Assert.Equal(8 - chips, list.VisibleRows);
+        Assert.Equal(8, (int)list.Describe()["bodyRows"]! + (int)list.Describe()["chipRows"]!);
+        Assert.False(Row("cl:row7").Visible);
+        list.FilterOpen = false;
+        Assert.Equal(8, list.VisibleRows);
+        Assert.Equal(0, list.Describe()["chipRows"]);
+
+        // A chip that picks a filter closes the chips and gives the rows back as well.
+        list.FilterOpen = true;
+        Click(Row("cl:filters0"), UiChecklistLayout.ChipKey(1));
+        Assert.Equal("chests", list.Filter);
+        Assert.False(list.FilterOpen);
+        Assert.Equal(8, list.VisibleRows);
+        // So does Cancel.
+        list.FilterOpen = true;
+        list.Cancel();
+        Assert.Equal(8, list.VisibleRows);
+    }
+
+    [Fact]
+    public void A_list_that_fills_its_window_keeps_the_filled_rows_when_a_fold_shortens_it()
+    {
+        var o = Options();
+        o.FillHeight = true;
+        var (list, handle, _) = NewList(Many(20), o);
+        Assert.True(handle.ApplyFill(16)); // the panel has room for 16 rows
+        Assert.Equal(16, list.Describe()["bodyRows"]);
+        list.SetGroupCollapsed("Storage", true); // 1 + 1 + 10 lines
+        Assert.Equal(16, list.Describe()["bodyRows"]);
+        Assert.Equal(16 - 12, handle.Fillers);
+        list.SetGroupCollapsed("Crafting", true);
+        Assert.Equal(16, list.Describe()["bodyRows"]);
+        Assert.Null(list.Describe()["room"]); // no layout on the fake runtime
+    }
+
+    [Fact]
+    public void The_icon_preview_rows_fit_every_checked_width_and_the_header_lines_up()
+    {
+        var columns = new UiChecklistModel(Options()).Columns;
+        var body = UiChecklistLayout.RowCells(columns, true, "View", previewIcon: true);
+        var header = UiChecklistLayout.HeaderCells(columns, true, "View", previewIcon: true);
+        foreach (var c in body.Where(c => c.Kind == CellKind.Text)) c.Text = "Large wooden chest";
+        foreach (float width in UiWidgetLayout.CheckedRowWidths)
+        {
+            float inset = UiDataTableLayout.ScrollInset;
+            var placedBody = MenuPanelLayout.CellColumns(width, new CellRowSpec("row", body, rightInset: inset));
+            var placedHeader = MenuPanelLayout.CellColumns(width, new CellRowSpec("header", header, rightInset: inset));
+            AssertFits(placedBody, width, inset);
+            AssertFits(placedHeader, width, inset);
+            var view = placedBody.Single(p => p.Key == UiChecklistLayout.CellView);
+            Assert.True(view.Visible);
+            Assert.Equal(UiWidgetLayout.IconButtonWidth, view.Right - view.Left, 2); // never cut to "Vi…"
+            var pad = placedHeader.Single(p => p.Key == UiChecklistLayout.CellViewPad);
+            Assert.Equal(pad.Left, view.Left, 2);
+            foreach (var col in columns)
+            {
+                var h = placedHeader.Single(p => p.Key == "c:" + col.Key);
+                var b = placedBody.Single(p => p.Key == "c:" + col.Key);
+                Assert.Equal(h.Visible, b.Visible);
+                if (h.Visible) Assert.Equal(h.Left, b.Left, 2);
+            }
+        }
+    }
+
     private static void AssertFits(CellPlacement[] placed, float width, float inset)
     {
         float left = -width / 2f, right = width / 2f - inset;

@@ -155,7 +155,7 @@ Status: built and game-free tested (`UiChecklistTests.The_gallery_checklist_hold
 (`Ui.Panel(...).GameWindow(900)`) with one `panel.Checklist` filling it: 300 synthetic chests, stations and belts in the
 Storage, Crafting and Logistics sections, the **Show** filter (Chests, Stations, Belts, Within 30 m), the Name, Plot,
 Distance and Note columns sorted by distance, every 23rd row grayed (*Another clan's plot*), and **Add N**. A row's
-**View** (or a right-click on the row) is the preview stub: the list is suspended, one line names the entry, and
+The eye at each row's end (**View**, the checklist's default icon preview button), or a right-click on the row, is the preview stub: the list is suspended, one line names the entry, and
 **Back to the list** resumes it as it was. The gallery's **Lists** tab opens it (**Checklist window**). Live check:
 [ui.md, Checklist](../../docs/ui.md#checklist-checklist1) (not run).
 
