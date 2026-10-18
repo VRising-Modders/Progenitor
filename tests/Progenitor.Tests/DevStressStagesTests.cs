@@ -360,6 +360,11 @@ public class DevStressStagesTests
         Assert.Equal(2, a.Limit);
         Assert.Throws<ArgumentException>(() => StressStageArgs.ParseStations(Json("{\"seed\":18,\"experiment\":true}")));
         Assert.Throws<ArgumentException>(() => StressStageArgs.ParseStations(Json("{\"seed\":18,\"plots\":[1,2,3,4],\"experiment\":true}")));
+        // batch:true lifts the cap once a castle is proven: every plot, or any list.
+        var batch = StressStageArgs.ParseStations(Json("{\"seed\":18,\"experiment\":true,\"batch\":true,\"perCastle\":20,\"limit\":20,\"confirm\":\"stress\"}"));
+        Assert.True(batch.Batch);
+        Assert.True(batch.AllPlots);
+        Assert.True(StressStageArgs.ParseStations(Json("{\"seed\":18,\"plots\":[1,2,3,4,5],\"experiment\":true,\"batch\":true}")).Batch);
         // A dry run may plan the experiment anywhere.
         Assert.True(StressStageArgs.ParseStations(Json("{\"seed\":18,\"experiment\":true,\"dryRun\":true}")).Experiment);
     }

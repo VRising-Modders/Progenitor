@@ -55,6 +55,8 @@ internal sealed class StressStageArgs
     public int Limit { get; private set; } = 1;
     /// <summary>stress_stations experiment: free tiles kept around every other building (default 0: footprints only must not overlap).</summary>
     public int Margin { get; private set; }
+    /// <summary>stress_stations experiment: lift the 1..3 plot cap (all plots or any list), with chunked work and readback across frames.</summary>
+    public bool Batch { get; private set; }
     public const int MaxExperimentPlots = 3;
     public bool DryRun { get; private set; }
     public string? Confirm { get; private set; }
@@ -139,8 +141,9 @@ internal sealed class StressStageArgs
         a.Experiment = Bool(args, "experiment", false);
         a.Limit = OptInt(args, "limit", 1, MaxPerCastle) ?? 1;
         a.Margin = OptInt(args, "margin", 0, 3) ?? 0;
-        if (a.Experiment && !a.DryRun && (a.AllPlots || a.Plots.Count > MaxExperimentPlots))
-            throw new ArgumentException($"experiment placement needs plots:[...] with 1..{MaxExperimentPlots} territories (prove it on one castle first)");
+        a.Batch = Bool(args, "batch", false);
+        if (a.Experiment && !a.DryRun && !a.Batch && (a.AllPlots || a.Plots.Count > MaxExperimentPlots))
+            throw new ArgumentException($"experiment placement needs plots:[...] with 1..{MaxExperimentPlots} territories, or batch:true for more (prove it on one castle first)");
         a.Confirm = Str(args, "confirm");
         a.BudgetMs = Double(args, "budgetMs", StressArgs.DefaultBudgetMs, StressArgs.MinBudgetMs, StressArgs.MaxBudgetMs);
         return a;

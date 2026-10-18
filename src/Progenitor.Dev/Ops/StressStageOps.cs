@@ -470,71 +470,110 @@ internal static class StressStageOps
         var plan = new Dictionary<string, object?> { ["seed"] = a.Seed, ["perCastle"] = a.PerCastle, ["experiment"] = place, ["limit"] = a.Limit, ["margin"] = a.Margin, ["note"] = PlacementNote };
         var placed = new List<Placement>();
         job.Plan = plan;
+        var rows = new List<object>();
+        int total = 0;
+        var reasons = new Dictionary<string, int>();
+        var catalog = new List<int>();
+        // The plan runs one castle per step: the spot search builds a tile set per station, which adds up over a batch.
         job.Add("plan", () =>
         {
-            var catalog = reads.Values.SelectMany(r => r.Refinement.Select(s => s.Guid)).GroupBy(g => g)
-                .OrderByDescending(x => x.Count()).ThenBy(x => x.Key).Select(x => x.Key).ToList();
-            var rows = new List<object>();
-            int total = 0;
-            var reasons = new Dictionary<string, int>();
+            catalog.AddRange(reads.Values.SelectMany(r => r.Refinement.Select(s => s.Guid)).GroupBy(g => g)
+                .OrderByDescending(x => x.Count()).ThenBy(x => x.Key).Select(x => x.Key));
+            var steps = new List<(string, Func<string>)>();
+            foreach (var kv0 in reads.OrderBy(k => k.Key))
+            {
+                var kv = kv0;
+                steps.Add(($"plan {kv.Key}", () => PlanCastle(kv.Key, kv.Value)));
+            }
+            steps.Add(("plan summary", () =>
+            {
+                plan["catalog"] = catalog.Select(c => Name(world, c)).ToList();
+                plan["castles"] = rows;
+                plan["stationsToAdd"] = total;
+                plan["spotReasons"] = reasons.OrderBy(k => k.Key).ToDictionary(k => k.Key, k => (object?)k.Value);
+                if (place && placed.Count == 0 && total > 0)
+                    job.Note("nothing placed: " + string.Join(", ", reasons.Select(k => k.Key + " x" + k.Value)) + " (see plan.castles[].placements[].detail)");
+                return place ? $"{placed.Count} placement(s) queued of {total} planned" : total + " station(s) would be added";
+            }));
+            job.InsertNext(steps);
+            return $"{catalog.Count} station kind(s), {reads.Count} castle(s) to plan";
+        });
+
+        string PlanCastle(int territory, StationCastle castle)
+        {
+            var have = castle.Refinement.Select(s => s.Guid).ToList();
+            // Placement copies a same-kind, unrotated template in this castle, so with the experiment only those kinds are
+            // planned, repeated round-robin to reach the target (a template from another castle is not proven).
+            var kinds = a.Experiment ? catalog.Where(g => castle.Templates.ContainsKey(g)).ToList() : catalog;
+            var add = StressStationPlanner.Plan(have, a.PerCastle, kinds);
+            total += add.Count;
+            var row = new Dictionary<string, object?>
+            {
+                ["territory"] = territory,
+                ["buildings"] = castle.Buildings.Count,
+                ["floors"] = castle.Buildings.Count(b => b.IsFloor),
+                ["refinementStations"] = have.Count,
+                ["templateKinds"] = kinds.Count,
+                ["structureRevision"] = castle.Revision,
+                ["add"] = add.GroupBy(x => x).Select(x => (object)new Dictionary<string, object?> { ["prefab"] = Name(world, x.Key), ["guid"] = x.Key, ["count"] = x.Count() }).ToList(),
+            };
+            if (a.Experiment && kinds.Count == 0 && have.Count < a.PerCastle)
+            {
+                row["reason"] = "no_template";
+                reasons["no_template"] = (reasons.TryGetValue("no_template", out int nt) ? nt : 0) + 1;
+            }
+            if (place || a.Experiment)
+            {
+                var spots = new List<object>();
+                var occupied = castle.Buildings.Where(b => !b.IsFloor).ToList();
+                var extra = new List<(int Height, StressRect Rect)>();
+                foreach (int guid in add.Take(a.Limit))
+                {
+                    var spot = FindStationSpot(castle, guid, occupied, extra, a.Margin, out var reason, out var detail);
+                    var spotRow = new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["reason"] = reason, ["detail"] = detail };
+                    spots.Add(spotRow);
+                    reasons[reason] = (reasons.TryGetValue(reason, out int rn) ? rn : 0) + 1;
+                    if (spot is not (StressRect r, int height, Unity.Mathematics.float3 pos)) continue;
+                    extra.Add((height, r));
+                    spotRow["tiles"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}";
+                    spotRow["height"] = height;
+                    spotRow["x"] = Math.Round(pos.x, 2);
+                    spotRow["y"] = Math.Round(pos.y, 2);
+                    spotRow["z"] = Math.Round(pos.z, 2);
+                    if (!place) continue;
+                    var p = new Placement { Territory = territory, PrefabGuid = guid, Spot = r, Position = pos, Heart = castle.Heart, RevisionBefore = castle.Revision };
+                    placed.Add(p);
+                    job.Add($"place {territory} {guid} at {r.MinX},{r.MinY}", () => PlaceStation(world, p));
+                }
+                row["placements"] = spots;
+            }
+            rows.Add(row);
+            return $"{add.Count} to add";
+        }
+        // One row per placed station, a few per frame (a batch can place hundreds), then one per castle.
+        job.ReadbackSteps = () =>
+        {
+            var steps = new List<Func<object>>();
+            foreach (var p0 in placed)
+            {
+                var p = p0;
+                steps.Add(() => PlacementReadback(world, p, reads[p.Territory]));
+            }
             foreach (var kv in reads.OrderBy(k => k.Key))
             {
-                var castle = kv.Value;
-                var have = castle.Refinement.Select(s => s.Guid).ToList();
-                var add = StressStationPlanner.Plan(have, a.PerCastle, catalog);
-                total += add.Count;
-                var row = new Dictionary<string, object?>
+                int t = kv.Key;
+                int before = kv.Value.Refinement.Count;
+                steps.Add(() => new Dictionary<string, object?>
                 {
-                    ["territory"] = kv.Key,
-                    ["buildings"] = castle.Buildings.Count,
-                    ["floors"] = castle.Buildings.Count(b => b.IsFloor),
-                    ["refinementStations"] = have.Count,
-                    ["structureRevision"] = castle.Revision,
-                    ["add"] = add.GroupBy(x => x).Select(x => (object)new Dictionary<string, object?> { ["prefab"] = Name(world, x.Key), ["guid"] = x.Key, ["count"] = x.Count() }).ToList(),
-                };
-                if (place || a.Experiment)
-                {
-                    var spots = new List<object>();
-                    var occupied = castle.Buildings.Where(b => !b.IsFloor).ToList();
-                    var extra = new List<(int Height, StressRect Rect)>();
-                    foreach (int guid in add.Take(a.Limit))
-                    {
-                        var spot = FindStationSpot(castle, guid, occupied, extra, a.Margin, out var reason, out var detail);
-                        var spotRow = new Dictionary<string, object?> { ["prefab"] = Name(world, guid), ["reason"] = reason, ["detail"] = detail };
-                        spots.Add(spotRow);
-                        reasons[reason] = (reasons.TryGetValue(reason, out int rn) ? rn : 0) + 1;
-                        if (spot is not (StressRect r, int height, Unity.Mathematics.float3 pos)) continue;
-                        extra.Add((height, r));
-                        spotRow["tiles"] = $"{r.MinX},{r.MinY}..{r.MaxX},{r.MaxY}";
-                        spotRow["height"] = height;
-                        spotRow["x"] = Math.Round(pos.x, 2);
-                        spotRow["y"] = Math.Round(pos.y, 2);
-                        spotRow["z"] = Math.Round(pos.z, 2);
-                        if (!place) continue;
-                        var p = new Placement { Territory = kv.Key, PrefabGuid = guid, Spot = r, Position = pos, Heart = castle.Heart, RevisionBefore = castle.Revision };
-                        placed.Add(p);
-                        job.Add($"place {kv.Key} {guid} at {r.MinX},{r.MinY}", () => PlaceStation(world, p));
-                    }
-                    row["placements"] = spots;
-                }
-                rows.Add(row);
+                    ["territory"] = t,
+                    ["refinementStationsBefore"] = before,
+                    ["placed"] = placed.Count(p => p.Territory == t && p.Placed != Entity.Null),
+                    ["target"] = a.PerCastle,
+                });
             }
-            plan["catalog"] = catalog.Select(c => Name(world, c)).ToList();
-            plan["castles"] = rows;
-            plan["stationsToAdd"] = total;
-            plan["spotReasons"] = reasons.OrderBy(k => k.Key).ToDictionary(k => k.Key, k => (object?)k.Value);
-            if (place && placed.Count == 0 && total > 0)
-                job.Note("nothing placed: " + string.Join(", ", reasons.Select(k => k.Key + " x" + k.Value)) + " (see plan.castles[].placements[].detail)");
-            return place ? $"{placed.Count} placement(s) queued of {total} planned" : total + " station(s) would be added";
-        });
-        job.Readback = () =>
-        {
-            var list = new List<object>();
-            foreach (var p in placed) list.Add(PlacementReadback(world, p, reads[p.Territory]));
-            foreach (var kv in reads.OrderBy(k => k.Key))
-                list.Add(new Dictionary<string, object?> { ["territory"] = kv.Key, ["refinementStationsBefore"] = kv.Value.Refinement.Count, ["placed"] = placed.Count(p => p.Territory == kv.Key && p.Placed != Entity.Null) });
-            return list;
+            return steps;
         };
+        if (a.Batch) job.Note($"batch: {reads.Count} castle(s), read, placed and read back a few steps per frame under budgetMs {a.BudgetMs}");
         return Start(world, job);
     }
 
@@ -1318,16 +1357,53 @@ internal static class StressStageOps
             job.ReadbackScheduled = true;
             MainThread.PostDelayed(job.DryRun ? 0 : 1.0, () =>
             {
+                if (job.Finished) { Resolve(job); return; }
+                if (job.ReadbackSteps != null)
+                {
+                    // Many rows (a batch of castles): read back under the frame budget, a few rows per frame.
+                    try { job.ReadbackQueue = job.ReadbackSteps(); }
+                    catch (Exception e) { job.Note("readback threw: " + e.Message); job.ReadbackQueue = new List<Func<object>>(); }
+                    job.ReadbackRows = new List<object>();
+                    MainThread.PostDelayed(0, ReadbackTick, TickOwner);
+                    return;
+                }
                 try { job.ReadbackRows = job.Readback?.Invoke(); }
                 catch (Exception e) { job.Note("readback threw: " + e.Message); }
-                job.Finish();
-                Plugin.Logger?.LogInfo($"stress_{job.Kind} seed {job.Seed}: {job.Phase} {job.Reason} ({job.Done}/{job.StepCount} steps, {job.Failed} failed, max tick {job.MaxTickMs:0.0} ms)");
-                Resolve(job);
+                EndJob(job);
             }, TickOwner);
             return;
         }
         if (job.Finished) { Resolve(job); return; }
         MainThread.PostDelayed(0, Tick, TickOwner);
+    }
+
+    private static void ReadbackTick()
+    {
+        var job = s_job;
+        if (job == null || job.Finished || job.ReadbackQueue == null) return;
+        var world = job.World;
+        if (world == null || !world.IsCreated || !ReferenceEquals(world, Progenitor.Worlds.Server))
+        {
+            job.Cancel("the server world changed during readback");
+            Resolve(job);
+            return;
+        }
+        double start = Clock.Elapsed.TotalMilliseconds;
+        while (job.ReadbackAt < job.ReadbackQueue.Count && Clock.Elapsed.TotalMilliseconds - start < job.BudgetMs)
+        {
+            var step = job.ReadbackQueue[job.ReadbackAt++];
+            try { job.ReadbackRows!.Add(step()); }
+            catch (Exception e) { job.ReadbackRows!.Add(new Dictionary<string, object?> { ["readbackError"] = e.Message }); }
+        }
+        if (job.ReadbackAt < job.ReadbackQueue.Count) { MainThread.PostDelayed(0, ReadbackTick, TickOwner); return; }
+        EndJob(job);
+    }
+
+    private static void EndJob(StageJob job)
+    {
+        job.Finish();
+        Plugin.Logger?.LogInfo($"stress_{job.Kind} seed {job.Seed}: {job.Phase} {job.Reason} ({job.Done}/{job.StepCount} steps, {job.Failed} failed, max tick {job.MaxTickMs:0.0} ms)");
+        Resolve(job);
     }
 
     private static void Resolve(StageJob job)
@@ -1363,6 +1439,11 @@ internal static class StressStageOps
         public DeferredResult? Pending { get; set; }
         public Dictionary<string, object?> Plan { get; set; } = new();
         public Func<List<object>>? Readback { get; set; }
+        /// <summary>Instead of <see cref="Readback"/>: one function per row, run a few per frame.</summary>
+        public Func<List<Func<object>>>? ReadbackSteps { get; set; }
+        public List<Func<object>>? ReadbackQueue { get; set; }
+        public int ReadbackAt { get; set; }
+        public double BudgetMs => _budgetMs;
         public List<object>? ReadbackRows { get; set; }
         public bool ReadbackScheduled { get; set; }
         public string Phase { get; private set; } = "running";
@@ -1448,7 +1529,26 @@ internal static class StressStageOps
             ["plan"] = Plan,
             ["notes"] = _notes.ToList(),
             ["rows"] = _rows.Count > 400 ? _rows.Where(r => r["ok"] is false).Take(200).Concat(_rows.Skip(_rows.Count - 50)).ToList() : _rows.ToList(),
-            ["readback"] = ReadbackRows,
+            ["readback"] = ReadbackRows == null || ReadbackRows.Count <= 300 ? ReadbackRows : Problems(ReadbackRows),
+            ["readbackRows"] = ReadbackRows?.Count,
+            ["readbackProblems"] = ReadbackRows?.Count(IsProblem),
         };
+
+        /// <summary>A readback row with a failed check: a false check flag, a true NoOwner, overlaps or an error.</summary>
+        private static bool IsProblem(object row)
+        {
+            if (row is not Dictionary<string, object?> d) return false;
+            foreach (var key in new[] { "exists", "heartConnected", "sameTeamAsHeart", "tileRegistered", "footprintAsPlanned", "listedAsStation", "ok" })
+                if (d.TryGetValue(key, out var v) && v is false) return true;
+            if (d.TryGetValue("noOwner", out var no) && no is true) return true;
+            if (d.TryGetValue("overlaps", out var ov) && ov is System.Collections.ICollection c && c.Count > 0) return true;
+            return d.ContainsKey("readbackError");
+        }
+
+        /// <summary>For a big batch: every problem row (up to 200) and the per-castle rows.</summary>
+        private static List<object> Problems(List<object> rows) =>
+            rows.Where(IsProblem).Take(200)
+                .Concat(rows.Where(r => r is Dictionary<string, object?> d && d.ContainsKey("refinementStationsBefore")))
+                .ToList();
     }
 }
