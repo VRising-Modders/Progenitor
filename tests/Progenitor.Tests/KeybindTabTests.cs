@@ -153,6 +153,24 @@ namespace Progenitor.Tests
 
             public bool IsHeld(KeyChord chord) => _held.Contains(chord.Key);
 
+            /// <summary>HOLDMOD1: the modifier keys held now, for the capture's lone-modifier rule; null: unreadable.</summary>
+            public ModifierSides? Mods { get; set; }
+
+            /// <summary>HOLDMOD1 review: modifier press edges of this frame only (a tap shorter than a frame); cleared by <see cref="Frame"/>.</summary>
+            public ModifierSides ModsPressed { get; set; }
+
+            public bool TryReadModifiers(out ModifierSides held, out ModifierSides pressed)
+            {
+                held = Mods ?? ModifierSides.None;
+                pressed = ModsPressed;
+                return Mods != null;
+            }
+
+            /// <summary>HOLDMOD1 review: <c>Application.isFocused</c>; null: unknown.</summary>
+            public bool? Focused { get; set; }
+
+            public bool? WindowFocused => Focused;
+
             /// <summary>PAD1: the controller's held buttons (<see cref="KeyChord.GamepadBit"/> bits); null: no controller.</summary>
             public uint? PadHeld { get; set; }
 
@@ -167,6 +185,7 @@ namespace Progenitor.Tests
             {
                 Keybinds.Pump();
                 _edges.Clear();
+                ModsPressed = ModifierSides.None;
             }
         }
 

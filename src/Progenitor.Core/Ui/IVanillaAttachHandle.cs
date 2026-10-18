@@ -145,6 +145,17 @@ public interface IVanillaAttachHandle : IDisposable
     IDisposable OnPanel(Action<VanillaPanelEvent> handler) => NoLease.Instance;
 
     /// <summary>
+    /// HOLDMOD1: re-render an open panel or tooltip. Raises one <see cref="VanillaPanelChange.Refreshed"/> to this
+    /// handle's <see cref="OnPanel"/> handlers on the site's next frame, with the target it still shows, so the same
+    /// handler that fills the rows on <see cref="VanillaPanelChange.Opened"/> and
+    /// <see cref="VanillaPanelChange.TargetChanged"/> fills them again. Call it when something the rows depend on
+    /// changed while the target did not, such as a hold key (<c>ctx.Keybinds.RegisterHold</c> on
+    /// <see cref="KeyChord.Alt"/>) starting or ending. Calls before that frame make one refresh. Returns false and raises
+    /// nothing while the panel is closed, on a disabled or disposed handle, and on the map card.
+    /// </summary>
+    bool Refresh() => false;
+
+    /// <summary>
     /// P6: add a button. On the panel sites it is a clone of the game's own inventory bar button
     /// (its art, hover and press states), captioned in the window's own font, and sized and spaced by
     /// the vanilla group (inline anchors) or by the column (edge anchors). Like a row it is

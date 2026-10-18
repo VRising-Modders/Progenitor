@@ -126,7 +126,8 @@ public static partial class ModsMenu
         if (string.IsNullOrWhiteSpace(chord))
             throw new ArgumentException("args.chord is required (e.g. \"F9 + Ctrl\"); to unbind a key use keys op=unbind");
         // KEYS4 (live 2026-09-30): "Shift" alone parsed as None and offered to unbind the key.
-        if (KeyChord.IsModifiersOnly(chord, out _))
+        // HOLDMOD1: one modifier on its own ("Alt") is a lone-modifier chord; the row decides whether it may take it.
+        if (KeyChord.IsModifiersOnly(chord, out var mods) && !KeyChord.IsSingleModifier(mods))
             throw new ArgumentException("args.chord '" + chord!.Trim() + "' is only modifiers. " + KeybindsTabLayout.ModifiersOnlyReason
                 + " To unbind a key use keys op=unbind.");
         if (!KeyChord.TryParse(chord, out var parsed))

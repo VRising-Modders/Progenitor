@@ -359,7 +359,49 @@ internal static class KeybindArbiter
 
     /// <summary>True when <paramref name="c"/> is a game key that stops mod keys on its chord.</summary>
     internal static bool GameWins(KeybindClaim c) =>
-        c.Source == KeybindSource.Game && EnforceGameWins && c.Mode.Length == 0;
+        c.Source == KeybindSource.Game && EnforceGameWins && c.Mode.Length == 0 && !SharesLoneModifier(c);
+
+    /// <summary>
+    /// HOLDMOD1: a game action on Ctrl, Shift or Alt on its own (Advanced Tooltip and Toggle Emote Wheel on Left Alt,
+    /// Toggle Action Wheel on Left Ctrl, Cliff Jump on Left Shift) never stops a mod key on that lone modifier, and a
+    /// remap never takes it from either side: the game reads the modifier as a held key, Progenitor never consumes a
+    /// key, so both act on it. It is shown as a shared key (<see cref="SoftGameSentence"/>).
+    /// </summary>
+    internal static bool SharesLoneModifier(KeybindClaim game) =>
+        game.Source == KeybindSource.Game && game.Comparable && game.Chord.IsLoneModifier;
+
+    /// <summary>
+    /// HOLDMOD1: true when <paramref name="a"/> and <paramref name="b"/> are on the same lone modifier and at most one of
+    /// them is a Progenitor bind. The game's actions and ordinary mods' KeyCode settings read the modifier themselves and
+    /// Progenitor cannot stop them, so a Progenitor hold shares the key with them (as the Mouse2-Mouse4 KeyCode values are
+    /// kept out of the winner rule, so a Progenitor bind never starts losing to another mod's setting it never met). Two
+    /// Progenitor binds on one lone modifier clash, and the first-installed rule decides.
+    /// </summary>
+    internal static bool SharesLoneModifier(KeybindClaim a, KeybindClaim b) =>
+        a.Comparable && b.Comparable && a.Chord.IsLoneModifier && a.Chord == b.Chord
+        && !(a.Source == KeybindSource.Progenitor && b.Source == KeybindSource.Progenitor);
+
+    /// <summary>HOLDMOD1: <c>Alt is also held by the game (Advanced Tooltip) and Old Mod (Modifier Key); both act on it.</c>, or empty.</summary>
+    internal static string SharedSentence(KeybindClaim claim, IReadOnlyList<KeybindClaim> shared)
+    {
+        if (shared == null || shared.Count == 0) return "";
+        var gameActions = new List<string>();
+        var names = new List<string>();
+        foreach (var s in shared)
+        {
+            if (s.Source == KeybindSource.Game)
+            {
+                if (!gameActions.Contains(s.DisplayName)) gameActions.Add(s.DisplayName);
+                continue;
+            }
+
+            string n = DisplayNameOf(s.OwnerId) + " (" + s.DisplayName + ")";
+            if (!names.Contains(n)) names.Add(n);
+        }
+
+        if (gameActions.Count > 0) names.Insert(0, GameName + " (" + JoinNames(gameActions) + ")");
+        return claim.Chord.DisplayText + " is also held by " + JoinNames(names) + "; both act on it.";
+    }
 
     /// <summary>
     /// KEYS4: true when game key <paramref name="game"/> stops a mod key of <paramref name="scope"/>: an
@@ -367,7 +409,7 @@ internal static class KeybindArbiter
     /// (<see cref="GameKeybindCatalog.InMenus"/>) stops a menu key, since both act in a menu.
     /// </summary>
     internal static bool GameWins(KeybindClaim game, KeybindScope scope) =>
-        scope switch
+        !SharesLoneModifier(game) && scope switch
         {
             KeybindScope.Menu => game.Source == KeybindSource.Game && EnforceGameWins && IsGameMenuKey(game),
             // MAPTP1: a map key acts only in the map, where the game's own map keys and menu keys are live.
@@ -941,6 +983,13 @@ internal static class KeybindArbiter
             // KEYS4: only the claims this one can meet (a menu key never meets a gameplay key).
             var same = sameChord.FindAll(o => ReferenceEquals(o, c) || ScopesMeet(o, c));
 
+            // HOLDMOD1: a lone modifier is shared with every claim that is not another Progenitor bind (the game's
+            // lone-modifier actions, an ordinary mod's KeyCode setting). Shared claims are no clash: they are left out
+            // of Others (so out of the conflict count and the Conflicts view) and only named in the reason.
+            var shared = same.FindAll(o => !ReferenceEquals(o, c) && SharesLoneModifier(o, c));
+            if (shared.Count > 0) same.RemoveAll(o => shared.Contains(o));
+            string sharedText = SharedSentence(c, shared);
+
             var others = new List<KeybindClaim>();
             foreach (var o in same)
                 if (!ReferenceEquals(o, c) && !SameOwner(o, c)) others.Add(o);
@@ -950,7 +999,7 @@ internal static class KeybindArbiter
                 // A game key is never beaten; it is listed with the mods that want it, for the tab.
                 var mods = others.FindAll(o => o.Source != KeybindSource.Game);
                 verdicts.Add(new KeybindVerdict(c, true, null, "", c.Source == KeybindSource.Game ? mods : others,
-                    c.Source == KeybindSource.Game && mods.Count > 0 ? GameAlsoUsedBy(c, mods) : ""));
+                    JoinSentences(c.Source == KeybindSource.Game && mods.Count > 0 ? GameAlsoUsedBy(c, mods) : "", sharedText)));
                 continue;
             }
 
@@ -971,9 +1020,9 @@ internal static class KeybindArbiter
             if (active)
             {
                 var modOthers = others.FindAll(o => o.Source != KeybindSource.Game);
-                reason = JoinSentences(WinnerSentence(c, modOthers), SoftGameSentence(soft));
+                reason = JoinSentences(JoinSentences(WinnerSentence(c, modOthers), SoftGameSentence(soft)), sharedText);
             }
-            else reason = LoserSentence(c, winner, rule);
+            else reason = JoinSentences(LoserSentence(c, winner, rule), sharedText);
             verdicts.Add(new KeybindVerdict(c, active, active ? null : winner, rule, others, reason));
         }
 
@@ -1359,6 +1408,18 @@ internal static class LegacyKeyNames
         {
             reason = chord.Key + " cannot be stored in this mod's setting.";
             return false;
+        }
+
+        // HOLDMOD1: a lone modifier is stored as its KeyCode (LeftAlt), keeping the side the entry already names.
+        if (chord.IsLoneModifier)
+        {
+            text = chord.LoneFlag switch
+            {
+                KeyModifiers.Ctrl => Side("LeftControl", "RightControl"),
+                KeyModifiers.Shift => Side("LeftShift", "RightShift"),
+                _ => Side("LeftAlt", "RightAlt"),
+            };
+            return true;
         }
 
         if (keyCodeOnly)

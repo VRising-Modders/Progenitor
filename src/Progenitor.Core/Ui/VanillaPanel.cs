@@ -523,6 +523,14 @@ public enum VanillaPanelChange
 
     /// <summary>The panel closed. <see cref="VanillaPanelEvent.Previous"/> is what it showed.</summary>
     Closed = 3,
+
+    /// <summary>
+    /// HOLDMOD1: the panel is still open on the same target and the plugin asked for its rows again
+    /// (<see cref="IVanillaAttachHandle.Refresh"/>), for example because a hold key started or ended.
+    /// <see cref="VanillaPanelEvent.Target"/> and <see cref="VanillaPanelEvent.Previous"/> are both the shown target.
+    /// Render as for <see cref="TargetChanged"/>. Only a <c>Refresh</c> call raises it.
+    /// </summary>
+    Refreshed = 4,
 }
 
 /// <summary>One open, close or target change of a vanilla panel site.</summary>
@@ -564,6 +572,20 @@ internal sealed class VanillaPanelTracker
 
     internal VanillaPanelTarget Target { get; private set; }
 
+    private bool _refreshPending;
+
+    /// <summary>
+    /// HOLDMOD1: ask for one <see cref="VanillaPanelChange.Refreshed"/> on the next <see cref="Observe"/> that finds the
+    /// panel still open on the same target. True when the panel is open now. An open, close or target change on that
+    /// frame takes its place (the handler renders on it anyway). Several requests before that frame make one refresh.
+    /// </summary>
+    internal bool RequestRefresh()
+    {
+        if (!IsOpen) return false;
+        _refreshPending = true;
+        return true;
+    }
+
     /// <summary>
     /// Feed one frame. Returns the edge it produced, or null when nothing changed (the common case:
     /// every frame the panel stays open on the same target, and every frame it stays closed).
@@ -571,6 +593,8 @@ internal sealed class VanillaPanelTracker
     internal VanillaPanelChange? Observe(bool open, in VanillaPanelTarget target, out VanillaPanelTarget previous)
     {
         previous = Target;
+        bool refresh = _refreshPending;
+        _refreshPending = false;
         if (!open)
         {
             if (!IsOpen) return null;
@@ -587,7 +611,7 @@ internal sealed class VanillaPanelTracker
             return VanillaPanelChange.Opened;
         }
 
-        if (Target == target) return null;
+        if (Target == target) return refresh ? VanillaPanelChange.Refreshed : null;
         Target = target;
         return VanillaPanelChange.TargetChanged;
     }
@@ -597,6 +621,7 @@ internal sealed class VanillaPanelTracker
     {
         IsOpen = false;
         Target = VanillaPanelTarget.None;
+        _refreshPending = false;
     }
 }
 

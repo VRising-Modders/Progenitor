@@ -476,8 +476,6 @@ namespace Progenitor.Tests
         // ---- modifiers alone (KEYS4 B) --------------------------------------------------------------
 
         [Theory]
-        [InlineData("Shift")]
-        [InlineData("LeftShift")]
         [InlineData("Ctrl + Alt")]
         public void Capturing_modifiers_alone_is_refused_not_turned_into_an_unbind(string chord)
         {

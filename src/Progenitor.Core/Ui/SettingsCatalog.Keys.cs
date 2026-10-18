@@ -144,6 +144,9 @@ public static partial class SettingsCatalog
         if (foreign && !AllowForeignEdits) return SettingWriteResult.Refused(before, KeyForeignReason);
         // KEYS2: Progenitor never writes a chord Windows or Steam takes first, into anyone's setting.
         if (ReservedChords.Reason(chord) is { } reserved) return SettingWriteResult.Refused(before, reserved);
+        // HOLDMOD1 review: a mod's own key may act on a press, so it never takes Ctrl, Shift or Alt on its own.
+        // Its own default is still accepted (a reset puts back what the mod shipped).
+        if (chord.IsLoneModifier && claim.DefaultChord != chord) return SettingWriteResult.Refused(before, KeybindsTabLayout.CfgLoneModifierReason(chord));
         if (!LegacyKeyNames.TryFormat(chord, keyCodeOnly, out string text, out string why, before))
             return SettingWriteResult.Refused(before, why);
         try

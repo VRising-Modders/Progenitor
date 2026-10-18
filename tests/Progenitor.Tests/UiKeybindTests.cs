@@ -63,7 +63,6 @@ public class UiKeybindTests : IDisposable
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("None")]
-    [InlineData("Ctrl")]
     [InlineData("Ctrl + Shift")]
     public void KeyChord_unbound_values_parse_to_None_and_are_not_errors(string text)
     {

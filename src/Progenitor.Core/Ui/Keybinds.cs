@@ -133,6 +133,19 @@ public static class Keybinds
     private static bool _leftArmed, _rightArmed;
 
     /// <summary>
+    /// HOLDMOD1: the capture's lone-modifier state (<see cref="TakeLoneModifier"/>): armed once every modifier has been
+    /// seen up since the capture began, the modifiers held since then, and whether a key or button went down meanwhile.
+    /// </summary>
+    private static bool _loneArmed, _loneSpoiled;
+
+    private static KeyModifiers _loneUnion;
+
+    /// <summary>HOLDMOD1 review: whether the game window had focus at the last pump (<see cref="IKeyInputSource.WindowFocused"/>).</summary>
+    private static bool _windowFocused = true;
+
+    internal const string FocusLostReleaseLog = "Ui: the game window lost focus; held keybinds were released.";
+
+    /// <summary>
     /// KEYS8: the left or right button a capture just took, until it has been released and two more pumps have
     /// run. While set, clicks on Progenitor's own widgets are dropped (<see cref="SwallowsUiClicks"/>), so the
     /// click that chose the key does not also press whatever button was under the pointer.
@@ -801,6 +814,19 @@ public static class Keybinds
             chord = instead;
         }
 
+        // HOLDMOD1: Ctrl, Shift or Alt on its own is a hold key only. A cfg value on one falls back to the default; a
+        // press bind's default on one is registered unbound.
+        bool hold = whileHeld != null || onReleased != null;
+        if (LoneModifierRefusal(chord, hold, scope) != null)
+        {
+            var instead = chord != defaultKey && LoneModifierRefusal(defaultKey, hold, scope) == null
+                && MouseChords.Allowed(defaultKey, scope) && !ReservedChords.IsReserved(defaultKey)
+                ? defaultKey
+                : KeyChord.None;
+            Plugin.Logger?.LogWarning(LoneModifierRefusedLog(label, chord, instead));
+            chord = instead;
+        }
+
         // R36 finding 5. An exempt bind fires in the states where no chat window can be read, so
         // its chord must not be one the player could be typing into a field we cannot see. The
         // player's cfg value is refused back to the default; a default that is itself a bare
@@ -1117,6 +1143,9 @@ public static class Keybinds
         if (reserved != null) return reserved;
         string? click = MouseChords.Refusal(chord, target.Scope, target.PluginId, target.Id);
         if (click != null) return click;
+        // HOLDMOD1: a lone modifier is a hold key only.
+        string? lone = LoneModifierRefusal(chord, target.HasHold, target.Scope);
+        if (lone != null) return lone;
         if (target.AllowWhenChatUnknown && !MayBindWhenChatUnknown(chord))
         {
             log = PrintableChordRefusedLog(target.Label, chord, "The bind stays on " + target.Chord + ".");
@@ -1297,7 +1326,7 @@ public static class Keybinds
             _gamepadCapture = gamepad ? new GamepadCapture() : null;
             _waitStarted = Clock();
             _waitBegan = _waitStarted;
-            _leftArmed = _rightArmed = false;
+            _leftArmed = _rightArmed = _loneArmed = false;
             ArmPumpLocked();
         }
 
@@ -1641,6 +1670,40 @@ public static class Keybinds
         catch { return true; }
     }
 
+    /// <summary>
+    /// HOLDMOD1: why a bind may not use lone-modifier chord <paramref name="chord"/>, or null. Ctrl, Shift or Alt on its
+    /// own fires the moment it goes down, so it would also fire on every Ctrl+C, every capital letter and every Alt+X:
+    /// only a bind that acts while the key is held (a <c>whileHeld</c> or <c>onReleased</c> handler) may use one, and
+    /// never in the chat scope, which is press only. Null for any other chord.
+    /// </summary>
+    internal static string? LoneModifierRefusal(KeyChord chord, bool hold, KeybindScope scope)
+    {
+        if (!chord.IsLoneModifier) return null;
+        if (hold && scope != KeybindScope.Chat) return null;
+        return LoneModifierPressReason(chord);
+    }
+
+    /// <summary>HOLDMOD1: the row-sized refusal for a lone modifier on a press-only bind.</summary>
+    internal static string LoneModifierPressReason(KeyChord chord) =>
+        chord.DisplayText + " on its own only works for a key you hold down, and this key acts on a press. "
+        + "Press another key with it (for example X + " + chord.DisplayText + ") or pick another key.";
+
+    /// <summary>
+    /// HOLDMOD1: the same refusal for the bind <paramref name="pluginId"/>/<paramref name="id"/> (the Keybinds tab's
+    /// rows), or null when it may take <paramref name="chord"/> or is not a live bind.
+    /// </summary>
+    internal static string? LoneModifierRefusalFor(string? pluginId, string id, KeyChord chord)
+    {
+        if (!chord.IsLoneModifier) return null;
+        var target = FindLive(pluginId, id);
+        return target == null ? null : LoneModifierRefusal(chord, target.HasHold, target.Scope);
+    }
+
+    /// <summary>HOLDMOD1: a registration's default or cfg value on a lone modifier its handlers cannot use.</summary>
+    public static string LoneModifierRefusedLog(string label, KeyChord chord, KeyChord instead) =>
+        "Ui: keybind '" + label + "' cannot be bound to " + chord + ": " + LoneModifierPressReason(chord) + " "
+        + (instead.IsBound ? "Using " + instead + " instead." : "It is registered unbound; pick a key in Mods > Keybinds.");
+
     /// <summary>KEYS8: a registration's default or cfg value on a click chord its scope refuses.</summary>
     public static string ClickChordRefusedLog(string label, KeyChord chord, string reason, KeyChord instead) =>
         "Ui: keybind '" + label + "' cannot be bound to " + chord + ": " + reason + " "
@@ -1837,7 +1900,7 @@ public static class Keybinds
                 _rebinding = Live[i];
                 _waitStarted = Clock();
                 _waitBegan = _waitStarted;
-                _leftArmed = _rightArmed = false;
+                _leftArmed = _rightArmed = _loneArmed = false;
                 capture = _capture;
                 _capture = null;
                 ArmPumpLocked();
@@ -1945,6 +2008,24 @@ public static class Keybinds
         {
             ReleaseHolding(snapshot);
             return;
+        }
+
+        // HOLDMOD1 review: the window losing focus (Alt+Tab) ends every hold, since the key's release happens in another
+        // window and may never be seen. Only the edge acts: an unfocused window still runs binds (the bridge's key op
+        // with background input), and a capture forgets a modifier it was watching.
+        bool? focused;
+        try { focused = source.WindowFocused; }
+        catch { focused = null; }
+        if (focused == false && _windowFocused)
+        {
+            _windowFocused = false;
+            _loneSpoiled = true;
+            if (AnyHolding(snapshot)) Plugin.Logger?.LogDiag(FocusLostReleaseLog);
+            ReleaseHolding(snapshot);
+        }
+        else if (focused == true)
+        {
+            _windowFocused = true;
         }
 
         ChatFocus focus;
@@ -2206,7 +2287,9 @@ public static class Keybinds
             return;
         }
 
-        if (!got) return;
+        // HOLDMOD1: a key or button going down while a modifier is held makes it a chord, never a lone modifier.
+        if (got) _loneSpoiled = true;
+        else if (!TakeLoneModifier(source, out pressed, out pressedSides)) return;
 
         if (KeyChord.IsClickButton(pressed.Key))
         {
@@ -2285,6 +2368,52 @@ public static class Keybinds
 
         if (rebinding != null) Rebind(rebinding.PluginId, rebinding.Id, pressed);
         else Deliver(capture!, new KeyCaptureResult(RebindOutcome.Bound, pressed, null));
+    }
+
+    /// <summary>
+    /// HOLDMOD1: the capture's lone-modifier rule. Ctrl, Shift or Alt pressed and released with no other key, button
+    /// or modifier in between is that modifier on its own (<see cref="KeyChord.LoneModifier"/>), returned on the pump
+    /// it comes up. A modifier already down when the capture began counts only after every modifier has been seen up.
+    /// Two modifiers together (Ctrl+Alt released with no key) record nothing and the capture keeps waiting.
+    /// </summary>
+    private static bool TakeLoneModifier(IKeyInputSource source, out KeyChord chord, out ModifierSides sides)
+    {
+        chord = KeyChord.None;
+        sides = ModifierSides.None;
+        ModifierSides held, pressed;
+        try
+        {
+            if (!source.TryReadModifiers(out held, out pressed)) return false;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: keybind capture modifier read threw: " + e.Message);
+            return false;
+        }
+
+        bool meta = KeyChord.IsWindowsKeyHeld(held);
+        var mods = KeyChord.ModifiersOf(held);
+        if (!_loneArmed)
+        {
+            if (mods != KeyModifiers.None || meta) return false;
+            _loneArmed = true;
+            _loneUnion = KeyModifiers.None;
+            _loneSpoiled = false;
+            return false;
+        }
+
+        // Review: a press edge counts even when the key is already up again (a tap shorter than one frame).
+        if (meta || KeyChord.IsWindowsKeyHeld(pressed)) _loneSpoiled = true;
+        _loneUnion |= mods | KeyChord.ModifiersOf(pressed);
+        if (mods != KeyModifiers.None || meta) return false;
+
+        var union = _loneUnion;
+        bool spoiled = _loneSpoiled;
+        _loneUnion = KeyModifiers.None;
+        _loneSpoiled = false;
+        if (spoiled || !KeyChord.IsSingleModifier(union)) return false;
+        chord = KeyChord.LoneModifier(union);
+        return true;
     }
 
     /// <summary>
@@ -2377,6 +2506,9 @@ public static class Keybinds
         // rule, which holds in every scope, applies to it here.
         string? click = MouseChords.Refusal(pressed, rebinding != null ? ScopeOf(rebinding) : KeybindScope.Gameplay, rebinding?.PluginId, rebinding?.Id);
         if (click != null) return click;
+        // HOLDMOD1: a press-only bind's rebind refuses a lone modifier (the tab's capture checks the row it edits).
+        if (rebinding is Registration target && LoneModifierRefusal(pressed, target.HasHold, target.Scope) is { } lone)
+            return lone;
         if (rebinding == null || pressed == rebinding.Chord) return null;
         // Fail closed: a check that cannot run refuses the key rather than allowing a possible clash.
         try { return ClashFor(rebinding.PluginId, rebinding.Id, pressed)?.Reason; }
@@ -2719,8 +2851,9 @@ public static class Keybinds
         PointerOverModUi = DefaultPointerOverModUi;
         GameMenuOpen = DefaultGameMenuOpen;
         PointerHitsModUi = DefaultPointerHitsModUi;
-        _leftArmed = _rightArmed = false;
+        _leftArmed = _rightArmed = _loneArmed = false;
         _swallowButton = UiKey.None;
+        _windowFocused = true;
         _swallowReleasedPumps = -1;
         _swallowSince = 0;
         KeybindConflictPrompt.ResetForTests();

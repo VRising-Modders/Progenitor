@@ -6796,7 +6796,7 @@ Checked with an internal live spike (read-only steps plus one 5 s register/remov
 
 ### Vanilla panel sites (P6, experimental)
 
-`Ui.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid)` attaches to the game's interaction windows: `ContainerPanel` (left edge, right edge, beside rename), `StationPanel` (workstations, refinement stations, prison cells, the devourer and the unit stations; both edges; [list](ui.md#station-windows)), `InventoryPanel` (beside sort), `CastleHeartPanel` (alias `ThronePanel`; both edges), `InventoryTooltip` (a line in the item tooltip) and `RecipeTooltip` (rows under the product or the requirement list of a recipe tooltip in a workstation, refinement station or the crafting tab; the target carries the recipe, its product and requirements; `SetRows` with `VanillaRow` colors each row by `LabelTone`). The handle reports open, close and the entity shown (`OnPanel`, `Target`: client entity, its `NetworkId` for the server — resolved there with `ctx.Inventory.TryResolveNetworkId` — the hovered item or recipe for the tooltips) and hosts `Button(caption)` clones of the game's own inventory bar button and rows in the window's own font. Inline anchors join the vanilla button group; edge columns sit outside the frame and hide, with one log line, rather than overlap another window or leave the screen. A site whose resolver fails after a game update is absent with one line; a missing piece (a donor, an anchor group) is logged once and withholds only what needs it. The refresh is `SystemHooks.After<XMenuMapper>` with `OnlyWhenSystemRuns = false`, reading every mapper once per frame; nothing is patched, no key is read, and everything is released on dispose, `Ui.RemoveAll` and Core Uninstall. Status: source-checked, built and game-free tested (`VanillaPanelTests`, `VanillaRecipeTooltipTests`), **not live-verified**. Contract, placement rules and the live acceptance procedure: [ui.md](ui.md#vanilla-panel-sites-p6). Example: `samples/Progenitor.PanelsExample`.
+`Ui.AttachToVanilla(site, anchor, ctx.Owner, ctx.Guid)` attaches to the game's interaction windows: `ContainerPanel` (left edge, right edge, beside rename), `StationPanel` (workstations, refinement stations, prison cells, the devourer and the unit stations; both edges; [list](ui.md#station-windows)), `InventoryPanel` (beside sort), `CastleHeartPanel` (alias `ThronePanel`; both edges), `InventoryTooltip` (a line in the item tooltip) and `RecipeTooltip` (rows under the product or the requirement list of a recipe tooltip in a workstation, refinement station or the crafting tab; the target carries the recipe, its product and requirements; `SetRows` with `VanillaRow` colors each row by `LabelTone`). The handle reports open, close and the entity shown (`OnPanel`, `Target`: client entity, its `NetworkId` for the server — resolved there with `ctx.Inventory.TryResolveNetworkId` — the hovered item or recipe for the tooltips; `Refresh()` raises the handler again for an open one, [HOLDMOD1](#lone-modifier-hold-keys-holdmod1)) and hosts `Button(caption)` clones of the game's own inventory bar button and rows in the window's own font. Inline anchors join the vanilla button group; edge columns sit outside the frame and hide, with one log line, rather than overlap another window or leave the screen. A site whose resolver fails after a game update is absent with one line; a missing piece (a donor, an anchor group) is logged once and withholds only what needs it. The refresh is `SystemHooks.After<XMenuMapper>` with `OnlyWhenSystemRuns = false`, reading every mapper once per frame; nothing is patched, no key is read, and everything is released on dispose, `Ui.RemoveAll` and Core Uninstall. Status: source-checked, built and game-free tested (`VanillaPanelTests`, `VanillaRecipeTooltipTests`), **not live-verified**. Contract, placement rules and the live acceptance procedure: [ui.md](ui.md#vanilla-panel-sites-p6). Example: `samples/Progenitor.PanelsExample`.
 
 ### Keybinds (FUI5)
 
@@ -6825,7 +6825,7 @@ The only direct readers are the framework's own input layer:
 
 Otherwise the dev bridge (`src/Progenitor.Dev`) is not an exception: it presses binds with the [`keybind_press`](bridge-ops-client.md#keybind_press) op instead of reading keys. `tests/Progenitor.Tests/DirectKeyReadSourceTests.cs` enforces the rule over `src/`, `samples/` and `templates/` and reports every offending `file:line`; adding a file to its allowlist requires a reason in the test and a row here. At load, a `ProgenitorPlugin` whose own assembly references one of these reads gets one warning line and an informational `direct-key-read` problem on its Mods page. That check reads metadata only: it also counts unreachable code, does not see helper DLLs the plugin ships, and never refuses the load.
 
-One registration binds one `string` entry under `[Keybinds]` in the plugin's own `GUID.cfg`, in **BepInEx `KeyboardShortcut` format** — main key first, then modifiers, joined with `" + "`: `F9`, `F10 + Ctrl`, `K + Ctrl + Shift`, `None` to unbind. Key names are `UnityEngine.InputSystem.Key` names; modifiers are side-agnostic `Ctrl` / `Shift` / `Alt` (`LeftControl` and friends parse too). Mouse buttons are `MouseLeft`, `MouseRight`, `MouseMiddle`, `MouseBack` and `MouseForward` (`MouseLeft + Ctrl + Shift`); a cfg also reads Unity's `KeyCode` names counted from 0 (`Mouse0` left, `Mouse1` right, `Mouse2` middle, `Mouse3` back, `Mouse4` forward), the shown names (`Left Mouse`, `Right Mouse`, `Middle Mouse`, `Mouse Back`, `Mouse Forward`) and the game's words (`Mouse Button 4` forward, `Mouse Button 5` back, `Scroll Wheel`). An unreadable value keeps the default and logs one line rather than silently unbinding.
+One registration binds one `string` entry under `[Keybinds]` in the plugin's own `GUID.cfg`, in **BepInEx `KeyboardShortcut` format** — main key first, then modifiers, joined with `" + "`: `F9`, `F10 + Ctrl`, `K + Ctrl + Shift`, `None` to unbind, and for a hold bind one modifier on its own (`Alt`; [lone-modifier hold keys](#lone-modifier-hold-keys-holdmod1)). Key names are `UnityEngine.InputSystem.Key` names; modifiers are side-agnostic `Ctrl` / `Shift` / `Alt` (`LeftControl` and friends parse too). Mouse buttons are `MouseLeft`, `MouseRight`, `MouseMiddle`, `MouseBack` and `MouseForward` (`MouseLeft + Ctrl + Shift`); a cfg also reads Unity's `KeyCode` names counted from 0 (`Mouse0` left, `Mouse1` right, `Mouse2` middle, `Mouse3` back, `Mouse4` forward), the shown names (`Left Mouse`, `Right Mouse`, `Middle Mouse`, `Mouse Back`, `Mouse Forward`) and the game's words (`Mouse Button 4` forward, `Mouse Button 5` back, `Scroll Wheel`). An unreadable value keeps the default and logs one line rather than silently unbinding.
 
 **The input read.** A mod cannot add a `ProjectM.ButtonInputAction` — it is a compiled enum — and the vanilla binding list comes from the `Settings/DefaultControls` `InputActionAsset`, so there is no game seam that hands us "a key the player bound". Core therefore polls the Input System's device layer once per `Plugin.Frame`: `UnityEngine.InputSystem.Keyboard.current` (`get_current`), indexed by `Key` (`KeyControl get_Item(Key)`), read through `ButtonControl.wasPressedThisFrame` with `isPressed` for the modifiers. `Unity.InputSystem.dll` is a shipped interop assembly and Bootstrap's `UiInputContext.Update` already reads `Keyboard.current.escapeKey` live, so this path is proven on this build. Legacy `UnityEngine.Input.GetKeyDown(KeyCode)` **is** in the game's metadata and is deliberately not used: this build's active input handling is the Input System package, where the legacy module throws on first read. Reading a device control is not a context mutation, so none of `_DenyModificationsOfInputContexts`' rules apply to this poll. The whole read is behind `IKeyInputSource`, so every rule below is tested without a client.
 
@@ -6942,7 +6942,7 @@ A grayed row's undo on the mod page goes through the same checks; if the old key
 
 **Keys that open the mod's UI (KEYOPEN1).** `ctx.Keybinds.RegisterOpener(id, key, description, onPressed)` registers a key that only opens or closes the mod's own UI; it fires at the title screen and the loading screen too, and while a panel has input, so the key closes what it opened. A focused chat box or text field still suppresses it. The handler must only open or close the mod's own UI (a page through `ctx.Menu.OpenPage`, a window, a panel): it must not send chat, run a command or write into a field it does not own, because where no chat window exists the framework cannot tell the player is typing. For the same reason a printable key without Ctrl or Alt is refused: a player's cfg value of that kind falls back to the default, and a printable default keeps its key but fires in play only, with a warning in the log. Examples: the controls sample's Ctrl+F7, the Sample's F9, Ctrl+F9 and Shift+F9. Source-checked and game-free tested (`ModPageOpenTests`). Verified live 2026-10-12 at the title screen on the Steam client: Ctrl+F7, Shift+F9 and F9 opened their page or window and Ctrl+F7 and F9 closed them again, while the Sample's plain F8 bind stayed suppressed.
 
-**Hold and release.** `ctx.Keybinds.RegisterHold(id, key, description, onPressed, whileHeld, onReleased)` runs `whileHeld` every frame the main key stays down after the press, and `onReleased` once when it comes up. `onReleased` also runs when the bind stops being allowed to fire (a panel takes input, chat or a text field gets focus) and when the bind is disposed or its plugin unloads mid-hold. Use it instead of polling a key's held state yourself.
+**Hold and release.** `ctx.Keybinds.RegisterHold(id, key, description, onPressed, whileHeld, onReleased)` runs `whileHeld` every frame the main key stays down after the press, and `onReleased` once when it comes up. `onReleased` also runs when the bind stops being allowed to fire (a panel takes input, chat or a text field gets focus) and when the bind is disposed or its plugin unloads mid-hold. Use it instead of polling a key's held state yourself. A hold bind can also sit on Ctrl, Shift or Alt on its own ([lone-modifier hold keys](#lone-modifier-hold-keys-holdmod1)).
 
 **Map keys.** `ctx.Keybinds.RegisterInMap(id, key, description, onPressed)` and `RegisterHoldInMap(id, key, description, onPressed, whileHeld, onReleased)` register a bind that fires only while the game's world map is open (the full-screen menu on its Map tab). It competes only with what is live there (other map and menu keys, the game's map and menu keys, and Push To Talk, which the game reads on every screen), so a key that means something in play (a letter, a mouse button) can be used in the map. Closing the map under a held key releases it. Plugin example: the Sample's map ruler (`samples/Progenitor.Sample/SampleMap.cs`): Ctrl+C over the map logs the world point under the cursor (`RegisterInMap`), and holding Ctrl+R measures a distance (`RegisterHoldInMap`: the press marks the start, each held frame follows the cursor, the release logs the distance and a release with the map closed cancels). Core's debug buff map teleport (`src/Progenitor.Core/Debugging/DebugMap.cs`, [Debug tools](#debug-tools-debug)) registers the same map-scope hold through `Keybinds.RegisterScoped`.
 
@@ -6965,6 +6965,121 @@ So a gameplay `MouseLeft + Ctrl` fires in the world view and the character also 
 The framework's input file reads the buttons: `UnityKeyInputSource` reads `Mouse.current.leftButton` / `rightButton` beside the middle, back and forward buttons, through the same edge tracker. Bootstrap is unchanged.
 
 **Chat keys (Core only).** `KeybindScope.Chat` binds fire only while the player types in the game's chat box, and are then the only binds that run (press only). They meet only the game's in-chat keys (`CycleChat` on Tab), which never stop them; the owner undoes the game's action when both act on one press (the game reads Tab itself in chat, so it cannot be blocked first). Core's name completion key (`ChatCompleteName`, Tab, [chat.md](chat.md#chat-commands-as-built-chat2)) is the one user. There is no plugin API for this scope yet.
+
+#### Lone-modifier hold keys (HOLDMOD1)
+
+HOLDMOD1 (requested 2026-10-18 for "hold Alt to show advanced tooltip numbers"). A hold bind's whole chord can be Ctrl,
+Shift or Alt on its own. Typical use: show more detail while the key is held, and redraw an open tooltip when it
+starts and ends with `IVanillaAttachHandle.Refresh()`:
+
+```csharp
+var tip = UiApi.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipBody, ctx.Owner, ctx.Guid);
+ctx.Track(tip);
+bool advanced = false;
+ctx.Track(tip.OnPanel(e =>
+{
+    if (e.Change == VanillaPanelChange.Closed) return;
+    // Opened, TargetChanged and Refreshed all mean "fill the rows for e.Target".
+    tip.SetRows(advanced ? AdvancedRows(e.Target) : BasicRows(e.Target));
+}));
+ctx.Keybinds.RegisterHold("AdvancedNumbers", KeyChord.Alt, "Show advanced numbers in tooltips while held.",
+    onPressed: () => { advanced = true; tip.Refresh(); },
+    onReleased: () => { advanced = false; tip.Refresh(); });
+```
+
+- **The chord.** `KeyChord.Alt`, `KeyChord.Ctrl`, `KeyChord.Shift`, or `KeyChord.LoneModifier(KeyModifiers.Alt)`;
+  `IsLoneModifier` says a chord is one. Either side's key counts (left or right Alt), as for every modifier. The cfg,
+  the Keybinds tab and every sentence write `Alt`; `LeftAlt`, `RightAlt`, `LeftControl` and `new KeyChord(UiKey.RightAlt)`
+  all mean the same chord. Two modifiers with no key (`Ctrl + Alt`) still read as unbound.
+- **Press.** It presses when the modifier goes down with no other modifier held, so Ctrl+Alt, AltGr (Windows delivers
+  it as Left Ctrl + Right Alt) and the Windows key never start lone Alt. An ordinary key already held (W while
+  walking) does not stop it.
+- **Hold and release.** It stays held while the modifier is down, whatever else is pressed meanwhile: another key
+  joining, Ctrl added, or switching from left to right Alt keep the same hold. `Alt + X` binds still fire, and X going
+  down never presses the lone hold a second time. It releases when the modifier comes up, and on the usual hold
+  releases (a mod panel takes input, chat or a text field gets focus, a capture starts, unload). The game window losing
+  focus (Alt+Tab) also ends it (`IKeyInputSource.WindowFocused`, `Application.isFocused`; logged once as `Ui: the game
+  window lost focus; held keybinds were released.`), because the modifier's release then happens in another window.
+  After returning, the hold starts again only on a fresh press, so coming back with Alt+Tab and letting go of Alt
+  starts and ends one short hold. Only the loss acts: an unfocused window still runs binds (the bridge's `key` op with
+  background input).
+- **Hold binds only.** Because it starts the moment the modifier goes down, it also runs, briefly, while the player
+  uses that modifier in a chord (Alt+X, Ctrl+C, Shift for a capital letter). Use it for something harmless to show while
+  held. A bind with no `whileHeld` and no `onReleased` handler (every `Register`, `RegisterOpener`, `RegisterInMap`
+  and a `RegisterHold` with `onPressed` only) never takes one: a default on one is registered unbound, a cfg value on
+  one falls back to the default, and a rebind, capture or typed value is refused with
+  `Alt on its own only works for a key you hold down, and this key acts on a press. Press another key with it (for example X + Alt) or pick another key.`
+  Chat-scope keys (press only) refuse one too.
+- **Where it fires.** A gameplay hold bind fires with the game's inventory, crafting, refinement and storage windows
+  open, which is where the item and recipe tooltips show: those are the game's windows, not Progenitor panels, and
+  the gameplay scope is open on every screen of a world. A Progenitor panel taking input suppresses it unless the bind
+  is registered with `allowWhileCaptured: true` (pass it when your own window over a station takes input). Chat focus,
+  any focused text field, and a framework text field with owned focus suppress it (Shift types capitals there). A
+  `RegisterHoldInMap` bind on Alt fires only in the map.
+- **The game's own lone-modifier keys** (the game's input asset, live sweep 2026-09-30): Left Alt is Advanced Tooltip,
+  Toggle Emote Wheel and Emotes Modifier (and Map Toggle Legend in the map); Left Ctrl is Toggle Action Wheel (and
+  Building Toggle Color Wheel while building); Left Shift is Cliff Jump, Custom Split Item, Shapeshift Modifier and Track
+  Item in the inventory, and either Shift is Ability 4's second binding and Building Fill. The debug actions on Left
+  Shift and Left Ctrl never conflict. The game reads these modifiers as held keys and Progenitor never consumes a key,
+  so a mod hold on the same lone modifier **shares** it (`KeybindArbiter.SharesLoneModifier(a, b)`): the game's action
+  never stops the bind in any scope, the row says `Alt is also held by the game (Advanced Tooltip and Toggle Emote
+  Wheel); both act on it.` in the muted tone, a remap onto it is not refused, and the Keybinds tab never takes the key
+  from the game (or from the mod when a game row moves onto it). A shared key is not a conflict: it is not in the
+  verdict's `Others`, the **Conflicts N** count, the Conflicts view or the mod's problems. Holding Alt in play still
+  does whatever the game does with it.
+- **Ordinary mods' key settings share it too.** Another mod's `KeyboardShortcut` or `KeyCode` setting on `LeftAlt`
+  (an older mod's `ModifierKey = LeftAlt`) reads the key itself and Progenitor cannot stop it, so it is shared the same
+  way and never makes the Progenitor hold inactive by install order (as `Mouse2`-`Mouse4` KeyCode values stay out of
+  the winner rule). Its row reads `Alt is also held by <mod> (<setting>); both act on it.` The Keybinds tab never puts a
+  lone modifier into such a setting, since the mod may act on a press (`<chord> on its own can't be a key for a mod's
+  own setting: the mod may act on a press. Press another key with it or pick another key.`); putting back the
+  setting's own default is still allowed.
+- **Between Progenitor binds** the first-installed rule applies as for any chord: two mods' Alt holds clash, only the
+  one installed first fires, and both count as a conflict. `Alt` and `X + Alt` are different chords and never clash.
+- **The capture.** In the Keybinds tab, a mod page's Keys row and the settings panel, press and release the modifier
+  alone to record it (`Alt`). A key or mouse button pressed while it is held records that chord instead (`Q + Alt`);
+  two modifiers released together record nothing and the capture keeps waiting; a modifier already down when the
+  capture began counts only after it has been released, and the window losing focus forgets a modifier the capture
+  was watching. `IKeyInputSource.TryReadModifiers` is the read the capture uses; `UnityKeyInputSource` answers it from
+  the six side-specific modifier controls and the Windows keys, held now and pressed this frame through the same press
+  edge as every key (`KeyEdgeTracker`), so a tap shorter than one frame still records. A game row can take a lone
+  modifier too (written as the left key, `<Keyboard>/leftAlt`); an ordinary mod's setting row cannot (above).
+- **The bridge.** `mods_ui keys op=capture chord="Alt"` delivers it to a row; `keybind_press {"chord":"Alt"}` runs the
+  press handler of the binds on Alt; `key {"action":"down","keys":"Alt","ms":3000}` holds the real Left Alt through the
+  game's own input, which is the end-to-end hold.
+
+`IVanillaAttachHandle.Refresh()` returns false while the panel or tooltip is closed. While it is open it queues one
+`VanillaPanelChange.Refreshed` (its `Target` and `Previous` are the shown target) for the handle's `OnPanel` handlers
+on the site's next frame, before the rows sync. Several calls before that frame make one, and an open, close or target
+change on that frame is raised instead. Only the plugin's own call raises it; existing handlers that render on every
+non-`Closed` change need no change ([ui.md](ui.md#vanilla-panel-sites-p6)).
+
+Source: `KeyChord.cs` (the chord, the match), `UnityKeyInputSource.cs` (both sides' edges, the held read),
+`Keybinds.cs` (`LoneModifierRefusal`, `TakeLoneModifier`), `KeybindArbiter.cs` (`SharesLoneModifier`),
+`KeybindRemapGuard.cs`, `KeybindsPane.cs`, `VanillaPanel.cs` (`VanillaPanelTracker.RequestRefresh`),
+`VanillaAttachHandle.cs`; `KeybindLoneModifierTests`, `KeybindLoneModifierTabTests`, `VanillaPanelTests`.
+**Status:** source-checked, built and game-free tested; **acceptance procedure — not run** (no lone-modifier hold has
+been pressed in the game and no tooltip has been refreshed live). Live check, on the test client with a test mod:
+
+1. Deploy a hold bind on `KeyChord.Alt` that attaches to `InventoryTooltip` as in the example above, then join a world.
+2. Open the inventory and hover a stack with the `mouse` op; `ui_read` the tooltip's rows: the basic rows.
+3. `key {"action":"down","keys":"Alt","ms":3000}`: expect one `onPressed`, the advanced rows on the next frame, and the
+   game's own advanced tooltip at the same time. `key {"action":"up","keys":"Alt"}`: the basic rows again.
+4. Hold Alt and tap X with an `X + Alt` bind registered: expect that bind to fire once and no second `onPressed`.
+5. In the Keybinds tab, edit the bind's row, press and release Alt alone: expect `Alt` in the edit bar; on a press-only
+   row expect the refusal above; on another mod's config-file key row expect the config-file refusal. Hold `Ctrl` then
+   press `Alt`: expect no `onPressed`.
+6. AltGr: `key {"action":"hold","keys":"AltGr","ms":1000}` presses Right Alt alone: expect one `onPressed` (either
+   Alt counts). Then `key {"action":"hold","keys":"Ctrl+AltGr","ms":1000}`, which is how Windows delivers AltGr on a
+   German, French, Polish or Nordic layout (Left Ctrl + Right Alt): expect no Alt `onPressed`. With a `KeyChord.Ctrl`
+   hold registered too, record whether it starts: it should not when both keys arrive in one input update, and a
+   start means Left Ctrl was sampled on its own first (the op may queue the two modifiers as separate events). If a test machine has such a layout, press AltGr on the physical keyboard (a foreground input test)
+   and expect the same.
+7. Alt+Tab: hold Alt on the physical keyboard with the hold active (the advanced rows shown), press Tab to switch to
+   another window, let go of Alt there. Expect `onReleased` and the log line above at the focus loss, the basic rows when
+   back in the game, and no hold until Alt is pressed again. This takes the game window's focus, so it needs the
+   client to be free.
+8. Remove the test mod and confirm the clean unload.
 
 #### Controller keybinds
 

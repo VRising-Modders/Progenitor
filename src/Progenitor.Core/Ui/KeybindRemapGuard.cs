@@ -106,6 +106,7 @@ internal static class KeybindRemapGuard
                 foreach (var c in cached.Claims)
                 {
                     if (!c.Comparable || c.Chord != chord || !KeybindArbiter.ScopesMeet(c, moving.Scope)) continue;
+                    if (SharedLoneModifier(moving.Source, c)) continue;
                     take.Clear();
                     return new RemapRefusal(ClashReason(chord, c, KeybindGameCache.AgeText(cached.SavedUtc)), c, ReservedBy.None);
                 }
@@ -117,6 +118,8 @@ internal static class KeybindRemapGuard
                 if (!c.Comparable || c.Chord != chord) continue;
                 if (string.Equals(c.Key, moving.Key, StringComparison.OrdinalIgnoreCase)) continue;
                 if (!KeybindArbiter.ScopesMeet(c, moving)) continue;
+                // HOLDMOD1: a lone modifier is shared with the game and ordinary mods; neither side is taken from.
+                if (SharedLoneModifier(moving.Source, c)) continue;
                 if (!CanTake(c) || ShippedOverlap(moving, c))
                 {
                     if (game && c.Source == KeybindSource.Game)
@@ -218,6 +221,7 @@ internal static class KeybindRemapGuard
                 {
                     if (!c.Comparable || c.Chord != chord) continue;
                     if (!KeybindArbiter.ScopesMeet(c, scope)) continue;
+                    if (SharedLoneModifier(source, c)) continue;
                     age = KeybindGameCache.AgeText(cached.Value.SavedUtc);
                     return c;
                 }
@@ -231,6 +235,8 @@ internal static class KeybindRemapGuard
             // KEYS4: a menu key and a gameplay key never meet (the game's menu keys meet both).
             if (!KeybindArbiter.ScopesMeet(c, scope)) continue;
             if (c.Source != KeybindSource.Game && Skip(c)) continue;
+            // HOLDMOD1: a lone modifier the game or an ordinary mod also reads is shared, not taken.
+            if (SharedLoneModifier(source, c)) continue;
             // KEYS9: a game key moving among the game's own keys; the caller words those as a warning.
             if (ignoreGame && c.Source == KeybindSource.Game) continue;
             return c;
@@ -238,6 +244,14 @@ internal static class KeybindRemapGuard
 
         return null;
     }
+
+    /// <summary>
+    /// HOLDMOD1: true when a claim of <paramref name="moving"/> and <paramref name="other"/> meet on a lone modifier
+    /// unless both are Progenitor binds: the game and ordinary mods share it (<see cref="KeybindArbiter.SharesLoneModifier(KeybindClaim, KeybindClaim)"/>).
+    /// </summary>
+    internal static bool SharedLoneModifier(KeybindSource moving, KeybindClaim other) =>
+        other.Comparable && other.Chord.IsLoneModifier
+        && !(moving == KeybindSource.Progenitor && other.Source == KeybindSource.Progenitor);
 
     /// <summary>Who holds a key, as the refusal names it: <c>the game (Interact)</c>, <c>Progenitor Sample (Net ping)</c>.</summary>
     internal static string HolderName(KeybindClaim holder) =>
