@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using ProjectM;
 using ProjectM.Network;
 using Progenitor.Ecs;
 using Unity.Collections;
@@ -519,7 +520,224 @@ public static unsafe class GhostOps
         return entity;
     }
 
-    /// <summary>Destroy a synthetic user and its character, if it has one (ghost and stress owners).</summary>
+    // ---- Offline user team ------------------------------------------------------------------
+    // The server's new-user path (ServerBootstrapSystem's authenticate step, new-user branch, read
+    // 2026-10-18): Instantiate(ServerRootPrefabCollection.PlayerTeamPrefabGUID), UserTeam.UserEntity =
+    // user, then the user's TeamReference base value = the team (ModificationsRegistry.SetBaseValue,
+    // which for a field with no registered modification just stores the value). No team event.
+
+    private static int TeamReferenceEntityOffset => Layout.TeamReferenceValueOffset + Layout.ModifiableEntityValueOffset;
+
+    /// <summary>
+    /// Give an offline synthetic user (a <c>stress_populate</c> owner) its own team the way the server
+    /// gives one to a new user: an instance of the game's player team prefab
+    /// (<c>ServerRootPrefabCollection.PlayerTeamPrefabGUID</c>, resolved through
+    /// <c>PrefabCollectionSystem._PrefabGuidToEntityMap</c>), its <c>UserTeam.UserEntity</c> set to the user,
+    /// and the user's <c>TeamReference</c> (added when missing) pointing at it. Field pokes at the
+    /// <c>layout.txt</c> offsets through <c>GetComponentDataRawRW</c>; no native call, no new generic
+    /// interop instantiation. Idempotent: a user that already has its own team is left alone. Refuses a
+    /// connected user and a user whose <c>TeamReference</c> names someone else's team. On any failure
+    /// after the team was instantiated, the team is destroyed again. Server, main thread.
+    /// Source-checked against the server code; not live-verified.
+    /// </summary>
+    internal static OfflineUserTeamResult EnsureOfflineUserTeam(World world, Entity user)
+    {
+        if (world == null || !world.IsCreated) return OfflineUserTeamResult.Refuse("no_world", "no server world");
+        var em = world.EntityManager;
+        var seen = ObserveOfflineUserTeam(em, user, out var existing, out _);
+        var decision = OfflineUserTeamRules.Decide(seen);
+        if (decision.Action == OfflineUserTeamAction.Refuse) return OfflineUserTeamResult.Refuse(decision.Code, decision.Detail);
+        if (decision.Action == OfflineUserTeamAction.Ready) return OfflineUserTeamResult.Done(existing, created: false, "already had its team");
+
+        if (!TryPlayerTeamPrefab(world, out var prefab, out var guid, out var why))
+            return OfflineUserTeamResult.Refuse("no_team_prefab", why);
+        if (!em.HasComponent(prefab, ComponentIndex.Of<UserTeam>(ComponentType.AccessMode.ReadOnly))
+            || !em.HasComponent(prefab, ComponentIndex.Of<TeamAllies>(ComponentType.AccessMode.ReadOnly)))
+            return OfflineUserTeamResult.Refuse("no_team_prefab", $"player team prefab {guid} lacks UserTeam or TeamAllies");
+
+        var team = Entity.Null;
+        try
+        {
+            team = em.Instantiate(prefab);
+            WriteEntityField<UserTeam>(em, team, Layout.UserTeamUserEntityOffset, user);
+            if (!user.Has<TeamReference>(em)) user.Add<TeamReference>(em);
+            WriteEntityField<TeamReference>(em, user, TeamReferenceEntityOffset, team);
+
+            var after = ObserveOfflineUserTeam(em, user, out var readTeam, out _);
+            if (OfflineUserTeamRules.Decide(after).Action != OfflineUserTeamAction.Ready || readTeam != team)
+                throw new InvalidOperationException("read-back: missing " + string.Join(", ", OfflineUserTeamRules.Missing(after)) + $", team {FormatEntity(readTeam)}");
+        }
+        catch (Exception e)
+        {
+            if (team != Entity.Null)
+            {
+                try { if (em.Exists(team)) em.DestroyEntity(team); } catch { /* best-effort rollback */ }
+            }
+            Plugin.Logger?.LogWarning($"offline user team for {FormatEntity(user)} failed: {e.Message}");
+            return OfflineUserTeamResult.Refuse("team_failed", e.Message);
+        }
+
+        Plugin.Logger?.LogInfo($"offline user team created: user {FormatEntity(user)} team {FormatEntity(team)} prefab {guid}");
+        return OfflineUserTeamResult.Done(team, created: true, $"team {FormatEntity(team)} from prefab {guid}");
+    }
+
+    /// <summary>
+    /// Read what <see cref="OfflineUserTeamRules.Decide"/> needs: the user, the entity its
+    /// <c>TeamReference</c> names, that team's <c>UserTeam</c> back-pointer and <c>TeamAllies</c> rows.
+    /// </summary>
+    internal static OfflineUserTeamObservation ObserveOfflineUserTeam(EntityManager em, Entity user, out Entity team, out List<Entity> allies)
+    {
+        team = Entity.Null;
+        allies = new List<Entity>();
+        var o = new OfflineUserTeamObservation();
+        if (user == Entity.Null || !em.Exists(user)) return o;
+        o.UserExists = true;
+        o.HasUser = user.Has<User>(em);
+        if (o.HasUser)
+        {
+            try { o.IsConnected = em.GetComponentData<User>(user).IsConnected; }
+            catch { o.HasUser = false; }
+        }
+        o.HasTeamReference = TryReadEntityField<TeamReference>(em, user, TeamReferenceEntityOffset, out team);
+        if (!o.HasTeamReference) team = Entity.Null;
+        o.TeamExists = team != Entity.Null && em.Exists(team);
+        if (!o.TeamExists) return o;
+        o.TeamHasUserTeam = TryReadEntityField<UserTeam>(em, team, Layout.UserTeamUserEntityOffset, out var back);
+        o.TeamPointsAtUser = o.TeamHasUserTeam && back == user;
+        o.TeamHasAllies = TryReadAllies(em, team, allies);
+        return o;
+    }
+
+    /// <summary>
+    /// Read what <c>TeamUtility.ClaimCastle(EntityManager, user, heart, limitType)</c> would read, without
+    /// calling it: <see cref="OfflineUserTeamRules.ClaimCastleRefusal"/> is null when every read succeeds.
+    /// </summary>
+    internal static ClaimCastleObservation ObserveClaim(EntityManager em, Entity user, Entity heart, out Entity castleTeam, out List<Entity> castleAllies)
+    {
+        castleTeam = Entity.Null;
+        castleAllies = new List<Entity>();
+        var c = new ClaimCastleObservation();
+        var userTeam = Entity.Null;
+        c.UserHasTeamReference = user != Entity.Null && em.Exists(user)
+            && TryReadEntityField<TeamReference>(em, user, TeamReferenceEntityOffset, out userTeam);
+        c.UserTeamReady = c.UserHasTeamReference && userTeam != Entity.Null && em.Exists(userTeam)
+            && TryReadAllies(em, userTeam, new List<Entity>());
+        c.HeartExists = heart != Entity.Null && em.Exists(heart);
+        if (!c.HeartExists) return c;
+        c.HeartHasCastleHeart = em.HasComponent(heart, ComponentIndex.Of<ProjectM.CastleBuilding.CastleHeart>(ComponentType.AccessMode.ReadOnly));
+        c.HeartHasTeamReference = TryReadEntityField<TeamReference>(em, heart, TeamReferenceEntityOffset, out castleTeam);
+        if (!c.HeartHasTeamReference) { castleTeam = Entity.Null; return c; }
+        c.CastleTeamReady = castleTeam != Entity.Null && em.Exists(castleTeam) && TryReadAllies(em, castleTeam, castleAllies);
+        c.CastleTeamAllies = castleAllies.Count;
+        if (castleAllies.Count == 1)
+        {
+            var previous = castleAllies[0];
+            c.PreviousTeamReady = previous != Entity.Null && em.Exists(previous)
+                && TryReadAllies(em, previous, new List<Entity>())
+                && em.HasComponent(previous, ComponentIndex.Of<UserTeam>(ComponentType.AccessMode.ReadOnly));
+        }
+        return c;
+    }
+
+    /// <summary>
+    /// <c>ServerRootPrefabCollection.PlayerTeamPrefabGUID</c> (the GUID the server's new-user path reads),
+    /// cross-checked against <c>PrefabCollectionSystem._RootPrefabs.PlayerTeamPrefabGUID</c>, resolved to
+    /// the prefab entity through <c>_PrefabGuidToEntityMap</c>.
+    /// </summary>
+    internal static bool TryPlayerTeamPrefab(World world, out Entity prefab, out string guidText, out string why)
+    {
+        prefab = Entity.Null;
+        guidText = "";
+        var em = world.EntityManager;
+        var prefabs = world.GetExistingSystemManaged<PrefabCollectionSystem>();
+        if (prefabs == null) { why = "no PrefabCollectionSystem"; return false; }
+
+        int? serverGuid = null;
+        var serverType = ComponentIndex.Of<ServerRootPrefabCollection>(ComponentType.AccessMode.ReadOnly);
+        foreach (var e in Query.Entities(em, includeDisabled: true, includeSystems: true, serverType))
+        {
+            byte* p = (byte*)em.GetComponentDataRawRO(e, serverType.TypeIndex);
+            if (p == null) continue;
+            int size = SafeTypeSize(serverType.TypeIndex);
+            if (size > 0 && size < Layout.ServerRootPrefabCollectionPlayerTeamPrefabGuidOffset + sizeof(int)) continue;
+            serverGuid = *(int*)(p + Layout.ServerRootPrefabCollectionPlayerTeamPrefabGuidOffset);
+            break;
+        }
+
+        int? rootGuid = null;
+        try { rootGuid = prefabs._RootPrefabs.PlayerTeamPrefabGUID.GuidHash; }
+        catch (Exception e) { Plugin.Logger?.LogWarning($"offline user team: RootPrefabCollection read failed: {e.Message}"); }
+
+        if (serverGuid is int s && rootGuid is int r && s != r)
+        {
+            why = $"ServerRootPrefabCollection names player team prefab {s} but RootPrefabCollection names {r}";
+            return false;
+        }
+        int? chosen = serverGuid ?? rootGuid;
+        if (chosen is not int guid || guid == 0) { why = "no player team prefab GUID in either root prefab collection"; return false; }
+        guidText = guid.ToString(CultureInfo.InvariantCulture);
+        if (!prefabs._PrefabGuidToEntityMap.TryGetValue(new Stunlock.Core.PrefabGUID(guid), out prefab) || prefab == Entity.Null || !em.Exists(prefab))
+        {
+            prefab = Entity.Null;
+            why = $"player team prefab {guid} is not in _PrefabGuidToEntityMap";
+            return false;
+        }
+        why = "";
+        return true;
+    }
+
+    private static bool TryReadEntityField<T>(EntityManager em, Entity entity, int offset, out Entity value)
+    {
+        value = Entity.Null;
+        var type = ComponentIndex.Of<T>(ComponentType.AccessMode.ReadOnly);
+        if (entity == Entity.Null || !em.Exists(entity) || !em.HasComponent(entity, type)) return false;
+        int size = SafeTypeSize(type.TypeIndex);
+        if (size > 0 && size < offset + 8) return false;
+        byte* p = (byte*)em.GetComponentDataRawRO(entity, type.TypeIndex);
+        if (p == null) return false;
+        value = new Entity { Index = *(int*)(p + offset), Version = *(int*)(p + offset + 4) };
+        return true;
+    }
+
+    private static void WriteEntityField<T>(EntityManager em, Entity entity, int offset, Entity value)
+    {
+        var type = ComponentIndex.Of<T>(ComponentType.AccessMode.ReadWrite);
+        string name = typeof(T).Name;
+        if (!em.Exists(entity) || !em.HasComponent(entity, type))
+            throw new InvalidOperationException($"{FormatEntity(entity)} has no {name}");
+        int size = SafeTypeSize(type.TypeIndex);
+        if (size > 0 && size < offset + 8)
+            throw new InvalidOperationException($"refusing {name} poke: TypeSize {size} is smaller than offset {offset} + 8");
+        byte* p = (byte*)em.GetComponentDataRawRW(entity, type.TypeIndex);
+        if (p == null) throw new InvalidOperationException($"{name} GetComponentDataRawRW returned null");
+        *(int*)(p + offset) = value.Index;
+        *(int*)(p + offset + 4) = value.Version;
+    }
+
+    /// <summary>The <c>TeamAllies</c> rows through the non-generic raw buffer read, at the metadata stride.</summary>
+    private static bool TryReadAllies(EntityManager em, Entity team, List<Entity> into)
+    {
+        var type = ComponentIndex.Of<TeamAllies>(ComponentType.AccessMode.ReadOnly);
+        if (team == Entity.Null || !em.Exists(team) || !em.HasComponent(team, type)) return false;
+        int length = em.GetBufferLength(team, type.TypeIndex);
+        if (length <= 0) return true;
+        byte* raw = (byte*)em.GetBufferRawRO(team, type.TypeIndex);
+        if (raw == null) return false;
+        for (int i = 0; i < length; i++)
+        {
+            byte* row = raw + (i * Layout.TeamAlliesStride) + Layout.TeamAlliesValueOffset;
+            into.Add(new Entity { Index = *(int*)row, Version = *(int*)(row + 4) });
+        }
+        return true;
+    }
+
+    private static int SafeTypeSize(TypeIndex typeIndex)
+    {
+        try { return TypeManager.GetTypeInfo(typeIndex).TypeSize; }
+        catch { return 0; }
+    }
+
+    /// <summary>Destroy a synthetic user, its character and its own team, if it has them (ghost and stress owners).</summary>
     internal static bool TryDestroyGhostEntity(EntityManager em, Entity entity)
     {
         try
@@ -538,6 +756,19 @@ public static unsafe class GhostOps
                 Plugin.Logger?.LogInfo($"ghost destroying character {FormatEntity(character)} of {FormatEntity(entity)}");
                 em.DestroyEntity(character);
             }
+
+            try
+            {
+                var seen = ObserveOfflineUserTeam(em, entity, out var team, out var allies);
+                if (OfflineUserTeamRules.IsOwnTeam(seen.TeamExists, seen.TeamHasUserTeam, seen.TeamPointsAtUser) && team != entity)
+                {
+                    if (allies.Count > 0)
+                        Plugin.Logger?.LogWarning($"ghost destroying team {FormatEntity(team)} of {FormatEntity(entity)} with {allies.Count} ally row(s) still on it");
+                    Plugin.Logger?.LogInfo($"ghost destroying team {FormatEntity(team)} of {FormatEntity(entity)}");
+                    em.DestroyEntity(team);
+                }
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning($"ghost team cleanup for {FormatEntity(entity)}: {e.Message}"); }
 
             Plugin.Logger?.LogInfo($"ghost destroying user {FormatEntity(entity)}");
             em.DestroyEntity(entity);
@@ -776,4 +1007,29 @@ public static unsafe class GhostOps
         public readonly Entity Entity;
         public TrackedGhost(Entity entity) => Entity = entity;
     }
+}
+
+/// <summary>Outcome of <see cref="GhostOps.EnsureOfflineUserTeam"/>.</summary>
+internal readonly struct OfflineUserTeamResult
+{
+    private OfflineUserTeamResult(bool ok, bool created, Entity team, string code, string detail)
+    {
+        Ok = ok;
+        Created = created;
+        Team = team;
+        Code = code;
+        Detail = detail;
+    }
+
+    public bool Ok { get; }
+    /// <summary>True when this call instantiated the team; false when the user already had it.</summary>
+    public bool Created { get; }
+    public Entity Team { get; }
+    /// <summary>Empty when <see cref="Ok"/>; else <c>no_world</c>, <c>no_user</c>, <c>connected</c>, <c>foreign_team</c>, <c>team_without_allies</c>, <c>no_team_prefab</c> or <c>team_failed</c>.</summary>
+    public string Code { get; }
+    public string Detail { get; }
+
+    public static OfflineUserTeamResult Done(Entity team, bool created, string detail) => new(true, created, team, "", detail);
+
+    public static OfflineUserTeamResult Refuse(string code, string detail) => new(false, false, Entity.Null, code, detail);
 }

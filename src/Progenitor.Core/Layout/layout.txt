@@ -563,6 +563,15 @@ enum   HideTargetHUDTypeTargetInfo               = 2    : HideTargetHUDType.Targ
 offset TeamReferenceValueOffset                  = 0x0  : TeamReference.Value
 offset ModifiableEntityValueOffset               = 0x0  : ModifiableEntity._Value
 
+# ---- Dev stress owners: an offline user's own team (src/Progenitor.Dev/Ops/GhostOps.cs) ---------
+# A new user's team is an instance of ServerRootPrefabCollection.PlayerTeamPrefabGUID with
+# UserTeam.UserEntity = the user and the user's TeamReference pointing at it (the server's new-user
+# path, read 2026-10-18). TeamAllies is the per-team ally list ClaimCastle edits; one Entity per row.
+offset ServerRootPrefabCollectionPlayerTeamPrefabGuidOffset = 0x70 : ServerRootPrefabCollection.PlayerTeamPrefabGUID
+offset UserTeamUserEntityOffset                  = 0x0  : UserTeam.UserEntity
+size   TeamAlliesStride                          = 8    : TeamAllies                        # one Entity
+offset TeamAlliesValueOffset                     = 0x0  : TeamAllies.Value
+
 # ---- Clock: time of day (src/Progenitor.Core/Clock/TimeOfDayRuntime.cs) --------------------------
 # DayNightCycle is the server singleton the day/night systems read. DayNightCycleSystem.OnUpdate
 # (the server's native code, read 2026-09-25) writes, each frame,

@@ -73,6 +73,12 @@ internal interface IStressBackend
     /// <summary>Stress users of other seeds and of this seed already in the world (refuse populate over them).</summary>
     void CountExisting(int seed, out int sameSeed, out int otherSeeds);
 
+    /// <summary>
+    /// Reserve a <c>User.Index</c> for every owner (<see cref="StressOwnerPlan.UserIndex"/>) before any write,
+    /// against every User in the world (<see cref="StressIndexPlan"/>). A refusal ends the job with nothing written.
+    /// </summary>
+    StressOutcome ReserveOwnerIndexes(IReadOnlyList<StressOwnerPlan> owners);
+
     StressOutcome CreateOwner(StressOwnerPlan owner);
     StressOutcome CreateClan(StressClanPlan clan, StressPlan plan);
     StressOutcome PlaceHeart(StressPlotPlan plot, StressOwnerPlan owner);
@@ -321,6 +327,16 @@ internal sealed class StressJob
         {
             Finish("refused", "unproven: this build has no proven path for " + string.Join(", ", _missing.Keys) + "; nothing was written (partial:true runs only the proven steps)");
             return;
+        }
+
+        if (plan.Owners.Count > 0 && !_missing.ContainsKey(KindName(StressStepKind.Owner)))
+        {
+            var reserved = _backend.ReserveOwnerIndexes(plan.Owners);
+            if (!reserved.Ok)
+            {
+                Finish("refused", "owner_index: " + reserved.Detail + "; nothing was written");
+                return;
+            }
         }
 
         Phase = "execute";

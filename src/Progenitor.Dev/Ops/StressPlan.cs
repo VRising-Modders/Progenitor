@@ -182,8 +182,6 @@ internal static class StressIdentity
 {
     public const ulong PlatformIdBase = 90000000000100000UL;
     public const int PerSeed = 100;
-    /// <summary>First <c>User.Index</c> tried for a stress owner (ghosts start at 10001).</summary>
-    public const int IndexFloor = 20001;
     public const string OwnerPrefix = "Stress";
     public const string ClanPrefix = "StressClan";
 
@@ -212,6 +210,73 @@ internal static class StressIdentity
     public static string OwnerName(int ordinal) => OwnerPrefix + ordinal.ToString("D2", CultureInfo.InvariantCulture);
 
     public static string ClanName(int ordinal) => ClanPrefix + ordinal.ToString("D2", CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// <c>User.Index</c> values for stress owners, chosen once for the whole job before any write.
+///
+/// <para>Why these rules (research note <c>stress-owner-team-2026-10-18.md</c>, section 7, server code):</para>
+/// <list type="bullet">
+/// <item>Every 128-user bitmask the server builds (<c>UserBitMask128</c>: the sync mask, the activity grid,
+/// map icons, chat, war events, input) sets bits from <c>ConnectedUser.UserIndex</c>, the approved-connection
+/// slot, never from <c>User.Index</c>. An offline owner has no <c>ConnectedUser</c>, so it never occupies a bit.</item>
+/// <item>A new player's <c>User.Index</c> is the highest index any existing User holds, plus one. Indexes are
+/// never reused, so an index no User holds now can never collide with a later player; but an owner placed above
+/// the current maximum moves every later player's index up by that much.</item>
+/// </list>
+///
+/// <para>So owners first fill unused indexes below the current maximum (no effect on later players), then take
+/// the indexes right after it. All stay below <see cref="MaskWidth"/>, and at least <see cref="RealPlayerHeadroom"/>
+/// indexes above the highest one stay free for real players inside that width. Index 0 is never used. Fails
+/// closed: no partial allocation.</para>
+/// </summary>
+internal static class StressIndexPlan
+{
+    /// <summary>Width of the game's per-user bitmask (<c>UserBitMask128</c>, an int4).</summary>
+    public const int MaskWidth = 128;
+
+    /// <summary>Indexes kept free above the highest index after allocation, for players who join later.</summary>
+    public const int RealPlayerHeadroom = 16;
+
+    /// <summary>The highest index an owner may get: <see cref="MaskWidth"/> - 1 - <see cref="RealPlayerHeadroom"/>.</summary>
+    public const int MaxOwnerIndex = MaskWidth - 1 - RealPlayerHeadroom;
+
+    public static bool TryAllocate(IEnumerable<int> usedIndexes, int count, out int[] indexes, out string reason)
+    {
+        indexes = Array.Empty<int>();
+        if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+        var used = new HashSet<int>(usedIndexes ?? Array.Empty<int>());
+        if (count == 0) { reason = ""; return true; }
+        int max = -1;
+        foreach (int i in used) if (i > max) max = i;
+        foreach (int i in used)
+        {
+            if (i < 0)
+            {
+                reason = $"an existing user holds User.Index {i}; refusing to place owners next to an index outside 0..{MaskWidth - 1}";
+                return false;
+            }
+        }
+        if (max > MaxOwnerIndex)
+        {
+            reason = $"an existing user already holds User.Index {max}, above {MaxOwnerIndex} ({MaskWidth}-user mask minus {RealPlayerHeadroom} kept for real players); no owner index is safe";
+            return false;
+        }
+
+        var picked = new List<int>(count);
+        for (int i = 1; i < max && picked.Count < count; i++)
+            if (!used.Contains(i)) picked.Add(i);
+        for (int i = Math.Max(1, max + 1); picked.Count < count && i <= MaxOwnerIndex; i++)
+            picked.Add(i);
+        if (picked.Count < count)
+        {
+            reason = $"only {picked.Count} safe User.Index values for {count} owners (highest existing {max}, owners may use 1..{MaxOwnerIndex} and leave {RealPlayerHeadroom} free for real players); use fewer owners";
+            return false;
+        }
+        indexes = picked.ToArray();
+        reason = "";
+        return true;
+    }
 }
 
 /// <summary>What the gate learns about this process. Every field may be null.</summary>
@@ -403,6 +468,8 @@ internal sealed class StressOwnerPlan
     public int Ordinal { get; set; }
     public string Name { get; set; } = "";
     public ulong PlatformId { get; set; }
+    /// <summary>The <c>User.Index</c> reserved by <see cref="StressIndexPlan"/> before any write; -1 until then.</summary>
+    public int UserIndex { get; set; } = -1;
     /// <summary>Clan ordinal, 0 = no clan.</summary>
     public int Clan { get; set; }
     public List<int> Territories { get; } = new();

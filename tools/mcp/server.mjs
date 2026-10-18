@@ -919,9 +919,9 @@ server.tool("progenitor_container_preview", "ctx.Inventory.Preview through the D
   },
   async ({ side, ...args }) => { try { return text(await bridge(side ?? "client", "container_preview", args)); } catch (e) { return fail(e); } });
 
-server.tool("progenitor_stress", "Server only, Moo World copy on the isolated test server only (refused under C:\\VRisingServer, outside _testserver, or on any other save). Stress castles for offline test owners Stress01... (PlatformId band by seed), planned deterministically from the seed and built a few steps per frame under budgetMs. populate (op stress_populate, needs confirm:'stress' unless dryRun): owners (2-5 plots each), clans of 2-5, per free plot a heart at the territory pivot with blood-essence fuel, a 6x6-cell floor block, chests (filled, some nearly full) and stations. Replies once planned with per-plot rows (refusals: plot_taken, not_a_plot, no_valid_pivot, no_floor_fit, no_owner_capacity) and 'missing': step kinds with no proven path. Without partial a missing kind refuses the whole op and writes nothing; partial:true runs only the proven steps (in this build: owners) and refuses each plot. clear (op stress_clear, confirm:'stress'): removes that seed's owners and their characters; keeps (and reports) an owner that still owns a heart or is in a clan; safe to run twice. status (op stress_status): phase, steps, ticks, maxTickMs, per-plot and per-owner results; plot:<index> adds that plot's full layout. Planner and runner unit-tested; not run live.",
+server.tool("progenitor_stress", "Server only, Moo World copy on the isolated test server only (refused under C:\\VRisingServer, outside _testserver, or on any other save). Stress castles for offline test owners Stress01... (PlatformId band by seed), planned deterministically from the seed and built a few steps per frame under budgetMs. populate (op stress_populate, needs confirm:'stress' unless dryRun): owners (2-5 plots each), clans of 2-5, per free plot a heart at the territory pivot with blood-essence fuel, a 6x6-cell floor block, chests (filled, some nearly full) and stations. Replies once planned with per-plot rows (refusals: plot_taken, not_a_plot, no_valid_pivot, no_floor_fit, no_owner_capacity) and 'missing': step kinds with no proven path. Without partial a missing kind refuses the whole op and writes nothing; partial:true runs only the proven steps (in this build: owners) and refuses each plot. clear (op stress_clear, confirm:'stress'): removes that seed's owners and their characters; keeps (and reports) an owner that still owns a heart or is in a clan; safe to run twice. status (op stress_status): phase, steps, ticks, maxTickMs, per-plot and per-owner results; plot:<index> adds that plot's full layout. team (op stress_team, read only, seed): each owner's own team (TeamReference, UserTeam back-pointer, TeamAllies); heart:'index:version' adds that heart's castle team and, per owner, whether every read TeamUtility.ClaimCastle makes would succeed (never claims). Owners get their team the way the server gives a new user one. Planner and runner unit-tested; not run live.",
   {
-    action: z.enum(["populate", "clear", "status"]).optional().describe("Default status."),
+    action: z.enum(["populate", "clear", "status", "team"]).optional().describe("Default status."),
     seed: z.number().int().min(0).max(9999).optional().describe("populate/clear: the plan seed; it also picks the owners' PlatformId band."),
     confirm: z.string().optional().describe("populate/clear: must be 'stress' (a dry run needs no confirm)."),
     owners: z.number().int().min(1).max(99).optional().describe("populate: test owners, default 40 (fewer when there are under 2 usable plots each)."),
@@ -935,9 +935,10 @@ server.tool("progenitor_stress", "Server only, Moo World copy on the isolated te
     partial: z.boolean().optional().describe("populate: run the steps that have a proven path and refuse the rest per plot."),
     plot: z.number().int().min(0).optional().describe("status: also return this territory's full layout."),
     rows: z.boolean().optional().describe("status: false for counts only."),
+    heart: z.string().regex(/^\d+:\d+$/).optional().describe("team: a castle heart entity 'index:version' to check ClaimCastle readiness against."),
   },
   async ({ action, ...args }) => {
-    const op = { populate: "stress_populate", clear: "stress_clear", status: "stress_status" }[action ?? "status"];
+    const op = { populate: "stress_populate", clear: "stress_clear", status: "stress_status", team: "stress_team" }[action ?? "status"];
     try { return text(await bridge("server", op, args)); } catch (e) { return fail(e); }
   });
 

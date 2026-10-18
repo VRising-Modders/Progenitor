@@ -38,6 +38,9 @@ test('stress tool maps each action to its server op and passes the arguments thr
   assert.deepEqual(calls[3], ['server', 'stress_clear', { seed: 7, confirm: 'stress' }]);
   await tool.handler(tool.schema.parse({ action: 'status', plot: 12, rows: false }));
   assert.deepEqual(calls[4], ['server', 'stress_status', { plot: 12, rows: false }]);
+  await tool.handler(tool.schema.parse({ action: 'team', seed: 7, heart: '1234:5' }));
+  assert.deepEqual(calls[5], ['server', 'stress_team', { seed: 7, heart: '1234:5' }]);
+  assert.match(tool.description, /never claims/);
 });
 
 test('stress tool schema rejects bad values', () => {
@@ -49,5 +52,6 @@ test('stress tool schema rejects bad values', () => {
   assert.equal(tool.schema.safeParse({ chests: [10] }).success, false);
   assert.equal(tool.schema.safeParse({ fill: 2 }).success, false);
   assert.equal(tool.schema.safeParse({ budgetMs: 50 }).success, false);
+  assert.equal(tool.schema.safeParse({ action: 'team', seed: 7, heart: 'heart' }).success, false);
   assert.equal(tool.schema.safeParse({ action: 'populate', seed: 0, plots: [0, 3] }).success, true);
 });
