@@ -42,20 +42,31 @@ public sealed class CastleContainerInfo
     /// <summary>True when the model carries <c>NameableInteractable</c> (it can be renamed).</summary>
     public bool Nameable { get; init; }
 
-    /// <summary>A chest's inventory, a station's input (instance 0).</summary>
+    /// <summary>
+    /// A chest's inventory, a station's input. Instance 0, except on a station whose component
+    /// names its input inventory: then the <c>InventoryInstanceElement</c> row holding that entity.
+    /// </summary>
     public InventoryRef Main { get; init; }
 
-    /// <summary>A refinement station's output (instance 1); <see cref="InventoryRef.None"/> otherwise.</summary>
+    /// <summary>
+    /// The separate output inventory of a refinement station (furnace, sawmill, loom, blood press, ...)
+    /// or a salvage station (the Devourer): the <c>InventoryInstanceElement</c> row whose entity is the
+    /// station component's <c>OutputInventoryEntity</c>. <see cref="InventoryRef.None"/> for a chest, a
+    /// crafting station (its crafted items land in its one inventory) and every other model.
+    /// </summary>
     public InventoryRef Output { get; init; }
 
     /// <summary>
-    /// True for a crafting or refinement station: a model with a recipe list (<c>WorkstationRecipesBuffer</c>)
-    /// or a <c>Refinementstation</c>. Storage that carries <c>CastleWorkstation</c> only for room and servant
+    /// True for a crafting, refinement or salvage station: a model with a recipe list (<c>WorkstationRecipesBuffer</c>),
+    /// a <c>Refinementstation</c> or a <c>Salvagestation</c>. Storage that carries <c>CastleWorkstation</c> only for room and servant
     /// bonuses is a container, not a station.
     /// </summary>
     public bool IsStation { get; init; }
 
-    /// <summary>True for a refinement station: separate input and output inventories.</summary>
+    /// <summary>
+    /// True for a refinement station (<c>Refinementstation</c>). A salvage station is not one but also has
+    /// an <see cref="Output"/>: test <c>Output.IsNone</c> for a separate output.
+    /// </summary>
     public bool IsRefinement { get; init; }
 
     /// <summary>Slots of <see cref="Main"/> (0 when unreadable).</summary>
@@ -67,7 +78,7 @@ public sealed class CastleContainerInfo
     /// <inheritdoc />
     public override string ToString() =>
         (Nameplate.Length > 0 ? "\"" + Nameplate + "\" " : "") + Building.Label + " " + Building.Entity
-        + " id=" + Id + " slots=" + SlotCount + (IsRefinement ? " (input+output)" : "");
+        + " id=" + Id + " slots=" + SlotCount + (Output.IsNone ? "" : " (input+output)");
 }
 
 /// <summary>
@@ -79,6 +90,16 @@ internal sealed class CastleInventoryRow
     internal CastleBuildingInfo Building { get; init; } = new();
     internal bool IsStation { get; init; }
     internal bool IsRefinement { get; init; }
+
+    /// <summary>The input (or only) inventory's instance index.</summary>
+    internal int InputInstance { get; init; }
+
+    /// <summary>
+    /// The separate output's instance index, -1 for none. Null when the runtime did not say: a
+    /// refinement row then keeps instance 1, any other row has no output.
+    /// </summary>
+    internal int? OutputInstance { get; init; }
+
     internal int SlotCount { get; init; }
     internal bool Nameable { get; init; }
     internal string Nameplate { get; init; } = "";
@@ -113,14 +134,15 @@ internal static class CastleContainerRows
                 catch (Exception ex) { Plugin.Logger?.LogWarning("Castles: container id for " + e + " threw: " + ex.Message); }
             }
 
+            int output = OutputOf(r);
             list.Add(new CastleContainerInfo
             {
                 Building = r.Building,
                 Id = id,
                 Nameplate = r.Nameplate ?? "",
                 Nameable = r.Nameable,
-                Main = new InventoryRef(e.Index, e.Version, 0, epoch),
-                Output = r.IsRefinement ? new InventoryRef(e.Index, e.Version, 1, epoch) : InventoryRef.None,
+                Main = new InventoryRef(e.Index, e.Version, r.InputInstance, epoch),
+                Output = output >= 0 ? new InventoryRef(e.Index, e.Version, output, epoch) : InventoryRef.None,
                 IsStation = r.IsStation,
                 IsRefinement = r.IsRefinement,
                 SlotCount = r.SlotCount,
@@ -129,4 +151,7 @@ internal static class CastleContainerRows
 
         return list;
     }
+
+    /// <summary>The row's output instance: as reported, else instance 1 on a refinement row, else none (-1).</summary>
+    internal static int OutputOf(CastleInventoryRow r) => r.OutputInstance ?? (r.IsRefinement ? 1 : -1);
 }

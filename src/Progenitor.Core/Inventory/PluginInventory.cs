@@ -17,7 +17,10 @@ public enum InventoryPart
     /// <summary>Instance 0 of a refinement station (same as <see cref="Main"/>).</summary>
     Input = 0,
 
-    /// <summary>Instance 1 of a refinement station.</summary>
+    /// <summary>
+    /// Instance 1: a refinement station's output on the stations the game spawns. <c>OutputOf</c>
+    /// reads the row from the station's own field and also covers a salvage station.
+    /// </summary>
     Output = 1,
 }
 
@@ -43,11 +46,28 @@ public sealed partial class PluginInventory
         return InventoryRef.For(owner, (int)part);
     }
 
-    /// <summary>A refinement station's input (instance 0); a crafting station's only inventory.</summary>
-    public InventoryRef InputOf(Entity station) => Of(station, InventoryPart.Input);
+    /// <summary>
+    /// A refinement or salvage station's input: the row holding the station component's
+    /// <c>InputInventoryEntity</c> (instance 0 on the stations the game spawns). A crafting station's
+    /// only inventory; instance 0 for any other model.
+    /// </summary>
+    public InventoryRef InputOf(Entity station)
+    {
+        Require(nameof(InputOf));
+        return InventoryRef.For(station, StationInventoryReader.Read(Worlds.Server!.EntityManager, station).Input);
+    }
 
-    /// <summary>A refinement station's output (instance 1). Calls on a station without one report that reason.</summary>
-    public InventoryRef OutputOf(Entity station) => Of(station, InventoryPart.Output);
+    /// <summary>
+    /// A refinement or salvage station's output: the row holding the station component's
+    /// <c>OutputInventoryEntity</c>. On a model without a separate output this is instance 1, and
+    /// calls on it report that reason.
+    /// </summary>
+    public InventoryRef OutputOf(Entity station)
+    {
+        Require(nameof(OutputOf));
+        int output = StationInventoryReader.Read(Worlds.Server!.EntityManager, station).Output;
+        return InventoryRef.For(station, output >= 0 ? output : (int)InventoryPart.Output);
+    }
 
     /// <summary>How many inventories <paramref name="owner"/> has: 1 for a chest or heart, 2 for a refinement station, 0 for none.</summary>
     public int Instances(Entity owner)

@@ -36,7 +36,7 @@ namespace Progenitor.Sample;
 /// </list>
 /// A container token is <c>#n</c> (from <c>.items chests</c>), a stable id <c>c-…</c>, an entity
 /// <c>index:version</c>, <c>bag</c> (your character) or <c>heart</c> (the castle's heart); append
-/// <c>/out</c> for a refinement station's output. Items are a spawnable name or a GUID hash.
+/// <c>/out</c> for a refinement or salvage station's output. Items are a spawnable name or a GUID hash.
 /// Parsing and replies are game-free so the test project compiles this file.
 /// </summary>
 internal static class SampleInventory
@@ -109,7 +109,7 @@ internal static class SampleInventory
         internal bool Output { get; }
     }
 
-    /// <summary>Parse a container token. <c>/out</c> selects instance 1.</summary>
+    /// <summary>Parse a container token. <c>/out</c> selects the station's output inventory.</summary>
     internal static bool TryParseContainer(string? text, out ContainerToken token)
     {
         token = default;
@@ -469,7 +469,7 @@ internal static class SampleInventory
         {
             var r = rows[i];
             string line = "#" + (i + 1) + " " + r.Building.Entity + " " + r.Id + (r.Nameplate.Length > 0 ? " \"" + r.Nameplate + "\"" : "")
-                + " " + r.Building.Label + " slots=" + r.SlotCount + (r.IsRefinement ? " (in+/out)" : r.IsStation ? " (station)" : "");
+                + " " + r.Building.Label + " slots=" + r.SlotCount + (!r.Output.IsNone ? " (in+/out)" : r.IsStation ? " (station)" : "");
             ctx.Reply(line);
             SampleLog.Info(Area, "chest " + line);
         }
@@ -517,7 +517,6 @@ internal static class SampleInventory
             return false;
         }
 
-        var part = token.Output ? InventoryPart.Output : InventoryPart.Main;
         switch (token.Kind)
         {
             case TokenKind.Bag:
@@ -531,11 +530,14 @@ internal static class SampleInventory
                 return true;
             }
             case TokenKind.Entity:
-                container = plugin.Inventory.Of(new Entity { Index = token.Index, Version = token.Version }, part);
+            {
+                var entity = new Entity { Index = token.Index, Version = token.Version };
+                container = token.Output ? plugin.Inventory.OutputOf(entity) : plugin.Inventory.Of(entity);
                 return true;
+            }
             case TokenKind.Id:
                 if (!plugin.Inventory.TryFind(token.Id, out var owner, out why)) return false;
-                container = plugin.Inventory.Of(owner, part);
+                container = token.Output ? plugin.Inventory.OutputOf(owner) : plugin.Inventory.Of(owner);
                 return true;
             default:
             {

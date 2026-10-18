@@ -476,14 +476,18 @@ internal sealed unsafe class UnityCastleRuntime : ICastleRuntime
                 bool refinement = e.Has<Refinementstation>(em);
                 // Ordinary storage also carries CastleWorkstation for room/servant
                 // bonuses. The recipe buffer distinguishes a crafting workstation.
-                bool station = refinement || e.Has<WorkstationRecipesBuffer>(em) || e.Has<ResearchStation>(em);
+                bool station = refinement || e.Has<Salvagestation>(em) || e.Has<WorkstationRecipesBuffer>(em) || e.Has<ResearchStation>(em);
+                // Input and output rows come from the station component's own inventory fields.
+                var instances = Inventory.StationInventoryReader.Read(em, e);
                 CastleNameplates.TryRead(em, e, out bool nameable, out string name);
                 rows.Add(new CastleInventoryRow
                 {
                     Building = ToInfo(b),
                     IsStation = station,
                     IsRefinement = refinement,
-                    SlotCount = Inventory.UnityInventoryBackend.SlotCount(em, e, 0),
+                    InputInstance = instances.Input,
+                    OutputInstance = instances.Output,
+                    SlotCount = Inventory.UnityInventoryBackend.SlotCount(em, e, instances.Input),
                     Nameable = nameable,
                     Nameplate = name,
                 });
