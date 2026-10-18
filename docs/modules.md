@@ -3262,8 +3262,23 @@ game's. A panel takes Escape here when it is a window (a mod's hub or another ga
 floating panel that takes the input now (`WhileShown`, or `WhenHovered` under the pointer: the rule the topmost-window
 close already uses, so a tracker left on screen does not cost a second Escape), and is not a Mods workspace pane, not
 mounted in the chest's own tab (`IVanillaPanelTabs.Mount`) and not `UiCaptureMode.Never`. Panels mounted in that window's tabs stay shown on that
-first Escape, because the window stays. With only mounted panels shown, Escape closes them and the window together, as
-before.
+first Escape, because the window stays.
+
+**Escape on a mounted tab panel closes the window (MOUNTESC1).** A panel mounted in the window's tab
+(`IVanillaPanelTabs.Mount`) is part of that window, so with only mounted panels shown (and passive overlays), one Escape
+closes the whole game window, as on the game's own tabs: the framework hides the mounted panels and closes the window
+with the game's own close (`HUDMenuManager.CloseMenu`). A popup opened from the mounted panel (an Add picker, any panel
+that is not mounted) still takes the first Escape; the next closes the window. `IVanillaPanelTabs.EscapeClosesWindow =
+false` keeps the earlier behavior (the first Escape hides the mounted panel and leaves the window open on that tab).
+Source-checked and game-free tested; not live-verified.
+
+Why the earlier text ("Escape closes them and the window together, as before") did not hold: live on 2026-10-18 (Core
+2026.10.107, The Devourer with a mounted `WhenHovered` Input panel) the first Escape hid only the panel and the window
+stayed open on an empty tab. Any shown panel that captures (a `WhenHovered` panel included) registers Progenitor's
+order-599 input context, which takes `Back` and `Menu_Close` in every scope so that Escape never also opens the game's
+menu. The window's own Escape close is therefore behind that context (inferred from this result: the window's handler at
+502 did not close it either), so the sweep hid the panel and nothing closed the window; the second Escape, with no panel
+shown and no context, reached the game. The framework now makes that close itself.
 
 **A panel beside the chest costs one more Escape.** A mod panel shown next to the chest window but not mounted in its
 tab (a `WhileShown` side panel, a docked game window, a hub) is a window over it by this rule: the first Escape hides that
@@ -3370,6 +3385,9 @@ log with the filter `ContainerReturn|ContainerPreview|menu-hotkey guard|hub retu
    not reach the key release (the open question above).
 3. **Tab panels.** With a mod that mounts a panel in the chest's tab (Satisvampory's Input tab), select that tab, open
    the hub, Escape once: the hub closes, the tab's panel is still shown. Escape again: the chest and the tab close.
+   Then open the chest, select the tab (no hub) and press Escape once: the whole window closes with its tab panel
+   (MOUNTESC1; the log has `closed the game's window with its mounted tab panels`). Open the tab's Add picker and press
+   Escape: the picker closes, the window stays; Escape again closes the window. Repeat at a station (The Devourer).
 4. **Return with the window open.** Open the chest, then the hub, click Return: `hub return reopen = AlreadyOpen`, no
    Interact press in the log. Open the hub with no chest open, open a chest, click Return: no reopen line (the snapshot
    was not open).

@@ -1305,12 +1305,19 @@ public static partial class Ui
 
             // RETURN1: with the game's chest or station window open under a panel that takes Escape, the guard holds the
             // game's close, so that window stays: the panels mounted in its tabs stay with it.
-            bool keepMounted = false;
+            bool keepMounted = false, closeHost = false;
             try
             {
-                keepMounted = GameWindowUnderPanel.IsInteractWindow(GameWindowUnderPanel.MenuTypeNow()) && EscapeHidesAPanelOverGameWindow();
+                bool interact = GameWindowUnderPanel.IsInteractWindow(GameWindowUnderPanel.MenuTypeNow());
+                bool taker = interact && EscapeHidesAPanelOverGameWindow();
+                keepMounted = interact && taker;
+                // MOUNTESC1: only panels mounted in the window's own tabs (and passive overlays) are up. They are part
+                // of that window, so this Escape is the window's: Progenitor's 599 context takes the press from the
+                // game (Back and Menu_Close in every scope), so the window is closed here, the game's own close, and
+                // the mounted panels go with it.
+                closeHost = GameWindowUnderPanel.EscapeClosesHost(interact, taker, AnyMountedClosingHost(snapshot));
             }
-            catch { keepMounted = false; }
+            catch { keepMounted = false; closeHost = false; }
             for (int i = 0; i < snapshot.Length; i++)
             {
                 if (snapshot[i] is UiPanelHandle panel && panel.State == UiHandleState.Shown)
@@ -1319,6 +1326,16 @@ public static partial class Ui
                     try { panel.Hide(); hidden++; }
                     catch (Exception e) { Plugin.Logger?.LogWarning("Ui: Escape hide threw: " + e.Message); }
                 }
+            }
+            if (closeHost)
+            {
+                bool closed = false;
+                try { closed = GameWindowUnderPanel.CloseGameWindow(); }
+                catch (Exception e) { Plugin.Logger?.LogWarning("Ui: Escape window close threw: " + e.Message); }
+                if (keyCode == 27) _swallowBack = true;
+                Plugin.Logger?.LogDiag("Ui: key " + keyCode + (closed
+                    ? " closed the game's window with its mounted tab panels."
+                    : " found the game's window already closing; its mounted tab panels hidden."));
             }
         }
         finally
@@ -1378,6 +1395,19 @@ public static partial class Ui
     private static bool HasShownWindow(UiHandle[] snapshot) => ShownWindows(snapshot).Count > 0;
 
     private static readonly List<UiHandle> EscapeWindowBuffer = new();
+
+    /// <summary>MOUNTESC1: a shown panel mounted in a chest or station tab whose tabs send Escape to the window (the default).</summary>
+    private static bool AnyMountedClosingHost(UiHandle[] snapshot)
+    {
+        foreach (var h in snapshot)
+        {
+            if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown || !p.MountedInTab) continue;
+            bool toWindow = true;
+            try { toWindow = p.MountedEscapeClosesWindow?.Invoke() ?? true; } catch { toWindow = true; }
+            if (toWindow) return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// RETURN1: whether the next Escape hides a Progenitor panel that sits over the game's chest or station window rather

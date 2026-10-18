@@ -223,7 +223,9 @@ on `Menu_Close` (Escape) and on Interact's key release, ahead of the 599 mask. S
 window is open and a panel that takes Escape is shown over it (a game or standard window, or a floating panel taking
 the input now; not a workspace pane, not mounted in that window's tab, not `Never`), the menu-hotkey guard at 498 takes `Back` and `Menu_Close` as it does for a key capture or a dialog,
 held until that Escape is released: the first Escape hides the Progenitor panels, the next one closes the game's window.
-Panels mounted in the window's tabs stay on that first Escape. While a Progenitor field has the keyboard over such a
+Panels mounted in the window's tabs stay on that first Escape. With only mounted tab panels shown, one Escape closes the
+whole game window and its tab panels, as on the game's own tabs (MOUNTESC1; `IVanillaPanelTabs.EscapeClosesWindow`,
+default true; a popup opened from the tab panel still takes the first Escape). While a Progenitor field has the keyboard over such a
 window, the guard also takes Interact. A panel beside the window but not mounted in its tab therefore costs one more
 Escape; a hub opened over a container preview closes before the preview. Source-checked and game-free tested, not live-verified; the rules, the reopen and
 the live steps: [modules.md, Back where the player was](modules.md#back-where-the-player-was).
