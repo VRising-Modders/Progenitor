@@ -683,12 +683,14 @@ public sealed class JoinFlowStage2Tests
         Assert.Contains(@"$exe='C:\Program Files (x86)\Steam\steamapps\common\VRising\VRising.exe';", script, StringComparison.Ordinal);
         // One start; a second ask only when no process with this executable appeared.
         Assert.Equal(2, CountOf(script, "Start-Process 'steam://run/1604030'"));
-        Assert.Contains("if(Up){exit 3}", script, StringComparison.Ordinal);
+        Assert.Contains("if(Up){Note 'the game is already running; nothing started (exit 3)';exit 3}", script, StringComparison.Ordinal);
         // 2026-10-09: the second ask also waits for Steam's own running/launching flag, after 90 s, so a slow Steam
         // start is never asked twice ("Game already running").
         Assert.Contains("(Get-Date).AddSeconds(90)", script, StringComparison.Ordinal);
-        Assert.Contains(@"function Launching{(Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam\Apps\1604030' -Name Running).Running -eq 1};", script, StringComparison.Ordinal);
-        Assert.Contains("if($exe.Length -gt 0 -and -not (Up) -and -not (Launching)){Start-Process", script, StringComparison.Ordinal);
+        Assert.Contains(@"Get-ItemProperty -Path 'HKCU:\Software\Valve\Steam\Apps\1604030' -Name Running -ErrorAction Stop", script, StringComparison.Ordinal);
+        Assert.Contains("function Launching{-not (SteamIdle)};", script, StringComparison.Ordinal);
+        Assert.True(script.IndexOf("while(-not (SteamIdle))", StringComparison.Ordinal) < script.IndexOf("Start-Process", StringComparison.Ordinal));
+        Assert.Contains("if(Up){Note 'the game started'}elseif($exe.Length -gt 0 -and -not (Launching)){Note 'the game did not appear; asking Steam a second time';Start-Process", script, StringComparison.Ordinal);
         Assert.DoesNotContain("\"", script, StringComparison.Ordinal);
 
         string args = RelaunchCommand.Arguments(script);

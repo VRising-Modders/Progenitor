@@ -283,6 +283,9 @@ internal static class JoinFlowLive
     /// <summary>The relauncher: inbox PowerShell, detached and hidden, through Steam.</summary>
     private sealed class LiveRelauncher : IJoinRelauncher
     {
+        /// <summary>The restart log, in the BepInEx folder: the helper's steps and the game's broker failures.</summary>
+        private const string RestartLogName = "progenitor-restart.log";
+
         public RelaunchPlan Plan()
         {
             var plan = new RelaunchPlan();
@@ -298,38 +301,113 @@ internal static class JoinFlowLive
             plan.Why = string.Join("; ", why);
             using var self = Process.GetCurrentProcess();
             string exe = Environment.ProcessPath ?? "";
-            plan.Script = RelaunchCommand.Script(self.Id, self.StartTime.ToUniversalTime().Ticks, exe);
+            plan.Script = RelaunchCommand.Script(self.Id, self.StartTime.ToUniversalTime().Ticks, exe,
+                logPath: Path.Combine(Paths.BepInExRootPath, RestartLogName));
             plan.FileName = ps;
             plan.Arguments = RelaunchCommand.Arguments(plan.Script);
             return plan;
         }
 
-        public bool Start(RelaunchPlan plan, out string error)
+        public void Start(RelaunchPlan plan, Action<bool, string> done)
         {
-            error = "";
-            try
+            // The broker can take seconds to answer: wait for it on a background thread so no frame blocks, and
+            // hand the answer to the main thread (the caller quits from there).
+            var thread = new System.Threading.Thread(() =>
             {
-                var info = new ProcessStartInfo(plan.FileName, plan.Arguments)
+                bool started;
+                string error;
+                try { started = RunBroker(plan, out error); }
+                catch (Exception e)
                 {
-                    UseShellExecute = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    WorkingDirectory = Environment.SystemDirectory,
-                };
-                using var p = Process.Start(info);
-                if (p == null)
-                {
-                    error = "the relauncher did not start";
-                    return false;
+                    started = false;
+                    error = e.Message;
                 }
 
-                Plugin.Logger?.LogInfo("JoinFlow: relauncher started (pid " + p.Id + "); it starts V Rising through Steam once this process exits");
-                return true;
-            }
-            catch (Exception e)
+                Dev.MainThread.Post(() => done(started, error), Owner);
+            })
             {
-                error = e.Message;
+                IsBackground = true,
+                Name = "Progenitor restart broker",
+            };
+            thread.Start();
+        }
+
+        // Runs off the main thread. Logs through BepInEx's logger (thread-safe) and the restart log.
+        private static bool RunBroker(RelaunchPlan plan, out string error)
+        {
+            error = "";
+            // Only this short-lived broker is a child of the game. Windows owns the waiting helper, so Steam
+            // cannot retain the old session through inherited handles. The broker's command travels on its
+            // command line (Unicode), never through a console code page, so non-ASCII install paths survive.
+            var utf8 = new System.Text.UTF8Encoding(false);
+            var info = new ProcessStartInfo(plan.FileName, RelaunchCommand.BrokerArguments(plan.FileName, plan.Arguments))
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = utf8,
+                StandardErrorEncoding = utf8,
+                WindowStyle = ProcessWindowStyle.Hidden,
+                WorkingDirectory = Environment.SystemDirectory,
+            };
+            using var p = Process.Start(info);
+            if (p == null)
+            {
+                error = "the relauncher did not start";
                 return false;
             }
+
+            // Read both pipes while waiting, so a full pipe can never stall the broker.
+            var stdout = p.StandardOutput.ReadToEndAsync();
+            var stderr = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(RelaunchCommand.BrokerTimeoutSeconds * 1000))
+            {
+                // Kill it so it cannot create the helper after the game has told the player to start manually.
+                // A helper it created just before this still waits for Steam to report the game idle and for no
+                // game process to be running, so it never launches a second copy beside a manual start.
+                string killed;
+                try
+                {
+                    p.Kill(entireProcessTree: true);
+                    killed = "killed";
+                }
+                catch (Exception e) { killed = "could not be killed (" + e.Message + ")"; }
+
+                error = "the Windows restart broker did not answer within " + RelaunchCommand.BrokerTimeoutSeconds + " s and was " + killed;
+                Plugin.Logger?.LogWarning("JoinFlow: " + error);
+                NoteRestartLog("game: " + error);
+                return false;
+            }
+
+            p.WaitForExit(); // drains the redirected pipes
+            string result = Wait(stdout).Trim().TrimStart('﻿').Trim();
+            string detail = Wait(stderr).Trim();
+            if (p.ExitCode != 0 || !int.TryParse(result, out int helperPid) || helperPid <= 0)
+            {
+                error = "the Windows restart broker failed (exit " + p.ExitCode + "): " + detail;
+                NoteRestartLog("game: " + error);
+                return false;
+            }
+
+            Plugin.Logger?.LogInfo("JoinFlow: independent relauncher started (pid " + helperPid + "); Windows owns the helper; broker exited");
+            return true;
+        }
+
+        private static string Wait(Task<string> read)
+        {
+            try { return read.Wait(2000) ? read.Result : ""; }
+            catch { return ""; }
+        }
+
+        private static void NoteRestartLog(string message)
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(Paths.BepInExRootPath, RestartLogName),
+                    DateTime.UtcNow.ToString("o") + " " + message + Environment.NewLine, new System.Text.UTF8Encoding(false));
+            }
+            catch { /* the log is best effort */ }
         }
 
         public void Quit(double delaySeconds)

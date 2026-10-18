@@ -27,8 +27,11 @@ internal interface IJoinRelauncher
     /// <summary>The relauncher for this process (probes Steam and PowerShell; starts nothing).</summary>
     RelaunchPlan Plan();
 
-    /// <summary>Start the relauncher, detached. False with the reason when it could not be started.</summary>
-    bool Start(RelaunchPlan plan, out string error);
+    /// <summary>
+    /// Start the relauncher, detached, without blocking the caller. <paramref name="done"/> runs once, on the main
+    /// thread (live: a later frame; fakes may call it at once), with whether it started and, if not, why.
+    /// </summary>
+    void Start(RelaunchPlan plan, Action<bool, string> done);
 
     /// <summary>Quit the game the safe way (<c>Application.Quit</c>) after <paramref name="delaySeconds"/>.</summary>
     void Quit(double delaySeconds);
@@ -774,18 +777,32 @@ internal static partial class JoinFlowClient
             + "; relaunch " + (plan.Mode == RelaunchMode.Automatic ? "automatic" : "manual" + (plan.Why.Length > 0 ? " (" + plan.Why + ")" : "")));
         if (dryRun) return "dry-run";
 
-        bool started = false;
-        string error = plan.Why;
-        if (plan.Mode == RelaunchMode.Automatic)
+        if (plan.Mode != RelaunchMode.Automatic) return AfterRestartStart(relauncher, false, plan.Why);
+        return BeginRelaunch(relauncher, plan, (started, error) => AfterRestartStart(relauncher, started, error));
+    }
+
+    /// <summary>
+    /// Starts the relauncher without blocking this frame and runs <paramref name="after"/> once with its answer.
+    /// Returns <paramref name="after"/>'s result when the answer came at once, else <c>quitting</c> (the game quits as
+    /// soon as the relauncher answers, at once or, when it failed, the manual way).
+    /// </summary>
+    private static string BeginRelaunch(IJoinRelauncher relauncher, RelaunchPlan plan, Func<bool, string, string> after)
+    {
+        string? outcome = null;
+        int once = 0;
+        void Done(bool started, string error)
         {
-            try { started = relauncher.Start(plan, out error); }
-            catch (Exception e)
-            {
-                started = false;
-                error = e.Message;
-            }
+            if (Interlocked.Exchange(ref once, 1) != 0) return;
+            outcome = after(started, error ?? "");
         }
 
+        try { relauncher.Start(plan, Done); }
+        catch (Exception e) { Done(false, e.Message); }
+        return outcome ?? "quitting";
+    }
+
+    private static string AfterRestartStart(IJoinRelauncher relauncher, bool started, string error)
+    {
         if (!started)
         {
             // Still quit, but say so first: the record reconnects a manual start.
