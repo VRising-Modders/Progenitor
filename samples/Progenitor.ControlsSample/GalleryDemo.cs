@@ -453,6 +453,9 @@ internal sealed class GalleryDemo
             case "attach-icon-tooltip":
             case "attach-tooltip":
             case "attach-recipe":
+            case "attach-tooltip-ends":
+            case "attach-indent":
+            case "attach-keyhint":
             case "attach-map":
                 CallLines(panel, tab, e.Control, e.Sample);
                 break;

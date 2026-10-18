@@ -1355,6 +1355,20 @@ internal sealed partial class UnityUiRuntime
         catch { return false; }
     }
 
+    /// <summary>The slot at the end of <paramref name="column"/> but before its footer containers, or -1 for the end.</summary>
+    private static int TooltipSlotBeforeFooters(Transform column)
+    {
+        try
+        {
+            return VanillaRecipeTooltip.SlotBeforeFooters(column.childCount, i =>
+            {
+                var c = column.GetChild(i);
+                return c != null ? SafeObjectName(c.gameObject) : "";
+            });
+        }
+        catch { return -1; }
+    }
+
     /// <summary>The sibling index right after <paramref name="reference"/> and any Progenitor container already there.</summary>
     private static int TooltipSlotAfter(Transform reference)
     {
@@ -1794,6 +1808,15 @@ internal sealed partial class UnityUiRuntime
                     // under the product's description, above the requirement list (both are
                     // InformationEntries children on 1.1.13.0).
                     if (host != null && site == VanillaUiSite.RecipeTooltip) siblingIndex = TooltipSlotAfter(frame!.transform);
+                    else if (host != null) siblingIndex = TooltipSlotBeforeFooters(host);
+                    break;
+                case VanillaPanelAnchor.TooltipFooter:
+                    // The text column's very last row (InformationEntries on 1.1.13.0): after the game's last entry
+                    // (InputContexts) and after every Progenitor container already there, so footers stack in build
+                    // order and an item tooltip's body rows, built later, still go above them.
+                    var footFrame = view.Tooltip != null ? view.Tooltip.DescriptionFrame : null;
+                    host = Alive(footFrame) ? footFrame!.transform.parent : null;
+                    if (host == null) missing = "FakeTooltip.DescriptionFrame";
                     break;
                 case VanillaPanelAnchor.TooltipRequirements:
                     var block = RecipeBlockOf(view.Tooltip);
@@ -2445,7 +2468,7 @@ internal sealed partial class UnityUiRuntime
             }
 
             clone.SetActive(true);
-            return new PanelRowWidget(clone, tmp);
+            return new PanelRowWidget(clone, tmp) { Site = site };
         }
         catch (Exception e)
         {
@@ -2730,6 +2753,9 @@ internal sealed partial class UnityUiRuntime
                 }
 
                 d["siteAnchors"] = VanillaUiSites.AnchorKeys(rb.Site);
+                bool indented = false;
+                foreach (int level in rb.RowIndents) indented |= level > 0;
+                if (indented) d["indentStep"] = Mathf.Round(IndentStepReadback(rb.Site) * 10f) / 10f;
                 d["buttonFailure"] = ButtonFailures.TryGetValue(rb.Site, out var bf) ? bf : "";
             }
 
@@ -3428,11 +3454,37 @@ internal sealed partial class UnityUiRuntime
             }
             catch { /* a row Unity is destroying keeps its old color for its last frame */ }
         }
+
+        /// <summary>The site whose donor this row was cloned from (its indent step is measured there).</summary>
+        internal VanillaUiSite Site { get; init; }
+
+        internal float FontSize
+        {
+            get { try { return Alive && _tmp != null ? _tmp.fontSize : 0f; } catch { return 0f; } }
+        }
+
+        private Vector4? _baseMargin;
+        private float _indentPx;
+
+        /// <summary>The row's text inset by <paramref name="px"/> on the left (the donor's own margin kept); a repeat is no write.</summary>
+        internal void SetIndent(float px)
+        {
+            if (!Alive || _tmp == null || Mathf.Abs(px - _indentPx) < 0.25f) return;
+            try
+            {
+                _baseMargin ??= _tmp.margin;
+                var m = _baseMargin.Value;
+                _tmp.margin = new Vector4(m.x + px, m.y, m.z, m.w);
+                _indentPx = px;
+            }
+            catch { /* */ }
+        }
     }
 
     public void StyleAttachRow(IRuntimeWidget row, LabelTone tone)
     {
         if (row is PanelRowWidget panelRow) panelRow.SetTone(tone);
+        else if (row is KeyHintRowWidget hint) hint.SetTone(tone);
     }
 }
 #endif

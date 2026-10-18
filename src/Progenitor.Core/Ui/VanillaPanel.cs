@@ -41,7 +41,7 @@ public enum VanillaPanelAnchor
 
     /// <summary>
     /// The tooltip's own text column. On <see cref="VanillaUiSite.InventoryTooltip"/> the rows are the
-    /// column's last lines; on <see cref="VanillaUiSite.RecipeTooltip"/> they sit right under the
+    /// column's last lines (above any <see cref="TooltipFooter"/> rows); on <see cref="VanillaUiSite.RecipeTooltip"/> they sit right under the
     /// product's description, above the requirement list.
     /// </summary>
     TooltipBody = 5,
@@ -63,46 +63,118 @@ public enum VanillaPanelAnchor
     TooltipRequirementLine = 7,
 
     /// <summary>
-    /// <see cref="VanillaUiSite.RecipeTooltip"/> only: rows directly under the tooltip's title (the icon and name
+    /// <see cref="VanillaUiSite.RecipeTooltip"/> and <see cref="VanillaUiSite.InventoryTooltip"/>: rows directly under the tooltip's title (the icon and name
     /// band), above everything else the tooltip shows, the product's description included. The container is the
     /// tooltip's own next row after its title band, the way the build menu's breadcrumb line sits, and its rows
     /// start where the title's text starts.
     /// </summary>
     TooltipHeader = 8,
+
+    /// <summary>
+    /// <see cref="VanillaUiSite.RecipeTooltip"/> and <see cref="VanillaUiSite.InventoryTooltip"/>: rows at the very
+    /// bottom of the tooltip's text column, after every line the game shows there (on a recipe, below the duration
+    /// line and the game's own last line). Several plugins' footers stack in the order they were built; on the item
+    /// tooltip, <see cref="TooltipBody"/> rows stay above them.
+    /// </summary>
+    TooltipFooter = 9,
 }
 
 /// <summary>
 /// One row of a vanilla attachment with its <see cref="LabelTone"/>: plain text in the site's own
 /// font (the tooltip's description style on the tooltip sites). <see cref="LabelTone.Normal"/> keeps
-/// the game's own text color; the other tones use the framework's label colors. Game-free.
+/// the game's own text color; the other tones use the framework's label colors. A row can be indented
+/// (<see cref="Indent"/>) and can be a key hint in the game's own hint style (<see cref="KeyHint"/>). Game-free.
 /// </summary>
 public readonly struct VanillaRow : IEquatable<VanillaRow>
 {
+    /// <summary>The deepest <see cref="Indent"/> level; a larger value reads as this.</summary>
+    public const int MaxIndent = 4;
+
     /// <summary>A row of <paramref name="text"/> in <paramref name="tone"/>.</summary>
     public VanillaRow(string text, LabelTone tone = LabelTone.Normal)
     {
         _text = text;
         Tone = tone;
+        _indent = 0;
+        _key = null;
+        Hold = false;
+    }
+
+    /// <summary>A row of <paramref name="text"/> in <paramref name="tone"/>, indented <paramref name="indent"/> levels.</summary>
+    public VanillaRow(string text, LabelTone tone, int indent)
+        : this(text, tone)
+    {
+        _indent = indent;
     }
 
     private readonly string? _text;
+    private readonly int _indent;
+    private readonly string? _key;
 
-    /// <summary>The row's text. Never null (a default row is empty).</summary>
+    /// <summary>The row's text; for a key hint, its action label. Never null (a default row is empty).</summary>
     public string Text => _text ?? "";
 
-    /// <summary>The row's color.</summary>
-    public LabelTone Tone { get; }
+    /// <summary>The row's color. A key hint keeps the game's hint color unless a tone other than Normal is given.</summary>
+    public LabelTone Tone { get; init; }
+
+    /// <summary>
+    /// Indent levels, 0 (none) to <see cref="MaxIndent"/>. One level is the width of a requirement line's icon and
+    /// the gap after it, measured from the game's own requirement row, so a row at level 1 under a requirement
+    /// line starts where that line's text starts, past its icon. Each level adds one more of that width.
+    /// </summary>
+    public int Indent
+    {
+        get => _indent < 0 ? 0 : _indent > MaxIndent ? MaxIndent : _indent;
+        init => _indent = value;
+    }
+
+    /// <summary>A key hint: the bind id or key chord the row's glyph shows (empty for a plain row).</summary>
+    public string Key => _key ?? "";
+
+    /// <summary>A key hint row (made by <see cref="KeyHint"/>).</summary>
+    public bool IsKeyHint => _key != null;
+
+    /// <summary>A key hint for a hold: the game's <i>Hold</i> word before the glyph.</summary>
+    public bool Hold { get; init; }
+
+    /// <summary>
+    /// A row in the game's own key-hint style: the key's glyph (the game's key, mouse or controller art) followed by
+    /// <paramref name="label"/> in the game's hint font and color, as on the world map's hint bar (<i>[Alt] Open
+    /// Legend</i>). <paramref name="bindIdOrKeyChord"/> is the id of a bind the attaching plugin registered with
+    /// <c>ctx.Keybinds</c> (the glyph follows a remap, and shows the controller button while the player uses a
+    /// controller and the bind has one) or a chord as written (<c>Alt</c>, <c>Shift + F</c>). A lone modifier shows
+    /// its own cap. <paramref name="hold"/> puts the game's <i>Hold</i> before the glyph.
+    /// </summary>
+    public static VanillaRow KeyHint(string bindIdOrKeyChord, string label, bool hold = false) =>
+        new(label ?? "", LabelTone.Normal, bindIdOrKeyChord ?? "", hold);
+
+    private VanillaRow(string text, LabelTone tone, string key, bool hold)
+    {
+        _text = text;
+        Tone = tone;
+        _indent = 0;
+        _key = key;
+        Hold = hold;
+    }
 
     /// <summary>A plain row: the game's own text color.</summary>
     public static implicit operator VanillaRow(string text) => new(text);
 
-    public bool Equals(VanillaRow other) => Tone == other.Tone && string.Equals(Text, other.Text, StringComparison.Ordinal);
+    public bool Equals(VanillaRow other) =>
+        Tone == other.Tone && Indent == other.Indent && Hold == other.Hold
+        && string.Equals(Text, other.Text, StringComparison.Ordinal)
+        && string.Equals(_key, other._key, StringComparison.Ordinal);
 
     public override bool Equals(object? obj) => obj is VanillaRow r && Equals(r);
 
-    public override int GetHashCode() => HashCode.Combine(Text, Tone);
+    public override int GetHashCode() => HashCode.Combine(Text, Tone, Indent, _key, Hold);
 
-    public override string ToString() => Tone == LabelTone.Normal ? Text : Text + " [" + LabelTones.Name(Tone) + "]";
+    public override string ToString()
+    {
+        string s = IsKeyHint ? (Hold ? "Hold " : "") + "[" + Key + "] " + Text : Text;
+        if (Indent > 0) s = new string('>', Indent) + " " + s;
+        return Tone == LabelTone.Normal ? s : s + " [" + LabelTones.Name(Tone) + "]";
+    }
 }
 
 /// <summary>

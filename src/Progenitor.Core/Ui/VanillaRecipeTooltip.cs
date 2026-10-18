@@ -83,6 +83,24 @@ internal static class VanillaRecipeTooltip
         return i;
     }
 
+    /// <summary>The container-name suffix of a <see cref="VanillaPanelAnchor.TooltipFooter"/> container.</summary>
+    internal const string FooterSuffix = "-footer";
+
+    /// <summary>
+    /// Where a row container that belongs at the end of the tooltip's text column goes when footers may be there:
+    /// before the first <see cref="VanillaPanelAnchor.TooltipFooter"/> container of the column's trailing run of
+    /// Progenitor containers, so footer rows stay the very last; -1 (the end) when there is none.
+    /// </summary>
+    internal static int SlotBeforeFooters(int childCount, Func<int, string?> nameAt)
+    {
+        if (nameAt == null || childCount <= 0) return -1;
+        int start = childCount;
+        while (start > 0 && UiOwnership.IsOwned(nameAt(start - 1) ?? "")) start--;
+        for (int i = start; i < childCount; i++)
+            if ((nameAt(i) ?? "").EndsWith(FooterSuffix, StringComparison.Ordinal)) return i;
+        return -1;
+    }
+
     /// <summary>The largest title inset a header row accepts; a wider reading is a rect not laid out yet.</summary>
     internal const float MaxHeaderInset = 200f;
 

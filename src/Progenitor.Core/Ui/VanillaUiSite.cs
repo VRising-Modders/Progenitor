@@ -125,7 +125,8 @@ public enum VanillaUiSite
     /// (<see cref="VanillaPanelTarget.ItemGuid"/> is that entry's <c>EntryId</c>). Rows only, appended
     /// to the tooltip's text column after <c>DescriptionFrame</c> and cloned from
     /// <c>Description</c>, so a line reads in the tooltip's own font, color and spacing. Anchor:
-    /// <see cref="VanillaPanelAnchor.TooltipBody"/>. Refresh: <c>SystemHooks.After&lt;InventoryMenuMapper&gt;</c>.
+    /// <see cref="VanillaPanelAnchor.TooltipBody"/> (default), <see cref="VanillaPanelAnchor.TooltipHeader"/> (under the
+    /// title) and <see cref="VanillaPanelAnchor.TooltipFooter"/> (the column's very last lines). Refresh: <c>SystemHooks.After&lt;InventoryMenuMapper&gt;</c>.
     /// </summary>
     InventoryTooltip = 6,
 
@@ -147,7 +148,8 @@ public enum VanillaUiSite
     /// the tooltip's <c>Description</c>. Anchors: <see cref="VanillaPanelAnchor.TooltipBody"/> (under the
     /// product's description), <see cref="VanillaPanelAnchor.TooltipRequirements"/> (under the
     /// requirement list), <see cref="VanillaPanelAnchor.TooltipRequirementLine"/> (under one
-    /// requirement line) and <see cref="VanillaPanelAnchor.TooltipHeader"/> (under the title). Refresh: the shared mapper scan.
+    /// requirement line), <see cref="VanillaPanelAnchor.TooltipHeader"/> (under the title) and
+    /// <see cref="VanillaPanelAnchor.TooltipFooter"/> (the very bottom). Refresh: the shared mapper scan.
     /// </summary>
     RecipeTooltip = 7,
 }
@@ -253,7 +255,7 @@ internal static class VanillaUiSites
         donor: "Description",
         system: "InventoryMenuMapper",
         allowIgnoreLayout: true,
-        anchors: new[] { VanillaPanelAnchor.TooltipBody },
+        anchors: new[] { VanillaPanelAnchor.TooltipBody, VanillaPanelAnchor.TooltipHeader, VanillaPanelAnchor.TooltipFooter },
         buttons: false);
 
     private static readonly VanillaUiSiteInfo Recipe = new(
@@ -262,7 +264,7 @@ internal static class VanillaUiSites
         donor: "Description",
         system: "WorkstationMenuMapper",
         allowIgnoreLayout: true,
-        anchors: new[] { VanillaPanelAnchor.TooltipBody, VanillaPanelAnchor.TooltipRequirements, VanillaPanelAnchor.TooltipRequirementLine, VanillaPanelAnchor.TooltipHeader },
+        anchors: new[] { VanillaPanelAnchor.TooltipBody, VanillaPanelAnchor.TooltipRequirements, VanillaPanelAnchor.TooltipRequirementLine, VanillaPanelAnchor.TooltipHeader, VanillaPanelAnchor.TooltipFooter },
         buttons: false);
 
     /// <summary>
@@ -334,7 +336,8 @@ internal static class VanillaUiSites
     /// <summary>Whether <paramref name="anchor"/> puts the container into a tooltip's text column.</summary>
     internal static bool IsTooltipAnchor(VanillaPanelAnchor anchor) =>
         anchor == VanillaPanelAnchor.TooltipBody || anchor == VanillaPanelAnchor.TooltipRequirements
-        || anchor == VanillaPanelAnchor.TooltipRequirementLine || anchor == VanillaPanelAnchor.TooltipHeader;
+        || anchor == VanillaPanelAnchor.TooltipRequirementLine || anchor == VanillaPanelAnchor.TooltipHeader
+        || anchor == VanillaPanelAnchor.TooltipFooter;
 
     /// <summary>
     /// How many requirement lines the game's recipe tooltip can show: its requirement list holds six
@@ -405,6 +408,7 @@ internal static class VanillaUiSites
         VanillaPanelAnchor.TooltipRequirements => "requirements",
         VanillaPanelAnchor.TooltipRequirementLine => "line",
         VanillaPanelAnchor.TooltipHeader => "header",
+        VanillaPanelAnchor.TooltipFooter => "footer",
         _ => "",
     };
 }

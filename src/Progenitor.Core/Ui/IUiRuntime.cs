@@ -637,6 +637,25 @@ internal interface IUiRuntime
     void StyleAttachRow(IRuntimeWidget row, LabelTone tone) { }
 
     /// <summary>
+    /// Indent a row <see cref="CloneDonorRow"/> or <see cref="CloneKeyHintRow"/> made by <paramref name="level"/>
+    /// steps (<see cref="VanillaRow.Indent"/>). Writes only when the level or the measured step changed. Must never throw.
+    /// </summary>
+    void IndentAttachRow(IRuntimeWidget row, int level) { }
+
+    /// <summary>
+    /// A key-hint row (<see cref="VanillaRow.KeyHint"/>) in <paramref name="container"/>: a copy of the game's own
+    /// key-hint entry (its glyph image, its texts, its font and color) with nothing of the game's left driving it.
+    /// Null when no entry could be copied. The row implements <see cref="IKeyHintRowReadback"/>.
+    /// </summary>
+    IRuntimeWidget? CloneKeyHintRow(VanillaUiSite site, IRuntimeWidget container) => null;
+
+    /// <summary>Draw <paramref name="parts"/> on a <see cref="CloneKeyHintRow"/> row. Writes only what changed. Must never throw.</summary>
+    void ApplyKeyHint(IRuntimeWidget row, VanillaKeyHintParts parts) { }
+
+    /// <summary>Whether the game is showing controller glyphs now (the player is on a controller).</summary>
+    bool ControllerGlyphsActive => false;
+
+    /// <summary>
     /// P6: create the mod-owned container for a panel site at <paramref name="anchor"/>, using the
     /// panel instance the most recent sample resolved. Edge anchors parent it beside the panel
     /// (ignored by any vanilla layout group, positioned by <see cref="FitAttachContainer"/>); inline
