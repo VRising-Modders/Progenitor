@@ -967,13 +967,16 @@ public static partial class ModsMenu
         var dialog = UiDialog.Open(
             factory, PlainUninstallDialogTag, "uninstall", pluginId,
             ModPageCopy.UninstallHeading(name, ""), PlainUninstallBody, PlainUninstallYes, LabelTone.Danger, ModPageCopy.PromptNo,
-            danger: true, extras: new[] { (new DialogButton("yes-restart", "Yes, uninstall and restart", DialogButtonRole.Option, CellTone.Gold), (Action)(() =>
+            danger: true, extras: new[] { (new DialogButton(YesRestartKey, YesRestartCaption, DialogButtonRole.Option, CellTone.Gold), (Action)(() =>
             {
                 if (!string.Equals(_switchDialogPlugin, pluginId, StringComparison.OrdinalIgnoreCase)) return;
                 _switchDialogPlugin = "";
                 var outcome = ModSwitch.RequestRemove(pluginId, name, PlainIdentityOf(pluginId));
                 NoteAndReopen(pluginId, outcome.Message);
-                if (outcome.Ok) Networking.JoinFlowClient.RunRestart(Networking.JoinFlowClient.CurrentRestartOffer(), false);
+                if (!outcome.Ok) return;
+                // The shared restart button: its confirmation, only for an offer that covers this removal, never mid-join.
+                string restart = RestartAfterUninstall(pluginId, name);
+                if (restart != "confirm") NoteAndReopen(pluginId, NoteAfterUninstallRestart(outcome.Message, restart));
             })) });
         dialog.OnYes(() =>
         {
@@ -985,6 +988,11 @@ public static partial class ModsMenu
     }
 
     internal const string PlainUninstallYes = "Yes, uninstall";
+
+    /// <summary>The uninstall dialogs' combined answer: mark the removal, then ask for the restart.</summary>
+    internal const string YesRestartKey = "yes-restart";
+
+    internal const string YesRestartCaption = "Yes, uninstall and restart";
 
     internal const string PlainUninstallBody =
         "Progenitor moves it to BepInEx/progenitor-removed the next time the game starts. You can restore it "

@@ -537,7 +537,7 @@ internal sealed partial class ModPagePane
             facts: _model.PromptFacts(_prompt),
             danger: PromptIsDestructive(_prompt),
             extras: _prompt == ModPromptKind.Uninstall && actions.YesAndRestart != null
-                ? new[] { (new DialogButton("yes-restart", "Yes, uninstall and restart", DialogButtonRole.Option, CellTone.Gold), actions.YesAndRestart) }
+                ? new[] { (new DialogButton(ModsMenu.YesRestartKey, ModsMenu.YesRestartCaption, DialogButtonRole.Option, CellTone.Gold), actions.YesAndRestart) }
                 : null);
         PromptDialog = dialog;
         var block = dialog.Prompt;

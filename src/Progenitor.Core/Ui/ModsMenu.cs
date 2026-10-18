@@ -1473,8 +1473,7 @@ public static partial class ModsMenu
                 Action = () => OnModsActionClick(pluginId),
                 Yes = () => OnModsPromptYes(pluginId),
                 YesAndRestart = model.Uninstall is { Client: not ClientRemover.None, Server: ServerRemover.None, ClientUnloadsNow: false }
-                    ? () => { OnModsPromptYes(pluginId); if (IsUninstallPending(pluginId))
-                        JoinFlowClient.RunRestart(JoinFlowClient.CurrentRestartOffer(), false); }
+                    ? () => OnModsPromptYesAndRestart(pluginId, model.Name)
                     : null,
                 No = () => OnModsPromptNo(pluginId),
                 Store = () => OnModsStoreLinkClick(pluginId),
@@ -1521,6 +1520,11 @@ public static partial class ModsMenu
     internal const string CellOpenInInstall = "open";
     internal const string CellRestore = "restore";
 
+    /// <summary>The Details row that opens the mod's own listing in Install Mods.</summary>
+    internal const string RowPageInstallListing = "page-install-listing";
+
+    internal const string ViewInInstallMods = "View in Install Mods";
+
     private static void BuildModPageNotes(
         IUiPanel panel,
         string pluginId,
@@ -1538,13 +1542,17 @@ public static partial class ModsMenu
         // ABOUTSRC1: a listing nothing ties to these files (the LINK1 name match, a GUID that spells a package name,
         // another version) is not shown at all, so there is no "Matched by name" note to draw for it.
 
-        var listingLink = ResolveInstallLink(pluginId);
-        if (listingLink is { } resolvedLink && !string.IsNullOrEmpty(resolvedLink.Key))
+        // The same tie rule: View in Install Mods only for the listing these files came from (the page model's verified
+        // listing), never for one a GUID or a name found.
+        string listingKey = model != null
+            ? model.Listing.Key
+            : VerifiedListingEntry(pluginId, sidebarRow, deep: true)?.Key ?? "";
+        if (listingKey.Length > 0)
         {
-            var link = Fact("page-install-listing", "Listing", new[] {
-                new CellSpec(CellKind.Button, "open").With(text: "View in Install Mods")
+            var link = Fact(RowPageInstallListing, "Listing", new[] {
+                new CellSpec(CellKind.Button, CellOpenInInstall).With(text: ViewInInstallMods)
             }, "Open this mod's listing in Install Mods.", textValue: false);
-            link.OnClick("open", () => OpenModLinkCatalog(resolvedLink.Key));
+            link.OnClick(CellOpenInInstall, () => OpenModLinkCatalog(listingKey));
         }
         var restartOffer = JoinFlowClient.CurrentRestartOffer();
         if (restartOffer.Shown)
@@ -2865,15 +2873,41 @@ public static partial class ModsMenu
         if (!IsOpen) return;
         EnsureTabState();
         var inventory = CurrentSidebarModel(applySearch: false);
-        if (inventory.Find(pluginId) == null)
-            foreach (var candidate in inventory.Rows)
-                if (string.Equals(ResolveInstallLink(candidate.Id)?.Key, pluginId, StringComparison.OrdinalIgnoreCase))
-                { pluginId = candidate.Id; break; }
+        if (inventory.Find(pluginId) == null) pluginId = InstalledPluginOfPackage(inventory, pluginId) ?? pluginId;
         if (!string.IsNullOrWhiteSpace(pluginId))
             _tabState!.Mods.Selection = ModsWorkspaceIdentity.Installed(pluginId.Trim());
         // Selecting the current tab is a no-op; an in-tab link still needs to open its page.
         if (_tabState!.Selected == ModsTab.Mods) OpenMod(pluginId, ReasonUserButton);
         else SelectWorkspaceTab(ModsTab.Mods);
+    }
+
+    /// <summary>
+    /// The installed plugin a listing's <b>Configure in Mods</b> opens when the listing names no plugin id the Mods list
+    /// has (a package key). Of the rows these files tie to that package (<see cref="SharePackageOf"/>: the ledger, or a
+    /// package manifest beside the DLL) and the rows whose id the listing itself names (its manifest id or plugin
+    /// identity), a row that is both wins: the package's own plugin. A package that installs several plugins otherwise
+    /// opens the first tied row in Mods-list order, and a row only the listing names comes last. Null when none.
+    /// </summary>
+    internal static string? InstalledPluginOfPackage(ModsSidebarModel inventory, string packageKey)
+    {
+        if (inventory == null || string.IsNullOrWhiteSpace(packageKey)) return null;
+        string? best = null;
+        int bestScore = 0;
+        foreach (var row in inventory.Rows)
+        {
+            if (row == null || string.IsNullOrEmpty(row.Id)) continue;
+            bool tied = false;
+            try { tied = InstalledListingCheck.SamePackage(SharePackageOf(row).Package, packageKey); }
+            catch { tied = false; }
+            bool named = string.Equals(ResolveInstallLink(row.Id)?.Key, packageKey, StringComparison.OrdinalIgnoreCase);
+            int score = (tied ? 2 : 0) + (named ? 1 : 0);
+            if (score <= bestScore) continue;
+            best = row.Id;
+            bestScore = score;
+            if (score == 3) break;
+        }
+
+        return best;
     }
 
     private static void RebuildConfigurationAfterAction()
@@ -6440,6 +6474,21 @@ public static partial class ModsMenu
         _modPrompt = ModPromptKind.None;
         _modPromptPlugin = "";
         if (IsOpen) OpenMod(pluginId, ReasonUserButton);
+    }
+
+    /// <summary>
+    /// The uninstall prompt's <b>Yes, uninstall and restart</b>: the prompt's yes, then, once the removal is marked, the shared
+    /// restart button (<see cref="RestartAfterUninstall"/>). A removal that did not take asks for nothing.
+    /// </summary>
+    private static void OnModsPromptYesAndRestart(string pluginId, string name)
+    {
+        OnModsPromptYes(pluginId);
+        if (!IsUninstallPending(pluginId)) return;
+        string restart = RestartAfterUninstall(pluginId, name);
+        if (restart == "confirm") return;
+        _modsActionPlugin = pluginId;
+        _modsActionNote = NoteAfterUninstallRestart(_modsActionNote, restart);
+        if (IsOpen && CurrentSidebarModel(applySearch: false).Find(pluginId) != null) OpenMod(pluginId, ReasonUserButton);
     }
 
     /// <summary>The prompt's yes: the one place a Mods-page action changes anything.</summary>

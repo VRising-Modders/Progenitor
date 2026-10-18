@@ -2027,6 +2027,37 @@ public sealed class ModPageTests : IDisposable
         Assert.Equal("CryptSnooze", ModsMenu.ModPage.Model.Name);
     }
 
+    /// <summary>
+    /// Review of PR 133, finding 3: a package that installs several plugins. Configure in Mods from its listing opens the
+    /// package's own plugin (the one the listing's manifest id names) when it is installed; a listing that names none of
+    /// them opens the first tied plugin in Mods-list order.
+    /// </summary>
+    [Fact]
+    public void Configure_from_a_multi_plugin_package_opens_its_own_plugin_else_the_first()
+    {
+        var catalog = new PageCatalog();
+        catalog.Entries.Add(Verified("Corvane", "Suite", "1.0.0", "b.main"));
+        ModsMenu.SetInstallCatalogForTests(catalog);
+        ModsMenu.LedgerForTests = new[]
+        {
+            new InstalledLedgerRow("Corvane-Suite", "sha", "1.0.0", "Alpha.dll", "package:Corvane-Suite@1.0.0",
+                ServerInstallLedger.CategoryMod, InstalledState.ClientRoot, "", pluginId: "a.first"),
+            new InstalledLedgerRow("Corvane-Suite", "sha", "1.0.0", "Main.dll", "package:Corvane-Suite@1.0.0",
+                ServerInstallLedger.CategoryMod, InstalledState.ClientRoot, "", pluginId: "b.main"),
+        };
+        using var first = ModsMenu.Register(new object(), "a.first", "Alpha");
+        using var main = ModsMenu.Register(new object(), "b.main", "Main");
+        ModsMenu.Open();
+        ModsMenu.OpenInstalledFromInstall("Corvane-Suite");
+        Assert.Equal("b.main", ModsMenu.ModPage!.Model.PluginId);
+
+        var unnamed = new PageCatalog();
+        unnamed.Entries.Add(Listing("Corvane", "Suite", "1.0.0", "Client"));
+        ModsMenu.SetInstallCatalogForTests(unnamed);
+        ModsMenu.OpenInstalledFromInstall("Corvane-Suite");
+        Assert.Equal("a.first", ModsMenu.ModPage!.Model.PluginId);
+    }
+
     private void SeedCryptSnooze(string? readme = null)
     {
         var catalog = new PageCatalog();
@@ -2151,6 +2182,73 @@ public sealed class ModPageTests : IDisposable
         Assert.False(dialog.IsOpen);
         Assert.Equal(ModPromptKind.None, ModsMenu.ModPrompt);
         Assert.False(TryRow(PageRows(), ModPagePane.RowPrompt, out _), "No must close the dialog");
+    }
+
+    /// <summary>
+    /// Review of PR 133, finding 2: the mod page prompt's <b>Yes, uninstall and restart</b> marks the removal, then goes
+    /// through the shared restart button: its confirmation opens (here in the Manual wording, nothing can relaunch the
+    /// game) instead of a restart starting at once. <b>Not now</b> leaves the removal marked and nothing restarting.
+    /// What removal breaks: the combined answer called the restart directly, past the confirmation, the Manual
+    /// wording and the double-press guard.
+    /// </summary>
+    [Fact]
+    public void Page_uninstall_and_restart_asks_through_the_shared_restart_confirmation()
+    {
+        SeedCryptSnooze();
+        var seam = new FakeSeam();
+        ModsMenu.UninstallSeam = seam;
+        ModsMenu.PendingRestartForTests = () => seam.Pending
+            ? new[] { new PendingClientChange { Id = "example.cryptsnooze", Name = "CryptSnooze", Action = PendingClientChange.ActionRemove } }
+            : Array.Empty<PendingClientChange>();
+        JoinFlowClient.PendingRestartProbe = ModsMenu.ClientPendingRestart;
+        var owner = new object();
+        JoinFlowClient.RestartDialogFactory = title => UiApi.Panel(title, owner, "test.page.restart");
+        try
+        {
+            ModsMenu.Open();
+            ModsMenu.OpenMod("example.cryptsnooze");
+            Click(ModPageCopy.Uninstall);
+            Click(ModsMenu.YesRestartCaption);
+
+            Assert.Equal(1, seam.MarkCalls);
+            var confirm = UiDialog.Current;
+            Assert.NotNull(confirm);
+            Assert.Equal("install-restart", confirm!.Tag);
+            Assert.Equal(ClientRestartText.ManualTitle, confirm.Content.Title);
+            Assert.Equal(ClientRestartText.QuitToDesktop, confirm.Content.MainCaption);
+
+            Assert.Equal("not now", JoinFlowClient.AnswerRestart(yes: false, dryRun: false));
+            Assert.Null(UiDialog.Current);
+            Assert.True(seam.Pending);
+        }
+        finally
+        {
+            ModsMenu.PendingRestartForTests = null;
+            JoinFlowClient.Uninstall();
+        }
+    }
+
+    /// <summary>
+    /// Review of PR 133, finding 3: <b>View in Install Mods</b> follows the ABOUTSRC1 tie rule. A listing found only because
+    /// its manifest id equals the plugin GUID (another package) is not these files' listing: no row. The ledger's own
+    /// package is.
+    /// </summary>
+    [Fact]
+    public void View_in_Install_Mods_shows_only_for_the_listing_these_files_came_from()
+    {
+        SeedCryptSnooze();
+        ModsMenu.Open();
+        ModsMenu.OpenMod("example.cryptsnooze");
+        Assert.Contains(ModsMenu.ViewInInstallMods, JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")));
+
+        // Another package whose manifest id is this plugin's GUID; nothing on disk ties it to these files.
+        var other = new PageCatalog();
+        other.Entries.Add(Verified("Other", "CryptSnoozeFork", "9.9.9", "example.cryptsnooze"));
+        ModsMenu.SetInstallCatalogForTests(other);
+        ModsMenu.LedgerForTests = Array.Empty<InstalledLedgerRow>();
+        ModsMenu.OpenMod("example.cryptsnooze");
+        Assert.Equal("Other-CryptSnoozeFork", ModsMenu.ModPage!.Model.CandidateKey);
+        Assert.DoesNotContain(ModsMenu.ViewInInstallMods, JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")));
     }
 
     /// <summary>

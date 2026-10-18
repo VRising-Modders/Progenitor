@@ -3108,7 +3108,11 @@ internal sealed partial class InstallModsPane
             if (!ReferenceEquals(panel, _panel) || _revealListingKey != key) return;
             if (!string.Equals(_state.DrawerKey, key, StringComparison.OrdinalIgnoreCase))
             { _revealListingKey = null; return; }
-            if (FillPending || !_rowIndex.ContainsKey(key)) return;
+            if (FillPending) return;
+            // Every row is built now: a listing that is not among them, or that the filters hide, is not revealed, and
+            // the request goes (left set, a later build would jump the list to it once the filters change).
+            if (!_rowIndex.TryGetValue(key, out int index) || index < 0 || index >= _rows.Count || !IsVisible(_rows[index].Entry))
+            { _revealListingKey = null; return; }
             AnchorRowNow(key, 0f);
             if (_anchoredTo != null) _revealListingKey = null;
         }));
