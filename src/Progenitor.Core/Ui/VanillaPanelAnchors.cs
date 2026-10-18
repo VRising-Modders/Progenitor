@@ -277,4 +277,51 @@ internal static class VanillaPanelAnchors
     /// </summary>
     internal static float PositionedSpacing(float groupSpacing) =>
         groupSpacing >= 4f ? groupSpacing : VanillaPanelPlacement.DefaultSpacing;
+
+    /// <summary>
+    /// Where a placed title-row container goes so that nothing the game draws later covers it. uGUI hands a click to
+    /// the last-drawn raycast target under the pointer, and a later sibling draws over a whole earlier subtree: on
+    /// 1.1.13.0 the devourer's and the workstation's <c>MotionRoot/Blocker</c> (a transparent, raycast-target image
+    /// that covers the window and its title strip) comes after <c>HUDPanelBackground</c>, which holds the title row,
+    /// so a container inside the title row never gets a pointer event. <paramref name="levels"/> runs from the group's
+    /// parent (index 0) out to the window root's child level; each says which child is on the chain to the group and
+    /// which later siblings are active and cover the rename button with a raycast target. The answer is the outermost
+    /// level with such a cover and the index right after its last cover, or level -1 when nothing covers the row (the
+    /// container stays the last child of the group's parent, as before).
+    /// </summary>
+    internal static (int Level, int SiblingIndex) AboveCovers(IReadOnlyList<CoverLevel> levels)
+    {
+        if (levels == null) return (-1, -1);
+        for (int i = levels.Count - 1; i >= 0; i--)
+        {
+            var l = levels[i];
+            int last = -1;
+            if (l.Covers != null)
+                foreach (int c in l.Covers)
+                    if (c > l.ChainIndex && c > last) last = c;
+            if (last >= 0) return (i, last + 1);
+        }
+
+        return (-1, -1);
+    }
+}
+
+/// <summary>One level of <see cref="VanillaPanelAnchors.AboveCovers"/>: the chain child's index and the covering later siblings.</summary>
+internal readonly struct CoverLevel
+{
+    internal CoverLevel(int chainIndex, IReadOnlyList<int>? covers, string name = "")
+    {
+        ChainIndex = chainIndex;
+        Covers = covers;
+        Name = name ?? "";
+    }
+
+    /// <summary>The index, at this level, of the child that holds the rename group.</summary>
+    internal int ChainIndex { get; }
+
+    /// <summary>Indices of later siblings that are active and cover the rename button with a raycast target.</summary>
+    internal IReadOnlyList<int>? Covers { get; }
+
+    /// <summary>The level's object name, for the log line.</summary>
+    internal string Name { get; }
 }
