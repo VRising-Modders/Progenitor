@@ -23,6 +23,14 @@ public interface IVanillaPanelTabs : IDisposable
 
     /// <summary>False while <see cref="SetTabEnabled"/> has disabled the tab. Default: true.</summary>
     bool IsTabEnabled(int index) => true;
+
+    /// <summary>
+    /// Whether Escape on a panel mounted in these tabs closes the whole game window, as on the game's own tabs (default
+    /// true). A popup opened from the mounted panel (any panel not mounted) still takes the first Escape. False keeps the
+    /// earlier behavior: the first Escape hides the mounted panel and leaves the window open on an empty tab. Default
+    /// implementation: always true.
+    /// </summary>
+    bool EscapeClosesWindow { get => true; set { } }
 }
 
 public static partial class Ui
@@ -157,6 +165,9 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
         }
     }
 
+    /// <inheritdoc />
+    public bool EscapeClosesWindow { get; set; } = true;
+
     public bool ShowRedistribution
     {
         get => _host?.ShowRedistribution ?? false;
@@ -196,7 +207,13 @@ internal sealed class VanillaPanelTabs : IVanillaPanelTabs
     {
         // WINDOWS1 review: a panel mounted in a chest or station tab is placed by that tab, never in the window row (it
         // pushed a window aside, and Escape could hide it and blank the tab).
-        if (panel is UiPanelHandle tagged) { tagged.Flows = false; tagged.MountedInTab = true; }
+        if (panel is UiPanelHandle tagged)
+        {
+            tagged.Flows = false;
+            tagged.MountedInTab = true;
+            // MOUNTESC1: read at the press, so a later change of EscapeClosesWindow applies; a disposed handle says yes.
+            tagged.MountedEscapeClosesWindow = () => _disposed || EscapeClosesWindow;
+        }
         if (!_disposed && panel is UiPanelHandle h && h.RuntimePanel != null) { h.GridControls = true; _host?.Mount(h.RuntimePanel); }
     }
 

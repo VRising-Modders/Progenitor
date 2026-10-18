@@ -378,6 +378,7 @@ public sealed class ContainerReturnEscapeTests : IDisposable
     {
         foreach (var p in _panels) p.Dispose();
         GameWindowUnderPanel.MenuTypeNow = GameWindowUnderPanel.NoMenu;
+        GameWindowUnderPanel.CloseGameWindow = GameWindowUnderPanel.NoClose;
         UiInputCapture.ResetForTests();
         UiApi.ResetForTests();
     }
@@ -459,13 +460,100 @@ public sealed class ContainerReturnEscapeTests : IDisposable
         Assert.False(UiApi.EscapeHidesAPanelOverGameWindow());
     }
 
-    [Fact]
-    public void With_only_the_tab_panel_the_sweep_and_the_chest_window_close_together()
+    private int _menu;
+    private int _closes;
+
+    /// <summary>A game window that the framework's close really closes (as <c>HUDMenuManager.CloseMenu</c> does).</summary>
+    private void ChestWindowOpen(int menu = 3)
     {
-        GameWindowUnderPanel.MenuTypeNow = () => 3;
+        _menu = menu;
+        GameWindowUnderPanel.MenuTypeNow = () => _menu;
+        GameWindowUnderPanel.CloseGameWindow = () =>
+        {
+            if (!GameWindowUnderPanel.IsInteractWindow(_menu)) return false;
+            _closes++;
+            _menu = 0;
+            return true;
+        };
+    }
+
+    [Fact]
+    public void Escape_on_a_mounted_tab_panel_closes_the_whole_game_window_once()
+    {
+        // MOUNTESC1 (live 2026-10-18, The Devourer, Input tab): one Escape hid only the panel and left the window open on an
+        // empty tab. The panel is part of the window: one Escape closes both.
+        ChestWindowOpen(22); // SalvagestationMenu
         var tab = Shown("Input", UiCaptureMode.WhenHovered, mounted: true);
-        Assert.False(UiApi.EscapeHidesAPanelOverGameWindow()); // no hold: the chest's own Escape closes it
+        Assert.False(UiApi.EscapeHidesAPanelOverGameWindow()); // nothing over the window holds its close
+        UiApi.PressEscapeForBridge(); // 27, then the paired Back 17
+        Assert.Equal(UiHandleState.Built, tab.State);
+        Assert.Equal(1, _closes);
+        Assert.Equal(0, _menu);
+    }
+
+    [Fact]
+    public void A_popup_from_the_tab_panel_takes_the_first_escape_and_the_window_the_next()
+    {
+        ChestWindowOpen();
+        var tab = Shown("Input", UiCaptureMode.WhenHovered, mounted: true);
+        var picker = Shown("Add", UiCaptureMode.WhileShown); // opened from the tab panel, not mounted
+        UiApi.PressEscapeForBridge();
+        Assert.Equal(UiHandleState.Built, picker.State);
+        Assert.Equal(UiHandleState.Shown, tab.State);
+        Assert.Equal(0, _closes);
+
         UiApi.PressEscapeForBridge();
         Assert.Equal(UiHandleState.Built, tab.State);
+        Assert.Equal(1, _closes);
+    }
+
+    [Fact]
+    public void The_opt_out_keeps_the_earlier_behavior()
+    {
+        ChestWindowOpen();
+        var tab = Shown("Input", UiCaptureMode.WhenHovered, mounted: true);
+        ((UiPanelHandle)tab).MountedEscapeClosesWindow = () => false; // IVanillaPanelTabs.EscapeClosesWindow = false
+        UiApi.PressEscapeForBridge();
+        Assert.Equal(UiHandleState.Built, tab.State);
+        Assert.Equal(0, _closes);
+        Assert.Equal(3, _menu);
+    }
+
+    [Fact]
+    public void A_mounted_panel_with_no_game_window_open_closes_nothing_else()
+    {
+        ChestWindowOpen(0);
+        var tab = Shown("Input", UiCaptureMode.WhenHovered, mounted: true);
+        UiApi.PressEscapeForBridge();
+        Assert.Equal(UiHandleState.Built, tab.State);
+        Assert.Equal(0, _closes);
+    }
+
+    [Fact]
+    public void The_host_close_rule()
+    {
+        Assert.True(GameWindowUnderPanel.EscapeClosesHost(true, false, true));
+        Assert.False(GameWindowUnderPanel.EscapeClosesHost(true, true, true));   // a popup or hub over it takes this one
+        Assert.False(GameWindowUnderPanel.EscapeClosesHost(true, false, false)); // no mounted panel (or opted out)
+        Assert.False(GameWindowUnderPanel.EscapeClosesHost(false, false, true)); // no game window open
+    }
+
+    [Fact]
+    public void Tabs_send_escape_to_the_window_by_default()
+    {
+        IVanillaPanelTabs older = new DefaultTabs();
+        Assert.True(older.EscapeClosesWindow);
+        older.EscapeClosesWindow = false; // the default member ignores it: an older implementation keeps the default
+        Assert.True(older.EscapeClosesWindow);
+    }
+
+    private sealed class DefaultTabs : IVanillaPanelTabs
+    {
+        public int Selected { get; set; }
+        public bool ShowRedistribution { get; set; }
+        public void Mount(IUiPanel panel) { }
+        public event Action<VanillaPanelEvent>? PanelChanged { add { } remove { } }
+        public event Action<int>? SelectionChanged { add { } remove { } }
+        public void Dispose() { }
     }
 }

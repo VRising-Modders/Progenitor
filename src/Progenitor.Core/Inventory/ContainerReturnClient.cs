@@ -7,6 +7,7 @@ using Progenitor.Inputs;
 using Progenitor.Ui;
 using Progenitor.WorldState;
 using ProjectM;
+using ProjectM.UI;
 using Unity.Entities;
 using Unity.Transforms;
 
@@ -45,7 +46,21 @@ internal static class ContainerReturnClient
         if (_installed || Plugin.IsServerProcess) return;
         _installed = true;
         GameWindowUnderPanel.MenuTypeNow = WorldPickBackend.MenuTypeNow;
+        GameWindowUnderPanel.CloseGameWindow = CloseInteractWindow;
         Plugin.Frame += Tick;
+    }
+
+    /// <summary>
+    /// MOUNTESC1: the game's own close for the open chest, station or heart window (<c>HUDMenuManager.CloseMenu</c>, the
+    /// call the world pick and the preview already make), only while such a window is the open menu.
+    /// </summary>
+    private static bool CloseInteractWindow()
+    {
+        var world = Worlds.Client;
+        if (world == null || !world.IsCreated) return false;
+        if (!GameWindowUnderPanel.IsInteractWindow(WorldPickBackend.MenuTypeNow())) return false;
+        HUDMenuManager.CloseMenu(world);
+        return true;
     }
 
     internal static void Uninstall()
@@ -53,6 +68,7 @@ internal static class ContainerReturnClient
         if (!_installed) return;
         _installed = false;
         GameWindowUnderPanel.MenuTypeNow = GameWindowUnderPanel.NoMenu;
+        GameWindowUnderPanel.CloseGameWindow = GameWindowUnderPanel.NoClose;
         Plugin.Frame -= Tick;
         var job = _job;
         _job = null;

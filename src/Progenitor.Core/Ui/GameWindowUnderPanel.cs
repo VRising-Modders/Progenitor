@@ -20,6 +20,24 @@ internal static class GameWindowUnderPanel
 
     internal static int NoMenu() => 0;
 
+    /// <summary>
+    /// MOUNTESC1: close the game's open chest, station or castle heart window with the game's own close
+    /// (<c>HUDMenuManager.CloseMenu</c>); true when one was open and the close was asked. Set by the client runtime at
+    /// Core install and reset at uninstall; tests set it.
+    /// </summary>
+    internal static Func<bool> CloseGameWindow = NoClose;
+
+    internal static bool NoClose() => false;
+
+    /// <summary>
+    /// MOUNTESC1: an Escape that reached the sweep is the game window's own: an interact window is open, no Progenitor
+    /// panel over it takes Escape (<see cref="PanelTakesEscape"/>), and a panel mounted in its tabs is shown (with its
+    /// tabs' <c>EscapeClosesWindow</c> on). Progenitor's input context takes the press from the game while any panel is
+    /// shown, so the framework closes the window itself; the mounted panels go with it, as the game's own tabs do.
+    /// </summary>
+    internal static bool EscapeClosesHost(bool interactWindowOpen, bool anyPanelTakesEscape, bool anyMountedClosingHost) =>
+        interactWindowOpen && !anyPanelTakesEscape && anyMountedClosingHost;
+
     /// <summary>True when <paramref name="menuType"/> (<c>OpenHUDMenuSystem.CurrentMenuType</c>) is a chest, station or other interact window.</summary>
     internal static bool IsInteractWindow(int menuType) => UiWorldPickMenus.TryGet(menuType, out _);
 

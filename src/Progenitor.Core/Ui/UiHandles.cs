@@ -442,6 +442,12 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
     /// </summary>
     internal bool MountedInTab { get; set; }
 
+    /// <summary>
+    /// MOUNTESC1: whether Escape on this mounted panel closes its host window (<see cref="IVanillaPanelTabs.EscapeClosesWindow"/>,
+    /// read at the press); null means yes.
+    /// </summary>
+    internal Func<bool>? MountedEscapeClosesWindow { get; set; }
+
     /// <summary>HUB1: <see cref="UiLook.GameWindow(IUiPanel)"/> was called on this panel (its tabs are the game's window tabs).</summary>
     internal bool IsGameWindow { get; set; }
 
