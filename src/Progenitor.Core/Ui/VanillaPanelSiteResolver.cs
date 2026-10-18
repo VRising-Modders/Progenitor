@@ -2614,7 +2614,9 @@ internal sealed partial class UnityUiRuntime
             }
 
             clone.SetActive(true);
-            return new PanelRowWidget(clone, tmp) { Site = site };
+            var made = new PanelRowWidget(clone, tmp) { Site = site };
+            host.Rows.Add(made);
+            return made;
         }
         catch (Exception e)
         {
@@ -2637,6 +2639,7 @@ internal sealed partial class UnityUiRuntime
         if (VanillaUiSites.IsTooltipAnchor(anchor))
         {
             if (anchor == VanillaPanelAnchor.TooltipHeader) AlignHeader(host, view);
+            else if (anchor == VanillaPanelAnchor.TooltipFooter) AlignToLineBefore(host, view);
             var verdict = VanillaPanelPlacement.CheckTooltip(host.HostLaidOut);
             if (verdict.Fit == VanillaFit.Fits) ClampTooltip(view);
             return verdict;
@@ -3023,7 +3026,15 @@ internal sealed partial class UnityUiRuntime
             }
             catch { /* */ }
             d["rect"] = rect;
-            if (rb.Container is PanelContainerWidget tip && VanillaUiSites.IsTooltipAnchor(tip.Anchor)) DescribeTooltipSlot(d, tip);
+            if (rb.Container is PanelContainerWidget tip && VanillaUiSites.IsTooltipAnchor(tip.Anchor))
+            {
+                DescribeTooltipSlot(d, tip);
+                if (tip.Anchor == VanillaPanelAnchor.TooltipFooter && d["tooltipSlot"] is Dictionary<string, object?> footSlot)
+                {
+                    footSlot["inset"] = tip.LineInset;
+                    footSlot["alignedTo"] = tip.LineBefore;
+                }
+            }
             if (rb.Container is PanelContainerWidget placed && placed.Mode == InlineMode.Positioned)
             {
                 d["slot"] = placed.Slot == BesideSlot.After ? "after" : placed.Slot == BesideSlot.Above ? "above" : "none";
@@ -3278,6 +3289,14 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>A <see cref="VanillaPanelAnchor.TooltipHeader"/> container's measured title inset, or -1 before the first measure.</summary>
         internal float HeaderInset { get; set; } = -1f;
+
+        /// <summary>The rows cloned into this container, in build order (dead ones are skipped where read).</summary>
+        internal List<IRuntimeWidget> Rows { get; } = new();
+
+        /// <summary>A footer container's measured inset (its left padding) and the game line it follows, for the readback.</summary>
+        internal int LineInset { get; set; } = -1;
+
+        internal string LineBefore { get; set; } = "";
 
         internal string Name { get; }
 
@@ -3749,6 +3768,19 @@ internal sealed partial class UnityUiRuntime
 
         private Vector4? _baseMargin;
         private float _indentPx;
+
+        /// <summary>Where the row's text starts, in world x, without its indent; NaN when it cannot be read.</summary>
+        internal float ContentLeftWorld(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3> corners)
+        {
+            try
+            {
+                if (!Alive || _tmp == null || !_tmp.gameObject.activeInHierarchy) return float.NaN;
+                _tmp.rectTransform.GetWorldCorners(corners);
+                float margin = _tmp.margin.x - _indentPx;
+                return corners[0].x + margin * _tmp.rectTransform.lossyScale.x;
+            }
+            catch { return float.NaN; }
+        }
 
         /// <summary>The row's text inset by <paramref name="px"/> on the left (the donor's own margin kept); a repeat is no write.</summary>
         internal void SetIndent(float px)

@@ -101,6 +101,41 @@ internal static class VanillaRecipeTooltip
         return -1;
     }
 
+    /// <summary>
+    /// The game line a <see cref="VanillaPanelAnchor.TooltipFooter"/> container lines up with: the nearest sibling before
+    /// <paramref name="index"/> that is the game's (not a Progenitor container) and shows text now
+    /// (<paramref name="showsText"/>: active, with a visible non-empty text). -1 when there is none.
+    /// </summary>
+    internal static int NeighborLineBefore(int index, Func<int, string?> nameAt, Func<int, bool> showsText)
+    {
+        if (nameAt == null || showsText == null) return -1;
+        for (int i = index - 1; i >= 0; i--)
+        {
+            if (UiOwnership.IsOwned(nameAt(i) ?? "")) continue;
+            if (showsText(i)) return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The left padding a row container takes so its rows' content starts where the game line it follows starts:
+    /// <paramref name="currentPad"/> moved by the world-space distance from the rows' content to the line's text, over the
+    /// container's scale. False (keep the padding) when the scale is not positive, a value is not a number, the move is
+    /// under half a unit, or the result leaves 0..<see cref="MaxHeaderInset"/> (a rect not laid out yet).
+    /// </summary>
+    internal static bool TryNeighborInset(float lineLeft, float contentLeft, float scale, int currentPad, out int pad)
+    {
+        pad = currentPad;
+        if (!(scale > 0f) || float.IsNaN(lineLeft) || float.IsNaN(contentLeft)) return false;
+        float delta = (lineLeft - contentLeft) / scale;
+        if (float.IsNaN(delta) || Math.Abs(delta) < 0.5f) return false;
+        float next = currentPad + delta;
+        if (next < 0f || next > MaxHeaderInset) return false;
+        pad = (int)Math.Round(next);
+        return pad != currentPad;
+    }
+
     /// <summary>The largest title inset a header row accepts; a wider reading is a rect not laid out yet.</summary>
     internal const float MaxHeaderInset = 200f;
 

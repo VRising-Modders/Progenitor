@@ -194,6 +194,42 @@ public class VanillaRowFeaturesTests
         Assert.True(VanillaKeyHint.ShouldDraw(true, true, p, q, 3, 3, 0));
     }
 
+    [Fact]
+    public void A_footer_lines_up_with_the_nearest_game_line_that_shows_text()
+    {
+        var names = new List<string>(Column) { "progenitor-ui-a.mod-RecipeTooltip-tooltip", "progenitor-ui-b.mod-RecipeTooltip-footer" };
+        // InputContexts shows no text here; BottomInfoLayout (the duration line) does.
+        bool Shows(int i) => names[i] is "BottomInfoLayout" or "TooltipDescFrame" || names[i].StartsWith("progenitor-");
+        Assert.Equal(2, VanillaRecipeTooltip.NeighborLineBefore(names.Count - 1, i => names[i], Shows));
+        Assert.Equal(-1, VanillaRecipeTooltip.NeighborLineBefore(0, i => names[i], Shows));
+        Assert.Equal(-1, VanillaRecipeTooltip.NeighborLineBefore(1, i => names[i], i => false));
+    }
+
+    [Theory]
+    [InlineData(110f, 100f, 1f, 0, true, 10)]
+    [InlineData(120f, 100f, 2f, 4, true, 14)]
+    [InlineData(100.2f, 100f, 1f, 10, false, 10)]
+    [InlineData(95f, 100f, 1f, 10, true, 5)]
+    [InlineData(90f, 100f, 1f, 4, false, 4)]
+    [InlineData(500f, 100f, 1f, 0, false, 0)]
+    [InlineData(110f, 100f, 0f, 0, false, 0)]
+    [InlineData(float.NaN, 100f, 1f, 3, false, 3)]
+    public void The_footer_inset_moves_the_padding_by_the_measured_gap(float line, float content, float scale, int current, bool moved, int pad)
+    {
+        Assert.Equal(moved, VanillaRecipeTooltip.TryNeighborInset(line, content, scale, current, out int got));
+        Assert.Equal(pad, got);
+    }
+
+    [Fact]
+    public void The_footer_is_aligned_by_the_fit()
+    {
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("else if (anchor == VanillaPanelAnchor.TooltipFooter) AlignToLineBefore(host, view);", resolver);
+        string rows = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelRows.cs");
+        Assert.Contains("VanillaRecipeTooltip.NeighborLineBefore(", rows);
+        Assert.Contains("VanillaRecipeTooltip.TryNeighborInset(lineLeft, contentLeft, rt.lossyScale.x, current, out int pad)", rows);
+    }
+
     // ---------------------------------------------------------------- footer slot
 
     private static readonly string[] Column =
