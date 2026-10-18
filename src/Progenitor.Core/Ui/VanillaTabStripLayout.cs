@@ -419,4 +419,75 @@ internal static class VanillaTabCaption
 
     /// <summary>A placement value moved by more than a hundredth of a unit from what the tab set.</summary>
     internal static bool Drifted(float now, float wanted) => !(Math.Abs(now - wanted) <= .01f);
+
+    /// <summary>
+    /// Where a simple image with "preserve aspect" draws its sprite inside <paramref name="rect"/>:
+    /// the largest box of the sprite's aspect (<paramref name="spriteWidth"/> by
+    /// <paramref name="spriteHeight"/>) that fits, placed along the free axis by the rect's pivot
+    /// (0 = left or bottom, 1 = right or top), as the image builds its mesh. A pivot of (0, 1)
+    /// draws a too-wide rect's art at its left edge; a centered pivot centers it. The rect itself
+    /// for unusable input.
+    /// </summary>
+    internal static ScreenRect PreserveAspect(ScreenRect rect, float spriteWidth, float spriteHeight, float pivotX, float pivotY)
+    {
+        if (!rect.IsKnown || !(spriteWidth > 0f) || !(spriteHeight > 0f) || float.IsInfinity(spriteWidth) || float.IsInfinity(spriteHeight)) return rect;
+        float w = rect.MaxX - rect.MinX, h = rect.MaxY - rect.MinY;
+        if (!(w > 0f) || !(h > 0f)) return rect;
+        float px = Clamp01(pivotX), py = Clamp01(pivotY);
+        float spriteRatio = spriteWidth / spriteHeight, rectRatio = w / h;
+        if (rectRatio > spriteRatio)
+        {
+            float nw = h * spriteRatio;
+            float x = rect.MinX + (w - nw) * px;
+            return ScreenRect.FromCorners(x, rect.MinY, x + nw, rect.MaxY);
+        }
+
+        float nh = w / spriteRatio;
+        float y = rect.MinY + (h - nh) * py;
+        return ScreenRect.FromCorners(rect.MinX, y, rect.MaxX, y + nh);
+
+        static float Clamp01(float v) => float.IsNaN(v) ? .5f : Math.Max(0f, Math.Min(1f, v));
+    }
+
+    /// <summary>
+    /// The insets (bottom, top) of the part of a tab spanning <paramref name="tabBottom"/> to
+    /// <paramref name="tabTop"/> that the strip's own images drawn over it leave visible: each band
+    /// in <paramref name="covers"/> (bottom, top, in the same units) that overlaps the tab's bottom
+    /// or top edge hides that part of the tab art (the baseline trim is drawn after the tabs). A
+    /// caption is centered on what is left. A band in the middle hides nothing at an edge and is
+    /// ignored; covers that would leave nothing visible are ignored too.
+    /// </summary>
+    internal static (float Bottom, float Top) CoveredInsets(float tabBottom, float tabTop, IReadOnlyList<(float Bottom, float Top)> covers)
+    {
+        float bottom = tabBottom, top = tabTop;
+        if (covers == null || !(tabTop > tabBottom)) return (0f, 0f);
+        var bands = new List<(float Bottom, float Top)>();
+        foreach (var (b, t) in covers)
+            if (!float.IsNaN(b) && !float.IsNaN(t) && t > b) bands.Add((b, t));
+        // Bands that touch each other chain from the edge inward, in either order.
+        bands.Sort((x, y) => x.Bottom.CompareTo(y.Bottom));
+        foreach (var (b, t) in bands)
+            if (b <= bottom + .5f && t > bottom && t < tabTop) bottom = t;
+        bands.Sort((x, y) => y.Top.CompareTo(x.Top));
+        foreach (var (b, t) in bands)
+            if (t >= top - .5f && b < top && b > tabBottom) top = b;
+
+        if (top - bottom < 1f) return (0f, 0f);
+        return (bottom - tabBottom, tabTop - top);
+    }
+
+    /// <summary>
+    /// <paramref name="art"/> without the full-width bands of <paramref name="covers"/> (images drawn
+    /// over it) at its bottom or top edge (<see cref="CoveredInsets"/>), in screen pixels: what the
+    /// player sees of the art. A cover narrower than the art is ignored.
+    /// </summary>
+    internal static ScreenRect Uncovered(ScreenRect art, IReadOnlyList<ScreenRect> covers)
+    {
+        if (!art.IsKnown || covers == null || covers.Count == 0) return art;
+        var bands = new List<(float Bottom, float Top)>();
+        foreach (var c in covers)
+            if (c.IsKnown && c.MinX <= art.MinX + .5f && c.MaxX >= art.MaxX - .5f) bands.Add((c.MinY, c.MaxY));
+        var (b, t) = CoveredInsets(art.MinY, art.MaxY, bands);
+        return b == 0f && t == 0f ? art : ScreenRect.FromCorners(art.MinX, art.MinY + b, art.MaxX, art.MaxY - t);
+    }
 }

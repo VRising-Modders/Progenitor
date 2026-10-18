@@ -382,4 +382,68 @@ public sealed class VanillaTabStripLayoutTests
         Assert.True(VanillaTabCaption.Drifted(6.5f, 6f));
         Assert.True(VanillaTabCaption.Drifted(float.NaN, 0f));
     }
+
+    // The prison cell readback (live, Core 2026.10.93): a 190.3 x 49 tab whose own image draws
+    // Tab_Normal (320 x 94, simple, preserve aspect), with the baseline trims TabDivider (bottom 0,
+    // 8 high) and TabGradient (bottom 2.4, 8 high) drawn over the tabs' bottom edge.
+
+    [Fact]
+    public void PreserveAspectDrawsAWideTabsArtByItsPivot()
+    {
+        var tab = R(2164, 858, 190.3f, 49);
+        var corner = VanillaTabCaption.PreserveAspect(tab, 320, 94, 0f, 1f);
+        Assert.Equal(2164f, corner.MinX, 1);
+        Assert.Equal(49f * 320f / 94f, corner.MaxX - corner.MinX, 1);   // 166.8: narrower than the tab
+        Assert.Equal(49f, corner.MaxY - corner.MinY, 1);
+        Assert.True(VanillaTabCaption.Offset(tab, corner).Dx < -11f);   // the art sits left; a centered caption reads right
+
+        var centered = VanillaTabCaption.PreserveAspect(tab, 320, 94, .5f, .5f);
+        Assert.Equal(0f, VanillaTabCaption.Offset(tab, centered).Dx, 2);
+        Assert.Equal(0f, VanillaTabCaption.Offset(tab, centered).Dy, 2);
+    }
+
+    [Fact]
+    public void PreserveAspectDrawsATallTabsArtByItsPivotToo()
+    {
+        var tab = R(0, 0, 100, 60);
+        var top = VanillaTabCaption.PreserveAspect(tab, 320, 94, 0f, 1f);
+        Assert.Equal(100f, top.MaxX - top.MinX, 1);
+        Assert.Equal(60f, top.MaxY, 1);                                  // against the top: a centered caption reads low
+        Assert.True(VanillaTabCaption.Offset(tab, top).Dy > 10f);
+        Assert.Equal(0f, VanillaTabCaption.Offset(tab, VanillaTabCaption.PreserveAspect(tab, 320, 94, .5f, .5f)).Dy, 2);
+        Assert.Equal(tab, VanillaTabCaption.PreserveAspect(tab, 0, 94, .5f, .5f));
+    }
+
+    [Fact]
+    public void TrimsOverTheTabsBottomEdgeRaiseTheCaptionBand()
+    {
+        var band = VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (2.4f, 10.4f), (0f, 8f) });
+        Assert.Equal(10.4f, band.Bottom, 2);                           // chained, in either order
+        Assert.Equal(0f, band.Top);
+        Assert.Equal((0f, 0f), VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (-8f, 0f) }));  // under the tabs: nothing hidden
+        Assert.Equal((0f, 0f), VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (20f, 24f) })); // a band in the middle
+        Assert.Equal((0f, 0f), VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (-1f, 60f) })); // covers it all
+        Assert.Equal(4f, VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (45f, 52f) }).Top, 2);
+    }
+
+    [Fact]
+    public void TheVisibleArtExcludesFullWidthTrimsOverItsEdge()
+    {
+        var tab = R(2164, 858, 190.3f, 49);
+        var divider = R(2152, 858, 604, 8);
+        var visible = VanillaTabCaption.Uncovered(tab, new[] { divider, R(2160, 860.4f, 588, 8) });
+        Assert.Equal(868.4f, visible.MinY, 1);
+        Assert.Equal(907f, visible.MaxY, 1);
+
+        // The live false pass: glyphs centered on the tab rect read about 5 px low on the visible art.
+        var caption = R(2170, 858, 178.3f, 49);
+        var glyphs = R(2218, 872.9f, 82.4f, 19.2f);
+        Assert.True(VanillaTabCaption.Centered(tab, caption, glyphs));
+        Assert.False(VanillaTabCaption.Centered(visible, caption, glyphs));
+        // With the caption band raised by the covered 10.4 units, it is centered again.
+        Assert.True(VanillaTabCaption.Centered(visible, R(2170, 868.4f, 178.3f, 38.6f), R(2218, 878.1f, 82.4f, 19.2f)));
+
+        // A narrower image over the art (another tab's piece, an icon) hides no edge.
+        Assert.Equal(tab, VanillaTabCaption.Uncovered(tab, new[] { R(2170, 858, 40, 8) }));
+    }
 }
