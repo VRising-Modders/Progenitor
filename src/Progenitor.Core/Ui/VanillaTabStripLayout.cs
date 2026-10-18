@@ -6,12 +6,20 @@ namespace Progenitor.Ui;
 /// <summary>Where <see cref="VanillaTabStripLayout.Place"/> put a station window's tab strip, in the window root's local units (y up).</summary>
 internal readonly struct VanillaTabStripPlacement
 {
-    internal VanillaTabStripPlacement(float top, float height, bool clamped)
+    internal VanillaTabStripPlacement(float top, float height, bool clamped, bool raised = false, float overlap = 0f)
     {
         Top = top;
         Height = height;
         Clamped = clamped;
+        Raised = raised;
+        Overlap = overlap;
     }
+
+    /// <summary>The top was moved up so the strip ends above the window's own content (<see cref="VanillaTabStripLayout.ClearContent"/>).</summary>
+    internal bool Raised { get; }
+
+    /// <summary>How far the window's content still reaches into the strip from below, in root units; 0 when clear.</summary>
+    internal float Overlap { get; }
 
     /// <summary>The strip's top edge (its pivot is the top center).</summary>
     internal float Top { get; }
@@ -139,6 +147,27 @@ internal static class VanillaTabStripLayout
     }
 
     /// <summary>
+    /// Keep the strip off the window's own content. <paramref name="contentTop"/> is the top edge
+    /// of the highest native content under the strip (measured in this window, root units, y up;
+    /// null when none is measured). When it reaches into the strip, the strip is raised to stand on
+    /// it, but never above <paramref name="ceiling"/> (the bonus row's bottom or the visible area's
+    /// top, whichever is lower). What still overlaps is reported in
+    /// <see cref="VanillaTabStripPlacement.Overlap"/>. A clear strip is returned unchanged.
+    /// </summary>
+    internal static VanillaTabStripPlacement ClearContent(VanillaTabStripPlacement placement, float? contentTop, float? ceiling)
+    {
+        if (!contentTop.HasValue || !Finite(contentTop.Value)) return placement;
+        float overlap = contentTop.Value - placement.Bottom;
+        if (overlap <= Tolerance) return placement;
+        float top = contentTop.Value + placement.Height;
+        if (ceiling.HasValue && Finite(ceiling.Value) && top > ceiling.Value) top = Math.Max(placement.Top, ceiling.Value);
+        bool raised = top > placement.Top + Tolerance;
+        if (!raised) top = placement.Top;
+        float left = Math.Max(0f, contentTop.Value - (top - placement.Height));
+        return new VanillaTabStripPlacement(top, placement.Height, placement.Clamped, raised, left <= Tolerance ? 0f : left);
+    }
+
+    /// <summary>
     /// The self-check. <paramref name="strip"/> is the strip's screen rect; <paramref name="masks"/>
     /// the screen rects of the enabled parent masks (name, rect); <paramref name="above"/> the
     /// visible rects drawn after the strip (later siblings, override-sorted canvases), with names.
@@ -231,6 +260,128 @@ internal sealed class VanillaTabStripHeight
 }
 
 /// <summary>
+/// The top of a station window's own content under the strip, read only once the reading has
+/// settled: not before the game tab row has been hidden for <see cref="HiddenFrames"/> frames (or
+/// since the last layout switch), and only when two readings in a row agree. A reading taken while
+/// the window is still laying itself out would move the strip on open.
+/// </summary>
+internal sealed class VanillaContentReading
+{
+    /// <summary>Frames the game tab row must have been hidden (or the slot switched) before a reading counts.</summary>
+    internal const int HiddenFrames = 2;
+
+    /// <summary>Frames between readings once a reading has settled and nothing changed.</summary>
+    internal const int Interval = 30;
+
+    private int _since = int.MinValue / 2;
+    private int _lastRead = int.MinValue / 2;
+    private float? _pending;
+    private bool _hasPending;
+
+    /// <summary>The settled content top (root units, y up); null when none is settled or no content shows.</summary>
+    internal float? Settled { get; private set; }
+
+    /// <summary>True once a reading has settled since the last <see cref="Restart"/>.</summary>
+    internal bool IsSettled { get; private set; }
+
+    /// <summary>Start over at <paramref name="frame"/>: the row was hidden, the slot switched or the layout changed.</summary>
+    internal void Restart(int frame)
+    {
+        _since = frame;
+        _hasPending = false;
+        IsSettled = false;
+    }
+
+    /// <summary>Forget every reading (a new strip).</summary>
+    internal void Reset()
+    {
+        _since = _lastRead = int.MinValue / 2;
+        _hasPending = false;
+        IsSettled = false;
+        Settled = null;
+    }
+
+    /// <summary>A reading is wanted at <paramref name="frame"/>: every frame until one settles, then every <see cref="Interval"/> frames.</summary>
+    internal bool Due(int frame)
+        => frame - _since >= HiddenFrames && (!IsSettled || frame - _lastRead >= Interval);
+
+    /// <summary>Take a reading; true when the settled value changed (by more than half a unit, or appeared or went away).</summary>
+    internal bool Feed(float? top, int frame)
+    {
+        _lastRead = frame;
+        bool agrees = _hasPending && Same(_pending, top);
+        _pending = top;
+        _hasPending = true;
+        if (!agrees) { if (IsSettled && !Same(Settled, top)) IsSettled = false; return false; }
+        bool changed = !IsSettled || !Same(Settled, top);
+        Settled = top;
+        IsSettled = true;
+        return changed;
+    }
+
+    private static bool Same(float? a, float? b)
+        => a.HasValue == b.HasValue && (!a.HasValue || Math.Abs(a.Value - b!.Value) <= .5f);
+}
+
+/// <summary>
+/// Whether the hidden game tab row keeps its layout slot. Hiding the row takes it out of its
+/// parent's layout, so in a stacked window the content after it moves up into the strip. The
+/// slot is kept when settled content reaches into the strip, and given up again when keeping it
+/// did not help (the overlap did not shrink), or when the content would stay clear of the strip
+/// even without it (clear by more than the row's height).
+/// </summary>
+internal sealed class VanillaRowSlot
+{
+    private float _overlapBefore;
+
+    internal bool Kept { get; private set; }
+
+    /// <summary>A new strip: the row is out of the layout again and may be kept again.</summary>
+    internal void Reset()
+    {
+        Kept = false;
+        Useless = false;
+        _overlapBefore = 0f;
+    }
+
+    /// <summary>Keeping the slot was tried and did not help: not tried again for this strip.</summary>
+    internal bool Useless { get; private set; }
+
+    /// <summary>
+    /// Decide from a settled reading: <paramref name="overlap"/> is how far the content reaches into
+    /// the strip (negative: how far below it the content starts), <paramref name="rowHeight"/> the
+    /// game tab row's height. True when <see cref="Kept"/> changed.
+    /// </summary>
+    internal bool Decide(float overlap, float rowHeight)
+    {
+        float tolerance = VanillaTabStripLayout.Tolerance;
+        if (float.IsNaN(overlap)) return false;
+        if (!Kept)
+        {
+            if (Useless || overlap <= tolerance) return false;
+            _overlapBefore = overlap;
+            Kept = true;
+            return true;
+        }
+
+        if (overlap > tolerance && overlap >= _overlapBefore - tolerance)
+        {
+            Kept = false;
+            Useless = true;
+            return true;
+        }
+
+        if (!float.IsNaN(rowHeight) && rowHeight > 0f && -overlap > rowHeight + tolerance)
+        {
+            Kept = false;
+            return true;
+        }
+
+        return false;
+    }
+}
+
+/// <summary>
 /// Logs a strip's failed self-check once: only when two checks in a row agree (the game lays a
 /// window out over its first frames), and only the first such state per strip.
 /// </summary>
@@ -306,12 +457,40 @@ internal static class VanillaTabCaption
     /// unknown text rect (nothing drawn yet) is judged on the caption rect alone.
     /// </summary>
     internal static bool Centered(ScreenRect tab, ScreenRect captionRect, ScreenRect text, float tolerance = Tolerance)
+        => Placed(tab, captionRect, text, 0f, tolerance);
+
+    /// <summary>
+    /// <see cref="Centered"/> against the game's own caption: the caption rect's vertical offset from
+    /// the art box's center must be <paramref name="expectedDy"/> pixels (<see cref="NativeOffset"/>
+    /// scaled to the screen; 0 where the game centers its captions), within <paramref name="tolerance"/>.
+    /// </summary>
+    internal static bool Placed(ScreenRect tab, ScreenRect captionRect, ScreenRect text, float expectedDy, float tolerance = Tolerance)
     {
         var (rx, ry) = Offset(tab, captionRect);
-        if (float.IsNaN(rx) || Math.Abs(rx) > tolerance || Math.Abs(ry) > tolerance) return false;
+        if (float.IsNaN(expectedDy) || float.IsInfinity(expectedDy)) expectedDy = 0f;
+        if (float.IsNaN(rx) || Math.Abs(rx) > tolerance || Math.Abs(ry - expectedDy) > tolerance) return false;
         if (!text.IsKnown) return true;
         var (tx, _) = Offset(tab, text);
         return Math.Abs(tx) <= tolerance;
+    }
+
+    /// <summary>The largest share of the tab's height the game's own caption may sit off center and still be followed.</summary>
+    internal const float MaxNativeShare = .25f;
+
+    /// <summary>
+    /// How far, in units of a tab <paramref name="tabHeight"/> tall, the caption sits off the tab's
+    /// vertical center (y up) to match the game's own caption on the donor tab:
+    /// <paramref name="shareDy"/> is that caption's center offset as a share of the donor tab's
+    /// height. 0 when it is unknown, not finite, under half a unit (the game centers it), or more
+    /// than <see cref="MaxNativeShare"/> off (a donor read mid-layout, not a placement to copy).
+    /// </summary>
+    internal static float NativeOffset(float? shareDy, float tabHeight)
+    {
+        if (!shareDy.HasValue || float.IsNaN(shareDy.Value) || float.IsInfinity(shareDy.Value)) return 0f;
+        if (!(tabHeight > 0f) || float.IsInfinity(tabHeight)) return 0f;
+        if (Math.Abs(shareDy.Value) > MaxNativeShare) return 0f;
+        float dy = shareDy.Value * tabHeight;
+        return Math.Abs(dy) < .5f ? 0f : dy;
     }
 
     /// <summary>The share of the largest visible image's width or height an image must reach to count as the tab's frame art.</summary>
@@ -419,4 +598,75 @@ internal static class VanillaTabCaption
 
     /// <summary>A placement value moved by more than a hundredth of a unit from what the tab set.</summary>
     internal static bool Drifted(float now, float wanted) => !(Math.Abs(now - wanted) <= .01f);
+
+    /// <summary>
+    /// Where a simple image with "preserve aspect" draws its sprite inside <paramref name="rect"/>:
+    /// the largest box of the sprite's aspect (<paramref name="spriteWidth"/> by
+    /// <paramref name="spriteHeight"/>) that fits, placed along the free axis by the rect's pivot
+    /// (0 = left or bottom, 1 = right or top), as the image builds its mesh. A pivot of (0, 1)
+    /// draws a too-wide rect's art at its left edge; a centered pivot centers it. The rect itself
+    /// for unusable input.
+    /// </summary>
+    internal static ScreenRect PreserveAspect(ScreenRect rect, float spriteWidth, float spriteHeight, float pivotX, float pivotY)
+    {
+        if (!rect.IsKnown || !(spriteWidth > 0f) || !(spriteHeight > 0f) || float.IsInfinity(spriteWidth) || float.IsInfinity(spriteHeight)) return rect;
+        float w = rect.MaxX - rect.MinX, h = rect.MaxY - rect.MinY;
+        if (!(w > 0f) || !(h > 0f)) return rect;
+        float px = Clamp01(pivotX), py = Clamp01(pivotY);
+        float spriteRatio = spriteWidth / spriteHeight, rectRatio = w / h;
+        if (rectRatio > spriteRatio)
+        {
+            float nw = h * spriteRatio;
+            float x = rect.MinX + (w - nw) * px;
+            return ScreenRect.FromCorners(x, rect.MinY, x + nw, rect.MaxY);
+        }
+
+        float nh = w / spriteRatio;
+        float y = rect.MinY + (h - nh) * py;
+        return ScreenRect.FromCorners(rect.MinX, y, rect.MaxX, y + nh);
+
+        static float Clamp01(float v) => float.IsNaN(v) ? .5f : Math.Max(0f, Math.Min(1f, v));
+    }
+
+    /// <summary>
+    /// The insets (bottom, top) of the part of a tab spanning <paramref name="tabBottom"/> to
+    /// <paramref name="tabTop"/> that the strip's own images drawn over it leave visible: each band
+    /// in <paramref name="covers"/> (bottom, top, in the same units) that overlaps the tab's bottom
+    /// or top edge hides that part of the tab art (the baseline trim is drawn after the tabs). A
+    /// caption is centered on what is left. A band in the middle hides nothing at an edge and is
+    /// ignored; covers that would leave nothing visible are ignored too.
+    /// </summary>
+    internal static (float Bottom, float Top) CoveredInsets(float tabBottom, float tabTop, IReadOnlyList<(float Bottom, float Top)> covers)
+    {
+        float bottom = tabBottom, top = tabTop;
+        if (covers == null || !(tabTop > tabBottom)) return (0f, 0f);
+        var bands = new List<(float Bottom, float Top)>();
+        foreach (var (b, t) in covers)
+            if (!float.IsNaN(b) && !float.IsNaN(t) && t > b) bands.Add((b, t));
+        // Bands that touch each other chain from the edge inward, in either order.
+        bands.Sort((x, y) => x.Bottom.CompareTo(y.Bottom));
+        foreach (var (b, t) in bands)
+            if (b <= bottom + .5f && t > bottom && t < tabTop) bottom = t;
+        bands.Sort((x, y) => y.Top.CompareTo(x.Top));
+        foreach (var (b, t) in bands)
+            if (t >= top - .5f && b < top && b > tabBottom) top = b;
+
+        if (top - bottom < 1f) return (0f, 0f);
+        return (bottom - tabBottom, tabTop - top);
+    }
+
+    /// <summary>
+    /// <paramref name="art"/> without the full-width bands of <paramref name="covers"/> (images drawn
+    /// over it) at its bottom or top edge (<see cref="CoveredInsets"/>), in screen pixels: what the
+    /// player sees of the art. A cover narrower than the art is ignored.
+    /// </summary>
+    internal static ScreenRect Uncovered(ScreenRect art, IReadOnlyList<ScreenRect> covers)
+    {
+        if (!art.IsKnown || covers == null || covers.Count == 0) return art;
+        var bands = new List<(float Bottom, float Top)>();
+        foreach (var c in covers)
+            if (c.IsKnown && c.MinX <= art.MinX + .5f && c.MaxX >= art.MaxX - .5f) bands.Add((c.MinY, c.MaxY));
+        var (b, t) = CoveredInsets(art.MinY, art.MaxY, bands);
+        return b == 0f && t == 0f ? art : ScreenRect.FromCorners(art.MinX, art.MinY + b, art.MaxX, art.MaxY - t);
+    }
 }

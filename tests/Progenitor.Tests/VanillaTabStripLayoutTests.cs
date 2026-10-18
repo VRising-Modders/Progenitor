@@ -382,4 +382,220 @@ public sealed class VanillaTabStripLayoutTests
         Assert.True(VanillaTabCaption.Drifted(6.5f, 6f));
         Assert.True(VanillaTabCaption.Drifted(float.NaN, 0f));
     }
+
+    // The Blood Press readback (live, Core 2026.10.93): placed strip, top 779, 49 high, panel top
+    // 724, so the strip's bottom is 730, the bonus row's bottom 799 (top = bonus bottom - 20).
+    // The recipe list reached into the strip.
+
+    [Fact]
+    public void BloodPressStripIsPlacedUnderTheBonusRow()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        Assert.Equal(779f, p.Top);
+        Assert.Equal(730f, p.Bottom);
+        Assert.Equal(724f, p.PanelTop);
+        Assert.False(p.Raised);
+        Assert.Equal(0f, p.Overlap);
+    }
+
+    [Fact]
+    public void ContentUnderTheStripLeavesItWhereItIs()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        Assert.Equal(p.Top, VanillaTabStripLayout.ClearContent(p, 724f, 799f).Top);
+        Assert.Equal(p.Top, VanillaTabStripLayout.ClearContent(p, 730.5f, 799f).Top); // touching, within tolerance
+        Assert.Equal(p.Top, VanillaTabStripLayout.ClearContent(p, null, 799f).Top);
+    }
+
+    [Fact]
+    public void ContentReachingIntoTheStripRaisesItOntoTheContent()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        var clear = VanillaTabStripLayout.ClearContent(p, 740f, 799f);
+        Assert.True(clear.Raised);
+        Assert.Equal(789f, clear.Top);
+        Assert.Equal(740f, clear.Bottom);
+        Assert.Equal(0f, clear.Overlap);
+    }
+
+    [Fact]
+    public void TheStripIsNeverRaisedIntoTheBonusRowAndReportsWhatStillOverlaps()
+    {
+        var p = VanillaTabStripLayout.Place(900f, 799f, null, 49f);
+        // The first recipe row's top at 770: standing on it would put the strip's top at 819, past the bonus row.
+        var clear = VanillaTabStripLayout.ClearContent(p, 770f, 799f);
+        Assert.True(clear.Raised);
+        Assert.Equal(799f, clear.Top);
+        Assert.Equal(20f, clear.Overlap, 3);
+        // A strip already at its ceiling is not moved, and the overlap is reported.
+        var stuck = VanillaTabStripLayout.ClearContent(p, 770f, 779f);
+        Assert.False(stuck.Raised);
+        Assert.Equal(779f, stuck.Top);
+        Assert.Equal(40f, stuck.Overlap, 3);
+    }
+
+    // The prison cell readback (live, Core 2026.10.93): a 190.3 x 49 tab whose own image draws
+    // Tab_Normal (320 x 94, simple, preserve aspect), with the baseline trims TabDivider (bottom 0,
+    // 8 high) and TabGradient (bottom 2.4, 8 high) drawn over the tabs' bottom edge.
+
+    [Fact]
+    public void PreserveAspectDrawsAWideTabsArtByItsPivot()
+    {
+        var tab = R(2164, 858, 190.3f, 49);
+        var corner = VanillaTabCaption.PreserveAspect(tab, 320, 94, 0f, 1f);
+        Assert.Equal(2164f, corner.MinX, 1);
+        Assert.Equal(49f * 320f / 94f, corner.MaxX - corner.MinX, 1);   // 166.8: narrower than the tab
+        Assert.Equal(49f, corner.MaxY - corner.MinY, 1);
+        Assert.True(VanillaTabCaption.Offset(tab, corner).Dx < -11f);   // the art sits left; a centered caption reads right
+
+        var centered = VanillaTabCaption.PreserveAspect(tab, 320, 94, .5f, .5f);
+        Assert.Equal(0f, VanillaTabCaption.Offset(tab, centered).Dx, 2);
+        Assert.Equal(0f, VanillaTabCaption.Offset(tab, centered).Dy, 2);
+    }
+
+    [Fact]
+    public void PreserveAspectDrawsATallTabsArtByItsPivotToo()
+    {
+        var tab = R(0, 0, 100, 60);
+        var top = VanillaTabCaption.PreserveAspect(tab, 320, 94, 0f, 1f);
+        Assert.Equal(100f, top.MaxX - top.MinX, 1);
+        Assert.Equal(60f, top.MaxY, 1);                                  // against the top: a centered caption reads low
+        Assert.True(VanillaTabCaption.Offset(tab, top).Dy > 10f);
+        Assert.Equal(0f, VanillaTabCaption.Offset(tab, VanillaTabCaption.PreserveAspect(tab, 320, 94, .5f, .5f)).Dy, 2);
+        Assert.Equal(tab, VanillaTabCaption.PreserveAspect(tab, 0, 94, .5f, .5f));
+    }
+
+    [Fact]
+    public void TrimsOverTheTabsBottomEdgeRaiseTheCaptionBand()
+    {
+        var band = VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (2.4f, 10.4f), (0f, 8f) });
+        Assert.Equal(10.4f, band.Bottom, 2);                           // chained, in either order
+        Assert.Equal(0f, band.Top);
+        Assert.Equal((0f, 0f), VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (-8f, 0f) }));  // under the tabs: nothing hidden
+        Assert.Equal((0f, 0f), VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (20f, 24f) })); // a band in the middle
+        Assert.Equal((0f, 0f), VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (-1f, 60f) })); // covers it all
+        Assert.Equal(4f, VanillaTabCaption.CoveredInsets(0f, 49f, new[] { (45f, 52f) }).Top, 2);
+    }
+
+    [Fact]
+    public void TheVisibleArtExcludesFullWidthTrimsOverItsEdge()
+    {
+        var tab = R(2164, 858, 190.3f, 49);
+        var divider = R(2152, 858, 604, 8);
+        var visible = VanillaTabCaption.Uncovered(tab, new[] { divider, R(2160, 860.4f, 588, 8) });
+        Assert.Equal(868.4f, visible.MinY, 1);
+        Assert.Equal(907f, visible.MaxY, 1);
+
+        // The live false pass: glyphs centered on the tab rect read about 5 px low on the visible art.
+        var caption = R(2170, 858, 178.3f, 49);
+        var glyphs = R(2218, 872.9f, 82.4f, 19.2f);
+        Assert.True(VanillaTabCaption.Centered(tab, caption, glyphs));
+        Assert.False(VanillaTabCaption.Centered(visible, caption, glyphs));
+        // With the caption band raised by the covered 10.4 units, it is centered again.
+        Assert.True(VanillaTabCaption.Centered(visible, R(2170, 868.4f, 178.3f, 38.6f), R(2218, 878.1f, 82.4f, 19.2f)));
+
+        // A narrower image over the art (another tab's piece, an icon) hides no edge.
+        Assert.Equal(tab, VanillaTabCaption.Uncovered(tab, new[] { R(2170, 858, 40, 8) }));
+    }
+
+    [Theory]
+    [InlineData(0f, 49f, 0f)]          // the game centers its caption: no correction, whatever the trims
+    [InlineData(.005f, 49f, 0f)]       // under half a unit
+    [InlineData(.1f, 49f, 4.9f)]       // the game's caption sits a tenth of the tab high: ours too
+    [InlineData(-.1f, 40f, -4f)]
+    [InlineData(.4f, 49f, 0f)]         // further than a quarter off: a donor read mid-layout
+    [InlineData(float.NaN, 49f, 0f)]
+    [InlineData(.1f, 0f, 0f)]
+    public void CaptionsFollowTheGamesOwnCaptionOffset(float share, float height, float dy)
+        => Assert.Equal(dy, VanillaTabCaption.NativeOffset(float.IsNaN(share) ? null : share, height), 3);
+
+    [Fact]
+    public void UnknownGameCaptionMeansCentered()
+        => Assert.Equal(0f, VanillaTabCaption.NativeOffset(null, 49f));
+
+    [Fact]
+    public void PlacementIsJudgedAgainstTheGamesCaptionOffset()
+    {
+        var art = R(0, 0, 190, 49);
+        var caption = R(6, 0, 178, 49);
+        var glyphs = R(70, 15, 50, 19);
+        Assert.True(VanillaTabCaption.Placed(art, caption, glyphs, 0f));
+        // The caption is centered, but the game's sits 5 px higher: not placed like the game's.
+        Assert.False(VanillaTabCaption.Placed(art, caption, glyphs, 5f));
+        Assert.True(VanillaTabCaption.Placed(art, R(6, 5, 178, 49), R(70, 20, 50, 19), 5f));
+    }
+
+    [Fact]
+    public void ContentIsReadOnlyAfterTheRowWasHiddenAndTwoReadingsAgree()
+    {
+        var reading = new VanillaContentReading();
+        reading.Restart(100);                      // the strip is built and the game row hidden at frame 100
+        Assert.False(reading.Due(100));
+        Assert.False(reading.Due(101));
+        Assert.True(reading.Due(102));
+        Assert.False(reading.Feed(760f, 102));     // a first reading never counts
+        Assert.False(reading.IsSettled);
+        Assert.False(reading.Feed(745f, 103));     // still laying out
+        Assert.True(reading.Feed(745.3f, 104));    // two in a row agree: settled
+        Assert.Equal(745.3f, reading.Settled!.Value, 2);
+        Assert.False(reading.Due(105));            // then only every Interval frames
+        Assert.True(reading.Due(104 + VanillaContentReading.Interval));
+        Assert.False(reading.Feed(745.1f, 134));   // within half a unit: not a change (the value follows it)
+        Assert.True(reading.IsSettled);
+
+        // A change of layout starts over, but keeps the last settled value until a new one settles.
+        reading.Restart(200);
+        Assert.False(reading.IsSettled);
+        Assert.Equal(745.1f, reading.Settled!.Value, 2);
+        Assert.False(reading.Due(201));
+        Assert.False(reading.Feed(700f, 202));
+        Assert.True(reading.Feed(700f, 203));
+        Assert.Equal(700f, reading.Settled!.Value);
+
+        reading.Reset();
+        Assert.Null(reading.Settled);
+    }
+
+    [Fact]
+    public void ASettledValueThatMovesIsReadAgainUntilItSettles()
+    {
+        var reading = new VanillaContentReading();
+        reading.Restart(0);
+        reading.Feed(700f, 2);
+        reading.Feed(700f, 3);
+        Assert.True(reading.IsSettled);
+        Assert.False(reading.Feed(690f, 33));      // moved: unsettled, read every frame again
+        Assert.False(reading.IsSettled);
+        Assert.True(reading.Due(34));
+        Assert.True(reading.Feed(690f, 34));
+        Assert.Equal(690f, reading.Settled!.Value);
+    }
+
+    [Fact]
+    public void TheRowKeepsItsSlotOnlyWhileThatHelps()
+    {
+        // Blood Press: content 40 units into the strip; the game tab row is 32 high.
+        var slot = new VanillaRowSlot();
+        Assert.False(slot.Decide(-10f, 32f));      // clear: nothing to do
+        Assert.True(slot.Decide(40f, 32f));        // reaches in: keep the slot
+        Assert.True(slot.Kept);
+        Assert.False(slot.Decide(8f, 32f));        // it helped (40 -> 8): stays kept; the strip is raised for the rest
+        Assert.False(slot.Decide(-5f, 32f));       // clear by less than the row: collapsing would bring it back
+        Assert.True(slot.Decide(-40f, 32f));       // clear by more than the row: give the slot up
+        Assert.False(slot.Kept);
+        Assert.False(slot.Useless);
+    }
+
+    [Fact]
+    public void AKeptSlotThatDoesNotHelpIsGivenUpForGood()
+    {
+        var slot = new VanillaRowSlot();
+        Assert.True(slot.Decide(40f, 32f));
+        Assert.True(slot.Decide(40f, 32f));        // no change: the row's slot is not what overlaps
+        Assert.False(slot.Kept);
+        Assert.True(slot.Useless);
+        Assert.False(slot.Decide(40f, 32f));       // not tried again for this strip
+        slot.Reset();
+        Assert.True(slot.Decide(40f, 32f));        // a new strip may try again
+    }
 }
