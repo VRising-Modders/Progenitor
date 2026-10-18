@@ -88,7 +88,21 @@ internal sealed class ModelLoad
 
     public ModelSection Section { get; }
     public string PrefabName { get; }
-    public ModelLoadState State { get; internal set; } = ModelLoadState.Pending;
+    private ModelLoadState _state = ModelLoadState.Pending;
+    internal Action? BeforeLeavingReady;
+    public ModelLoadState State
+    {
+        get => _state;
+        internal set
+        {
+            if (_state == ModelLoadState.Ready && value != ModelLoadState.Ready)
+            {
+                // Presentation owners must release borrowed renderers before the section hold.
+                try { BeforeLeavingReady?.Invoke(); } catch { /* load release must still complete */ }
+            }
+            _state = value;
+        }
+    }
     public string? Reason { get; internal set; }
 
     /// <summary>The prefab asset (a <c>UnityEngine.GameObject</c> in the game) while Ready.</summary>

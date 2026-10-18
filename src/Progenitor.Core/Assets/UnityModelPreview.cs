@@ -35,6 +35,7 @@ internal sealed class UnityModelPreview : IDisposable
     private UnityModelPreview() { }
 
     public string CloneName { get; private set; } = "";
+    internal bool IsDisposed => _disposed;
 
     internal static UnityModelPreview Create(GameObject source)
     {
@@ -94,20 +95,34 @@ internal sealed class UnityModelPreview : IDisposable
             }
         }
 
-        // A still uses the first authored LOD. Copying every enabled LOD renderer would
-        // superimpose several versions of the model after removing its LODGroup driver.
+        // A still uses each group's first authored LOD containing a live renderer reference.
+        // Empty/all-null levels do not hide a later usable level. Decide per group, then union
+        // exclusions: a renderer rejected by one group cannot be restored by a later group.
+        // Renderers outside all groups are unaffected.
         var omittedLods = new HashSet<int>();
         foreach (var node in nodes)
         {
             var group = node.Source.GetComponent<LODGroup>();
             if (group == null) continue;
             var lods = group.GetLODs();
-            if (lods.Length == 0) continue;
-            for (int i = 1; i < lods.Length; i++)
+            var groupRenderers = new HashSet<int>();
+            var selectedRenderers = new HashSet<int>();
+            bool selected = false;
+            for (int i = 0; i < lods.Length; i++)
+            {
+                bool nonempty = false;
                 foreach (var renderer in lods[i].renderers)
-                    if (renderer != null) omittedLods.Add(renderer.GetInstanceID());
-            foreach (var renderer in lods[0].renderers)
-                if (renderer != null) omittedLods.Remove(renderer.GetInstanceID());
+                {
+                    if (renderer == null) continue;
+                    int id = renderer.GetInstanceID();
+                    groupRenderers.Add(id);
+                    if (!selected) selectedRenderers.Add(id);
+                    nonempty = true;
+                }
+                selected |= nonempty;
+            }
+            groupRenderers.ExceptWith(selectedRenderers);
+            omittedLods.UnionWith(groupRenderers);
         }
 
         var renderers = new List<Renderer>();

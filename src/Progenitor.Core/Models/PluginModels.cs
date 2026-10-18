@@ -218,7 +218,11 @@ public sealed class ModelHandle : IDisposable
         }
     }
 
-    internal void Start() => _load = ModelFrame.Acquire(Section, PrefabName);
+    internal void Start()
+    {
+        _load = ModelFrame.Acquire(Section, PrefabName);
+        _load.BeforeLeavingReady = ClosePreviews;
+    }
 
     internal void FailServerSide() => _serverReason = ModelLoadReasons.ServerSide;
 
@@ -261,10 +265,15 @@ public sealed class ModelHandle : IDisposable
     }
 
     /// <summary>Destroys the copies and ends the hold. Idempotent.</summary>
-    public void Dispose()
+    private void ClosePreviews()
     {
         foreach (var preview in _previews) preview.Dispose();
         _previews.Clear();
+    }
+
+    public void Dispose()
+    {
+        ClosePreviews();
         foreach (var go in _instances)
         {
             try { if (go != null) UnityObject.Destroy(go); }
@@ -274,6 +283,7 @@ public sealed class ModelHandle : IDisposable
         if (_load != null)
         {
             var result = ModelFrame.Release(_load);
+            _load.BeforeLeavingReady = null;
             if (result == ModelReleaseResult.KeptForGame)
                 Plugin.Logger?.LogInfo("Models: " + PrefabName + " released; a game unit uses it, so its section stays requested.");
             _load = null;

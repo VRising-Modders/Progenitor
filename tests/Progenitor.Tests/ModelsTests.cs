@@ -301,6 +301,48 @@ public class ModelsTests
     }
 
     [Fact]
+    public void Presentation_is_invalidated_before_release_and_again_after_reload()
+    {
+        var game = Game();
+        var loader = new ModelLoader(game);
+        var load = loader.Acquire(Evolved, "HYB_NPCDracula_Evolved");
+        Run(loader, game, 3);
+        int invalidations = 0;
+        bool wasReady = true;
+        bool held = true;
+        load.BeforeLeavingReady = () =>
+        {
+            invalidations++;
+            wasReady &= load.State == ModelLoadState.Ready && load.Prefab != null;
+            held &= loader.HeldSections == 1;
+        };
+        game.Requested.Remove(Evolved);
+        game.Stream();
+        Run(loader, game, ModelLoader.WatchIntervalFrames + 3);
+        Assert.Equal(ModelLoadState.Ready, load.State);
+        Assert.Equal(1, invalidations);
+        loader.Release(load);
+        Assert.Equal(2, invalidations);
+        Assert.True(wasReady);
+        Assert.True(held);
+        Assert.Equal(0, loader.HeldSections);
+    }
+
+    [Fact]
+    public void Broken_presentation_cleanup_cannot_strand_a_section_hold()
+    {
+        var game = Game();
+        var loader = new ModelLoader(game);
+        var load = loader.Acquire(Evolved, "HYB_NPCDracula_Evolved");
+        Run(loader, game, 3);
+        load.BeforeLeavingReady = () => throw new InvalidOperationException("destroy failed");
+        Assert.Equal(ModelReleaseResult.Unrequested, loader.Release(load));
+        Assert.Equal(ModelLoadState.Released, load.State);
+        Assert.Equal(0, loader.HeldSections);
+        Assert.DoesNotContain(Evolved, game.Requested);
+    }
+
+    [Fact]
     public void Unknown_section_fails_and_drops_its_hold()
     {
         var game = Game();

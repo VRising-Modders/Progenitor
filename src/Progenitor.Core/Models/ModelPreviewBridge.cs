@@ -57,6 +57,7 @@ internal static class ModelPreviewBridge
     {
         try
         {
+            if (_preview != null && !_preview.IsOpen) _preview = null;
             if (DateTime.UtcNow >= _deadline || _epoch != Progenitor.WorldState.WorldEpoch.Current) { Close(); return; }
             if (_model?.State == ModelLoadState.Failed)
             {
