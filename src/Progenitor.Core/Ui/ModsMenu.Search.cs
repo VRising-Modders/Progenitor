@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using Progenitor.Networking;
 
 namespace Progenitor.Ui;
 
@@ -32,11 +34,63 @@ public static partial class ModsMenu
         return found;
     }
 
-    private static bool MatchesModOrSettings(string id, string name)
+    private static bool MatchesModOrSettings(string id, string name) =>
+        MatchesSearch(id, name, _search) || SettingsMatch(id);
+
+    // Search matching reads each mod's sections once per settings revision instead of once per row
+    // per keystroke. Only matching reads them (labels, sections, help, predicates); the results pane
+    // builds fresh sections for the mods it shows, because a released view releases its items.
+    private readonly record struct SettingsStamp(int List, int Pages, int Keys, int Sources, int Scoped);
+    private static readonly Dictionary<string, (ModMenuRegistration? Mod, List<ModSettingsSection> Sections)> SearchSectionCache =
+        new(StringComparer.OrdinalIgnoreCase);
+    private static SettingsStamp _searchCacheStamp;
+    private static int _settingsSectionsRevision;
+    private static bool _searchResultsQueued;
+    private static long _searchResultsDue;
+    internal const int SearchResultsDelayMs = 200;
+
+    /// <summary>How many times search matching built a mod's sections (tests).</summary>
+    internal static int SearchSectionBuilds { get; private set; }
+
+    private static SettingsStamp CurrentSettingsStamp() => new(
+        Volatile.Read(ref _listGeneration), _settingsSectionsRevision, SettingsCatalog.KeyVersion,
+        SettingsCatalog.SourceCount, ScopedSettings.ClientRevision);
+
+    private static List<ModSettingsSection> CachedSettingsSections(string id)
     {
-        if (MatchesSearch(id, name, _search)) return true;
+        var stamp = CurrentSettingsStamp();
+        if (stamp != _searchCacheStamp) { SearchSectionCache.Clear(); _searchCacheStamp = stamp; }
         Mods.TryGetValue(id, out var mod);
-        return SearchSections(BuildSettingsSections(id, mod), _search).Count > 0;
+        if (SearchSectionCache.TryGetValue(id, out var hit) && ReferenceEquals(hit.Mod, mod)) return hit.Sections;
+        var sections = BuildSettingsSections(id, mod);
+        SearchSectionBuilds++;
+        SearchSectionCache[id] = (mod, sections);
+        return sections;
+    }
+
+    private static bool SettingsMatch(string id) => SearchSections(CachedSettingsSections(id), _search).Count > 0;
+
+    private static void QueueSearchResults()
+    {
+        _searchResultsDue = Environment.TickCount64 + SearchResultsDelayMs;
+        if (_searchResultsQueued) return;
+        _searchResultsQueued = true;
+        Plugin.Frame += FlushSearchResults;
+    }
+
+    private static void FlushSearchResults()
+    {
+        if (Environment.TickCount64 < _searchResultsDue) return;
+        CancelSearchResults();
+        if (IsOpen) UpdateSearchResults();
+    }
+
+    private static void CancelSearchResults()
+    {
+        if (!_searchResultsQueued) return;
+        _searchResultsQueued = false;
+        try { Plugin.Frame -= FlushSearchResults; }
+        catch { /* already unsubscribed */ }
     }
 
     private static void ReleaseSearchViews()
@@ -79,10 +133,10 @@ public static partial class ModsMenu
         int count = 0;
         foreach (var row in CurrentSidebarModel(applySearch: false).Rows)
         {
+            bool nameMatch = MatchesSearch(row.Id, row.Name, _search);
+            if (!nameMatch && !SettingsMatch(row.Id)) continue;
             Mods.TryGetValue(row.Id, out var mod);
             var sections = SearchSections(BuildSettingsSections(row.Id, mod), _search);
-            bool nameMatch = MatchesSearch(row.Id, row.Name, _search);
-            if (!nameMatch && sections.Count == 0) continue;
             foreach (var section in sections) count += section.Items.Count;
             matches.Add((row.Id, row.Name, nameMatch, sections));
         }

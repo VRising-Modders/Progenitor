@@ -32,14 +32,17 @@ internal static partial class ScopedSettings
             {
                 bool used = false;
                 foreach (var row in Entries.Values) if (row.Schema.Personal && row.Schema.PluginId == Schema.PluginId) { used = true; break; }
-                if (!used) Stores.Remove(Schema.PluginId);
+                if (!used) Stores.Release(Schema.PluginId);
             }
             _schemaRevision++;
         }
     }
 
     private static readonly Dictionary<string, Registration> Entries = new(StringComparer.Ordinal);
-    private static readonly Dictionary<string, PlayerSettingsStore> Stores = new(StringComparer.Ordinal);
+    private static readonly PlayerSettingsStores Stores = new(
+        pluginId => new PlayerSettingsStore(Path.Combine(BepInEx.Paths.ConfigPath, "progenitor-players"), pluginId,
+            message => Plugin.Logger?.LogWarning(message)),
+        message => Plugin.Logger?.LogWarning(message));
     private static readonly RemoteInstallRateLimiter PersonalLimiter = new(30, 60);
     private static int _schemaRevision;
 
@@ -93,11 +96,15 @@ internal static partial class ScopedSettings
         if (!IsFinite(defaultValue)) throw new ArgumentException("A finite default value is required.");
         if (bounds != null && !bounds.IsValid(defaultValue)) throw new ArgumentException("Default is outside the setting's bounds.");
         if (validate?.Invoke(defaultValue) is string reason) throw new ArgumentException(reason);
-        if (!Stores.TryGetValue(pluginId, out var store))
-        {
-            store = new PlayerSettingsStore(Path.Combine(BepInEx.Paths.ConfigPath, "progenitor-players"), pluginId);
-            Stores.Add(pluginId, store);
-        }
+        // A store opened here is kept only when the row registers, so a refused row leaves no empty store behind.
+        return Stores.Register(pluginId, store => PersonalRow(store, pluginId, name, version, section, key, id, fallback,
+            defaultValue, description, bounds, validate, changed));
+    }
+
+    private static Registration PersonalRow<T>(PlayerSettingsStore store, string pluginId, string name, string version,
+        string section, string key, string id, string fallback, T defaultValue, string description,
+        AcceptableValueBase? bounds, Func<T, string?>? validate, Action<ulong, T> changed)
+    {
         var row = new Registration
         {
             Schema = Describe(pluginId, name, version, section, key, typeof(T), defaultValue, description, bounds, true),
@@ -110,7 +117,8 @@ internal static partial class ScopedSettings
             string value = store.Get(player, storageKey, fallback);
             if (SettingsEditors.TryParse(value, typeof(T), out var parsed, out _) &&
                 (bounds == null || bounds.IsValid(parsed)) && IsFinite(parsed)) return value;
-            store.Orphan(player, storageKey);
+            if (store.Orphan(player, storageKey))
+                Plugin.Logger?.LogWarning("Player setting " + id + " held a value it no longer accepts; it was kept under orphans and reads as the default.");
             return fallback;
         };
         row.Write = (player, value, playerName) =>
@@ -122,8 +130,8 @@ internal static partial class ScopedSettings
             if (validate?.Invoke((T)parsed!) is string refusal) return new(false, current, refusal);
             string actual = SettingsEditors.Format(parsed);
             if (actual.Length > row.Schema.MaxLength || ServerSettings.HasDisallowedControl(actual)) return new(false, current, "The value is too long or contains control characters.");
+            // Memory changes now; the store writes coalesced changes on the next poll (Tick).
             store.Set(player, storageKey, actual, fallback, playerName);
-            store.Flush();
             if (current != actual)
             {
                 try { changed(player, (T)parsed!); }
@@ -131,7 +139,6 @@ internal static partial class ScopedSettings
             }
             return new(true, actual, "");
         };
-        row.Release = () => store.Flush();
         Add(row);
         return row;
     }

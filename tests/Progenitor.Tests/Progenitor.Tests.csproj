@@ -23,6 +23,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsWire.cs" Link="Linked\ScopedSettingsWire.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsSnapshot.cs" Link="Linked\ScopedSettingsSnapshot.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Config\PlayerSettingsStore.cs" Link="Linked\PlayerSettingsStore.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Config\PlayerSettingsStores.cs" Link="Linked\PlayerSettingsStores.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Networking\ScopedSettingsClient.cs" Link="Linked\ScopedSettingsClient.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ScopedSettingsRows.cs" Link="Linked\ScopedSettingsRows.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModSettingsView.Scoped.cs" Link="Linked\ModSettingsView.Scoped.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\ModsMenu.ScopedSettings.cs" Link="Linked\ModsMenu.ScopedSettings.cs" />

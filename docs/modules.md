@@ -1470,7 +1470,7 @@ bool on = receive.For(userEntity);   // server; the client reads receive.Mine on
 ```
 
 - `scope: SettingScope.Personal` on the server throws; use `PerPlayer`. The legacy `synced: true` overload keeps its signature and stays read-only unless the author opts into admin edits.
-- Values are stored in `BepInEx/config/progenitor-players/<modGuid>.json` (non-default overrides only, atomic writes) and survive plugin and Core reloads and world wipes.
+- Values are stored in `BepInEx/config/progenitor-players/<modGuid>.json` (non-default overrides only, coalesced atomic writes) and survive plugin and Core reloads and world wipes. Edits to the file while the server runs are merged; an invalid file is kept as `<modGuid>.json.bad` and does not stop the plugin from loading.
 - Unload releases the registration, callbacks and pending requests; the saved values stay.
 - Examples: `samples/Progenitor.ReloadExample` (server only) and `samples/Progenitor.SampleServerLed` (both sides).
 

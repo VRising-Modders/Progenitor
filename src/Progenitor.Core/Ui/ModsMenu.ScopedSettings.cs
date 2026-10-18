@@ -29,7 +29,15 @@ public static partial class ModsMenu
             _scopedSnapshot = null;
             if (_tabState?.Selected == ModsTab.Mods)
             {
-                if (_showingSearch) { UpdateSearchResults(); _scopedValuesDirty = false; return; }
+                if (_showingSearch)
+                {
+                    // The server's catalog can add or remove mods from the list: rebuild it too (next
+                    // frame, keeping the search field focused), not only the results.
+                    UpdateSearchResults();
+                    QueueSearchRebuild();
+                    _scopedValuesDirty = false;
+                    return;
+                }
                 var id = _selected;
                 if (!string.IsNullOrEmpty(id)) RebuildModKeepingScroll(id!, "settings-manifest");
                 RebuildSidebar("settings-manifest");

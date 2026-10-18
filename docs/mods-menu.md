@@ -161,7 +161,7 @@ Job NATIVE5 closes the two gaps that still cost the route after a swap: every ow
 
 The Mods search matches mod names and IDs, setting labels, section names and help text. While a query is present, the content pane shows results grouped by mod; mod-name matches appear first. Matching settings use their normal editors and permission checks, including personal, per-player server and administrator settings. Hidden settings stay hidden.
 
-Typing keeps the search field focused. **Open mod** opens the full page; **Show in mod** opens and scrolls to the matching setting, expanding its group when needed. Clearing the query restores the previous mod page and scroll position. Install Mods retains its separate catalog search.
+Typing keeps the search field focused; the list filters as you type and the results update after a short pause. **Open mod** opens the full page; **Show in mod** opens and scrolls to the matching setting, expanding its group when needed. Clearing the query restores the previous mod page and scroll position. Install Mods retains its separate catalog search.
 
 Verified in the test client at 1920×1080 on the 2026-10-15 build, before the port to current main: typed search, results spanning two mods, setting navigation and restoring the prior page. Related game-free tests also cover hidden rows, scope preservation and search-field behavior. The port is built and game-free tested only.
 

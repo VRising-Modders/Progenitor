@@ -1876,6 +1876,7 @@ public static partial class ModsMenu
     internal static void NotifySettingsPageChanged(string pluginId)
     {
         _ = pluginId;
+        _settingsSectionsRevision++;
         if (IsOpen) QueueDirectoryRefresh();
     }
 
@@ -1886,6 +1887,7 @@ public static partial class ModsMenu
     /// </summary>
     internal static void NotifySettingsPageRemoved(string pluginId)
     {
+        _settingsSectionsRevision++;
         if (_showingSearch) Close(ReasonLifecycle("plugin-unload"));
         if (string.Equals(_resetAllPlugin, pluginId, StringComparison.OrdinalIgnoreCase)) CloseResetAllDialog();
         if (IsOpen && string.Equals(_selected, pluginId, StringComparison.OrdinalIgnoreCase))
@@ -4611,6 +4613,8 @@ public static partial class ModsMenu
     {
         string next = (text ?? "").Trim();
         if (next == _search) return false;
+        // A search session starts or ends: settings sections are read fresh for the next one.
+        if (next.Length == 0 || _search.Length == 0) SearchSectionCache.Clear();
         _search = next;
         SearchFilterChanges++;
         return true;
@@ -4622,7 +4626,9 @@ public static partial class ModsMenu
         CancelSearchRebuild();
         if (_sidebarSearchInput != null && _sidebarSearchInput.Value != _search) _sidebarSearchInput.Value = _search;
         RefilterCatalogRows();
-        UpdateSearchResults();
+        // Typing rebuilds the results pane once it pauses; a programmatic search or a cleared one shows at once.
+        if (rebuildNow || _search.Length == 0) { CancelSearchResults(); UpdateSearchResults(); }
+        else QueueSearchResults();
     }
     /// <summary>
     /// Show or hide already-built catalog rows. Must not rebuild the sidebar:
@@ -7638,6 +7644,7 @@ public static partial class ModsMenu
     internal static void ResetSearchesForClose()
     {
         CancelSearchRebuild();
+        CancelSearchResults();
         TryChangeSearch("");
         // The kept Mods list (parked or hidden) is shown again by the next open; its box shows the empty search.
         try { if (_sidebarSearchInput is { IsDisposed: false } box && box.Value.Length > 0) box.Value = ""; }
@@ -7664,6 +7671,7 @@ public static partial class ModsMenu
 
         TryChangeSearch("");
         CancelSearchRebuild();
+        CancelSearchResults();
         RebuildSidebar(ReasonUserButton);
         UpdateSearchResults();
 #if !PROGENITOR_TESTS

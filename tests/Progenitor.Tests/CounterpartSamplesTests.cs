@@ -486,6 +486,7 @@ public sealed class CounterpartSamplesTests : IDisposable
         Assert.Equal(ServerLedPolicy.Route.Skip, ServerLedPolicy.RouteFor(Read(off), false));
         Assert.Equal(ServerLedPolicy.Route.Chat, ServerLedPolicy.RouteFor(Read(popup), false));
 
+        store.Flush(); // writes are coalesced; unload flushes them
         store = new PlayerSettingsStore(_dir, ServerLedDeclaration.Guid);
         Assert.Equal(ServerLedPolicy.Route.Popup, ServerLedPolicy.RouteFor(Read(popup), true));
         Assert.Equal(ServerLedPolicy.Route.Skip, ServerLedPolicy.RouteFor(Read(off), false));

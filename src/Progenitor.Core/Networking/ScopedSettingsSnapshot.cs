@@ -27,6 +27,13 @@ internal sealed class ScopedSettingsSnapshot
     internal Guid Generation { get; private set; }
     internal int BeginCount { get; private set; }
 
+    /// <summary>Whether a begun snapshot is still arriving at <paramref name="now"/>; an expired one is discarded.</summary>
+    internal bool Collecting(double now)
+    {
+        if (_collecting && (double.IsNaN(now) || double.IsInfinity(now) || now < _started || now - _started >= TimeoutSeconds)) Reset();
+        return _collecting;
+    }
+
     internal bool Accept(ScopedSettingsPacket packet, double now)
     {
         if (double.IsNaN(now) || double.IsInfinity(now)) { Reset(); return false; }

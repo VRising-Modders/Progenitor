@@ -13,19 +13,22 @@ namespace Progenitor.Networking;
 internal static partial class ScopedSettings
 {
     internal const int EventId = 0x50725374; // PrSt
-    internal static IReadOnlyList<ScopedSettingRecord> ClientRows => _clientRows;
-    internal static bool ClientReady { get; private set; }
-    internal static bool ClientCanEditServerWide { get; private set; }
-    internal static string ClientServerName { get; private set; } = "";
-    internal static int ClientRevision { get; private set; }
-    internal static event Action<string, string>? ClientValueChanged;
-    private static List<ScopedSettingRecord> _clientRows = new();
-    private static readonly Dictionary<string, ScopedSettingRecord> ClientById = new(StringComparer.Ordinal);
-    private static readonly Dictionary<Guid, Pending> PendingRequests = new();
+    private static readonly ScopedSettingsClient Client = new(bytes => CustomEvents.SendToServer(EventId, bytes))
+    { Warning = message => Plugin.Logger?.LogWarning(message) };
+    internal static IReadOnlyList<ScopedSettingRecord> ClientRows => Client.Rows;
+    internal static bool ClientReady => Client.Ready;
+    internal static bool ClientCanEditServerWide => Client.CanEditServerWide;
+    internal static string ClientServerName => Client.ServerName;
+    internal static int ClientRevision => Client.Revision;
+    internal static event Action<string, string>? ClientValueChanged
+    {
+        add => Client.ValueChanged += value;
+        remove => Client.ValueChanged -= value;
+    }
     private static readonly Dictionary<int, Peer> Peers = new();
-    private static readonly ScopedSettingsSnapshot SnapshotReceiver = new();
-    private static Guid _clientGeneration;
+    private static readonly List<int> StalePeers = new();
     private static double _nextPoll;
+    private static int _sending; // peers with queued packets; per-frame work happens only while nonzero
     private static IDisposable? _disconnect, _world;
     private static bool _installed;
 
@@ -36,65 +39,26 @@ internal static partial class ScopedSettings
         internal int Revision = -1;
         internal bool Admin;
         internal Guid Generation;
+        internal Guid PreviousGeneration; // writes sent before the client received the newer snapshot
         internal double SendStarted;
         internal Queue<byte[]> Outgoing = new();
         internal Dictionary<string, string> Values = new(StringComparer.Ordinal);
     }
-    private sealed class Pending : IDisposable
-    {
-        internal Guid Id;
-        internal string RowId = "";
-        internal double Deadline;
-        internal Action<ServerSettingResult>? Done;
-        public void Dispose() { PendingRequests.Remove(Id); Done = null; }
-    }
     private static double Now() => System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency;
 
-    internal static string? ReadClient(string id) => ClientReady && ClientById.TryGetValue(id, out var row) ? row.Value : null;
-    internal static bool HasClient(string id, string type) => ClientReady && ClientById.TryGetValue(id, out var row) && row.Personal && row.Type == type;
+    internal static string? ReadClient(string id) => Client.Read(id);
+    internal static bool HasClient(string id, string type) => Client.Has(id, type);
 
-    internal static IDisposable Request(string id, string value, string? expected, Action<ServerSettingResult> done)
-    {
-        if (done == null) throw new ArgumentNullException(nameof(done));
-        var pending = new Pending { Id = Guid.NewGuid(), RowId = id, Deadline = Now() + 8, Done = done };
-        string error = !ClientReady || !ClientById.TryGetValue(id, out var row) ? "This server setting is unavailable." : "";
-        if (error.Length == 0)
-        {
-            row = ClientById[id];
-            if (!row.Editable || !row.Personal && !ClientCanEditServerWide) error = "Only server admins can change this setting.";
-            if (PendingRequests.Count >= 32) error = "Too many pending setting changes.";
-            foreach (var request in PendingRequests.Values) if (request.RowId == id) error = "A change to this setting is already pending.";
-        }
-        if (error.Length > 0) { done(new(false, ReadClient(id) ?? "", error)); return pending; }
-        row = ClientById[id];
-        PendingRequests.Add(pending.Id, pending);
-        try
-        {
-            byte[] bytes = ScopedSettingsWire.Encode(new ScopedSettingsPacket
-            {
-                Kind = 5, Generation = _clientGeneration, RequestId = pending.Id, Id = id, Personal = row.Personal,
-                Type = row.Type, Expected = expected ?? row.Value, Value = value,
-            });
-            if (!CustomEvents.SendToServer(EventId, bytes)) Complete(pending.Id, new(false, row.Value, "The connection did not accept the change."));
-        }
-        catch (Exception e) { Complete(pending.Id, new(false, row.Value, e.Message)); }
-        return pending;
-    }
-
-    private static void Complete(Guid id, ServerSettingResult result)
-    {
-        if (!PendingRequests.TryGetValue(id, out var pending)) return;
-        var done = pending.Done; pending.Dispose();
-        try { done?.Invoke(result); } catch (Exception e) { Plugin.Logger?.LogWarning("Settings completion: " + e.Message); }
-    }
+    internal static IDisposable Request(string id, string value, string? expected, Action<ServerSettingResult> done) =>
+        Client.Request(id, value, expected, done, Now());
 
     internal static unsafe void Install()
     {
         if (_installed) return;
         if (Plugin.IsServerProcess) CustomEvents.OnReceiveFromClient(EventId, OnRequest);
         else CustomEvents.OnReceive(EventId, OnResponse);
-        _disconnect = EventBus.On<PlayerDisconnected>(ev => Peers.Remove(ev.User.Index));
-        _world = EventBus.On<WorldReady>(_ => { Peers.Clear(); ClearClient(); });
+        _disconnect = EventBus.On<PlayerDisconnected>(ev => { if (Peers.Remove(ev.User.Index)) CountSending(); });
+        _world = EventBus.On<WorldReady>(_ => { Peers.Clear(); _sending = 0; ClearClient(); });
         Plugin.Frame += Tick;
         _installed = true;
     }
@@ -105,8 +69,7 @@ internal static partial class ScopedSettings
         _disconnect?.Dispose(); _disconnect = null; _world?.Dispose(); _world = null;
         CustomEvents.RemoveHandler(EventId, OnResponse); CustomEvents.RemoveClientHandler(EventId, OnRequest);
         foreach (var row in new List<Registration>(Entries.Values)) row.Dispose();
-        foreach (var store in Stores.Values) { try { store.Flush(); } catch (Exception e) { Plugin.Logger?.LogWarning(e.Message); } }
-        Stores.Clear(); Peers.Clear(); ClearClient(); ClientValueChanged = null; _installed = false;
+        Stores.Clear(); Peers.Clear(); _sending = 0; ClearClient(); Client.ClearSubscribers(); _installed = false;
     }
 
     internal static void OnHandshakeOk(World? world, Entity entity, Handshake.Capability capabilities)
@@ -119,14 +82,7 @@ internal static partial class ScopedSettings
         _nextPoll = 0;
     }
 
-    private static void ClearClient()
-    {
-        if (ClientReady || _clientRows.Count > 0) ClientRevision++;
-        ClientReady = false; ClientCanEditServerWide = false; ClientServerName = "";
-        _clientRows = new(); ClientById.Clear(); SnapshotReceiver.Reset();
-        _clientGeneration = Guid.Empty;
-        foreach (var id in new List<Guid>(PendingRequests.Keys)) Complete(id, new(false, "", "Disconnected from the server."));
-    }
+    private static void ClearClient() => Client.Clear("Disconnected from the server.");
 
     private static void Tick()
     {
@@ -134,52 +90,92 @@ internal static partial class ScopedSettings
         double now = Now();
         if (!Plugin.IsServerProcess)
         {
-            if (!RemoteInstallEvents.ClientConnected()) { ClearClient(); return; }
-            foreach (var pending in new List<Pending>(PendingRequests.Values))
-                if (now >= pending.Deadline) Complete(pending.Id, new(false, ReadClient(pending.RowId) ?? "", "The server did not answer in time."));
+            // Clears once on the disconnect edge; allocation-free while connected.
+            Client.Tick(RemoteInstallEvents.ClientConnected(), now);
             return;
         }
-        var world = Worlds.Server;
-        if (world == null || !world.IsCreated) { Peers.Clear(); return; }
         bool poll = now >= _nextPoll;
+        if (!poll && _sending == 0) return;
         if (poll)
         {
             _nextPoll = now + 1;
-            foreach (var row in Entries.Values)
-            {
-                bool editable = row.Schema.Personal || ServerSettings.IsEditable(row.Schema.Id);
-                if (editable != row.Schema.Editable) { row.Schema.Editable = editable; _schemaRevision++; }
-            }
+            Stores.Tick(); // coalesced personal writes, also while no server world exists
         }
-        foreach (var pair in new List<KeyValuePair<int, Peer>>(Peers))
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) { if (Peers.Count > 0) { Peers.Clear(); _sending = 0; } return; }
+        if (poll) Poll(world, now);
+        if (_sending > 0) SendQueued(world);
+    }
+
+    /// <summary>Once a second: editability, store writes, peer validation, snapshots and deltas.</summary>
+    private static void Poll(World world, double now)
+    {
+        foreach (var row in Entries.Values)
+        {
+            bool editable = row.Schema.Personal || ServerSettings.IsEditable(row.Schema.Id);
+            if (editable != row.Schema.Editable) { row.Schema.Editable = editable; _schemaRevision++; }
+        }
+        StalePeers.Clear();
+        foreach (var pair in Peers)
         {
             var peer = pair.Value;
-            if (!world.EntityManager.Exists(peer.Entity) || !world.EntityManager.HasComponent<User>(peer.Entity)) { Peers.Remove(pair.Key); continue; }
-            var user = world.EntityManager.GetComponentData<User>(peer.Entity);
-            if (!user.IsConnected || user.PlatformId != peer.Account || Handshake.UserAnswerStatus(user.Index) != "ok") { Peers.Remove(pair.Key); continue; }
+            if (!PeerValid(world, peer, out var user)) { StalePeers.Add(pair.Key); continue; }
             try
             {
                 if (peer.Outgoing.Count > 0 && now - peer.SendStarted > 15)
                 {
                     peer.Outgoing.Clear(); peer.Revision = -1;
                 }
-                if (poll && peer.Outgoing.Count == 0)
+                if (peer.Outgoing.Count == 0)
                 {
                     bool admin = ServerAdminList.AuthorizeShared(user.PlatformId, user.IsAdmin) != RemoteAuthorizedBy.None;
                     if (peer.Revision != _schemaRevision || peer.Admin != admin) Snapshot(peer, admin);
                     else Deltas(peer);
                 }
-                var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
-                if (bootstrap == null) continue;
-                // Spread catalogs over frames; no packet exceeds the custom-event limit.
+            }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Scoped settings: " + e.Message); }
+        }
+        foreach (int index in StalePeers) Peers.Remove(index);
+        StalePeers.Clear();
+        CountSending();
+    }
+
+    /// <summary>Per frame while packets wait: up to four per peer, so no frame sends a whole catalog.</summary>
+    private static void SendQueued(World world)
+    {
+        var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
+        if (bootstrap == null) return;
+        foreach (var peer in Peers.Values)
+        {
+            if (peer.Outgoing.Count == 0) continue;
+            try
+            {
+                // A peer that left since the last poll drops its packets; the poll removes it.
+                if (!PeerValid(world, peer, out var user)) { peer.Outgoing.Clear(); continue; }
                 for (int i = 0; i < 4 && peer.Outgoing.Count > 0; i++)
                 {
                     if (!CustomEvents.SendToUser(bootstrap, user.Index, EventId, peer.Outgoing.Peek())) break;
                     peer.Outgoing.Dequeue();
                 }
             }
-            catch (Exception e) { Plugin.Logger?.LogWarning("Scoped settings: " + e.Message); }
+            catch (Exception e) { peer.Outgoing.Clear(); Plugin.Logger?.LogWarning("Scoped settings: " + e.Message); }
         }
+        CountSending();
+    }
+
+    private static bool PeerValid(World world, Peer peer, out User user)
+    {
+        user = default;
+        if (!world.EntityManager.Exists(peer.Entity) || !world.EntityManager.HasComponent<User>(peer.Entity)) return false;
+        user = world.EntityManager.GetComponentData<User>(peer.Entity);
+        return user.IsConnected && user.PlatformId == peer.Account && Handshake.UserAnswerStatus(user.Index) == "ok";
+    }
+
+    private static void CountSending()
+    {
+        int sending = 0;
+        foreach (var peer in Peers.Values) if (peer.Outgoing.Count > 0) sending++;
+        _sending = sending;
     }
 
     private static void Snapshot(Peer peer, bool admin)
@@ -204,7 +200,7 @@ internal static partial class ScopedSettings
         packets.Enqueue(ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 1, Generation = generation, Count = rowPackets.Count, CanEdit = admin, ServerName = name }));
         foreach (var packet in rowPackets) packets.Enqueue(packet);
         packets.Enqueue(ScopedSettingsWire.Encode(new ScopedSettingsPacket { Kind = 3, Generation = generation, Count = rowPackets.Count }));
-        peer.Generation = generation; peer.Revision = _schemaRevision; peer.Admin = admin; peer.Values = values; peer.Outgoing = packets; peer.SendStarted = Now();
+        peer.PreviousGeneration = peer.Generation; peer.Generation = generation; peer.Revision = _schemaRevision; peer.Admin = admin; peer.Values = values; peer.Outgoing = packets; peer.SendStarted = Now();
     }
 
     private static void Deltas(Peer peer)
@@ -246,7 +242,11 @@ internal static partial class ScopedSettings
         var user = world.EntityManager.GetComponentData<User>(entity);
         if (!user.IsConnected || !Peers.TryGetValue(user.Index, out var peer) || peer.Account != user.PlatformId || peer.Entity != entity) return;
         var actor = new RemoteInstallActor(user.CharacterName.ToString(), user.PlatformId, user.IsAdmin, ServerAdminList.AuthorizeShared(user.PlatformId, user.IsAdmin));
-        var result = Apply(request, request.Generation == peer.Generation && Handshake.UserAnswerStatus(user.Index) == "ok", actor);
+        // A write sent before the client received the newest snapshot carries the previous generation.
+        // Apply still checks that the row exists with the same scope and type, and the expected value.
+        bool current = request.Generation != Guid.Empty &&
+            (request.Generation == peer.Generation || request.Generation == peer.PreviousGeneration);
+        var result = Apply(request, current && Handshake.UserAnswerStatus(user.Index) == "ok", actor);
         var bootstrap = world.GetExistingSystemManaged<ServerBootstrapSystem>();
         if (bootstrap != null) CustomEvents.SendToUser(bootstrap, user.Index, EventId, ScopedSettingsWire.Encode(new ScopedSettingsPacket
         {
@@ -259,44 +259,6 @@ internal static partial class ScopedSettings
     private static unsafe void OnResponse(int _, byte* payload, int length)
     {
         if (payload == null || !ScopedSettingsWire.TryDecode(new ReadOnlySpan<byte>(payload, Math.Max(0, length)), true, out var packet)) return;
-        Accept(packet);
-    }
-
-    private static void Accept(ScopedSettingsPacket packet)
-    {
-        if (packet.Kind <= 3)
-        {
-            if (!SnapshotReceiver.Accept(packet, Now())) return;
-            _clientRows = new(SnapshotReceiver.Rows); ClientById.Clear();
-            foreach (var row in _clientRows) ClientById.Add(row.Id, row);
-            ClientCanEditServerWide = SnapshotReceiver.CanEdit; ClientServerName = SnapshotReceiver.ServerName;
-            _clientGeneration = SnapshotReceiver.Generation;
-            ClientReady = true; ClientRevision++;
-            foreach (var row in _clientRows) NotifyValue(row.Id, row.Value);
-            return;
-        }
-        switch (packet.Kind)
-        {
-            case 4:
-                if (packet.Generation == _clientGeneration) SetClientValue(packet.Id, packet.Value);
-                break;
-            case 6:
-                if (packet.Generation != _clientGeneration || !PendingRequests.TryGetValue(packet.RequestId, out var pending) || pending.RowId != packet.Id) return;
-                if (packet.Success || packet.Error.StartsWith("This setting changed on the server.", StringComparison.Ordinal)) SetClientValue(packet.Id, packet.Value);
-                Complete(packet.RequestId, new(packet.Success, packet.Value, packet.Error));
-                break;
-        }
-    }
-
-    private static void SetClientValue(string id, string value)
-    {
-        if (!ClientById.TryGetValue(id, out var row) || row.Value == value) return;
-        row.Value = value; NotifyValue(id, value);
-    }
-    private static void NotifyValue(string id, string value)
-    {
-        if (ClientValueChanged == null) return;
-        foreach (Action<string, string> callback in ClientValueChanged.GetInvocationList())
-            try { callback(id, value); } catch (Exception e) { Plugin.Logger?.LogWarning("Player settings subscriber: " + e.Message); }
+        Client.Accept(packet, Now());
     }
 }

@@ -30,7 +30,8 @@ public sealed class PlayerSetting<T> : IDisposable
         else ScopedSettings.ClientValueChanged += OnClientValue;
     }
 
-    /// <summary>Fires on the game thread when an accepted value changes. Client events use an empty account id (the local player).</summary>
+    /// <summary>Fires on the game thread when an accepted value changes. Client events use an empty account id (the local player)
+    /// and also fire once when the server first provides the value; a re-sent catalog with the same value does not fire.</summary>
     public event Action<PlayerAccountId, T>? Changed;
 
     /// <summary>Read this account's saved preference on the server.</summary>
