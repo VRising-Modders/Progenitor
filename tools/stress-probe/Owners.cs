@@ -26,7 +26,7 @@ public sealed partial class Plugin
         _batchWorld = world;
         _protected.Clear();
         foreach (var p in Progenitor.Castles.CastleReader.Plots(world))
-            if (ProtectedPlots.Contains(p.TerritoryIndex)) _protected[p.TerritoryIndex] = (p.HeartEntity, p.OwnerUserEntity);
+            if (Progenitor.Dev.Ops.StressProtectedPlots.Contains(p.TerritoryIndex)) _protected[p.TerritoryIndex] = (p.HeartEntity, p.OwnerUserEntity);
         if (_protected.Count != 7) throw new InvalidOperationException("Expected seven protected castles.");
         int count = single ? 1 : 40;
         var em = world.EntityManager;
@@ -68,7 +68,7 @@ public sealed partial class Plugin
             _owners[n] = user;
             Log.LogInfo("stress-owners: ready name=" + StressIdentity.OwnerName(n) + " user=" + user + " index=" + owner.Index + " team=" + team.Team);
         }
-        var plots = Progenitor.Castles.CastleReader.Plots(world).Where(p => !ProtectedPlots.Contains(p.TerritoryIndex)).OrderBy(p => p.TerritoryIndex).ToArray();
+        var plots = Progenitor.Castles.CastleReader.Plots(world).Where(p => !Progenitor.Dev.Ops.StressProtectedPlots.Contains(p.TerritoryIndex)).OrderBy(p => p.TerritoryIndex).ToArray();
         if (single) plots = plots.Where(p => p.TerritoryIndex == 0).ToArray();
         if (plots.Length == 0) throw new InvalidOperationException("No generated castles.");
         for (int i = 0; i < plots.Length; i++) _claims.Enqueue((plots[i].TerritoryIndex, _owners[(i % count) + 1]));

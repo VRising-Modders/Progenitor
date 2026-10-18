@@ -57,11 +57,18 @@ internal static class StressTransferOps
         if (dry || refusal != null) return new { dryRun = dry, applied = false, refusal, before, castleLimit = limits.CastleLimit };
 
         // The generated wrapper is the same one used by the qualified castle harness.
+        long logStart = LogBuffer.Instance.LatestSeq;
         try { TeamUtility.ClaimCastle(em, target, heart, limits.CastleHeartLimitType); }
         catch (Exception e)
         {
-            return new { applied = (bool?)null, verified = false, error = "Claim attempted; inspect before retrying: " + e.Message, before };
+            Snapshot? after = null;
+            string? observationError = null;
+            try { after = Observe(world, plot, old, target, heart); }
+            catch (Exception readError) { observationError = readError.Message; }
+            return new { applied = (bool?)null, verified = false, error = "Claim attempted; inspect before retrying: " + e.Message,
+                before, after, observationError, assertions = AssertionsSince(logStart) };
         }
+        var immediateAssertions = AssertionsSince(logStart);
         var deferred = new DeferredResult(10_000);
         MainThread.PostDelayed(2, () =>
         {
@@ -69,7 +76,8 @@ internal static class StressTransferOps
             {
                 if (!world.IsCreated || !ReferenceEquals(world, Worlds.Server)) throw new InvalidOperationException("world_changed");
                 var after = Observe(world, plot, old, target, heart);
-                bool verified = after.Owner == Fmt(target) && after.LastOwner == Fmt(target)
+                var assertions = immediateAssertions.Concat(AssertionsSince(logStart)).Distinct().ToArray();
+                bool verified = assertions.Length == 0 && after.Owner == Fmt(target) && after.LastOwner == Fmt(target)
                     && after.CastleAllies.SequenceEqual(new[] { after.NewTeam })
                     && !after.OldAllies.Contains(after.CastleTeam) && after.NewAllies.Count(a => a == after.CastleTeam) == 1
                     && after.OldPlots.SequenceEqual(before.OldPlots.Where(p => p != plot))
@@ -77,7 +85,7 @@ internal static class StressTransferOps
                     && after.NewCount == after.NewPlots.Length
                     && (before.OldCount == null ? after.OldCount == null : after.OldCount == after.OldPlots.Length)
                     && after.TargetComplete;
-                deferred.SetResult(new { applied = true, verified, before, after });
+                deferred.SetResult(new { applied = true, verified, before, after, assertions });
             }
             catch (Exception e) { deferred.SetResult(new { applied = true, verified = false, error = e.Message, before }); }
         }, deferred);
@@ -145,10 +153,16 @@ internal static class StressTransferOps
     {
         if (!user.Has<UserHeartCount>(em)) return null;
         var type = ComponentIndex.Of<UserHeartCount>(ComponentType.AccessMode.ReadOnly);
-        var size = TypeManager.GetTypeInfo(type.TypeIndex).TypeSize;
-        if (size < Layout.StressUserHeartCountOffset + sizeof(int)) return null;
+        if (!StressTransferRules.CanReadCount(() => TypeManager.GetTypeInfo(type.TypeIndex).TypeSize,
+            Layout.StressUserHeartCountOffset + sizeof(int))) return null;
         var p = (byte*)em.GetComponentDataRawRO(user, type.TypeIndex);
         return p == null ? null : *(int*)(p + Layout.StressUserHeartCountOffset);
     }
     private static string Fmt(Entity e) => e.Index + ":" + e.Version;
+
+    private static string[] AssertionsSince(long since)
+    {
+        try { return LogBuffer.Instance.Read(since, 2000, "Assertion failed", null).Select(e => e.Text).ToArray(); }
+        catch (Exception e) { return new[] { "Assertion log check unavailable: " + e.Message }; }
+    }
 }

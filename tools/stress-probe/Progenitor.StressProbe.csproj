@@ -8,6 +8,7 @@
   <ItemGroup>
     <Reference Include="Progenitor" HintPath="$(StressProbeCore)" Private="false" />
     <Reference Include="Progenitor.Dev" HintPath="$(StressProbeDev)" Private="false" />
+    <Compile Include="../../src/Progenitor.Dev/Ops/StressProtectedPlots.cs" Link="StressProtectedPlots.cs" />
     <Compile Include="../../src/Progenitor.Dev/Ops/StressPlace.cs" Link="StressPlace.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(StressOwnerSource)' != ''">

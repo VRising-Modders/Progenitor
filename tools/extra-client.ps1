@@ -83,13 +83,6 @@ $liveServer = "C:\VRisingServer"
 $testServer = Get-ProgenitorWorkspacePath -Child "_testserver"
 $headlessBase = Get-ProgenitorWorkspacePath -Child "_headless"
 
-if ($Index -eq 0) {
-  throw "-Index 0 is the primary Steam-launched client. Use tools/launch-client.ps1."
-}
-if ($Index -lt 1 -or $Index -gt 99) {
-  throw "-Index must be 1..99 (0 is the primary Steam client; use tools/launch-client.ps1)"
-}
-
 $headlessRoot = if ($headlessBase) { Join-Path $headlessBase "client" } else { $null }
 # Headless instances default to their own install root (tools/headless-root.ps1): a private
 # BepInEx tree with only Progenitor, so the player's client and its plugins are never touched.

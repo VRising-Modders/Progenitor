@@ -14,7 +14,6 @@ public sealed partial class Plugin
     private readonly Queue<(int Plot, Entity Territory)> _pending = new();
     private readonly Dictionary<int, (Entity Heart, Entity Owner)> _protected = new();
     private readonly List<int> _completed = new();
-    private static readonly HashSet<int> ProtectedPlots = new() { 45, 67, 86, 92, 125, 129, 136 };
 
     private void BeginGeneration(World world, bool single = false)
     {
@@ -26,7 +25,7 @@ public sealed partial class Plugin
         foreach (var e in Query.Entities(world.EntityManager, true, false, ComponentIndex.Of<CastleTerritory>(ComponentType.AccessMode.ReadOnly)))
         {
             var t = world.EntityManager.GetComponentData<CastleTerritory>(e);
-            if (!ProtectedPlots.Contains(t.CastleTerritoryIndex) && !world.EntityManager.Exists(t.CastleHeart))
+            if (!Progenitor.Dev.Ops.StressProtectedPlots.Contains(t.CastleTerritoryIndex) && !world.EntityManager.Exists(t.CastleHeart))
                 targets.Add((t.CastleTerritoryIndex, e));
         }
         foreach (var t in targets.OrderBy(t => t.Plot).Take(single ? 1 : int.MaxValue)) _pending.Enqueue(t);

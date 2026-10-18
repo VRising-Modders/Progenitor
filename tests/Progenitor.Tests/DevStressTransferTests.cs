@@ -39,8 +39,26 @@ public class DevStressTransferTests
     [InlineData(90000000000020010UL, true)]
     [InlineData(90000000000020099UL, true)]
     [InlineData(90000000000020100UL, false)]
-    [InlineData(90000000000101810UL, true)]
+    [InlineData(90000000000101810UL, false)]
+    [InlineData(90000000000020001UL, false)]
+    [InlineData(90000000000020002UL, false)]
+    [InlineData(90000000000020003UL, false)]
+    [InlineData(90000000000020009UL, false)]
     public void IdentityBandsStaySynthetic(ulong id, bool expected) => Assert.Equal(expected, StressTransferRules.AllowedIdentity(id));
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    [InlineData(3, false)]
+    [InlineData(4, true)]
+    [InlineData(8, true)]
+    [InlineData(-1, false)]
+    public void CountReadUsesVerifiedLayoutWhenSizeIsUnknown(int size, bool expected) =>
+        Assert.Equal(expected, StressTransferRules.CanReadCount(() => size, 4));
+
+    [Fact]
+    public void UnavailableTypeInfoDoesNotHidePresentHeartCount() =>
+        Assert.True(StressTransferRules.CanReadCount(() => throw new System.InvalidOperationException(), 4));
 
     private static string? Decide(bool oldStress = true, bool allowed = true, bool complete = true,
         bool offline = true, bool noClan = true, bool links = true, int? count = 0, int limit = 5) =>

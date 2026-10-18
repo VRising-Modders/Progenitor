@@ -2,9 +2,17 @@ namespace Progenitor.Dev.Ops;
 
 internal static class StressTransferRules
 {
-    internal static bool Protected(int plot) => plot is 45 or 67 or 86 or 92 or 125 or 129 or 136;
-    internal static bool AllowedIdentity(ulong id) => StressIdentity.IsStressPlatformId(id)
-        || (id >= 90000000000020001UL && id <= 90000000000020099UL);
+    internal static bool Protected(int plot) => StressProtectedPlots.Contains(plot);
+    internal static bool AllowedIdentity(ulong id) => id >= 90000000000020010UL && id <= 90000000000020099UL;
+
+    // TypeSize can be unavailable through interop. The field layout is verified separately.
+    internal static bool CanReadCount(System.Func<int> readSize, int requiredBytes)
+    {
+        int size;
+        try { size = readSize(); }
+        catch { size = 0; }
+        return size == 0 || size >= requiredBytes;
+    }
 
     internal static string? Refusal(int plot, bool oldIsStress, bool allowedTarget,
         bool complete, bool offline, bool noClan, bool links, int owned, int? heartCount, int limit)
