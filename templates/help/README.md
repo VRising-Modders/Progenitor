@@ -41,7 +41,7 @@ window.HELP = {
 
 ## Keep it short
 
-One idea per page: a title and about 60 words, or three to five bullets. At most one code block and one callout. Lead with what to do. One sentence per glossary entry. Use the table class `num` on number columns so numbers align right.
+One idea per page: a title and about 60 words, or three to five bullets. At most one code block, one callout and one screenshot (`shot: { src: "img/name.webp", alt: "...", caption: "..." }`, the image in an `img` folder beside the page; the sync check fails on a missing file). Lead with what to do. One sentence per glossary entry. Use the table class `num` on number columns so numbers align right.
 
 ## For Progenitor maintainers
 

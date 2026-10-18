@@ -56,6 +56,25 @@ for (const file of [templatePath, ...targets]) {
   }
 }
 
-if (check && (stale || relative)) process.exit(1);
+// Screenshots are the one relative reference allowed: shot: { src: "img/x.webp" } names a file that ships beside the page
+// (package.ps1 and deploy.ps1 copy docs/guide/img with the guide; a mod's help/* files travel with its help page).
+// Each one must exist, inside the page's own folder.
+let missingShots = 0;
+for (const file of targets) {
+  const text = readFileSync(file, "utf8");
+  const dir = dirname(file);
+  for (const m of text.matchAll(/\bshot:\s*\{\s*src:\s*"([^"]+)"/g)) {
+    const src = m[1];
+    const line = text.slice(0, m.index).split("\n").length;
+    if (/^(https?:|data:)/.test(src)) continue;
+    if (src.startsWith("/") || src.includes("..") || !existsSync(join(dir, src))) {
+      missingShots++;
+      console.error(`${file}:${line}: screenshot "${src}" is not a file inside the page's folder`);
+    }
+  }
+}
+
+if (check && (stale || relative || missingShots)) process.exit(1);
+if (missingShots) process.exit(1);
 if (relative) process.exit(1);
-if (check) console.log("help pages are in sync and have no relative links");
+if (check) console.log("help pages are in sync, have no relative links, and every screenshot exists");

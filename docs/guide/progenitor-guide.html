@@ -190,6 +190,13 @@ main { padding: 30px 36px 18px; min-width: 0; }
 .callout .label { display: block; margin-bottom: 3px; color: #e07a7f; }
 .callout p { margin: 0; }
 
+/* Screenshot */
+.shot { margin: 6px 0 16px; }
+.shot a { display: block; border: 1px solid var(--rule); border-radius: 2px; overflow: hidden; background: #000; }
+.shot a:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { margin-top: 6px; font-size: 13.5px; color: var(--muted); }
+
 /* Code */
 .code { position: relative; margin: 2px 0 16px; background: var(--code-bg); border: 1px solid var(--rule-soft); border-radius: 2px; }
 .code .lang { position: absolute; left: 12px; top: 7px; font: 600 11px/1 var(--sans); letter-spacing: 0.12em; text-transform: uppercase; color: #6f6467; }
@@ -315,8 +322,8 @@ window.HELP = {
   chapters: [
     {
       id: "start", title: "Welcome", pages: [
-        { id: "welcome", title: "What Progenitor is",
-          html: `<p>[[progenitor|Progenitor]] is a modding framework for V Rising, loaded through [[bepinex|BepInEx]]. It gives every mod one in-game <strong>Mods</strong> menu: settings, keybinds, installs and updates.</p>
+        { id: "welcome", title: "What Progenitor is", shot: { src: "img/welcome-castle.webp", alt: "A castle at night in V Rising, its halls lit by candles" },
+          html: `<p>[[progenitor|Progenitor]] is a mod manager and modding framework for V Rising, loaded through [[bepinex|BepInEx]]. Its in-game <strong>Mods</strong> menu installs, updates and turns off mods, and holds every mod's settings and keybinds. It also adds features of its own: a better chat box, build menu search, dye all and photo mode.</p>
 <p>Mods built on it can load, update and unload while the game runs, and clean up after themselves.</p>
 <p>For the fastest help, <a href="#help/ai-help">ask an AI assistant (ChatGPT, Gemini, Grok, Claude&hellip;) with our ready-made prompt &rarr;</a></p>` },
         { id: "choose", title: "Choose your path", chooser: true,
@@ -339,7 +346,7 @@ window.HELP = {
 <li>Extract it into the [[game-folder|game folder]], the one that holds <code>VRising.exe</code>.</li>
 <li>Start the game. <strong>Mods</strong> appears on the title screen.</li></ol>
 <p>To update by hand, extract the new zip the same way and let it replace the files. It never changes BepInEx's own files or settings.</p>` },
-        { id: "open", title: "Open the Mods menu",
+        { id: "open", title: "Open the Mods menu", shot: { src: "img/players-open-title.webp", alt: "The V Rising title screen with Mods above Continue", caption: "<strong>Mods</strong> on the title screen." },
           html: `<ul><li><strong>Mods</strong> on the title screen.</li><li>The <strong>MODS</strong> tab in the in-game menu.</li><li><span class="kbd">F10</span> anywhere (remappable).</li></ul>
 <p>Tabs: <strong>Mods</strong>, <strong>Install Mods</strong>, <strong>Keybinds</strong>, <strong>Preferences</strong>, <strong>Server</strong>.</p>` },
         { id: "mod-page", title: "Every mod's settings are here",
@@ -379,7 +386,7 @@ window.HELP = {
     /* ---------------- Players: Chat ---------------- */
     {
       id: "chat", role: "players", title: "Chat", pages: [
-        { id: "overview", title: "The chat box",
+        { id: "overview", title: "The chat box", shot: { src: "img/chat-overview.webp", alt: "The chat box with its All and Clan tabs" },
           html: `<p>Progenitor builds on the game's chat box. To go back to the game's own chat lines, turn off <strong>Progenitor's chat lines</strong>.</p>
 <ul><li>Chat stays on screen for 30 seconds after the last message, instead of 14.</li><li>Clicking the chat doesn't attack or turn the camera, and the mouse wheel scrolls only the chat.</li>
 <li>The next pages cover tabs, moving and resizing, history, links, mentions and more.</li></ul>
@@ -485,7 +492,7 @@ window.HELP = {
 <tr><td>Anywhere</td><td><span class="kbd">F10</span> (Open Mods menu, remappable).</td></tr></tbody></table>
 <p>To close the [[workspace|Mods menu]], click <strong>Close Mods</strong> at the bottom of the left list, or press <span class="kbd">F10</span> or <span class="kbd">Escape</span>. In a search box, Escape clears the text first.</p>
 <p>Tabs: Mods, Install Mods, Keybinds, Preferences, Server.</p>` },
-        { id: "landing", title: "The Mods tab",
+        { id: "landing", title: "The Mods tab", shot: { src: "img/menu-landing.webp", alt: "The Mods tab with no mod picked: tiles for Your settings, Server settings, Preferences, Collect logs and the Help guide" },
           html: `<p>With no mod picked, tiles lead to <strong>Your settings</strong>, <strong>Server settings</strong>, <strong>Preferences</strong>, <strong>Collect logs</strong> and the <strong>Help guide</strong> (this page).</p>
 <ul><li>The list: <strong>Installed</strong>, <strong>On this server</strong>, <strong>Required by Progenitor</strong>. Filter chips: All, Needs attention, Disabled.</li>
 <li>The diamond beside a mod shows how it's doing: green is running, amber needs a look, red failed, gray is off, hollow is waiting. <strong>Update</strong> means a newer version is out.</li></ul>` },
@@ -500,7 +507,7 @@ window.HELP = {
           html: `<ul><li>A mod built on Progenitor turns off and on at once.</li><li>Others wait for the next start: <em>Turns off at next start</em>.</li>
 <li>If other mods need it, it asks first.</li><li>BepInEx and Progenitor's own parts can't be turned off.</li></ul>
 <p>A bar on the Mods and Install Mods tabs counts what waits for a restart: <strong>Restart now</strong>, or <strong>Restart and rejoin</strong> the server.</p>` },
-        { id: "preferences", title: "Preferences",
+        { id: "preferences", title: "Preferences", shot: { src: "img/menu-preferences.webp", alt: "The Preferences tab of the Mods menu" },
           html: `<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Edit other mods' settings</td><td>Off</td><td>Lets the Mods menu change mods not built on Progenitor.</td></tr>
 <tr><td>Install view</td><td>Simple</td><td>Simple or Advanced Install Mods tab.</td></tr>
@@ -523,7 +530,7 @@ window.HELP = {
     /* ---------------- Players: Install Mods ---------------- */
     {
       id: "install", role: "players", title: "Install Mods", pages: [
-        { id: "simple", title: "Simple view",
+        { id: "simple", title: "Simple view", shot: { src: "img/install-simple.webp", alt: "The Install Mods tab in Simple view, listing Thunderstore's mods" },
           html: `<ul><li>One row per mod, with one button.</li>
 <li><strong>Show</strong> picks All, Installed or Updates. Click a column header to sort.</li>
 <li><em>Loads at next start</em> or <em>Removed at next start</em> means the change waits for a restart.</li>
@@ -547,7 +554,7 @@ window.HELP = {
     /* ---------------- Players: Keybinds ---------------- */
     {
       id: "keybinds", role: "players", title: "Keybinds", pages: [
-        { id: "tab", title: "The Keybinds tab",
+        { id: "tab", title: "The Keybinds tab", shot: { src: "img/keybinds-tab.webp", alt: "The Keybinds tab listing Progenitor's keys" },
           html: `<p>Every mod's keys, then the game's own, in one list. Hover a row to see what it does.</p>
 <ul><li><strong>Show</strong>: All, <strong>Conflicts N</strong> or Changed.</li><li><strong>&darr; Mod keys</strong>, <strong>&darr; Game keys</strong> and <strong>Jump to mod</strong> move through the list.</li>
 <li>Search by action, key or mod name.</li>
@@ -600,7 +607,7 @@ window.HELP = {
     /* ---------------- Players: In the game ---------------- */
     {
       id: "game", role: "players", title: "In the Game", pages: [
-        { id: "build-search", title: "Build menu search",
+        { id: "build-search", title: "Build menu search", shot: { src: "img/game-build-search.webp", alt: "The build menu filtered to torches by Search buildings", caption: "Typing <em>torch</em> keeps three buildings." },
           html: `<ul><li>The build menu gets a <strong>Search buildings</strong> box. Type to filter the current tab by name.</li>
 <li><span class="kbd">Enter</span> keeps the filter and returns to the game; <span class="kbd">Escape</span> or <strong>&times;</strong> clears it.</li>
 <li>Item tooltips show where to find the item in the menu.</li></ul>
@@ -609,12 +616,12 @@ window.HELP = {
 <tr><td>Clear the search on close</td><td>On</td><td>Empties the box when the build menu closes.</td></tr>
 <tr><td>Breadcrumbs</td><td>On</td><td>The "where to find it" line in tooltips.</td></tr></tbody></table>
 <p><strong>Mods &rsaquo; Progenitor &rsaquo; Build menu</strong>.</p>` },
-        { id: "dye-all", title: "Dye all",
+        { id: "dye-all", title: "Dye all", shot: { src: "img/game-dye-all.webp", alt: "Character, Equipment with the dye colors open; every armor piece took the held color" },
           html: `<ol><li>Open <strong>Character &rsaquo; Equipment</strong> and the dye colors.</li><li>Hold a color swatch for a second.</li><li>Every piece you can see takes that color.</li></ol>
 <p>Where a transmog shows, the transmog is dyed and the armor under it keeps its color. A slot you hid, or a broken piece, stays as it is. A click still colors only the selected piece.</p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Dye all on hold</td><td>On</td><td>Holding a swatch dyes every piece you can see. <strong>Mods &rsaquo; Progenitor &rsaquo; Equipment</strong>.</td></tr></tbody></table>` },
-        { id: "photo-mode", title: "Photo mode",
+        { id: "photo-mode", title: "Photo mode", shot: { src: "img/game-photo-mode.webp", alt: "A castle seen from photo mode's free camera, the HUD hidden" },
           html: `<p>A free camera with the HUD hidden. Turn on <strong>Photo mode</strong> under <strong>Mods &rsaquo; Progenitor &rsaquo; Photo mode</strong>, then press <span class="kbd">Ctrl+Shift+F9</span> to enter and leave.</p>
 <table><thead><tr><th class="label">Key</th><th class="label">Does</th></tr></thead><tbody>
 <tr><td><span class="kbd">W</span> <span class="kbd">A</span> <span class="kbd">S</span> <span class="kbd">D</span>, <span class="kbd">E</span> up, <span class="kbd">Q</span> down</td><td>Fly</td></tr>
@@ -682,7 +689,7 @@ window.HELP = {
 <li>The host of a private game.</li>
 <li>All admins are equal: any admin may change any setting.</li>
 <li>To stop that, [[config-lock|lock]] groups in the server's <code>progenitor.cfg</code>: <code>[ServerSettings] LockedInGame</code>.</li></ul>` },
-        { id: "server-tab", title: "The Server tab",
+        { id: "server-tab", title: "The Server tab", shot: { src: "img/admins-server-tab.webp", alt: "The Server tab on a server, open at When players join" },
           html: `<p>Join your server, open <strong>Mods</strong>, then the [[server-tab|Server]] tab. Admins edit; everyone else reads.</p>
 <ul><li><a href="#admins/joining/popup">Mods players need</a>: required and recommended client mods.</li>
 <li><a href="#admins/rules/rules">Server rules</a>, <a href="#admins/backups/backups">backups</a>, <a href="#admins/chat/allow">chat</a> and <a href="#admins/mods/updates">updates</a>.</li>
@@ -1259,6 +1266,7 @@ My question:` } },
           return '<div class="gl-entry" id="term-' + g.id + '" data-id="' + g.id + '"><dt>' + esc(g.term) + "</dt><dd>" + g.def + "</dd></div>";
         }).join("") + "</dl>";
     }
+    if (d.shot) body += '<figure class="shot"><a href="' + esc(d.shot.src) + '" target="_blank" rel="noopener" title="Open full size"><img src="' + esc(d.shot.src) + '" alt="' + esc(d.shot.alt || "") + '" loading="lazy"></a>' + (d.shot.caption ? "<figcaption>" + terms(d.shot.caption) + "</figcaption>" : "") + "</figure>";
     if (d.callout) body += '<div class="callout' + (d.callout.warn ? " warn" : "") + '"><span class="label">' + esc(d.callout.title || "Tip") + "</span><p>" + terms(d.callout.text) + "</p></div>";
     return h + body;
   }
@@ -1442,7 +1450,7 @@ My question:` } },
   // ---- Search across every page ----
   var search = $("search"), results = $("results"), active = -1;
   var index = pages.map(function (p) {
-    var d = p.data, text = plain((d.lede || "") + " " + (d.html || "") + " " + (d.callout ? d.callout.title + " " + d.callout.text : "")) + " " + (d.code ? d.code.text : "");
+    var d = p.data, text = plain((d.lede || "") + " " + (d.html || "") + " " + (d.callout ? d.callout.title + " " + d.callout.text : "") + " " + (d.shot && d.shot.caption ? d.shot.caption : "")) + " " + (d.code ? d.code.text : "");
     if (d.glossary) text += " " + (H.glossary || []).map(function (g) { return g.term + " " + plain(g.def); }).join(" ");
     return { page: p, text: text.replace(/\s+/g, " ").trim() };
   });

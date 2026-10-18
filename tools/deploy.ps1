@@ -544,6 +544,14 @@ function Copy-ProgenitorGuide($t) {
   Invoke-DeployNewDir $destDir
   try {
     Copy-Item -LiteralPath $src -Destination $final -Force
+    # Its screenshots (the pages' shot fields) ship beside it, as package.ps1 ships them.
+    $imgSrc = Join-Path (Split-Path $src -Parent) "img"
+    if (Test-Path -LiteralPath $imgSrc) {
+      $imgDest = Join-Path $destDir "img"
+      Invoke-DeployNewDir $imgDest
+      Get-ChildItem -LiteralPath $imgSrc -File | Where-Object { $_.Extension -in '.webp', '.png', '.jpg' } |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $imgDest $_.Name) -Force }
+    }
     Write-Host "[$($t.Name)] Progenitor guide -> progenitor-core/docs/guide"
   } catch {
     Write-Warning "[$($t.Name)] Progenitor guide not updated: $($_.Exception.Message)"

@@ -119,4 +119,28 @@ public sealed class HelpGuideCoverageTests
             "The help guide states current behavior only; put testing status in the developer docs or the PR body"
             + " (docs/documentation.md, \"Keep the help guide current\"): " + string.Join(" | ", found));
     }
+
+    /// <summary>
+    /// Every screenshot a guide page names (<c>shot: { src: "img/..." }</c>) is a WebP, PNG or JPEG in docs/guide/img with
+    /// alt text, and package.ps1 and deploy.ps1 both copy that folder beside the guide.
+    /// What this would catch: a page showing a broken image in the game because the file was renamed, never added, or
+    /// not shipped with the guide.
+    /// </summary>
+    [Fact]
+    public void Every_guide_screenshot_exists_has_alt_text_and_ships_with_the_guide()
+    {
+        string block = ContentBlock();
+        var shots = Regex.Matches(block, @"\bshot:\s*\{\s*src:\s*""([^""]+)"",\s*alt:\s*""([^""]*)""");
+        Assert.True(shots.Count > 0, "the guide names no screenshots");
+        Assert.Equal(Regex.Matches(block, @"\bshot:\s*\{").Count, shots.Count);
+        foreach (Match m in shots)
+        {
+            string src = m.Groups[1].Value;
+            Assert.Matches(@"^img/[a-z0-9-]+\.(webp|png|jpg)$", src);
+            Assert.True(File.Exists(Path.Combine(SourcePin.RepoRoot(), "docs", "guide", src)), "missing screenshot docs/guide/" + src);
+            Assert.False(string.IsNullOrWhiteSpace(m.Groups[2].Value), src + " has no alt text");
+        }
+        foreach (string script in new[] { "package.ps1", "deploy.ps1" })
+            Assert.Contains("\"img\"", SourcePin.ReadFile("tools", script), StringComparison.Ordinal);
+    }
 }

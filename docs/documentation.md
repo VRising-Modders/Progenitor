@@ -34,6 +34,7 @@ The guide describes current behavior only. A new feature still gets its guide pa
 - Keep the glossary consistent: every `[[term|...]]` has an entry and every entry is used.
 - Edit only the content block (`templates/help/README.md`), then run `node tools/help-guide/sync.mjs --check`.
 - `HelpGuideCoverageTests` fails when a row on Progenitor's own page or the Server tab is not named in the guide, or when the guide contains a testing-status phrase.
+- A page may show one screenshot: `shot: { src: "img/<name>.webp", alt: "…", caption: "…" }` (caption optional). Put the image in `docs/guide/img`: a game capture at 1600x900 WebP, about 50-100 KB, taken in a clean world with no personal names, IDs or chat from real players. `package.ps1` and `deploy.ps1` copy the folder beside the guide; the sync check and `HelpGuideCoverageTests` fail on a missing file or missing alt text.
 
 ## Make examples executable and claims verifiable
 
