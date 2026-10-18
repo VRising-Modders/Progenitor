@@ -939,6 +939,37 @@ internal static class ChatTabs
         return true;
     }
 
+    /// <summary>
+    /// CHAT7, for the bridge's <c>chat_tabs submit</c>: end the input line as Enter does in the game's input field
+    /// (<c>onSubmit</c>, then <c>DeactivateInputField</c>, whose end-edit runs the game's send). A field without keyboard
+    /// focus (a headless client, an unfocused window) cannot be deactivated, so its <c>onEndEdit</c> is raised directly:
+    /// the same event, the game's send listens on it. Opens the chat first when it is closed and replies
+    /// <c>opening</c>; call again once <c>input.focused</c> is true.
+    /// </summary>
+    internal static string SubmitInputLine()
+    {
+        var world = Worlds.Client;
+        var window = world?.GetExistingSystemManaged<ClientChatSystem>()?._ChatWindow;
+        var field = window?.ChatInputField;
+        if (world == null || window == null || field == null || field.Pointer == IntPtr.Zero) return "no-input";
+        if (!window.IsChatFocused)
+        {
+            ChatHelper.ToggleChat(world);
+            return "opening";
+        }
+
+        string text = field.text ?? "";
+        field.onSubmit?.Invoke(text);
+        if (field.isFocused)
+        {
+            field.DeactivateInputField(false);
+            return "submitted";
+        }
+
+        field.onEndEdit?.Invoke(text);
+        return "end-edit";
+    }
+
     private static float CanvasScale()
     {
         try

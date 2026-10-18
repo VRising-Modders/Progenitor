@@ -263,6 +263,50 @@ public sealed class ChatTabInputTests
         Assert.Null(watch.Frame(false, "still typing", OnTab));
     }
 
+    // Live 2026-10-18: the game empties the input when Enter sends, but its focus flag drops a chat update later.
+    [Fact]
+    public void Sent_watch_counts_a_send_whose_focus_loss_shows_a_frame_after_the_clear()
+    {
+        var watch = new ChatSentWatch();
+        bool NoTab(string _) => false;
+
+        Assert.Null(watch.Frame(true, "hello", NoTab));
+        Assert.Null(watch.Frame(true, "", NoTab));      // emptied, focus flag not updated yet
+        Assert.Equal("hello", watch.Typed);
+        Assert.True(watch.LostFocus(false));
+        Assert.Equal("hello", watch.Frame(false, "", NoTab));
+        Assert.Equal("", watch.Typed);
+
+        // Tolerates the lag up to ClearedFrames focused frames.
+        Assert.Null(watch.Frame(true, "again", NoTab));
+        for (int i = 0; i < ChatSentWatch.ClearedFrames; i++) Assert.Null(watch.Frame(true, "", NoTab));
+        Assert.Equal("again", watch.Frame(false, "", NoTab));
+
+        // A line emptied while the input stays open (select all, delete) is no longer offered once focus stays.
+        Assert.Null(watch.Frame(true, "typo", NoTab));
+        for (int i = 0; i <= ChatSentWatch.ClearedFrames; i++) Assert.Null(watch.Frame(true, "", NoTab));
+        Assert.Null(watch.Frame(false, "", NoTab));
+
+        // Typing again after a clear forgets the emptied line.
+        Assert.Null(watch.Frame(true, "first", NoTab));
+        Assert.Null(watch.Frame(true, "", NoTab));
+        Assert.Null(watch.Frame(true, "s", NoTab));
+        Assert.Equal("s", watch.Typed);
+
+        // A swapped line (Forget) right after a clear is not counted.
+        Assert.Null(watch.Frame(true, "draft", NoTab));
+        Assert.Null(watch.Frame(true, "", NoTab));
+        watch.Forget();
+        Assert.Null(watch.Frame(false, "", NoTab));
+
+        // A tab click right after a clear is asked with the emptied line and stays a tab click.
+        var asked = new List<string>();
+        Assert.Null(watch.Frame(true, "for clan", NoTab));
+        Assert.Null(watch.Frame(true, "", NoTab));
+        Assert.Null(watch.Frame(false, "", s => { asked.Add(s); return true; }));
+        Assert.Equal(new[] { "for clan" }, asked);
+    }
+
     [Fact]
     public void Saved_send_channels_round_trip_and_older_strings_still_load()
     {

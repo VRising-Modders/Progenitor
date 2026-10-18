@@ -229,14 +229,28 @@ internal sealed class ChatTabInputTracker
 /// row (a tab click: the line becomes that tab's draft), not for a bare whisper line, and not after the line was
 /// swapped for another tab's (<see cref="Forget"/>). Escape on a typed line may count; recall then offers it, which is
 /// harmless. Game-free.
+/// <para>
+/// When Enter sends, the game empties the input at once but reports the focus loss
+/// (<c>HUDChatWindow.IsChatFocused</c>) only from its next chat update, so the line is seen empty while still focused
+/// for a frame first. A line emptied all at once is therefore kept for up to <see cref="ClearedFrames"/> focused
+/// frames and counts if the focus drops in that time.
+/// </para>
 /// </summary>
 internal sealed class ChatSentWatch
 {
+    /// <summary>How many focused frames a line emptied all at once still counts as the typed line.</summary>
+    internal const int ClearedFrames = 2;
+
     private string _typed = "";
+    private string _cleared = "";
+    private int _clearedFrames;
     private bool _wasFocused;
 
-    /// <summary>The line typed so far while the input has focus (empty after <see cref="Forget"/>).</summary>
-    internal string Typed => _typed;
+    /// <summary>
+    /// The line typed so far while the input has focus, or the line the game just emptied when it sent it (empty after
+    /// <see cref="Forget"/>).
+    /// </summary>
+    internal string Typed => _typed.Length > 0 ? _typed : _cleared;
 
     /// <summary>The last focus loss went to a press on the tab row.</summary>
     internal bool LastLossWasTabClick { get; private set; }
@@ -248,11 +262,23 @@ internal sealed class ChatSentWatch
     internal string? Frame(bool focused, string? text, Func<string, bool> lostToTabRow)
     {
         string? sent = null;
-        if (focused) _typed = text ?? "";
+        if (focused)
+        {
+            string now = text ?? "";
+            if (now.Length == 0 && _typed.Length > 0)
+            {
+                // Emptied all at once: the game's send, whose focus loss shows a frame later.
+                _cleared = _typed;
+                _clearedFrames = 1;
+            }
+            else if (now.Length > 0 || ++_clearedFrames > ClearedFrames) _cleared = "";
+            _typed = now;
+        }
         else if (_wasFocused)
         {
-            string typed = _typed;
+            string typed = Typed;
             _typed = "";
+            _cleared = "";
             bool tabClick = typed.Length > 0 && lostToTabRow(typed);
             LastLossWasTabClick = tabClick;
             if (!tabClick && string.IsNullOrEmpty(text) && typed.Trim().Length > 0 && !ChatTabInput.IsBareWhisper(typed)) sent = typed;
@@ -266,7 +292,11 @@ internal sealed class ChatSentWatch
     internal bool LostFocus(bool focused) => _wasFocused && !focused;
 
     /// <summary>The line in the input was replaced (another tab's draft, a long message sent by parts): forget it.</summary>
-    internal void Forget() => _typed = "";
+    internal void Forget()
+    {
+        _typed = "";
+        _cleared = "";
+    }
 }
 
 /// <summary>What a pending chat insert does on this frame (<see cref="ChatInsertPlan.Next"/>).</summary>
