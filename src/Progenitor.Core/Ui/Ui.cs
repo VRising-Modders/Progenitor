@@ -346,32 +346,53 @@ public static partial class Ui
     /// one frame watch.
     /// </summary>
     public static IVanillaAttachHandle AttachToVanilla(
-        VanillaUiSite site, VanillaPanelAnchor anchor, object? owner = null, string? pluginId = null)
+        VanillaUiSite site, VanillaPanelAnchor anchor, object? owner = null, string? pluginId = null) =>
+        Attach(site, anchor, 0, owner, pluginId);
+
+    /// <summary>
+    /// Rows right under one requirement line of the recipe tooltip
+    /// (<see cref="VanillaUiSite.RecipeTooltip"/>, anchor <see cref="VanillaPanelAnchor.TooltipRequirementLine"/>):
+    /// <paramref name="line"/> is the line's index in <see cref="VanillaPanelTarget.Requirements"/> (0 = the
+    /// first; the game's tooltip has room for <see cref="VanillaUiSites.MaxRequirementLines"/>). One handle per
+    /// line; rows from several handles on one line stack in the order they were built. The container lives
+    /// inside the game's requirement list, right after that line's own row, so the following lines move down;
+    /// it is shown only while the game shows that line, and the game's rewrite of the lines (every tooltip
+    /// update) neither moves nor removes it. A line out of range gives a disabled handle and one log line.
+    /// </summary>
+    public static IVanillaAttachHandle AttachToRequirementLine(int line, object? owner = null, string? pluginId = null) =>
+        Attach(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirementLine, line, owner, pluginId);
+
+    private static IVanillaAttachHandle Attach(
+        VanillaUiSite site, VanillaPanelAnchor anchor, int line, object? owner, string? pluginId)
     {
         string id = string.IsNullOrWhiteSpace(pluginId) ? InferPluginId(owner) : pluginId.Trim();
         string key = VanillaUiSites.Key(site);
         bool anchorOk = VanillaUiSites.TryResolveAnchor(site, anchor, out var resolved);
-        string suffix = VanillaUiSites.AnchorKey(resolved);
+        bool perLine = resolved == VanillaPanelAnchor.TooltipRequirementLine;
+        string suffix = perLine ? VanillaUiSites.LineKey(line) : VanillaUiSites.AnchorKey(resolved);
         string container = UiOwnership.AttachName(id, suffix.Length == 0 ? key : key + "-" + suffix);
 
         string? refusal =
             !VanillaUiSites.IsDefined(site) ? "site " + (int)site + " is not a site Core knows"
             : !anchorOk ? "anchor " + anchor + " is not an anchor this site accepts"
+            : perLine && !VanillaUiSites.IsRequirementLine(line)
+                ? "requirement line " + line + " is outside 0.." + (VanillaUiSites.MaxRequirementLines - 1)
             : _skipped ? "the module is skipped"
             : !CurrentRuntime().IsClient ? "it is client-only"
             : null;
 
+        int requirementLine = perLine ? line : -1;
         var runtime = CurrentRuntime();
         if (refusal != null)
         {
             Plugin.Logger?.LogInfo(
                 "Ui: attach " + key + " " + refusal + "; returning a disabled handle.");
-            var off = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: false, resolved);
+            var off = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: false, resolved, requirementLine);
             VanillaAttachRegistry.Add(off, installWatch: null);
             return off;
         }
 
-        var handle = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: true, resolved);
+        var handle = new VanillaAttachHandle(site, id, container, owner, runtime, enabled: true, resolved, requirementLine);
         VanillaAttachRegistry.Add(handle, InstallSiteWatch);
         Plugin.Logger?.LogInfo("Ui: attach " + key + " requested by " + id + " as " + container);
         return handle;

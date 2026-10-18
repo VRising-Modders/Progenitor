@@ -44,6 +44,15 @@ public enum MaterialOperation
     /// off a plot the game has no shared storage to reach and the craft keeps the game's own rules.
     /// </summary>
     CharacterCraft = 6,
+
+    /// <summary>
+    /// Display only: the "have" count of each requirement line in a refinement station's recipe tooltip
+    /// (a Furnace, a Fabricator). The game counts only the station's own slots there; with a view the line
+    /// shows the station's count plus the pool total of the item. Refining itself still takes from the
+    /// station's slots: this operation never pays and no game check reads it.
+    /// <see cref="MaterialContext.Station"/> is the refinement station whose window is open.
+    /// </summary>
+    RefineView = 7,
 }
 
 /// <summary>Which operations Progenitor can currently route through a provider.</summary>
@@ -52,16 +61,25 @@ public static class MaterialOperations
     /// <summary>
     /// The operations whose availability and payment seams are wired: <see cref="MaterialOperation.Build"/>,
     /// <see cref="MaterialOperation.Craft"/>, <see cref="MaterialOperation.Repair"/>,
-    /// <see cref="MaterialOperation.Upgrade"/> and <see cref="MaterialOperation.CharacterCraft"/>. A
+    /// <see cref="MaterialOperation.Upgrade"/> and <see cref="MaterialOperation.CharacterCraft"/>, plus the
+    /// display-only <see cref="MaterialOperation.RefineView"/> (a view, never a payment). A
     /// provider that names others is told so once at registration and those operations stay vanilla.
     /// </summary>
     public static IReadOnlyCollection<MaterialOperation> Supported { get; } = Array.AsReadOnly(
-        new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft });
+        new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft,
+            MaterialOperation.RefineView });
 
     /// <summary>True when <paramref name="operation"/> is wired.</summary>
     public static bool IsSupported(MaterialOperation operation) =>
         operation is MaterialOperation.Build or MaterialOperation.Craft or MaterialOperation.Repair or MaterialOperation.Upgrade
-            or MaterialOperation.CharacterCraft;
+            or MaterialOperation.CharacterCraft or MaterialOperation.RefineView;
+
+    /// <summary>
+    /// True when <paramref name="operation"/> only changes what the player sees
+    /// (<see cref="MaterialOperation.RefineView"/>): Progenitor computes and sends its view, and no game
+    /// check or payment ever asks for it.
+    /// </summary>
+    public static bool IsDisplayOnly(MaterialOperation operation) => operation == MaterialOperation.RefineView;
 
     /// <summary>
     /// True when <paramref name="operation"/> is governed only while the character stands on a castle
@@ -109,6 +127,8 @@ public readonly struct MaterialContext : IEquatable<MaterialContext>
     /// <item><description><see cref="MaterialOperation.CharacterCraft"/>: <see cref="ContainerId.None"/> (the
     /// Character window's Crafting tab has no workstation; <see cref="StandingTerritory"/> is always set,
     /// since the operation is governed only on a plot).</description></item>
+    /// <item><description><see cref="MaterialOperation.RefineView"/>: the refinement station whose window the
+    /// player has open.</description></item>
     /// </list>
     /// </summary>
     public ContainerId Station { get; }

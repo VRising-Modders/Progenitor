@@ -41,6 +41,7 @@ internal static class MaterialsTestBridge
         else
         {
             result["views"] = MaterialSeamRuntime.DescribeViews();
+            result["refineTooltip"] = MaterialRefineTooltipRuntime.Describe();
         }
         return result;
     }

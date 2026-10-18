@@ -46,7 +46,7 @@ internal static class MaterialNet
 /// is one <see cref="MaterialService"/> session: the provider is asked once at the check, every line is
 /// paid from that answer, and the queued <see cref="MaterialPaid"/> events are published when the
 /// system's update ends. Every second (and right after an invalidation or a governed payment) each
-/// online player's Build, Craft, Upgrade and CharacterCraft totals are refreshed and sent when they changed
+/// online player's Build, Craft, Upgrade, CharacterCraft and RefineView totals are refreshed and sent when they changed
 /// (<see cref="MaterialRefreshPolicy"/>, <see cref="MaterialViewPublisher"/>); a refresh recomputes a
 /// view only when something it depends on changed (<see cref="MaterialService.RefreshView"/>).</para>
 ///
@@ -56,7 +56,8 @@ internal static class MaterialNet
 /// crafting menu's update while that window is open): items the provider governs show the server's pool
 /// amount, every other item keeps the game's own shared amount. Without a matching view the game's own
 /// counts are shown. A displayed count is never authorization: the server checks again and pays at
-/// action time.</para>
+/// action time. A RefineView view never reaches the merged count: it only rewrites the refinement window's
+/// recipe tooltip lines (<see cref="MaterialRefineTooltipRuntime"/>).</para>
 /// </summary>
 internal static unsafe class MaterialSeamRuntime
 {
@@ -211,6 +212,12 @@ internal static unsafe class MaterialSeamRuntime
                 _characterCraftMenuFrame = FrameNow();
             }, always));
             Hooks.Add(SystemHooks.After<ProjectM.UI.CharacterCraftingSubMenuMapper>(_ => _inCharacterCraftMenu = false, always));
+            // The refinement window's recipe tooltip: its requirement lines are rewritten by the game on
+            // every update of this mapper; a RefineView view adds the pool after that write, and the
+            // Before puts the game's text back so the next update reads the game's own count. Both hooks
+            // run only when the system runs, so they always pair.
+            Hooks.Add(SystemHooks.Before<ProjectM.UI.RefinementstationMenuMapper>(_ => MaterialRefineTooltipRuntime.Before()));
+            Hooks.Add(SystemHooks.After<ProjectM.UI.RefinementstationMenuMapper>(_ => MaterialRefineTooltipRuntime.After(Overlay)));
             CustomEvents.OnReceive(MaterialViewWire.EventId, OnView);
             _clientHandler = true;
             Handshake.ClientConnectionEnded += OnConnectionEnded;
@@ -222,7 +229,11 @@ internal static unsafe class MaterialSeamRuntime
 
     internal static void Uninstall()
     {
-        if (!_server) MaterialPlacementDispatch.Restore();
+        if (!_server)
+        {
+            MaterialPlacementDispatch.Restore();
+            MaterialRefineTooltipRuntime.Clear();
+        }
         if (_bound) BootstrapLink.TrySetMaterialSlots(null, null, null, null);
         _bound = false;
         _reason = "Core uninstalled";
@@ -554,9 +565,11 @@ internal static unsafe class MaterialSeamRuntime
             try { userIndex = em.GetComponentData<User>(userEntity).Index; }
             catch { continue; }
             // A CharacterCraft view only to a client that declared it reads one (an older Core drops it as malformed).
-            bool readsCharacterCraft = (Handshake.CapsOf(userIndex) & Handshake.Capability.MaterialCharacterCraft) != 0;
+            var caps = Handshake.CapsOf(userIndex);
+            bool readsCharacterCraft = (caps & Handshake.Capability.MaterialCharacterCraft) != 0;
+            bool readsRefineView = (caps & Handshake.Capability.MaterialRefineView) != 0;
             foreach (var op in MaterialClientPolicy.ViewOperations)
-                if (MaterialClientPolicy.ReadByPeer(op, readsCharacterCraft))
+                if (MaterialClientPolicy.ReadByPeer(op, readsCharacterCraft, readsRefineView))
                     Push(bootstrap, userIndex, user, character, op, force || dirty, dirty, Reads);
         }
         return true;
@@ -566,14 +579,15 @@ internal static unsafe class MaterialSeamRuntime
         bool recompute, MaterialStockReads reads)
     {
         MaterialViewContent? content = null;
-        // A Craft view only means something at a workstation and an Upgrade view only with a castle
-        // heart's window open; skip the provider calls otherwise. A CharacterCraft view is computed only
+        // A Craft view only means something at a workstation, an Upgrade view only with a castle heart's
+        // window open and a RefineView view only at a refinement station; skip the provider calls otherwise. A CharacterCraft view is computed only
         // on a plot (MaterialService refuses it off one). A Repair view is not sent (see
         // MaterialClientPolicy.ViewOperations).
         ulong stationNet = op switch
         {
             MaterialOperation.Craft => _world!.StationNet(character),
             MaterialOperation.Upgrade => _world!.HeartTargetNet(character),
+            MaterialOperation.RefineView => _world!.RefinementStationNet(character),
             _ => 0,
         };
         // Upgrade: only the window of a heart the player or the player's clan owns.
@@ -616,6 +630,7 @@ internal static unsafe class MaterialSeamRuntime
     private static void OnConnectionEnded()
     {
         Overlay.Clear();
+        MaterialRefineTooltipRuntime.Clear();
         _malformedViews = 0;
     }
 

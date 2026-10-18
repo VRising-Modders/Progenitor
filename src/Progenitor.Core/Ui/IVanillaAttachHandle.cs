@@ -120,6 +120,13 @@ public interface IVanillaAttachHandle : IDisposable
     VanillaPanelAnchor Anchor => VanillaPanelAnchor.Default;
 
     /// <summary>
+    /// For <see cref="VanillaPanelAnchor.TooltipRequirementLine"/>: which requirement line the rows sit
+    /// under (0 = the first, an index into <see cref="VanillaPanelTarget.Requirements"/>); -1 for every
+    /// other anchor.
+    /// </summary>
+    int RequirementLine => -1;
+
+    /// <summary>
     /// P6: the panel is open right now (for the tooltip site: a tooltip is shown over an item).
     /// Always false for the map card, which reports no open state.
     /// </summary>

@@ -51,6 +51,16 @@ public enum VanillaPanelAnchor
     /// (the "0/3 Glass" lines), in the tooltip's own text style.
     /// </summary>
     TooltipRequirements = 6,
+
+    /// <summary>
+    /// <see cref="VanillaUiSite.RecipeTooltip"/> only: rows right under one requirement line (the line
+    /// <see cref="IVanillaAttachHandle.RequirementLine"/> names, an index into
+    /// <see cref="VanillaPanelTarget.Requirements"/>), inside the requirement list, so the next line moves
+    /// down to make room. Attach with <see cref="Ui.AttachToRequirementLine"/>; a plain
+    /// <see cref="Ui.AttachToVanilla(VanillaUiSite, VanillaPanelAnchor, object?, string?)"/> with this anchor is
+    /// line 0. Hidden while the recipe shown has no such line.
+    /// </summary>
+    TooltipRequirementLine = 7,
 }
 
 /// <summary>

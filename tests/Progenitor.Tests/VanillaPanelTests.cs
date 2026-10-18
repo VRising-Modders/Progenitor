@@ -115,6 +115,9 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.TooltipBody)]
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, true, VanillaPanelAnchor.TooltipRequirements)]
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirementLine, true, VanillaPanelAnchor.TooltipRequirementLine)]
+    [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipRequirementLine, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.TooltipRequirementLine, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.MapWarEventInfo, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     public void Anchors_resolve_per_site(VanillaUiSite site, VanillaPanelAnchor asked, bool ok, VanillaPanelAnchor resolved)
@@ -568,6 +571,80 @@ public class VanillaPanelTests : IDisposable
         Assert.Single(Lines, l => l.StartsWith("Ui: attached RecipeTooltip anchor=requirements"));
         Assert.Equal(new[] { VanillaPanelAnchor.TooltipRequirements }, _client.BuiltAnchors.ToArray());
         h.Dispose();
+    }
+
+    [Fact]
+    public void A_requirement_line_attachment_builds_under_its_own_line_and_keeps_its_rows_across_rewrites()
+    {
+        var glass = new VanillaRecipeRequirement(301, 3);
+        var plank = new VanillaRecipeRequirement(302, 8);
+        var line1 = UiApi.AttachToRequirementLine(1, _owner, "example.recipes");
+        Assert.True(line1.Enabled);
+        Assert.Equal(VanillaPanelAnchor.TooltipRequirementLine, line1.Anchor);
+        Assert.Equal(1, line1.RequirementLine);
+        Assert.EndsWith("RecipeTooltip-line1", line1.ContainerName);
+        line1.OnPanel(e =>
+        {
+            if (e.Change == VanillaPanelChange.Closed) return;
+            var needs = e.Target.Requirements;
+            line1.SetRows(new VanillaRow[] { needs.Count > 1 ? "Network: 40 x" + needs[1].ItemGuid : "" });
+        });
+
+        // The game rewrites the tooltip every frame; the same hovered recipe is one target and the
+        // rows stay one set (never dropped, never duplicated).
+        for (int frame = 0; frame < 5; frame++)
+            _client.Fire(VanillaUiSite.RecipeTooltip, Open(64, Recipe(9010, 500, 1, VanillaPanelKind.RefinementStation, glass, plank)));
+        Assert.Equal(new[] { "Network: 40 x302" }, _client.RowTexts);
+        Assert.Equal(new[] { 1 }, _client.BuiltLines.Distinct().ToArray());
+
+        var described = ((VanillaAttachHandle)line1).Readback().Describe();
+        Assert.Equal(1, described["requirementLine"]);
+        Assert.Equal("TooltipRequirementLine", described["anchor"]);
+
+        // Another recipe: rebuilt under the same line, one set of rows again.
+        _client.Fire(VanillaUiSite.RecipeTooltip, Open(64, Recipe(9011, 500, 1, VanillaPanelKind.RefinementStation, plank, glass)));
+        Assert.Equal(new[] { "Network: 40 x301" }, _client.RowTexts);
+        line1.Dispose();
+    }
+
+    [Fact]
+    public void A_requirement_line_outside_the_tooltip_is_a_disabled_handle()
+    {
+        var h = UiApi.AttachToRequirementLine(VanillaUiSites.MaxRequirementLines, _owner, "example.recipes");
+        Assert.False(h.Enabled);
+        Assert.Contains(Lines, l => l.Contains("requirement line 6 is outside 0..5"));
+        h.Dispose();
+        var neg = UiApi.AttachToRequirementLine(-1, _owner, "example.recipes");
+        Assert.False(neg.Enabled);
+        neg.Dispose();
+
+        // The plain anchor overload is line 0; other anchors have no line.
+        var zero = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirementLine, _owner, "example.recipes");
+        Assert.Equal(0, zero.RequirementLine);
+        zero.Dispose();
+        var block = UiApi.AttachToVanilla(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.TooltipRequirements, _owner, "example.recipes");
+        Assert.Equal(-1, block.RequirementLine);
+        block.Dispose();
+    }
+
+    [Fact]
+    public void A_requirement_line_container_shows_only_with_its_game_line()
+    {
+        Assert.True(VanillaUiSites.LineShown(wanted: true, gameLineShown: true));
+        Assert.False(VanillaUiSites.LineShown(wanted: true, gameLineShown: false));
+        Assert.False(VanillaUiSites.LineShown(wanted: false, gameLineShown: true));
+        Assert.True(VanillaUiSites.IsTooltipAnchor(VanillaPanelAnchor.TooltipRequirementLine));
+        Assert.Equal("line", VanillaUiSites.AnchorKey(VanillaPanelAnchor.TooltipRequirementLine));
+        Assert.Equal("line3", VanillaUiSites.LineKey(3));
+        Assert.True(VanillaUiSites.IsRequirementLine(0));
+        Assert.True(VanillaUiSites.IsRequirementLine(5));
+        Assert.False(VanillaUiSites.IsRequirementLine(6));
+
+        // The game leaves out a requirement without item data: the shown lines no longer match the
+        // target's requirements one for one, so no per-line container is shown for that recipe.
+        Assert.True(VanillaUiSites.RequirementLinesMatch(3, 3));
+        Assert.False(VanillaUiSites.RequirementLinesMatch(2, 3));
+        Assert.False(VanillaUiSites.RequirementLinesMatch(0, 0));
     }
 
     [Fact]
@@ -1130,6 +1207,14 @@ public class VanillaPanelTests : IDisposable
             if (RefuseWatch) return null;
             _watches[site] = onFrame;
             return new Lease(() => _watches.Remove(site));
+        }
+
+        public List<int> BuiltLines { get; } = new();
+
+        public IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName, int line)
+        {
+            BuiltLines.Add(line);
+            return BuildPanelContainer(site, anchor, containerName);
         }
 
         public IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName)
