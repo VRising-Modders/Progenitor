@@ -113,8 +113,17 @@ public sealed class UiWorldPickOptions
     /// </summary>
     public bool CloseGameWindows { get; set; }
 
+    /// <summary>
+    /// PICKMOD1: a second line on the prompt band naming a modifier the mod reads from
+    /// <see cref="UiWorldPickResult.Modifiers"/>, for example <c>"Shift+{interact}: except"</c>: the part before
+    /// <c>": "</c> is drawn on the game's key cap (<c>{interact}</c> becomes the game's Interact key, so a remap is
+    /// followed), the rest as words. Without <c>": "</c> the whole hint is words. Empty (the default): one line.
+    /// </summary>
+    public string ModifierHint { get; set; } = "";
+
     internal UiWorldPickOptions Copy() => new()
     {
+        ModifierHint = (ModifierHint ?? "").Trim(),
         CloseGameWindows = CloseGameWindows,
         Kinds = Kinds,
         Prompt = string.IsNullOrWhiteSpace(Prompt) || (Repeat && Prompt.Trim() == DefaultPrompt)
@@ -134,8 +143,9 @@ public sealed class UiWorldPickOptions
 public readonly struct UiWorldPickResult
 {
     internal UiWorldPickResult(int entityIndex, int entityVersion, UiWorldPickKind kind, int menuType, string menu, int worldEpoch, bool suppressed,
-        int networkId0 = 0, int networkId1 = 0, int networkId2 = 0)
+        int networkId0 = 0, int networkId1 = 0, int networkId2 = 0, KeyModifiers modifiers = KeyModifiers.None)
     {
+        Modifiers = modifiers;
         NetworkId0 = networkId0;
         NetworkId1 = networkId1;
         NetworkId2 = networkId2;
@@ -168,6 +178,23 @@ public readonly struct UiWorldPickResult
 
     /// <summary>True when the panel was kept closed (<see cref="UiWorldPickOptions.SuppressPanel"/>).</summary>
     public bool Suppressed { get; }
+
+    /// <summary>
+    /// PICKMOD1: the modifier keys (either side's Ctrl, Shift, Alt) held at the Interact press that made this pick, from
+    /// the framework's own key sampling (the same reads the keybinds use; nothing polls the keyboard for it). A modifier
+    /// let go within a quarter second before the pick was seen still counts. Works with <see cref="UiWorldPickOptions.Repeat"/>:
+    /// each pick has its own. <see cref="KeyModifiers.None"/> on a gamepad or when the keyboard cannot be read.
+    /// </summary>
+    public KeyModifiers Modifiers { get; }
+
+    /// <summary>PICKMOD1: Shift was held at the press (<see cref="Modifiers"/>).</summary>
+    public bool Shift => (Modifiers & KeyModifiers.Shift) != 0;
+
+    /// <summary>PICKMOD1: Ctrl was held at the press.</summary>
+    public bool Ctrl => (Modifiers & KeyModifiers.Ctrl) != 0;
+
+    /// <summary>PICKMOD1: Alt was held at the press.</summary>
+    public bool Alt => (Modifiers & KeyModifiers.Alt) != 0;
 
     /// <summary>
     /// The picked entity's <c>NetworkId</c>, first word: <c>Normal_Index</c> for a normal id. Same
@@ -208,7 +235,8 @@ public readonly struct UiWorldPickResult
     public override string ToString() =>
         Kind + " " + EntityIndex + ":" + EntityVersion
         + (HasNetworkId ? " net=" + NetworkIdIndex + ":" + NetworkIdGeneration : "")
-        + " via " + Menu + " (epoch " + WorldEpoch + (Suppressed ? ", panel kept closed" : "") + ")";
+        + " via " + Menu + " (epoch " + WorldEpoch + (Suppressed ? ", panel kept closed" : "")
+        + (Modifiers != KeyModifiers.None ? ", held " + Modifiers : "") + ")";
 }
 
 /// <summary>

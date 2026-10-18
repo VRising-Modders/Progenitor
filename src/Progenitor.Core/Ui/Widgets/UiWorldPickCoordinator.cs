@@ -165,7 +165,7 @@ internal sealed class UiWorldPickCoordinator
     /// world is gone). Returns the result delivered, or null when nothing was picked.
     /// </summary>
     internal UiWorldPickResult? Complete(int menuType, int entityIndex, int entityVersion, int epoch, bool suppressed,
-        int networkId0 = 0, int networkId1 = 0, int networkId2 = 0)
+        int networkId0 = 0, int networkId1 = 0, int networkId2 = 0, KeyModifiers modifiers = KeyModifiers.None)
     {
         var pick = _current;
         if (pick == null) return null;
@@ -178,7 +178,7 @@ internal sealed class UiWorldPickCoordinator
         }
 
         var result = new UiWorldPickResult(entityIndex, entityVersion, info.Kind, menuType, info.Name, epoch, suppressed,
-            networkId0, networkId1, networkId2);
+            networkId0, networkId1, networkId2, modifiers);
         if (pick.Options.Repeat) return Repick(pick, result);
         pick.Result = result;
         pick.PickCount = 1;

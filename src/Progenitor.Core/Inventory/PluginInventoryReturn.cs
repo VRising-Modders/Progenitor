@@ -40,7 +40,21 @@ public sealed partial class PluginInventory
     /// start; <paramref name="done"/> runs once on the main thread with the outcome. A newer reopen replaces a running
     /// one. Main thread. <b>Experimental</b>: source-checked and game-free tested, not live-verified.</para>
     /// </summary>
-    public ContainerReopenResult ReopenLast(ContainerWindowInfo? openWhenStarted = null, Action<ContainerReopenResult>? done = null)
+    public ContainerReopenResult ReopenLast(ContainerWindowInfo? openWhenStarted = null, Action<ContainerReopenResult>? done = null) =>
+        ReopenLast(openWhenStarted, done, null);
+
+    /// <summary>
+    /// <see cref="ReopenLast(ContainerWindowInfo?, Action{ContainerReopenResult}?)"/> with options: with
+    /// <see cref="ContainerReopenOptions.RemoteIfAway"/>, when the window cannot be reopened where the player stands
+    /// (moved away, out of reach), the same chest opens remotely through the container preview instead
+    /// (<see cref="ContainerReopenResult.RemoteOpened"/>, or <see cref="ContainerReopenResult.RemoteFailed"/> with the
+    /// server's sentence in <see cref="ContainerReopenFinished.Reason"/>). <see cref="ContainerReopenOptions.Done"/> gets
+    /// the outcome, its reason and the remote preview. Opt-in. <b>Experimental</b>: not live-verified.
+    /// </summary>
+    public ContainerReopenResult ReopenLast(ContainerWindowInfo? openWhenStarted, ContainerReopenOptions options) =>
+        ReopenLast(openWhenStarted, null, options ?? throw new ArgumentNullException(nameof(options)));
+
+    private ContainerReopenResult ReopenLast(ContainerWindowInfo? openWhenStarted, Action<ContainerReopenResult>? done, ContainerReopenOptions? options)
     {
         _ctx.EnsureAttached();
         if (!_ctx.IsClient) throw new InvalidOperationException("ctx.Inventory.ReopenLast runs on the client.");
@@ -51,7 +65,8 @@ public sealed partial class PluginInventory
             _returnTracked = true;
             _ctx.Track(new ActionDisposable(() => ContainerReturnClient.CancelFor(owner)));
         }
-        return ContainerReturnClient.ReopenLast(done, "ReopenLast", owner, openWhenStarted: openWhenStarted);
+        if (options?.RemotePreview?.Problem() is { } problem) throw new ArgumentException(problem, nameof(options));
+        return ContainerReturnClient.ReopenLast(done, "ReopenLast", owner, openWhenStarted: openWhenStarted, options: options);
     }
 }
 #endif

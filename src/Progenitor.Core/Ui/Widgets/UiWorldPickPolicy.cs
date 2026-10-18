@@ -54,6 +54,71 @@ internal static class UiWorldPickCopy
 
     /// <summary>Widest the prompt text may draw, in reference pixels, before it ends in an ellipsis.</summary>
     internal const float MaxPromptWidth = 900f;
+
+    /// <summary>PICKMOD1: the token in <see cref="UiWorldPickOptions.ModifierHint"/> that stands for the game's Interact key.</summary>
+    internal const string InteractToken = "{interact}";
+
+    /// <summary>
+    /// PICKMOD1: the band's second line from <see cref="UiWorldPickOptions.ModifierHint"/>: <c>"Shift+{interact}: except"</c>
+    /// is the key cap <c>Shift+F</c> (the game's Interact key put in for the token, any case) followed by the words
+    /// <c>except</c>. A hint without <c>": "</c> is words only (no cap). Empty for no hint. Each part trimmed.
+    /// </summary>
+    internal static (string Keys, string Words) SplitHint(string? hint, string interactKey)
+    {
+        if (string.IsNullOrWhiteSpace(hint)) return ("", "");
+        string text = hint!.Trim();
+        int colon = text.IndexOf(": ", StringComparison.Ordinal);
+        string keys = colon > 0 ? text.Substring(0, colon).Trim() : "";
+        string words = colon > 0 ? text.Substring(colon + 2).Trim() : text;
+        if (keys.Length > 0)
+        {
+            string key = string.IsNullOrWhiteSpace(interactKey) ? InteractFallback : interactKey.Trim();
+            int at;
+            while ((at = keys.IndexOf(InteractToken, StringComparison.OrdinalIgnoreCase)) >= 0)
+                keys = keys.Substring(0, at) + key + keys.Substring(at + InteractToken.Length);
+        }
+        return (keys, words);
+    }
+}
+
+/// <summary>
+/// PICKMOD1, game-free: which modifier keys count as held at a pick's Interact press. The framework samples its own held
+/// modifiers once a frame while a pick is armed; the interact is seen a frame or more after the press, by which time a
+/// quick player may have let go of Shift, so the modifiers held at any sample in the last <see cref="WindowSeconds"/>
+/// count.
+/// </summary>
+internal sealed class UiWorldPickModifiers
+{
+    /// <summary>How far back a held modifier still counts for the next pick.</summary>
+    internal const double WindowSeconds = 0.25;
+
+    private readonly System.Collections.Generic.List<(double At, KeyModifiers Held)> _samples = new();
+
+    /// <summary>One frame's held modifiers.</summary>
+    internal void Note(double now, KeyModifiers held)
+    {
+        Prune(now);
+        _samples.Add((now, held));
+    }
+
+    /// <summary>Every modifier held at a sample within <see cref="WindowSeconds"/> of <paramref name="now"/>.</summary>
+    internal KeyModifiers At(double now)
+    {
+        Prune(now);
+        var all = KeyModifiers.None;
+        foreach (var s in _samples) all |= s.Held;
+        return all;
+    }
+
+    /// <summary>A pick armed, or a pick delivered (a repeating pick's next press starts fresh).</summary>
+    internal void Clear() => _samples.Clear();
+
+    private void Prune(double now)
+    {
+        int keep = 0;
+        while (keep < _samples.Count && now - _samples[keep].At > WindowSeconds) keep++;
+        if (keep > 0) _samples.RemoveRange(0, keep);
+    }
 }
 
 /// <summary>Who takes an Escape press while a world pick is armed.</summary>
@@ -172,6 +237,9 @@ internal static class UiWorldPickBandLook
     internal const float MinWidth = 980f;
 
     internal const float Height = 52f;
+
+    /// <summary>PICKMOD1: what a modifier hint's second line adds to the band's height.</summary>
+    internal const float HintRowHeight = 36f;
 
     /// <summary>Padding between the band's content and its ends (inside the fade).</summary>
     internal const float PadX = 90f;

@@ -3356,6 +3356,25 @@ The Controls sample's hub (Ctrl+F8, `samples/Progenitor.ControlsSample`) does ex
 the hub opens and, on Return, reopens only when the hub was opened over a chest or station, logging
 `hub return reopen = <outcome>`.
 
+**From afar when the player walked away (`ContainerReopenOptions.RemoteIfAway`, REOPEN2, opt-in).** A flow that sends
+the player away (a world pick of other chests) ends with `Moved`, and a panel mounted in the chest's tab is left with no
+window. With `ctx.Inventory.ReopenLast(snapshot, new ContainerReopenOptions { RemoteIfAway = true, Done = ... })`, when the
+window cannot be reopened where the player stands (`Moved`, `Gone`: out of streaming range, `NotOpened`: the press
+reached nothing), the same container opens remotely through `ctx.Inventory.Preview` instead: the game's window in the
+station layout (the bag on the left), read-only, the mods' tabs attached as on any preview. The client asks by the
+window's network id; the server resolves it to the stable id with the same untrusted-words resolver mods use and runs
+every preview check on that: owner or clan, the Remote chest preview setting, the container open gate. The outcome is
+`RemoteOpened` once the window shows, or `RemoteFailed` with the server's sentence in `ContainerReopenFinished.Reason`
+("This server has remote chest preview turned off.", "The server does not know that container.", a gate's refusal).
+Only plain containers can be previewed: a station's window gives `RemoteFailed` at once ("Only chests and braziers can be
+opened from afar."), so a mod with a panel in a station's tab hides it on that outcome. Never after `ClosedByPlayer`, a
+window in the way or a busy input. `RemotePreview` sets the preview's options (default: kept open until closed);
+`RemoteStarted` hands the preview over as it starts (dispose it to close the window early).
+
+**Opt-in, not the default.** A remote window is a different thing from the player's own: read-only, a streaming lease, a
+server setting that may refuse it. So the plain `ReopenLast` never opens one; a mod's hub Return asks for it explicitly.
+The Controls sample's hub does (`RemoteIfAway = true`) and logs `hub return reopen = RemoteOpened` (or the refusal).
+
 **A preview over the player's window (`ReturnToOpenWindow`, default true).** With the player's own window open (the
 remembered one, open now), a preview waits until the previewed chest and its inventory are on the client, then closes
 that window with the game's own close (its mapper ends the interaction, as Escape would) and opens the preview. When the
@@ -3400,6 +3419,10 @@ log with the filter `ContainerReturn|ContainerPreview|menu-hotkey guard|hub retu
    Progenitor flow` before the press and the input released 0.4 s after it. Open the chest again, step 2 m away (the
    window closes as you walk) and `reopen`: `ClosedByPlayer` or `Moved`, no press. Reconnect and `reopen` before opening
    anything: `NothingToReopen`.
+5b. **From afar.** Open a chest, open the Controls sample's hub, walk 3 m away, click Return: `hub return reopen =
+   RemoteOpened`, the chest's window in the station layout (capture), the client log has `opened remotely instead`, server
+   status shows the preview. On a PvP-only setting: `RemoteFailed: This server allows remote chest preview only in PvE...`.
+   At The Devourer: `RemoteFailed: Only chests and braziers can be opened from afar.`
 6. **The player's own close stays.** Open the chest, Escape (it closes): the log has `closed by the player`; `reopen`:
    `ClosedByPlayer`, no press. The same after closing it with the Interact key.
 7. **A preview over the window.** Open a near chest, then `container_preview {"action":"open","id":"c-…far…","keepOpen":true}`:

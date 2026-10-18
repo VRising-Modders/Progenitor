@@ -47,6 +47,65 @@ public enum ContainerReopenResult
     /// snapshot passed to <c>ReopenLast</c> was not open, or names another opening of it: nothing is reopened.
     /// </summary>
     ClosedByPlayer = 11,
+
+    /// <summary>
+    /// The window could not be reopened where the player stands (they moved away, or the object is out of reach), and
+    /// <see cref="ContainerReopenOptions.RemoteIfAway"/> opened the same container remotely instead: the game's container
+    /// window, read-only, through the container preview, with the mods' tabs attached.
+    /// </summary>
+    RemoteOpened = 12,
+
+    /// <summary>
+    /// The remote fallback was tried and did not open: the server refused (not a plain container, not the player's or
+    /// their clan's castle, the server setting, an open gate), or it timed out. <see cref="ContainerReopenFinished.Reason"/>
+    /// has the player-facing sentence.
+    /// </summary>
+    RemoteFailed = 13,
+}
+
+/// <summary>Options for <c>ctx.Inventory.ReopenLast(snapshot, options)</c> (client).</summary>
+public sealed record ContainerReopenOptions
+{
+    /// <summary>
+    /// When the window cannot be reopened where the player stands (<see cref="ContainerReopenResult.Moved"/>,
+    /// <see cref="ContainerReopenResult.Gone"/> or <see cref="ContainerReopenResult.NotOpened"/>), open the same container
+    /// remotely through <c>ctx.Inventory.Preview</c> (the game's container window in the station layout, read-only, the
+    /// mods' tabs attached), under the preview's own rules: owner or clan, the server's Remote chest preview setting,
+    /// the container open gate. Only chests and braziers can be previewed; a station's window is refused
+    /// (<see cref="ContainerReopenResult.RemoteFailed"/>). Never after <see cref="ContainerReopenResult.ClosedByPlayer"/>.
+    /// Default false.
+    /// </summary>
+    public bool RemoteIfAway { get; init; }
+
+    /// <summary>The preview options for the remote fallback. Default: kept open until closed, the station layout.</summary>
+    public ContainerPreviewOptions? RemotePreview { get; init; }
+
+    /// <summary>Runs once on the main thread with the outcome, its reason and the remote preview if one was started.</summary>
+    public Action<ContainerReopenFinished>? Done { get; init; }
+
+    /// <summary>Runs when the remote fallback starts, with its preview (dispose it to close the window early).</summary>
+    public Action<IContainerPreview>? RemoteStarted { get; init; }
+}
+
+/// <summary>How a <c>ReopenLast</c> ended (<see cref="ContainerReopenOptions.Done"/>).</summary>
+public sealed class ContainerReopenFinished
+{
+    internal ContainerReopenFinished(ContainerReopenResult result, string reason, IContainerPreview? remote)
+    {
+        Result = result; Reason = reason ?? ""; Remote = remote;
+    }
+
+    /// <summary>The outcome.</summary>
+    public ContainerReopenResult Result { get; }
+
+    /// <summary>A player-facing sentence for a remote refusal (the server's words); empty otherwise.</summary>
+    public string Reason { get; }
+
+    /// <summary>The remote preview, when the fallback started one (open with <see cref="ContainerReopenResult.RemoteOpened"/>).</summary>
+    public IContainerPreview? Remote { get; }
+
+    /// <inheritdoc />
+    public override string ToString() => Result + (Reason.Length > 0 ? ": " + Reason : "");
 }
 
 /// <summary>
@@ -138,6 +197,28 @@ internal static class ContainerReturnRules
         if (moved) return ContainerReopenResult.Moved;
         return ContainerReopenResult.Started;
     }
+
+    /// <summary>
+    /// REOPEN2: the outcomes after which <see cref="ContainerReopenOptions.RemoteIfAway"/> opens the container remotely:
+    /// the player is not where the window can be reopened (moved away, the object out of streaming range, the press reached
+    /// nothing). Never after the player closed it, another window is in the way, or the input is busy.
+    /// </summary>
+    internal static bool FallsBackToRemote(ContainerReopenResult result) =>
+        result is ContainerReopenResult.Moved or ContainerReopenResult.Gone or ContainerReopenResult.NotOpened;
+
+    /// <summary>
+    /// REOPEN2: what a remote fallback's preview reports: <see cref="ContainerReopenResult.RemoteOpened"/> once its window
+    /// shows, <see cref="ContainerReopenResult.RemoteFailed"/> when it closed before, null while it is still on its way.
+    /// </summary>
+    internal static ContainerReopenResult? RemoteOutcome(ContainerPreviewState state, bool everOpen)
+    {
+        if (everOpen || state == ContainerPreviewState.Open) return ContainerReopenResult.RemoteOpened;
+        if (state == ContainerPreviewState.Closed) return ContainerReopenResult.RemoteFailed;
+        return null;
+    }
+
+    /// <summary>The remote fallback's sentence when the window is not a chest's (only plain containers can be previewed).</summary>
+    internal const string RemoteNotAContainer = "Only chests and braziers can be opened from afar.";
 
     /// <summary>How long after a Progenitor flow closed the game's window (a world pick, a preview, the Mods menu) that close counts as the flow's.</summary>
     internal const double FlowCloseSeconds = 1.0;

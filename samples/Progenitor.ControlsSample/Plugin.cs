@@ -57,7 +57,12 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         hub.AfterReturn = () =>
         {
             if (atOpen is not { IsOpen: true }) return; // the hub was not opened over a chest or station
-            ctx.Inventory.ReopenLast(atOpen, outcome => log(ControlsDemo.LogPrefix + "hub return reopen = " + outcome));
+            // Walked away meanwhile: the same chest opens from afar instead (the preview's rules apply; stations cannot).
+            ctx.Inventory.ReopenLast(atOpen, new Progenitor.Inventory.ContainerReopenOptions
+            {
+                RemoteIfAway = true,
+                Done = finished => log(ControlsDemo.LogPrefix + "hub return reopen = " + finished),
+            });
         };
         // The keys the hub's key hints name: each does what its button does. Escape stays the framework's (it already
         // closes the topmost window), so Return is Ctrl+Backspace; the hub takes the input while shown, so it fires then.

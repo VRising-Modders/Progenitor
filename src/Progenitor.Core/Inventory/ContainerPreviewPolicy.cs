@@ -539,6 +539,9 @@ internal static class ContainerPreviewAuthorization
     internal const string SaveHookRefusal =
         "This server cannot share container contents right now: its world-save hook is not in place (see the server log).";
 
+    /// <summary>REOPEN2: the refusal when a preview asked by network id names nothing the server knows as a container.</summary>
+    internal const string UnknownByNetworkId = "The server does not know that container.";
+
     /// <summary>The lease seconds the server grants for a requested length: clamped to (0, 600], 30 when unusable.</summary>
     internal static double GrantSeconds(double requested) =>
         !double.IsFinite(requested) || requested <= 0 ? 30 : Math.Min(requested, ContainerPreviewOptions.MaxSeconds);

@@ -80,8 +80,24 @@ internal static unsafe class ContainerPreviewClient
     /// <summary>Start a preview; a running one closes (<see cref="ContainerPreviewCloseReason.Replaced"/>).</summary>
     internal static ContainerPreviewHandle Open(ContainerId container, ContainerPreviewOptions options, object? owner, bool hudGate = true, bool syncInventory = true)
     {
-        if (!_installed) throw new InvalidOperationException("The container preview is not installed (client side only).");
         if (container.IsNone) throw new ArgumentException("No container id.", nameof(container));
+        return Open(container, 0, 0, 0, options, owner, hudGate, syncInventory);
+    }
+
+    /// <summary>
+    /// REOPEN2: a preview of the container this client knows only by its network id words (the window the player had open):
+    /// the server resolves them to its stable id and runs every preview check on that; the reply carries the id back.
+    /// </summary>
+    internal static ContainerPreviewHandle OpenByNetworkId(int netIndex, int netGeneration, int netType, ContainerPreviewOptions options, object? owner)
+    {
+        if (netIndex == 0 && netGeneration == 0) throw new ArgumentException("No network id.");
+        return Open(ContainerId.None, netIndex, netGeneration, netType, options, owner, hudGate: true, syncInventory: true);
+    }
+
+    private static ContainerPreviewHandle Open(ContainerId container, int netIndex, int netGeneration, int netType,
+        ContainerPreviewOptions options, object? owner, bool hudGate, bool syncInventory)
+    {
+        if (!_installed) throw new InvalidOperationException("The container preview is not installed (client side only).");
         var world = Worlds.Client;
         if (world == null || !world.IsCreated) throw new InvalidOperationException("No client world (join a game first).");
         // A preview that took the place of the player's window hands the return on to the one replacing it.
@@ -92,16 +108,21 @@ internal static unsafe class ContainerPreviewClient
         var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate, SyncInventory = syncInventory };
         if (inheritReturn) handle.Machine.InheritPlayerWindow();
         _current = handle;
-        if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds, syncInventory))
+        if (!SendRequest(ContainerPreviewWire.KindOpen, sequence, container, handle.Machine.RequestSeconds, syncInventory, netIndex, netGeneration, netType))
             handle.Close(ContainerPreviewCloseReason.Failed, "The preview request could not be sent.", notify: true);
         return handle;
     }
 
-    internal static bool SendRequest(string kind, int sequence, ContainerId container, double seconds, bool syncInventory = true)
+    internal static bool SendRequest(string kind, int sequence, ContainerId container, double seconds, bool syncInventory = true,
+        int netIndex = 0, int netGeneration = 0, int netType = 0)
     {
         try
         {
-            var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket { Kind = kind, Sequence = sequence, Container = container.ToString(), Seconds = seconds, SyncInventory = syncInventory });
+            var bytes = ContainerPreviewWire.Encode(new ContainerPreviewPacket
+            {
+                Kind = kind, Sequence = sequence, Container = container.IsNone ? "" : container.ToString(), Seconds = seconds,
+                SyncInventory = syncInventory, NetIndex = netIndex, NetGeneration = netGeneration, NetType = netType,
+            });
             return CustomEvents.SendToServer(ContainerPreviewWire.EventId, bytes);
         }
         catch (Exception e)
@@ -443,7 +464,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         return sub == null ? null : sub.transform;
     }
 
-    public ContainerId Container { get; }
+    public ContainerId Container { get; private set; }
     public ContainerPreviewState State => Machine.State;
     public ContainerPreviewCloseReason CloseReason => Machine.CloseReason;
     public string? Reason => Machine.Phase == ContainerPreviewPhase.Closed ? Machine.Message : null;
@@ -465,6 +486,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         }
         if (Machine.Phase == ContainerPreviewPhase.Closed) { Finish(notify: true, tellServer: false); return; }
         _netIndex = p.NetIndex; _netGeneration = p.NetGeneration; _netType = p.NetType;
+        // REOPEN2: a preview asked by network id learns its stable id from the server's answer.
+        if (Container.IsNone && ContainerId.TryParse(p.Container, out var resolved)) Container = resolved;
         if (!NetworkIdWords.Validate(_netIndex, _netGeneration, _netType, out var why))
         {
             Close(ContainerPreviewCloseReason.Failed, "The server sent an unusable network id: " + why, notify: true);

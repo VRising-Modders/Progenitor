@@ -30,6 +30,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
     internal const string WorldPickBandName = UiOwnership.Prefix + "world-pick-band";
 
     private const float BandHeight = UiWorldPickBandLook.Height;
+    private const float HintRowHeight = UiWorldPickBandLook.HintRowHeight;
     private const float BandBottom = UiWorldPickCopy.BandBottom;
     private const float FrameBelowEdge = 8f;
     private const float PromptSize = 24f;
@@ -46,7 +47,7 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
     private static bool _bandFadeTeardown;
 
     public void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey, string cancelWord = UiWorldPickCopy.CancelWord,
-        string pickWord = UiWorldPickCopy.PickWord, string count = "")
+        string pickWord = UiWorldPickCopy.PickWord, string count = "", string modifierHint = "")
     {
         if (panel is not UnityPanel host || !host.Alive) return;
         try
@@ -131,27 +132,43 @@ internal sealed partial class UnityUiRuntime : IWorldPickBandRuntime
             Add(BandCap(band, cancelKey, out float capB), capB, GapCapWord);
             Add(BandText(band, string.IsNullOrEmpty(cancelWord) ? UiWorldPickCopy.CancelWord : cancelWord, WordSize, text, 0f, out float cancelWidth), cancelWidth, 0f);
 
-            float width = UiWorldPickBandLook.Width(x);
+            // PICKMOD1: the modifier hint's own line under the first (the key on the game's cap, then its words, muted).
+            var (hintKeys, hintWords) = UiWorldPickCopy.SplitHint(modifierHint, interactKey);
+            int firstRow = parts.Count;
+            float x1 = x;
+            x = 0f;
+            if (hintKeys.Length > 0) Add(BandCap(band, hintKeys, out float capH), capH, GapCapWord);
+            if (hintWords.Length > 0)
+                Add(BandText(band, UiRichText.Literal(hintWords), WordSize, ToColor(MenuPalette.Muted), UiWorldPickCopy.MaxPromptWidth, out float hintWidth), hintWidth, 0f);
+            float x2 = x;
+            bool twoRows = parts.Count > firstRow;
+            float height = twoRows ? BandHeight + HintRowHeight : BandHeight;
+
+            float width = UiWorldPickBandLook.Width(Mathf.Max(x1, x2));
             bandRt.anchorMin = new Vector2(0.5f, 0f);
             bandRt.anchorMax = new Vector2(0.5f, 0f);
             bandRt.pivot = new Vector2(0.5f, 0f);
-            bandRt.sizeDelta = new Vector2(width, BandHeight);
+            bandRt.sizeDelta = new Vector2(width, height);
             bandRt.anchoredPosition = new Vector2(0f, BandBottom + FrameBelowEdge);
 
-            float cursor = -x / 2f;
+            float cursor = -x1 / 2f;
+            float rowY = twoRows ? HintRowHeight / 2f : 0f;
             for (int i = 0; i < parts.Count; i++)
             {
+                // The second row is centered in the band's bottom HintRowHeight; the first keeps the top BandHeight.
+                if (i == firstRow) { cursor = -x2 / 2f; rowY = -height / 2f + HintRowHeight / 2f; }
                 var (rt, w, gap) = parts[i];
                 rt.anchorMin = new Vector2(0.5f, 0.5f);
                 rt.anchorMax = new Vector2(0.5f, 0.5f);
                 rt.pivot = new Vector2(0f, 0.5f);
-                rt.anchoredPosition = new Vector2(cursor, 0f);
+                rt.anchoredPosition = new Vector2(cursor, rowY);
                 cursor += w + gap;
             }
 
             BandRule(band, width, top: true, fade);
             BandRule(band, width, top: false, fade);
-            Plugin.Logger?.LogDiag("Ui: world pick band " + (int)width + "x" + (int)BandHeight + " keys=" + interactKey + "/" + cancelKey);
+            Plugin.Logger?.LogDiag("Ui: world pick band " + (int)width + "x" + (int)height + " keys=" + interactKey + "/" + cancelKey
+                + (twoRows ? " hint=" + hintKeys + "/" + hintWords : ""));
         }
         catch (Exception e)
         {

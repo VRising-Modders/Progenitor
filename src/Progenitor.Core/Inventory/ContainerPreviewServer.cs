@@ -345,6 +345,23 @@ internal static unsafe class ContainerPreviewServer
     private static void Open(World world, Entity userEntity, User user, ContainerPreviewPacket request)
     {
         var em = world.EntityManager;
+        // REOPEN2: a client that knows the container only by its network id (ctx.Inventory.ReopenLast's remote fallback)
+        // sends the words instead of the id. Resolved here with the same untrusted-words resolver mods use; every check
+        // below then runs on the stable id exactly as for any other preview, the open gate included.
+        if (string.IsNullOrEmpty(request.Container) && (request.NetIndex != 0 || request.NetGeneration != 0))
+        {
+            string why = "inventory not ready";
+            if (InventoryRuntime.Installed
+                && InventoryRuntime.TryResolveNetworkId(request.NetIndex, request.NetGeneration, request.NetType, out var byNet, out _, out why))
+                request.Container = byNet.ToString();
+            else
+            {
+                Plugin.Logger?.LogInfo("ContainerPreview: refused user " + user.PlatformId + " network id "
+                    + NetworkIdWords.Format(request.NetIndex, request.NetGeneration) + ": " + why);
+                Reply(world, user.Index, request.Sequence, false, ContainerPreviewAuthorization.UnknownByNetworkId, 0, 0, 0);
+                return;
+            }
+        }
         var facts = new ContainerPreviewFacts { UserConnected = user.IsConnected, Mode = Mode, IsPvE = IsPvE() };
         facts.RateOk = facts.UserConnected && Opens.TryTake(user.PlatformId, Now);
         facts.IdParsed = ContainerId.TryParse(request.Container, out var id);
@@ -435,7 +452,7 @@ internal static unsafe class ContainerPreviewServer
         }
         Plugin.Logger?.LogInfo("ContainerPreview: user " + user.PlatformId + " previews " + id + " (" + container.Index + ":" + container.Version
             + ", " + holder.Policy.Deadline.ToString("0") + ", inventory sync " + (holder.Sync == null ? "off" : holder.Sync.HeldCount + " entities") + ").");
-        Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType);
+        Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType, id.ToString());
     }
 
     /// <summary>
@@ -544,12 +561,12 @@ internal static unsafe class ContainerPreviewServer
         }
     }
 
-    private static void Reply(World world, int userIndex, int sequence, bool ok, string message, int index, int generation, int type)
+    private static void Reply(World world, int userIndex, int sequence, bool ok, string message, int index, int generation, int type, string container = "")
     {
         Send(world, userIndex, new ContainerPreviewPacket
         {
             Kind = ContainerPreviewWire.KindReply, Sequence = sequence, Ok = ok, Message = ContainerPreviewWire.Clip(message),
-            NetIndex = index, NetGeneration = generation, NetType = type,
+            NetIndex = index, NetGeneration = generation, NetType = type, Container = container ?? "",
         });
     }
 
