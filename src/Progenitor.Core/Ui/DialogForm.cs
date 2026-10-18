@@ -81,6 +81,12 @@ public sealed class DialogFormOptions
 
     /// <summary>Whether the footer names this mod; null: <see cref="PluginDialogs.ShowModVersion"/>.</summary>
     public bool? ShowModVersion { get; set; }
+
+    /// <summary>
+    /// MASKED1: the field is a password field (asterisks, no copy or cut, no undo, asterisks in every readback;
+    /// <see cref="Initial"/> is ignored). <see cref="DialogFormResult.Text"/> still carries the typed text.
+    /// </summary>
+    public bool Masked { get; set; }
 }
 
 /// <summary>FORMDIALOG1: a form's answer: the text and each box's state, read by index or by key.</summary>

@@ -2799,7 +2799,9 @@ the ordinary window with its ordinary rights.
 
 **What happens, step by step.**
 
-1. `Open` sends the request (`Requesting`). No answer in 8 s closes with `NoAnswer`.
+1. `Open` sends the request (`Requesting`). No answer in 8 s closes with `NoAnswer`. When a plugin's
+   [open gate](#container-open-gate) handler asks the player first, the server says so and the client waits while the
+   masked prompt is up (up to 300 s); a refusal or a wrong answer closes with `Refused` and the plugin's sentence.
 2. The server holds the user's **streaming origin** at the chest, the same lease `ctx.Camera.Observe` uses,
    so the chest entity streams to the client and stays enabled on the server (`Waiting`). The lease is shared:
    a camera preview of the same chest (within 0.5 m) and the container preview hold one lease, each with its own
@@ -3059,6 +3061,164 @@ and the shared lease.
 
 Afterwards: close any preview, disconnect to the title screen, and remove every sample deployed for the
 batch from both reload folders.
+
+### Container open gate
+
+`ctx.Inventory.OnOpenRequest` (server) decides every container window a player asks for, **before it opens**: a
+walk-up interaction with a placed container, station or castle heart (`ContainerOpenKind.Interact`) and the remote
+preview (`ContainerOpenKind.Preview`). A handler answers `Allow`, `Deny(reason)` or `Challenge(token)`; a challenge
+shows the player a masked password prompt, and the typed text comes back to the plugin's answer handler with the token.
+Designed to be enforced on the server, so a modified client cannot open a refused container, pending live verification. **Experimental**: source-checked, built and game-free
+tested (`ContainerOpenGateTests`, `DialogTests.A_secret_prompt_masks_its_field_and_every_readback_but_submits_the_text`);
+**not live-verified**. The acceptance procedure is below. API table: [api.md, Container open gate](api.md#inventory).
+
+```csharp
+// Server: a password lock. Only a salted hash is kept (SampleLocks.cs has Make and Matches).
+_gate = ctx.Inventory.OnOpenRequest(
+    request => !_locks.ContainsKey(request.Container) || _remembered.Contains((request.PlatformId, request.Container))
+        ? ContainerOpenDecision.Allow
+        : ContainerOpenDecision.Challenge(request.Container.ToString(), "Locked", "Enter this container's password.", 32,
+            offerRemember: true),
+    answer =>
+    {
+        if (!_locks.TryGetValue(answer.Request.Container, out var hash) || !Matches(hash, answer.Secret.Reveal()))
+            return ContainerAnswerVerdict.Reject("Wrong password.");
+        if (answer.Remember) _remembered.Add((answer.Request.PlatformId, answer.Request.Container)); // your own grant
+        return ContainerAnswerVerdict.Accept(rememberForSession: true);
+    });
+
+// The password changed: ask everyone again.
+ctx.Inventory.RevokeOpenGrants(chestId);
+```
+
+Shortened from `samples/Progenitor.Sample/SampleLocks.cs` (compile-checked with the Sample's build; compile against that
+file rather than copying this block). The Sample's `.items lock <c> <password>`, `.items unlock <c>` and `.items locks`
+drive it. They type the password into a chat command, so it shows in the chat line and the command log: use a throwaway
+word there. The player's answer goes through the masked prompt and is not logged.
+
+**What a player sees.** At a locked chest the window does not open; a prompt asks for the password (the title and line
+the plugin gave, one asterisk per character, Cancel and OK, the plugin's name in the footer). A right answer opens the
+chest without a second interaction: the client repeats the interaction for the player (below). A wrong one shows a toast
+(`<Mod>: Wrong password.`) and nothing opens; interacting again asks again. A refusal without a prompt is a toast with the
+plugin's sentence. A remote preview of a locked chest shows the same prompt and then opens; refused, it closes as
+`Refused` with the sentence.
+
+**How handlers combine.** Every registered handler is asked once per open, in registration order (all plugins). The
+first `Deny` wins. Otherwise every `Challenge` is asked in turn, one prompt at a time, each answer going to its own
+plugin's answer handler with its own token; the open goes on only when all of them accepted. A handler that throws
+refuses the open ("This container could not be checked. Try again."), and so does a `Challenge` from a plugin that gave
+no answer handler (one warning). Only containers with a stable id are gated: placed containers, stations and castle
+hearts ([Stable container ids](#stable-container-ids)). A placed one whose id is not bound yet (just after a load) is
+refused with "This container is not ready yet. Try again in a moment." Anything else (a player, a door, a chest outside
+any castle) is never asked about. The player is resolved the way the game resolves it for the container's sync list:
+the buffed character, then its `ControlledBy` controller (the user). A servant's or another NPC's interaction (no player
+character) is not asked about; a player's interaction whose user cannot be resolved is refused (one warning, no prompt). An interaction already open when the first handler registers is left alone. Keep
+`decide` quick and free of entity writes: it runs inside the game's frame, once per open.
+
+**Session grants and passes.** `ContainerAnswerVerdict.Accept(rememberForSession: true)` (the default) remembers the
+(player, container) pair for that plugin until the player disconnects: later opens still ask the handler, with
+`ContainerOpenRequest.HasSessionGrant` true, and its `Challenge` counts as answered (its `Deny` still refuses). Every
+right answer also leaves a one-shot pass for 30 s, which lets the repeat of the same open through once.
+`RevokeOpenGrants(container)` or `RevokeOpenGrants(platformId)` drops a plugin's grants and passes (it does not close a
+window that is already open: the next open is asked again); a disconnect drops the
+player's, and removing a plugin's last handler drops that plugin's. Grants live in memory only; Progenitor never stores
+a password, a hash or an answer.
+
+**Remember password (the plugin's own grant).** `Challenge(..., offerRemember: true)` adds a **Remember password**
+box under the masked field. The player's choice reaches the answer handler as `ContainerOpenAnswer.Remember`. Keeping it
+is the plugin's job: on a right answer with `Remember`, store your own grant (in your mod's save) and answer `Allow` for
+that player and container from then on; forget it when the password changes. The gate persists nothing of it, and it is
+separate from the gate's session grant above (that one ends at disconnect whatever the box said). The Sample keeps its
+grant in memory (`SampleLocks.Decide`).
+
+**The prompt round trip.** Core's own channel (`'PrCg'`), no mod message needed. Server to client: `prompt` (title,
+line, field limit, the plugin's name), `denied` (a toast) and `result` (what an answer did). Client to server: `answer`
+(the typed text) and `cancel`. The prompt is `ctx.Dialogs.PromptSecret`'s dialog, or a masked form with a **Remember password** box when the challenge offers one ([ui.md](ui.md#masked-input-masked1)).
+One prompt per player at a time; a new open replaces a waiting one. A prompt waits 120 s, then ends with "The prompt
+timed out."; at most 5 answers per player per minute are read ("Too many tries. Wait a minute and try again."). A plugin
+that unloads while its prompt is up ends it ("The lock changed. Try again."). The typed text is in the answer packet and
+nowhere else: no log line, readback, packet `ToString` or `ChallengeSecret.ToString` shows it. It travels on the game's
+own connection, like chat, so a lock is a game lock, not a vault: tell players not to reuse a real password.
+
+**After a right answer.** For a preview the server runs the same open again (the answer counts now) and the window
+opens. For an interaction the server tells the client to repeat it: the client takes a one-second framework input lease
+(hover and buttons; it yields to the player's own mouse and keys), hovers the container, presses Interact once and hands the input back, the order the Dev bot driver
+uses. When the lease cannot be taken (another lease holds the buttons, no local character) or the container is not on
+the client, a toast says "Unlocked. Interact again to open it." and the pass waits 30 s for that interaction.
+
+**The seam (server).** A player's interaction is an interact buff on the character (`InteractBuff`, `SpellTarget.Target`
+= what is interacted with, `EntityOwner` = the character). The client opens the window when that buff reaches it, and
+the server accepts the window's item events only while it exists ([Container preview](#container-preview), "Read-only is
+the game's rule"); the same buff is what puts the user on the chest inventory's sync list. The gate checks every new
+interact buff in a `SystemHooks.After<InteractInventorySync_Spawn>` (the game's spawn reaction for interact buffs) and,
+for a refused open, destroys the buff with `DestroyUtility.Destroy`, the way the game's own interact validation ends an
+interaction it does not allow. Both happen in the same spawn and destroy pass of the frame, before the frame's network
+send, so neither the buff nor the container's inventory reaches the client, and the game's destroy reaction takes the
+user off the sync list again (a preview's own sync copy stays: the list is a multiset). The target is read raw at a
+layout fact (`SpellTargetTargetOffset`; `SpellTarget` carries a bool). A `Plugin.Frame` pass checks the same buffs once
+more and catches one that did not come through the spawn reaction, a frame late. The hooks exist only while a handler is
+registered. No native call, no new generic instantiation over a game type.
+
+**Stations with an extra buff.** Some stations' interactions carry `AdditionalInteractBuff`: the game's
+`AdditionalInteractBuffComponentSpawnSystem` spawns an extra buff on the character for the interaction, and
+`AdditionalInteractBuffComponentDestroySystem` (in the destroy reaction) removes it when the interaction ends. The server
+metadata places the spawn system and `InteractInventorySync_Spawn` in the same spawn reaction group with no order between
+them, so the extra buff may already exist when the gate refuses, or be spawned on the refused interaction afterwards.
+Either way the gate destroys it too: it reads the extra buff's prefab and instance off the refused interaction, then for
+1 s destroys that instance and any buff of that prefab on the character (the watch ends at once when that character's
+next interaction is allowed).
+
+**During a reload.** The hooks exist only while a handler is registered. A hot reload of the plugin that registered the
+handler (or of Core) removes the old handler before the new generation registers its own: in between, usually well under
+a second, opens are not gated, and a prompt that was up ends with "The lock changed. Try again." A plugin that must not
+leave that gap should not be hot-reloaded on a live server.
+
+**Not gated.** Servants' and other NPCs' interactions with containers (and a servant's own inventory), castle-wide
+crafting and building from chests, route stations' transfers, a servant coffin's owner rule
+(the game lets a coffin's owner use it within 36 m without an interaction), Progenitor's own server writes
+(`ctx.Inventory`), and anything a server-side mod does. The gate controls who gets a container window and its contents,
+not every way items can leave a chest.
+
+#### Live acceptance (procedure, not run)
+
+On the isolated test server and an idle test client, a castle the test character owns with two chests (one with a few
+stacks), and the Progenitor Sample on both sides (its `.items` verbs are server-side, admin only). Read status with
+`container_preview` (`side: "server"` for the server half): both sides' `gate`.
+
+1. **Lock.** `.items chests`, then `.items lock #1 sesame`. Server `gate.handlers` lists the Sample, `hooked` true.
+2. **Walk-up, wrong answer.** Walk to chest #1 and interact. Expected: no window, the prompt (Locked, one asterisk per
+   character). Server: `pending` has one row (`kind` Interact, `prompt` "1 of 1"), `closedInteractions` grew by 1, and
+   `progenitor_components` on the chest's inventory shows the user not in `SyncToUserBuffer`. Client `mods_ui status`
+   `dialog.masked` true. Type `wrong` (`mods_ui dialog_type wrong`, then `dialog_choose yes`): a toast
+   "Progenitor Sample: Wrong password.", no window, the server log has no typed text (search it for `wrong`).
+3. **Right answer.** Interact again, answer `sesame`. Expected: the window opens without another interaction (client
+   log `repeating the interaction`; `gate.repeating` true for a moment), server `grants` 1. Move an item in and out:
+   it works (a real interaction).
+4. **Session grant.** Close the window and interact again: it opens at once, no prompt. Disconnect and reconnect:
+   the prompt is back (`grants` 0 after the disconnect).
+   - **Remember password.** The prompt shows the box (`mods_ui status` `dialog.checks`). Answer right with the box ticked,
+     disconnect and reconnect: the chest opens without a prompt (the Sample's own grant; server `grants` stays 0 until the
+     next answer). `.items lock #1 sesame` again: the prompt is back.
+5. **Revoke.** `.items lock #1 other`: the reply says one earlier unlock was forgotten; interacting asks again.
+6. **Preview.** With the chest locked, `container_preview open {"id":"c-…"}` from 100 m away: the prompt shows, client
+   `status` `preview.held` true and `phase` Requesting; answer right: the preview opens as usual. Again with a wrong
+   answer: the preview closes `Refused` with "Progenitor Sample: Wrong password." Cancel: `Refused`, "Canceled.".
+   Close the preview while the prompt is up: the prompt goes and the server `pending` is empty.
+7. **Not stuck.** After each refused interaction the character can walk, attack and interact with another chest at once;
+   `progenitor_components` on the character shows no `InteractBuff` buff left, and the chest has no `InteractedUpon`
+   interacting flag a second later.
+   - **A station with an extra buff.** Lock a station whose interaction carries `AdditionalInteractBuff` (read the
+     station's interact buff with `progenitor_components` while it is open once, unlocked, to find one). Locked, interact:
+     no window, and a second later the character's buffs hold neither the interact buff nor the extra buff; the character
+     moves and casts normally. Answer right: the window opens and the extra buff is back (the game's own).
+   - **Preview plus a refused walk-up.** Open a preview of the locked chest (answer the prompt), then walk up and
+     interact with the same chest and cancel the prompt. `progenitor_components` on the chest's inventory entity:
+     `SyncToUserBuffer` holds the user exactly once (the preview's copy); close the preview: zero.
+8. **Unlocked chest and unload.** Chest #2 opens normally throughout. `.items unlock #1`: chest #1 opens normally.
+   Remove the Sample from both reload folders: server `gate.handlers` empty, `hooked` false, every chest opens.
+
+Afterwards: close any window, disconnect to the title screen, and remove every sample deployed for the batch from both
+reload folders.
 
 ### Online player positions
 

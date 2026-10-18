@@ -7,7 +7,8 @@ namespace Progenitor.Inventory;
 /// The container preview channel's packets, game-free. One Core-reserved event id (<c>'PrCp'</c>) carries both
 /// directions; <see cref="ContainerPreviewPacket.Kind"/> keeps an answer from ever decoding as a request, and each side
 /// registers only its own direction. Client → server: <c>open</c>, <c>renew</c>, <c>close</c>. Server → client:
-/// <c>reply</c> (to an open) and <c>ended</c> (the server let go: the lease ended, access changed, the container is gone).
+/// <c>reply</c> (to an open), <c>hold</c> (keep waiting: the open gate asks the player first) and <c>ended</c> (the server
+/// let go: the lease ended, access changed, the container is gone).
 /// The network id words in a reply are session-local; never persist them.
 /// </summary>
 internal static class ContainerPreviewWire
@@ -25,9 +26,15 @@ internal static class ContainerPreviewWire
     internal const string KindReply = "reply";
     internal const string KindEnded = "ended";
 
+    /// <summary>
+    /// Server to client: keep waiting for the reply (the container open gate is asking the player first); <c>Seconds</c>
+    /// is how much longer. An older client drops the kind and closes with NoAnswer after its usual wait.
+    /// </summary>
+    internal const string KindHold = "hold";
+
     internal static bool IsRequestKind(string? kind) => kind is KindOpen or KindRenew or KindClose;
 
-    internal static bool IsAnswerKind(string? kind) => kind is KindReply or KindEnded;
+    internal static bool IsAnswerKind(string? kind) => kind is KindReply or KindEnded or KindHold;
 
     internal static byte[] Encode(ContainerPreviewPacket packet) => JsonSerializer.SerializeToUtf8Bytes(packet);
 
@@ -64,7 +71,7 @@ internal sealed class ContainerPreviewPacket
     /// <summary>The <see cref="ContainerId"/> text (<c>c-</c> plus 32 hex digits).</summary>
     public string Container { get; set; } = "";
 
-    /// <summary>open / renew: the lease seconds asked for.</summary>
+    /// <summary>open / renew: the lease seconds asked for; hold: how much longer the client waits for the reply.</summary>
     public double Seconds { get; set; }
 
     /// <summary>

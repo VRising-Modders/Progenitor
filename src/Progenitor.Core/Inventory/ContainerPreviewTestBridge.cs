@@ -9,7 +9,7 @@ namespace Progenitor.Inventory;
 /// Dev bridge <c>container_preview</c> (reached by reflection from <c>Progenitor.Dev</c>): open, read and close a
 /// container preview without a plugin, for the live experiments E1 to E5. Client: <c>Open</c>, <c>Close</c>,
 /// <c>Status</c>, <c>BagMode</c>. Server: <c>ServerStatus</c> (every server-side preview and every shared streaming
-/// lease). Main thread.
+/// lease). Both sides' status also carry the container open gate (<c>gate</c>). Main thread.
 /// </summary>
 internal static class ContainerPreviewTestBridge
 {
@@ -53,6 +53,8 @@ internal static class ContainerPreviewTestBridge
             ["side"] = "client",
             ["bagHide"] = ContainerPreviewClient.BagHideByAlpha ? "alpha" : "inactive",
             ["preview"] = ContainerPreviewClient.Current?.Describe(),
+            // The container open gate's client half: a prompt up, a repeat running, the last toast.
+            ["gate"] = ContainerOpenGateClient.Describe(),
         };
         if (world != null && world.IsCreated)
         {
@@ -125,6 +127,8 @@ internal static class ContainerPreviewTestBridge
             ["observationRecords"] = ObservationGuard.RecordCount,
             ["observationSweepPending"] = ObservationGuard.SweepPending,
             ["leases"] = leases,
+            // The container open gate (ctx.Inventory.OnOpenRequest): handlers, grants, passes, prompts waiting.
+            ["gate"] = ContainerOpenGateServer.Describe(),
         };
     }
 }

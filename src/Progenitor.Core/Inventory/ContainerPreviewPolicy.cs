@@ -209,8 +209,12 @@ internal sealed class ContainerPreviewMachine
     /// <summary>True while an open preview's inventory is missing (the client holds the window's mapper).</summary>
     internal bool InventoryMissing => !double.IsNaN(_inventoryMissingSince);
 
+    /// <summary>The longest a hold (the open gate asking the player first) can extend the wait for the reply.</summary>
+    internal const double MaxHoldSeconds = 300;
+
     private readonly ContainerPreviewOptions _options;
-    private readonly double _startedAt;
+    private double _answerBy;
+    private double _deadlineFrom;
     private double _waitingSince;
     private double _openingSince;
     private double _nextRenew = double.PositiveInfinity;
@@ -221,7 +225,23 @@ internal sealed class ContainerPreviewMachine
         _options = options ?? throw new ArgumentNullException(nameof(options));
         var problem = options.Problem();
         if (problem != null) throw new ArgumentException(problem, nameof(options));
-        _startedAt = now;
+        _answerBy = now + RequestTimeoutSeconds;
+        _deadlineFrom = now;
+    }
+
+    /// <summary>True while a hold from the server extends the wait for its reply.</summary>
+    internal bool Held { get; private set; }
+
+    /// <summary>
+    /// The server asks to keep waiting (the open gate shows the player a prompt first): the reply may take up to
+    /// <paramref name="seconds"/> more (at most <see cref="MaxHoldSeconds"/>). Only while the request is unanswered.
+    /// </summary>
+    internal bool Hold(double now, double seconds)
+    {
+        if (Phase != ContainerPreviewPhase.Requesting || !double.IsFinite(seconds) || seconds <= 0) return false;
+        _answerBy = Math.Max(_answerBy, now + Math.Min(seconds, MaxHoldSeconds));
+        Held = true;
+        return true;
     }
 
     internal ContainerPreviewPhase Phase { get; private set; } = ContainerPreviewPhase.Requesting;
@@ -252,14 +272,16 @@ internal sealed class ContainerPreviewMachine
     /// <summary>The seconds the server is asked to hold the lease for on the first request.</summary>
     internal double RequestSeconds => _options.KeepOpen ? RenewGrantSeconds : _options.Seconds;
 
-    /// <summary>When a timed preview ends by time alone (from the request); +infinity with KeepOpen.</summary>
-    internal double Deadline => _options.KeepOpen ? double.PositiveInfinity : _startedAt + _options.Seconds;
+    /// <summary>When a timed preview ends by time alone (from the request, or from the reply after a hold); +infinity with KeepOpen.</summary>
+    internal double Deadline => _options.KeepOpen ? double.PositiveInfinity : _deadlineFrom + _options.Seconds;
 
     /// <summary>The server's answer. A refusal closes with its sentence; an agreement starts waiting for replication.</summary>
     internal bool OnReply(double now, bool ok, string? message)
     {
         if (Phase != ContainerPreviewPhase.Requesting) return false;
         if (!ok) return Close(ContainerPreviewCloseReason.Refused, string.IsNullOrWhiteSpace(message) ? "The server refused the preview." : message!);
+        // After a hold the server ran the open again when the player answered: its lease time starts now, and so does ours.
+        if (Held) _deadlineFrom = now;
         Phase = ContainerPreviewPhase.Waiting;
         _waitingSince = now;
         if (_options.KeepOpen) _nextRenew = now + RenewEverySeconds;
@@ -280,7 +302,7 @@ internal sealed class ContainerPreviewMachine
         switch (Phase)
         {
             case ContainerPreviewPhase.Requesting:
-                if (now - _startedAt >= RequestTimeoutSeconds)
+                if (now >= _answerBy)
                     return Closed(ContainerPreviewCloseReason.NoAnswer, "The server did not answer the preview request.");
                 return ContainerPreviewStep.None;
 

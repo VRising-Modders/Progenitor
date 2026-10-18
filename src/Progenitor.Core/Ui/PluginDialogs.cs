@@ -122,6 +122,24 @@ public sealed class PluginDialogs
     }
 
     /// <summary>
+    /// MASKED1: ask for a secret (a password): a Prompt whose field draws one asterisk per character. Copy and cut do
+    /// nothing in it, and the framework's readbacks show asterisks; <paramref name="onSubmit"/> gets the typed text. Never
+    /// log it. The field starts empty. <paramref name="validate"/>, <paramref name="maxLength"/> (0: no cap),
+    /// <paramref name="submit"/>, <paramref name="cancel"/> and <paramref name="onCancel"/> are as in
+    /// <see cref="Prompt"/>.
+    /// </summary>
+    public IDisposable PromptSecret(
+        string title, string body, Action<string> onSubmit, Func<string, string?>? validate = null, string submit = "OK",
+        int maxLength = 64, string cancel = "Cancel", Action? onCancel = null, bool? showModVersion = null)
+    {
+        if (onSubmit == null) throw new ArgumentNullException(nameof(onSubmit));
+        if (ServerSide()) return Noop.Instance;
+        return UiDialogs.Prompt(
+            _ctx.Owner, _ctx.Guid, Footer(showModVersion), title, body, "", onSubmit, "", validate,
+            submit, maxLength, cancel, onCancel, masked: true);
+    }
+
+    /// <summary>
     /// FORMDIALOG1: a small form: a one-line text field with <see cref="DialogFormOptions.Caption"/> on its left, then
     /// <see cref="DialogFormOptions.Checks"/> as the game's checkboxes under <see cref="DialogFormOptions.Heading"/>, then
     /// Cancel (left) and Save (right). A click anywhere on a box's line flips it. Save validates

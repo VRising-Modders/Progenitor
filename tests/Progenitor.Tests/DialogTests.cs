@@ -332,6 +332,86 @@ public sealed class DialogTests : IDisposable
         Assert.Equal("Ada", prompt.View!.Input!.Cells.Single(c => c.Key == UiDialogs.CellField).Text);
     }
 
+    /// <summary>
+    /// MASKED1: a secret prompt builds a masked field (the runtime draws asterisks and blocks copy), reads back asterisks
+    /// only, and still hands the typed text to its submit; an ordinary prompt stays unmasked.
+    /// </summary>
+    [Fact]
+    public void A_secret_prompt_masks_its_field_and_every_readback_but_submits_the_text()
+    {
+        string? submitted = null;
+        var secret = UiDialogs.Prompt(_owner, Guid, Plain, "Locked", "Enter the password.", "", t => submitted = t, "", null, "OK", 32, "Cancel", null, masked: true);
+        Assert.True(secret.IsOpen);
+        var field = _runtime.Row(UiDialogs.InputRow)!.Cells().Single(c => c.Key == UiDialogs.CellField);
+        Assert.True(field.Masked);
+        Assert.Equal(32, field.MaxLength);
+
+        ModsMenu.TypeDialog("hunter2");
+        var read = UiDialog.Describe();
+        Assert.Equal("*******", read["typed"]);
+        Assert.Equal("*******", read["field"]);
+        Assert.Equal(true, read["masked"]);
+        Assert.DoesNotContain("hunter2", string.Join("|", read.Values.Select(v => v?.ToString() ?? "")));
+
+        Assert.True(_runtime.Click(UiDialogs.ButtonsRow, UiDialogs.CellMain));
+        Assert.Equal("hunter2", submitted);
+        Assert.Null(UiDialog.Current);
+
+        Assert.Equal("", secret.Text);                                    // the typed secret left with the dialog
+
+        UiDialogs.Prompt(_owner, Guid, Plain, "Name", "", "", _ => { }, "", null, "OK", 0, "Cancel", null);
+        Assert.False(_runtime.Row(UiDialogs.InputRow)!.Cells().Single(c => c.Key == UiDialogs.CellField).Masked);
+        ModsMenu.TypeDialog("Ada");
+        Assert.Equal("Ada", UiDialog.Describe()["typed"]);
+        Assert.Equal(false, UiDialog.Describe()["masked"]);
+    }
+
+    /// <summary>
+    /// MASKED1: a masked form (the container open gate's prompt with its Remember password box) masks its field and
+    /// readback, hands the text and the box to its save, and keeps no text after; a masked dialog that a framework
+    /// dialog displaces comes back empty, not with the typed secret.
+    /// </summary>
+    [Fact]
+    public void A_masked_form_hands_the_text_and_the_remember_box_to_its_save_and_keeps_nothing()
+    {
+        DialogFormResult? saved = null;
+        var form = UiDialogs.Form(_owner, Guid, Plain, "Locked", new DialogFormOptions
+        {
+            Caption = "Password",
+            Masked = true,
+            Initial = "ignored?",
+            MaxLength = 32,
+            Checks = new[] { new DialogCheck { Label = "Remember password", Key = "remember" } },
+            Save = "OK",
+        }, r => saved = r, body: "Enter this container's password.");
+        var field = _runtime.Row(UiDialogs.InputRow)!.Cells().Single(c => c.Key == UiDialogs.CellField);
+        Assert.True(field.Masked);
+        Assert.Contains(("Enter this container's password.", false), _runtime.DialogTexts);
+
+        form.SetText("sesame");
+        Assert.Equal("******", UiDialog.Describe()["typed"]);
+        ClickRow(form.View!.CheckRows[0]);
+        Assert.True(_runtime.Click(UiDialogs.ButtonsRow, UiDialogs.CellMain));
+        Assert.NotNull(saved);
+        Assert.Equal("sesame", saved!.Text);
+        Assert.True(saved.IsOn("remember"));
+        Assert.Equal("", form.Text);
+    }
+
+    [Fact]
+    public void A_masked_prompt_displaced_by_a_framework_dialog_comes_back_empty()
+    {
+        var secret = UiDialogs.Prompt(_owner, Guid, Plain, "Locked", "", "", _ => { }, "", null, "OK", 32, "Cancel", null, masked: true);
+        secret.SetText("hunter2");
+        var framework = UiApi.Dialog("Uninstall HotDemo?", "", "Yes, uninstall", LabelTone.Orange, "No", owner: new object(), pluginId: "progenitor");
+        Assert.True(secret.IsQueued);
+        UiApi.PressKeyForTests(27, true);
+        Assert.True(secret.IsOpen);
+        Assert.Equal("", secret.Text);
+        Assert.Equal("", secret.View!.Input!.Cells.Single(c => c.Key == UiDialogs.CellField).Text);
+        _ = framework;
+    }
+
     // ---- unload -------------------------------------------------------------------------------
 
     /// <summary>Every unload path drops the plugin's dialogs, shown and queued, and runs no callback.</summary>

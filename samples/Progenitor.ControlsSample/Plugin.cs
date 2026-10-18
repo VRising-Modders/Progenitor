@@ -246,6 +246,11 @@ internal static class ControlsDialogs
                     placeholder: "text", validate: s => (s ?? "").Trim().Length < 3 ? "At least three characters." : null,
                     maxLength: 40, onCancel: () => Say("cancel"));
                 break;
+            case "Password":
+                // MASKED1: the field draws asterisks; the text reaches only this callback. Never log it.
+                ctx.Dialogs.PromptSecret("Password dialog", "Type any password.", s => Say("a password of " + (s ?? "").Length.ToString(CultureInfo.InvariantCulture) + " characters"),
+                    validate: s => (s ?? "").Length == 0 ? "Type a password." : null, maxLength: 32, onCancel: () => Say("cancel"));
+                break;
             case "Form":
                 ctx.Dialogs.Form("Form dialog", new DialogFormOptions
                 {

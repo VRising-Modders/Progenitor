@@ -111,6 +111,15 @@ internal sealed class DialogContent
     /// <summary>TEXTEXPAND1: the editor shows the text and takes no edits (a value the player may read, not change).</summary>
     internal bool InputReadOnly { get; set; }
 
+    /// <summary>
+    /// MASKED1: a Prompt whose field is a password field: it draws asterisks, copy and cut do nothing, and the readback
+    /// (<c>typed</c>, <c>field</c>) shows asterisks. The text still reaches the submit callback.
+    /// </summary>
+    internal bool InputMasked { get; set; }
+
+    /// <summary>MASKED1: what a readback shows for <paramref name="text"/>: asterisks in a masked Prompt.</summary>
+    internal string Shown(string? text) => UiMaskedText.Shown(text, InputMasked);
+
     /// <summary>TEXTEXPAND1: a live <c>1,234 / 4,096</c> counter under the editor (<see cref="UiTextExpandLayout.CounterText"/>).</summary>
     internal bool Counter { get; set; }
 
@@ -390,6 +399,7 @@ internal sealed class UiDialogView
             var field = new CellSpec(CellKind.Input, UiDialogs.CellField)
                 .With(text: content.InputInitial ?? "", placeholder: content.InputPlaceholder ?? "");
             field.MaxLength = content.MaxLength > 0 ? content.MaxLength : 0;
+            field.Masked = content.InputMasked;
             if (content.EditorHeight > 0f)
             {
                 // TEXTEXPAND1: the expanded editor — as wide as the dialog's content, its height asked
@@ -669,9 +679,11 @@ internal sealed class UiDialog : IDisposable
             ["note"] = open?.Content.Note ?? "",
             // WIPECONFIRM1: a typed confirmation: the word, what is typed, and whether the main button is enabled.
             ["confirmWord"] = open?.Content.ConfirmWord ?? "",
-            ["typed"] = open?._text ?? "",
+            // MASKED1: a masked Prompt reads back asterisks, never its text.
+            ["typed"] = open == null ? "" : open.Content.Shown(open._text),
             // The text the field draws (equal to typed after a keystroke or dialog_type; empty shows the placeholder).
-            ["field"] = open?.FieldText ?? "",
+            ["field"] = open == null ? "" : open.Content.Shown(open.FieldText),
+            ["masked"] = open?.Content.InputMasked ?? false,
             ["mainEnabled"] = open == null || open.Content.MainEnabled(open._text),
             // FORMDIALOG1: a form's boxes ({index, row, label, on}), the heading, and whether Save may be pressed for them.
             ["checks"] = ChecksReadback(open),
@@ -1299,6 +1311,8 @@ internal sealed class UiDialog : IDisposable
         }
 
         _panel = panel;
+        // MASKED1: a masked field's text is never kept for a rebuild: a dialog put back in the queue comes back empty.
+        if (Content.InputMasked) _text = "";
         Content.InputInitial = _text;
         UiDialogView view;
         try { view = UiDialogView.Build(panel, Content); }
@@ -1798,6 +1812,8 @@ internal sealed class UiDialog : IDisposable
     {
         if (_closed) return;
         _closed = true;
+        // MASKED1: the typed secret leaves with the dialog.
+        if (Content.InputMasked) _text = "";
         Queue.Remove(this);
         if (ReferenceEquals(_current, this)) _current = null;
         DropPanel();
@@ -1968,7 +1984,17 @@ internal static class UiDialogs
     internal static UiDialog Prompt(
         object owner, string pluginId, string footer,
         string title, string body, string initial, Action<string> onSubmit, string placeholder,
-        Func<string, string?>? validate, string submit, int maxLength, string cancel, Action? onCancel)
+        Func<string, string?>? validate, string submit, int maxLength, string cancel, Action? onCancel) =>
+        Prompt(owner, pluginId, footer, title, body, initial, onSubmit, placeholder, validate, submit, maxLength, cancel, onCancel, masked: false);
+
+    /// <summary>
+    /// <see cref="Prompt(object, string, string, string, string, string, Action{string}, string, Func{string, string?}?, string, int, string, Action?)"/>
+    /// with MASKED1's <paramref name="masked"/>: a password field (asterisks, no copy, asterisks in every readback).
+    /// </summary>
+    internal static UiDialog Prompt(
+        object owner, string pluginId, string footer,
+        string title, string body, string initial, Action<string> onSubmit, string placeholder,
+        Func<string, string?>? validate, string submit, int maxLength, string cancel, Action? onCancel, bool masked)
     {
         if (onSubmit == null) throw new ArgumentNullException(nameof(onSubmit));
         var content = new DialogContent
@@ -1983,6 +2009,7 @@ internal static class UiDialogs
             InputInitial = maxLength > 0 && (initial ?? "").Length > maxLength ? initial!.Substring(0, maxLength) : initial ?? "",
             InputPlaceholder = placeholder ?? "",
             MaxLength = maxLength > 0 ? maxLength : 0,
+            InputMasked = masked,
             Footer = footer,
         };
         return Queue(owner, pluginId, content, "prompt").OnSubmit(onSubmit, validate).OnNo(onCancel);
@@ -1995,7 +2022,8 @@ internal static class UiDialogs
     /// <paramref name="onSave"/> gets the text and every box's state. Throws for no box or more than ten.
     /// </summary>
     internal static UiDialog Form(
-        object owner, string pluginId, string footer, string title, DialogFormOptions options, Action<DialogFormResult> onSave)
+        object owner, string pluginId, string footer, string title, DialogFormOptions options, Action<DialogFormResult> onSave,
+        string body = "")
     {
         if (onSave == null) throw new ArgumentNullException(nameof(onSave));
         if (options == null) throw new ArgumentNullException(nameof(options));
@@ -2007,7 +2035,10 @@ internal static class UiDialogs
         {
             Shape = UiDialogShape.Prompt,
             Title = title ?? "",
+            Body = body ?? "",
             InputCaption = options.Caption ?? "",
+            // MASKED1: a form's field can be a password field too (the container open gate's prompt with its Remember box).
+            InputMasked = options.Masked,
             MainCaption = string.IsNullOrWhiteSpace(options.Save) ? "Save" : options.Save,
             MainTone = CellTone.Gold,
             CancelCaption = string.IsNullOrWhiteSpace(options.Cancel) ? "Cancel" : options.Cancel,

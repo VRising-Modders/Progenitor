@@ -7285,7 +7285,7 @@ public static partial class ModsMenu
     {
         UiToggleHandle toggle => toggle.Value ? "true" : "false",
         UiSliderHandle slider => slider.Value.ToString("G", CultureInfo.InvariantCulture),
-        UiInputHandle input => input.Value ?? "",
+        UiInputHandle input => UiMaskedText.Shown(input.Value, input.Masked),
         UiChoiceHandle choice => choice.Value ?? "",
         UiOptionsHandle options => options.Value ?? "",
         UiInfoHandle info => info.Value ?? "",
@@ -7402,7 +7402,7 @@ public static partial class ModsMenu
             string next = value ?? input.Value ?? "";
             input.Value = next;
             UiSlotTable.BootstrapDispatch(handle.WidgetId, (byte)UiSlotKind.Text, 0, false, next);
-            newValue = input.Value ?? "";
+            newValue = UiMaskedText.Shown(input.Value, input.Masked);
             return 1;
         }
 

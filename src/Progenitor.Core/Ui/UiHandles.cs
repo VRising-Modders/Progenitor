@@ -1505,6 +1505,20 @@ internal sealed class UiSliderHandle : UiHandle, IUiSlider
 internal sealed class UiInputHandle : UiHandle, IUiInput
 {
     private ushort _submitId;
+    private bool _masked;
+
+    /// <inheritdoc cref="IUiInput.Masked"/>
+    public bool Masked
+    {
+        get => _masked;
+        set
+        {
+            _masked = value;
+            if (IsDisposed || Runtime is not { Alive: true } r) return;
+            try { Ui.CurrentRuntime().SetInputMasked(r, value); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: input mask threw: " + e.Message); }
+        }
+    }
     public void Focus(bool selectAll = true)
     {
         if (!IsDisposed && Runtime is { Alive: true } r) Ui.CurrentRuntime().FocusInput(r, selectAll);
