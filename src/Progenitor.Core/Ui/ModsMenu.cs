@@ -3451,6 +3451,7 @@ public static partial class ModsMenu
         }
         catch { configured = ""; }
 
+        SyncConfiguredServerFolder();
         var folder = _folder != null && _folder.HasValidatedServer ? _folder : RouteFolder(configured);
         bool valid = folder != null && folder.HasValidatedServer;
         string root = valid ? folder!.Current.CanonicalPath ?? "" : "";
@@ -3801,14 +3802,17 @@ public static partial class ModsMenu
         // the dialog source the expanded editor and the confirmations open with, not only a mod page. Before, a Server
         // tab drawn before any mod page had none, so the field's expand button and admin confirmations did nothing.
         EnsureModPageDialogFactory();
-        if (_bindings != null) return;
+        if (_bindings != null)
+        {
+            SyncConfiguredServerFolder();
+            return;
+        }
         var file = TrySharedConfigFile();
         if (file == null) return;
         _bindings = ConfigurationPane.Bind(file);
         WireRememberedFilters();
         SettingsCatalog.SharedFileProbe ??= TrySharedConfigFile;
-        if (_folder != null && !string.IsNullOrWhiteSpace(_bindings.DedicatedServerPath.Value))
-            _folder.Apply(_bindings.DedicatedServerPath.Value);
+        SyncConfiguredServerFolder();
     }
 
     /// <summary>Bind <c>[Mods]</c> once on the shared cfg (Core install / first workspace open).</summary>
@@ -3820,8 +3824,24 @@ public static partial class ModsMenu
         WireRememberedFilters();
         SettingsCatalog.SharedFileProbe ??= () => file;
         _folder ??= new LocalServerFolder();
-        if (!string.IsNullOrWhiteSpace(_bindings.DedicatedServerPath.Value))
-            _folder.Apply(_bindings.DedicatedServerPath.Value);
+        SyncConfiguredServerFolder();
+    }
+
+    private static LocalServerFolder? _syncedServerFolder;
+    private static string? _syncedServerPath;
+
+    // Config may load after binding. Revalidate on a path or folder change, not every UI tick.
+    private static void SyncConfiguredServerFolder()
+    {
+        if (_bindings == null || _folder == null) return;
+        string path = _bindings.DedicatedServerPath.Value ?? "";
+        if (ReferenceEquals(_syncedServerFolder, _folder)
+            && string.Equals(_syncedServerPath, path, StringComparison.Ordinal)) return;
+        _syncedServerFolder = _folder;
+        _syncedServerPath = path;
+        // Apply keeps the previous valid folder on failure; a changed config must not use that root.
+        _folder.Clear();
+        if (!string.IsNullOrWhiteSpace(path)) _folder.Apply(path);
     }
 
     private static ConfigFile? TrySharedConfigFile()

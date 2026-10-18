@@ -10,6 +10,8 @@ internal static class InstallSimpleCopy
 {
     public const string ViewSimple = "Simple";
     public const string ViewAdvanced = "Advanced";
+    public const string Explanation = "Simple chooses the client, server, or both from the mod's requirements and what's already installed. Confirmations show where changes apply. Use Advanced to manage each side separately.";
+
     public const string ShowUpdates = "Updates";
     public const string HeaderVersion = "Version";
     public const string HeaderStatus = "Status";
@@ -70,16 +72,33 @@ internal sealed partial class InstallModsPane
     internal Action? OpenServerSettings { get; set; }
 
     /// <summary>The link is drawn: the Simple view, acting on the connected server, for an admin there.</summary>
-    internal bool ServerSettingsLinkShown
+    internal bool ServerSettingsLinkShown => IsSimple && OpenServerSettings != null && PickerInputs?.Connected == true;
+
+    internal IUiCellRow? SimpleServerRow { get; private set; }
+
+    private void BuildSimpleServerContext(IUiPanel panel)
     {
-        get
+        var route = CurrentRoute;
+        bool connected = PickerInputs?.Connected == true;
+        string state = route.Block == ServerRouteBlock.Disconnected ? "Disconnected · Connect to manage"
+            : route.Kind == ServerRouteKind.Local ? "Local management"
+            : connected ? "Connected · Remote management" : "No server selected";
+        string name = PickedServer?.ShortName ?? ServerIdentityFor(route.Kind == ServerRouteKind.Remote).ShortName;
+        var cells = new List<CellSpec>
         {
-            if (!IsSimple || OpenServerSettings == null) return false;
-            bool admin;
-            try { admin = ServerSettingsAdminProbe?.Invoke() ?? false; }
-            catch { admin = false; }
-            return admin && SimpleActsOnServer;
-        }
+            new CellSpec(CellKind.Text, "server-context").With(
+                text: (route.Kind == ServerRouteKind.None && !connected && !route.ForcedRemote ? "Server" : "Server: " + name) + "\n" + state,
+                width: CellWidth.Fill(200f), wrap: CellWrap.Wrap),
+        };
+        if (ServerSettingsLinkShown) cells.Add(ServerSettingsLinkCell());
+        var row = panel.CellRow(new CellRowSpec("simple-server", cells, height: 60f, plain: true));
+        SimpleServerRow = row;
+        row.OnClick(CellServerSettings, () => PressServerSettings());
+        panel.CellRow(new CellRowSpec("simple-help", new[]
+        {
+            new CellSpec(CellKind.Muted, "explanation").With(text: InstallSimpleCopy.Explanation,
+                width: CellWidth.Fill(200f), wrap: CellWrap.Wrap),
+        }, height: 52f, plain: true));
     }
 
     /// <summary>The link's cell: a key cap at the right of the search row.</summary>

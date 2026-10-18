@@ -113,7 +113,7 @@ public sealed class JoinAdminWideTests
         Assert.True(at > 0);
         string body = menu.Substring(at, 600);
         Assert.Contains("EnsureModPageDialogFactory();", body);
-        Assert.True(body.IndexOf("EnsureModPageDialogFactory();", StringComparison.Ordinal) < body.IndexOf("if (_bindings != null) return;", StringComparison.Ordinal));
+        Assert.True(body.IndexOf("EnsureModPageDialogFactory();", StringComparison.Ordinal) < body.IndexOf("if (_bindings != null)", StringComparison.Ordinal));
         Assert.Contains("EnsureBindings();", Source("Ui", "ModsMenu.SectionNav.cs"));
         Assert.Contains("has no dialog source; nothing opened.", Source("Ui", "ModSettingsView.cs"));
     }

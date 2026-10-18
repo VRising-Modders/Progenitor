@@ -99,6 +99,8 @@ internal sealed class ServerTabPane
     /// <summary>The name column of a group line (canvas units): room for "Players without Progenitor".</summary>
     internal const float GroupNameWidth = 300f;
 
+    internal Func<Progenitor.Install.ServerRoute>? RouteProbe { get; set; }
+
     private readonly Func<SettingsScopeContext> _context;
     private readonly Func<LastServerFacts> _lastServer;
     private readonly Func<LastServerRecord, string>? _join;
@@ -184,7 +186,7 @@ internal sealed class ServerTabPane
     {
         if (context == null || context.Connection == SettingConnection.NotConnected) return Title;
         string name;
-        try { name = Progenitor.Install.ServerIdentity.Connected(context.ServerName, context.ServerAddress).TitleName; }
+        try { name = Progenitor.Install.ServerIdentity.Connected(context.ServerName, context.ServerAddress).ShortName; }
         catch { name = ""; }
         return string.IsNullOrWhiteSpace(name) ? Title : name;
     }
@@ -248,11 +250,22 @@ internal sealed class ServerTabPane
         _builtTitle = TitleOf(context);
         panel.ContentAlignment = ConfigurationLayout.Alignment;
         Ui.HidePaneTitle(panel);
-        var title = panel.Heading(_builtTitle);
-        title.SectionRule();
+        Ui.PinMenuRows(panel, MenuRowPin.Top);
+        var title = panel.CellRow(new CellRowSpec(RowHead, new[]
+        {
+            new CellSpec(CellKind.Text, "name").With(text: _builtTitle, width: CellWidth.Fill(200f),
+                fontSize: 26f, wrap: CellWrap.Wrap),
+        }, height: 64f, plain: true));
         TitleHeading = title;
         var state = _builtState;
         AddReadback(title, RowHead, (Func<object?>)(() => Describe(state)));
+        var route = RouteProbe?.Invoke() ?? default;
+        string status = state == ServerTabState.NotConnected ? "Disconnected"
+            : "Connected" + (route.Kind == Progenitor.Install.ServerRouteKind.Local ? " · Local management" : " · Remote management")
+                + (state == ServerTabState.Ready ? (context.CanEditServerWide ? " · Admin access" : " · Read-only access") : " · " + EmptyLine(state));
+        var statusRow = panel.Note(status);
+        AddReadback(statusRow, "server-context", status);
+        Ui.PinMenuRows(panel, MenuRowPin.Content);
         panel.SettingsDescriptionMode(true);
 
         if (state != ServerTabState.Ready)
@@ -268,7 +281,8 @@ internal sealed class ServerTabPane
         {
             Embedded = true,
             OmitServerChip = true,
-            EmptyHeading = Title,
+            EmptyHeading = "Setting help",
+            DefaultToFirstSetting = false,
             EmptyBody = ColumnIntro,
         };
         configure?.Invoke(view);

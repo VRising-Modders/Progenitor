@@ -586,6 +586,42 @@ public sealed class InstallSidesPaneTests : IDisposable
     }
 
     [Fact]
+    public void Fresh_server_scan_overrides_an_earlier_session_install()
+    {
+        var catalog = new FakeCatalog();
+        var entry = Tagged("o-b", new[] { "Client", "Server", "Oakveil Update" });
+        catalog.Entries.Add(entry);
+        var rig = new Rig(this, catalog, pane =>
+            pane.ServerRouteProbe = () => new ServerRoute(ServerRouteKind.Local, ServerRouteBlock.None), ValidatedFolder());
+        // Restore the session history left by a prior server-only install, then scan after removal.
+        var state = typeof(InstallModsPane).GetField("_state",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(rig.Pane)!;
+        foreach (string field in new[] { "SessionServerOnly", "SessionInstalled" })
+            ((HashSet<string>)state.GetType().GetField(field)!.GetValue(state)!).Add(entry.Key);
+        Assert.Equal(HalfState.Installed, rig.Pane.ServerHalfOf(entry).State);
+        rig.Pane.SetInstalledQuery(new InstalledStateQuery());
+        Assert.Equal(HalfState.Absent, rig.Pane.ServerHalfOf(entry).State);
+        Assert.Equal(SideCells.NotInstalled, rig.Pane.SideCellsFor(entry).Server.Text);
+        Assert.DoesNotContain(SideButton.Uninstall, rig.Pane.SideCellsFor(entry).Server.Buttons);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Explicit_server_targets_never_fall_back_to_client(bool both)
+    {
+        var catalog = new FakeCatalog();
+        var entry = Tagged("o-b", new[] { "Client", "Server", "Oakveil Update" });
+        catalog.Entries.Add(entry);
+        var rig = new Rig(this, catalog, pane =>
+            pane.ServerRouteProbe = () => new ServerRoute(ServerRouteKind.Local, ServerRouteBlock.None));
+        Assert.False(both ? rig.Pane.OnBothClick(entry.Key)
+            : rig.Pane.OnSideClick(entry.Key, true, SideButton.Install));
+        Assert.Empty(catalog.Planned);
+        Assert.NotEqual(InstallPromptKind.Install, rig.Pane.Prompt);
+    }
+
+    [Fact]
     public void The_both_shortcut_installs_both_halves_through_the_local_folder()
     {
         var catalog = new FakeCatalog();

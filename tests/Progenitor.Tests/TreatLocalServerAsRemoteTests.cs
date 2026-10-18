@@ -99,12 +99,25 @@ public sealed class TreatLocalServerAsRemoteTests : IDisposable
         Assert.False(decision.Route.CanInstall);
     }
 
-    [Fact]
-    public void On_but_not_connected_the_folder_is_still_the_local_route()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Disconnected_local_management_requires_remote_testing_to_be_off(bool forced)
     {
-        var decision = ServerRouteSelector.Decide(LiveJoin(treatAsRemote: true, connected: false));
-        Assert.Equal(ServerRouteKind.Local, decision.Route.Kind);
-        Assert.False(decision.Route.ForcedRemote);
+        var decision = ServerRouteSelector.Decide(LiveJoin(treatAsRemote: forced, connected: false));
+        Assert.Equal(forced ? ServerRouteKind.None : ServerRouteKind.Local, decision.Route.Kind);
+        Assert.Equal(forced, decision.Route.ForcedRemote);
+        Assert.Equal(!forced, decision.Route.CanManage);
+        Assert.Equal(!forced, decision.Route.CanInstall);
+        var entry = new ServerPickEntry(ServerPicker.LocalPrefix + @"C:\GameModding\_testserver\server",
+            ServerPickKind.LocalFolder, "Test", "Test", @"C:\GameModding\_testserver\server", "");
+        var picked = ServerPicker.RouteFor(entry, decision.Route, @"C:\GameModding\_testserver\server");
+        Assert.Equal(decision.Route.Kind, picked.Kind);
+        if (forced)
+        {
+            Assert.Equal(ServerRouteBlock.Disconnected, picked.Block);
+            Assert.Equal("Connect to manage", picked.Reason);
+        }
     }
 
     [Fact]

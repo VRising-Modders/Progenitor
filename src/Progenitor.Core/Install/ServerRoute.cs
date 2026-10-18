@@ -43,6 +43,9 @@ internal enum ServerRouteBlock
 
     /// <summary>Connected to a Progenitor server whose remote-install status has not arrived yet.</summary>
     Pending = 7,
+
+    /// <summary>Remote management requires a connection; local fallback is disabled.</summary>
+    Disconnected = 8,
 }
 
 /// <summary>Everything the route decision reads. Plain values, so the matrix is testable.</summary>
@@ -124,6 +127,7 @@ internal readonly struct ServerRoute
         ServerRouteBlock.NotProgenitor => ServerRouteCopy.NotProgenitor,
         ServerRouteBlock.Unreachable => ServerRouteCopy.Unreachable(Detail),
         ServerRouteBlock.Pending => ServerRouteCopy.Pending,
+        ServerRouteBlock.Disconnected => "Connect to manage",
         ServerRouteBlock.NoServer => ServerRouteCopy.NoServer,
         _ => "",
     };
@@ -146,6 +150,7 @@ internal readonly struct ServerRoute
 
     public string BlockName => Block switch
     {
+        ServerRouteBlock.Disconnected => "disconnected",
         ServerRouteBlock.NoServer => "no-server",
         ServerRouteBlock.NotProgenitor => "not-progenitor",
         ServerRouteBlock.RemoteOff => "remote-off",
@@ -183,6 +188,12 @@ internal static class ServerRouteSelector
     public static ServerRouteDecision Decide(ServerRouteFacts facts)
     {
         if (facts == null) throw new ArgumentNullException(nameof(facts));
+        // Remote testing must not regain filesystem access when the player leaves the server.
+        if (facts.TreatLocalAsRemote && !facts.Connected)
+            return new ServerRouteDecision(
+                new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true),
+                false, "Connect to manage; local folder access disabled by TreatLocalServerAsRemote", facts);
+
         // F23 (live 2026-10-07): this client hosts a private game: its own server (the hosted child) is the local route,
         // whatever the configured dedicated folder is. The connected server is that child.
         // Review (M5): a stale hosting flag must not route another server's installs into the private game's folder: while
@@ -220,7 +231,7 @@ internal static class ServerRouteSelector
             : source == LocalFolderSource.Configured ? facts.CanonicalPath : "";
 
         // REMOTETEST1: with the setting on, the connected server is handled through the remote route
-        // even when it is a local folder's. The folder stays the route when not connected, and
+        // even when it is a local folder's. Disconnected remote testing is handled above, and
         // connectedIsLocal (what the picker merges on) keeps its physical meaning.
         bool forced = facts.TreatLocalAsRemote && connectedIsLocal;
         var inputs = new ServerRouteInputs(facts.PathValid || detected, facts.Connected, connectedIsLocal && !forced, facts.HandshakeOk, facts.RemoteStatus);

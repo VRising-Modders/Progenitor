@@ -50,6 +50,20 @@ public sealed class SideCellsTests
 
     private static SideButton[] B(params SideButton[] b) => b;
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Disconnected_remote_target_hides_stale_server_state_and_actions(bool previouslyInstalled)
+    {
+        var d = D(Absent, previouslyInstalled ? Installed("1.0.0") : Absent,
+            route: new ServerRoute(ServerRouteKind.None, ServerRouteBlock.Disconnected, forcedRemote: true));
+        Assert.Equal("Connect to manage", d.Server.Text);
+        Assert.True(d.Server.Grayed);
+        Assert.Empty(d.Server.Buttons);
+        Assert.Equal(SideButton.None, d.Shortcut);
+        Assert.Contains(SideButton.Install, d.Client.Buttons);
+    }
+
     [Fact]
     public void Nothing_installed_offers_install_on_each_side_and_the_both_shortcut()
     {

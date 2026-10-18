@@ -549,14 +549,13 @@ internal static class SettingScopeSections
     };
 
     /// <summary>
-    /// <c>Applies to everyone on &lt;server&gt;</c>: the server's name when known, else its address, cut
-    /// in the middle like a confirmation title (<see cref="ServerIdentity.TitleName"/>); when not
+    /// <c>Applies to everyone on &lt;server&gt;</c>: the server's full name when known, else its address; when not
     /// connected, <see cref="AppliesNotConnected"/>.
     /// </summary>
     public static string ServerLine(bool connected, string? serverName, string? address)
     {
         if (!connected) return AppliesNotConnected;
-        return AppliesPrefix + ServerIdentity.Connected(serverName, address).TitleName;
+        return AppliesPrefix + ServerIdentity.Connected(serverName, address).ShortName;
     }
 
     public static IReadOnlyList<ScopedSection> Group(IEnumerable<ScopedRow> rows, string serverLine)

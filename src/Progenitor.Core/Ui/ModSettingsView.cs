@@ -226,6 +226,8 @@ internal sealed partial class ModSettingsView
     internal Action<ModSettingsDescription>? DescriptionChanged { get; set; }
 
     /// <summary>What the column says with nothing to describe (the page owner's title and one-liner).</summary>
+    internal bool DefaultToFirstSetting { get; set; } = true;
+
     internal string EmptyHeading { get; set; } = ModPageCopy.SettingsHeading;
 
     internal string EmptyBody { get; set; } = "";
@@ -404,7 +406,7 @@ internal sealed partial class ModSettingsView
 
         string? hovered = VisibleOrNull(_hoveredId);
         string? selected = VisibleOrNull(_selectedId);
-        var (id, source) = ModSettingsDescription.Pick(hovered, selected, FirstVisibleId);
+        var (id, source) = ModSettingsDescription.Pick(hovered, selected, DefaultToFirstSetting ? FirstVisibleId : "");
         return DescriptionOf(id, source);
     }
 

@@ -496,6 +496,8 @@ internal static class SideCells
 
         var half = input.Server ?? SideHalf.None;
         var route = input.Route;
+        if (route.Block == ServerRouteBlock.Disconnected)
+            return new SideCell(KindNoServer, route.Reason, SideCellTone.Muted);
         if (half.Busy.Length > 0) return BusyCell(half);
 
         // INSTALLSIDES2 item 3: not an admin. The states stay as an admin would read them; the buttons

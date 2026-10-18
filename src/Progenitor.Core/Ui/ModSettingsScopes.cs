@@ -242,9 +242,10 @@ internal static class ModSettingsScopes
             {
                 ModPageSpacing.Lead(),
                 new CellSpec(CellKind.Muted, CellScopeLine).With(
-                    text: line ?? "", width: CellWidth.Fraction(1f), fontSize: GameSettingsLook.ActionRowText, tone: CellTone.Muted),
+                    text: line ?? "", width: CellWidth.Fraction(1f), fontSize: GameSettingsLook.ActionRowText, tone: CellTone.Muted,
+                    wrap: CellWrap.Wrap, vAlign: CellVAlign.Top),
             },
-            height: ModSettingsRowGrid.ActionRowHeight, rightInset: HeadBlockLayout.RightColumnInset, plain: true);
+            height: ModSettingsRowGrid.ActionRowHeight, rightInset: HeadBlockLayout.RightColumnInset, plain: true, fitWrap: true);
 
     /// <summary>
     /// An author subsection's heading, the same in both scopes: small caps in the game's gold, a step larger than the rows'
