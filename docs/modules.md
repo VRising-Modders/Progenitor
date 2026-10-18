@@ -2150,8 +2150,9 @@ A reference from before a save reload is refused as stale; keep a `ContainerId` 
 |---|---|---|
 | Chest, castle heart, player bag entity | The entity carries `InventoryBuffer` itself | `Of(owner)` (instance 0 only) |
 | Player character, servant | `InventoryInstanceElement` rows point at external inventory entities (one row on a character: the bag) | `Of(character)` |
-| Refinement station (furnace, sawmill, …) | Two external inventories, spawned input then output (8 slots each, unrestricted) | `InputOf(station)` = instance 0, `OutputOf(station)` = instance 1 |
-| Crafting station | One inventory | `InputOf(station)` / `Of(station)` |
+| Refinement station (furnace, sawmill, tannery, loom, blood press, …) | Two external inventories, spawned input then output (8 slots each, unrestricted); `Refinementstation.InputInventoryEntity` / `OutputInventoryEntity` name them | `InputOf(station)` / `OutputOf(station)`: the row holding that entity (0 and 1 as spawned) |
+| Salvage station (the Devourer) | Two external inventories; `Salvagestation.InputInventoryEntity` / `OutputInventoryEntity` name them | `InputOf(station)` / `OutputOf(station)`: the row holding that entity; the index is read, not assumed |
+| Crafting station | One inventory; crafted items land in it (no separate output) | `InputOf(station)` / `Of(station)` |
 
 `Instances(owner)` says how many there are. The heart's inventory is reached with
 `Of(heart)`; which slots are its fuel pads is read from its level table
@@ -2362,7 +2363,7 @@ ctx.Inventory.OnPlayerMove(m =>
 | Field | What |
 |---|---|
 | `User`, `Character` (`UserIndex`/`UserVersion`, `CharacterIndex`/`CharacterVersion`) | The sender, from the event's `FromCharacter`. |
-| `Container`, `IsCastleContainer`, `Inventory` | The owner's `ContainerId` (a placed chest, station or heart; `None` for a servant or a world container) and the `InventoryRef` (owner plus instance; 1 is a refinement station's output). |
+| `Container`, `IsCastleContainer`, `Inventory` | The owner's `ContainerId` (a placed chest, station or heart; `None` for a servant or a world container) and the `InventoryRef` (owner plus instance; 1 is a refinement station's output as the game spawns it). |
 | `Item`, `Amount`, `Direction` | Item `PrefabGUID` hash, units (always above 0), `In` / `Out` / `Within` seen from the container. |
 | `CountBefore`, `CountAfter` | The container's total of the item around the game's update. |
 | `Kind` | `Move` (drag, shift-click), `MoveAll` (take all, deposit all), `SmartMerge`, `Split`, `Sort`, `SortAll`, `Drop`, `Equip`. |
@@ -2517,7 +2518,8 @@ yours (for example `ctx.Castles.RelationTo`). Network ids are session-local: per
 | Member | What |
 |---|---|
 | `ICastleHandle.Containers()` | Placed models with an inventory that are not a station or the heart. |
-| `ICastleHandle.Stations()` | Models with a recipe list (`WorkstationRecipesBuffer`) or `Refinementstation`; refinement rows carry `Output`. Storage that carries `CastleWorkstation` only for room and servant bonuses is listed by `Containers()`. |
+| `ICastleHandle.Stations()` | Models with a recipe list (`WorkstationRecipesBuffer`), a `Refinementstation` or a `Salvagestation`. Storage that carries `CastleWorkstation` only for room and servant bonuses is listed by `Containers()`. |
+| `CastleContainerInfo.Main` / `Output` | `Main` is the input (or only) inventory. `Output` is the separate output of a refinement or salvage station: the `InventoryInstanceElement` row whose entity is the station component's `OutputInventoryEntity`, never an index assumed from the station kind. A refinement station whose field cannot be matched keeps instance 1. Every other model has `Output.IsNone`: crafting stations (crafted items land in their one inventory), unit stations, prison cells, research stations, chests. `IsRefinement` stays true for refinement stations only; test `Output.IsNone` for a separate output. Game-free tested; the salvage output is **not live-verified**. |
 | `ICastleHandle.StructureRevision` | A `long` that changes when a container or station on this plot is built or destroyed, or the world is loaded. Key a cache of the two lists above on it. Renames, slot counts and contents do not move it. A build and a destroy between two reads may show up to 10 s late. Valid within one process only: do not persist it. 0 on a disabled or stale handle. Game-free tested, not live-verified. |
 | `ICastleHandle.Name` | The heart's nameplate. |
 | `ICastleHandle.HeartId` | The heart's stable id. |
@@ -2559,7 +2561,7 @@ world yet).
 slots 0–7), `add|remove <c> <item> <n>`, `name <c> "text"`, `id <c>`, `net <c>` (the
 container's network id words), `resolve <index> <generation> [type]` (what a request handler does
 with a client's words: the entity and id, or the refusal), `watch <c>`, `stamp <c>` (the change stamp and clock, and against the previous `.items stamp` of that container whether the stamp is equal and what `AnyChangedSince` said), `moves` (toggle a `Sample items: player move …` log line per [player move](#player-moves)), `heart`, `clan`. A container `<c>` is `#n` (row of `.items chests`), a `c-…` id, an
-`index:version` entity, `bag` or `heart`; append `/out` for a refinement station's output. Items are
+`index:version` entity, `bag` or `heart`; append `/out` for a refinement or salvage station's output. Items are
 a spawnable name or a GUID hash. Every action logs a `Sample items: …` line; the sample also logs
 `PlayerReady` and `PlayerTerritoryChanged`.
 

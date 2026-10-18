@@ -138,6 +138,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ecs\ChunkVersionMath.cs" Link="Linked\ChunkVersionMath.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Clans\ClanTypes.cs" Link="Linked\ClanTypes.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleContainers.cs" Link="Linked\CastleContainers.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\StationInventoryMap.cs" Link="Linked\StationInventoryMap.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleInventoryIndex.cs" Link="Linked\CastleInventoryIndex.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\NameplateCodec.cs" Link="Linked\NameplateCodec.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleHeartFuel.cs" Link="Linked\CastleHeartFuel.cs" />

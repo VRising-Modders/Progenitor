@@ -24,8 +24,9 @@ public readonly struct InventoryRef : IEquatable<InventoryRef>
     public int OwnerVersion { get; }
 
     /// <summary>
-    /// Inventory instance on the owner: 0 main (or a refinement station's input), 1 a
-    /// refinement station's output. Matches the owner's <c>InventoryInstanceElement</c> rows.
+    /// Inventory instance on the owner: the index of the owner's <c>InventoryInstanceElement</c> row.
+    /// 0 is the main inventory (or a station's input); a refinement or salvage station's output is
+    /// the row its component's <c>OutputInventoryEntity</c> names (1 as the game spawns them).
     /// </summary>
     public int Instance { get; }
 
