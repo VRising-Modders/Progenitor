@@ -25,7 +25,7 @@ internal interface IWorldPickBandRuntime
     /// Escape key cap (<see cref="UiWorldPickCopy.CancelWord"/>, or <see cref="UiWorldPickCopy.FinishWord"/> while a pick repeats).
     /// </summary>
     void StyleWorldPickBand(IRuntimePanel panel, string prompt, string interactKey, string cancelKey, string cancelWord = UiWorldPickCopy.CancelWord,
-        string pickWord = UiWorldPickCopy.PickWord, string count = "");
+        string pickWord = UiWorldPickCopy.PickWord, string count = "", string modifierHint = "");
 }
 
 /// <summary>
@@ -100,6 +100,10 @@ internal static unsafe class WorldPickBackend
     private static string _escapeWord = UiWorldPickCopy.CancelWord;
     private static string _interactWord = UiWorldPickCopy.PickWord;
     private static string _count = "";
+    private static string _hint = "";
+
+    /// <summary>PICKMOD1: the modifiers held lately, sampled once a frame while a pick is armed.</summary>
+    private static readonly UiWorldPickModifiers PickModifiers = new();
     private static bool _closeKeyHeld;
     private static ulong? _armedWorldSeq;
     private static Entity _armedCharacter;
@@ -236,6 +240,8 @@ internal static unsafe class WorldPickBackend
             _count = UiWorldPickCopy.BandCount(pick.Options.Repeat, pick.PickCount);
             _escapeWord = UiWorldPickCopy.EscapeWord(pick.Options.Repeat);
             _interactWord = UiWorldPickCopy.InteractWord(pick.Options.Repeat);
+            _hint = pick.Options.ModifierHint;
+            PickModifiers.Clear();
             ShowBand();
         }
 
@@ -422,6 +428,12 @@ internal static unsafe class WorldPickBackend
         try { c?.Tick(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: world pick tick threw: " + e.Message); }
         if (c != null) UpdateBand(c);
+        // PICKMOD1: the framework's own held-modifier read (no key polling of its own), once a frame while armed.
+        if (c != null && c.IsArmed)
+        {
+            try { PickModifiers.Note(Now(), Keybinds.HeldModifiers()); }
+            catch { /* the keyboard could not be read: no modifiers */ }
+        }
 
         if (Swallow.Count > 0)
         {
@@ -504,7 +516,12 @@ internal static unsafe class WorldPickBackend
             if (plan.Swallow) Swallow.Add(buffKey, now);
 
             UnityUiRuntime.ReadNetworkId(em, target, out int n0, out int n1, out int n2);
-            coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, plan.Suppressed, n0, n1, n2);
+            // A fresh sample first: a frame hitch between the last tick's sample and this press must not drop a held Shift.
+            var heldNow = KeyModifiers.None;
+            try { heldNow = Keybinds.HeldModifiers(); }
+            catch { /* the keyboard could not be read: no modifiers */ }
+            var held = PickModifiers.Deliver(Now(), heldNow);
+            coordinator.Complete(menu, target.Index, target.Version, WorldEpoch.Current, plan.Suppressed, n0, n1, n2, held);
         }
     }
 
@@ -660,7 +677,7 @@ internal static unsafe class WorldPickBackend
     private static void StyleBand(UiPanelHandle handle)
     {
         if (Ui.CurrentRuntime() is IWorldPickBandRuntime band && handle.RuntimePanel is { } runtimePanel)
-            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey, _escapeWord, _interactWord, _count);
+            band.StyleWorldPickBand(runtimePanel, _prompt, InteractKeyText(), UiWorldPickCopy.EscapeKey, _escapeWord, _interactWord, _count, _hint);
     }
 
     private static void ReleaseBand()

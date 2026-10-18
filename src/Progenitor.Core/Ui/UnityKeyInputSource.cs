@@ -383,6 +383,19 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
         return true;
     }
 
+    /// <summary>PICKMOD1: the modifier keys held now, held state only (no edge is read).</summary>
+    public bool TryReadHeldModifiers(out ModifierSides held)
+    {
+        held = ModifierSides.None;
+        Keyboard? keyboard;
+        try { keyboard = Keyboard.current; }
+        catch { return false; }
+        if (keyboard == null) return false;
+        try { held = HeldSides(keyboard); }
+        catch { return false; }
+        return true;
+    }
+
     private static readonly (UiKey Key, ModifierSides Side)[] ModifierEdgeKeys =
     {
         (UiKey.LeftCtrl, ModifierSides.LeftCtrl), (UiKey.RightCtrl, ModifierSides.RightCtrl),

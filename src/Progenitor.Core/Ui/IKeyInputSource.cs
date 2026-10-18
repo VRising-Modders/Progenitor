@@ -161,6 +161,17 @@ internal interface IKeyInputSource
     }
 
     /// <summary>
+    /// PICKMOD1: which modifier keys are down now, held state only (no press edges are read or consumed, so it can be
+    /// asked any number of times a frame without disturbing <see cref="TryReadModifiers"/>). False when the source cannot
+    /// tell. Never throws. Defaulted so existing sources need no change.
+    /// </summary>
+    bool TryReadHeldModifiers(out ModifierSides held)
+    {
+        held = ModifierSides.None;
+        return false;
+    }
+
+    /// <summary>
     /// HOLDMOD1 review: whether the game window has focus (<c>Application.isFocused</c>), or null when the source cannot
     /// tell. When it goes from focused to not focused the pump releases every active hold, because a key let go while
     /// another window has focus (Alt+Tab) is never seen coming up. Defaulted to null (unknown) for existing sources.

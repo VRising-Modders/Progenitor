@@ -518,9 +518,7 @@ internal static class ContainerPreviewAuthorization
     /// <summary>Null to allow, else the player-facing refusal. The order is fixed.</summary>
     internal static string? Refusal(in ContainerPreviewFacts f)
     {
-        if (!f.UserConnected) return "You are not connected.";
-        if (ContainerPreviewSettings.Refusal(f.Mode, f.IsPvE) is { } off) return off;
-        if (!f.RateOk) return "Too many preview requests; try again shortly.";
+        if (RequestRefusal(f) is { } early) return early;
         if (!f.IdParsed) return "That is not a container id.";
         if (!f.Found) return "That container no longer exists.";
         if (!f.HasInventory) return "That has no inventory.";
@@ -533,11 +531,27 @@ internal static class ContainerPreviewAuthorization
     }
 
     /// <summary>
+    /// The checks that need nothing about the container (the first three of <see cref="Refusal"/>, same order): the user
+    /// is connected, the server's setting allows previews, the rate token was taken. The server applies them before any
+    /// lookup, a network-id resolve included, so a refused or flooding client costs no lookup.
+    /// </summary>
+    internal static string? RequestRefusal(in ContainerPreviewFacts f)
+    {
+        if (!f.UserConnected) return "You are not connected.";
+        if (ContainerPreviewSettings.Refusal(f.Mode, f.IsPvE) is { } off) return off;
+        if (!f.RateOk) return "Too many preview requests; try again shortly.";
+        return null;
+    }
+
+    /// <summary>
     /// The refusal when the server's world-save hook is not in place: the inventory sync must be taken out around every
     /// world save, and without the hook the server never hears of one.
     /// </summary>
     internal const string SaveHookRefusal =
         "This server cannot share container contents right now: its world-save hook is not in place (see the server log).";
+
+    /// <summary>REOPEN2: the refusal when a preview asked by network id names nothing the server knows as a container.</summary>
+    internal const string UnknownByNetworkId = "The server does not know that container.";
 
     /// <summary>The lease seconds the server grants for a requested length: clamped to (0, 600], 30 when unusable.</summary>
     internal static double GrantSeconds(double requested) =>

@@ -653,6 +653,18 @@ public static class Keybinds
     }
 
     /// <summary>
+    /// PICKMOD1: the modifier keys (either side's Ctrl, Shift, Alt) held now, through the framework's key source (held
+    /// state only, no edge consumed). <see cref="KeyModifiers.None"/> when the keyboard cannot be read.
+    /// </summary>
+    internal static KeyModifiers HeldModifiers()
+    {
+        IKeyInputSource source;
+        lock (Gate) source = _source;
+        try { return source.TryReadHeldModifiers(out var held) ? KeyChord.ModifiersOf(held) : KeyModifiers.None; }
+        catch { return KeyModifiers.None; }
+    }
+
+    /// <summary>
     /// Register a keybind. Returns a handle whose <c>Dispose</c> unregisters it; the config entry
     /// itself is left in the cfg (the player's value survives a reload).
     /// </summary>

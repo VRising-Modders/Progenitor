@@ -73,7 +73,17 @@ internal static class ContainerReturnClient
         var job = _job;
         _job = null;
         job?.End(ContainerReopenResult.Cancelled);
+        var remote = _remote;
+        _remote = null;
+        remote?.Drop();
+        foreach (var h in RemoteOpened.TakeAll()) CloseQuiet(h);
         _last = null;
+    }
+
+    /// <summary>A remote fallback's preview closes for an unload: no Closed handlers run, and they are released.</summary>
+    private static void CloseQuiet(ContainerPreviewHandle handle)
+    {
+        try { handle.Close(ContainerPreviewCloseReason.Unloaded, "", notify: false); } catch { /* */ }
     }
 
     /// <summary>The remembered window, or null (<c>ctx.Inventory.LastWindow</c>).</summary>
@@ -92,8 +102,9 @@ internal static class ContainerReturnClient
     /// however long it ran.
     /// </summary>
     internal static ContainerReopenResult ReopenLast(Action<ContainerReopenResult>? done, string why, object? owner = null, bool anyAge = false,
-        ContainerWindowInfo? openWhenStarted = null)
+        ContainerWindowInfo? openWhenStarted = null, ContainerReopenOptions? options = null)
     {
+        var sink = new Sink(done, options, why, owner);
         var world = Worlds.Client;
         bool inGame = _installed && world != null && world.IsCreated;
         var last = _last;
@@ -115,11 +126,21 @@ internal static class ContainerReturnClient
         if (answer != ContainerReopenResult.Started)
         {
             Note(why, answer, last);
-            Report(done, answer);
+            // REOPEN2: not where the window can be reopened: the same container from afar, if asked for. A running
+            // reopen ends first (Cancelled), as when this call starts one of its own.
+            if (remembered && sink.WantsRemote(answer))
+            {
+                var running = _job;
+                _job = null;
+                running?.End(ContainerReopenResult.Cancelled);
+                if (StartRemote(last!, sink)) return ContainerReopenResult.Started;
+            }
+            sink.Finish(answer);
             return answer;
         }
         _job?.End(ContainerReopenResult.Cancelled);
-        _job = new Reopen(world!, last!, done, why, owner);
+        _remote?.Cancel();
+        _job = new Reopen(world!, last!, sink);
         Plugin.Logger?.LogInfo("ContainerReturn: reopening " + last!.Describe() + " (" + why + ").");
         return ContainerReopenResult.Started;
     }
@@ -134,13 +155,64 @@ internal static class ContainerReturnClient
     /// </summary>
     internal static void NoteFlowClose() => _flowCloseAt = Now;
 
-    /// <summary>A plugin unloads: its running reopen ends without calling back into it.</summary>
+    /// <summary>
+    /// A plugin unloads: its running reopen ends without calling back into it, and every remote preview the fallback
+    /// opened for it closes (also one kept open after RemoteOpened, which the watch no longer holds).
+    /// </summary>
     internal static void CancelFor(object owner)
     {
         var job = _job;
-        if (job == null || !ReferenceEquals(job.Owner, owner)) return;
-        _job = null;
-        job.Drop();
+        if (job != null && ReferenceEquals(job.Sink.Owner, owner))
+        {
+            _job = null;
+            job.Drop();
+        }
+        var remote = _remote;
+        if (remote != null && ReferenceEquals(remote.Sink.Owner, owner))
+        {
+            _remote = null;
+            remote.Drop();
+        }
+        foreach (var h in RemoteOpened.TakeFor(owner)) CloseQuiet(h);
+    }
+
+    private static RemoteWatch? _remote;
+
+    /// <summary>REOPEN2: the remote previews opened for each plugin, until they close, so its unload closes them.</summary>
+    private static readonly RemotePreviewsByOwner<ContainerPreviewHandle> RemoteOpened = new();
+
+    /// <summary>
+    /// REOPEN2: open the remembered container remotely through the container preview (the server's own rules: owner or
+    /// clan, the Remote chest preview setting, the open gate). False when it cannot even be asked (not a container window,
+    /// no preview on this client); the sink is then finished with <see cref="ContainerReopenResult.RemoteFailed"/>.
+    /// </summary>
+    private static bool StartRemote(Remembered last, Sink sink)
+    {
+        if (last.Kind != VanillaPanelKind.Container)
+        {
+            Plugin.Logger?.LogInfo("ContainerReturn: " + last.Describe() + " is not a container; no remote fallback.");
+            sink.Finish(ContainerReopenResult.RemoteFailed, ContainerReturnRules.RemoteNotAContainer);
+            return true;
+        }
+        try
+        {
+            var options = sink.Options?.RemotePreview ?? new ContainerPreviewOptions { KeepOpen = true };
+            var handle = ContainerPreviewClient.OpenByNetworkId(last.N0, last.N1, last.N2, options, sink.Owner);
+            RemoteOpened.Add(sink.Owner, handle);
+            _remote?.Cancel();
+            _remote = new RemoteWatch(handle, sink);
+            Plugin.Logger?.LogInfo("ContainerReturn: " + last.Describe() + " opened remotely instead (" + sink.Why + ").");
+            try { sink.Options?.RemoteStarted?.Invoke(handle); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerReturn: a RemoteStarted callback threw: " + e.Message); }
+            _remote?.Poll();
+            return true;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("ContainerReturn: the remote fallback could not start: " + e.Message);
+            sink.Finish(ContainerReopenResult.RemoteFailed, "The container could not be opened from afar.");
+            return true;
+        }
     }
 
     private static void Tick()
@@ -155,6 +227,10 @@ internal static class ContainerReturnClient
         }
         try { Track(world); }
         catch (Exception e) { WarnOnce("track", e); }
+        try { _remote?.Poll(); }
+        catch (Exception e) { WarnOnce("remote", e); }
+        if (_remote is { Done: true }) _remote = null;
+        RemoteOpened.Prune(h => h.State == ContainerPreviewState.Closed);
         var running = _job;
         if (running == null) return;
         try { running.Tick(); }
@@ -212,11 +288,80 @@ internal static class ContainerReturnClient
         return world != null && world.IsCreated && ReferenceEquals(world, r.World) && r.Epoch == WorldEpoch.Current;
     }
 
-    private static void Report(Action<ContainerReopenResult>? done, ContainerReopenResult result)
+    /// <summary>Who hears how a reopen ended: the plain callback, the options' <c>Done</c>, and the remote fallback's wish.</summary>
+    private sealed class Sink
     {
-        if (done == null) return;
-        try { done(result); }
-        catch (Exception e) { Plugin.Logger?.LogWarning("ContainerReturn: a done callback threw: " + e.Message); }
+        private Action<ContainerReopenResult>? _done;
+        private ContainerReopenOptions? _options;
+        private bool _finished;
+
+        internal Sink(Action<ContainerReopenResult>? done, ContainerReopenOptions? options, string why, object? owner)
+        {
+            _done = done; _options = options; Why = why; Owner = owner;
+        }
+
+        internal string Why { get; }
+        internal object? Owner { get; }
+        internal ContainerReopenOptions? Options => _options;
+
+        internal bool WantsRemote(ContainerReopenResult result) =>
+            _options?.RemoteIfAway == true && ContainerReturnRules.FallsBackToRemote(result);
+
+        /// <summary>Forget the callbacks (the plugin is unloading).</summary>
+        internal void Drop() { _done = null; _options = null; }
+
+        internal void Finish(ContainerReopenResult result, string reason = "", IContainerPreview? remote = null)
+        {
+            if (_finished) return;
+            _finished = true;
+            _lastOutcome = result + (reason.Length > 0 ? ": " + reason : "") + " (" + Why + ")";
+            try { _done?.Invoke(result); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerReturn: a done callback threw: " + e.Message); }
+            try { _options?.Done?.Invoke(new ContainerReopenFinished(result, reason, remote)); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("ContainerReturn: a Done callback threw: " + e.Message); }
+        }
+    }
+
+    /// <summary>REOPEN2: a remote fallback's preview, until its window shows (RemoteOpened) or it closes first (RemoteFailed).</summary>
+    private sealed class RemoteWatch
+    {
+        private readonly ContainerPreviewHandle _handle;
+
+        internal RemoteWatch(ContainerPreviewHandle handle, Sink sink)
+        {
+            _handle = handle;
+            Sink = sink;
+        }
+
+        internal Sink Sink { get; }
+        internal bool Done { get; private set; }
+
+        internal void Poll()
+        {
+            if (Done) return;
+            var outcome = ContainerReturnRules.RemoteOutcome(_handle.State);
+            if (outcome == null) return;
+            Done = true;
+            string reason = outcome == ContainerReopenResult.RemoteFailed ? _handle.Reason ?? "" : "";
+            Plugin.Logger?.LogInfo("ContainerReturn: remote fallback " + outcome + (reason.Length > 0 ? ": " + reason : "") + ".");
+            Sink.Finish(outcome.Value, reason, _handle);
+        }
+
+        /// <summary>A newer reopen: the outcome so far stands; the preview itself is the caller's (it stays).</summary>
+        internal void Cancel()
+        {
+            if (Done) return;
+            Done = true;
+            Sink.Finish(ContainerReopenResult.Cancelled, "", _handle);
+        }
+
+        /// <summary>The plugin unloads: no callback, and the preview closes.</summary>
+        internal void Drop()
+        {
+            Done = true;
+            Sink.Drop();
+            try { _handle.Close(ContainerPreviewCloseReason.Unloaded, "", notify: false); } catch { /* */ }
+        }
     }
 
     private static void Note(string why, ContainerReopenResult result, Remembered? last)
@@ -329,25 +474,24 @@ internal static class ContainerReturnClient
     {
         private readonly World _world;
         private readonly Remembered _target;
-        private Action<ContainerReopenResult>? _done;
         private readonly string _why;
         private readonly ContainerReopenPlan _plan;
         private InputLease? _hover;
         private InputLease? _buttons;
 
-        internal Reopen(World world, Remembered target, Action<ContainerReopenResult>? done, string why, object? owner)
+        internal Reopen(World world, Remembered target, Sink sink)
         {
-            _world = world; _target = target; _done = done; _why = why; Owner = owner;
+            _world = world; _target = target; Sink = sink; _why = sink.Why;
             _plan = new ContainerReopenPlan(Now);
         }
 
-        /// <summary>The plugin that asked (null for Core's own return after a preview).</summary>
-        internal object? Owner { get; }
+        /// <summary>Who hears the outcome; its owner is the plugin that asked (null for Core's own return after a preview).</summary>
+        internal Sink Sink { get; }
 
         /// <summary>End without the callback (its plugin is unloading).</summary>
         internal void Drop()
         {
-            _done = null;
+            Sink.Drop();
             End(ContainerReopenResult.Cancelled);
         }
 
@@ -460,7 +604,9 @@ internal static class ContainerReturnClient
             var result = _plan.Result;
             _lastOutcome = result + " (" + _why + ")";
             Plugin.Logger?.LogInfo("ContainerReturn: " + _target.Describe() + " " + result + " (" + _why + (_plan.PressedEver ? ", Interact pressed" : "") + ").");
-            Report(_done, result);
+            // REOPEN2: the press reached nothing, or the player moved during it: from afar, if asked for.
+            if (Sink.WantsRemote(result) && StartRemote(_target, Sink)) return;
+            Sink.Finish(result);
         }
     }
 }
