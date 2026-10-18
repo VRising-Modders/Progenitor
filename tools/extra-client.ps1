@@ -42,7 +42,7 @@
   only the Steam install is allowed.
 
   A new platform id has no character. Once the join settles, run the create_character op on
-  this instance's bridge ({"name":"..."}; idempotent, retry until it answers already=true), then
+  this instance's bridge ({"name":"..."}; idempotent, retry until it answers result=ready), then
   run the wake op on the server ({"user":"<name>"}) so the character leaves the crypt sleep and
   becomes visible to other players. docs/test-rig.md has the details.
 

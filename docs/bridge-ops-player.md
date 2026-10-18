@@ -1,6 +1,6 @@
 # Bridge operations: players, world and capture
 
-Operation reference for the [development bridge](bridge.md), part 2 of 5: healing and protection, time, photos, teleport, give and unlock, inspection, snapshots, saves, connect and host, capture and performance probes. Other parts: [core, entities and samples](bridge-ops.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
+Operation reference for the [development bridge](bridge.md), part 2 of 5: healing and protection, first characters, time, photos, teleport, give and unlock, inspection, snapshots, saves, connect and host, capture and performance probes. Other parts: [core, entities and samples](bridge-ops.md), [Mods workspace UI](bridge-ops-ui.md), [server info and join flow](bridge-ops-join.md), [input, install and session](bridge-ops-client.md). Part of the [development loop](dev-loop.md).
 
 ## `heal`
 
@@ -50,6 +50,32 @@ Server process only. `action` `finish` (the default) creates a `GiveUpReviveEven
 Server process only. Creates a `CharacterRespawnEvent` plus `FromCharacter`. `location` is `crypt`, `wooden`, `stone`, or `waypoint` (default `waypoint`). `index` is the spawn option (default 0). Does not call `ServerBootstrapSystem.RespawnCharacter`. Verified live: waypoint index 0 cleared `ProjectM.Dead` and restored health to 125.
 
 `bind` (test tooling) records a point for that user only; `{"clear": true}` forgets it. It never touches the game's respawn list, so a normal respawn (the death screen, the game) is unchanged: only this bridge `respawn` op uses the point, teleporting a bound user there once the revive has replaced the character (checked once a second for up to 10 s). Optional `x`, `y`, `z` on `respawn` bind that user, then revive the same way. Until 2026-10-11 bind linked a server-only marker entity into the user's `RespawnPointOwnerBuffer`; the client cannot resolve it, and its death screen threw "The entity does not exist" every frame, so Space never respawned. `bind` and `bind {"clear": true}` remove any such leftover marker.
+
+## `create_character`
+
+Creates the first character for a user that has none, mainly for headless extra clients ([test rig](test-rig.md#extra-clients-and-headless-clients-experimental-early-development)). Args: `name` (required, 1..20 characters, the game's name rules apply) and optional appearance bytes `gender`, `skin`, `face`, `eyes`, `hairStyle`, `hairColor`, `features`, `accessories` (default 0).
+
+**Client (preferred).** Sends the creation screen's own `CreateCharacterEvent` (event id 527272789), unless the client already has a `LocalCharacter`. Then, deferred, it waits for the character and for the client to leave the character-creation scene, and replies:
+
+| Field | Meaning |
+|---|---|
+| `ok` | `true` when `result` is `ready`. |
+| `already` | `true` when the client already had a character, so nothing was sent. |
+| `result` | `ready` (in the game, creation scene gone), `not_spawned` (no character within 10 s; a send during loading can be dropped, so run the op again), `still_loading` (the character exists but the client stayed on its loading screen for 10 s), or `stuck` (the op's own calls did not clear the scene). |
+| `leftCreation`, `handler` | Whether the op had to take the client off the creation scene, and with which of the game's calls: `HUDMenuManager.GoToMenu(WakeUpMenu)`, `Object.Destroy(creation scene)`, both, or `none`. |
+| `character`, `hudMenu`, `view`, `creationScenes` | The last read: the local character entity, `HUDMenuType`, `ViewLocation` and the number of creation scenes. |
+| `name`, `event` | Only when it sent: the name and the event entity. |
+| `note` | What to do next for every result except `ready`. |
+
+The whole op finishes within 22 s, inside `call.mjs`'s default 30 s timeout.
+
+**Why a client could stay on the creation scene.** While a character-less user's join loads, the game's loading screen already builds the creation scene, whose camera narrows the main camera to that scene. Only the creation menu's shutdown destroys it. A character that arrives during loading (a bridge send before the join settles) makes the game skip the creation menu, so the scene and its camera stayed: the character played normally behind a view of the crypt (seen live 2026-10-18 with an earlier version of this op, which only sent; a disconnect and reconnect cleared it). The op now leaves the game 30 frames for its own exit, then makes the game's own call for whatever is left: `GoToMenu(WakeUpMenu)` while the creation menu is still current (what the menu itself does once the character exists), or `Object.Destroy` on a creation scene that outlived its menu (what the menu's shutdown does). It never touches the scene while the loading screen is up. Because an existing character makes the op skip the send, running it again on a client left on the creation scene clears it.
+
+**Server (fallback).** `platformId` (string or number) or `userIndex` plus `name` on the server bridge enqueues the inbound event for a connected user. The character spawns, but that client stays on its creation screen (verified live 2026-09-24). Run the client form on that client afterwards, or disconnect and reconnect it.
+
+New characters start asleep in the crypt; a headless client cannot press the wake-up key, so run the server `wake` op ([test rig](test-rig.md#extra-clients-and-headless-clients-experimental-early-development)).
+
+Status: the decisions are covered by `BridgeCharacterCreatePlanTests`, and the op compiles. The menu exit and the scene cleanup are source-checked against the game's client metadata only; **not yet verified live**. Acceptance: on a fresh world, run the client op during the join's loading screen, continue into the game, and expect `result: ready` with `handler: Object.Destroy(creation scene)` and the normal game view; run it again and expect `already: true`, `handler: none`.
 
 ## Allocator.Temp on the bridge drain
 
