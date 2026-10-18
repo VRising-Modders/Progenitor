@@ -383,6 +383,17 @@ internal sealed class UiChecklistModel
         return changed;
     }
 
+    /// <summary>
+    /// The lines the entries make with no filter, no search and nothing folded: every entry and every section heading.
+    /// <see cref="UiChecklistOptions.KeepHeight"/> keeps the body no taller than this, so a short list stays short.
+    /// </summary>
+    internal int FullLineCount()
+    {
+        int headings = 0;
+        foreach (var s in _sectionOrder.Keys) if (s.Length > 0) headings++;
+        return _entries.Count + headings;
+    }
+
     /// <summary>The flattened body: what each line of the scroll window draws. Cached until something changes.</summary>
     internal IReadOnlyList<UiChecklistLine> Lines()
     {

@@ -33,6 +33,8 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private readonly UiTableViewport _viewport;
     private readonly bool _preview;
     private readonly string _previewCaption;
+    private readonly UiRowActionIcon? _previewIcon;
+    private readonly UiIconMarks _viewMarks = new();
     private readonly IUiCellRow _search;
     private readonly List<IUiCellRow> _chipRows = new();
     private readonly List<int> _chipFilters = new();
@@ -80,6 +82,8 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             : new UiTableViewport(_options.VisibleRows);
         _preview = _options.Preview;
         _previewCaption = string.IsNullOrWhiteSpace(_options.PreviewCaption) ? "View" : _options.PreviewCaption.Trim();
+        _previewIcon = _preview ? _options.PreviewIcon : null;
+        bool viewIcon = _previewIcon != null;
         var cols = _model.Columns;
         float inset = UiDataTableLayout.ScrollInset;
 
@@ -111,7 +115,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             }
         }
 
-        _header = Part(panel.CellHeader(UiChecklistLayout.HeaderCells(cols, _preview, _previewCaption), RowKey("header"), inset));
+        _header = Part(panel.CellHeader(UiChecklistLayout.HeaderCells(cols, _preview, _previewCaption, viewIcon), RowKey("header"), inset));
         Lease(_header.OnSort(k => { if (Live) HeaderClick(k); }));
 
         int slots = _viewport.Built;
@@ -126,7 +130,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             int slot = i;
             _cache[i] = new Dictionary<string, CellState>(StringComparer.Ordinal);
             var row = Part(panel.CellRow(new CellRowSpec(
-                RowKey("row" + i), UiChecklistLayout.RowCells(cols, _preview, _previewCaption), hover: true, soft: true,
+                RowKey("row" + i), UiChecklistLayout.RowCells(cols, _preview, _previewCaption, viewIcon), hover: true, soft: true,
                 separator: true, rightInset: inset)));
             _slots.Add(row);
             Lease(row.OnRowClick(() => ClickSlot(slot)));
@@ -135,6 +139,13 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             if (_preview)
             {
                 Lease(row.OnClick(UiChecklistLayout.CellView, () => PreviewSlot(slot)));
+                if (viewIcon)
+                {
+                    // The data table's icon button: a drawn face (the checklist's own hover brightens it) and a tooltip.
+                    _viewMarks.Attach(row, UiChecklistLayout.CellView, watchHover: false);
+                    Lease(row.OnCellHover(UiChecklistLayout.CellView, on => HoverView(slot, on)));
+                }
+
                 // A right press anywhere on the row (the row's own object; a cell button keeps its own press).
                 if (widgets != null && RuntimeRowOf(row) is { } runtimeRow)
                 {
@@ -258,7 +269,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         set
         {
             if (IsDisposed || !_model.HasFilters || _filterOpen == value) return;
-            _filterOpen = value;
+            SetFilterOpen(value);
             Render();
         }
     }
@@ -266,7 +277,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private void PickFilter(int index)
     {
         if (index < 0 || index >= _model.Filters.Count) return;
-        _filterOpen = false;
+        SetFilterOpen(false);
         string id = UiChecklistModel.IdOf(_model.Filters[index]);
         if (_model.SetFilter(id))
         {
@@ -275,6 +286,60 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             Raise(_filterChanged, _model.Filter, "filter");
         }
         else Render();
+    }
+
+    /// <summary>
+    /// The slot rows the open filter's chips keep out of use (<see cref="UiChecklistOptions.KeepHeight"/>): the rows in use
+    /// with the chips closed (<see cref="ClosedSlots"/>) less those in use now; 0 while the chips are closed. Recomputed by
+    /// every <see cref="UseSlots"/>, so a new row count (a fill answer, a refresh) never leaves a stale count behind.
+    /// </summary>
+    private int _chipTaken;
+
+    /// <summary>The slot rows the body uses with the filter's chips closed.</summary>
+    internal int ClosedSlots => _viewport.Slots + _chipTaken;
+
+    /// <summary>Whether the open filter's chips take their rows from the body now.</summary>
+    private bool ChipsReserved => _filterOpen && _options.KeepHeight && _chipRows.Count > 0;
+
+    /// <summary>
+    /// The body's height in rows with <see cref="UiChecklistOptions.KeepHeight"/>: its rows in use with the chips closed, no
+    /// more than the lines the entries make unfiltered and fully unfolded (so a short or empty list stays short), less the
+    /// open chips' rows. The lines a fold, a filter or a search hide are made up by filler rows up to this.
+    /// </summary>
+    internal int BodyTarget()
+    {
+        if (!_options.KeepHeight) return 0;
+        int target = Math.Min(ClosedSlots, _model.FullLineCount());
+        if (ChipsReserved) target -= _chipRows.Count;
+        return Math.Max(0, Math.Min(target, _viewport.Slots));
+    }
+
+    /// <summary>
+    /// Use <paramref name="closed"/> slot rows with the chips closed (clamped to the rows built); while the chips are open
+    /// and reserved, use as many fewer as they take from the body's height (<see cref="BodyTarget"/>; at least the
+    /// viewport's fewest), and recompute <see cref="_chipTaken"/>. True when the rows in use changed.
+    /// </summary>
+    private bool UseSlots(int closed)
+    {
+        closed = Math.Min(_viewport.Built, UiTableViewport.ClampSlots(closed));
+        int now = closed;
+        if (ChipsReserved) now = Math.Min(closed, _model.FullLineCount()) - _chipRows.Count;
+        bool changed = _viewport.SetSlots(now);
+        _chipTaken = ChipsReserved ? Math.Max(0, closed - _viewport.Slots) : 0;
+        if (changed && WidgetRuntime.Current is { } runtime) AttachBar(runtime);
+        return changed;
+    }
+
+    /// <summary>
+    /// Open or close the filter's chips. With <see cref="UiChecklistOptions.KeepHeight"/> the chips' rows come out of the
+    /// body while they show, so the window keeps its height (a body at its fewest rows keeps them, and the window grows).
+    /// </summary>
+    private void SetFilterOpen(bool open)
+    {
+        if (_filterOpen == open) return;
+        int closed = ClosedSlots;
+        _filterOpen = open;
+        UseSlots(closed);
     }
 
     public IReadOnlyList<UiChecklistEntry> Shown => new List<UiChecklistEntry>(_model.Shown);
@@ -398,7 +463,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         if (IsDisposed) return;
         if (_filterOpen)
         {
-            _filterOpen = false;
+            SetFilterOpen(false);
             Render(); // the chips hide
         }
 
@@ -626,7 +691,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
     private ScreenRect BodyRect()
     {
         if (IsDisposed || !Visible || Panel.State != UiHandleState.Shown) return ScreenRect.Unknown;
-        int shown = _viewport.Shown;
+        int shown = Math.Min(_slots.Count, _viewport.Shown + _fillers); // the filler rows too: the body keeps its height
         if (shown <= 0) return ScreenRect.Unknown;
         var a = RectOf(_slots[0]);
         var b = RectOf(_slots[shown - 1]);
@@ -634,8 +699,13 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         return ScreenRect.FromCorners(Math.Min(a.MinX, b.MinX), Math.Min(a.MinY, b.MinY), Math.Max(a.MaxX, b.MaxX), Math.Max(a.MaxY, b.MaxY));
     }
 
+    /// <summary>The slot row the pointer is on (its row hover), or -1.</summary>
+    private int _hoveredSlot = -1;
+
     private void HoverSlot(int slot, bool on)
     {
+        if (on) _hoveredSlot = slot;
+        else if (_hoveredSlot == slot) _hoveredSlot = -1;
         var line = LineAtSlot(slot);
         if (!on)
         {
@@ -680,6 +750,41 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     /// <summary>Tests: the row hover the kit's pointer slot delivers.</summary>
     internal void HoverSlotForTests(int slot, bool on) => HoverSlot(slot, on);
+
+    /// <summary>
+    /// The pointer on an icon preview button (<see cref="UiChecklistOptions.PreviewIcon"/>): its mark brightens and the
+    /// caption shows as its tooltip; leaving it gives the row its own tooltip back.
+    /// </summary>
+    private void HoverView(int slot, bool on)
+    {
+        if (_previewIcon == null || slot < 0 || slot >= _slots.Count) return;
+        var slotRow = _slots[slot];
+        _viewMarks.SetLit(slotRow, UiChecklistLayout.CellView, on);
+        if (!on)
+        {
+            if (_hoveredSlot == slot) HoverSlot(slot, true);
+            else HideTooltip();
+            return;
+        }
+
+        if (!Visible || LineAtSlot(slot) is not { Kind: UiChecklistLineKind.Entry })
+        {
+            HideTooltip();
+            return;
+        }
+
+        ShowTooltip(RectOf(slotRow, UiChecklistLayout.CellView), _previewCaption, "",
+            () => slotRow.Visible && RectOf(slotRow, UiChecklistLayout.CellView).IsKnown);
+    }
+
+    /// <summary>Tests: the icon preview button's hover.</summary>
+    internal void HoverViewForTests(int slot, bool on) => HoverView(slot, on);
+
+    /// <summary>Tests and readback: the mark the preview button of slot <paramref name="slot"/> draws (none for a text button).</summary>
+    internal UiDrawnMark ViewMarkAt(int slot) => _viewMarks.MarkOf(_slots[slot], UiChecklistLayout.CellView);
+
+    /// <summary>Tests: the color that mark is drawn in now.</summary>
+    internal PaletteColor ViewMarkColorAt(int slot) => _viewMarks.ColorOf(_slots[slot], UiChecklistLayout.CellView);
 
     private void AttachBar(IWidgetRuntime runtime)
     {
@@ -769,8 +874,10 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     internal bool ApplyFill(int rows)
     {
-        if (rows < 0 || IsDisposed || !_viewport.SetSlots(rows)) return false;
-        if (WidgetRuntime.Current is { } runtime) AttachBar(runtime);
+        if (rows < 0 || IsDisposed) return false;
+        // The answer counts the open chips among the panel's other rows: with them closed, the body has their rows too.
+        int closed = ChipsReserved ? rows + _chipRows.Count : rows;
+        if (!UseSlots(closed)) return false;
         Render();
         return true;
     }
@@ -791,6 +898,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
 
     protected override void OnDisposing()
     {
+        _viewMarks.Dispose();
         try { _fillTick?.Dispose(); }
         catch { /* */ }
         _fillTick = null;
@@ -865,10 +973,33 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             ["confirm"] = ConfirmText,
             ["canConfirm"] = CanConfirm,
             ["preview"] = _preview,
+            ["previewIcon"] = _previewIcon is { } pi ? UiDataTableLayout.MarkOf(pi).Name : "",
+            ["keepHeight"] = _options.KeepHeight,
+            ["fillers"] = _fillers,
+            ["bodyTarget"] = BodyTarget(),
+            ["fullLines"] = _model.FullLineCount(),
+            ["bodyRows"] = ShownSlots(),
+            ["chipRows"] = _filterOpen ? _chipRows.Count : 0,
+            ["room"] = Room(),
             ["suspended"] = _suspended,
             ["scrollBar"] = _bar != null,
             ["rowKeys"] = RowKey("row") + "<n>",
         };
+    }
+
+    /// <summary>
+    /// The readback's <c>room</c>: the panel's last layout (<see cref="IWidgetRuntime.PanelRoom"/>) as <c>{viewport,
+    /// content}</c> in kit units, so a live check can see that a fold, a filter or a search left the content's height as it
+    /// was; null before a layout or on a runtime that does not lay panels out.
+    /// </summary>
+    private Dictionary<string, object?>? Room()
+    {
+        try
+        {
+            if (WidgetRuntime.Current is not { } runtime || !runtime.PanelRoom(Panel, out float viewport, out float content)) return null;
+            return new Dictionary<string, object?> { ["viewport"] = Math.Round(viewport, 1), ["content"] = Math.Round(content, 1) };
+        }
+        catch { return null; }
     }
 
     internal Dictionary<string, string> HeaderMarks()
@@ -890,6 +1021,7 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         try
         {
             var lines = _model.Lines();
+            if (ChipsReserved) UseSlots(ClosedSlots); // a refresh changed the lines the chips' rows come out of
             _viewport.SetCount(lines.Count);
             if (!ReferenceEquals(lines, _renderedLines) || _viewport.Top != _renderedTop) HideTooltip();
             _renderedLines = lines;
@@ -901,15 +1033,25 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             RenderSearch();
             bool icons = AnyIcon();
             RenderHeader(icons);
+            // KeepHeight: blank filler rows under the lines keep the body at all its rows (a fold, a filter, a search).
+            _fillers = _options.KeepHeight ? _viewport.Fillers(BodyTarget()) : 0;
+            int fillTo = _viewport.Shown + _fillers;
             for (int i = 0; i < _slots.Count; i++)
             {
                 int index = _viewport.LineAt(i);
                 if (index < 0)
                 {
-                    TrySetVisible(_slots[i], false);
+                    if (i < fillTo)
+                    {
+                        RenderFiller(i, icons);
+                        SetFiller(i, true);
+                        TrySetVisible(_slots[i], true);
+                    }
+                    else TrySetVisible(_slots[i], false);
                     continue;
                 }
 
+                SetFiller(i, false);
                 RenderSlot(i, lines[index], icons);
                 TrySetVisible(_slots[i], true);
             }
@@ -1087,7 +1229,12 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
             Write(slot, view, UiDataTableModel.Display(cell, col), tone, true);
         }
 
-        if (_preview) Write(slot, UiChecklistLayout.CellView, _previewCaption, CellTone.Normal, !section);
+        if (_preview)
+        {
+            Write(slot, UiChecklistLayout.CellView, _previewIcon != null ? "" : _previewCaption, CellTone.Normal, !section);
+            if (_previewIcon is { } pi)
+                _viewMarks.Set(row, UiChecklistLayout.CellView, section ? UiDrawnMark.None : UiDataTableLayout.MarkOf(pi));
+        }
 
         bool open = section && !_model.IsCollapsed(line.Section);
         if (_expandedNow[slot] != open)
@@ -1100,6 +1247,68 @@ internal sealed class UiChecklistHandle : UiComposedHandle, IUiChecklist
         {
             row.SetSelected(on);
             _selectedNow[slot] = on;
+        }
+    }
+
+    /// <summary>The filler rows drawn under the lines now (<see cref="UiChecklistOptions.KeepHeight"/>).</summary>
+    private int _fillers;
+
+    /// <summary>Which slots are fillers now (null: never one yet).</summary>
+    private bool?[]? _fillerNow;
+
+    /// <summary>Tests and readback: the filler rows drawn under the lines now.</summary>
+    internal int Fillers => _fillers;
+
+    /// <summary>Tests: whether slot <paramref name="slot"/> is a filler now.</summary>
+    internal bool IsFillerSlot(int slot) => _fillerNow is { } f && f[slot] == true;
+
+    /// <summary>
+    /// Make slot <paramref name="slot"/> a filler or a row again (the data table's MinRows rule): a filler is passed over
+    /// by the navigation and its row button takes no click and draws no hover wash. Written only when it changes.
+    /// </summary>
+    private void SetFiller(int slot, bool filler)
+    {
+        _fillerNow ??= new bool?[_slots.Count];
+        bool was = _fillerNow[slot] == true;
+        _fillerNow[slot] = filler;
+        if (was == filler) return;
+        UiNav.SetSkipped(_slots[slot], filler);
+        if (WidgetRuntime.Current is IWidgetCellField field && RuntimeRowOf(_slots[slot]) is { } row)
+        {
+            try { field.SetRowInert(row, filler); }
+            catch (Exception e) { Plugin.Logger?.LogWarning("Ui: checklist '" + Key + "' filler row: " + e.Message); }
+        }
+    }
+
+    /// <summary>
+    /// A filler slot: a blank line as tall as any, with the icon's and every column's place kept, and nothing to check,
+    /// fold, preview or hover.
+    /// </summary>
+    private void RenderFiller(int slot, bool icons)
+    {
+        var row = _slots[slot];
+        Write(slot, UiChecklistLayout.CellCheck, CellLayout.CheckText(false), CellTone.Normal, false);
+        Write(slot, UiChecklistLayout.CellFold, UiWidgetLayout.ExpandGlyph, CellTone.Normal, false);
+        Write(slot, UiChecklistLayout.CellSection, "", CellTone.Gold, false);
+        Write(slot, UiChecklistLayout.CellIcon, "", CellTone.Normal, false);
+        Write(slot, UiChecklistLayout.CellIconPad, "", CellTone.Muted, icons);
+        foreach (var col in _model.Columns) Write(slot, UiDataTableLayout.ViewKey(col.Key), "", CellTone.Normal, true);
+        if (_preview)
+        {
+            Write(slot, UiChecklistLayout.CellView, _previewIcon != null ? "" : _previewCaption, CellTone.Normal, false);
+            if (_previewIcon != null) _viewMarks.Set(row, UiChecklistLayout.CellView, UiDrawnMark.None);
+        }
+
+        if (_expandedNow[slot] != false)
+        {
+            row.SetExpanded(false);
+            _expandedNow[slot] = false;
+        }
+
+        if (_selectedNow[slot] != false)
+        {
+            row.SetSelected(false);
+            _selectedNow[slot] = false;
         }
     }
 

@@ -324,6 +324,29 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void A_checklists_icon_preview_button_is_a_stop_and_its_filler_rows_are_not()
+    {
+        UiApi.SetRuntimeForTests(new TableRuntimeFake());
+        using var panel = Panel();
+        // Lines: #A a0 a1 a2 #B b0 b1 b2 (8) in 6 rows; folding A leaves 5 lines and one filler (slot 5).
+        var entries = Enumerable.Range(0, 6).Select(i => new UiChecklistEntry("e" + i, "Chest " + i) { Section = i < 3 ? "A" : "B" }).ToList();
+        var list = panel.Checklist("cl", entries, new UiChecklistOptions { Preview = true, VisibleRows = 6 });
+        var handle = (UiChecklistHandle)list;
+        Surface(Children(panel));
+        var row = (UiHandle)handle.SlotAt(1);
+        Assert.Contains(UiNav.Stops(row), t => t.Part == UiChecklistLayout.CellView);
+        Assert.True(UiNav.FocusOn(row, UiChecklistLayout.CellView));
+        list.SetGroupCollapsed("A", true);
+        Surface(Children(panel));
+        Assert.Equal(1, handle.Fillers);
+        Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(5)));
+        // Down from the last entry passes over the filler.
+        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(4), ""));
+        UiNav.Execute(NavCommand.Down);
+        Assert.NotSame(handle.SlotAt(5), UiNav.Focus.Handle);
+    }
+
+    [Fact]
     public void Down_from_a_tables_last_row_passes_over_its_filler_rows()
     {
         UiApi.SetRuntimeForTests(new TableRuntimeFake());

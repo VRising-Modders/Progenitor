@@ -50,9 +50,13 @@ internal static class UiChecklistLayout
     /// <summary>The count the Confirm button is sized for, so a growing count never ellipsizes its caption.</summary>
     internal const int ConfirmSizedFor = 9999;
 
-    /// <summary>The preview button's width: its caption at the button's size and the button's padding.</summary>
-    internal static float ViewWidth(string caption) =>
-        (float)Math.Ceiling(CellLayout.EstimateTextWidth(caption, MenuPanelLayout.HeaderButtonFontSize) + CellLayout.ButtonPad);
+    /// <summary>
+    /// The preview button's width: the icon button's fixed 28 units (<paramref name="icon"/>), else its caption at the
+    /// button's size and the button's padding.
+    /// </summary>
+    internal static float ViewWidth(string caption, bool icon = false) => icon
+        ? UiWidgetLayout.IconButtonWidth
+        : (float)Math.Ceiling(CellLayout.EstimateTextWidth(caption, MenuPanelLayout.HeaderButtonFontSize) + CellLayout.ButtonPad);
 
     /// <summary>The search row: the value box (fill), and with filters the caption and the dropdown bar at the right.</summary>
     internal static List<CellSpec> SearchCells(string placeholder, bool filters, string caption, IEnumerable<string> labels)
@@ -105,11 +109,12 @@ internal static class UiChecklistLayout
         UiDataTableLayout.WidthOf(col, fill) + (UiDataTableLayout.NeedsLeftJustify(columns, col) ? UiDataTableLayout.LeftTextLead : 0f);
 
     /// <summary>
-    /// One body slot row: [check] [fold] [icon | icon pad] the columns [section heading] [view | view pad]. An entry line
-    /// shows the check, the icon or its pad, the columns and (with a preview) the view button; a section line shows the
-    /// fold arrow and the heading alone.
+    /// One body slot row: [check] [fold] [icon | icon pad] the columns [section heading] [view]. An entry line shows the
+    /// check, the icon or its pad, the columns and (with a preview) the view button; a section line shows the fold arrow
+    /// and the heading alone. With <paramref name="previewIcon"/> the view button is the data table's box-less icon button
+    /// (its face a drawn mark, no caption), else a text button with <paramref name="previewCaption"/>.
     /// </summary>
-    internal static List<CellSpec> RowCells(IReadOnlyList<UiTableColumn> columns, bool preview, string previewCaption)
+    internal static List<CellSpec> RowCells(IReadOnlyList<UiTableColumn> columns, bool preview, string previewCaption, bool previewIcon = false)
     {
         int fill = UiDataTableLayout.FillIndex(columns);
         var cells = new List<CellSpec>(columns.Count + 8)
@@ -133,7 +138,8 @@ internal static class UiChecklistLayout
 
         cells.Add(new CellSpec(CellKind.Text, CellSection) { Visible = false, MinWidth = UiWidgetLayout.CaptionMinWidth }
             .With(text: "", tone: CellTone.Gold, width: CellWidth.Fill(UiWidgetLayout.CaptionMinWidth)));
-        if (preview)
+        if (preview && previewIcon) cells.Add(UiWidgetLayout.IconButton(CellView));
+        else if (preview)
         {
             float vw = ViewWidth(previewCaption);
             cells.Add(new CellSpec(CellKind.Button, CellView) { MinWidth = vw, Skin = CellSkin.Quiet, Hover = true }
@@ -144,7 +150,7 @@ internal static class UiChecklistLayout
     }
 
     /// <summary>The header for <see cref="RowCells"/>: blanks as wide as the check, the icon and the view button, and the captions.</summary>
-    internal static List<CellSpec> HeaderCells(IReadOnlyList<UiTableColumn> columns, bool preview, string previewCaption)
+    internal static List<CellSpec> HeaderCells(IReadOnlyList<UiTableColumn> columns, bool preview, string previewCaption, bool previewIcon = false)
     {
         int fill = UiDataTableLayout.FillIndex(columns);
         var cells = new List<CellSpec>(columns.Count + 3)
@@ -168,7 +174,7 @@ internal static class UiChecklistLayout
 
         if (preview)
         {
-            float vw = ViewWidth(previewCaption);
+            float vw = ViewWidth(previewCaption, previewIcon);
             cells.Add(new CellSpec(CellKind.Text, CellViewPad) { MinWidth = vw }.With(text: "", width: CellWidth.Px(vw), align: CellAlign.Right));
         }
 

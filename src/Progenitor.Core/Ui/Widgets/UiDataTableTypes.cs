@@ -40,6 +40,9 @@ public enum UiRowActionIcon
 
     /// <summary>A check mark: confirm or mark the row.</summary>
     Check = 5,
+
+    /// <summary>An eye: view or preview the row's thing (a checklist row's preview button).</summary>
+    View = 6,
 }
 
 /// <summary>

@@ -65,6 +65,7 @@ internal static class UiDataTableLayout
         UiRowActionIcon.Remove => UiDrawnMark.RemoveMark,
         UiRowActionIcon.Chest => UiDrawnMark.ChestMark,
         UiRowActionIcon.Check => UiDrawnMark.CheckMark,
+        UiRowActionIcon.View => UiDrawnMark.EyeMark,
         _ => UiDrawnMark.LocateMark,
     };
 
