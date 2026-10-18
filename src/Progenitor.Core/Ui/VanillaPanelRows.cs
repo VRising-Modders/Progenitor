@@ -127,6 +127,91 @@ internal sealed partial class UnityUiRuntime
         catch { /* the row keeps its last indent */ }
     }
 
+    // ------------------------------------------------------------------ footer inset
+
+    private static Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>? _lineCorners;
+
+    /// <summary>
+    /// Start a footer container's rows where the game line before it starts (on a recipe, the duration line; the
+    /// column's own entries carry their own insets, so the column's padding alone leaves a footer short of them). The
+    /// line is the nearest game sibling before the container that shows text (<see cref="VanillaRecipeTooltip.NeighborLineBefore"/>);
+    /// its text start (rect left plus its margin) is compared with the first row's content start, as the header compares
+    /// with the title, after the tooltip is laid out, and the container's left padding moves by the difference
+    /// (<see cref="VanillaRecipeTooltip.TryNeighborInset"/>). Written only when it moves by half a unit or more, so a steady
+    /// tooltip is never laid out again and the first frame is already in place.
+    /// </summary>
+    private static void AlignToLineBefore(PanelContainerWidget host, PanelView view)
+    {
+        try
+        {
+            var t = host.Transform;
+            var rt = host.Rect;
+            var column = t != null && t.parent != null ? t.parent : null;
+            if (t == null || rt == null || column == null || !Alive(host.GameObject)) return;
+            var group = host.GameObject!.GetComponent<VerticalLayoutGroup>();
+            if (group == null || group.padding == null) return;
+
+            // Lay the tooltip out first: the rows were just built, and the game wrote its lines this frame.
+            var root = view.Tooltip != null ? view.Tooltip.GetComponent<RectTransform>() : null;
+            if (root != null) LayoutRebuilder.ForceRebuildLayoutImmediate(root);
+
+            int index = t.GetSiblingIndex();
+            int line = VanillaRecipeTooltip.NeighborLineBefore(index, i =>
+            {
+                var c = column.GetChild(i);
+                return c != null ? SafeObjectName(c.gameObject) : "";
+            }, i => ShownText(column.GetChild(i)) != null);
+            if (line < 0) return;
+            var text = ShownText(column.GetChild(line));
+            if (text == null) return;
+
+            _lineCorners ??= new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3>(4);
+            text.rectTransform.GetWorldCorners(_lineCorners);
+            float lineLeft = _lineCorners[0].x + text.margin.x * text.rectTransform.lossyScale.x;
+
+            float contentLeft = float.NaN;
+            foreach (var row in host.Rows)
+            {
+                contentLeft = row is PanelRowWidget p ? p.ContentLeftWorld(_lineCorners)
+                    : row is KeyHintRowWidget k ? k.ContentLeftWorld(_lineCorners)
+                    : float.NaN;
+                if (!float.IsNaN(contentLeft)) break;
+            }
+
+            host.LineBefore = SafeObjectName(column.GetChild(line).gameObject);
+            if (float.IsNaN(contentLeft)) return;
+            int current = group.padding.left;
+            if (!VanillaRecipeTooltip.TryNeighborInset(lineLeft, contentLeft, rt.lossyScale.x, current, out int pad))
+            {
+                host.LineInset = current;
+                return;
+            }
+
+            var padding = group.padding;
+            padding.left = pad;
+            group.padding = padding;
+            host.LineInset = pad;
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+        }
+        catch { /* the rows keep their last inset */ }
+    }
+
+    /// <summary>The first active, non-empty text under <paramref name="entry"/> (itself included), or null.</summary>
+    private static TextMeshProUGUI? ShownText(Transform? entry)
+    {
+        try
+        {
+            if (entry == null || !entry.gameObject.activeInHierarchy) return null;
+            var texts = entry.GetComponentsInChildren<TextMeshProUGUI>(false);
+            if (texts == null) return null;
+            foreach (var tmp in texts)
+                if (tmp != null && tmp.enabled && !string.IsNullOrWhiteSpace(tmp.text)) return tmp;
+        }
+        catch { /* */ }
+
+        return null;
+    }
+
     // ------------------------------------------------------------------ key hints
 
     public bool ControllerGlyphsActive => MapShareHint.ControllerActive();
@@ -317,7 +402,9 @@ internal sealed partial class UnityUiRuntime
             go.transform.localScale = Vector3.one;
             go.SetActive(true);
             done = true;
-            return new KeyHintRowWidget(go, site, image, comboImage, keyText, comboText, interaction, action);
+            var made = new KeyHintRowWidget(go, site, image, comboImage, keyText, comboText, interaction, action);
+            host.Rows.Add(made);
+            return made;
         }
         catch (Exception e)
         {
@@ -540,6 +627,30 @@ internal sealed partial class UnityUiRuntime
                 _tone = tone;
             }
             catch { /* */ }
+        }
+
+        /// <summary>Where the entry's first shown part starts, in world x, without its indent; NaN when it cannot be read.</summary>
+        internal float ContentLeftWorld(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<Vector3> corners)
+        {
+            try
+            {
+                if (!Alive || !_go!.activeInHierarchy) return float.NaN;
+                float left = float.PositiveInfinity;
+                var t = _go.transform;
+                for (int i = 0; i < t.childCount; i++)
+                {
+                    var c = t.GetChild(i);
+                    if (c == null || !c.gameObject.activeSelf) continue;
+                    var rt = c.TryCast<RectTransform>();
+                    if (rt == null) continue;
+                    rt.GetWorldCorners(corners);
+                    if (corners[0].x < left) left = corners[0].x;
+                }
+
+                if (float.IsInfinity(left)) return float.NaN;
+                return left - _indentPx * t.lossyScale.x;
+            }
+            catch { return float.NaN; }
         }
 
         /// <summary>Inset the entry by <paramref name="px"/>: its own row group's left padding plus the indent.</summary>
