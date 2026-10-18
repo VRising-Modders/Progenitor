@@ -1858,9 +1858,12 @@ What changes on screen while a preview owns the window:
   `ContainerPreviewOptions.HidePlayerInventory` the player's bag panel is hidden the same way as the buttons; that is the
   space a mod window (a Find list, for example) docks into, on the left of the container
   window, with `panel.Dock(UiDock.Left, …)` ([Docked panels](#docked-panels-dock1)). The pairing of the two is not live-checked.
+  Behavior change (2026-10-18): the option used to default to true; a caller that docks on the left now sets it explicitly.
 - Panels attached to the container window (`UiApi.AttachPanelTabs` tabs and vanilla panel sites) get a `VanillaPanelTarget`
   naming the previewed chest: its client entity, its network id (the server's words when the entity has none to read) and
-  `PreviewContainer`, its `ContainerId` (`IsPreview` true). A mod can send either to its server. Edits through the mod's
+  `PreviewContainer`, its `ContainerId` (`IsPreview` true). A hovered item in the player's own bag half is not the
+  chest's: its tooltip target names no entity and is not a preview target. The close is one `Closed`: the target keeps
+  `PreviewContainer` until the window is gone. A mod can send either to its server. Edits through the mod's
   own messages need no game permission; the chest's own slots stay read-only. Not live-verified.
 - Escape closes the preview and the window after framework dialogs, key captures and the focused chat box
   (the same precedence as the world pick).

@@ -213,24 +213,24 @@ public class CameraPreviewHoldTests
     }
 
     [Fact]
-    public void Only_the_canvas_that_holds_the_window_is_kept()
+    public void Every_canvas_that_holds_a_window_part_is_kept()
     {
         var holds = new[] { false, false, true, true };
-        Assert.Equal(2, CameraPreviewHud.CanvasToKeep(true, holds));
-        Assert.Equal(-1, CameraPreviewHud.CanvasToKeep(false, holds));
-        Assert.Equal(-1, CameraPreviewHud.CanvasToKeep(true, new[] { false, false }));
-        Assert.Equal(-1, CameraPreviewHud.CanvasToKeep(true, System.Array.Empty<bool>()));
+        Assert.Equal(new[] { false, false, true, true }, CameraPreviewHud.CanvasesToKeep(true, holds));
+        Assert.Equal(new[] { false, false, false, false }, CameraPreviewHud.CanvasesToKeep(false, holds));
+        Assert.Equal(new[] { false, false }, CameraPreviewHud.CanvasesToKeep(true, new[] { false, false }));
+        Assert.Empty(CameraPreviewHud.CanvasesToKeep(true, System.Array.Empty<bool>()));
     }
 
     [Fact]
     public void Every_other_canvas_stays_hidden_and_none_is_spared_without_a_window()
     {
-        int kept = CameraPreviewHud.CanvasToKeep(true, new[] { false, true, false });
+        var kept = CameraPreviewHud.CanvasesToKeep(true, new[] { false, true, false });
         Assert.True(CameraPreviewHud.Reasserts(0, kept));
         Assert.False(CameraPreviewHud.Reasserts(1, kept));
         Assert.True(CameraPreviewHud.Reasserts(2, kept));
         // The container preview closed: the canvas is hidden again on the next frame.
-        int none = CameraPreviewHud.CanvasToKeep(false, new[] { false, true, false });
+        var none = CameraPreviewHud.CanvasesToKeep(false, new[] { false, true, false });
         for (int i = 0; i < 3; i++) Assert.True(CameraPreviewHud.Reasserts(i, none));
     }
 

@@ -489,12 +489,17 @@ internal readonly struct VanillaPreviewWindow
 /// </summary>
 internal static class VanillaPanelPreview
 {
-    internal static VanillaPanelTarget Apply(in VanillaPanelTarget target, in VanillaPreviewWindow preview)
+    /// <param name="emptyIsWindow">
+    /// True for a site whose empty target can only mean the window's own (the container panel and the inventory panel,
+    /// while the mapper has no target for a moment). False for the inventory tooltip: there an empty target is a hovered
+    /// item in the player's own bag half, which belongs to no container and must not name the previewed chest.
+    /// </param>
+    internal static VanillaPanelTarget Apply(in VanillaPanelTarget target, in VanillaPreviewWindow preview, bool emptyIsWindow)
     {
         if (target.Kind != VanillaPanelKind.Container || !preview.OwnsWindow || preview.Container.IsNone) return target;
-        bool onWindow = (target.EntityIndex == preview.WindowIndex && target.EntityVersion == preview.WindowVersion)
-            || (target.EntityIndex == preview.TargetIndex && target.EntityVersion == preview.TargetVersion && (preview.TargetIndex != 0 || preview.TargetVersion != 0))
-            || !target.HasEntity;
+        bool onWindow = (target.HasEntity && target.EntityIndex == preview.WindowIndex && target.EntityVersion == preview.WindowVersion)
+            || (target.HasEntity && target.EntityIndex == preview.TargetIndex && target.EntityVersion == preview.TargetVersion)
+            || (!target.HasEntity && emptyIsWindow);
         if (!onWindow) return target;
         int index = target.EntityIndex, version = target.EntityVersion;
         if (!target.HasEntity) { index = preview.TargetIndex != 0 || preview.TargetVersion != 0 ? preview.TargetIndex : preview.WindowIndex; version = preview.TargetIndex != 0 || preview.TargetVersion != 0 ? preview.TargetVersion : preview.WindowVersion; }

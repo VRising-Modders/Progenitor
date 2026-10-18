@@ -120,7 +120,8 @@ public sealed partial class PluginCamera
         internal CameraPreview(PluginCamera camera, UnitVec3 point, float yaw, CameraPreviewOptions options)
         {
             _camera = camera; _point = point; _anchor = point; _yaw = yaw; _ended = options.Ended; _screenOffset = options.ScreenOffset;
-            (Distance, Pitch) = CameraPreviewFramingRules.Resolve(options.Distance, options.Pitch, options.MatchPlayerCamera, PlayerCameraShot());
+            (Distance, Pitch) = CameraPreviewFramingRules.Resolve(options.Distance, options.Pitch, options.MatchPlayerCamera,
+                options.MatchPlayerCamera ? PlayerCameraShot(camera) : (false, 0, 0));
             _policy = new CameraPreviewPolicy(options.Hold ? CameraPreviewPolicy.MaxTimedSeconds : options.Seconds, options.Hold, 0);
             _world = Worlds.Client ?? throw new InvalidOperationException("No client world.");
             _epoch = WorldEpoch.Current;
@@ -408,8 +409,13 @@ public sealed partial class PluginCamera
             return s;
         }
 
-        /// <summary>The player's own camera as an orbit shot, measured before the preview takes the camera (<see cref="CameraPreviewOptions.MatchPlayerCamera"/>).</summary>
-        private static (bool Ok, float Distance, float Pitch) PlayerCameraShot()
+        /// <summary>
+        /// The player's own camera as an orbit shot, measured before the preview takes the camera
+        /// (<see cref="CameraPreviewOptions.MatchPlayerCamera"/>). Only while the player's camera is on screen: with a
+        /// plugin shot running (a preview being replaced keeps its orbit until this one starts) or the game not in its
+        /// top-down mode, the reading is someone else's camera and the defaults are used.
+        /// </summary>
+        private static (bool Ok, float Distance, float Pitch) PlayerCameraShot(PluginCamera camera)
         {
             try
             {
@@ -417,9 +423,12 @@ public sealed partial class PluginCamera
                 var cam = UnityEngine.Camera.main;
                 if (world == null || !world.IsCreated || cam == null) return (false, 0, 0);
                 if (!TryLocalCharacter(world, out _, out var at)) return (false, 0, 0);
+                bool anyShot = CameraDirector.Owner is { IsShotActive: true };
+                bool topDown = camera.Director.Mode == CameraMode.TopDown;
                 var p = cam.transform.position;
                 var f = cam.transform.forward;
-                return CameraPreviewFramingRules.FromCamera(p.x, p.y, p.z, f.x, f.y, f.z, at.x, at.y, at.z);
+                return CameraPreviewFramingRules.FromCamera(CameraPreviewFramingRules.PlayerCameraOnScreen(anyShot, topDown),
+                    p.x, p.y, p.z, f.x, f.y, f.z, at.x, at.y, at.z);
             }
             catch { return (false, 0, 0); }
         }

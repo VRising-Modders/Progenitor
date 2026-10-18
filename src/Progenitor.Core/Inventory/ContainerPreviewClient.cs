@@ -68,6 +68,7 @@ internal static unsafe class ContainerPreviewClient
         _installed = false;
         _current?.Close(ContainerPreviewCloseReason.Unloaded, "", notify: false);
         _current = null;
+        ReleaseClosingView();
         foreach (var guarded in Guarding) guarded.FinishMapperGuard();
         Guarding.Clear();
         try { CustomEvents.RemoveHandler(ContainerPreviewWire.EventId); }
@@ -84,6 +85,7 @@ internal static unsafe class ContainerPreviewClient
         var world = Worlds.Client;
         if (world == null || !world.IsCreated) throw new InvalidOperationException("No client world (join a game first).");
         _current?.Close(ContainerPreviewCloseReason.Replaced, "", notify: true);
+        ReleaseClosingView();
         int sequence = _sequence = _sequence == int.MaxValue ? 1 : _sequence + 1;
         var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate, SyncInventory = syncInventory };
         _current = handle;
@@ -110,9 +112,44 @@ internal static unsafe class ContainerPreviewClient
     internal static Progenitor.Ui.VanillaPreviewWindow PreviewWindow(World world)
     {
         var c = _current;
-        if (c == null || !ReferenceEquals(c.World, world)) return default;
-        try { return c.PanelView(); }
-        catch { return default; }
+        if (c != null && ReferenceEquals(c.World, world))
+        {
+            try { return c.PanelView(); }
+            catch { return default; }
+        }
+        // A preview that just closed: its window goes on a later frame. Until then the panel target keeps naming the
+        // previewed chest, so the close is one Closed event, not a TargetChanged to the bare chest first.
+        if (_closingWorld == null || !ReferenceEquals(_closingWorld, world)) return default;
+        try
+        {
+            if (world.IsCreated)
+            {
+                var window = ReadWindow(world);
+                bool shown = window.Menu == Layout.HUDMenuTypeContainerMenu;
+                bool same = window.Target.Index == _closing.WindowIndex && window.Target.Version == _closing.WindowVersion;
+                if (ContainerPreviewMachine.HoldsClosingView(shown, same, window.Interact != Entity.Null)) return _closing;
+            }
+        }
+        catch { /* */ }
+        ReleaseClosingView();
+        return default;
+    }
+
+    private static Progenitor.Ui.VanillaPreviewWindow _closing;
+    private static World? _closingWorld;
+
+    /// <summary>The closing preview's panel view, held while its window is still on screen (<see cref="PreviewWindow"/>).</summary>
+    internal static void HoldClosingView(World world, in Progenitor.Ui.VanillaPreviewWindow view)
+    {
+        if (!view.OwnsWindow || view.Container.IsNone) { ReleaseClosingView(); return; }
+        _closing = view;
+        _closingWorld = world;
+    }
+
+    internal static void ReleaseClosingView()
+    {
+        _closing = default;
+        _closingWorld = null;
     }
 
     internal static void Forget(ContainerPreviewHandle handle)
@@ -287,17 +324,17 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     internal World World => _world;
 
     /// <summary>
-    /// The container window's own part (the mapper's container sub-menu), while this preview owns the window; null
-    /// otherwise. The camera preview keeps the HUD canvas that holds it shown (<c>CameraPreviewHud</c>).
+    /// The panel sites' view of this preview (<see cref="Progenitor.Ui.VanillaPanelPreview"/>): whether it owns the
+    /// window, the entity the window was opened on, the chest's entity now, the server's network id words and the id.
     /// </summary>
-    /// <summary>The panel sites' view of this preview (<see cref="Progenitor.Ui.VanillaPanelPreview"/>).</summary>
     internal Progenitor.Ui.VanillaPreviewWindow PanelView() => new(
         Machine.OwnsWindow, _windowTarget.Index, _windowTarget.Version, _target.Index, _target.Version,
         _netIndex, _netGeneration, _netType, Container);
 
     /// <summary>
-    /// Every part of the open container window a hidden HUD must leave shown: the container half, the character inventory
-    /// half (the game's station layout shows both), and their common parent. Empty when the preview does not own it.
+    /// Every part of the open container window a hidden HUD must leave shown: the container half and its parent, and the
+    /// character inventory half only while it is shown (the station layout; <see cref="ContainerPreviewOptions.HidePlayerInventory"/>
+    /// false). A hidden bag adds nothing, so its canvas is not kept on its account. Empty when the preview does not own the window.
     /// </summary>
     internal List<Transform> WindowParts()
     {
@@ -307,8 +344,11 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (mapper == null) return parts;
         var sub = mapper._ContainerSubMenu;
         if (sub != null) { parts.Add(sub.transform); if (sub.transform.parent != null) parts.Add(sub.transform.parent); }
-        var bag = mapper._InventorySubMenu;
-        if (bag != null) parts.Add(bag.transform);
+        if (!_options.HidePlayerInventory)
+        {
+            var bag = mapper._InventorySubMenu;
+            if (bag != null) parts.Add(bag.transform);
+        }
         return parts;
     }
 
@@ -382,6 +422,10 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         };
     }
 
+    /// <summary>
+    /// The container half alone (the mapper's container sub-menu) while this preview owns the window, else null: the
+    /// camera preview's readback reports whether it draws. <see cref="WindowParts"/> is what the hidden HUD keeps.
+    /// </summary>
     internal Transform? WindowPart()
     {
         if (!Machine.OwnsWindow || !_world.IsCreated) return null;
@@ -671,7 +715,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// <summary>Close for <paramref name="reason"/>. <paramref name="tellServer"/> false when the server already let go.</summary>
     internal void Close(ContainerPreviewCloseReason reason, string message, bool notify, bool tellServer = true)
     {
+        Progenitor.Ui.VanillaPreviewWindow view = default;
+        try { view = PanelView(); } catch { /* */ }
         if (!Machine.Close(reason, message)) return;
+        // Held only while the window it opened stays on screen; unload or a dead world has no window to hold for.
+        if (reason != ContainerPreviewCloseReason.Unloaded && reason != ContainerPreviewCloseReason.WorldChanged && _world.IsCreated)
+            ContainerPreviewClient.HoldClosingView(_world, view);
+        else ContainerPreviewClient.ReleaseClosingView();
         Finish(notify, tellServer);
     }
 

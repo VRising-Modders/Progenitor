@@ -1341,7 +1341,7 @@ internal sealed partial class UnityUiRuntime
         ReadNetworkId(world, target, out int n0, out int n1, out int n2);
         var panelTarget = new VanillaPanelTarget(kind, target.Index, target.Version, n0, n1, n2, itemGuid, itemAmount);
         // A remote container preview's window: the previewed chest, its network id and its stable id.
-        if (kind == VanillaPanelKind.Container) panelTarget = VanillaPanelPreview.Apply(panelTarget, Progenitor.Inventory.ContainerPreviewClient.PreviewWindow(world));
+        if (kind == VanillaPanelKind.Container) panelTarget = VanillaPanelPreview.Apply(panelTarget, Progenitor.Inventory.ContainerPreviewClient.PreviewWindow(world), emptyIsWindow: site != VanillaUiSite.InventoryTooltip);
         if (site == VanillaUiSite.ContainerPanel) { LastContainerPanelTarget = panelTarget; LastContainerPanelFrame = Time.frameCount; }
         return Finish(site, view, panelTarget);
     }
