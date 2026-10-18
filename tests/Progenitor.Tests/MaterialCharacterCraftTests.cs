@@ -270,7 +270,7 @@ public partial class MaterialServiceTests
     {
         Assert.True(MaterialClientPolicy.ReadByPeer(CharacterCraft, true));
         Assert.False(MaterialClientPolicy.ReadByPeer(CharacterCraft, false));
-        foreach (var op in MaterialClientPolicy.ViewOperations.Where(o => o != CharacterCraft))
+        foreach (var op in MaterialClientPolicy.ViewOperations.Where(o => o != CharacterCraft && o != MaterialOperation.RefineView))
             Assert.True(MaterialClientPolicy.ReadByPeer(op, false));
         Assert.True((Progenitor.Networking.Handshake.SelfCapabilities & Progenitor.Networking.Handshake.Capability.MaterialCharacterCraft) != 0);
     }

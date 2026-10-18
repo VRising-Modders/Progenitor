@@ -140,8 +140,10 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         object? owner,
         IUiRuntime runtime,
         bool enabled,
-        VanillaPanelAnchor anchor = VanillaPanelAnchor.Default)
+        VanillaPanelAnchor anchor = VanillaPanelAnchor.Default,
+        int requirementLine = -1)
     {
+        RequirementLine = anchor == VanillaPanelAnchor.TooltipRequirementLine ? Math.Max(0, requirementLine) : -1;
         Site = site;
         PluginId = pluginId ?? UiOwnership.UnownedId;
         ContainerName = containerName;
@@ -155,6 +157,8 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     public VanillaUiSite Site { get; }
 
     public VanillaPanelAnchor Anchor { get; }
+
+    public int RequirementLine { get; }
 
     /// <summary>A P6 panel site: open/close tracking, buttons and placement apply.</summary>
     internal bool IsPanel { get; }
@@ -546,7 +550,9 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         try
         {
             container = IsPanel
-                ? _runtime.BuildPanelContainer(Site, Anchor, ContainerName)
+                ? (RequirementLine >= 0
+                    ? _runtime.BuildPanelContainer(Site, Anchor, ContainerName, RequirementLine)
+                    : _runtime.BuildPanelContainer(Site, Anchor, ContainerName))
                 : _runtime.BuildAttachContainer(Site, ContainerName, decision.Parent, decision.IgnoreLayout);
         }
         catch (Exception e)
@@ -804,6 +810,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             {
                 Site = Site,
                 Anchor = Anchor,
+                RequirementLine = RequirementLine,
                 PluginId = PluginId,
                 ContainerName = ContainerName,
                 Enabled = Enabled,
@@ -1152,6 +1159,9 @@ internal sealed class VanillaAttachReadback
 
     internal IRuntimeWidget? Container { get; init; }
 
+    /// <summary>The requirement line of a per-line attachment, else -1.</summary>
+    internal int RequirementLine { get; init; } = -1;
+
     /// <summary>The game-free part of the readback.</summary>
     internal Dictionary<string, object?> Describe()
     {
@@ -1170,7 +1180,9 @@ internal sealed class VanillaAttachReadback
             });
         }
 
-        return new Dictionary<string, object?>
+        var line = Container as IRequirementLineGate;
+        bool containerShown = Container != null && Container.Alive && Container.Visible && (line == null || line.GameLineShown);
+        var result = new Dictionary<string, object?>
         {
             ["site"] = VanillaUiSites.Key(Site),
             ["anchor"] = Anchor.ToString(),
@@ -1181,7 +1193,7 @@ internal sealed class VanillaAttachReadback
             ["target"] = Target.ToString(),
             ["visible"] = Visible,
             ["attached"] = Attached,
-            ["shown"] = Container != null && Container.Alive && Container.Visible,
+            ["shown"] = containerShown,
             ["fit"] = Fit,
             ["fitReason"] = FitReason,
             ["withheld"] = Withheld,
@@ -1189,7 +1201,24 @@ internal sealed class VanillaAttachReadback
             ["rows"] = new List<string>(Rows),
             ["rowTones"] = Array.ConvertAll(RowTones, t => LabelTones.Name(t)),
         };
+        if (RequirementLine >= 0)
+        {
+            result["requirementLine"] = RequirementLine;
+            result["gameLineShown"] = line?.GameLineShown;
+        }
+        return result;
     }
+}
+
+/// <summary>
+/// A per-line container (<see cref="VanillaPanelAnchor.TooltipRequirementLine"/>): drawn only while the
+/// game shows its requirement line. <see cref="IRuntimeWidget.Visible"/> is the attachment's own wish;
+/// <see cref="GameLineShown"/> is the game's line, read on the last sync.
+/// </summary>
+internal interface IRequirementLineGate
+{
+    /// <summary>The game showed this container's requirement line at the last sync.</summary>
+    bool GameLineShown { get; }
 }
 
 /// <summary>

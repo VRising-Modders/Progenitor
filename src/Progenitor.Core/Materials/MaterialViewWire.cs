@@ -26,7 +26,7 @@ internal sealed class MaterialView
 
     /// <summary>
     /// Network id (packed) of the structure the view was computed for: the workstation of a Craft view,
-    /// the castle heart of an Upgrade view; 0 otherwise.
+    /// the castle heart of an Upgrade view, the refinement station of a RefineView view; 0 otherwise.
     /// </summary>
     internal ulong StationNet { get; }
 
@@ -110,7 +110,7 @@ internal static class MaterialViewWire
         if (s.Length < 1) { reason = "empty"; return false; }
         if (s[0] != Version) { reason = "version " + s[0]; return false; }
         if (s.Length < HeaderBytes) { reason = "short header " + s.Length; return false; }
-        if (s[1] > (byte)MaterialOperation.CharacterCraft) { reason = "operation " + s[1]; return false; }
+        if (s[1] > (byte)MaterialOperation.RefineView) { reason = "operation " + s[1]; return false; }
         int count = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(24));
         if (count < 0 || count > MaxRows) { reason = "row count " + count; return false; }
         if (s.Length != HeaderBytes + count * 8) { reason = "length " + s.Length + " for " + count + " rows"; return false; }
@@ -466,22 +466,30 @@ internal static class MaterialClientPolicy
 {
     /// <summary>The operations the server sends views for, in refresh order.</summary>
     internal static IReadOnlyList<MaterialOperation> ViewOperations { get; } =
-        Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft });
+        Array.AsReadOnly(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft,
+            MaterialOperation.RefineView });
 
     /// <summary>
     /// Whether a client reads views of this operation. A CharacterCraft view goes only to a client that
-    /// declared it (<c>Handshake.Capability.MaterialCharacterCraft</c>): an older client drops operation 6
-    /// as malformed and would warn at every resend. Nothing is computed or sent for the others.
+    /// declared it (<c>Handshake.Capability.MaterialCharacterCraft</c>), a RefineView view only to one that
+    /// declared <c>Handshake.Capability.MaterialRefineView</c>: an older client drops operation 6 or 7 as
+    /// malformed. Nothing is computed or sent for the others.
     /// </summary>
-    internal static bool ReadByPeer(MaterialOperation operation, bool peerReadsCharacterCraft) =>
-        operation != MaterialOperation.CharacterCraft || peerReadsCharacterCraft;
+    internal static bool ReadByPeer(MaterialOperation operation, bool peerReadsCharacterCraft, bool peerReadsRefineView = false) =>
+        operation switch
+        {
+            MaterialOperation.CharacterCraft => peerReadsCharacterCraft,
+            MaterialOperation.RefineView => peerReadsRefineView,
+            _ => true,
+        };
 
     /// <summary>
     /// A view of this operation only means something at a structure (Craft: a workstation, Upgrade: a
-    /// castle heart's window); without one the server sends none and skips the provider calls.
+    /// castle heart's window, RefineView: a refinement station's window); without one the server sends
+    /// none and skips the provider calls.
     /// </summary>
     internal static bool NeedsStation(MaterialOperation operation) =>
-        operation is MaterialOperation.Craft or MaterialOperation.Upgrade;
+        operation is MaterialOperation.Craft or MaterialOperation.Upgrade or MaterialOperation.RefineView;
 
     /// <summary>
     /// An Upgrade view is computed only for a heart the player owns or whose owner is in the player's

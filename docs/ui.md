@@ -1668,7 +1668,7 @@ ctx.Track(tip.OnPanel(e => tip.SetRows(new[] { "In storage: " + CountInStorage(e
 | `InventoryPanel` | the active `_InventorySubMenu` of the container, station, castle heart or character window; the station windows include the prison cell, devourer and unit stations, so `InventoryPanel` and `InventoryTooltip` also resolve beside those (source-checked; live check pending) | `BesideSort` | the window's target beside a container or station; none (`Kind = Character`) in the character menu |
 | `CastleHeartPanel` (alias `ThronePanel`) | `CastleHeartMenuMapper._CastleHeartSubMenu`, `._Target` | `LeftEdge`, `RightEdge` | the castle heart |
 | `InventoryTooltip` | the inventory's (or the container half's) `FakeTooltip` while it is shown over a hovered `ItemGridSelectionEntry` | `TooltipBody` | `ItemGuid` and `ItemAmount` of the hovered stack; the container when the slot is in the container half |
-| `RecipeTooltip` | the window's own `FakeTooltip` while it is shown over a hovered recipe entry of that window's `RecipesParent`: workstation, refinement station or the character menu's crafting tab ([Recipe tooltip](#recipe-tooltip)) | `TooltipBody`, `TooltipRequirements` | `RecipeGuid`, `ItemGuid` (what the tooltip describes), the product as `ProductGuid` / `ProductAmount`, `Requirements`; the station and its `NetworkId` (none in the crafting tab) |
+| `RecipeTooltip` | the window's own `FakeTooltip` while it is shown over a hovered recipe entry of that window's `RecipesParent`: workstation, refinement station or the character menu's crafting tab ([Recipe tooltip](#recipe-tooltip)) | `TooltipBody`, `TooltipRequirements`, `TooltipRequirementLine` | `RecipeGuid`, `ItemGuid` (what the tooltip describes), the product as `ProductGuid` / `ProductAmount`, `Requirements`; the station and its `NetworkId` (none in the crafting tab) |
 
 `ThronePanel` and `CastleHeartPanel` are the same value. The throne has no window of its own on this build (sitting on it is the `UseThrone` interaction); the castle list and the blood essence fuel live in the castle heart window, so both names address it.
 
@@ -1700,7 +1700,26 @@ ctx.Track(needs.OnPanel(e =>
   | Refinement station | the recipe's own `PrefabGUID` (`EntryId`) and the recipe's requirements scaled by the station's bonus | the recipe (`RecipeGuid`) | 0 |
 
   At a refinement station, use `ProductGuid` for the item the recipe makes.
-- **Anchors.** `TooltipBody` (default) puts the rows right under the product's description; `TooltipRequirements` right under the requirement list (the "0/3 Glass" lines). Both are in the tooltip's own entry column, a vertical group, so the tooltip grows to fit. Rows from several plugins stack in the order they were built. A suffix inside one requirement line is not offered: the game rewrites those lines on every tooltip update.
+- **Anchors.** `TooltipBody` (default) puts the rows right under the product's description; `TooltipRequirements` right under the requirement list (the "0/3 Glass" lines). Both are in the tooltip's own entry column, a vertical group, so the tooltip grows to fit. Rows from several plugins stack in the order they were built. `TooltipRequirementLine` puts them right under one requirement line (below).
+- **Under one requirement line.** `UiApi.AttachToRequirementLine(line, ctx.Owner, ctx.Guid)` gives a handle whose rows sit directly under requirement line `line` (0 = the first; an index into `Target.Requirements`, so `Target.Requirements[line].ItemGuid` is that line's item). One handle per line; lines 0 to 5 (the tooltip's six pooled line rows); another line number gives a disabled handle and one log line. `AttachToVanilla(RecipeTooltip, TooltipRequirementLine, ...)` is line 0. The container is a child of the requirement list (`Tooltip_RecipeRequiredItems`, a vertical group), right after that line's row and any Progenitor container already there, so the following lines move down and the tooltip grows. The game's rewrite of the lines on every tooltip update only writes each line's texts, colors and shown state, never the list's children, so it neither moves nor removes the rows. The container is shown exactly while the game shows its line: a recipe with fewer lines hides it with the game's unused rows, re-checked after every window mapper's update so a new recipe never shows a stale line container for a frame. `ui_read panels` lists `requirementLine` and `gameLineShown` for such a handle. Status: game-free tested (`VanillaPanelTests`), built, **not live-verified**.
+
+  ```csharp
+  for (int i = 0; i < 6; i++)
+  {
+      int line = i;
+      var under = UiApi.AttachToRequirementLine(line, ctx.Owner, ctx.Guid);
+      ctx.Track(under);
+      ctx.Track(under.OnPanel(e =>
+      {
+          if (e.Change == VanillaPanelChange.Closed) return;
+          var needs = e.Target.Requirements;
+          if (line >= needs.Count) { under.ClearRows(); return; }
+          under.SetRows(new VanillaRow[] { new("In the network: " + CountInStorage(needs[line].ItemGuid), LabelTone.Ok) });
+      }));
+  }
+  ```
+
+- **Requirement counts at a refinement station.** The game counts only the station's own slots there. A material provider that names `MaterialOperation.RefineView` makes each governed line show the station's count plus the provider's pool total, in the game's format and colors ([modules.md, Refinement recipe tooltip counts](modules.md#refinement-recipe-tooltip-counts)); the per-line rows above are independent of it.
 - **Rows only,** in the tooltip's description style; `SetRows(IReadOnlyList<VanillaRow>)` colors each row by `LabelTone`. Buttons are disabled.
 - **Not read:** the entry's own requirement list (the amounts the tooltip shows) and the window's selection group. Both are interop generics over game value types, which the framework does not instantiate.
 - **Refinement rows.** A refinement recipe is a row with input and output icons. Hovering an icon does not change the game's tooltip (the row's icon lookup always answers "none"), so the site reports the row's recipe whichever part of the row is hovered.
@@ -1743,6 +1762,7 @@ Read from the UI prefabs the game ships, not from a live run. Two serialized fie
 | `InventoryTooltip` `TooltipBody` | `FakeTooltip.DescriptionFrame`'s parent (a vertical group) | `tooltip`: the last line of the text column | rows only |
 | `RecipeTooltip` `TooltipBody` | the same column (`InformationEntries`) | `tooltip`: right after `TooltipDescFrame`, above the requirement list | rows only |
 | `RecipeTooltip` `TooltipRequirements` | the same column | `tooltip`: right after `Tooltip_RecipeRequiredItems` (`FakeTooltip.RecipeRequiredItems`) | rows only |
+| `RecipeTooltip` `TooltipRequirementLine` | `Tooltip_RecipeRequiredItems` (a vertical group of six `RecipeRequiredItem` rows, `TooltipRecipeRequiredItems.RequiredItemsList`) | `tooltip`: right after that line's `RecipeRequiredItem` row; shown only while the game shows the row | rows only |
 
 **`BesideSort` geometry on this build, at rest** (the window's own units, origin at its top-left corner; the game's scaler matches height to 1080, so 1920x1080 and 2560x1440 give the same numbers). The window is 620 x 925. The bar is centered: its four 116x36 cells run from 66 to 554, with the row at y -861 to -825. The slot right of `SmartMergeButtonNew` starts 8 units after it and ends at the window edge, so it is **58 units** wide (562-620). The item area (`ParentContainerInventory`, x 20-600, y -787 to -512) starts 38 units above the bar and never reaches the bar row.
 

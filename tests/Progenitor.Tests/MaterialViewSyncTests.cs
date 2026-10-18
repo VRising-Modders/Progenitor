@@ -33,6 +33,7 @@ public class MaterialViewSyncTests
             [MaterialOperation.Craft] = null,
             [MaterialOperation.Upgrade] = null,
             [MaterialOperation.CharacterCraft] = null,
+            [MaterialOperation.RefineView] = null,
         };
         /// <summary>What the transport does with the next packets: true delivers, false fails the send, null accepts it and loses it.</summary>
         public readonly Queue<bool?> Link = new();
@@ -500,13 +501,15 @@ public class MaterialViewSyncTests
     }
 
     [Fact]
-    public void The_wire_accepts_character_craft_and_refuses_unknown_operations()
+    public void The_wire_accepts_character_craft_and_refine_view_and_refuses_unknown_operations()
     {
         var view = new MaterialView(MaterialOperation.CharacterCraft, 3, 1, 4, 5, false, false, new[] { new MaterialLine(Wood, 25) }, Heart);
         var bytes = MaterialViewWire.Encode(view);
         Assert.True(MaterialViewWire.TryDecode(bytes, out var decoded, out _));
         Assert.Equal(MaterialOperation.CharacterCraft, decoded!.Operation);
-        bytes[1] = (byte)MaterialOperation.CharacterCraft + 1;
+        bytes[1] = (byte)MaterialOperation.RefineView;
+        Assert.True(MaterialViewWire.TryDecode(bytes, out _, out _));
+        bytes[1] = (byte)MaterialOperation.RefineView + 1;
         Assert.False(MaterialViewWire.TryDecode(bytes, out _, out string reason));
         Assert.StartsWith("operation", reason);
     }

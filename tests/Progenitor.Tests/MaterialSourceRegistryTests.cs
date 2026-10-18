@@ -85,7 +85,8 @@ public class MaterialSourceRegistryTests
     [Fact]
     public void Repair_upgrade_and_character_craft_are_wired_and_research_and_other_stay_vanilla()
     {
-        Assert.Equal(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft },
+        Assert.Equal(new[] { MaterialOperation.Build, MaterialOperation.Craft, MaterialOperation.Repair, MaterialOperation.Upgrade, MaterialOperation.CharacterCraft,
+                MaterialOperation.RefineView },
             MaterialOperations.Supported);
         foreach (var op in MaterialOperations.Supported) Assert.True(MaterialOperations.IsSupported(op));
         Assert.False(MaterialOperations.IsSupported(MaterialOperation.Research));

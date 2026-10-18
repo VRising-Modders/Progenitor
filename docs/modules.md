@@ -3408,6 +3408,7 @@ returns `null` for.
 | Refresh cost: per-refresh reads, reuse of unchanged views, `Recomputes`/`Skips` | game-free tested (`MaterialViewRefreshTests`, `MaterialViewRefreshBenchTests`), **not live-verified** |
 | Native availability and payment seams (Bootstrap) | **experimental, opt-in, off by default**; live-verified on the isolated test rig on 2026-10-14 for craft, build, the per-item fallback, the reserve, provider faults, a shortfall between check and payment, disable, the client resend, unload and a server Core swap; other screens reading the same count are not live-verified (below) |
 | `CharacterCraft` (crafting from the Character window on a plot: scope, plot rule, the CharacterCraft view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (build b6f997d61, run by another session with its own provider): wired, the crafting list showed pool totals on a plot, a bridge-sent craft logged one check and one paid line, `payments` rose and the item was crafted, and off a plot there was no check or paid line and nothing was crafted; not verified: the client's own craft click, a short craft, and the later changes (capability gate, reuse without provider calls, character placement by `Translation`) (`MaterialCharacterCraftTests`, `MaterialViewSyncTests`, `MaterialEventArgsTests`); the same two native seams, no new one; live procedure: [Shared Resources Test, character crafting cases](../samples/Progenitor.SharedResourcesTest/README.md#character-crafting-cases) |
+| `RefineView` (display only: the refinement station recipe tooltip's requirement counts, [below](#refinement-recipe-tooltip-counts)) | **experimental, opt-in**, source-checked against the client metadata, interop and the native code of the refinement window's tooltip update and the tooltip's requirement list; game-free tested (`MaterialRefineTooltipTests`, `MaterialViewSyncTests`); **not live-verified**. No new native seam: a `SystemHooks` Before/After pair on the client's `RefinementstationMenuMapper` and plain Unity text and color writes |
 | `Repair` and `Upgrade` (scopes, the upgrade request filter, the Upgrade view) | **experimental, opt-in**, game-free tested and live-verified on the isolated test rig on 2026-10-14 (cases 15, 16, 17, 18, 19, 20 and 22, the last partial: the chest half); not verified: claim staying vanilla (case 21) and the client's own path of an equipped-item repair (`MaterialTransactionTests`, `MaterialScopeTrackerTests`, `MaterialUpgradeFilterTests`, `MaterialViewSyncTests`); the same two native seams, no new one |
 
 ```csharp
@@ -3439,7 +3440,8 @@ check (one synchronous system update) or while the per-player totals are refresh
 must not move items, must not call back into `ctx.MaterialSource` and must not throw.
 
 - `Operations`: what it governs. `Build`, `Craft`, `Repair`, `Upgrade` and `CharacterCraft` are wired
-  (`MaterialOperations.Supported`); `Research` and `Other` are logged once at registration
+  (`MaterialOperations.Supported`), and so is the display-only `RefineView` (a provider names it to have
+  refinement recipe tooltips show its pool; it is never asked at a payment); `Research` and `Other` are logged once at registration
   (`not-wired=…`) and stay vanilla. Re-read on `InvalidateAll`. `CharacterCraft` is separate from
   `Craft`: a provider that names only `Craft` leaves crafting from the Character window to the game.
 - `Candidates(ctx)`: every container that may pay for any item in this context; used to find which
@@ -3477,6 +3479,7 @@ any case):
 | `Upgrade` | The castle heart being upgraded (its `ContainerId`; hearts have one): the heart the game passed to the call, else the heart whose window is open, else the heart of the standing plot |
 | `Build` | `ContainerId.None` |
 | `CharacterCraft` | `ContainerId.None` (the Character window's crafting has no workstation). `StandingTerritory` is always set: the operation is governed only on a plot |
+| `RefineView` | The refinement station (a furnace, a fabricator: the character's interaction target when it carries `Refinementstation`) whose window is open. It is left out of the pool: the tooltip already counts its slots |
 
 **`CharacterCraft` only on a plot.** Crafting from the Character window is governed only while the
 character stands on a castle plot: the game itself passes the plot's castle heart to the count and the
@@ -3611,7 +3614,7 @@ it stays local. Nothing is ever written to a castle heart's shared aggregate.
 
 The server refreshes each online player's Build totals, while the player stands on a plot their
 CharacterCraft totals, while the player works at a workstation their
-Craft totals, and while the window of a castle heart the player or the player's clan owns is open
+Craft totals, while the player has a refinement station's window open their RefineView totals, and while the window of a castle heart the player or the player's clan owns is open
 their Upgrade totals (never for an enemy's or a decaying heart, even an allied one), every second, and
 at once after an invalidation or a governed payment; a refresh recomputes a view only when something it
 depends on changed ([refresh cost](#refresh-cost)), and sends a view only
@@ -3628,7 +3631,46 @@ A view (`'PrMv'`, Core's reserved range, version 2) lists **only the items the p
 (zero included, which hides the game's shared amount for that item), with world epoch, provider
 revision, the server publisher's generation, a per-player sequence, and the network ids of the castle heart at the player's standing plot
 and of the structure it was computed for (Craft: the workstation; Upgrade: the castle heart whose window
-is open). At most 1500 items, flagged when cut.
+is open; RefineView: the refinement station). At most 1500 items, flagged when cut. A RefineView view goes
+only to a client whose Core declared handshake capability `MaterialRefineView` (536870912); an older
+client would drop operation 7 as malformed.
+
+#### Refinement recipe tooltip counts
+
+At a refinement station the game counts only the station's own slots for the recipe tooltip's "have"
+numbers, so a recipe the pool could feed reads "0/3 Glass" in red. `RefineView` changes that line for
+display only; refining keeps taking from the station's slots.
+
+- **What the game does** (source-checked, client): every update of `RefinementstationMenuMapper`
+  rebuilds the hovered recipe's cost list (the station's count of each item, the recipe amount scaled by
+  the station's resource bonus) and sets the tooltip, which always ends in
+  `TooltipRecipeRequiredItems.SetData`: each line's amount text becomes `{inStock}/{amount}` and its amount
+  and item name take `StunColor.Red2` (none), `Green1` (enough) or `Yellow2` (some).
+- **What Progenitor does**: right after that update (`SystemHooks.After`, same frame, before the canvas
+  draws), when the client holds a RefineView view for the very station the window shows, each line whose
+  item the view lists shows the game's count plus the pool total in the same format, and both texts take
+  the game's color for the new count (the same three-state rule, colors read from `StunColor`). Before the
+  window's next update (`SystemHooks.Before`) any line still holding Progenitor's text is put back to the
+  game's, so the next pass always starts from the game's own count and the pool is never added twice.
+  Lines are matched to the recipe's requirements by order (the game's own order); when the shown line
+  count differs from the requirement count, every line keeps the game's text. Items the view does not
+  list keep the game's line. No game method is called and no game data changes.
+- **Hover**: the hovered recipe row is found with the same mouse-hover rule as the recipe tooltip site
+  (the row's `IsHovered`), so with a gamepad the lines keep the game's counts.
+- **Workstations** need no RefineView: their recipe tooltip lists the costs the workstation window
+  computes from the merged count, which the Craft view already replaces (source-checked).
+- **Readback**: the development bridge's `materials status` on the client returns `refineTooltip`: the
+  last pass's frame, `state` (`applied`, or why not: no view, no hovered refinement recipe, a view for
+  another station, a line count mismatch), recipe, station network id, view sequence, and per line
+  `row`, `item`, `need`, `gameHave` (the game's own count), `providerHave` (-1 when not governed),
+  `shownHave`, `text`, `color` (`red`, `yellow`, `green`), `rgba` and `written`.
+
+Live check (acceptance procedure, not run): with the seams armed on both sides and a provider that names
+`RefineView`, open a Fabricator holding no Glass, hover "Sludge-filled Canister" with 3 Glass in a pool
+container; the Glass line should read `3/3` in the game's green, `materials status` (client) should
+show `gameHave` 0, `providerHave` 3, `shownHave` 3, `color` green; with 1 Glass in the pool `1/3` yellow;
+removing the provider should put back `0/3` red within about a second; refining still needs Glass in
+the station's own slot.
 
 #### Refresh cost
 

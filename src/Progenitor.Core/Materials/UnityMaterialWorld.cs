@@ -62,7 +62,8 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
 
     /// <summary>
     /// The structure an operation runs at: the workstation for Craft and Repair (the character's
-    /// interaction target when it is a castle workstation), the castle heart for Upgrade (the heart the
+    /// interaction target when it is a castle workstation), the refinement station for RefineView (the
+    /// interaction target when it is one), the castle heart for Upgrade (the heart the
     /// game passed to this call, else the heart whose window the character has open, else the heart of
     /// the plot it stands on), nothing for Build and CharacterCraft (the Character window's Crafting tab
     /// has no workstation).
@@ -74,6 +75,8 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
             case MaterialOperation.Craft:
             case MaterialOperation.Repair:
                 return StationOf(em, character);
+            case MaterialOperation.RefineView:
+                return RefinementStationOf(em, character);
             case MaterialOperation.Upgrade:
                 var hint = HeartHint;
                 if (hint != Entity.Null && hint.Exists(em) && hint.Has<CastleHeart>(em)) return hint;
@@ -106,7 +109,7 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         var em = Em;
         var ch = new Entity { Index = context.Character.Index, Version = context.Character.Version };
         into.Add(InventoryRef.For(ch, 0));
-        var station = StationOf(em, ch);
+        var station = context.Operation == MaterialOperation.RefineView ? RefinementStationOf(em, ch) : StationOf(em, ch);
         if (station != Entity.Null && !station.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(station, 0));
         if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade or MaterialOperation.CharacterCraft)
         {
@@ -234,6 +237,13 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         return station == Entity.Null ? 0 : MaterialNet.Of(Em, station);
     }
 
+    /// <summary>Packed network id of the refinement station whose window the character has open; 0 for none.</summary>
+    internal ulong RefinementStationNet(CastleId character)
+    {
+        var station = RefinementStationOf(Em, new Entity { Index = character.Index, Version = character.Version });
+        return station == Entity.Null ? 0 : MaterialNet.Of(Em, station);
+    }
+
     /// <summary>Packed network id of the castle heart whose window the character has open; 0 for none.</summary>
     internal ulong HeartTargetNet(CastleId character)
     {
@@ -326,6 +336,16 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
     {
         var target = InteractionTarget(em, character);
         return target != Entity.Null && target.Has<CastleHeart>(em) ? target : Entity.Null;
+    }
+
+    /// <summary>
+    /// The refinement station (a furnace, a fabricator: <c>Refinementstation</c>) the character is working
+    /// at: its interaction target when it is one, or <see cref="Entity.Null"/>.
+    /// </summary>
+    internal static Entity RefinementStationOf(EntityManager em, Entity character)
+    {
+        var target = InteractionTarget(em, character);
+        return target != Entity.Null && target.Has<Refinementstation>(em) ? target : Entity.Null;
     }
 
     internal static Entity StationOf(EntityManager em, Entity character)

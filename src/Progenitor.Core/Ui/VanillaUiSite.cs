@@ -141,8 +141,9 @@ public enum VanillaUiSite
     /// stays closed (the game's own tooltip follows its selection group's cursor, not read here).
     /// A new hovered recipe is a <see cref="VanillaPanelChange.TargetChanged"/>. Rows only, cloned from
     /// the tooltip's <c>Description</c>. Anchors: <see cref="VanillaPanelAnchor.TooltipBody"/> (under the
-    /// product's description) and <see cref="VanillaPanelAnchor.TooltipRequirements"/> (under the
-    /// requirement list). Refresh: the shared mapper scan.
+    /// product's description), <see cref="VanillaPanelAnchor.TooltipRequirements"/> (under the
+    /// requirement list) and <see cref="VanillaPanelAnchor.TooltipRequirementLine"/> (under one
+    /// requirement line). Refresh: the shared mapper scan.
     /// </summary>
     RecipeTooltip = 7,
 }
@@ -257,7 +258,7 @@ internal static class VanillaUiSites
         donor: "Description",
         system: "WorkstationMenuMapper",
         allowIgnoreLayout: true,
-        anchors: new[] { VanillaPanelAnchor.TooltipBody, VanillaPanelAnchor.TooltipRequirements },
+        anchors: new[] { VanillaPanelAnchor.TooltipBody, VanillaPanelAnchor.TooltipRequirements, VanillaPanelAnchor.TooltipRequirementLine },
         buttons: false);
 
     /// <summary>
@@ -328,7 +329,26 @@ internal static class VanillaUiSites
 
     /// <summary>Whether <paramref name="anchor"/> puts the container into a tooltip's text column.</summary>
     internal static bool IsTooltipAnchor(VanillaPanelAnchor anchor) =>
-        anchor == VanillaPanelAnchor.TooltipBody || anchor == VanillaPanelAnchor.TooltipRequirements;
+        anchor == VanillaPanelAnchor.TooltipBody || anchor == VanillaPanelAnchor.TooltipRequirements
+        || anchor == VanillaPanelAnchor.TooltipRequirementLine;
+
+    /// <summary>
+    /// How many requirement lines the game's recipe tooltip can show: its requirement list holds six
+    /// pooled rows (<c>RecipeRequiredItem</c> .. <c>RecipeRequiredItem (5)</c> on 1.1.13.0).
+    /// </summary>
+    internal const int MaxRequirementLines = 6;
+
+    /// <summary>Whether <paramref name="line"/> names a requirement line the tooltip can show.</summary>
+    internal static bool IsRequirementLine(int line) => line >= 0 && line < MaxRequirementLines;
+
+    /// <summary>The container name suffix of a per-line attachment (<c>line0</c>, <c>line1</c>, ...).</summary>
+    internal static string LineKey(int line) => "line" + line.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// Whether a per-line container is drawn: the plugin wants it shown and the game shows that line's
+    /// own row (a recipe with fewer lines hides it with the game's unused rows). Game-free.
+    /// </summary>
+    internal static bool LineShown(bool wanted, bool gameLineShown) => wanted && gameLineShown;
 
     /// <summary>Whether <paramref name="anchor"/> is one of the column anchors placed by Progenitor.</summary>
     internal static bool IsEdge(VanillaPanelAnchor anchor) =>
@@ -343,6 +363,7 @@ internal static class VanillaUiSites
         VanillaPanelAnchor.BesideSort => "sort",
         VanillaPanelAnchor.TooltipBody => "tooltip",
         VanillaPanelAnchor.TooltipRequirements => "requirements",
+        VanillaPanelAnchor.TooltipRequirementLine => "line",
         _ => "",
     };
 }

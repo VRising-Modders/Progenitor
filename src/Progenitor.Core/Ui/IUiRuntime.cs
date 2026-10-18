@@ -647,6 +647,14 @@ internal interface IUiRuntime
     IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName) => null;
 
     /// <summary>
+    /// <see cref="BuildPanelContainer(VanillaUiSite, VanillaPanelAnchor, string)"/> for a per-line anchor
+    /// (<see cref="VanillaPanelAnchor.TooltipRequirementLine"/>): the container goes right after requirement
+    /// line <paramref name="line"/>'s own row. The default ignores the line.
+    /// </summary>
+    IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName, int line) =>
+        BuildPanelContainer(site, anchor, containerName);
+
+    /// <summary>
     /// P6: clone the site's button donor into <paramref name="container"/> with
     /// <paramref name="caption"/>. The clone keeps the game's art and its hover and press transitions,
     /// loses every inherited persistent <c>UnityEvent</c> call and its icon, and exposes its

@@ -531,7 +531,14 @@ internal sealed partial class UnityUiRuntime
             onFrame(sample);
         }
 
-        Action<SystemHookContext> frame = ctx => Sample(ctx?.World);
+        Action<SystemHookContext> frame = site == VanillaUiSite.RecipeTooltip
+            ? ctx =>
+            {
+                Sample(ctx?.World);
+                try { SyncRequirementLines(); }
+                catch { /* a container Unity just destroyed is dropped on the next sync */ }
+            }
+            : ctx => Sample(ctx?.World);
         Action watchdog = () =>
         {
             if (!watch.Open || Time.frameCount - watch.Frame < WatchdogFrames) return;
@@ -967,6 +974,51 @@ internal sealed partial class UnityUiRuntime
     /// <summary>The one hover the recipe site last read the buffers for.</summary>
     private static readonly VanillaRecipeHoverMemo RecipeHover = new();
 
+    /// <summary>
+    /// The refinement window's recipe tooltip, for the material counts
+    /// (<c>MaterialOperation.RefineView</c>): its <c>FakeTooltip</c> while shown over a hovered recipe row
+    /// (the same hover rule as <see cref="VanillaUiSite.RecipeTooltip"/>: the entry's <c>IsHovered</c>),
+    /// the station the window shows, a key for the hovered entry, and the recipe's requirement rows (read
+    /// once per hover through <see cref="ReadRecipe"/>). False when the window, its tooltip or a hovered
+    /// recipe is missing. Field reads only; uses this frame's shared window scan.
+    /// </summary>
+    internal static bool TryRefinementRecipeTooltip(World world, out FakeTooltip? tooltip, out Entity station, out long entryKey,
+        out int recipe, out VanillaRecipeRequirement[]? requirements)
+    {
+        tooltip = null;
+        station = Entity.Null;
+        entryKey = 0;
+        recipe = 0;
+        requirements = null;
+        try
+        {
+            EnsureScan(world);
+            if (!_refinement.SubShown || _refinement.Target == Entity.Null) return false;
+            var sub = _refinement.Sub!.TryCast<RefinementstationSubMenu>();
+            if (sub == null || !Shown(sub.FakeTooltip)) return false;
+            var hovered = HoveredRecipeIn(sub.RecipesParent);
+            if (hovered == null) return false;
+            recipe = RecipeIdOf(hovered);
+            if (recipe == 0) return false;
+            entryKey = hovered.Pointer.ToInt64();
+            int worldKey = RuntimeHelpers.GetHashCode(world);
+            if (!RecipeHover.Holds(entryKey, recipe, worldKey))
+            {
+                ReadRecipe(world, recipe, out int product, out int amount, out var rows);
+                RecipeHover.Store(entryKey, recipe, worldKey, product, amount, rows);
+            }
+            requirements = RecipeHover.Requirements;
+            tooltip = sub.FakeTooltip;
+            station = _refinement.Target;
+            return true;
+        }
+        catch
+        {
+            tooltip = null;
+            return false;
+        }
+    }
+
     /// <summary>The recipe an entry shows: <c>EntryId</c> of a workstation or crafting-tab entry, or of a refinement row.</summary>
     private static int RecipeIdOf(GridSelectionEntry entry)
     {
@@ -1034,6 +1086,51 @@ internal sealed partial class UnityUiRuntime
             return Alive(block) ? block.transform : null;
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// The transform of requirement line <paramref name="line"/>'s own row
+    /// (<c>TooltipRecipeRequiredItems.RequiredItemsList[line]</c>, a <c>WorkstationRequirementEntry</c>), or null.
+    /// </summary>
+    private static Transform? RequirementRowOf(FakeTooltip? tooltip, int line)
+    {
+        try
+        {
+            if (line < 0 || !Alive(tooltip)) return null;
+            var block = tooltip!.RecipeRequiredItems;
+            if (!Alive(block)) return null;
+            var list = block.RequiredItemsList;
+            if (list == null || line >= list.Count) return null;
+            var entry = list[line];
+            return Alive(entry) ? entry.transform : null;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>The live per-line containers (<see cref="VanillaPanelAnchor.TooltipRequirementLine"/>).</summary>
+    private static readonly List<PanelContainerWidget> LineContainers = new();
+
+    private static void TrackLineContainer(PanelContainerWidget widget)
+    {
+        LineContainers.RemoveAll(w => !w.Alive);
+        LineContainers.Add(widget);
+    }
+
+    /// <summary>
+    /// Show each per-line container exactly while the game shows its line. Run after every window mapper's
+    /// update (the recipe tooltip site's watch hooks all of them), so the one that just rewrote the tooltip
+    /// is followed by a sync in the same frame, before the canvas draws: a recipe with fewer lines never
+    /// shows a stale container for a frame.
+    /// </summary>
+    private static void SyncRequirementLines()
+    {
+        if (LineContainers.Count == 0) return;
+        for (int i = LineContainers.Count - 1; i >= 0; i--)
+        {
+            var w = LineContainers[i];
+            if (!w.Alive) { LineContainers.RemoveAt(i); continue; }
+            w.SyncLine();
+        }
     }
 
     /// <summary>The sibling index right after <paramref name="reference"/> and any Progenitor container already there.</summary>
@@ -1428,7 +1525,10 @@ internal sealed partial class UnityUiRuntime
 
     // ------------------------------------------------------------------ build
 
-    public IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName)
+    public IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName) =>
+        BuildPanelContainer(site, anchor, containerName, -1);
+
+    public IRuntimeWidget? BuildPanelContainer(VanillaUiSite site, VanillaPanelAnchor anchor, string containerName, int line)
     {
         if (!PanelViews.TryGetValue(site, out var view) || view == null || !view.Live || !Alive(view.Panel)) return null;
         GameObject? go = null;
@@ -1436,6 +1536,7 @@ internal sealed partial class UnityUiRuntime
         {
             Transform? host;
             GameObject? reference = null;
+            GameObject? lineRow = null;
             string missing = "";
             int siblingIndex = -1;
             switch (anchor)
@@ -1469,6 +1570,20 @@ internal sealed partial class UnityUiRuntime
                     host = block != null ? block.parent : null;
                     if (host == null) missing = "FakeTooltip.RecipeRequiredItems";
                     else siblingIndex = TooltipSlotAfter(block!);
+                    break;
+                case VanillaPanelAnchor.TooltipRequirementLine:
+                    // Inside the requirement list (a vertical group of the game's pooled line rows),
+                    // right after this line's own row and any Progenitor container already there. The
+                    // game's rewrite of the lines only writes each row's texts and active state, so the
+                    // container keeps its place.
+                    var lineT = RequirementRowOf(view.Tooltip, line);
+                    host = lineT != null ? lineT.parent : null;
+                    if (host == null) missing = "requirement line " + line + " (FakeTooltip.RecipeRequiredItems.RequiredItemsList)";
+                    else
+                    {
+                        siblingIndex = TooltipSlotAfter(lineT!);
+                        lineRow = lineT!.gameObject;
+                    }
                     break;
                 default:
                     host = null;
@@ -1598,7 +1713,13 @@ internal sealed partial class UnityUiRuntime
 
             bool hostLaid = false;
             try { hostLaid = host.GetComponent<VerticalLayoutGroup>() != null; } catch { /* */ }
-            return new PanelContainerWidget(go, site, anchor, hostLaid, mode, size, group);
+            var widget = new PanelContainerWidget(go, site, anchor, hostLaid, mode, size, group);
+            if (lineRow != null)
+            {
+                widget.GateOn(lineRow);
+                TrackLineContainer(widget);
+            }
+            return widget;
         }
         catch (Exception e)
         {
@@ -2368,10 +2489,41 @@ internal sealed partial class UnityUiRuntime
     // ------------------------------------------------------------------ widgets
 
     /// <summary>A P6 container. Destroyed through the module's destroy helper with the verdict kept.</summary>
-    private sealed class PanelContainerWidget : IRuntimeWidget, IReleaseVerdict
+    private sealed class PanelContainerWidget : IRuntimeWidget, IReleaseVerdict, IRequirementLineGate
     {
         private GameObject? _go;
         private UiDestroyVerdict _verdict = UiDestroyVerdict.Failed;
+
+        // A per-line container: shown while the attachment wants it (_wanted) and the game shows the line.
+        private GameObject? _lineRow;
+        private bool _gated;
+        private bool _wanted = true;
+
+        /// <summary>Gate this container on the game's requirement line row <paramref name="lineRow"/>.</summary>
+        internal void GateOn(GameObject lineRow)
+        {
+            _wanted = Alive && _go!.activeSelf;
+            _lineRow = lineRow;
+            _gated = true;
+            SyncLine();
+        }
+
+        public bool GameLineShown
+        {
+            get { try { return !_gated || (UnityUiRuntime.Alive(_lineRow) && _lineRow!.activeSelf); } catch { return false; } }
+        }
+
+        /// <summary>Apply the gate: active exactly when wanted and the game shows the line.</summary>
+        internal void SyncLine()
+        {
+            if (!_gated) return;
+            try
+            {
+                bool show = VanillaUiSites.LineShown(_wanted, GameLineShown);
+                if (UnityUiRuntime.Alive(_go) && _go!.activeSelf != show) _go.SetActive(show);
+            }
+            catch { /* */ }
+        }
 
         internal PanelContainerWidget(
             GameObject go, VanillaUiSite site, VanillaPanelAnchor anchor, bool hostLaidOut, InlineMode mode, Vector2 buttonSize,
@@ -2521,8 +2673,14 @@ internal sealed partial class UnityUiRuntime
 
         public bool Visible
         {
-            get { try { return UnityUiRuntime.Alive(_go) && _go!.activeSelf; } catch { return false; } }
-            set { try { if (UnityUiRuntime.Alive(_go) && _go!.activeSelf != value) _go.SetActive(value); } catch { /* */ } }
+            // A gated container reports the attachment's wish, not the line gate: the handle compares
+            // this with what it wants and must not fight the gate every frame.
+            get { try { return UnityUiRuntime.Alive(_go) && (_gated ? _wanted : _go!.activeSelf); } catch { return false; } }
+            set
+            {
+                if (_gated) { _wanted = value; SyncLine(); return; }
+                try { if (UnityUiRuntime.Alive(_go) && _go!.activeSelf != value) _go.SetActive(value); } catch { /* */ }
+            }
         }
 
         public bool BoolValue { get => false; set { } }
