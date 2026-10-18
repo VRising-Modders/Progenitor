@@ -273,6 +273,15 @@ public class ContainerPreviewSyncTests
     }
 
     [Fact]
+    public void Leases_end_before_their_records_are_put_away_on_unload()
+    {
+        string plugin = SourcePin.ReadFile("src", "Progenitor.Core", "Plugin.cs");
+        int endAll = plugin.IndexOf("Cameras.SharedObservation.EndAll();", StringComparison.Ordinal);
+        int guard = plugin.IndexOf("Cameras.ObservationGuard.Uninstall();", StringComparison.Ordinal);
+        Assert.True(endAll > 0 && guard > endAll, "EndAll must restore the origins and settle the records before the record store goes away");
+    }
+
+    [Fact]
     public void Lease_records_are_one_per_user()
     {
         var doc = new Progenitor.Cameras.ObservationLeaseRecords();
@@ -295,7 +304,11 @@ public class ContainerPreviewSyncTests
         string start = SourcePin.MethodBody(obs, "private void Start(");
         Assert.Contains("_proxySuspended = Persistence.WorldSaveGuard.Active;", start);
         Assert.Contains("ObservationGuard.Put(Platform, _point, _originalProxy.Value);", start);
-        Assert.Contains("ObservationGuard.Remove(Platform);", SourcePin.MethodBody(obs, "private void Close("));
+        string close = SourcePin.MethodBody(obs, "private void Close(");
+        Assert.Contains("if (settled) { ObservationGuard.Remove(Platform);", close);
+        Assert.Contains("settled = !math.all(em.GetComponentData<User>(_user).ProxySyncPosition.Value == _point);", close);
+        string guardFile = SourcePin.ReadFile("src", "Progenitor.Core", "Cameras", "ObservationGuard.cs");
+        Assert.Contains("(_store as ModStore)?.SaveToDisk();", SourcePin.MethodBody(guardFile, "private static void Save("));
         // A lease start that finds the origin at a recorded point repairs it instead of refusing.
         string acquire = SourcePin.MethodBody(obs, "internal static SharedObservation Acquire(");
         Assert.True(acquire.IndexOf("ObservationGuard.TryRepair(world, user)", StringComparison.Ordinal)

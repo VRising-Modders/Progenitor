@@ -369,6 +369,10 @@ internal sealed unsafe class SharedObservation
         Active = false;
         if (ByUser.TryGetValue(_user, out var current) && ReferenceEquals(current, this)) ByUser.Remove(_user);
         _hook?.Dispose(); _hook = null;
+        // Drop the persisted record only when the origin is known to be off the point (restored now, or never left
+        // there). With the world gone (shutdown, unload after the world ended) or a failed restore it stays, so the next
+        // start's sweep can repair an origin the last world save may hold.
+        bool settled = false;
         try
         {
             if (_world.IsCreated)
@@ -376,14 +380,19 @@ internal sealed unsafe class SharedObservation
                 var em = _world.EntityManager;
                 try
                 {
-                    if (_user.Exists(em) && math.all(em.GetComponentData<User>(_user).ProxySyncPosition.Value == _point)) WriteProxy(_originalProxy.Value);
+                    if (!_user.Exists(em)) settled = true;
+                    else
+                    {
+                        if (math.all(em.GetComponentData<User>(_user).ProxySyncPosition.Value == _point)) WriteProxy(_originalProxy.Value);
+                        settled = !math.all(em.GetComponentData<User>(_user).ProxySyncPosition.Value == _point);
+                    }
                 }
                 finally { if (_anchor != Entity.Null && _anchor.Exists(em)) em.DestroyEntity(_anchor); }
             }
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("Camera: observation restore threw: " + e.Message); }
-        ObservationGuard.Remove(Platform);
-        Plugin.Logger?.LogInfo("Camera: streaming origin restored (" + reason + ").");
+        if (settled) { ObservationGuard.Remove(Platform); Plugin.Logger?.LogInfo("Camera: streaming origin restored (" + reason + ")."); }
+        else Plugin.Logger?.LogWarning("Camera: streaming origin of user " + Platform + " could not be confirmed restored (" + reason + "); its record stays for the next start's sweep.");
         foreach (var holder in _holders.TakeAll())
         {
             try { holder.LeaseEnded(reason, notify); }

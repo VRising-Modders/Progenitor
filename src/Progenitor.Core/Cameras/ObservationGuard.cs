@@ -109,7 +109,13 @@ internal static class ObservationGuard
     private static void Save()
     {
         if (!_loaded) return;   // the previous run's records are not loaded yet: never write over them
-        try { _store?.Set(ObservationLeaseRecords.Key, _records); }
+        try
+        {
+            _store?.Set(ObservationLeaseRecords.Key, _records);
+            // Write the small store file now, not at the next ModSave.SaveAll: a crash before that would lose the record
+            // of a lease whose point the world save may already hold.
+            (_store as ModStore)?.SaveToDisk();
+        }
         catch (Exception e) { Plugin.Logger?.LogWarning("Camera: storing the streaming-origin records threw: " + e.Message); }
     }
 

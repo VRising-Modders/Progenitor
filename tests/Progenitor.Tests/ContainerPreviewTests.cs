@@ -379,10 +379,36 @@ public class ContainerPreviewTests
     {
         var m = OpenMachine();
         m.Step(1, new ContainerPreviewSample { SameWorld = true, ContainerMenuOpen = true });
-        // Found again, but the window still shows the old entity: not ours.
+        // Found again as another entity; the window is bound to the destroyed one: end at once, not after the grace.
         Assert.Equal(ContainerPreviewStep.Closed, m.Step(2, new ContainerPreviewSample
+            { SameWorld = true, TargetFound = true, TargetReplaced = true, InventoryReady = true, ContainerMenuOpen = true, WindowIsOurs = false }));
+        Assert.Equal(ContainerPreviewCloseReason.TargetGone, m.CloseReason);
+        Assert.Equal("The container left this client.", m.Message);
+    }
+
+    [Fact]
+    public void A_replaced_target_ends_the_preview_even_while_its_inventory_is_still_missing()
+    {
+        var m = OpenMachine();
+        Assert.Equal(ContainerPreviewStep.Closed, m.Step(1, new ContainerPreviewSample
+            { SameWorld = true, TargetFound = true, TargetReplaced = true, InventoryReady = false, ContainerMenuOpen = true }));
+        Assert.Equal(ContainerPreviewCloseReason.TargetGone, m.CloseReason);
+    }
+
+    [Fact]
+    public void The_same_chest_back_but_another_window_shown_is_window_closed()
+    {
+        var m = OpenMachine();
+        Assert.Equal(ContainerPreviewStep.Closed, m.Step(1, new ContainerPreviewSample
             { SameWorld = true, TargetFound = true, InventoryReady = true, ContainerMenuOpen = true, WindowIsOurs = false }));
         Assert.Equal(ContainerPreviewCloseReason.WindowClosed, m.CloseReason);
+    }
+
+    [Fact]
+    public void The_client_flags_a_chest_that_came_back_as_another_entity()
+    {
+        string client = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewClient.cs");
+        Assert.Contains("s.TargetReplaced = _windowTarget != Entity.Null && _target != Entity.Null && _target != _windowTarget;", client);
     }
 
     [Theory]

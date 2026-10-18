@@ -192,7 +192,7 @@ internal static unsafe class ContainerPreviewServer
         // Before the store is ready, the previous run's records are not loaded yet: writing now would overwrite them.
         // The ready callback merges this run's records in and writes them.
         if (!_storeLoaded) return;
-        try { _store?.Set(ContainerPreviewSyncRecords.Key, _records); }
+        try { _store?.Set(ContainerPreviewSyncRecords.Key, _records); (_store as Persistence.ModStore)?.SaveToDisk(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: storing the sync records threw: " + e.Message); }
     }
 

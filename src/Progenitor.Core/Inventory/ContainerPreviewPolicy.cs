@@ -157,6 +157,8 @@ internal struct ContainerPreviewSample
     public bool WindowIsOurs;
     /// <summary>The game's open HUD menu is the container window (whatever it shows).</summary>
     public bool ContainerMenuOpen;
+    /// <summary>The chest is on this client again, but as another entity than the one the window was opened on.</summary>
+    public bool TargetReplaced;
     /// <summary>The game has some HUD menu open that is not ours.</summary>
     public bool OtherMenuOpen;
 }
@@ -293,6 +295,9 @@ internal sealed class ContainerPreviewMachine
             case ContainerPreviewPhase.Open:
                 if (!s.SameWorld) return Closed(ContainerPreviewCloseReason.WorldChanged, "");
                 if (now >= Deadline) return Closed(ContainerPreviewCloseReason.Timeout, "");
+                // The chest came back as another entity (it left the client, a save took the origin away for a moment): the
+                // window is bound to the destroyed one. Reopening over an open container window is not a proven path, so end now.
+                if (s.TargetReplaced) return Closed(ContainerPreviewCloseReason.TargetGone, "The container left this client.");
                 if (!s.TargetFound || !s.InventoryReady)
                 {
                     // The player closed the window (or opened another menu) meanwhile.

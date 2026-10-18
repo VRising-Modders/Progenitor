@@ -2619,8 +2619,12 @@ server, standing next to a chest.
 `ctx.Inventory.Preview` (client) opens **the game's own container window** for a chest or brazier somewhere
 else in the world, read-only, for the castle's owner and clan: a Find window docks on the left, where the
 player's bag panel normally sits, and the real container window shows the chest on the right, as if the
-player had opened it at the chest. **Experimental: source-checked, built against the installed game and
-game-free tested (`ContainerPreviewTests`); not live-verified.** The experiments below are open.
+player had opened it at the chest. **Experimental.** Verified live on 2026-10-17 (test server, Core 2026.10.91.3): E1/E2
+on far chests (895 m; the game's window with the real contents; an empty chest too), a world save mid-preview with
+the guard on (the window stayed open), the close (releases read back, no records, no leases), E1b 8a (the inventory
+sync list **is saved**; the startup sweep removed the leftover), 8b (a kill during the save suspension left no
+leftover and the origin untouched) and `proxy_reset`. Not live: E3 to E5, the streaming-origin sweep's restore and
+the repair at a lease start.
 
 ```csharp
 // Client: preview a chest the server told us about (a ContainerId from a Find result, for example).
@@ -2717,10 +2721,10 @@ removal read back; a failed release is retried every second (also after the leas
 tries with an error line. Main thread only. A failed first write refuses the preview ("The server could not share
 that container's contents.") after releasing whatever it took; a failed later refresh ends it the same way.
 
-**Open question: is `SyncToUserBuffer` saved?** Not known (the game rebuilds the bitmask it feeds after a
-load, which suggests that the mask is not saved; the list was not traced). If it is saved, a server crash during a
-preview would leave the user synced to that chest's contents: read-only data for the castle's own owner or
-clan member, no permission change. Two guards, both harmless if it is not saved:
+**`SyncToUserBuffer` is saved with the world** (live 2026-10-17, E1b 8a: an entry left in a save by a kill came back
+after the restart, and the startup sweep removed it). So a server crash during a preview would leave the user
+synced to that chest's contents (read-only data for the castle's own owner or clan member, no permission change)
+without the two guards below (both live-verified the same day: 8b, and the sweep in 8a):
 
 - **World saves.** When the game accepts a world save (the save trigger, `ModSave.BeforeWorldSave`; also the Dev
   bridge's direct save-event fallback, which raises the same notification; not the other `ModSave.SaveAll` callers
@@ -2755,7 +2759,8 @@ client while the window is open (the save guard above, or the server letting go)
 was: a `Before<ContainerMenuMapper>` skip keeps the game's mapper from reading the missing entity (it checks the entity
 the window was opened on), so nothing throws, and the interact HUD's auto-close stays held. `status` shows
 `inventoryMissing` true. If both come back within 20 s the window updates again; if the chest comes back as another
-entity (the window still shows the old one) the preview ends (`WindowClosed`); if the player closes the window
+entity, the window is bound to the destroyed one and reopening over an open container window is not a proven path,
+so the preview ends at once (`TargetGone`, "The container left this client."); if the player closes the window
 meanwhile it ends (`WindowClosed`); otherwise it closes after 20 s (`TargetGone`, "The container's contents stopped
 arriving." or "The container left this client.").
 
@@ -2796,21 +2801,21 @@ is left alone. Every hook exists only from the open until the close, except the 
 docking the Find window itself
 (`panel.Dock(UiDock.Left, …)`, [ui.md](ui.md#docked-panels-dock1)).
 
-**Live plan (not run).** On the isolated test server and an idle test client, with the client in a castle
+**Live plan (E1, E2 and E1b run 2026-10-17; E3 to E5 not run).** On the isolated test server and an idle test client, with the client in a castle
 the test character owns, a second castle chest more than 100 m away (outside ordinary streaming), one chest
 upstairs, a brazier, and a clan member's and an ally's castle for the refusals. Read container ids with the
 Sample's `.items chests` / `.items id <c>` on the server (then remove the Sample again). The bridge op is
 `container_preview` (MCP `progenitor_container_preview`); `status` with `side: "server"` shows the server half
 and the shared lease.
 
-- **E1 relevance.** `open {"id":"c-…","keepOpen":true}` for the far chest. Within the replication timeout,
+- **E1 relevance (passed 2026-10-17 with the inventory sync, E1b).** `open {"id":"c-…","keepOpen":true}` for the far chest. Within the replication timeout,
   client `status` shows `phase` `Opening` or `Open` with a `target` and an `inventory` entity; server status
   shows the preview and a lease with 1 holder at the chest's point. With `progenitor_components` on the
   client inventory entity, `InventoryBuffer` is present; put a weapon in that chest first and confirm its
   item entity exists on the client. Repeat for the upstairs chest. **Run 2026-10-17 (before the inventory
   sync): failed.** The chest arrived; the inventory never did (`ReplicationTimeout`, "The container's inventory
   did not arrive.") at about 740 m and 1000 m. Cause and fix: the inventory sync paragraph above.
-- **E1b inventory sync (not run).** Same chest, with a few stacks and one weapon in it.
+- **E1b inventory sync (run 2026-10-17: steps 3, 4, 6, 7, 8a, 8b and the repair passed).** Same chest, with a few stacks and one weapon in it.
   1. Server, before: `progenitor_components` on the chest's inventory entity and the weapon's item entity:
      `SyncToUserBuffer` length (0, or other users' interactions) and `SyncToUserBitMask` 0.
   2. Control: client `open {"id":"c-…","keepOpen":true,"syncInventory":false}`: the E1 result again
@@ -2868,7 +2873,7 @@ and the shared lease.
      note.
   9. Cleanup as in E4: every list back to its step 1 contents, the guard back on (it is by itself), the client at
      the title screen, sample plugins removed from both reload folders.
-- **E2 open and hold.** First `open {"id":"c-…","hudGate":false}`: the open is written but the interact-HUD
+- **E2 open and hold (passed 2026-10-17 with the inventory sync: menu 3, mapperTarget the target, InteractBuff 0:0; the `hudGate: false` half not run).** First `open {"id":"c-…","hudGate":false}`: the open is written but the interact-HUD
   skip is off, so the game should close the window at once (`closeReason` `WindowClosed` or `OpenFailed`;
   expected per the research, not yet observed). Then a normal open: the window appears filled
   (`progenitor_capture`), `status` shows `menu` 3 with `mapperTarget` equal to `target` and
@@ -5754,7 +5759,9 @@ later lease was refused as "another view"). So every lease, camera or container 
   writes the point again. A lease that starts during a save starts with the original in place. While the origin is
   back, the remote spot may stop streaming to the client for those seconds.
 - **Keeps a record** (the user's platform id, the lease point, the original origin) in Progenitor's mod save
-  (`progenitor.observation`) while it runs, dropped when it closes. Records written before the store is ready are
+  (`progenitor.observation`, written to its file at once, not only with the next save) while it runs, dropped when it
+  closes with the origin confirmed off the point (kept when the world is already gone, for the next sweep). Records
+  written before the store is ready are
   merged into the previous run's.
 - **After a load**, a record whose user's origin still sits at the recorded point (within 0.01 m), with no lease of
   this run for that user, gets the recorded original back, with a warning line naming the user and both points. A
@@ -5764,7 +5771,9 @@ later lease was refused as "another view"). So every lease, camera or container 
 
 A one-off repair for an origin left over from before the records existed is the Dev bridge's
 `container_preview {"side":"server","action":"proxy_reset","user":"<platform id>"}` (zero; refused while a lease holds
-the user). Game-free tested (`ContainerPreviewSyncTests`); the save restore and the sweep are not live-verified.
+the user). Game-free tested (`ContainerPreviewSyncTests`). Live 2026-10-17: a world save mid-preview with the guard on
+(the preview stayed open), a kill during the save suspension that left the origin untouched (E1b 8b), and
+`proxy_reset`. Not live: the startup sweep's restore of a recorded origin and the repair at a lease start.
 
 Pair the two ends: when the client preview ends, tell the server so it disposes the lease. If that message is lost (the client plugin unloaded, for example), the lease still ends on disconnect, when the player walks away, or at its deadline, at most ten minutes later.
 

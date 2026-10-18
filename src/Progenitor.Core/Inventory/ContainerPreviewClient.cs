@@ -359,6 +359,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         var window = ContainerPreviewClient.ReadWindow(world);
         s.WindowIsOurs = window.Menu == Layout.HUDMenuTypeContainerMenu && window.Target == _target && _target != Entity.Null && window.Interact == Entity.Null;
         s.ContainerMenuOpen = window.Menu == Layout.HUDMenuTypeContainerMenu;
+        s.TargetReplaced = _windowTarget != Entity.Null && _target != Entity.Null && _target != _windowTarget;
         s.OtherMenuOpen = window.Menu > 0 && !s.WindowIsOurs;
         return s;
     }
