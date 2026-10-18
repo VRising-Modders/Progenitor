@@ -935,6 +935,8 @@ server.tool("progenitor_stress", "Server only, Moo World copy on the isolated te
     groups: z.array(z.number().int().min(2).max(99)).min(1).max(12).optional().describe("groups/clan/refine: clan sizes, default [8, 6, 4, 2]."),
     share: z.number().int().min(0).max(99).optional().describe("groups/clan/refine: castle-share owners (3+ castles each), default half of the owners outside clans."),
     clan: z.number().int().min(1).max(12).optional().describe("clan: only this clan ordinal, to prove one clan first."),
+    members: z.array(z.string().regex(/^\d+$/)).min(1).max(99).optional().describe("clan: one clan of exactly these users by platform id, leader first (for example the headless clients' users, which have characters); instead of the seed's grouping. Connected members are allowed."),
+    name: z.string().min(1).max(61).optional().describe("clan with members: the clan name, default StressClanH1."),
     experiment: z.boolean().optional().describe("clan: opts in to the game's add-member routine (a native call through its generated wrapper), required unless dryRun. stations: places stations (needs plots with 1-3 castles and confirm)."),
     limit: z.number().int().min(1).max(30).optional().describe("stations experiment: stations placed per castle at most, default 1."),
     hours: z.number().min(0.05).max(24).optional().describe("refine: hours of raw inputs per station, default 1."),

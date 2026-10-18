@@ -58,6 +58,9 @@ test('stress tool maps the staged actions to their server ops', async () => {
   assert.match(tool.description, /ClanSize is refused/);
   await tool.handler(tool.schema.parse({ action: 'stations', seed: 18, plots: [12], experiment: true, limit: 1, confirm: 'stress' }));
   assert.deepEqual(calls[5], ['server', 'stress_stations', { seed: 18, plots: [12], experiment: true, limit: 1, confirm: 'stress' }]);
+  await tool.handler(tool.schema.parse({ action: 'clan', seed: 18, members: ['76561198000000001', '76561198000000002'], name: 'HeadlessClan', experiment: true, confirm: 'stress' }));
+  assert.deepEqual(calls[6], ['server', 'stress_clan', { seed: 18, members: ['76561198000000001', '76561198000000002'], name: 'HeadlessClan', experiment: true, confirm: 'stress' }]);
+  assert.equal(tool.schema.safeParse({ action: 'clan', members: ['abc'] }).success, false);
   assert.equal(tool.schema.safeParse({ action: 'refine', supply: 'far' }).success, false);
   assert.equal(tool.schema.safeParse({ action: 'groups', groups: [1] }).success, false);
   assert.equal(tool.schema.safeParse({ action: 'stations', perCastle: 40 }).success, false);

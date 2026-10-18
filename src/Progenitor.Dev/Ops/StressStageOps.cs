@@ -84,6 +84,7 @@ internal static class StressStageOps
         if (!a.DryRun && !a.Experiment)
             throw new InvalidOperationException("experiment_required: stress_clan calls the game's add-member routine (TeamUtility.AddUserToClan) through its generated wrapper; pass experiment:true to opt in, ideally with clan:1 first");
         var world = RequireIdle();
+        if (a.Members != null) return ClanOfMembers(world, a);
         var collected = Collect(world, a.Seed, null);
         return PlanThen(world, collected, a, g =>
         {
@@ -141,7 +142,7 @@ internal static class StressStageOps
                     var user = members[i];
                     var name = clan.Members[i].Name;
                     int role = i == 0 ? Layout.ClanRoleLeader : Layout.ClanRoleMember;
-                    job.Add("join " + clan.Name + " " + name, () => JoinClan(world, clanEntity, user, role, limit));
+                    job.Add("join " + clan.Name + " " + name, () => JoinClan(world, clanEntity, user, role, limit, allowConnected: false, group.Name));
                 }
                 made.Add((clan, () => clanEntity, members));
             }
@@ -160,6 +161,113 @@ internal static class StressStageOps
             job.Readback = () => made.Select(m => ClanReadback(world, m.Group, m.ClanEntity(), m.Members, collected)).ToList<object>();
             return job;
         });
+    }
+
+    /// <summary>
+    /// <c>stress_clan {members:[platform ids]}</c>: one clan of exactly these users, leader first. Meant for the
+    /// headless clients' users, which are real users with characters (offline stress owners fail the status shape).
+    /// Same create and join steps, same refusals except that a connected member is allowed (the game's own create
+    /// and accept paths run for connected users). The character's clan name is set through the game's
+    /// <c>ClanUtility.SetCharacterClanName</c>, which writes it only when the user has a Controller.
+    /// </summary>
+    private static object ClanOfMembers(World world, StressStageArgs a)
+    {
+        var em = world.EntityManager;
+        var job = new StageJob("clan", a.Seed, a.DryRun, a.BudgetMs, stopOnFailure: true);
+        var settings = SettingsOrNull(world);
+        CastleHeartLimitType limit = CastleHeartLimitType.User;
+        var notes = new List<string>();
+        try { if (settings != null) limit = settings.CastleStatModifiers_Global.CastleHeartLimitType; }
+        catch (Exception e) { notes.Add("CastleHeartLimitType unreadable, using User: " + e.Message); }
+        int clanSize = 0;
+        try { clanSize = settings?.ClanSize ?? 0; } catch { }
+
+        // Every User, online or offline, by platform id.
+        var byPlatform = new Dictionary<ulong, (Entity Entity, User User)>();
+        foreach (var e in Query.Entities(em, includeDisabled: true, includeSystems: false, ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly)))
+        {
+            try { var u = em.GetComponentData<User>(e); byPlatform[u.PlatformId] = (e, u); } catch { }
+        }
+        var group = new StressOwnerGroup { Kind = StressGroupKind.Clan, Ordinal = 0, Name = a.ClanName };
+        var collected = new Collected();
+        var members = new List<Entity>();
+        var rows = new List<object>();
+        string? why = null;
+        int n = 0;
+        foreach (ulong id in a.Members!)
+        {
+            n++;
+            if (!byPlatform.TryGetValue(id, out var found)) { why ??= "no user with platform id " + id; rows.Add(new Dictionary<string, object?> { ["platformId"] = id.ToString(CultureInfo.InvariantCulture), ["found"] = false }); continue; }
+            string name;
+            try { name = found.User.CharacterName.ToString(); } catch { name = "?"; }
+            var spots = new StressOwnerSpots { Ordinal = n, Name = name, PlatformId = id, UserIndex = found.User.Index };
+            members.Add(found.Entity);
+            group.Members.Add(spots);
+            collected.UserByOrdinal[n] = found.Entity;
+            var seen = GhostOps.ObserveOfflineUserTeam(em, found.Entity, out _, out _);
+            var clan = found.User.ClanEntity._Entity;
+            string? refusal = null;
+            if (clan != Entity.Null && em.Exists(clan)) refusal = "already in clan " + Fmt(clan);
+            else if (!seen.HasTeamReference || !seen.TeamExists || !seen.TeamHasAllies) refusal = "has no own team with allies";
+            else if (ClanStatusShapeMissing(em, found.Entity) is string shape) refusal = "status_shape: " + shape;
+            if (refusal != null) why ??= name + " " + refusal;
+            rows.Add(new Dictionary<string, object?>
+            {
+                ["platformId"] = id.ToString(CultureInfo.InvariantCulture),
+                ["found"] = true,
+                ["name"] = name,
+                ["user"] = Fmt(found.Entity),
+                ["connected"] = found.User.IsConnected,
+                ["refusal"] = refusal,
+            });
+        }
+        foreach (var plot in CastleReader.Plots(world))
+        {
+            var owner = group.Members.FirstOrDefault(m => m.PlatformId == plot.OwnerPlatformId);
+            if (owner == null) continue;
+            owner.Castles.Add(new StressCastleSpot { Territory = plot.TerritoryIndex, Owner = owner.Ordinal });
+            collected.Plots[plot.TerritoryIndex] = plot;
+        }
+        if (members.Count < 2) why ??= "a clan needs at least 2 members";
+        if (clanSize <= 0) why ??= "the server's ClanSize setting could not be read";
+        else if (a.Members!.Count > clanSize) why ??= $"clan_size: {a.Members.Count} members, above the server's ClanSize {clanSize}";
+        bool prefabOk = TryClanPrefab(world, out var prefab, out var prefabWhy);
+        if (!prefabOk) why ??= "no clan prefab: " + prefabWhy;
+        var spawnTeams = world.GetExistingSystemManaged<SpawnTeamSystem>();
+        if (spawnTeams == null) why ??= "no SpawnTeamSystem";
+
+        job.Plan = new Dictionary<string, object?>
+        {
+            ["clan"] = a.ClanName,
+            ["members"] = rows,
+            ["castleHeartLimitType"] = limit.ToString(),
+            ["serverClanSize"] = clanSize,
+            ["refusal"] = why,
+            ["notes"] = notes,
+        };
+        if (why != null)
+        {
+            job.Note("refused before any write: " + why);
+            return Start(world, job);
+        }
+        if (!a.DryRun)
+        {
+            Entity clanEntity = Entity.Null;
+            string clanName = a.ClanName;
+            job.Add("create " + clanName, () =>
+            {
+                clanEntity = CreateClan(world, prefab, spawnTeams!, clanName, members[0], out var detail);
+                return detail;
+            });
+            for (int i = 0; i < members.Count; i++)
+            {
+                var user = members[i];
+                int role = i == 0 ? Layout.ClanRoleLeader : Layout.ClanRoleMember;
+                job.Add("join " + clanName + " " + group.Members[i].Name, () => JoinClan(world, clanEntity, user, role, limit, allowConnected: true, clanName));
+            }
+            job.Readback = () => new List<object> { ClanReadback(world, group, clanEntity, members, collected) };
+        }
+        return Start(world, job);
     }
 
     // ---- stress_refine --------------------------------------------------------------------------
@@ -601,12 +709,12 @@ internal static class StressStageOps
         return null;
     }
 
-    private static unsafe string JoinClan(World world, Entity clan, Entity user, int role, CastleHeartLimitType limit)
+    private static unsafe string JoinClan(World world, Entity clan, Entity user, int role, CastleHeartLimitType limit, bool allowConnected, string clanName)
     {
         var em = world.EntityManager;
         if (clan == Entity.Null || !em.Exists(clan)) throw new InvalidOperationException("the clan entity is gone");
         var u = em.GetComponentData<User>(user);
-        if (u.IsConnected) throw new InvalidOperationException("the owner is connected");
+        if (u.IsConnected && !allowConnected) throw new InvalidOperationException("the owner is connected");
         if (u.ClanEntity._Entity != Entity.Null) throw new InvalidOperationException("the owner is already in clan " + Fmt(u.ClanEntity._Entity));
         TeamUtility.AddUserToClan(em, clan, user, ref u, limit);
         if (u.ClanEntity._Entity != clan) throw new InvalidOperationException("AddUserToClan did not set ClanEntity on the copy");
@@ -623,8 +731,8 @@ internal static class StressStageOps
         // component must exist first (a real user has it from the user prefab; the offline owner does not).
         if (!user.Has<ClanRole>(em)) user.Add<ClanRole>(em);
         ProjectM.Gameplay.Clan.ClanSystem_Server.SetClanRole(em, user, (ClanRoleEnum)role);
-        // ClanUtility.SetCharacterClanName is not called: it only writes the name onto the character the user's
-        // Controller points at, and an offline owner has no Controller, so it would do nothing.
+        // The game sets the clan name on the character the user's Controller points at; the routine does nothing without a Controller.
+        if (user.Has<Controller>(em)) ClanUtility.SetCharacterClanName(em, user, new FixedString64Bytes(clanName));
         Plugin.Logger?.LogInfo($"stress clan join user {Fmt(user)} clan {Fmt(clan)} role {role}");
         return $"user {Fmt(user)} role {role}";
     }

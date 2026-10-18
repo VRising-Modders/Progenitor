@@ -77,8 +77,34 @@ internal sealed class StressStageArgs
         a.BudgetMs = Double(args, "budgetMs", StressArgs.DefaultBudgetMs, StressArgs.MinBudgetMs, StressArgs.MaxBudgetMs);
         if (a.OnlyClan is int c && c > a.Groups.Count)
             throw new ArgumentException($"args.clan {c} is above the {a.Groups.Count} clan(s) in groups");
+        if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("members", out var mem) && mem.ValueKind != JsonValueKind.Null)
+        {
+            if (mem.ValueKind != JsonValueKind.Array || mem.GetArrayLength() < 1 || mem.GetArrayLength() > StressArgs.MaxOwners)
+                throw new ArgumentException("args.members must be an array of user platform ids (strings), leader first");
+            var ids = new List<ulong>();
+            foreach (var item in mem.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String || !ulong.TryParse(item.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out ulong id) || id == 0)
+                    throw new ArgumentException("args.members entries must be platform ids as decimal strings");
+                if (ids.Contains(id)) throw new ArgumentException("args.members lists platform id " + id + " twice");
+                ids.Add(id);
+            }
+            if (a.OnlyClan != null) throw new ArgumentException("args.members and args.clan cannot be combined");
+            a.Members = ids;
+            var name = Str(args, "name");
+            if (name != null && (name.Trim().Length == 0 || System.Text.Encoding.UTF8.GetByteCount(name) > MaxClanNameBytes))
+                throw new ArgumentException($"args.name must be 1..{MaxClanNameBytes} UTF-8 bytes");
+            a.ClanName = name?.Trim() ?? "StressClanH1";
+        }
         return a;
     }
+
+    /// <summary>The create step accepts a name shorter than 0x3E bytes.</summary>
+    public const int MaxClanNameBytes = 0x3D;
+
+    /// <summary>stress_clan with <c>members</c>: one clan of exactly these users (by platform id, leader first), e.g. headless clients' users.</summary>
+    public IReadOnlyList<ulong>? Members { get; private set; }
+    public string ClanName { get; private set; } = "";
 
     public static StressStageArgs ParseRefine(JsonElement args)
     {

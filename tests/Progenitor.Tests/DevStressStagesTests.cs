@@ -288,6 +288,20 @@ public class DevStressStagesTests
     }
 
     [Fact]
+    public void Clan_MembersByPlatformId()
+    {
+        var a = StressStageArgs.ParseClan(Json("{\"seed\":18,\"members\":[\"76561198000000001\",\"76561198000000002\"],\"name\":\"Headless\"}"));
+        Assert.Equal(new ulong[] { 76561198000000001, 76561198000000002 }, a.Members);
+        Assert.Equal("Headless", a.ClanName);
+        Assert.Equal("StressClanH1", StressStageArgs.ParseClan(Json("{\"seed\":18,\"members\":[\"5\",\"6\"]}")).ClanName);
+        Assert.Null(StressStageArgs.ParseClan(Json("{\"seed\":18}")).Members);
+        Assert.Throws<ArgumentException>(() => StressStageArgs.ParseClan(Json("{\"seed\":18,\"members\":[5,6]}")));
+        Assert.Throws<ArgumentException>(() => StressStageArgs.ParseClan(Json("{\"seed\":18,\"members\":[\"5\",\"5\"]}")));
+        Assert.Throws<ArgumentException>(() => StressStageArgs.ParseClan(Json("{\"seed\":18,\"members\":[\"5\"],\"clan\":1}")));
+        Assert.Throws<ArgumentException>(() => StressStageArgs.ParseClan(Json("{\"seed\":18,\"members\":[\"5\"],\"name\":\"" + new string('x', 62) + "\"}")));
+    }
+
+    [Fact]
     public void Stations_ExperimentNeedsAFewNamedPlots()
     {
         var a = StressStageArgs.ParseStations(Json("{\"seed\":18,\"plots\":[12],\"experiment\":true,\"limit\":2,\"confirm\":\"stress\"}"));
