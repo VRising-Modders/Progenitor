@@ -529,7 +529,7 @@ window.HELP = {
 <ul><li>The list: <strong>Installed</strong>, <strong>On this server</strong>, <strong>Required by Progenitor</strong>. Filter chips: All, Needs attention, Disabled.</li>
 <li>The diamond beside a mod shows how it's doing: green is running, amber needs a look, red failed, gray is off, hollow is waiting. <strong>Update</strong> means a newer version is out.</li></ul>` },
         { id: "mod-page", title: "A mod's page",
-          html: `<ol><li><strong>The bar:</strong> the on/off switch, its status, version, conflicts, <strong>Help</strong> (when the mod has a guide) and <strong>Uninstall</strong>.</li>
+          html: `<ol><li><strong>The bar:</strong> the on/off switch, its status, version, conflicts, <strong>Help</strong> (when the mod has a guide) and <strong>Uninstall</strong>. When the mod is removed at the next start, <strong>Yes, uninstall and restart</strong> marks it for removal and then asks whether to restart the game now. While changes wait for a restart, the page also offers the restart.</li>
 <li><strong>Problems</strong>, with <strong>Retry</strong> and <strong>Copy report</strong>.</li>
 <li><strong>Details:</strong> where it installs, its store page and <strong>Share in chat</strong> ([[mod-link|mod link]]), updates, kept versions and <strong>Roll back</strong>.</li>
 <li><strong>Settings:</strong> Your settings, then [[server-setting|Server settings]]. Each row has a reset arrow; <strong>Restart</strong> marks one that applies at the next start; <strong>Reset all</strong> asks first.</li>
@@ -575,7 +575,7 @@ window.HELP = {
 <li>More filters: <strong>Side</strong>, <strong>Show</strong> and <strong>Only</strong>. <strong>Clear filters</strong> resets them.</li></ul>
 <p>Switch views at the left of the search box, or in Preferences (Install view).</p>` },
         { id: "row", title: "A mod's row",
-          html: `<p>Click a row for the mod's description, latest version, side and what it requires.</p>
+          html: `<p>Click a row for the mod's description, latest version, side and what it requires. On an installed mod's page, <strong>View in Install Mods</strong> opens its row here; <strong>Configure in Mods</strong> on the row goes back to its page.</p>
 <ul><li><strong>Install</strong>, <strong>Update</strong>, <strong>Uninstall</strong> and <strong>Install on both</strong> ask first. <em>· restart</em> means it loads at the next start.</li>
 <li>Mods it needs install with it.</li><li><strong>Share</strong> on hover, or <strong>Copy link</strong>, makes a [[mod-link|mod link]] for chat.</li>
 <li><strong>Updates</strong> band: <strong>Update all</strong>, or <strong>Keep 1.2.0</strong> on a row (<strong>Unpin</strong> undoes it).</li></ul>` },

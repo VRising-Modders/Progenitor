@@ -3089,6 +3089,35 @@ internal sealed partial class InstallModsPane
         SetDrawer(key);
     }
 
+    private string? _revealListingKey;
+
+    /// <summary>Explicit navigation reveals the expanded listing at the top; ordinary drawer clicks keep their anchor.</summary>
+    public void RevealListing(string key)
+    {
+        _revealListingKey = key;
+        RevealSelectedListing();
+    }
+
+    private void RevealSelectedListing()
+    {
+        var panel = _panel;
+        string? key = _revealListingKey;
+        if (panel == null || key == null || FillPending) return;
+        NextFrame(() => NextFrame(() =>
+        {
+            if (!ReferenceEquals(panel, _panel) || _revealListingKey != key) return;
+            if (!string.Equals(_state.DrawerKey, key, StringComparison.OrdinalIgnoreCase))
+            { _revealListingKey = null; return; }
+            if (FillPending) return;
+            // Every row is built now: a listing that is not among them, or that the filters hide, is not revealed, and
+            // the request goes (left set, a later build would jump the list to it once the filters change).
+            if (!_rowIndex.TryGetValue(key, out int index) || index < 0 || index >= _rows.Count || !IsVisible(_rows[index].Entry))
+            { _revealListingKey = null; return; }
+            AnchorRowNow(key, 0f);
+            if (_anchoredTo != null) _revealListingKey = null;
+        }));
+    }
+
     /// <summary>
     /// INSTALLSIDES1: make <paramref name="key"/> the listing the install flow belongs to, without
     /// touching which drawer is open. A change closes the open confirmation and drops the old
@@ -9262,6 +9291,7 @@ internal sealed partial class InstallModsPane
             // not exist until the rows that are hidden by the filters have been taken out.
             // INSTALLSIDES2: no reveal — a toggle keeps its row where it was; nothing else moves the list.
             AnchorClickedRow();
+            RevealSelectedListing();
             if (_unbuilt != null)
             {
                 int generation = ++_fillGeneration;
@@ -9315,6 +9345,7 @@ internal sealed partial class InstallModsPane
 
         _unbuilt = null;
         RefilterListings();
+        RevealSelectedListing();
     }
 
     /// <summary>One listing's row (and its drawer when it is the opened one). False for a keyless entry.</summary>

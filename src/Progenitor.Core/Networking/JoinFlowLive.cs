@@ -73,6 +73,17 @@ internal static class JoinFlowLive
         JoinFlowClient.PendingRestartProbe = Ui.ModsMenu.ClientPendingRestart;
         JoinFlowClient.RunsNowProbe = Ui.ModsMenu.RunsNowAfterRestart;
         JoinFlowClient.RestartDialogFactory = title => Ui.Ui.Panel(title, DialogOwner, JoinFlowPanel.PluginId);
+        // The restart never starts mid-join: connected or connecting, the handshake not answered yet (a server without
+        // Progenitor never answers; an install window holds the join on purpose). The held flag can outlive a world that
+        // went without passing through Idle, so at the title view with no world it does not count.
+        JoinFlowClient.JoinConnectingProbe = () =>
+        {
+            if (!Handshake.ClientConnectionHeld) return false;
+            if (string.Equals(Handshake.LastClientResult, "ok", StringComparison.Ordinal)) return false;
+            if (JoinFlowClient.JoinedWithoutProgenitor || ClientInstallWindow.IsArmed) return false;
+            var host = JoinFlowClient.ConnectHost;
+            return host == null || host.WorldExists || !host.MainMenuReady;
+        };
 
         // JOINTURNON: installed-but-off mods are turned on through the Mods list's own switch.
         JoinFlowClient.OffCopyProbe = Ui.ModsMenu.JoinOffCopyOf;

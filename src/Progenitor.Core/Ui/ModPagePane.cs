@@ -12,6 +12,7 @@ internal sealed class ModPageActions
 
     /// <summary>The prompt's yes.</summary>
     internal Action? Yes { get; set; }
+    internal Action? YesAndRestart { get; set; }
 
     /// <summary>The prompt's no.</summary>
     internal Action? No { get; set; }
@@ -534,7 +535,10 @@ internal sealed partial class ModPagePane
             PromptYesTone(_prompt),
             ModPageModel.PromptNo(_prompt),
             facts: _model.PromptFacts(_prompt),
-            danger: PromptIsDestructive(_prompt));
+            danger: PromptIsDestructive(_prompt),
+            extras: _prompt == ModPromptKind.Uninstall && actions.YesAndRestart != null
+                ? new[] { (new DialogButton(ModsMenu.YesRestartKey, ModsMenu.YesRestartCaption, DialogButtonRole.Option, CellTone.Gold), actions.YesAndRestart) }
+                : null);
         PromptDialog = dialog;
         var block = dialog.Prompt;
         PromptBlock = block;

@@ -70,6 +70,7 @@ internal static partial class JoinFlowClient
         PendingRestartProbe = null;
         HostedSaveProbe = null;
         RunsNowProbe = null;
+        JoinConnectingProbe = null;
         RestartDialogFactory = null;
         RestartChanged = null;
     }
@@ -136,10 +137,42 @@ internal static partial class JoinFlowClient
         });
     }
 
+    /// <summary>
+    /// The client is between a connect and the server's answer (live: a held connection whose handshake has not answered
+    /// <c>ok</c>, on a server with Progenitor and outside an install window). Null: only this flow's own reconnect counts.
+    /// </summary>
+    internal static Func<bool>? JoinConnectingProbe { get; set; }
+
+    /// <summary>What <see cref="PressRestartButton"/> and <see cref="AnswerRestart"/> answer while a join is in progress.</summary>
+    internal const string RestartRefusedJoining = "a join is in progress";
+
+    /// <summary>
+    /// A join is in progress: this flow's reconnect (Join now, the after-restart rejoin) has not ended, or the client is
+    /// connecting (<see cref="JoinConnectingProbe"/>). The restart is never started then: before the client world exists
+    /// there is nothing to leave, and quitting mid-join would drop the connect halfway.
+    /// </summary>
+    internal static bool JoinBlocksRestart
+    {
+        get
+        {
+            JoinReconnect? r;
+            lock (Gate) r = _reconnect;
+            if (r != null && !r.Finished) return true;
+            try { return JoinConnectingProbe?.Invoke() == true; }
+            catch { return false; }
+        }
+    }
+
     /// <summary>The bar's button: open the confirmation (the dialog kit). Returns <c>confirm</c>, or why nothing opened.</summary>
     internal static string PressRestartButton()
     {
         if (Interlocked.CompareExchange(ref _relaunching, 0, 0) != 0) return "already restarting";
+        if (JoinBlocksRestart)
+        {
+            Plugin.Logger?.LogInfo("Install restart: not asked; " + RestartRefusedJoining);
+            return RestartRefusedJoining;
+        }
+
         var offer = CurrentRestartOffer();
         if (!offer.Shown) return "nothing waits for a restart";
         _confirmOffer = offer;
@@ -183,6 +216,15 @@ internal static partial class JoinFlowClient
         {
             Plugin.Logger?.LogInfo("Install restart: Not now");
             return "not now";
+        }
+
+        // A join that started while the confirmation was open: nothing restarts (the bar asks again afterwards).
+        if (!dryRun && JoinBlocksRestart)
+        {
+            try { dialog?.Close(); }
+            catch { /* answered */ }
+            Plugin.Logger?.LogInfo("Install restart: not started; " + RestartRefusedJoining);
+            return RestartRefusedJoining;
         }
 
         return RunRestart(offer ?? CurrentRestartOffer(), dryRun);

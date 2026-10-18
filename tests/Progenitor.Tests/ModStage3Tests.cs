@@ -985,6 +985,140 @@ public sealed class ModStage3Tests : IDisposable
         Assert.Empty(state.Requests);
     }
 
+    /// <summary>A loose single-DLL mod in <c>BepInEx/plugins</c> that another tool installed, on its mod page.</summary>
+    private string PlaceLoosePlainMod()
+    {
+        string root = Path.Combine(_dir, "BepInEx");
+        string plugins = Path.Combine(root, "plugins");
+        Directory.CreateDirectory(plugins);
+        System.IO.File.WriteAllText(Path.Combine(plugins, "Loose.dll"), "loose bytes");
+        var ident = PluginFileActions.Identify(root, "test.s3.loose", Path.Combine(plugins, "Loose.dll"),
+            Array.Empty<LoadedPluginFact>(), pluginGuidsOf: _ => new[] { "test.s3.loose" });
+        Assert.True(ident.Loose);
+        Assert.True(ident.Certain, ident.Why);
+        ModSwitch.BepInExRoot = () => root;
+        ModsMenu.PlainIdentityProbe = id => id == "test.s3.loose" ? ident : null;
+        // The live wiring: the bar's pending changes are the Mods window's, and its confirmation is a framework dialog.
+        JoinFlowClient.PendingRestartProbe = ModsMenu.ClientPendingRestart;
+        JoinFlowClient.RestartDialogFactory = title => UiApi.Panel(title, _owner, "test.s3.restart");
+        return root;
+    }
+
+    private static void ClickPlainUninstall()
+    {
+        ModsMenu.ClickVisibleWidget("content", ModPagePane.FrameworkKey + "/" + ModFrameworkLine.CellAction, null, null);
+        Assert.Equal(ModsMenu.PlainUninstallDialogTag, UiDialog.Current!.Tag);
+        Assert.Contains(UiDialog.Current!.Content.ExtraButtons, b => b.Key == ModsMenu.YesRestartKey);
+    }
+
+    /// <summary>
+    /// Review of PR 133, finding 1: a loose DLL with nothing else pending. <b>Yes, uninstall and restart</b> marks the
+    /// removal, the removal is part of the pending restart (the page's Pending changes row, the bar), and the shared
+    /// restart button asks: its confirmation, in the Manual-mode wording when nothing can relaunch the game here.
+    /// Nothing quits before that answer.
+    /// What removal breaks: the restart offer never saw a next-start removal of a plugin another tool installed, so the
+    /// combined answer marked it and then nothing restarted and nothing said so.
+    /// </summary>
+    [Fact]
+    public void Plain_uninstall_and_restart_marks_the_removal_and_asks_for_its_restart()
+    {
+        string root = PlaceLoosePlainMod();
+        try
+        {
+            using var reg = ModsMenu.Register(_owner, "test.s3.loose", "Loose");
+            ModsMenu.Open();
+            ModsMenu.OpenMod("test.s3.loose");
+            Assert.False(JoinFlowClient.CurrentRestartOffer().Shown);
+
+            ClickPlainUninstall();
+            ModsMenu.ClickVisibleWidget("content", ModsMenu.YesRestartCaption, null, null);
+
+            Assert.True(PluginFileActions.TryRead(root, out var state, out _));
+            Assert.Equal(PluginFileAction.Remove, Assert.Single(state.Requests).Action);
+            var offer = JoinFlowClient.CurrentRestartOffer();
+            Assert.True(offer.Shown);
+            var change = Assert.Single(offer.Pending);
+            Assert.Equal("test.s3.loose", change.Id);
+            Assert.True(change.IsRemoval);
+
+            // The shared button's confirmation, not a restart: no relauncher here, so the Manual wording.
+            var confirm = UiDialog.Current;
+            Assert.NotNull(confirm);
+            Assert.Equal("install-restart", confirm!.Tag);
+            Assert.Equal(ClientRestartText.ManualTitle, confirm.Content.Title);
+            Assert.Equal(ClientRestartText.QuitToDesktop, confirm.Content.MainCaption);
+            Assert.Equal(ModSwitchWords.RemovedAtNextStart + ".", ModsMenu.ModsActionNote);
+
+            // The page shows the pending restart too.
+            Assert.Contains("Pending changes", JsonSerializer.Serialize(ModsMenu.ReadVisibleWidgets("content")));
+        }
+        finally { JoinFlowClient.Uninstall(); }
+    }
+
+    /// <summary>
+    /// Review of PR 133, finding 1: an unrelated change waits and this removal is not part of the offer (a stand-in
+    /// pending list). The combined answer marks the removal but asks for no restart, and the page says to restart.
+    /// What removal breaks: the restart went ahead for the other change instead.
+    /// </summary>
+    [Fact]
+    public void Plain_uninstall_and_restart_never_restarts_for_an_offer_that_does_not_cover_it()
+    {
+        string root = PlaceLoosePlainMod();
+        ModsMenu.PendingRestartForTests = () => new[]
+        {
+            new PendingClientChange { Id = "other.mod", Name = "Other", Version = "1.0.0", Action = PendingClientChange.ActionInstall },
+        };
+        try
+        {
+            using var reg = ModsMenu.Register(_owner, "test.s3.loose", "Loose");
+            ModsMenu.Open();
+            ModsMenu.OpenMod("test.s3.loose");
+            ClickPlainUninstall();
+            ModsMenu.ClickVisibleWidget("content", ModsMenu.YesRestartCaption, null, null);
+
+            Assert.True(PluginFileActions.TryRead(root, out var state, out _));
+            Assert.Equal(PluginFileAction.Remove, Assert.Single(state.Requests).Action);
+            Assert.Null(UiDialog.Current);
+            Assert.EndsWith(ModsMenu.RestartAfterUninstallNotCovered, ModsMenu.ModsActionNote);
+        }
+        finally
+        {
+            ModsMenu.PendingRestartForTests = null;
+            JoinFlowClient.Uninstall();
+        }
+    }
+
+    /// <summary>
+    /// Review of PR 133, finding 2: during a join (the client connecting, the server not answered yet) the combined
+    /// answer marks the removal and opens no restart confirmation; the page says to restart once the join has finished.
+    /// The bar's own button refuses the same way.
+    /// </summary>
+    [Fact]
+    public void Plain_uninstall_and_restart_never_asks_mid_join()
+    {
+        PlaceLoosePlainMod();
+        JoinFlowClient.JoinConnectingProbe = () => true;
+        try
+        {
+            using var reg = ModsMenu.Register(_owner, "test.s3.loose", "Loose");
+            ModsMenu.Open();
+            ModsMenu.OpenMod("test.s3.loose");
+            ClickPlainUninstall();
+            ModsMenu.ClickVisibleWidget("content", ModsMenu.YesRestartCaption, null, null);
+
+            Assert.True(JoinFlowClient.CurrentRestartOffer().Shown);
+            Assert.Null(UiDialog.Current);
+            Assert.EndsWith(ModsMenu.RestartAfterUninstallJoining, ModsMenu.ModsActionNote);
+            Assert.Equal(JoinFlowClient.RestartRefusedJoining, JoinFlowClient.PressRestartButton());
+
+            // Once the join is over, the same button asks.
+            JoinFlowClient.JoinConnectingProbe = () => false;
+            Assert.Equal("confirm", JoinFlowClient.PressRestartButton());
+            Assert.Equal("install-restart", UiDialog.Current!.Tag);
+        }
+        finally { JoinFlowClient.Uninstall(); }
+    }
+
     /// <summary>
     /// Re-review of 9a27bf01, finding 4: the switch never waits long on the main thread for the
     /// next-start file's lock; while another process holds it the press says busy, try again.

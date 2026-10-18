@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Progenitor.Install;
 using Progenitor.Networking;
+using Progenitor.PluginActions;
 
 namespace Progenitor.Ui;
 
@@ -55,6 +56,7 @@ public static partial class ModsMenu
         if (fromPane || (pane != null && pane.HasEntries))
         {
             MergeRemovals(list, CachedLedgerRemovals());
+            MergeRemovals(list, PlainRemovals(ModSwitch.PlainState()));
             return list;
         }
 
@@ -77,8 +79,81 @@ public static partial class ModsMenu
         catch { /* no ledger, nothing pending */ }
 
         MergeRemovals(list, CachedLedgerRemovals());
+        MergeRemovals(list, PlainRemovals(ModSwitch.PlainState()));
         return list;
     }
+
+    /// <summary>
+    /// An ordinary plugin marked for removal at the next start (<see cref="ModSwitch.RequestRemove"/>: the preloader's
+    /// request file) waits for a restart as a ledger removal does. Neither the Install tab's rows nor the ledger name a
+    /// plugin another tool installed (a loose DLL in <c>BepInEx/plugins</c>, a folder), so without this its removal reached
+    /// no Restart offer and <b>Yes, uninstall and restart</b> had nothing to restart for.
+    /// </summary>
+    internal static List<PendingClientChange> PlainRemovals(PluginFileState? state)
+    {
+        var list = new List<PendingClientChange>();
+        if (state == null) return list;
+        foreach (var r in state.Requests)
+        {
+            if (r == null || r.Action != PluginFileAction.Remove || string.IsNullOrWhiteSpace(r.PluginId)) continue;
+            list.Add(new PendingClientChange
+            {
+                Id = r.PluginId,
+                Name = string.IsNullOrWhiteSpace(r.Name) ? r.PluginId : r.Name,
+                Action = PendingClientChange.ActionRemove,
+            });
+        }
+
+        return list;
+    }
+
+    /// <summary>The restart offer names this mod (by plugin id, else by name).</summary>
+    internal static bool OfferCovers(ClientRestartOffer offer, string pluginId, string name)
+    {
+        if (offer == null || !offer.Shown) return false;
+        foreach (var p in offer.Pending)
+        {
+            if (p == null) continue;
+            if (pluginId.Length > 0 && string.Equals(p.Id, pluginId, StringComparison.OrdinalIgnoreCase)) return true;
+            if (name.Length > 0 && string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Added to the page's note when <b>Yes, uninstall and restart</b> cannot ask for the restart during a join.</summary>
+    internal const string RestartAfterUninstallJoining = "Restart once the join has finished.";
+
+    /// <summary>Added to the page's note when the restart offer does not cover the removal.</summary>
+    internal const string RestartAfterUninstallNotCovered = "Restart the game to finish the uninstall.";
+
+    /// <summary>
+    /// <b>Yes, uninstall and restart</b>, after the removal was marked: the shared restart button (its confirmation, the
+    /// Manual-mode <c>Quit to desktop</c> wording, its double-press and mid-join guards), and only when the pending offer
+    /// covers this mod, so an unrelated pending change never restarts in its place. Returns <c>confirm</c> when the
+    /// confirmation opened, else the sentence to add to the page's note.
+    /// </summary>
+    internal static string RestartAfterUninstall(string pluginId, string name)
+    {
+        ForgetLedgerRemovals();
+        ClientRestartOffer offer;
+        try { offer = JoinFlowClient.CurrentRestartOffer(); }
+        catch { offer = ClientRestartOffer.None; }
+        if (!OfferCovers(offer, pluginId ?? "", name ?? ""))
+        {
+            Plugin.Logger?.LogInfo("Ui: uninstall and restart of " + pluginId + ": the restart offer does not cover it; nothing restarts");
+            return RestartAfterUninstallNotCovered;
+        }
+
+        string pressed = JoinFlowClient.PressRestartButton();
+        if (pressed == "confirm") return pressed;
+        Plugin.Logger?.LogInfo("Ui: uninstall and restart of " + pluginId + ": the restart was not asked for (" + pressed + ")");
+        return pressed == JoinFlowClient.RestartRefusedJoining ? RestartAfterUninstallJoining : RestartAfterUninstallNotCovered;
+    }
+
+    /// <summary>The note of a combined uninstall and restart: the removal's, then why no confirmation opened (if none did).</summary>
+    internal static string NoteAfterUninstallRestart(string removal, string restart) =>
+        restart == "confirm" || restart.Length == 0 ? removal : (removal.Length > 0 ? removal + " " + restart : restart);
 
     private static List<PendingClientChange>? _removals;
     private static long _removalsAt;

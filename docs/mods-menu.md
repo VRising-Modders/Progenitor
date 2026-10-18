@@ -2144,3 +2144,19 @@ Offline lifecycle tests live under `ModsMenuTests`, `ModMenuInventoryTests`, `Me
 
 Row backgrounds apply their state tint without a fade to avoid white bands on page creation. This follow-up is build-checked; live entry-flash acceptance remains pending.
 
+
+## Mod-page actions and listing links
+
+A mod's Details includes **View in Install Mods** when the listing these files came from is known (`page-install-listing`). It follows the same tie rule as the page's listing facts: the ledger row's package, or a package manifest beside the DLL. A listing found only by the plugin GUID or by a name, which may be another package, is not offered. The button opens the Install Mods tab, expands that listing and puts its header at the top of the list once layout is complete, including rows created later; ordinary drawer clicks keep their existing scroll anchor (`InstallModsPane.RevealListing`). A listing the current filters hide is not revealed, and the request is dropped so a later build does not jump the list to it.
+
+**Configure in Mods** from a listing returns to the installed plugin's page even when the package name differs from the plugin id. For a package that installs several plugins, it opens the package's own plugin (the one the listing's manifest id or plugin identity names) when that plugin is installed; otherwise it opens the first plugin tied to the package in Mods-list order (`ModsMenu.InstalledPluginOfPackage`).
+
+While client changes wait for a restart, the mod page shows **Pending changes** with the same restart button as the pending-restart bar (`page-restart`). The pending changes include ledger removals and an ordinary plugin marked for removal at the next start (the plain uninstall of a loose DLL or a folder another tool installed).
+
+A client-only uninstall that takes effect at the next start also offers **Yes, uninstall and restart** (dialog button `yes-restart`), on the mod page's prompt and on the plain uninstall dialog; **Yes** and the cancel choice are unchanged. The combined action marks the removal, then asks for the restart through the shared restart button:
+
+- The restart confirmation opens. When the game cannot relaunch itself here, it uses the Manual wording with **Quit to desktop**. A second press while a restart is starting does nothing.
+- It asks only when the pending offer covers this mod. Otherwise nothing restarts and the page's note says to restart the game.
+- While a join is in progress (Join now's reconnect, or the client connecting before the server has answered), neither this action nor the bar's button starts a restart. The page's note says to restart once the join has finished.
+
+Status: built and game-free tested (`ModPageTests`, `ModStage3Tests`, `InstallSidesPaneTests`). On the 2026-10-15 build before the port to current main, the dialog, pending removal and its cancellation, the restart confirmation and the listing round trip (HuntsAndRifts, 1920x1080) were checked live; **Yes, uninstall and restart** was not run end to end. The port and the 2026-10-18 review fixes (removals in the pending offer, the shared confirmation, the mid-join guard, the listing tie rule) have not been run live.

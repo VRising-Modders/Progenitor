@@ -227,6 +227,62 @@ public sealed class InstallSidesPaneTests : IDisposable
         SourcePin.AssertUncommented(anchor, "float next = MenuPanelLayout.AnchorOffset(was, rowY, wantedY, ContentHeightOf(content), viewH);");
     }
 
+    [Fact]
+    public void Explicit_listing_navigation_reveals_at_top_once_after_layout()
+    {
+        var catalog = new FakeCatalog();
+        catalog.Entries.AddRange(new[] { Listing("o-a"), Listing("o-b") });
+        var rig = new Rig(this, catalog);
+        var frames = new Queue<Action>();
+        rig.Pane.FrameScheduler = step => frames.Enqueue(step);
+        var writes = new List<float>();
+        rig.Pane.AnchorProbe = (key, wanted) =>
+        {
+            if (wanted.HasValue) writes.Add(wanted.Value);
+            return (620f, 620f);
+        };
+        rig.Pane.SelectListing("o-b");
+        rig.Rebuild();
+        rig.Pane.RevealListing("o-b");
+        Assert.Empty(writes);
+        while (frames.Count > 0) frames.Dequeue()();
+        Assert.Equal(new[] { 0f }, writes);
+        rig.Rebuild();
+        while (frames.Count > 0) frames.Dequeue()();
+        Assert.Single(writes);
+    }
+
+    /// <summary>
+    /// Review of PR 133, finding 4: a reveal whose listing the filters hide is dropped, so a later build (the filters
+    /// cleared) does not jump the list to it.
+    /// </summary>
+    [Fact]
+    public void A_reveal_of_a_filtered_out_listing_is_dropped()
+    {
+        var catalog = new FakeCatalog();
+        catalog.Entries.AddRange(new[] { Listing("o-a", side: "Server"), Listing("o-b") });
+        var rig = new Rig(this, catalog);
+        var frames = new Queue<Action>();
+        rig.Pane.FrameScheduler = step => frames.Enqueue(step);
+        var writes = new List<float>();
+        rig.Pane.AnchorProbe = (key, wanted) =>
+        {
+            if (wanted.HasValue) writes.Add(wanted.Value);
+            return (620f, 620f);
+        };
+        rig.Pane.Filters.Side = InstallSideFilter.Server;
+        rig.Pane.SelectListing("o-b");
+        rig.Rebuild();
+        rig.Pane.RevealListing("o-b");
+        while (frames.Count > 0) frames.Dequeue()();
+        Assert.Empty(writes);
+
+        rig.Pane.Filters.Side = InstallSideFilter.Any;
+        rig.Rebuild();
+        while (frames.Count > 0) frames.Dequeue()();
+        Assert.Empty(writes);
+    }
+
     // ---- The drawer --------------------------------------------------------------------------
 
     [Fact]
