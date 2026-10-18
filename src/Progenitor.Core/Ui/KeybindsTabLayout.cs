@@ -1237,8 +1237,11 @@ internal static class KeybindsTabLayout
         return new KeybindsDescription(row.Id, row.Name, row.Description, string.Join(" ", warning), tone, string.Join(" ", info), source, hint);
     }
 
-    /// <summary>KEYS4: the refusal for a capture of modifiers alone (<c>Shift</c>).</summary>
-    internal const string ModifiersOnlyReason = "Ctrl, Shift and Alt alone can't be a key; hold them with another key (for example F9 + Shift).";
+    /// <summary>
+    /// KEYS4: the refusal for a capture of modifiers with no key (<c>Ctrl + Alt</c>). HOLDMOD1: one modifier on its own
+    /// (press and release Alt) is a key for a hold bind.
+    /// </summary>
+    internal const string ModifiersOnlyReason = "Two modifiers together can't be a key; hold them with another key (for example F9 + Ctrl + Shift), or press and release one modifier on its own.";
 
     /// <summary>KEYS4: the description column's note on a menu key (the workspace's back and forward).</summary>
     internal const string MenuScopeNote = "Works only while the Mods menu is open, so it never clashes with a gameplay key.";
@@ -1378,7 +1381,7 @@ internal static class KeybindsTabLayout
     /// <summary>When the Conflicts filter is chosen and nothing clashes.</summary>
     internal const string NoConflicts = "No key conflicts.";
 
-    internal const string CaptureHelp = "Press the new key or chord; a left or right click needs Ctrl, Shift or Alt. Escape cancels.";
+    internal const string CaptureHelp = "Press the new key or chord; a left or right click needs Ctrl, Shift or Alt. Press and release Ctrl, Shift or Alt alone for a hold key. Escape cancels.";
 
     /// <summary>PAD1: the controller capture's help line.</summary>
     internal const string CaptureHelpGamepad =

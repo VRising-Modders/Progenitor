@@ -147,6 +147,9 @@ internal static class UiTypedKeys
     internal static bool FieldTakes(KeyChord chord)
     {
         if (!chord.IsBound) return false;
+        // HOLDMOD1: a field uses Shift for capitals and selection and Ctrl for its editing keys, so a lone-modifier
+        // hold waits while a framework field has owned focus.
+        if (chord.IsLoneModifier) return true;
         var key = chord.Key;
         if (key is UiKey.Backspace or UiKey.Delete or UiKey.LeftArrow or UiKey.RightArrow or UiKey.Home or UiKey.End)
             return true;

@@ -288,6 +288,16 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
         }
 
         if (keyboard == null) return false;
+
+        // HOLDMOD1: a lone modifier goes down on either side's key, and fires when it is the only modifier held
+        // (KeyChord.MatchesHeld). Both sides are sampled every time so each key's edge state stays contiguous.
+        if (chord.IsLoneModifier)
+        {
+            bool left = SideWentDown(keyboard, KeyChord.LeftKeyOf(chord.LoneFlag));
+            bool right = SideWentDown(keyboard, KeyChord.RightKeyOf(chord.LoneFlag));
+            return (left || right) && chord.MatchesHeld(HeldSides(keyboard));
+        }
+
         if (!Map.TryGetValue(chord.Key, out var key)) return false;
 
         var control = keyboard[key];
@@ -323,11 +333,45 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
             }
 
             var keyboard = Keyboard.current;
-            if (keyboard == null || !Map.TryGetValue(chord.Key, out var key)) return false;
+            if (keyboard == null) return false;
+            // HOLDMOD1: a lone modifier is held while either side's key is down.
+            if (chord.IsLoneModifier)
+                return SideHeld(keyboard, KeyChord.LeftKeyOf(chord.LoneFlag)) || SideHeld(keyboard, KeyChord.RightKeyOf(chord.LoneFlag));
+            if (!Map.TryGetValue(chord.Key, out var key)) return false;
             var control = keyboard[key];
             return control != null && control.isPressed;
         }
         catch { return false; }
+    }
+
+    /// <summary>HOLDMOD1: one modifier key's press edge, through the same tracker as every other key.</summary>
+    private bool SideWentDown(Keyboard keyboard, UiKey side)
+    {
+        if (!Map.TryGetValue(side, out var key)) return false;
+        var control = keyboard[key];
+        return control != null && WentDown(keyboard, _edges, side, control);
+    }
+
+    private static bool SideHeld(Keyboard keyboard, UiKey side)
+    {
+        if (!Map.TryGetValue(side, out var key)) return false;
+        var control = keyboard[key];
+        return control != null && control.isPressed;
+    }
+
+    /// <summary>
+    /// HOLDMOD1: the six modifier keys and the Windows keys held now, for the key capture's lone-modifier rule
+    /// (press and release Alt alone records Alt). False when there is no keyboard.
+    /// </summary>
+    public bool TryReadHeldModifiers(out ModifierSides sides)
+    {
+        sides = ModifierSides.None;
+        Keyboard? keyboard;
+        try { keyboard = Keyboard.current; }
+        catch { return false; }
+        if (keyboard == null) return false;
+        sides = HeldSides(keyboard);
+        return true;
     }
 
     public bool TryReadPressedChord(out KeyChord chord, out ModifierSides sides)

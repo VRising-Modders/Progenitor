@@ -205,6 +205,22 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         return new PanelLease(this, handler);
     }
 
+    /// <summary>
+    /// HOLDMOD1: one <see cref="VanillaPanelChange.Refreshed"/> to this handle's <see cref="OnPanel"/> handlers on the
+    /// site's next frame, while the panel stays open on the same target. False (nothing raised) while it is closed, on a
+    /// disabled or disposed handle, and on the map card.
+    /// </summary>
+    public bool Refresh()
+    {
+        if (!Enabled || !IsPanel || IsDisposed) return false;
+        lock (_gate)
+        {
+            if (!_tracker.RequestRefresh()) return false;
+            _fitDirty = true;
+            return true;
+        }
+    }
+
     private void Unsubscribe(Action<VanillaPanelEvent> handler)
     {
         lock (_gate) _panelHandlers.Remove(handler);
@@ -720,7 +736,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
 
         // Open and close of a window are said once each; the tooltip's per-hover edges and a
         // station's target changes are the plugin's to log if it wants them.
-        if (!VanillaUiSites.IsTooltip(Site) && edge.Value != VanillaPanelChange.TargetChanged)
+        if (!VanillaUiSites.IsTooltip(Site) && edge.Value is VanillaPanelChange.Opened or VanillaPanelChange.Closed)
         {
             Plugin.Logger?.LogInfo(
                 "Ui: panel " + VanillaUiSites.Key(Site) + " " + (edge.Value == VanillaPanelChange.Opened ? "opened " + current : "closed " + previous)

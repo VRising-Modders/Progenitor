@@ -1420,6 +1420,16 @@ internal sealed class KeybindsPane
                     break;
                 }
 
+                // HOLDMOD1: Ctrl, Shift or Alt on its own is a key only for a Progenitor bind that acts while held.
+                if (claim.Source == KeybindSource.Progenitor
+                    && Keybinds.LoneModifierRefusalFor(claim.OwnerId, claim.ActionId, result.Chord) is { } lone)
+                {
+                    _pending = null;
+                    _editStatus = KeybindsTabLayout.StillWaiting(lone);
+                    StartCapture();
+                    break;
+                }
+
                 // Requested 2026-10-10: a key something else has is taken, not refused. Save unbinds the holders
                 // (named here, before Save, and in their rows after it), so a remap still never leaves a conflict.
                 // Refused: a reserved chord, a bare click and a holder this tab can't change.

@@ -153,6 +153,15 @@ namespace Progenitor.Tests
 
             public bool IsHeld(KeyChord chord) => _held.Contains(chord.Key);
 
+            /// <summary>HOLDMOD1: the modifier keys held now, for the capture's lone-modifier rule; null: unreadable.</summary>
+            public ModifierSides? Mods { get; set; }
+
+            public bool TryReadHeldModifiers(out ModifierSides sides)
+            {
+                sides = Mods ?? ModifierSides.None;
+                return Mods != null;
+            }
+
             /// <summary>PAD1: the controller's held buttons (<see cref="KeyChord.GamepadBit"/> bits); null: no controller.</summary>
             public uint? PadHeld { get; set; }
 

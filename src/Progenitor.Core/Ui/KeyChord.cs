@@ -178,11 +178,91 @@ public readonly struct KeyChord : IEquatable<KeyChord>
 
     public KeyChord(UiKey key, KeyModifiers modifiers = KeyModifiers.None)
     {
+        // HOLDMOD1: Ctrl, Shift or Alt as the main key with no other modifier is a lone-modifier chord. It is stored
+        // side-agnostically on the left key (RightAlt and LeftAlt + Alt both become Alt), like every modifier.
+        var lone = LoneFlagOfKey(key);
+        if (lone != KeyModifiers.None && (modifiers & ~lone) == KeyModifiers.None)
+        {
+            Key = LeftKeyOf(lone);
+            Modifiers = KeyModifiers.None;
+            Held = UiKey.None;
+            return;
+        }
+
         Key = key;
         // PAD1: a gamepad button never carries keyboard modifiers.
         Modifiers = key == UiKey.None || IsGamepadKey(key) ? KeyModifiers.None : modifiers;
         Held = UiKey.None;
     }
+
+    /// <summary>
+    /// HOLDMOD1: a chord that is one modifier on its own: <c>KeyChord.LoneModifier(KeyModifiers.Alt)</c> is "Alt".
+    /// Either side's key counts (left or right Alt). Only a hold bind (<c>ctx.Keybinds.RegisterHold</c> with a
+    /// <c>whileHeld</c> or <c>onReleased</c> handler) can use one. <paramref name="modifier"/> must be exactly one of
+    /// Ctrl, Shift and Alt; anything else gives <see cref="None"/>.
+    /// </summary>
+    public static KeyChord LoneModifier(KeyModifiers modifier) =>
+        IsSingleModifier(modifier) ? new KeyChord(LeftKeyOf(modifier)) : None;
+
+    /// <summary>HOLDMOD1: Alt on its own (either Alt key), the usual key for "show more while held".</summary>
+    public static readonly KeyChord Alt = LoneModifier(KeyModifiers.Alt);
+
+    /// <summary>HOLDMOD1: Ctrl on its own (either Ctrl key).</summary>
+    public static readonly KeyChord Ctrl = LoneModifier(KeyModifiers.Ctrl);
+
+    /// <summary>HOLDMOD1: Shift on its own (either Shift key).</summary>
+    public static readonly KeyChord Shift = LoneModifier(KeyModifiers.Shift);
+
+    /// <summary>
+    /// HOLDMOD1: true for a lone-modifier chord (<see cref="Alt"/>, <see cref="Ctrl"/>, <see cref="Shift"/>): its main key
+    /// is the modifier and nothing else is part of it. It fires when that modifier goes down with no other modifier
+    /// held, and stays held while that modifier is down, whatever else is pressed meanwhile.
+    /// </summary>
+    public bool IsLoneModifier => Modifiers == KeyModifiers.None && LoneFlagOfKey(Key) != KeyModifiers.None;
+
+    /// <summary>HOLDMOD1: the modifier a lone-modifier chord stands for; <see cref="KeyModifiers.None"/> for any other chord.</summary>
+    internal KeyModifiers LoneFlag => IsLoneModifier ? LoneFlagOfKey(Key) : KeyModifiers.None;
+
+    /// <summary>HOLDMOD1: true for the keys a lone-modifier chord can stand on: both Ctrl, Shift and Alt keys (never the Windows keys).</summary>
+    public static bool IsLoneModifierKey(UiKey key) => LoneFlagOfKey(key) != KeyModifiers.None;
+
+    private static KeyModifiers LoneFlagOfKey(UiKey key) => key switch
+    {
+        UiKey.LeftCtrl or UiKey.RightCtrl => KeyModifiers.Ctrl,
+        UiKey.LeftShift or UiKey.RightShift => KeyModifiers.Shift,
+        UiKey.LeftAlt or UiKey.RightAlt => KeyModifiers.Alt,
+        _ => KeyModifiers.None,
+    };
+
+    /// <summary>HOLDMOD1: the left key of one modifier (the stored main key of its lone chord).</summary>
+    internal static UiKey LeftKeyOf(KeyModifiers modifier) => modifier switch
+    {
+        KeyModifiers.Ctrl => UiKey.LeftCtrl,
+        KeyModifiers.Shift => UiKey.LeftShift,
+        KeyModifiers.Alt => UiKey.LeftAlt,
+        _ => UiKey.None,
+    };
+
+    /// <summary>HOLDMOD1: the right key of one modifier; the input source reads both sides for a lone chord.</summary>
+    internal static UiKey RightKeyOf(KeyModifiers modifier) => modifier switch
+    {
+        KeyModifiers.Ctrl => UiKey.RightCtrl,
+        KeyModifiers.Shift => UiKey.RightShift,
+        KeyModifiers.Alt => UiKey.RightAlt,
+        _ => UiKey.None,
+    };
+
+    /// <summary>HOLDMOD1: true when <paramref name="modifiers"/> is exactly one of Ctrl, Shift and Alt.</summary>
+    internal static bool IsSingleModifier(KeyModifiers modifiers) =>
+        modifiers is KeyModifiers.Ctrl or KeyModifiers.Shift or KeyModifiers.Alt;
+
+    /// <summary>HOLDMOD1: a lone modifier's name as the cfg and the Keybinds tab write it: <c>Ctrl</c>, <c>Shift</c>, <c>Alt</c>.</summary>
+    private static string LoneName(KeyModifiers modifier) => modifier switch
+    {
+        KeyModifiers.Ctrl => "Ctrl",
+        KeyModifiers.Shift => "Shift",
+        _ => "Alt",
+    };
 
     private KeyChord(UiKey button, UiKey held, bool gamepad)
     {
@@ -385,6 +465,8 @@ public readonly struct KeyChord : IEquatable<KeyChord>
     {
         // KEYS2: a key pressed with a Windows key held is Windows' shortcut (Win+G, Win+Alt+R), never ours.
         if (IsWindowsKeyHeld(sides)) return false;
+        // HOLDMOD1: a lone modifier fires when it is the only modifier held, so Ctrl+Alt (and AltGr) never fire lone Alt.
+        if (IsLoneModifier) return ModifiersOf(sides) == LoneFlag;
         if (ModifiersOf(sides) != Modifiers) return false;
         return !(IsAltGrShaped && IsAltGrPair(sides));
     }
@@ -396,7 +478,10 @@ public readonly struct KeyChord : IEquatable<KeyChord>
     /// <summary>KEYS8: true for the left and right buttons, the ones that attack, move and click menus.</summary>
     public static bool IsClickButton(UiKey key) => key is UiKey.MouseLeft or UiKey.MouseRight;
 
-    /// <summary>True when <paramref name="key"/> is itself a modifier and cannot be a main key.</summary>
+    /// <summary>
+    /// True when <paramref name="key"/> is itself a modifier key (Ctrl, Shift, Alt, the Windows keys). HOLDMOD1: Ctrl,
+    /// Shift and Alt can still be a whole chord on their own (<see cref="IsLoneModifier"/>); they never take another key.
+    /// </summary>
     public static bool IsModifierKey(UiKey key) =>
         key is UiKey.LeftShift or UiKey.RightShift
             or UiKey.LeftCtrl or UiKey.RightCtrl
@@ -416,8 +501,9 @@ public readonly struct KeyChord : IEquatable<KeyChord>
     /// <summary>
     /// KEYS4 (found live 2026-09-30: capturing <c>Shift</c> through the bridge offered "Unbind this key"):
     /// true when <paramref name="text"/> names modifiers and nothing else (<c>Shift</c>, <c>Ctrl + Alt</c>).
-    /// <see cref="TryParse"/> reads that as <see cref="None"/>, which is right for a cfg value and wrong for
-    /// a captured key: a capture refuses it.
+    /// HOLDMOD1: one modifier on its own parses as a lone-modifier chord (<see cref="IsLoneModifier"/>); two or more
+    /// (<c>Ctrl + Alt</c>) still parse as <see cref="None"/>, which is right for a cfg value and wrong for a captured
+    /// key: a capture refuses those.
     /// </summary>
     public static bool IsModifiersOnly(string? text, out KeyModifiers modifiers)
     {
@@ -471,7 +557,14 @@ public readonly struct KeyChord : IEquatable<KeyChord>
             held = parsed;
         }
 
-        if (key == UiKey.None) return true;
+        if (key == UiKey.None)
+        {
+            // HOLDMOD1: one modifier on its own ("Alt", "LeftShift") is that lone-modifier chord. Two or more with no
+            // key ("Ctrl + Alt") still read as unbound, as before.
+            if (IsSingleModifier(modifiers)) chord = LoneModifier(modifiers);
+            return true;
+        }
+
         if (IsGamepadKey(key))
         {
             // A gamepad button never takes Ctrl, Shift or Alt.
@@ -526,6 +619,7 @@ public readonly struct KeyChord : IEquatable<KeyChord>
     public override string ToString()
     {
         if (!IsBound) return "None";
+        if (IsLoneModifier) return LoneName(LoneFlag);
         if (IsGamepad) return Held == UiKey.None ? Key.ToString() : Key + Separator + Held;
         var sb = new StringBuilder(Key.ToString());
         if ((Modifiers & KeyModifiers.Ctrl) != 0) sb.Append(Separator).Append("Ctrl");
@@ -544,6 +638,7 @@ public readonly struct KeyChord : IEquatable<KeyChord>
         get
         {
             if (!IsBound) return "None";
+            if (IsLoneModifier) return LoneName(LoneFlag);
             if (IsGamepad)
                 return Held == UiKey.None ? KeyDisplayName(Key) : KeyDisplayName(Key) + Separator + KeyDisplayName(Held);
             var sb = new StringBuilder(KeyDisplayName(Key));

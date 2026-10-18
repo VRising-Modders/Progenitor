@@ -557,6 +557,7 @@ window.HELP = {
 <li><strong>Save</strong>, <strong>Unbind</strong> or <strong>Cancel</strong>.</li></ol>
 <ul><li>The reset arrow puts one row back to its default; <strong>Reset all mod keys</strong> does every mod key, never the game's.</li>
 <li>Keys Windows or Steam keep (<span class="kbd">Alt+F4</span>) are refused.</li>
+<li><span class="kbd">Ctrl</span>, <span class="kbd">Shift</span> or <span class="kbd">Alt</span> on its own: press and release it without another key. Only a key that works while you hold it takes one; any other key refuses it and keeps waiting. The game also uses <span class="kbd">Alt</span>, <span class="kbd">Ctrl</span> and <span class="kbd">Shift</span> alone (Advanced Tooltip, the action wheel, Cliff Jump), so holding one does both the game's action and the mod's.</li>
 <li>Mouse: Middle Mouse, Mouse Back and Mouse Forward work as keys; Left and Right Mouse with a modifier.</li>
 <li>Controller: on keys made with Progenitor, the second key on the row is the controller button (a mod's own config-file keys have none). Click it, then press a button, or hold one and press another; it is taken when you let go. Any button can be chosen, B too. <span class="kbd">Escape</span>, clicking elsewhere or waiting 5 seconds cancels. Press the button you hold first. A button the game already uses there is refused. Only Share map location has one to start with.</li></ul>` },
         { id: "conflicts", title: "Conflicts",
@@ -564,6 +565,7 @@ window.HELP = {
 <ol><li>The game's own keys.</li><li>Progenitor's keys.</li><li>Between mods, the one installed first.</li></ol>
 <ul><li>The other key is <strong>not active</strong>: its row says why, the Mods list marks the mod, and <strong>Conflicts N</strong> lists it. Click its key to pick another.</li>
 <li>A mod that reads keys from its own config file still fires. Progenitor can't stop it, and the row says so.</li>
+<li><span class="kbd">Alt</span>, <span class="kbd">Ctrl</span> or <span class="kbd">Shift</span> alone is shared with the game: both act on it and neither loses it. Between two mods on it, the one installed first keeps it.</li>
 <li>A conflict clears as soon as either key changes or its mod is removed.</li></ul>` },
         { id: "dialog", title: "The Key conflict dialog",
           html: `<p>When a mod loads wanting a taken key, <strong>Key conflict: &lt;mod&gt;</strong> asks once. It names the key, the mod that holds it and why that one comes first.</p>

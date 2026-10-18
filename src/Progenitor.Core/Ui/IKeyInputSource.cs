@@ -146,6 +146,18 @@ internal interface IKeyInputSource
     bool IsHeld(KeyChord chord) => false;
 
     /// <summary>
+    /// HOLDMOD1: which modifier keys (both sides of Ctrl, Shift and Alt, and the Windows keys) are down now. The key
+    /// capture reads it to record a lone modifier: one modifier pressed and released with no other key in between.
+    /// <see cref="TryReadPressedChord"/> never reports a modifier on its own. False when the source cannot tell. Never
+    /// throws. Defaulted so existing sources need no change.
+    /// </summary>
+    bool TryReadHeldModifiers(out ModifierSides sides)
+    {
+        sides = ModifierSides.None;
+        return false;
+    }
+
+    /// <summary>
     /// PAD1: which gamepad buttons are down now, as a mask of <see cref="KeyChord.GamepadBit"/> bits, read from
     /// <c>Gamepad.current</c> (each button's <c>ButtonControl.isPressed</c>; the triggers by their press point). False
     /// when there is no gamepad. The gamepad key capture reads this once a pump (<see cref="GamepadCapture"/>). A gamepad

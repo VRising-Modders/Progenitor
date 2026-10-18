@@ -149,6 +149,78 @@ public class VanillaPanelTests : IDisposable
 
     // ---------------------------------------------------------------- tracker
 
+    /// <summary>HOLDMOD1: a refresh request is one Refreshed edge on the next frame that is still open on the same target.</summary>
+    [Fact]
+    public void A_refresh_request_is_one_Refreshed_edge_and_a_real_edge_takes_its_place()
+    {
+        var t = new VanillaPanelTracker();
+        Assert.False(t.RequestRefresh());
+        Assert.Null(t.Observe(false, default, out _));
+
+        Assert.Equal(VanillaPanelChange.Opened, t.Observe(true, Chest(1), out _));
+        Assert.True(t.RequestRefresh());
+        Assert.True(t.RequestRefresh());
+        Assert.Equal(VanillaPanelChange.Refreshed, t.Observe(true, Chest(1), out var prev));
+        Assert.Equal(Chest(1), prev);
+        Assert.Equal(Chest(1), t.Target);
+        Assert.Null(t.Observe(true, Chest(1), out _));
+
+        // A target change or a close on the refresh frame is raised instead, and the request does not linger.
+        Assert.True(t.RequestRefresh());
+        Assert.Equal(VanillaPanelChange.TargetChanged, t.Observe(true, Chest(2), out _));
+        Assert.Null(t.Observe(true, Chest(2), out _));
+        Assert.True(t.RequestRefresh());
+        Assert.Equal(VanillaPanelChange.Closed, t.Observe(false, default, out _));
+        Assert.Equal(VanillaPanelChange.Opened, t.Observe(true, Chest(2), out _));
+        Assert.Null(t.Observe(true, Chest(2), out _));
+
+        Assert.True(t.RequestRefresh());
+        t.Reset();
+        Assert.Equal(VanillaPanelChange.Opened, t.Observe(true, Chest(2), out _));
+        Assert.Null(t.Observe(true, Chest(2), out _));
+    }
+
+    /// <summary>HOLDMOD1: Refresh re-renders an open tooltip through the plugin's own OnPanel handler.</summary>
+    [Fact]
+    public void Refresh_runs_the_panel_handler_again_on_the_next_frame_with_the_same_target()
+    {
+        var h = UiApi.AttachToVanilla(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipBody, _owner, "example.panels");
+        bool advanced = false;
+        var seen = new List<VanillaPanelEvent>();
+        h.OnPanel(e =>
+        {
+            seen.Add(e);
+            if (e.Change == VanillaPanelChange.Closed) return;
+            h.SetRows(new[] { (advanced ? "Per minute: " : "In storage: ") + e.Target.ItemAmount });
+        });
+        Assert.False(h.Refresh());
+
+        var item = new VanillaPanelTarget(VanillaPanelKind.Character, 0, 0, itemGuid: 9, itemAmount: 37);
+        _client.Fire(VanillaUiSite.InventoryTooltip, Open(31, item));
+        Assert.Equal(new[] { "In storage: 37" }, _client.RowTexts);
+
+        // The hold key starts: the plugin flips its state and asks for the rows again.
+        advanced = true;
+        Assert.True(h.Refresh());
+        Assert.Equal(new[] { "In storage: 37" }, _client.RowTexts);
+        _client.Fire(VanillaUiSite.InventoryTooltip, Open(31, item));
+        Assert.Equal(new[] { "Per minute: 37" }, _client.RowTexts);
+        Assert.Equal(VanillaPanelChange.Refreshed, seen[^1].Change);
+        Assert.Equal(item, seen[^1].Target);
+        Assert.Equal(item, seen[^1].Previous);
+
+        // One refresh per request; a closed tooltip raises nothing.
+        _client.Fire(VanillaUiSite.InventoryTooltip, Open(31, item));
+        Assert.Equal(2, seen.Count);
+        _client.Fire(VanillaUiSite.InventoryTooltip, VanillaSiteSample.Absent);
+        Assert.False(h.Refresh());
+        Assert.Equal(VanillaPanelChange.Closed, seen[^1].Change);
+        Assert.DoesNotContain(Lines, l => l.Contains("Ui: panel InventoryTooltip"));
+
+        h.Dispose();
+        Assert.False(h.Refresh());
+    }
+
     [Fact]
     public void The_tracker_turns_a_level_into_open_target_and_close_edges()
     {
