@@ -500,7 +500,8 @@ internal static unsafe class ContainerPreviewServer
         || e.Has<ResearchStation>(em) || e.Has<Salvagestation>(em) || e.Has<UnitSpawnerstation>(em)
         || e.Has<PrisonCell>(em) || e.Has<ServantCoffinstation>(em) || e.Has<ServantEquipment>(em)
         || e.Has<Forge_Shared>(em) || e.Has<FusionForge_Shared>(em) || e.Has<BloodMixer_Shared>(em) || e.Has<JewelCraftingStation>(em)
-        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em);
+        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em)
+        || e.Has<LightningRodStation>(em);
 
     /// <summary>
     /// STATIONPREVIEW1: the windows of the previewable stations the model is (<see cref="ContainerPreviewMenus.PreviewableStations"/>,
@@ -509,9 +510,9 @@ internal static unsafe class ContainerPreviewServer
     private static List<int> StationMenusOf(EntityManager em, Entity e)
     {
         var menus = new List<int>(1);
-        if (e.Has<WorkstationRecipesBuffer>(em)) menus.Add(ContainerPreviewMenus.WorkstationMenu);
-        if (e.Has<Refinementstation>(em)) menus.Add(ContainerPreviewMenus.RefinementstationMenu);
         if (e.Has<Salvagestation>(em)) menus.Add(ContainerPreviewMenus.SalvagestationMenu);
+        if (e.Has<Refinementstation>(em)) menus.Add(ContainerPreviewMenus.RefinementstationMenu);
+        if (e.Has<WorkstationRecipesBuffer>(em)) menus.Add(ContainerPreviewMenus.WorkstationMenu);
         return menus;
     }
 
@@ -523,7 +524,8 @@ internal static unsafe class ContainerPreviewServer
         e.Has<CastleHeart>(em) || e.Has<ResearchStation>(em) || e.Has<UnitSpawnerstation>(em)
         || e.Has<PrisonCell>(em) || e.Has<ServantCoffinstation>(em) || e.Has<ServantEquipment>(em)
         || e.Has<Forge_Shared>(em) || e.Has<FusionForge_Shared>(em) || e.Has<BloodMixer_Shared>(em) || e.Has<JewelCraftingStation>(em)
-        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em);
+        || e.Has<Stables_Shared>(em) || e.Has<ProjectM.Contest.Arena.CastleArenaStation_Shared>(em) || e.Has<InventoryRouteStation>(em)
+        || e.Has<LightningRodStation>(em);
 
     /// <summary>The server's setting now (the default until the shared cfg binds).</summary>
     internal static ContainerPreviewMode Mode

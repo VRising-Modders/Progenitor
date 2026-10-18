@@ -152,6 +152,21 @@ public interface IContainerPreview : IDisposable
     event Action<ContainerPreviewClosed> Closed;
 }
 
+/// <summary>
+/// STATIONPREVIEW1, game-free: a previewed model's inventories on this client. The window is opened, and kept bound, only
+/// while every instance is here (a furnace's input and its output), never on the first alone: the mappers read them all.
+/// </summary>
+internal static class ContainerPreviewInventories
+{
+    /// <summary>True when the model has at least one inventory and every one of them is present.</summary>
+    internal static bool Ready(int count, IReadOnlyList<bool> present)
+    {
+        if (count <= 0 || present.Count < count) return false;
+        for (int i = 0; i < count; i++) if (!present[i]) return false;
+        return true;
+    }
+}
+
 /// <summary>The client preview's internal phases; <see cref="Opening"/> shows as <see cref="ContainerPreviewState.Waiting"/>.</summary>
 internal enum ContainerPreviewPhase
 {
@@ -596,19 +611,19 @@ internal static class ContainerPreviewSettings
 
     internal const string Label = "Remote chest preview";
     internal const string Help =
-        "Lets players open the window of a chest in their own or their clan's castle from anywhere, to look inside. They "
-        + "can never take, move or sort anything through it.";
+        "Lets players open the window of a chest, or of a crafting, refining or salvage station, in their own or their "
+        + "clan's castle from anywhere, to look inside. They can never take, move, sort or start anything through it.";
     internal static readonly IReadOnlyList<string> Labels = new[] { "Off", "PvE servers only", "On" };
     internal static readonly IReadOnlyList<string> Descriptions = new[]
     {
-        "Nobody can look into chests from afar on this server.",
+        "Nobody can look into chests or stations from afar on this server.",
         "Allowed while this server's game mode is PvE; off on PvP.",
         "Allowed on this server whatever its game mode.",
     };
 
     internal const string ConfigDescription =
         "Server. Remote chest preview: off, pve (only while the game mode is PvE) or on. Players see their own or their "
-        + "clan's chests from afar, read-only. Edited in the Mods menu (Progenitor, On this server).";
+        + "clan's chests and crafting, refining or salvage stations from afar, read-only. Edited in the Mods menu (Progenitor, On this server).";
 
     internal const string OffRefusal = "This server has remote chest preview turned off.";
     internal const string PvPRefusal = "This server allows remote chest preview only in PvE, and it is a PvP server.";
@@ -643,7 +658,7 @@ internal static class ContainerPreviewMenus
         "CastleHeart", "Refinementstation", "WorkstationRecipesBuffer", "ResearchStation", "Salvagestation",
         "UnitSpawnerstation", "PrisonCell", "ServantCoffinstation", "ServantEquipment",
         "Forge_Shared", "FusionForge_Shared", "BloodMixer_Shared", "JewelCraftingStation", "Stables_Shared",
-        "CastleArenaStation_Shared", "InventoryRouteStation",
+        "CastleArenaStation_Shared", "InventoryRouteStation", "LightningRodStation",
     };
 
     /// <summary>The game's HUD menu numbers the preview opens (<c>HUDMenuType</c>; layout facts in <c>layout.txt</c>).</summary>
@@ -651,13 +666,15 @@ internal static class ContainerPreviewMenus
 
     /// <summary>
     /// STATIONPREVIEW1: the stations a preview may open, each by the component that makes it that station and the window
-    /// it opens. Their windows open the same way as the container's (init data <c>{Target, InteractBuff}</c>), the game's
-    /// server refuses every item and station event from a player with no interaction with them, and their inventories
-    /// reach the client through the same per-user sync list.
+    /// it opens, in the order that picks the window when a model carries more than one of them: the salvage station, then
+    /// the refining station, then the recipe list (a salvage station or a furnace may carry a recipe list too; the recipe
+    /// list alone is a crafting station). Their windows open the same way as the container's (init data
+    /// <c>{Target, InteractBuff}</c>), the game's server refuses every item and station event from a player with no
+    /// interaction with them, and their inventories reach the client through the same per-user sync list.
     /// </summary>
     internal static readonly IReadOnlyList<(string Component, int Menu)> PreviewableStations = new[]
     {
-        ("WorkstationRecipesBuffer", WorkstationMenu), ("Refinementstation", RefinementstationMenu), ("Salvagestation", SalvagestationMenu),
+        ("Salvagestation", SalvagestationMenu), ("Refinementstation", RefinementstationMenu), ("WorkstationRecipesBuffer", WorkstationMenu),
     };
 
     /// <summary>The own-menu components that stay refused when stations are allowed (a source test keeps the server's check equal).</summary>
@@ -675,15 +692,16 @@ internal static class ContainerPreviewMenus
     }
 
     /// <summary>
-    /// The window a preview opens for a model: <see cref="ContainerMenu"/> for a plain container; the station's window
-    /// when the client can open station windows, the model is exactly one previewable station (<paramref name="stationMenus"/>
-    /// lists the windows of the previewable components it carries) and carries no other own-menu component; else 0
-    /// (refused).
+    /// The window a preview opens for a model: <see cref="ContainerMenu"/> for a plain container; for a client that can
+    /// open station windows and a model with no other own-menu component, the station's window by its station component
+    /// (<paramref name="stationMenus"/>: the windows of the previewable components it carries, in
+    /// <see cref="PreviewableStations"/> order, so the first wins: a salvage station that also lists recipes opens the
+    /// salvage window); else 0 (refused).
     /// </summary>
     internal static int WindowFor(bool hasOwnMenu, IReadOnlyList<int> stationMenus, bool otherOwnMenu, bool clientOpensStations)
     {
         if (!hasOwnMenu) return ContainerMenu;
-        if (!clientOpensStations || otherOwnMenu || stationMenus.Count != 1) return 0;
+        if (!clientOpensStations || otherOwnMenu || stationMenus.Count == 0) return 0;
         return stationMenus[0];
     }
 

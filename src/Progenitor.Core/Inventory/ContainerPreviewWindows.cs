@@ -138,14 +138,32 @@ internal static unsafe class ContainerPreviewWindows
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static ComponentType SalvageInit() => ComponentIndex.Of<SalvagestationMenu.InitData>(ComponentType.AccessMode.ReadWrite);
 
-    /// <summary>The N3 guard on window <paramref name="menuType"/>'s mapper: skip it while the target is away.</summary>
+    /// <summary>
+    /// The N3 guard on window <paramref name="menuType"/>'s mapper: skip it while the target or one of its inventories is
+    /// away. A station window's sub menu mapper (<c>WorkstationSubMenuMapper</c> and its two siblings, the systems that
+    /// read the station's recipes, queue and inventories) gets the same guard; the container window keeps its one guard,
+    /// as qualified live. One handle disposes both.
+    /// </summary>
     internal static IDisposable HookMapper(int menuType, Action<SystemHookContext> hook) => menuType switch
     {
-        ContainerPreviewMenus.WorkstationMenu => WorkstationHook(hook),
-        ContainerPreviewMenus.RefinementstationMenu => RefinementHook(hook),
-        ContainerPreviewMenus.SalvagestationMenu => SalvageHook(hook),
+        ContainerPreviewMenus.WorkstationMenu => new Both(WorkstationHook(hook), WorkstationSubHook(hook)),
+        ContainerPreviewMenus.RefinementstationMenu => new Both(RefinementHook(hook), RefinementSubHook(hook)),
+        ContainerPreviewMenus.SalvagestationMenu => new Both(SalvageHook(hook), SalvageSubHook(hook)),
         _ => SystemHooks.Before<ContainerMenuMapper>(hook),
     };
+
+    private sealed class Both : IDisposable
+    {
+        private IDisposable? _a, _b;
+        internal Both(IDisposable a, IDisposable b) { _a = a; _b = b; }
+
+        public void Dispose()
+        {
+            var a = _a; _a = null;
+            var b = _b; _b = null;
+            try { a?.Dispose(); } finally { b?.Dispose(); }
+        }
+    }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static IDisposable WorkstationHook(Action<SystemHookContext> hook) => SystemHooks.Before<WorkstationMenuMapper>(hook);
@@ -155,5 +173,14 @@ internal static unsafe class ContainerPreviewWindows
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static IDisposable SalvageHook(Action<SystemHookContext> hook) => SystemHooks.Before<SalvagestationMenuMapper>(hook);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IDisposable WorkstationSubHook(Action<SystemHookContext> hook) => SystemHooks.Before<WorkstationSubMenuMapper>(hook);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IDisposable RefinementSubHook(Action<SystemHookContext> hook) => SystemHooks.Before<RefinementstationSubMenuMapper>(hook);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IDisposable SalvageSubHook(Action<SystemHookContext> hook) => SystemHooks.Before<SalvagestationSubMenuMapper>(hook);
 }
 #endif

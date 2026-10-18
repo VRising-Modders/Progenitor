@@ -32,17 +32,44 @@ public sealed class StationPreviewTests
     }
 
     [Fact]
-    public void Two_station_kinds_or_another_menu_are_refused()
+    public void Another_menu_is_refused()
     {
-        Assert.Equal(0, ContainerPreviewMenus.WindowFor(true, new[] { ContainerPreviewMenus.WorkstationMenu, ContainerPreviewMenus.RefinementstationMenu }, false, true));
         Assert.Equal(0, ContainerPreviewMenus.WindowFor(true, Array.Empty<int>(), true, true)); // a castle heart, a prison, a coffin...
+        Assert.Equal(0, ContainerPreviewMenus.WindowFor(true, Array.Empty<int>(), false, true)); // an own menu, no station
+        Assert.Contains("LightningRodStation", ContainerPreviewMenus.OwnMenuComponents);
+        Assert.Contains("LightningRodStation", ContainerPreviewMenus.OtherOwnMenuComponents);
+    }
+
+    [Fact]
+    public void A_devourer_that_also_lists_recipes_opens_the_salvage_window()
+    {
+        // The server lists the station windows in PreviewableStations order: salvage, refining, then the recipe list.
+        var devourer = new[] { ContainerPreviewMenus.SalvagestationMenu, ContainerPreviewMenus.WorkstationMenu };
+        Assert.Equal(ContainerPreviewMenus.SalvagestationMenu, ContainerPreviewMenus.WindowFor(true, devourer, false, true));
+        var furnace = new[] { ContainerPreviewMenus.RefinementstationMenu, ContainerPreviewMenus.WorkstationMenu };
+        Assert.Equal(ContainerPreviewMenus.RefinementstationMenu, ContainerPreviewMenus.WindowFor(true, furnace, false, true));
+        var bench = new[] { ContainerPreviewMenus.WorkstationMenu };
+        Assert.Equal(ContainerPreviewMenus.WorkstationMenu, ContainerPreviewMenus.WindowFor(true, bench, false, true));
+        // Never past another own menu.
+        Assert.Equal(0, ContainerPreviewMenus.WindowFor(true, devourer, otherOwnMenu: true, clientOpensStations: true));
+    }
+
+    [Fact]
+    public void The_window_opens_only_with_every_inventory_instance_present()
+    {
+        Assert.True(ContainerPreviewInventories.Ready(1, new[] { true }));
+        Assert.True(ContainerPreviewInventories.Ready(2, new[] { true, true }));
+        Assert.False(ContainerPreviewInventories.Ready(2, new[] { true, false })); // a furnace's output not here yet
+        Assert.False(ContainerPreviewInventories.Ready(2, new[] { false, true })); // the first missing, the second here
+        Assert.False(ContainerPreviewInventories.Ready(0, Array.Empty<bool>()));
+        Assert.False(ContainerPreviewInventories.Ready(2, new[] { true }));
     }
 
     [Fact]
     public void The_previewable_stations_and_the_rest_make_the_whole_refusal_list()
     {
         var stations = ContainerPreviewMenus.PreviewableStations.Select(s => s.Component).ToList();
-        Assert.Equal(new[] { "WorkstationRecipesBuffer", "Refinementstation", "Salvagestation" }, stations);
+        Assert.Equal(new[] { "Salvagestation", "Refinementstation", "WorkstationRecipesBuffer" }, stations);
         var all = ContainerPreviewMenus.OtherOwnMenuComponents.Concat(stations).OrderBy(x => x, StringComparer.Ordinal);
         Assert.Equal(ContainerPreviewMenus.OwnMenuComponents.OrderBy(x => x, StringComparer.Ordinal), all);
         foreach (var s in stations) Assert.DoesNotContain(s, ContainerPreviewMenus.OtherOwnMenuComponents);

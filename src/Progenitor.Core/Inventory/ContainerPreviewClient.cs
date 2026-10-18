@@ -551,7 +551,12 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         if (!s.SameWorld || Machine.Phase == ContainerPreviewPhase.Requesting) return s;
         var em = world!.EntityManager;
 
-        if (_target != Entity.Null && (!em.Exists(_target) || !SameWords(em, _target, _targetWords))) { _target = Entity.Null; _inventory = Entity.Null; }
+        if (_target != Entity.Null && (!em.Exists(_target) || !SameWords(em, _target, _targetWords)))
+        {
+            _target = Entity.Null;
+            _inventory = Entity.Null;
+            ForgetInventories();
+        }
         if (_target == Entity.Null && now >= _nextLookup)
         {
             _nextLookup = now + 0.1;
@@ -561,16 +566,9 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         s.TargetFound = _target != Entity.Null;
         if (s.TargetFound)
         {
-            if (_inventory == Entity.Null || !em.Exists(_inventory))
-            {
-                _inventory = Entity.Null;
-                if (UnityInventoryBackend.TryInventoryEntity(em, _target, 0, out var inv, out _))
-                {
-                    _inventory = inv;
-                    ContainerPreviewClient.TryWords(em, inv, out _inventoryWords.Item1, out _inventoryWords.Item2, out _inventoryWords.Item3);
-                }
-            }
-            s.InventoryReady = _inventory != Entity.Null;
+            // STATIONPREVIEW1: every inventory instance (a furnace's input and output), not just the first.
+            RefreshInventories(em);
+            s.InventoryReady = ContainerPreviewInventories.Ready(_inventories.Count, AllPresent(em));
             if (s.InventoryReady) _inventorySeen = true;
         }
 
@@ -663,7 +661,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             {
                 // The chest is here but its inventory left (a save suspension, the server letting go): hold the window as
                 // it was rather than let the mapper read a missing inventory. The machine closes after a grace period.
-                if (Machine.OwnsWindow && _inventorySeen && (_inventory == Entity.Null || !em.Exists(_inventory))) c.Skip = true;
+                if (Machine.OwnsWindow && _inventorySeen && !ContainerPreviewInventories.Ready(_inventories.Count, AllPresent(em))) c.Skip = true;
                 return;
             }
             // The chest left this client (a save suspension takes the streaming origin away for a moment, or it is gone):
@@ -680,32 +678,61 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         try
         {
             _drop ??= new EventDropQueries();
-            DroppedEvents += _drop.Drop(c.World, _targetWords, _inventoryWords, OtherInventoryWords(c.World));
+            DroppedEvents += _drop.Drop(c.World, _targetWords, _inventoryWords, _otherInventoryWords.Count == 0 ? null : _otherInventoryWords);
         }
         catch (Exception e) { WarnOnce("event filter", e); }
     }
 
-    private List<(int, int, int)>? _otherInventories;
-    private double _otherInventoriesAt = double.NegativeInfinity;
+    /// <summary>STATIONPREVIEW1: the target's inventory per instance (Entity.Null where it has not arrived), and their words.</summary>
+    private readonly List<Entity> _inventories = new();
+    private readonly List<(int, int, int)> _otherInventoryWords = new();
+
+    /// <summary>The target changed or left: forget its inventories (the filter's words with them).</summary>
+    private void ForgetInventories()
+    {
+        _inventories.Clear();
+        _otherInventoryWords.Clear();
+    }
 
     /// <summary>
-    /// STATIONPREVIEW1: the network id words of the target's inventories after the first (a refining station's output),
-    /// read again once a second; null for a single-inventory container.
+    /// Every inventory instance of the target, looked up again where missing; no instance is skipped because an earlier
+    /// one has not arrived. Instance 0 is <see cref="_inventory"/>; the others' network id words feed the event filter.
     /// </summary>
-    private List<(int, int, int)>? OtherInventoryWords(World world)
+    private void RefreshInventories(EntityManager em)
     {
-        if (_menuType == ContainerPreviewMenus.ContainerMenu || _target == Entity.Null) return null;
-        double now = ContainerPreviewClient.Now;
-        if (now - _otherInventoriesAt < 1.0) return _otherInventories;
-        _otherInventoriesAt = now;
-        var list = new List<(int, int, int)>();
-        var em = world.EntityManager;
-        for (int instance = 1; instance < Progenitor.Items.Items.MaxInventoryInstances; instance++)
+        int count = UnityInventoryBackend.InventoryCount(em, _target);
+        bool changed = count != _inventories.Count;
+        while (_inventories.Count < count) _inventories.Add(Entity.Null);
+        if (_inventories.Count > count) _inventories.RemoveRange(count, _inventories.Count - count);
+        for (int i = 0; i < count; i++)
         {
-            if (!UnityInventoryBackend.TryInventoryEntity(em, _target, instance, out var inv, out _) || inv == _target) break;
-            if (ContainerPreviewClient.TryWords(em, inv, out int a, out int b, out int c)) list.Add((a, b, c));
+            var known = _inventories[i];
+            if (known != Entity.Null && em.Exists(known)) continue;
+            _inventories[i] = UnityInventoryBackend.TryInventoryEntity(em, _target, i, out var inv, out _) ? inv : Entity.Null;
+            changed |= _inventories[i] != known;
         }
-        return _otherInventories = list.Count == 0 ? null : list;
+        var first = count > 0 ? _inventories[0] : Entity.Null;
+        if (first != _inventory)
+        {
+            _inventory = first;
+            _inventoryWords = default;
+            if (first != Entity.Null) ContainerPreviewClient.TryWords(em, first, out _inventoryWords.Item1, out _inventoryWords.Item2, out _inventoryWords.Item3);
+        }
+        if (!changed) return;
+        _otherInventoryWords.Clear();
+        for (int i = 1; i < _inventories.Count; i++)
+        {
+            var inv = _inventories[i];
+            if (inv != Entity.Null && inv != _target && ContainerPreviewClient.TryWords(em, inv, out int a, out int b, out int c)) _otherInventoryWords.Add((a, b, c));
+        }
+    }
+
+    /// <summary>Whether each known instance is present now (for <see cref="ContainerPreviewInventories.Ready"/>).</summary>
+    private IReadOnlyList<bool> AllPresent(EntityManager em)
+    {
+        var present = new bool[_inventories.Count];
+        for (int i = 0; i < present.Length; i++) present[i] = _inventories[i] != Entity.Null && em.Exists(_inventories[i]);
+        return present;
     }
 
     private bool OnEscape()

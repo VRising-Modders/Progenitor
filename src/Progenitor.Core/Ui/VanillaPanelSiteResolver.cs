@@ -446,9 +446,11 @@ internal sealed partial class UnityUiRuntime
 
     /// <summary>
     /// The chest, station or castle heart window shown now, through the same once-a-frame mapper scan the panel sites use
-    /// (<c>ctx.Inventory.LastWindow</c> remembers it). <paramref name="interactBuff"/> is the container window's
-    /// interaction (<c>ContainerMenuMapper._InteractBuff</c>; <see cref="Entity.Null"/> for a remote preview's window) and
-    /// is left null for the other windows, which only open through an interaction. False when none of them is shown.
+    /// (<c>ctx.Inventory.LastWindow</c> remembers it). <paramref name="interactBuff"/> is the window's interaction (the
+    /// mapper's <c>_InteractBuff</c>; <see cref="Entity.Null"/> for a remote preview's window) for the windows a preview can
+    /// open: the container window and the crafting, refining and salvage station windows (STATIONPREVIEW1). It is left
+    /// null for the other windows (the castle heart, a prison cell, a unit station), which only open through an
+    /// interaction. False when none of them is shown.
     /// </summary>
     internal static bool TryOpenInteractWindow(World world, out VanillaPanelKind kind, out Entity target, out Entity interactBuff)
     {

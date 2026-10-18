@@ -388,6 +388,19 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
     /// The entity that holds <paramref name="owner"/>'s inventory <paramref name="instance"/>.
     /// An owner with its own <c>InventoryBuffer</c> has only instance 0 (itself).
     /// </summary>
+    /// <summary>
+    /// STATIONPREVIEW1: how many inventories <paramref name="owner"/> has (1 for an owner that holds its own rows, the length
+    /// of its inventory list otherwise, 0 for none), whether or not each has reached this world yet.
+    /// </summary>
+    internal static int InventoryCount(EntityManager em, Entity owner)
+    {
+        if (!owner.Exists(em)) return 0;
+        if (owner.Has<InventoryBuffer>(em)) return 1;
+        if (!owner.Has<InventoryInstanceElement>(em)) return 0;
+        int length = em.GetBufferLength(owner, ComponentIndex.IndexOf<InventoryInstanceElement>());
+        return length < 0 ? 0 : Math.Min(length, Progenitor.Items.Items.MaxInventoryInstances);
+    }
+
     internal static bool TryInventoryEntity(EntityManager em, Entity owner, int instance, out Entity inventory, out string reason)
     {
         inventory = Entity.Null;
