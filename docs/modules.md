@@ -2617,9 +2617,15 @@ server, standing next to a chest.
 ### Container preview
 
 `ctx.Inventory.Preview` (client) opens **the game's own container window** for a chest or brazier somewhere
-else in the world, read-only, for the castle's owner and clan: a Find window docks on the left, where the
-player's bag panel normally sits, and the real container window shows the chest on the right, as if the
-player had opened it at the chest. **Experimental.** Verified live on 2026-10-17 (test server, Core 2026.10.91.3): E1/E2
+else in the world, read-only, for the castle's owner and clan. By default it shows as if the player had opened the
+chest where it stands: the character inventory on the left, the chest on the right. A mod that docks its own window
+on the left (a Find list) sets `HidePlayerInventory = true`, and the bag panel is hidden so the mod window sits where
+it was. **Experimental.**
+
+> **Behavior change (2026-10-18).** `HidePlayerInventory` used to default to true. A caller that docks a panel on the
+> left (`Dock(UiDock.Left, …)`) and relied on the old default now gets the bag under its panel: set
+> `HidePlayerInventory = true` explicitly. Callers that dock nothing, or dock on the right, need no change.
+ Verified live on 2026-10-17 (test server, Core 2026.10.91.3): E1/E2
 on far chests (895 m; the game's window with the real contents; an empty chest too), a world save mid-preview with
 the guard on (the window stayed open), the close (releases read back, no records, no leases), E1b 8a (the inventory
 sync list **is saved**; the startup sweep removed the leftover), 8b (a kill during the save suspension left no
@@ -2627,8 +2633,9 @@ leftover and the origin untouched) and `proxy_reset`. Not live: E3 to E5, the st
 the repair at a lease start.
 
 ```csharp
-// Client: preview a chest the server told us about (a ContainerId from a Find result, for example).
-_preview = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true });
+// Client: preview a chest the server told us about (a ContainerId from a Find result, for example). The Find
+// window is docked on the left, so the bag panel is hidden to make room for it.
+_preview = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true, HidePlayerInventory = true });
 _preview.Closed += closed =>
 {
     CloseMyFindWindow();                                   // or keep it; Esc closed only the container
@@ -2690,7 +2697,10 @@ the ordinary window with its ordinary rights.
    a menu is open, so input is captured anyway.
 5. Once the window shows (`Open`), the take-all, sort, rename and burn-toggle buttons are hidden with a
    CanvasGroup (alpha 0, no raycasts) so the window's layout keeps its spacing, and with
-   `HidePlayerInventory` the bag panel too. Everything is put back on close.
+   `HidePlayerInventory` (off by default since 2026-10-18: the window shows the game's station layout, the character
+   inventory on the left and the chest on the right) the bag panel too. Everything is put back on close. Panels and
+   tabs attached to the container window get a `VanillaPanelTarget` naming the previewed chest (its entity, its
+   network id, and `PreviewContainer`, its `ContainerId`).
 6. With `DropItemEvents` (default), a `Before<SerializeAndSendClientEventsSystem>` drops this client's item
    events that name the previewed chest or its inventory before they are sent, so a drag snaps back
    instead of failing on the server. A courtesy only; the server refusal above is the guarantee.
@@ -2894,9 +2904,35 @@ and the shared lease.
   stop-interacting send and no mapper exception. Then a camera preview and a container preview of the same
   chest: server status shows one lease with 2 holders, and ending one leaves the other streaming.
 - **E5 controller and bag.** With a gamepad, cycle focus in the window with the bag hidden by CanvasGroup
-  (default), then `bag {"mode":"inactive"}` and a new open: record where focus lands in each and whether the
-  container's layout moves. Switching focus between a docked Find panel and the container is a `ctx.Keybinds` bind of
-  the mod that docks it, not of this API.
+  (`hideBag: true`), then `bag {"mode":"inactive"}` and a new open: record where focus lands in each and whether the
+  container's layout moves.
+- **E6 station layout, attached tabs, camera (not run).** Satisvampory deployed (its container tabs attached), the far
+  chest with a few stacks.
+  1. `open {"id":"c-…","keepOpen":true}` (the bag is shown now). Capture: the character inventory on the left, the
+     chest window full size on the right. `status.window`: both halves `active`, the container half's `size` the
+     normal window size, `gridSlots` and `gridSlotsShown` matching the chest's slot count, `inventoryRows` the same,
+     `targetDisabled` / `inventoryDisabled` recorded. `status.panelTarget`: `matchesPreview` true, `previewContainer`
+     the opened id, `target` naming the chest's entity and network id.
+  2. Click each Satisvampory tab (Input, Output, Accepts) and make one edit through it (real input, brief focus):
+     the tab switches, the edit's own message reaches its server (Satisvampory's log names the chest), and the chest's
+     slots are unchanged. Switch back to the game's own tab: the grid shows again.
+  3. With the window open, start `ctx.Camera.Preview` (Hold, `MatchPlayerCamera` true, `ScreenOffset` 0) through
+     the Sample or Satisvampory. `camera_preview` readback: `distance` and `pitch` near the player's own camera (about
+     15 m), `hud.kept` naming every canvas that holds the window, `containerWindow.visible` true. Capture at 1920x1080
+     and at 32:9: both window halves fully shown with the grid, the chest between them. `status.window` as in step 1.
+     If the grid is gone here and not in step 1, the halves' `rootCanvas` names say which canvas is still hidden.
+  4. Escape once: the container preview ends (`Escape`), the window closes, and the attached tabs' panels get one
+     `Closed` (no `TargetChanged` to the bare chest first; the Satisvampory log or a panels sample shows the events).
+     Escape again: the camera preview ends.
+  5. E3 with the bag shown (real input, brief focus). Read the chest on the server first (`.items slots c-…`). With
+     `dropEvents: false`: drag a stack from the bag half into the chest, and one from the chest into the bag; a
+     shift-click each way too. Each snaps back; read the chest again: identical, the bag unchanged, the server log
+     shows no item change. Reopen with `dropEvents: true` and repeat both directions: `status` `droppedEvents`
+     counts the chest-side attempts, nothing reaches the server, the chest and bag are unchanged. Record whether a
+     bag-to-bag move inside the bag half still works (it names no previewed entity, so it is not dropped).
+
+  Switching focus between a docked Find panel and the container is a `ctx.Keybinds` bind of the mod that docks it,
+  not of this API.
 
 Afterwards: close any preview, disconnect to the title screen, and remove every sample deployed for the
 batch from both reload folders.
@@ -5726,6 +5762,19 @@ A preview shows the player a distant spot (a storage room, say) without moving t
 - **Server:** `ctx.Camera.Observe(user, target, …)` writes a secondary streaming origin for that user at the target, so the server sends the client what is there. The real character is not moved. The lease makes one anchor entity (not saved) and one system hook, and releases both when it ends. The caller authorizes the target.
 - **Client:** `ctx.Camera.Preview(point, yaw, …)` orbits the point at 6 m and 35° pitch, points the client's render origin at it (so streamed rooms draw), and hides the native HUD. Right-drag or `Rotate` turns it; rotation is automatic until the player turns it. The preview moves only the camera. The caller blocks gameplay input and shows its own controls.
 
+**Distance and pitch.** The orbit is 6 m out at 35 degrees unless `CameraPreviewOptions.Distance` (2 to 40 m) or
+`Pitch` (10 to 85 degrees) says otherwise. `MatchPlayerCamera` measures the player's own camera when the preview starts
+(the pitch of its forward axis, and its distance along that axis to the point it looks at, where the axis meets the
+character's ground height) and uses that, which is how the game frames a chest the player opens: it does not move the
+camera for an interaction. It reads only the player's own camera: with a plugin shot on screen (a preview being
+replaced still shows its orbit), the game not in its top-down mode, or a look-at point more than 5 m from the
+character, the defaults apply. Explicit values override either part; the defaults also apply when the camera cannot
+be read. The screen offset is computed from the measured camera, so it holds for any
+distance and aspect (32:9 too). With a container preview's station layout (character inventory left, chest right),
+`ScreenOffset` 0 puts the chest between the two halves. While a camera preview has hidden the HUD and a container
+preview of this client owns the container window, every hidden canvas holding part of that window (the chest half,
+its parent, the inventory half) stays shown. Game-free tested (`ContainerPreviewLayoutTests`), not live-verified.
+
 **Holding a preview open.** A timed preview lasts at most 10 seconds. To keep one open (a "Keep open" button), call `Hold()` on both handles. That keeps the current orbit and rotation (nothing restarts) and removes the short timeout. A hold still has a cap of ten minutes from the last `Hold()` on both sides (`CameraPreview.MaxHoldSeconds`, `CameraObservation.MaxRenewSeconds`); calling `Hold()` again restarts it. On the server, `Renew(seconds)` sets the lease's deadline to at most ten minutes from now, for a mod that would rather send a heartbeat.
 
 **Framing offset (DOCK1, measured since CAMOFFSET1; source-checked and game-free tested in `CameraFramingTests`, not live-verified).** `CameraPreviewOptions.ScreenOffset` puts the previewed point beside the center of the screen instead of on it, as a share of the screen's width right of center: 0.15 for a panel docked left ([Docked panels](ui.md#docked-panels-dock1)), a negative value for one docked right, at most 0.4 either way (out of range throws). The camera still orbits the point itself: only the framing moves. The preview starts centered and, once its orbit write has landed and the camera has been posed for a frame, anchors the orbit on the point moved sideways along the live camera's own right axis. A reading that cannot be the orbit camera (the previewed point more than 1.5 m nearer or 3 m farther than the 6 m orbit, or a pitch more than 10 degrees off) is dropped, so the player's camera before the switch never pulls the anchor aside. How far is measured each tick from the live camera (`Camera.main`) with its own projection: the viewport x of its look-at point at the previewed point's depth and of a point one meter right of it, mapped through the camera's viewport rect to the screen share. Nothing is assumed about the field of view, the aspect (16:9, 21:9 or 32:9), an off-center projection or the yaw convention; only that the orbit camera looks along its forward axis at its anchor, as the centered preview already does. The shot glides to the offset over the first few frames. `CameraPreview.SetScreenOffset(offset)` changes it on a running preview. A frame whose camera cannot be read, or whose reading is dropped, keeps the last measurement; with none yet the point stays centered, and a new offset waits for a new measurement. One log line 1.5 s into a preview with an offset says where the point projects and what was read (`Camera: preview framing offset …`), and the bridge's `camera_preview` op (MCP `progenitor_camera_preview`) reads the same at any time. The first version (DOCK1, #79) computed the shift from `fieldOfView` and `aspect` and the yaw it wrote; on a 32:9 screen it framed empty floor live.
@@ -5781,13 +5830,14 @@ The Sample does exactly this (`SampleCamera.cs`: `Packet.Sequence`, `EndReport.S
 | `Failed` | A game read or the camera write failed. The preview ends rather than risk a stuck camera. |
 | `Unloaded` | The plugin or Core unloaded. `ended` is not called. |
 
-**With a container preview: the chest window stays (source-checked and game-free tested in `CameraPreviewHoldTests`, not live-verified).** The preview hides the HUD by turning off every root canvas under the game's `HUDCanvas(Clone)` and keeping them off every frame, and the game's container window sits on one of those canvases. Core 2026.10.92 hid it too: a [container preview](#container-preview) opened before the camera preview showed its window for a moment, then lost it once the camera preview started, and one opened during it never showed. Now, while this client's container preview (`ctx.Inventory.Preview`) owns the container window in the same client world, the camera preview leaves the one hidden canvas that holds that window as it was. The window stays visible and usable (read-only, as the container preview always is), and the rest of the HUD (hotbar, health, nameplates, the other menus' canvases) stays hidden. It works in either order. With a window that is already open, it is kept from the first frame; with one opened later, it is kept as soon as the container preview owns it. When the container preview ends, that canvas is hidden again on the next frame. Nothing to opt into: it follows the container preview.
+**With a container preview: the chest window stays (source-checked and game-free tested in `CameraPreviewHoldTests`, not live-verified).** The preview hides the HUD by turning off every root canvas under the game's `HUDCanvas(Clone)` and keeping them off every frame, and the game's container window sits on one of those canvases. Core 2026.10.92 hid it too: a [container preview](#container-preview) opened before the camera preview showed its window for a moment, then lost it once the camera preview started, and one opened during it never showed. Now, while this client's container preview (`ctx.Inventory.Preview`) owns the container window in the same client world, the camera preview leaves every hidden canvas that holds a part of that window as it was (the container half and, in the station layout, the character inventory half; a hidden bag adds nothing). The window stays visible and usable (read-only, as the container preview always is), and the rest of the HUD (hotbar, health, nameplates, the other menus' canvases) stays hidden. It works in either order. With a window that is already open, it is kept from the first frame; with one opened later, it is kept as soon as the container preview owns it. When the container preview ends, those canvases are hidden again on the next frame. Nothing to opt into: it follows the container preview.
 
-The layout this is built for: the object in the middle, the mod's panel docked left, the game's chest window on the right where the game puts it. With panels on both sides, frame the object at the center (`ScreenOffset = 0`, or `SetScreenOffset(0f)` when the chest window opens) rather than beside a single left panel.
+Two layouts. The game's station layout (the default): the character inventory on the left, the chest on the right, the object between them; frame it at the center (`ScreenOffset = 0`, or `SetScreenOffset(0f)` when the chest window opens) and, for the game's own framing, `MatchPlayerCamera`. A mod panel docked left instead of the bag: set `HidePlayerInventory = true` so the bag does not show under the panel; with panels on both sides the center framing still fits.
 
 ```csharp
 _preview = ctx.Camera.Preview(point, yawDegrees: 30, new CameraPreviewOptions { Hold = true, ScreenOffset = 0f, Ended = OnCameraEnded });
-_chest = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true });
+// The mod's panel is docked left, where the bag would show: hide the bag.
+_chest = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true, HidePlayerInventory = true });
 _chest.Closed += closed => { /* the camera preview keeps running: end it here too if the mod wants both to go */ };
 ```
 
@@ -5803,11 +5853,11 @@ A framework dialog or open dropdown, a key capture and the focused chat box stil
 - The container preview ends, for any reason: the camera preview runs on and hides the chest window's canvas again. Its server lease is shared with the camera's `Observe` at the same point (within 0.5 m), so the camera side keeps streaming while its own holder runs ([One streaming origin per user](#camera-preview)).
 - The camera preview ends, for any reason: the HUD comes back, and the container preview's window stays open over the normal camera. The container preview ends on its own rules (`Escape`, `Disposed`, `LeaseEnded`, …).
 
-**HUD readback.** The bridge's `camera_preview` op (MCP `progenitor_camera_preview`) reports `ownsHud`; `hud`, every canvas the hide took (`name`, `wasEnabled`, `enabled`, `kept`) and the one left shown (`kept`); `containerWindow`, with `containerPreview` (its state), `ownsWindow`, `keptCanvas`, `found`, `active`, `canvas`, `canvasEnabled`, `rootCanvas`, `rootCanvasEnabled` and `visible`; and `escapeOwner`, who takes the next Escape (`ContainerPreview`, then `Preview`). The log says `PhotoMode: HUD canvas '…' left shown (it holds the container window).` and, after the close, `… hidden again …`.
+**HUD readback.** The bridge's `camera_preview` op (MCP `progenitor_camera_preview`) reports `ownsHud`; `hud`, every canvas the hide took (`name`, `wasEnabled`, `enabled`, `kept`) and the ones left shown (`kept`, comma-separated); `containerWindow`, with `containerPreview` (its state), `ownsWindow`, `keptCanvas`, `found`, `active`, `canvas`, `canvasEnabled`, `rootCanvas`, `rootCanvasEnabled` and `visible`; and `escapeOwner`, who takes the next Escape (`ContainerPreview`, then `Preview`). The log says `PhotoMode: HUD canvas '…' left shown (it holds the container window).` and, after the close, `… hidden again …`.
 
 **Live check (not run).** On the isolated test server and a free test client, in a castle the test character owns, with a chest more than 100 m away and the Sample deployed to both:
 
-1. Container preview first: `container_preview open {"id":"c-…","keepOpen":true}`, wait for `phase` `Open`, then `.shot preview hold` within a second (the order Satisvampory uses). Expect the chest window to stay on screen once the camera reaches the point, and no hotbar, health or nameplates. `camera_preview`: `containerWindow.visible` true, `keptCanvas` the canvas name, every other `hud.canvases` row `enabled` false; take a capture.
+1. Container preview first: `container_preview open {"id":"c-…","keepOpen":true}`, wait for `phase` `Open`, then `.shot preview hold` within a second (the order Satisvampory uses). Expect the chest window to stay on screen once the camera reaches the point, and no hotbar, health or nameplates. `camera_preview`: `containerWindow.visible` true, `keptCanvas` the kept canvas names, every other `hud.canvases` row `enabled` false; take a capture.
 2. Hover and scroll the chest window (the pointer works), try a drag: it snaps back (read-only).
 3. Press Escape once: the container preview closes (`closeReason` `Escape`), the camera preview stays, `camera_preview` shows `ownsWindow` false, `keptCanvas` null, `escapeOwner` `Preview`, and the system menu stays closed. Press Escape again: the camera preview ends (`Escape`) and the HUD comes back.
 4. Camera preview first: `.shot preview hold`, then the `container_preview open`: the window appears during the preview and step 1's readback holds. End the camera preview with `.shot end`: the HUD comes back and the chest window stays open; `container_preview close`.

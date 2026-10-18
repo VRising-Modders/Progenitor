@@ -496,7 +496,7 @@ public class ContainerPreviewTests
     {
         Assert.Null(new ContainerPreviewOptions { KeepOpen = true, Seconds = 0 }.Problem());
         var d = new ContainerPreviewOptions();
-        Assert.True(d.HidePlayerInventory);
+        Assert.False(d.HidePlayerInventory);   // the game's station layout: bag left, chest right
         Assert.True(d.DropItemEvents);
         Assert.False(d.KeepOpen);
         Assert.Equal(30, d.Seconds);

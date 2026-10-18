@@ -52,7 +52,11 @@ public enum ContainerPreviewCloseReason
     Failed = 14,
 }
 
-/// <summary>Options for <c>ctx.Inventory.Preview.Open</c>. The defaults are a 30 second preview with the bag hidden.</summary>
+/// <summary>
+/// Options for <c>ctx.Inventory.Preview.Open</c>. The defaults are a 30 second preview in the game's station layout (the
+/// character inventory shown on the left of the chest); a mod that docks its own window there sets
+/// <see cref="HidePlayerInventory"/>.
+/// </summary>
 public sealed record ContainerPreviewOptions
 {
     /// <summary>Most a timed preview may last, in seconds (ten minutes, the server lease's cap).</summary>
@@ -61,8 +65,13 @@ public sealed record ContainerPreviewOptions
     /// <summary>Most <see cref="ReplicationTimeoutSeconds"/> may be.</summary>
     public const float MaxReplicationTimeoutSeconds = 30;
 
-    /// <summary>Hide the player's own inventory panel (the bag) next to the container, so a mod window can sit there.</summary>
-    public bool HidePlayerInventory { get; init; } = true;
+    /// <summary>
+    /// Hide the player's own inventory panel (the bag) next to the container, so a mod window docked on the left can sit
+    /// there. Off by default since 2026-10-18 (it was on before): the window shows as the game shows it at a chest, the
+    /// character inventory on the left and the chest on the right. A caller that docks a panel on the left sets this to
+    /// true, or the bag shows under its panel. Nothing moves into or out of the chest either way.
+    /// </summary>
+    public bool HidePlayerInventory { get; init; } = false;
 
     /// <summary>Keep the preview open until the player or the caller closes it; the client renews the server lease.</summary>
     public bool KeepOpen { get; init; }
@@ -231,6 +240,14 @@ internal sealed class ContainerPreviewMachine
 
     /// <summary>True when the preview wrote the open and has not closed: the window, if shown, is the preview's.</summary>
     internal bool OwnsWindow => Phase is ContainerPreviewPhase.Opening or ContainerPreviewPhase.Open;
+
+    /// <summary>
+    /// After a close: the panel sites keep the closed preview's view (the previewed chest's id on the target) while the
+    /// container menu is still shown on the window's own entity with no interaction behind it. Anything else (the menu
+    /// gone, another chest, a real interaction the player started) drops it.
+    /// </summary>
+    internal static bool HoldsClosingView(bool containerMenuShown, bool onWindowEntity, bool hasInteraction)
+        => containerMenuShown && onWindowEntity && !hasInteraction;
 
     /// <summary>The seconds the server is asked to hold the lease for on the first request.</summary>
     internal double RequestSeconds => _options.KeepOpen ? RenewGrantSeconds : _options.Seconds;

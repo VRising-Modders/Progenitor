@@ -68,6 +68,7 @@ internal static unsafe class ContainerPreviewClient
         _installed = false;
         _current?.Close(ContainerPreviewCloseReason.Unloaded, "", notify: false);
         _current = null;
+        ReleaseClosingView();
         foreach (var guarded in Guarding) guarded.FinishMapperGuard();
         Guarding.Clear();
         try { CustomEvents.RemoveHandler(ContainerPreviewWire.EventId); }
@@ -84,6 +85,7 @@ internal static unsafe class ContainerPreviewClient
         var world = Worlds.Client;
         if (world == null || !world.IsCreated) throw new InvalidOperationException("No client world (join a game first).");
         _current?.Close(ContainerPreviewCloseReason.Replaced, "", notify: true);
+        ReleaseClosingView();
         int sequence = _sequence = _sequence == int.MaxValue ? 1 : _sequence + 1;
         var handle = new ContainerPreviewHandle(container, options, world, sequence, owner) { HudGate = hudGate, SyncInventory = syncInventory };
         _current = handle;
@@ -104,6 +106,50 @@ internal static unsafe class ContainerPreviewClient
             Plugin.Logger?.LogWarning("ContainerPreview: " + kind + " send threw: " + e.Message);
             return false;
         }
+    }
+
+    /// <summary>What the running preview says about the container window in <paramref name="world"/>, for the panel sites.</summary>
+    internal static Progenitor.Ui.VanillaPreviewWindow PreviewWindow(World world)
+    {
+        var c = _current;
+        if (c != null && ReferenceEquals(c.World, world))
+        {
+            try { return c.PanelView(); }
+            catch { return default; }
+        }
+        // A preview that just closed: its window goes on a later frame. Until then the panel target keeps naming the
+        // previewed chest, so the close is one Closed event, not a TargetChanged to the bare chest first.
+        if (_closingWorld == null || !ReferenceEquals(_closingWorld, world)) return default;
+        try
+        {
+            if (world.IsCreated)
+            {
+                var window = ReadWindow(world);
+                bool shown = window.Menu == Layout.HUDMenuTypeContainerMenu;
+                bool same = window.Target.Index == _closing.WindowIndex && window.Target.Version == _closing.WindowVersion;
+                if (ContainerPreviewMachine.HoldsClosingView(shown, same, window.Interact != Entity.Null)) return _closing;
+            }
+        }
+        catch { /* */ }
+        ReleaseClosingView();
+        return default;
+    }
+
+    private static Progenitor.Ui.VanillaPreviewWindow _closing;
+    private static World? _closingWorld;
+
+    /// <summary>The closing preview's panel view, held while its window is still on screen (<see cref="PreviewWindow"/>).</summary>
+    internal static void HoldClosingView(World world, in Progenitor.Ui.VanillaPreviewWindow view)
+    {
+        if (!view.OwnsWindow || view.Container.IsNone) { ReleaseClosingView(); return; }
+        _closing = view;
+        _closingWorld = world;
+    }
+
+    internal static void ReleaseClosingView()
+    {
+        _closing = default;
+        _closingWorld = null;
     }
 
     internal static void Forget(ContainerPreviewHandle handle)
@@ -278,8 +324,107 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     internal World World => _world;
 
     /// <summary>
-    /// The container window's own part (the mapper's container sub-menu), while this preview owns the window; null
-    /// otherwise. The camera preview keeps the HUD canvas that holds it shown (<c>CameraPreviewHud</c>).
+    /// The panel sites' view of this preview (<see cref="Progenitor.Ui.VanillaPanelPreview"/>): whether it owns the
+    /// window, the entity the window was opened on, the chest's entity now, the server's network id words and the id.
+    /// </summary>
+    internal Progenitor.Ui.VanillaPreviewWindow PanelView() => new(
+        Machine.OwnsWindow, _windowTarget.Index, _windowTarget.Version, _target.Index, _target.Version,
+        _netIndex, _netGeneration, _netType, Container);
+
+    /// <summary>
+    /// Every part of the open container window a hidden HUD must leave shown: the container half and its parent, and the
+    /// character inventory half only while it is shown (the station layout; <see cref="ContainerPreviewOptions.HidePlayerInventory"/>
+    /// false). A hidden bag adds nothing, so its canvas is not kept on its account. Empty when the preview does not own the window.
+    /// </summary>
+    internal List<Transform> WindowParts()
+    {
+        var parts = new List<Transform>(3);
+        if (!Machine.OwnsWindow || !_world.IsCreated) return parts;
+        var mapper = ContainerPreviewClient.ReadWindow(_world).Mapper;
+        if (mapper == null) return parts;
+        var sub = mapper._ContainerSubMenu;
+        if (sub != null) { parts.Add(sub.transform); if (sub.transform.parent != null) parts.Add(sub.transform.parent); }
+        if (!_options.HidePlayerInventory)
+        {
+            var bag = mapper._InventorySubMenu;
+            if (bag != null) parts.Add(bag.transform);
+        }
+        return parts;
+    }
+
+    /// <summary>
+    /// Readback for the live checks: each half of the window (shown, its size on screen, its root canvas and whether that
+    /// canvas draws), the container grid's slot count, and the chest and inventory entities on this client (present,
+    /// disabled, the inventory's row count).
+    /// </summary>
+    private Dictionary<string, object?> WindowReadback()
+    {
+        var r = new Dictionary<string, object?>();
+        try
+        {
+            if (!_world.IsCreated) return r;
+            var mapper = ContainerPreviewClient.ReadWindow(_world).Mapper;
+            if (mapper != null)
+            {
+                var sub = mapper._ContainerSubMenu;
+                r["container"] = sub == null ? null : Half(sub.gameObject);
+                if (sub != null && sub.EquipmentItemsParent != null)
+                {
+                    var grid = sub.EquipmentItemsParent.transform;
+                    int active = 0;
+                    for (int i = 0; i < grid.childCount; i++) if (grid.GetChild(i).gameObject.activeSelf) active++;
+                    r["gridSlots"] = grid.childCount;
+                    r["gridSlotsShown"] = active;
+                }
+                var bag = mapper._InventorySubMenu;
+                r["inventory"] = bag == null ? null : Half(bag.gameObject);
+            }
+            var em = _world.EntityManager;
+            r["targetPresent"] = _target != Entity.Null && em.Exists(_target);
+            r["targetDisabled"] = _target != Entity.Null && em.Exists(_target) && _target.Has<Disabled>(em);
+            r["inventoryPresent"] = _inventory != Entity.Null && em.Exists(_inventory);
+            if (_inventory != Entity.Null && em.Exists(_inventory))
+            {
+                r["inventoryDisabled"] = _inventory.Has<Disabled>(em);
+                r["inventoryRows"] = em.GetBuffer<InventoryBuffer>(_inventory, true).Length;
+            }
+        }
+        catch (Exception e) { r["error"] = e.Message; }
+        return r;
+    }
+
+    private static Dictionary<string, object?> Half(GameObject go)
+    {
+        var h = new Dictionary<string, object?> { ["active"] = go.activeInHierarchy };
+        var rect = go.GetComponent<RectTransform>();
+        if (rect != null) { var size = rect.rect.size; h["size"] = new[] { size.x, size.y }; h["position"] = new[] { rect.position.x, rect.position.y }; }
+        var canvas = go.GetComponentInParent<Canvas>();
+        var root = canvas == null ? null : canvas.rootCanvas;
+        h["rootCanvas"] = root == null ? null : root.gameObject.name;
+        h["rootCanvasEnabled"] = root != null && root.enabled;
+        var group = go.GetComponent<CanvasGroup>();
+        if (group != null) { h["alpha"] = group.alpha; h["blocksRaycasts"] = group.blocksRaycasts; h["interactable"] = group.interactable; }
+        return h;
+    }
+
+    /// <summary>The container panel site's newest target (what attached mod tabs receive) and how many frames ago it was read.</summary>
+    private Dictionary<string, object?> PanelTargetReadback()
+    {
+        var t = Progenitor.Ui.UnityUiRuntime.LastContainerPanelTarget;
+        int frame = Progenitor.Ui.UnityUiRuntime.LastContainerPanelFrame;
+        return new Dictionary<string, object?>
+        {
+            ["target"] = frame < 0 ? null : t.ToString(),
+            ["framesAgo"] = frame < 0 ? null : Time.frameCount - frame,
+            ["previewContainer"] = t.IsPreview ? t.PreviewContainer.ToString() : null,
+            ["matchesPreview"] = frame >= 0 && t.IsPreview && t.PreviewContainer == Container
+                && t.NetworkIdIndex == _netIndex && t.NetworkIdGeneration == _netGeneration,
+        };
+    }
+
+    /// <summary>
+    /// The container half alone (the mapper's container sub-menu) while this preview owns the window, else null: the
+    /// camera preview's readback reports whether it draws. <see cref="WindowParts"/> is what the hidden HUD keeps.
     /// </summary>
     internal Transform? WindowPart()
     {
@@ -570,7 +715,13 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// <summary>Close for <paramref name="reason"/>. <paramref name="tellServer"/> false when the server already let go.</summary>
     internal void Close(ContainerPreviewCloseReason reason, string message, bool notify, bool tellServer = true)
     {
+        Progenitor.Ui.VanillaPreviewWindow view = default;
+        try { view = PanelView(); } catch { /* */ }
         if (!Machine.Close(reason, message)) return;
+        // Held only while the window it opened stays on screen; unload or a dead world has no window to hold for.
+        if (reason != ContainerPreviewCloseReason.Unloaded && reason != ContainerPreviewCloseReason.WorldChanged && _world.IsCreated)
+            ContainerPreviewClient.HoldClosingView(_world, view);
+        else ContainerPreviewClient.ReleaseClosingView();
         Finish(notify, tellServer);
     }
 
@@ -676,6 +827,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["target"] = _target == Entity.Null ? null : _target.Index + ":" + _target.Version,
         ["inventory"] = _inventory == Entity.Null ? null : _inventory.Index + ":" + _inventory.Version,
         ["inventoryMissing"] = Machine.InventoryMissing,
+        ["window"] = WindowReadback(),
+        ["panelTarget"] = PanelTargetReadback(),
         ["hooks"] = _hudHook != null,
         ["hiddenUi"] = _hidden.Count,
         ["droppedEvents"] = DroppedEvents,

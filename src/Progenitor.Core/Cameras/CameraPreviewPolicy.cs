@@ -86,6 +86,82 @@ public sealed class CameraPreviewOptions
     /// at that place on screen while the camera turns. Change it on a running preview with <c>SetScreenOffset</c>.
     /// </summary>
     public float ScreenOffset { get; set; }
+
+    /// <summary>
+    /// The orbit distance in meters, 2 to 40; null keeps 6 (or the player's camera with <see cref="MatchPlayerCamera"/>).
+    /// Farther shows more of the room around the point.
+    /// </summary>
+    public float? Distance { get; set; }
+
+    /// <summary>The orbit pitch in degrees below the horizon, 10 to 85; null keeps 35 (or the player's camera).</summary>
+    public float? Pitch { get; set; }
+
+    /// <summary>
+    /// Frame the point the way the player's own camera frames their character right now: the same distance and pitch,
+    /// as when the player walks up to a chest and opens it (the game does not move the camera for that). Measured from
+    /// the game's camera when the preview starts; <see cref="Distance"/> and <see cref="Pitch"/> override either part,
+    /// and the defaults apply when the camera cannot be read.
+    /// </summary>
+    public bool MatchPlayerCamera { get; set; }
+}
+
+/// <summary>The camera preview's orbit distance and pitch, game-free (<see cref="CameraPreviewOptions.Distance"/>, <c>Pitch</c>, <c>MatchPlayerCamera</c>).</summary>
+internal static class CameraPreviewFramingRules
+{
+    internal const float DefaultDistance = 6, DefaultPitch = 35;
+    internal const float MinDistance = 2, MaxDistance = 40;
+    internal const float MinPitch = 10, MaxPitch = 85;
+
+    /// <summary>Null when the explicit values are usable, else the sentence to throw.</summary>
+    internal static string? Problem(float? distance, float? pitch)
+    {
+        if (distance is float d && (!float.IsFinite(d) || d < MinDistance || d > MaxDistance)) return "Distance must be 2 to 40 meters.";
+        if (pitch is float p && (!float.IsFinite(p) || p < MinPitch || p > MaxPitch)) return "Pitch must be 10 to 85 degrees.";
+        return null;
+    }
+
+    /// <summary>How far (meters, on the ground) the player's camera may look from the character and still count as the player's camera.</summary>
+    internal const float MaxLookOffset = 5;
+
+    /// <summary>
+    /// The player's camera as an orbit shot: the pitch of its forward axis below the horizon and its distance to its
+    /// look-at point, where that axis meets the character's ground height (an orbit shot circles the point it looks at,
+    /// and the game's camera need not look exactly at the character). Not usable (false) when
+    /// <paramref name="playerCameraOnScreen"/> is false (a plugin shot, such as an earlier preview's orbit, or a mode
+    /// switch not landed yet, is on screen), when unreadable, when the axis does not point down, when that look-at point
+    /// is more than <see cref="MaxLookOffset"/> from the character, or when the result is outside the ranges above.
+    /// </summary>
+    internal static (bool Ok, float Distance, float Pitch) FromCamera(bool playerCameraOnScreen, float cx, float cy, float cz,
+        float fx, float fy, float fz, float tx, float ty, float tz)
+    {
+        if (!playerCameraOnScreen) return (false, 0, 0);
+        float len = MathF.Sqrt(fx * fx + fy * fy + fz * fz);
+        if (!float.IsFinite(len) || len < 1e-4f) return (false, 0, 0);
+        float ux = fx / len, uy = fy / len, uz = fz / len;
+        if (uy >= -1e-3f || cy <= ty) return (false, 0, 0);
+        float pitch = MathF.Asin(Math.Clamp(-uy, -1f, 1f)) * (180f / MathF.PI);
+        float distance = (cy - ty) / -uy;
+        float lx = cx + ux * distance, lz = cz + uz * distance;
+        float ox = lx - tx, oz = lz - tz;
+        bool ok = float.IsFinite(pitch) && float.IsFinite(distance)
+            && MathF.Sqrt(ox * ox + oz * oz) <= MaxLookOffset
+            && pitch >= MinPitch && pitch <= MaxPitch && distance >= MinDistance && distance <= MaxDistance;
+        return ok ? (true, distance, pitch) : (false, 0, 0);
+    }
+
+    /// <summary>
+    /// The camera on screen is the player's own: no plugin shot runs (an earlier preview that is being replaced still
+    /// has its orbit on screen) and the game reports its top-down mode (a requested switch has not landed otherwise).
+    /// </summary>
+    internal static bool PlayerCameraOnScreen(bool anyShotActive, bool gameModeIsTopDown) => !anyShotActive && gameModeIsTopDown;
+
+    /// <summary>The preview's distance and pitch: explicit values first, then the player's camera when asked and readable, then the defaults.</summary>
+    internal static (float Distance, float Pitch) Resolve(float? distance, float? pitch, bool matchPlayerCamera, (bool Ok, float Distance, float Pitch) player)
+    {
+        float d = DefaultDistance, p = DefaultPitch;
+        if (matchPlayerCamera && player.Ok) { d = player.Distance; p = player.Pitch; }
+        return (distance ?? d, pitch ?? p);
+    }
 }
 
 /// <summary>
@@ -363,10 +439,10 @@ internal static class CameraPreviewEscape
 }
 
 /// <summary>
-/// Which hidden HUD canvas a camera preview leaves shown. The preview hides every root canvas of the game's HUD
-/// (<c>PhotoHud</c>), and the game's container window sits on one of them. While this client's container preview owns
-/// that window, in the same client world, and the camera preview itself hid the HUD, the one hidden canvas that holds
-/// the window stays as it was; every other canvas stays hidden and is kept off every frame. Game-free so it is tested.
+/// Which hidden HUD canvases a camera preview leaves shown. The preview hides every root canvas of the game's HUD
+/// (<c>PhotoHud</c>), and the game's container window sits on one or more of them. While this client's container preview
+/// owns that window, in the same client world, and the camera preview itself hid the HUD, every hidden canvas that holds
+/// a part of the window stays as it was; every other canvas stays hidden and is kept off every frame. Game-free so it is tested.
 /// </summary>
 internal static class CameraPreviewHud
 {
@@ -375,18 +451,23 @@ internal static class CameraPreviewHud
         previewOwnsHud && containerOwnsWindow && sameWorld;
 
     /// <summary>
-    /// The index of the hidden canvas to leave shown: the first whose subtree holds the container window
-    /// (<paramref name="holdsWindow"/>, one entry per hidden canvas), or -1 when nothing is kept or none holds it.
+    /// Every hidden canvas to leave shown: each one whose subtree holds a part of the container window
+    /// (<paramref name="holdsAnyPart"/>, one entry per hidden canvas). The window's halves (the container, the character
+    /// inventory beside it) can sit on different canvases, and keeping only the first left half the window hidden.
+    /// All false when nothing is kept.
     /// </summary>
-    internal static int CanvasToKeep(bool keep, System.Collections.Generic.IReadOnlyList<bool> holdsWindow)
+    internal static bool[] CanvasesToKeep(bool keep, System.Collections.Generic.IReadOnlyList<bool> holdsAnyPart)
     {
-        if (!keep || holdsWindow == null) return -1;
-        for (int i = 0; i < holdsWindow.Count; i++) if (holdsWindow[i]) return i;
-        return -1;
+        if (holdsAnyPart == null) return Array.Empty<bool>();
+        var kept = new bool[holdsAnyPart.Count];
+        if (!keep) return kept;
+        for (int i = 0; i < kept.Length; i++) kept[i] = holdsAnyPart[i];
+        return kept;
     }
 
-    /// <summary>Whether the per-frame reassert turns hidden canvas <paramref name="index"/> off again.</summary>
-    internal static bool Reasserts(int index, int kept) => index != kept;
+    /// <summary>Whether the per-frame reassert turns hidden canvas <paramref name="index"/> off again (not one that is kept).</summary>
+    internal static bool Reasserts(int index, System.Collections.Generic.IReadOnlyList<bool> kept) =>
+        kept == null || index < 0 || index >= kept.Count || !kept[index];
 }
 
 /// <summary>What one server observation check saw. Game-free so the end decision is unit tested.</summary>
