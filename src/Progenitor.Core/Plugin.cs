@@ -323,6 +323,8 @@ public sealed class Plugin
             // Hosted owns LifetimeQuitting / LifetimeFrame for this generation. Do not
             // null them here: Hosted.Install just pointed them at the child-completion
             // callbacks, and a restore while a child is running would drop those slots.
+            // LifetimeQuit shares the quit slot between Core's own quit work and Hosted's callback.
+            LifetimeQuit.AttachCore();
             BootstrapLink.NotifyCoreReady();
         }
         _installed = true;
@@ -569,7 +571,7 @@ public sealed class Plugin
         // again (R28 findings 14 and 17).
         try { Dev.PerfProbe.NoteCoreUninstall(); }
         catch (Exception e) { Logger?.LogWarning($"PerfProbe.NoteCoreUninstall: {e.Message}"); }
-        BootstrapLink.SetLifetimeQuitting(null);
+        LifetimeQuit.DetachCore();
         BootstrapLink.SetLifetimeFrame(null);
         HarmonySlotHandoff.ClearLateFrame();
         ResetLocalizationHookFlag();

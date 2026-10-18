@@ -923,7 +923,7 @@ public static class HostedServerLauncher
     {
         try { BootstrapLink.SetLifetimeFrame(OnFrameCompleteDeferredUninstall); }
         catch (Exception e) { Plugin.Logger?.LogError($"Hosted: SetLifetimeFrame threw: {e}"); }
-        try { BootstrapLink.SetLifetimeQuitting(OnQuittingCompleteDeferredUninstall); }
+        try { LifetimeQuit.SetHosted(OnQuittingCompleteDeferredUninstall); }
         catch (Exception e) { Plugin.Logger?.LogError($"Hosted: SetLifetimeQuitting threw: {e}"); }
     }
 
@@ -962,7 +962,7 @@ public static class HostedServerLauncher
         {
             try { BootstrapLink.SetLifetimeFrame(null); }
             catch (Exception e) { Plugin.Logger?.LogError($"Hosted: clear LifetimeFrame threw: {e}"); }
-            try { BootstrapLink.SetLifetimeQuitting(null); }
+            try { LifetimeQuit.SetHosted(null); }
             catch (Exception e) { Plugin.Logger?.LogError($"Hosted: clear LifetimeQuitting threw: {e}"); }
         }
         else

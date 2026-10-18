@@ -726,7 +726,13 @@ public sealed class ConfigHelperTests : IDisposable
         Assert.False(ReadOrphans(_plugin).ContainsKey(definition));
         Assert.Empty(
             ConfigSync.TestLogs.FindAll(l => l.Contains("could not be written as an orphan", StringComparison.Ordinal)));
-        Assert.True(_plugin.SaveOnConfigSet);
+
+        // The live row still holds the server's text and nothing parks the operator's, so the file must not
+        // autosave: SaveOnConfigSet stays off (the hold stays), and the log says why.
+        Assert.False(_plugin.SaveOnConfigSet);
+        Assert.True(ConfigSync.IsSaveHeldOff(_plugin));
+        Assert.Contains(ConfigSync.TestLogs, l => l.Contains("SaveOnConfigSet stays off", StringComparison.Ordinal));
+        Assert.False(ConfigSync.TrySaveHeldFile(_plugin, out _));
     }
 
     /// <summary>

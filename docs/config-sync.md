@@ -43,15 +43,38 @@ Default locks use the same lock as a server value: refused writes, parked locals
 
 Status: source-checked and game-free tested (`ConfigSyncRangeTests`, `ConfigSyncTests`); not live-verified.
 
-The client applies them, caches its previous locals, and **locks** the entries until disconnect (or a new `Client_0` world). Plugin hot-reload while still in the session does **not** restore locals: Unregister keeps the lock and the server value (and does not write Toml), and a re-bind of the same key re-attaches (one `re-attached … after plugin reload` line). A server push or server re-register that lands while the plugin is unbound updates the session lock, so re-attach writes the **newest** server value. Live BepInEx assigns `ConfigEntry.Value` first; ConfigSync reverts on the entry's `SettingChanged` / the file's `SettingChanged` immediately and logs one line per key until unlock. `SaveOnConfigSet` stays **off** while any Synced slot on that file is locked — `EndApply` never forces it back to true — so a later non-synced `Value` set cannot auto-save. Locked keys are also parked as BepInEx `OrphanedEntries` holding the pre-join local (including a key bound after the session is already locked), so an explicit `ConfigFile.Save()` writes that local instead of the live server `BoxedValue`. Parking drops the live row even when `ConfigFile.Remove` throws.
+The client applies them, caches its previous locals, and **locks** the entries until disconnect (or a new `Client_0` world). Plugin hot-reload while still in the session does **not** restore locals: Unregister keeps the lock and the server value (and does not write Toml), and a re-bind of the same key re-attaches (one `re-attached … after plugin reload` line). A server push or server re-register that lands while the plugin is unbound updates the session lock, so re-attach writes the **newest** server value. Live BepInEx assigns `ConfigEntry.Value` first; ConfigSync reverts on the entry's `SettingChanged` / the file's `SettingChanged` immediately and logs one line per key until unlock. `SaveOnConfigSet` stays **off** while any Synced slot on that file is locked — `EndApply` never forces it back to true — so BepInEx does not auto-save a later non-synced `Value` set; ConfigSync saves it instead (see [Local settings in a held cfg](#local-settings-in-a-held-cfg)). Locked keys are also parked as BepInEx `OrphanedEntries` holding the pre-join local (including a key bound after the session is already locked), so an explicit `ConfigFile.Save()` writes that local instead of the live server `BoxedValue`. Parking drops the live row even when `ConfigFile.Remove` throws.
 
 On disconnect the cached locals are written back, the entries unlock, `SaveOnConfigSet` is restored, and the file is `Save()`d so disk matches the restored locals.
+
+### Local settings in a held cfg
+
+A cfg with synced entries usually also holds the plugin's own non-synced entries (player preferences, keybinds). While the hold is on, ConfigSync saves that file itself after any of them changes, whoever made the change: a plugin setting `ConfigEntry<T>.Value` itself, or the settings page (which also saves at once).
+
+| Rule | Behavior |
+|---|---|
+| Debounce | One pending save per file, written `ConfigSync.LocalSaveDebounceSeconds` (**1.5 s**) after the last change, and at most `ConfigSync.LocalSaveMaxWaitSeconds` (**10 s**) after the first, so a plugin writing every frame is still saved. |
+| What is written | The same save as an explicit `ConfigFile.Save()` during the hold (`ConfigSync.TrySaveHeldFile`): locked keys are parked orphans holding the player's own pre-join values, so a server value never reaches disk. When a locked key could not be parked, nothing is saved, with one warning per file per session. |
+| Not a trigger | A write by sync itself to a synced entry (join snapshot, later push, default lock, revert of a refused write, restore). A plugin's write to its own entry made while an apply runs is saved after the apply. |
+| Left to the mod | A file whose `SaveOnConfigSet` was already off before the hold. |
+| Flush | A pending save is written at once on disconnect or a new client world, when the file's last synced entry unregisters (plugin unload or hot reload), on Core unload, and on a normal quit (Bootstrap's quit slot). A forced kill runs none of these. |
+| Server value left live | When a restore gives up and cannot park the player's value, that file keeps `SaveOnConfigSet` off for the rest of the Core generation and nothing saves it, because its live row still holds the server's value. |
+
+Status: source-checked and game-free tested (`ConfigSyncLocalSaveTests`, and `ConfigHelperTests` for a value left live); not live-verified.
+
+Acceptance procedure — not run:
+
+1. Client and test server run a plugin with a synced entry and a non-synced entry in one cfg, where the plugin sets the non-synced `ConfigEntry<T>.Value` from its own code. A settings-page write is not this path: it saves at once (SAVEHOLD1) and logs no line here.
+2. Join the test server. Make the plugin change the non-synced entry. Within about 2 s the client `BepInEx/config/<guid>.cfg` holds the new value, the synced key still holds the pre-join local (not the server's value), and the log has one `ConfigSync: saved '…' for a local setting change while its synced settings are locked (debounce)` line for that file.
+3. Change it again and hot-reload the plugin within the debounce: the cfg holds the newest value. No new log line: the save line is logged once per file per Core generation.
+4. Change it again and quit the game normally within the debounce: after restart the value is kept.
+5. Disconnect: the cfg holds the restored locals and the non-synced value.
 
 **"Server values never reach your `.cfg`" is a tested claim, not an assertion.** `ConfigSyncTests.A_synced_value_never_reaches_the_cfg_on_disk` drives a synced entry through the real client apply path against the `ConfigFile` shim (`tests/Progenitor.Tests/ConfigFileShims.cs`, whose `Save()` writes a real file: Entries then OrphanedEntries, the same order as live BepInEx) and asserts on **bytes read back from disk**, not on the shim's in-memory `LastSavedText`:
 
 1. before the join the file holds the local (`Count = 3`);
 2. after `ApplyRecords` the overlay is the server's value (`Count == 9`) and the file is byte-for-byte unchanged;
-3. a write to the locked key and a write to an unrelated non-synced key on the same file change nothing on disk (`SaveOnConfigSet` is held off while any synced slot on that file is locked), and the locked key reverts with `ConfigSync: refused write to …`;
+3. a write to the locked key and a write to an unrelated non-synced key on the same file change nothing on disk at once (`SaveOnConfigSet` is held off while any synced slot on that file is locked; the non-synced change is saved later by the debounced local save, which this test does not run), and the locked key reverts with `ConfigSync: refused write to …`;
 4. an explicit `ConfigFile.Save()` during the session writes the parked pre-join local (`Count = 3`, never `9` or `99`) and the non-synced key's new value;
 5. after `RestoreLocal()` the file holds the restored local and `SaveOnConfigSet` is back on.
 
@@ -83,5 +106,7 @@ Client:
 - `ConfigSync: re-attached {plugin}/{section}/{key} to the locked server value after plugin reload`
 - `ConfigSync: refused write to {plugin}/{section}/{key} while locked to the server value`
 - `ConfigSync: restored {n} local setting(s) after disconnect`
+- `ConfigSync: saved '{path}' for a local setting change while its synced settings are locked ({debounce|max wait|disconnect|plugin unload|unload|process exit}); synced keys keep this client's own values on disk` (once per file)
+- `ConfigSync: a local setting change in '{path}' was not saved ({reason}): {why}` (once per file per session)
 
 Administrator edits from the client (opt-in per entry; authorized by the server's admin list or `adminauth`, rate limited and audited to `BepInEx/progenitor-settings.log`) are described under [Settings rows](mods-menu.md#settings-rows). Not provided: a separate config-editor plugin UI.
