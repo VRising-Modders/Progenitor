@@ -29,6 +29,33 @@ public sealed class ContainerReturnTests
     }
 
     [Fact]
+    public void A_snapshot_reopens_only_the_opening_it_saw_open_and_never_a_window_the_player_closed()
+    {
+        // Snapshot taken with the window open, same opening: reopen.
+        Assert.Equal(ContainerReopenResult.Started, ContainerReturnRules.Check(true, true, 5, true, false,
+            closedByPlayer: false, hasSnapshot: true, snapshotWasOpen: true, snapshotSameOpening: true));
+        // The window was not open when the flow started: nothing to go back to.
+        Assert.Equal(ContainerReopenResult.ClosedByPlayer, ContainerReturnRules.Check(true, true, 5, true, false,
+            closedByPlayer: false, hasSnapshot: true, snapshotWasOpen: false, snapshotSameOpening: true));
+        // The player opened and closed it again since: another opening.
+        Assert.Equal(ContainerReopenResult.ClosedByPlayer, ContainerReturnRules.Check(true, true, 5, true, false,
+            closedByPlayer: false, hasSnapshot: true, snapshotWasOpen: true, snapshotSameOpening: false));
+        // Closed by the player, with or without a snapshot.
+        Assert.Equal(ContainerReopenResult.ClosedByPlayer, ContainerReturnRules.Check(true, true, 5, true, false, closedByPlayer: true));
+        Assert.Equal(ContainerReopenResult.ClosedByPlayer, ContainerReturnRules.Check(true, true, 5, true, false,
+            closedByPlayer: true, hasSnapshot: true, snapshotWasOpen: true, snapshotSameOpening: true));
+    }
+
+    [Fact]
+    public void A_window_closing_to_nothing_is_the_players_close_unless_a_flow_just_closed_it()
+    {
+        Assert.True(ContainerReturnRules.ClosedByPlayer(0, double.PositiveInfinity)); // Escape, Interact, walking away
+        Assert.True(ContainerReturnRules.ClosedByPlayer(0, ContainerReturnRules.FlowCloseSeconds + 0.1));
+        Assert.False(ContainerReturnRules.ClosedByPlayer(0, 0.1));  // a world pick or a preview closed it
+        Assert.False(ContainerReturnRules.ClosedByPlayer(9, double.PositiveInfinity)); // another window took its place
+    }
+
+    [Fact]
     public void Moving_more_than_a_meter_on_the_ground_counts_as_moved()
     {
         Assert.False(ContainerReturnRules.Moved(10, 20, 10.5f, 20.5f));
@@ -50,9 +77,9 @@ public sealed class ContainerReturnTests
     }
 
     [Theory]
-    [InlineData(ContainerPreviewCloseReason.Disposed, true)]
-    [InlineData(ContainerPreviewCloseReason.Escape, true)]
-    [InlineData(ContainerPreviewCloseReason.WindowClosed, true)]
+    [InlineData(ContainerPreviewCloseReason.Disposed, false)]
+    [InlineData(ContainerPreviewCloseReason.Escape, false)]
+    [InlineData(ContainerPreviewCloseReason.WindowClosed, false)]
     [InlineData(ContainerPreviewCloseReason.Timeout, true)]
     [InlineData(ContainerPreviewCloseReason.LeaseEnded, true)]
     [InlineData(ContainerPreviewCloseReason.TargetGone, true)]
@@ -62,7 +89,7 @@ public sealed class ContainerReturnTests
     [InlineData(ContainerPreviewCloseReason.WorldChanged, false)]
     [InlineData(ContainerPreviewCloseReason.Unloaded, false)]
     [InlineData(ContainerPreviewCloseReason.None, false)]
-    public void A_preview_returns_unless_replaced_the_world_changed_or_unloaded(ContainerPreviewCloseReason reason, bool returns) =>
+    public void A_preview_returns_only_when_it_ended_on_its_own(ContainerPreviewCloseReason reason, bool returns) =>
         Assert.Equal(returns, ContainerReturnRules.ReturnsAfterPreview(reason));
 
     // ---- one reopen ------------------------------------------------------------------------------
@@ -80,7 +107,10 @@ public sealed class ContainerReturnTests
         Assert.Equal(ContainerReopenStep.Press, p.Step(0.1, Here()));
         Assert.True(p.PressedEver);
         Assert.Equal(ContainerReopenStep.Wait, p.Step(0.2, Here()));
-        Assert.Equal(ContainerReopenStep.Finish, p.Step(0.3, Here(window: true)));
+        // The input goes back as soon as the press is over; the window is then only watched.
+        Assert.Equal(ContainerReopenStep.ReleaseInput, p.Step(0.1 + ContainerReopenPlan.PressSeconds, Here()));
+        Assert.Equal(ContainerReopenStep.Wait, p.Step(0.6, Here()));
+        Assert.Equal(ContainerReopenStep.Finish, p.Step(0.7, Here(window: true)));
         Assert.Equal(ContainerReopenResult.Opened, p.Result);
         Assert.Equal(ContainerReopenStep.Wait, p.Step(0.4, Here(window: true))); // done stays done
     }
@@ -153,9 +183,32 @@ public sealed class ContainerReturnTests
     }
 
     [Fact]
+    public void A_window_opening_during_the_press_is_seen_at_once()
+    {
+        var p = Pressed(out double at);
+        Assert.Equal(ContainerReopenStep.Finish, p.Step(at + 0.1, Here(window: true)));
+        Assert.Equal(ContainerReopenResult.Opened, p.Result);
+    }
+
+    [Fact]
+    public void A_different_window_after_the_press_ends_it_early()
+    {
+        var p = Pressed(out double at);
+        var other = Here(menu: true);
+        other.OtherWindowOpen = true;
+        Assert.Equal(ContainerReopenStep.Finish, p.Step(at + 0.05, other));
+        Assert.Equal(ContainerReopenResult.MenuOpen, p.Result);
+
+        // The reopened window's own menu, its object not read yet, is not a different one.
+        var q = Pressed(out double at2);
+        Assert.Equal(ContainerReopenStep.Wait, q.Step(at2 + 0.05, Here(menu: true)));
+    }
+
+    [Fact]
     public void No_window_after_the_press_is_not_opened()
     {
         var p = Pressed(out double at);
+        Assert.Equal(ContainerReopenStep.ReleaseInput, p.Step(at + ContainerReopenPlan.PressSeconds, Here()));
         Assert.Equal(ContainerReopenStep.Wait, p.Step(at + ContainerReopenPlan.OpenWaitSeconds - 0.01, Here()));
         Assert.Equal(ContainerReopenStep.Finish, p.Step(at + ContainerReopenPlan.OpenWaitSeconds, Here()));
         Assert.Equal(ContainerReopenResult.NotOpened, p.Result);
@@ -384,6 +437,18 @@ public sealed class ContainerReturnEscapeTests : IDisposable
         UiApi.PressEscapeForBridge();
         Assert.Equal(UiHandleState.Built, hub.State);
         Assert.Equal(UiHandleState.Built, tab.State);
+    }
+
+    [Fact]
+    public void Only_panels_shown_after_a_point_count_when_asked()
+    {
+        // A container preview yields Escape to a hub opened after its window, not to a Find panel docked before it.
+        GameWindowUnderPanel.MenuTypeNow = () => 3;
+        Shown("Find", UiCaptureMode.WhileShown);
+        long armed = UiPanelHandle.LastShownSequence;
+        Assert.False(UiApi.EscapeHidesAPanelOverGameWindow(armed));
+        Shown("Hub", UiCaptureMode.WhileShown);
+        Assert.True(UiApi.EscapeHidesAPanelOverGameWindow(armed));
     }
 
     [Fact]

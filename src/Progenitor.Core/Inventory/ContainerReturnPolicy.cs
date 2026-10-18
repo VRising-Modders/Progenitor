@@ -41,6 +41,12 @@ public enum ContainerReopenResult
 
     /// <summary>Not in a game world on the client (the server, the title screen).</summary>
     NotInGame = 10,
+
+    /// <summary>
+    /// The player closed that window themselves (it closed to no other window and no Progenitor flow closed it), or the
+    /// snapshot passed to <c>ReopenLast</c> was not open, or names another opening of it: nothing is reopened.
+    /// </summary>
+    ClosedByPlayer = 11,
 }
 
 /// <summary>
@@ -51,11 +57,19 @@ public enum ContainerReopenResult
 public sealed class ContainerWindowInfo
 {
     internal ContainerWindowInfo(VanillaPanelKind kind, int menuType, int entityIndex, int entityVersion,
-        int networkIdIndex, int networkIdGeneration, bool isOpen, double secondsSinceSeen)
+        int networkIdIndex, int networkIdGeneration, bool isOpen, double secondsSinceSeen, int openCount)
     {
         Kind = kind; MenuType = menuType; EntityIndex = entityIndex; EntityVersion = entityVersion;
         NetworkIdIndex = networkIdIndex; NetworkIdGeneration = networkIdGeneration; IsOpen = isOpen; SecondsSinceSeen = secondsSinceSeen;
+        OpenCount = openCount;
     }
+
+    /// <summary>
+    /// Which opening of a window this is: it changes every time the player opens a chest or station window. Take the
+    /// snapshot when your flow starts and pass it to <c>ReopenLast</c>: it reopens only that same opening, and only if
+    /// it was open then.
+    /// </summary>
+    public int OpenCount { get; }
 
     /// <summary>Which window: <see cref="VanillaPanelKind.Container"/>, a station kind or the castle heart.</summary>
     public VanillaPanelKind Kind { get; }
@@ -109,27 +123,46 @@ internal static class ContainerReturnRules
     }
 
     /// <summary>
-    /// The call's own answer, in order: a game world, a remembered window not too old, the object still on this client,
-    /// the character still where it stood. <see cref="ContainerReopenResult.Started"/> when all hold.
+    /// The call's own answer, in order: a game world, a remembered window not too old, the snapshot (when the caller
+    /// passed one) open when it was taken and of the same opening, the window not closed by the player, the object still
+    /// on this client, the character still where it stood. <see cref="ContainerReopenResult.Started"/> when all hold.
     /// </summary>
-    internal static ContainerReopenResult Check(bool inGame, bool remembered, double secondsSinceSeen, bool targetPresent, bool moved)
+    internal static ContainerReopenResult Check(bool inGame, bool remembered, double secondsSinceSeen, bool targetPresent, bool moved,
+        bool closedByPlayer = false, bool hasSnapshot = false, bool snapshotWasOpen = false, bool snapshotSameOpening = false)
     {
         if (!inGame) return ContainerReopenResult.NotInGame;
         if (!remembered || !(secondsSinceSeen <= RememberSeconds)) return ContainerReopenResult.NothingToReopen;
+        if (hasSnapshot && (!snapshotWasOpen || !snapshotSameOpening)) return ContainerReopenResult.ClosedByPlayer;
+        if (closedByPlayer) return ContainerReopenResult.ClosedByPlayer;
         if (!targetPresent) return ContainerReopenResult.Gone;
         if (moved) return ContainerReopenResult.Moved;
         return ContainerReopenResult.Started;
     }
 
+    /// <summary>How long after a Progenitor flow closed the game's window (a world pick, a preview, the Mods menu) that close counts as the flow's.</summary>
+    internal const double FlowCloseSeconds = 1.0;
+
     /// <summary>
-    /// Whether a container preview that took the place of the player's window opens that window again when it closes.
-    /// Not when a newer preview replaced it (that one returns instead), the world changed, or the plugin or Core unloaded.
-    /// A preview the game closed because the player opened something else is handled by the reopen itself, which gives up
-    /// when another game window stays open.
+    /// Who closed the remembered window, decided on the first frame it is no longer shown: another game window took its
+    /// place (the Mods menu, the map, another chest), or a Progenitor flow closed it within <see cref="FlowCloseSeconds"/>,
+    /// and it was not the player; it closed to nothing otherwise (the player's Escape or Interact, or walking away), and
+    /// it was.
+    /// </summary>
+    internal static bool ClosedByPlayer(int menuNow, double secondsSinceFlowClose) =>
+        menuNow == 0 && !(secondsSinceFlowClose <= FlowCloseSeconds);
+
+    /// <summary>
+    /// Whether a container preview that took the place of the player's window opens that window again when it closes:
+    /// only when it ended on its own (time, the server letting go, the chest leaving, a failure). Not when the caller
+    /// disposed it or the player closed it (Escape, or the game's own close: <c>Disposed</c>, <c>Escape</c>,
+    /// <c>WindowClosed</c>); a caller that wants the window back then calls <c>ReopenLast</c> with the snapshot it took
+    /// before opening the preview. Not when a newer preview replaced it (that one inherits the return), the world
+    /// changed, or the plugin or Core unloaded.
     /// </summary>
     internal static bool ReturnsAfterPreview(ContainerPreviewCloseReason reason) => reason is not (
         ContainerPreviewCloseReason.None or ContainerPreviewCloseReason.Replaced
-        or ContainerPreviewCloseReason.WorldChanged or ContainerPreviewCloseReason.Unloaded);
+        or ContainerPreviewCloseReason.WorldChanged or ContainerPreviewCloseReason.Unloaded
+        or ContainerPreviewCloseReason.Disposed or ContainerPreviewCloseReason.Escape or ContainerPreviewCloseReason.WindowClosed);
 
     /// <summary>
     /// Whether the window open now is one to remember: a chest or station window the player opened at the object. A
@@ -158,6 +191,11 @@ internal struct ContainerReopenSample
     public bool AnyMenuOpen;
     /// <summary>A camera preview is running (it moves the player's view; the reopen waits for it to end).</summary>
     public bool CameraPreview;
+    /// <summary>
+    /// A different game window is open: another menu type than the remembered window's, or the same window on another
+    /// object. The remembered window opening (its menu type, no object bound yet) is not a different one.
+    /// </summary>
+    public bool OtherWindowOpen;
 }
 
 /// <summary>What the runtime does this frame.</summary>
@@ -171,13 +209,15 @@ internal enum ContainerReopenStep
     Press = 2,
     /// <summary>Done: hand the input back; <see cref="ContainerReopenPlan.Result"/> says how it went.</summary>
     Finish = 3,
+    /// <summary>The press is over: hand the input back now and only watch for the window.</summary>
+    ReleaseInput = 4,
 }
 
 /// <summary>
 /// One reopen, game-free: let the frame settle (a close the same key press asked for lands a frame later), wait for the
 /// game's windows to close and a camera preview to end, hover the object for a few frames so the hover reaches the
-/// outgoing command, press Interact once, then wait for the window. The hover-then-press order is the Dev bot driver's
-/// and the container open gate's repeat.
+/// outgoing command, press Interact once, hand the input back as soon as the press ends, then only watch for the
+/// window. The hover-then-press order is the Dev bot driver's and the container open gate's repeat.
 /// </summary>
 internal sealed class ContainerReopenPlan
 {
@@ -199,7 +239,7 @@ internal sealed class ContainerReopenPlan
     /// <summary>How long after the press the window may take to open.</summary>
     internal const double OpenWaitSeconds = 1.5;
 
-    private enum Phase { Settle, WaitMenu, Hover, Pressed, Done }
+    private enum Phase { Settle, WaitMenu, Hover, Pressed, Watching, Done }
 
     private Phase _phase = Phase.Settle;
     private int _frames;
@@ -231,7 +271,10 @@ internal sealed class ContainerReopenPlan
     {
         if (_phase == Phase.Done) return ContainerReopenStep.Wait;
         if (!s.SameWorld) return End(ContainerReopenResult.Cancelled);
-        if (_phase == Phase.Pressed && s.WindowOnTarget) return End(ContainerReopenResult.Opened);
+        if ((_phase is Phase.Pressed or Phase.Watching) && s.WindowOnTarget) return End(ContainerReopenResult.Opened);
+        // A different window opened after the press (the press reached another object, or the player opened something):
+        // end now rather than wait out the timeout.
+        if ((_phase is Phase.Pressed or Phase.Watching) && s.OtherWindowOpen) return End(ContainerReopenResult.MenuOpen);
         if (!s.TargetPresent) return End(ContainerReopenResult.Gone);
         if (s.Moved) return End(ContainerReopenResult.Moved);
         switch (_phase)
@@ -269,6 +312,12 @@ internal sealed class ContainerReopenPlan
                 return ContainerReopenStep.Press;
 
             case Phase.Pressed:
+                if (now - _since >= OpenWaitSeconds) return End(ContainerReopenResult.NotOpened);
+                if (now - _since < PressSeconds) return ContainerReopenStep.Wait;
+                _phase = Phase.Watching;
+                return ContainerReopenStep.ReleaseInput;
+
+            case Phase.Watching:
                 if (now - _since >= OpenWaitSeconds) return End(ContainerReopenResult.NotOpened);
                 return ContainerReopenStep.Wait;
         }

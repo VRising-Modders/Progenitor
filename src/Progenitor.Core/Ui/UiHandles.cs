@@ -1048,6 +1048,9 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
 
     private static long s_shownSequence;
 
+    /// <summary>RETURN1: the newest <see cref="ShownSequence"/> handed out (a panel shown after this point has a larger one).</summary>
+    internal static long LastShownSequence => Interlocked.Read(ref s_shownSequence);
+
     /// <summary>NAV1: when this panel was last shown (higher is newer); 0 before its first show.</summary>
     internal long ShownSequence { get; private set; }
 

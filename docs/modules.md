@@ -3235,8 +3235,8 @@ tested (`ContainerReturnTests`); not live-verified (the live steps are at the en
 |---|---|---|
 | The window stays open | A Progenitor panel or hub never closes the game's window. The game keeps the interaction while the player stands there, so there is nothing to reopen. | Every panel, window and hub; nothing to call. |
 | Escape order | The first Escape closes the Progenitor window; the next one closes the game's. Typing in a Progenitor field over a chest window does not close it. | Automatic over a chest, station or castle heart window. |
-| `ctx.Inventory.ReopenLast` | Opens the last chest or station window again the game's way, when something did close it. | Call it when your flow ends; it leaves a window that is still open alone. |
-| `ContainerPreviewOptions.ReturnToOpenWindow` | A remote preview takes the place of the player's open window and opens it again when it ends. | On by default. |
+| `ctx.Inventory.ReopenLast(snapshot)` | Opens the window that was open when your flow started again, the game's way, if something closed it. Never one the player closed. | Take `ctx.Inventory.LastWindow` when the flow starts; pass it when the flow ends. A window still open is left alone. |
+| `ContainerPreviewOptions.ReturnToOpenWindow` | A remote preview takes the place of the player's open window and opens it again when the preview ends on its own. | On by default. After `Dispose`, Escape or the game's close, call `ReopenLast` with your snapshot. |
 
 **Why this set.** Keeping the window open is the only way that involves no second interaction, so it comes first.
 `ReopenLast` covers what keep-open cannot: the game has one container window, so a preview of another chest must
@@ -3263,18 +3263,40 @@ floating panel that takes the input now (`WhileShown`, or `WhenHovered` under th
 close already uses, so a tracker left on screen does not cost a second Escape), and is not a Mods workspace pane, not
 mounted in the chest's own tab (`IVanillaPanelTabs.Mount`) and not `UiCaptureMode.Never`. Panels mounted in that window's tabs stay shown on that
 first Escape, because the window stays. With only mounted panels shown, Escape closes them and the window together, as
-before. While a Progenitor text field has the keyboard over such a window, the guard also takes Interact, so typing that
+before.
+
+**A panel beside the chest costs one more Escape.** A mod panel shown next to the chest window but not mounted in its
+tab (a `WhileShown` side panel, a docked game window, a hub) is a window over it by this rule: the first Escape hides that
+panel and the next one closes the chest. To have one Escape close both, mount the panel in the window's tab
+(`IVanillaPanelTabs.Mount`), make it `WhenHovered` (it then takes Escape only while the pointer is over it), or close it
+yourself when the chest window closes (the panel site's `Closed`).
+
+**A hub over a container preview.** The preview takes Escape for its own window, but only when no Progenitor window was
+shown after the preview's window opened: a hub opened over the preview closes first (the framework's window close), the
+guard keeps the preview's window, and the next Escape ends the preview. A panel shown before the preview (a docked Find
+list) stays below it: the first Escape ends the preview, as before. While a Progenitor text field has the keyboard over such a window, the guard also takes Interact, so typing that
 letter does not close the chest. Whether blocking Interact also removes its key release from the chest's handler is the
 open question the hotkey guard already has (its `InputsUp` list); the live check reads the window.
 
-**`ctx.Inventory.ReopenLast(done)` (client).** Core remembers the window the player last opened at the object: a chest,
+**`ctx.Inventory.ReopenLast(openWhenStarted, done)` (client).** Core remembers the window the player last opened at the object: a chest,
 a workstation, a refinement, prison, salvage or unit station, or the castle heart (the windows the panel sites cover),
 read once a frame only while such a window is open, through the panel sites' mapper scan. A remote preview's window is
-never remembered (a container window with no interaction behind it). `ctx.Inventory.LastWindow` shows it.
+never remembered (a container window with no interaction behind it), and neither is a window opened during a world pick
+(those interactions are picks). `ctx.Inventory.LastWindow` shows it; its `OpenCount` changes with every opening.
 
-`ReopenLast` repeats the player's own interaction: a one-second framework input lease (hover and buttons,
-`UserPolicy.Override` so a mouse movement cannot swap the hovered object under the press), hover the object for three
-frames, press Interact for 0.4 s. That is the Dev bot driver's order and the container open gate's repeat. Nothing is
+**Never a window the player closed.** When the remembered window stops showing, Core notes who closed it: another game
+window took its place (the Mods menu, the map, another chest), or a Progenitor flow closed it within the last second (a
+world pick with `CloseGameWindows`, a preview taking its place), and it was not the player; it closed to nothing
+otherwise (the player's Escape, the Interact key, walking away), and it was. A window the player closed is never
+reopened (`ClosedByPlayer`). Pass the snapshot your flow took when it started, too: the window is then reopened only if
+it was open then and it is that same opening (`OpenCount`), so a chest that was not open when the hub opened, or one the
+player opened and closed again meanwhile, stays closed.
+
+`ReopenLast` repeats the player's own interaction: hover the object for three frames, press Interact for 0.4 s (the Dev
+bot driver's order and the container open gate's repeat), then hand the input back at once and only watch for the window.
+It takes two framework leases, each only for that half second: the buttons with `UserPolicy.Yield` (a press of the
+player's own suspends it), the hover with `UserPolicy.Override`, because a mouse movement during the press would swap the
+hovered object and the press would reach whatever is under the cursor. Nothing is
 written to the game's menus and no event is built, so the server sees an ordinary interaction with its own range and
 permission checks, and every server-side open handler (the container open gate, `OnOpenRequest`) runs in front of it.
 A container with a password asks again unless the player's session grant for it still holds.
@@ -3282,6 +3304,7 @@ A container with a password asks again unless the player's session grant for it 
 | Answer | Meaning |
 |---|---|
 | `Started` | Running; `done` gets the outcome. |
+| `ClosedByPlayer` | The player closed that window themselves, or the snapshot was not open when taken, or names another opening. |
 | `NotInGame` | No client world. |
 | `NothingToReopen` | No window opened at an object in this world, or it closed more than 10 minutes ago (a preview's own return has no age limit). |
 | `Gone` | The object left this client (destroyed, or out of streaming range). Found again by its network id once if the entity changed. |
@@ -3291,30 +3314,43 @@ A container with a password asks again unless the player's session grant for it 
 | `InputBusy` | Another input lease holds the hover or the buttons. |
 | `Opened` | The window shows the object again. |
 | `NotOpened` | Interact was pressed and no window showed within 1.5 s: out of range, refused by the server, or an open gate's prompt asked first. |
+| `MenuOpen` (after the press) | A different window opened (another menu, or the same window on another object): the reopen ends at once. |
 | `Cancelled` | A newer `ReopenLast` (one at a time), a world change, or Core unloading. The calling plugin's unload cancels its own reopen without calling back. |
 
 `done` runs once on the main thread with the outcome, also when the call did not start. Keys: none of this reads a key;
 a mod that offers a "back" key registers it through `ctx.Keybinds` and calls `ReopenLast` from it.
 
 ```csharp
-// Client: the hub's Return. The chest window is normally still open underneath (AlreadyOpen); if something closed it,
-// it opens again while the player stands where they stood.
+// Client: a hub opened from a chest's Locate button. Take the snapshot when the flow starts.
+ContainerWindowInfo? atOpen = ctx.Inventory.LastWindow;
+hub.Show();
+
+// The hub's Return. The chest window is normally still open underneath (AlreadyOpen); if a flow closed it, it opens
+// again while the player stands where they stood. Not if the hub was opened without a chest open, or the player closed it.
 returnButton.OnClick(() =>
 {
     hub.Hide();
-    ctx.Inventory.ReopenLast(outcome => ctx.Log.LogInfo("back to the chest: " + outcome));
+    if (atOpen is { IsOpen: true })
+        ctx.Inventory.ReopenLast(atOpen, outcome => ctx.Log.LogInfo("back to the chest: " + outcome));
 });
 ```
 
-The Controls sample's hub (Ctrl+F8, `samples/Progenitor.ControlsSample`) does exactly this on Return and logs
+The Controls sample's hub (Ctrl+F8, `samples/Progenitor.ControlsSample`) does exactly this: it takes the snapshot when
+the hub opens and, on Return, reopens only when the hub was opened over a chest or station, logging
 `hub return reopen = <outcome>`.
 
 **A preview over the player's window (`ReturnToOpenWindow`, default true).** With the player's own window open (the
 remembered one, open now), a preview waits until the previewed chest and its inventory are on the client, then closes
 that window with the game's own close (its mapper ends the interaction, as Escape would) and opens the preview. When the
-preview ends for any reason but `Replaced`, `WorldChanged` or `Unloaded`, after its `Closed` handlers ran and only if
-none of them started another preview, it calls `ReopenLast`: the reopen waits for the preview's window to go, then
-repeats the interaction. A preview that replaces one which took the player's window inherits the return. A refused or
+preview ends **on its own** (`Timeout`, `LeaseEnded`, `TargetGone`, `OpenFailed`, `Failed`), after its `Closed` handlers
+ran and only if none of them started another preview, it calls `ReopenLast`: the reopen waits for the preview's window to
+go, then repeats the interaction.
+
+> **For callers (changed in review, 2026-10-18).** The preview does **not** return by itself when the caller disposes it
+> (`Disposed`) or the player closes it (`Escape`, or the game's own close, `WindowClosed`): a deliberate close is not
+> overridden. A caller whose Return button disposes the preview and wants the player back at their chest calls
+> `ctx.Inventory.ReopenLast(snapshot)` with the `LastWindow` snapshot it took before opening the preview; the window the
+> preview took counts as closed by a flow, not by the player, so that call reopens it. A preview that replaces one which took the player's window inherits the return. A refused or
 failed request never touches the player's window, because the window is closed only once the chest is ready. With
 `ReturnToOpenWindow = false` a preview waits for that window to close and otherwise ends with `OpenFailed` ("Another game
 menu is open."), the behavior before 2026-10-18.
@@ -3335,17 +3371,22 @@ log with the filter `ContainerReturn|ContainerPreview|menu-hotkey guard|hub retu
 3. **Tab panels.** With a mod that mounts a panel in the chest's tab (Satisvampory's Input tab), select that tab, open
    the hub, Escape once: the hub closes, the tab's panel is still shown. Escape again: the chest and the tab close.
 4. **Return with the window open.** Open the chest, then the hub, click Return: `hub return reopen = AlreadyOpen`, no
-   Interact press in the log.
+   Interact press in the log. Open the hub with no chest open, open a chest, click Return: no reopen line (the snapshot
+   was not open).
 5. **Reopen after a close.** Open the chest, then `mods_ui {"action":"open"}` and `mods_ui {"action":"close"}` (the
    game's full-screen menu takes the chest window's place, which ends the interaction). `container_preview
    {"action":"reopen"}`: `answer` `Started`, the log has `ContainerReturn: pressing Interact`, then status
-   `return.lastOutcome` `Opened`, and a capture shows the chest window. Close it with Escape, step 2 m away and `reopen`:
-   `Moved`, no press. Reconnect and `reopen` before opening anything: `NothingToReopen`.
-6. **Escape, then reopen.** Open the chest, Escape (it closes), `reopen`: `Opened`. Then open the chest, open the
-   Controls sample's hub, press Escape twice (the hub, then the chest), click nothing and `reopen`: `Opened`.
+   `return.lastOutcome` `Opened`, and a capture shows the chest window; the log has `closed by another window or a
+   Progenitor flow` before the press and the input released 0.4 s after it. Open the chest again, step 2 m away (the
+   window closes as you walk) and `reopen`: `ClosedByPlayer` or `Moved`, no press. Reconnect and `reopen` before opening
+   anything: `NothingToReopen`.
+6. **The player's own close stays.** Open the chest, Escape (it closes): the log has `closed by the player`; `reopen`:
+   `ClosedByPlayer`, no press. The same after closing it with the Interact key.
 7. **A preview over the window.** Open a near chest, then `container_preview {"action":"open","id":"c-…far…","keepOpen":true}`:
-   status shows `tookPlayerWindow` true, the far chest in the window; `close`: the far chest's window goes and the near
-   chest's window opens again (`Opened`). Then `open` with `"returnToWindow":false`: the preview ends `OpenFailed` after the
+   status shows `tookPlayerWindow` true, the far chest in the window. A timed preview (`"seconds":10`, no `keepOpen`): at
+   the end the far chest's window goes and the near chest's window opens again (`Opened`). With `close` (`Disposed`) or
+   Escape instead: the near chest stays closed, and `reopen` then opens it (`Opened`: the preview's close was a flow's).
+   Open the hub over the preview (Ctrl+F8) and press Escape: the hub closes, the preview stays; Escape again ends it. Then `open` with `"returnToWindow":false`: the preview ends `OpenFailed` after the
    replication wait and the near chest stays open.
 8. **With the open gate.** Lock the near chest with the Sample's `.items lock`, answer the
    password once (session grant), then step 7: the return opens without a prompt. After a disconnect and rejoin (no

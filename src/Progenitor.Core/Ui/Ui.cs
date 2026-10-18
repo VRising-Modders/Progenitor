@@ -1384,9 +1384,10 @@ public static partial class Ui
     /// than in it (<see cref="GameWindowUnderPanel.PanelTakesEscape"/>: a game or standard window, or a floating panel that
     /// takes the input now; never a Mods workspace pane, a panel mounted in a chest or station tab, or a
     /// <see cref="UiCaptureMode.Never"/> panel). Per frame from the shown-input pump while such a game window is open, and
-    /// from the Escape sweep; no allocation.
+    /// from the Escape sweep; no allocation. <paramref name="shownAfter"/>: count only panels shown after that
+    /// <see cref="UiPanelHandle.ShownSequence"/> (a container preview yields Escape to a hub opened over it).
     /// </summary>
-    internal static bool EscapeHidesAPanelOverGameWindow()
+    internal static bool EscapeHidesAPanelOverGameWindow(long shownAfter = 0)
     {
         EscapeWindowBuffer.Clear();
         lock (Gate) EscapeWindowBuffer.AddRange(Live);
@@ -1396,7 +1397,7 @@ public static partial class Ui
             {
                 if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown) continue;
                 // Mounted and passive panels never count; skip them before the pointer read.
-                if (p.MountedInTab || p.ShownCaptureMode == UiCaptureMode.Never) continue;
+                if (p.MountedInTab || p.ShownCaptureMode == UiCaptureMode.Never || p.ShownSequence <= shownAfter) continue;
                 bool isWindow = p.IsGameWindow || p.WindowWidth > 0f;
                 if (GameWindowUnderPanel.PanelTakesEscape(ModsMenu.IsWorkspacePanel(p), p.MountedInTab, p.ShownCaptureMode,
                         isWindow, isWindow || TakesInput(p)))

@@ -106,6 +106,9 @@ internal static unsafe class WorldPickBackend
     private static ulong? _hudWorldSeq;
     private static OpenHUDMenuSystem? _hudSystem;
 
+    /// <summary>RETURN1: a world pick is armed (its interactions are picks, not windows to remember).</summary>
+    internal static bool PickArmed => _coordinator?.IsArmed == true;
+
     /// <summary>The process-wide pick state machine (one per Core generation).</summary>
     internal static UiWorldPickCoordinator Coordinator
     {
@@ -254,6 +257,8 @@ internal static unsafe class WorldPickBackend
         {
             int menu = MenuTypeNow();
             if (!UiWorldPickMenus.ClosesForPick(menu)) return 0;
+            // RETURN1: this close is the pick's, not the player's: ctx.Inventory.ReopenLast may open the window again.
+            Progenitor.Inventory.ContainerReturnClient.NoteFlowClose();
             var world = Worlds.Client;
             if (world == null || !world.IsCreated) return 0;
             HUDMenuManager.CloseMenu(world);

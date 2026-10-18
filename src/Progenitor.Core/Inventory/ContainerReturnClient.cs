@@ -21,9 +21,11 @@ namespace Progenitor.Inventory;
 /// window and its object; a container window with no interaction behind it (a remote preview's) is skipped. The object's
 /// network id words and where the character stands are kept with it.</para>
 ///
-/// <para><b>Reopen.</b> The interaction the player made, repeated: a one-second framework input lease (hover and
-/// buttons, <see cref="UserPolicy.Override"/> so a mouse movement cannot swap the hovered object under the press), hover
-/// the object, press Interact (the Dev bot driver's order, and the container open gate's repeat). Nothing is written to
+/// <para><b>Reopen.</b> The interaction the player made, repeated: hover the object for three frames, press Interact
+/// for 0.4 s (the Dev bot driver's order, and the container open gate's repeat), then hand the input back and only watch
+/// for the window. Two framework leases, held only for that half second: the buttons with
+/// <see cref="UserPolicy.Yield"/>, the hover with <see cref="UserPolicy.Override"/> so a mouse movement cannot swap the
+/// hovered object under the press. A window the player closed themselves is never reopened. Nothing is written to
 /// the game's menus and no event is built: the server sees an ordinary interaction, with its own range and permission
 /// checks and every server-side open handler (the open gate) in front of it.</para>
 /// </summary>
@@ -73,7 +75,8 @@ internal static class ContainerReturnClient
     /// <paramref name="anyAge"/> skips the age limit: a container preview returning to the window it took the place of,
     /// however long it ran.
     /// </summary>
-    internal static ContainerReopenResult ReopenLast(Action<ContainerReopenResult>? done, string why, object? owner = null, bool anyAge = false)
+    internal static ContainerReopenResult ReopenLast(Action<ContainerReopenResult>? done, string why, object? owner = null, bool anyAge = false,
+        ContainerWindowInfo? openWhenStarted = null)
     {
         var world = Worlds.Client;
         bool inGame = _installed && world != null && world.IsCreated;
@@ -87,7 +90,12 @@ internal static class ContainerReturnClient
             present = last!.Rebind(em);
             moved = present && last.Moved(em);
         }
-        var answer = ContainerReturnRules.Check(inGame, remembered, age, present, moved);
+        bool hasSnapshot = openWhenStarted != null;
+        bool sameOpening = hasSnapshot && remembered && openWhenStarted!.OpenCount == last!.OpenCount
+            && openWhenStarted.NetworkIdIndex == last.N0 && openWhenStarted.NetworkIdGeneration == last.N1;
+        var answer = ContainerReturnRules.Check(inGame, remembered, age, present, moved,
+            closedByPlayer: remembered && last!.ClosedByPlayer, hasSnapshot: hasSnapshot,
+            snapshotWasOpen: openWhenStarted?.IsOpen == true, snapshotSameOpening: sameOpening);
         if (answer != ContainerReopenResult.Started)
         {
             Note(why, answer, last);
@@ -99,6 +107,16 @@ internal static class ContainerReturnClient
         Plugin.Logger?.LogInfo("ContainerReturn: reopening " + last!.Describe() + " (" + why + ").");
         return ContainerReopenResult.Started;
     }
+
+    private static double _flowCloseAt = double.NegativeInfinity;
+    private static int _openCount;
+
+    /// <summary>
+    /// A Progenitor flow is about to close the game's chest or station window (a world pick with
+    /// <c>CloseGameWindows</c>, a container preview taking its place): that close is not the player's
+    /// (<see cref="ContainerReopenResult.ClosedByPlayer"/>).
+    /// </summary>
+    internal static void NoteFlowClose() => _flowCloseAt = Now;
 
     /// <summary>A plugin unloads: its running reopen ends without calling back into it.</summary>
     internal static void CancelFor(object owner)
@@ -132,23 +150,36 @@ internal static class ContainerReturnClient
         if (running.Finished && ReferenceEquals(_job, running)) _job = null;
     }
 
-    /// <summary>Remember the shown chest, station or heart window, if the player opened it at the object.</summary>
+    /// <summary>
+    /// Remember the shown chest, station or heart window, if the player opened it at the object; and when the remembered
+    /// window stops showing, note who closed it (<see cref="ContainerReturnRules.ClosedByPlayer"/>). Each new opening
+    /// gets a new <see cref="ContainerWindowInfo.OpenCount"/>.
+    /// </summary>
     private static void Track(World world)
     {
         int menu = WorldPickBackend.MenuTypeNow();
-        if (!GameWindowUnderPanel.IsInteractWindow(menu)) return;
-        if (!UnityUiRuntime.TryOpenInteractWindow(world, out var kind, out var target, out var interact)) return;
-        bool previewOwns = false;
-        try { previewOwns = ContainerPreviewClient.Current?.Machine.OwnsWindow == true; } catch { /* */ }
-        if (!ContainerReturnRules.Remembers(kind, kind != VanillaPanelKind.Container || interact != Entity.Null, previewOwns)) return;
-        var em = world.EntityManager;
-        if (!em.Exists(target)) return;
+        bool real = false;
+        var kind = VanillaPanelKind.None;
+        var target = Entity.Null;
+        if (GameWindowUnderPanel.IsInteractWindow(menu) && UnityUiRuntime.TryOpenInteractWindow(world, out kind, out target, out var interact))
+        {
+            bool previewOwns = false;
+            try { previewOwns = ContainerPreviewClient.Current?.Machine.OwnsWindow == true; } catch { /* */ }
+            real = ContainerReturnRules.Remembers(kind, kind != VanillaPanelKind.Container || interact != Entity.Null, previewOwns)
+                && world.EntityManager.Exists(target);
+        }
         var last = _last;
+        if (last != null && last.WasOpen && !(real && ReferenceEquals(last.World, world) && last.Target == target))
+            last.MarkClosed(ContainerReturnRules.ClosedByPlayer(menu, Now - _flowCloseAt));
+        // During a world pick the interactions are picks: the window the pick closed stays the one to return to.
+        if (!real || WorldPickBackend.PickArmed) return;
+        var em = world.EntityManager;
         if (last == null || !ReferenceEquals(last.World, world) || last.Target != target || last.Epoch != WorldEpoch.Current)
         {
             if (!ContainerPreviewClient.TryWords(em, target, out int n0, out int n1, out int n2)) return;
             last = _last = new Remembered(world, WorldEpoch.Current, kind, menu, target, n0, n1, n2);
         }
+        if (!last.WasOpen) last.MarkOpen(++_openCount);
         last.Seen(em, Now);
     }
 
@@ -214,6 +245,24 @@ internal static class ContainerReturnClient
         internal int N1 { get; }
         internal int N2 { get; }
         private double _seenAt = double.NegativeInfinity;
+
+        /// <summary>The window shows this object now (as of the last frame).</summary>
+        internal bool WasOpen { get; private set; }
+
+        /// <summary>Which opening this is (<see cref="ContainerWindowInfo.OpenCount"/>).</summary>
+        internal int OpenCount { get; private set; }
+
+        /// <summary>The last close was the player's own (<see cref="ContainerReopenResult.ClosedByPlayer"/>).</summary>
+        internal bool ClosedByPlayer { get; private set; }
+
+        internal void MarkOpen(int count) { WasOpen = true; ClosedByPlayer = false; OpenCount = count; }
+
+        internal void MarkClosed(bool byPlayer)
+        {
+            WasOpen = false;
+            ClosedByPlayer = byPlayer;
+            Plugin.Logger?.LogInfo("ContainerReturn: " + Describe() + " closed" + (byPlayer ? " by the player." : " by another window or a Progenitor flow."));
+        }
         private bool _stoodKnown;
         private float _stoodX, _stoodZ;
 
@@ -253,7 +302,7 @@ internal static class ContainerReturnClient
         {
             bool open = false;
             try { open = WindowShows(World, Target); } catch { /* */ }
-            return new ContainerWindowInfo(Kind, Menu, Target.Index, Target.Version, N0, N1, open, open ? 0 : Math.Max(0, Age(now)));
+            return new ContainerWindowInfo(Kind, Menu, Target.Index, Target.Version, N0, N1, open, open ? 0 : Math.Max(0, Age(now)), OpenCount);
         }
 
         internal string Describe() => Kind + " " + Target.Index + ":" + Target.Version + " net=" + N0 + ":" + N1;
@@ -267,7 +316,8 @@ internal static class ContainerReturnClient
         private Action<ContainerReopenResult>? _done;
         private readonly string _why;
         private readonly ContainerReopenPlan _plan;
-        private InputLease? _lease;
+        private InputLease? _hover;
+        private InputLease? _buttons;
 
         internal Reopen(World world, Remembered target, Action<ContainerReopenResult>? done, string why, object? owner)
         {
@@ -299,6 +349,7 @@ internal static class ContainerReturnClient
                 int menu = WorldPickBackend.MenuTypeNow();
                 s.AnyMenuOpen = menu != 0;
                 s.WindowOnTarget = s.TargetPresent && WindowShows(_world, _target.Target);
+                s.OtherWindowOpen = menu != 0 && !s.WindowOnTarget && OtherWindow(menu);
                 try { s.CameraPreview = Progenitor.Cameras.PluginCamera.CameraPreview.Current?.Active == true; } catch { /* */ }
             }
             switch (_plan.Step(Now, s))
@@ -307,9 +358,12 @@ internal static class ContainerReturnClient
                     StartHover();
                     break;
                 case ContainerReopenStep.Press:
-                    if (_lease == null || !_lease.Active) { Finish(_plan.End(ContainerReopenResult.InputBusy)); break; }
-                    _lease.Press(SyncedButtons.Interact, ContainerReopenPlan.PressSeconds);
+                    if (_hover == null || !_hover.Active || _buttons == null || !_buttons.Active) { Finish(_plan.End(ContainerReopenResult.InputBusy)); break; }
+                    _buttons.Press(SyncedButtons.Interact, ContainerReopenPlan.PressSeconds);
                     Plugin.Logger?.LogInfo("ContainerReturn: pressing Interact on " + _target.Describe() + ".");
+                    break;
+                case ContainerReopenStep.ReleaseInput:
+                    ReleaseInput();
                     break;
                 case ContainerReopenStep.Finish:
                     Finish(ContainerReopenStep.Finish);
@@ -317,32 +371,67 @@ internal static class ContainerReturnClient
             }
         }
 
+        /// <summary>
+        /// A different window than the one being reopened: another menu type, or the same window bound to another object.
+        /// The reopened window's own menu with no object read yet is not a different one.
+        /// </summary>
+        private bool OtherWindow(int menu)
+        {
+            if (menu != _target.Menu) return true;
+            return UnityUiRuntime.TryOpenInteractWindow(_world, out _, out var shown, out _) && shown != Entity.Null && shown != _target.Target;
+        }
+
+        /// <summary>
+        /// Two leases for the hover and the press, each only as long as needed. The buttons yield to the player
+        /// (<see cref="UserPolicy.Yield"/>): a press of their own suspends ours. The hover overrides the player's mouse for
+        /// the half second of the hover and the press only, so a mouse movement cannot swap the hovered object under the
+        /// press (the press would reach whatever is under the cursor).
+        /// </summary>
         private void StartHover()
         {
-            InputAcquireResult acquired;
-            try
+            var hover = Acquire(InputChannels.Hover, UserPolicy.Override, "hover the chest or station being opened again", out var hoverResult);
+            if (hover == null)
             {
-                acquired = InputLeases.TryAcquire(Holder,
-                    new InputLeaseOptions(InputChannels.Hover | InputChannels.Buttons, UserPolicy.Override, preempt: false,
-                        reason: "open the chest or station window the player had open again"), out _lease);
-            }
-            catch (Exception e)
-            {
-                Plugin.Logger?.LogWarning("ContainerReturn: the input lease threw: " + e.Message);
-                acquired = InputAcquireResult.Faulted;
-            }
-            if (acquired != InputAcquireResult.Acquired || _lease == null)
-            {
-                Plugin.Logger?.LogInfo("ContainerReturn: input lease " + acquired + ".");
+                Plugin.Logger?.LogInfo("ContainerReturn: hover lease " + hoverResult + ".");
                 Finish(_plan.End(ContainerReopenResult.InputBusy));
                 return;
             }
-            try { _lease.Hover(_target.Target); }
+            _hover = hover;
+            var buttons = Acquire(InputChannels.Buttons, UserPolicy.Yield, "press Interact on the chest or station being opened again", out var buttonsResult);
+            if (buttons == null)
+            {
+                Plugin.Logger?.LogInfo("ContainerReturn: buttons lease " + buttonsResult + ".");
+                Finish(_plan.End(ContainerReopenResult.InputBusy));
+                return;
+            }
+            _buttons = buttons;
+            try { _hover.Hover(_target.Target); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogInfo("ContainerReturn: the object cannot be hovered (" + e.Message + ").");
                 Finish(_plan.End(ContainerReopenResult.Gone));
             }
+        }
+
+        private static InputLease? Acquire(InputChannels channels, UserPolicy policy, string reason, out InputAcquireResult result)
+        {
+            InputLease? lease = null;
+            try { result = InputLeases.TryAcquire(Holder, new InputLeaseOptions(channels, policy, preempt: false, reason: reason), out lease); }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("ContainerReturn: the input lease threw: " + e.Message);
+                result = InputAcquireResult.Faulted;
+            }
+            return result == InputAcquireResult.Acquired ? lease : null;
+        }
+
+        /// <summary>The press is over: hand the hover and the buttons back; the window is watched without them.</summary>
+        private void ReleaseInput()
+        {
+            var hover = _hover; _hover = null;
+            var buttons = _buttons; _buttons = null;
+            try { buttons?.Dispose(); } catch { /* */ }
+            try { hover?.Dispose(); } catch { /* */ }
         }
 
         /// <summary>End now (a newer reopen, unload, no world).</summary>
@@ -351,9 +440,7 @@ internal static class ContainerReturnClient
         private void Finish(ContainerReopenStep step)
         {
             if (step != ContainerReopenStep.Finish) return;
-            var lease = _lease;
-            _lease = null;
-            try { lease?.Dispose(); } catch { /* */ }
+            ReleaseInput();
             var result = _plan.Result;
             _lastOutcome = result + " (" + _why + ")";
             Plugin.Logger?.LogInfo("ContainerReturn: " + _target.Describe() + " " + result + " (" + _why + (_plan.PressedEver ? ", Interact pressed" : "") + ").");

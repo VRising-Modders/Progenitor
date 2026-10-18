@@ -224,7 +224,8 @@ window is open and a panel that takes Escape is shown over it (a game or standar
 the input now; not a workspace pane, not mounted in that window's tab, not `Never`), the menu-hotkey guard at 498 takes `Back` and `Menu_Close` as it does for a key capture or a dialog,
 held until that Escape is released: the first Escape hides the Progenitor panels, the next one closes the game's window.
 Panels mounted in the window's tabs stay on that first Escape. While a Progenitor field has the keyboard over such a
-window, the guard also takes Interact. Source-checked and game-free tested, not live-verified; the rules, the reopen and
+window, the guard also takes Interact. A panel beside the window but not mounted in its tab therefore costs one more
+Escape; a hub opened over a container preview closes before the preview. Source-checked and game-free tested, not live-verified; the rules, the reopen and
 the live steps: [modules.md, Back where the player was](modules.md#back-where-the-player-was).
 
 **Capture mode is not how a panel receives its own input.** `WhenHovered` / `WhileShown` / `Never` decide only the gameplay *block*. Typed keys, wheel notches and click-to-focus are delivered by a separate pump; see [Shown-input pump](#shown-input-pump-not-the-hover-pump).
@@ -1947,7 +1948,8 @@ What changes on screen while a preview owns the window:
 - Escape closes the preview and the window after framework dialogs, key captures and the focused chat box
   (the same precedence as the world pick).
 - With the player's own chest or station window open, the preview takes its place once the previewed chest is ready and
-  opens it again the game's way when it ends (`ContainerPreviewOptions.ReturnToOpenWindow`, default true;
+  opens it again the game's way when the preview ends on its own, not after `Dispose` or Escape
+  (`ContainerPreviewOptions.ReturnToOpenWindow`, default true;
   [Back where the player was](modules.md#back-where-the-player-was)). Not live-verified.
 
 Everything is restored on close. The server rule, the read-only guarantee, the close reasons and the open live

@@ -49,8 +49,16 @@ public sealed class Plugin : ProgenitorPlugin<ControlsContext>
         // Back where the player was: opened over a chest or station, the hub leaves that window open underneath (Escape
         // closes the hub first). Return also reopens the window if something closed it meanwhile; a window still open is
         // left alone (AlreadyOpen).
-        // The callback gets the outcome once, also when the call did not start (NothingToReopen with no chest opened).
-        hub.AfterReturn = () => ctx.Inventory.ReopenLast(outcome => log(ControlsDemo.LogPrefix + "hub return reopen = " + outcome));
+        // Only the window that was open when the hub opened, and only that opening: a chest the player closed themselves,
+        // or one that was not open then, is never reopened. The callback gets the outcome once, also when the call did not
+        // start (NothingToReopen with no chest opened).
+        Progenitor.Inventory.ContainerWindowInfo? atOpen = null;
+        hub.BeforeOpen = () => atOpen = ctx.Inventory.LastWindow;
+        hub.AfterReturn = () =>
+        {
+            if (atOpen is not { IsOpen: true }) return; // the hub was not opened over a chest or station
+            ctx.Inventory.ReopenLast(atOpen, outcome => log(ControlsDemo.LogPrefix + "hub return reopen = " + outcome));
+        };
         // The keys the hub's key hints name: each does what its button does. Escape stays the framework's (it already
         // closes the topmost window), so Return is Ctrl+Backspace; the hub takes the input while shown, so it fires then.
         ctx.Keybinds.Register(GalleryHub.ToggleBindId, new KeyChord(UiKey.F8, KeyModifiers.Ctrl),

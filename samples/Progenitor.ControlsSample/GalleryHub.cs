@@ -74,6 +74,7 @@ internal sealed class GalleryHub : IDisposable
             return "closed";
         }
 
+        BeforeOpen?.Invoke();
         w ??= _window = Build();
         w.Show();
         return "opened";
@@ -150,6 +151,9 @@ internal sealed class GalleryHub : IDisposable
     /// chest leaves the chest's window open underneath, and if something closed it meanwhile, Return opens it again.
     /// </summary>
     internal Action? AfterReturn { get; set; }
+
+    /// <summary>Runs just before the window opens: the plugin takes the <c>ctx.Inventory.LastWindow</c> snapshot there.</summary>
+    internal Action? BeforeOpen { get; set; }
 
     /// <summary>The table's actions column key.</summary>
     internal const string ActionsKey = "actions";

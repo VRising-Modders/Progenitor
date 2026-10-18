@@ -301,6 +301,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     private double _nextLookup;
     private IDisposable? _hudHook, _mapperHook, _sendHook, _escape;
     private bool _capturing;
+    private long _shownAtArm;
     private readonly WorldBoundQuery _goToMenu = new("ContainerPreview.GoToHUDMenu");
     private Entity _windowTarget = Entity.Null;
     private bool _inventorySeen;
@@ -490,6 +491,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
             // again the game's way when this preview ends (Finish).
             Plugin.Logger?.LogInfo("ContainerPreview: taking the place of the player's open window ("
                 + (ContainerReturnClient.LastWindow()?.ToString() ?? "?") + "); it opens again when the preview ends.");
+            ContainerReturnClient.NoteFlowClose();
             ContainerPreviewClient.CloseMenu(_world);
             return;
         }
@@ -555,6 +557,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// <summary>Install the hooks and take Escape just before the open is written.</summary>
     private void ArmWindow()
     {
+        _shownAtArm = Ui.UiPanelHandle.LastShownSequence;
         _hudHook = SystemHooks.Before<InteractSystemHUD>(BeforeInteractHud);
         _mapperHook = SystemHooks.Before<ContainerMenuMapper>(BeforeMapper);
         if (_options.DropItemEvents) _sendHook = SystemHooks.Before<SerializeAndSendClientEventsSystem>(BeforeSend);
@@ -651,6 +654,12 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         try { capture = Keybinds.EscapeBelongsToCapture; } catch { /* */ }
         try { chat = Keybinds.ChatFocusNow == ChatFocus.Focused; } catch { /* */ }
         if (ContainerPreviewEscape.Decide(true, dialog, capture, chat) != ContainerPreviewEscapeOwner.Preview) return false;
+        // RETURN1: a Progenitor window opened over the preview's window after it (a hub) is above it: that one closes
+        // first (the framework's sweep), and the 498 hold keeps this window. A panel docked before the preview (Find) is
+        // below it: the preview closes first, as before.
+        bool newerOnTop = false;
+        try { newerOnTop = Ui.Ui.EscapeHidesAPanelOverGameWindow(_shownAtArm); } catch { /* */ }
+        if (newerOnTop) return false;
         Close(ContainerPreviewCloseReason.Escape, "", notify: true);
         return true;
     }
