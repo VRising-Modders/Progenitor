@@ -438,8 +438,9 @@ internal sealed partial class UnityUiRuntime
         }
 
         string text = "";
-        try { text = field.text ?? ""; } catch { /* */ }
+        try { text = ReadbackText(field, field.text ?? ""); } catch { /* */ }
         result["focused"] = true;
+        result["masked"] = IsMaskedField(field);
         result["caption"] = TestFocusedCaption();
         result["length"] = text.Length;
         result["hash"] = UiTextTestInput.Hash(text);

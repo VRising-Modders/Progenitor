@@ -145,6 +145,10 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"WorldSaveGuard.Install: {e.Message}"); }
         try { Inventory.ContainerPreviewServer.Install(); Inventory.ContainerPreviewClient.Install(); }
         catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Install: {e.Message}"); }
+        // Container open gate (ctx.Inventory.OnOpenRequest): the Core-owned 'PrCg' channel. Server: the handlers and the
+        // interaction seam (hooked only while a handler is registered); client: the masked prompt and its toasts.
+        try { Inventory.ContainerOpenGateServer.Install(); Inventory.ContainerOpenGateClient.Install(); }
+        catch (Exception e) { Logger?.LogWarning($"ContainerOpenGate.Install: {e.Message}"); }
         // ctx.Servants: hunt returns, sends and the experimental throne list hook. Server only;
         // SystemHooks on three servant systems and one Plugin.Frame handler.
         try { Servants.ServantRuntime.Install(); }
@@ -482,6 +486,8 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"Inventory.Uninstall: {e.Message}"); }
         try { Inventory.InventorySortRuntime.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"InventorySort.Uninstall: {e.Message}"); }
+        try { Inventory.ContainerOpenGateClient.Uninstall(); Inventory.ContainerOpenGateServer.Uninstall(); }
+        catch (Exception e) { Logger?.LogWarning($"ContainerOpenGate.Uninstall: {e.Message}"); }
         try { Inventory.ContainerPreviewClient.Uninstall(); Inventory.ContainerPreviewServer.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Uninstall: {e.Message}"); }
         // Any shared streaming-origin lease still running (plugins end their own on unload): restore the users' origins.

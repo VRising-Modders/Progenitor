@@ -2150,6 +2150,12 @@ internal sealed class CellSpec
     internal bool ReadOnly { get; set; }
 
     /// <summary>
+    /// MASKED1, <see cref="CellKind.Input"/> only: a password field. It draws one asterisk per character (TMP's password
+    /// content type), copy and cut do nothing, and every readback shows asterisks instead of the text.
+    /// </summary>
+    internal bool Masked { get; set; }
+
+    /// <summary>
     /// KIT1: caption size in place of the kind's own (<see cref="FontSize"/>), or 0 for the kind's
     /// default. The head block's display title is the reason this exists: 34 px on a
     /// <see cref="CellKind.Text"/> cell whose kind size is 20.

@@ -5309,6 +5309,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 UndoIgnoredReadOnly++;
                 return;
             }
+            // MASKED1: nothing to undo in a password field.
+            if (!UiMaskedText.KeepsHistory(IsMaskedField(field))) return;
 
             var before = ReadFieldState(field);
             int max = FieldMaxLength(field);
@@ -5466,6 +5468,16 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         catch { return false; }
     }
 
+    /// <summary>MASKED1: a password field (TMP's password content type): its text is never copied or read back.</summary>
+    internal static bool IsMaskedField(TMP_InputField? field)
+    {
+        try { return field != null && field.contentType == TMP_InputField.ContentType.Password; }
+        catch { return false; }
+    }
+
+    /// <summary>MASKED1: what a readback shows for <paramref name="text"/> in <paramref name="field"/>: asterisks for a password field.</summary>
+    internal static string ReadbackText(TMP_InputField? field, string text) => UiMaskedText.Shown(text, IsMaskedField(field));
+
     private static bool IsMultiline(TMP_InputField field)
     {
         try { return field != null && field.lineType == TMP_InputField.LineType.MultiLineNewline; }
@@ -5596,6 +5608,8 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 if (paste) TypedStats.RejectedReadOnly += Math.Max(1, ReadClipboard().Length);
                 return;
             }
+            // MASKED1: a password field never puts its text on the clipboard.
+            if (!UiMaskedText.ClipboardAllowed(letter, IsMaskedField(field))) return;
 
             string clip = paste ? ReadClipboard() : "";
             var filter = FieldFilter(field);
@@ -5710,7 +5724,12 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         }
         // TEXTUNDO1: every owned edit is a step (or extends the open one); a caret move or a selection
         // ends the open step. An outside change since the last step clears the history first.
-        try { armed?.Undo.Record(before, result.State, kind, Environment.TickCount64); }
+        // MASKED1: a password field keeps no history (the text would live on in it).
+        try
+        {
+            if (UiMaskedText.KeepsHistory(IsMaskedField(field))) armed?.Undo.Record(before, result.State, kind, Environment.TickCount64);
+            else armed?.Undo.Clear("masked");
+        }
         catch { /* the history never blocks an edit */ }
         WriteFieldState(field, before, result.State);
     }
@@ -8398,7 +8417,9 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         if (field == null || caretGo == null) return;
         TMP_Text? tmp = null;
         try { tmp = field.textComponent; } catch { tmp = null; }
-        MeasureOwnedCaret(armed, tmp, state.Text, state.Caret, out float localX, out float midY, out float height);
+        // MASKED1: a password field draws one asterisk per character, so the caret is placed on the drawn text.
+        string drawn = UiMaskedText.Shown(state.Text, IsMaskedField(field));
+        MeasureOwnedCaret(armed, tmp, drawn, state.Caret, out float localX, out float midY, out float height);
 
         RectTransform? textRt = null;
         try { textRt = tmp != null ? tmp.rectTransform : field.textViewport; } catch { textRt = null; }
@@ -16376,7 +16397,16 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                     {
                         try { field.characterLimit = spec.MaxLength; } catch { /* */ }
                     }
+                    // MASKED1: a password field draws asterisks (TMP's password content type, the server password's path).
+                    if (spec.Masked)
+                    {
+                        try { field.contentType = TMP_InputField.ContentType.Password; } catch { /* */ }
+                    }
                     try { if (field.text != (spec.Text ?? "")) field.text = spec.Text ?? ""; } catch { /* */ }
+                    if (spec.Masked)
+                    {
+                        try { field.ForceLabelUpdate(); } catch { /* */ }
+                    }
                     AttachCellPlaceholder(control, field, spec.Placeholder, spec.Text ?? "");
                     PaintSearchField(control, field);
                     if (spec.Skin == CellSkin.ValueBox) PaintValueBoxField(control, field);

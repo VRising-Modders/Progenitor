@@ -339,6 +339,9 @@
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerPreviewPolicy.cs" Link="Linked\ContainerPreviewPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerPreviewWire.cs" Link="Linked\ContainerPreviewWire.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerPreviewSyncPolicy.cs" Link="Linked\ContainerPreviewSyncPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerOpenGatePolicy.cs" Link="Linked\ContainerOpenGatePolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerOpenGateWire.cs" Link="Linked\ContainerOpenGateWire.cs" />
+    <Compile Include="..\..\samples\Progenitor.Sample\SampleLocks.cs" Link="Linked\SampleLocks.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Units\UnitVec3.cs" Link="Linked\UnitVec3.cs" />
     <!-- ctx.Input: ownership, the user yield, what to write each frame and the command patch are
          game-free; UnityInputRuntime.cs and PluginInput.cs are the game half and stay out. -->
@@ -461,6 +464,7 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiFieldInsert.cs" Link="Linked\UiFieldInsert.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiKeyRepeat.cs" Link="Linked\UiKeyRepeat.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiTextUndo.cs" Link="Linked\UiTextUndo.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\UiMaskedText.cs" Link="Linked\UiMaskedText.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\SettingPersistence.cs" Link="Linked\SettingPersistence.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiTypedKeys.cs" Link="Linked\UiTypedKeys.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\UiCaretLayout.cs" Link="Linked\UiCaretLayout.cs" />
@@ -1248,6 +1252,7 @@
     <Compile Remove="EffectsTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
     <Compile Remove="SampleFxTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
     <Compile Remove="UiTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
+    <Compile Remove="UiMaskedInputTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
     <Compile Remove="SampleUiTests.cs" Condition="'$(SkipForeignTestFiles)' == 'true'" />
     <!-- These reference the Effects / Ui sources removed below, so they must go with them.
          The filtered build had gone stale: EV11-EV14 and FS added SampleBeam.cs and the beam

@@ -724,6 +724,7 @@ The runtime draws the title and body through `IUiRuntime.AddDialogText` (a label
 | `Notice(title, body, ok = "OK", onClose = null, showModVersion = null)` → `IDisposable` | One button. The button, Enter and Escape run `onClose`. |
 | `Choose(title, body, options, onPick, cancel = "Cancel", onCancel = null, showModVersion = null)` → `IDisposable` | `onPick` gets the option's index. At most three options whose captions fit the row at one width (with Cancel's) are buttons on the button row, Cancel on the left; otherwise a vertical list above a Cancel row. Enter does nothing (there is no main action); `cancel` and Escape run `onCancel`. One to ten options, or `ArgumentException` (a longer list belongs on a page). |
 | `Prompt(title, body, initial, onSubmit, placeholder = "", validate = null, submit = "OK", maxLength = 0, cancel = "Cancel", onCancel = null, showModVersion = null)` → `IDisposable` | A text field. The main button and Enter validate: `validate` returns null to accept, and `onSubmit` gets the text; anything else refuses and is shown under the field (the dialog stays open) — an empty or blank string shows `Not accepted.`. A text longer than `maxLength` is refused the same way (`At most N characters.`); the field also stops typing at it, and an `initial` longer than `maxLength` is cut to it (the field and the value agree). The field has the keyboard when the dialog appears (the same focus path a click takes). Typing clears the error. A validator that throws blocks the submit (`This value could not be checked.`) and is logged. |
+| `PromptSecret(title, body, onSubmit, validate = null, submit = "OK", maxLength = 64, cancel = "Cancel", onCancel = null, showModVersion = null)` → `IDisposable` | MASKED1: a Prompt for a password. The field starts empty and draws asterisks; see [Masked input](#masked-input-masked1). |
 | `Confirm(title, facts, yes, onYes, note = "", no = "Cancel", onNo = null, danger = false, showModVersion = null)` → `IDisposable` | <a id="facts"></a>DIALOGS2: the same yes/no, with label/value `DialogFact` rows in place of the body and at most one short `note` under them. A fact with an empty value is left out; an empty label continues the fact above (a second `Requires` line). `DialogFactTone` `Ok` / `Warn` / `Danger` colors a value. |
 | `Notice(title, facts, note = "", ok = "OK", onClose = null, showModVersion = null)` → `IDisposable` | DIALOGS2: a notice with facts. |
 | `Form(title, options, onSave)` → `IDisposable` | FORMDIALOG1: a name and a few on/off choices in one dialog: a captioned one-line field, one to ten `DialogCheck` boxes under a heading, Cancel and Save. `DialogFormOptions` holds the field, the boxes and the rules; `onSave` gets a `DialogFormResult` (`Text`, `IsOn(index)`, `IsOn(key)`). See [Form dialog](#form-dialog-formdialog1). |
@@ -807,6 +808,43 @@ From `samples/Progenitor.ControlsSample/Plugin.cs` (`ControlsDialogs`, kind `For
 - **Keys.** Enter saves (validated, as a Prompt's submit), unless the player moved the keyboard focus onto a box or a button: then Enter presses that one (on a box it flips it, on Cancel it cancels, on Save it saves). The focus a dialog opens with does not count, so typing a name and pressing Enter saves; a `danger` confirmation's main answer is never pressed by Enter. Escape cancels. Tab and Shift+Tab walk the field, each box and the buttons, in reading order, and wrap around; Down leaves the one-line field for the first box, and Up from the first box goes back into the field. Tab and Down stay with an input method while it is composing text in the field. Space on a focused box (A on a controller) flips it; arrows move between boxes and buttons. These keys are read by the framework's own input layer (the typed-key pump and `UiNav`, sampled every frame), like every dialog's Enter, and apply to every dialog with a one-line field (a Prompt too).
 - **State.** Nothing is written until Save. A framework dialog that steps in front puts the form back in the queue with its text and boxes as the player left them.
 - **Bridge.** `widget_click` with a box's label or row key flips it through the line's own click slot. `mods_ui status` → `dialog.checks [{index, row, label, on, color}]`, `checksHeading`, `checksOk`, `checksHint` (the hint while shown) and `mainEnabled`.
+
+### Masked input (MASKED1)
+
+**Status: source-checked and game-free tested (`UiMaskedInputTests`; `DialogTests.A_secret_prompt_masks_its_field_and_every_readback_but_submits_the_text`, `A_masked_form_hands_the_text_and_the_remember_box_to_its_save_and_keeps_nothing`, `A_masked_prompt_displaced_by_a_framework_dialog_comes_back_empty`), not live-verified.** One masked text input, three ways to get it:
+
+| Where | How |
+|---|---|
+| A field on a mod's own panel | `var pw = panel.Input("Password"); pw.Masked = true;` read `pw.Value` when the player confirms, then set it to `""`. |
+| A password dialog | `ctx.Dialogs.PromptSecret(title, body, onSubmit, ...)`. |
+| A dialog with check boxes | `ctx.Dialogs.Form(title, new DialogFormOptions { Caption = "Password", Masked = true, Checks = ... }, onSave)`. |
+
+Core's container open gate prompt is the masked Prompt, or the masked Form with one **Remember password** box when the plugin's challenge offers it ([modules.md](modules.md#container-open-gate)).
+
+| Rule (all three) | Behavior |
+|---|---|
+| Drawing | The game's text field in its password mode (TMP's password content type, the path the server password field in the Mods menu already uses): one asterisk per character. The caret is placed on the drawn asterisks. |
+| Clipboard | Copy (Ctrl+C) and cut (Ctrl+X) do nothing; paste works. |
+| Undo | The field keeps no undo history: Ctrl+Z and Ctrl+Y do nothing in it. |
+| Readback | Asterisks only: `mods_ui status` `dialog.typed` and `dialog.field`, a panel field's value in the widget readback and in `widget_set`'s reply, the focused-field readbacks (the text-test readback also reports `masked`). `dialog.masked` is true. |
+| State | The text lives in the field only. A masked dialog drops its text when it closes, and comes back empty (not with the typed text) after a framework dialog stepped in front of it; a masked form ignores `Initial`. The text reaches only the submit or save callback, or `IUiInput.Value`. |
+| Logs | Nothing in the framework logs a field's text. A mod that receives the secret must not either. |
+
+The password dialog:
+
+```
+                    Locked
+       ─────────────────◆─────────────────
+          Enter this container's password.
+             [ ******                    ]
+            [   Cancel   ]   [     OK     ]
+              Progenitor Sample · Progenitor 2026.10.x
+```
+
+| Part | Rule |
+|---|---|
+| Layout | A Prompt's: the title, the optional body, the 420-unit field (`dialog-input/field`) with its error line under it, Cancel left and OK right in the accent, the footer. No placeholder. The field has the keyboard when the dialog appears. With a Remember password box it is a Form's layout instead: the body, the captioned field, the box, Cancel and OK. |
+| Keys | A Prompt's (or a Form's): Enter submits (validated), Escape cancels. |
 
 ### Behavior
 

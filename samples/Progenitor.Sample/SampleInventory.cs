@@ -31,6 +31,8 @@ namespace Progenitor.Sample;
 /// bag slots 0–7, the action bar, in place), <c>.items add|remove &lt;c&gt;
 /// &lt;item&gt; &lt;amount&gt;</c>, <c>.items name &lt;c&gt; "&lt;text&gt;"</c>, <c>.items id
 /// &lt;c&gt;</c>, <c>.items watch &lt;c&gt;</c>, <c>.items stamp &lt;c&gt;</c> (<c>ctx.Inventory.ChangeStamp</c> and <c>AnyChangedSince</c> since the last <c>.items stamp</c> of that container), <c>.items moves</c> (toggle a log of players' container moves, <c>ctx.Inventory.OnPlayerMove</c>), <c>.items heart</c>, <c>.items clan</c>.</description></item>
+/// <item><description><c>.items lock &lt;c&gt; &lt;password&gt;</c>, <c>.items unlock &lt;c&gt;</c>, <c>.items locks</c>:
+/// a password lock through the container open gate (<see cref="SampleLocks"/>).</description></item>
 /// </list>
 /// A container token is <c>#n</c> (from <c>.items chests</c>), a stable id <c>c-…</c>, an entity
 /// <c>index:version</c>, <c>bag</c> (your character) or <c>heart</c> (the castle's heart); append
@@ -42,13 +44,14 @@ internal static class SampleInventory
     internal const string Area = "items";
 
     internal const string UsageReply =
-        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | stamp <c> | moves | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
+        "Usage: .items chests | slots <c> | count <c> <item> | free <c> <item> | move <from> <to> <item> <amount> | moveslot <from> <slot> <to> <amount> | moveall <from> <to> [keepbar] | add <c> <item> <n> | remove <c> <item> <n> | name <c> \"text\" | id <c> | net <c> | resolve <index> <generation> [type] | watch <c> | stamp <c> | moves | lock <c> <password> | unlock <c> | locks | heart | clan   (c = #n, c-<id>, index:version, bag, heart; /out = station output)";
 
     /// <summary>The verbs this file handles (the grant/equip verbs stay in <see cref="SampleItems"/>).</summary>
     internal static bool Handles(string? verb) => (verb ?? "").Trim().ToLowerInvariant() switch
     {
         "chests" or "slots" or "count" or "free" or "move" or "moveslot" or "moveall" or "add" or "remove"
-            or "name" or "id" or "net" or "resolve" or "watch" or "stamp" or "moves" or "heart" or "clan" => true,
+            or "name" or "id" or "net" or "resolve" or "watch" or "stamp" or "moves" or "heart" or "clan"
+            or "lock" or "unlock" or "locks" => true,
         _ => false,
     };
 
@@ -242,6 +245,7 @@ internal static class SampleInventory
     internal static void Attach(PluginContext ctx)
     {
         if (!ctx.IsServer) return;
+        SampleLocks.Attach(ctx);
         ctx.Events.On<PlayerReady>(e => SampleLog.Info(Area, "player ready user=" + e.User + " character=" + e.Character));
         ctx.Events.On<PlayerTerritoryChanged>(e => SampleLog.Info(Area, "territory user=" + e.User + " " + e.OldTerritory
             + " -> " + e.NewTerritory + (e.Initial ? " (initial)" : "") + (e.Castle.Enabled ? " castle=" + e.Castle.Heart : "")));
@@ -249,6 +253,7 @@ internal static class SampleInventory
 
     internal static void Detach()
     {
+        SampleLocks.Detach();
         foreach (var w in Watches.Values) w.Dispose();
         Watches.Clear();
         LastStamps.Clear();
@@ -294,6 +299,13 @@ internal static class SampleInventory
                     + " " + (m.IsCastleContainer ? m.Container.ToString() : m.Inventory.ToString()) + " by user " + m.User
                     + " (" + m.Kind + ", " + m.CountBefore + " -> " + m.CountAfter + ", other " + m.Counterpart + (m.Ambiguous ? ", ambiguous" : "") + ")"));
                 ctx.Reply("Logging players' container moves to the server log (Sample items: player move …). Run again to stop.");
+                return;
+            }
+            case "locks":
+            {
+                var line = "locks: " + SampleLocks.Count + (SampleLocks.Count > 0 ? " (" + string.Join(", ", SampleLocks.Locked) + ")" : "");
+                ctx.Reply(line);
+                SampleLog.Info(Area, line);
                 return;
             }
             case "resolve":
@@ -355,6 +367,28 @@ internal static class SampleInventory
                         : "net " + firstLabel + " id=" + id + " has no network id: " + reason;
                 ctx.Reply(line);
                 SampleLog.Info(Area, line);
+                return;
+            }
+            case "lock":
+            case "unlock":
+            {
+                // The container open gate: a salted hash only; the player's answer goes through the masked prompt.
+                var id = inv.IdOf(first.Owner, out string reason);
+                if (id.IsNone) { ctx.Reply(firstLabel + " has no id: " + reason); return; }
+                if (verb.Trim().ToLowerInvariant() == "unlock")
+                {
+                    bool had = SampleLocks.Unlock(id);
+                    inv.RevokeOpenGrants(id);
+                    ctx.Reply(had ? "Unlocked " + firstLabel + " (" + id + ")." : firstLabel + " was not locked.");
+                    SampleLog.Info(Area, "unlock " + id + " had=" + had);
+                    return;
+                }
+                if (string.IsNullOrEmpty(b)) { ctx.Reply(UsageReply); return; }
+                SampleLocks.Lock(id, b);
+                int revoked = inv.RevokeOpenGrants(id);
+                ctx.Reply("Locked " + firstLabel + " (" + id + "); " + revoked + " earlier unlock(s) forgotten.");
+                // Never the password: only the id.
+                SampleLog.Info(Area, "lock " + id + " revoked=" + revoked);
                 return;
             }
             case "name":

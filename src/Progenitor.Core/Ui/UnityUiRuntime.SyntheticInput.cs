@@ -1019,7 +1019,7 @@ internal sealed partial class UnityUiRuntime
         var field = FocusedArmedField();
         if (field == null) return new Dictionary<string, object?> { ["focused"] = false };
         string text = "";
-        try { text = field.text ?? ""; } catch { /* */ }
+        try { text = ReadbackText(field, field.text ?? ""); } catch { /* */ }
         return new Dictionary<string, object?>
         {
             ["focused"] = true,

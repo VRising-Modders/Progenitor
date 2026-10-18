@@ -330,6 +330,8 @@ internal static unsafe class ContainerPreviewServer
                 case ContainerPreviewWire.KindClose:
                     if (ByUser.TryGetValue(userEntity, out var closing) && closing.Sequence == request.Sequence)
                         closing.End(CameraObservationEndReason.Disposed, notify: false, message: "");
+                    // A preview closed while the open gate's prompt was up: the prompt goes, and a later answer opens nothing.
+                    else ContainerOpenGateServer.CancelPreview(user.PlatformId, request.Sequence);
                     break;
             }
         }
@@ -379,6 +381,31 @@ internal static unsafe class ContainerPreviewServer
             return;
         }
 
+        // The container open gate (ctx.Inventory.OnOpenRequest): a plugin may refuse the preview, or ask the player first.
+        // While the player answers, the client is told to keep waiting; a right answer runs this open again (the answer
+        // counts then), anything else refuses it with the sentence.
+        if (ContainerOpenGateServer.Installed)
+        {
+            int sequence = request.Sequence;
+            ulong platform = user.PlatformId;
+            string? gateRefusal = ContainerOpenGateServer.CheckPreview(world, userEntity, user, id, container, sequence,
+                (ok, message) => ContinueAfterGate(userEntity, platform, request, ok, message), out bool held);
+            if (gateRefusal != null)
+            {
+                Reply(world, user.Index, request.Sequence, false, gateRefusal, 0, 0, 0);
+                return;
+            }
+            if (held)
+            {
+                Send(world, user.Index, new ContainerPreviewPacket
+                {
+                    Kind = ContainerPreviewWire.KindHold, Sequence = request.Sequence, Container = request.Container,
+                    Seconds = ContainerGatePending<ContainerOpenRequest>.PromptSeconds + ContainerPreviewMachine.RequestTimeoutSeconds,
+                });
+                return;
+            }
+        }
+
         if (ByUser.TryGetValue(userEntity, out var previous)) previous.End(CameraObservationEndReason.Replaced, notify: false, message: "");
         container.TryRead<Translation>(em, out var at);
         var holder = new Holder(userEntity, user.Index, request.Sequence, id, container, ContainerPreviewAuthorization.GrantSeconds(request.Seconds))
@@ -409,6 +436,31 @@ internal static unsafe class ContainerPreviewServer
         Plugin.Logger?.LogInfo("ContainerPreview: user " + user.PlatformId + " previews " + id + " (" + container.Index + ":" + container.Version
             + ", " + holder.Policy.Deadline.ToString("0") + ", inventory sync " + (holder.Sync == null ? "off" : holder.Sync.HeldCount + " entities") + ").");
         Reply(world, user.Index, request.Sequence, true, "", netIndex, netGeneration, netType);
+    }
+
+    /// <summary>
+    /// The open gate's prompt for a preview was answered: right runs the open again for the same request (the answers count
+    /// now), anything else refuses it. A user who left, or a world that went, gets nothing.
+    /// </summary>
+    private static void ContinueAfterGate(Entity userEntity, ulong platform, ContainerPreviewPacket request, bool ok, string message)
+    {
+        if (!_installed) return;
+        var world = Worlds.Server;
+        if (world == null || !world.IsCreated) return;
+        var em = world.EntityManager;
+        if (!userEntity.Exists(em) || !userEntity.Has<User>(em)) return;
+        var user = em.GetComponentData<User>(userEntity);
+        if (user.PlatformId != platform || !user.IsConnected) return;
+        try
+        {
+            if (ok) Open(world, userEntity, user, request);
+            else Reply(world, user.Index, request.Sequence, false, string.IsNullOrWhiteSpace(message) ? "The preview was not unlocked." : message, 0, 0, 0);
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("ContainerPreview: open after the gate threw: " + e.Message);
+            Reply(world, user.Index, request.Sequence, false, "The preview failed on the server.", 0, 0, 0);
+        }
     }
 
     /// <summary>

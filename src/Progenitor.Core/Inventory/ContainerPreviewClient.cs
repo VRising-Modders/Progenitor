@@ -164,6 +164,12 @@ internal static unsafe class ContainerPreviewClient
         var current = _current;
         if (p == null || current == null || p.Sequence != current.Sequence) return;
         if (p.Kind == ContainerPreviewWire.KindReply) current.OnReply(p);
+        else if (p.Kind == ContainerPreviewWire.KindHold)
+        {
+            // The container open gate asks the player first (a prompt is up): keep waiting for the reply.
+            if (current.Machine.Hold(Now, p.Seconds))
+                Plugin.Logger?.LogInfo("ContainerPreview: " + current.Container + " waits for the open gate's prompt.");
+        }
         else current.Close(ContainerPreviewCloseReason.LeaseEnded, p.Message, notify: true, tellServer: false);
     }
 
@@ -821,6 +827,7 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["sequence"] = Sequence,
         ["state"] = State.ToString(),
         ["phase"] = Machine.Phase.ToString(),
+        ["held"] = Machine.Held,
         ["closeReason"] = CloseReason.ToString(),
         ["reason"] = Reason,
         ["networkId"] = _netType == 0 ? null : NetworkIdWords.Format(_netIndex, _netGeneration),

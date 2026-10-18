@@ -353,6 +353,13 @@ public interface IUiInput : IUiHandle
     IDisposable OnSubmitted(Action<string> handler) => OnChanged(handler);
     /// <summary>Focus a visible field, optionally selecting its existing text.</summary>
     void Focus(bool selectAll = true) { }
+
+    /// <summary>
+    /// MASKED1: a password field. True draws one asterisk per character instead of the text; copy and cut do nothing;
+    /// the field keeps no undo history; every framework readback shows asterisks. <see cref="Value"/> still returns the
+    /// typed text (read it, use it, clear it; never log it). Set it right after creating the field.
+    /// </summary>
+    bool Masked { get => false; set { } }
 }
 
 /// <summary>
