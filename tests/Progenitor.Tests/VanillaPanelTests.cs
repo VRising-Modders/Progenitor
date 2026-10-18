@@ -106,7 +106,9 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, true, VanillaPanelAnchor.BesideRename)]
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideSort, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.RightEdge, true, VanillaPanelAnchor.RightEdge)]
-    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideRename, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideRename, true, VanillaPanelAnchor.BesideRename)]
+    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideSort, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideRename, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.BesideSort)]
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, true, VanillaPanelAnchor.RightEdge)]
@@ -1204,6 +1206,178 @@ public class VanillaPanelTests : IDisposable
         Assert.True(UiDrawnMarkArt.Alpha(UiDrawnMark.ChestMark, 12, 34) < 0.1f);
     }
 
+    [Fact]
+    public void A_sprite_icon_names_a_game_sprite_and_falls_back_to_its_mark()
+    {
+        Assert.Equal("sprite:LinkIcon_Journal", VanillaButtonIcon.Sprite(" LinkIcon_Journal ").ToString());
+        Assert.Equal("LinkIcon_Journal", VanillaButtonIcon.Sprite("LinkIcon_Journal").SpriteName);
+        Assert.Equal("chest", VanillaButtonIcon.Sprite("LinkIcon_Journal").Mark);
+        Assert.Equal("check", VanillaButtonIcon.Sprite("LinkIcon_Journal", "check").Mark);
+        Assert.Equal(VanillaButtonIcon.Default, VanillaButtonIcon.Sprite(" "));
+        Assert.Equal(VanillaButtonIcon.Drawn("up"), VanillaButtonIcon.Sprite("", "up"));
+        Assert.NotEqual(VanillaButtonIcon.Sprite("a"), VanillaButtonIcon.Sprite("A"));
+        Assert.Equal("", VanillaButtonIcon.Default.SpriteName);
+        Assert.Equal("", default(VanillaButtonIcon).SpriteName);
+        // A caption-only button's icon is not chosen, and not the chest a caller picks.
+        Assert.False(VanillaButtonIcon.Unchosen.Chosen);
+        Assert.True(VanillaButtonIcon.Default.Chosen && VanillaButtonIcon.Item(5).Chosen && VanillaButtonIcon.Sprite("x").Chosen);
+        Assert.NotEqual(VanillaButtonIcon.Default, VanillaButtonIcon.Unchosen);
+        Assert.Equal("none", VanillaButtonIcon.Unchosen.ToString());
+    }
+
+    [Theory]
+    [InlineData(VanillaPanelAnchor.BesideRename, true, true, true)]
+    [InlineData(VanillaPanelAnchor.BesideRename, false, false, false)]
+    [InlineData(VanillaPanelAnchor.BesideSort, true, false, true)]
+    [InlineData(VanillaPanelAnchor.BesideSort, false, false, true)]
+    [InlineData(VanillaPanelAnchor.LeftEdge, true, false, false)]
+    [InlineData(VanillaPanelAnchor.RightEdge, true, false, false)]
+    [InlineData(VanillaPanelAnchor.TooltipBody, true, false, false)]
+    public void A_title_row_button_with_an_icon_is_always_its_icon_face(VanillaPanelAnchor anchor, bool chosen, bool always, bool face)
+    {
+        var icon = chosen ? VanillaButtonIcon.Sprite("LinkIcon_Journal") : VanillaButtonIcon.Unchosen;
+        Assert.Equal(always, VanillaUiSites.IconAlways(anchor, icon));
+        Assert.Equal(face, VanillaUiSites.HasIconFace(anchor, icon));
+        Assert.Equal(anchor == VanillaPanelAnchor.BesideRename, VanillaUiSites.IsTitleRow(anchor));
+    }
+
+    [Fact]
+    public void A_caption_only_button_asks_for_no_icon_and_an_icon_button_for_its_own()
+    {
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        rename.Button("Options");
+        rename.Button("Log", VanillaButtonIcon.Sprite("LinkIcon_Journal"));
+        rename.Button("Stash", VanillaButtonIcon.Default);
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+
+        Assert.Equal(new[] { "none", "sprite:LinkIcon_Journal", "mark:chest" }, _client.ClonedIcons.Select(i => i.ToString()).ToArray());
+        rename.Dispose();
+    }
+
+    [Theory]
+    [InlineData(VanillaPanelKind.Container, true)]
+    [InlineData(VanillaPanelKind.Workstation, true)]
+    [InlineData(VanillaPanelKind.RefinementStation, true)]
+    [InlineData(VanillaPanelKind.SalvageStation, true)]
+    [InlineData(VanillaPanelKind.UnitStation, true)]
+    [InlineData(VanillaPanelKind.PrisonCell, false)]
+    [InlineData(VanillaPanelKind.CastleHeart, false)]
+    public void Each_window_names_its_rename_button_or_says_it_has_none(VanillaPanelKind kind, bool has)
+    {
+        Assert.Equal(has, VanillaStationWindows.HasRename(kind));
+        string missing = VanillaStationWindows.RenameMissing(kind);
+        if (has) Assert.EndsWith("OpenTagEditButton", missing);
+        else Assert.EndsWith("window has no rename button", missing);
+    }
+
+    [Fact]
+    public void The_container_rename_text_keeps_its_parent_field()
+    {
+        Assert.Equal("ContainerSubMenu.OpenTagEditButtonParent and OpenTagEditButton", VanillaStationWindows.RenameMissing(VanillaPanelKind.Container));
+        Assert.Equal("RefinementstationSubMenu.OpenTagEditButtonParent and OpenTagEditButton", VanillaStationWindows.RenameMissing(VanillaPanelKind.RefinementStation));
+        Assert.Equal("the prison cell window has no rename button", VanillaStationWindows.RenameMissing(VanillaPanelKind.PrisonCell));
+    }
+
+    [Fact]
+    public void Each_site_lists_its_anchor_keys_with_rename_on_the_station_and_not_the_heart()
+    {
+        Assert.Equal(new[] { "left", "right", "rename" }, VanillaUiSites.AnchorKeys(VanillaUiSite.StationPanel));
+        Assert.Equal(new[] { "left", "right", "rename" }, VanillaUiSites.AnchorKeys(VanillaUiSite.ContainerPanel));
+        Assert.DoesNotContain("rename", VanillaUiSites.AnchorKeys(VanillaUiSite.CastleHeartPanel));
+        Assert.Empty(VanillaUiSites.AnchorKeys((VanillaUiSite)99));
+    }
+
+    [Fact]
+    public void A_station_title_row_button_takes_its_icon()
+    {
+        var station = UiApi.AttachToVanilla(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        Assert.True(station.Enabled);
+        station.Button("Log", VanillaButtonIcon.Sprite("LinkIcon_Journal"));
+        _client.Fire(VanillaUiSite.StationPanel, Open(31, new VanillaPanelTarget(VanillaPanelKind.Workstation, 900, 2, 50, 1, 0)));
+        Assert.Equal(new[] { "sprite:LinkIcon_Journal" }, _client.ClonedIcons.Select(i => i.ToString()).ToArray());
+        Assert.Contains(VanillaPanelAnchor.BesideRename, _client.BuiltAnchors);
+        station.Dispose();
+
+        var heart = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        Assert.False(heart.Enabled);
+        Assert.Contains(Lines, l => l.Contains("CastleHeartPanel") && l.Contains("is not an anchor this site accepts"));
+        heart.Dispose();
+    }
+
+    [Fact]
+    public void The_station_resolver_fills_the_rename_group_per_window()
+    {
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("FillRename(view, window.Sub!, kind, renameButton, renameParent);", resolver);
+        Assert.Contains("FillRename(view, sub, VanillaPanelKind.Container, sub.OpenTagEditButton, sub.OpenTagEditButtonParent);", resolver);
+        Assert.Contains("renameParent = sub.OpenTagEditButtonParent;", resolver);
+        Assert.Contains("SalvageReader.Rename(window.Sub!) : UnitReader.Rename(window.Sub!)", resolver);
+        Assert.Contains("d[\"siteAnchors\"] = VanillaUiSites.AnchorKeys(rb.Site);", resolver);
+    }
+
+    [Fact]
+    public void One_sweep_looks_for_every_wanted_sprite_and_the_next_call_that_frame_does_not_sweep()
+    {
+        VanillaButtonSprites.Clear();
+        VanillaButtonSprites.Want("A");
+        VanillaButtonSprites.Want("B");
+        VanillaButtonSprites.Want("C");
+        VanillaButtonSprites.Note("C", new object(), 1);
+        var first = VanillaButtonSprites.SweepFor("A", 10);
+        Assert.Equal(new[] { "A", "B" }, first.ToArray());
+        foreach (var n in first) VanillaButtonSprites.Note(n, null, 10);
+        Assert.Empty(VanillaButtonSprites.SweepFor("B", 10));
+        Assert.Empty(VanillaButtonSprites.SweepFor("A", 11));
+        // Due again after the retry interval, and both names go together.
+        Assert.Equal(new[] { "A", "B" }, VanillaButtonSprites.SweepFor("A", 10 + VanillaButtonSprites.RetryFrames).ToArray());
+        VanillaButtonSprites.Clear();
+    }
+
+    [Fact]
+    public void A_named_sprite_is_kept_while_alive_and_a_miss_is_not_looked_for_again_at_once()
+    {
+        VanillaButtonSprites.Clear();
+        var sprite = new object();
+        bool alive = true;
+        Assert.True(VanillaButtonSprites.MaySearch("LinkIcon_Journal", 100));
+        VanillaButtonSprites.Note("LinkIcon_Journal", null, 100);
+        Assert.False(VanillaButtonSprites.MaySearch("LinkIcon_Journal", 101));
+        Assert.False(VanillaButtonSprites.MaySearch("LinkIcon_Journal", 100 + VanillaButtonSprites.RetryFrames - 1));
+        Assert.True(VanillaButtonSprites.MaySearch("LinkIcon_Journal", 100 + VanillaButtonSprites.RetryFrames));
+        // A frame counter that went back (a new process generation) may search at once.
+        Assert.True(VanillaButtonSprites.MaySearch("LinkIcon_Journal", 5));
+        Assert.Null(VanillaButtonSprites.Get("LinkIcon_Journal", _ => alive));
+
+        VanillaButtonSprites.Note("LinkIcon_Journal", sprite, 800);
+        Assert.Same(sprite, VanillaButtonSprites.Get("LinkIcon_Journal", _ => alive));
+        Assert.True(VanillaButtonSprites.MaySearch("LinkIcon_Journal", 801));
+        alive = false;
+        Assert.Null(VanillaButtonSprites.Get("LinkIcon_Journal", _ => alive));
+        alive = true;
+        Assert.Null(VanillaButtonSprites.Get("LinkIcon_Journal", _ => alive));
+        Assert.False(VanillaButtonSprites.MaySearch("", 0));
+        VanillaButtonSprites.Clear();
+
+        Assert.Equal(2, VanillaButtonSprites.Match("LinkIcon_Journal", "LinkIcon_Journal"));
+        Assert.Equal(1, VanillaButtonSprites.Match("LinkIcon_Journal", "linkicon_journal"));
+        Assert.Equal(0, VanillaButtonSprites.Match("LinkIcon_Journal", "LinkIcon_JournalV"));
+        Assert.Equal(0, VanillaButtonSprites.Match("LinkIcon_Journal", null));
+    }
+
+    [Fact]
+    public void The_resolver_builds_a_title_row_icon_face_and_keeps_it_through_a_text_row()
+    {
+        // Source pins on the Unity half (not compiled here).
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("VanillaUiSites.HasIconFace(host.Anchor, icon) ? AddIconFace(site, clone, label, icon, size, out faceSource) : null", resolver);
+        Assert.Contains("if (always) widget.SetIconMode(true);", resolver);
+        Assert.Contains("else if (IconAlways) icon = true;", resolver);
+        Assert.Contains("internal float TextWidth => IconAlways ? _donorSize.y : _textWidth;", resolver);
+        Assert.Contains("Buttons[i].IconAlways ? ButtonSize.y :", resolver);
+        Assert.Contains("VanillaButtonSprites.SweepFor(name, frame)", resolver);
+        Assert.Contains("ClonePanelButton(site, container, caption, VanillaButtonIcon.Unchosen)", resolver);
+    }
+
     // ---------------------------------------------------------------- fake
 
     private sealed class FakePanelRuntime : IUiRuntime
@@ -1297,6 +1471,15 @@ public class VanillaPanelTests : IDisposable
             var c = new FakeWidget(containerName, false);
             _containers.Add(c);
             return c;
+        }
+
+        /// <summary>The icon each button clone was asked for, in order.</summary>
+        public List<VanillaButtonIcon> ClonedIcons { get; } = new();
+
+        public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon)
+        {
+            ClonedIcons.Add(icon);
+            return ClonePanelButton(site, container, caption);
         }
 
         public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption)

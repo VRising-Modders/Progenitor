@@ -712,7 +712,7 @@ public static partial class Ui
         catch (Exception e) { Plugin.Logger?.LogWarning("Ui: dialog unload threw: " + e.Message); }
 
         // P7: the widget backends' process-wide state (tooltip, HUD notices, Locate pings, a world pick, a drag).
-        try { UiKeyHints.Reset(); UiBuildingIcons.Clear(); } catch { /* HUB1: the key hints and building icons go with Core */ }
+        try { UiKeyHints.Reset(); UiBuildingIcons.Clear(); VanillaButtonSprites.Clear(); Progenitor.Castles.BuildingDisplayNames.Clear(); } catch { /* HUB1: the key hints, building icons and names, and named button sprites go with Core */ }
 #if !PROGENITOR_TESTS
         try { UnityBuildingIcons.Clear(); } catch { /* HUB1: the blueprint icon ids go with Core too */ }
 #endif
@@ -1088,6 +1088,7 @@ public static partial class Ui
         // HUB1: no key hint, building icon or tab-history pointer seam outlives a test.
         UiKeyHints.Reset();
         UiBuildingIcons.Clear();
+        VanillaButtonSprites.Clear();
         UiTabHistoryRoute.ResetForTests();
         VanillaAttachRegistry.ResetForTests();
         VanillaSiteHealth.Clear();

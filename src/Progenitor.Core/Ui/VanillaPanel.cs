@@ -130,29 +130,50 @@ public readonly struct VanillaRecipeRequirement : IEquatable<VanillaRecipeRequir
 }
 
 /// <summary>
-/// The face a P6 button shows when its caption does not fit its slot (spec P6; today only
-/// <see cref="VanillaPanelAnchor.BesideSort"/> falls back): a square button in the game's bar art
-/// with this icon, and the caption as its tooltip. Game-free.
+/// The square icon face of a P6 button: a button in the game's bar art with this icon, and the caption as
+/// its tooltip (spec P6). On <see cref="VanillaPanelAnchor.BesideSort"/> it is the fallback shown when the
+/// captions do not fit the slot; on an inline title-row anchor (<see cref="VanillaPanelAnchor.BesideRename"/>)
+/// a button given an icon always shows it, as a square the row's height (see
+/// <see cref="VanillaUiSites.IconAlways"/>). The icon is, in order: the named game sprite (<see cref="Sprite"/>),
+/// the item's game icon (<see cref="Item"/>), else the framework's drawn mark. Game-free.
 /// </summary>
 public readonly struct VanillaButtonIcon : IEquatable<VanillaButtonIcon>
 {
-    private VanillaButtonIcon(int itemGuid, string mark)
+    private VanillaButtonIcon(int itemGuid, string mark, string? spriteName = null, bool chosen = true)
     {
         ItemGuid = itemGuid;
         Mark = mark ?? "";
+        _spriteName = spriteName;
+        _chosen = chosen;
     }
+
+    private readonly string? _spriteName;
+    private readonly bool _chosen;
 
     /// <summary>An item's prefab id whose game icon is shown (the item's own inventory icon), or 0.</summary>
     public int ItemGuid { get; }
 
     /// <summary>
-    /// The framework's drawn mark shown when there is no item icon: <c>chest</c> (the default),
+    /// The framework's drawn mark shown when there is no game icon: <c>chest</c> (the default),
     /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c>, <c>grip</c> or <c>locate</c>.
     /// </summary>
     public string Mark { get; }
 
+    /// <summary>The name of the game sprite to show (<see cref="Sprite"/>), or empty.</summary>
+    public string SpriteName => _spriteName ?? "";
+
+    /// <summary>
+    /// The caller chose this icon (every public factory). False only for the icon of a caption-only
+    /// <see cref="IVanillaAttachHandle.Button(string)"/>: that button keeps its text face on a title-row
+    /// anchor, and falls back to the chest on <see cref="VanillaPanelAnchor.BesideSort"/>.
+    /// </summary>
+    internal bool Chosen => _chosen;
+
     /// <summary>The drawn chest mark.</summary>
     public static VanillaButtonIcon Default => new(0, "chest");
+
+    /// <summary>The icon of a caption-only button (not <see cref="Chosen"/>; drawn as the chest where a face is needed).</summary>
+    internal static VanillaButtonIcon Unchosen => new(0, "chest", chosen: false);
 
     /// <summary>The game icon of item <paramref name="prefabGuid"/>; the chest mark when the item has none.</summary>
     public static VanillaButtonIcon Item(int prefabGuid) => new(prefabGuid, "chest");
@@ -160,13 +181,156 @@ public readonly struct VanillaButtonIcon : IEquatable<VanillaButtonIcon>
     /// <summary>A drawn mark by name (see <see cref="Mark"/>); an unknown name gives the chest.</summary>
     public static VanillaButtonIcon Drawn(string mark) => new(0, string.IsNullOrWhiteSpace(mark) ? "chest" : mark.Trim());
 
-    public bool Equals(VanillaButtonIcon other) => ItemGuid == other.ItemGuid && string.Equals(Mark, other.Mark, StringComparison.Ordinal);
+    /// <summary>
+    /// A sprite the game has loaded, by name (an exact-case match first, else a case-insensitive one), such as
+    /// <c>LinkIcon_Journal</c>; the drawn <paramref name="fallbackMark"/> (see <see cref="Mark"/>) while no loaded
+    /// sprite has that name. Nothing is loaded for it: the name is looked up among the sprites in memory when the
+    /// button's face is built (each time its window opens), and a name not found is looked for again at most once
+    /// every <see cref="VanillaButtonSprites.RetryFrames"/> frames. Shown in its own colors. A blank name is the
+    /// drawn mark alone.
+    /// </summary>
+    public static VanillaButtonIcon Sprite(string name, string fallbackMark = "chest")
+    {
+        string mark = string.IsNullOrWhiteSpace(fallbackMark) ? "chest" : fallbackMark.Trim();
+        return string.IsNullOrWhiteSpace(name) ? new(0, mark) : new(0, mark, name.Trim());
+    }
+
+    public bool Equals(VanillaButtonIcon other) =>
+        ItemGuid == other.ItemGuid && _chosen == other._chosen
+        && string.Equals(Mark, other.Mark, StringComparison.Ordinal)
+        && string.Equals(SpriteName, other.SpriteName, StringComparison.Ordinal);
 
     public override bool Equals(object? obj) => obj is VanillaButtonIcon o && Equals(o);
 
-    public override int GetHashCode() => ItemGuid * 31 + (Mark?.GetHashCode() ?? 0);
+    public override int GetHashCode() => HashCode.Combine(ItemGuid, Mark ?? "", SpriteName, _chosen);
 
-    public override string ToString() => ItemGuid != 0 ? "item:" + ItemGuid : "mark:" + (string.IsNullOrEmpty(Mark) ? "chest" : Mark);
+    public override string ToString() =>
+        !_chosen ? "none"
+        : SpriteName.Length > 0 ? "sprite:" + SpriteName
+        : ItemGuid != 0 ? "item:" + ItemGuid
+        : "mark:" + (string.IsNullOrEmpty(Mark) ? "chest" : Mark);
+}
+
+/// <summary>
+/// The game sprites <see cref="VanillaButtonIcon.Sprite"/> names, found by name among the loaded sprites and kept
+/// while alive. A name not found is not looked for again for <see cref="RetryFrames"/> frames: a sweep of the loaded
+/// sprites is not cheap. The Unity side sweeps; this is the game-free cache. Cleared on Core Uninstall.
+/// </summary>
+internal static class VanillaButtonSprites
+{
+    /// <summary>Frames before a name that was not found is looked for again (about 10 seconds at 60 fps).</summary>
+    internal const int RetryFrames = 600;
+
+    private static readonly object Gate = new();
+    private static readonly Dictionary<string, object> Found = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, int> MissedAt = new(StringComparer.Ordinal);
+
+    /// <summary>The cached sprite for <paramref name="name"/> while <paramref name="alive"/> says so; a dead one is forgotten.</summary>
+    internal static object? Get(string name, Func<object, bool> alive)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        lock (Gate)
+        {
+            if (!Found.TryGetValue(name, out var o)) return null;
+            bool ok;
+            try { ok = alive(o); }
+            catch { ok = false; }
+            if (ok) return o;
+            Found.Remove(name);
+            return null;
+        }
+    }
+
+    /// <summary>Whether <paramref name="name"/> may be looked for on <paramref name="frame"/>: never missed, or not within <see cref="RetryFrames"/> of its last miss.</summary>
+    internal static bool MaySearch(string name, int frame)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        lock (Gate)
+        {
+            if (!MissedAt.TryGetValue(name, out int at)) return true;
+            return frame < at || frame - at >= RetryFrames;
+        }
+    }
+
+    /// <summary>A search's answer: the sprite found, or (null) a miss on <paramref name="frame"/>.</summary>
+    internal static void Note(string name, object? sprite, int frame)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+        lock (Gate)
+        {
+            if (sprite != null)
+            {
+                Found[name] = sprite;
+                MissedAt.Remove(name);
+                Wanted.Remove(name);
+            }
+            else MissedAt[name] = frame;
+        }
+    }
+
+    /// <summary>Most names kept waiting for a sweep; one more is not remembered (it is still looked for when asked).</summary>
+    internal const int MaxWanted = 64;
+
+    private static readonly HashSet<string> Wanted = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A button was made with this sprite name (<see cref="IVanillaAttachHandle.Button(string, VanillaButtonIcon)"/>):
+    /// remember it, so the first sweep, when any button's face is built, looks for every name at once.
+    /// </summary>
+    internal static void Want(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+        lock (Gate)
+        {
+            if (!Found.ContainsKey(name) && Wanted.Count < MaxWanted) Wanted.Add(name);
+        }
+    }
+
+    /// <summary>
+    /// The names one sweep on <paramref name="frame"/> looks for: <paramref name="name"/> (now remembered as wanted)
+    /// and every other wanted name that may be searched, so several buttons' sprites share one sweep. Empty when
+    /// <paramref name="name"/> may not be searched yet. Every name in the list gets a <see cref="Note"/> after the sweep,
+    /// so a later call on the same frame does not sweep again.
+    /// </summary>
+    internal static List<string> SweepFor(string name, int frame)
+    {
+        var list = new List<string>();
+        if (!MaySearch(name, frame)) return list;
+        lock (Gate)
+        {
+            if (Wanted.Count < MaxWanted) Wanted.Add(name);
+            list.Add(name);
+            foreach (var w in Wanted)
+            {
+                if (string.Equals(w, name, StringComparison.Ordinal) || Found.ContainsKey(w)) continue;
+                if (MissedAt.TryGetValue(w, out int at) && frame >= at && frame - at < RetryFrames) continue;
+                list.Add(w);
+            }
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// How well a loaded sprite's <paramref name="name"/> matches <paramref name="wanted"/>: 2 the exact name (the
+    /// sweep stops), 1 the name in another case (the first such is kept while the sweep goes on), 0 no match.
+    /// </summary>
+    internal static int Match(string wanted, string? name)
+    {
+        if (name == null || string.IsNullOrEmpty(wanted)) return 0;
+        if (string.Equals(name, wanted, StringComparison.Ordinal)) return 2;
+        return string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+    }
+
+    internal static void Clear()
+    {
+        lock (Gate)
+        {
+            Found.Clear();
+            Wanted.Clear();
+            MissedAt.Clear();
+        }
+    }
 }
 
 /// <summary>Which vanilla window an attachment's panel belongs to.</summary>

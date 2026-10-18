@@ -226,11 +226,12 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         lock (_gate) _panelHandlers.Remove(handler);
     }
 
-    public IUiButton Button(string caption) => Button(caption, VanillaButtonIcon.Default);
+    public IUiButton Button(string caption) => Button(caption, VanillaButtonIcon.Unchosen);
 
     public IUiButton Button(string caption, VanillaButtonIcon icon)
     {
         if (!Enabled || IsDisposed || !VanillaUiSites.Info(Site).AcceptsButtons) return DisabledAttachButton.Instance;
+        VanillaButtonSprites.Want(icon.SpriteName);
         int index;
         ushort id = UiSlotTable.Alloc(Owner);
         lock (_gate)
@@ -778,7 +779,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
             }
 
             IRuntimeWidget? button = null;
-            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i], i < _icons.Count ? _icons[i] : VanillaButtonIcon.Default); }
+            try { button = _runtime.ClonePanelButton(Site, _container!, _captions[i], i < _icons.Count ? _icons[i] : VanillaButtonIcon.Unchosen); }
             catch (Exception e)
             {
                 Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " button clone threw: " + e.Message);

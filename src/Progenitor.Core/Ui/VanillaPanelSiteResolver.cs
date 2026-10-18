@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Il2CppInterop.Runtime;
 using Progenitor.Ecs;
 using Progenitor.Hooks;
 using ProjectM.Network;
@@ -81,6 +82,9 @@ internal sealed partial class UnityUiRuntime
         internal Transform? RenameGroup;
         internal string RenameSource = "";
         internal GameObject? RenameButton;
+
+        /// <summary>What <see cref="VanillaPanelAnchor.BesideRename"/> lacks on this window when it has no rename group (<see cref="VanillaStationWindows.RenameMissing"/>).</summary>
+        internal string RenameMissing = "";
         internal TextMeshProUGUI? CaptionDonor;
         internal TextMeshProUGUI? BodyDonor;
         internal FakeTooltip? Tooltip;
@@ -109,6 +113,7 @@ internal sealed partial class UnityUiRuntime
             RenameGroup = null;
             RenameSource = "";
             RenameButton = null;
+            RenameMissing = "";
             CaptionDonor = null;
             BodyDonor = null;
             Tooltip = null;
@@ -430,6 +435,14 @@ internal sealed partial class UnityUiRuntime
             return s == null ? null : RectOf(s.ItemInputsParent);
         }
 
+        /// <summary>The devourer window's rename button (<c>OpenTagEditButton</c>), or null.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static Component? Rename(Component sub)
+        {
+            var s = sub.TryCast<SalvagestationSubMenu>();
+            return s == null ? null : s.OpenTagEditButton;
+        }
+
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal static void Clear() => M = null;
     }
@@ -452,6 +465,14 @@ internal sealed partial class UnityUiRuntime
         {
             var s = sub.TryCast<UnitSpawnerstationSubMenu>();
             return s == null ? null : RectOf(s.RecipesParent);
+        }
+
+        /// <summary>The unit station window's rename button (<c>OpenTagEditButton</c>), or null.</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static Component? Rename(Component sub)
+        {
+            var s = sub.TryCast<UnitSpawnerstationSubMenu>();
+            return s == null ? null : s.OpenTagEditButton;
         }
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -723,16 +744,29 @@ internal sealed partial class UnityUiRuntime
         view.Reset();
         view.Panel = sub.gameObject;
         view.Grid = RectOf(sub.EquipmentItemsParent);
-        view.RenameButton = Alive(sub.OpenTagEditButton) ? sub.OpenTagEditButton.gameObject : null;
+        FillRename(view, sub, VanillaPanelKind.Container, sub.OpenTagEditButton, sub.OpenTagEditButtonParent);
+        FromInventory(view, _container.Inventory);
+        view.Obstacle = _container.InventoryShown ? _container.Inventory!.gameObject : null;
+        return Finish(VanillaUiSite.ContainerPanel, view, world, VanillaPanelKind.Container, _container.Target);
+    }
 
-        // OpenTagEditButtonParent is empty in the shipped prefab (1.1.13.0); the rename button's
-        // own parent is the group then (VanillaPanelAnchors.RenameGroup), cached per window.
+    /// <summary>
+    /// The rename button and the group <see cref="VanillaPanelAnchor.BesideRename"/> is placed beside, for a window of
+    /// <paramref name="kind"/>. <paramref name="parentField"/> (<c>OpenTagEditButtonParent</c>, where the window has
+    /// one) is empty in the shipped prefabs (1.1.13.0); the rename button's own parent is the group then
+    /// (<see cref="VanillaPanelAnchors.RenameGroup"/>), cached per window. A window without a rename button keeps none,
+    /// and the anchor says why (<see cref="VanillaStationWindows.RenameMissing"/>).
+    /// </summary>
+    private static void FillRename(PanelView view, Component sub, VanillaPanelKind kind, Component? button, Component? parentField)
+    {
+        view.RenameMissing = VanillaStationWindows.RenameMissing(kind);
+        if (!VanillaStationWindows.HasRename(kind)) return;
+        view.RenameButton = Alive(button) ? button!.gameObject : null;
         int subId = sub.GetInstanceID();
         if (!RenameGroups.TryGetValue(subId, out var rename) || Stale(rename.Group, rename.Frame))
         {
             if (RenameGroups.Count > 8) RenameGroups.Clear();
-            var pick = VanillaPanelAnchors.RenameGroup(
-                TransformNode.Of(sub.OpenTagEditButtonParent), TransformNode.Of(sub.OpenTagEditButton));
+            var pick = VanillaPanelAnchors.RenameGroup(TransformNode.Of(parentField), TransformNode.Of(button));
             var group = GoOf(pick.Node);
             rename = (group != null ? group.transform : null, pick.Source, Time.frameCount);
             RenameGroups[subId] = rename;
@@ -740,9 +774,6 @@ internal sealed partial class UnityUiRuntime
 
         view.RenameGroup = Alive(rename.Group) ? rename.Group : null;
         view.RenameSource = rename.Source;
-        FromInventory(view, _container.Inventory);
-        view.Obstacle = _container.InventoryShown ? _container.Inventory!.gameObject : null;
-        return Finish(VanillaUiSite.ContainerPanel, view, world, VanillaPanelKind.Container, _container.Target);
     }
 
     private static VanillaSiteSample SampleStation(PanelView view, World world)
@@ -753,6 +784,7 @@ internal sealed partial class UnityUiRuntime
         var window = StationScans[pick];
         var kind = picked.Kind;
         RectTransform? grid;
+        Component? renameButton = null, renameParent = null;
         switch (kind)
         {
             case VanillaPanelKind.Workstation:
@@ -760,6 +792,7 @@ internal sealed partial class UnityUiRuntime
                 var sub = window.Sub!.TryCast<WorkstationSubMenu>();
                 if (sub == null) return Miss(view);
                 grid = RectOf(sub.RecipesParent);
+                renameButton = sub.OpenTagEditButton;
                 break;
             }
             case VanillaPanelKind.RefinementStation:
@@ -767,6 +800,8 @@ internal sealed partial class UnityUiRuntime
                 var sub = window.Sub!.TryCast<RefinementstationSubMenu>();
                 if (sub == null) return Miss(view);
                 grid = RectOf(sub.RecipesParent);
+                renameButton = sub.OpenTagEditButton;
+                renameParent = sub.OpenTagEditButtonParent;
                 break;
             }
             case VanillaPanelKind.PrisonCell:
@@ -784,6 +819,13 @@ internal sealed partial class UnityUiRuntime
                 });
                 if (!ok) return Miss(view);
                 grid = found;
+
+                // The prison cell has no rename button. A missing pencil only withholds BesideRename.
+                if (kind != VanillaPanelKind.PrisonCell)
+                {
+                    try { renameButton = kind == VanillaPanelKind.SalvageStation ? SalvageReader.Rename(window.Sub!) : UnitReader.Rename(window.Sub!); }
+                    catch { renameButton = null; /* BesideRename says what is missing; the window stays */ }
+                }
                 break;
             }
             default:
@@ -793,6 +835,7 @@ internal sealed partial class UnityUiRuntime
         view.Reset();
         view.Panel = window.Sub!.gameObject;
         view.Grid = grid;
+        FillRename(view, window.Sub!, kind, renameButton, renameParent);
         FromInventory(view, window.Inventory);
         view.Obstacle = window.InventoryShown ? window.Inventory!.gameObject : null;
         return Finish(VanillaUiSite.StationPanel, view, world, kind, window.Target);
@@ -1588,7 +1631,7 @@ internal sealed partial class UnityUiRuntime
                 case VanillaPanelAnchor.BesideRename:
                     host = Alive(view.RenameGroup) ? view.RenameGroup : null;
                     reference = Alive(view.RenameButton) ? view.RenameButton : null;
-                    if (host == null) missing = "ContainerSubMenu.OpenTagEditButtonParent and OpenTagEditButton";
+                    if (host == null) missing = view.RenameMissing.Length > 0 ? view.RenameMissing : "the window's rename button";
                     break;
                 case VanillaPanelAnchor.BesideSort:
                     reference = Alive(view.Sort) ? view.Sort : null;
@@ -1885,7 +1928,7 @@ internal sealed partial class UnityUiRuntime
     }
 
     public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption) =>
-        ClonePanelButton(site, container, caption, VanillaButtonIcon.Default);
+        ClonePanelButton(site, container, caption, VanillaButtonIcon.Unchosen);
 
     public IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon)
     {
@@ -1934,15 +1977,19 @@ internal sealed partial class UnityUiRuntime
             }
 
             // BesideSort may fall back to a square icon face (PlaceBesideRow); its icon is built now,
-            // hidden, so the switch is a SetActive and never a clone.
-            GameObject? face = host.Anchor == VanillaPanelAnchor.BesideSort ? AddIconFace(clone, label, icon, size) : null;
-            var widget = new PanelButtonWidget(clone, label, stun.onClick, size, face, this) { Site = site };
+            // hidden, so the switch is a SetActive and never a clone. On a title-row anchor a button
+            // given an icon is that face for good (VanillaUiSites.IconAlways), a square the row's height.
+            string faceSource = "";
+            GameObject? face = VanillaUiSites.HasIconFace(host.Anchor, icon) ? AddIconFace(site, clone, label, icon, size, out faceSource) : null;
+            bool always = face != null && VanillaUiSites.IconAlways(host.Anchor, icon);
+            var widget = new PanelButtonWidget(clone, label, stun.onClick, size, face, this) { Site = site, IconAlways = always, FaceSource = faceSource };
             var element = clone.GetComponent<LayoutElement>() ?? clone.AddComponent<LayoutElement>();
             element.ignoreLayout = false;
             element.preferredHeight = size.y;
             element.minHeight = size.y;
             widget.Element = element;
             widget.Refit();
+            if (always) widget.SetIconMode(true);
 
             clone.SetActive(true);
             host.Buttons.Add(widget);
@@ -1961,27 +2008,39 @@ internal sealed partial class UnityUiRuntime
     private const float IconFaceShare = 0.67f;
 
     /// <summary>
-    /// The icon an icon-mode button shows: the item's own game icon (<c>ManagedItemData.Icon</c>) for
-    /// <see cref="VanillaButtonIcon.Item"/>, else the framework's drawn mark, tinted with the caption's
-    /// color. Built hidden; the caption's object is the one that hides when it shows.
+    /// The icon an icon-mode button shows: the named loaded game sprite for <see cref="VanillaButtonIcon.Sprite"/>,
+    /// the item's own game icon (<c>ManagedItemData.Icon</c>) for <see cref="VanillaButtonIcon.Item"/>, else the
+    /// framework's drawn mark, tinted with the caption's color. Built hidden; the caption's object is the one that
+    /// hides when it shows. <paramref name="source"/> says which it was (<c>sprite:</c>, <c>item:</c> or <c>mark:</c>
+    /// and the name), for the readback.
     /// </summary>
-    private static GameObject? AddIconFace(GameObject clone, TextMeshProUGUI caption, VanillaButtonIcon icon, Vector2 size)
+    private static GameObject? AddIconFace(VanillaUiSite site, GameObject clone, TextMeshProUGUI caption, VanillaButtonIcon icon, Vector2 size, out string source)
     {
         GameObject? go = null;
+        source = "";
         try
         {
             Sprite? sprite = null;
-            bool itemIcon = false;
-            if (icon.ItemGuid != 0)
+            bool gameIcon = false;
+            if (icon.SpriteName.Length > 0)
+            {
+                sprite = NamedSprite(site, icon.SpriteName);
+                gameIcon = sprite != null;
+                if (gameIcon) source = "sprite:" + (sprite!.name ?? icon.SpriteName);
+            }
+
+            if (sprite == null && icon.ItemGuid != 0)
             {
                 sprite = ItemIconSprite(icon.ItemGuid);
-                itemIcon = sprite != null;
+                gameIcon = sprite != null;
+                if (gameIcon) source = "item:" + icon.ItemGuid.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
 
             if (sprite == null)
             {
                 if (!UiDrawnMark.TryParse(icon.Mark, out var mark) || !mark.IsIcon) mark = UiDrawnMark.ChestMark;
                 sprite = MarkSprite(mark);
+                source = "mark:" + mark.Name;
             }
 
             if (sprite == null) return null;
@@ -1998,7 +2057,7 @@ internal sealed partial class UnityUiRuntime
             image.sprite = sprite;
             image.preserveAspect = true;
             image.raycastTarget = false;
-            image.color = itemIcon ? Color.white : caption.color;
+            image.color = gameIcon ? Color.white : caption.color;
             go.SetActive(false);
             return go;
         }
@@ -2006,8 +2065,64 @@ internal sealed partial class UnityUiRuntime
         {
             Plugin.Logger?.LogWarning("Ui: attach icon face not built: " + e.Message);
             TryDestroyImmediate(go);
+            source = "";
             return null;
         }
+    }
+
+    /// <summary>
+    /// A loaded game sprite by name (<see cref="VanillaButtonIcon.Sprite"/>): the cached one while alive, else one
+    /// sweep of the sprites in memory (an exact-case name wins over another case; the framework's own sprites are
+    /// skipped). Loads nothing. A miss is said once per name and not swept again for
+    /// <see cref="VanillaButtonSprites.RetryFrames"/> frames.
+    /// </summary>
+    private static Sprite? NamedSprite(VanillaUiSite site, string name)
+    {
+        var cached = VanillaButtonSprites.Get(name, o => o is Sprite s && Alive(s));
+        if (cached is Sprite hit) return hit;
+        int frame = Time.frameCount;
+        // One sweep looks for every wanted name due a search; the others asked this frame then read the cache or
+        // their fresh miss instead of sweeping again.
+        var names = VanillaButtonSprites.SweepFor(name, frame);
+        if (names.Count == 0) return null;
+        var exact = new Sprite?[names.Count];
+        var loose = new Sprite?[names.Count];
+        int left = names.Count;
+        try
+        {
+            var all = Resources.FindObjectsOfTypeAll(Il2CppType.Of<Sprite>());
+            for (int i = 0; all != null && i < all.Length && left > 0; i++)
+            {
+                Sprite? s;
+                string? n;
+                try
+                {
+                    s = all[i] == null ? null : all[i].TryCast<Sprite>();
+                    n = s != null ? s.name : null;
+                }
+                catch { continue; }
+                if (s == null || n == null || UiOwnership.IsOwned(n)) continue;
+                for (int k = 0; k < names.Count; k++)
+                {
+                    if (exact[k] != null) continue;
+                    int m = VanillaButtonSprites.Match(names[k], n);
+                    if (m == 2) { exact[k] = s; left--; }
+                    else if (m == 1 && loose[k] == null) loose[k] = s;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach sprite '" + name + "' lookup threw: " + e.Message);
+        }
+
+        for (int k = 1; k < names.Count; k++) VanillaButtonSprites.Note(names[k], exact[k] ?? loose[k], frame);
+        var found = exact[0] ?? loose[0];
+        VanillaButtonSprites.Note(name, found, frame);
+        if (found == null && VanillaSiteHealth.LogOnce(site, "sprite missing: " + name))
+            Plugin.Logger?.LogInfo("Ui: attach " + VanillaUiSites.Key(site) + " icon sprite '" + name + "' is not loaded; the button shows its drawn mark (looked for again in "
+                + VanillaButtonSprites.RetryFrames + " frames).");
+        return found;
     }
 
     /// <summary>An item's own inventory icon from the client's game data, or null.</summary>
@@ -2431,7 +2546,14 @@ internal sealed partial class UnityUiRuntime
                     : AnchorStatus.TryGetValue((rb.Site, rb.Anchor), out var s) ? s
                     : "not resolved yet (the window has not been open with this anchor attached)";
                 if (PanelViews.TryGetValue(rb.Site, out var view) && view.Live)
+                {
                     d["donor"] = view.DonorSource.Length > 0 ? view.DonorSource : "<none>";
+                    // The open window's rename button: where BesideRename goes, or why it cannot.
+                    d["rename"] = Alive(view.RenameGroup) ? "ok via=" + view.RenameSource
+                        : view.RenameMissing.Length > 0 ? "missing: " + view.RenameMissing : "";
+                }
+
+                d["siteAnchors"] = VanillaUiSites.AnchorKeys(rb.Site);
                 d["buttonFailure"] = ButtonFailures.TryGetValue(rb.Site, out var bf) ? bf : "";
             }
 
@@ -2465,6 +2587,8 @@ internal sealed partial class UnityUiRuntime
                     if (i < rb.Buttons.Length && rb.Buttons[i] is PanelButtonWidget tipped && tipped.Alive)
                     {
                         b["face"] = tipped.IconMode ? "icon" : "text";
+                        b["iconAlways"] = tipped.IconAlways;
+                        b["icon"] = tipped.FaceSource;
                         b["tooltip"] = new Dictionary<string, object?>
                         {
                             ["text"] = tipped.IconMode ? tipped.Text : "",
@@ -2697,7 +2821,7 @@ internal sealed partial class UnityUiRuntime
             for (int i = 0; i < Buttons.Count; i++)
             {
                 if (!Buttons[i].Alive || !Buttons[i].Visible) continue;
-                w += VanillaPanelAnchors.MinButtonWidth(Buttons[i].CaptionWidth, CaptionPadding, ButtonSize.y);
+                w += Buttons[i].IconAlways ? ButtonSize.y : VanillaPanelAnchors.MinButtonWidth(Buttons[i].CaptionWidth, CaptionPadding, ButtonSize.y);
                 n++;
             }
 
@@ -2806,20 +2930,34 @@ internal sealed partial class UnityUiRuntime
         }
 
         /// <summary>
-        /// Shown as a square icon button (its caption hidden, the caption as its tooltip) because the
-        /// caption does not fit the slot (<see cref="VanillaPanelPlacement.PlaceBesideRow"/>).
+        /// Shown as a square icon button (its caption hidden, the caption as its tooltip): the caption
+        /// does not fit the slot (<see cref="VanillaPanelPlacement.PlaceBesideRow"/>), or the button is
+        /// <see cref="IconAlways"/>.
         /// </summary>
         internal bool IconMode { get; private set; }
 
-        /// <summary>The width this button asks for as text: donor width or caption plus padding.</summary>
-        internal float TextWidth => _textWidth;
+        /// <summary>
+        /// The width this button asks for as text: donor width or caption plus padding; the square for a button that
+        /// is always its icon (<see cref="IconAlways"/>).
+        /// </summary>
+        internal float TextWidth => IconAlways ? _donorSize.y : _textWidth;
 
-        /// <summary>An icon face was built (a <see cref="VanillaPanelAnchor.BesideSort"/> button).</summary>
+        /// <summary>An icon face was built (a <see cref="VanillaPanelAnchor.BesideSort"/> button, or <see cref="IconAlways"/>).</summary>
         internal bool HasIcon => UnityUiRuntime.Alive(_icon);
+
+        /// <summary>
+        /// Always the square icon face, never text (<see cref="VanillaUiSites.IconAlways"/>: a title-row anchor and a
+        /// chosen icon). A row switch to text leaves it as it is.
+        /// </summary>
+        internal bool IconAlways { get; init; }
+
+        /// <summary>What the icon face shows (<c>sprite:</c>, <c>item:</c> or <c>mark:</c> and a name), or empty without one.</summary>
+        internal string FaceSource { get; init; } = "";
 
         internal void SetIconMode(bool icon)
         {
             if (_icon == null) icon = false;
+            else if (IconAlways) icon = true;
             if (icon == IconMode) return;
             IconMode = icon;
             try
