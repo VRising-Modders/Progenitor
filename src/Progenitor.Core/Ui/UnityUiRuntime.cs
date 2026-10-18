@@ -5108,6 +5108,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
         long nowMs = Environment.TickCount64;
         bool escapeHeld = KeyHeld(keyboard, Key.Escape);
         bool escapeEdge = TypeKeyDown(keyboard, UiKey.Escape, frame);
+        bool buildEscape = false;
         // KEYS3 polish (live P2): while a key capture or a framework dialog owns Escape, the 498 guard
         // also takes Back/Menu_Close so the game's FullscreenMenu does not close under the workspace.
         try
@@ -5118,15 +5119,19 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             int gameMenu = GameWindowUnderPanel.MenuTypeNow();
             // The window test only runs with a game window open (it reads the pointer for hover-captured panels).
             bool overGameWindow = GameWindowUnderPanel.IsInteractWindow(gameMenu) && GameWindowUnderPanel.HoldsClose(gameMenu, Ui.EscapeHidesAPanelOverGameWindow());
+            // Build search: an Escape that clears a search the box does not have the keyboard for (Copy building filled
+            // it) is kept from the game, so the build menu stays open; the hold lasts until Escape is up.
+            buildEscape = BuildMenuSearch.EscapeClearsQuery;
             MenuHotkeyGuard.SetCloseHeld(MenuHotkeyGuard.NextCloseHold(
-                Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose || overGameWindow,
+                Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose || overGameWindow || buildEscape,
                 escapeHeld, MenuHotkeyGuard.CloseHeld));
             // RETURN1: a chest window also closes on Interact's key release; typing that letter in a Progenitor field over
             // it must not close it.
             MenuHotkeyGuard.SetInteractHeld(GameWindowUnderPanel.HoldsInteract(gameMenu, field != null));
         }
         catch { MenuHotkeyGuard.SetCloseHeld(false); MenuHotkeyGuard.SetInteractHeld(false); }
-        if (escapeEdge)
+        if (escapeEdge && buildEscape) BuildMenuSearch.ClearOnUnfocusedEscape();
+        else if (escapeEdge)
         {
             ModsMenu.TryClearSearchOnEscape();
             // BUILDSEARCH1: an external field (the build-menu search) gives up focus on Escape.

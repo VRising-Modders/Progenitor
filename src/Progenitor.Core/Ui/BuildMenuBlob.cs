@@ -348,12 +348,17 @@ internal static class BuildSearchResults
         Func<int, string> blueprintText, Func<int, string> groupText, int maxCells = MaxCells) =>
         Select(blob, words, blueprintText, groupText, out _, maxCells);
 
-    /// <summary>As <see cref="Select(BuildMenuBlob, IReadOnlyList{string}, Func{int, string}, Func{int, string}, int)"/>; <paramref name="matched"/> counts every matching cell, shown or not.</summary>
+    /// <summary>
+    /// As <see cref="Select(BuildMenuBlob, IReadOnlyList{string}, Func{int, string}, Func{int, string}, int)"/>; <paramref name="matched"/>
+    /// counts every matching cell, shown or not. The cell holding <paramref name="preferGuid"/> (Copy building's item) is
+    /// always given, even past the cap: it takes the last place.
+    /// </summary>
     internal static List<BuildMenuBlob.ResultCell> Select(
         BuildMenuBlob blob, IReadOnlyList<string> words,
-        Func<int, string> blueprintText, Func<int, string> groupText, out int matched, int maxCells = MaxCells)
+        Func<int, string> blueprintText, Func<int, string> groupText, out int matched, int maxCells = MaxCells, int preferGuid = 0)
     {
         matched = 0;
+        bool preferShown = false;
         var cells = new List<BuildMenuBlob.ResultCell>();
         if (words == null || words.Count == 0) return cells;
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -379,7 +384,17 @@ internal static class BuildSearchResults
             string key = s.GroupGuid + ":" + string.Join(",", guids);
             if (!seen.Add(key)) continue;
             matched++;
-            if (cells.Count < maxCells) cells.Add(new BuildMenuBlob.ResultCell(s.GroupGuid, at));
+            bool preferred = preferGuid != 0 && Array.IndexOf(guids, preferGuid) >= 0;
+            if (cells.Count < maxCells)
+            {
+                cells.Add(new BuildMenuBlob.ResultCell(s.GroupGuid, at));
+                preferShown |= preferred;
+            }
+            else if (preferred && !preferShown && maxCells > 0)
+            {
+                cells[maxCells - 1] = new BuildMenuBlob.ResultCell(s.GroupGuid, at);
+                preferShown = true;
+            }
         }
 
         return cells;

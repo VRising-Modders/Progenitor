@@ -34,6 +34,9 @@ internal static partial class BuildMenuSearch
     private static int _recentEmptyUntil;
     private static int _recentCategory = -1, _recentTag = -1;
     private static int _copyGuid, _copyGroup, _copyFrames;
+    // Copy building's item and the name it put in the box: its cell is always in the results while that text stands.
+    private static int _copyPrefer;
+    private static string _copyFill = "";
     private static bool _copyDispatched;
     private static World? _toolsWorld;
     private static TMPro.TextMeshProUGUI? _scopeHint;
@@ -328,14 +331,30 @@ internal static partial class BuildMenuSearch
         // Use the ordinary menu entry: unavailable blueprints stay unavailable and payment remains vanilla.
         LeaveRecent();
         RestoreResults("copy building");
-        if (_field != null) { UnityUiRuntime.SetExternalFieldText(_field, ""); UnityUiRuntime.BlurExternalField(_field); }
-        _words = Array.Empty<string>();
-        RestoreSearchTabs();
+        // The box shows the copied item's name, so the player sees what was picked (a floor instead of the object on
+        // it, say). Without a box (gamepad layout) or a name, the box is cleared as before.
+        string fill = "";
+        if (_field != null)
+        {
+            NameFor(world, prefab, out string localized);
+            fill = BuildSearchMatch.CopyQuery(localized);
+            UnityUiRuntime.SetExternalFieldText(_field, fill);
+            UnityUiRuntime.BlurExternalField(_field);
+        }
+        // Applied now, not at the next filter pass, so the next mapper update already shows the results and the
+        // selection below is not reset by their arrival.
+        _appliedQuery = fill;
+        _liveQuery = fill;
+        _words = BuildSearchMatch.Words(fill);
+        _copyFill = fill;
+        _copyPrefer = fill.Length > 0 ? prefab.GuidHash : 0;
+        _emptyResultsKey = "";
+        if (_words.Length == 0) RestoreSearchTabs();
         mapper.SetSelectedCategory(place.Category);
         mapper.SetSelectedTag(place.Tag, 0);
         _copyGuid = prefab.GuidHash;
         _copyGroup = place.InGroup ? place.GroupGuid : 0;
-        _copyFrames = 8;
+        _copyFrames = 12;
         _copyDispatched = false;
     }
 
@@ -398,6 +417,8 @@ internal static partial class BuildMenuSearch
         _recentEmptyKey = _recentQueryKey = "";
         _copyGuid = 0;
         _copyDispatched = false;
+        _copyPrefer = 0;
+        _copyFill = "";
         _toolsWorld = null;
         _scopeHint = null;
     }

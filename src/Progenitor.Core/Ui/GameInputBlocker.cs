@@ -1315,7 +1315,7 @@ internal sealed unsafe class GameInputBlocker : IUiInputBlocker
                     Plugin.Logger?.LogInfo(
                         "Ui: menu-hotkey guard took Back/Menu_Close ahead of FullscreenMenuMapper (order "
                         + UiInputCapture.HotkeyGuardOrder + " < " + UiInputCapture.HudMenuOrder
-                        + ") while a key capture, a dialog or a Progenitor window over a game window owns Escape.");
+                        + ") while a key capture, a dialog, a Progenitor window over a game window or a build search owns Escape.");
             }
 
             // RETURN1: a Progenitor field has the keyboard over the game's chest or station window, whose input handler

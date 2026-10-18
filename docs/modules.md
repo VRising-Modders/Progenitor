@@ -6781,9 +6781,13 @@ shows each stage's counters on both sides (built and unit-tested; not live-verif
 `ReceiveSlotPolicy.CoreProtocolIds`; adding it is a Bootstrap change.
 
 **Copy building.** With the build menu open, point at a building and press **Copy building** (default Middle
-Mouse; Keybinds tab > Progenitor > **Build mode**). The search clears, the menu switches to the item's tab and
-the item is picked for placement exactly as a click on it would be, so an item that is not unlocked stays
-unavailable and costs are the game's own. Nothing happens while the box has the keyboard, in the castle relocation
+Mouse; Keybinds tab > Progenitor > **Build mode**). Copy building puts the item's name in the search box so you
+can see what you picked (easy to miss: pointing at an object can copy the floor or wall under it). The results show
+that item, picked for placement exactly as a click on it would be, even when the name matches several items, so an
+item that is not unlocked stays unavailable and costs are the game's own. Typing or the x button changes or clears
+the search as usual. Without the box (the gamepad layout) or an item name, the search is cleared instead and the menu
+switches to the item's tab. The name fill and its selection are unit-tested in their decisions (the filled name, the
+copied item kept in capped results); not live-verified. Nothing happens while the box has the keyboard, in the castle relocation
 menu, or with the menu closed. The key's current binding is shown in the game's key-hint row of the build screen,
 with the game's mouse-button graphic for a mouse button and the key name otherwise; it follows a remap and goes
 when the key is unbound.
@@ -6828,11 +6832,11 @@ The **Copy building** key is stored as `CopyBuilding` in the same file and is re
 | Type | From two letters on, the item row shows the matches from every tab, at most 48 cells. The count beside the box reads "12 found", or "48 of 212 found" when there are more. One letter filters the selected tab. |
 | Hover a result | The tooltip is the game's own, with the breadcrumb saying where the item normally lives. |
 | x button (shown while the box has text) | Clears the search and keeps the keyboard in the box. The row is the selected tab again, with nothing selected for placement. |
-| Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. |
+| Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. With text in the box and the box not focused (after Copy building, say), one Escape also clears the search and the build menu stays open; the next Escape, with the search empty, is the game's own. A dialog, a key capture, the chat box or the Mods menu takes Escape first. The unfocused clear is unit-tested in its decisions; not live-verified. |
 | Enter, or a click elsewhere | Gives the keyboard back and keeps the search. |
 | Switch tab | Not while the box has text: the category and tag buttons are disabled. Clear the search to browse. |
 | Recent | Click it with the box empty: the row lists recent builds. Type to filter them. Another category leaves Recent. |
-| Copy building (Middle Mouse) | Picks the building under the cursor: clears the search, opens its tab and selects it. |
+| Copy building (Middle Mouse) | Picks the building under the cursor: puts its name in the search box and selects it in the results. |
 | Close the build menu | Clears the search (`ClearOnClose`). |
 
 **Matching.** The query is split into words. An item matches when every word appears in its names, in any order

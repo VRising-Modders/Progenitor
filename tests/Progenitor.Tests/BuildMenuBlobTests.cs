@@ -239,6 +239,96 @@ public class BuildMenuResultsTests
         Assert.Equal("3 found", BuildSearchMatch.ResultsText(3, 3));
     }
 
+    [Fact]
+    public void The_copied_item_is_always_in_the_capped_results()
+    {
+        var blob = Blob(out _);
+        // "wall" matches three cells in menu order: walls group (201..), hanging flowers group, wall clock (401).
+        int Hit(List<BuildMenuBlob.ResultCell> cells) =>
+            cells.FindIndex(c => Array.Exists(c.BlueprintAt, at => System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(Bytes().AsSpan(at)) == 401));
+        var capped = BuildSearchResults.Select(blob, BuildSearchMatch.Words("wall"),
+            g => Names.TryGetValue(g, out var n) ? n : "", g => Groups.TryGetValue(g, out var n) ? n : "",
+            out int matched, maxCells: 2);
+        Assert.Equal(-1, Hit(capped));
+        var preferred = BuildSearchResults.Select(blob, BuildSearchMatch.Words("wall"),
+            g => Names.TryGetValue(g, out var n) ? n : "", g => Groups.TryGetValue(g, out var n) ? n : "",
+            out int matched2, maxCells: 2, preferGuid: 401);
+        Assert.Equal(2, preferred.Count);
+        Assert.Equal(1, Hit(preferred));
+        Assert.Equal(matched, matched2);
+        // Already within the cap: nothing moves.
+        var within = BuildSearchResults.Select(blob, BuildSearchMatch.Words("wall"),
+            g => Names.TryGetValue(g, out var n) ? n : "", g => Groups.TryGetValue(g, out var n) ? n : "",
+            out _, preferGuid: 401);
+        Assert.Equal(3, within.Count);
+        Assert.Equal(2, Hit(within));
+    }
+
+    private static byte[] Bytes() => BuildMenuBlobTestData.Sample();
+
+    [Theory]
+    [InlineData("Stone Wall", "Stone Wall")]
+    [InlineData("  Wooden   Wall\tWindow ", "Wooden Wall Window")]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData(null, "")]
+    public void Copy_fills_the_box_with_the_items_display_name(string? name, string expected) =>
+        Assert.Equal(expected, BuildSearchMatch.CopyQuery(name));
+
+    [Fact]
+    public void The_filled_name_matches_the_copied_item_and_its_results_include_it()
+    {
+        var blob = Blob(out _);
+        string fill = BuildSearchMatch.CopyQuery("Stone Wall");
+        var words = BuildSearchMatch.Words(fill);
+        Assert.True(BuildSearchMatch.Matches(words, BuildSearchMatch.Join(new[] { "Stone Wall", "castle wall tier02 stone" })));
+        // "stone wall" also matches "stone wall window": several results, the copied one (201) among them.
+        var cells = BuildSearchResults.Select(blob, words,
+            g => Names.TryGetValue(g, out var n) ? n : "", g => Groups.TryGetValue(g, out var n) ? n : "", out _, preferGuid: 201);
+        var cell = Assert.Single(cells);
+        Assert.Equal(2, cell.BlueprintAt.Length);
+        Assert.True(BuildSearchMatch.QueryChars(words) >= BuildSearchResults.MinQueryChars);
+    }
+
+    [Fact]
+    public void A_long_name_is_cut_at_a_word_within_the_field_limit_and_still_matches()
+    {
+        string name = string.Join(" ", System.Linq.Enumerable.Repeat("Ornate", 15));
+        string fill = BuildSearchMatch.CopyQuery(name);
+        Assert.True(fill.Length <= BuildSearchMatch.MaxQueryLength);
+        Assert.False(fill.EndsWith(" ", StringComparison.Ordinal));
+        Assert.True(BuildSearchMatch.Matches(BuildSearchMatch.Words(fill), BuildSearchMatch.Normalize(name)));
+    }
+
+    [Theory]
+    // menuOpen, hasQuery, focused, capture, dialog, chat, workspace -> takes
+    [InlineData(true, true, false, false, false, false, false, true)]
+    [InlineData(true, false, false, false, false, false, false, false)] // empty: the game's Escape
+    [InlineData(false, true, false, false, false, false, false, false)] // menu closed
+    [InlineData(true, true, true, false, false, false, false, false)] // the focused box handles it
+    [InlineData(true, true, false, true, false, false, false, false)] // a key capture owns Escape
+    [InlineData(true, true, false, false, true, false, false, false)] // a dialog
+    [InlineData(true, true, false, false, false, true, false, false)] // chat
+    [InlineData(true, true, false, false, false, false, true, false)] // the Mods workspace
+    public void An_unfocused_Escape_clears_the_search_only_when_nothing_above_takes_it(
+        bool menuOpen, bool hasQuery, bool focused, bool capture, bool dialog, bool chat, bool workspace, bool takes) =>
+        Assert.Equal(takes, BuildSearchEscape.Takes(menuOpen, hasQuery, focused, capture, dialog, chat, workspace));
+
+    [Fact]
+    public void The_close_hold_keeps_the_clearing_press_from_the_game_until_Escape_is_up()
+    {
+        // Frame of the press: the search has text, so the hold is on before the game reads Escape.
+        bool held = MenuHotkeyGuard.NextCloseHold(false, BuildSearchEscape.Takes(true, true, false, false, false, false, false), true, false);
+        Assert.True(held);
+        // Next frames: the search is empty but Escape is still down: still held.
+        held = MenuHotkeyGuard.NextCloseHold(false, BuildSearchEscape.Takes(true, false, false, false, false, false, false), true, held);
+        Assert.True(held);
+        // Escape up: released; the next Escape (empty search) is the game's.
+        held = MenuHotkeyGuard.NextCloseHold(false, BuildSearchEscape.Takes(true, false, false, false, false, false, false), false, held);
+        Assert.False(held);
+        Assert.False(MenuHotkeyGuard.NextCloseHold(false, BuildSearchEscape.Takes(true, false, false, false, false, false, false), true, held));
+    }
+
     [Theory]
     [InlineData("w", 1)]
     [InlineData("  w  a ", 2)]
