@@ -330,6 +330,8 @@ internal enum CameraPreviewEscapeOwner
     Chat = 3,
     GameMenu = 4,
     Preview = 5,
+    /// <summary>The game's container window of this client's container preview is open: the container preview closes it first.</summary>
+    ContainerPreview = 6,
 }
 
 /// <summary>
@@ -337,20 +339,54 @@ internal enum CameraPreviewEscapeOwner
 /// focused chat box &gt; an open game menu &gt; the preview. Progenitor panels shown with the preview (the caller's
 /// own controls) do not stand in front of it: Escape ends the preview, and the caller closes its controls from
 /// <c>ended</c>. The preview holds the close key (so the system menu does not open) only while it owns Escape.
+/// <para>A container window of this client's container preview (<c>ctx.Inventory.Preview</c>) is a game menu, but it
+/// comes before the general game-menu rule: the first Escape is the container preview's (it closes its window,
+/// <c>Escape</c>), the next one is the camera preview's. The camera preview holds the close key meanwhile too, so the
+/// game's own Back neither closes that window behind the container preview's back nor opens the system menu.</para>
 /// </summary>
 internal static class CameraPreviewEscape
 {
-    internal static CameraPreviewEscapeOwner Decide(bool previewActive, bool dialogOpen, bool captureOwnsEscape, bool chatFocused, bool gameMenuOpen)
+    internal static CameraPreviewEscapeOwner Decide(bool previewActive, bool dialogOpen, bool captureOwnsEscape, bool chatFocused, bool gameMenuOpen,
+        bool containerPreviewWindow = false)
     {
         if (!previewActive) return CameraPreviewEscapeOwner.NoPreview;
         if (dialogOpen) return CameraPreviewEscapeOwner.Dialog;
         if (captureOwnsEscape) return CameraPreviewEscapeOwner.KeyCapture;
         if (chatFocused) return CameraPreviewEscapeOwner.Chat;
+        if (containerPreviewWindow) return CameraPreviewEscapeOwner.ContainerPreview;
         if (gameMenuOpen) return CameraPreviewEscapeOwner.GameMenu;
         return CameraPreviewEscapeOwner.Preview;
     }
 
-    internal static bool HoldsCloseKey(CameraPreviewEscapeOwner owner) => owner == CameraPreviewEscapeOwner.Preview;
+    internal static bool HoldsCloseKey(CameraPreviewEscapeOwner owner) =>
+        owner is CameraPreviewEscapeOwner.Preview or CameraPreviewEscapeOwner.ContainerPreview;
+}
+
+/// <summary>
+/// Which hidden HUD canvas a camera preview leaves shown. The preview hides every root canvas of the game's HUD
+/// (<c>PhotoHud</c>), and the game's container window sits on one of them. While this client's container preview owns
+/// that window, in the same client world, and the camera preview itself hid the HUD, the one hidden canvas that holds
+/// the window stays as it was; every other canvas stays hidden and is kept off every frame. Game-free so it is tested.
+/// </summary>
+internal static class CameraPreviewHud
+{
+    /// <summary>Keep the container window shown: the camera preview hid the HUD and this client's container preview owns the window in the same world.</summary>
+    internal static bool KeepContainerWindow(bool previewOwnsHud, bool containerOwnsWindow, bool sameWorld) =>
+        previewOwnsHud && containerOwnsWindow && sameWorld;
+
+    /// <summary>
+    /// The index of the hidden canvas to leave shown: the first whose subtree holds the container window
+    /// (<paramref name="holdsWindow"/>, one entry per hidden canvas), or -1 when nothing is kept or none holds it.
+    /// </summary>
+    internal static int CanvasToKeep(bool keep, System.Collections.Generic.IReadOnlyList<bool> holdsWindow)
+    {
+        if (!keep || holdsWindow == null) return -1;
+        for (int i = 0; i < holdsWindow.Count; i++) if (holdsWindow[i]) return i;
+        return -1;
+    }
+
+    /// <summary>Whether the per-frame reassert turns hidden canvas <paramref name="index"/> off again.</summary>
+    internal static bool Reasserts(int index, int kept) => index != kept;
 }
 
 /// <summary>What one server observation check saw. Game-free so the end decision is unit tested.</summary>

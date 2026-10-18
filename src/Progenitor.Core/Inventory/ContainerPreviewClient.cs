@@ -274,6 +274,20 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     internal Entity Target => _target;
     internal int DroppedEvents { get; private set; }
 
+    /// <summary>The client world this preview was opened in.</summary>
+    internal World World => _world;
+
+    /// <summary>
+    /// The container window's own part (the mapper's container sub-menu), while this preview owns the window; null
+    /// otherwise. The camera preview keeps the HUD canvas that holds it shown (<c>CameraPreviewHud</c>).
+    /// </summary>
+    internal Transform? WindowPart()
+    {
+        if (!Machine.OwnsWindow || !_world.IsCreated) return null;
+        var sub = ContainerPreviewClient.ReadWindow(_world).Mapper?._ContainerSubMenu;
+        return sub == null ? null : sub.transform;
+    }
+
     public ContainerId Container { get; }
     public ContainerPreviewState State => Machine.State;
     public ContainerPreviewCloseReason CloseReason => Machine.CloseReason;

@@ -126,7 +126,13 @@ public sealed partial class PluginCamera
                 // Centered first: the camera on screen now is still the player's, so the offset is measured from the
                 // orbit camera on the next ticks, and the shot glides to it.
                 camera.Orbit(point, Distance, yaw, Pitch, instant: true);
-                _ownsHud = !PhotoHud.IsHidden; if (_ownsHud) PhotoHud.Hide(true);
+                _ownsHud = !PhotoHud.IsHidden;
+                if (_ownsHud)
+                {
+                    PhotoHud.Hide(true);
+                    // A container preview whose window is already open keeps it (the same frame, so it never flickers).
+                    KeepContainerWindow();
+                }
                 // Escape reaches the framework only while Bootstrap forwards it (a shown panel or this hold).
                 Ui.Ui.CurrentRuntime().SetCapture(true); _forwarding = true;
                 _escape = Ui.Ui.PushEscape(OnEscape);
@@ -321,6 +327,10 @@ public sealed partial class PluginCamera
                 ["lateral"] = r.Lateral,
                 ["pinholeLateral"] = p._measured ? CameraFraming.PinholeLateral(r.Target, r.Depth, fov, aspect) : float.NaN,
                 ["rightAgreement"] = p._measured ? CameraFraming.RightAgreement(p._yaw, r.CameraRight) : float.NaN,
+                ["ownsHud"] = p._ownsHud,
+                ["hud"] = PhotoHud.Describe(),
+                ["containerWindow"] = p.ContainerWindowReadback(),
+                ["escapeOwner"] = p.EscapeOwnerNow().ToString(),
             };
             if (TryProject(p._point, out var v, out float sx))
             {
@@ -353,7 +363,7 @@ public sealed partial class PluginCamera
             if (!Active) return;
             try
             {
-                if (_ownsHud) PhotoHud.Reassert();
+                if (_ownsHud) { KeepContainerWindow(); PhotoHud.Reassert(); }
                 var elapsed = _clock.Elapsed.TotalSeconds;
                 var reason = _policy.Decide(elapsed, Sample());
                 if (reason != CameraPreviewEndReason.None) { End(reason, notify: true); return; }
@@ -417,7 +427,70 @@ public sealed partial class PluginCamera
             try { capture = Keybinds.EscapeBelongsToCapture; } catch { /* */ }
             try { chat = Keybinds.ChatFocusNow == ChatFocus.Focused; } catch { /* */ }
             bool menu = UiWorldPickEscape.GameMenuOpen(WorldPickBackend.MenuTypeNow());
-            return CameraPreviewEscape.Decide(Active, dialog, capture, chat, menu);
+            return CameraPreviewEscape.Decide(Active, dialog, capture, chat, menu, ContainerOwnsWindow(out _));
+        }
+
+        /// <summary>This client's container preview owns the game's container window, in this preview's client world.</summary>
+        private bool ContainerOwnsWindow(out Progenitor.Inventory.ContainerPreviewHandle? container)
+        {
+            container = null;
+            try
+            {
+                var c = Progenitor.Inventory.ContainerPreviewClient.Current;
+                if (c == null || !c.Machine.OwnsWindow || !ReferenceEquals(c.World, _world)) return false;
+                container = c;
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>
+        /// Leave the HUD canvas that holds the container window shown while this client's container preview owns the
+        /// window (opened before this preview or during it); hide it again once it does not (<see cref="CameraPreviewHud"/>).
+        /// </summary>
+        private void KeepContainerWindow()
+        {
+            UnityEngine.Transform? part = null;
+            bool owns = ContainerOwnsWindow(out var container);
+            if (CameraPreviewHud.KeepContainerWindow(_ownsHud, owns, sameWorld: owns))
+            {
+                try { part = container!.WindowPart(); } catch { part = null; }
+            }
+            _keptCanvas = PhotoHud.Keep(part);
+        }
+
+        /// <summary>The name of the hidden HUD canvas left shown for the container window, or null.</summary>
+        private string? _keptCanvas;
+
+        /// <summary>The readback's view of the container window: who owns it, its canvas, and whether it can be seen.</summary>
+        private System.Collections.Generic.Dictionary<string, object?> ContainerWindowReadback()
+        {
+            var result = new System.Collections.Generic.Dictionary<string, object?>();
+            Progenitor.Inventory.ContainerPreviewHandle? any = null;
+            try { any = Progenitor.Inventory.ContainerPreviewClient.Current; } catch { /* */ }
+            result["containerPreview"] = any?.State.ToString();
+            bool owns = ContainerOwnsWindow(out var container);
+            result["ownsWindow"] = owns;
+            result["keptCanvas"] = _keptCanvas;
+            if (!owns || container == null) { result["visible"] = false; return result; }
+            try
+            {
+                var part = container.WindowPart();
+                result["found"] = part != null;
+                if (part == null) { result["visible"] = false; return result; }
+                bool active = part.gameObject.activeInHierarchy;
+                var canvas = part.GetComponentInParent<UnityEngine.Canvas>();
+                var root = canvas == null ? null : canvas.rootCanvas;
+                bool canvasOn = canvas != null && canvas.enabled && root != null && root.enabled;
+                result["active"] = active;
+                result["canvas"] = canvas == null ? null : canvas.gameObject.name;
+                result["canvasEnabled"] = canvas != null && canvas.enabled;
+                result["rootCanvas"] = root == null ? null : root.gameObject.name;
+                result["rootCanvasEnabled"] = root != null && root.enabled;
+                result["visible"] = active && canvasOn;
+            }
+            catch (Exception e) { result["error"] = e.Message; result["visible"] = false; }
+            return result;
         }
 
         private void HoldCloseKey(bool want)

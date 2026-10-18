@@ -2779,7 +2779,7 @@ counts from the first holder's start, not from where the player stood when the s
 | Reason | When |
 |---|---|
 | `Disposed` | The caller disposed it. |
-| `Escape` | The player pressed Escape and nothing above the preview takes it: a framework dialog or open dropdown, a key capture and the focused chat box each come first. The container window is a game menu, but the preview owns it, so Escape closes it. (The game's own Escape on that menu may close the window first; that reads as `WindowClosed`. E4 records which.) |
+| `Escape` | The player pressed Escape and nothing above the preview takes it: a framework dialog or open dropdown, a key capture and the focused chat box each come first. The container window is a game menu, but the preview owns it, so Escape closes it. (The game's own Escape on that menu may close the window first; that reads as `WindowClosed`. E4 records which.) During a camera preview the camera preview holds the close key, so this press is always the preview's (`Escape`), and the next Escape ends the camera preview ([Camera preview](#camera-preview), "With a container preview"). |
 | `WindowClosed` | The game closed the window or opened another menu over it (a real interaction, its own Escape). |
 | `Refused` | The server said no; `Reason` is its sentence. |
 | `NoAnswer` | No answer in 8 s (an older server, or no Progenitor on it). |
@@ -2796,6 +2796,10 @@ counts from the first holder's start, not from where the player stood when the s
 Closing calls the game's `HUDMenuManager.CloseMenu(world)` only while the open menu is still the container
 window on this chest (or not bound yet) with no interaction behind it, so a menu the player opened for real
 is left alone. Every hook exists only from the open until the close, except the mapper guard, which waits for the window to be gone (above). A hook that throws logs one warning per preview, not one per frame.
+
+**With a camera preview.** A `ctx.Camera.Preview` hides the HUD but leaves the container window shown while this
+preview owns it, opened before the camera preview or during it; the first Escape closes the window, the next ends the
+camera preview, and neither ends the other ([Camera preview](#camera-preview), "With a container preview").
 
 **Not in scope.** Stations, refiners and servant coffins (other menus); a fake interaction buff (it would make the window writable);
 docking the Find window itself
@@ -5713,7 +5717,7 @@ The Sample does exactly this (`SampleCamera.cs`: `Packet.Sequence`, `EndReport.S
 | Reason | When |
 |---|---|
 | `Disposed` | The caller disposed the handle (a Return button). |
-| `Escape` | The player pressed Escape and nothing above the preview takes it. A framework dialog or open dropdown, a key capture, the focused chat box and an open game menu each take the press first. A shown Progenitor panel (the caller's own controls) does not: Escape ends the preview, and the caller closes its controls in `ended`. While the preview owns Escape it holds the close key, so the same press does not open the system menu. |
+| `Escape` | The player pressed Escape and nothing above the preview takes it. A framework dialog or open dropdown, a key capture, the focused chat box and an open game menu each take the press first. A shown Progenitor panel (the caller's own controls) does not: Escape ends the preview, and the caller closes its controls in `ended`. While the preview owns Escape it holds the close key, so the same press does not open the system menu. An open container preview window takes the first press ([With a container preview](#camera-preview), below). |
 | `Damaged` / `Died` | The player's character lost health or died. A drop that only follows a lower maximum (gear or a buff taken off clamps health to the new maximum) is not damage. |
 | `Moved` | The character moved more than 1.5 m from where it stood (`MoveLimitMeters`): a step, knockback or a teleport. A caller that does not block movement gets this on the first step. |
 | `WorldChanged` | The client world ended or changed (disconnect, leaving, a new world), or the local character is gone. |
@@ -5722,6 +5726,38 @@ The Sample does exactly this (`SampleCamera.cs`: `Packet.Sequence`, `EndReport.S
 | `Timeout` / `HoldLimit` | The timed seconds, or ten minutes after the last `Hold()`. |
 | `Failed` | A game read or the camera write failed. The preview ends rather than risk a stuck camera. |
 | `Unloaded` | The plugin or Core unloaded. `ended` is not called. |
+
+**With a container preview: the chest window stays (source-checked and game-free tested in `CameraPreviewHoldTests`, not live-verified).** The preview hides the HUD by turning off every root canvas under the game's `HUDCanvas(Clone)` and keeping them off every frame, and the game's container window sits on one of those canvases. Core 2026.10.92 hid it too: a [container preview](#container-preview) opened before the camera preview showed its window for a moment, then lost it once the camera preview started, and one opened during it never showed. Now, while this client's container preview (`ctx.Inventory.Preview`) owns the container window in the same client world, the camera preview leaves the one hidden canvas that holds that window as it was. The window stays visible and usable (read-only, as the container preview always is), and the rest of the HUD (hotbar, health, nameplates, the other menus' canvases) stays hidden. It works in either order. With a window that is already open, it is kept from the first frame; with one opened later, it is kept as soon as the container preview owns it. When the container preview ends, that canvas is hidden again on the next frame. Nothing to opt into: it follows the container preview.
+
+The layout this is built for: the object in the middle, the mod's panel docked left, the game's chest window on the right where the game puts it. With panels on both sides, frame the object at the center (`ScreenOffset = 0`, or `SetScreenOffset(0f)` when the chest window opens) rather than beside a single left panel.
+
+```csharp
+_preview = ctx.Camera.Preview(point, yawDegrees: 30, new CameraPreviewOptions { Hold = true, ScreenOffset = 0f, Ended = OnCameraEnded });
+_chest = ctx.Inventory.Preview.Open(chestId, new ContainerPreviewOptions { KeepOpen = true });
+_chest.Closed += closed => { /* the camera preview keeps running: end it here too if the mod wants both to go */ };
+```
+
+| Escape press | What happens |
+|---|---|
+| First (a container preview window is open) | The container preview closes its window: `Closed` with `Escape`. The camera preview keeps running and hides that canvas again. |
+| Next | The camera preview ends (`Escape`). |
+
+A framework dialog or open dropdown, a key capture and the focused chat box still take Escape before either. While the container preview's window is open the camera preview holds the close key, as it does while it owns Escape, so the game's own Back neither closes the window behind the container preview's back (it would read as `WindowClosed`) nor opens the system menu. Another game menu (not the container preview's) still takes Escape first, as before.
+
+**What ends what.** Neither ends the other; the mod pairs them if it wants both to go together.
+
+- The container preview ends, for any reason: the camera preview runs on and hides the chest window's canvas again. Its server lease is shared with the camera's `Observe` at the same point (within 0.5 m), so the camera side keeps streaming while its own holder runs ([One streaming origin per user](#camera-preview)).
+- The camera preview ends, for any reason: the HUD comes back, and the container preview's window stays open over the normal camera. The container preview ends on its own rules (`Escape`, `Disposed`, `LeaseEnded`, …).
+
+**HUD readback.** The bridge's `camera_preview` op (MCP `progenitor_camera_preview`) reports `ownsHud`; `hud`, every canvas the hide took (`name`, `wasEnabled`, `enabled`, `kept`) and the one left shown (`kept`); `containerWindow`, with `containerPreview` (its state), `ownsWindow`, `keptCanvas`, `found`, `active`, `canvas`, `canvasEnabled`, `rootCanvas`, `rootCanvasEnabled` and `visible`; and `escapeOwner`, who takes the next Escape (`ContainerPreview`, then `Preview`). The log says `PhotoMode: HUD canvas '…' left shown (it holds the container window).` and, after the close, `… hidden again …`.
+
+**Live check (not run).** On the isolated test server and a free test client, in a castle the test character owns, with a chest more than 100 m away and the Sample deployed to both:
+
+1. Container preview first: `container_preview open {"id":"c-…","keepOpen":true}`, wait for `phase` `Open`, then `.shot preview hold` within a second (the order Satisvampory uses). Expect the chest window to stay on screen once the camera reaches the point, and no hotbar, health or nameplates. `camera_preview`: `containerWindow.visible` true, `keptCanvas` the canvas name, every other `hud.canvases` row `enabled` false; take a capture.
+2. Hover and scroll the chest window (the pointer works), try a drag: it snaps back (read-only).
+3. Press Escape once: the container preview closes (`closeReason` `Escape`), the camera preview stays, `camera_preview` shows `ownsWindow` false, `keptCanvas` null, `escapeOwner` `Preview`, and the system menu stays closed. Press Escape again: the camera preview ends (`Escape`) and the HUD comes back.
+4. Camera preview first: `.shot preview hold`, then the `container_preview open`: the window appears during the preview and step 1's readback holds. End the camera preview with `.shot end`: the HUD comes back and the chest window stays open; `container_preview close`.
+5. Clean up per the standing rules: no preview running, the client at the title screen, the Sample removed from both reload folders.
 
 Escape reaches the framework through Bootstrap's forwarding, which a preview keeps on while it runs, and through the same consumed-Escape path the world pick uses (`Ui.PushEscape`). Nothing polls a key. Plain Escape is not a rebindable mod key, so it is not a `ctx.Keybinds` entry. Ending a preview restores the render origin, the HUD and the top-down camera if this plugin still owns it.
 
