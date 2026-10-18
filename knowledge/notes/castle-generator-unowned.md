@@ -37,7 +37,16 @@ territory without changing its heart or structure revision.
 Verified live on copied Moo World, territory 0, server Core/Dev 2026.10.93.
 Log sequences 8962/8968 record generation; 9242/9248/9253 record inventories and fuel;
 9317/9318 record occupied refusal and temporary User count restored to three.
-Ownership, clans, individual resource clearing and save reload remain unverified.
+Offline ownership passed on plot 0 with helper revision f13f36c7a: log 14940
+records the reciprocal owner/castle team links, and Castle API reads Stress01
+(platform 90000000000101801) as owner. The owner is offline at User.Index 3,
+with no ConnectedUser or character. Clans, individual clearing and save reload
+remain unverified.
+
+The full copied-save batch then produced 147 occupied territories (seven existing,
+140 generated) and assigned all 140 generated castles to 40 offline owners.
+Every assignment passed owner and reciprocal-team readback (completion log 16445).
+Original heart and owner identities remained unchanged.
 
 ## Gotchas
 
@@ -52,5 +61,9 @@ Ownership, clans, individual resource clearing and save reload remain unverified
 
 - **Symptom:** Castle API discovers the castle but returns a null owner.
 - **Cause:** Generation connects structures to the heart without claiming it for the admin.
-- **Fix:** Keep ownership as a separate pending qualification; do not report a completed
-  owned castle or proceed to bulk population until the claim path passes live verification.
+- **Fix:** Create the offline owner's team from PlayerTeamPrefabGUID, set the UserTeam
+  back-pointer and TeamReference, then call the verified TeamUtility.ClaimCastle
+  wrapper after the heart's castle team initializes. Read back the heart's owner
+  and reciprocal TeamAllies links on later frames. A bare offline User lacks the
+  team needed by ClaimCastle. Allocate unused low User indexes; offline owners
+  must never receive ConnectedUser slots.

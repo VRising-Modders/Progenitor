@@ -10,6 +10,16 @@
     <Reference Include="Progenitor.Dev" HintPath="$(StressProbeDev)" Private="false" />
     <Compile Include="../../src/Progenitor.Dev/Ops/StressPlace.cs" Link="StressPlace.cs" />
   </ItemGroup>
+  <ItemGroup Condition="'$(StressOwnerSource)' != ''">
+    <Compile Include="$(StressOwnerSource)/src/Progenitor.Dev/Ops/GhostOps.cs" Link="Owner/GhostOps.cs" />
+    <Compile Include="$(StressOwnerSource)/src/Progenitor.Dev/Ops/OfflineUserTeamRules.cs" Link="Owner/OfflineUserTeamRules.cs" />
+    <Compile Include="$(StressOwnerSource)/src/Progenitor.Dev/Ops/StressPlan.cs" Link="Owner/StressPlan.cs" />
+    <Compile Include="$(StressOwnerSource)/src/Progenitor.Dev/DevGate.cs" Link="Owner/DevGate.cs" />
+    <Compile Include="$(StressOwnerSource)/src/Progenitor.Core/Networking/ServerHostSettingsFiles.cs" Link="Owner/ServerHostSettingsFiles.cs" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(StressOwnerSource)' != ''">
+    <DefineConstants>$(DefineConstants);STRESS_OWNERS</DefineConstants>
+  </PropertyGroup>
   <Target Name="RequireProbeCore" BeforeTargets="ResolveReferences" Condition="!Exists('$(StressProbeCore)')">
     <Error Text="Set StressProbeCore to the reviewed Core DLL deployed on the isolated test server." />
   </Target>

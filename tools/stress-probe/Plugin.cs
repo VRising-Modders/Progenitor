@@ -11,10 +11,16 @@ namespace Progenitor.StressProbe;
 
 [BepInPlugin("progenitor.stress-probe", "Progenitor Stress Probe", "0.1.0")]
 [BepInDependency("progenitor")]
-public sealed class Plugin : BasePlugin
+public sealed partial class Plugin : BasePlugin
 {
-    public override void Load() => Progenitor.Dev.MainThread.Post(Inspect);
-    public override bool Unload() { Log.LogInfo("stress-probe: unloaded"); return true; }
+    public override void Load()
+    {
+#if STRESS_OWNERS
+        Progenitor.Dev.Ops.Plugin.Logger = Log;
+#endif
+        Progenitor.Dev.MainThread.Post(Inspect);
+    }
+    public override bool Unload() { _batchActive = false; Log.LogInfo("stress-probe: unloaded"); return true; }
 
     private void Inspect()
     {
@@ -47,10 +53,23 @@ public sealed class Plugin : BasePlugin
             if (!string.Equals(Path.GetFullPath(Environment.ProcessPath ?? ""),
                 @"C:\VRisingMods\_testserver\server\VRisingServer.exe", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Server executable mismatch.");
+            var argv = Environment.GetCommandLineArgs();
+            int saveArg = Array.FindIndex(argv, a => string.Equals(a, "-persistentDataPath", StringComparison.OrdinalIgnoreCase));
+            if (saveArg < 0 || saveArg + 1 >= argv.Length || !string.Equals(Path.GetFullPath(argv[saveArg + 1]).TrimEnd('\\'),
+                @"C:\VRisingMods\_testserver\moo-world-copy-20260909", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Copied test save mismatch.");
             Entity target = Entity.Null;
             foreach (var e in Query.Entities(world.EntityManager, true, false, ComponentIndex.Of<CastleTerritory>(ComponentType.AccessMode.ReadOnly)))
                 if (world.EntityManager.GetComponentData<CastleTerritory>(e).CastleTerritoryIndex == plot) target = e;
-            if (action == "generate:0") RunOne(world, target);
+            if (action == "generate-rest") BeginGeneration(world);
+            else if (action == "generate-next") BeginGeneration(world, true);
+            else if (action == "rank5:0") BeginHearts(world, true);
+            else if (action == "rank5-all") BeginHearts(world, false);
+#if STRESS_OWNERS
+            else if (action == "claim:0") BeginClaims(world, single: true);
+            else if (action == "claim-rest") BeginClaims(world, single: false);
+#endif
+            else if (action == "generate:0") RunOne(world, target);
             else if (action == "fuel:0")
             {
                 var heart = world.EntityManager.GetComponentData<CastleTerritory>(target).CastleHeart;
@@ -65,6 +84,12 @@ public sealed class Plugin : BasePlugin
 
     private void RunOne(World world, Entity territory)
     {
+        Log.LogInfo("stress-probe: generate=" + GenerateOnce(world, territory));
+        Progenitor.Dev.MainThread.PostDelayed(3, InspectResult, this);
+    }
+
+    private string GenerateOnce(World world, Entity territory)
+    {
         var em = world.EntityManager;
         var before = new System.Collections.Generic.HashSet<Entity>(Query.Entities(em, true, false, ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly)));
         try
@@ -76,7 +101,10 @@ public sealed class Plugin : BasePlugin
             foreach (var e in Query.Entities(em, true, false, ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly)))
                 if (!before.Contains(e)) temporary = e;
             if (temporary == Entity.Null) throw new InvalidOperationException("Temporary admin creation failed.");
-            Log.LogInfo("stress-probe: generate=" + Progenitor.Dev.Ops.StressPlace.Generate(world, territory, temporary));
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            string result = Progenitor.Dev.Ops.StressPlace.Generate(world, territory, temporary);
+            Log.LogInfo("stress-probe: generation elapsedMs=" + timer.Elapsed.TotalMilliseconds.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+            return result;
         }
         finally
         {
@@ -84,7 +112,6 @@ public sealed class Plugin : BasePlugin
                 if (!before.Contains(e) && em.Exists(e)) em.DestroyEntity(e);
             Log.LogInfo("stress-probe: temporary-user cleanup count=" + Query.Entities(em, true, false, ComponentIndex.Of<User>(ComponentType.AccessMode.ReadOnly)).Count + " expected=" + before.Count);
         }
-        Progenitor.Dev.MainThread.PostDelayed(3, InspectResult, this);
     }
 
     private void InspectResult()
