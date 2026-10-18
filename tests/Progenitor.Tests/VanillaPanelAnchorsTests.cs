@@ -321,6 +321,95 @@ public class VanillaPanelAnchorsTests
         Assert.True(VanillaFitResult.Moving.Shown);
     }
 
+    [Fact]
+    public void A_window_sliding_as_one_piece_keeps_its_shape_and_is_placed_once()
+    {
+        // The devourer, live on Core 2026.10.107: the window held at its +30 open pose, then slid to rest, and the
+        // title row was placed twice. Measured on the moving content, both poses are one shape.
+        var settle = new PlacementSettle();
+        var lastAtStart = new UiRect(424, 887, 24, 24);
+        var frameAtStart = new UiRect(8, 0, 664, 938);
+        var lastAtRest = new UiRect(394, 887, 24, 24);
+        var frameAtRest = new UiRect(-22, 0, 664, 938);
+        Assert.True(PlacementSettle.SameShape(frameAtRest, lastAtRest, frameAtStart, lastAtStart));
+        Assert.False(settle.Observe(frameAtStart, lastAtStart));
+        Assert.False(settle.Observe(frameAtStart, lastAtStart));
+        Assert.True(settle.Observe(frameAtStart, lastAtStart));
+        Assert.True(settle.Observe(new UiRect(-7, 0, 664, 938), new UiRect(409, 887, 24, 24)));
+        Assert.True(settle.Observe(frameAtRest, lastAtRest));
+
+        var placedAtStart = new UiRect(456, 887, 24, 24);
+        var placedAtRest = new UiRect(426, 887, 24, 24);
+        Assert.Equal(
+            PlacementSettle.ShapeKey("after", "icon", frameAtStart, lastAtStart, placedAtStart),
+            PlacementSettle.ShapeKey("after", "icon", frameAtRest, lastAtRest, placedAtRest));
+
+        // The old static frame (the root's rect widened by the strip) changes shape against the content: two placements.
+        Assert.False(PlacementSettle.SameShape(new UiRect(0, 0, 672, 938), lastAtStart, frameAtRest, lastAtRest));
+        Assert.NotEqual(
+            PlacementSettle.ShapeKey("after", "icon", frameAtStart, lastAtStart, placedAtStart),
+            PlacementSettle.ShapeKey("after", "text", frameAtStart, lastAtStart, placedAtStart));
+    }
+
+    [Fact]
+    public void The_window_rect_is_the_moving_content_when_it_fills_the_window()
+    {
+        var root = new UiRect(0, 0, 620, 925);
+        Assert.Equal(new UiRect(30, 0, 620, 925), VanillaPanelPlacement.WindowRect(root, new UiRect(30, 0, 620, 925)));
+        // The stash's Background is 620 x 0: not the window.
+        Assert.Equal(root, VanillaPanelPlacement.WindowRect(root, new UiRect(0, 0, 620, 0)));
+        Assert.Equal(root, VanillaPanelPlacement.WindowRect(root, new UiRect(0, 0, 300, 925)));
+        Assert.Equal(root, VanillaPanelPlacement.WindowRect(root, default));
+    }
+
+    [Theory]
+    [InlineData(1, 1, "icon")]
+    [InlineData(2, 2, "icon")]
+    [InlineData(2, 1, "mixed")]
+    [InlineData(2, 0, "text")]
+    [InlineData(0, 0, "text")]
+    public void The_face_word_says_what_the_visible_buttons_show(int visible, int icons, string word) =>
+        Assert.Equal(word, VanillaPanelPlacement.FaceWord(visible, icons));
+
+    [Fact]
+    public void A_title_row_container_goes_after_the_outermost_cover()
+    {
+        // Devourer on 1.1.13.0, from the group's parent out: Name (no cover), the strip, HUDPanelBackground,
+        // MotionRoot (HUDPanelBackground at 0, Blocker at 1 covers the title row), the window root.
+        var devourer = new List<CoverLevel>
+        {
+            new(0, null, "Name"),
+            new(0, null, "HUDPanelBackground"),
+            new(0, null, "HUDPanelBackground"),
+            new(0, new[] { 1 }, "MotionRoot"),
+            new(0, null, "SalvagestationSubMenu"),
+        };
+        Assert.Equal((3, 2), VanillaPanelAnchors.AboveCovers(devourer));
+
+        // The stash: Blocker comes before HUDPanelBackground, so nothing later covers the row.
+        var stash = new List<CoverLevel> { new(0, null, "Name"), new(1, null, "Background") };
+        Assert.Equal((-1, -1), VanillaPanelAnchors.AboveCovers(stash));
+
+        // A cover before the chain child does not count; covers at two levels pick the outer one, after its last cover.
+        Assert.Equal((-1, -1), VanillaPanelAnchors.AboveCovers(new List<CoverLevel> { new(3, new[] { 1, 2 }) }));
+        Assert.Equal((1, 6), VanillaPanelAnchors.AboveCovers(new List<CoverLevel> { new(0, new[] { 2 }), new(1, new[] { 5, 3 }) }));
+        Assert.Equal((-1, -1), VanillaPanelAnchors.AboveCovers(null!));
+    }
+
+    [Fact]
+    public void The_resolver_puts_the_title_row_above_covers_and_reads_back_what_takes_the_click()
+    {
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("var above = TitleRowHost(parentT, view.Panel!.transform, reference, group, out int aboveIndex, out coverNote);", resolver);
+        Assert.Contains("if (!g.enabled || !g.raycastTarget || !g.gameObject.activeInHierarchy) continue;".Replace("if (!g", "if (g == null || !g"), resolver);
+        Assert.Contains("ReparentAboveCovers(host, view, group)", resolver);
+        Assert.Contains("windowLocal = VanillaPanelPlacement.WindowRect(panelLocal, moving);", resolver);
+        Assert.Contains("b[\"raycast\"] = RaycastAtCenter(tipped.Rect, tipped.GameObject);", resolver);
+        Assert.Contains("b[\"interactable\"] = InteractableOf(tipped.GameObject);", resolver);
+        Assert.Contains("d[\"placements\"] = placed.Placements;", resolver);
+        Assert.Contains("d[\"hitsSelf\"]", resolver);
+    }
+
     // ---------------------------------------------------------------- BesideRename
 
     [Fact]

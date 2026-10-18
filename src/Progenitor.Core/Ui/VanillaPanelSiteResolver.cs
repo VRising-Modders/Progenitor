@@ -1879,6 +1879,19 @@ internal sealed partial class UnityUiRuntime
             var group = host;
             var parentT = mode == InlineMode.Positioned && group.parent != null ? group.parent : group;
 
+            // A placed title-row container goes after anything the window draws over its title row with a raycast
+            // target (the devourer's and the workstation's MotionRoot/Blocker), or no click or hover ever reaches it.
+            string coverNote = "";
+            if (mode == InlineMode.Positioned && VanillaUiSites.IsTitleRow(anchor) && Alive(view.Panel))
+            {
+                var above = TitleRowHost(parentT, view.Panel!.transform, reference, group, out int aboveIndex, out coverNote);
+                if (above != null)
+                {
+                    parentT = above;
+                    siblingIndex = aboveIndex;
+                }
+            }
+
             go = new GameObject(containerName);
             var rt = go.AddComponent<RectTransform>();
             rt.SetParent(parentT, worldPositionStays: false);
@@ -1895,6 +1908,7 @@ internal sealed partial class UnityUiRuntime
                 + " mode=" + (VanillaUiSites.IsEdge(anchor) ? "column" : VanillaUiSites.IsTooltipAnchor(anchor) ? "tooltip" : VanillaPanelAnchors.ModeWord(mode))
                 + (anchor == VanillaPanelAnchor.BesideSort ? " sort=" + view.SortSource : "")
                 + (anchor == VanillaPanelAnchor.BesideRename ? " via=" + view.RenameSource : "")
+                + (coverNote.Length > 0 ? " above=" + coverNote : "")
                 + (VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " donor=" + view.DonorSource),
                 VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " button=" + Mathf.RoundToInt(size.x) + "x" + Mathf.RoundToInt(size.y));
             host = parentT;
@@ -2003,6 +2017,137 @@ internal sealed partial class UnityUiRuntime
             TryDestroy(go, immediate: true);
             return null;
         }
+    }
+
+    /// <summary>
+    /// The parent and sibling index that put a placed title-row container above every later sibling that covers the
+    /// rename button with a raycast target (<see cref="VanillaPanelAnchors.AboveCovers"/>), walking from
+    /// <paramref name="groupParent"/> out to <paramref name="panel"/>. Null when nothing covers the row: the container
+    /// stays the last child of the group's parent. <paramref name="note"/> names what it went above (<c>MotionRoot/Blocker</c>).
+    /// </summary>
+    private static Transform? TitleRowHost(Transform groupParent, Transform panel, GameObject? reference, Transform group, out int index, out string note)
+    {
+        index = -1;
+        note = "";
+        try
+        {
+            var refRt = reference != null ? reference.GetComponent<RectTransform>() : group.TryCast<RectTransform>();
+            var target = RectIn(panel, refRt);
+            if (target.IsEmpty) target = RectIn(panel, group.TryCast<RectTransform>());
+            if (target.IsEmpty) return null;
+
+            var levels = new List<CoverLevel>();
+            var parents = new List<Transform>();
+            var names = new List<string>();
+            Transform chain = group;
+            var level = groupParent;
+            for (int depth = 0; level != null && depth < 12; depth++)
+            {
+                // The chain child at this level: the group itself at the first level, else the ancestor below.
+                while (chain != null && chain.parent != null && chain.parent.Pointer != level.Pointer) chain = chain.parent;
+                if (chain == null || chain.parent == null) break;
+                int chainIndex = chain.GetSiblingIndex();
+                List<int>? covers = null;
+                for (int i = chainIndex + 1; i < level.childCount; i++)
+                {
+                    var sib = level.GetChild(i);
+                    if (sib == null || !sib.gameObject.activeInHierarchy || SafeObjectName(sib.gameObject).StartsWith(UiOwnership.Prefix, StringComparison.OrdinalIgnoreCase)) continue;
+                    string? hit = CoveringGraphic(sib, panel, target);
+                    if (hit == null) continue;
+                    (covers ??= new List<int>()).Add(i);
+                    names.Add(SafeObjectName(level.gameObject) + "/" + hit);
+                }
+
+                levels.Add(new CoverLevel(chainIndex, covers, SafeObjectName(level.gameObject)));
+                parents.Add(level);
+                if (level.Pointer == panel.Pointer) break;
+                chain = level;
+                level = level.parent;
+            }
+
+            var pick = VanillaPanelAnchors.AboveCovers(levels);
+            if (pick.Level < 0) return null;
+            index = pick.SiblingIndex;
+            note = names.Count > 0 ? string.Join(",", names) : SafeObjectName(parents[pick.Level].gameObject);
+            return parents[pick.Level];
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach title-row cover check threw: " + e.Message);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Move a placed title-row container above a cover the window turned on after it was built (<see cref="TitleRowHost"/>).
+    /// True when it moved (the caller places it again in its new parent's units). One line per move.
+    /// </summary>
+    private static bool ReparentAboveCovers(PanelContainerWidget host, PanelView view, Transform group)
+    {
+        try
+        {
+            var rt = host.Rect;
+            if (rt == null || group.parent == null || !Alive(view.Panel)) return false;
+            var parent = TitleRowHost(group.parent, view.Panel!.transform, view.RenameButton, group, out int index, out string note) ?? group.parent;
+            if (rt.parent != null && rt.parent.Pointer == parent.Pointer)
+            {
+                // Same parent: only the order may need fixing (a cover moved after us).
+                if (index >= 0 && rt.GetSiblingIndex() < index - 1) rt.SetSiblingIndex(Mathf.Min(index - 1, parent.childCount - 1));
+                else return false;
+            }
+            else
+            {
+                rt.SetParent(parent, worldPositionStays: false);
+                if (index >= 0) rt.SetSiblingIndex(Mathf.Min(index, parent.childCount - 1));
+                else rt.SetAsLastSibling();
+                var prt = parent.TryCast<RectTransform>();
+                var pivot = prt != null ? prt.pivot : new Vector2(0.5f, 0.5f);
+                rt.anchorMin = pivot;
+                rt.anchorMax = pivot;
+                rt.pivot = Vector2.zero;
+                rt.localScale = Vector3.one;
+            }
+
+            Plugin.Logger?.LogInfo("Ui: attach " + VanillaUiSites.Key(host.Site) + " anchor=" + VanillaUiSites.AnchorKey(host.Anchor)
+                + " moved above " + (note.Length > 0 ? note : "nothing (cover gone)") + " parent=" + SafeObjectName(parent.gameObject));
+            return true;
+        }
+        catch (Exception e)
+        {
+            Plugin.Logger?.LogWarning("Ui: attach title-row reparent threw: " + e.Message);
+            return false;
+        }
+    }
+
+    /// <summary>The path below <paramref name="sib"/> of an active raycast-target graphic that overlaps <paramref name="target"/>, or null.</summary>
+    private static string? CoveringGraphic(Transform sib, Transform panel, UiRect target)
+    {
+        foreach (var g in sib.GetComponentsInChildren<Graphic>(false))
+        {
+            try
+            {
+                if (g == null || !g.enabled || !g.raycastTarget || !g.gameObject.activeInHierarchy) continue;
+                if (!RaycastsReach(g.transform, sib)) continue;
+                if (!RectIn(panel, g.rectTransform).Overlaps(target)) continue;
+                return g.transform == sib ? SafeObjectName(sib.gameObject) : SafeObjectName(sib.gameObject) + "/" + SafeObjectName(g.gameObject);
+            }
+            catch { /* an unreadable graphic is not a cover */ }
+        }
+
+        return null;
+    }
+
+    /// <summary>No <c>CanvasGroup</c> from <paramref name="t"/> up to <paramref name="top"/> turns raycasts off.</summary>
+    private static bool RaycastsReach(Transform t, Transform top)
+    {
+        for (var a = t; a != null; a = a.parent)
+        {
+            var cg = a.GetComponent<CanvasGroup>();
+            if (cg != null && cg.enabled && !cg.blocksRaycasts) return false;
+            if (a.Pointer == top.Pointer) break;
+        }
+
+        return true;
     }
 
     private static InlineMode PlanInline(Transform host, bool besideSort)
@@ -2563,15 +2708,25 @@ internal sealed partial class UnityUiRuntime
 
         // The frame is the window widened to the strip the group lives on (the container's title
         // strip sits above its window rect).
+        // The window rect is the window's moving content when it fills the window (MotionRoot, which the open slide
+        // moves inside the static root), so the frame moves with the group and a slide keeps its shape.
         FitScratchRects.Clear();
+        var windowLocal = panelLocal;
         try
         {
             var a = group.parent;
+            UiRect moving = default;
             for (int depth = 0; a != null && depth < 8 && a.Pointer != panelSpace.Pointer; depth++, a = a.parent)
-                FitScratchRects.Add(RectIn(panelSpace, a.TryCast<RectTransform>()));
+            {
+                var r = RectIn(panelSpace, a.TryCast<RectTransform>());
+                FitScratchRects.Add(r);
+                if (a.parent != null && a.parent.Pointer == panelSpace.Pointer) moving = r;
+            }
+
+            windowLocal = VanillaPanelPlacement.WindowRect(panelLocal, moving);
         }
         catch { /* the window rect alone is the frame */ }
-        var frame = VanillaPanelPlacement.InlineFrame(panelLocal, FitScratchRects);
+        var frame = VanillaPanelPlacement.InlineFrame(windowLocal, FitScratchRects);
         FitScratchRects.Clear();
 
         // Obstacles: the group's own members; for a placed container also the group's siblings
@@ -2625,14 +2780,33 @@ internal sealed partial class UnityUiRuntime
 
             // The geometry the verdict was made on, said when it changes (a refused slot is asked
             // again every 30 frames; the line repeats only if something moved).
+            string slotWord = slot == BesideSlot.After ? "after" : slot == BesideSlot.Above ? "above" : "none";
+            string faceWord = inlineVerdict.Fit == VanillaFit.Fits ? host.FaceWord() : "none";
             string geometry = "Ui: attach " + VanillaUiSites.Key(host.Site) + " anchor=" + VanillaUiSites.AnchorKey(host.Anchor)
-                + " slot=" + (slot == BesideSlot.After ? "after" : slot == BesideSlot.Above ? "above" : "none")
-                + " face=" + (inlineVerdict.Fit == VanillaFit.Fits ? (inlineVerdict.Icons ? "icon" : "text") : "none")
+                + " slot=" + slotWord
+                + " face=" + faceWord
                 + " last=" + lastMember + " frame=" + frame + " row=" + Mathf.RoundToInt(width) + "/min" + Mathf.RoundToInt(host.MinInlineWidth(rowSpacing))
                 + " placed=" + inlineVerdict.Rect + " reason=" + inlineVerdict.Reason;
-            if (!PlacementSaid.TryGetValue((host.Site, host.Anchor), out var said) || said != geometry)
+
+            // Said, and counted as a placement, when the placement's shape changes; a window sliding as one piece
+            // keeps its shape, so one open is one line.
+            string shape = PlacementSettle.ShapeKey(slotWord, faceWord, frame, lastMember, inlineVerdict.Rect) + "|" + inlineVerdict.Reason;
+            if (host.LastShape != shape)
             {
-                PlacementSaid[(host.Site, host.Anchor)] = geometry;
+                host.LastShape = shape;
+                if (inlineVerdict.Fit == VanillaFit.Fits)
+                {
+                    host.Placements++;
+
+                    // A new placement checks again that nothing the window turned on since covers the title row.
+                    if (VanillaUiSites.IsTitleRow(host.Anchor) && ReparentAboveCovers(host, view, group))
+                        Place(host, panelSpace, inlineVerdict.Rect);
+                }
+            }
+
+            if (!PlacementSaid.TryGetValue((host.Site, host.Anchor), out var said) || said != shape)
+            {
+                PlacementSaid[(host.Site, host.Anchor)] = shape;
                 Plugin.Logger?.LogInfo(geometry);
             }
         }
@@ -2722,7 +2896,88 @@ internal sealed partial class UnityUiRuntime
     /// (<c>anchorStatus</c>: <c>ok host=... mode=... donor=...</c> or <c>missing: ...</c>), and the
     /// screen rects of the container and of each built button while they are shown. Main thread.
     /// </summary>
-    internal static List<object?> DescribeAttachments()
+    internal static List<object?> DescribeAttachments() => DescribeAttachmentsCore();
+
+    /// <summary>
+    /// A cloned button's interactable state for the readback: the button's own <c>interactable</c>, and every
+    /// <c>CanvasGroup</c> above it that turns interaction or raycasts off (by name).
+    /// </summary>
+    private static Dictionary<string, object?> InteractableOf(GameObject? go)
+    {
+        var d = new Dictionary<string, object?>();
+        if (go == null) return d;
+        try
+        {
+            var stun = go.GetComponent<SimpleStunButton>();
+            d["button"] = stun != null && stun.interactable;
+            d["active"] = go.activeInHierarchy;
+            var off = new List<object?>();
+            for (var t = go.transform; t != null; t = t.parent)
+            {
+                var cg = t.GetComponent<CanvasGroup>();
+                if (cg == null || !cg.enabled) continue;
+                if (!cg.interactable || !cg.blocksRaycasts)
+                    off.Add(SafeObjectName(t.gameObject) + (!cg.interactable ? " interactable=false" : "") + (!cg.blocksRaycasts ? " blocksRaycasts=false" : ""));
+                if (cg.ignoreParentGroups) break;
+            }
+
+            d["groupsOff"] = off;
+            d["ok"] = stun != null && stun.interactable && go.activeInHierarchy && off.Count == 0;
+        }
+        catch (Exception e) { d["error"] = e.Message; }
+        return d;
+    }
+
+    /// <summary>
+    /// What the pointer would hit at the center of <paramref name="rt"/>: the topmost raycast result (the graphic that
+    /// takes a click there), whether it is this button or inside it, and the first few results under it. Read on
+    /// demand for the readback, never per frame.
+    /// </summary>
+    private static Dictionary<string, object?> RaycastAtCenter(RectTransform? rt, GameObject? self)
+    {
+        var d = new Dictionary<string, object?>();
+        if (rt == null || self == null || !self.activeInHierarchy) { d["why"] = "not shown"; return d; }
+        try
+        {
+            var canvas = rt.GetComponentInParent<Canvas>();
+            var root = canvas != null ? canvas.rootCanvas : null;
+            Camera? cam = root != null && root.renderMode != RenderMode.ScreenSpaceOverlay ? root.worldCamera : null;
+            var center = rt.TransformPoint(rt.rect.center);
+            var sp = RectTransformUtility.WorldToScreenPoint(cam, center);
+            d["x"] = Math.Round(sp.x, 1);
+            d["y"] = Math.Round(sp.y, 1);
+            var es = UnityEngine.EventSystems.EventSystem.current;
+            if (es == null) { d["why"] = "no EventSystem"; return d; }
+            var ev = new UnityEngine.EventSystems.PointerEventData(es) { position = sp };
+            var results = new Il2CppSystem.Collections.Generic.List<UnityEngine.EventSystems.RaycastResult>();
+            es.RaycastAll(ev, results);
+            var under = new List<object?>();
+            GameObject? top = null;
+            for (int i = 0; results != null && i < results.Count && i < 4; i++)
+            {
+                GameObject? g = null;
+                try { g = results[i].gameObject; } catch { }
+                if (i == 0) top = g;
+                under.Add(g == null ? null : PathOf(g.transform));
+            }
+
+            d["topmost"] = top == null ? null : PathOf(top.transform);
+            d["hitsSelf"] = top != null && (top.Pointer == self.Pointer || top.transform.IsChildOf(self.transform));
+            d["under"] = under;
+        }
+        catch (Exception e) { d["why"] = e.GetType().Name + ": " + e.Message; }
+        return d;
+    }
+
+    /// <summary>The last four names of <paramref name="t"/>'s path, outermost first.</summary>
+    private static string PathOf(Transform t)
+    {
+        var parts = new List<string>();
+        for (var a = t; a != null && parts.Count < 4; a = a.parent) parts.Insert(0, SafeObjectName(a.gameObject));
+        return string.Join("/", parts);
+    }
+
+    private static List<object?> DescribeAttachmentsCore()
     {
         var list = new List<object?>();
         foreach (var handle in VanillaAttachRegistry.Snapshot())
@@ -2772,7 +3027,9 @@ internal sealed partial class UnityUiRuntime
             if (rb.Container is PanelContainerWidget placed && placed.Mode == InlineMode.Positioned)
             {
                 d["slot"] = placed.Slot == BesideSlot.After ? "after" : placed.Slot == BesideSlot.Above ? "above" : "none";
-                d["face"] = placed.IconRow ? "icon" : "text";
+                d["face"] = placed.FaceWord();
+                d["placements"] = placed.Placements;
+                d["parent"] = placed.Transform != null && placed.Transform.parent != null ? SafeObjectName(placed.Transform.parent.gameObject) : "";
             }
 
             if (d["buttons"] is List<object?> buttons)
@@ -2793,6 +3050,8 @@ internal sealed partial class UnityUiRuntime
                         b["face"] = tipped.IconMode ? "icon" : "text";
                         b["iconAlways"] = tipped.IconAlways;
                         b["icon"] = tipped.FaceSource;
+                        b["interactable"] = InteractableOf(tipped.GameObject);
+                        b["raycast"] = RaycastAtCenter(tipped.Rect, tipped.GameObject);
                         var (tipTitle, tipBody, tipSource) = tipped.TooltipContent;
                         b["tooltip"] = new Dictionary<string, object?>
                         {
@@ -2944,6 +3203,26 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>The row is shown as icon buttons (the captions did not fit the slot).</summary>
         internal bool IconRow { get; private set; }
+
+        /// <summary>The shape of the last placement (<see cref="PlacementSettle.ShapeKey"/>).</summary>
+        internal string LastShape { get; set; } = "";
+
+        /// <summary>How many different placements this container got (a window open is one; readback <c>placements</c>).</summary>
+        internal int Placements { get; set; }
+
+        /// <summary>What the visible buttons show: <c>icon</c> (all), <c>text</c> (none) or <c>mixed</c>.</summary>
+        internal string FaceWord()
+        {
+            int visible = 0, icons = 0;
+            for (int i = 0; i < Buttons.Count; i++)
+            {
+                if (!Buttons[i].Alive || !Buttons[i].Visible) continue;
+                visible++;
+                if (Buttons[i].IconMode) icons++;
+            }
+
+            return VanillaPanelPlacement.FaceWord(visible, icons);
+        }
 
         /// <summary>Switch every button between its text and icon face.</summary>
         internal void SetIconRow(bool icons)
@@ -3271,6 +3550,8 @@ internal sealed partial class UnityUiRuntime
         }
 
         internal LayoutElement? Element { get; set; }
+
+        internal GameObject? GameObject => UnityUiRuntime.Alive(_go) ? _go : null;
 
         internal RectTransform? Rect
         {

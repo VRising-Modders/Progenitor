@@ -942,10 +942,16 @@ internal sealed class PlacementSettle
     private UiRect _last;
     private int _same = -1;
 
-    /// <summary>Record one measurement; true once the last <see cref="VanillaPanelPlacement.SettleFrames"/> agreed.</summary>
+    /// <summary>
+    /// Record one measurement; true once the last <see cref="VanillaPanelPlacement.SettleFrames"/> agreed. Agreeing is
+    /// on shape, not position: the frame relative to the last member, and both sizes. A window whose content moves as
+    /// one piece (the open slide, with a frame measured on the moving content) keeps its shape, so it is judged once
+    /// and stays placed while it moves; a frame that changes against its content (a static frame over sliding content,
+    /// or a layout change) starts the count again.
+    /// </summary>
     internal bool Observe(in UiRect frame, in UiRect last)
     {
-        if (_same >= 0 && Same(frame, _frame) && Same(last, _last))
+        if (_same >= 0 && SameShape(frame, last, _frame, _last))
         {
             _same++;
         }
@@ -960,6 +966,23 @@ internal sealed class PlacementSettle
     }
 
     internal void Reset() => _same = -1;
+
+    /// <summary>The same frame and last member up to one translation of both (within half a unit).</summary>
+    internal static bool SameShape(in UiRect frame, in UiRect last, in UiRect frame0, in UiRect last0) =>
+        Same(new UiRect(frame.X - last.X, frame.Y - last.Y, frame.Width, frame.Height),
+             new UiRect(frame0.X - last0.X, frame0.Y - last0.Y, frame0.Width, frame0.Height))
+        && Math.Abs(last.Width - last0.Width) <= 0.5f && Math.Abs(last.Height - last0.Height) <= 0.5f;
+
+    /// <summary>
+    /// A key for "the same placement" that ignores where the window is: the slot, the face and the frame and placed
+    /// rect relative to the last member. The geometry line is said when this changes, so a window that slides keeps
+    /// one line per open.
+    /// </summary>
+    internal static string ShapeKey(string slot, string face, in UiRect frame, in UiRect last, in UiRect placed) =>
+        slot + "|" + face + "|" + Rel(frame, last) + "|" + Rel(placed, last) + "|" + Math.Round(last.Width) + "x" + Math.Round(last.Height);
+
+    private static string Rel(in UiRect r, in UiRect origin) =>
+        Math.Round(r.X - origin.X) + "," + Math.Round(r.Y - origin.Y) + "," + Math.Round(r.Width) + "x" + Math.Round(r.Height);
 
     private static bool Same(in UiRect a, in UiRect b) =>
         Math.Abs(a.X - b.X) <= 0.5f && Math.Abs(a.Y - b.Y) <= 0.5f
@@ -1266,7 +1289,26 @@ internal static class VanillaPanelPlacement
     /// inside the strip), while the inventory's bottom bar lives on a body as wide as the window.
     /// Narrower ancestors (the title text, the 24-unit rename group) are not frames.
     /// </summary>
-    internal static UiRect InlineFrame(in UiRect panel, IReadOnlyList<UiRect>? ancestors)
+    internal static UiRect InlineFrame(in UiRect panel, IReadOnlyList<UiRect>? ancestors) => InlineFrameOf(panel, ancestors);
+
+    /// <summary>The geometry line's <c>face=</c> word: <c>icon</c> when every visible button shows its icon, <c>text</c> when none does, else <c>mixed</c>.</summary>
+    internal static string FaceWord(int visible, int icons) =>
+        visible > 0 && icons >= visible ? "icon" : icons <= 0 ? "text" : "mixed";
+
+    /// <summary>
+    /// The window rect an inline frame starts from: the window's moving content (<paramref name="moving"/>, the
+    /// window root's child that holds the group, such as <c>MotionRoot</c>) when it fills the window to
+    /// <see cref="FrameWidthShare"/> in both directions, else the static root (<paramref name="panel"/>). On 1.1.13.0
+    /// the open slide moves <c>MotionRoot</c> 30 units inside a root that stays put; a frame from the root would
+    /// change shape against the sliding content.
+    /// </summary>
+    internal static UiRect WindowRect(in UiRect panel, in UiRect moving)
+    {
+        if (moving.IsEmpty || panel.IsEmpty) return panel;
+        return moving.Width >= panel.Width * FrameWidthShare && moving.Height >= panel.Height * FrameWidthShare ? moving : panel;
+    }
+
+    private static UiRect InlineFrameOf(in UiRect panel, IReadOnlyList<UiRect>? ancestors)
     {
         if (panel.IsEmpty || ancestors == null) return panel;
         for (int i = 0; i < ancestors.Count; i++)
