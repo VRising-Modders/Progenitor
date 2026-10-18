@@ -360,18 +360,45 @@ internal sealed class UnityKeyInputSource : IKeyInputSource
     }
 
     /// <summary>
-    /// HOLDMOD1: the six modifier keys and the Windows keys held now, for the key capture's lone-modifier rule
-    /// (press and release Alt alone records Alt). False when there is no keyboard.
+    /// HOLDMOD1: the six modifier keys and the Windows keys held now, and those whose press edge
+    /// (<see cref="KeyEdgeTracker"/>, the Input System's own flag included) is on this frame, for the key capture's
+    /// lone-modifier rule (press and release Alt alone records Alt, even within one frame). False when there is no
+    /// keyboard.
     /// </summary>
-    public bool TryReadHeldModifiers(out ModifierSides sides)
+    public bool TryReadModifiers(out ModifierSides held, out ModifierSides pressed)
     {
-        sides = ModifierSides.None;
+        held = ModifierSides.None;
+        pressed = ModifierSides.None;
         Keyboard? keyboard;
         try { keyboard = Keyboard.current; }
         catch { return false; }
         if (keyboard == null) return false;
-        sides = HeldSides(keyboard);
+        held = HeldSides(keyboard);
+        foreach (var (key, side) in ModifierEdgeKeys)
+        {
+            try { if (SideWentDown(keyboard, key)) pressed |= side; }
+            catch { /* a control read mid-teardown is not a press */ }
+        }
+
         return true;
+    }
+
+    private static readonly (UiKey Key, ModifierSides Side)[] ModifierEdgeKeys =
+    {
+        (UiKey.LeftCtrl, ModifierSides.LeftCtrl), (UiKey.RightCtrl, ModifierSides.RightCtrl),
+        (UiKey.LeftShift, ModifierSides.LeftShift), (UiKey.RightShift, ModifierSides.RightShift),
+        (UiKey.LeftAlt, ModifierSides.LeftAlt), (UiKey.RightAlt, ModifierSides.RightAlt),
+        (UiKey.LeftMeta, ModifierSides.LeftMeta), (UiKey.RightMeta, ModifierSides.RightMeta),
+    };
+
+    /// <summary>HOLDMOD1 review: <c>Application.isFocused</c>; null when it cannot be read.</summary>
+    public bool? WindowFocused
+    {
+        get
+        {
+            try { return UnityEngine.Application.isFocused; }
+            catch { return null; }
+        }
     }
 
     public bool TryReadPressedChord(out KeyChord chord, out ModifierSides sides)

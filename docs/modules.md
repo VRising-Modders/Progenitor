@@ -6947,7 +6947,12 @@ ctx.Keybinds.RegisterHold("AdvancedNumbers", KeyChord.Alt, "Show advanced number
 - **Hold and release.** It stays held while the modifier is down, whatever else is pressed meanwhile: another key
   joining, Ctrl added, or switching from left to right Alt keep the same hold. `Alt + X` binds still fire, and X going
   down never presses the lone hold a second time. It releases when the modifier comes up, and on the usual hold
-  releases (a mod panel takes input, chat or a text field gets focus, a capture starts, unload).
+  releases (a mod panel takes input, chat or a text field gets focus, a capture starts, unload). The game window losing
+  focus (Alt+Tab) also ends it (`IKeyInputSource.WindowFocused`, `Application.isFocused`; logged once as `Ui: the game
+  window lost focus; held keybinds were released.`), because the modifier's release then happens in another window.
+  After returning, the hold starts again only on a fresh press, so coming back with Alt+Tab and letting go of Alt
+  starts and ends one short hold. Only the loss acts: an unfocused window still runs binds (the bridge's `key` op with
+  background input).
 - **Hold binds only.** Because it starts the moment the modifier goes down, it also runs, briefly, while the player
   uses that modifier in a chord (Alt+X, Ctrl+C, Shift for a capital letter). Use it for something harmless to show while
   held. A bind with no `whileHeld` and no `onReleased` handler (every `Register`, `RegisterOpener`, `RegisterInMap`
@@ -6966,20 +6971,29 @@ ctx.Keybinds.RegisterHold("AdvancedNumbers", KeyChord.Alt, "Show advanced number
   Building Toggle Color Wheel while building); Left Shift is Cliff Jump, Custom Split Item, Shapeshift Modifier and Track
   Item in the inventory, and either Shift is Ability 4's second binding and Building Fill. The debug actions on Left
   Shift and Left Ctrl never conflict. The game reads these modifiers as held keys and Progenitor never consumes a key,
-  so a mod hold on the same lone modifier **shares** it (`KeybindArbiter.SharesLoneModifier`): the game's action never
-  stops the bind in any scope, the row says `Alt is also held by the game (Advanced Tooltip and Toggle Emote Wheel);
-  both act on it.`, a remap onto it is not refused, and the Keybinds tab never takes the key from the game (or from the
-  mod when a game row moves onto it). Holding Alt in play still does whatever the game does with it.
-- **Between mods** the first-installed rule applies as for any chord: two mods' Alt holds clash and only the one
-  installed first fires. `Alt` and `X + Alt` are different chords and never clash. An ordinary mod's `KeyboardShortcut`
-  on `LeftAlt` is compared as lone Alt, and the tab writes a lone modifier into one as `LeftAlt` (keeping `RightAlt`
-  when the entry already names it).
+  so a mod hold on the same lone modifier **shares** it (`KeybindArbiter.SharesLoneModifier(a, b)`): the game's action
+  never stops the bind in any scope, the row says `Alt is also held by the game (Advanced Tooltip and Toggle Emote
+  Wheel); both act on it.` in the muted tone, a remap onto it is not refused, and the Keybinds tab never takes the key
+  from the game (or from the mod when a game row moves onto it). A shared key is not a conflict: it is not in the
+  verdict's `Others`, the **Conflicts N** count, the Conflicts view or the mod's problems. Holding Alt in play still
+  does whatever the game does with it.
+- **Ordinary mods' key settings share it too.** Another mod's `KeyboardShortcut` or `KeyCode` setting on `LeftAlt`
+  (an older mod's `ModifierKey = LeftAlt`) reads the key itself and Progenitor cannot stop it, so it is shared the same
+  way and never makes the Progenitor hold inactive by install order (as `Mouse2`-`Mouse4` KeyCode values stay out of
+  the winner rule). Its row reads `Alt is also held by <mod> (<setting>); both act on it.` The Keybinds tab never puts a
+  lone modifier into such a setting, since the mod may act on a press (`<chord> on its own can't be a key for a mod's
+  own setting: the mod may act on a press. Press another key with it or pick another key.`); putting back the
+  setting's own default is still allowed.
+- **Between Progenitor binds** the first-installed rule applies as for any chord: two mods' Alt holds clash, only the
+  one installed first fires, and both count as a conflict. `Alt` and `X + Alt` are different chords and never clash.
 - **The capture.** In the Keybinds tab, a mod page's Keys row and the settings panel, press and release the modifier
   alone to record it (`Alt`). A key or mouse button pressed while it is held records that chord instead (`Q + Alt`);
   two modifiers released together record nothing and the capture keeps waiting; a modifier already down when the
-  capture began counts only after it has been released. `IKeyInputSource.TryReadHeldModifiers` is the read the
-  capture uses; `UnityKeyInputSource` answers it from the six side-specific modifier controls. A game row can take a
-  lone modifier too (written as the left key, `<Keyboard>/leftAlt`).
+  capture began counts only after it has been released, and the window losing focus forgets a modifier the capture
+  was watching. `IKeyInputSource.TryReadModifiers` is the read the capture uses; `UnityKeyInputSource` answers it from
+  the six side-specific modifier controls and the Windows keys, held now and pressed this frame through the same press
+  edge as every key (`KeyEdgeTracker`), so a tap shorter than one frame still records. A game row can take a lone
+  modifier too (written as the left key, `<Keyboard>/leftAlt`); an ordinary mod's setting row cannot (above).
 - **The bridge.** `mods_ui keys op=capture chord="Alt"` delivers it to a row; `keybind_press {"chord":"Alt"}` runs the
   press handler of the binds on Alt; `key {"action":"down","keys":"Alt","ms":3000}` holds the real Left Alt through the
   game's own input, which is the end-to-end hold.
@@ -7003,8 +7017,19 @@ been pressed in the game and no tooltip has been refreshed live). Live check, on
    game's own advanced tooltip at the same time. `key {"action":"up","keys":"Alt"}`: the basic rows again.
 4. Hold Alt and tap X with an `X + Alt` bind registered: expect that bind to fire once and no second `onPressed`.
 5. In the Keybinds tab, edit the bind's row, press and release Alt alone: expect `Alt` in the edit bar; on a press-only
-   row expect the refusal above. Hold `Ctrl` then press `Alt`: expect no `onPressed`.
-6. Remove the test mod and confirm the clean unload.
+   row expect the refusal above; on another mod's config-file key row expect the config-file refusal. Hold `Ctrl` then
+   press `Alt`: expect no `onPressed`.
+6. AltGr: `key {"action":"hold","keys":"AltGr","ms":1000}` presses Right Alt alone: expect one `onPressed` (either
+   Alt counts). Then `key {"action":"hold","keys":"Ctrl+AltGr","ms":1000}`, which is how Windows delivers AltGr on a
+   German, French, Polish or Nordic layout (Left Ctrl + Right Alt): expect no Alt `onPressed`. With a `KeyChord.Ctrl`
+   hold registered too, record whether it starts: it should not when both keys arrive in one input update, and a
+   start means Left Ctrl was sampled on its own first (the op may queue the two modifiers as separate events). If a test machine has such a layout, press AltGr on the physical keyboard (a foreground input test)
+   and expect the same.
+7. Alt+Tab: hold Alt on the physical keyboard with the hold active (the advanced rows shown), press Tab to switch to
+   another window, let go of Alt there. Expect `onReleased` and the log line above at the focus loss, the basic rows when
+   back in the game, and no hold until Alt is pressed again. This takes the game window's focus, so it needs the
+   client to be free.
+8. Remove the test mod and confirm the clean unload.
 
 #### Controller keybinds
 

@@ -1376,6 +1376,10 @@ internal static class KeybindsTabLayout
     internal const string GameControlsWhere =
         "Read-only here. Change these in the game: Esc > Options > Controls > Keyboard & Mouse Bindings.";
 
+    /// <summary>HOLDMOD1 review: the refusal for a lone modifier on an ordinary mod's config-file key.</summary>
+    internal static string CfgLoneModifierReason(KeyChord chord) =>
+        chord.DisplayText + " on its own can't be a key for a mod's own setting: the mod may act on a press. Press another key with it or pick another key.";
+
     internal const string GameNoteHeading = "Game keys";
 
     /// <summary>When the Conflicts filter is chosen and nothing clashes.</summary>

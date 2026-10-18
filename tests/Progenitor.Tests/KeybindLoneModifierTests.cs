@@ -346,6 +346,65 @@ public sealed class KeybindLoneModifierTests : IDisposable
         finally { Keybinds.RebindFinished -= finished.Add; }
     }
 
+    /// <summary>Review of PR #102: a tap shorter than one frame is seen through the press edge, not the held state.</summary>
+    [Fact]
+    public void A_tap_of_Alt_shorter_than_a_frame_still_records_Alt()
+    {
+        var c = new Counts();
+        var bind = HoldOn(new KeyChord(UiKey.F7), c);
+        Assert.True(Keybinds.BeginRebind("example.mod", "Advanced"));
+        _keys.Frame();
+        _keys.Tap(UiKey.RightAlt);
+        _keys.Frame();
+        Assert.Equal(KeyChord.Alt, bind.Chord);
+    }
+
+    /// <summary>Review of PR #102: Alt+Tab away ends the hold, since the release happens in another window.</summary>
+    [Fact]
+    public void Losing_window_focus_releases_the_hold_and_forgets_a_captured_modifier()
+    {
+        var c = new Counts();
+        HoldOn(KeyChord.Alt, c);
+        _keys.Focused = true;
+        _keys.Frame();
+        _keys.Down(UiKey.LeftAlt);
+        _keys.Frame();
+        Assert.Equal((1, 0, 0), (c.Pressed, c.Held, c.Released));
+
+        // Alt+Tab: the window loses focus with Alt still read as down.
+        _keys.Focused = false;
+        _keys.Frame();
+        Assert.Equal(1, c.Released);
+        Assert.Contains(_log.Diags, l => l == Keybinds.FocusLostReleaseLog);
+        _keys.Frame();
+        Assert.Equal((1, 0, 1), (c.Pressed, c.Held, c.Released));
+
+        // Back with Alt never seen up: no hold resumes until a fresh press.
+        _keys.Focused = true;
+        _keys.Frame();
+        Assert.Equal((1, 0, 1), (c.Pressed, c.Held, c.Released));
+        _keys.Up(UiKey.LeftAlt);
+        _keys.Frame();
+        _keys.Down(UiKey.LeftAlt);
+        _keys.Frame();
+        Assert.Equal(2, c.Pressed);
+        _keys.ReleaseAll();
+        _keys.Frame();
+
+        // A capture watching Alt when the window loses focus records nothing on its release.
+        var bind = HoldOn(new KeyChord(UiKey.F7), new Counts(), "Other");
+        Assert.True(Keybinds.BeginRebind("example.mod", "Other"));
+        _keys.Frame();
+        _keys.Down(UiKey.LeftAlt);
+        _keys.Frame();
+        _keys.Focused = false;
+        _keys.Frame();
+        _keys.Focused = true;
+        _keys.Up(UiKey.LeftAlt);
+        _keys.Frame();
+        Assert.Equal(new KeyChord(UiKey.F7), bind.Chord);
+    }
+
     [Fact]
     public void A_key_pressed_while_Alt_is_held_records_the_chord_not_Alt()
     {
@@ -457,14 +516,25 @@ public sealed class KeybindLoneModifierTests : IDisposable
 
         public void ReleaseAll() => _held.Clear();
 
+        private readonly HashSet<UiKey> _tapped = new();
+
+        /// <summary>A press and release between two samples: only the Input System's own press flag sees it.</summary>
+        public void Tap(UiKey key) => _tapped.Add(key);
+
+        /// <summary><c>Application.isFocused</c>; null: unknown.</summary>
+        public bool? Focused { get; set; }
+
+        public bool? WindowFocused => Focused;
+
         /// <summary>One frame: the pump samples, then this frame's keys become the previous sample.</summary>
         public void Frame()
         {
             Keybinds.Pump();
             _previous = new HashSet<UiKey>(_held);
+            _tapped.Clear();
         }
 
-        private bool WentDown(UiKey key) => _held.Contains(key) && !_previous.Contains(key);
+        private bool WentDown(UiKey key) => (_held.Contains(key) && !_previous.Contains(key)) || _tapped.Contains(key);
 
         private ModifierSides Sides()
         {
@@ -517,9 +587,18 @@ public sealed class KeybindLoneModifierTests : IDisposable
             return false;
         }
 
-        public bool TryReadHeldModifiers(out ModifierSides sides)
+        public bool TryReadModifiers(out ModifierSides held, out ModifierSides pressed)
         {
-            sides = Sides();
+            held = Sides();
+            pressed = ModifierSides.None;
+            foreach (var (key, side) in new[]
+            {
+                (UiKey.LeftCtrl, ModifierSides.LeftCtrl), (UiKey.RightCtrl, ModifierSides.RightCtrl),
+                (UiKey.LeftShift, ModifierSides.LeftShift), (UiKey.RightShift, ModifierSides.RightShift),
+                (UiKey.LeftAlt, ModifierSides.LeftAlt), (UiKey.RightAlt, ModifierSides.RightAlt),
+                (UiKey.LeftMeta, ModifierSides.LeftMeta), (UiKey.RightMeta, ModifierSides.RightMeta),
+            })
+                if (WentDown(key)) pressed |= side;
             return true;
         }
     }

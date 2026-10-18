@@ -146,16 +146,26 @@ internal interface IKeyInputSource
     bool IsHeld(KeyChord chord) => false;
 
     /// <summary>
-    /// HOLDMOD1: which modifier keys (both sides of Ctrl, Shift and Alt, and the Windows keys) are down now. The key
-    /// capture reads it to record a lone modifier: one modifier pressed and released with no other key in between.
-    /// <see cref="TryReadPressedChord"/> never reports a modifier on its own. False when the source cannot tell. Never
-    /// throws. Defaulted so existing sources need no change.
+    /// HOLDMOD1: which modifier keys (both sides of Ctrl, Shift and Alt, and the Windows keys) are down now
+    /// (<paramref name="held"/>) and which went down this frame (<paramref name="pressed"/>, through the same press-edge
+    /// rule as every key, so a tap shorter than one frame is still seen). The key capture reads it to record a lone
+    /// modifier: one modifier pressed and released with no other key in between. <see cref="TryReadPressedChord"/> never
+    /// reports a modifier on its own. False when the source cannot tell. Never throws. Defaulted so existing sources
+    /// need no change.
     /// </summary>
-    bool TryReadHeldModifiers(out ModifierSides sides)
+    bool TryReadModifiers(out ModifierSides held, out ModifierSides pressed)
     {
-        sides = ModifierSides.None;
+        held = ModifierSides.None;
+        pressed = ModifierSides.None;
         return false;
     }
+
+    /// <summary>
+    /// HOLDMOD1 review: whether the game window has focus (<c>Application.isFocused</c>), or null when the source cannot
+    /// tell. When it goes from focused to not focused the pump releases every active hold, because a key let go while
+    /// another window has focus (Alt+Tab) is never seen coming up. Defaulted to null (unknown) for existing sources.
+    /// </summary>
+    bool? WindowFocused => null;
 
     /// <summary>
     /// PAD1: which gamepad buttons are down now, as a mask of <see cref="KeyChord.GamepadBit"/> bits, read from

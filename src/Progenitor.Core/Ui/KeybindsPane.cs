@@ -1430,6 +1430,15 @@ internal sealed class KeybindsPane
                     break;
                 }
 
+                // HOLDMOD1 review: an ordinary mod's config-file key may act on a press; it never takes a lone modifier.
+                if (claim.Source == KeybindSource.Cfg && result.Chord.IsLoneModifier && claim.DefaultChord != result.Chord)
+                {
+                    _pending = null;
+                    _editStatus = KeybindsTabLayout.StillWaiting(KeybindsTabLayout.CfgLoneModifierReason(result.Chord));
+                    StartCapture();
+                    break;
+                }
+
                 // Requested 2026-10-10: a key something else has is taken, not refused. Save unbinds the holders
                 // (named here, before Save, and in their rows after it), so a remap still never leaves a conflict.
                 // Refused: a reserved chord, a bare click and a holder this tab can't change.

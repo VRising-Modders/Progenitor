@@ -140,6 +140,11 @@ public static class Keybinds
 
     private static KeyModifiers _loneUnion;
 
+    /// <summary>HOLDMOD1 review: whether the game window had focus at the last pump (<see cref="IKeyInputSource.WindowFocused"/>).</summary>
+    private static bool _windowFocused = true;
+
+    internal const string FocusLostReleaseLog = "Ui: the game window lost focus; held keybinds were released.";
+
     /// <summary>
     /// KEYS8: the left or right button a capture just took, until it has been released and two more pumps have
     /// run. While set, clicks on Progenitor's own widgets are dropped (<see cref="SwallowsUiClicks"/>), so the
@@ -2005,6 +2010,24 @@ public static class Keybinds
             return;
         }
 
+        // HOLDMOD1 review: the window losing focus (Alt+Tab) ends every hold, since the key's release happens in another
+        // window and may never be seen. Only the edge acts: an unfocused window still runs binds (the bridge's key op
+        // with background input), and a capture forgets a modifier it was watching.
+        bool? focused;
+        try { focused = source.WindowFocused; }
+        catch { focused = null; }
+        if (focused == false && _windowFocused)
+        {
+            _windowFocused = false;
+            _loneSpoiled = true;
+            if (AnyHolding(snapshot)) Plugin.Logger?.LogDiag(FocusLostReleaseLog);
+            ReleaseHolding(snapshot);
+        }
+        else if (focused == true)
+        {
+            _windowFocused = true;
+        }
+
         ChatFocus focus;
         try { focus = source.ChatFocus; }
         catch (Exception e)
@@ -2357,10 +2380,10 @@ public static class Keybinds
     {
         chord = KeyChord.None;
         sides = ModifierSides.None;
-        ModifierSides held;
+        ModifierSides held, pressed;
         try
         {
-            if (!source.TryReadHeldModifiers(out held)) return false;
+            if (!source.TryReadModifiers(out held, out pressed)) return false;
         }
         catch (Exception e)
         {
@@ -2379,12 +2402,10 @@ public static class Keybinds
             return false;
         }
 
-        if (meta) _loneSpoiled = true;
-        if (mods != KeyModifiers.None || meta)
-        {
-            _loneUnion |= mods;
-            return false;
-        }
+        // Review: a press edge counts even when the key is already up again (a tap shorter than one frame).
+        if (meta || KeyChord.IsWindowsKeyHeld(pressed)) _loneSpoiled = true;
+        _loneUnion |= mods | KeyChord.ModifiersOf(pressed);
+        if (mods != KeyModifiers.None || meta) return false;
 
         var union = _loneUnion;
         bool spoiled = _loneSpoiled;
@@ -2832,6 +2853,7 @@ public static class Keybinds
         PointerHitsModUi = DefaultPointerHitsModUi;
         _leftArmed = _rightArmed = _loneArmed = false;
         _swallowButton = UiKey.None;
+        _windowFocused = true;
         _swallowReleasedPumps = -1;
         _swallowSince = 0;
         KeybindConflictPrompt.ResetForTests();

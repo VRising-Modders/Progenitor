@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using BepInEx.Configuration;
 using System.Linq;
 using Progenitor.Ui;
 using Xunit;
@@ -61,6 +62,90 @@ namespace Progenitor.Tests
             // An ordinary game key still wins, as before.
             HoldBind("d.mod", "Use", new KeyChord(UiKey.F));
             Assert.False(KeybindArbiter.Current().FindProgenitor("d.mod", "Use")!.Active);
+        }
+
+        /// <summary>
+        /// Review of PR #102: an older mod's own <c>ModifierKey = LeftAlt</c> setting shares Alt with a Progenitor hold, as
+        /// the game does, instead of making it inactive by install order. Shared claims are no conflict.
+        /// </summary>
+        [Fact]
+        public void An_ordinary_mods_LeftAlt_setting_shares_Alt_and_is_not_counted_as_a_conflict()
+        {
+            var cfg = File("old.mod");
+            cfg.Bind("Hotkeys", "ModifierKey", new KeyboardShortcut("LeftAlt"), "Hold for details.");
+            SettingsCatalog.Register("old.mod", cfg, new object(), foreign: true);
+            KeybindArbiter.InstallTimeOf = id => id == "old.mod" ? Ledger(30) : Ledger(1);
+            UseGame(GameAction("AdvancedTooltip", "Advanced Tooltip", "<Keyboard>/leftAlt"));
+
+            var log = new List<string>();
+            HoldBind("a.mod", "Advanced", KeyChord.Alt, log);
+            var claim = SettingsCatalog.KeyClaims(sweep: false).Single(c => c.ActionId == "Hotkeys/ModifierKey");
+            Assert.Equal(KeyChord.Alt, claim.Chord);
+            Assert.True(KeybindArbiter.SharesLoneModifier(claim, Mod("a.mod", "Advanced", KeyChord.Alt)));
+            Assert.False(KeybindArbiter.SharesLoneModifier(Mod("b.mod", "X", KeyChord.Alt), Mod("a.mod", "Advanced", KeyChord.Alt)));
+
+            var picture = KeybindArbiter.Current();
+            var mine = picture.FindProgenitor("a.mod", "Advanced")!;
+            Assert.True(mine.Active);
+            Assert.False(mine.InConflict);
+            Assert.StartsWith("Alt is also held by the game (Advanced Tooltip) and old.mod (", mine.Reason);
+            Assert.EndsWith("); both act on it.", mine.Reason);
+            var theirs = picture.Find(claim.Key)!;
+            Assert.True(theirs.Active);
+            Assert.False(theirs.InConflict);
+            Assert.StartsWith("Alt is also held by ", theirs.Reason);
+            Assert.Empty(ModProblems.For("a.mod"));
+
+            _keys.Down(KeyChord.Alt);
+            _keys.Frame();
+            Assert.Equal(new[] { "a.mod pressed" }, log);
+            _keys.Up(UiKey.LeftAlt);
+            _keys.Frame();
+
+            // The tab: no conflict counted, the Conflicts view leaves the rows out, the muted note stays.
+            OpenKeybindsTab();
+            Assert.Equal(0, Pane().Model!.ConflictCount);
+            var row = Pane().Model!.FindRow("progenitor:a.mod/Advanced")!;
+            Assert.False(row.Conflict);
+            Assert.False(Pane().Model!.FindRow(claim.Key)!.Conflict);
+            Assert.Contains("both act on it", KeybindsTabLayout.Describe(row, "selected").Info + " " + KeybindsTabLayout.Describe(row, "selected").Warning);
+
+            // A second Progenitor hold on Alt is a real clash, and is counted.
+            HoldBind("b.mod", "Peek", KeyChord.Alt);
+            OpenKeybindsTab();
+            Assert.True(Pane().Model!.ConflictCount > 0);
+            Assert.True(Pane().Model!.FindRow("progenitor:b.mod/Peek")!.Conflict);
+            Assert.False(Pane().Model!.FindRow(claim.Key)!.Conflict);
+        }
+
+        /// <summary>Review of PR #102: an ordinary mod's key may act on a press, so its row never takes a lone modifier.</summary>
+        [Fact]
+        public void A_config_file_key_row_refuses_a_lone_modifier_except_its_own_default()
+        {
+            var cfg = File("plain.mod");
+            cfg.Bind("Hotkeys", "Toggle", new KeyboardShortcut("F7"), "Toggles it.");
+            cfg.Bind("Hotkeys", "ModifierKey", new KeyboardShortcut("LeftAlt"), "Hold for details.");
+            SettingsCatalog.Register("plain.mod", cfg, new object(), foreign: true);
+            SettingsCatalog.AllowForeignEdits = true;
+            var toggle = SettingsCatalog.KeyClaims(sweep: false).Single(c => c.ActionId == "Hotkeys/Toggle");
+
+            OpenKeybindsTab();
+            Assert.True(Pane().BeginEdit(toggle.Key));
+            Pane().OnCaptured(new KeyCaptureResult(RebindOutcome.Bound, KeyChord.Alt, null));
+            var edit = (Dictionary<string, object?>)Pane().Describe()["edit"]!;
+            Assert.Null(edit["pending"]);
+            Assert.StartsWith(KeybindsTabLayout.CfgLoneModifierReason(KeyChord.Alt), (string)edit["status"]!);
+            ModsMenu.KeysOp("cancel", null, null);
+
+            var refused = SettingsCatalog.WriteKey(toggle, KeyChord.Shift);
+            Assert.Equal(SettingWriteState.Refused, refused.State);
+            Assert.Equal(KeybindsTabLayout.CfgLoneModifierReason(KeyChord.Shift), refused.Error);
+
+            // A reset puts back what the mod shipped, even a lone modifier.
+            var modifier = SettingsCatalog.KeyClaims(sweep: false).Single(c => c.ActionId == "Hotkeys/ModifierKey");
+            Assert.Equal(SettingWriteState.Accepted, SettingsCatalog.WriteKey(modifier, F8).State);
+            modifier = SettingsCatalog.KeyClaims(sweep: false).Single(c => c.ActionId == "Hotkeys/ModifierKey");
+            Assert.Equal(SettingWriteState.Accepted, SettingsCatalog.WriteKey(modifier, KeyChord.Alt).State);
         }
 
         [Fact]
