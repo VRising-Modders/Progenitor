@@ -343,6 +343,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerOpenGatePolicy.cs" Link="Linked\ContainerOpenGatePolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerOpenGateWire.cs" Link="Linked\ContainerOpenGateWire.cs" />
     <Compile Include="..\..\samples\Progenitor.Sample\SampleLocks.cs" Link="Linked\SampleLocks.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Inventory\ContainerReturnPolicy.cs" Link="Linked\ContainerReturnPolicy.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\GameWindowUnderPanel.cs" Link="Linked\GameWindowUnderPanel.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Units\UnitVec3.cs" Link="Linked\UnitVec3.cs" />
     <!-- ctx.Input: ownership, the user yield, what to write each frame and the command patch are
          game-free; UnityInputRuntime.cs and PluginInput.cs are the game half and stay out. -->

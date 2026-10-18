@@ -1303,10 +1303,19 @@ public static partial class Ui
                 return;
             }
 
+            // RETURN1: with the game's chest or station window open under a panel that takes Escape, the guard holds the
+            // game's close, so that window stays: the panels mounted in its tabs stay with it.
+            bool keepMounted = false;
+            try
+            {
+                keepMounted = GameWindowUnderPanel.IsInteractWindow(GameWindowUnderPanel.MenuTypeNow()) && EscapeHidesAPanelOverGameWindow();
+            }
+            catch { keepMounted = false; }
             for (int i = 0; i < snapshot.Length; i++)
             {
                 if (snapshot[i] is UiPanelHandle panel && panel.State == UiHandleState.Shown)
                 {
+                    if (GameWindowUnderPanel.SweepKeepsMounted(keepMounted, keepMounted, panel.MountedInTab)) continue;
                     try { panel.Hide(); hidden++; }
                     catch (Exception e) { Plugin.Logger?.LogWarning("Ui: Escape hide threw: " + e.Message); }
                 }
@@ -1367,6 +1376,36 @@ public static partial class Ui
     }
 
     private static bool HasShownWindow(UiHandle[] snapshot) => ShownWindows(snapshot).Count > 0;
+
+    private static readonly List<UiHandle> EscapeWindowBuffer = new();
+
+    /// <summary>
+    /// RETURN1: whether the next Escape hides a Progenitor panel that sits over the game's chest or station window rather
+    /// than in it (<see cref="GameWindowUnderPanel.PanelTakesEscape"/>: a game or standard window, or a floating panel that
+    /// takes the input now; never a Mods workspace pane, a panel mounted in a chest or station tab, or a
+    /// <see cref="UiCaptureMode.Never"/> panel). Per frame from the shown-input pump while such a game window is open, and
+    /// from the Escape sweep; no allocation.
+    /// </summary>
+    internal static bool EscapeHidesAPanelOverGameWindow()
+    {
+        EscapeWindowBuffer.Clear();
+        lock (Gate) EscapeWindowBuffer.AddRange(Live);
+        try
+        {
+            foreach (var h in EscapeWindowBuffer)
+            {
+                if (h is not UiPanelHandle p || p.IsDisposed || p.State != UiHandleState.Shown) continue;
+                // Mounted and passive panels never count; skip them before the pointer read.
+                if (p.MountedInTab || p.ShownCaptureMode == UiCaptureMode.Never) continue;
+                bool isWindow = p.IsGameWindow || p.WindowWidth > 0f;
+                if (GameWindowUnderPanel.PanelTakesEscape(ModsMenu.IsWorkspacePanel(p), p.MountedInTab, p.ShownCaptureMode,
+                        isWindow, isWindow || TakesInput(p)))
+                    return true;
+            }
+            return false;
+        }
+        finally { EscapeWindowBuffer.Clear(); }
+    }
 
     /// <summary>
     /// CHECKLIST1: whether an Escape that reached the Escape handlers belongs to a control on <paramref name="panel"/>: the

@@ -141,8 +141,15 @@ internal sealed class GalleryHub : IDisposable
         if (w == null || w.State != UiHandleState.Shown) return "not open";
         Say("return");
         w.Hide();
+        AfterReturn?.Invoke();
         return "closed";
     }
+
+    /// <summary>
+    /// Runs after Return closed the window. The plugin sets it to <c>ctx.Inventory.ReopenLast</c>: a hub opened over a
+    /// chest leaves the chest's window open underneath, and if something closed it meanwhile, Return opens it again.
+    /// </summary>
+    internal Action? AfterReturn { get; set; }
 
     /// <summary>The table's actions column key.</summary>
     internal const string ActionsKey = "actions";

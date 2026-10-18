@@ -311,8 +311,11 @@ namespace Progenitor.Tests
             SourcePin.AssertUncommented(guard, "state.BlockKeyDown((ButtonInputAction)closes[i]);");
             string runtime = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "UnityUiRuntime.cs");
             SourcePin.AssertUncommented(SourcePin.MethodBody(runtime, "private static void PumpTypedKeys("),
-                // NAV1: also while B on a workspace page means back to the list.
-                "Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose,");
+                // NAV1: also while B on a workspace page means back to the list; RETURN1: and while a Progenitor panel
+                // that takes Escape is shown over the game's chest or station window.
+                "Keybinds.EscapeBelongsToCapture, UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen || UiNav.HoldsGameClose || overGameWindow,");
+            SourcePin.AssertUncommented(SourcePin.MethodBody(runtime, "private static void PumpTypedKeys("),
+                "MenuHotkeyGuard.SetInteractHeld(GameWindowUnderPanel.HoldsInteract(gameMenu, field != null));");
             Assert.True(UiInputCapture.HotkeyGuardOrder < UiInputCapture.HudMenuOrder);
         }
 

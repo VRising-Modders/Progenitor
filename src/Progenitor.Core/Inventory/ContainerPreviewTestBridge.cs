@@ -13,7 +13,7 @@ namespace Progenitor.Inventory;
 /// </summary>
 internal static class ContainerPreviewTestBridge
 {
-    public static Dictionary<string, object?> Open(string id, bool keepOpen, double seconds, bool hideBag, double replicationTimeout, bool dropEvents, bool hudGate, bool syncInventory)
+    public static Dictionary<string, object?> Open(string id, bool keepOpen, double seconds, bool hideBag, double replicationTimeout, bool dropEvents, bool hudGate, bool syncInventory, bool returnToWindow)
     {
         if (Plugin.IsServerProcess) throw new InvalidOperationException("container_preview open runs on the client");
         if (!ContainerId.TryParse(id, out var container)) throw new ArgumentException("args.id must be a container id (c- plus 32 hex digits)");
@@ -24,6 +24,7 @@ internal static class ContainerPreviewTestBridge
             HidePlayerInventory = hideBag,
             ReplicationTimeoutSeconds = (float)replicationTimeout,
             DropItemEvents = dropEvents,
+            ReturnToOpenWindow = returnToWindow,
         };
         var problem = options.Problem();
         if (problem != null) throw new ArgumentException(problem);
@@ -44,6 +45,17 @@ internal static class ContainerPreviewTestBridge
         return result;
     }
 
+    /// <summary>RETURN1: what <c>ctx.Inventory.ReopenLast</c> does; the outcome is in <c>status.return.lastOutcome</c> about a second later.</summary>
+    public static Dictionary<string, object?> Reopen()
+    {
+        if (Plugin.IsServerProcess) throw new InvalidOperationException("container_preview reopen runs on the client");
+        var answer = ContainerReturnClient.ReopenLast(null, "Dev bridge reopen");
+        var result = ContainerReturnClient.Describe();
+        result["requested"] = "reopen";
+        result["answer"] = answer.ToString();
+        return result;
+    }
+
     public static Dictionary<string, object?> Status()
     {
         if (Plugin.IsServerProcess) return ServerStatus();
@@ -55,6 +67,10 @@ internal static class ContainerPreviewTestBridge
             ["preview"] = ContainerPreviewClient.Current?.Describe(),
             // The container open gate's client half: a prompt up, a repeat running, the last toast.
             ["gate"] = ContainerOpenGateClient.Describe(),
+            // RETURN1: the remembered chest or station window and the last reopen's outcome.
+            ["return"] = ContainerReturnClient.Describe(),
+            ["closeHeld"] = Progenitor.Ui.MenuHotkeyGuard.CloseHeld,
+            ["interactHeld"] = Progenitor.Ui.MenuHotkeyGuard.InteractHeld,
         };
         if (world != null && world.IsCreated)
         {

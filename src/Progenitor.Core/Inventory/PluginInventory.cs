@@ -26,7 +26,7 @@ public enum InventoryPart
 /// chests, station input and output, castle hearts, servants, player bags. Every write is
 /// server-authoritative and read back. Main thread only. On the client every call throws
 /// <see cref="InvalidOperationException"/> ("ctx.Inventory runs on the server side only"), except
-/// <see cref="Preview"/>, which is client only.
+/// <see cref="Preview"/>, <see cref="ReopenLast"/> and <see cref="LastWindow"/>, which are client only.
 /// </summary>
 public sealed partial class PluginInventory
 {

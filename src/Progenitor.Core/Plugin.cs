@@ -143,7 +143,7 @@ public sealed class Plugin
         // ctx.Camera.Observe lease rely on them (the game saves User.ProxySyncPosition and the inventory sync lists).
         try { Persistence.WorldSaveGuard.Install(); Cameras.ObservationGuard.Install(); }
         catch (Exception e) { Logger?.LogWarning($"WorldSaveGuard.Install: {e.Message}"); }
-        try { Inventory.ContainerPreviewServer.Install(); Inventory.ContainerPreviewClient.Install(); }
+        try { Inventory.ContainerPreviewServer.Install(); Inventory.ContainerPreviewClient.Install(); Inventory.ContainerReturnClient.Install(); }
         catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Install: {e.Message}"); }
         // Container open gate (ctx.Inventory.OnOpenRequest): the Core-owned 'PrCg' channel. Server: the handlers and the
         // interaction seam (hooked only while a handler is registered); client: the masked prompt and its toasts.
@@ -488,7 +488,7 @@ public sealed class Plugin
         catch (Exception e) { Logger?.LogWarning($"InventorySort.Uninstall: {e.Message}"); }
         try { Inventory.ContainerOpenGateClient.Uninstall(); Inventory.ContainerOpenGateServer.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ContainerOpenGate.Uninstall: {e.Message}"); }
-        try { Inventory.ContainerPreviewClient.Uninstall(); Inventory.ContainerPreviewServer.Uninstall(); }
+        try { Inventory.ContainerReturnClient.Uninstall(); Inventory.ContainerPreviewClient.Uninstall(); Inventory.ContainerPreviewServer.Uninstall(); }
         catch (Exception e) { Logger?.LogWarning($"ContainerPreview.Uninstall: {e.Message}"); }
         // Any shared streaming-origin lease still running (plugins end their own on unload): restore the users' origins.
         try { Cameras.SharedObservation.EndAll(); }

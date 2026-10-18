@@ -42,6 +42,17 @@ test('container preview tool sends open, status, close and bag to the container_
   assert.deepEqual(plain(calls[4]), ['client', 'container_preview', { action: 'bag', mode: 'alpha' }]);
 });
 
+test('container preview tool sends reopen and returnToWindow, and reopen takes the queue slot', async () => {
+  const { tool, calls } = load();
+  await tool.handler(tool.schema.parse({ action: 'reopen' }));
+  assert.deepEqual(plain(calls[0]), ['client', 'container_preview', { action: 'reopen' }]);
+  const id = 'c-' + '0123456789abcdef'.repeat(2);
+  await tool.handler(tool.schema.parse({ action: 'open', id, returnToWindow: false }));
+  assert.deepEqual(plain(calls[1]), ['client', 'container_preview', { action: 'open', id, returnToWindow: false }]);
+  assert.equal(isReadOnlyOp('container_preview', { action: 'reopen' }), false);
+  assert.equal(isReadOnlyOp('container_preview', {}), true);
+});
+
 test('container preview tool schema rejects unknown actions and out-of-range lengths', () => {
   const { tool } = load();
   assert.equal(tool.schema.safeParse({ action: 'move' }).success, false);
