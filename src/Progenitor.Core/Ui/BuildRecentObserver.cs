@@ -18,31 +18,61 @@ namespace Progenitor.Ui;
 
 /// <summary>
 /// Server-authoritative, exact-match Recent ingestion. Observes existing systems only.
-/// Creation writes UserOwner and a BuildingSequence targeting the new structure; the server
-/// sequence consumer runs after spawn playback and before SpawnTag removal. A pre-placement
-/// snapshot excludes existing targets. Unsupported transformations are omitted, never inferred.
-/// No wallpaper coverage. Static/compile verification is not live verification.
+/// Before the server's placement system, each authenticated placement request (or pre-cast completion) of a
+/// connected peer is recorded with its user, blueprint, position and rotation. Placement writes UserOwner on the
+/// new structure, which carries SpawnTag until the spawn group removes it. Before the server's spawn-reaction
+/// sequence consumer (after spawn playback, before SpawnTag removal), every just-spawned structure owned by a
+/// peer is matched exactly against those requests. A pre-placement snapshot of the structures already spawning
+/// excludes them: only a newly created entity carries SpawnTag, so the snapshot is a short-lived handful, never
+/// every structure in the world. A building sequence is not required: a piece whose blueprint has none never
+/// gets a sequence entity. Unsupported transformations are omitted, never inferred. No wallpaper coverage.
+/// Per-stage counters (<see cref="Diagnostics"/>) are read through the Dev bridge's <c>build_search</c> op.
+/// Static/compile verification is not live verification.
 /// </summary>
 internal static unsafe class BuildRecentObserver
 {
     internal const int EventId = 0x50725262; // PrRb, Core-reserved; both directions versioned below.
-    private const int MaxEntities = 16384;
+    /// <summary>Most just-spawned structures (BlueprintData with SpawnTag) one frame examines or snapshots.</summary>
+    private const int MaxSpawning = 512;
+    /// <summary>A peer's hello counts this long from when it arrived (the client sends one every 10 s).</summary>
+    private const long PeerLifetimeMs = 30000;
     private const int SequenceTargetOffset = 4;
     private const int NetworkedEntityWaitingOffset = 8;
     private static readonly BuildRecentCorrelation Correlation = new();
+    private static readonly BuildRecentStats Stats = new();
     private static readonly List<IDisposable> Hooks = new();
     private static readonly object Gate = new();
-    private static readonly Queue<(Wire Packet, Entity User, ulong Platform)> Inbox = new();
+    private static readonly Queue<(Wire Packet, Entity User, ulong Platform, long At)> Inbox = new();
     private static readonly Dictionary<ulong, Peer> Peers = new();
     private static readonly HashSet<(ulong, ulong)> Received = new();
     private static readonly Queue<(ulong, ulong)> ReceivedOrder = new();
     private static World? _server;
     private static ulong _serverEpoch, _clientEpoch, _serverNonce, _clientNonce, _serial;
-    private static long _helloAt;
+    private static long _helloAt, _pruneAt;
     private static bool _installed, _queries;
     private static int _warnings;
-    private static EntityQuery _requests, _abilities, _structures, _sequences;
+    private static EntityQuery _requests, _abilities, _spawning, _sequences;
     private sealed record Peer(ulong Nonce, ulong Platform, long At);
+
+    // Every stage's counter name, so a reader sees each one (0 until it happens).
+    private static readonly string[] ClientCounters =
+        { "hellosSent", "hellosSendRefused", "packetsReceived", "packetsMalformed", "packetsWrongNonce", "packetsDuplicate", "recordsAdded" };
+    private static readonly string[] ServerCounters =
+    {
+        "hellosReceived", "hellosMalformed", "hellosDroppedFull", "peersRegistered", "hellosStale",
+        "requestsSeen", "requestsRelocation", "requestsNullComponent", "requestsNotOwned",
+        "abilityEventsSeen", "abilityEventsNotPlacement", "abilityEventsNotOwned",
+        "correlationAdds", "correlationAddRefused", "requestsTooMany", "spawningTooMany",
+        "sequenceEntities", "sequenceTargetNoSpawnTag", "sequenceTargetWaitingForSync",
+        "candidates", "rejectNullBlueprint", "rejectNullOwner", "rejectNullTranslation", "rejectNullTilePosition",
+        "rejectNullPrefab", "rejectOwnerWaitingForSync", "rejectGuidMismatch", "noBuildingSequence",
+        "rejectNoPeer", "rejectNotConnected",
+        BuildRecentStats.NameOf(BuildRecentConfirm.InvalidTarget), BuildRecentStats.NameOf(BuildRecentConfirm.AlreadyConfirmed),
+        BuildRecentStats.NameOf(BuildRecentConfirm.NoPendingForUser), BuildRecentStats.NameOf(BuildRecentConfirm.GuidMismatch),
+        BuildRecentStats.NameOf(BuildRecentConfirm.RotationMismatch), BuildRecentStats.NameOf(BuildRecentConfirm.PositionMismatch),
+        BuildRecentStats.NameOf(BuildRecentConfirm.ExistedBefore), BuildRecentStats.NameOf(BuildRecentConfirm.Ambiguous),
+        BuildRecentStats.NameOf(BuildRecentConfirm.Confirmed), "packetsSent", "packetsSendFailed",
+    };
 
     // Managed wire struct only: not a game/native ABI. Pack and exact length are checked on receive.
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -60,11 +90,15 @@ internal static unsafe class BuildRecentObserver
         {
             CheckLayouts();
             _installed = true;
+            Stats.Clear();
             if (Plugin.IsServerProcess)
             {
                 CustomEvents.OnReceiveFromClient(EventId, ReceiveHello);
                 Hooks.Add(SystemHooks.Before<PlaceTileModelSystem>(BeforePlacement));
-                Hooks.Add(SystemHooks.Before<SpawnSequenceForEntitySystem_Server>(BeforeSequences));
+                // Every frame, not only when a sequence is consumed: hellos are drained on their own schedule and a
+                // piece whose blueprint has no building sequence spawns no sequence entity.
+                Hooks.Add(SystemHooks.Before<SpawnSequenceForEntitySystem_Server>(BeforeSpawnReaction,
+                    new HookOptions { OnlyWhenSystemRuns = false }));
             }
             else
             {
@@ -89,24 +123,63 @@ internal static unsafe class BuildRecentObserver
         lock (Gate) Inbox.Clear();
     }
 
+    /// <summary>Per-stage counters and state for the side this process is, for the Dev bridge. Main thread.</summary>
+    internal static Dictionary<string, object?> Diagnostics()
+    {
+        bool server = Plugin.IsServerProcess;
+        var r = new Dictionary<string, object?>
+        {
+            ["side"] = server ? "server" : "client",
+            ["installed"] = _installed,
+            ["counters"] = Stats.Snapshot(server ? ServerCounters : ClientCounters),
+        };
+        lock (Gate) r["inbox"] = Inbox.Count;
+        if (server)
+        {
+            r["peers"] = Peers.Count;
+            r["pending"] = Correlation.PendingCount;
+            r["worldReady"] = _queries;
+            var miss = Correlation.LastPositionMiss;
+            r["lastPositionMiss"] = miss == null ? null : new[] { miss.Value.X, miss.Value.Y, miss.Value.Z };
+        }
+        else
+        {
+            lock (Gate) r["clientNonceSet"] = _clientNonce != 0;
+            r["helloInMs"] = Math.Max(0, _helloAt - Environment.TickCount64);
+        }
+        return r;
+    }
+
     private static void Receive(int id, byte* p, int length)
     {
-        if (!_installed || id != EventId || p == null || length != sizeof(Wire)) return;
+        if (!_installed || id != EventId) return;
+        Stats.Add("packetsReceived");
+        if (p == null || length != sizeof(Wire)) { Stats.Add("packetsMalformed"); return; }
         var packet = *(Wire*)p;
         if (packet.Version != 1 || packet.Kind != 2 || packet.ClientNonce == 0
-            || packet.ServerNonce == 0 || packet.Serial == 0 || packet.Blueprint == 0) return;
+            || packet.ServerNonce == 0 || packet.Serial == 0 || packet.Blueprint == 0) { Stats.Add("packetsMalformed"); return; }
         lock (Gate)
-            if (packet.ClientNonce == _clientNonce && Inbox.Count < 256) Inbox.Enqueue((packet, Entity.Null, 0));
+        {
+            if (packet.ClientNonce != _clientNonce) { Stats.Add("packetsWrongNonce"); return; }
+            if (Inbox.Count < 256) Inbox.Enqueue((packet, Entity.Null, 0, 0));
+        }
     }
 
     private static void ReceiveHello(int id, Entity userEntity, User user, byte* p, int length)
     {
-        if (!_installed || id != EventId || p == null || length != sizeof(Wire) || !user.IsConnected) return;
+        if (!_installed || id != EventId) return;
+        Stats.Add("hellosReceived");
+        if (p == null || length != sizeof(Wire) || !user.IsConnected) { Stats.Add("hellosMalformed"); return; }
         var packet = *(Wire*)p;
         if (packet.Version != 1 || packet.Kind != 1 || packet.ClientNonce == 0
-            || packet.ServerNonce != 0 || packet.Serial != 0 || packet.Blueprint != 0) return;
+            || packet.ServerNonce != 0 || packet.Serial != 0 || packet.Blueprint != 0) { Stats.Add("hellosMalformed"); return; }
         lock (Gate)
-            if (Inbox.Count < 256) Inbox.Enqueue((packet, userEntity, user.PlatformId));
+        {
+            // Keep the newest hellos and their arrival time: a backlog never crowds out a fresh hello (a client that
+            // reloaded Core says hello with a new nonce), and a stale one still expires.
+            if (Inbox.Count >= 256) { Inbox.Dequeue(); Stats.Add("hellosDroppedFull"); }
+            Inbox.Enqueue((packet, userEntity, user.PlatformId, Environment.TickCount64));
+        }
     }
 
     private static void ClientTick(SystemHookContext hook)
@@ -125,25 +198,28 @@ internal static unsafe class BuildRecentObserver
             {
                 _helloAt = now + 10000;
                 var hello = new Wire { Version = 1, Kind = 1, ClientNonce = _clientNonce };
-                CustomEvents.SendToServer(EventId, hello);
+                Stats.Add(CustomEvents.SendToServer(EventId, hello) ? "hellosSent" : "hellosSendRefused");
             }
             foreach (var item in Drain(2))
             {
                 var p = item.Packet;
-                if (p.ClientNonce != _clientNonce) continue;
+                if (p.ClientNonce != _clientNonce) { Stats.Add("packetsWrongNonce"); continue; }
                 var key = (p.ServerNonce, p.Serial);
-                if (!Received.Add(key)) continue;
+                if (!Received.Add(key)) { Stats.Add("packetsDuplicate"); continue; }
                 ReceivedOrder.Enqueue(key);
                 while (ReceivedOrder.Count > 512) Received.Remove(ReceivedOrder.Dequeue());
                 BuildMenuSearch.RecordBuilt(p.Blueprint);
+                Stats.Add("recordsAdded");
             }
+            // The history file is written on a debounce, also while the build menu is closed.
+            BuildMenuSearch.FlushRecent();
         }
         catch (Exception e) { Warn(e); }
     }
 
-    private static List<(Wire Packet, Entity User, ulong Platform)> Drain(int kind)
+    private static List<(Wire Packet, Entity User, ulong Platform, long At)> Drain(int kind)
     {
-        var result = new List<(Wire, Entity, ulong)>();
+        var result = new List<(Wire, Entity, ulong, long)>();
         lock (Gate)
         {
             int n = Inbox.Count;
@@ -170,17 +246,30 @@ internal static unsafe class BuildRecentObserver
             _queries = true;
             _requests = Query.Build(em, false, false, C<BuildTileModelEvent>(), C<FromCharacter>());
             _abilities = Query.Build(em, false, false, C<AbilityPreCastFinishedEvent>());
-            _structures = Query.Build(em, true, false, C<BlueprintData>());
+            _spawning = Query.Build(em, true, false, C<BlueprintData>(), C<SpawnTag>());
             _sequences = Query.Build(em, true, false, C<SpawnSequenceForEntity>(), C<SpawnTag>());
         }
         long now = Environment.TickCount64;
-        foreach (var key in new List<ulong>(Peers.Keys)) if (now - Peers[key].At > 30000) Peers.Remove(key);
-        foreach (var item in Drain(1))
+        bool any;
+        lock (Gate) any = Inbox.Count > 0;
+        if (any)
+            foreach (var item in Drain(1))
+            {
+                // A peer lives from its hello's arrival, not from when a hook happened to drain it.
+                ulong key = Key(item.User);
+                if (now - item.At > PeerLifetimeMs || (Peers.TryGetValue(key, out var seen) && seen.At > item.At)) { Stats.Add("hellosStale"); continue; }
+                if (Peers.Count < 256 || Peers.ContainsKey(key))
+                {
+                    if (!Peers.ContainsKey(key)) Stats.Add("peersRegistered");
+                    Peers[key] = new(item.Packet.ClientNonce, item.Platform, item.At);
+                }
+            }
+        if (now >= _pruneAt)
         {
-            if (Peers.Count < 256 || Peers.ContainsKey(Key(item.User)))
-                Peers[Key(item.User)] = new(item.Packet.ClientNonce, item.Platform, now);
+            _pruneAt = now + 1000;
+            foreach (var key in new List<ulong>(Peers.Keys)) if (now - Peers[key].At > PeerLifetimeMs) Peers.Remove(key);
+            Correlation.Prune(now);
         }
-        Correlation.Prune(now);
         return true;
     }
 
@@ -190,32 +279,43 @@ internal static unsafe class BuildRecentObserver
         {
             if (!Server(hook) || Peers.Count == 0) return;
             var em = hook.World.EntityManager;
-            if (_requests.CalculateEntityCount() + _abilities.CalculateEntityCount() == 0) return;
-            if (_structures.CalculateEntityCount() > MaxEntities || _requests.CalculateEntityCount() > 128
-                || _abilities.CalculateEntityCount() > 128) { Correlation.Clear(); return; }
+            int requests = _requests.CalculateEntityCount(), abilities = _abilities.CalculateEntityCount();
+            if (requests + abilities == 0) return;
+            if (requests > 128 || abilities > 128) { Stats.Add("requestsTooMany"); Correlation.Clear(); return; }
+            // Confirmation requires SpawnTag on the structure, and only a newly created entity carries it, so the
+            // structures that could be mistaken for this placement's result are the ones spawning right now. A burst
+            // larger than the bound (a world load) skips these requests only; they are omitted, never guessed.
+            if (_spawning.CalculateEntityCount() > MaxSpawning) { Stats.Add("spawningTooMany"); return; }
             var existing = new HashSet<ulong>();
-            foreach (var entity in Entities(_structures)) existing.Add(Key(entity));
+            foreach (var entity in Entities(_spawning)) existing.Add(Key(entity));
             long now = Environment.TickCount64;
-            foreach (var entity in Entities(_requests))
+            if (requests > 0)
+                foreach (var entity in Entities(_requests))
                 {
+                    Stats.Add("requestsSeen");
                     byte* p = AiRuntime.RO<BuildTileModelEvent>(em, entity, 0x18);
                     byte* f = AiRuntime.RO<FromCharacter>(em, entity, 0x10);
-                    if (p == null || f == null || *(int*)(p + 0x14) != 0) continue; // relocation excluded
+                    if (p == null || f == null) { Stats.Add("requestsNullComponent"); continue; }
+                    if (*(int*)(p + 0x14) != 0) { Stats.Add("requestsRelocation"); continue; } // RebuildUniqueKey.Id
                     Entity user = *(Entity*)f, character = *(Entity*)(f + 8);
-                    if (!Owns(em, user, character)) continue;
-                    Correlation.Add(Key(entity), false, Key(user), *(int*)p, Position(p + 4), p[0x10], now, existing);
+                    if (!Owns(em, user, character)) { Stats.Add("requestsNotOwned"); continue; }
+                    Stats.Add(Correlation.Add(Key(entity), false, Key(user), *(int*)p, Position(p + 4), p[0x10], now, existing)
+                        ? "correlationAdds" : "correlationAddRefused");
                 }
-            foreach (var entity in Entities(_abilities))
+            if (abilities > 0)
+                foreach (var entity in Entities(_abilities))
                 {
+                    Stats.Add("abilityEventsSeen");
                     byte* f = AiRuntime.RO<AbilityPreCastFinishedEvent>(em, entity, 0x18);
                     if (f == null) continue;
                     Entity character = *(Entity*)f, ability = *(Entity*)(f + 8);
                     byte* p = AiRuntime.RO<PlaceTilemodelAbility>(em, ability, 0x12);
                     byte* c = AiRuntime.RO<ControlledBy>(em, character, 8);
-                    if (p == null || c == null) continue;
+                    if (p == null || c == null) { Stats.Add("abilityEventsNotPlacement"); continue; }
                     Entity user = *(Entity*)c;
-                    if (!Owns(em, user, character)) continue;
-                    Correlation.Add(Key(entity), true, Key(user), *(int*)(p + 0xC), Position(p), p[0x10], now, existing);
+                    if (!Owns(em, user, character)) { Stats.Add("abilityEventsNotOwned"); continue; }
+                    Stats.Add(Correlation.Add(Key(entity), true, Key(user), *(int*)(p + 0xC), Position(p), p[0x10], now, existing)
+                        ? "correlationAdds" : "correlationAddRefused");
                 }
         }
         catch (Exception e) { Correlation.Clear(); Warn(e); }
@@ -229,41 +329,66 @@ internal static unsafe class BuildRecentObserver
         return data.IsConnected && data.PlatformId == peer.Platform && player != null && *(Entity*)(player + 0x60) == user;
     }
 
-    private static void BeforeSequences(SystemHookContext hook)
+    private static void BeforeSpawnReaction(SystemHookContext hook)
     {
         try
         {
-            if (!Server(hook) || Peers.Count == 0) return;
+            if (!Server(hook) || Peers.Count == 0 || Correlation.PendingCount == 0) return;
             var em = hook.World.EntityManager;
-            if (_sequences.CalculateEntityCount() > 512) { Correlation.Clear(); return; }
-            foreach (var entity in Entities(_sequences))
+            int spawning = _spawning.CalculateEntityCount();
+            if (spawning == 0) return;
+            if (spawning > MaxSpawning) { Stats.Add("spawningTooMany"); return; }
+            CountSequences(em);
+            long now = Environment.TickCount64;
+            foreach (var target in Entities(_spawning))
             {
-                byte* s = AiRuntime.RO<SpawnSequenceForEntity>(em, entity, 0x10);
-                // Target._WaitingForSync: Target @4 + named nested field @8, not an opaque flags byte.
-                if (s == null || s[SequenceTargetOffset + NetworkedEntityWaitingOffset] != 0) continue;
-                Entity target = *(Entity*)(s + SequenceTargetOffset);
-                if (!target.Has<SpawnTag>(em)) continue;
+                Stats.Add("candidates");
                 byte* b = AiRuntime.RO<BlueprintData>(em, target, 0x24);
                 byte* o = AiRuntime.RO<UserOwner>(em, target, 0xC);
                 byte* t = AiRuntime.RO<Translation>(em, target, 12);
                 byte* r = AiRuntime.RO<TilePosition>(em, target, 12);
                 byte* g = AiRuntime.RO<PrefabGUID>(em, target, 4);
-                if (b == null || o == null || t == null || r == null || g == null || o[8] != 0) continue;
-                int sequence = *(int*)s, guid = *(int*)(b + 8);
-                // Strict identity: generated/transformed pieces are outside this first observer's coverage.
-                if (guid == 0 || *(int*)g != guid || sequence == 0
-                    || (sequence != *(int*)(b + 0x1C) && sequence != *(int*)(b + 0x20))) continue;
+                if (b == null) { Stats.Add("rejectNullBlueprint"); continue; }
+                if (o == null) { Stats.Add("rejectNullOwner"); continue; }
+                if (t == null) { Stats.Add("rejectNullTranslation"); continue; }
+                if (r == null) { Stats.Add("rejectNullTilePosition"); continue; }
+                if (g == null) { Stats.Add("rejectNullPrefab"); continue; }
+                if (o[NetworkedEntityWaitingOffset] != 0) { Stats.Add("rejectOwnerWaitingForSync"); continue; }
+                int guid = *(int*)(b + 8);
+                // Strict identity: generated/transformed pieces (a prefab other than their blueprint) are not covered.
+                if (guid == 0 || *(int*)g != guid) { Stats.Add("rejectGuidMismatch"); continue; }
+                if (*(int*)(b + 0x1C) == 0 && *(int*)(b + 0x20) == 0) Stats.Add("noBuildingSequence"); // diagnostic only
                 Entity user = *(Entity*)o;
-                if (!Peers.TryGetValue(Key(user), out var peer) || !user.Has<User>(em)) continue;
+                if (!Peers.TryGetValue(Key(user), out var peer) || !user.Has<User>(em)) { Stats.Add("rejectNoPeer"); continue; }
+                if (!Correlation.HasPendingFor(Key(user))) { Stats.Add(BuildRecentStats.NameOf(BuildRecentConfirm.NoPendingForUser)); continue; }
                 var data = em.GetComponentData<User>(user);
-                if (!data.IsConnected || data.PlatformId != peer.Platform) continue;
-                if (!Correlation.Confirm(Key(target), Key(user), guid, Position(t), r[8], Environment.TickCount64)) continue;
+                if (!data.IsConnected || data.PlatformId != peer.Platform) { Stats.Add("rejectNotConnected"); continue; }
+                var result = Correlation.Check(Key(target), Key(user), guid, Position(t), r[8], now);
+                Stats.Add(BuildRecentStats.NameOf(result));
+                if (result != BuildRecentConfirm.Confirmed) continue;
                 var packet = new Wire { Version = 1, Kind = 2, ClientNonce = peer.Nonce,
                     ServerNonce = _serverNonce, Serial = ++_serial, Blueprint = guid };
-                CustomEvents.SendToUser(hook.World, user, EventId, packet);
+                Stats.Add(CustomEvents.SendToUser(hook.World, user, EventId, packet) ? "packetsSent" : "packetsSendFailed");
             }
         }
         catch (Exception e) { Correlation.Clear(); Warn(e); }
+    }
+
+    /// <summary>Diagnostics only: how many sequence entities exist and whether their targets still carry SpawnTag.</summary>
+    private static void CountSequences(EntityManager em)
+    {
+        int count = _sequences.CalculateEntityCount();
+        if (count == 0 || count > MaxSpawning) return;
+        foreach (var entity in Entities(_sequences))
+        {
+            Stats.Add("sequenceEntities");
+            byte* s = AiRuntime.RO<SpawnSequenceForEntity>(em, entity, 0x10);
+            if (s == null) continue;
+            // Target._WaitingForSync: Target @4 + named nested field @8, not an opaque flags byte.
+            if (s[SequenceTargetOffset + NetworkedEntityWaitingOffset] != 0) { Stats.Add("sequenceTargetWaitingForSync"); continue; }
+            Entity target = *(Entity*)(s + SequenceTargetOffset);
+            if (!target.Has<SpawnTag>(em)) Stats.Add("sequenceTargetNoSpawnTag");
+        }
     }
 
     private static void ResetClient()
@@ -277,10 +402,10 @@ internal static unsafe class BuildRecentObserver
     private static void ResetServer()
     {
         if (_queries && _server != null && _server.IsCreated)
-            foreach (var q in new[] { _requests, _abilities, _structures, _sequences })
+            foreach (var q in new[] { _requests, _abilities, _spawning, _sequences })
                 try { q.Dispose(); } catch { }
-        _queries = false; _server = null; _serverEpoch = 0; _serial = 0;
-        _requests = _abilities = _structures = _sequences = default;
+        _queries = false; _server = null; _serverEpoch = 0; _serial = 0; _pruneAt = 0;
+        _requests = _abilities = _spawning = _sequences = default;
         Peers.Clear(); Correlation.Clear();
     }
 
@@ -309,6 +434,7 @@ internal static unsafe class BuildRecentObserver
         At<BuildTileModelEvent>(nameof(BuildTileModelEvent.SpawnTranslation), 4);
         At<BuildTileModelEvent>(nameof(BuildTileModelEvent.SpawnTileRotation), 0x10);
         At<BuildTileModelEvent>(nameof(BuildTileModelEvent.RebuildUniqueKey), 0x14);
+        At<ProjectM.CastleBuilding.Rebuilding.CastleRebuildUniqueKey>(nameof(ProjectM.CastleBuilding.Rebuilding.CastleRebuildUniqueKey.Id), 0);
         At<FromCharacter>(nameof(FromCharacter.User), 0); At<FromCharacter>(nameof(FromCharacter.Character), 8);
         At<AbilityPreCastFinishedEvent>(nameof(AbilityPreCastFinishedEvent.Character), 0);
         At<AbilityPreCastFinishedEvent>(nameof(AbilityPreCastFinishedEvent.Ability), 8);

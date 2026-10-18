@@ -18,6 +18,10 @@ internal static partial class BuildMenuSearch
 {
     private static readonly BuildRecentHistory Recent = new();
     private static readonly BuildMenuRecentTab RecentTab = new();
+    private static readonly BuildRecentSaveDebounce RecentSave = new();
+    // Recent reorders native cells by sibling index; every cell's original index is kept to put the row back.
+    private static readonly Dictionary<IntPtr, (Transform Transform, int Index)> RecentSiblings = new();
+    private static string _recentOrderKey = "";
     private static readonly Dictionary<IntPtr, (SimpleStunButton Button, bool Enabled, bool Select, bool Highlight, bool SelectDisabled)> SearchTabs = new();
     private static readonly Dictionary<IntPtr, (CanvasGroup Group, float Alpha, bool Interactable, bool Owned)> SearchTabFades = new();
     private static readonly Dictionary<IntPtr, (UnityEngine.UI.Graphic Graphic, bool Enabled)> SearchHighlights = new();
@@ -30,6 +34,9 @@ internal static partial class BuildMenuSearch
     private static int _recentEmptyUntil;
     private static int _recentCategory = -1, _recentTag = -1;
     private static int _copyGuid, _copyGroup, _copyFrames;
+    // Copy building's item and the name it put in the box: its cell is always in the results while that text stands.
+    private static int _copyPrefer;
+    private static string _copyFill = "";
     private static bool _copyDispatched;
     private static World? _toolsWorld;
     private static TMPro.TextMeshProUGUI? _scopeHint;
@@ -55,7 +62,16 @@ internal static partial class BuildMenuSearch
     internal static void RecordBuilt(int guid)
     {
         if (!Recent.Record(guid, _recentCount?.Value ?? BuildRecentHistory.DefaultCount)) return;
-        SaveRecent();
+        RecentSave.Mark(Environment.TickCount64);
+    }
+
+    /// <summary>Writes the history file once the debounce wait is over (or now, on close); a no-op otherwise.</summary>
+    internal static void FlushRecent(bool force = false)
+    {
+        if (!RecentSave.Pending || (!force && !RecentSave.Due(Environment.TickCount64))) return;
+        RecentSave.Saved();
+        try { SaveRecent(); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Build menu: saving recent buildings failed: " + e.Message); }
     }
 
     private static void SaveRecent()
@@ -103,16 +119,75 @@ internal static partial class BuildMenuSearch
         _jumpCategory = _jumpTag = -1;
         _recentCategory = _recentTag = -1;
         _recentEmptyKey = _recentQueryKey = "";
+        RestoreRecentOrder();
         RestoreResults("leave recent");
         RestoreHidden();
+    }
+
+    /// <summary>
+    /// Recent's row follows recency by sibling order only (native cells keep their data and index). The cells are read
+    /// and moved only when the history, the query or the cell set changed, not every frame.
+    /// </summary>
+    private static void OrderRecentCells(BuildMenu_StructureSelectionGroup group)
+    {
+        var entries = group.Entries;
+        int count = Math.Min(group.DataCount, entries == null ? 0 : entries.Count);
+        string key = Recent.Revision + "|" + count + "|" + group.Pointer + "|" + string.Join(" ", _words);
+        if (key == _recentOrderKey) return;
+        _recentOrderKey = key;
+        var guids = new int[count];
+        var transforms = new Transform?[count];
+        for (int i = 0; i < count; i++)
+        {
+            var entry = entries![i];
+            if (!Alive(entry)) continue;
+            var primary = entry.Primary;
+            guids[i] = Alive(primary) ? primary.PrefabGuid.GuidHash : 0;
+            transforms[i] = entry.transform;
+        }
+        // Record every cell's place before the first move, so leaving Recent puts the whole row back.
+        for (int i = 0; i < entries!.Count; i++)
+        {
+            var entry = entries[i];
+            if (!Alive(entry)) continue;
+            var t = entry.transform;
+            if (!RecentSiblings.ContainsKey(t.Pointer)) RecentSiblings[t.Pointer] = (t, t.GetSiblingIndex());
+        }
+        int sibling = 0;
+        foreach (int i in BuildRecentHistory.SiblingOrder(Recent.Items, guids))
+        {
+            var t = transforms[i];
+            if (t == null) continue;
+            if (t.GetSiblingIndex() != sibling) t.SetSiblingIndex(sibling);
+            sibling++;
+        }
+    }
+
+    private static void RestoreRecentOrder()
+    {
+        _recentOrderKey = "";
+        if (RecentSiblings.Count == 0) return;
+        var saved = new List<(Transform Transform, int Index)>(RecentSiblings.Values);
+        RecentSiblings.Clear();
+        saved.Sort((a, b) => a.Index.CompareTo(b.Index));
+        foreach (var (t, index) in saved)
+            try { if (Alive(t)) t.SetSiblingIndex(index); }
+            catch { /* a destroyed cell has no place to restore */ }
     }
 
     private static void UpdateBuildTools(World world, BuildMenuMapper mapper, BuildMenu menu)
     {
         if (!ReferenceEquals(world, _toolsWorld)) { _copyGuid = 0; _toolsWorld = world; }
-        if (Recent.Trim(_recentCount?.Value ?? BuildRecentHistory.DefaultCount)) SaveRecent();
+        if (Recent.Trim(_recentCount?.Value ?? BuildRecentHistory.DefaultCount)) RecentSave.Mark(Environment.TickCount64);
+        FlushRecent();
         if (!mapper._IsInRelocationBuildMenu)
             RecentTab.Update(menu, _recentSelected, ChooseRecent, LeaveRecent);
+        else
+        {
+            // Relocation has no Recent: the tab would be visible but dead there.
+            LeaveRecent();
+            RecentTab.Hide();
+        }
         if (_copyBind != null && _copyBind.Chord.Key != UiKey.None && !mapper._IsInRelocationBuildMenu)
             BuildMenuCopyHint.Show(menu, _copyBind.Chord, world);
         else BuildMenuCopyHint.Hide();
@@ -133,15 +208,7 @@ internal static partial class BuildMenuSearch
             }
         }
         if (_scopeHint != null) _scopeHint.text = allSearch ? "Clear search to browse categories" : "";
-        if (_recentSelected && _group != null)
-        {
-            // Native cells retain their data/index; only their visual sibling order follows recency.
-            int sibling = 0;
-            foreach (int guid in Recent.Items)
-                for (int i = 0; i < Math.Min(_group.DataCount, _group.Entries.Count); i++)
-                    if (_group.Entries[i].Primary.PrefabGuid.GuidHash == guid)
-                        _group.Entries[i].transform.SetSiblingIndex(sibling++);
-        }
+        if (_recentSelected && _group != null) OrderRecentCells(_group);
         FinishCopySelection();
     }
 
@@ -264,14 +331,30 @@ internal static partial class BuildMenuSearch
         // Use the ordinary menu entry: unavailable blueprints stay unavailable and payment remains vanilla.
         LeaveRecent();
         RestoreResults("copy building");
-        if (_field != null) { UnityUiRuntime.SetExternalFieldText(_field, ""); UnityUiRuntime.BlurExternalField(_field); }
-        _words = Array.Empty<string>();
-        RestoreSearchTabs();
+        // The box shows the copied item's name, so the player sees what was picked (a floor instead of the object on
+        // it, say). Without a box (gamepad layout) or a name, the box is cleared as before.
+        string fill = "";
+        if (_field != null)
+        {
+            NameFor(world, prefab, out string localized);
+            fill = BuildSearchMatch.CopyQuery(localized);
+            UnityUiRuntime.SetExternalFieldText(_field, fill);
+            UnityUiRuntime.BlurExternalField(_field);
+        }
+        // Applied now, not at the next filter pass, so the next mapper update already shows the results and the
+        // selection below is not reset by their arrival.
+        _appliedQuery = fill;
+        _liveQuery = fill;
+        _words = BuildSearchMatch.Words(fill);
+        _copyFill = fill;
+        _copyPrefer = fill.Length > 0 ? prefab.GuidHash : 0;
+        _emptyResultsKey = "";
+        if (_words.Length == 0) RestoreSearchTabs();
         mapper.SetSelectedCategory(place.Category);
         mapper.SetSelectedTag(place.Tag, 0);
         _copyGuid = prefab.GuidHash;
         _copyGroup = place.InGroup ? place.GroupGuid : 0;
-        _copyFrames = 8;
+        _copyFrames = 12;
         _copyDispatched = false;
     }
 
@@ -324,6 +407,8 @@ internal static partial class BuildMenuSearch
 
     private static void CloseBuildTools()
     {
+        RestoreRecentOrder();
+        FlushRecent(force: true);
         RestoreSearchTabs();
         RecentTab.Dispose();
         BuildMenuCopyHint.Release();
@@ -332,6 +417,8 @@ internal static partial class BuildMenuSearch
         _recentEmptyKey = _recentQueryKey = "";
         _copyGuid = 0;
         _copyDispatched = false;
+        _copyPrefer = 0;
+        _copyFill = "";
         _toolsWorld = null;
         _scopeHint = null;
     }

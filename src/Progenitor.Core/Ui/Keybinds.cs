@@ -1512,7 +1512,7 @@ public static class Keybinds
             return Not(FieldTakesKeyReason);
         if (focus == ChatFocus.Unknown && !reg.AllowWhenChatUnknown && source.IsAvailable)
             return Not("suppressed: no chat window can be read");
-        string? blocked = gamepad ? SafeGamepadWinnerGate(reg) : GateNow(reg);
+        string? blocked = gamepad ? GamepadGateNow(reg) : GateNow(reg);
         if (blocked != null) return Not("not-active: " + blocked);
         if (holdFrames < 0)
         {
@@ -1842,7 +1842,9 @@ public static class Keybinds
     private static string? GateNow(Registration reg)
     {
         string? blocked = SafeWinnerGate(reg);
-        if (blocked != null || reg.Scope != KeybindScope.Window) return blocked;
+        if (blocked != null) return blocked;
+        if (reg.Scope == KeybindScope.Gameplay) return BuildYieldNow(reg, gamepad: false);
+        if (reg.Scope != KeybindScope.Window) return null;
         try
         {
             if (SharerActingNow(reg) is { } holder) return WindowYieldReason(holder);
@@ -1888,6 +1890,42 @@ public static class Keybinds
     {
         if (UiTabHistoryRoute.Target() == null) return false;
         return UiInputCapture.IsBlocking && UiInputCapture.TryGetAppliedScope(out var scope) && scope != UiMaskScope.CloseKeyOnly;
+    }
+
+    /// <summary><see cref="GateNow"/> for the controller chord: the gamepad picture's verdict, then the build-menu share.</summary>
+    private static string? GamepadGateNow(Registration reg) =>
+        SafeGamepadWinnerGate(reg) ?? (reg.Scope == KeybindScope.Gameplay ? BuildYieldNow(reg, gamepad: true) : null);
+
+    /// <summary>Why a gameplay key did not fire: a build key on its chord acts while the build menu is open.</summary>
+    internal static string BuildYieldReason(KeybindClaim holder) =>
+        "suppressed: " + KeybindArbiter.DisplayNameOf(holder.OwnerId) + "'s " + holder.DisplayName
+        + " has this key while the build menu is open";
+
+    /// <summary>
+    /// The build-menu share (<see cref="KeybindArbiter.BuildShare"/>): a Progenitor gameplay bind gives way to a build key
+    /// on its chord only while the build menu is open (<see cref="BuildScopeOpen"/>) and that build key can act now (live,
+    /// still winning its chord, allowed while a panel holds the input when one does). With the menu closed it acts as usual.
+    /// </summary>
+    private static string? BuildYieldNow(Registration reg, bool gamepad)
+    {
+        try
+        {
+            var sharers = KeybindArbiter.BuildSharersOf(reg.PluginId, reg.Id, gamepad);
+            if (sharers.Count == 0 || !ScopeOpen(KeybindScope.Build)) return null;
+            bool captured = UiInputCapture.IsFullyBlocking;
+            var chord = gamepad ? reg.GamepadChord : reg.Chord;
+            foreach (var s in sharers)
+            {
+                var other = FindLive(s.OwnerId, s.ActionId);
+                if (other == null || other.Disposed || other.Scope != KeybindScope.Build) continue;
+                if ((gamepad ? other.GamepadChord : other.Chord) != chord) continue;
+                if (captured && !other.AllowWhileCaptured) continue;
+                if ((gamepad ? SafeGamepadWinnerGate(other) : SafeWinnerGate(other)) != null) continue;
+                return BuildYieldReason(s);
+            }
+        }
+        catch (Exception e) { Plugin.Logger?.LogWarning("Ui: build key share check threw: " + e.Message); }
+        return null;
     }
 
     /// <summary>PAD1: <see cref="SafeWinnerGate"/> for the controller chord (the gamepad picture's verdict).</summary>
@@ -2233,7 +2271,7 @@ public static class Keybinds
 
         // KEYS1: the winner rule. A bind that lost its chord to the game or to a mod installed
         // first does not run — asked on the press edge only, so a quiet frame costs nothing.
-        string? blocked = gamepad ? SafeGamepadWinnerGate(reg) : GateNow(reg);
+        string? blocked = gamepad ? GamepadGateNow(reg) : GateNow(reg);
         if (blocked != null)
         {
             Plugin.Logger?.LogInfo(NotFiredLog(reg.Label + (gamepad ? " (controller)" : ""), blocked));

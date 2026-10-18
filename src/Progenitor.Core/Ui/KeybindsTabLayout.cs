@@ -1245,6 +1245,12 @@ internal static class KeybindsTabLayout
             if (yields.Length > 0) info.Add(yields);
         }
         else if (row.Claim.Scope == KeybindScope.Build) info.Add(BuildScopeNote);
+        else if (row.Claim.Source == KeybindSource.Progenitor && row.Claim.Scope == KeybindScope.Gameplay)
+        {
+            // A build key on the same key is not a clash: it acts only while the build menu is open, this key elsewhere.
+            string shares = KeybindArbiter.BuildShareNote(KeybindArbiter.BuildSharersOf(row.Claim.OwnerId, row.Claim.ActionId));
+            if (shares.Length > 0) info.Add(shares);
+        }
         if (row.Claim.Source == KeybindSource.Cfg)
         {
             info.Add(FromConfigFile);
@@ -1277,7 +1283,7 @@ internal static class KeybindsTabLayout
     /// <summary>CHAT2: a chat bind's note in the Keybinds tab.</summary>
     internal const string ChatScopeNote = "Works only while typing in chat, so it never clashes with a gameplay key.";
 
-    internal const string BuildScopeNote = "Build mode: works only while the build menu is open. Building and gameplay keys still take part in conflicts; Push To Talk can share this key.";
+    internal const string BuildScopeNote = "Build mode: works only while the build menu is open. The game's building and gameplay keys and other mods' key settings still take part in conflicts; Push To Talk can share this key, and a Progenitor gameplay key on it acts everywhere else.";
 
     /// <summary>KEYS4: the description column's note on a game debug key.</summary>
     internal const string DebugKeyNote = "A debug key. The game's debug menu is off for players, so it never conflicts with a mod key.";

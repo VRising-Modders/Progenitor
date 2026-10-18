@@ -233,7 +233,7 @@ internal static class KeybindRemapGuard
             var c = v.Claim;
             if (!c.Comparable || c.Chord != chord) continue;
             // KEYS4: a menu key and a gameplay key never meet (the game's menu keys meet both).
-            if (!KeybindArbiter.ScopesMeet(c, scope)) continue;
+            if (!KeybindArbiter.ScopesMeet(c, scope, source)) continue;
             if (c.Source != KeybindSource.Game && Skip(c)) continue;
             // HOLDMOD1: a lone modifier the game or an ordinary mod also reads is shared, not taken.
             if (SharedLoneModifier(source, c)) continue;

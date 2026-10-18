@@ -472,8 +472,19 @@ internal static class KeybindArbiter
         if (a.Source == KeybindSource.Game && b.Source == KeybindSource.Game) return true;
         if (a.Source == KeybindSource.Game) return ScopesMeet(a, b.Scope);
         if (b.Source == KeybindSource.Game) return ScopesMeet(b, a.Scope);
+        if (BuildShare(a.Source, a.Scope, b.Source, b.Scope)) return false;
         return ModScopesMeet(a.Scope, b.Scope);
     }
+
+    /// <summary>
+    /// A Progenitor build key (<see cref="KeybindScope.Build"/>) and a Progenitor gameplay key on one chord share it at
+    /// press time instead of clashing: the build key acts while the build menu is open and the gameplay key gives way
+    /// then (<see cref="Keybinds"/>' build gate); with the build menu closed the gameplay key acts as usual. An ordinary
+    /// mod's key setting is not shared (Progenitor cannot stop that mod), so it still meets a build key.
+    /// </summary>
+    internal static bool BuildShare(KeybindSource aSource, KeybindScope a, KeybindSource bSource, KeybindScope b) =>
+        aSource == KeybindSource.Progenitor && bSource == KeybindSource.Progenitor
+        && ((a == KeybindScope.Build && b == KeybindScope.Gameplay) || (a == KeybindScope.Gameplay && b == KeybindScope.Build));
 
     /// <summary>
     /// Two mod keys meet in the same scope; a map key also meets a menu key, because the map is a tab of the
@@ -488,15 +499,20 @@ internal static class KeybindArbiter
         return a == b
             || (a == KeybindScope.Map && b == KeybindScope.Menu)
             || (a == KeybindScope.Menu && b == KeybindScope.Map)
-            // Build keys act in the build menu, where gameplay keys and the menu's own keys stay live.
+            // Build keys act in the build menu, where gameplay keys and the menu's own keys stay live. Two Progenitor
+            // binds share Build and Gameplay at press time instead (BuildShare, checked by the callers first).
             || (a == KeybindScope.Build && (b == KeybindScope.Gameplay || b == KeybindScope.Menu))
             || (b == KeybindScope.Build && (a == KeybindScope.Gameplay || a == KeybindScope.Menu));
     }
 
-    /// <summary>KEYS4: whether <paramref name="c"/> can clash with a mod key of <paramref name="scope"/>.</summary>
-    internal static bool ScopesMeet(KeybindClaim c, KeybindScope scope)
+    /// <summary>
+    /// KEYS4: whether <paramref name="c"/> can clash with a mod key of <paramref name="scope"/> from
+    /// <paramref name="source"/> (a Progenitor bind unless the caller says otherwise).
+    /// </summary>
+    internal static bool ScopesMeet(KeybindClaim c, KeybindScope scope, KeybindSource source = KeybindSource.Progenitor)
     {
-        if (c.Source != KeybindSource.Game) return ModScopesMeet(c.Scope, scope);
+        if (c.Source != KeybindSource.Game)
+            return !BuildShare(c.Source, c.Scope, source, scope) && ModScopesMeet(c.Scope, scope);
         return scope switch
         {
             KeybindScope.Gameplay => true,
@@ -566,6 +582,12 @@ internal static class KeybindArbiter
 
     /// <summary>HUB2: window keys (<see cref="KeybindScope.Window"/>) and the other mods' keys on their chord.</summary>
     private static Dictionary<string, List<KeybindClaim>> _windowSharers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Gameplay binds and the build keys on their chord they give way to while the build menu is open.</summary>
+    private static Dictionary<string, List<KeybindClaim>> _buildSharers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>As <see cref="_buildSharers"/>, for the controller chords.</summary>
+    private static Dictionary<string, List<KeybindClaim>> _gamepadBuildSharers = new(StringComparer.OrdinalIgnoreCase);
 
     // PAD1 review: Pad is whether a gamepad is connected; a change re-reads the game's bindings (a connected pad's
     // live controller bindings replace the shipped ones, and the other way round).
@@ -646,6 +668,8 @@ internal static class KeybindArbiter
             _game = null;
             _blocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _windowSharers = new Dictionary<string, List<KeybindClaim>>(StringComparer.OrdinalIgnoreCase);
+            _buildSharers = new Dictionary<string, List<KeybindClaim>>(StringComparer.OrdinalIgnoreCase);
+            _gamepadBuildSharers = new Dictionary<string, List<KeybindClaim>>(StringComparer.OrdinalIgnoreCase);
             _cachedGamepad = null;
             _gameGamepad = null;
             _gamepadBlocked = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -845,6 +869,7 @@ internal static class KeybindArbiter
             if (v.Claim.Source == KeybindSource.Progenitor && !v.Active)
                 blocked[v.Claim.OwnerId + "/" + v.Claim.ActionId] = v.Reason;
         var windowSharers = WindowSharers(picture);
+        var buildSharers = BuildSharers(picture);
 
         // PAD1: the gamepad picture from the same stamp (the game's gamepad bindings are re-read with the keyboard ones).
         GameKeybindSnapshot? padGame;
@@ -856,9 +881,12 @@ internal static class KeybindArbiter
         foreach (var v in padPicture.Verdicts)
             if (v.Claim.Source == KeybindSource.Progenitor && !v.Active)
                 padBlocked[v.Claim.OwnerId + "/" + v.Claim.ActionId] = v.Reason;
+        var padBuildSharers = BuildSharers(padPicture);
 
         lock (CacheGate)
         {
+            _buildSharers = buildSharers;
+            _gamepadBuildSharers = padBuildSharers;
             _cachedGamepad = padPicture;
             _gameGamepad = padGame;
             _gamepadBlocked = padBlocked;
@@ -937,6 +965,51 @@ internal static class KeybindArbiter
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// For each active Progenitor gameplay bind, the active Progenitor build keys (<see cref="KeybindScope.Build"/>) on its
+    /// chord (<see cref="BuildShare"/>). Not a clash: at press time the gameplay bind gives way to one of them only while
+    /// the build menu is open and that build key can act, so one press never fires both. Pure.
+    /// </summary>
+    internal static Dictionary<string, List<KeybindClaim>> BuildSharers(KeybindPicture picture)
+    {
+        var result = new Dictionary<string, List<KeybindClaim>>(StringComparer.OrdinalIgnoreCase);
+        var builds = new Dictionary<KeyChord, List<KeybindClaim>>();
+        foreach (var v in picture.Verdicts)
+        {
+            var c = v.Claim;
+            if (c.Source != KeybindSource.Progenitor || c.Scope != KeybindScope.Build || !c.Comparable || !v.Active) continue;
+            if (!builds.TryGetValue(c.Chord, out var list)) builds[c.Chord] = list = new List<KeybindClaim>();
+            list.Add(c);
+        }
+
+        if (builds.Count == 0) return result;
+        foreach (var v in picture.Verdicts)
+        {
+            var c = v.Claim;
+            if (c.Source != KeybindSource.Progenitor || c.Scope != KeybindScope.Gameplay || !c.Comparable || !v.Active) continue;
+            if (builds.TryGetValue(c.Chord, out var list)) result[c.OwnerId + "/" + c.ActionId] = list;
+        }
+
+        return result;
+    }
+
+    /// <summary>The build keys gameplay bind <paramref name="bindId"/> gives way to while the build menu is open; empty when none.</summary>
+    internal static IReadOnlyList<KeybindClaim> BuildSharersOf(string pluginId, string bindId, bool gamepad = false)
+    {
+        Dictionary<string, List<KeybindClaim>> sharers;
+        lock (CacheGate) sharers = gamepad ? _gamepadBuildSharers : _buildSharers;
+        return sharers.TryGetValue((pluginId ?? "") + "/" + (bindId ?? ""), out var list) ? list : Array.Empty<KeybindClaim>();
+    }
+
+    /// <summary>The Keybinds tab's quiet note on a gameplay key that gives way to a build key in the build menu, or empty.</summary>
+    internal static string BuildShareNote(IReadOnlyList<KeybindClaim> builds)
+    {
+        if (builds == null || builds.Count == 0) return "";
+        var s = builds[0];
+        return DisplayNameOf(s.OwnerId) + "'s " + s.DisplayName + " also uses " + s.ChordText
+            + "; while the build menu is open that key acts and this one doesn't.";
     }
 
     /// <summary>HUB2: the other mods' keys window key <paramref name="bindId"/> gives way to; empty when none.</summary>

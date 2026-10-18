@@ -6753,31 +6753,51 @@ closed did nothing, and the hint showed the game's middle-mouse graphic at 1920x
 
 ### Recent, Copy building and the box position
 
-**Recent.** A **Recent** category sits below the game's categories. It lists the last distinct items the player
+**Recent.** A **Recent** category sits below the game's categories (not in the castle relocation menu, which has
+no Recent). It lists the last distinct items the player
 built, newest first; building an item again moves it to the front. Only a finished placement counts: hovering,
 selecting, or a placement the game refuses adds nothing, and relocating a building is not a build. The list is
 kept on the client in `BepInEx/config/progenitor.build-history.cfg` (`[History] Blueprints`, blueprint
 identities only, never a world entity id), so it survives closing the menu, a Core reload and a restart, and is
 shared by every world. Typing in the box while Recent is selected filters the list; the count reads "3 recent" or
-"No recent matches". Items not yet unlocked are left out, as in any tab.
+"No recent matches". Items not yet unlocked are left out, as in any tab. The row is put in recency order by moving
+the game's cells, only when the history, the search or the cells change; leaving Recent or closing the menu puts
+every cell back in its original place. The history file is written at most once every 3 seconds after a change, and
+at once when the menu closes.
 
 The server says which placements finished: a server running this Core sends each confirmed build back to its
 builder on the Core-reserved event `'PrRb'` (versioned; both sides drop a malformed packet). On a server without it,
 Recent stays empty and the rest of the menu is unchanged. A building the game turns into another piece when placed,
-and wallpapers, are not recorded. Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
+and wallpapers, are not recorded. The server records each placement request of a player
+whose client said hello, then, every frame while one is pending, checks the structures being spawned that frame:
+the piece must belong to that player and match the request's blueprint, position (within 0.001 units) and rotation
+exactly, and must not have been spawning already when the request arrived. Only structures still being spawned are
+compared (at most 512 in a frame; a larger burst is skipped), never every structure in the world, so populated
+servers are covered. A building sequence is not required: a piece whose blueprint has none spawns no sequence.
+Hellos are taken in every frame and count for 30 seconds from when they arrived, so a client that reloaded Core is
+recognized by its new hello within 10 seconds. The Dev bridge's [`build_search` diagnostics](bridge-ops-client.md#build_search)
+shows each stage's counters on both sides (built and unit-tested; not live-verified; a live placement on
+2026-10-18 recorded nothing before this change). Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
 `ReceiveSlotPolicy.CoreProtocolIds`; adding it is a Bootstrap change.
 
 **Copy building.** With the build menu open, point at a building and press **Copy building** (default Middle
-Mouse; Keybinds tab > Progenitor > **Build mode**). The search clears, the menu switches to the item's tab and
-the item is picked for placement exactly as a click on it would be, so an item that is not unlocked stays
-unavailable and costs are the game's own. Nothing happens while the box has the keyboard, in the castle relocation
+Mouse; Keybinds tab > Progenitor > **Build mode**). Copy building puts the item's name in the search box so you
+can see what you picked (easy to miss: pointing at an object can copy the floor or wall under it). The results show
+that item, picked for placement exactly as a click on it would be, even when the name matches several items, so an
+item that is not unlocked stays unavailable and costs are the game's own. Typing or the x button changes or clears
+the search as usual. Without the box (the gamepad layout) or an item name, the search is cleared instead and the menu
+switches to the item's tab. The name fill and its selection are unit-tested in their decisions (the filled name, the
+copied item kept in capped results); not live-verified. Nothing happens while the box has the keyboard, in the castle relocation
 menu, or with the menu closed. The key's current binding is shown in the game's key-hint row of the build screen,
 with the game's mouse-button graphic for a mouse button and the key name otherwise; it follows a remap and goes
 when the key is unbound.
 
 The key is in the *build* keybind scope (`KeybindScope.Build`, Core only): it works only while the build menu is
-shown. It still conflicts with the game's gameplay actions, building keys and menu keys, and with mod gameplay,
-menu and build keys; Push To Talk (also Middle Mouse by default) is read on every screen, so that pair is a
+shown. It still conflicts with the game's gameplay actions, building keys and menu keys, with ordinary mods' key
+settings, and with mod menu and build keys. A Progenitor gameplay key on the same chord shares it by press instead:
+the build key acts while the build menu is open and the gameplay key gives way on that press; with the menu closed
+the gameplay key acts, so moving Copy building onto another mod's key never turns that key off in play (unit-tested;
+not live-verified). Push To Talk (also Middle Mouse by default) is read on every screen, so that pair is a
 warning and both act. The game's seven inventory actions in its General group (Drop Item, Split Item, Custom
 Split Item, Repair Item, Smart Take Items, Auto Transfer Items, Sort Items) now count as inventory keys for every
 mod key, so they are a warning rather than a conflict. See [Who gets a key](mods-menu.md#who-gets-a-key-first-installed).
@@ -6812,11 +6832,11 @@ The **Copy building** key is stored as `CopyBuilding` in the same file and is re
 | Type | From two letters on, the item row shows the matches from every tab, at most 48 cells. The count beside the box reads "12 found", or "48 of 212 found" when there are more. One letter filters the selected tab. |
 | Hover a result | The tooltip is the game's own, with the breadcrumb saying where the item normally lives. |
 | x button (shown while the box has text) | Clears the search and keeps the keyboard in the box. The row is the selected tab again, with nothing selected for placement. |
-| Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. |
+| Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. With text in the box and the box not focused (after Copy building, say), one Escape also clears the search and the build menu stays open; the next Escape, with the search empty, is the game's own. A dialog, a key capture, the chat box or the Mods menu takes Escape first. The unfocused clear is unit-tested in its decisions; not live-verified. |
 | Enter, or a click elsewhere | Gives the keyboard back and keeps the search. |
 | Switch tab | Not while the box has text: the category and tag buttons are disabled. Clear the search to browse. |
 | Recent | Click it with the box empty: the row lists recent builds. Type to filter them. Another category leaves Recent. |
-| Copy building (Middle Mouse) | Picks the building under the cursor: clears the search, opens its tab and selects it. |
+| Copy building (Middle Mouse) | Picks the building under the cursor: puts its name in the search box and selects it in the results. |
 | Close the build menu | Clears the search (`ClearOnClose`). |
 
 **Matching.** The query is split into words. An item matches when every word appears in its names, in any order

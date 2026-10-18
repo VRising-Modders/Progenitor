@@ -130,7 +130,45 @@ internal static class BuildSearchMatch
         return n;
     }
 
+    /// <summary>
+    /// Copy building: the text put in the search box for a copied item, its display name (spaces collapsed, at most
+    /// <see cref="MaxQueryLength"/> characters, cut at a word). Empty when the item has no name to show; the box is
+    /// then cleared as before. The search matches an item's own display name, so the copied item is among the results.
+    /// </summary>
+    internal static string CopyQuery(string? displayName)
+    {
+        if (string.IsNullOrWhiteSpace(displayName)) return "";
+        var sb = new StringBuilder(displayName!.Length);
+        bool space = false;
+        foreach (char c in displayName.Trim())
+        {
+            if (char.IsWhiteSpace(c) || char.IsControl(c)) { space = sb.Length > 0; continue; }
+            if (space) { sb.Append(' '); space = false; }
+            sb.Append(c);
+        }
+        string text = sb.ToString();
+        if (text.Length > MaxQueryLength)
+        {
+            int cut = text.LastIndexOf(' ', MaxQueryLength);
+            text = cut > 0 ? text.Substring(0, cut) : text.Substring(0, MaxQueryLength);
+        }
+        return Words(text).Length == 0 ? "" : text;
+    }
+
     /// <summary>The count shown beside the field while a query is active: "3 of 17".</summary>
     internal static string CountText(int visible, int total) =>
         visible.ToString(CultureInfo.InvariantCulture) + " of " + total.ToString(CultureInfo.InvariantCulture);
+}
+
+/// <summary>
+/// Whether an Escape press belongs to the build search while the box does not have the keyboard: the build menu is
+/// open, the search has text, and nothing above it takes Escape (a key capture, a framework dialog, the chat box, the
+/// Mods workspace). Then the press clears the search and is kept from the game, so the build menu stays open; the next
+/// Escape, with the search empty, is the game's. With the box focused its own Escape handling applies instead.
+/// </summary>
+internal static class BuildSearchEscape
+{
+    internal static bool Takes(bool menuOpen, bool hasQuery, bool fieldFocused, bool captureOwnsEscape, bool dialogOpen,
+        bool chatFocused, bool workspaceOpen) =>
+        menuOpen && hasQuery && !fieldFocused && !captureOwnsEscape && !dialogOpen && !chatFocused && !workspaceOpen;
 }

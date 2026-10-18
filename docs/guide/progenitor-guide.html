@@ -643,11 +643,11 @@ window.HELP = {
       id: "game", role: "players", title: "In the Game", pages: [
         { id: "build-search", title: "Build menu search", shot: { src: "img/game-build-search.webp", alt: "The build menu filtered to candles by Search buildings", caption: "Typing <em>candle</em> finds 16 buildings." },
           html: `<ul><li>The build menu gets a <strong>Search buildings</strong> box. Type to filter the current tab by name.</li>
-<li><span class="kbd">Enter</span> keeps the filter and returns to the game; <span class="kbd">Escape</span> or <strong>&times;</strong> clears it.</li>
+<li><span class="kbd">Enter</span> keeps the filter and returns to the game; <span class="kbd">Escape</span> or <strong>&times;</strong> clears it. With text in the box, one <span class="kbd">Escape</span> clears the search and keeps the build menu open; the next one closes it as usual.</li>
 <li>Item tooltips show where to find the item in the menu.</li>
 <li>While the box has text, the category buttons are grayed out. Clear the search to browse them again.</li></ul>
 <p><strong>Recent.</strong> The <strong>Recent</strong> category, below the others, lists the buildings you placed most recently, newest first. Placing one again moves it back to the top. Type in the search box while Recent is open to search only your recent buildings. Recent fills in only on a server that runs Progenitor too.</p>
-<p><strong>Copy building.</strong> With the build menu open, point at a building and press <span class="kbd">Middle Mouse</span>. The menu jumps to that building, ready to place another one. The key is shown with the game's own hints at the bottom of the screen. Change it in the <strong>Keybinds</strong> tab, under <strong>Progenitor &rsaquo; Build mode</strong>.</p>
+<p><strong>Copy building.</strong> With the build menu open, point at a building and press <span class="kbd">Middle Mouse</span>. The menu jumps to that building, ready to place another one. Copy building puts the item's name in the search box so you can see what you picked: if it shows the floor or a wall, point at the object again. The key is shown with the game's own hints at the bottom of the screen. Change it in the <strong>Keybinds</strong> tab, under <strong>Progenitor &rsaquo; Build mode</strong>. You can put it on a key another mod already uses: it works in the build menu, and the other mod's key keeps working everywhere else.</p>
 <table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
 <tr><td>Build menu search</td><td>On</td><td>The search box.</td></tr>
 <tr><td>Clear the search on close</td><td>On</td><td>Empties the box when the build menu closes.</td></tr>

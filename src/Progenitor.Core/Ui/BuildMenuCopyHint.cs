@@ -24,6 +24,12 @@ internal static class BuildMenuCopyHint
     private static string? _chord;
     private static bool _warned;
     private static ControlsVisualMapping? _mapping;
+    // The found key-hint row, kept while it is alive and shown; searched again only when it is not.
+    private static InputContextsCollection? _row;
+    private static IntPtr _rowMenu;
+    // A chord whose mouse icon was not found in this world: not looked up again until the binding or world changes.
+    private static string? _iconMiss;
+    private static ulong _iconMissWorld;
 
     internal static string KeyIconName => Alive(_icon) && _icon!.gameObject.activeSelf && Alive(_icon.sprite) ? _icon.sprite.name : "";
 
@@ -51,7 +57,7 @@ internal static class BuildMenuCopyHint
                 return;
             }
 
-            var row = FindRow(menu);
+            var row = CachedRow(menu);
             var parent = row?.ContextsParent;
             var donor = Alive(parent) ? FindDonor(parent!) : null;
             if (!Alive(parent) || !Alive(donor))
@@ -64,14 +70,20 @@ internal static class BuildMenuCopyHint
                 || _parent!.Pointer != parent!.Pointer || _menu != menu.Pointer)
             {
                 Release();
+                _row = row;
+                _rowMenu = menu.Pointer;
                 if (!Build(parent!, donor!)) return;
                 _menu = menu.Pointer;
             }
 
             string label = chord.DisplayText;
-            if (_chord != label || (KeyChord.IsMouseKey(chord.Key) && KeyIconName.Length == 0 && Time.frameCount % 60 == 0))
+            if (_chord != label)
             {
-                var sprite = MouseIcon(world, chord.Key);
+                // Looking the icon up can scan every loaded asset; a miss is remembered for this chord and world.
+                bool mouse = KeyChord.IsMouseKey(chord.Key);
+                bool knownMiss = mouse && _iconMiss == label && _iconMissWorld == world.SequenceNumber;
+                var sprite = knownMiss ? null : MouseIcon(world, chord.Key);
+                if (mouse && !knownMiss && !Alive(sprite)) { _iconMiss = label; _iconMissWorld = world.SequenceNumber; }
                 bool useIcon = Alive(_icon) && Alive(sprite);
                 if (useIcon)
                 {
@@ -123,7 +135,18 @@ internal static class BuildMenuCopyHint
         _parent = null;
         _menu = IntPtr.Zero;
         _chord = null;
+        _row = null;
+        _rowMenu = IntPtr.Zero;
         _warned = false;
+    }
+
+    /// <summary>The key-hint row found last for this menu while it is still alive and shown; otherwise a new search.</summary>
+    private static InputContextsCollection? CachedRow(BuildMenu menu)
+    {
+        if (_rowMenu == menu.Pointer && Usable(_row)) return _row;
+        _row = FindRow(menu);
+        _rowMenu = _row != null ? menu.Pointer : IntPtr.Zero;
+        return _row;
     }
 
     private static InputContextsCollection? FindRow(BuildMenu menu)

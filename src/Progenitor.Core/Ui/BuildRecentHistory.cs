@@ -49,6 +49,19 @@ internal sealed class BuildRecentHistory
 
     internal string Save() => string.Join(",", _items.Select(g => g.ToString(CultureInfo.InvariantCulture)));
 
+    /// <summary>
+    /// The Recent row's visual order: the indexes of <paramref name="cellGuids"/> (the native cells' prefabs, in cell
+    /// order) newest first, as <paramref name="recent"/> lists them. Cells with no recent prefab are left out.
+    /// </summary>
+    internal static List<int> SiblingOrder(IReadOnlyList<int> recent, IReadOnlyList<int> cellGuids)
+    {
+        var order = new List<int>();
+        foreach (int guid in recent)
+            for (int i = 0; i < cellGuids.Count; i++)
+                if (guid != 0 && cellGuids[i] == guid) order.Add(i);
+        return order;
+    }
+
     internal List<BuildMenuBlob.ResultCell> Cells(BuildMenuBlob blob, Func<int, bool> matches)
     {
         var cells = new List<BuildMenuBlob.ResultCell>();
@@ -65,6 +78,18 @@ internal sealed class BuildRecentHistory
         }
         return cells;
     }
+}
+
+/// <summary>Writes the history file at most once per <see cref="DelayMs"/>: the first change starts the wait.</summary>
+internal sealed class BuildRecentSaveDebounce
+{
+    internal const long DelayMs = 3000;
+    private long _due = -1;
+
+    internal bool Pending => _due >= 0;
+    internal void Mark(long now) { if (_due < 0) _due = now + DelayMs; }
+    internal bool Due(long now) => _due >= 0 && now >= _due;
+    internal void Saved() => _due = -1;
 }
 
 /// <summary>Search and its count occupy one measured band clear of the variant selector.</summary>

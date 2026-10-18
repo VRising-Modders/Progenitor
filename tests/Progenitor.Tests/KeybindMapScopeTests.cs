@@ -121,17 +121,26 @@ namespace Progenitor.Tests
         }
 
         [Fact]
-        public void Build_conflicts_exclude_unrelated_modes_but_include_gameplay()
+        public void Build_conflicts_exclude_unrelated_modes_and_share_progenitor_gameplay_keys()
         {
             UseGame(GameInMode("MapMarker", F8, GameKeybindCatalog.InTheMap));
+            KeybindArbiter.CfgSource = () => new[]
+            {
+                new KeybindClaim(KeybindSource.Cfg, "zz.cfg", "Thing", "Thing", F8, chordText: "F8"),
+            };
             RegisterBuild("build.mod", "Copy", F8);
             RegisterMap("map.mod", "MapThing", F8);
             Keybinds.RegisterScoped(_owner, "photo.mod", "PhotoThing", File("photo"), F8, "", () => { }, null, null,
                 false, true, KeybindScope.Photo);
             Keybinds.Register(_owner, "play.mod", "Action", File("play"), F8, "", () => { });
-            var row = KeybindArbiter.Current().FindProgenitor("build.mod", "Copy")!;
-            Assert.Contains(row.Others, c => c.OwnerId == "play.mod");
+            var picture = KeybindArbiter.Current();
+            var row = picture.FindProgenitor("build.mod", "Copy")!;
+            // An ordinary mod's key setting still meets a build key; a Progenitor gameplay key shares it at press time
+            // (zz.cfg sorts after play.mod, so play.mod keeps its gameplay chord against it).
+            Assert.Contains(row.Others, c => c.OwnerId == "zz.cfg");
+            Assert.DoesNotContain(row.Others, c => c.OwnerId == "play.mod");
             Assert.DoesNotContain(row.Others, c => c.ActionId == "MapMarker" || c.OwnerId == "map.mod" || c.OwnerId == "photo.mod");
+            Assert.Contains(KeybindArbiter.BuildSharersOf("play.mod", "Action"), c => c.OwnerId == "build.mod");
         }
 
         [Theory]
@@ -147,15 +156,74 @@ namespace Progenitor.Tests
         [Theory]
         [InlineData(false)]
         [InlineData(true)]
-        public void Build_and_gameplay_mod_keys_keep_first_installed_priority(bool buildFirst)
+        public void Build_and_gameplay_mod_keys_share_a_chord_whichever_was_installed_first(bool buildFirst)
         {
             UseGame();
-            KeybindArbiter.InstallTimeOf = id => (id == "build.mod") == buildFirst ? Ledger(9) : Ledger(1);
-            RegisterBuild("build.mod", "Copy", F8);
-            Keybinds.Register(_owner, "play.mod", "Action", File("play"), F8, "", () => { });
+            KeybindArbiter.InstallTimeOf = id => (id == "build.mod") == buildFirst ? Ledger(1) : Ledger(9);
+            int build = 0, play = 0;
+            bool open = false;
+            Keybinds.BuildScopeOpen = () => open;
+            RegisterBuild("build.mod", "Copy", F8, () => build++);
+            Keybinds.Register(_owner, "play.mod", "Action", File("play"), F8, "", () => play++);
             var picture = KeybindArbiter.Current();
-            Assert.Equal(buildFirst, picture.FindProgenitor("build.mod", "Copy")!.Active);
-            Assert.Equal(!buildFirst, picture.FindProgenitor("play.mod", "Action")!.Active);
+            Assert.True(picture.FindProgenitor("build.mod", "Copy")!.Active);
+            Assert.True(picture.FindProgenitor("play.mod", "Action")!.Active);
+            Assert.False(picture.FindProgenitor("play.mod", "Action")!.InConflict);
+            PressF8();
+            Assert.Equal((0, 1), (build, play));
+            open = true;
+            PressF8();
+            Assert.Equal((1, 1), (build, play));
+        }
+
+        private void PressF8()
+        {
+            _keys.Frame();
+            _keys.Down(F8);
+            _keys.Frame();
+            _keys.Up(F8.Key);
+            _keys.Frame();
+        }
+
+        [Fact]
+        public void Core_build_key_on_a_plugins_gameplay_key_wins_only_while_the_build_menu_is_open()
+        {
+            // Review finding: Core always outranks mods, so a static clash silenced the plugin's key everywhere.
+            UseGame();
+            KeybindConflictPrompt.ScreenReady = () => true;
+            int copy = 0, dodge = 0;
+            bool open = false;
+            Keybinds.BuildScopeOpen = () => open;
+            Keybinds.RegisterScoped(_owner, SettingsPanel.PluginId, "CopyBuilding", File("core"), F8, "", () => copy++,
+                null, null, false, false, KeybindScope.Build);
+            Keybinds.Register(_owner, "a.mod", "Dodge", File("a"), F8, "Dodge.", () => dodge++);
+            _keys.Frame();
+            _keys.Frame();
+
+            var picture = KeybindArbiter.Current();
+            var dodgeRow = picture.FindProgenitor("a.mod", "Dodge")!;
+            Assert.True(dodgeRow.Active);
+            Assert.False(dodgeRow.InConflict);
+            Assert.False(picture.FindProgenitor(SettingsPanel.PluginId, "CopyBuilding")!.InConflict);
+            Assert.Null(KeybindArbiter.BlockedReason("a.mod", "Dodge"));
+            Assert.Empty(KeybindConflictPrompt.Find(picture, null));
+
+            // Build menu closed: the plugin's key fires, Copy building does not.
+            PressF8();
+            Assert.Equal((0, 1), (copy, dodge));
+
+            // Build menu open: Copy building fires and the plugin's key gives way on that press.
+            open = true;
+            PressF8();
+            Assert.Equal((1, 1), (copy, dodge));
+            Assert.StartsWith("not-active: suppressed: Progenitor's",
+                Keybinds.SimulatePress("a.mod", "Dodge").Single().Reason);
+            Assert.Equal(1, dodge);
+
+            // Closed again: back to the plugin's key.
+            open = false;
+            PressF8();
+            Assert.Equal((1, 2), (copy, dodge));
         }
 
         [Fact]

@@ -39,7 +39,8 @@ namespace Progenitor.Ui;
 /// <see cref="UnityUiRuntime.CreateExternalSearchField"/>). While the field has focus the exclusive
 /// input hold (<see cref="UiInputCapture.AcquireExclusive"/>, the photo-mode mask) keeps every typed
 /// letter away from the character and the build hotkeys; it is released once every key is up after
-/// focus ends. Escape clears the query, or with an empty query gives up focus; Enter gives up focus
+/// focus ends. Escape clears the query, or with an empty query gives up focus (without focus, an Escape
+/// clears a non-empty query and is kept from the game: <see cref="EscapeClearsQuery"/>); Enter gives up focus
 /// and keeps the filter; the clear button (x) empties the query. Closing the build menu clears it when
 /// <c>ClearOnClose</c> is on (the default).</para>
 /// </summary>
@@ -588,6 +589,36 @@ internal static partial class BuildMenuSearch
 
     private static void OnSubmit() => UnityUiRuntime.BlurExternalField(_field);
 
+    /// <summary>
+    /// Whether an Escape press now belongs to the search although the box does not have the keyboard (Copy building
+    /// fills it without focus): see <see cref="BuildSearchEscape.Takes"/>. Read by the typed-key pump, which then holds
+    /// the game's close actions at the 498 guard for that press (and until Escape is up) and calls
+    /// <see cref="ClearOnUnfocusedEscape"/>.
+    /// </summary>
+    internal static bool EscapeClearsQuery
+    {
+        get
+        {
+            try
+            {
+                if (!_installed || !Enabled || _field == null) return false;
+                return BuildSearchEscape.Takes(_open && Alive(_menu), _liveQuery.Length > 0,
+                    UnityUiRuntime.IsExternalFieldFocused(_field), Keybinds.EscapeBelongsToCapture,
+                    UiDialog.Current is { IsOpen: true } || UiChoiceHandle.AnyOpen,
+                    Keybinds.ChatFocusNow == ChatFocus.Focused, ModsMenu.IsOpen);
+            }
+            catch { return false; }
+        }
+    }
+
+    /// <summary>The unfocused Escape: clear the search, leave the build menu open and the keyboard with the game.</summary>
+    internal static void ClearOnUnfocusedEscape()
+    {
+        if (_field == null) return;
+        UnityUiRuntime.SetExternalFieldText(_field, "");
+        _liveQuery = "";
+    }
+
     private static void OnClearPointer(UiPointerEvent e)
     {
         if (e.Kind != UiPointerEventKind.Down || !e.PrimaryHeld) return;
@@ -626,6 +657,8 @@ internal static partial class BuildMenuSearch
         {
             _appliedQuery = query;
             _words = BuildSearchMatch.Words(query);
+            // Typing over Copy building's name (or clearing it) ends its claim on the capped results.
+            if (!string.Equals(query, _copyFill, StringComparison.Ordinal)) { _copyPrefer = 0; _copyFill = ""; }
         }
 
         if (!ReferenceEquals(world, _namesWorld))
@@ -972,7 +1005,7 @@ internal static partial class BuildMenuSearch
 
     private static List<BuildMenuBlob.ResultCell> ResultsFor(World world, BuildMenuIndex index, string query, out int matched)
     {
-        string key = query + "|" + index.BlobData.ToInt64();
+        string key = query + "|" + index.BlobData.ToInt64() + "|" + _copyPrefer;
         if (ResultCache.TryGetValue(key, out var cached))
         {
             matched = cached.Matched;
@@ -982,7 +1015,7 @@ internal static partial class BuildMenuSearch
         if (ResultCache.Count > 64) ResultCache.Clear();
         var cells = BuildSearchResults.Select(index.Blob, _words,
             guid => NameFor(world, new PrefabGUID(guid), out _),
-            group => BuildSearchMatch.Normalize(index.GroupName(group)), out matched);
+            group => BuildSearchMatch.Normalize(index.GroupName(group)), out matched, preferGuid: _copyPrefer);
         ResultCache[key] = (cells, matched);
         return cells;
     }
@@ -1235,13 +1268,21 @@ internal static partial class BuildMenuSearch
 
 /// <summary>
 /// The Dev bridge's <c>build_search</c> op reaches the build-menu search through this type by
-/// reflection (Core grants the Dev assembly no internals), like <c>JoinFlowTestBridge</c>. Client only,
+/// reflection (Core grants the Dev assembly no internals), like <c>JoinFlowTestBridge</c>. Client only (RecentDiagnostics: both sides),
 /// main thread.
 /// </summary>
 internal static class BuildSearchTestBridge
 {
     public static Dictionary<string, object?> RecentTab() => BuildMenuSearch.ShowRecentForTest();
-    public static Dictionary<string, object?> Status(int maxCells) => BuildMenuSearch.Describe(maxCells);
+    public static Dictionary<string, object?> Status(int maxCells)
+    {
+        var r = BuildMenuSearch.Describe(maxCells);
+        r["recentObserver"] = BuildRecentObserver.Diagnostics();
+        return r;
+    }
+
+    /// <summary>The Recent pipeline's per-stage counters on this side (client or server).</summary>
+    public static Dictionary<string, object?> RecentDiagnostics() => BuildRecentObserver.Diagnostics();
 
     public static Dictionary<string, object?> Set(string text) => BuildMenuSearch.SetQuery(text);
 
