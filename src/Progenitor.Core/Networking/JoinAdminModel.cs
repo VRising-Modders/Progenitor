@@ -425,7 +425,7 @@ internal static class JoinAdminOps
         // CHAT4: the Server tab's Chat group (server-only values).
         ServerOptionOps.ChatFilter, ServerOptionOps.ChatFilterWords, ServerOptionOps.ChatFilterAction, ServerOptionOps.ChatRelay,
         ServerOptionOps.ChatRelayUrl, ServerOptionOps.ChatRelayGlobal, ServerOptionOps.ChatRelayLocal, ServerOptionOps.ChatRelayClan,
-        ServerOptionOps.ChatRelayWhispers, ServerOptionOps.ChatRelaySystem,
+        ServerOptionOps.ChatRelayWhispers, ServerOptionOps.ChatRelaySystem, ServerOptionOps.HotLoadAnnounce,
         // AUTOUPDATE3: the Server tab's Updates group (server-only values) and its three actions.
         ServerOptionOps.UpdateMods, ServerOptionOps.UpdateMajors, ServerOptionOps.UpdateRestartWhenEmpty, ServerOptionOps.UpdateEmptyMinutes,
         ServerOptionOps.UpdateBackup, ServerOptionOps.UpdateBackupKeep, ServerOptionOps.UpdateBackupSkipHours,

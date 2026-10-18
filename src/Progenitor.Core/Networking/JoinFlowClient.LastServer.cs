@@ -75,6 +75,9 @@ internal static partial class JoinFlowClient
     /// <summary>The server without Progenitor that this client is in was detected (<c>ServerModPause</c>): a successful join too.</summary>
     internal static void NoteJoinedWithoutProgenitor() => _joinedWithoutProgenitor = true;
 
+    /// <summary>This client is in a world on a server found to have no Progenitor (cleared when the world goes).</summary>
+    internal static bool JoinedWithoutProgenitor => _joinedWithoutProgenitor;
+
     /// <summary>
     /// Once a second (every ten once written) from <see cref="Tick"/>: in a joined world (the handshake said ok, or a server without Progenitor was
     /// detected), write the last-server record when the server, its name or its password use changed. Leaving clears the

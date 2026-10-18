@@ -133,6 +133,7 @@ Every chat feature ships with its settings in the same change (decided 2026-10-0
 | Long messages | Send long lines in parts | **Allow long messages**, **Longest long message** | CHAT9 (built) |
 | Command hints | Show command hints after "." | none | CHAT10 (built) |
 | Mod suggestions | Suggest mods after "[mod:" | **Allow mod links** | CHAT11 (built) |
+| Hot-load messages ([hot-reload.md](hot-reload.md#hot-load-messages)) | Show mod reload messages (`[Chat] HotLoadMessages`; this PC's and the server's lines) | **Announce mod reloads** | built (not live-verified) |
 | Word filter, Discord relay | none | **Word filter**, **Filtered words**, **When a word matches**; **Discord relay**, **Discord webhook address**, one switch per relayed channel | built (server) |
 
 ### Server settings (as built)
@@ -155,6 +156,7 @@ The **Chat** group of the **Server** tab follows **Server rules**: like the rule
 | Discord webhook address | empty | `[ChatRelay] WebhookUrl` | nobody: the row reads **Set** or **Not set** |
 | Relay Global chat, Relay System lines | on | `[ChatRelay] Global`, `System` | admins only |
 | Relay Local chat, Relay clan chat, Relay whispers | off | `[ChatRelay] Local`, `Clan`, `Whispers` | admins only |
+| Announce mod reloads | on | `[HotLoad] Announce` (a System line to every player when a mod or Progenitor hot-loads on the server; [hot-reload.md](hot-reload.md#hot-load-messages)) | admins only |
 
 **How the policy reaches players.** The five synced rows are ConfigSync rows of Progenitor (`progenitor/ServerChat/<key>`), sent to every client that answered the handshake and edited by admins through the server-wide edit path (authorization, rate limit, audit, lock list). A client fills `ChatPolicy` from them twice a second while ConfigSync holds the server's values, and goes back to `ChatPolicy.Defaults` (everything allowed, 1000 characters) when it leaves the server, when the server has no Progenitor or an older one, and when Core unloads. The filter and relay rows travel only on the admin channel to admins of the joined server; the word list is never sent to other players, and the webhook address is never sent at all.
 
@@ -173,7 +175,7 @@ The **Chat** group of the **Server** tab follows **Server rules**: like the rule
 **Locking.** The lock list (`[ServerSettings] LockedInGame`) takes the group word `chat` for the whole group, or a row's id as `settings_places` lists it.
 
 **Acceptance procedure — not run** (isolated test server, Steam client as an admin, a second player or a ghost user):
-1. Server tab → Chat: an admin sees all fifteen rows; a player who is not an admin sees the five synced rows as `Admin only · <value>` and none of the others.
+1. Server tab → Chat: an admin sees all sixteen rows; a player who is not an admin sees the five synced rows as `Admin only · <value>` and none of the others.
 2. Turn **Allow clickable links** off: the client log shows `Chat: policy from the server … links off`. Leave the server: `Chat: policy defaults (left the server)`.
 3. Word filter on, words `darn`, Replace: a line `darn it` from one player reaches the other as `*** it`. Switch to Block: the line reaches nobody and its sender gets the notice.
 4. Relay on with a test webhook: Global lines arrive in Discord as `Name: message`, `@everyone` does not ping, a burst of 60 lines arrives in at most one post a second with the oldest dropped, and the server log never shows the address.

@@ -464,7 +464,14 @@ window.HELP = {
 <tr><td>Up and Down bring back sent lines</td><td>On</td><td>Your last 50 lines, commands too.</td></tr>
 <tr><td>Show command hints after "."</td><td>On</td><td>The server's commands you can run show above the line; <span class="kbd">Tab</span> completes the first. Needs Progenitor on the server.</td></tr>
 <tr><td>Send long lines in parts</td><td>On</td><td>A line too long for the game goes out in parts; players with Progenitor see one line.</td></tr></tbody></table>
-<p>You can remap these chat keys in the Keybinds tab: <span class="kbd">Tab</span> to complete, <span class="kbd">Up</span>/<span class="kbd">Down</span> to recall, <span class="kbd">Enter</span> to send a long line.</p>` }
+<p>You can remap these chat keys in the Keybinds tab: <span class="kbd">Tab</span> to complete, <span class="kbd">Up</span>/<span class="kbd">Down</span> to recall, <span class="kbd">Enter</span> to send a long line.</p>` },
+        { id: "reload-messages", title: "Mod reload messages",
+          html: `<p>When Progenitor or a mod [[hot-reload|hot-reloads]] while you play, a System line in chat says what changed:</p>
+<ul><li><em>Progenitor updated to 2026.10.85.</em></li><li><em>MyMod reloaded (2.0.0).</em></li><li><em>OtherMod removed.</em></li>
+<li><em>MyMod failed to update; the previous version keeps running.</em></li></ul>
+<p>Several changes at once share one line. Lines about the server's mods start with <em>Server hot load:</em>. Nothing is said when the game starts or while you join a server, and lines about your own mods show only while you're in a world.</p>
+<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
+<tr><td>Show mod reload messages</td><td>On</td><td>Shows these lines, for your mods and the server's. Off hides both.</td></tr></tbody></table>` }
       ]
     },
     /* ---------------- Players: Mods menu ---------------- */
@@ -799,7 +806,11 @@ LockedInGame = server-rules, updates` } }
 <tr><td>Relay Global chat</td><td>On</td><td rowspan="2">Public channels.</td></tr><tr><td>Relay System lines</td><td>On</td></tr>
 <tr><td>Relay Local chat</td><td>Off</td><td></td></tr>
 <tr><td>Relay clan chat</td><td>Off</td><td rowspan="2">Players expect these to be private.</td></tr><tr><td>Relay whispers</td><td>Off</td></tr></tbody></table>
-<p>Nothing pings in Discord; at most one post a second.</p>` }
+<p>Nothing pings in Discord; at most one post a second.</p>` },
+        { id: "reload-messages", title: "Mod reload messages",
+          html: `<p>When Progenitor or a mod [[hot-reload|hot-reloads]] on the server, everyone online sees one System line, such as <em>Server hot load: MyMod reloaded (2.0.0).</em> A deploy of several mods at once shares one line. Nothing is said when the server starts. At most one line goes out every 30 seconds, and the same news isn't repeated within 3 minutes.</p>
+<table><thead><tr><th class="label">Setting</th><th class="label">Default</th><th class="label">What it does</th></tr></thead><tbody>
+<tr><td>Announce mod reloads</td><td>On</td><td>Off: no line for anyone. Players can also hide these lines for themselves.</td></tr></tbody></table>` }
       ]
     },
     {

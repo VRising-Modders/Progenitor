@@ -11,7 +11,7 @@ namespace Progenitor.Networking;
 /// <see cref="ServerSettings"/>): <c>BepInEx/config/progenitor.serverchat.cfg</c>, section <c>[ServerChat]</c>. Every player
 /// with Progenitor receives them; the client fills <c>ChatPolicy</c> from them.</item>
 /// <item><b>Server only</b> (the admin channel, <c>'PrJa'</c>; <see cref="ServerOptionOps"/>): the server's
-/// <c>progenitor.cfg</c>, sections <c>[ChatFilter]</c> and <c>[ChatRelay]</c>. Only admins receive them; the webhook address
+/// <c>progenitor.cfg</c>, sections <c>[ChatFilter]</c>, <c>[ChatRelay]</c> and <c>[HotLoad]</c>. Only admins receive them; the webhook address
 /// is never sent (it reads <c>set</c> or empty).</item>
 /// </list>
 /// </summary>
@@ -52,6 +52,10 @@ internal static class ServerChatOptions
     public const string ClanKey = "Clan";
     public const string WhispersKey = "Whispers";
     public const string SystemKey = "System";
+
+    /// <summary>Hot-load chat lines (docs/hot-reload.md): the server's <c>[HotLoad] Announce</c>.</summary>
+    public const string HotLoadSection = "HotLoad";
+    public const string HotLoadAnnounceKey = "Announce";
 
     // ---- the page's words -----------------------------------------------------------------------------------
 
@@ -115,12 +119,18 @@ internal static class ServerChatOptions
         "Posts admins' System lines and server-wide notices from Progenitor and its mods to Discord while the relay is on. "
         + "Replies sent to one player are never posted.";
 
+    internal const string HotLoadAnnounceLabel = "Announce mod reloads";
+    internal const string HotLoadAnnounceHelp =
+        "Tells everyone online in chat when Progenitor or a mod loads, reloads or is removed while the server runs, such as "
+        + "\"Server hot load: MyMod reloaded (2.0.0).\" Players can hide these lines in their own chat settings.";
+
     /// <summary>The server-only rows' operations, in page order.</summary>
     internal static readonly IReadOnlyList<string> AdminOps = new[]
     {
         ServerOptionOps.ChatFilter, ServerOptionOps.ChatFilterWords, ServerOptionOps.ChatFilterAction,
         ServerOptionOps.ChatRelay, ServerOptionOps.ChatRelayUrl, ServerOptionOps.ChatRelayGlobal, ServerOptionOps.ChatRelayLocal,
         ServerOptionOps.ChatRelayClan, ServerOptionOps.ChatRelayWhispers, ServerOptionOps.ChatRelaySystem,
+        ServerOptionOps.HotLoadAnnounce,
     };
 
     /// <summary>Each server-only option's default (the server binds them with these).</summary>
@@ -133,6 +143,7 @@ internal static class ServerChatOptions
         ServerOptionOps.ChatRelayUrl => "",
         ServerOptionOps.ChatRelayGlobal => "true",
         ServerOptionOps.ChatRelaySystem => "true",
+        ServerOptionOps.HotLoadAnnounce => "true",
         _ => "false",
     };
 }
@@ -222,6 +233,9 @@ internal static class ServerChatRows
     internal static AdminSettingSpec RelaySystem() =>
         Spec(ServerOptionOps.ChatRelaySystem, AdminSettingKind.Toggle, ServerChatOptions.RelaySystemLabel, ServerChatOptions.RelaySystemHelp);
 
+    internal static AdminSettingSpec HotLoadAnnounce() =>
+        Spec(ServerOptionOps.HotLoadAnnounce, AdminSettingKind.Toggle, ServerChatOptions.HotLoadAnnounceLabel, ServerChatOptions.HotLoadAnnounceHelp);
+
     /// <summary>Every server-only row, in page order.</summary>
     internal static IEnumerable<AdminSettingSpec> All()
     {
@@ -235,6 +249,7 @@ internal static class ServerChatRows
         yield return RelayClan();
         yield return RelayWhispers();
         yield return RelaySystem();
+        yield return HotLoadAnnounce();
     }
 
     /// <summary>The words as the row reads them: <c>None</c>, or the list.</summary>

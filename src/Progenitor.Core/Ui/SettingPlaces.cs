@@ -288,7 +288,7 @@ internal static class SettingPlaces
         yield return Cfg("Chat", "ReplyShortcut", Chat, UiFile);
         yield return Cfg("Chat", "NameCompletion", Chat, UiFile);
         foreach (var key in new[] { "View", "Timestamps", "CollapseRepeats", "KeepHistory", "HistoryLines", "Mentions",
-                     "MentionSound", "MentionWords", "FontSize", "BackgroundOpacity", "LockPosition", "Recall", "MutedPlayers", "LongMessages", "ChannelColor", "CommandHints", "ModSuggestions" })
+                     "MentionSound", "MentionWords", "FontSize", "BackgroundOpacity", "LockPosition", "Recall", "MutedPlayers", "HotLoadMessages", "LongMessages", "ChannelColor", "CommandHints", "ModSuggestions" })
             yield return Cfg("Chat", key, Chat, UiFile);
         // Set from the chat box itself (the tab strip, dragging, the quick menu), not a page row; TestNames (testing
         // only), ReplacedBy (another chat mod's compatibility list) and HistoryDefaultRaised (the 500 to 5000 upgrade

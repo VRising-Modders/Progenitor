@@ -531,6 +531,8 @@
          (ProgenitorPlugin itself references BepInEx), so DebugBuff's keep-vs-sweep rule and the
          reason inference are both covered here. -->
     <Compile Include="..\..\src\Progenitor.Core\Plugins\PluginUnloadReason.cs" Link="Linked\PluginUnloadReason.cs" />
+    <!-- Hot-load chat lines: the coalescing, the text and the startup quiet are game-free (HotLoadNoticeTests). -->
+    <Compile Include="..\..\src\Progenitor.Core\Reload\HotLoadNotice.cs" Link="Linked\HotLoadNotice.cs" />
     <!-- Job FHARM: the patch registry's tagging / sweep / refusal rules and the god-mode guard
          set. Game-free on purpose — HarmonyLib lives behind IPatchApplier
          (Patches\HarmonyPatchApplier.cs) and the Entity-typed face behind GodMode.cs, neither of
