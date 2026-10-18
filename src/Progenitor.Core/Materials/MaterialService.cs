@@ -547,6 +547,8 @@ internal sealed class MaterialService
     internal MaterialPayResult Pay(CastleId character, MaterialOperation operation, int item, int amount)
     {
         if (amount <= 0) return new MaterialPayResult(0, 0, "");
+        // A display-only operation (RefineView) never pays, whatever scope routed the call here.
+        if (MaterialOperations.IsDisplayOnly(operation)) return new MaterialPayResult(amount, 0, "display-only operation");
         var s = Open(character, operation, fresh: false);
         if (!s.Governed) return new MaterialPayResult(amount, 0, "not governed");
         if (!s.Checked) return new MaterialPayResult(amount, 0, "no governed check in this operation");
@@ -648,6 +650,7 @@ internal sealed class MaterialService
     /// <summary>Plan a whole request without taking anything, from a fresh provider answer.</summary>
     internal MaterialPlan<InventoryRef>? PlanRequest(CastleId character, MaterialOperation operation, IEnumerable<MaterialLine> lines)
     {
+        if (MaterialOperations.IsDisplayOnly(operation)) return null;
         var s = Build(character, operation);
         if (!s.Governed) return null;
         return MaterialPlanner.Plan(lines, item => SpecOf(s, item), _world.Ledger, s.Exclusions);
@@ -667,6 +670,10 @@ internal sealed class MaterialService
 
     private Session Open(CastleId character, MaterialOperation operation, bool fresh)
     {
+        // Seam sessions (check, compose, payment) are never opened for a display-only operation: such a
+        // session is not governed, so the game keeps its own count and pays by its own rules. Its views
+        // are computed by the refresh, which does not go through here.
+        if (MaterialOperations.IsDisplayOnly(operation)) return new Session();
         var key = (character, operation);
         if (_sessions.TryGetValue(key, out var existing))
         {

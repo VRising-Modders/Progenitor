@@ -33,6 +33,7 @@ internal static class MaterialRefineTooltipRuntime
     private static readonly RefineRowMemo Memo = new();
     private static FakeTooltip? _written;
     private static readonly List<RefineLine> Last = new();
+    private static readonly List<(WorkstationRequirementEntry Entry, TextMeshProUGUI Amount, string Current, RefineLine Line)> Pending = new();
     private static string _lastState = "not run";
     private static long _lastFrame = -1;
     private static int _lastRecipe;
@@ -111,13 +112,25 @@ internal static class MaterialRefineTooltipRuntime
         if (!MaterialRefineTooltip.LinesMatch(shown, requirements.Length))
             return "lines " + shown + " != requirements " + requirements.Length;
 
+        // Decide every line first; write only when each line the game wrote can be its requirement.
+        Pending.Clear();
         for (int i = 0; i < requirements.Length && i < count; i++)
         {
             var entry = list[i];
             var amount = Tmp(entry.Amount);
-            if (amount == null) continue;
+            if (amount == null) return "line " + i + " has no amount text";
             string current = amount.text;
             var line = MaterialRefineTooltip.Decide(i, requirements[i].ItemGuid, current, totals);
+            if (line.Need >= 0 && !MaterialRefineTooltip.NeedFits(line.Need, requirements[i].Amount))
+            {
+                Last.Add(line with { Write = false, Note = "need " + line.Need + " > recipe amount " + requirements[i].Amount });
+                return "lines do not match the hovered recipe";
+            }
+            Pending.Add((entry, amount, current, line));
+        }
+
+        foreach (var (entry, amount, current, line) in Pending)
+        {
             if (line.Write)
             {
                 Paint(entry, amount, line.Text, line.State);
@@ -126,6 +139,7 @@ internal static class MaterialRefineTooltipRuntime
             }
             Last.Add(line);
         }
+        Pending.Clear();
         return "applied";
     }
 

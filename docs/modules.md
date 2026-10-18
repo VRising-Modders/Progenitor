@@ -3653,8 +3653,18 @@ display only; refining keeps taking from the station's slots.
   window's next update (`SystemHooks.Before`) any line still holding Progenitor's text is put back to the
   game's, so the next pass always starts from the game's own count and the pool is never added twice.
   Lines are matched to the recipe's requirements by order (the game's own order); when the shown line
-  count differs from the requirement count, every line keeps the game's text. Items the view does not
-  list keep the game's line. No game method is called and no game data changes.
+  count differs from the requirement count, or a line's written need is more than its requirement's
+  recipe amount (the station multiplier only lowers it, so a larger need means the tooltip shows another
+  recipe than the hovered row), every line keeps the game's text. Items the view does not list keep the
+  game's line. A governed line whose pool is empty already reads the game's text and is not put back.
+  No game method is called and no game data changes.
+- **No double count.** The context's `Station` is the open refinement station, and every inventory the
+  game's tooltip count can read there (its input, instance 0, its output, instance 1, and any other, as
+  the station's instances and as the inventory entities they point at, whatever components they carry) is
+  left out of the pool. Only a provider container elsewhere adds to the station's own count.
+- **Never paid.** A display-only operation never opens a check or payment session: `CountGate`,
+  `ComposeExtraRows`, `GovernsLine`, `Pay` and the whole-request payment all refuse it, whatever routed
+  the call (`MaterialServiceTests`).
 - **Hover**: the hovered recipe row is found with the same mouse-hover rule as the recipe tooltip site
   (the row's `IsHovered`), so with a gamepad the lines keep the game's counts.
 - **Workstations** need no RefineView: their recipe tooltip lists the costs the workstation window
@@ -3670,7 +3680,9 @@ Live check (acceptance procedure, not run): with the seams armed on both sides a
 container; the Glass line should read `3/3` in the game's green, `materials status` (client) should
 show `gameHave` 0, `providerHave` 3, `shownHave` 3, `color` green; with 1 Glass in the pool `1/3` yellow;
 removing the provider should put back `0/3` red within about a second; refining still needs Glass in
-the station's own slot.
+the station's own slot. Put Glass in the station's input and output slots and in a pool chest: the line must
+read the game's own number (`gameHave`) plus the pool chest only, never any station slot a second time;
+`gameHave` also shows which of the station's inventories the game's count reads.
 
 #### Refresh cost
 

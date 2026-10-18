@@ -1125,12 +1125,43 @@ internal sealed partial class UnityUiRuntime
     private static void SyncRequirementLines()
     {
         if (LineContainers.Count == 0) return;
+        LineMatchScratch.Clear();
         for (int i = LineContainers.Count - 1; i >= 0; i--)
         {
             var w = LineContainers[i];
             if (!w.Alive) { LineContainers.RemoveAt(i); continue; }
-            w.SyncLine();
+            w.SyncLine(LinesMatchFor(w.Block));
         }
+        LineMatchScratch.Clear();
+    }
+
+    private static readonly Dictionary<IntPtr, bool> LineMatchScratch = new();
+
+    /// <summary>
+    /// Whether the game's shown requirement lines are the hovered recipe's requirements one for one: as many
+    /// shown line rows as <see cref="VanillaPanelTarget.Requirements"/> has entries. The game leaves out a
+    /// requirement it has no item data for, which would shift every later line; then no per-line container is
+    /// shown for that recipe, so rows never sit under the wrong item. Read once per requirement list per sync.
+    /// </summary>
+    private static bool LinesMatchFor(TooltipRecipeRequiredItems? block)
+    {
+        try
+        {
+            if (!Alive(block)) return false;
+            if (LineMatchScratch.TryGetValue(block!.Pointer, out bool known)) return known;
+            int shown = 0;
+            var list = block.RequiredItemsList;
+            int n = list == null ? 0 : list.Count;
+            for (int i = 0; i < n; i++)
+            {
+                var entry = list![i];
+                if (Alive(entry) && entry.gameObject.activeSelf) shown++;
+            }
+            bool match = VanillaUiSites.RequirementLinesMatch(shown, RecipeHover.Requirements?.Length ?? 0);
+            LineMatchScratch[block.Pointer] = match;
+            return match;
+        }
+        catch { return false; }
     }
 
     /// <summary>The sibling index right after <paramref name="reference"/> and any Progenitor container already there.</summary>
@@ -1716,7 +1747,7 @@ internal sealed partial class UnityUiRuntime
             var widget = new PanelContainerWidget(go, site, anchor, hostLaid, mode, size, group);
             if (lineRow != null)
             {
-                widget.GateOn(lineRow);
+                widget.GateOn(lineRow, view.Tooltip != null ? view.Tooltip.RecipeRequiredItems : null);
                 TrackLineContainer(widget);
             }
             return widget;
@@ -2494,29 +2525,41 @@ internal sealed partial class UnityUiRuntime
         private GameObject? _go;
         private UiDestroyVerdict _verdict = UiDestroyVerdict.Failed;
 
-        // A per-line container: shown while the attachment wants it (_wanted) and the game shows the line.
+        // A per-line container: shown while the attachment wants it (_wanted), the game shows the line and
+        // the game's lines are the hovered recipe's requirements one for one (_linesMatch).
         private GameObject? _lineRow;
         private bool _gated;
         private bool _wanted = true;
+        private bool _linesMatch;
+
+        /// <summary>The requirement list this per-line container sits in, or null.</summary>
+        internal TooltipRecipeRequiredItems? Block { get; private set; }
 
         /// <summary>Gate this container on the game's requirement line row <paramref name="lineRow"/>.</summary>
-        internal void GateOn(GameObject lineRow)
+        internal void GateOn(GameObject lineRow, TooltipRecipeRequiredItems? block)
         {
             _wanted = Alive && _go!.activeSelf;
             _lineRow = lineRow;
+            Block = block;
             _gated = true;
-            SyncLine();
+            SyncLine(LinesMatchFor(block));
         }
 
         public bool GameLineShown
         {
-            get { try { return !_gated || (UnityUiRuntime.Alive(_lineRow) && _lineRow!.activeSelf); } catch { return false; } }
+            get { try { return !_gated || (_linesMatch && UnityUiRuntime.Alive(_lineRow) && _lineRow!.activeSelf); } catch { return false; } }
         }
 
-        /// <summary>Apply the gate: active exactly when wanted and the game shows the line.</summary>
-        internal void SyncLine()
+        /// <summary>Apply the gate: active exactly when wanted, the lines match the recipe and the game shows this line.</summary>
+        internal void SyncLine(bool linesMatch)
         {
             if (!_gated) return;
+            _linesMatch = linesMatch;
+            Apply();
+        }
+
+        private void Apply()
+        {
             try
             {
                 bool show = VanillaUiSites.LineShown(_wanted, GameLineShown);
@@ -2678,7 +2721,7 @@ internal sealed partial class UnityUiRuntime
             get { try { return UnityUiRuntime.Alive(_go) && (_gated ? _wanted : _go!.activeSelf); } catch { return false; } }
             set
             {
-                if (_gated) { _wanted = value; SyncLine(); return; }
+                if (_gated) { _wanted = value; Apply(); return; }
                 try { if (UnityUiRuntime.Alive(_go) && _go!.activeSelf != value) _go.SetActive(value); } catch { /* */ }
             }
         }

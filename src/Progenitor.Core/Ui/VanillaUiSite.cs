@@ -350,6 +350,13 @@ internal static class VanillaUiSites
     /// </summary>
     internal static bool LineShown(bool wanted, bool gameLineShown) => wanted && gameLineShown;
 
+    /// <summary>
+    /// Whether the tooltip's shown requirement lines are the target's requirements one for one: the game leaves
+    /// out a requirement it has no item data for, which shifts every later line, so a per-line container is shown
+    /// only when the shown line count equals the requirement count. Game-free.
+    /// </summary>
+    internal static bool RequirementLinesMatch(int shownLines, int requirements) => shownLines > 0 && shownLines == requirements;
+
     /// <summary>Whether <paramref name="anchor"/> is one of the column anchors placed by Progenitor.</summary>
     internal static bool IsEdge(VanillaPanelAnchor anchor) =>
         anchor == VanillaPanelAnchor.LeftEdge || anchor == VanillaPanelAnchor.RightEdge;

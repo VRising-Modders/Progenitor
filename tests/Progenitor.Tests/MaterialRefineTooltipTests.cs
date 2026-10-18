@@ -103,6 +103,15 @@ public class MaterialRefineTooltipTests
         Assert.False(MaterialRefineTooltip.LinesMatch(0, 0));
     }
 
+    [Theory]
+    [InlineData(3, 3, true)]   // no station bonus
+    [InlineData(2, 3, true)]   // a bonus lowers the written need
+    [InlineData(0, 3, true)]
+    [InlineData(4, 3, false)]  // more than the recipe asks: another recipe is shown
+    [InlineData(-1, 3, false)]
+    public void A_written_need_must_fit_the_matched_requirement(int need, int amount, bool fits) =>
+        Assert.Equal(fits, MaterialRefineTooltip.NeedFits(need, amount));
+
     [Fact]
     public void Progenitors_text_is_put_back_before_the_game_reads_the_line_again()
     {
@@ -124,6 +133,12 @@ public class MaterialRefineTooltipTests
         // A line that was not written is not remembered.
         memo.Clear();
         memo.Wrote(MaterialRefineTooltip.Decide(1, Plank, "2/8", totals), "2/8");
+        Assert.Equal(0, memo.Count);
+
+        // A governed line written with the game's own text (empty pool) needs no restore either.
+        var empty = MaterialRefineTooltip.Decide(0, Glass, "0/3", new Dictionary<int, int> { [Glass] = 0 });
+        Assert.True(empty.Write);
+        memo.Wrote(empty, "0/3");
         Assert.Equal(0, memo.Count);
     }
 

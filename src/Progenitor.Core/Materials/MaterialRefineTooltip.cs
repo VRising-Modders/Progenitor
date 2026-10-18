@@ -105,6 +105,14 @@ internal static class MaterialRefineTooltip
     internal static bool LinesMatch(int shownLines, int requirements) => shownLines > 0 && shownLines == requirements;
 
     /// <summary>
+    /// Whether a line the game wrote can be the requirement Progenitor matched it to: the game writes the
+    /// recipe amount scaled by the station's resource multiplier (a bonus only lowers it), so the written need
+    /// is at most the recipe's own amount. A larger need means the tooltip shows another recipe than the hovered
+    /// entry (for example the selection cursor moved without the pointer); nothing is written then.
+    /// </summary>
+    internal static bool NeedFits(int need, int recipeAmount) => need >= 0 && need <= recipeAmount;
+
+    /// <summary>
     /// The RefineView totals that apply to the refinement window of the station with network id
     /// <paramref name="stationNet"/>: only a view the server computed for that very station. False (show the
     /// game's own counts) without one, or for a window whose station has no network id.
@@ -153,10 +161,14 @@ internal sealed class RefineRowMemo
 {
     private readonly Dictionary<int, (string Written, string GameText, RefineLineState GameState)> _rows = new();
 
-    /// <summary>Record a line written over the game's <paramref name="gameText"/> (lines not written are ignored).</summary>
+    /// <summary>
+    /// Record a line written over the game's <paramref name="gameText"/>. A line not written, or written with the
+    /// game's own text (a governed item with an empty pool), needs no restore: whatever the game writes next is
+    /// read as the game's either way, and skipping it avoids rewriting the line twice a frame for nothing.
+    /// </summary>
     internal void Wrote(in RefineLine line, string gameText)
     {
-        if (!line.Write) return;
+        if (!line.Write || string.Equals(line.Text, gameText, StringComparison.Ordinal)) return;
         _rows[line.Row] = (line.Text, gameText, MaterialRefineTooltip.StateOf(line.GameHave, line.Need));
     }
 

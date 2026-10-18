@@ -639,6 +639,12 @@ public class VanillaPanelTests : IDisposable
         Assert.True(VanillaUiSites.IsRequirementLine(0));
         Assert.True(VanillaUiSites.IsRequirementLine(5));
         Assert.False(VanillaUiSites.IsRequirementLine(6));
+
+        // The game leaves out a requirement without item data: the shown lines no longer match the
+        // target's requirements one for one, so no per-line container is shown for that recipe.
+        Assert.True(VanillaUiSites.RequirementLinesMatch(3, 3));
+        Assert.False(VanillaUiSites.RequirementLinesMatch(2, 3));
+        Assert.False(VanillaUiSites.RequirementLinesMatch(0, 0));
     }
 
     [Fact]

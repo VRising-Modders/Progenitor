@@ -351,6 +351,26 @@ internal sealed unsafe class UnityInventoryBackend : IInventoryBackend
     internal static bool HasInventory(EntityManager em, Entity owner) =>
         owner.Has<InventoryBuffer>(em) || owner.Has<InventoryInstanceElement>(em);
 
+    /// <summary>
+    /// How many inventories <paramref name="owner"/> has: 1 for an owner with its own <c>InventoryBuffer</c>, else
+    /// its <c>InventoryInstanceElement</c> row count (0 for none or unreadable, capped at the item module's limit).
+    /// </summary>
+    internal static int InstanceCount(EntityManager em, Entity owner)
+    {
+        try
+        {
+            if (!owner.Exists(em)) return 0;
+            if (owner.Has<InventoryBuffer>(em)) return 1;
+            if (!owner.Has<InventoryInstanceElement>(em)) return 0;
+            int length = em.GetBufferLength(owner, ComponentIndex.IndexOf<InventoryInstanceElement>());
+            return length <= 0 ? 0 : Math.Min(length, Progenitor.Items.Items.MaxInventoryInstances);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     /// <summary>Slot count of the owner's inventory <paramref name="instance"/>, or 0 when unreadable.</summary>
     internal static int SlotCount(EntityManager em, Entity owner, int instance)
     {

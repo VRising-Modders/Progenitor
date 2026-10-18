@@ -109,7 +109,16 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
         var em = Em;
         var ch = new Entity { Index = context.Character.Index, Version = context.Character.Version };
         into.Add(InventoryRef.For(ch, 0));
-        var station = context.Operation == MaterialOperation.RefineView ? RefinementStationOf(em, ch) : StationOf(em, ch);
+        if (context.Operation == MaterialOperation.RefineView)
+        {
+            // The tooltip's own count reads the open refinement station: leave every one of its inventories
+            // out of the pool (input 0, output 1 and any other), as the owner's instances and as the inventory
+            // entities they point at, whatever components they carry, so the pool never counts them again.
+            var refinery = RefinementStationOf(em, ch);
+            if (refinery != Entity.Null) AddEveryInventory(em, refinery, into);
+            return;
+        }
+        var station = StationOf(em, ch);
         if (station != Entity.Null && !station.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(station, 0));
         if (context.Operation is MaterialOperation.Repair or MaterialOperation.Upgrade or MaterialOperation.CharacterCraft)
         {
@@ -118,6 +127,17 @@ internal sealed class UnityMaterialWorld : IMaterialWorld, IMaterialLedger<Inven
             // inventory that is not shared storage, so the pool leaves it out, whatever kind it is.
             var target = InteractionTarget(em, ch);
             if (target != Entity.Null && !target.Has<CastleSharedInventory>(em)) into.Add(InventoryRef.For(target, 0));
+        }
+    }
+
+    private static void AddEveryInventory(EntityManager em, Entity owner, ICollection<InventoryRef> into)
+    {
+        int n = UnityInventoryBackend.InstanceCount(em, owner);
+        for (int i = 0; i < n; i++)
+        {
+            into.Add(InventoryRef.For(owner, i));
+            if (UnityInventoryBackend.TryInventoryEntity(em, owner, i, out var bag, out _) && bag != owner)
+                into.Add(InventoryRef.For(bag, 0));
         }
     }
 

@@ -363,6 +363,36 @@ public partial class MaterialServiceTests
     }
 
     [Fact]
+    public void A_display_only_operation_is_viewed_but_never_checked_or_paid()
+    {
+        var (world, provider, registry, service, paid, _) = Setup();
+        var a = world.Chest(1, (Iron, 10));
+        provider.All.Add(a);
+        provider.Operations = new[] { MaterialOperation.RefineView };
+        registry.Register(provider, "test");
+
+        // The view is computed (that is the operation's whole purpose) ...
+        var totals = new Dictionary<int, int>();
+        Assert.True(service.TryView(world.Player, MaterialOperation.RefineView, totals, out var ctx, out _));
+        Assert.Equal(MaterialOperation.RefineView, ctx.Operation);
+        Assert.Equal(10, totals[Iron]);
+
+        // ... but no seam session is ever governed and nothing is ever taken.
+        Assert.False(service.CountGate(world.Player, MaterialOperation.RefineView));
+        Assert.False(service.ComposeExtraRows(world.Player, MaterialOperation.RefineView,
+            new Dictionary<int, long> { [Iron] = 0 }, new Dictionary<int, long>(), new List<MaterialLine>()));
+        Assert.False(service.GovernsLine(world.Player, MaterialOperation.RefineView, Iron));
+        var r = service.Pay(world.Player, MaterialOperation.RefineView, Iron, 4);
+        Assert.Equal(4, r.Remainder);
+        Assert.Equal(0, r.Paid);
+        Assert.Null(service.PlanRequest(world.Player, MaterialOperation.RefineView, new[] { new MaterialLine(Iron, 4) }));
+        Assert.Null(service.PayRequest(world.Player, MaterialOperation.RefineView, new[] { new MaterialLine(Iron, 4) }));
+        service.EndScope();
+        Assert.Equal(10, world.Get(a, Iron));
+        Assert.Empty(paid);
+    }
+
+    [Fact]
     public void Whole_request_payment_is_all_or_nothing()
     {
         var (world, provider, registry, service, _, _) = Setup();
