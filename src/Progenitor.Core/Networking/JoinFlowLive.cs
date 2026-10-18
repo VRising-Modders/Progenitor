@@ -298,7 +298,9 @@ internal static class JoinFlowLive
             plan.Why = string.Join("; ", why);
             using var self = Process.GetCurrentProcess();
             string exe = Environment.ProcessPath ?? "";
-            plan.Script = RelaunchCommand.Script(self.Id, self.StartTime.ToUniversalTime().Ticks, exe);
+            plan.Script = RelaunchCommand.Script(self.Id, self.StartTime.ToUniversalTime().Ticks, exe,
+                logPath: System.IO.Path.Combine(System.IO.Path.GetDirectoryName(exe) ?? Environment.SystemDirectory,
+                    "BepInEx", "progenitor-restart.log"));
             plan.FileName = ps;
             plan.Arguments = RelaunchCommand.Arguments(plan.Script);
             return plan;
@@ -309,9 +311,15 @@ internal static class JoinFlowLive
             error = "";
             try
             {
-                var info = new ProcessStartInfo(plan.FileName, plan.Arguments)
+                // Only this short-lived broker is a child of the game. WMI owns the waiting
+                // helper, so Steam cannot retain the old session through inherited handles.
+                var info = new ProcessStartInfo(plan.FileName, "-NoProfile -NonInteractive -WindowStyle Hidden -Command -")
                 {
-                    UseShellExecute = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                     WindowStyle = ProcessWindowStyle.Hidden,
                     WorkingDirectory = Environment.SystemDirectory,
                 };
@@ -322,7 +330,21 @@ internal static class JoinFlowLive
                     return false;
                 }
 
-                Plugin.Logger?.LogInfo("JoinFlow: relauncher started (pid " + p.Id + "); it starts V Rising through Steam once this process exits");
+                p.StandardInput.WriteLine(RelaunchCommand.BrokerScript(plan.FileName, plan.Arguments));
+                p.StandardInput.Close();
+                if (!p.WaitForExit(15000))
+                {
+                    error = "Windows restart broker did not respond within 15 seconds";
+                    return false;
+                }
+                string result = p.StandardOutput.ReadToEnd().Trim();
+                string detail = p.StandardError.ReadToEnd().Trim();
+                if (p.ExitCode != 0 || !int.TryParse(result, out int helperPid) || helperPid <= 0)
+                {
+                    error = "Windows restart broker failed: " + detail;
+                    return false;
+                }
+                Plugin.Logger?.LogInfo("JoinFlow: independent relauncher started (pid " + helperPid + "); Windows owns the helper; broker exited");
                 return true;
             }
             catch (Exception e)

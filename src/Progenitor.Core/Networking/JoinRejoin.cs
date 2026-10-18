@@ -423,6 +423,15 @@ internal enum RelaunchMode
 /// </summary>
 internal static class RelaunchCommand
 {
+    internal static string BrokerScript(string fileName, string arguments) =>
+        "$ErrorActionPreference='Stop';try{" +
+        "$startup=New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ShowWindow=[uint16]0};" +
+        "$result=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=" +
+        Quote("\"" + fileName + "\" " + arguments) +
+        ";ProcessStartupInformation=$startup};" +
+        "if($result.ReturnValue -ne 0){throw ('Create failed: '+$result.ReturnValue)};" +
+        "Write-Output $result.ProcessId;exit 0}catch{[Console]::Error.WriteLine($_);exit 1}";
+
     public const string SteamRunUrl = "steam://run/1604030";
 
     /// <summary>How long the relauncher waits for the old process to exit.</summary>
@@ -430,6 +439,9 @@ internal static class RelaunchCommand
 
     /// <summary>Steam keeps an app "running" for a few seconds after it exits (seen live 2026-09-12).</summary>
     public const int SettleSeconds = 8;
+
+    /// <summary>Maximum additional wait for Steam to release the previous game session.</summary>
+    public const int SteamExitSeconds = 180;
 
     /// <summary>
     /// How long it watches for the new process before asking Steam once more. A slow Steam start took more than 30 s
@@ -441,7 +453,7 @@ internal static class RelaunchCommand
     public const string SteamAppKey = @"HKCU:\Software\Valve\Steam\Apps\1604030";
 
     /// <summary>The PowerShell script (one line): wait, settle, start once, re-ask only if nothing appeared.</summary>
-    public static string Script(int pid, long startTicksUtc, string gameExePath, string url = SteamRunUrl)
+    public static string Script(int pid, long startTicksUtc, string gameExePath, string url = SteamRunUrl, string? logPath = null)
     {
         if (pid <= 0) throw new ArgumentOutOfRangeException(nameof(pid));
         string exe = Quote(gameExePath ?? "");
@@ -449,16 +461,23 @@ internal static class RelaunchCommand
         var inv = CultureInfo.InvariantCulture;
         var sb = new StringBuilder();
         sb.Append("$ErrorActionPreference='SilentlyContinue';");
+        sb.Append("$log=").Append(Quote(logPath ?? "")).Append(";function Note($message){if($log){Add-Content -LiteralPath $log -Value ((Get-Date -Format o)+' '+$message)}};Note 'helper started';");
         sb.Append("$p=Get-Process -Id ").Append(pid.ToString(inv)).Append(';');
         // The same process only: a reused id has another start time.
         sb.Append("if($p -and [math]::Abs($p.StartTime.ToUniversalTime().Ticks-").Append(startTicksUtc.ToString(inv))
             .Append(") -lt 20000000){if(-not $p.WaitForExit(").Append((WaitSeconds * 1000).ToString(inv)).Append(")){exit 2}};");
         sb.Append("Start-Sleep -Seconds ").Append(SettleSeconds.ToString(inv)).Append(';');
+        sb.Append("Note 'process wait completed; waiting for Steam';");
         sb.Append("$exe=").Append(exe).Append(';');
         sb.Append("function Up{$exe.Length -gt 0 -and @(Get-Process|Where-Object{$_.Path -eq $exe}).Count -gt 0};");
         // Steam's own "running or launching" flag: a launch Steam has started counts as up, so it is never asked twice.
-        sb.Append("function Launching{(Get-ItemProperty -Path ").Append(Quote(SteamAppKey)).Append(" -Name Running).Running -eq 1};");
+        // An unreadable Steam state is not permission to launch. Wait for an explicit zero.
+        sb.Append("function SteamIdle{try{$r=Get-ItemProperty -Path ").Append(Quote(SteamAppKey)).Append(" -Name Running -ErrorAction Stop;return ($null -ne $r.Running -and $r.Running -eq 0)}catch{return $false}};");
+        sb.Append("function Launching{-not (SteamIdle)};");
+        sb.Append("$deadline=(Get-Date).AddSeconds(").Append(SteamExitSeconds.ToString(inv)).Append(");");
+        sb.Append("while(-not (SteamIdle)){if((Get-Date) -ge $deadline){Note 'Steam wait timed out';exit 4};Start-Sleep -Seconds 2};");
         sb.Append("if(Up){exit 3};");
+        sb.Append("Note 'Steam idle; requesting launch';");
         sb.Append("Start-Process ").Append(u).Append(';');
         sb.Append("$t=(Get-Date).AddSeconds(").Append(AppearSeconds.ToString(inv)).Append(");");
         sb.Append("while((Get-Date) -lt $t -and -not (Up)){Start-Sleep -Seconds 2};");
