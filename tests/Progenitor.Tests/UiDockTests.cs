@@ -532,6 +532,32 @@ public sealed class UiDockTests : IDisposable
     }
 
     [Fact]
+    public void A_kit_panel_strip_is_its_narrow_ask_or_the_640_frame_on_each_canvas_and_its_row_stays_centered()
+    {
+        // A kit panel (not a game window) asking 20% of the screen: narrow at 1920 (384), the 640 frame at 3840 (768
+        // asked), where the runtime draws it at 640. The re-flow's dock must say the same on each canvas.
+        var kit = (UiPanelHandle)UiApi.Panel("Kit strip", _owner, "example.mod");
+        kit.Dock(UiDock.Top, new UiDockOptions { WidthFraction = 0.2f });
+        var dock = kit.EffectiveDock!.Value;
+        Assert.Equal(384f, UiDockLayout.FrameWidth(dock, 1920f), 2);
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(dock, 3840f), 2);
+        kit.Dock(UiDock.Bottom, new UiDockOptions { Width = 800f });
+        Assert.Equal(Basic, UiDockLayout.FrameWidth(kit.EffectiveDock!.Value, 1920f), 2);
+        // A game window with the same share is drawn wide, so it keeps it.
+        var wide = (UiPanelHandle)UiApi.Panel("Wide strip", _owner, "example.mod").GameWindow();
+        wide.Dock(UiDock.Top, new UiDockOptions { WidthFraction = 0.2f });
+        Assert.Equal(768f, UiDockLayout.FrameWidth(wide.EffectiveDock!.Value, 3840f), 2);
+
+        // Two centered strips at 3840: the kit one (drawn 640) and a 300 strip. No hole between them, and the row is
+        // centered, with each frame at the width the runtime draws it.
+        var row = new[] { dock, Top(width: 300f) };
+        var a = UiDockLayout.Place(row, 0, 3840f, 1080f, Basic);
+        var b = UiDockLayout.Place(row, 1, 3840f, 1080f, 300f);
+        Assert.Equal(PanelFlow.ColumnGap, (b.X - 150f) - (a.X + Basic * 0.5f), 3);
+        Assert.Equal(0f, ((a.X - Basic * 0.5f) + (b.X + 150f)) * 0.5f, 3);
+    }
+
+    [Fact]
     public void The_gallery_docked_panel_walks_the_edges_and_is_a_narrow_strip_on_top_and_bottom()
     {
         var lines = new List<string>();

@@ -108,7 +108,7 @@ public static class UiPlacement
 /// <summary>One docked panel's request, in panel units. Game-free.</summary>
 internal readonly struct UiDockSpec : IEquatable<UiDockSpec>
 {
-    internal UiDockSpec(UiDock side, UiDockAlign align, float margin, float width, float fraction, float offset = 0f)
+    internal UiDockSpec(UiDock side, UiDockAlign align, float margin, float width, float fraction, float offset = 0f, bool kitFrame = false)
     {
         Side = side;
         Align = align;
@@ -116,6 +116,7 @@ internal readonly struct UiDockSpec : IEquatable<UiDockSpec>
         Width = width;
         Fraction = fraction;
         Offset = offset;
+        KitFrame = kitFrame;
     }
 
     internal static UiDockSpec From(UiDock side, UiDockOptions o) =>
@@ -137,13 +138,22 @@ internal readonly struct UiDockSpec : IEquatable<UiDockSpec>
     /// <summary>The same dock with this frame width instead (a share of 0 and <paramref name="width"/> units; 0 is the kit frame).</summary>
     internal UiDockSpec WithWidth(float width) => new(Side, Align, Margin, Math.Max(0f, width), 0f, Offset);
 
+    /// <summary>
+    /// Drawn as a kit panel (not a game window): never wider than the 640 frame. A narrow strip's ask is kept; any ask
+    /// that comes to 640 or more on the canvas being laid out is the 640 frame (<see cref="UiDockLayout.FrameWidth"/>).
+    /// </summary>
+    internal bool KitFrame { get; }
+
+    /// <summary>The same dock, marked as a kit panel's (<see cref="KitFrame"/>).</summary>
+    internal UiDockSpec AsKitFrame() => new(Side, Align, Margin, Width, Fraction, Offset, kitFrame: true);
+
     public bool Equals(UiDockSpec other) =>
         Side == other.Side && Align == other.Align && Margin.Equals(other.Margin) && Width.Equals(other.Width)
-        && Fraction.Equals(other.Fraction) && Offset.Equals(other.Offset);
+        && Fraction.Equals(other.Fraction) && Offset.Equals(other.Offset) && KitFrame == other.KitFrame;
 
     public override bool Equals(object? obj) => obj is UiDockSpec other && Equals(other);
 
-    public override int GetHashCode() => HashCode.Combine((int)Side, (int)Align, Margin, Width, Fraction, Offset);
+    public override int GetHashCode() => HashCode.Combine((int)Side, (int)Align, Margin, Width, Fraction, Offset, KitFrame);
 }
 
 /// <summary>How a docked frame sits in its area's height: centered, hung from the top, or standing on the bottom.</summary>
@@ -244,13 +254,16 @@ internal static class UiDockLayout
     /// <summary>
     /// The frame width a dock is drawn at: the kit's 640 frame at least, a wide ask capped at 90% of the canvas. A top or
     /// bottom strip that asks for less than 640 is drawn at its ask, never below <see cref="MinStripWidth"/>
-    /// (<see cref="IsNarrowStrip"/>).
+    /// (<see cref="IsNarrowStrip"/>). A kit panel's dock (<see cref="UiDockSpec.KitFrame"/>) that is not narrow on this
+    /// canvas is the 640 frame.
     /// </summary>
     internal static float FrameWidth(in UiDockSpec dock, float canvasWidth)
     {
         float canvas = Sane(canvasWidth, PanelFlow.FallbackCanvasWidth);
         float asked = AskedWidth(dock, canvas);
         if (IsNarrowAsk(dock, asked)) return Math.Max(MinStripWidth, asked);
+        // A kit panel is drawn at 640 whatever wider it asked (a share that reaches 640 on this canvas included).
+        if (dock.KitFrame) return UiWindowLayout.BasicFrameWidth;
         return UiWindowLayout.FrameWidthFor(asked, canvas);
     }
 

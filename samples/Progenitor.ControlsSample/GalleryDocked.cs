@@ -5,7 +5,7 @@ namespace Progenitor.ControlsSample;
 
 /// <summary>
 /// The gallery's docked panel: a plain floating game window docked to the left edge (<c>panel.Dock(UiDock.Left)</c>),
-/// vertically centered, the way a preview's controls or a Find panel sit beside the scene. Its buttons move it round the
+/// vertically centered, the way a preview's controls or a Find panel sit beside the scene. Its buttons move it around the
 /// edges (left, right, top, bottom), step its alignment along the edge (center and top on a side; start, center and end
 /// on the top or bottom), and widen it to 30% of the screen on a side. On the top and bottom edges it is a narrow
 /// strip, 420 wide (it fits the gap in the middle of the game's container window), with no title band and as tall as
@@ -58,7 +58,7 @@ internal sealed class GalleryDocked : IDisposable
     private static bool Strip(UiDock side) => side is UiDock.Top or UiDock.Bottom;
 
     /// <summary>
-    /// The next edge round the screen: left, right, top, bottom. The alignment is kept when the new edge takes it. On the
+    /// The next edge around the screen: left, right, top, bottom. The alignment is kept when the new edge takes it. On the
     /// top and bottom edges it becomes a narrow strip (<see cref="StripWidth"/> wide, no title band, as tall as its rows).
     /// </summary>
     internal void NextEdge()

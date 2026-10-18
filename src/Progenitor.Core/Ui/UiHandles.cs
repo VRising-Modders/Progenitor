@@ -864,8 +864,10 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
 
     /// <summary>
     /// DOCK1: the dock the re-flow lays the other panels out around, with the width this panel's frame is really drawn at:
-    /// a standard window's own width, a game window's dock width (or its <see cref="GameWindowWidth"/>), a top or bottom
-    /// strip's asked width, else the kit frame.
+    /// a standard window's own width, a game window's dock width (or its <see cref="GameWindowWidth"/>), else the kit
+    /// frame. A kit panel docked as a top or bottom strip with a width ask keeps it, marked as a kit frame
+    /// (<see cref="UiDockSpec.KitFrame"/>): the layout draws it at that ask only while the ask is narrow on the canvas it
+    /// lays out on, and at 640 otherwise, as the runtime does.
     /// </summary>
     internal UiDockSpec? EffectiveDock
     {
@@ -874,8 +876,7 @@ internal sealed class UiPanelHandle : UiHandle, IUiPanel, IUiControlHost
             if (Dock is not { } d) return null;
             if (WindowWidth > 0f) return d.WithWidth(WindowWidth);
             if (IsGameWindow) return d.HasWidth ? d : d.WithWidth(GameWindowWidth);
-            // A kit panel docked as a top or bottom strip may be narrower than 640 (a narrow strip), never wider.
-            if (d.Horizontal && (d.Fraction > 0f || (d.Width > 0f && d.Width < UiWindowLayout.BasicFrameWidth))) return d;
+            if (d.Horizontal && d.HasWidth) return d.AsKitFrame();
             return d.WithWidth(0f);
         }
     }
