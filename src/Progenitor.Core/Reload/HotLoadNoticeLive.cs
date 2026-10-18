@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.Loader;
@@ -12,7 +13,8 @@ namespace Progenitor.Reload;
 /// <c>Unload</c> report reload-folder plugins here; once a frame this polls <see cref="HotLoadNotices"/> with Bootstrap's
 /// last Core reload and sends the line it settles on: on a client, a System line in Progenitor's chat ([Chat]
 /// HotLoadMessages); on a server, a System line to every connected player ([HotLoad] Announce in the server's
-/// progenitor.cfg). The model's state crosses a Core swap as one plain string in the process's AppDomain data.
+/// progenitor.cfg), rate-limited by <see cref="HotLoadBroadcastLimiter"/>. The model's state crosses a Core swap as one
+/// plain string in the process's AppDomain data.
 /// </summary>
 internal static class HotLoadNoticeLive
 {
@@ -27,6 +29,7 @@ internal static class HotLoadNoticeLive
     private static readonly object Gate = new();
     private static readonly Stopwatch Clock = Stopwatch.StartNew();
     private static HotLoadNotices? _model;
+    private static HotLoadBroadcastLimiter _broadcasts = new();
     private static ConfigEntry<bool>? _announce;
     private static double _nextPoll;
     private static bool _installed;
@@ -51,7 +54,13 @@ internal static class HotLoadNoticeLive
         }
         catch { carried = null; }
 
-        lock (Gate) _model = new HotLoadNotices(Now(), Plugin.Version, carried);
+        HotLoadNotices model;
+        lock (Gate)
+        {
+            _model = model = new HotLoadNotices(Now(), Plugin.Version, carried);
+            _broadcasts = new HotLoadBroadcastLimiter();
+        }
+
         if (Plugin.IsServerProcess)
         {
             Config.SharedConfig.BindWhenAvailable("[" + Section + "]", file =>
@@ -64,7 +73,7 @@ internal static class HotLoadNoticeLive
 
         Plugin.Frame -= OnFrame;
         Plugin.Frame += OnFrame;
-        Plugin.Logger?.LogInfo("HotLoad: installed (" + (carried == null ? "process start: the first loads are not announced" : "after a Core swap") + ").");
+        Plugin.Logger?.LogInfo("HotLoad: installed (" + (model.InStartup ? "process start: the first loads are not announced" : "after a Core swap") + ").");
     }
 
     internal static void Uninstall()
@@ -76,6 +85,8 @@ internal static class HotLoadNoticeLive
         {
             model = _model;
             _model = null;
+            // A server line still waiting for the broadcast gap is said by the next generation.
+            if (model != null && _broadcasts.Pending) model.CarryForward(_broadcasts.TakePending());
         }
 
         if (model != null)
@@ -93,41 +104,55 @@ internal static class HotLoadNoticeLive
     // ---- plugin events (ProgenitorPlugin) ---------------------------------------------------------------------
 
     internal static void NoteLoaded(Type pluginType, string id, string name, string version) =>
-        Note(pluginType, m => m.Loaded(id, name, version, Now(), Cascade(), Silent()));
+        Note(pluginType, (m, cascade, silent) => m.Loaded(id, name, version, Now(), cascade, silent));
 
     internal static void NoteFailed(Type pluginType, string id, string name, string version) =>
-        Note(pluginType, m => m.Failed(id, name, version, Now(), Cascade(), Silent()));
+        Note(pluginType, (m, cascade, silent) => m.Failed(id, name, version, Now(), cascade, silent));
 
     internal static void NoteUnloaded(Type pluginType, string id, string name, string version, PluginUnloadReason reason) =>
-        Note(pluginType, m => m.Unloaded(id, name, version, reason, Now(), Cascade(), Silent()));
+        Note(pluginType, (m, cascade, silent) => m.Unloaded(id, name, version, reason, Now(), cascade, silent));
 
-    private static void Note(Type pluginType, Action<HotLoadNotices> apply)
+    private static void Note(Type pluginType, Action<HotLoadNotices, bool, bool> apply)
     {
         try
         {
             // Reload-folder plugins only: each loads into its own collectible context. A chainloader plugin never reloads.
             if (!(AssemblyLoadContext.GetLoadContext(pluginType.Assembly)?.IsCollectible ?? false)) return;
+            bool cascade = Cascade();
+            bool silent = Joining();
             lock (Gate)
-                if (_model != null) apply(_model);
+                if (_model != null) apply(_model, cascade, silent);
         }
         catch (Exception e) { Plugin.Logger?.LogWarning("HotLoad: a plugin event was not noted: " + e.Message); }
     }
 
+    /// <summary>
+    /// The cascade decision (<see cref="HotLoadCoreStatus.IsCascade"/>) on the raw probe answer and status line:
+    /// <c>CoreLoader.IsReloading</c> already reads false while the swap unloads and reloads the plugins, the status's
+    /// <c>scheduled</c> outcome does not.
+    /// </summary>
     private static bool Cascade()
     {
-        try { return CoreSwapProbe.Probe(null) == CoreSwapProbeResult.InFlight; }
-        catch { return false; }
+        bool probe;
+        try { probe = CoreSwapProbe.Probe(null) == CoreSwapProbeResult.InFlight; }
+        catch { probe = false; }
+        return HotLoadCoreStatus.IsCascade(probe, ReadStatusLine(), DateTime.UtcNow);
     }
 
-    /// <summary>A client between its connect and the handshake answer: the join's own loads are not hot loads.</summary>
-    private static bool Silent()
+    /// <summary>
+    /// A client between its connect and the handshake answer, on a server with Progenitor (a server without it never
+    /// answers: once the client knows that, it is not joining any more).
+    /// </summary>
+    private static bool Joining()
     {
         if (Plugin.IsServerProcess) return false;
         try
         {
-            return Worlds.Client is { IsCreated: true }
-                && Networking.Handshake.ClientConnectionHeld
-                && !string.Equals(Networking.Handshake.LastClientResult, "ok", StringComparison.Ordinal);
+            return HotLoadNoticeText.JoinInProgress(
+                Worlds.Client is { IsCreated: true },
+                Networking.Handshake.ClientConnectionHeld,
+                Networking.Handshake.LastClientResult,
+                Networking.JoinFlowClient.JoinedWithoutProgenitor);
         }
         catch { return false; }
     }
@@ -139,11 +164,21 @@ internal static class HotLoadNoticeLive
         double now = Now();
         if (now < _nextPoll) return;
         _nextPoll = now + PollSeconds;
-        string? line;
+        List<HotLoadSentence>? sentences;
+        string? broadcast = null;
         try
         {
             var status = ReadStatus();
-            lock (Gate) line = _model?.Poll(now, status);
+            bool hold = Joining();
+            lock (Gate)
+            {
+                sentences = _model?.PollSentences(now, status, hold);
+                if (Plugin.IsServerProcess)
+                {
+                    if (sentences != null) _broadcasts.Offer(sentences);
+                    broadcast = _broadcasts.Take(now);
+                }
+            }
         }
         catch (Exception e)
         {
@@ -151,27 +186,14 @@ internal static class HotLoadNoticeLive
             return;
         }
 
-        if (line != null) Send(line);
-    }
-
-    private static void Send(string line)
-    {
         if (Plugin.IsServerProcess)
         {
-            string text = HotLoadNoticeText.ServerLine(line);
-            if (!Announce)
-            {
-                Plugin.Logger?.LogInfo("HotLoad: " + line + " (not announced: [HotLoad] Announce is off)");
-                return;
-            }
-
-            int sent = 0;
-            try { sent = Progenitor.Chat.Chat.Broadcast(text); }
-            catch (Exception e) { Plugin.Logger?.LogWarning("HotLoad: the broadcast threw: " + e.Message); }
-            Plugin.Logger?.LogInfo("HotLoad: " + line + " (sent to " + sent + " player" + (sent == 1 ? "" : "s") + ")");
+            if (broadcast != null) SendServer(broadcast);
             return;
         }
 
+        string? line = sentences == null ? null : HotLoadNoticeText.Join(sentences);
+        if (line == null) return;
         bool shown = false;
         string why = "";
         try { shown = Progenitor.Chat.ChatView.AddHotLoadLine(line, out why); }
@@ -179,18 +201,38 @@ internal static class HotLoadNoticeLive
         Plugin.Logger?.LogInfo("HotLoad: " + line + (shown ? " (shown in chat)" : " (not shown: " + why + ")"));
     }
 
-    /// <summary>Bootstrap's <c>CoreReloadStatus.FormatLastReload()</c> and <c>CoreLoader.IsReloading</c>; null without Bootstrap.</summary>
-    private static HotLoadCoreStatus? ReadStatus()
+    private static void SendServer(string line)
+    {
+        if (!Announce)
+        {
+            Plugin.Logger?.LogInfo("HotLoad: " + line + " (not announced: [HotLoad] Announce is off)");
+            return;
+        }
+
+        int sent = 0;
+        try { sent = Progenitor.Chat.Chat.Broadcast(HotLoadNoticeText.ServerLine(line)); }
+        catch (Exception e) { Plugin.Logger?.LogWarning("HotLoad: the broadcast threw: " + e.Message); }
+        Plugin.Logger?.LogInfo("HotLoad: " + line + " (sent to " + sent + " player" + (sent == 1 ? "" : "s") + ")");
+    }
+
+    /// <summary>Bootstrap's <c>CoreReloadStatus.FormatLastReload()</c>, or null without Bootstrap.</summary>
+    private static string? ReadStatusLine()
     {
         var method = FormatLastReload();
         if (method == null) return null;
-        string? text;
-        try { text = method.Invoke(null, Array.Empty<object>()) as string; }
+        try { return method.Invoke(null, Array.Empty<object>()) as string; }
         catch { return null; }
+    }
+
+    /// <summary>The status line with <c>CoreLoader.IsReloading</c>; null without Bootstrap.</summary>
+    private static HotLoadCoreStatus? ReadStatus()
+    {
+        string? text = ReadStatusLine();
+        if (text == null) return null;
         bool inFlight;
         try { inFlight = CoreSwapProbe.Probe(null) == CoreSwapProbeResult.InFlight; }
         catch { inFlight = false; }
-        return HotLoadCoreStatus.Parse(text, inFlight);
+        return HotLoadCoreStatus.Parse(text, inFlight, DateTime.UtcNow);
     }
 
     private static MethodInfo? FormatLastReload()

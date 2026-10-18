@@ -11,6 +11,11 @@ public sealed class HotLoadNoticeTests
 {
     private const string Core = "2026.10.85";
 
+    private static readonly System.DateTime Now = new(2026, 10, 17, 10, 0, 30, System.DateTimeKind.Utc);
+
+    private static string Line(string outcome, string reason = "watch", string stamp = "2026-10-17T10:00:00.0000000Z") =>
+        "lastReload gen=2 outcome=" + outcome + " reason=" + reason + " timestamp=" + stamp;
+
     private static HotLoadCoreStatus Status(string outcome, string timestamp, string reason = "watch", bool inFlight = false) =>
         new() { Outcome = outcome, Timestamp = timestamp, Reason = reason, InFlight = inFlight };
 
@@ -201,13 +206,13 @@ public sealed class HotLoadNoticeTests
     [Fact]
     public void The_status_line_parses_with_spaces_in_the_reason()
     {
-        var s = HotLoadCoreStatus.Parse("lastReload gen=3 outcome=ok reason=self-update 2026.10.85 now timestamp=2026-10-17T10:00:00.0000000Z", false)!;
+        var s = HotLoadCoreStatus.Parse("lastReload gen=3 outcome=ok reason=self-update 2026.10.85 now timestamp=2026-10-17T10:00:00.0000000Z", false, Now)!;
         Assert.Equal("ok", s.Outcome);
         Assert.Equal("self-update 2026.10.85 now", s.Reason);
         Assert.Equal("2026-10-17T10:00:00.0000000Z", s.Timestamp);
         Assert.False(s.InFlight);
-        Assert.True(HotLoadCoreStatus.Parse("lastReload gen=3 outcome=scheduled reason= timestamp=", false)!.InFlight);
-        Assert.Null(HotLoadCoreStatus.Parse("nonsense", false));
+        Assert.True(HotLoadCoreStatus.Parse("lastReload gen=3 outcome=scheduled reason= timestamp=", false, Now)!.InFlight);
+        Assert.Null(HotLoadCoreStatus.Parse("nonsense", false, Now));
     }
 
     [Fact]
@@ -222,14 +227,17 @@ public sealed class HotLoadNoticeTests
     }
 
     [Theory]
-    [InlineData("Server: Satisvampory reloaded (2.0.0).", true)]
-    [InlineData("Server: Progenitor updated to 2026.10.85. Progenitor Dev reloaded (2026.10.85).", true)]
-    [InlineData("Server: HuntsAndRifts removed.", true)]
-    [InlineData("Server: Satisvampory failed to update; the previous version keeps running.", true)]
-    [InlineData("Server: A reloaded (1.0.0). 3 more mods changed.", true)]
+    [InlineData("Server hot load: Satisvampory reloaded (2.0.0).", true)]
+    [InlineData("Server hot load: Progenitor updated to 2026.10.85. Progenitor Dev reloaded (2026.10.85).", true)]
+    [InlineData("Server hot load: HuntsAndRifts removed.", true)]
+    [InlineData("Server hot load: Satisvampory failed to update; the previous version keeps running.", true)]
+    [InlineData("Server hot load: A reloaded (1.0.0). 3 more mods changed.", true)]
     [InlineData("Satisvampory reloaded (2.0.0).", false)]
-    [InlineData("Server: restarting in 5 minutes.", false)]
-    [InlineData("Server: Satisvampory reloaded (2.0.0)", false)]
+    // Another mod's server notice that happens to read like one is left alone.
+    [InlineData("Server: HuntsAndRifts removed.", false)]
+    [InlineData("Castle removed.", false)]
+    [InlineData("Server hot load: restarting in 5 minutes.", false)]
+    [InlineData("Server hot load: Satisvampory reloaded (2.0.0)", false)]
     [InlineData("", false)]
     public void The_client_recognizes_a_servers_hot_load_line(string text, bool expected) =>
         Assert.Equal(expected, HotLoadNoticeText.IsServerNotice(text));
@@ -243,5 +251,89 @@ public sealed class HotLoadNoticeTests
         m.Failed("x", "X Mod", "1.0.0", t, cascade: false, silent: false);
         string line = m.Poll(t + 2, Idle)!;
         Assert.True(HotLoadNoticeText.IsServerNotice(HotLoadNoticeText.ServerLine(line)), line);
+    }
+
+    [Fact]
+    public void A_scheduled_status_is_the_cascade_even_when_the_probe_reads_idle()
+    {
+        // CoreLoader.IsReloading reads false while the swap unloads and reloads plugins; the status line still says scheduled.
+        Assert.True(HotLoadCoreStatus.IsCascade(false, Line("scheduled"), Now));
+        Assert.True(HotLoadCoreStatus.IsCascade(true, null, Now));
+        Assert.False(HotLoadCoreStatus.IsCascade(false, Line("ok"), Now));
+        Assert.False(HotLoadCoreStatus.IsCascade(false, null, Now));
+        // A scheduled status that never got its result does not silence plugin events for good.
+        Assert.False(HotLoadCoreStatus.IsCascade(false, Line("scheduled", stamp: "2026-10-17T09:50:00.0000000Z"), Now));
+
+        // The decision fed into a whole Core deploy: no "failed to reload", no "reloaded" per plugin.
+        var old = Running(out double t);
+        bool cascade = HotLoadCoreStatus.IsCascade(false, Line("scheduled"), Now);
+        old.Unloaded("satis", "Satisvampory", "2.0.0", PluginUnloadReason.Swap, t, cascade, silent: false);
+        old.Unloaded("hunts", "HuntsAndRifts", "1.1.0", PluginUnloadReason.Swap, t, cascade, silent: false);
+        var m = new HotLoadNotices(100, Core, old.Save(t));
+        cascade = HotLoadCoreStatus.IsCascade(false, Line("scheduled"), Now);
+        m.Loaded("satis", "Satisvampory", "2.0.0", 100.2, cascade, silent: false);
+        m.Loaded("hunts", "HuntsAndRifts", "1.1.0", 100.2, cascade, silent: false);
+        Assert.Null(m.Poll(101, HotLoadCoreStatus.Parse(Line("scheduled"), false, Now)));
+        var done = HotLoadCoreStatus.Parse(Line("ok", stamp: "2026-10-17T10:00:20.0000000Z"), false, Now);
+        Assert.Equal("Progenitor reloaded (" + Core + ").", m.Poll(106, done));
+    }
+
+    [Fact]
+    public void A_line_waits_while_a_join_runs_but_not_on_a_server_without_Progenitor()
+    {
+        var m = Running(out double t);
+        Swap(m, "satis", "Satisvampory", "2.0.1", t);
+        Assert.Null(m.Poll(t + 2, Idle, holdForJoin: true));
+        Assert.Null(m.Poll(t + 20, Idle, holdForJoin: true));
+        Assert.Equal("Satisvampory updated to 2.0.1.", m.Poll(t + 21, Idle, holdForJoin: false));
+
+        Assert.True(HotLoadNoticeText.JoinInProgress(inWorld: true, connectionHeld: true, handshakeResult: null, serverWithoutProgenitor: false));
+        Assert.False(HotLoadNoticeText.JoinInProgress(true, true, "ok", false));
+        // A vanilla server never answers the handshake: once that is known, the client is not joining any more.
+        Assert.False(HotLoadNoticeText.JoinInProgress(true, true, null, serverWithoutProgenitor: true));
+        Assert.False(HotLoadNoticeText.JoinInProgress(false, true, null, false));
+    }
+
+    [Fact]
+    public void Server_broadcasts_wait_for_their_gap_merge_by_mod_and_skip_recent_repeats()
+    {
+        var limit = new HotLoadBroadcastLimiter();
+        limit.Offer(new[] { new HotLoadSentence("A", "A reloaded (1.0.0).") });
+        Assert.Equal("A reloaded (1.0.0).", limit.Take(0));
+
+        limit.Offer(new[] { new HotLoadSentence("A", "A reloaded (1.0.0).") });
+        Assert.Null(limit.Take(10));
+        // The same news inside three minutes: dropped.
+        Assert.Null(limit.Take(31));
+        Assert.False(limit.Pending);
+
+        limit.Offer(new[] { new HotLoadSentence("A", "A updated to 2.0.0."), new HotLoadSentence("B", "B removed.") });
+        limit.Offer(new[] { new HotLoadSentence("A", "A updated to 3.0.0.") });
+        Assert.Equal("B removed. A updated to 3.0.0.", limit.Take(45));
+        Assert.Null(limit.Take(60));
+
+        limit.Offer(new[] { new HotLoadSentence("A", "A reloaded (1.0.0).") });
+        Assert.Equal("A reloaded (1.0.0).", limit.Take(200));
+    }
+
+    [Fact]
+    public void A_dry_run_swap_says_nothing()
+    {
+        var old = Running(out double t);
+        var m = new HotLoadNotices(100, Core, old.Save(t));
+        m.Loaded("satis", "Satisvampory", "2.0.0", 100.2, cascade: true, silent: false);
+        var dry = HotLoadCoreStatus.Parse(Line("ok", reason: "core_reload dryRun", stamp: "2026-10-17T10:00:20.0000000Z"), false, Now);
+        Assert.Null(m.Poll(106, dry));
+        Assert.Null(m.Poll(110, dry));
+        Assert.False(m.Pending);
+    }
+
+    [Fact]
+    public void State_of_another_format_starts_as_at_process_start()
+    {
+        var m = new HotLoadNotices(0, Core, "v0\ncore\t2026.10.80\nknown\tsatis\tSatisvampory\t2.0.0\n");
+        Assert.True(m.InStartup);
+        Assert.Null(m.KnownVersion("satis"));
+        Assert.Null(m.Poll(10, Idle));
     }
 }

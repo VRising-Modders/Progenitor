@@ -128,7 +128,7 @@ internal static class ProgenitorPage
                 help: "Their lines are left out of your chat. Right-click one of their lines to mute or unmute.")
             .SettingRef("Chat", "HotLoadMessages", label: "Show mod reload messages", control: SettingControl.Toggle,
                 help: "A System line when Progenitor or a mod loads, reloads or is removed while you play, on your PC or on the "
-                    + "server (\"Satisvampory reloaded (2.0.0).\"). Off hides both.")
+                    + "server (\"MyMod reloaded (2.0.0).\"). Off hides both.")
             .SettingRef("Chat", "ReplyShortcut", label: "/r replies to the last whisper", control: SettingControl.Toggle,
                 help: "Typing /r at the start of a chat line becomes the game's /reply.")
             .SettingRef("Chat", "NameCompletion", label: "Tab completes names after /w", control: SettingControl.Toggle,

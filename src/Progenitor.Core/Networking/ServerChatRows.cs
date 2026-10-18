@@ -122,7 +122,7 @@ internal static class ServerChatOptions
     internal const string HotLoadAnnounceLabel = "Announce mod reloads";
     internal const string HotLoadAnnounceHelp =
         "Tells everyone online in chat when Progenitor or a mod loads, reloads or is removed while the server runs, such as "
-        + "\"Server: Satisvampory reloaded (2.0.0).\" Players can hide these lines in their own chat settings.";
+        + "\"Server hot load: MyMod reloaded (2.0.0).\" Players can hide these lines in their own chat settings.";
 
     /// <summary>The server-only rows' operations, in page order.</summary>
     internal static readonly IReadOnlyList<string> AdminOps = new[]
