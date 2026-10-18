@@ -144,6 +144,11 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     private int _keptFrames;
     private int _pendingFits;
 
+    // Attach order: containers on one stacking anchor (the edge columns, the title rows) line up in this order, so
+    // two plugins' containers on one edge never draw in one spot. Process-wide and only ever increasing.
+    private static long s_nextOrder;
+    private int _stackVersion = int.MinValue;
+
     internal VanillaAttachHandle(
         VanillaUiSite site,
         string pluginId,
@@ -163,7 +168,15 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         Enabled = enabled;
         Anchor = anchor;
         IsPanel = VanillaUiSites.IsPanel(site);
+        Order = Interlocked.Increment(ref s_nextOrder);
     }
+
+    /// <summary>
+    /// When this handle was attached, relative to every other (lower is earlier). Containers on a stacking anchor
+    /// (<see cref="VanillaUiSites.Stacks"/>) line up in this order: an edge column under the ones attached before it, a
+    /// title-row container beyond them.
+    /// </summary>
+    internal long Order { get; }
 
     public VanillaUiSite Site { get; }
 
@@ -618,6 +631,13 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         }
 
         _container = container;
+        if (IsPanel)
+        {
+            // Before the first fit: the runtime stacks this container behind the ones attached earlier.
+            try { _runtime.SetAttachOrder(container, Order); }
+            catch { /* unstacked is the old behavior, not a broken container */ }
+        }
+
         _instanceId = sample.InstanceId;
         _warnedContainer = false;
         _withheld = "";
@@ -675,6 +695,20 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     {
         if (_fit == VanillaFit.Blocked && !VanillaUiSites.IsEdge(Anchor) && !_fitRetry) return false;
         if (_fitDirty) return true;
+
+        // A container stacked on this anchor moved, appeared or went: line up behind it on this frame, not 30 later.
+        if (IsPanel && VanillaUiSites.Stacks(Anchor))
+        {
+            int v;
+            try { v = _runtime.AttachStackVersion(Site, Anchor); }
+            catch { v = _stackVersion; }
+            if (v != _stackVersion)
+            {
+                _stackVersion = v;
+                return true;
+            }
+        }
+
         if (++_keptFrames < RefitEvery) return false;
         _keptFrames = 0;
         return true;
@@ -691,6 +725,13 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
         {
             Plugin.Logger?.LogWarning("Ui: attach " + VanillaUiSites.Key(Site) + " fit threw: " + e.Message);
             result = new VanillaFitResult(VanillaFit.Blocked, "threw");
+        }
+
+        // What this fit already lined up behind (read after it, so its own placement does not ask for another).
+        if (IsPanel && VanillaUiSites.Stacks(Anchor))
+        {
+            try { _stackVersion = _runtime.AttachStackVersion(Site, Anchor); }
+            catch { /* the next change asks again */ }
         }
 
         if (result.Settling)
@@ -870,6 +911,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
                 RowIndents = _specs.ConvertAll(r => r.Indent).ToArray(),
                 RowHints = HintReadbackLocked(),
                 Container = attached ? _container : null,
+                Order = Order,
             };
         }
     }
@@ -1398,6 +1440,9 @@ internal sealed class VanillaAttachReadback
     /// <summary>The requirement line of a per-line attachment, else -1.</summary>
     internal int RequirementLine { get; init; } = -1;
 
+    /// <summary>The handle's attach order (<see cref="VanillaAttachHandle.Order"/>).</summary>
+    internal long Order { get; init; }
+
     /// <summary>The game-free part of the readback.</summary>
     internal Dictionary<string, object?> Describe()
     {
@@ -1438,6 +1483,7 @@ internal sealed class VanillaAttachReadback
             ["rows"] = new List<string>(Rows),
             ["rowTones"] = Array.ConvertAll(RowTones, t => LabelTones.Name(t)),
             ["rowIndents"] = RowIndents,
+            ["order"] = Order,
         };
         bool anyHint = false;
         foreach (var h in RowHints) anyHint |= h != null;

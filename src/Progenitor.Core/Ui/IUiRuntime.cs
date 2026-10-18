@@ -710,6 +710,19 @@ internal interface IUiRuntime
     VanillaFitResult FitAttachContainer(
         VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons) =>
         VanillaFitResult.Unknown;
+
+    /// <summary>
+    /// P6: the attach order of the handle that owns <paramref name="container"/> (lower is earlier), given right after
+    /// the build and before the first fit. On a stacking anchor (<see cref="VanillaUiSites.Stacks"/>) the fit lines the
+    /// container up behind every live container of the same site and anchor with a lower order. Must never throw.
+    /// </summary>
+    void SetAttachOrder(IRuntimeWidget container, long order) { }
+
+    /// <summary>
+    /// P6: a number that changes whenever a stacked container of <paramref name="site"/> and <paramref name="anchor"/>
+    /// is placed somewhere new, shown, hidden or released, so the containers stacked behind it refit on the next frame.
+    /// </summary>
+    int AttachStackVersion(VanillaUiSite site, VanillaPanelAnchor anchor) => 0;
 }
 
 /// <summary>One cloned widget (or a fake). Handle property writes go through here.</summary>

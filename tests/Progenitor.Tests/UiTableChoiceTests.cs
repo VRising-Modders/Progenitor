@@ -424,4 +424,37 @@ public sealed class UiTableChoiceTests : IDisposable
         // The stroke: about 2 of 22 pixels, as the game's rename pencil.
         Assert.InRange(UiDrawnMarkArt.LogStroke * 2f * 22f, 1.8f, 2.2f);
     }
+
+    [Fact]
+    public void The_settings_mark_is_a_cog_outline_in_the_log_stroke_and_a_drawn_button_icon()
+    {
+        var mark = UiDrawnMark.SettingsMark;
+        Assert.True(mark.IsIcon);
+        Assert.Equal("settings", mark.Name);
+        Assert.True(UiDrawnMark.TryParse("settings", out var parsed) && parsed.Equals(mark));
+        Assert.False(UiDrawnMark.TryParse("settings:1", out _));
+        Assert.Equal(UiDrawnMark.SettingsMark, UiDataTableLayout.MarkOf(UiRowActionIcon.Settings));
+        Assert.Equal("mark:settings", VanillaButtonIcon.Drawn("settings").ToString());
+        int n = UiDrawnMarkArt.TextureHeight;
+        Assert.Equal((n, n), UiDrawnMarkArt.TextureSize(mark));
+
+        // Alpha at a point given in shares of the texture from its center (x right, y up).
+        float At(float dx, float dy) => UiDrawnMarkArt.Alpha(mark, (int)Math.Floor((0.5f + dx) * n), (int)Math.Floor((0.5f + dy) * n));
+        float Polar(float r, double degrees) => At(r * (float)Math.Cos(degrees * Math.PI / 180), r * (float)Math.Sin(degrees * Math.PI / 180));
+
+        Assert.True(Polar(UiDrawnMarkArt.CogTip, 90) > 0.5f, "the top tooth's tip");
+        Assert.True(Polar(UiDrawnMarkArt.CogTip, 150) > 0.5f, "the next tooth's tip, 60 degrees on");
+        Assert.True(Polar(UiDrawnMarkArt.CogBody, 120) > 0.5f, "the body's rim between two teeth");
+        Assert.True(Polar(UiDrawnMarkArt.CogTip, 120) < 0.1f, "open between two teeth");
+        Assert.True(Polar((UiDrawnMarkArt.CogBody + UiDrawnMarkArt.CogTip) / 2, 90) < 0.1f, "a tooth is an outline, hollow inside");
+        Assert.True(Polar(UiDrawnMarkArt.CogHub, 0) > 0.5f, "the hub ring");
+        Assert.True(At(0, 0) < 0.1f, "the hub is open");
+        Assert.True(Polar((UiDrawnMarkArt.CogHub + UiDrawnMarkArt.CogBody) / 2, 45) < 0.1f, "between the hub and the rim");
+        Assert.True(UiDrawnMarkArt.Alpha(mark, 1, 1) < 0.1f, "the corner is empty");
+        Assert.Equal(6, UiDrawnMarkArt.CogTeeth);
+
+        // Six-fold: every tooth is the same.
+        for (int k = 0; k < UiDrawnMarkArt.CogTeeth; k++)
+            Assert.True(Polar(UiDrawnMarkArt.CogTip, 90 + 60 * k) > 0.5f, "tooth " + k);
+    }
 }

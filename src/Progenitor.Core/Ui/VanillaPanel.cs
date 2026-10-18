@@ -77,6 +77,16 @@ public enum VanillaPanelAnchor
     /// tooltip, <see cref="TooltipBody"/> rows stay above them.
     /// </summary>
     TooltipFooter = 9,
+
+    /// <summary>
+    /// Mod icon buttons in a window's own row of small icon buttons, beside the game's buttons there, at their size and
+    /// in their art. On <see cref="VanillaUiSite.CastleHeartPanel"/> that is the castle heart window's top-right row
+    /// (<c>CastleHeartLevelPanel.AbandonButton</c> and <c>ExposeButton</c>, 42 x 42 on game build 1.1.13.0): the row is
+    /// anchored to the window's right edge, so the mod buttons are placed left of the game's first button, by the
+    /// row's own spacing, and the game's buttons never move. Several containers on the row stack leftward in attach
+    /// order. Buttons only; a button given an icon is always a square icon button the row's height.
+    /// </summary>
+    BesideTitleButtons = 10,
 }
 
 /// <summary>
@@ -236,7 +246,8 @@ public readonly struct VanillaButtonIcon : IEquatable<VanillaButtonIcon>
     /// <summary>
     /// The framework's drawn mark shown when there is no game icon: <c>chest</c> (the default),
     /// <c>check</c>, <c>up</c>, <c>down</c>, <c>remove</c>, <c>grip</c>, <c>locate</c>, <c>eye</c>, <c>block</c> (a circle with
-    /// a slash) or <c>log</c> (a page with lines, to sit beside the game's rename pencil).
+    /// a slash), <c>log</c> (a page with lines, to sit beside the game's rename pencil) or <c>settings</c> (a cog, in the
+    /// log's stroke).
     /// </summary>
     public string Mark { get; }
 
@@ -928,6 +939,9 @@ internal enum BesideSlot
 
     /// <summary>Centered above the reference control.</summary>
     Above = 2,
+
+    /// <summary>Left of the group's first visible member (or of the container stacked there before it), on its row.</summary>
+    Before = 3,
 }
 
 /// <summary>
@@ -1119,7 +1133,25 @@ internal static class VanillaPanelPlacement
         float width,
         float height,
         in UiRect bounds,
-        IReadOnlyList<UiObstacle>? obstacles)
+        IReadOnlyList<UiObstacle>? obstacles) =>
+        PlaceEdge(anchor, panel, gridTop, width, height, bounds, obstacles, null, DefaultSpacing);
+
+    /// <summary>
+    /// <see cref="PlaceEdge(VanillaPanelAnchor, in UiRect, float?, float, float, in UiRect, IReadOnlyList{UiObstacle}?)"/>
+    /// under the columns placed on the same edge before it (<paramref name="earlier"/>, in attach order),
+    /// <paramref name="spacing"/> below the lowest (<see cref="StackedEdgeTop"/>): two plugins' columns on one edge stack
+    /// instead of drawing in one spot.
+    /// </summary>
+    internal static VanillaFitResult PlaceEdge(
+        VanillaPanelAnchor anchor,
+        in UiRect panel,
+        float? gridTop,
+        float width,
+        float height,
+        in UiRect bounds,
+        IReadOnlyList<UiObstacle>? obstacles,
+        IReadOnlyList<UiRect>? earlier,
+        float spacing)
     {
         if (anchor != VanillaPanelAnchor.LeftEdge && anchor != VanillaPanelAnchor.RightEdge)
             return new VanillaFitResult(VanillaFit.Blocked, "anchor");
@@ -1130,6 +1162,7 @@ internal static class VanillaPanelPlacement
         float top = gridTop.HasValue && gridTop.Value <= panel.YMax && gridTop.Value >= panel.Y
             ? gridTop.Value
             : panel.YMax;
+        top = StackedEdgeTop(top, earlier, spacing);
         float x = anchor == VanillaPanelAnchor.LeftEdge ? panel.X - EdgeGap - width : panel.XMax + EdgeGap;
         var rect = new UiRect(x, top - height, width, height);
         if (rect.IsEmpty) return new VanillaFitResult(VanillaFit.Fits, "empty", rect);
@@ -1239,6 +1272,74 @@ internal static class VanillaPanelPlacement
     }
 
     private static VanillaFitResult Placed(in VanillaFitResult r) => new(r.Fit, r.Reason, r.Rect, retry: true);
+
+    /// <summary>
+    /// A positioned inline container left of <paramref name="reference"/> (the row's first visible member, or the
+    /// container stacked there before this one) by <paramref name="spacing"/>, centered on its row: the slot of a row
+    /// anchored to the window's right edge (<see cref="VanillaPanelAnchor.BesideTitleButtons"/>). All in one space.
+    /// </summary>
+    internal static UiRect PlaceBefore(in UiRect reference, float spacing, float width, float height)
+    {
+        float sp = spacing < 0 ? 0 : spacing;
+        float centerY = reference.Y + reference.Height * 0.5f;
+        return new UiRect(reference.X - sp - width, centerY - height * 0.5f, width, height);
+    }
+
+    /// <summary>
+    /// The <see cref="BesideSlot.Before"/> slot of a placed row (<see cref="PlaceBefore"/>), checked like the after slot:
+    /// inside <paramref name="frame"/> and over no obstacle. There is no second slot and no icon fallback: a row placed
+    /// here is a row of icon buttons already (<see cref="VanillaUiSites.IconAlways"/>).
+    /// </summary>
+    internal static VanillaFitResult PlaceBeforeRow(
+        in UiRect reference, float spacing, float width, float height,
+        in UiRect frame, IReadOnlyList<UiObstacle>? obstacles, out BesideSlot slot)
+    {
+        var rect = PlaceBefore(reference, spacing, width, height);
+        var verdict = CheckPlaced(rect, frame, obstacles);
+        slot = verdict.Fit == VanillaFit.Fits ? BesideSlot.Before : BesideSlot.None;
+        return Placed(verdict);
+    }
+
+    /// <summary>
+    /// The rect a stacked inline container is placed beside: the row's own member (<paramref name="member"/>), or the
+    /// outermost of the containers placed on the same anchor before it (<paramref name="earlier"/>), so containers from
+    /// several plugins line up in attach order instead of drawing in one spot. <paramref name="before"/> stacks leftward
+    /// (the outermost is the leftmost), else rightward. Empty rects are skipped.
+    /// </summary>
+    internal static UiRect StackReference(in UiRect member, IReadOnlyList<UiRect>? earlier, bool before)
+    {
+        var best = member;
+        if (earlier == null) return best;
+        for (int i = 0; i < earlier.Count; i++)
+        {
+            var r = earlier[i];
+            if (r.IsEmpty) continue;
+            if (best.IsEmpty || (before ? r.X < best.X : r.XMax > best.XMax)) best = r;
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// The top of an edge column stacked under the columns placed on the same edge before it (<paramref name="earlier"/>,
+    /// in the same space): <paramref name="spacing"/> below the lowest of them, else <paramref name="top"/> (the
+    /// column's own top: the item grid's, or the frame's). Empty rects are skipped, so a hidden column leaves no gap.
+    /// </summary>
+    internal static float StackedEdgeTop(float top, IReadOnlyList<UiRect>? earlier, float spacing)
+    {
+        if (earlier == null) return top;
+        float sp = spacing < 0 ? 0 : spacing;
+        float t = top;
+        for (int i = 0; i < earlier.Count; i++)
+        {
+            var r = earlier[i];
+            if (r.IsEmpty) continue;
+            float below = r.Y - sp;
+            if (below < t) t = below;
+        }
+
+        return t;
+    }
 
     /// <summary>
     /// A placed row of <paramref name="buttons"/> captioned buttons, in the order the rule tries

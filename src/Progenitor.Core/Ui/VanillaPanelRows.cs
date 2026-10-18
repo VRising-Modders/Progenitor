@@ -301,7 +301,7 @@ internal sealed partial class UnityUiRuntime
     public IRuntimeWidget? CloneKeyHintRow(VanillaUiSite site, IRuntimeWidget container)
     {
         if (container is not PanelContainerWidget host || !host.Alive) return null;
-        if (host.Anchor == VanillaPanelAnchor.BesideRename || host.Anchor == VanillaPanelAnchor.BesideSort) return null;
+        if (VanillaUiSites.IsInline(host.Anchor)) return null;
         var donor = KeyHintDonorFor(site);
         if (donor == null)
         {

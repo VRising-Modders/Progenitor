@@ -74,6 +74,7 @@ internal static class UiDataTableLayout
         UiRowActionIcon.View => UiDrawnMark.EyeMark,
         UiRowActionIcon.Block => UiDrawnMark.BlockMark,
         UiRowActionIcon.Log => UiDrawnMark.LogMark,
+        UiRowActionIcon.Settings => UiDrawnMark.SettingsMark,
         _ => UiDrawnMark.LocateMark,
     };
 
