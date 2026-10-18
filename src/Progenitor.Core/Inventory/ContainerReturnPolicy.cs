@@ -71,8 +71,9 @@ public sealed record ContainerReopenOptions
     /// <see cref="ContainerReopenResult.Gone"/> or <see cref="ContainerReopenResult.NotOpened"/>), open the same container
     /// remotely through <c>ctx.Inventory.Preview</c> (the game's container window in the station layout, read-only, the
     /// mods' tabs attached), under the preview's own rules: owner or clan, the server's Remote chest preview setting,
-    /// the container open gate. Only chests and braziers can be previewed; a station's window is refused
-    /// (<see cref="ContainerReopenResult.RemoteFailed"/>). Never after <see cref="ContainerReopenResult.ClosedByPlayer"/>.
+    /// the container open gate. A chest's or brazier's window, or a crafting, refining or salvage station's own window
+    /// (STATIONPREVIEW1); any other window (the castle heart, a prison cell, a unit station) gives
+    /// <see cref="ContainerReopenResult.RemoteFailed"/> at once. Never after <see cref="ContainerReopenResult.ClosedByPlayer"/>.
     /// Default false.
     /// </summary>
     public bool RemoteIfAway { get; init; }
@@ -221,8 +222,14 @@ internal static class ContainerReturnRules
         return null;
     }
 
-    /// <summary>The remote fallback's sentence when the window is not a chest's (only plain containers can be previewed).</summary>
-    internal const string RemoteNotAContainer = "Only chests and braziers can be opened from afar.";
+    /// <summary>
+    /// The remote fallback's sentence for a window the preview cannot open (the castle heart, a prison cell, a unit
+    /// station...). Chests, braziers and crafting, refining or salvage stations can (STATIONPREVIEW1).
+    /// </summary>
+    internal const string RemoteNotAContainer = "Only chests, braziers and crafting, refining or salvage stations can be opened from afar.";
+
+    /// <summary>STATIONPREVIEW1: the windows the remote fallback can open (the preview's windows).</summary>
+    internal static bool OpensFromAfar(VanillaPanelKind kind) => ContainerPreviewMenus.MenuOf(kind) != 0;
 
     /// <summary>How long after a Progenitor flow closed the game's window (a world pick, a preview, the Mods menu) that close counts as the flow's.</summary>
     internal const double FlowCloseSeconds = 1.0;
@@ -256,7 +263,9 @@ internal static class ContainerReturnRules
     internal static bool Remembers(VanillaPanelKind kind, bool hasInteraction, bool previewOwnsWindow)
     {
         if (kind is VanillaPanelKind.None or VanillaPanelKind.Character) return false;
-        if (kind == VanillaPanelKind.Container && (!hasInteraction || previewOwnsWindow)) return false;
+        // STATIONPREVIEW1: a window a preview can open (a chest's, or a crafting, refining or salvage station's) with no
+        // interaction behind it is a preview's; the caller passes true for windows that only open through one.
+        if (!hasInteraction || previewOwnsWindow) return false;
         return true;
     }
 }

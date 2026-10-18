@@ -80,6 +80,12 @@ internal sealed class ContainerPreviewPacket
     /// </summary>
     public bool SyncInventory { get; set; } = true;
 
+    /// <summary>STATIONPREVIEW1, open: the client can open station windows (an older client's packet has no field: false).</summary>
+    public bool Stations { get; set; }
+
+    /// <summary>STATIONPREVIEW1, reply: the window to open (<c>HUDMenuType</c>); 0 from an older server means the container window.</summary>
+    public int MenuType { get; set; }
+
     /// <summary>reply: the server agreed.</summary>
     public bool Ok { get; set; }
 

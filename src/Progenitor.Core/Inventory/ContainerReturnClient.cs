@@ -183,14 +183,15 @@ internal static class ContainerReturnClient
 
     /// <summary>
     /// REOPEN2: open the remembered container remotely through the container preview (the server's own rules: owner or
-    /// clan, the Remote chest preview setting, the open gate). False when it cannot even be asked (not a container window,
-    /// no preview on this client); the sink is then finished with <see cref="ContainerReopenResult.RemoteFailed"/>.
+    /// clan, the Remote chest preview setting, the open gate). A chest's window, or a crafting, refining or salvage
+    /// station's (STATIONPREVIEW1: the preview opens those windows too). For any other window the sink is finished with
+    /// <see cref="ContainerReopenResult.RemoteFailed"/> at once.
     /// </summary>
     private static bool StartRemote(Remembered last, Sink sink)
     {
-        if (last.Kind != VanillaPanelKind.Container)
+        if (!ContainerReturnRules.OpensFromAfar(last.Kind))
         {
-            Plugin.Logger?.LogInfo("ContainerReturn: " + last.Describe() + " is not a container; no remote fallback.");
+            Plugin.Logger?.LogInfo("ContainerReturn: " + last.Describe() + " cannot be opened from afar; no remote fallback.");
             sink.Finish(ContainerReopenResult.RemoteFailed, ContainerReturnRules.RemoteNotAContainer);
             return true;
         }
@@ -257,7 +258,9 @@ internal static class ContainerReturnClient
         {
             bool previewOwns = false;
             try { previewOwns = ContainerPreviewClient.Current?.Machine.OwnsWindow == true; } catch { /* */ }
-            real = ContainerReturnRules.Remembers(kind, kind != VanillaPanelKind.Container || interact != Entity.Null, previewOwns)
+            // STATIONPREVIEW1: every window a preview can open names its interaction; the others only open through one.
+            bool hasInteraction = interact != Entity.Null || ContainerPreviewMenus.MenuOf(kind) == 0;
+            real = ContainerReturnRules.Remembers(kind, hasInteraction, previewOwns)
                 && world.EntityManager.Exists(target);
         }
         var last = _last;

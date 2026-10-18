@@ -717,6 +717,22 @@ offset DropInventoryItemEventInventoryOffset       = 0x0  : DropInventoryItemEve
 offset EquipItemFromInventoryEventFromInventoryOffset = 0x0 : EquipItemFromInventoryEvent.FromInventory          # NetworkId
 offset ToggleRefiningEventStationOffset            = 0x0  : ToggleRefiningEvent.Refinementstation                # NetworkId; a brazier's burn toggle names the brazier
 offset RenameInteractableIdOffset                  = 0x40 : InteractEvents_Client.RenameInteractable.InteractableId # NetworkId, after FixedString64Bytes NewName
+# STATIONPREVIEW1: the three station windows a preview may open, each the same {Target, InteractBuff} init data as the
+# container's, and the station events their windows send (each names the station by NetworkId at 0x0).
+offset WorkstationMenuInitDataTargetOffset         = 0x0  : WorkstationMenu.InitData.TargetWorkstation         # Entity {Index, Version}
+offset WorkstationMenuInitDataInteractBuffOffset   = 0x8  : WorkstationMenu.InitData.InteractBuff              # Entity; Entity.Null = no interaction
+offset RefinementstationMenuInitDataTargetOffset   = 0x0  : RefinementstationMenu.InitData.TargetWorkstation   # Entity
+offset RefinementstationMenuInitDataInteractBuffOffset = 0x8 : RefinementstationMenu.InitData.InteractBuff     # Entity
+offset SalvagestationMenuInitDataTargetOffset      = 0x0  : SalvagestationMenu.InitData.TargetWorkstation      # Entity
+offset SalvagestationMenuInitDataInteractBuffOffset = 0x8 : SalvagestationMenu.InitData.InteractBuff           # Entity
+enum   HUDMenuTypeWorkstationMenu                  = 4    : HUDMenuType.WorkstationMenu                        # an [InteractMenu] type
+enum   HUDMenuTypeRefinementstationMenu            = 6    : HUDMenuType.RefinementstationMenu                  # an [InteractMenu] type
+enum   HUDMenuTypeSalvagestationMenu               = 22   : HUDMenuType.SalvagestationMenu                     # an [InteractMenu] type
+offset StartCraftItemEventWorkstationOffset        = 0x0  : StartCraftItemEvent.Workstation                    # NetworkId
+offset StopCraftItemEventWorkstationOffset         = 0x0  : StopCraftItemEvent.Workstation                     # NetworkId
+offset ToggleRefiningRecipeEventStationOffset      = 0x0  : ToggleRefiningRecipeEvent.RefinementStation        # NetworkId
+offset ToggleSalvageEventStationOffset             = 0x0  : ToggleSalvageEvent.Salvagestation                  # NetworkId
+offset ShareRefinementEventStationOffset           = 0x0  : ShareRefinementEvent.Station                       # NetworkId
 
 # ---- Container open gate (src/Progenitor.Core/Inventory/ContainerOpenGateServer.cs) -------------------------------
 # Server only. An interaction is a buff entity (InteractBuff) whose SpellTarget names what is interacted with; the gate

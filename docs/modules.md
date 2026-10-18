@@ -2773,12 +2773,33 @@ returnButton.OnClick(() => _preview.Dispose());
 only when every check passes, in this order, and otherwise replies with the sentence in
 `IContainerPreview.Reason`: the user is connected; the server's **Remote chest preview** setting allows it
 (below); at most 30 opens a minute; the id parses and names a live container; it has an inventory and **no
-menu of its own** (not a castle heart, a crafting, refining, research or salvage station, a forge, fusion
-forge, blood mixer, jewel crafting station, stable, arena station or route station, a vermin nest or tomb,
-a prison, a servant coffin or a servant: chests and braziers pass); it is connected to a castle heart; and
+menu of its own** (not a castle heart, a research station, a forge, fusion forge, blood mixer, jewel crafting
+station, stable, arena station or route station, a vermin nest or tomb, a prison, a servant coffin or a servant:
+chests and braziers pass, and so does a lone crafting, refining or salvage station, below); it is connected to a castle heart; and
 the user is that castle's **owner or a member of the owner's clan** (`ctx.Castles.RelationTo` `Owner` /
 `ClanMember`). Allies and strangers are refused. No mod can widen the rule. Once a preview runs, the server
 re-checks the setting, existence and access every second and ends it when any fails.
+
+**Station windows (STATIONPREVIEW1; source-checked and game-free tested, `StationPreviewTests`; not live-verified).** A
+crafting station (a workbench and the other recipe benches), a refining station (a furnace, a sawmill and the other
+converters) or a salvage station (The Devourer) opens in **its own** game window, the one a player sees at it, with the
+same rules: the server setting, owner or clan, the rate, the inventory sync, the container open gate. The client says it
+can open station windows (`Stations` on the request) and the server's answer names the window (`MenuType`), so an older
+client keeps the container-only rule and gets the old refusal. Only a model that is exactly one of the three, with no
+other menu of its own, passes; anything else gets "Only chests, braziers and crafting, refining or salvage stations can
+be previewed." How it works is the container's: each window's init data is the same `{Target, InteractBuff}` (layout
+facts `WorkstationMenu`/`RefinementstationMenu`/`SalvagestationMenu.InitData`, menus 4, 6 and 22), the interact HUD's
+auto-close is held the same way, each window's mapper is guarded the same way, and every inventory of the station
+(a furnace's input and output) syncs through the same per-user list. Read-only is again the game's own rule: every item
+event and the start, stop, recipe, burn and salvage toggles are refused on the server without an interaction. The
+refinement window's share button (`ShareRefinementEvent`) is the one event the game's server takes from anyone, window
+or not, so a preview adds nothing there; the client's courtesy filter drops it with the station's other events
+(`StartCraftItemEvent`, `StopCraftItemEvent`, `ToggleRefiningRecipeEvent`, `ToggleSalvageEvent`, each naming the
+station at 0x0). A station window keeps its own buttons (they do nothing); `HidePlayerInventory` hides its bag half as
+on a chest. Mod tabs attached to the station window get the preview's target (`PreviewContainer`) and take edits through
+the mod's own messages, as on a chest. The queue and the recipe list live on the station and stream with it; a
+workstation's "have" counts come from the castle's other chests, which are not synced while you are away, so they may
+read low. Research: the internal note "remote station window".
 
 **Clan membership is the whole access rule.** The game has no per-container permission inside a clan: every
 clan member may open every chest of the clan's castles at the chest, and its only per-player castle
@@ -3366,8 +3387,10 @@ window's network id; the server resolves it to the stable id with the same untru
 every preview check on that: owner or clan, the Remote chest preview setting, the container open gate. The outcome is
 `RemoteOpened` once the window shows, or `RemoteFailed` with the server's sentence in `ContainerReopenFinished.Reason`
 ("This server has remote chest preview turned off.", "The server does not know that container.", a gate's refusal).
-Only plain containers can be previewed: a station's window gives `RemoteFailed` at once ("Only chests and braziers can be
-opened from afar."), so a mod with a panel in a station's tab hides it on that outcome. Never after `ClosedByPlayer`, a
+A crafting, refining or salvage station opens remotely in its own window (STATIONPREVIEW1, [Station windows](#container-preview)),
+so The Devourer comes back with its tabs. Any other window (the castle heart, a prison cell, a unit station) gives
+`RemoteFailed` at once ("Only chests, braziers and crafting, refining or salvage stations can be opened from afar."), so a
+mod with a panel in such a window's tab hides it on that outcome. Never after `ClosedByPlayer`, a
 window in the way or a busy input. `RemotePreview` sets the preview's options (default: kept open until closed);
 `RemoteStarted` hands the preview over as it starts (dispose it to close the window early). When the fallback starts
 from the call itself (the player already moved), `Done` can run before `ReopenLast` returns `Started` (a station's window
@@ -3425,7 +3448,8 @@ log with the filter `ContainerReturn|ContainerPreview|menu-hotkey guard|hub retu
 5b. **From afar.** Open a chest, open the Controls sample's hub, walk 3 m away, click Return: `hub return reopen =
    RemoteOpened`, the chest's window in the station layout (capture), the client log has `opened remotely instead`, server
    status shows the preview. On a PvP-only setting: `RemoteFailed: This server allows remote chest preview only in PvE...`.
-   At The Devourer: `RemoteFailed: Only chests and braziers can be opened from afar.`
+   At The Devourer: `RemoteOpened`, the salvage station's own window with its mod tabs (status `menuType` 22). At a prison
+   cell: `RemoteFailed: Only chests, braziers and crafting, refining or salvage stations can be opened from afar.`
 6. **The player's own close stays.** Open the chest, Escape (it closes): the log has `closed by the player`; `reopen`:
    `ClosedByPlayer`, no press. The same after closing it with the Interact key.
 7. **A preview over the window.** Open a near chest, then `container_preview {"action":"open","id":"c-…far…","keepOpen":true}`:

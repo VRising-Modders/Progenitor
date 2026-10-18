@@ -475,6 +475,18 @@ internal sealed partial class UnityUiRuntime
             if (!StationScans[i].SubShown || StationScans[i].Target == Entity.Null) continue;
             kind = VanillaStationWindows.Covered[i].Kind;
             target = StationScans[i].Target;
+            // STATIONPREVIEW1: the three station windows a preview can open name their interaction too (null for a preview's).
+            try
+            {
+                interactBuff = kind switch
+                {
+                    VanillaPanelKind.Workstation => _workstationMapper == null ? Entity.Null : _workstationMapper._InteractBuff,
+                    VanillaPanelKind.RefinementStation => _refinementMapper == null ? Entity.Null : _refinementMapper._InteractBuff,
+                    VanillaPanelKind.SalvageStation => SalvageReader.Interact(),
+                    _ => Entity.Null,
+                };
+            }
+            catch { interactBuff = Entity.Null; }
             return true;
         }
         return false;
@@ -533,6 +545,10 @@ internal sealed partial class UnityUiRuntime
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal static WindowScan Read() => M == null ? default : Window(M._SalvageStationSubMenu, M._InventorySubMenu, M._Target);
+
+        /// <summary>STATIONPREVIEW1: the window's interaction (null for a preview's window).</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static Entity Interact() => M == null ? Entity.Null : M._InteractBuff;
 
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal static IDisposable Hook(Action<SystemHookContext> frame, HookOptions options) => SystemHooks.After<SalvagestationMenuMapper>(frame, options);
@@ -1734,7 +1750,8 @@ internal sealed partial class UnityUiRuntime
         ReadNetworkId(world, target, out int n0, out int n1, out int n2);
         var panelTarget = new VanillaPanelTarget(kind, target.Index, target.Version, n0, n1, n2, itemGuid, itemAmount);
         // A remote container preview's window: the previewed chest, its network id and its stable id.
-        if (kind == VanillaPanelKind.Container) panelTarget = VanillaPanelPreview.Apply(panelTarget, Progenitor.Inventory.ContainerPreviewClient.PreviewWindow(world), emptyIsWindow: site != VanillaUiSite.InventoryTooltip);
+        // STATIONPREVIEW1: a station preview's window too (Apply matches the window's kind).
+        if (kind != VanillaPanelKind.None) panelTarget = VanillaPanelPreview.Apply(panelTarget, Progenitor.Inventory.ContainerPreviewClient.PreviewWindow(world), emptyIsWindow: site != VanillaUiSite.InventoryTooltip);
         if (site == VanillaUiSite.ContainerPanel) { LastContainerPanelTarget = panelTarget; LastContainerPanelFrame = Time.frameCount; }
         return Finish(site, view, panelTarget);
     }

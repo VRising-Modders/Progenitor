@@ -495,8 +495,13 @@ internal struct ContainerPreviewFacts
     public bool Found;
     /// <summary>The model has an inventory.</summary>
     public bool HasInventory;
-    /// <summary>The model carries one of <see cref="ContainerPreviewMenus.OwnMenuComponents"/>: it has a menu of its own.</summary>
+    /// <summary>
+    /// The model has a menu of its own the preview cannot open: one of <see cref="ContainerPreviewMenus.OwnMenuComponents"/>,
+    /// other than a lone previewable station for a client that opens station windows (<see cref="ContainerPreviewMenus.WindowFor"/>).
+    /// </summary>
     public bool HasOwnMenu;
+    /// <summary>STATIONPREVIEW1: the client said it can open station windows (an older client cannot).</summary>
+    public bool ClientOpensStations;
     /// <summary>The model is connected to a castle heart.</summary>
     public bool InCastle;
     public CastleRelation Relation;
@@ -522,7 +527,7 @@ internal static class ContainerPreviewAuthorization
         if (!f.IdParsed) return "That is not a container id.";
         if (!f.Found) return "That container no longer exists.";
         if (!f.HasInventory) return "That has no inventory.";
-        if (f.HasOwnMenu) return "Only plain containers (chests, braziers) can be previewed.";
+        if (f.HasOwnMenu) return f.ClientOpensStations ? StationRefusal : "Only plain containers (chests, braziers) can be previewed.";
         if (!f.InCastle) return "That container is not in a castle.";
         if (f.Relation is not (CastleRelation.Owner or CastleRelation.ClanMember))
             return "Only the castle's owner and clan can preview its containers.";
@@ -547,6 +552,9 @@ internal static class ContainerPreviewAuthorization
     /// The refusal when the server's world-save hook is not in place: the inventory sync must be taken out around every
     /// world save, and without the hook the server never hears of one.
     /// </summary>
+    /// <summary>STATIONPREVIEW1: the refusal of a model with a menu the preview cannot open, to a client that opens stations.</summary>
+    internal const string StationRefusal = "Only chests, braziers and crafting, refining or salvage stations can be previewed.";
+
     internal const string SaveHookRefusal =
         "This server cannot share container contents right now: its world-save hook is not in place (see the server log).";
 
@@ -636,5 +644,69 @@ internal static class ContainerPreviewMenus
         "UnitSpawnerstation", "PrisonCell", "ServantCoffinstation", "ServantEquipment",
         "Forge_Shared", "FusionForge_Shared", "BloodMixer_Shared", "JewelCraftingStation", "Stables_Shared",
         "CastleArenaStation_Shared", "InventoryRouteStation",
+    };
+
+    /// <summary>The game's HUD menu numbers the preview opens (<c>HUDMenuType</c>; layout facts in <c>layout.txt</c>).</summary>
+    internal const int ContainerMenu = 3, WorkstationMenu = 4, RefinementstationMenu = 6, SalvagestationMenu = 22;
+
+    /// <summary>
+    /// STATIONPREVIEW1: the stations a preview may open, each by the component that makes it that station and the window
+    /// it opens. Their windows open the same way as the container's (init data <c>{Target, InteractBuff}</c>), the game's
+    /// server refuses every item and station event from a player with no interaction with them, and their inventories
+    /// reach the client through the same per-user sync list.
+    /// </summary>
+    internal static readonly IReadOnlyList<(string Component, int Menu)> PreviewableStations = new[]
+    {
+        ("WorkstationRecipesBuffer", WorkstationMenu), ("Refinementstation", RefinementstationMenu), ("Salvagestation", SalvagestationMenu),
+    };
+
+    /// <summary>The own-menu components that stay refused when stations are allowed (a source test keeps the server's check equal).</summary>
+    internal static IEnumerable<string> OtherOwnMenuComponents
+    {
+        get
+        {
+            foreach (var name in OwnMenuComponents)
+            {
+                bool station = false;
+                foreach (var (component, _) in PreviewableStations) if (component == name) station = true;
+                if (!station) yield return name;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The window a preview opens for a model: <see cref="ContainerMenu"/> for a plain container; the station's window
+    /// when the client can open station windows, the model is exactly one previewable station (<paramref name="stationMenus"/>
+    /// lists the windows of the previewable components it carries) and carries no other own-menu component; else 0
+    /// (refused).
+    /// </summary>
+    internal static int WindowFor(bool hasOwnMenu, IReadOnlyList<int> stationMenus, bool otherOwnMenu, bool clientOpensStations)
+    {
+        if (!hasOwnMenu) return ContainerMenu;
+        if (!clientOpensStations || otherOwnMenu || stationMenus.Count != 1) return 0;
+        return stationMenus[0];
+    }
+
+    /// <summary>True for a window the preview knows how to open and hold.</summary>
+    internal static bool IsPreviewWindow(int menu) => menu is ContainerMenu or WorkstationMenu or RefinementstationMenu or SalvagestationMenu;
+
+    /// <summary>The window a preview opens for a panel kind, or 0 for a kind it never opens.</summary>
+    internal static int MenuOf(Progenitor.Ui.VanillaPanelKind kind) => kind switch
+    {
+        Progenitor.Ui.VanillaPanelKind.Container => ContainerMenu,
+        Progenitor.Ui.VanillaPanelKind.Workstation => WorkstationMenu,
+        Progenitor.Ui.VanillaPanelKind.RefinementStation => RefinementstationMenu,
+        Progenitor.Ui.VanillaPanelKind.SalvageStation => SalvagestationMenu,
+        _ => 0,
+    };
+
+    /// <summary>The panel site kind of a preview window (what attached tabs see), or <see cref="Progenitor.Ui.VanillaPanelKind.None"/>.</summary>
+    internal static Progenitor.Ui.VanillaPanelKind KindOf(int menu) => menu switch
+    {
+        ContainerMenu => Progenitor.Ui.VanillaPanelKind.Container,
+        WorkstationMenu => Progenitor.Ui.VanillaPanelKind.Workstation,
+        RefinementstationMenu => Progenitor.Ui.VanillaPanelKind.RefinementStation,
+        SalvagestationMenu => Progenitor.Ui.VanillaPanelKind.SalvageStation,
+        _ => Progenitor.Ui.VanillaPanelKind.None,
     };
 }
