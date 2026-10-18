@@ -73,7 +73,7 @@ The launcher sets `PROGENITOR_HEADLESS=1`; Bootstrap's `HeadlessClient` then re-
 
 **First character.** A new platform id has no character. After the join settles, run `create_character` on that extra client (`{"name":"HeadlessOne"}`, optional appearance bytes); it sends the creation screen's own `CreateCharacterEvent` and is idempotent (`already:true` once the client has a `LocalCharacter`), so retry it if the server has not spawned the character yet: a send during loading is dropped. The server-side form (`platformId` + `name` on the server bridge) also spawns a character but leaves that client on its creation screen until it reconnects. New characters start asleep in the crypt and stay hidden from other players until their client presses the wake-up key (Space), which a headless client cannot do. Run `wake` on the server (`{"user":"HeadlessOne"}` or `{"platformId":"…"}`): before `SpawnCharacterSystem` updates it sets `SyncedButtonInputAction.Respawn` (1024) in the character's `EntityInput.State`, the bit that system waits for, until the user's `SpawnCharacter` request is gone (usually one frame; log `wake: 'HeadlessOne' spawn request finished`). Removing the `AB_Interact_CoffinSleeping` buff instead does not work: the system re-applies it.
 
-`tools/extra-client.ps1 -Index N` (N = 1..9) starts `VRising.exe` with `ProcessStartInfo` (`UseShellExecute = false`) and a per-process environment. It refuses `-Index 0` (that is `launch-client.ps1`), accepts only the Steam install or a root under `<workspace>\_headless`, and never touches `C:\VRisingServer` or the staged test server. `-Stop` kills only the PID recorded for that index, after confirming it is `VRising.exe` under an allowed root, never by name.
+`tools/extra-client.ps1 -Index N` (N = 1..99) starts `VRising.exe` with `ProcessStartInfo` (`UseShellExecute = false`) and a per-process environment. It refuses `-Index 0` (that is `launch-client.ps1`), accepts only the Steam install or a root under `<workspace>\_headless`, and never touches `C:\VRisingServer` or the staged test server. `-Stop` kills only the PID recorded for that index, after confirming it is `VRising.exe` under an allowed root, never by name.
 
 | Resource | Value |
 |---|---|
@@ -100,6 +100,8 @@ powershell -File tools/extra-client.ps1 -Index 1 -Stop
 ```
 
 The default MCP `client` side stays on 27341 (primary Steam client); one MCP process targets one client port. Never point an extra instance at the live server.
+
+Indexes 10..99 use the same existing identity band as 1..9; index 10 uses platform ID `90000000000020010` and bridge port 27441. An unused identity lets the game create a new user through its normal connection flow. Reusing an identity reconnects its existing user; it does not rebuild missing components on a hand-made offline owner. Check the target save for that identity before a first-user test. Run clients serially for large sets, disconnect normally before stopping each process, and verify persistence before batching. Higher indexes are parameter-tested, not live-qualified. Run `powershell -NoProfile -File tools/tests/extra-client-parameters.ps1` to check the launcher bounds without starting clients.
 
 ## Install window from Thunderstore, TOFU and legacy cleanup
 

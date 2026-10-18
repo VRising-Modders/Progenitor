@@ -1,5 +1,7 @@
 # Progenitor roadmap
 
+Extra-client launcher accepts indexes 1..99, matching the existing client/server identity range. Parameter validation is covered offline; creation and persistence of native stress players through higher indexes still require live qualification.
+
 Server test castles: scoped generation, Castle API inventory discovery, real heart fueling and native offline owner claims passed on the copied save. All 147 territories have castles: seven original heart/owner identities preserved and 140 generated castles distributed across 40 offline owners, with reciprocal team links checked. All 147 hearts passed rank-5 and full-fuel checks; a world save was written and the harness removed cleanly. Clans, individual clearing checks and save reload remain unqualified. This is an isolated qualification harness, not yet an integrated stress-population backend. [Qualification harness](../tools/stress-probe/README.md).
 
 **Reviewed 2026-09-10 against source, offline tests and internal reviews R86 and R87.** The framework foundations are usable; the complete product is not done. The 2026-09-10 batch is **implemented offline** in this tree: nothing from it is in a reviewed candidate, and none of it is live-accepted. M2–M4 contain qualified historical work alongside unfinished acceptance gates. M5 has a useful offline catalog and five researched recipes, not a complete asset-loading browser.

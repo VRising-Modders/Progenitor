@@ -3,7 +3,7 @@
   Launch or stop an extra V Rising client process (not through Steam) for multi-instance tests.
 
 .DESCRIPTION
-  Index 1..9 starts VRising.exe directly (never through Steam) with an isolated -logFile,
+  Index 1..99 starts VRising.exe directly (never through Steam) with an isolated -logFile,
   -persistentDataPath, Dev-bridge port, and token file. Never uses steam://run (Steam is
   single-instance and would focus the primary client). Index 0 is refused; that is
   tools/launch-client.ps1.
@@ -58,6 +58,7 @@
 #>
 param(
   [Parameter(Mandatory = $true)]
+  [ValidateRange(1, 99)]
   [int]$Index,
   [switch]$Stop,
   [switch]$Headless,
@@ -85,8 +86,8 @@ $headlessBase = Get-ProgenitorWorkspacePath -Child "_headless"
 if ($Index -eq 0) {
   throw "-Index 0 is the primary Steam-launched client. Use tools/launch-client.ps1."
 }
-if ($Index -lt 1 -or $Index -gt 9) {
-  throw "-Index must be 1..9 (0 is the primary Steam client; use tools/launch-client.ps1)"
+if ($Index -lt 1 -or $Index -gt 99) {
+  throw "-Index must be 1..99 (0 is the primary Steam client; use tools/launch-client.ps1)"
 }
 
 $headlessRoot = if ($headlessBase) { Join-Path $headlessBase "client" } else { $null }
