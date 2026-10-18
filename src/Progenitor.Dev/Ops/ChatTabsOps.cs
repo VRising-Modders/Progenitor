@@ -18,6 +18,7 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{"action":"edit","tab":1}</c> (FORMDIALOG1: the tab editor; <c>-1</c>: a new custom tab)</item>
 /// <item><c>{"action":"select","index":1}</c>: CHAT13, show a tab as a click does.</item>
 /// <item><c>{"action":"line","text":"hello"}</c>: CHAT13, put text in the chat input line.</item>
+/// <item><c>{"action":"submit"}</c>: CHAT7, end the line as Enter does (opens the chat first when it is closed).</item>
 /// </list>
 /// </summary>
 internal static class ChatTabsOps
@@ -69,8 +70,16 @@ internal static class ChatTabsOps
                 reply["set"] = set;
                 return reply;
             }
+            case "submit":
+            {
+                // CHAT7: end the line as Enter does, through the game's input field (its send runs on end-edit).
+                string result = Invoke(type, "SubmitInputLine") as string ?? "";
+                var reply = Invoke(type, "Describe") as Dictionary<string, object?> ?? new Dictionary<string, object?>();
+                reply["submit"] = result;
+                return reply;
+            }
             default:
-                throw new ArgumentException("args.action must be read, move, edit, select or line");
+                throw new ArgumentException("args.action must be read, move, edit, select, line or submit");
         }
     }
 
