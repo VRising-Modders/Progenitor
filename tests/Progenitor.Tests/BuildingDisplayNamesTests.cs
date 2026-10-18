@@ -87,5 +87,17 @@ public class BuildingDisplayNamesTests
         Assert.Contains("registry.TryGet<ProjectM.ManagedBlueprintData>(", src);
         Assert.Contains("Localization.Localization.TryGetGameString(key, out var text)", src);
         Assert.Contains("if (prefabGuid == 0 || Plugin.IsServerProcess) return null;", src);
+        // A key with no text yet is asked again; only an empty key is a kept absence.
+        Assert.Contains("if ((guid._a | guid._b | guid._c | guid._d) == 0) return (Progenitor.Castles.BuildingNameLookup.NoName, null);", src);
+        Assert.Contains("// A key the string table does not answer (yet) is asked again, like missing blueprint data.\n        return (Progenitor.Castles.BuildingNameLookup.NotReady, null);", src.Replace("\r\n", "\n"));
+    }
+
+    [Fact]
+    public void A_language_switch_forgets_the_kept_names()
+    {
+        string loc = SourcePin.ReadFile("src", "Progenitor.Core", "Localization", "Localization.cs");
+        int postfix = loc.IndexOf("internal static void Postfix(string language)", System.StringComparison.Ordinal);
+        Assert.True(postfix > 0);
+        Assert.Contains("Progenitor.Castles.BuildingDisplayNames.Clear();", loc.Substring(postfix, 600));
     }
 }

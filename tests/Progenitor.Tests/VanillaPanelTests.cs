@@ -106,7 +106,9 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, true, VanillaPanelAnchor.BesideRename)]
     [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideSort, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.RightEdge, true, VanillaPanelAnchor.RightEdge)]
-    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideRename, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideRename, true, VanillaPanelAnchor.BesideRename)]
+    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideSort, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideRename, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.BesideSort)]
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, true, VanillaPanelAnchor.RightEdge)]
@@ -1252,6 +1254,85 @@ public class VanillaPanelTests : IDisposable
         rename.Dispose();
     }
 
+    [Theory]
+    [InlineData(VanillaPanelKind.Container, true)]
+    [InlineData(VanillaPanelKind.Workstation, true)]
+    [InlineData(VanillaPanelKind.RefinementStation, true)]
+    [InlineData(VanillaPanelKind.SalvageStation, true)]
+    [InlineData(VanillaPanelKind.UnitStation, true)]
+    [InlineData(VanillaPanelKind.PrisonCell, false)]
+    [InlineData(VanillaPanelKind.CastleHeart, false)]
+    public void Each_window_names_its_rename_button_or_says_it_has_none(VanillaPanelKind kind, bool has)
+    {
+        Assert.Equal(has, VanillaStationWindows.HasRename(kind));
+        string missing = VanillaStationWindows.RenameMissing(kind);
+        if (has) Assert.EndsWith("OpenTagEditButton", missing);
+        else Assert.EndsWith("window has no rename button", missing);
+    }
+
+    [Fact]
+    public void The_container_rename_text_keeps_its_parent_field()
+    {
+        Assert.Equal("ContainerSubMenu.OpenTagEditButtonParent and OpenTagEditButton", VanillaStationWindows.RenameMissing(VanillaPanelKind.Container));
+        Assert.Equal("RefinementstationSubMenu.OpenTagEditButtonParent and OpenTagEditButton", VanillaStationWindows.RenameMissing(VanillaPanelKind.RefinementStation));
+        Assert.Equal("the prison cell window has no rename button", VanillaStationWindows.RenameMissing(VanillaPanelKind.PrisonCell));
+    }
+
+    [Fact]
+    public void Each_site_lists_its_anchor_keys_with_rename_on_the_station_and_not_the_heart()
+    {
+        Assert.Equal(new[] { "left", "right", "rename" }, VanillaUiSites.AnchorKeys(VanillaUiSite.StationPanel));
+        Assert.Equal(new[] { "left", "right", "rename" }, VanillaUiSites.AnchorKeys(VanillaUiSite.ContainerPanel));
+        Assert.DoesNotContain("rename", VanillaUiSites.AnchorKeys(VanillaUiSite.CastleHeartPanel));
+        Assert.Empty(VanillaUiSites.AnchorKeys((VanillaUiSite)99));
+    }
+
+    [Fact]
+    public void A_station_title_row_button_takes_its_icon()
+    {
+        var station = UiApi.AttachToVanilla(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        Assert.True(station.Enabled);
+        station.Button("Log", VanillaButtonIcon.Sprite("LinkIcon_Journal"));
+        _client.Fire(VanillaUiSite.StationPanel, Open(31, new VanillaPanelTarget(VanillaPanelKind.Workstation, 900, 2, 50, 1, 0)));
+        Assert.Equal(new[] { "sprite:LinkIcon_Journal" }, _client.ClonedIcons.Select(i => i.ToString()).ToArray());
+        Assert.Contains(VanillaPanelAnchor.BesideRename, _client.BuiltAnchors);
+        station.Dispose();
+
+        var heart = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        Assert.False(heart.Enabled);
+        Assert.Contains(Lines, l => l.Contains("CastleHeartPanel") && l.Contains("is not an anchor this site accepts"));
+        heart.Dispose();
+    }
+
+    [Fact]
+    public void The_station_resolver_fills_the_rename_group_per_window()
+    {
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("FillRename(view, window.Sub!, kind, renameButton, renameParent);", resolver);
+        Assert.Contains("FillRename(view, sub, VanillaPanelKind.Container, sub.OpenTagEditButton, sub.OpenTagEditButtonParent);", resolver);
+        Assert.Contains("renameParent = sub.OpenTagEditButtonParent;", resolver);
+        Assert.Contains("SalvageReader.Rename(window.Sub!) : UnitReader.Rename(window.Sub!)", resolver);
+        Assert.Contains("d[\"siteAnchors\"] = VanillaUiSites.AnchorKeys(rb.Site);", resolver);
+    }
+
+    [Fact]
+    public void One_sweep_looks_for_every_wanted_sprite_and_the_next_call_that_frame_does_not_sweep()
+    {
+        VanillaButtonSprites.Clear();
+        VanillaButtonSprites.Want("A");
+        VanillaButtonSprites.Want("B");
+        VanillaButtonSprites.Want("C");
+        VanillaButtonSprites.Note("C", new object(), 1);
+        var first = VanillaButtonSprites.SweepFor("A", 10);
+        Assert.Equal(new[] { "A", "B" }, first.ToArray());
+        foreach (var n in first) VanillaButtonSprites.Note(n, null, 10);
+        Assert.Empty(VanillaButtonSprites.SweepFor("B", 10));
+        Assert.Empty(VanillaButtonSprites.SweepFor("A", 11));
+        // Due again after the retry interval, and both names go together.
+        Assert.Equal(new[] { "A", "B" }, VanillaButtonSprites.SweepFor("A", 10 + VanillaButtonSprites.RetryFrames).ToArray());
+        VanillaButtonSprites.Clear();
+    }
+
     [Fact]
     public void A_named_sprite_is_kept_while_alive_and_a_miss_is_not_looked_for_again_at_once()
     {
@@ -1293,7 +1374,7 @@ public class VanillaPanelTests : IDisposable
         Assert.Contains("else if (IconAlways) icon = true;", resolver);
         Assert.Contains("internal float TextWidth => IconAlways ? _donorSize.y : _textWidth;", resolver);
         Assert.Contains("Buttons[i].IconAlways ? ButtonSize.y :", resolver);
-        Assert.Contains("VanillaButtonSprites.MaySearch(name, frame)", resolver);
+        Assert.Contains("VanillaButtonSprites.SweepFor(name, frame)", resolver);
         Assert.Contains("ClonePanelButton(site, container, caption, VanillaButtonIcon.Unchosen)", resolver);
     }
 

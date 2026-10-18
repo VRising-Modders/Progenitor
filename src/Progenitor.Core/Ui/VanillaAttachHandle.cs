@@ -231,6 +231,7 @@ internal sealed class VanillaAttachHandle : IVanillaAttachHandle
     public IUiButton Button(string caption, VanillaButtonIcon icon)
     {
         if (!Enabled || IsDisposed || !VanillaUiSites.Info(Site).AcceptsButtons) return DisabledAttachButton.Instance;
+        VanillaButtonSprites.Want(icon.SpriteName);
         int index;
         ushort id = UiSlotTable.Alloc(Owner);
         lock (_gate)

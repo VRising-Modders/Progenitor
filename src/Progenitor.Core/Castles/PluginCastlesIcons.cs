@@ -42,8 +42,9 @@ public sealed partial class PluginCastles
     /// The name the game shows for the castle building <paramref name="prefabGuid"/>, in the player's language: the
     /// build menu's and the station window's title (<c>TM_SalvageStation_Table</c> is "The Devourer"). Read from the
     /// building's blueprint data (<c>ManagedBlueprintData.Name</c>) and the game's string table. Kept per prefab for the
-    /// client world (a world change forgets them). Null when the building has no such name, on prefab 0, while the
-    /// game's data is not up yet (not kept: ask again), and on the server, which has no string table. Client, main thread.
+    /// client world; a world change or a language switch forgets them. Null when the blueprint names no text (kept), on
+    /// prefab 0, while the game's data or the key's text is not there yet (not kept: ask again), and on the server,
+    /// which has no string table. Client, main thread.
     /// </summary>
     public string? BuildingDisplayName(int prefabGuid)
     {
@@ -68,9 +69,13 @@ public sealed partial class PluginCastles
         if (!registry.TryGet<ProjectM.ManagedBlueprintData>(new Stunlock.Core.PrefabGUID(prefab), out var data) || data == null)
             return (Progenitor.Castles.BuildingNameLookup.NotReady, null);
         var key = data.Name;
+        var guid = key.Key;
+        if ((guid._a | guid._b | guid._c | guid._d) == 0) return (Progenitor.Castles.BuildingNameLookup.NoName, null);
         if (Progenitor.Localization.Localization.TryGetGameString(key, out var text) && !string.IsNullOrWhiteSpace(text))
             return (Progenitor.Castles.BuildingNameLookup.Found, text);
-        return (Progenitor.Castles.BuildingNameLookup.NoName, null);
+
+        // A key the string table does not answer (yet) is asked again, like missing blueprint data.
+        return (Progenitor.Castles.BuildingNameLookup.NotReady, null);
     }
 }
 #endif

@@ -262,9 +262,53 @@ internal static class VanillaButtonSprites
             {
                 Found[name] = sprite;
                 MissedAt.Remove(name);
+                Wanted.Remove(name);
             }
             else MissedAt[name] = frame;
         }
+    }
+
+    /// <summary>Most names kept waiting for a sweep; one more is not remembered (it is still looked for when asked).</summary>
+    internal const int MaxWanted = 64;
+
+    private static readonly HashSet<string> Wanted = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A button was made with this sprite name (<see cref="IVanillaAttachHandle.Button(string, VanillaButtonIcon)"/>):
+    /// remember it, so the first sweep, when any button's face is built, looks for every name at once.
+    /// </summary>
+    internal static void Want(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return;
+        lock (Gate)
+        {
+            if (!Found.ContainsKey(name) && Wanted.Count < MaxWanted) Wanted.Add(name);
+        }
+    }
+
+    /// <summary>
+    /// The names one sweep on <paramref name="frame"/> looks for: <paramref name="name"/> (now remembered as wanted)
+    /// and every other wanted name that may be searched, so several buttons' sprites share one sweep. Empty when
+    /// <paramref name="name"/> may not be searched yet. Every name in the list gets a <see cref="Note"/> after the sweep,
+    /// so a later call on the same frame does not sweep again.
+    /// </summary>
+    internal static List<string> SweepFor(string name, int frame)
+    {
+        var list = new List<string>();
+        if (!MaySearch(name, frame)) return list;
+        lock (Gate)
+        {
+            if (Wanted.Count < MaxWanted) Wanted.Add(name);
+            list.Add(name);
+            foreach (var w in Wanted)
+            {
+                if (string.Equals(w, name, StringComparison.Ordinal) || Found.ContainsKey(w)) continue;
+                if (MissedAt.TryGetValue(w, out int at) && frame >= at && frame - at < RetryFrames) continue;
+                list.Add(w);
+            }
+        }
+
+        return list;
     }
 
     /// <summary>
@@ -283,6 +327,7 @@ internal static class VanillaButtonSprites
         lock (Gate)
         {
             Found.Clear();
+            Wanted.Clear();
             MissedAt.Clear();
         }
     }

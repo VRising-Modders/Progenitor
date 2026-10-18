@@ -790,6 +790,10 @@ public static class Localization
             {
                 Plugin.Logger?.LogError($"Localization SetLanguage postfix: {e}");
             }
+
+            // ctx.Castles.BuildingDisplayName: the kept names were in the old language.
+            try { Progenitor.Castles.BuildingDisplayNames.Clear(); }
+            catch { /* the next world change clears them too */ }
         }
     }
 

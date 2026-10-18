@@ -6,13 +6,13 @@ namespace Progenitor.Castles;
 /// <summary>What one lookup of a building's display name found.</summary>
 internal enum BuildingNameLookup
 {
-    /// <summary>The game's data is not up yet, or the prefab has no blueprint data now: ask again later (not cached).</summary>
+    /// <summary>The game's data is not up yet, the prefab has no blueprint data now, or the string table has no text for its key: ask again later (not cached).</summary>
     NotReady = 0,
 
     /// <summary>The localized name the game shows.</summary>
     Found = 1,
 
-    /// <summary>The blueprint names no text, or the game's string table has none for its key: no name (cached).</summary>
+    /// <summary>The blueprint names no text (an empty key): no name (cached).</summary>
     NoName = 2,
 }
 

@@ -195,6 +195,48 @@ internal static class VanillaStationWindows
         return false;
     }
 
+    /// <summary>
+    /// The rename button (the title row's pencil) that <see cref="VanillaPanelAnchor.BesideRename"/> goes after, as
+    /// the window's field, or null when the window has none. Read from the game's metadata (1.1.13.0): the
+    /// container, workstation, refinement station, devourer and unit-station windows have an
+    /// <c>OpenTagEditButton</c>; the prison cell and castle heart windows have no rename button.
+    /// </summary>
+    internal static string? RenameField(VanillaPanelKind kind) => kind switch
+    {
+        VanillaPanelKind.Container => "ContainerSubMenu.OpenTagEditButton",
+        VanillaPanelKind.Workstation => "WorkstationSubMenu.OpenTagEditButton",
+        VanillaPanelKind.RefinementStation => "RefinementstationSubMenu.OpenTagEditButton",
+        VanillaPanelKind.SalvageStation => "SalvagestationSubMenu.OpenTagEditButton",
+        VanillaPanelKind.UnitStation => "UnitSpawnerstationSubMenu.OpenTagEditButton",
+        _ => null,
+    };
+
+    /// <summary>Whether a window of <paramref name="kind"/> has a rename button (<see cref="RenameField"/>).</summary>
+    internal static bool HasRename(VanillaPanelKind kind) => RenameField(kind) != null;
+
+    /// <summary>
+    /// The anchor-status text for a <see cref="VanillaPanelAnchor.BesideRename"/> container that cannot be built on a
+    /// window of <paramref name="kind"/>: the window has no rename button, or the fields that should name it are empty.
+    /// </summary>
+    internal static string RenameMissing(VanillaPanelKind kind)
+    {
+        var field = RenameField(kind);
+        if (field == null) return "the " + KindWords(kind) + " window has no rename button";
+        return kind == VanillaPanelKind.Container || kind == VanillaPanelKind.RefinementStation
+            ? field + "Parent and " + field.Substring(field.IndexOf('.') + 1)
+            : field;
+    }
+
+    private static string KindWords(VanillaPanelKind kind) => kind switch
+    {
+        VanillaPanelKind.PrisonCell => "prison cell",
+        VanillaPanelKind.CastleHeart => "castle heart",
+        VanillaPanelKind.SalvageStation => "devourer",
+        VanillaPanelKind.UnitStation => "unit station",
+        VanillaPanelKind.RefinementStation => "refinement station",
+        _ => kind.ToString(),
+    };
+
     /// <summary>A kind <see cref="VanillaUiSite.StationPanel"/> reports.</summary>
     internal static bool IsStation(VanillaPanelKind kind) => TryGet(kind, out _);
 
