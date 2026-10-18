@@ -2014,6 +2014,19 @@ public sealed class ModPageTests : IDisposable
     }
 
     /// <summary>The live client's own case: CryptSnooze, installed by Progenitor, listed by the index.</summary>
+    [Fact]
+    public void Configure_from_package_key_opens_the_existing_plugin_page()
+    {
+        SeedCryptSnooze();
+        using var mod = ModsMenu.Register(new object(), "example.cryptsnooze", "CryptSnooze");
+        ModsMenu.InstallLinkProbe = id => id == "example.cryptsnooze"
+            ? new ModsMenu.ModsInstallLink("Corvane-CryptSnooze", "2.0.4") : null;
+        ModsMenu.Open();
+        ModsMenu.OpenInstalledFromInstall("Corvane-CryptSnooze");
+        Assert.Equal("example.cryptsnooze", ModsMenu.ModPage!.Model.PluginId);
+        Assert.Equal("CryptSnooze", ModsMenu.ModPage.Model.Name);
+    }
+
     private void SeedCryptSnooze(string? readme = null)
     {
         var catalog = new PageCatalog();
@@ -2114,6 +2127,7 @@ public sealed class ModPageTests : IDisposable
         Assert.Equal("example.cryptsnooze", dialog.Key);
         // The whole point: a separate panel, not the page's.
         Assert.NotSame(page, dialog.Panel);
+        Assert.Contains(dialog.Content.ExtraButtons, b => b.Key == "yes-restart" && b.Caption == "Yes, uninstall and restart");
 
         // The readback keys are the ones the in-pane block published, plus `presentation`.
         var prompt = PromptRows();

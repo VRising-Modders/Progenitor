@@ -227,6 +227,31 @@ public sealed class InstallSidesPaneTests : IDisposable
         SourcePin.AssertUncommented(anchor, "float next = MenuPanelLayout.AnchorOffset(was, rowY, wantedY, ContentHeightOf(content), viewH);");
     }
 
+    [Fact]
+    public void Explicit_listing_navigation_reveals_at_top_once_after_layout()
+    {
+        var catalog = new FakeCatalog();
+        catalog.Entries.AddRange(new[] { Listing("o-a"), Listing("o-b") });
+        var rig = new Rig(this, catalog);
+        var frames = new Queue<Action>();
+        rig.Pane.FrameScheduler = step => frames.Enqueue(step);
+        var writes = new List<float>();
+        rig.Pane.AnchorProbe = (key, wanted) =>
+        {
+            if (wanted.HasValue) writes.Add(wanted.Value);
+            return (620f, 620f);
+        };
+        rig.Pane.SelectListing("o-b");
+        rig.Rebuild();
+        rig.Pane.RevealListing("o-b");
+        Assert.Empty(writes);
+        while (frames.Count > 0) frames.Dequeue()();
+        Assert.Equal(new[] { 0f }, writes);
+        rig.Rebuild();
+        while (frames.Count > 0) frames.Dequeue()();
+        Assert.Single(writes);
+    }
+
     // ---- The drawer --------------------------------------------------------------------------
 
     [Fact]

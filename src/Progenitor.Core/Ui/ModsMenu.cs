@@ -1472,6 +1472,10 @@ public static partial class ModsMenu
                 ToggleDeveloper = () => OnDevDetailsToggle(pluginId),
                 Action = () => OnModsActionClick(pluginId),
                 Yes = () => OnModsPromptYes(pluginId),
+                YesAndRestart = model.Uninstall is { Client: not ClientRemover.None, Server: ServerRemover.None, ClientUnloadsNow: false }
+                    ? () => { OnModsPromptYes(pluginId); if (IsUninstallPending(pluginId))
+                        JoinFlowClient.RunRestart(JoinFlowClient.CurrentRestartOffer(), false); }
+                    : null,
                 No = () => OnModsPromptNo(pluginId),
                 Store = () => OnModsStoreLinkClick(pluginId),
                 // Chat stage 3 (mod links): only when the package is known (the ledger, or a listing that
@@ -1534,6 +1538,22 @@ public static partial class ModsMenu
         // ABOUTSRC1: a listing nothing ties to these files (the LINK1 name match, a GUID that spells a package name,
         // another version) is not shown at all, so there is no "Matched by name" note to draw for it.
 
+        var listingLink = ResolveInstallLink(pluginId);
+        if (listingLink is { } resolvedLink && !string.IsNullOrEmpty(resolvedLink.Key))
+        {
+            var link = Fact("page-install-listing", "Listing", new[] {
+                new CellSpec(CellKind.Button, "open").With(text: "View in Install Mods")
+            }, "Open this mod's listing in Install Mods.", textValue: false);
+            link.OnClick("open", () => OpenModLinkCatalog(resolvedLink.Key));
+        }
+        var restartOffer = JoinFlowClient.CurrentRestartOffer();
+        if (restartOffer.Shown)
+        {
+            var restart = Fact("page-restart", "Pending changes", new[] {
+                new CellSpec(CellKind.Button, "restart").With(text: restartOffer.Button)
+            }, restartOffer.Sentence, textValue: false);
+            restart.OnClick("restart", () => JoinFlowClient.PressRestartButton());
+        }
         string requirement = "", explanation = "";
         foreach (var item in ModMenuInventory.Snapshot().Rows)
         {
@@ -2844,10 +2864,16 @@ public static partial class ModsMenu
     {
         if (!IsOpen) return;
         EnsureTabState();
+        var inventory = CurrentSidebarModel(applySearch: false);
+        if (inventory.Find(pluginId) == null)
+            foreach (var candidate in inventory.Rows)
+                if (string.Equals(ResolveInstallLink(candidate.Id)?.Key, pluginId, StringComparison.OrdinalIgnoreCase))
+                { pluginId = candidate.Id; break; }
         if (!string.IsNullOrWhiteSpace(pluginId))
             _tabState!.Mods.Selection = ModsWorkspaceIdentity.Installed(pluginId.Trim());
-        // Same path as a strip button: the switch rebuilds the panes from inside the click.
-        SelectWorkspaceTab(ModsTab.Mods);
+        // Selecting the current tab is a no-op; an in-tab link still needs to open its page.
+        if (_tabState!.Selected == ModsTab.Mods) OpenMod(pluginId, ReasonUserButton);
+        else SelectWorkspaceTab(ModsTab.Mods);
     }
 
     private static void RebuildConfigurationAfterAction()
@@ -6927,6 +6953,7 @@ public static partial class ModsMenu
         if (key.Length > 0)
             _tabState!.InstallMods.Selection = ModsWorkspaceIdentity.Catalog(key);
         SelectWorkspaceTab(ModsTab.InstallMods);
+        if (key.Length > 0) _installPane?.RevealListing(key);
     }
 
     internal static string ServerGroupCaption(int count) =>

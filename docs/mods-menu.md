@@ -2142,3 +2142,11 @@ Offline lifecycle tests live under `ModsMenuTests`, `ModMenuInventoryTests`, `Me
 
 Row backgrounds apply their state tint without a fade to avoid white bands on page creation. This follow-up is build-checked; live entry-flash acceptance remains pending.
 
+
+## Mod-page actions and listing links
+
+A mod's Details includes **View in Install Mods** when its listing is known (`page-install-listing`). It opens the Install Mods tab, expands that listing and puts its header at the top of the list once layout is complete, including rows created later; ordinary drawer clicks keep their existing scroll anchor (`InstallModsPane.RevealListing`). **Configure in Mods** from a listing returns to the installed plugin's page even when the package name differs from the plugin id.
+
+While client changes wait for a restart, the mod page shows **Pending changes** with the same restart button as the pending-restart bar (`page-restart`). A client-only uninstall that takes effect at the next start also offers **Yes, uninstall and restart** (dialog button `yes-restart`), on the mod page's prompt and on the plain uninstall dialog; **Yes** and the cancel choice are unchanged. The combined action asks for the restart only after the removal was marked successfully.
+
+Status: built and game-free tested (`ModPageTests`, `InstallSidesPaneTests`). On the 2026-10-15 build before the port to current main, the dialog, pending removal and its cancellation, the restart confirmation and the listing round trip (HuntsAndRifts, 1920x1080) were checked live; **Yes, uninstall and restart** was not run end to end. The port has not been run live.
