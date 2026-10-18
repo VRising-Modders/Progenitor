@@ -227,9 +227,9 @@ $bridgeArgs = Join-Path $env:TEMP 'progenitor-ghost-args.json'
 node tools/mcp/call.mjs server ghost "@$bridgeArgs"
 ```
 
-## Stress castles (server): `stress_populate`, `stress_clear`, `stress_status`
+## Stress castles (server): `stress_populate`, `stress_clear`, `stress_status`, `stress_team`
 
-Server process only, main thread. Fills the free castle plots of a save with test castles owned by offline test owners, for load tests of `ctx.Castles`, inventories and the server frame. MCP: `progenitor_stress` (`action`: `populate`, `clear`, `status`).
+Server process only, main thread. Fills the free castle plots of a save with test castles owned by offline test owners, for load tests of `ctx.Castles`, inventories and the server frame. MCP: `progenitor_stress` (`action`: `populate`, `clear`, `status`, `team`).
 
 **Refused** unless every check passes: no path of the process (executable, game root, BepInEx config, `-persistentDataPath`) is under `C:\VRisingServer`; the executable or game root is in a `_testserver` folder; `-persistentDataPath` is a `moo-world-copy*` folder under `_testserver` that is not a `.bak` copy; and the request carries `confirm:"stress"` (a `dryRun` needs no confirm). The user approved the op for the Moo World copy test save only. Its owners are meant to stay in that save until `stress_clear` removes them; this is an exception to the ghost-user rule above, for this op only. Back up the save first.
 
@@ -257,15 +257,19 @@ The run is a job: territory discovery (one territory per step), the plan, then o
 
 `missing` maps each step kind with no proven path to the reason. If it is not empty and `partial` is false, the job ends `refused` with reason `unproven` before any write. The job is also refused when owners of this seed are already in the world (run `stress_clear` first) or owners of another seed are (their names would clash).
 
-Owners: each is a User written the way `ghost create` writes one (a real user's record copied and patched), with `IsConnected` false, `IsBot` true, no `ConnectedUser` and no character, `User.Index` from 20001 and PlatformId `90000000000100000 + seed × 100 + n`. That band is outside the ghost and extra-client bands, so `ghost destroy` and Dev unload leave them. Not live-verified: how an enabled offline User with no character behaves in the game's systems, the autosave and the next load.
+Owners: each is a User written the way `ghost create` writes one (a real user's record copied and patched), with `IsConnected` false, `IsBot` true, no `ConnectedUser` and no character, `User.Index` from 20001 and PlatformId `90000000000100000 + seed × 100 + n`. Each owner then gets its own team the way the server gives a new user one: an instance of the game's player team prefab (`ServerRootPrefabCollection.PlayerTeamPrefabGUID`) whose `UserTeam` points at the owner, and a `TeamReference` on the owner pointing at that team. This is what `TeamUtility.ClaimCastle` reads to give the owner a castle. If the team step fails, the owner is destroyed again and refused with `no_team_prefab` or `team_failed`. That band is outside the ghost and extra-client bands, so `ghost destroy` and Dev unload leave them. Not live-verified: how an enabled offline User with no character behaves in the game's systems, the autosave and the next load, and the owner team (source-checked against the server code only).
 
 ### `stress_clear`
 
-Args: `seed` (required), `confirm:"stress"`, `budgetMs`, `dryRun`. Finds every User in that seed's band and destroys each with its character, if any. An owner that still owns a castle heart (`heart_left`) or is in a clan (`clan_member`) is kept and reported: removing a heart or a clan member has no proven path. Run it twice: the second run finds nothing and reports `removed: 0`. The reply comes when the job ends.
+Args: `seed` (required), `confirm:"stress"`, `budgetMs`, `dryRun`. Finds every User in that seed's band and destroys each with its character and its own team, if any. An owner that still owns a castle heart (`heart_left`) or is in a clan (`clan_member`) is kept and reported: removing a heart or a clan member has no proven path. Run it twice: the second run finds nothing and reports `removed: 0`. The reply comes when the job ends.
 
 ### `stress_status`
 
 The running or last job: `kind`, `seed`, `phase` (`discover`, `plan`, `execute`, `done`, `refused`, `failed`, `cancelled`), `reason`, `steps` (`done`/`total`), `ticks`, `maxTickMs`, `totalMs`, `missing`, territory counts, owner and plot counts by status and reason, and rows: `results` (per plot: owner, status, reason, heart, fuel, floors, stations, chests, filled, refusals), `ownerResults` and `clanResults`; for a clear, `removed`, `kept` and `users`. Args: `plot` (territory index) adds that plot's full layout (positions, prefabs, chest contents); `rows:false` returns counts only. `{phase: "idle"}` before any job. A Dev unload stops a job between steps; what it made stays until `stress_clear`.
+
+### `stress_team`
+
+Read only; no gate, never writes. Args: `seed` (required), `heart` (optional, a castle heart entity `index:version`). Returns `playerTeamPrefab` (`guid`, `entity`, or `playerTeamPrefabError`) and, per owner of that seed, `name`, `entity`, `userIndex`, `team`, `teamState` (`ready`; `missing` when the owner has no team; or a refusal code: `connected`, `foreign_team`, `team_without_allies`), `missing` (the pieces not found) and `allies` (the team's `TeamAllies` rows). With `heart`: `heart` (`exists`, `castleTeam`, `castleTeamAllies`) and per owner `claimRefusal`, null when every read `TeamUtility.ClaimCastle` makes would succeed for that owner and heart, else the first missing piece. It does not call ClaimCastle. **Not run live.**
 
 ```
 $bridgeArgs = Join-Path $env:TEMP 'progenitor-stress-args.json'
