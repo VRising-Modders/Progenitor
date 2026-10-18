@@ -7,7 +7,7 @@ using Unity.Entities;
 namespace Progenitor.Dev.Ops;
 
 /// <summary>Server-thread, one-territory castle generation for an explicitly authorized test world.</summary>
-public static class StressPlace
+internal static class StressPlace
 {
     /// <summary>Adds real blood essence to an initialized heart inventory; verify fuel on a later frame.</summary>
     public static Progenitor.Items.ItemGrantResult Fuel(World world, Entity heart, int amount)

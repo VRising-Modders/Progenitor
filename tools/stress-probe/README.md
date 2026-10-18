@@ -3,7 +3,7 @@
 Build from the repository root against the exact deployed Core and Dev:
 
 ```powershell
-dotnet build tools/stress-probe/Progenitor.StressProbe.csproj -p:StressProbeCore=C:\VRisingMods\_testserver\server\BepInEx\progenitor-core\Progenitor.dll -p:StressProbeDev=C:\VRisingMods\_testserver\server\BepInEx\progenitor-reload\Progenitor.Dev.dll
+dotnet build tools/stress-probe/Progenitor.StressProbe.csproj -p:StressProbeCore=<testserver>\server\BepInEx\progenitor-core\Progenitor.dll -p:StressProbeDev=<testserver>\server\BepInEx\progenitor-reload\Progenitor.Dev.dll
 ```
 
 Use only during an authorized, coordinated test window with a backed-up copied save.

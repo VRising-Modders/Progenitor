@@ -50,13 +50,19 @@ public sealed partial class Plugin : BasePlugin
             var action = File.ReadAllText(marker).Trim();
             File.Delete(marker);
             const int plot = 0;
-            if (!string.Equals(Path.GetFullPath(Environment.ProcessPath ?? ""),
-                @"C:\VRisingMods\_testserver\server\VRisingServer.exe", StringComparison.OrdinalIgnoreCase))
+            // The isolated test server (<workspace>\_testserver\server\VRisingServer.exe) and the copied save
+            // (<workspace>\_testserver\moo-world-copy-20260909), matched by path segments.
+            var exe = Path.GetFullPath(Environment.ProcessPath ?? "");
+            var exeDir = Path.GetDirectoryName(exe) ?? "";
+            if (!string.Equals(Path.GetFileName(exe), "VRisingServer.exe", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetFileName(exeDir), "server", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetFileName(Path.GetDirectoryName(exeDir) ?? ""), "_testserver", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Server executable mismatch.");
             var argv = Environment.GetCommandLineArgs();
             int saveArg = Array.FindIndex(argv, a => string.Equals(a, "-persistentDataPath", StringComparison.OrdinalIgnoreCase));
-            if (saveArg < 0 || saveArg + 1 >= argv.Length || !string.Equals(Path.GetFullPath(argv[saveArg + 1]).TrimEnd('\\'),
-                @"C:\VRisingMods\_testserver\moo-world-copy-20260909", StringComparison.OrdinalIgnoreCase))
+            var save = saveArg < 0 || saveArg + 1 >= argv.Length ? "" : Path.GetFullPath(argv[saveArg + 1]).TrimEnd('\\');
+            if (!string.Equals(Path.GetFileName(save), "moo-world-copy-20260909", StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(Path.GetDirectoryName(save), Path.GetDirectoryName(exeDir), StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Copied test save mismatch.");
             Entity target = Entity.Null;
             foreach (var e in Query.Entities(world.EntityManager, true, false, ComponentIndex.Of<CastleTerritory>(ComponentType.AccessMode.ReadOnly)))
