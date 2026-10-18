@@ -161,7 +161,8 @@ internal sealed class KeybindsRowModel
     /// mod's bare <c>Mouse0</c> default): Reset could never succeed, and Reset all would log a refusal for it.
     /// </summary>
     internal bool CanReset => IsGame ? Editable && Changed
-        : Editable && Changed && Claim.DefaultChord is { } d && MouseChords.Allowed(d, Claim.Scope);
+        : Editable && Changed && Claim.DefaultChord is { } d
+            && MouseChords.Allowed(d, Claim.Scope, Claim.Source == KeybindSource.Progenitor ? Claim.OwnerId : null, Claim.ActionId);
 
     internal bool CanClear => Editable && (Claim.Chord.IsBound || !Claim.Comparable && !string.Equals(Claim.ChordText, "None", StringComparison.OrdinalIgnoreCase));
 

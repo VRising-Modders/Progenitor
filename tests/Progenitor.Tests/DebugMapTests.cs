@@ -210,6 +210,59 @@ public class DebugMapTests
         return hold.Frame(0.5, true, true, Armed);
     }
 
+    // ---- one teleport per gesture (2026-10-18) ---------------------------------------------------
+
+    private static readonly KeyChord GameChord = new(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Shift);
+
+    [Fact]
+    public void Only_a_game_authenticated_admin_wearer_is_marked_as_teleported_by_the_game()
+    {
+        // On the admin list but not authenticated (no adminauth): Progenitor teleports them.
+        Assert.Equal(new DebugMapState(true, true, false), StateFor(true, true, isAdmin: true, gameAuthenticated: false));
+        // Authenticated: the game's own Ctrl+Shift+left click teleports them.
+        Assert.Equal(new DebugMapState(true, true, true), StateFor(true, true, isAdmin: true, gameAuthenticated: true));
+        // The flag never stands without the teleport power.
+        Assert.Equal(new DebugMapState(true, false, false), StateFor(true, true, isAdmin: false, gameAuthenticated: true));
+        Assert.Equal(DebugMapState.None, StateFor(true, false, true, true));
+    }
+
+    [Fact]
+    public void The_hold_is_skipped_only_when_the_game_teleports_on_the_same_click()
+    {
+        var listed = new DebugMapState(true, true, false);
+        var authenticated = new DebugMapState(true, true, true);
+
+        Assert.True(SkipHold(authenticated, GameChord));
+        // The game checks only Ctrl and Shift, so Alt with them is the game's gesture too.
+        Assert.True(SkipHold(authenticated, new KeyChord(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Shift | KeyModifiers.Alt)));
+        // Any other key: the game does nothing on it, so Progenitor's hold teleports.
+        Assert.False(SkipHold(authenticated, new KeyChord(UiKey.MouseMiddle)));
+        Assert.False(SkipHold(authenticated, new KeyChord(UiKey.MouseLeft, KeyModifiers.Shift)));
+        Assert.False(SkipHold(authenticated, new KeyChord(UiKey.MouseRight, KeyModifiers.Ctrl | KeyModifiers.Shift)));
+        Assert.False(SkipHold(authenticated, KeyChord.None));
+        // A listed admin who has not authenticated: the game refuses its own teleport, so the hold is theirs.
+        Assert.False(SkipHold(listed, GameChord));
+        Assert.False(SkipHold(DebugMapState.None, GameChord));
+        Assert.True(IsGameTeleportChord(DefaultTeleportKey));
+    }
+
+    [Fact]
+    public void The_state_message_carries_the_game_flag_in_its_old_reserved_byte()
+    {
+        var msg = StateMsg.For(new DebugMapState(true, true, true));
+        Assert.Equal(1, msg.GameTeleports);
+        Assert.Equal(new DebugMapState(true, true, true), msg.State);
+        Assert.Equal(0, StateMsg.For(new DebugMapState(true, true, false)).GameTeleports);
+        Assert.Equal(6, (int)Marshal.OffsetOf<StateMsg>(nameof(StateMsg.GameTeleports)));
+
+        // A server from before the flag sends 0 there: the client always holds, as before.
+        var old = new StateMsg { Magic = Magic, Reveal = 1, CanTeleport = 1 };
+        Assert.False(old.State.GameTeleports);
+        Assert.False(SkipHold(old.State, GameChord));
+        // A flag without the power reads as off.
+        Assert.False(new StateMsg { Magic = Magic, Reveal = 1, CanTeleport = 0, GameTeleports = 1 }.State.GameTeleports);
+    }
+
     // ---- wire and lines --------------------------------------------------------------------------
 
     [Fact]

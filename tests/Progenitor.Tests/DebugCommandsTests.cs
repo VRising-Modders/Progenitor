@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Progenitor.Commands;
 using Progenitor.Debugging;
 using Progenitor.Persistence;
+using Progenitor.Ui;
 using Xunit;
 
 namespace Progenitor.Tests;
@@ -391,17 +392,21 @@ public sealed class DebugCommandsTests : IDisposable
     // ---- the map teleport key -----------------------------------------------------------------
 
     /// <summary>
-    /// Decided 2026-10-06: authenticated admins use the game's own Ctrl+Shift+click map
-    /// teleport, so Progenitor's key is registered unbound by default and clashes with nothing.
+    /// Decided 2026-10-18 (unbound from 2026-10-06): the key defaults to Ctrl+Shift+left click, the game's own admin
+    /// map teleport chord, so every admin wearing the debug buff teleports the same way.
     /// </summary>
     [Fact]
-    public void The_map_teleport_key_is_unbound_by_default()
+    public void The_map_teleport_key_defaults_to_the_games_own_gesture()
     {
+        Assert.Equal(new KeyChord(UiKey.MouseLeft, KeyModifiers.Ctrl | KeyModifiers.Shift), DebugMapPolicy.DefaultTeleportKey);
+        Assert.Equal("MouseLeft + Ctrl + Shift", DebugMapPolicy.DefaultTeleportKey.ToString());
         string map = SourcePin.ReadFile("src", "Progenitor.Core", "Debugging", "DebugMap.cs");
-        SourcePin.AssertUncommented(map, "internal static readonly KeyChord DefaultTeleportKey = KeyChord.None;");
+        SourcePin.AssertUncommented(map, "internal const string KeybindId = TeleportKeybindId;");
+        SourcePin.AssertUncommented(map, "if (_key != null && SkipHold(_state, _key.Chord)) return;");
+        SourcePin.AssertUncommented(map, "gameAuthenticated = u.IsAdmin;");
         Assert.DoesNotContain("UiKey.MouseMiddle", map, StringComparison.Ordinal);
         var lines = DebugMapPolicy.StatusLines(new DebugMapPolicy.DebugMapState(true, true), pushed: true, radius: 100f, walkCheck: false);
-        Assert.Contains("Ctrl+Shift+click", lines[1], StringComparison.Ordinal);
+        Assert.Contains("Ctrl+Shift+left click by default", lines[1], StringComparison.Ordinal);
     }
 
     private sealed class Ctx : ICommandContext

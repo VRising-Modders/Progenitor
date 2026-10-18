@@ -360,10 +360,11 @@ internal static class ReservedChords
 /// <item><description><see cref="KeybindScope.Menu"/> and <see cref="KeybindScope.Chat"/> refuse both buttons
 /// with any modifiers: a Mods-menu key is pressed while the pointer is on Progenitor's own buttons, and a chat
 /// key while the player clicks in the chat box.</description></item>
-/// <item><description><see cref="KeybindScope.Map"/> refuses the right button with Ctrl and Shift: the game's map
-/// sends its admin region unlock on that click (<c>MapMenuMapper.OnMapClicked</c>; Ctrl+Shift+left click is
-/// its admin teleport, which a server refuses for anyone who is not an authenticated admin, so that one is
-/// allowed).</description></item>
+/// <item><description><see cref="KeybindScope.Map"/> refuses both buttons with Ctrl and Shift: the game's map
+/// sends its admin teleport on the left click and its admin region unlock on the right one
+/// (<c>MapMenuMapper.OnMapClicked</c>). One bind is exempt from the left-click rule: Core's debug map teleport
+/// (<see cref="IsGameTeleportTwin"/>), which does what the game's gesture does, so the overlap is harmless
+/// (decided 2026-10-18).</description></item>
 /// </list>
 /// The other half of the rule is at the read (<see cref="Keybinds.ClickChordSuppressedReason"/>): a click chord
 /// never fires while the pointer is over a Progenitor window, and a gameplay one not while the game's
@@ -403,6 +404,31 @@ internal static class MouseChords
         return null;
     }
 
+    /// <summary>
+    /// The same refusal for one bind: <paramref name="pluginId"/>/<paramref name="id"/> is the Progenitor bind being set,
+    /// or null for a bind that is not Progenitor's. Core's debug map teleport may take Ctrl+Shift+left click on the map
+    /// (<see cref="IsGameTeleportTwin"/>); every other rule applies to it as to any bind.
+    /// </summary>
+    internal static string? Refusal(KeyChord chord, KeybindScope scope, string? pluginId, string? id)
+    {
+        string? refusal = Refusal(chord, scope);
+        return ReferenceEquals(refusal, MapTeleportReason) && IsGameTeleportTwin(pluginId, id) ? null : refusal;
+    }
+
+    /// <summary>
+    /// True for Core's debug map teleport (<c>progenitor/TeleportToMapPoint</c>). The game's Ctrl+Shift+left click on
+    /// the map teleports an authenticated admin to the point; this bind teleports any admin wearing the debug buff to
+    /// the same point, and the client skips its own request when the game's gesture already does it
+    /// (<see cref="Progenitor.Debugging.DebugMapPolicy.SkipHold"/>). So the chord may be shared.
+    /// </summary>
+    internal static bool IsGameTeleportTwin(string? pluginId, string? id) =>
+        string.Equals((pluginId ?? "").Trim(), SettingsPanel.PluginId, StringComparison.OrdinalIgnoreCase)
+        && string.Equals((id ?? "").Trim(), Progenitor.Debugging.DebugMapPolicy.TeleportKeybindId, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>True when <paramref name="chord"/> may be a bind in <paramref name="scope"/>.</summary>
     internal static bool Allowed(KeyChord chord, KeybindScope scope) => Refusal(chord, scope) == null;
+
+    /// <summary>True when <paramref name="chord"/> may be <paramref name="pluginId"/>/<paramref name="id"/>'s bind in <paramref name="scope"/>.</summary>
+    internal static bool Allowed(KeyChord chord, KeybindScope scope, string? pluginId, string? id) =>
+        Refusal(chord, scope, pluginId, id) == null;
 }
