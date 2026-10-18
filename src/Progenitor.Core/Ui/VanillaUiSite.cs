@@ -361,6 +361,25 @@ internal static class VanillaUiSites
     internal static bool IsEdge(VanillaPanelAnchor anchor) =>
         anchor == VanillaPanelAnchor.LeftEdge || anchor == VanillaPanelAnchor.RightEdge;
 
+    /// <summary>
+    /// Whether <paramref name="anchor"/> is an inline anchor in a window's title row
+    /// (<see cref="VanillaPanelAnchor.BesideRename"/>), whose row is the height of the game's small icon buttons.
+    /// </summary>
+    internal static bool IsTitleRow(VanillaPanelAnchor anchor) => anchor == VanillaPanelAnchor.BesideRename;
+
+    /// <summary>
+    /// A button with <paramref name="icon"/> on <paramref name="anchor"/> is always its square icon face, the caption
+    /// its hover tooltip: a title-row anchor and an icon the caller chose. A caption-only button keeps its text.
+    /// </summary>
+    internal static bool IconAlways(VanillaPanelAnchor anchor, VanillaButtonIcon icon) => IsTitleRow(anchor) && icon.Chosen;
+
+    /// <summary>
+    /// A button on <paramref name="anchor"/> gets an icon face at all: always on <see cref="VanillaPanelAnchor.BesideSort"/>
+    /// (the fallback when the captions do not fit), and where <see cref="IconAlways"/> holds.
+    /// </summary>
+    internal static bool HasIconFace(VanillaPanelAnchor anchor, VanillaButtonIcon icon) =>
+        anchor == VanillaPanelAnchor.BesideSort || IconAlways(anchor, icon);
+
     /// <summary>The short suffix the container name carries for an anchor (<c>left</c>, <c>sort</c>, ...).</summary>
     internal static string AnchorKey(VanillaPanelAnchor anchor) => anchor switch
     {

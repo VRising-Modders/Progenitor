@@ -168,10 +168,13 @@ public interface IVanillaAttachHandle : IDisposable
     IUiButton Button(string caption) => DisabledAttachButton.Instance;
 
     /// <summary>
-    /// <see cref="Button(string)"/> with the face it falls back to when its caption does not fit its
-    /// slot (<see cref="VanillaPanelAnchor.BesideSort"/>): a square button in the game's bar art with
-    /// <paramref name="icon"/> and the caption as its tooltip. <see cref="Button(string)"/> uses
-    /// <see cref="VanillaButtonIcon.Default"/> (a drawn chest).
+    /// <see cref="Button(string)"/> with an icon face: a square button in the game's bar art with
+    /// <paramref name="icon"/> and the caption as its hover tooltip. On
+    /// <see cref="VanillaPanelAnchor.BesideRename"/> (an inline title-row anchor) the button is always
+    /// this square, the title row's height (24 units on game build 1.1.13.0). On
+    /// <see cref="VanillaPanelAnchor.BesideSort"/> it is the fallback the row switches to when its
+    /// captions do not fit the slot; a caption-only <see cref="Button(string)"/> falls back to a drawn
+    /// chest there and stays text on the title row. Other anchors show the caption.
     /// </summary>
     IUiButton Button(string caption, VanillaButtonIcon icon) => Button(caption);
 

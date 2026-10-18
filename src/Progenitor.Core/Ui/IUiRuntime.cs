@@ -663,7 +663,7 @@ internal interface IUiRuntime
     /// </summary>
     IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption) => null;
 
-    /// <summary>P6: <see cref="ClonePanelButton(VanillaUiSite, IRuntimeWidget, string)"/> with the icon its face falls back to.</summary>
+    /// <summary>P6: <see cref="ClonePanelButton(VanillaUiSite, IRuntimeWidget, string)"/> with its icon face (<see cref="VanillaUiSites.HasIconFace"/>).</summary>
     IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon) =>
         ClonePanelButton(site, container, caption);
 

@@ -108,6 +108,7 @@
     <!-- Castles handle API. Every file here is game-free by construction; UnityCastleRuntime.cs
          is the module's only Unity/ProjectM file and is deliberately not on this list. -->
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleId.cs" Link="Linked\CastleId.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Castles\BuildingDisplayNames.cs" Link="Linked\BuildingDisplayNames.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleVec3.cs" Link="Linked\CastleVec3.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleGeometry.cs" Link="Linked\CastleGeometry.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Castles\CastleTerritoryBuffers.cs" Link="Linked\CastleTerritoryBuffers.cs" />
