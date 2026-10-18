@@ -634,6 +634,9 @@ offset SyncedServerDebugSettingsBuildingProximityRequirementDisabledOffset  = 0x
 # territory check that picks the heart, so CastleHeartConnection stays empty. Read-only raw reads.
 offset CastleHeartConnectionEntityOffset           = 0x0  : CastleHeartConnection.CastleHeartEntity   # NetworkedEntity, _Entity {Index, Version} first
 offset UserOwnerOwnerOffset                        = 0x0  : UserOwner.Owner                           # NetworkedEntity, _Entity first
+offset StressPlayerCharacterUserOffset             = 0x60 : PlayerCharacter.UserEntity
+offset StressControlledByControllerOffset          = 0x0  : ControlledBy.Controller
+offset StressUserHeartCountOffset                  = 0x0  : UserHeartCount.HeartCount
 offset CastleAreaRequirementRequirementTypeOffset  = 0x0  : CastleAreaRequirement.RequirementType     # CastleAreaRequirementType, byte
 enum   CastleAreaRequirementTypeAttachToOwnedArea  = 1    : CastleAreaRequirementType.AttachToOwnedArea
 

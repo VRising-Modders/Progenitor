@@ -30,6 +30,16 @@ In-memory ring (4000 entries) of every BepInEx log source. Not the disk file. `s
 
 Use `latestSeq` from the previous call as the next `since`.
 
+## `stress_transfer`
+
+Server, main thread, isolated copied-save gate shared with `stress_populate`. Transfers one occupied stress castle to a complete offline stress or extra-client user through the game's claim wrapper. Direct bridge call only; no MCP wrapper.
+
+Arguments: `castle` (territory index), `toPlatformId` (decimal string), `dryRun` (default false), `experiment:true` and `confirm:"stress"` for writes. A dry run needs neither opt-in and returns `before` plus `refusal` without writing. The seven original castles, non-stress owners, real player identities, connected users, clan members, broken reciprocal team links, mismatched heart counts and a full castle allowance are refused. Transfers happen before clan formation. The target must have matching Controller/LocalCharacter links, a Health-bearing character pointing back to that user, progression and UserHeartCount; these checks establish the required shape, not how the user was created.
+
+Successful writes return `applied:true` and, after two seconds, `verified` with `before` and `after`: both owners' territory sets, counts where present, reciprocal team links, UserOwner, LastUserOwner and target character/progression references. A failed later check reports `applied:true, verified:false`; it does not roll back or retry. Check logs and the copied save before another operation. World changes fail verification. Missing UserHeartCount on the old bare owner remains absent; its actual territory set must lose exactly the transferred castle.
+
+Use an unused extra-client identity to create and disconnect a normal player first. Reconnecting as a bare synthetic owner does not initialize the missing user graph. After one transfer, save and restart the copied server and resolve the identities again before batching. Implementation and refusal rules are checked offline; transfer and persistence qualification remain open.
+
 ## `bridge_status`
 
 Socket thread; never takes the one-op gate. Liveness probe after a main-thread timeout. Contract: [`bridge_status` in api.md](api.md#dev-bridge-ops). No MCP wrapper; use `call.mjs`.

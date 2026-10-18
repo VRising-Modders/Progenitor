@@ -1247,7 +1247,7 @@ internal static class StressStageOps
         return world;
     }
 
-    private static World RequireIdle()
+    internal static World RequireIdle()
     {
         if (s_planning) throw new InvalidOperationException("a stress stage job is still planning; read stress_stage_status in a moment");
         var running = s_job;
