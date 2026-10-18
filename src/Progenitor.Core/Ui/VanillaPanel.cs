@@ -363,6 +363,16 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
     /// <summary>For <see cref="VanillaUiSite.RecipeTooltip"/>: the product as a requirement-shaped pair.</summary>
     public VanillaRecipeRequirement Product => new(ProductGuid, ProductAmount);
 
+    /// <summary>
+    /// While the container window shows a remote container preview (<c>ctx.Inventory.Preview</c>) of this client: the
+    /// previewed container's stable id, which a mod can send to its server instead of (or with) the network id words;
+    /// <see cref="Progenitor.Inventory.ContainerId.None"/> otherwise. Set only for <see cref="VanillaPanelKind.Container"/>.
+    /// </summary>
+    public Progenitor.Inventory.ContainerId PreviewContainer { get; init; }
+
+    /// <summary>True when the panel shows a remote container preview (<see cref="PreviewContainer"/> is set).</summary>
+    public bool IsPreview => !PreviewContainer.IsNone;
+
     /// <summary>The <c>NetworkId</c>'s <c>Normal_Index</c>.</summary>
     public int NetworkIdIndex => NetworkId0;
 
@@ -384,7 +394,7 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
         && NetworkId0 == other.NetworkId0 && NetworkId1 == other.NetworkId1 && NetworkId2 == other.NetworkId2
         && ItemGuid == other.ItemGuid && ItemAmount == other.ItemAmount
         && RecipeGuid == other.RecipeGuid && ProductGuid == other.ProductGuid && ProductAmount == other.ProductAmount
-        && SameRequirements(_requirements, other._requirements);
+        && SameRequirements(_requirements, other._requirements) && PreviewContainer == other.PreviewContainer;
 
     private static bool SameRequirements(VanillaRecipeRequirement[]? a, VanillaRecipeRequirement[]? b)
     {
@@ -405,7 +415,7 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
         HashCode.Combine(
             HashCode.Combine(Kind, EntityIndex, EntityVersion, NetworkId0, NetworkId1, NetworkId2, ItemGuid, ItemAmount),
             HashCode.Combine(RecipeGuid, ProductGuid, ProductAmount),
-            _requirements?.Length ?? 0);
+            _requirements?.Length ?? 0, PreviewContainer);
 
     /// <summary>Equality operator.</summary>
     public static bool operator ==(VanillaPanelTarget a, VanillaPanelTarget b) => a.Equals(b);
@@ -439,8 +449,61 @@ public readonly struct VanillaPanelTarget : IEquatable<VanillaPanelTarget>
             s += " needs=";
             for (int i = 0; i < _requirements.Length; i++) s += (i > 0 ? "," : "") + _requirements[i];
         }
+        if (IsPreview) s += " preview=" + PreviewContainer;
 
         return s;
+    }
+}
+
+/// <summary>What this client's container preview says about the open container window, for the panel sites. Game-free.</summary>
+internal readonly struct VanillaPreviewWindow
+{
+    internal VanillaPreviewWindow(bool ownsWindow, int windowIndex, int windowVersion, int targetIndex, int targetVersion,
+        int net0, int net1, int net2, Progenitor.Inventory.ContainerId container)
+    {
+        OwnsWindow = ownsWindow; WindowIndex = windowIndex; WindowVersion = windowVersion;
+        TargetIndex = targetIndex; TargetVersion = targetVersion; Net0 = net0; Net1 = net1; Net2 = net2; Container = container;
+    }
+
+    /// <summary>The preview opened the container window and has not closed.</summary>
+    internal bool OwnsWindow { get; }
+    /// <summary>The client entity the window was opened on.</summary>
+    internal int WindowIndex { get; }
+    internal int WindowVersion { get; }
+    /// <summary>The previewed chest's client entity now (0:0 while it is off the client).</summary>
+    internal int TargetIndex { get; }
+    internal int TargetVersion { get; }
+    /// <summary>The chest's network id words the server sent.</summary>
+    internal int Net0 { get; }
+    internal int Net1 { get; }
+    internal int Net2 { get; }
+    internal Progenitor.Inventory.ContainerId Container { get; }
+}
+
+/// <summary>
+/// The panel sites' target while a remote container preview owns the container window, game-free. The game's mapper
+/// names the previewed chest as its target (there is no interaction behind the window); this makes the target say so
+/// for sure: the previewed chest's client entity and network id (the server's words when the entity has none to read,
+/// or is off the client for a moment), and <see cref="VanillaPanelTarget.PreviewContainer"/>. A container window that is
+/// not the preview's (a chest the player opened at the chest) is left as it is.
+/// </summary>
+internal static class VanillaPanelPreview
+{
+    internal static VanillaPanelTarget Apply(in VanillaPanelTarget target, in VanillaPreviewWindow preview)
+    {
+        if (target.Kind != VanillaPanelKind.Container || !preview.OwnsWindow || preview.Container.IsNone) return target;
+        bool onWindow = (target.EntityIndex == preview.WindowIndex && target.EntityVersion == preview.WindowVersion)
+            || (target.EntityIndex == preview.TargetIndex && target.EntityVersion == preview.TargetVersion && (preview.TargetIndex != 0 || preview.TargetVersion != 0))
+            || !target.HasEntity;
+        if (!onWindow) return target;
+        int index = target.EntityIndex, version = target.EntityVersion;
+        if (!target.HasEntity) { index = preview.TargetIndex != 0 || preview.TargetVersion != 0 ? preview.TargetIndex : preview.WindowIndex; version = preview.TargetIndex != 0 || preview.TargetVersion != 0 ? preview.TargetVersion : preview.WindowVersion; }
+        int n0 = target.NetworkId0, n1 = target.NetworkId1, n2 = target.NetworkId2;
+        if (!target.HasNetworkId) { n0 = preview.Net0; n1 = preview.Net1; n2 = preview.Net2; }
+        return new VanillaPanelTarget(target.Kind, index, version, n0, n1, n2, target.ItemGuid, target.ItemAmount)
+        {
+            PreviewContainer = preview.Container,
+        };
     }
 }
 

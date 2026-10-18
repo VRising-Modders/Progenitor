@@ -15,7 +15,7 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{}</c> or <c>{"action":"status"}</c> (either side): the client's running preview (state, phase, network id,
 /// client target and inventory entities, hooks, hidden UI, dropped item events) and the game's open menu and container
 /// window target; on the server, every server-side preview and every shared streaming lease (user, point, holders).</item>
-/// <item><c>{"action":"open","id":"c-...","keepOpen":false,"seconds":30,"hideBag":true,"replicationTimeout":5,"dropEvents":true,"hudGate":true,"syncInventory":true}</c>
+/// <item><c>{"action":"open","id":"c-...","keepOpen":false,"seconds":30,"hideBag":false,"replicationTimeout":5,"dropEvents":true,"hudGate":true,"syncInventory":true}</c>
 /// (client): start a preview of that container; read <c>status</c> for the outcome. <c>hudGate: false</c> (E2 only)
 /// leaves the game's interact-HUD auto-close alone, to observe it closing the window. <c>syncInventory: false</c> (E1b only) does
 /// not put the user in the chest's inventory sync lists, so the inventory stays away as in E1.</item>
@@ -41,7 +41,7 @@ internal static class ContainerPreviewOps
                 Str(args, "id") ?? throw new ArgumentException("args.id (a container id, c- plus 32 hex digits) is required for open"),
                 Bool(args, "keepOpen") ?? false,
                 Num(args, "seconds") ?? 30,
-                Bool(args, "hideBag") ?? true,
+                Bool(args, "hideBag") ?? false,
                 Num(args, "replicationTimeout") ?? 5,
                 Bool(args, "dropEvents") ?? true,
                 Bool(args, "hudGate") ?? true,

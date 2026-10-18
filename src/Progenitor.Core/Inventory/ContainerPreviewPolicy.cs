@@ -61,8 +61,12 @@ public sealed record ContainerPreviewOptions
     /// <summary>Most <see cref="ReplicationTimeoutSeconds"/> may be.</summary>
     public const float MaxReplicationTimeoutSeconds = 30;
 
-    /// <summary>Hide the player's own inventory panel (the bag) next to the container, so a mod window can sit there.</summary>
-    public bool HidePlayerInventory { get; init; } = true;
+    /// <summary>
+    /// Hide the player's own inventory panel (the bag) next to the container, so a mod window can sit there. Off by
+    /// default: the window shows as the game shows it at a chest, the character inventory on the left and the chest on
+    /// the right (the character inventory is the player's own; nothing moves into or out of the chest either way).
+    /// </summary>
+    public bool HidePlayerInventory { get; init; } = false;
 
     /// <summary>Keep the preview open until the player or the caller closes it; the client renews the server lease.</summary>
     public bool KeepOpen { get; init; }

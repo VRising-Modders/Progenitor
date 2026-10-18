@@ -106,6 +106,15 @@ internal static unsafe class ContainerPreviewClient
         }
     }
 
+    /// <summary>What the running preview says about the container window in <paramref name="world"/>, for the panel sites.</summary>
+    internal static Progenitor.Ui.VanillaPreviewWindow PreviewWindow(World world)
+    {
+        var c = _current;
+        if (c == null || !ReferenceEquals(c.World, world)) return default;
+        try { return c.PanelView(); }
+        catch { return default; }
+    }
+
     internal static void Forget(ContainerPreviewHandle handle)
     {
         if (ReferenceEquals(_current, handle)) _current = null;
@@ -281,6 +290,98 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
     /// The container window's own part (the mapper's container sub-menu), while this preview owns the window; null
     /// otherwise. The camera preview keeps the HUD canvas that holds it shown (<c>CameraPreviewHud</c>).
     /// </summary>
+    /// <summary>The panel sites' view of this preview (<see cref="Progenitor.Ui.VanillaPanelPreview"/>).</summary>
+    internal Progenitor.Ui.VanillaPreviewWindow PanelView() => new(
+        Machine.OwnsWindow, _windowTarget.Index, _windowTarget.Version, _target.Index, _target.Version,
+        _netIndex, _netGeneration, _netType, Container);
+
+    /// <summary>
+    /// Every part of the open container window a hidden HUD must leave shown: the container half, the character inventory
+    /// half (the game's station layout shows both), and their common parent. Empty when the preview does not own it.
+    /// </summary>
+    internal List<Transform> WindowParts()
+    {
+        var parts = new List<Transform>(3);
+        if (!Machine.OwnsWindow || !_world.IsCreated) return parts;
+        var mapper = ContainerPreviewClient.ReadWindow(_world).Mapper;
+        if (mapper == null) return parts;
+        var sub = mapper._ContainerSubMenu;
+        if (sub != null) { parts.Add(sub.transform); if (sub.transform.parent != null) parts.Add(sub.transform.parent); }
+        var bag = mapper._InventorySubMenu;
+        if (bag != null) parts.Add(bag.transform);
+        return parts;
+    }
+
+    /// <summary>
+    /// Readback for the live checks: each half of the window (shown, its size on screen, its root canvas and whether that
+    /// canvas draws), the container grid's slot count, and the chest and inventory entities on this client (present,
+    /// disabled, the inventory's row count).
+    /// </summary>
+    private Dictionary<string, object?> WindowReadback()
+    {
+        var r = new Dictionary<string, object?>();
+        try
+        {
+            if (!_world.IsCreated) return r;
+            var mapper = ContainerPreviewClient.ReadWindow(_world).Mapper;
+            if (mapper != null)
+            {
+                var sub = mapper._ContainerSubMenu;
+                r["container"] = sub == null ? null : Half(sub.gameObject);
+                if (sub != null && sub.EquipmentItemsParent != null)
+                {
+                    var grid = sub.EquipmentItemsParent.transform;
+                    int active = 0;
+                    for (int i = 0; i < grid.childCount; i++) if (grid.GetChild(i).gameObject.activeSelf) active++;
+                    r["gridSlots"] = grid.childCount;
+                    r["gridSlotsShown"] = active;
+                }
+                var bag = mapper._InventorySubMenu;
+                r["inventory"] = bag == null ? null : Half(bag.gameObject);
+            }
+            var em = _world.EntityManager;
+            r["targetPresent"] = _target != Entity.Null && em.Exists(_target);
+            r["targetDisabled"] = _target != Entity.Null && em.Exists(_target) && _target.Has<Disabled>(em);
+            r["inventoryPresent"] = _inventory != Entity.Null && em.Exists(_inventory);
+            if (_inventory != Entity.Null && em.Exists(_inventory))
+            {
+                r["inventoryDisabled"] = _inventory.Has<Disabled>(em);
+                r["inventoryRows"] = em.GetBuffer<InventoryBuffer>(_inventory, true).Length;
+            }
+        }
+        catch (Exception e) { r["error"] = e.Message; }
+        return r;
+    }
+
+    private static Dictionary<string, object?> Half(GameObject go)
+    {
+        var h = new Dictionary<string, object?> { ["active"] = go.activeInHierarchy };
+        var rect = go.GetComponent<RectTransform>();
+        if (rect != null) { var size = rect.rect.size; h["size"] = new[] { size.x, size.y }; h["position"] = new[] { rect.position.x, rect.position.y }; }
+        var canvas = go.GetComponentInParent<Canvas>();
+        var root = canvas == null ? null : canvas.rootCanvas;
+        h["rootCanvas"] = root == null ? null : root.gameObject.name;
+        h["rootCanvasEnabled"] = root != null && root.enabled;
+        var group = go.GetComponent<CanvasGroup>();
+        if (group != null) { h["alpha"] = group.alpha; h["blocksRaycasts"] = group.blocksRaycasts; h["interactable"] = group.interactable; }
+        return h;
+    }
+
+    /// <summary>The container panel site's newest target (what attached mod tabs receive) and how many frames ago it was read.</summary>
+    private Dictionary<string, object?> PanelTargetReadback()
+    {
+        var t = Progenitor.Ui.UnityUiRuntime.LastContainerPanelTarget;
+        int frame = Progenitor.Ui.UnityUiRuntime.LastContainerPanelFrame;
+        return new Dictionary<string, object?>
+        {
+            ["target"] = frame < 0 ? null : t.ToString(),
+            ["framesAgo"] = frame < 0 ? null : Time.frameCount - frame,
+            ["previewContainer"] = t.IsPreview ? t.PreviewContainer.ToString() : null,
+            ["matchesPreview"] = frame >= 0 && t.IsPreview && t.PreviewContainer == Container
+                && t.NetworkIdIndex == _netIndex && t.NetworkIdGeneration == _netGeneration,
+        };
+    }
+
     internal Transform? WindowPart()
     {
         if (!Machine.OwnsWindow || !_world.IsCreated) return null;
@@ -676,6 +777,8 @@ internal sealed unsafe class ContainerPreviewHandle : IContainerPreview
         ["target"] = _target == Entity.Null ? null : _target.Index + ":" + _target.Version,
         ["inventory"] = _inventory == Entity.Null ? null : _inventory.Index + ":" + _inventory.Version,
         ["inventoryMissing"] = Machine.InventoryMissing,
+        ["window"] = WindowReadback(),
+        ["panelTarget"] = PanelTargetReadback(),
         ["hooks"] = _hudHook != null,
         ["hiddenUi"] = _hidden.Count,
         ["droppedEvents"] = DroppedEvents,

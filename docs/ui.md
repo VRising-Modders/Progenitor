@@ -1853,9 +1853,15 @@ What changes on screen while a preview owns the window:
 
 - The take-all, sort, rename and burn-toggle buttons are hidden with a CanvasGroup (alpha 0, no raycasts, not
   interactable) so the window's layout keeps its spacing. They only work at the chest.
-- With `ContainerPreviewOptions.HidePlayerInventory` (the default) the player's bag panel is hidden the same
-  way. That is the space a mod window (a Find list, for example) docks into, on the left of the container
+- By default the window shows as at a real chest: the character inventory on the left, the chest on the right,
+  and the object between them (the camera preview with `ScreenOffset` 0 frames it there). With
+  `ContainerPreviewOptions.HidePlayerInventory` the player's bag panel is hidden the same way as the buttons; that is the
+  space a mod window (a Find list, for example) docks into, on the left of the container
   window, with `panel.Dock(UiDock.Left, …)` ([Docked panels](#docked-panels-dock1)). The pairing of the two is not live-checked.
+- Panels attached to the container window (`UiApi.AttachPanelTabs` tabs and vanilla panel sites) get a `VanillaPanelTarget`
+  naming the previewed chest: its client entity, its network id (the server's words when the entity has none to read) and
+  `PreviewContainer`, its `ContainerId` (`IsPreview` true). A mod can send either to its server. Edits through the mod's
+  own messages need no game permission; the chest's own slots stay read-only. Not live-verified.
 - Escape closes the preview and the window after framework dialogs, key captures and the focused chat box
   (the same precedence as the world pick).
 

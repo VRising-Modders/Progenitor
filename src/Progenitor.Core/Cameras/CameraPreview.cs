@@ -47,6 +47,7 @@ public sealed partial class PluginCamera
         if (!float.IsFinite(yawDegrees)) throw new ArgumentOutOfRangeException(nameof(yawDegrees));
         if (!options.Hold && (!float.IsFinite(options.Seconds) || options.Seconds <= 0 || options.Seconds > CameraPreviewPolicy.MaxTimedSeconds))
             throw new ArgumentOutOfRangeException(nameof(options), "Seconds must be more than 0 and at most 10; use Hold for longer.");
+        if (CameraPreviewFramingRules.Problem(options.Distance, options.Pitch) is { } framing) throw new ArgumentOutOfRangeException(nameof(options), framing);
         if (!CameraFraming.IsValidOffset(options.ScreenOffset))
             throw new ArgumentOutOfRangeException(nameof(options), "ScreenOffset must be finite and at most 0.4 either way.");
         _ = Director;
@@ -101,8 +102,11 @@ public sealed partial class PluginCamera
         /// <summary>The newest running preview of any plugin, for the bridge's readback; null when none runs.</summary>
         internal static CameraPreview? Current { get; private set; }
 
-        /// <summary>The orbit distance and pitch every preview uses.</summary>
-        private const float Distance = 6, Pitch = 35;
+        /// <summary>The orbit distance and pitch of the default framing (<see cref="CameraPreviewOptions.Distance"/>, <see cref="CameraPreviewOptions.Pitch"/>).</summary>
+        private const float DefaultDistance = CameraPreviewFramingRules.DefaultDistance, DefaultPitch = CameraPreviewFramingRules.DefaultPitch;
+
+        /// <summary>This preview's orbit distance (meters) and pitch (degrees).</summary>
+        private readonly float Distance, Pitch;
 
         /// <summary>True until the preview ends.</summary>
         public bool Active { get; private set; } = true;
@@ -116,6 +120,7 @@ public sealed partial class PluginCamera
         internal CameraPreview(PluginCamera camera, UnitVec3 point, float yaw, CameraPreviewOptions options)
         {
             _camera = camera; _point = point; _anchor = point; _yaw = yaw; _ended = options.Ended; _screenOffset = options.ScreenOffset;
+            (Distance, Pitch) = CameraPreviewFramingRules.Resolve(options.Distance, options.Pitch, options.MatchPlayerCamera, PlayerCameraShot());
             _policy = new CameraPreviewPolicy(options.Hold ? CameraPreviewPolicy.MaxTimedSeconds : options.Seconds, options.Hold, 0);
             _world = Worlds.Client ?? throw new InvalidOperationException("No client world.");
             _epoch = WorldEpoch.Current;
@@ -325,6 +330,8 @@ public sealed partial class PluginCamera
                 ["lookAtViewportX"] = r.AtLookAt,
                 ["oneMeterRightViewportX"] = r.AtRight,
                 ["lateral"] = r.Lateral,
+                ["distance"] = p.Distance,
+                ["pitch"] = p.Pitch,
                 ["pinholeLateral"] = p._measured ? CameraFraming.PinholeLateral(r.Target, r.Depth, fov, aspect) : float.NaN,
                 ["rightAgreement"] = p._measured ? CameraFraming.RightAgreement(p._yaw, r.CameraRight) : float.NaN,
                 ["ownsHud"] = p._ownsHud,
@@ -401,6 +408,22 @@ public sealed partial class PluginCamera
             return s;
         }
 
+        /// <summary>The player's own camera as an orbit shot, measured before the preview takes the camera (<see cref="CameraPreviewOptions.MatchPlayerCamera"/>).</summary>
+        private static (bool Ok, float Distance, float Pitch) PlayerCameraShot()
+        {
+            try
+            {
+                var world = Worlds.Client;
+                var cam = UnityEngine.Camera.main;
+                if (world == null || !world.IsCreated || cam == null) return (false, 0, 0);
+                if (!TryLocalCharacter(world, out _, out var at)) return (false, 0, 0);
+                var p = cam.transform.position;
+                var f = cam.transform.forward;
+                return CameraPreviewFramingRules.FromCamera(p.x, p.y, p.z, f.x, f.y, f.z, at.x, at.y, at.z);
+            }
+            catch { return (false, 0, 0); }
+        }
+
         private static bool TryLocalCharacter(World world, out Entity character, out float3 position)
         {
             character = Entity.Null; position = default;
@@ -445,18 +468,18 @@ public sealed partial class PluginCamera
         }
 
         /// <summary>
-        /// Leave the HUD canvas that holds the container window shown while this client's container preview owns the
+        /// Leave the HUD canvases that hold the container window (both halves: the container and the inventory beside it) shown while this client's container preview owns the
         /// window (opened before this preview or during it); hide it again once it does not (<see cref="CameraPreviewHud"/>).
         /// </summary>
         private void KeepContainerWindow()
         {
-            UnityEngine.Transform? part = null;
+            System.Collections.Generic.IReadOnlyList<UnityEngine.Transform>? parts = null;
             bool owns = ContainerOwnsWindow(out var container);
             if (CameraPreviewHud.KeepContainerWindow(_ownsHud, owns, sameWorld: owns))
             {
-                try { part = container!.WindowPart(); } catch { part = null; }
+                try { parts = container!.WindowParts(); } catch { parts = null; }
             }
-            _keptCanvas = PhotoHud.Keep(part);
+            _keptCanvas = PhotoHud.Keep(parts);
         }
 
         /// <summary>The name of the hidden HUD canvas left shown for the container window, or null.</summary>

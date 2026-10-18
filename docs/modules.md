@@ -2690,7 +2690,10 @@ the ordinary window with its ordinary rights.
    a menu is open, so input is captured anyway.
 5. Once the window shows (`Open`), the take-all, sort, rename and burn-toggle buttons are hidden with a
    CanvasGroup (alpha 0, no raycasts) so the window's layout keeps its spacing, and with
-   `HidePlayerInventory` the bag panel too. Everything is put back on close.
+   `HidePlayerInventory` (off by default since 2026-10-18: the window shows the game's station layout, the character
+   inventory on the left and the chest on the right) the bag panel too. Everything is put back on close. Panels and
+   tabs attached to the container window get a `VanillaPanelTarget` naming the previewed chest (its entity, its
+   network id, and `PreviewContainer`, its `ContainerId`).
 6. With `DropItemEvents` (default), a `Before<SerializeAndSendClientEventsSystem>` drops this client's item
    events that name the previewed chest or its inventory before they are sent, so a drag snaps back
    instead of failing on the server. A courtesy only; the server refusal above is the guarantee.
@@ -2894,8 +2897,24 @@ and the shared lease.
   stop-interacting send and no mapper exception. Then a camera preview and a container preview of the same
   chest: server status shows one lease with 2 holders, and ending one leaves the other streaming.
 - **E5 controller and bag.** With a gamepad, cycle focus in the window with the bag hidden by CanvasGroup
-  (default), then `bag {"mode":"inactive"}` and a new open: record where focus lands in each and whether the
-  container's layout moves. Switching focus between a docked Find panel and the container is a `ctx.Keybinds` bind of
+  (`hideBag: true`), then `bag {"mode":"inactive"}` and a new open: record where focus lands in each and whether the
+  container's layout moves.
+- **E6 station layout, attached tabs, camera (not run).** Satisvampory deployed (its container tabs attached), the far
+  chest with a few stacks.
+  1. `open {"id":"c-…","keepOpen":true}` (the bag is shown now). Capture: the character inventory on the left, the
+     chest window full size on the right. `status.window`: both halves `active`, the container half's `size` the
+     normal window size, `gridSlots` and `gridSlotsShown` matching the chest's slot count, `inventoryRows` the same,
+     `targetDisabled` / `inventoryDisabled` recorded. `status.panelTarget`: `matchesPreview` true, `previewContainer`
+     the opened id, `target` naming the chest's entity and network id.
+  2. Click each Satisvampory tab (Input, Output, Accepts) and make one edit through it (real input, brief focus):
+     the tab switches, the edit's own message reaches its server (Satisvampory's log names the chest), and the chest's
+     slots are unchanged. Switch back to the game's own tab: the grid shows again.
+  3. With the window open, start `ctx.Camera.Preview` (Hold, `MatchPlayerCamera` true, `ScreenOffset` 0) through
+     the Sample or Satisvampory. `camera_preview` readback: `distance` and `pitch` near the player's own camera (about
+     15 m), `hud.kept` naming every canvas that holds the window, `containerWindow.visible` true. Capture at 1920x1080
+     and at 32:9: both window halves fully shown with the grid, the chest between them. `status.window` as in step 1.
+     If the grid is gone here and not in step 1, the halves' `rootCanvas` names say which canvas is still hidden.
+  4. Escape once: the container preview ends (`Escape`), the window closes; Escape again: the camera preview ends. Switching focus between a docked Find panel and the container is a `ctx.Keybinds` bind of
   the mod that docks it, not of this API.
 
 Afterwards: close any preview, disconnect to the title screen, and remove every sample deployed for the
@@ -5725,6 +5744,16 @@ A preview shows the player a distant spot (a storage room, say) without moving t
 
 - **Server:** `ctx.Camera.Observe(user, target, …)` writes a secondary streaming origin for that user at the target, so the server sends the client what is there. The real character is not moved. The lease makes one anchor entity (not saved) and one system hook, and releases both when it ends. The caller authorizes the target.
 - **Client:** `ctx.Camera.Preview(point, yaw, …)` orbits the point at 6 m and 35° pitch, points the client's render origin at it (so streamed rooms draw), and hides the native HUD. Right-drag or `Rotate` turns it; rotation is automatic until the player turns it. The preview moves only the camera. The caller blocks gameplay input and shows its own controls.
+
+**Distance and pitch.** The orbit is 6 m out at 35 degrees unless `CameraPreviewOptions.Distance` (2 to 40 m) or
+`Pitch` (10 to 85 degrees) says otherwise. `MatchPlayerCamera` measures the player's own camera when the preview starts
+(the pitch of its forward axis and its distance to the character) and uses that, which is how the game frames a chest
+the player opens: it does not move the camera for an interaction. Explicit values override either part; the defaults
+apply when the camera cannot be read. The screen offset is computed from the measured camera, so it holds for any
+distance and aspect (32:9 too). With a container preview's station layout (character inventory left, chest right),
+`ScreenOffset` 0 puts the chest between the two halves. While a camera preview has hidden the HUD and a container
+preview of this client owns the container window, every hidden canvas holding part of that window (the chest half,
+its parent, the inventory half) stays shown. Game-free tested (`ContainerPreviewLayoutTests`), not live-verified.
 
 **Holding a preview open.** A timed preview lasts at most 10 seconds. To keep one open (a "Keep open" button), call `Hold()` on both handles. That keeps the current orbit and rotation (nothing restarts) and removes the short timeout. A hold still has a cap of ten minutes from the last `Hold()` on both sides (`CameraPreview.MaxHoldSeconds`, `CameraObservation.MaxRenewSeconds`); calling `Hold()` again restarts it. On the server, `Renew(seconds)` sets the lease's deadline to at most ten minutes from now, for a mod that would rather send a heartbeat.
 
