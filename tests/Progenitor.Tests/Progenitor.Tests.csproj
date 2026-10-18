@@ -42,6 +42,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\MenuHotkeyGuard.cs" Link="Linked\MenuHotkeyGuard.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\BuildSearchMatch.cs" Link="Linked\BuildSearchMatch.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\BuildMenuBlob.cs" Link="Linked\BuildMenuBlob.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\BuildRecentHistory.cs" Link="Linked\BuildRecentHistory.cs" />
+    <Compile Include="..\..\src\Progenitor.Core\Ui\BuildRecentCorrelation.cs" Link="Linked\BuildRecentCorrelation.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\NativeModsEntry.cs" Link="Linked\NativeModsEntry.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\NativeTabSelection.cs" Link="Linked\NativeTabSelection.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Ui\NativeOuterTabRegistration.cs" Link="Linked\NativeOuterTabRegistration.cs" />

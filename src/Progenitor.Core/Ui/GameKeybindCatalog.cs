@@ -263,6 +263,11 @@ internal static class GameKeybindCatalog
     internal static string ModeOf(string action, KeyChord chord)
     {
         string a = action ?? "";
+        // These General rows belong to DefaultControls' Inventory map and act on inventory
+        // slots/screens. Keep Core-map General actions (including AdvancedTooltip) unchanged;
+        // map membership alone is not enough for other groups such as gameplay's ActionBar.
+        if (a is "DropItem" or "SplitItem" or "CustomSplitItem" or "RepairItem"
+            or "SmartTakeItems" or "AutoTransferItems" or "SortItems") return InInventory;
         if (a.StartsWith("Building_", StringComparison.Ordinal)) return WhileBuilding;
         if (a.StartsWith("Emotes_", StringComparison.Ordinal)) return InEmoteMenu;
         if (a.StartsWith("Shapeshift_", StringComparison.Ordinal)) return WhileChoosingForm;

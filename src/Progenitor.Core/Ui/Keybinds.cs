@@ -1736,6 +1736,8 @@ public static class Keybinds
     /// <summary>MAPTP1: why a map bind did not run with the world map closed.</summary>
     internal const string MapClosedReason = "suppressed: works only while the map is open";
 
+    internal const string BuildClosedReason = "suppressed: works only while the build menu is open";
+
     /// <summary>CHAT2: why a chat bind did not run while the chat box does not have focus.</summary>
     internal const string ChatClosedReason = "suppressed: works only while typing in chat";
 
@@ -1743,6 +1745,7 @@ public static class Keybinds
     {
         KeybindScope.Photo => PhotoInactiveReason,
         KeybindScope.Map => MapClosedReason,
+        KeybindScope.Build => BuildClosedReason,
         KeybindScope.Chat => ChatClosedReason,
         KeybindScope.Window => WindowClosedReason,
         _ => MenuClosedReason,
@@ -1786,6 +1789,18 @@ public static class Keybinds
 
     private static bool DefaultMapScopeOpen() => GameMenuHistory.SafeMapOpen();
 
+    /// <summary>Core build tools only; reads menu state, never polls game input. Replaceable in tests.</summary>
+    internal static Func<bool> BuildScopeOpen { get; set; } = DefaultBuildScopeOpen;
+
+    private static bool DefaultBuildScopeOpen()
+    {
+#if PROGENITOR_TESTS
+        return false;
+#else
+        return BuildMenuSearch.IsBuildScopeOpen;
+#endif
+    }
+
     /// <summary>
     /// CHAT2: whether the player is typing in the game's chat box, for <see cref="KeybindScope.Chat"/> binds.
     /// Production: the key source's chat focus reads <see cref="ChatFocus.Focused"/>. A seam for tests.
@@ -1806,6 +1821,7 @@ public static class Keybinds
                 KeybindScope.Window => WindowScopeOpen(),
                 KeybindScope.Photo => PhotoScopeOpen(),
                 KeybindScope.Map => MapScopeOpen(),
+                KeybindScope.Build => BuildScopeOpen(),
                 KeybindScope.Chat => ChatScopeOpen(),
                 _ => true,
             };
@@ -1884,6 +1900,18 @@ public static class Keybinds
             return null;
         }
     }
+
+    /// <summary>Player-facing scope names; never expose enum spelling as UI copy.</summary>
+    internal static string ScopeText(KeybindScope scope) => scope switch
+    {
+        KeybindScope.Build => "Build mode",
+        KeybindScope.Map => "World map",
+        KeybindScope.Menu => "Menus",
+        KeybindScope.Window => "Menus and windows",
+        KeybindScope.Photo => "Photo mode",
+        KeybindScope.Chat => "Chat",
+        _ => "Gameplay",
+    };
 
     private static string? SafeWinnerGate(Registration reg)
     {
@@ -2859,6 +2887,7 @@ public static class Keybinds
         WindowHoldsInput = DefaultWindowHoldsInput;
         PhotoScopeOpen = NeverOpen;
         MapScopeOpen = DefaultMapScopeOpen;
+        BuildScopeOpen = DefaultBuildScopeOpen;
         ChatScopeOpen = DefaultChatScopeOpen;
         PointerOverModUi = DefaultPointerOverModUi;
         GameMenuOpen = DefaultGameMenuOpen;

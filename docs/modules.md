@@ -6721,11 +6721,17 @@ A built-in client feature, **on by default**, with no plugin API. In the game's 
   row, whatever tab is selected.
 - **A breadcrumb** in the hover tooltip of every item, with or without a search: `Decoration > Furniture` for a
   cell, `Decoration > Furniture > Workshop` for an item inside a group.
+- **A Recent category** at the bottom of the category list: the last distinct items the player built, newest first.
+- **Copy building**, a rebindable key (default Middle Mouse) that picks the building under the cursor for placement.
 
 Source: `src/Progenitor.Core/Ui/BuildMenuSearch.cs` (the box and the per-frame hooks), `BuildMenuIndex.cs` (the
 menu as data), `BuildMenuSwap.cs` (results from every tab), `BuildMenuCrumb.cs` (the breadcrumb),
-`UnityUiRuntime.ExternalFields.cs` (the text field). Game-free and unit-tested: `BuildSearchMatch.cs`
-(`BuildSearchMatchTests`) and `BuildMenuBlob.cs` (`BuildMenuBlobTests`, `BuildMenuResultsTests`).
+`UnityUiRuntime.ExternalFields.cs` (the text field), `BuildMenuSearch.Tools.cs` (Recent, Copy building and the
+disabled categories), `BuildMenuRecentTab.cs` (the Recent category button), `BuildMenuCopyHint.cs` (the key hint),
+`BuildRecentObserver.cs` (which builds count). Game-free and unit-tested: `BuildSearchMatch.cs`
+(`BuildSearchMatchTests`), `BuildMenuBlob.cs` (`BuildMenuBlobTests`, `BuildMenuResultsTests`),
+`BuildRecentHistory.cs` (`BuildRecentHistoryTests`; it also holds the box placement, `BuildSearchPlacement`) and
+`BuildRecentCorrelation.cs` (`BuildRecentCorrelationTests`). The build keybind scope: `KeybindMapScopeTests`.
 
 **Status.** Live-verified on 2026-10-04 (Steam client 3840x1080 on the isolated test server):
 
@@ -6739,6 +6745,50 @@ menu as data), `BuildMenuSwap.cs` (results from every tab), `BuildMenuCrumb.cs` 
   the copy was freed within the delay. One letter filtered the tab. A Core hot swap with results showing restored
   the game's blob, with no copy left, and re-attached the box.
 
+Recent, Copy building, the box position and the disabled categories (added 2026-10-15) are **unit-tested; not
+live-verified** on the current main. Before the port onto it, a Copy building press was observed on the Steam
+client (2026-10-15, one wooden floor blueprint): it picked the hovered building, the same press with the menu
+closed did nothing, and the hint showed the game's middle-mouse graphic at 1920x1080 and 3840x1080
+([knowledge note](../knowledge/notes/build-mode-mouse-hint.md)). That run did not cover Recent.
+
+### Recent, Copy building and the box position
+
+**Recent.** A **Recent** category sits below the game's categories. It lists the last distinct items the player
+built, newest first; building an item again moves it to the front. Only a finished placement counts: hovering,
+selecting, or a placement the game refuses adds nothing, and relocating a building is not a build. The list is
+kept on the client in `BepInEx/config/progenitor.build-history.cfg` (`[History] Blueprints`, blueprint
+identities only, never a world entity id), so it survives closing the menu, a Core reload and a restart, and is
+shared by every world. Typing in the box while Recent is selected filters the list; the count reads "3 recent" or
+"No recent matches". Items not yet unlocked are left out, as in any tab.
+
+The server says which placements finished: a server running this Core sends each confirmed build back to its
+builder on the Core-reserved event `'PrRb'` (versioned; both sides drop a malformed packet). On a server without it,
+Recent stays empty and the rest of the menu is unchanged. A building the game turns into another piece when placed,
+and wallpapers, are not recorded. Like `'PrIc'`, `'PrRb'` is not yet in Bootstrap's
+`ReceiveSlotPolicy.CoreProtocolIds`; adding it is a Bootstrap change.
+
+**Copy building.** With the build menu open, point at a building and press **Copy building** (default Middle
+Mouse; Keybinds tab > Progenitor > **Build mode**). The search clears, the menu switches to the item's tab and
+the item is picked for placement exactly as a click on it would be, so an item that is not unlocked stays
+unavailable and costs are the game's own. Nothing happens while the box has the keyboard, in the castle relocation
+menu, or with the menu closed. The key's current binding is shown in the game's key-hint row of the build screen,
+with the game's mouse-button graphic for a mouse button and the key name otherwise; it follows a remap and goes
+when the key is unbound.
+
+The key is in the *build* keybind scope (`KeybindScope.Build`, Core only): it works only while the build menu is
+shown. It still conflicts with the game's gameplay actions, building keys and menu keys, and with mod gameplay,
+menu and build keys; Push To Talk (also Middle Mouse by default) is read on every screen, so that pair is a
+warning and both act. The game's seven inventory actions in its General group (Drop Item, Split Item, Custom
+Split Item, Repair Item, Smart Take Items, Auto Transfer Items, Sort Items) now count as inventory keys for every
+mod key, so they are a warning rather than a conflict. See [Who gets a key](mods-menu.md#who-gets-a-key-first-installed).
+
+**The box position.** The search box and its count sit on one line above the item row, left of the game's variant
+selector when that is shown, and above the selector when the row is too narrow for both.
+
+**Categories during a search.** While the box has text, every category and tag button, Recent included, is
+dimmed and cannot be clicked, the selected-category highlight is hidden, and a line under the box reads "Clear
+search to browse categories". Clearing the search brings them back.
+
 ### Settings
 
 Mods menu (F10) > **Progenitor** > the **Build menu** group. Each switch takes effect at once. They are stored as
@@ -6750,6 +6800,9 @@ server-synced.
 | Build menu search | `Enabled` | `true` | Show the search box. Off while the menu is open: the box goes and the menu is the game's own again. |
 | Clear search when the menu closes | `ClearOnClose` | `true` | Off: the menu reopens with the last search applied. |
 | Show where items live | `Breadcrumbs` | `true` | The breadcrumb line in the tooltip. Independent of the search box. |
+| Recent buildings | `RecentCount` | `10` | How many distinct built items Recent keeps, 1 to 50. Lowering it drops the oldest. |
+
+The **Copy building** key is stored as `CopyBuilding` in the same file and is remapped in the Keybinds tab.
 
 ### Using the search
 
@@ -6761,7 +6814,9 @@ server-synced.
 | x button (shown while the box has text) | Clears the search and keeps the keyboard in the box. The row is the selected tab again, with nothing selected for placement. |
 | Escape | Clears the search; with the box already empty, gives the keyboard back to the game. The build menu does not close on that press. |
 | Enter, or a click elsewhere | Gives the keyboard back and keeps the search. |
-| Switch tab | The results stay; they are shown whatever tab is selected. |
+| Switch tab | Not while the box has text: the category and tag buttons are disabled. Clear the search to browse. |
+| Recent | Click it with the box empty: the row lists recent builds. Type to filter them. Another category leaves Recent. |
+| Copy building (Middle Mouse) | Picks the building under the cursor: clears the search, opens its tab and selects it. |
 | Close the build menu | Clears the search (`ClearOnClose`). |
 
 **Matching.** The query is split into words. An item matches when every word appears in its names, in any order
@@ -6863,6 +6918,15 @@ unlocks every recipe for a test character.
   fallback), and the row's "new" marks with a search active.
 - Physical keystrokes into the box: the OS-typing run was interrupted when someone else used the client.
 - The settings switches with the menu open. (Closing with a search active and reopening unfiltered ran live through the bridge's `open` / `close` on 2026-10-04.)
+- Recent: a placement reaching the list (server and client both on this Core), a refused placement staying out,
+  the order after a rebuild, the `RecentCount` trim, the list after a restart, and filtering inside Recent.
+- Copy building on the current main: a building inside a group, an item on another category, a locked item, a
+  remapped keyboard key and its hint, and the Push To Talk warning in the Keybinds tab.
+- The box beside and above the variant selector at narrow widths, and the disabled categories while searching.
+
+The Recent and Copy building check, after the steps below: build two different pieces, open Recent (or
+`build_search {"action":"recent"}`) and read `recentBlueprints`, newest first; point at a placed piece and press
+Copy building (`keybind_press`, plugin `progenitor`, bind `CopyBuilding`): `selectedBlueprint` is that piece.
 
 The live check:
 

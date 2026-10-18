@@ -310,7 +310,8 @@ internal sealed class KeybindsRowModel
             ["help"] = HelpLine,
             ["reserved"] = Reserved,
             ["decision"] = DecisionNote,
-            ["scope"] = Claim.Scope switch { KeybindScope.Menu => "menu", KeybindScope.Photo => "photo", KeybindScope.Map => "map", KeybindScope.Chat => "chat", KeybindScope.Window => "window", _ => "gameplay" },
+            ["scope"] = Claim.Scope switch { KeybindScope.Menu => "menu", KeybindScope.Photo => "photo", KeybindScope.Map => "map", KeybindScope.Chat => "chat", KeybindScope.Window => "window", KeybindScope.Build => "build", _ => "gameplay" },
+            ["scopeText"] = Keybinds.ScopeText(Claim.Scope),
             ["visible"] = visible,
             ["conflict"] = KeybindArbiter.ConflictReadback(Verdict) ?? (Secondary == null ? null : KeybindArbiter.ConflictReadback(Secondary)),
         };
@@ -795,7 +796,24 @@ internal sealed class KeybindsTabModel
             sections.Add(section);
         }
 
-        ApplyGroups(sections, groups ?? KeybindGroups.Snapshot());
+        var displayGroups = new List<KeybindGroupDefinition>(groups ?? KeybindGroups.Snapshot());
+        // Core build controls have their own player-facing section. Respect an explicit group
+        // if the owner already supplied one; presentation never changes conflict arbitration.
+        foreach (var section in sections)
+        {
+            var ids = new List<string>();
+            foreach (var row in section.Rows)
+            {
+                if (row.Claim.Scope != KeybindScope.Build) continue;
+                bool assigned = displayGroups.Exists(g => string.Equals(g.OwnerPluginId, section.OwnerId,
+                    StringComparison.OrdinalIgnoreCase) && g.IndexOf(row.Claim.ActionId) >= 0);
+                if (!assigned) ids.Add(row.Claim.ActionId);
+            }
+            if (ids.Count > 0)
+                displayGroups.Add(new KeybindGroupDefinition(section.OwnerId, section.OwnerId + ":build-mode",
+                    Keybinds.ScopeText(KeybindScope.Build), ids, Array.Empty<KeybindInfoRow>(), null, long.MaxValue));
+        }
+        ApplyGroups(sections, displayGroups);
         sections.AddRange(gameSections);
         return new KeybindsTabModel(picture, sections, gameSections.Count > 0 ? cacheNote : "");
     }
@@ -1226,6 +1244,7 @@ internal static class KeybindsTabLayout
             string yields = KeybindArbiter.WindowShareNote(KeybindArbiter.SharersOf(row.Claim.OwnerId, row.Claim.ActionId));
             if (yields.Length > 0) info.Add(yields);
         }
+        else if (row.Claim.Scope == KeybindScope.Build) info.Add(BuildScopeNote);
         if (row.Claim.Source == KeybindSource.Cfg)
         {
             info.Add(FromConfigFile);
@@ -1257,6 +1276,8 @@ internal static class KeybindsTabLayout
 
     /// <summary>CHAT2: a chat bind's note in the Keybinds tab.</summary>
     internal const string ChatScopeNote = "Works only while typing in chat, so it never clashes with a gameplay key.";
+
+    internal const string BuildScopeNote = "Build mode: works only while the build menu is open. Building and gameplay keys still take part in conflicts; Push To Talk can share this key.";
 
     /// <summary>KEYS4: the description column's note on a game debug key.</summary>
     internal const string DebugKeyNote = "A debug key. The game's debug menu is off for players, so it never conflicts with a mod key.";

@@ -13,6 +13,184 @@ namespace Progenitor.Tests
     public sealed partial class KeybindTabTests
     {
         private static readonly KeyChord Middle = new(UiKey.MouseMiddle);
+        // General entries found on the native DefaultControls Inventory map.
+        private static readonly string[] InventoryGeneralActions =
+        {
+            "DropItem", "SplitItem", "CustomSplitItem", "RepairItem", "SmartTakeItems",
+            "AutoTransferItems", "SortItems",
+        };
+
+        [Fact]
+        public void Every_general_row_has_its_audited_native_mode()
+        {
+            var coreActions = new[] { "Interact", "Interrupt", "Respawn", "CancelRevive", "Chat",
+                "ToggleEmoteWheel", "PushToTalk", "AdvancedTooltip" };
+            var general = GameKeybindCatalog.Listed.Where(e => e.Category == GameKeybindCatalog.General).ToArray();
+            Assert.Equal(InventoryGeneralActions.Concat(coreActions).OrderBy(a => a),
+                general.Select(e => e.Action).OrderBy(a => a));
+            foreach (var entry in general)
+            {
+                var claim = GameKeybindCatalog.Claim(entry, entry.Action, 0, null, "<Mouse>/middleButton", "");
+                bool inventory = InventoryGeneralActions.Contains(entry.Action);
+                Assert.Equal(inventory ? GameKeybindCatalog.InInventory : "", claim.Mode);
+                Assert.Equal(!inventory, KeybindArbiter.ScopesMeet(claim, KeybindScope.Build));
+                Assert.Equal(!inventory && entry.Action != "PushToTalk", KeybindArbiter.GameWins(claim, KeybindScope.Build));
+            }
+        }
+
+        private void RegisterBuild(string owner, string id, KeyChord chord, System.Action? press = null,
+            System.Action? held = null, System.Action? release = null) =>
+            Keybinds.RegisterScoped(_owner, owner, id, File(owner), chord, "", press ?? (() => { }), held, release,
+                allowWhileCaptured: false, allowWhenChatUnknown: true, KeybindScope.Build);
+
+        [Fact]
+        public void Build_middle_mouse_shares_PTT_without_changing_gameplay_priority()
+        {
+            UseGame(Game("PushToTalk", Middle));
+            RegisterBuild("a.mod", "Copy", Middle);
+            var copy = KeybindArbiter.Current().FindProgenitor("a.mod", "Copy")!;
+            Assert.True(copy.Active);
+            Assert.Contains(copy.Others, o => o.ActionId == "PushToTalk");
+            Assert.Contains("both remain active in Build mode", copy.Reason);
+            Assert.DoesNotContain("EnforceGameWins is off", copy.Reason);
+            Assert.True(KeybindArbiter.GameWins(Game("PushToTalk", Middle), KeybindScope.Gameplay));
+        }
+
+        [Theory]
+        [InlineData("<Mouse>/middleButton", UiKey.MouseMiddle)]
+        [InlineData("<Keyboard>/f8", UiKey.F8)]
+        public void All_inventory_general_actions_do_not_conflict_with_build_even_when_rebound(string path, UiKey key)
+        {
+            var chord = new KeyChord(key);
+            var inventory = InventoryGeneralActions.Select(action => GameKeybindCatalog.Claim(
+                GameKeybindCatalog.Listed.Single(e => e.Action == action), action, 0, null, path, "")).ToArray();
+            foreach (var claim in inventory)
+            {
+                Assert.Equal(GameKeybindCatalog.InInventory, claim.Mode);
+                Assert.True(claim.Comparable);
+                Assert.Equal(chord, claim.Chord);
+                Assert.False(KeybindArbiter.ScopesMeet(claim, KeybindScope.Build));
+                Assert.False(KeybindArbiter.GameWins(claim, KeybindScope.Build));
+            }
+            UseGame(inventory.Append(Game("PushToTalk", chord)).ToArray());
+            int presses = 0;
+            RegisterBuild("a.mod", "Copy", chord, () => presses++);
+            var copy = KeybindArbiter.Current().FindProgenitor("a.mod", "Copy")!;
+            Assert.True(copy.Active);
+            Assert.DoesNotContain(copy.Others, c => InventoryGeneralActions.Contains(c.ActionId));
+            Assert.Contains(copy.Others, c => c.ActionId == "PushToTalk");
+            Keybinds.BuildScopeOpen = () => true;
+            _keys.Down(chord); _keys.Frame();
+            Assert.Equal(1, presses);
+        }
+
+        [Theory]
+        [InlineData("Interact")]
+        [InlineData("Interrupt")]
+        [InlineData("Respawn")]
+        [InlineData("CancelRevive")]
+        [InlineData("Chat")]
+        [InlineData("ToggleEmoteWheel")]
+        [InlineData("AdvancedTooltip")]
+        [InlineData("ActionBar1")]
+        [InlineData("Building_Repair")]
+        public void Inventory_classification_keeps_real_build_conflicts_blocking(string action)
+        {
+            var claim = GameKeybindCatalog.Claim(
+                new GameKeybindCatalog.Entry(action, GameKeybindCatalog.General),
+                action, 0, null, "<Mouse>/middleButton", "");
+            Assert.True(KeybindArbiter.ScopesMeet(claim, KeybindScope.Build));
+            Assert.True(KeybindArbiter.GameWins(claim, KeybindScope.Build));
+            UseGame(claim);
+            RegisterBuild("a.mod", "Copy", Middle);
+            Assert.False(KeybindArbiter.Current().FindProgenitor("a.mod", "Copy")!.Active);
+        }
+
+        [Fact]
+        public void Build_mode_is_a_named_UI_group_and_scope()
+        {
+            UseGame(Game("PushToTalk", Middle));
+            RegisterBuild("a.mod", "Copy", Middle);
+            OpenKeybindsTab();
+            var section = Pane().Model!.Sections.Single(s => s.OwnerId == "a.mod" && s.Title == "Build mode");
+            var row = Assert.Single(section.Rows);
+            Assert.Equal("Copy", row.Claim.ActionId);
+            Assert.Equal("build", row.Readback(true)["scope"]);
+            Assert.Equal("Build mode", row.Readback(true)["scopeText"]);
+            Assert.Contains(KeybindsTabLayout.BuildScopeNote, KeybindsTabLayout.Describe(row, "selected").Info);
+        }
+
+        [Fact]
+        public void Build_conflicts_exclude_unrelated_modes_but_include_gameplay()
+        {
+            UseGame(GameInMode("MapMarker", F8, GameKeybindCatalog.InTheMap));
+            RegisterBuild("build.mod", "Copy", F8);
+            RegisterMap("map.mod", "MapThing", F8);
+            Keybinds.RegisterScoped(_owner, "photo.mod", "PhotoThing", File("photo"), F8, "", () => { }, null, null,
+                false, true, KeybindScope.Photo);
+            Keybinds.Register(_owner, "play.mod", "Action", File("play"), F8, "", () => { });
+            var row = KeybindArbiter.Current().FindProgenitor("build.mod", "Copy")!;
+            Assert.Contains(row.Others, c => c.OwnerId == "play.mod");
+            Assert.DoesNotContain(row.Others, c => c.ActionId == "MapMarker" || c.OwnerId == "map.mod" || c.OwnerId == "photo.mod");
+        }
+
+        [Theory]
+        [InlineData("Building_Pickup", "while building")]
+        [InlineData("Interact", "")]
+        public void Build_scope_preserves_native_build_and_gameplay_conflicts(string action, string mode)
+        {
+            UseGame(Game("PushToTalk", Middle), GameInMode(action, Middle, mode));
+            RegisterBuild("a.mod", "Copy", Middle);
+            Assert.False(KeybindArbiter.Current().FindProgenitor("a.mod", "Copy")!.Active);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public void Build_and_gameplay_mod_keys_keep_first_installed_priority(bool buildFirst)
+        {
+            UseGame();
+            KeybindArbiter.InstallTimeOf = id => (id == "build.mod") == buildFirst ? Ledger(9) : Ledger(1);
+            RegisterBuild("build.mod", "Copy", F8);
+            Keybinds.Register(_owner, "play.mod", "Action", File("play"), F8, "", () => { });
+            var picture = KeybindArbiter.Current();
+            Assert.Equal(buildFirst, picture.FindProgenitor("build.mod", "Copy")!.Active);
+            Assert.Equal(!buildFirst, picture.FindProgenitor("play.mod", "Action")!.Active);
+        }
+
+        [Fact]
+        public void Build_scope_fires_only_when_open_and_releases_when_closed()
+        {
+            UseGame(Game("PushToTalk", Middle));
+            bool open = false;
+            int pressed = 0, released = 0;
+            Keybinds.BuildScopeOpen = () => open;
+            RegisterBuild("a.mod", "Copy", Middle, () => pressed++, () => { }, () => released++);
+            _keys.Down(Middle); _keys.Frame();
+            _keys.Up(UiKey.MouseMiddle); _keys.Frame();
+            Assert.Equal(0, pressed);
+            Assert.Equal(Keybinds.BuildClosedReason, Keybinds.SimulatePress("a.mod", "Copy").Single().Reason);
+            open = true;
+            _keys.Down(Middle); _keys.Frame();
+            Assert.Equal(1, pressed);
+            open = false;
+            _keys.Frame();
+            Assert.Equal(1, released);
+        }
+
+        [Fact]
+        public void Build_scope_probe_failure_is_closed_and_chat_still_blocks_activation()
+        {
+            UseGame();
+            int pressed = 0;
+            RegisterBuild("a.mod", "Copy", Middle, () => pressed++);
+            Keybinds.BuildScopeOpen = () => throw new System.InvalidOperationException();
+            Assert.Equal(Keybinds.BuildClosedReason, Keybinds.SimulatePress("a.mod", "Copy").Single().Reason);
+            Keybinds.BuildScopeOpen = () => true;
+            _keys.Chat = true;
+            _keys.Down(Middle); _keys.Frame();
+            Assert.Equal(0, pressed);
+        }
 
         private static KeybindClaim GameInMode(string action, KeyChord chord, string mode) =>
             new(KeybindSource.Game, KeybindArbiter.GameOwnerId, action, action, chord,
