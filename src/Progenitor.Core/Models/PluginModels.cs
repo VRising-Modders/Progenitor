@@ -184,6 +184,7 @@ public sealed class ModelHandle : IDisposable
 {
     private readonly string _owner;
     private readonly List<GameObject> _instances = new();
+    private readonly List<ModelPreview> _previews = new();
     private ModelLoad? _load;
     private string? _serverReason;
 
@@ -248,9 +249,22 @@ public sealed class ModelHandle : IDisposable
     /// </summary>
     public Puppet InstantiatePuppet(string? name = null) => Puppet.Of(Instantiate(name));
 
+    /// <summary>Shows a static, camera-framed copy with its original materials. Client/main thread only, Ready required.
+    /// Dispose the returned preview to close it. Disposing this model also closes all its previews.</summary>
+    public ModelPreview Preview()
+    {
+        var prefab = Prefab ?? throw new InvalidOperationException("model must be Ready before previewing");
+        var preview = new ModelPreview(Progenitor.Effects.UnityModelPreview.Create(prefab));
+        _previews.RemoveAll(p => !p.IsOpen);
+        _previews.Add(preview);
+        return preview;
+    }
+
     /// <summary>Destroys the copies and ends the hold. Idempotent.</summary>
     public void Dispose()
     {
+        foreach (var preview in _previews) preview.Dispose();
+        _previews.Clear();
         foreach (var go in _instances)
         {
             try { if (go != null) UnityObject.Destroy(go); }
@@ -366,6 +380,8 @@ internal static class ModelFrame
     /// <summary>Core uninstall: copies destroyed, holds released, requests this generation added removed.</summary>
     internal static void Uninstall()
     {
+        ModelPreviewBridge.Close();
+        Progenitor.Effects.UnityModelPreview.DisposeAll();
         try { SceneryFrame.Uninstall(); }
         catch (Exception e) { Plugin.Logger?.LogWarning("Models: showing scenery on uninstall threw: " + e.Message); }
         try { ModelInstances.DestroyAllRoots(); }

@@ -188,6 +188,11 @@ Abilities and buildings-as-placeables remain research beyond the limited spell/p
 
 ## M5. In-game asset browser and MCP parity
 
+- **Implemented; qualification open:** static mesh/skinned-model preview via `ModelHandle.Preview()`
+  and client `model_preview` / `progenitor_model_preview`, using the existing model-section loader.
+  Includes auto-framing, original materials, replacement/timeout/unload cleanup. Shadow-bat visual
+  acceptance remains pending; this is not a full browser. [Contract and acceptance](model-preview.md).
+
 **Partial foundations; the complete browser remains planned after the broader prerequisites.** The currently assigned one-asset loading investigation is a bounded research increment, not a claim that the browser or preceding milestones have shipped.
 
 | Capability | Status | Evidence / remaining gate |

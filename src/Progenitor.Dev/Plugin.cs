@@ -167,6 +167,7 @@ public sealed class Plugin : BasePlugin, IMainThreadDropTarget
             Ops.TimeOps.Shutdown();
             Ops.WakeOps.Shutdown();
             Ops.CatalogAssetOps.Shutdown();
+            try { Ops.ModelPreviewOps.Shutdown(); } catch { }
             Ops.HostCapture.Shutdown();
             // Every key the key op still holds is released before the bridge goes.
             Ops.KeyInjectOps.Shutdown();

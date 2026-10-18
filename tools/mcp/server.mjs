@@ -341,6 +341,10 @@ server.tool("progenitor_ping", "Bridge health for one side: worlds, uptime, relo
   try { return withUsers(await bridge(side, "ping")); } catch (e) { return fail(e); }
 });
 
+server.tool("progenitor_model_preview", "Client-only static model preview with original materials. open streams the exact presentation name from its catalog scene:index section (omit section only for an already resident prefab). Poll status until visible, then inspect a screenshot; visible is not proof of appearance. close releases preview and its owned load. Automatically closes after seconds (default 30, maximum 300). Does not spawn a gameplay unit or use mouse input.",
+  { action: z.enum(["open", "status", "close"]), name: z.string().optional(), section: z.string().optional(), seconds: z.number().int().min(1).max(300).optional() },
+  async args => { try { return text(await bridge("client", "model_preview", args)); } catch (e) { return fail(e); } });
+
 server.tool("progenitor_whoami", "Show the identity this MCP process sends to the dev bridges (ai, session name, session id, MCP client, tool, pid, model). Pass ai / session_name / session_id to override them for the rest of this MCP process when auto-detection got them wrong; an empty string clears that override. Bridges keep the last users so agents sharing the client and test server can see who else touched them.",
   {
     ai: z.string().max(40).optional().describe("AI name, e.g. claude, codex, grok."),

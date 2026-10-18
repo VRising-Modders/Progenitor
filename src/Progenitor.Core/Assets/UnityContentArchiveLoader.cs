@@ -35,7 +35,6 @@ internal sealed unsafe class UnityContentArchiveLoader : IContentArchiveLoader
 
     readonly Dictionary<string, ArchiveHandle> _archives = new(StringComparer.Ordinal);
     readonly Dictionary<string, ContentFile> _files = new(StringComparer.Ordinal);
-    UnityObject? _targetObject;
 
     public bool IsClient => !Progenitor.Plugin.IsServerProcess;
 
@@ -146,7 +145,6 @@ internal sealed unsafe class UnityContentArchiveLoader : IContentArchiveLoader
             && !string.Equals(name, CatalogAssetIdentity.LanternName, StringComparison.Ordinal))
             return ContentGetObjectResult.Fail(AssetAcquisitionReasons.LoadError);
 
-        _targetObject = obj;
         return new ContentGetObjectResult(true, null, name, typeName, count);
     }
 
@@ -155,8 +153,6 @@ internal sealed unsafe class UnityContentArchiveLoader : IContentArchiveLoader
         if (!_files.TryGetValue(archiveId, out ContentFile file))
             return ContentUnloadStepResult.Done(waitVerified: true);
         _files.Remove(archiveId);
-        if (string.Equals(archiveId, CatalogAssetIdentity.LanternArchiveId, StringComparison.Ordinal))
-            _targetObject = null;
 
         if (!AssetAcquisitionOptIn.Granted)
             return ContentUnloadStepResult.Fail(AssetAcquisitionReasons.OptInRequired);
@@ -262,12 +258,26 @@ internal sealed unsafe class UnityContentArchiveLoader : IContentArchiveLoader
     public ContentInstantiateResult InstantiatePreview(string archiveId, ulong pathId, string pluginId, bool hostMenu)
     {
         if (!EnsureOptIn(out var refuse)) return ContentInstantiateResult.Fail(refuse);
-        if (_targetObject == null)
+        if (!_files.TryGetValue(archiveId, out ContentFile file))
             return ContentInstantiateResult.Fail(AssetAcquisitionReasons.LoadError);
 
-        GameObject? source = _targetObject as GameObject ?? _targetObject.TryCast<GameObject>();
+        // Resolve this acquisition's identity now, never the most recent GetObject call.
+        UnityObject? target = file.GetObject(pathId);
+        if (target == null)
+            return ContentInstantiateResult.Fail(AssetAcquisitionReasons.LoadError);
+        GameObject? source = target.TryCast<GameObject>();
         if (source == null)
             return ContentInstantiateResult.Fail(AssetAcquisitionReasons.UnsupportedClass);
+        if (CatalogAssetIdentity.IsLantern(archiveId, pathId)
+            && !string.Equals(source.name, CatalogAssetIdentity.LanternName, StringComparison.Ordinal))
+            return ContentInstantiateResult.Fail(AssetAcquisitionReasons.LoadError);
+
+        if (hostMenu && source.GetComponent<ParticleSystem>() == null
+            && source.GetComponentInChildren<ParticleSystem>() == null)
+        {
+            var model = UnityModelPreview.Create(source);
+            return new ContentInstantiateResult(true, null, true, model.CloneName, null, null, model);
+        }
 
         GameObject? clone;
         try
@@ -283,65 +293,89 @@ internal sealed unsafe class UnityContentArchiveLoader : IContentArchiveLoader
 
         if (clone == null) return ContentInstantiateResult.Fail(AssetAcquisitionReasons.LoadError);
 
-        string rootName = EffectOwnership.RootName(pluginId);
+        IDisposable ownership = new PreviewClone(clone);
         try
         {
-            var root = GameObject.Find(rootName);
-            if (root == null)
+            string rootName = EffectOwnership.RootName(pluginId);
+            try
             {
-                root = new GameObject(rootName);
-                UnityObject.DontDestroyOnLoad(root);
+                var root = GameObject.Find(rootName);
+                if (root == null)
+                {
+                    root = new GameObject(rootName);
+                    UnityObject.DontDestroyOnLoad(root);
+                }
+
+                clone.transform.SetParent(root.transform, false);
+                clone.SetActive(true);
+            }
+            catch (Exception e)
+            {
+                Plugin.Logger?.LogWarning("Assets: parent clone: " + e.Message);
             }
 
-            clone.transform.SetParent(root.transform, false);
-            clone.SetActive(true);
-        }
-        catch (Exception e)
-        {
-            Plugin.Logger?.LogWarning("Assets: parent clone: " + e.Message);
-        }
+            bool? playing = null;
+            ParticleSystem? ps = null;
+            try
+            {
+                ps = clone.GetComponent<ParticleSystem>() ?? clone.GetComponentInChildren<ParticleSystem>();
+                if (ps != null)
+                {
+                    try
+                    {
+                        var main = ps.main;
+                        main.simulationSpace = ParticleSystemSimulationSpace.Local;
+                    }
+                    catch { /* */ }
+                    ps.Play(true);
+                    playing = ps.isPlaying;
+                }
+            }
+            catch { /* */ }
 
-        bool? playing = null;
-        ParticleSystem? ps = null;
-        try
-        {
-            ps = clone.GetComponent<ParticleSystem>() ?? clone.GetComponentInChildren<ParticleSystem>();
+            bool hosted = false;
+            string? unsupported = null;
             if (ps != null)
             {
-                try
+                // ParticleHandle.Dispose releases its host first and then its owned clone.
+                var wrapped = UnityBorrowedObject.ForParticle(clone.name, clone, ps);
+                var handle = new ParticleHandle(clone.name, pluginId, rootName, owner: null, wrapped, enabled: true);
+                ownership = handle;
+                if (hostMenu)
                 {
-                    var main = ps.main;
-                    main.simulationSpace = ParticleSystemSimulationSpace.Local;
+                    var host = Assets.Host(handle, HostKind.RenderTexture);
+                    hosted = host != null && host.Enabled;
+                    if (!hosted)
+                        unsupported = "Assets.Host(RenderTexture) returned a disabled handle";
                 }
-                catch { /* */ }
-                ps.Play(true);
-                playing = ps.isPlaying;
             }
-        }
-        catch { /* */ }
-
-        bool hosted = false;
-        string? unsupported = null;
-        if (hostMenu)
-        {
-            if (ps == null)
+            else if (hostMenu)
             {
                 unsupported = "preview Host needs a ParticleSystem on the clone";
             }
-            else
-            {
-                // Same-assembly Effects internals: wrap the owned clone so Assets.Host can
-                // build the RenderTexture surface without editing UnityEffectRuntime.cs.
-                var wrapped = UnityBorrowedObject.ForParticle(clone.name, clone, ps);
-                var handle = new ParticleHandle(clone.name, pluginId, rootName, owner: null, wrapped, enabled: true);
-                var host = Assets.Host(handle, HostKind.RenderTexture);
-                hosted = host != null && host.Enabled;
-                if (!hosted)
-                    unsupported = "Assets.Host(RenderTexture) returned a disabled handle";
-            }
-        }
 
-        return new ContentInstantiateResult(true, null, hosted, clone.name, playing, unsupported);
+            return new ContentInstantiateResult(true, null, hosted, clone.name, playing, unsupported, ownership);
+        }
+        catch
+        {
+            ownership.Dispose();
+            throw;
+        }
+    }
+
+    private sealed class PreviewClone : IDisposable
+    {
+        private GameObject? _clone;
+
+        internal PreviewClone(GameObject clone) => _clone = clone;
+
+        public void Dispose()
+        {
+            var clone = _clone;
+            _clone = null;
+            // Only the instantiated hierarchy belongs to us; meshes/materials remain shared.
+            if (clone != null) UnityObject.DestroyImmediate(clone);
+        }
     }
 
     static bool EnsureOptIn(out string reason)
