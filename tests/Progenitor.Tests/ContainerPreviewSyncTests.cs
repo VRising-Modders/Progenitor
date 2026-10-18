@@ -201,7 +201,76 @@ public class ContainerPreviewSyncTests
         Assert.DoesNotContain("ModSave.BeforeSave +=", server);
     }
 
+    [Fact]
+    public void The_suspension_is_one_server_clock_and_a_new_sync_starts_inside_it()
+    {
+        string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
+        Assert.Contains("private static readonly SyncSaveSuspension Suspension = new();", server);
+        Assert.Contains("Suspension.Begin(now, SaveStamp());", SourcePin.MethodBody(server, "private static void OnBeforeWorldSave("));
+        Assert.Contains("holder.Sync?.Resume();", SourcePin.MethodBody(server, "private static void SaveTick("));
+        string open = SourcePin.MethodBody(server, "private static void Open(");
+        Assert.True(open.IndexOf("if (SaveSuspended) holder.Sync.Suspend();", StringComparison.Ordinal)
+            < open.IndexOf("holder.Sync.Refresh();", StringComparison.Ordinal));
+        string sync = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewSync.cs");
+        Assert.DoesNotContain("SyncSaveSuspension", sync);
+    }
+
+    [Fact]
+    public void Without_the_world_save_hook_a_synced_preview_is_refused_before_any_lease()
+    {
+        string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
+        string open = SourcePin.MethodBody(server, "private static void Open(");
+        int refuse = open.IndexOf("if (request.SyncInventory && !Persistence.ModSave.WorldSaveHookArmed)", StringComparison.Ordinal);
+        Assert.True(refuse > 0);
+        Assert.True(refuse < open.IndexOf("SharedObservation.Acquire(", StringComparison.Ordinal));
+        Assert.Contains("world-save hook is not in place", ContainerPreviewAuthorization.SaveHookRefusal);
+        string modSave = SourcePin.ReadFile("src", "Progenitor.Core", "Persistence", "ModSave.cs");
+        Assert.Contains("if (site == HarmonySlotHandoff.TriggerSave) WorldSaveHookArmed = true;", modSave);
+        Assert.Contains("if (site == HarmonySlotHandoff.TriggerSave) WorldSaveHookArmed = armed;", modSave);
+    }
+
+    [Fact]
+    public void The_bridges_direct_save_event_raises_the_same_notification()
+    {
+        string ops = SourcePin.ReadFile("src", "Progenitor.Dev", "Ops", "WorldSaveOps.cs");
+        int create = ops.IndexOf("if (!TryCreateSaveEvent(em, reason, diskName, compress, out var createNote))", StringComparison.Ordinal);
+        int notify = ops.IndexOf("ModSave.NotifyWorldSaveQueued();", StringComparison.Ordinal);
+        Assert.True(create > 0 && notify > create);
+    }
+
+    [Fact]
+    public void The_guard_turns_itself_back_on_after_one_save_or_five_minutes()
+    {
+        string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
+        string before = SourcePin.MethodBody(server, "private static void OnBeforeWorldSave(");
+        Assert.True(before.IndexOf("SaveGuardEnabled = true;", StringComparison.Ordinal) < before.IndexOf("Suspension.Begin", StringComparison.Ordinal));
+        Assert.Contains("now - _guardOffSince >= GuardOffMaxSeconds", SourcePin.MethodBody(server, "private static void SaveTick("));
+    }
+
     // ---- records and the startup sweep --------------------------------------------------------------
+
+    [Fact]
+    public void Records_survive_a_given_up_release_and_wait_for_the_store()
+    {
+        string server = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewServer.cs");
+        Assert.Contains("if (!sync.GaveUp) { Unrecord(container, platform); return; }", SourcePin.MethodBody(server, "private static void Released("));
+        Assert.Contains("if (!_storeLoaded) return;", SourcePin.MethodBody(server, "private static void SaveRecords("));
+        string sweep = SourcePin.MethodBody(server, "private static void Sweep(");
+        Assert.Contains("UnrecordRaw(r.Container, r.Platform);", sweep);
+        Assert.Contains("if (tries < MaxSweepAttempts) continue;", sweep);
+        string uninstall = SourcePin.MethodBody(server, "internal static void Uninstall(");
+        Assert.Contains("if (sync.Done && PendingRecord.TryGetValue(sync, out var rec)) Released(sync, rec.Container, rec.Platform);", uninstall);
+    }
+
+    [Fact]
+    public void An_append_whose_read_back_failed_still_holds_a_copy_that_landed()
+    {
+        string sync = SourcePin.ReadFile("src", "Progenitor.Core", "Inventory", "ContainerPreviewSync.cs");
+        string append = SourcePin.MethodBody(sync, "private void AppendOne(");
+        Assert.Contains("> SyncToUserBufferEdit.CountOf(before, _userKey))", append);
+        Assert.Contains("_ledger.MarkHeld(key);", append);
+        Assert.Contains("throw;", append);
+    }
 
     [Fact]
     public void Records_are_one_per_chest_and_user()
@@ -303,7 +372,7 @@ public class ContainerPreviewSyncTests
         string ended = SourcePin.MethodBody(server, "public void LeaseEnded(");
         Assert.Contains("Sync.End(); Finished(Sync, Container, Platform);", ended);
         Assert.Contains("RetryReleases(now);", SourcePin.MethodBody(server, "private static void Tick("));
-        Assert.Contains("holder.Sync?.Suspend(now);", server);
+        Assert.Contains("holder.Sync?.Suspend();", server);
         Assert.Contains("holder.Sync?.Tick(now);", server);
     }
 
@@ -315,7 +384,7 @@ public class ContainerPreviewSyncTests
         Assert.True(release.IndexOf("RemoveOne(em, e);", StringComparison.Ordinal) < release.IndexOf("_ledger.MarkReleased(key);", StringComparison.Ordinal));
         string remove = SourcePin.MethodBody(sync, "private void RemoveOne(");
         Assert.Contains("if (!SyncToUserBufferEdit.Same(next, ReadUsers(em, e)))", remove);
-        string append = SourcePin.MethodBody(sync, "private void AppendOne(");
+        string append = SourcePin.MethodBody(sync, "private void AppendRaw(");
         Assert.Contains("if (SyncToUserBufferEdit.AppendLanded(before, ReadUsers(em, e), _userKey)) return;", append);
         Assert.Contains("Layout.SyncToUserBufferStride", sync);
         Assert.DoesNotContain("GetBuffer<SyncToUserBuffer>", sync);

@@ -410,6 +410,9 @@ public static class WorldSaveOps
                     $"{gate}; {createNote} TerrainManager.SystemData is not read here.");
             }
 
+            // The trigger hook does not see this direct event (serialized on a later frame): tell Core's before-world-save
+            // listeners, the container preview's save guard among them.
+            ModSave.NotifyWorldSaveQueued();
             FlushModJson();
             return Result(ok: true, "SavePersistentDataEvent", diskName,
                 $"{gate}; {createNote} ModSave.SaveAll chained after the entity create. TerrainManager.SystemData is not read here.");

@@ -48,6 +48,11 @@ internal static unsafe class ContainerPreviewServer
     private static Persistence.IModStore? _store;
     private static IDisposable? _storeReady;
     private static double _sweepSince = double.NaN;
+    private static bool _storeLoaded;
+    private static readonly Dictionary<ContainerPreviewSyncRecord, int> SweepFailures = new();
+
+    /// <summary>A record whose sweep keeps throwing is left for the next start after this many tries.</summary>
+    internal const int MaxSweepAttempts = 5;
 
     internal static void Install()
     {
@@ -65,10 +70,14 @@ internal static unsafe class ContainerPreviewServer
             {
                 if (!_installed) return;
                 var loaded = store.Get<ContainerPreviewSyncRecords>(ContainerPreviewSyncRecords.Key) ?? new ContainerPreviewSyncRecords();
+                loaded.Records ??= new List<ContainerPreviewSyncRecord>();
+                loaded.Records.RemoveAll(r => r == null);
                 SweepPending.Clear();
-                SweepPending.AddRange(loaded.Records ?? new List<ContainerPreviewSyncRecord>());
+                SweepPending.AddRange(loaded.Records);
                 foreach (var r in _records.Records) loaded.Add(r.Container, r.Platform);   // this run's previews, if any started first
                 _records = loaded;
+                _storeLoaded = true;
+                SaveRecords();
                 _sweepSince = Now;
                 if (SweepPending.Count > 0)
                     Plugin.Logger?.LogInfo("ContainerPreview: " + SweepPending.Count + " inventory sync record(s) from an earlier run to sweep.");
@@ -103,35 +112,87 @@ internal static unsafe class ContainerPreviewServer
         foreach (var holder in new List<Holder>(ByUser.Values)) holder.End(CameraObservationEndReason.Unloaded, notify: false, message: "");
         ByUser.Clear();
         // One last try for releases still pending; whatever is left keeps its record for the next run's sweep.
-        foreach (var sync in Releasing) { try { sync.Tick(Now); } catch { /* the record stays */ } }
+        foreach (var sync in new List<ContainerPreviewSync>(Releasing))
+        {
+            try { sync.Tick(Now); } catch { /* the record stays */ }
+            if (sync.Done && PendingRecord.TryGetValue(sync, out var rec)) Released(sync, rec.Container, rec.Platform);
+        }
         Releasing.Clear();
         PendingRecord.Clear();
         SaveRecords();
         _storeReady?.Dispose();
         _storeReady = null;
         _store = null;
+        _storeLoaded = false;
         SweepPending.Clear();
+        SweepFailures.Clear();
         _records = new ContainerPreviewSyncRecords();
         _sweepSince = double.NaN;
+        Suspension.End();
     }
 
-    /// <summary>The game accepted a world save: take every preview's sync entries out until the save file is written.</summary>
-    /// <summary>E1b persistence read only (Dev bridge <c>guard</c>): false leaves the entries in for world saves. Back on at every install.</summary>
-    internal static bool SaveGuardEnabled { get; set; } = true;
+    /// <summary>The server-wide save suspension: one clock for every preview, so a sync that starts during it starts suspended.</summary>
+    private static readonly SyncSaveSuspension Suspension = new();
 
+    private static bool _guardEnabled = true;
+    private static double _guardOffSince = double.NaN;
+
+    /// <summary>
+    /// E1b persistence read only (Dev bridge <c>guard</c>): false leaves the entries in for world saves. It turns itself
+    /// back on after one world save or <see cref="GuardOffMaxSeconds"/>, and at every install.
+    /// </summary>
+    internal static bool SaveGuardEnabled
+    {
+        get => _guardEnabled;
+        set { _guardEnabled = value; _guardOffSince = value ? double.NaN : Now; }
+    }
+
+    /// <summary>The most the save guard stays off.</summary>
+    internal const double GuardOffMaxSeconds = 300;
+
+    /// <summary>True while a world save holds every preview's entries out.</summary>
+    internal static bool SaveSuspended => Suspension.Active;
+
+    private static DateTime SaveStamp()
+    {
+        try { return Persistence.WorldSaveTrigger.NewestSaveWriteUtc(Persistence.WorldSaveTrigger.SaveFolder()); }
+        catch { return DateTime.MinValue; }
+    }
+
+    /// <summary>
+    /// The game accepted (or the Dev bridge queued) a world save: begin, or extend, the server-wide suspension and take
+    /// every preview's sync entries out until the save file is written. With the save guard off (E1b only) this one save
+    /// keeps the entries, and the guard turns itself back on.
+    /// </summary>
     private static void OnBeforeWorldSave()
     {
         if (!SaveGuardEnabled)
         {
-            if (ByUser.Count > 0) Plugin.Logger?.LogWarning("ContainerPreview: save guard is off (Dev bridge); the inventory sync entries stay in this world save.");
+            Plugin.Logger?.LogWarning("ContainerPreview: save guard is off (Dev bridge); the inventory sync entries stay in this world save. The guard is on again from now.");
+            SaveGuardEnabled = true;
             return;
         }
         double now = Now;
+        Suspension.Begin(now, SaveStamp());
         foreach (var holder in ByUser.Values)
         {
-            try { holder.Sync?.Suspend(now); }
+            try { holder.Sync?.Suspend(); }
             catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: taking sync entries out for the save threw: " + e.Message); }
         }
+    }
+
+    /// <summary>Once a second: end the suspension once the save is written; turn a forgotten guard back on.</summary>
+    private static void SaveTick(double now)
+    {
+        if (!_guardEnabled && now - _guardOffSince >= GuardOffMaxSeconds)
+        {
+            SaveGuardEnabled = true;
+            Plugin.Logger?.LogInfo("ContainerPreview: save guard back on (" + GuardOffMaxSeconds + " s passed).");
+        }
+        if (!Suspension.Active || !Suspension.ShouldResume(now, SaveStamp())) return;
+        Plugin.Logger?.LogInfo("ContainerPreview: inventory sync entries go back "
+            + (Suspension.TimedOut ? "(the save file never changed in " + SyncSaveSuspension.TimeoutSeconds + " s)." : "after the save was written."));
+        foreach (var holder in ByUser.Values) holder.Sync?.Resume();
     }
 
     // ---- sync records and the startup sweep -----------------------------------------------------------
@@ -141,13 +202,26 @@ internal static unsafe class ContainerPreviewServer
         if (_records.Add(container.ToString(), platform)) SaveRecords();
     }
 
-    private static void Unrecord(ContainerId container, ulong platform)
+    private static void Unrecord(ContainerId container, ulong platform) => UnrecordRaw(container.ToString(), platform);
+
+    /// <summary>Drop a record by its stored text, so an unparsable record can be removed too.</summary>
+    private static void UnrecordRaw(string container, ulong platform)
     {
-        if (_records.Remove(container.ToString(), platform)) SaveRecords();
+        if (_records.Remove(container ?? "", platform)) SaveRecords();
+    }
+
+    /// <summary>A sync finished releasing: drop its record, unless a release was given up (the sweep needs it then).</summary>
+    private static void Released(ContainerPreviewSync sync, ContainerId container, ulong platform)
+    {
+        if (!sync.GaveUp) { Unrecord(container, platform); return; }
+        Plugin.Logger?.LogWarning("ContainerPreview: " + container + " kept its sync record: a release was given up; the next start sweeps it.");
     }
 
     private static void SaveRecords()
     {
+        // Before the store is ready, the previous run's records are not loaded yet: writing now would overwrite them.
+        // The ready callback merges this run's records in and writes them.
+        if (!_storeLoaded) return;
         try { _store?.Set(ContainerPreviewSyncRecords.Key, _records); }
         catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: storing the sync records threw: " + e.Message); }
     }
@@ -155,7 +229,7 @@ internal static unsafe class ContainerPreviewServer
     /// <summary>A sync whose lease ended releases its copies; one that could not keeps retrying from the tick.</summary>
     private static void Finished(ContainerPreviewSync sync, ContainerId container, ulong platform)
     {
-        if (sync.Done) { Unrecord(container, platform); return; }
+        if (sync.Done) { Released(sync, container, platform); return; }
         Releasing.Add(sync);
         PendingRecord[sync] = (container, platform);
     }
@@ -170,7 +244,7 @@ internal static unsafe class ContainerPreviewServer
             try { sync.Tick(now); } catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: release retry threw: " + e.Message); }
             if (!sync.Done) continue;
             Releasing.RemoveAt(i);
-            if (PendingRecord.Remove(sync, out var rec)) Unrecord(rec.Container, rec.Platform);
+            if (PendingRecord.Remove(sync, out var rec)) Released(sync, rec.Container, rec.Platform);
         }
     }
 
@@ -201,10 +275,20 @@ internal static unsafe class ContainerPreviewServer
                     int removed = user == Entity.Null || online ? 0 : ContainerPreviewSync.SweepOnce(world, user, container);
                     Plugin.Logger?.LogInfo("ContainerPreview: startup sweep of " + r.Container + ": " + removed + " leftover sync entr" + (removed == 1 ? "y" : "ies") + " removed.");
                 }
-                catch (Exception e) { Plugin.Logger?.LogWarning("ContainerPreview: startup sweep of " + r.Container + " threw: " + e.Message); continue; }
+                catch (Exception e)
+                {
+                    int tries = SweepFailures.TryGetValue(r, out int n) ? n + 1 : 1;
+                    SweepFailures[r] = tries;
+                    Plugin.Logger?.LogWarning("ContainerPreview: startup sweep of " + r.Container + " threw (try " + tries + " of " + MaxSweepAttempts + "): " + e.Message);
+                    if (tries < MaxSweepAttempts) continue;
+                    // Given up for this run: the record stays for the next start.
+                    SweepPending.RemoveAt(i);
+                    SweepFailures.Remove(r);
+                    continue;
+                }
             }
             SweepPending.RemoveAt(i);
-            if (!IsActive(r)) Unrecord(id, r.Platform);
+            if (!IsActive(r)) UnrecordRaw(r.Container, r.Platform);
         }
     }
 
@@ -317,6 +401,14 @@ internal static unsafe class ContainerPreviewServer
             return;
         }
 
+        // The sync must be taken out around world saves; without the save hook Core never hears of them.
+        if (request.SyncInventory && !Persistence.ModSave.WorldSaveHookArmed)
+        {
+            Plugin.Logger?.LogWarning("ContainerPreview: refused user " + user.PlatformId + ": the world-save hook is not in place.");
+            Reply(world, user.Index, request.Sequence, false, ContainerPreviewAuthorization.SaveHookRefusal, 0, 0, 0);
+            return;
+        }
+
         if (ByUser.TryGetValue(userEntity, out var previous)) previous.End(CameraObservationEndReason.Replaced, notify: false, message: "");
         container.TryRead<Translation>(em, out var at);
         var holder = new Holder(userEntity, user.Index, request.Sequence, id, container, ContainerPreviewAuthorization.GrantSeconds(request.Seconds))
@@ -333,6 +425,8 @@ internal static unsafe class ContainerPreviewServer
         {
             holder.Sync = new ContainerPreviewSync(world, userEntity, container);
             Record(id, user.PlatformId);
+            // A world save is being written: start suspended; the entries go in when the save is (SaveTick).
+            if (SaveSuspended) holder.Sync.Suspend();
             try { holder.Sync.Refresh(); }
             catch (Exception e)
             {
@@ -390,13 +484,14 @@ internal static unsafe class ContainerPreviewServer
     /// <summary>Once a second: the container still exists and the user still has access; otherwise let go.</summary>
     private static void Tick()
     {
-        if (ByUser.Count == 0 && Releasing.Count == 0 && SweepPending.Count == 0) return;
+        if (ByUser.Count == 0 && Releasing.Count == 0 && SweepPending.Count == 0 && !SaveSuspended && SaveGuardEnabled) return;
         double now = Now;
         if (now < _nextCheck) return;
         _nextCheck = now + 1;
         var world = Worlds.Server;
         if (world == null || !world.IsCreated) return;
         var em = world.EntityManager;
+        SaveTick(now);
         RetryReleases(now);
         Sweep(world, now);
         // An admin turning the setting off (or a PvE-only server becoming PvP) ends every running preview.

@@ -22,9 +22,7 @@ namespace Progenitor.Dev.Ops;
 /// <item><c>{"action":"close"}</c> (client): what Dispose does.</item>
 /// <item><c>{"action":"bag","mode":"inactive"|"alpha"}</c> (client): how the next preview hides the bag panel (E5).</item>
 /// <item><c>{"action":"guard","on":false}</c> (server, E1b persistence read only): leave the inventory sync entries in
-/// world saves; back on at every Core install.</item>
-/// <item><c>{"action":"guard","on":false}</c> (server, E1b persistence read only): leave the inventory sync entries in
-/// world saves; back on at every Core install.</item>
+/// world saves; back on by itself after one world save, after 5 minutes, and at every Core install.</item>
 /// </list>
 /// </summary>
 internal static class ContainerPreviewOps

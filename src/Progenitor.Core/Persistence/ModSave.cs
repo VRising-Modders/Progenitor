@@ -165,6 +165,19 @@ public static unsafe class ModSave
     /// </summary>
     internal static event Action? BeforeWorldSave;
 
+    /// <summary>
+    /// True while the save-trigger hook that raises <see cref="BeforeWorldSave"/> is in place for this Core generation (the
+    /// Bootstrap slot is filled, or Core's own patch was applied). False means world saves happen without Core hearing of
+    /// them, so a module that must change state around a world save cannot rely on it.
+    /// </summary>
+    internal static bool WorldSaveHookArmed { get; private set; }
+
+    /// <summary>
+    /// For a world save queued without the save trigger (the Dev bridge's direct <c>SavePersistentDataEvent</c> fallback):
+    /// raises the same before-world-save notification the trigger hook raises. Not a plugin API.
+    /// </summary>
+    public static void NotifyWorldSaveQueued() => RaiseBeforeWorldSave();
+
     private static void RaiseBeforeWorldSave()
     {
         try { BeforeWorldSave?.Invoke(); }
@@ -372,6 +385,7 @@ public static unsafe class ModSave
         _harmony = null;
         _directoryFallback = null;
         _installed = false;
+        WorldSaveHookArmed = false;
     }
 
     // ---- events -------------------------------------------------------------------------------
@@ -748,15 +762,17 @@ public static unsafe class ModSave
         return SavePaths.StoreFile(saveDirectory, guid);
     }
 
-    private static void TryPatchAll(Harmony harmony, Type hookType)
+    private static bool TryPatchAll(Harmony harmony, Type hookType)
     {
         try
         {
             harmony.PatchAll(hookType);
+            return true;
         }
         catch (Exception e)
         {
             Plugin.Logger?.LogError($"ModSave: PatchAll({hookType.Name}) threw: {e}");
+            return false;
         }
     }
 
@@ -804,10 +820,12 @@ public static unsafe class ModSave
         switch (HarmonySlotHandoff.Bind(site, dispatcher))
         {
             case HarmonySlotHandoff.SiteBind.Filled:
+                if (site == HarmonySlotHandoff.TriggerSave) WorldSaveHookArmed = true;
                 return;
             case HarmonySlotHandoff.SiteBind.Fallback:
                 Plugin.Logger?.LogInfo(HarmonySlotHandoff.FallbackSiteLog(site));
-                RouteFallback(site, harmony, hookType, slotRegister);
+                bool armed = RouteFallback(site, harmony, hookType, slotRegister);
+                if (site == HarmonySlotHandoff.TriggerSave) WorldSaveHookArmed = armed;
                 return;
             case HarmonySlotHandoff.SiteBind.Inert:
                 Plugin.Logger?.LogError(HarmonySlotHandoff.InertLog("ModSave", site));
@@ -833,7 +851,7 @@ public static unsafe class ModSave
     /// and shutdown but not on each autosave; the line below says the site is unpatched, and the
     /// <c>Uninstall</c>/<c>WorldReady</c> save paths are unaffected.</para>
     /// </summary>
-    private static void RouteFallback(string site, Harmony? harmony, Type hookType, Func<bool>? slotRegister)
+    private static bool RouteFallback(string site, Harmony? harmony, Type hookType, Func<bool>? slotRegister)
     {
         var route = Progenitor.Patches.CorePatchFallbackPolicy.Decide(
             slotShapeFits: slotRegister != null,
@@ -844,21 +862,20 @@ public static unsafe class ModSave
             case Progenitor.Patches.CoreFallbackRoute.Refused:
                 Plugin.Logger?.LogError(Progenitor.Patches.CorePatchFallbackPolicy.FormatRefused(
                     Progenitor.Patches.CorePatchFallbackPolicy.ModulePersistence, site));
-                return;
+                return false;
 
             case Progenitor.Patches.CoreFallbackRoute.Direct:
                 Plugin.Logger?.LogWarning(Progenitor.Patches.CorePatchFallbackPolicy.FormatDirect(
                     Progenitor.Patches.CorePatchFallbackPolicy.ModulePersistence, site,
                     Progenitor.WorldState.WorldEpoch.CoreGenerationOrZero()));
-                TryPatchAll(RequireHarmony(harmony), hookType);
-                return;
+                return TryPatchAll(RequireHarmony(harmony), hookType);
 
             default:
-                if (slotRegister!()) return;
+                if (slotRegister!()) return true;
                 Plugin.Logger?.LogError(
                     "ModSave: the slot-routed fallback for " + site + " was refused (see the "
                     + "patches: line above); this seam is off for this Core generation.");
-                return;
+                return false;
         }
     }
 

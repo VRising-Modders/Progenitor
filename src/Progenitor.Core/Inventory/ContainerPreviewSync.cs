@@ -37,10 +37,10 @@ internal sealed unsafe class ContainerPreviewSync
     private readonly Entity _container;
     private readonly long _userKey;
     private readonly ContainerPreviewSyncLedger _ledger = new();
-    private readonly SyncSaveSuspension _suspension = new();
     private readonly Dictionary<long, int> _releaseFailures = new();
     private bool _firstRefresh = true;
     private bool _ending;
+    private bool _suspended;
 
     internal ContainerPreviewSync(World world, Entity user, Entity container)
     {
@@ -48,17 +48,21 @@ internal sealed unsafe class ContainerPreviewSync
         _userKey = ContainerPreviewSyncLedger.Key(user.Index, user.Version);
     }
 
-    internal bool Suspended => _suspension.Active;
+    /// <summary>True while a world save holds the entries out (the server's suspension, <see cref="Suspend"/> / <see cref="Resume"/>).</summary>
+    internal bool Suspended => _suspended;
 
     internal int HeldCount => _ledger.Count;
 
     /// <summary>True once the lease ended and every copy is released (or given up).</summary>
     internal bool Done => _ending && _ledger.Count == 0;
 
+    /// <summary>True when at least one release was given up: the persisted record must stay for the startup sweep.</summary>
+    internal bool GaveUp { get; private set; }
+
     /// <summary>Bring the entries in line with the chest's current inventories and items. Throws on a failed take.</summary>
     internal void Refresh()
     {
-        if (_ending || Suspended || !_world.IsCreated) return;
+        if (_ending || _suspended || !_world.IsCreated) return;
         var em = _world.EntityManager;
         var (take, release) = _ledger.Plan(Wanted(em));
         foreach (long key in release) TryRelease(em, key);
@@ -67,46 +71,41 @@ internal sealed unsafe class ContainerPreviewSync
             var e = ToEntity(key);
             var before = ReadUsers(em, e);
             var action = ContainerPreviewSyncLedger.ActionFor(_firstRefresh, SyncToUserBufferEdit.CountOf(before, _userKey));
-            if (action == SyncEntryAction.Append) AppendOne(em, e, before);
+            if (action == SyncEntryAction.Append) AppendOne(em, key, before);
             _ledger.MarkHeld(key);
         }
         _firstRefresh = false;
     }
 
-    /// <summary>The 1 s server tick: retry releases after the end, put entries back after a save, else refresh.</summary>
+    /// <summary>The 1 s server tick: retry releases (after the end, or while a save holds the entries out), else refresh.</summary>
     internal void Tick(double now)
     {
-        if (_ending) { ReleaseAll(); return; }
-        if (Suspended)
-        {
-            if (!_suspension.ShouldResume(now, SaveStamp())) return;
-            Plugin.Logger?.LogInfo("ContainerPreview: inventory sync entries go back "
-                + (_suspension.TimedOut ? "(the save file never changed in " + SyncSaveSuspension.TimeoutSeconds + " s)." : "after the save was written."));
-            _firstRefresh = true;
-        }
+        if (_ending || _suspended) { ReleaseAll(); return; }
         Refresh();
     }
 
-    /// <summary>A world save was triggered: take every entry out; a second save during the suspension restarts the wait.</summary>
-    internal void Suspend(double now)
+    /// <summary>A world save was triggered (the server's suspension began or was extended): take every entry out.</summary>
+    internal void Suspend()
     {
         if (_ending) return;
-        _suspension.Begin(now, SaveStamp());
+        _suspended = true;
         ReleaseAll();
+    }
+
+    /// <summary>The save was written: the next refresh takes the copies again, appending as at the lease start.</summary>
+    internal void Resume()
+    {
+        if (_ending || !_suspended) return;
+        _suspended = false;
+        _firstRefresh = true;
     }
 
     /// <summary>The lease ended (any reason): release exactly this preview's copies; failures are retried by <see cref="Tick"/>.</summary>
     internal void End()
     {
         _ending = true;
-        _suspension.End();
+        _suspended = false;
         ReleaseAll();
-    }
-
-    private static DateTime SaveStamp()
-    {
-        try { return Persistence.WorldSaveTrigger.NewestSaveWriteUtc(Persistence.WorldSaveTrigger.SaveFolder()); }
-        catch { return DateTime.MinValue; }
     }
 
     private void ReleaseAll()
@@ -118,9 +117,11 @@ internal sealed unsafe class ContainerPreviewSync
         var em = _world.EntityManager;
         int held = _ledger.Count;
         foreach (long key in _ledger.Snapshot()) TryRelease(em, key);
-        Plugin.Logger?.LogInfo("ContainerPreview: inventory sync entries released (" + (held - _ledger.Count) + " of " + held
-            + (_ledger.Count > 0 ? "; " + _ledger.Count + " retried later" : "") + ").");
+        if (held != _ledger.Count || _releaseFailures.Count == 0)
+            Plugin.Logger?.LogInfo("ContainerPreview: inventory sync entries released (" + (held - _ledger.Count) + " of " + held
+                + (_ledger.Count > 0 ? "; " + _ledger.Count + " retried later" : "") + ").");
     }
+
 
     /// <summary>Release this preview's copy on one entity; marked released only when the removal read back (or nothing is left to remove).</summary>
     private void TryRelease(EntityManager em, long key)
@@ -141,8 +142,9 @@ internal sealed unsafe class ContainerPreviewSync
                 if (tries == 1) Plugin.Logger?.LogWarning("ContainerPreview: releasing a sync entry failed (retried): " + ex.Message);
                 return;
             }
-            Plugin.Logger?.LogError("ContainerPreview: releasing a sync entry failed " + tries + " times; given up (the startup sweep may remove it): " + ex.Message);
+            Plugin.Logger?.LogError("ContainerPreview: releasing a sync entry failed " + tries + " times; given up (its record stays for the startup sweep): " + ex.Message);
             _ledger.MarkReleased(key);
+            GaveUp = true;
             _releaseFailures.Remove(key);
         }
     }
@@ -207,7 +209,25 @@ internal sealed unsafe class ContainerPreviewSync
     }
 
     /// <summary>Append one copy of the user and read it back; throws when the list is not exactly the old one plus the user.</summary>
-    private void AppendOne(EntityManager em, Entity e, long[] before)
+    private void AppendOne(EntityManager em, long key, long[] before)
+    {
+        var e = ToEntity(key);
+        try { AppendRaw(em, e, before); }
+        catch
+        {
+            // The write may have landed even though the read-back failed (or something else changed the list at the same
+            // time): when the list now holds more copies of the user than before, one is ours, so hold it to release it.
+            try
+            {
+                if (SyncToUserBufferEdit.CountOf(ReadUsers(em, e), _userKey) > SyncToUserBufferEdit.CountOf(before, _userKey))
+                    _ledger.MarkHeld(key);
+            }
+            catch { /* unreadable: nothing more can be known here */ }
+            throw;
+        }
+    }
+
+    private void AppendRaw(EntityManager em, Entity e, long[] before)
     {
         byte* element = stackalloc byte[Layout.SyncToUserBufferStride];
         for (int i = 0; i < Layout.SyncToUserBufferStride; i++) element[i] = 0;

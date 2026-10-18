@@ -105,6 +105,8 @@ internal static class ContainerPreviewTestBridge
             ["syncSweepPending"] = ContainerPreviewServer.SyncBookkeeping.SweepPending,
             ["syncRecords"] = ContainerPreviewServer.SyncBookkeeping.Records,
             ["saveGuard"] = ContainerPreviewServer.SaveGuardEnabled,
+            ["saveSuspended"] = ContainerPreviewServer.SaveSuspended,
+            ["worldSaveHookArmed"] = Persistence.ModSave.WorldSaveHookArmed,
             ["leases"] = leases,
         };
     }

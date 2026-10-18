@@ -2722,17 +2722,26 @@ load, which suggests that the mask is not saved; the list was not traced). If it
 preview would leave the user synced to that chest's contents: read-only data for the castle's own owner or
 clan member, no permission change. Two guards, both harmless if it is not saved:
 
-- **World saves.** When the game accepts a world save (the save trigger, `ModSave.BeforeWorldSave`; not the other
-  `ModSave.SaveAll` callers such as a disconnect flush, which write only Progenitor's own files), the server takes
-  every preview entry out. It puts them back once the save file's write stamp moved past the one read at the trigger
-  and stood still for 1 s, or after 60 s if it never moves. A second save during that time restarts the wait from
-  its own trigger. The previewing client's window holds its last contents meanwhile (below).
+- **World saves.** When the game accepts a world save (the save trigger, `ModSave.BeforeWorldSave`; also the Dev
+  bridge's direct save-event fallback, which raises the same notification; not the other `ModSave.SaveAll` callers
+  such as a disconnect flush, which write only Progenitor's own files), the server begins one server-wide suspension
+  and takes every preview entry out. It puts them back once the save file's write stamp moved past the one read at
+  the trigger and stood still for 1 s, or after 60 s if it never moves. A second save during that time restarts the
+  wait from its own trigger. A preview that starts during the suspension starts suspended and takes its copies when
+  the suspension ends (its client may hit `ReplicationTimeout` if that takes longer than its replication wait). The
+  previewing client's window holds its last contents meanwhile (below). The hook that raises the notification is
+  part of Core's save seam; when it is not in place (the server log says why), a preview with inventory sync is
+  refused: "This server cannot share container contents right now: its world-save hook is not in place (see the
+  server log)."
 - **Startup sweep.** Each preview that holds entries is recorded (chest id and player) in Progenitor's mod save
-  (`progenitor.containerpreview`), and the record is dropped when the preview released everything. After a load,
-  records left by a run that did not end cleanly are swept once the chest's id is bound (up to 2 min): one copy of
-  that player is removed from each of the chest's lists **only where one is present**, and never while that player is
-  connected (after a Core hot reload a connected player may be at that chest for real) or while a preview of this
-  run holds that pair.
+  (`progenitor.containerpreview`), and the record is dropped when the preview released everything; a record whose
+  release was given up after 10 tries stays for the sweep. Records written before the mod save is ready are merged
+  into the previous run's, never written over them. After a load, records left by a run that did not end cleanly
+  are swept once the chest's id is bound (up to 2 min): one copy of that player is removed from each of the chest's
+  lists **only where one is present**, and never while that player is connected (after a Core hot reload a
+  connected player may be at that chest for real) or while a preview of this run holds that pair. A record that does
+  not parse, names a chest that is gone, or never binds is dropped; one whose sweep keeps throwing is left for the
+  next start after 5 tries. The log line `startup sweep of c-…: N leftover sync entries removed` gives the count.
 
 **The client when the inventory goes away.** If the chest's inventory entity leaves the client while the window is
 open (the save guard above, or the server letting go), the preview holds the window as it was: a
@@ -2816,18 +2825,27 @@ and the shared lease.
   7. `close`: server status shows no preview, `syncReleasing` 0; `progenitor_components` on the inventory and the
      weapon: exactly the step 1 lengths and entries. Record what the client's inventory entity does (destroyed,
      disabled, or stops updating).
-  8. **Persistence read (settles the open question).** Open again with sync on and confirm a `synced` row with
-     `thisUser` 1. Turn the save guard off for this test only: `container_preview {"side":"server","action":"guard",
-     "on":false}`. Save with the entry present (`progenitor_world_save`; server status keeps `syncSuspended` false
-     and the rows). Wait until the save file is written, then end the test server **without** Core's cleanup: kill
-     its process (matched by its full path under `_testserver`, never the live server), so the entry is neither
-     released nor taken out. Restart the test server, **do not connect**, and read the inventory's and the weapon's
-     `SyncToUserBuffer` with `progenitor_components` as soon as the bridge answers: the user present means the list
-     is saved; absent means it is not. Then wait for the log line `startup sweep of c-…` (only if the record was
-     written: the mod save writes with the world save) and read the lists again: the copy is gone (or was never
-     there). Server status shows `syncSweepPending` 0 and `syncRecords` 0. Record both reads in the research note.
-  9. Cleanup as in E4: every list back to its step 1 contents, the guard back on (a restart turns it on), the
-     client at the title screen, sample plugins removed from both reload folders.
+  8. **Persistence read (settles the open question).** Two runs on the test server; in each, the kill skips Core's
+     cleanup on purpose (kill the process matched by its full path under `_testserver`, never the live server).
+     The signal is the startup sweep's log line, `startup sweep of c-…: N leftover sync entries removed`, plus a
+     read of the lists before anyone connects.
+     - **8a, guard off (the list in the save).** Open with sync on and confirm a `synced` row with `thisUser` 1.
+       `container_preview {"side":"server","action":"guard","on":false}`, then `progenitor_world_save`: server
+       status keeps the rows and `syncSuspended` false, and the log says the guard is on again (it turns itself back
+       on after that one save, or after 5 minutes). Once the save file is written, kill the test server. Restart it,
+       **do not connect**, and read the inventory's and the weapon's `SyncToUserBuffer` as soon as the bridge answers,
+       then wait for the sweep line. **N greater than 0, or the user in the lists before the sweep, means the list is
+       saved**; N 0 with the user absent means it is not. Read the lists again after the sweep: the user's copy gone.
+       The record reaches the disk only with a world or mod save after the preview started; if the sweep line never
+       appears, server status `syncRecords` 0 tells that the record was not written.
+     - **8b, guard on (the normal case).** Open with sync on, then `progenitor_world_save` with the guard on: server
+       status shows `saveSuspended` true and no rows until the save is written, then the rows back. Right after the
+       rows are back, save once more and kill the test server while `saveSuspended` is true (the entries are out).
+       Restart, do not connect, read the lists and the sweep line: the user absent and N 0, whatever 8a found.
+     After both: server status `syncSweepPending` 0 and `syncRecords` 0, and `worldSaveHookArmed` true. Record the
+     reads and the N values in the research note.
+  9. Cleanup as in E4: every list back to its step 1 contents, the guard back on (it is by itself), the client at
+     the title screen, sample plugins removed from both reload folders.
 - **E2 open and hold.** First `open {"id":"c-…","hudGate":false}`: the open is written but the interact-HUD
   skip is off, so the game should close the window at once (`closeReason` `WindowClosed` or `OpenFailed`;
   expected per the research, not yet observed). Then a normal open: the window appears filled
