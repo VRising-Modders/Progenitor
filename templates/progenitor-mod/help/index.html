@@ -124,6 +124,8 @@ a:hover { color: #dfe7f7; }
   border-right: 1px solid var(--rule-soft); padding: 12px 0 28px;
 }
 .app.toc-closed .toc { visibility: hidden; padding: 0; border: 0; }
+.toc { grid-column: 1; grid-row: 2; }
+.scrim { display: none; }
 .label { font: 600 13px/1.2 var(--sans); font-variant: small-caps; letter-spacing: 0.1em; color: var(--muted); text-transform: lowercase; }
 .toc > .label { margin: 8px 20px 8px; }
 .rolebar .label { display: block; }
@@ -148,13 +150,14 @@ a:hover { color: #dfe7f7; }
 .pages a[aria-current="page"] { color: var(--text); border-left-color: var(--red-hi); background: linear-gradient(90deg, rgba(168, 36, 42, 0.45), rgba(168, 36, 42, 0.08)); }
 
 /* Page card */
-main { padding: 30px 36px 18px; min-width: 0; }
+main { grid-column: 2; grid-row: 2; padding: 30px 36px 18px; min-width: 0; }
 .crumb { max-width: 800px; margin: 0 auto 10px; display: flex; justify-content: space-between; gap: 12px; }
 .card {
   position: relative; max-width: 800px; margin: 0 auto; min-height: 380px; padding: 30px 40px 28px;
   background: linear-gradient(180deg, rgba(31, 9, 12, 0.97), rgba(19, 7, 9, 0.98));
   border: 1px solid var(--rule); border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.7), 0 18px 40px rgba(0, 0, 0, 0.55);
+  overflow-wrap: break-word;
 }
 /* Text styles. Titles and button captions centered, body text left, numbers right (as in the game). */
 .card h1 { margin: 0 0 4px; text-align: center; font: 600 30px/1.2 var(--serif); color: var(--text); }
@@ -169,6 +172,9 @@ main { padding: 30px 36px 18px; min-width: 0; }
 .card strong { color: var(--text); }
 .card code { font: 0.9em var(--mono); color: var(--code-text); background: rgba(0, 0, 0, 0.35); border: 1px solid var(--rule-soft); border-radius: 2px; padding: 1px 5px; }
 .card table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 15px; }
+/* Wide tables scroll inside their own box instead of widening the page. */
+.tbl { overflow-x: auto; margin: 0 0 16px; }
+.tbl > table { margin: 0; }
 .card th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
 .card td { padding: 8px 10px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
 .card td:first-child { color: var(--text); }
@@ -260,11 +266,35 @@ a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--r
   main { padding: 24px 20px 16px; }
   .card { padding: 26px 26px 24px; }
 }
+/* Narrow screens: one column, and Contents becomes a drawer over the page. */
 @media (max-width: 760px) {
-  .app { grid-template-columns: 0 minmax(0, 1fr); }
-  .toc { position: fixed; left: 0; width: 280px; z-index: 35; }
+  .app, .app.toc-closed { grid-template-columns: minmax(0, 1fr); }
+  main { grid-column: 1; padding: 16px 16px 14px; }
+  .top { gap: 10px; padding: 8px 16px; }
+  #tocBtn { white-space: nowrap; }
+  .toc {
+    position: fixed; left: 0; top: var(--top); bottom: 0; height: auto; width: min(300px, 86vw); z-index: 35;
+    box-shadow: 14px 0 30px rgba(0, 0, 0, 0.6); transition: transform 0.18s ease-out, visibility 0.18s;
+  }
+  .app.toc-closed .toc { transform: translateX(-100%); padding: 12px 0 28px; border-right: 1px solid var(--rule-soft); }
+  .scrim { position: fixed; inset: var(--top) 0 0 0; z-index: 34; background: rgba(0, 0, 0, 0.55); }
+  .app:not(.toc-closed) .scrim { display: block; }
   .brand-sub { display: none; }
+  .card { padding: 22px 16px 20px; min-height: 0; }
+  .card h1 { font-size: 26px; }
   .grid, .grid.two, .roles { grid-template-columns: 1fr; }
+  .pager { gap: 8px; }
+  .pager .btn { flex: 1 1 0; min-width: 0; padding: 9px 10px; }
+  .pager .ttl { max-width: none; }
+  .mid { flex: none; }
+  .dots { display: none; }
+  .foot { padding: 12px 16px; }
+}
+@media (max-width: 520px) {
+  .brand > span:not(.mono) { display: none; }
+  .spacer { display: none; }
+  .search { flex: 1; width: auto; min-width: 0; }
+  .mid #counterSub { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -285,6 +315,7 @@ a.term:hover, a.term:focus-visible { color: #fff; text-decoration-color: var(--r
     </div>
   </header>
   <nav class="toc" id="toc" aria-label="Contents"></nav>
+  <div class="scrim" id="scrim" aria-hidden="true"></div>
   <main id="main" tabindex="-1">
     <div class="crumb"><span class="label" id="crumbLeft"></span></div>
     <article class="card" id="card" aria-live="polite"></article>
@@ -453,6 +484,7 @@ window.HELP = {
   var brand = $("brand");
   brand.innerHTML = (H.logo ? '<img alt="" src="' + H.logo + '">' : '<span class="mono" aria-hidden="true">' + esc((H.title || "?").charAt(0)) + "</span>") +
     '<span><span class="brand-title">' + esc(H.title || "Help") + '</span><span class="brand-sub">' + esc(H.subtitle || "Help") + "</span></span>";
+  brand.setAttribute("aria-label", H.title || "Help");
   $("foot").innerHTML = "<span>" + esc(H.title || "") + (H.version ? " " + esc(H.version) : "") + ' &middot; <span class="kbd">&larr;</span> <span class="kbd">&rarr;</span> turn pages, <span class="kbd">/</span> search</span><span>' + esc(H.footer || "") + "</span>";
 
   // ---- Sidebar ----
@@ -487,9 +519,17 @@ window.HELP = {
       b.setAttribute("aria-expanded", open ? "false" : "true");
     }
   });
+  // On narrow screens Contents is a drawer over the page: closed by default, closed again after each page turn.
+  var narrowMq = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+  function narrow() { return !!(narrowMq && narrowMq.matches); }
   function setToc(open) { app.classList.toggle("toc-closed", !open); tocBtn.setAttribute("aria-expanded", String(open)); }
-  if (window.matchMedia && window.matchMedia("(max-width: 760px)").matches) setToc(false);
+  if (narrow()) setToc(false);
+  if (narrowMq) {
+    var onWidth = function () { setToc(!narrow()); };
+    if (narrowMq.addEventListener) narrowMq.addEventListener("change", onWidth); else if (narrowMq.addListener) narrowMq.addListener(onWidth);
+  }
   tocBtn.addEventListener("click", function () { setToc(app.classList.contains("toc-closed")); });
+  $("scrim").addEventListener("click", function () { setToc(false); });
 
   // ---- Navigation ----
   var current = null, card = $("card"), prevBtn = $("prevBtn"), nextBtn = $("nextBtn");
@@ -523,6 +563,7 @@ window.HELP = {
     prevBtn.setAttribute("aria-label", prev ? "Previous page: " + prev.title : "No previous page");
     nextBtn.setAttribute("aria-label", blocked ? "Choose a path first" : next ? "Next page: " + next.title : "No next page");
     renderToc(page);
+    if (narrow()) setToc(false);
     store(":page", page.key);
     hideTip();
     window.scrollTo(0, 0);
@@ -558,7 +599,7 @@ window.HELP = {
   });
   document.addEventListener("keydown", function (e) {
     var t = e.target, typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-    if (e.key === "Escape") { hideTip(); closeResults(); }
+    if (e.key === "Escape") { hideTip(); closeResults(); if (narrow() && !app.classList.contains("toc-closed")) { setToc(false); tocBtn.focus(); } }
     if (typing || e.altKey || e.ctrlKey || e.metaKey) return;
     if (e.key === "ArrowRight" && !nextBtn.disabled) { e.preventDefault(); nextBtn.click(); }
     else if (e.key === "ArrowLeft" && !prevBtn.disabled) { e.preventDefault(); prevBtn.click(); }
@@ -577,6 +618,11 @@ window.HELP = {
     fallback();
   }
   function wireCard() {
+    Array.prototype.forEach.call(card.querySelectorAll("table"), function (t) {
+      if (t.parentNode.classList.contains("tbl")) return;
+      var w = document.createElement("div"); w.className = "tbl";
+      t.parentNode.insertBefore(w, t); w.appendChild(t);
+    });
     Array.prototype.forEach.call(card.querySelectorAll(".copy"), function (b) {
       b.addEventListener("click", function () {
         copyText(current.data.code.text.replace(/^\n/, ""), function (ok) {
