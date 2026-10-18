@@ -63,10 +63,21 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
     /// panel: the same box, above every game and mod canvas, kept while <paramref name="stillShown"/>
     /// says so whether or not a mod panel is shown.
     /// </summary>
-    internal void ShowGameControlTooltip(ScreenRect anchor, string title, string body, Func<bool> stillShown)
+    internal void ShowGameControlTooltip(ScreenRect anchor, string title, string body, Func<bool> stillShown, bool below = false)
     {
-        ShowTooltip(anchor, title, body, stillShown);
+        _tipBelow = below;
+        try { ShowTooltip(anchor, title, body, stillShown); }
+        finally { _tipBelow = false; }
         if (TooltipShown) _tipNeedsPanel = false;
+    }
+
+    /// <summary>The box being shown goes under (or over) its anchor, never beside it (<see cref="UiTooltipLayout.PlaceIn"/>).</summary>
+    private static bool _tipBelow;
+
+    /// <summary>The shown tooltip's body (empty when none is up).</summary>
+    internal static string TooltipBody
+    {
+        get { try { return TooltipShown && _tipBody != null && _tipBody.gameObject.activeSelf ? (_tipBody.text ?? "") : ""; } catch { return ""; } }
     }
     private static IDisposable? _tipWatch;
 
@@ -110,7 +121,8 @@ internal sealed partial class UnityUiRuntime : IWidgetRuntime
                 ax = am;
             }
 
-            var place = UiTooltipLayout.PlaceIn(a.x, a.y, b.x, b.y, size.Width, size.Height, cr.width, cr.height, am.x, am.y, ax.x, ax.y);
+            var place = UiTooltipLayout.PlaceIn(a.x, a.y, b.x, b.y, size.Width, size.Height, cr.width, cr.height, am.x, am.y, ax.x, ax.y,
+                beside: !_tipBelow);
             var box = _tipBox!;
             box.sizeDelta = new Vector2(size.Width, size.Height);
             box.anchoredPosition = new Vector2(place.X, place.Y);

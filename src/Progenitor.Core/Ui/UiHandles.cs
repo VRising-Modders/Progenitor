@@ -2216,6 +2216,7 @@ internal sealed class UiCellRowHandle : UiHandle, IUiCellHeader
         CellSkin.Dropdown => "dropdown",
         CellSkin.LoopGlyph => "loop-glyph",
         CellSkin.GameTab => "game-tab",
+        CellSkin.Choice => "choice",
         _ => "kit",
     };
 

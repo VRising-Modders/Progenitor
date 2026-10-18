@@ -47,6 +47,12 @@ internal enum UiMarkShape
 
     /// <summary>An eye: an almond outline and a round pupil (view or preview the row's thing).</summary>
     Eye = 13,
+
+    /// <summary>A block sign: a ring with a slash across it from top left to bottom right (blocked, forbidden).</summary>
+    Block = 14,
+
+    /// <summary>A log: a page outline with four short horizontal lines across it (a journal, a history, a list).</summary>
+    Log = 15,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -102,6 +108,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static UiDrawnMark Icon(UiMarkShape shape) =>
         shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
             or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye
+            or UiMarkShape.Block or UiMarkShape.Log
             ? new UiDrawnMark(shape, 0, 0)
             : None;
 
@@ -115,10 +122,13 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static readonly UiDrawnMark ChestMark = Icon(UiMarkShape.Chest);
     internal static readonly UiDrawnMark LocateMark = Icon(UiMarkShape.Locate);
     internal static readonly UiDrawnMark EyeMark = Icon(UiMarkShape.Eye);
+    internal static readonly UiDrawnMark BlockMark = Icon(UiMarkShape.Block);
+    internal static readonly UiDrawnMark LogMark = Icon(UiMarkShape.Log);
 
     /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
     internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
-        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye;
+        or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye
+        or UiMarkShape.Block or UiMarkShape.Log;
 
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
@@ -139,6 +149,8 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.Chest => "chest",
         UiMarkShape.Locate => "locate",
         UiMarkShape.Eye => "eye",
+        UiMarkShape.Block => "block",
+        UiMarkShape.Log => "log",
         _ => "",
     };
 
@@ -177,6 +189,8 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "chest":
             case "locate":
             case "eye":
+            case "block":
+            case "log":
                 if (colon >= 0) return false;
                 mark = Icon(head switch
                 {
@@ -189,6 +203,8 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
                     "chest" => UiMarkShape.Chest,
                     "locate" => UiMarkShape.Locate,
                     "eye" => UiMarkShape.Eye,
+                    "block" => UiMarkShape.Block,
+                    "log" => UiMarkShape.Log,
                     _ => UiMarkShape.Grip,
                 });
                 return true;
@@ -230,7 +246,7 @@ internal static class UiDrawnMarkArt
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
         UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
         UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
-            or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye => (TextureHeight, TextureHeight),
+            or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye or UiMarkShape.Block or UiMarkShape.Log => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -331,6 +347,10 @@ internal static class UiDrawnMarkArt
                     new[] { 0.06f, 0.5f, 0.2f, 0.5f }, new[] { 0.8f, 0.5f, 0.94f, 0.5f })));
             case UiMarkShape.Eye:
                 return Clamp01(Eye(px, py));
+            case UiMarkShape.Block:
+                return Clamp01(Block(px, py));
+            case UiMarkShape.Log:
+                return Clamp01(Log(px, py));
             default:
                 return 0f;
         }
@@ -376,6 +396,54 @@ internal static class UiDrawnMarkArt
         float ring = Smooth(n * 0.05f - Math.Abs(r - n * 0.28f));
         float dot = Smooth(n * 0.08f - r);
         return Math.Max(ring, dot);
+    }
+
+    /// <summary>The block sign's ring radius and its strokes' half-width, as shares of the texture (the locate ring's stroke).</summary>
+    internal const float BlockRadius = 0.32f;
+
+    internal const float BlockStroke = 0.05f;
+
+    /// <summary>
+    /// The block sign: a ring of radius <see cref="BlockRadius"/> and a slash from its top-left to its bottom-right edge
+    /// (the 45-degree points of the ring), both <see cref="BlockStroke"/> half-wide, as the locate target's ring.
+    /// </summary>
+    private static float Block(float px, float py)
+    {
+        float n = TextureHeight, c = n / 2f;
+        float dx = px - c, dy = py - c;
+        float r = (float)Math.Sqrt(dx * dx + dy * dy);
+        float ring = Smooth(n * BlockStroke - Math.Abs(r - n * BlockRadius));
+        float d = BlockRadius * 0.7071f;
+        float slash = Strokes2(px, py, BlockStroke, new[] { 0.5f - d, 0.5f + d, 0.5f + d, 0.5f - d });
+        return Math.Max(ring, slash);
+    }
+
+    /// <summary>
+    /// The log's page (x from <see cref="LogLeft"/> to <see cref="LogRight"/>, y from <see cref="LogBottom"/> to
+    /// <see cref="LogTop"/>) and its strokes' half-width, as shares of the texture. The stroke is the game's rename pencil's
+    /// line weight: about 2 of its 22 pixels, so 0.045 of the side either way of the line.
+    /// </summary>
+    internal const float LogLeft = 0.22f, LogRight = 0.78f, LogBottom = 0.12f, LogTop = 0.88f;
+
+    internal const float LogStroke = 0.045f;
+
+    /// <summary>The heights of the log's four lines, top to bottom, as shares of the texture.</summary>
+    internal static readonly float[] LogLines = { 0.72f, 0.58f, 0.44f, 0.30f };
+
+    /// <summary>The log: a page outline with four lines across it, inset from its sides, the last one shorter.</summary>
+    private static float Log(float px, float py)
+    {
+        float n = TextureHeight;
+        float gx = px / n, gy = py / n;
+        float dx = Math.Max(LogLeft - gx, gx - LogRight), dy = Math.Max(LogBottom - gy, gy - LogTop);
+        float outside = (float)Math.Sqrt(Math.Max(dx, 0f) * Math.Max(dx, 0f) + Math.Max(dy, 0f) * Math.Max(dy, 0f));
+        float inside = Math.Min(Math.Max(dx, dy), 0f);
+        float page = Smooth((LogStroke - Math.Abs(outside + inside)) * n);
+        const float a = LogLeft + 0.12f, b = LogRight - 0.12f;
+        float lines = Strokes2(px, py, LogStroke,
+            new[] { a, LogLines[0], b, LogLines[0] }, new[] { a, LogLines[1], b, LogLines[1] },
+            new[] { a, LogLines[2], b, LogLines[2] }, new[] { a, LogLines[3], a + (b - a) * 0.6f, LogLines[3] });
+        return Math.Max(page, lines);
     }
 
     /// <summary>Half the eye's width and its lids' height above and below the center, as shares of the texture.</summary>

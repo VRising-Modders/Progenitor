@@ -2174,6 +2174,11 @@ internal sealed partial class UnityUiRuntime
         }
     }
 
+    public void SetPanelButtonTooltip(IRuntimeWidget button, string title, string body, bool set)
+    {
+        if (button is PanelButtonWidget pb) pb.SetTooltip(set ? new VanillaButtonTooltip(title, body) : null);
+    }
+
     /// <summary>Icon face size as a share of the button's height (24 on the 36-unit bar).</summary>
     private const float IconFaceShare = 0.67f;
 
@@ -2761,9 +2766,16 @@ internal sealed partial class UnityUiRuntime
                         b["face"] = tipped.IconMode ? "icon" : "text";
                         b["iconAlways"] = tipped.IconAlways;
                         b["icon"] = tipped.FaceSource;
+                        var (tipTitle, tipBody, tipSource) = tipped.TooltipContent;
                         b["tooltip"] = new Dictionary<string, object?>
                         {
                             ["text"] = tipped.IconMode ? tipped.Text : "",
+                            ["source"] = tipSource,
+                            ["style"] = VanillaButtonTooltip.Style,
+                            ["title"] = tipTitle,
+                            ["body"] = tipBody,
+                            ["placement"] = "below",
+                            ["boxBody"] = UnityUiRuntime.TooltipBody,
                             ["watch"] = tipped.TooltipWatch,
                             ["hovered"] = tipped.Hovered,
                             ["hoverEvents"] = tipped.HoverEvents,
@@ -3164,6 +3176,19 @@ internal sealed partial class UnityUiRuntime
         /// <summary>The site this button is on, for its one-time lines.</summary>
         internal VanillaUiSite Site { get; set; }
 
+        private VanillaButtonTooltip? _tip;
+
+        /// <summary>The plugin's <c>Tooltip(text, title)</c>, or null: the caption is the tooltip. A shown box is redrawn.</summary>
+        internal void SetTooltip(VanillaButtonTooltip? tip)
+        {
+            _tip = tip;
+            if (_hovered && IconMode) OnHover(true);
+        }
+
+        /// <summary>What the icon face's tooltip shows now (<see cref="VanillaButtonTooltip.Resolve"/>).</summary>
+        internal (string Title, string Body, string Source) TooltipContent =>
+            VanillaButtonTooltip.Resolve(_caption != null ? (_caption.text ?? "") : "", _tip);
+
         private void OnHover(bool inside)
         {
             _hovered = inside;
@@ -3181,13 +3206,14 @@ internal sealed partial class UnityUiRuntime
                 if (rt == null || _runtime == null) why = "no rect or runtime";
                 else
                 {
-                    string caption = _caption != null ? (_caption.text ?? "") : "";
+                    var (title, body, _) = TooltipContent;
                     var anchor = ScreenRectOf(rt);
                     if (!anchor.IsKnown) why = "the button's screen rect is unknown";
                     else
                     {
-                        // A game window has no mod panel: the box must not need one to stay up.
-                        _runtime.ShowGameControlTooltip(anchor, caption, "", () => _hovered && IconMode && Alive && ActiveInHierarchy);
+                        // A game window has no mod panel: the box must not need one to stay up. Under the button (over it
+                        // when there is no room below), never beside it, so it never covers the window's title.
+                        _runtime.ShowGameControlTooltip(anchor, title, body, () => _hovered && IconMode && Alive && ActiveInHierarchy, below: true);
                         if (!UnityUiRuntime.TooltipShown) why = "the tooltip box did not come up";
                     }
                 }

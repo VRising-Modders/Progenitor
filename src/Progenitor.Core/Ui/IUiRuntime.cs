@@ -663,6 +663,12 @@ internal interface IUiRuntime
     /// </summary>
     IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption) => null;
 
+    /// <summary>
+    /// P6: the hover tooltip of a cloned button's icon face: <paramref name="title"/> over <paramref name="body"/> while
+    /// <paramref name="set"/>, else the caption (<see cref="VanillaButtonTooltip.Resolve"/>).
+    /// </summary>
+    void SetPanelButtonTooltip(IRuntimeWidget button, string title, string body, bool set) { }
+
     /// <summary>P6: <see cref="ClonePanelButton(VanillaUiSite, IRuntimeWidget, string)"/> with its icon face (<see cref="VanillaUiSites.HasIconFace"/>).</summary>
     IRuntimeWidget? ClonePanelButton(VanillaUiSite site, IRuntimeWidget container, string caption, VanillaButtonIcon icon) =>
         ClonePanelButton(site, container, caption);

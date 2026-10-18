@@ -347,6 +347,31 @@ public sealed class UiNavTests : IDisposable
     }
 
     [Fact]
+    public void A_or_Space_on_a_tables_choice_cell_asks_for_the_next_option()
+    {
+        UiApi.SetRuntimeForTests(new TableRuntimeFake());
+        using var panel = Panel();
+        var choices = new[] { new UiTableChoice("allowed", "Allowed", LabelTone.Ok), new UiTableChoice("blocked", "Blocked", LabelTone.Orange) };
+        var table = panel.DataTable("t", new[]
+        {
+            new UiTableColumn("name", "Name"),
+            new UiTableColumn("rule", "Rule", UiTableColumnKind.Choice) { Editable = true, Choices = choices },
+        }, new UiDataTableOptions { VisibleRows = 4, MinRows = 4, ColumnChooser = false });
+        table.SetRows(new[] { new UiTableRow("a").Text("name", "Iron").Choice("rule", "allowed") });
+        var asked = new List<string>();
+        table.OnEdit(e => asked.Add(e.RowId + "=" + e.NewChoice));
+        var handle = (UiDataTableHandle)table;
+        Surface(Children(panel));
+        string cell = UiDataTableLayout.ChoiceKey("rule");
+        Assert.True(UiNav.FocusOn((UiHandle)handle.SlotAt(0), cell));
+        UiNav.Execute(NavCommand.Submit);
+        Assert.Equal(new[] { "a=blocked" }, asked);
+        // While it waits the cell is no stop (its button is hidden), and a filler never was one.
+        Assert.DoesNotContain(UiNav.Stops((UiHandle)handle.SlotAt(0)), t => t.Part == cell);
+        Assert.False(UiNav.IsStop((UiHandle)handle.SlotAt(2)));
+    }
+
+    [Fact]
     public void Down_from_a_tables_last_row_passes_over_its_filler_rows()
     {
         UiApi.SetRuntimeForTests(new TableRuntimeFake());

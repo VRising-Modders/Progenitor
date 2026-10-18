@@ -362,6 +362,10 @@ internal sealed class GalleryDemo
                 Action(panel, tab, "Hub window", api, () => Report("hub window = " + _host.ToggleHub()));
                 tabs.Add(tab, panel.Text("Each row of the hub's table has find, up, down and remove buttons; the first row's up and the last row's down are faint.", UiTextStyle.Body));
                 break;
+            case "table-choice":
+                Action(panel, tab, "Hub window", api, () => Report("hub window = " + _host.ToggleHub()));
+                tabs.Add(tab, panel.Text("Each row of the hub's table has a Rule: click it to switch between Allowed and Blocked. The prison cell refuses the change and goes back.", UiTextStyle.Body));
+                break;
             case "min-rows":
                 tabs.Add(tab, panel.Text("The hub's table lists three buildings and still draws eight rows: blank rows keep its height.", UiTextStyle.Body));
                 break;
@@ -446,6 +450,7 @@ internal sealed class GalleryDemo
             case "attach-station":
             case "attach-inventory":
             case "attach-heart":
+            case "attach-icon-tooltip":
             case "attach-tooltip":
             case "attach-recipe":
             case "attach-map":

@@ -85,6 +85,14 @@ internal sealed class UiDataTableModel
             if (_byKey.ContainsKey(c.Key)) throw new ArgumentException("Two columns have the key '" + c.Key + "'.", nameof(columns));
             if (c.Kind == UiTableColumnKind.Actions && UiDataTableLayout.ActionsColumn(_columns) != null)
                 throw new ArgumentException("A table has at most one actions column ('" + c.Key + "' is the second).", nameof(columns));
+            if (c.Kind == UiTableColumnKind.Choice)
+            {
+                var ids = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var choice in c.Choices)
+                    if (choice != null && !ids.Add(choice.Id))
+                        throw new ArgumentException("Column '" + c.Key + "' has two choices with the id '" + choice.Id + "'.", nameof(columns));
+            }
+
             _byKey[c.Key] = c;
             _columns.Add(c);
             if (c.Hidden && UiDataTableLayout.Hideable(c)) _hidden.Add(c.Key);
@@ -281,6 +289,8 @@ internal sealed class UiDataTableModel
     internal static bool IsEmpty(UiTableCell? cell, UiTableColumn column)
     {
         if (cell == null) return true;
+        // A choice sorts by its option's place; no option (or one the column does not have) is empty.
+        if (column.Kind == UiTableColumnKind.Choice) return column.ChoiceIndex(cell.Choice) < 0;
         if (cell.Value.HasValue) return double.IsNaN(cell.Value.Value);
         if (column.Kind == UiTableColumnKind.Number) return true;
         return string.IsNullOrEmpty(cell.SortText ?? cell.Text);
@@ -299,7 +309,8 @@ internal sealed class UiDataTableModel
         }
 
         int r;
-        if (a!.Value.HasValue && b!.Value.HasValue) r = a.Value.Value.CompareTo(b.Value.Value);
+        if (column.Kind == UiTableColumnKind.Choice) r = column.ChoiceIndex(a!.Choice).CompareTo(column.ChoiceIndex(b!.Choice));
+        else if (a!.Value.HasValue && b!.Value.HasValue) r = a.Value.Value.CompareTo(b.Value.Value);
         else if (a.Value.HasValue != b!.Value.HasValue) r = a.Value.HasValue ? -1 : 1; // numbers before words
         else
         {
@@ -595,6 +606,7 @@ internal sealed class UiDataTableModel
     internal static string Display(UiTableCell? cell, UiTableColumn column)
     {
         if (cell == null) return "";
+        if (column.Kind == UiTableColumnKind.Choice) return column.FindChoice(cell.Choice)?.Text ?? cell.Text;
         if (cell.Text.Length > 0) return cell.Text;
         // A text column's value only sorts (a status by severity): an empty text stays empty.
         return column.Kind == UiTableColumnKind.Number ? FormatValue(cell.Value, column) : "";
@@ -745,8 +757,36 @@ internal sealed class UiDataTableModel
         && PendingAt(row.Id, column.Key) == null;
 
     /// <summary>
-    /// Start an edit of <paramref name="rowId"/>'s <paramref name="column"/> with the typed <paramref name="text"/>. Null when
-    /// nothing changed (the same value) or it is refused; <paramref name="refusal"/> then says why (empty for no change).
+    /// Whether row <paramref name="row"/>'s cell in choice column <paramref name="column"/> takes a click now: an editable
+    /// choice column with options, the row and cell not locked, no answer awaited.
+    /// </summary>
+    internal bool CanChoose(UiTableRow row, UiTableColumn column) =>
+        column.Editable && column.Kind == UiTableColumnKind.Choice && column.Choices.Count > 0 && !row.Locked
+        && row[column.Key]?.Locked != true && PendingAt(row.Id, column.Key) == null;
+
+    /// <summary>
+    /// The option a click on a choice cell asks for: the one after <paramref name="current"/> in the column's order, the
+    /// last wrapping to the first; the first when the cell has no option (or one the column does not have). Null when the
+    /// column has no options.
+    /// </summary>
+    internal static UiTableChoice? NextChoice(UiTableColumn column, string? current)
+    {
+        var all = column.Choices;
+        if (all.Count == 0) return null;
+        int at = column.ChoiceIndex(current);
+        for (int step = 1; step <= all.Count; step++)
+        {
+            var next = all[((at < 0 ? -1 : at) + step) % all.Count];
+            if (next != null) return next;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Start an edit of <paramref name="rowId"/>'s <paramref name="column"/> with the typed <paramref name="text"/> (on a
+    /// choice column: an option id, empty for the next one). Null when nothing changed (the same value) or it is refused;
+    /// <paramref name="refusal"/> then says why (empty for no change).
     /// </summary>
     internal UiTableEdit? Begin(string rowId, string column, string? text, Func<UiTableEdit, bool, string?, bool> complete, out string refusal)
     {
@@ -758,6 +798,8 @@ internal sealed class UiDataTableModel
             refusal = "That cell is not in the table.";
             return null;
         }
+
+        if (col.Kind == UiTableColumnKind.Choice) return BeginChoice(row, col, text, complete, out refusal);
 
         if (!col.Editable || col.Kind != UiTableColumnKind.Number)
         {
@@ -801,6 +843,55 @@ internal sealed class UiDataTableModel
         return edit;
     }
 
+    /// <summary>A click on a choice cell (or <see cref="Begin"/> with an option id): the same refusals as a typed edit.</summary>
+    private UiTableEdit? BeginChoice(UiTableRow row, UiTableColumn col, string? text, Func<UiTableEdit, bool, string?, bool> complete, out string refusal)
+    {
+        refusal = "";
+        if (!col.Editable || col.Choices.Count == 0)
+        {
+            refusal = col.Caption + " cannot be edited here.";
+            return null;
+        }
+
+        if (PendingAt(row.Id, col.Key) != null)
+        {
+            refusal = "Waiting for the server to answer the last change.";
+            return null;
+        }
+
+        if (row.Locked || row[col.Key]?.Locked == true)
+        {
+            refusal = "You cannot change " + col.Caption + " here.";
+            return null;
+        }
+
+        var cell = row[col.Key];
+        string? current = cell?.Choice;
+        string wanted = (text ?? "").Trim();
+        UiTableChoice? next;
+        if (wanted.Length == 0) next = NextChoice(col, current);
+        else
+        {
+            next = col.FindChoice(wanted);
+            if (next == null)
+            {
+                refusal = "\"" + wanted + "\" is not one of the choices.";
+                return null;
+            }
+        }
+
+        if (next == null || string.Equals(next.Id, current, StringComparison.Ordinal)) return null;
+        int oldIndex = col.ChoiceIndex(current);
+        var edit = new UiTableEdit(row.Id, col.Key, oldIndex < 0 ? null : oldIndex, col.ChoiceIndex(next.Id), false, next.Id, Now, complete)
+        {
+            OldChoice = oldIndex < 0 ? null : current,
+            NewChoice = next.Id,
+        };
+        _pending[EditKey(row.Id, col.Key)] = edit;
+        _rejected.Remove(EditKey(row.Id, col.Key));
+        return edit;
+    }
+
     /// <summary>A typed number: invariant (<c>1,250.5</c>) first, then the player's culture.</summary>
     internal static bool TryParse(string text, out double value)
     {
@@ -829,7 +920,13 @@ internal sealed class UiDataTableModel
             {
                 var old = row[col.Key];
                 var cell = old?.Copy() ?? UiTableCell.Number(null);
-                if (edit.Clear)
+                if (edit.NewChoice != null)
+                {
+                    // A choice takes its option; the option's own words and tone are drawn, so a display is not used.
+                    cell.Choice = edit.NewChoice;
+                    cell.Inherited = false;
+                }
+                else if (edit.Clear)
                 {
                     cell.Inherited = true;
                     if (text != null) cell.Text = text;

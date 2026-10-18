@@ -16339,6 +16339,11 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                         try { cell.Tmp.enableWordWrapping = false; } catch { /* */ }
                         ClampCaptionText(cell.Tmp.gameObject);
                         try { cell.Tmp.margin = new Vector4(CellLayout.ButtonPad * .5f, 0f, CellLayout.ButtonPad * .5f, 0f); } catch { /* */ }
+                        // A data table choice cell reads as the text cell it replaces: the text cells' margins.
+                        if (spec.Skin == CellSkin.Choice)
+                        {
+                            try { cell.Tmp.margin = new Vector4(2f, 0f, 2f, 0f); } catch { /* */ }
+                        }
                         try { cell.Tmp.horizontalAlignment = HorizontalAlignmentOptions.Center; } catch { /* */ }
                         try { cell.Tmp.enableAutoSizing = false; } catch { /* */ }
                     }
@@ -17338,6 +17343,7 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
             if (cell.Spec.Skin == CellSkin.Dropdown && PaintDropdown(cell)) return;
             if (cell.Spec.Skin == CellSkin.Quiet && PaintQuiet(cell)) return;
             if (cell.Spec.Skin == CellSkin.Link && PaintLink(cell)) return;
+            if (cell.Spec.Skin == CellSkin.Choice && PaintChoice(cell)) return;
             if (cell.Spec.Skin == CellSkin.KeyCap && cell.Tmp != null)
             {
                 try { cell.Tmp.fontSize = cell.Spec.FontSize; } catch { /* */ }
@@ -18148,6 +18154,29 @@ internal sealed partial class UnityUiRuntime : IUiRuntime
                 try { cell.Tmp.fontSize = cell.Spec.FontSize; } catch { /* */ }
                 try { cell.Tmp.color = ToColor(MenuPalette.LinkText); } catch { /* */ }
                 try { cell.Tmp.fontStyle = FontStyles.Underline; } catch { /* */ }
+                try { cell.Tmp.horizontalAlignment = HorizontalAlignmentOptions.Left; } catch { /* */ }
+                try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
+            }
+
+            TintTransition(cell, cell.Tmp, 1.25f, 0.75f);
+            return true;
+        }
+
+        /// <summary>
+        /// A data table choice cell: no box (the fill stays as the transparent click target), the caption in its tone's
+        /// text color, left-aligned and not underlined, brighter on hover and darker pressed. The margins are the text
+        /// cells' (set once when the cell is built), so a drawn icon before the words keeps its own room.
+        /// </summary>
+        private static bool PaintChoice(Cell cell)
+        {
+            try { if (cell.Fill != null) { cell.Fill.sprite = null; cell.Fill.color = new Color(1f, 1f, 1f, 0f); cell.Fill.raycastTarget = true; } } catch { /* */ }
+            try { if (cell.Rim != null) cell.Rim.effectColor = new Color(0f, 0f, 0f, 0f); } catch { /* */ }
+            if (cell.Tmp != null)
+            {
+                try { cell.Tmp.text = Escape(cell.Spec.Text ?? ""); } catch { /* */ }
+                try { cell.Tmp.fontSize = cell.Spec.FontSize; } catch { /* */ }
+                try { cell.Tmp.color = ToColor(MenuPalette.TextColor(cell.Spec.Tone)); } catch { /* */ }
+                try { cell.Tmp.fontStyle = FontStyles.Normal; } catch { /* */ }
                 try { cell.Tmp.horizontalAlignment = HorizontalAlignmentOptions.Left; } catch { /* */ }
                 try { cell.Tmp.verticalAlignment = VerticalAlignmentOptions.Middle; } catch { /* */ }
             }

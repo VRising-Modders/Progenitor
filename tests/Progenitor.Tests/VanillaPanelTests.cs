@@ -1227,7 +1227,10 @@ public class VanillaPanelTests : IDisposable
         Assert.Contains("(!_tipNeedsPanel || AnyPanelShown())", widgets);
         Assert.Contains("internal void ShowGameControlTooltip(", widgets);
         string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
-        Assert.Contains("_runtime.ShowGameControlTooltip(anchor, caption", resolver);
+        Assert.Contains("_runtime.ShowGameControlTooltip(anchor, title, body", resolver);
+        // Under the button, never beside it: a title-row button's box never covers the window title.
+        Assert.Contains("ActiveInHierarchy, below: true)", resolver);
+        Assert.Contains("beside: !_tipBelow", widgets);
         Assert.Contains("icon tooltip not shown: ", resolver);
         Assert.Contains("[\"hoverEvents\"] = tipped.HoverEvents", resolver);
     }
@@ -1279,6 +1282,59 @@ public class VanillaPanelTests : IDisposable
         Assert.Equal(always, VanillaUiSites.IconAlways(anchor, icon));
         Assert.Equal(face, VanillaUiSites.HasIconFace(anchor, icon));
         Assert.Equal(anchor == VanillaPanelAnchor.BesideRename, VanillaUiSites.IsTitleRow(anchor));
+    }
+
+    [Fact]
+    public void An_icon_buttons_tooltip_is_its_title_and_body_when_set_and_its_caption_otherwise()
+    {
+        var rename = UiApi.AttachToVanilla(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideRename, _owner, "example.panels");
+        var log = rename.Button("Log", VanillaButtonIcon.Drawn("log"));
+        var plain = rename.Button("Stash", VanillaButtonIcon.Default);
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(11, Chest()));
+        Assert.Equal("mark:log", _client.ClonedIcons[0].ToString());
+
+        var lease = log.Tooltip("Deposits and withdrawals of this chest.", "Chest log");
+        var buttons = (List<object?>)ReadbackOf(rename)["buttons"]!;
+        var tip = (Dictionary<string, object?>)((Dictionary<string, object?>)buttons[0]!)["tooltip"]!;
+        Assert.Equal("tooltip", tip["source"]);
+        Assert.Equal(VanillaButtonTooltip.Style, tip["style"]);
+        Assert.Equal("Chest log", tip["title"]);
+        Assert.Equal("Deposits and withdrawals of this chest.", tip["body"]);
+        Assert.Equal(("Chest log", "Deposits and withdrawals of this chest.", true), _client.ButtonTooltips[^1]);
+        var other = (Dictionary<string, object?>)((Dictionary<string, object?>)buttons[1]!)["tooltip"]!;
+        Assert.Equal("caption", other["source"]);
+        Assert.Equal("Stash", other["title"]);
+        Assert.Equal("", other["body"]);
+
+        // A rebuilt window (closed and opened again) keeps it: the new clone is given it too.
+        _client.Fire(VanillaUiSite.ContainerPanel, VanillaSiteSample.Absent);
+        int before = _client.ButtonTooltips.Count;
+        _client.Fire(VanillaUiSite.ContainerPanel, Open(12, Chest()));
+        // One push per new clone, in button order: the log button's own tooltip, then Stash's caption.
+        Assert.Equal(new[] { ("Chest log", "Deposits and withdrawals of this chest.", true), ("", "", false) },
+            _client.ButtonTooltips.Skip(before).ToArray());
+
+        lease.Dispose(); // back to the caption
+        tip = (Dictionary<string, object?>)((Dictionary<string, object?>)((List<object?>)ReadbackOf(rename)["buttons"]!)[0]!)["tooltip"]!;
+        Assert.Equal("caption", tip["source"]);
+        Assert.Equal("Log", tip["title"]);
+        Assert.False(_client.ButtonTooltips[^1].Set);
+        Assert.NotNull(plain);
+        rename.Dispose();
+    }
+
+    [Fact]
+    public void A_title_row_buttons_tooltip_goes_under_the_button_never_beside_it()
+    {
+        Assert.Equal(("", "", "caption"), VanillaButtonTooltip.Resolve("", null));
+        Assert.Equal(("Log", "", "caption"), VanillaButtonTooltip.Resolve("Log", new VanillaButtonTooltip(" ", "")));
+        Assert.Equal(("", "Body only", "tooltip"), VanillaButtonTooltip.Resolve("Log", new VanillaButtonTooltip("", "Body only")));
+        // A 24-unit button at the top of a 1920x1080 canvas, with room to its right: beside by default, under when asked.
+        var beside = UiTooltipLayout.PlaceIn(900, 1000, 924, 1024, 200, 60, 1920, 1080, float.NaN, float.NaN, float.NaN, float.NaN);
+        Assert.Equal(UiTooltipLayout.Side.Right, beside.Side);
+        var under = UiTooltipLayout.PlaceIn(900, 1000, 924, 1024, 200, 60, 1920, 1080, float.NaN, float.NaN, float.NaN, float.NaN, beside: false);
+        Assert.Equal(UiTooltipLayout.Side.Below, under.Side);
+        Assert.True(under.Y + 60 <= 1000); // the box's top is under the button's bottom
     }
 
     [Fact]
@@ -1512,6 +1568,11 @@ public class VanillaPanelTests : IDisposable
             _containers.Add(c);
             return c;
         }
+
+        /// <summary>Every tooltip handed to a button clone, in order.</summary>
+        public List<(string Title, string Body, bool Set)> ButtonTooltips { get; } = new();
+
+        public void SetPanelButtonTooltip(IRuntimeWidget button, string title, string body, bool set) => ButtonTooltips.Add((title, body, set));
 
         /// <summary>The icon each button clone was asked for, in order.</summary>
         public List<VanillaButtonIcon> ClonedIcons { get; } = new();
