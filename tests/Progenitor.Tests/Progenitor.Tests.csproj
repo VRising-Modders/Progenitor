@@ -1027,6 +1027,8 @@
     <Compile Include="..\..\src\Progenitor.Core\Ui\MapRevealLeases.cs" Link="Linked\MapRevealLeases.cs" />
     <!-- Map share: the click, the chat token and the key tip. MapShare.cs and MapShareHint.cs are the game-bound halves. -->
     <Compile Include="..\..\src\Progenitor.Core\Ui\MapShareLogic.cs" Link="Linked\MapShareLogic.cs" />
+    <!-- Map focus: a chat location link's Set marker opens the map centered on the spot. MapFocus.cs is the game-bound half. -->
+    <Compile Include="..\..\src\Progenitor.Core\Ui\MapFocusLogic.cs" Link="Linked\MapFocusLogic.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Debugging\DebugMapPolicy.cs" Link="Linked\DebugMapPolicy.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Dye\DyeHold.cs" Link="Linked\DyeHold.cs" />
     <Compile Include="..\..\src\Progenitor.Core\Dye\DyeSlots.cs" Link="Linked\DyeSlots.cs" />

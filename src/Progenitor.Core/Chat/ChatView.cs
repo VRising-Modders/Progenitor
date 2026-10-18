@@ -1283,7 +1283,11 @@ internal static class ChatView
                 pick =>
                 {
                     if (pick != 0) return;
-                    try { WorldMap.SetMarker(lx, lz); }
+                    try
+                    {
+                        // The marker first, then the world map opens centered on it (when the game would open it now).
+                        if (WorldMap.SetMarker(lx, lz)) MapFocus.OpenAt(lx, lz, out _);
+                    }
                     catch (Exception e) { Plugin.Logger?.LogWarning("Chat: map marker threw: " + e.Message); }
                 },
                 Networking.JoinLinkText.CancelButton, null);
