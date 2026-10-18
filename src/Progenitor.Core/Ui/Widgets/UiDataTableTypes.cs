@@ -57,6 +57,9 @@ public enum UiRowActionIcon
 
     /// <summary>A page with lines across it: open the row's log, history or list.</summary>
     Log = 8,
+
+    /// <summary>A cog: open the row's settings.</summary>
+    Settings = 9,
 }
 
 /// <summary>

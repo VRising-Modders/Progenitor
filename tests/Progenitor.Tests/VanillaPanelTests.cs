@@ -112,6 +112,9 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.BesideSort)]
     [InlineData(VanillaUiSite.InventoryPanel, VanillaPanelAnchor.LeftEdge, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, true, VanillaPanelAnchor.RightEdge)]
+    [InlineData(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons, true, VanillaPanelAnchor.BesideTitleButtons)]
+    [InlineData(VanillaUiSite.ContainerPanel, VanillaPanelAnchor.BesideTitleButtons, false, VanillaPanelAnchor.Default)]
+    [InlineData(VanillaUiSite.StationPanel, VanillaPanelAnchor.BesideTitleButtons, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.TooltipBody)]
     [InlineData(VanillaUiSite.InventoryTooltip, VanillaPanelAnchor.TooltipRequirements, false, VanillaPanelAnchor.Default)]
     [InlineData(VanillaUiSite.RecipeTooltip, VanillaPanelAnchor.Default, true, VanillaPanelAnchor.TooltipBody)]
@@ -1431,12 +1434,14 @@ public class VanillaPanelTests : IDisposable
     [InlineData(VanillaPanelAnchor.LeftEdge, true, false, false)]
     [InlineData(VanillaPanelAnchor.RightEdge, true, false, false)]
     [InlineData(VanillaPanelAnchor.TooltipBody, true, false, false)]
+    [InlineData(VanillaPanelAnchor.BesideTitleButtons, true, true, true)]
+    [InlineData(VanillaPanelAnchor.BesideTitleButtons, false, false, false)]
     public void A_title_row_button_with_an_icon_is_always_its_icon_face(VanillaPanelAnchor anchor, bool chosen, bool always, bool face)
     {
         var icon = chosen ? VanillaButtonIcon.Sprite("LinkIcon_Journal") : VanillaButtonIcon.Unchosen;
         Assert.Equal(always, VanillaUiSites.IconAlways(anchor, icon));
         Assert.Equal(face, VanillaUiSites.HasIconFace(anchor, icon));
-        Assert.Equal(anchor == VanillaPanelAnchor.BesideRename, VanillaUiSites.IsTitleRow(anchor));
+        Assert.Equal(anchor is VanillaPanelAnchor.BesideRename or VanillaPanelAnchor.BesideTitleButtons, VanillaUiSites.IsTitleRow(anchor));
     }
 
     [Fact]
@@ -1535,6 +1540,7 @@ public class VanillaPanelTests : IDisposable
         Assert.Equal(new[] { "left", "right", "rename" }, VanillaUiSites.AnchorKeys(VanillaUiSite.StationPanel));
         Assert.Equal(new[] { "left", "right", "rename" }, VanillaUiSites.AnchorKeys(VanillaUiSite.ContainerPanel));
         Assert.DoesNotContain("rename", VanillaUiSites.AnchorKeys(VanillaUiSite.CastleHeartPanel));
+        Assert.Equal(new[] { "left", "right", "buttons" }, VanillaUiSites.AnchorKeys(VanillaUiSite.CastleHeartPanel));
         Assert.Empty(VanillaUiSites.AnchorKeys((VanillaUiSite)99));
     }
 
@@ -1620,13 +1626,127 @@ public class VanillaPanelTests : IDisposable
     {
         // Source pins on the Unity half (not compiled here).
         string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
-        Assert.Contains("VanillaUiSites.HasIconFace(host.Anchor, icon) ? AddIconFace(site, clone, label, icon, size, out faceSource) : null", resolver);
+        Assert.Contains("VanillaUiSites.HasIconFace(host.Anchor, icon) ? AddIconFace(site, clone, label, icon, size, out faceSource, share, tint) : null", resolver);
         Assert.Contains("if (always) widget.SetIconMode(true);", resolver);
         Assert.Contains("else if (IconAlways) icon = true;", resolver);
         Assert.Contains("internal float TextWidth => IconAlways ? _donorSize.y : _textWidth;", resolver);
         Assert.Contains("Buttons[i].IconAlways ? ButtonSize.y :", resolver);
         Assert.Contains("VanillaButtonSprites.SweepFor(name, frame)", resolver);
         Assert.Contains("ClonePanelButton(site, container, caption, VanillaButtonIcon.Unchosen)", resolver);
+    }
+
+    // ---------------------------------------------------------------- the castle heart's icon row and stacking
+
+    private static VanillaPanelTarget Heart() => new(VanillaPanelKind.CastleHeart, 700, 1, 60, 1, 0);
+
+    [Fact]
+    public void The_heart_icon_row_takes_icon_buttons_with_tooltips()
+    {
+        var row = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons, _owner, "satis.mod");
+        Assert.True(row.Enabled);
+        Assert.Equal(VanillaPanelAnchor.BesideTitleButtons, row.Anchor);
+        var cog = row.Button("Settings", VanillaButtonIcon.Drawn("settings"));
+        var lease = cog.Tooltip("Castle network settings.", "Network");
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(41, Heart()));
+
+        Assert.Contains(VanillaPanelAnchor.BesideTitleButtons, _client.BuiltAnchors);
+        Assert.Equal(new[] { "mark:settings" }, _client.ClonedIcons.Select(i => i.ToString()).ToArray());
+        Assert.Equal(("Network", "Castle network settings.", true), _client.ButtonTooltips[^1]);
+        Assert.True(VanillaUiSites.IconAlways(row.Anchor, VanillaButtonIcon.Drawn("settings")));
+        Assert.True(VanillaUiSites.IsInline(row.Anchor));
+        Assert.True(VanillaUiSites.PlacesBefore(row.Anchor));
+        Assert.True(VanillaUiSites.Stacks(row.Anchor));
+        Assert.EndsWith("CastleHeartPanel-buttons", (string)ReadbackOf(row)["container"]!);
+        var tip = (Dictionary<string, object?>)((Dictionary<string, object?>)((List<object?>)ReadbackOf(row)["buttons"]!)[0]!)["tooltip"]!;
+        Assert.Equal("tooltip", tip["source"]);
+        Assert.Equal("Network", tip["title"]);
+        lease.Dispose();
+        row.Dispose();
+    }
+
+    [Fact]
+    public void Two_edge_columns_on_one_heart_edge_get_their_attach_order_before_the_first_fit()
+    {
+        // Two RightEdge handles on the castle heart, one plugin under two plugin ids, used to draw in one spot.
+        var first = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, _owner, "satis.storage");
+        first.Button("Network");
+        var second = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, _owner, "satis.logistics");
+        second.Button("Routes");
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(42, Heart()));
+
+        Assert.Equal(2, _client.Orders.Count);
+        var a = _client.Orders.Single(o => o.Name.Contains("satis.storage"));
+        var b = _client.Orders.Single(o => o.Name.Contains("satis.logistics"));
+        Assert.True(a.Order < b.Order, "attach order: the first handle stacks first");
+        Assert.Equal(a.Order, (long)ReadbackOf(first)["order"]!);
+        Assert.Equal(b.Order, (long)ReadbackOf(second)["order"]!);
+
+        // The arithmetic the Unity half runs with those orders: the second column starts under the first, 8 units down.
+        var panel = new UiRect(0, 0, 620, 925);
+        var bounds = new UiRect(-650, -78, 1920, 1080);
+        var one = VanillaPanelPlacement.PlaceEdge(VanillaPanelAnchor.RightEdge, panel, null, 116, 80, bounds, null);
+        var two = VanillaPanelPlacement.PlaceEdge(VanillaPanelAnchor.RightEdge, panel, null, 116, 36, bounds, null,
+            new List<UiRect> { one.Rect }, VanillaPanelPlacement.DefaultSpacing);
+        Assert.Equal(VanillaFit.Fits, two.Fit);
+        Assert.Equal(one.Rect.X, two.Rect.X);
+        Assert.Equal(one.Rect.Y - VanillaPanelPlacement.DefaultSpacing, two.Rect.YMax, 3);
+        Assert.False(two.Rect.Overlaps(one.Rect));
+        first.Dispose();
+        second.Dispose();
+    }
+
+    [Fact]
+    public void A_stacked_container_that_moves_refits_the_ones_on_its_anchor_on_the_next_frame()
+    {
+        var first = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, _owner, "satis.storage");
+        first.Button("Network");
+        var second = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, _owner, "satis.logistics");
+        second.Button("Routes");
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(43, Heart()));
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(43, Heart()));
+        int before = _client.FitCalls;
+
+        // A kept frame with nothing changed fits nothing (the refit cadence is 30 frames).
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(43, Heart()));
+        Assert.Equal(before, _client.FitCalls);
+
+        // The Unity half bumps the anchor's version when a stacked container is placed somewhere new, shown or hidden.
+        _client.StackVersion++;
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(43, Heart()));
+        Assert.Equal(before + 2, _client.FitCalls);
+        _client.Fire(VanillaUiSite.CastleHeartPanel, Open(43, Heart()));
+        Assert.Equal(before + 2, _client.FitCalls);
+        first.Dispose();
+        second.Dispose();
+    }
+
+    [Fact]
+    public void The_resolver_stacks_edge_columns_and_title_rows_in_attach_order()
+    {
+        // Source pins on the Unity half (not compiled here).
+        string resolver = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelSiteResolver.cs");
+        Assert.Contains("var earlierColumns = EarlierStacked(host, space);", resolver);
+        Assert.Contains("earlierColumns, VanillaPanelPlacement.DefaultSpacing);", resolver);
+        Assert.Contains("var stackRef = VanillaPanelPlacement.StackReference(member, earlierRow, before);", resolver);
+        Assert.Contains("VanillaPanelPlacement.PlaceBeforeRow(stackRef, gap, width, host.ButtonSize.y, frame, FitScratch, out slot)", resolver);
+        Assert.Contains("if (IsStackPeer(host, sib)) continue;", resolver);
+        Assert.Contains("if (c.Order <= 0 || c.Order >= host.Order || !c.StackShown) continue;", resolver);
+        Assert.Contains("if (VanillaUiSites.Stacks(anchor)) StackedContainers.Add(widget);", resolver);
+        Assert.Contains("d[\"stack\"] = new Dictionary<string, object?>", resolver);
+        Assert.Contains("d[\"titleButtons\"] = Alive(view.TitleButtons)", resolver);
+        Assert.Contains("FillTitleButtons(view, _heart.Sub!);", resolver);
+        Assert.Contains("abandon = level.AbandonButton;", resolver);
+        Assert.Contains("expose = level.ExposeButton;", resolver);
+        Assert.Contains("if (VanillaUiSites.IsInline(host.Anchor)) return null;", resolver);
+        // A greyed Abandon or Expose donor never gives a dead mod button.
+        Assert.Contains("if (own0 != null && !own0.interactable) own0.interactable = true;", resolver);
+        // The row is watched during an open: a button shown or hidden re-reads it and refits the containers on it.
+        Assert.Contains("if (showChanged) BumpStack(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons);", resolver);
+        Assert.Contains("return new VanillaFitResult(VanillaFit.Blocked, \"hidden:row\", default, retry: true);", resolver);
+        string anchors = SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelAnchors.cs");
+        Assert.Contains("else if (!Equals(b.Parent, group)) continue;", anchors);
+        string rows =SourcePin.ReadFile("src", "Progenitor.Core", "Ui", "VanillaPanelRows.cs");
+        Assert.Contains("if (VanillaUiSites.IsInline(host.Anchor)) return null;", rows);
     }
 
     // ---------------------------------------------------------------- fake
@@ -1783,6 +1903,16 @@ public class VanillaPanelTests : IDisposable
 
         /// <summary>The anchors containers were built for, in build order.</summary>
         public List<VanillaPanelAnchor> BuiltAnchors { get; } = new();
+
+        /// <summary>Each container's attach order as the handle gave it, in the order given.</summary>
+        public List<(string Name, long Order)> Orders { get; } = new();
+
+        public void SetAttachOrder(IRuntimeWidget container, long order) => Orders.Add((container.Text, order));
+
+        /// <summary>What <see cref="AttachStackVersion"/> answers; a test bumps it as the Unity half does when a stacked container moves.</summary>
+        public int StackVersion { get; set; }
+
+        public int AttachStackVersion(VanillaUiSite site, VanillaPanelAnchor anchor) => StackVersion;
 
         public VanillaFitResult FitAttachContainer(
             VanillaUiSite site, VanillaPanelAnchor anchor, IRuntimeWidget container, int rows, int buttons)

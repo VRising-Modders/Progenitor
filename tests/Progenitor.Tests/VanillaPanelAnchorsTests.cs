@@ -506,4 +506,166 @@ public class VanillaPanelAnchorsTests
         Assert.Equal(inventory.XMax, barFrame.XMax);
         Assert.Equal(inventory.YMax, barFrame.YMax);
     }
+
+    // ---------------------------------------------------------------- BesideTitleButtons (the castle heart's icon row)
+
+    /// <summary>
+    /// <c>CastleHeartSubMenu/MotionRoot/HeartTab/AllyWindow/LevelPanel/ForfeitButtonsParent</c>: a horizontal group
+    /// anchored top-right that sizes its children (42-unit preferred width), holding the two 42 x 42 icon buttons
+    /// <c>AbandonButton</c> and <c>StandardImageButton</c> (the field <c>ExposeButton</c>).
+    /// </summary>
+    private static (Node Level, Node Row, Node Abandon, Node Expose) HeartRow()
+    {
+        var level = new Node("LevelPanel", 604, 337);
+        level.Add(new Node("LevelHeader", 96, 86));
+        var row = level.Add(new Node("ForfeitButtonsParent", 92, 42, layout: AnchorLayout.HorizontalControlled));
+        var abandon = row.Add(new Node("AbandonButton", 42, 42, button: true));
+        var expose = row.Add(new Node("StandardImageButton", 42, 42, button: true));
+        level.Add(new Node("CapacityGroup", 540, 90));
+        return (level, row, abandon, expose);
+    }
+
+    [Fact]
+    public void The_heart_icon_row_is_the_buttons_own_group_and_is_placed_not_joined()
+    {
+        var h = HeartRow();
+        var (group, reference) = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { h.Abandon, h.Expose });
+        Assert.Same(h.Row, group.Node);
+        Assert.Equal("AbandonButton.parent", group.Source);
+        Assert.Same(h.Abandon, reference.Node);
+        Assert.Equal("AbandonButton", reference.Source);
+
+        // The row sizes its children, so a generic inline plan would join it and the right-anchored row would push the
+        // game's buttons left. The heart's anchor is always placed.
+        Assert.Equal(InlineMode.Group, VanillaPanelAnchors.PlanInline(group.Node));
+        Assert.Equal(InlineMode.Positioned, VanillaPanelAnchors.PlanTitleButtons(group.Node));
+        Assert.Equal(InlineMode.None, VanillaPanelAnchors.PlanTitleButtons(null));
+        Assert.Equal("before", VanillaPanelAnchors.ModeWord(InlineMode.Positioned, before: true));
+        Assert.Equal("after", VanillaPanelAnchors.ModeWord(InlineMode.Positioned, before: false));
+    }
+
+    /// <summary>
+    /// A node as the Unity half hands them out: a new wrapper object on every <see cref="IAnchorNode.Parent"/> and
+    /// <see cref="IAnchorNode.Child"/> call, equal (not the same object) when it wraps the same transform.
+    /// </summary>
+    private sealed class Wrapper : IAnchorNode
+    {
+        internal Wrapper(Node inner) => Inner = inner;
+
+        internal Node Inner { get; }
+
+        public string Name => Inner.Name;
+
+        public bool Active => Inner.Active;
+
+        public bool IsButton => Inner.IsButton;
+
+        public bool CloneSafe => Inner.CloneSafe;
+
+        public float Width => Inner.Width;
+
+        public float Height => Inner.Height;
+
+        public AnchorLayout Layout => Inner.Layout;
+
+        public IAnchorNode? Parent => Inner.Parent is Node p ? new Wrapper(p) : null;
+
+        public int ChildCount => Inner.ChildCount;
+
+        public IAnchorNode? Child(int index) => Inner.Child(index) is Node c ? new Wrapper(c) : null;
+
+        public override bool Equals(object? obj) => obj is Wrapper w && ReferenceEquals(w.Inner, Inner);
+
+        public override int GetHashCode() => Inner.GetHashCode();
+    }
+
+    [Fact]
+    public void The_heart_row_is_found_when_each_parent_read_is_a_new_wrapper()
+    {
+        // Both buttons' parents are fresh wrapper objects of one row: the second button still belongs to it.
+        var h = HeartRow();
+        h.Abandon.Active = false;
+        var abandon = new Wrapper(h.Abandon);
+        var expose = new Wrapper(h.Expose);
+        Assert.NotSame(abandon.Parent, expose.Parent);
+        var (group, reference) = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { abandon, expose });
+        Assert.Equal(new Wrapper(h.Row), group.Node);
+        Assert.Same(expose, reference.Node);
+        Assert.Equal("ExposeButton", reference.Source);
+
+        // A button in another group is not part of the row.
+        var other = new Node("Elsewhere", 100, 42, layout: AnchorLayout.HorizontalControlled);
+        var stray = other.Add(new Node("StrayButton", 42, 42, button: true));
+        var pick = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { abandon, new Wrapper(stray) });
+        Assert.Equal(new Wrapper(h.Row), pick.Group.Node);
+        Assert.Same(abandon, pick.Reference.Node); // the only row member, inactive: still the reference
+    }
+
+    [Fact]
+    public void A_hidden_first_button_makes_the_next_one_the_reference_and_no_buttons_is_no_row()
+    {
+        var h = HeartRow();
+        h.Abandon.Active = false;
+        var (group, reference) = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { h.Abandon, h.Expose });
+        Assert.Same(h.Row, group.Node);
+        Assert.Same(h.Expose, reference.Node);
+        Assert.Equal("ExposeButton", reference.Source);
+
+        // Both hidden (an enemy castle's window shows no ally row): still the row, the first button the reference.
+        h.Expose.Active = false;
+        Assert.Same(h.Abandon, VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { h.Abandon, h.Expose }).Reference.Node);
+
+        Assert.False(VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { null, null }).Group.Found);
+        Assert.False(VanillaPanelAnchors.TitleButtonsRow(null).Group.Found);
+        Assert.False(VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { new Node("NotAButton", 42, 42) }).Group.Found);
+    }
+
+    [Fact]
+    public void The_heart_row_icon_buttons_go_left_of_the_games_and_a_second_plugins_go_left_of_the_first()
+    {
+        // In the heart window's units (620 x 925, origin bottom-left): the ally window insets 8 a side and starts 40 down,
+        // the row sits 8 in from its right edge and 16 down: the game's buttons at x 512..554 and 562..604, y 827..869.
+        var frame = new UiRect(0, 0, 620, 925);
+        var abandon = new UiRect(512, 827, 42, 42);
+        var expose = new UiRect(562, 827, 42, 42);
+        var header = new UiRect(262, 806, 96, 86);
+        var obstacles = new List<UiObstacle> { new("AbandonButton", abandon), new("StandardImageButton", expose), new("LevelHeader", header) };
+
+        // One 42-unit icon button: 8 units left of the leftmost game button, on its row.
+        var first = VanillaPanelPlacement.PlaceBeforeRow(abandon, 8, 42, 42, frame, obstacles, out var slot);
+        Assert.Equal(VanillaFit.Fits, first.Fit);
+        Assert.Equal(BesideSlot.Before, slot);
+        Assert.Equal(new UiRect(462, 827, 42, 42).ToString(), first.Rect.ToString());
+        Assert.True(first.Retry);
+
+        // Another plugin's container, attached later, stacks left of the first one instead of drawing over it.
+        var reference = VanillaPanelPlacement.StackReference(abandon, new List<UiRect> { first.Rect }, before: true);
+        Assert.Equal(first.Rect.ToString(), reference.ToString());
+        var second = VanillaPanelPlacement.PlaceBeforeRow(reference, 8, 92, 42, frame, obstacles, out slot);
+        Assert.Equal(VanillaFit.Fits, second.Fit);
+        Assert.Equal(new UiRect(362, 827, 92, 42).ToString(), second.Rect.ToString());
+        Assert.False(second.Rect.Overlaps(first.Rect));
+
+        // A row so wide it would reach the level header is hidden, never drawn over it.
+        var wide = VanillaPanelPlacement.PlaceBeforeRow(reference, 8, 120, 42, frame, obstacles, out slot);
+        Assert.Equal(VanillaFit.Blocked, wide.Fit);
+        Assert.Equal("overlap:LevelHeader", wide.Reason);
+        Assert.Equal(BesideSlot.None, slot);
+    }
+
+    [Fact]
+    public void Stacking_skips_hidden_containers_and_goes_the_right_way()
+    {
+        var member = new UiRect(100, 0, 24, 24);
+        var a = new UiRect(132, 0, 24, 24);
+        var b = new UiRect(164, 0, 40, 24);
+        Assert.Equal(b.ToString(), VanillaPanelPlacement.StackReference(member, new List<UiRect> { a, default, b }, before: false).ToString());
+        Assert.Equal(member.ToString(), VanillaPanelPlacement.StackReference(member, new List<UiRect> { a, b }, before: true).ToString());
+        Assert.Equal(member.ToString(), VanillaPanelPlacement.StackReference(member, null, before: false).ToString());
+
+        // Edge columns: under the lowest earlier column, by the spacing; a hidden (empty) one leaves no gap.
+        Assert.Equal(500f, VanillaPanelPlacement.StackedEdgeTop(500f, null, 8f));
+        Assert.Equal(500f, VanillaPanelPlacement.StackedEdgeTop(500f, new List<UiRect> { default }, 8f));
+        Assert.Equal(412f, VanillaPanelPlacement.StackedEdgeTop(500f, new List<UiRect> { new(628, 456, 116, 44), new(628, 420, 116, 80) }, 8f));
+    }
 }

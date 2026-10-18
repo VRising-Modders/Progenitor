@@ -104,8 +104,10 @@ public enum VanillaUiSite
     /// <summary>
     /// The castle heart's own window (blood essence fuel, castle list, upgrades):
     /// <c>CastleHeartMenu</c> (<c>CastleHeartMenuMapper._CastleHeartSubMenu</c>, <c>._Target</c> =
-    /// the heart entity). Anchors: <see cref="VanillaPanelAnchor.LeftEdge"/> (default) and
-    /// <see cref="VanillaPanelAnchor.RightEdge"/>; not <see cref="VanillaPanelAnchor.BesideRename"/>: the heart window
+    /// the heart entity). Anchors: <see cref="VanillaPanelAnchor.LeftEdge"/> (default),
+    /// <see cref="VanillaPanelAnchor.RightEdge"/> and <see cref="VanillaPanelAnchor.BesideTitleButtons"/> (the window's
+    /// top-right icon row, <c>AllyWindow.LevelPanel</c>'s <c>AbandonButton</c> and <c>ExposeButton</c>: the mod buttons go
+    /// left of the game's); not <see cref="VanillaPanelAnchor.BesideRename"/>: the heart window
     /// has no rename button on 1.1.13.0 (<c>CastleHeartSubMenu</c> has no <c>OpenTagEditButton</c>). Refresh:
     /// <c>SystemHooks.After&lt;CastleHeartMenuMapper&gt;</c>.
     /// </summary>
@@ -247,7 +249,7 @@ internal static class VanillaUiSites
         donor: "BottomBarButtonsParent button",
         system: "CastleHeartMenuMapper",
         allowIgnoreLayout: true,
-        anchors: new[] { VanillaPanelAnchor.LeftEdge, VanillaPanelAnchor.RightEdge });
+        anchors: new[] { VanillaPanelAnchor.LeftEdge, VanillaPanelAnchor.RightEdge, VanillaPanelAnchor.BesideTitleButtons });
 
     private static readonly VanillaUiSiteInfo Tooltip = new(
         VanillaUiSite.InventoryTooltip,
@@ -372,7 +374,29 @@ internal static class VanillaUiSites
     /// Whether <paramref name="anchor"/> is an inline anchor in a window's title row
     /// (<see cref="VanillaPanelAnchor.BesideRename"/>), whose row is the height of the game's small icon buttons.
     /// </summary>
-    internal static bool IsTitleRow(VanillaPanelAnchor anchor) => anchor == VanillaPanelAnchor.BesideRename;
+    internal static bool IsTitleRow(VanillaPanelAnchor anchor) =>
+        anchor == VanillaPanelAnchor.BesideRename || anchor == VanillaPanelAnchor.BesideTitleButtons;
+
+    /// <summary>
+    /// The inline anchors: a row of buttons beside a game control (<see cref="VanillaPanelAnchor.BesideRename"/>,
+    /// <see cref="VanillaPanelAnchor.BesideSort"/>, <see cref="VanillaPanelAnchor.BesideTitleButtons"/>). They take buttons
+    /// only: a text row inside a button row would read as a broken button.
+    /// </summary>
+    internal static bool IsInline(VanillaPanelAnchor anchor) =>
+        anchor == VanillaPanelAnchor.BesideRename || anchor == VanillaPanelAnchor.BesideSort
+        || anchor == VanillaPanelAnchor.BesideTitleButtons;
+
+    /// <summary>
+    /// A placed row that goes left of its reference (<see cref="BesideSlot.Before"/>): the castle heart's icon row is
+    /// anchored to the window's right edge, so the only room is on its left.
+    /// </summary>
+    internal static bool PlacesBefore(VanillaPanelAnchor anchor) => anchor == VanillaPanelAnchor.BesideTitleButtons;
+
+    /// <summary>
+    /// The anchors whose containers from several handles stack in attach order instead of drawing in one spot: the edge
+    /// columns (each under the one attached before it) and the title rows (each beyond the one attached before it).
+    /// </summary>
+    internal static bool Stacks(VanillaPanelAnchor anchor) => IsEdge(anchor) || IsTitleRow(anchor);
 
     /// <summary>
     /// A button with <paramref name="icon"/> on <paramref name="anchor"/> is always its square icon face, the caption
@@ -409,6 +433,7 @@ internal static class VanillaUiSites
         VanillaPanelAnchor.TooltipRequirementLine => "line",
         VanillaPanelAnchor.TooltipHeader => "header",
         VanillaPanelAnchor.TooltipFooter => "footer",
+        VanillaPanelAnchor.BesideTitleButtons => "buttons",
         _ => "",
     };
 }

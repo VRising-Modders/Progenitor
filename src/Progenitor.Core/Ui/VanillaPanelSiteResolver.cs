@@ -102,6 +102,24 @@ internal sealed partial class UnityUiRuntime
         /// <summary>The inventory's bottom bar (<c>BottomBarButtonsParent</c>).</summary>
         internal Transform? Bar;
 
+        /// <summary>
+        /// The window's own icon-button row <see cref="VanillaPanelAnchor.BesideTitleButtons"/> goes beside (the castle
+        /// heart's <c>ForfeitButtonsParent</c>), the game button that is its reference, and the field that found it.
+        /// </summary>
+        internal Transform? TitleButtons;
+        internal GameObject? TitleButtonsRef;
+        internal string TitleButtonsSource = "";
+
+        /// <summary>What <see cref="VanillaPanelAnchor.BesideTitleButtons"/> lacks on this window when it has no row.</summary>
+        internal string TitleButtonsMissing = "";
+
+        /// <summary>The row's own button the mod's buttons are cloned from when it is clone-safe (else the bar donor).</summary>
+        internal GameObject? TitleButtonsDonor;
+
+        /// <summary>The game icon's share of its button's height on that row (24 of 42 on 1.1.13.0), and its color.</summary>
+        internal float TitleIconShare;
+        internal Color TitleIconColor = Color.white;
+
         internal void Reset()
         {
             Live = false;
@@ -122,6 +140,13 @@ internal sealed partial class UnityUiRuntime
             Sort = null;
             SortSource = "";
             Bar = null;
+            TitleButtons = null;
+            TitleButtonsRef = null;
+            TitleButtonsSource = "";
+            TitleButtonsMissing = "";
+            TitleButtonsDonor = null;
+            TitleIconShare = 0f;
+            TitleIconColor = Color.white;
         }
     }
 
@@ -196,6 +221,19 @@ internal sealed partial class UnityUiRuntime
             }
             catch { return Vector2.zero; }
         }
+
+        /// <summary>Two nodes over the same transform are the same node (<see cref="Parent"/> makes a new wrapper each time).</summary>
+        public override bool Equals(object? obj)
+        {
+            try { return obj is TransformNode o && Alive(Transform) && Alive(o.Transform) && o.Transform.Pointer == Transform.Pointer; }
+            catch { return false; }
+        }
+
+        public override int GetHashCode()
+        {
+            try { return Alive(Transform) ? Transform.Pointer.GetHashCode() : 0; }
+            catch { return 0; }
+        }
     }
 
     private static AnchorLayout LayoutOf(Transform? t)
@@ -235,6 +273,42 @@ internal sealed partial class UnityUiRuntime
 
     /// <summary>Each container window's rename group and the rule that found it.</summary>
     private static readonly Dictionary<int, (Transform? Group, string Source, int Frame)> RenameGroups = new();
+
+    /// <summary>Each castle heart window's icon row, its reference button, the rule that found it and its donor.</summary>
+    private static readonly Dictionary<int, TitleButtonsCache> TitleButtonRows = new();
+
+    private sealed class TitleButtonsCache
+    {
+        internal Transform? Group;
+        internal GameObject? Reference;
+        internal GameObject? Donor;
+        internal string Source = "";
+        internal float IconShare;
+        internal Color IconColor = Color.white;
+        internal int Frame;
+
+        /// <summary>The row's buttons as read (<see cref="VanillaPanelAnchors.TitleButtonFields"/> order) and what of the row was shown on the last read.</summary>
+        internal GameObject?[] Buttons = new GameObject?[2];
+        internal int Shown = -1;
+    }
+
+    /// <summary>
+    /// What of the heart's icon row is shown: bit 0 the row itself (the heart tab is up), bit 1 and up each button. The
+    /// game shows and hides Abandon and Expose while the window is open (who may use them, the castle list tab), so a
+    /// change re-reads the row's reference and makes the containers on it refit on the next frame.
+    /// </summary>
+    private static int TitleRowShown(TitleButtonsCache row)
+    {
+        int bits = 0;
+        try
+        {
+            if (Alive(row.Group) && row.Group!.gameObject.activeInHierarchy) bits |= 1;
+            for (int i = 0; i < row.Buttons.Length; i++)
+                if (Alive(row.Buttons[i]) && row.Buttons[i]!.activeInHierarchy) bits |= 2 << i;
+        }
+        catch { bits = -2; }
+        return bits;
+    }
 
     /// <summary>
     /// The last word on each site and anchor: <c>ok ...</c> naming the host, the mode and the donor,
@@ -693,6 +767,10 @@ internal sealed partial class UnityUiRuntime
         GridCaches.Clear();
         InventoryAnchors.Clear();
         RenameGroups.Clear();
+        TitleButtonRows.Clear();
+        StackedContainers.Clear();
+        StackVersions.Clear();
+        StackScratch.Clear();
         ButtonFailures.Clear();
         AnchorStatusKey.Clear();
         PlacementSaid.Clear();
@@ -883,9 +961,118 @@ internal sealed partial class UnityUiRuntime
         if (!_heart.SubShown || _heart.Target == Entity.Null) return Miss(view);
         view.Reset();
         view.Panel = _heart.Sub!.gameObject;
+        FillTitleButtons(view, _heart.Sub!);
         FromInventory(view, _heart.Inventory);
         view.Obstacle = _heart.InventoryShown ? _heart.Inventory!.gameObject : null;
         return Finish(VanillaUiSite.CastleHeartPanel, view, world, VanillaPanelKind.CastleHeart, _heart.Target);
+    }
+
+    /// <summary>What <see cref="VanillaPanelAnchor.BesideTitleButtons"/> names when the heart window's icon row is not found.</summary>
+    private const string TitleButtonsFields = "CastleHeartSubMenu.AllyWindow.LevelPanel.AbandonButton and ExposeButton";
+
+    /// <summary>
+    /// The castle heart window's top-right icon row (<see cref="VanillaPanelAnchors.TitleButtonsRow"/>), cached per
+    /// window and read again only when a piece dies (or, missing, after <see cref="MissingRetryFrames"/>). The row's
+    /// reference button is also the donor of the mod's buttons there when it is clone-safe, so they are the game's own
+    /// art and size; the game icon's share of the button and its color are measured once, for the mod's icon faces.
+    /// </summary>
+    private static void FillTitleButtons(PanelView view, Component sub)
+    {
+        view.TitleButtonsMissing = TitleButtonsFields;
+        int id;
+        try { id = sub.GetInstanceID(); }
+        catch { return; }
+        bool known = TitleButtonRows.TryGetValue(id, out var row);
+        int shownBefore = known ? row!.Shown : -1;
+        bool showChanged = known && row!.Group != null && TitleRowShown(row) != shownBefore;
+        if (!known || Stale(row!.Group, row.Frame) || (row.Group != null && !Alive(row.Reference)) || showChanged)
+        {
+            if (TitleButtonRows.Count > 8) TitleButtonRows.Clear();
+            row = new TitleButtonsCache { Frame = Time.frameCount };
+            try
+            {
+                HeartReader.TitleButtons(sub, out var abandon, out var expose);
+                row.Buttons[0] = Alive(abandon) ? abandon!.gameObject : null;
+                row.Buttons[1] = Alive(expose) ? expose!.gameObject : null;
+                var pick = VanillaPanelAnchors.TitleButtonsRow(new IAnchorNode?[] { TransformNode.Of(abandon), TransformNode.Of(expose) });
+                var group = GoOf(pick.Group.Node);
+                var reference = GoOf(pick.Reference.Node);
+                if (group != null && reference != null)
+                {
+                    row.Group = group.transform;
+                    row.Reference = reference;
+                    row.Source = pick.Group.Source;
+                    row.Donor = pick.Reference.Node != null && pick.Reference.Node.CloneSafe ? reference : null;
+                    MeasureTitleIcon(reference, out row.IconShare, out row.IconColor);
+                }
+            }
+            catch (Exception e)
+            {
+                // A member the game renamed: only this anchor goes; the window and its other anchors stay.
+                if (VanillaSiteHealth.LogOnce(VanillaUiSite.CastleHeartPanel, "title buttons threw"))
+                    Plugin.Logger?.LogWarning("Ui: site CastleHeartPanel icon row not read (" + TitleButtonsFields + "): " + e.GetType().Name + ": " + e.Message);
+            }
+
+            row.Shown = TitleRowShown(row);
+            TitleButtonRows[id] = row;
+
+            // A button or the row shown or hidden during an open: the containers on the row refit on the next frame
+            // (their reference moved, or the row went with the heart tab and they must hide with it).
+            if (showChanged) BumpStack(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons);
+        }
+
+        if (!Alive(row.Group) || !Alive(row.Reference)) return;
+        view.TitleButtons = row.Group;
+        view.TitleButtonsRef = row.Reference;
+        view.TitleButtonsSource = row.Source;
+        view.TitleButtonsDonor = Alive(row.Donor) ? row.Donor : null;
+        view.TitleIconShare = row.IconShare;
+        view.TitleIconColor = row.IconColor;
+        view.TitleButtonsMissing = "";
+    }
+
+    /// <summary>The game icon on <paramref name="button"/> (its largest graphic smaller than the button): its share of the button's height and its color.</summary>
+    private static void MeasureTitleIcon(GameObject button, out float share, out Color color)
+    {
+        share = 0f;
+        color = Color.white;
+        try
+        {
+            var brt = button.GetComponent<RectTransform>();
+            float h = brt != null ? (brt.rect.height > 1f ? brt.rect.height : brt.sizeDelta.y) : 0f;
+            if (h <= 1f) return;
+            var stun = button.GetComponent<SimpleStunButton>();
+            IntPtr target = stun != null && stun.targetGraphic != null ? stun.targetGraphic.Pointer : IntPtr.Zero;
+            float best = 0f;
+            foreach (var g in button.GetComponentsInChildren<Graphic>(true))
+            {
+                if (g == null || g.Pointer == target || g.gameObject.Pointer == button.Pointer || g.TryCast<TMP_Text>() != null) continue;
+                var r = g.rectTransform.rect;
+                float side = Mathf.Max(r.width > 1f ? r.width : g.rectTransform.sizeDelta.x, r.height > 1f ? r.height : g.rectTransform.sizeDelta.y);
+                if (side <= best || side >= h * 0.8f) continue;
+                best = side;
+                color = g.color;
+            }
+
+            if (best > 1f) share = best / h;
+        }
+        catch { share = 0f; }
+    }
+
+    /// <summary>The castle heart window's reads that a game update could rename, in their own non-inlined method.</summary>
+    private static class HeartReader
+    {
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        internal static void TitleButtons(Component sub, out Component? abandon, out Component? expose)
+        {
+            abandon = null;
+            expose = null;
+            var heart = sub.TryCast<CastleHeartSubMenu>();
+            var level = heart != null && heart.AllyWindow != null ? heart.AllyWindow.LevelPanel : null;
+            if (level == null) return;
+            abandon = level.AbandonButton;
+            expose = level.ExposeButton;
+        }
     }
 
     /// <summary>The inventory a window shows right now; the game shows one window at a time.</summary>
@@ -1728,6 +1915,25 @@ internal sealed partial class UnityUiRuntime
         return fallback;
     }
 
+    /// <summary>A rect's laid-out size, else its authored size (zero when unknown).</summary>
+    private static Vector2 SizeOf(GameObject? go)
+    {
+        try
+        {
+            var rt = Rt(go);
+            if (rt == null) return Vector2.zero;
+            var r = rt.rect;
+            return new Vector2(r.width > 1f ? r.width : rt.sizeDelta.x, r.height > 1f ? r.height : rt.sizeDelta.y);
+        }
+        catch { return Vector2.zero; }
+    }
+
+    /// <summary>The field the buttons on <paramref name="anchor"/> are cloned from: the heart row's own button there, else the bar donor.</summary>
+    private static string DonorSourceFor(PanelView view, VanillaPanelAnchor anchor) =>
+        anchor == VanillaPanelAnchor.BesideTitleButtons && Alive(view.TitleButtonsDonor)
+            ? "CastleHeartLevelPanel." + SafeObjectName(view.TitleButtonsDonor)
+            : view.DonorSource;
+
     private static Vector2 DonorButtonSize(PanelView view)
     {
         try
@@ -1801,6 +2007,17 @@ internal sealed partial class UnityUiRuntime
                     host = reference != null ? reference.transform.parent : null;
                     if (host == null) missing = "InventorySubMenu.SelfSortButton, AllSortButton and a sort button on BottomBarButtonsParent";
                     break;
+                case VanillaPanelAnchor.BesideTitleButtons:
+                    // The window's own icon row (the castle heart's top-right buttons): placed left of the game's first
+                    // button, never joined (VanillaPanelAnchors.PlanTitleButtons).
+                    host = Alive(view.TitleButtons) ? view.TitleButtons : null;
+                    reference = Alive(view.TitleButtonsRef) ? view.TitleButtonsRef : null;
+                    if (host == null || reference == null)
+                    {
+                        host = null;
+                        missing = view.TitleButtonsMissing.Length > 0 ? view.TitleButtonsMissing : "the window's icon-button row";
+                    }
+                    break;
                 case VanillaPanelAnchor.TooltipBody:
                     var frame = view.Tooltip != null ? view.Tooltip.DescriptionFrame : null;
                     host = Alive(frame) ? frame!.transform.parent : null;
@@ -1867,7 +2084,9 @@ internal sealed partial class UnityUiRuntime
             // grid recenters its row, so a fifth cell would move all four game buttons.
             var mode = VanillaUiSites.IsEdge(anchor) || VanillaUiSites.IsTooltipAnchor(anchor)
                 ? InlineMode.None
-                : PlanInline(host, anchor == VanillaPanelAnchor.BesideSort);
+                : anchor == VanillaPanelAnchor.BesideTitleButtons
+                    ? InlineMode.Positioned
+                    : PlanInline(host, anchor == VanillaPanelAnchor.BesideSort);
             if (mode == InlineMode.GridCell || mode == InlineMode.Group)
                 siblingIndex = reference != null && reference.transform.parent != null && reference.transform.parent.Pointer == host.Pointer
                     ? reference.transform.GetSiblingIndex() + 1
@@ -1905,11 +2124,12 @@ internal sealed partial class UnityUiRuntime
             // button's measured height can read 0 before its first layout and 24 after.
             SetAnchorStatus(site, anchor, "ok host=" + SafeObjectName(parentT.gameObject)
                 + (mode == InlineMode.Positioned ? " group=" + SafeObjectName(group.gameObject) : "")
-                + " mode=" + (VanillaUiSites.IsEdge(anchor) ? "column" : VanillaUiSites.IsTooltipAnchor(anchor) ? "tooltip" : VanillaPanelAnchors.ModeWord(mode))
+                + " mode=" + (VanillaUiSites.IsEdge(anchor) ? "column" : VanillaUiSites.IsTooltipAnchor(anchor) ? "tooltip" : VanillaPanelAnchors.ModeWord(mode, VanillaUiSites.PlacesBefore(anchor)))
                 + (anchor == VanillaPanelAnchor.BesideSort ? " sort=" + view.SortSource : "")
                 + (anchor == VanillaPanelAnchor.BesideRename ? " via=" + view.RenameSource : "")
+                + (anchor == VanillaPanelAnchor.BesideTitleButtons ? " via=" + view.TitleButtonsSource + " ref=" + SafeObjectName(reference) : "")
                 + (coverNote.Length > 0 ? " above=" + coverNote : "")
-                + (VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " donor=" + view.DonorSource),
+                + (VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " donor=" + DonorSourceFor(view, anchor)),
                 VanillaUiSites.IsTooltipAnchor(anchor) ? "" : " button=" + Mathf.RoundToInt(size.x) + "x" + Mathf.RoundToInt(size.y));
             host = parentT;
             float tooltipWidth = 0f;
@@ -2004,6 +2224,7 @@ internal sealed partial class UnityUiRuntime
             bool hostLaid = false;
             try { hostLaid = host.GetComponent<VerticalLayoutGroup>() != null; } catch { /* */ }
             var widget = new PanelContainerWidget(go, site, anchor, hostLaid, mode, size, group);
+            if (VanillaUiSites.Stacks(anchor)) StackedContainers.Add(widget);
             if (lineRow != null)
             {
                 widget.GateOn(lineRow, view.Tooltip != null ? view.Tooltip.RecipeRequiredItems : null);
@@ -2171,6 +2392,27 @@ internal sealed partial class UnityUiRuntime
     private static Vector2 ButtonSizeFor(PanelView view, VanillaPanelAnchor anchor, InlineMode mode, Transform host, GameObject? reference)
     {
         var donor = DonorButtonSize(view);
+        if (anchor == VanillaPanelAnchor.BesideTitleButtons)
+        {
+            // The row's own buttons' size (42 x 42 on 1.1.13.0): the reference's height, not capped by the bar donor's 36.
+            float rh = 0f;
+            try
+            {
+                var rrt = Rt(reference);
+                if (rrt != null)
+                {
+                    rh = rrt.rect.height;
+                    if (rh <= 1f) rh = rrt.sizeDelta.y;
+                }
+            }
+            catch { /* */ }
+            float th = rh > 1f ? Math.Max(VanillaPanelAnchors.MinPositionedHeight, rh) : donor.y;
+            var own = Alive(view.TitleButtonsDonor) ? SizeOf(view.TitleButtonsDonor) : Vector2.zero;
+            return own.x > 1f && own.y > 1f
+                ? new Vector2(VanillaPanelAnchors.ScaledWidth(own.x, own.y, th), th)
+                : new Vector2(VanillaPanelAnchors.ScaledWidth(donor.x, donor.y, th), th);
+        }
+
         if (VanillaUiSites.IsEdge(anchor) || VanillaUiSites.IsTooltipAnchor(anchor)) return donor;
         switch (mode)
         {
@@ -2250,7 +2492,7 @@ internal sealed partial class UnityUiRuntime
     private static readonly Dictionary<(VanillaUiSite, VanillaPanelAnchor), string> AnchorStatusKey = new();
 
     /// <summary>The last placement geometry line said per site and anchor.</summary>
-    private static readonly Dictionary<(VanillaUiSite, VanillaPanelAnchor), string> PlacementSaid = new();
+    private static readonly Dictionary<string, string> PlacementSaid = new(StringComparer.Ordinal);
 
     /// <summary>Give our inline container the donor button's flexible width, so the vanilla group treats it like a button.</summary>
     private static void CopyFlexible(LayoutElement ours, GameObject? donor)
@@ -2275,15 +2517,29 @@ internal sealed partial class UnityUiRuntime
         if (VanillaUiSites.IsTooltipAnchor(host.Anchor)) return null;
         if (!PanelViews.TryGetValue(site, out var view) || view == null || !view.Live) return null;
         var donor = view.ButtonDonor;
-        if (!Alive(donor)) return ButtonFailed(site, "no button donor");
+        // On the heart's icon row the row's own button is the donor (its art and size), the bar button the fallback.
+        var own = host.Anchor == VanillaPanelAnchor.BesideTitleButtons && Alive(view.TitleButtonsDonor) ? view.TitleButtonsDonor : null;
+        if (!Alive(donor) && own == null) return ButtonFailed(site, "no button donor");
         if (!Alive(view.CaptionDonor)) return ButtonFailed(site, "no caption donor");
 
         GameObject? clone = null;
         try
         {
-            clone = CloneButton(donor!, host.GameObject!);
+            if (own != null) clone = CloneButton(own, host.GameObject!);
+            if (clone == null && Alive(donor)) clone = CloneButton(donor!, host.GameObject!);
+            else if (clone == null) donor = own;
             if (clone == null) return ButtonFailed(site, "donor " + SafeObjectName(donor) + " refused by the clone gate (a state target outside its own subtree, or not a plain SimpleStunButton)");
             clone.name = host.Name + "-button";
+
+            // The clone keeps the donor's interactable flag through SilenceClone. The heart row's Abandon and Expose
+            // buttons are greyed (not interactable) when the player may not use them, and a clone of a greyed donor
+            // would be a dead mod button: the mod's button is always interactable.
+            try
+            {
+                var own0 = clone.GetComponent<SimpleStunButton>();
+                if (own0 != null && !own0.interactable) own0.interactable = true;
+            }
+            catch { /* ButtonOperable below refuses a clone that still cannot be used */ }
 
             // Buttons stack before rows in a column; in an inline group there are only buttons.
             clone.transform.SetSiblingIndex(host.Buttons.Count);
@@ -2319,7 +2575,10 @@ internal sealed partial class UnityUiRuntime
             // hidden, so the switch is a SetActive and never a clone. On a title-row anchor a button
             // given an icon is that face for good (VanillaUiSites.IconAlways), a square the row's height.
             string faceSource = "";
-            GameObject? face = VanillaUiSites.HasIconFace(host.Anchor, icon) ? AddIconFace(site, clone, label, icon, size, out faceSource) : null;
+            bool ownRow = host.Anchor == VanillaPanelAnchor.BesideTitleButtons;
+            float share = ownRow && view.TitleIconShare > 0.2f && view.TitleIconShare < 0.9f ? view.TitleIconShare : ownRow ? TitleIconFaceShare : IconFaceShare;
+            Color? tint = ownRow ? view.TitleIconColor : null;
+            GameObject? face = VanillaUiSites.HasIconFace(host.Anchor, icon) ? AddIconFace(site, clone, label, icon, size, out faceSource, share, tint) : null;
             bool always = face != null && VanillaUiSites.IconAlways(host.Anchor, icon);
             var widget = new PanelButtonWidget(clone, label, stun.onClick, size, face, this) { Site = site, IconAlways = always, FaceSource = faceSource };
             var element = clone.GetComponent<LayoutElement>() ?? clone.AddComponent<LayoutElement>();
@@ -2352,13 +2611,20 @@ internal sealed partial class UnityUiRuntime
     private const float IconFaceShare = 0.67f;
 
     /// <summary>
+    /// The icon face's share on <see cref="VanillaPanelAnchor.BesideTitleButtons"/> when the game's own icon could not be
+    /// measured: the heart row's 24-unit icons on its 42-unit buttons.
+    /// </summary>
+    private const float TitleIconFaceShare = 24f / 42f;
+
+    /// <summary>
     /// The icon an icon-mode button shows: the named loaded game sprite for <see cref="VanillaButtonIcon.Sprite"/>,
     /// the item's own game icon (<c>ManagedItemData.Icon</c>) for <see cref="VanillaButtonIcon.Item"/>, else the
     /// framework's drawn mark, tinted with the caption's color. Built hidden; the caption's object is the one that
     /// hides when it shows. <paramref name="source"/> says which it was (<c>sprite:</c>, <c>item:</c> or <c>mark:</c>
     /// and the name), for the readback.
     /// </summary>
-    private static GameObject? AddIconFace(VanillaUiSite site, GameObject clone, TextMeshProUGUI caption, VanillaButtonIcon icon, Vector2 size, out string source)
+    private static GameObject? AddIconFace(VanillaUiSite site, GameObject clone, TextMeshProUGUI caption, VanillaButtonIcon icon, Vector2 size, out string source,
+        float share = IconFaceShare, Color? markTint = null)
     {
         GameObject? go = null;
         source = "";
@@ -2391,7 +2657,7 @@ internal sealed partial class UnityUiRuntime
             go = new GameObject("icon");
             var rt = go.AddComponent<RectTransform>();
             rt.SetParent(clone.transform, false);
-            float side = Mathf.Round(size.y * IconFaceShare);
+            float side = Mathf.Round(size.y * share);
             rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
             rt.sizeDelta = new Vector2(side, side);
             rt.anchoredPosition = Vector2.zero;
@@ -2401,7 +2667,8 @@ internal sealed partial class UnityUiRuntime
             image.sprite = sprite;
             image.preserveAspect = true;
             image.raycastTarget = false;
-            image.color = gameIcon ? Color.white : caption.color;
+            // A drawn mark takes the caption's color, or on a row of the game's own icons (the heart's) their color.
+            image.color = gameIcon ? Color.white : markTint ?? caption.color;
             go.SetActive(false);
             return go;
         }
@@ -2576,7 +2843,7 @@ internal sealed partial class UnityUiRuntime
         if (container is not PanelContainerWidget host || !host.Alive) return null;
 
         // An inline group is a row of buttons; a text row inside it would read as a broken button.
-        if (host.Anchor == VanillaPanelAnchor.BesideRename || host.Anchor == VanillaPanelAnchor.BesideSort) return null;
+        if (VanillaUiSites.IsInline(host.Anchor)) return null;
         if (!PanelViews.TryGetValue(site, out var view) || view == null || !view.Live) return null;
         var donor = view.BodyDonor;
         if (!Alive(donor)) return null;
@@ -2667,8 +2934,12 @@ internal sealed partial class UnityUiRuntime
                 FitScratch.Add(new UiObstacle(SafeObjectName(view.Obstacle), RectIn(space, Rt(view.Obstacle))));
 
             var bounds = RectIn(space, RootCanvasOf(view));
-            var result = VanillaPanelPlacement.PlaceEdge(anchor, panelRect, gridTop, column.Width, column.Height, bounds, FitScratch);
+            // Columns on one edge stack in attach order: each under the ones attached before it.
+            var earlierColumns = EarlierStacked(host, space);
+            var result = VanillaPanelPlacement.PlaceEdge(anchor, panelRect, gridTop, column.Width, column.Height, bounds, FitScratch,
+                earlierColumns, VanillaPanelPlacement.DefaultSpacing);
             FitScratch.Clear();
+            NoteStack(host, earlierColumns.Count, result);
 
             var rt = host.Rect;
             if (rt != null && !result.Rect.IsEmpty)
@@ -2679,6 +2950,7 @@ internal sealed partial class UnityUiRuntime
                 if ((rt.sizeDelta - sz).sqrMagnitude > 0.01f) rt.sizeDelta = sz;
             }
 
+            NotePlaced(host, result.Fit == VanillaFit.Blocked ? default : result.Rect);
             return result;
         }
 
@@ -2736,8 +3008,8 @@ internal sealed partial class UnityUiRuntime
         // (the inventory's item area above the bar), since it sits beside the group, not in it.
         FitScratch.Clear();
         var oursPtr = host.Transform != null ? host.Transform.Pointer : IntPtr.Zero;
-        UiRect lastMember = default;
-        AddMembers(group, panelSpace, oursPtr, ref lastMember);
+        UiRect lastMember = default, firstMember = default;
+        AddMembers(group, panelSpace, oursPtr, ref lastMember, ref firstMember);
         if (host.Mode == InlineMode.Positioned && group.parent != null)
         {
             var parent = group.parent;
@@ -2745,23 +3017,43 @@ internal sealed partial class UnityUiRuntime
             {
                 var sib = parent.GetChild(i);
                 if (sib == null || sib.Pointer == group.Pointer || sib.Pointer == oursPtr || !sib.gameObject.activeInHierarchy) continue;
+                // Another plugin's container on this anchor is not an obstacle: the stack keeps them apart.
+                if (IsStackPeer(host, sib)) continue;
                 FitScratch.Add(new UiObstacle(SafeObjectName(sib.gameObject), RectIn(panelSpace, sib.TryCast<RectTransform>())));
             }
         }
 
         VanillaFitResult inlineVerdict;
+        if (host.Mode == InlineMode.Positioned && host.Anchor == VanillaPanelAnchor.BesideTitleButtons && !RowShown(group))
+        {
+            // The heart's row is not shown (the castle list tab, an enemy castle): neither is anything placed beside it,
+            // also when the cover check lifted the container out of the row's own subtree. Asked again when it shows.
+            FitScratch.Clear();
+            host.Settle.Reset();
+            NotePlaced(host, default);
+            return new VanillaFitResult(VanillaFit.Blocked, "hidden:row", default, retry: true);
+        }
+
         if (host.Mode == InlineMode.Positioned)
         {
+            bool before = VanillaUiSites.PlacesBefore(host.Anchor);
             if (lastMember.IsEmpty) lastMember = RectIn(panelSpace, group.TryCast<RectTransform>());
+            if (firstMember.IsEmpty) firstMember = lastMember;
+            var member = before ? firstMember : lastMember;
 
             // Judge only a window at rest: it slides in when it opens, and a slot measured mid-slide
             // is the wrong slot (live: 88 wide sliding, 58 at rest). Until the frame and the bar have
             // measured the same three frames running, nothing is shown and nothing is logged.
-            if (!host.Settle.Observe(frame, lastMember))
+            if (!host.Settle.Observe(frame, member))
             {
                 FitScratch.Clear();
+                NotePlaced(host, default);
                 return VanillaFitResult.Moving;
             }
+
+            // Title-row containers from several plugins line up in attach order: beyond the ones placed before them.
+            var earlierRow = VanillaUiSites.Stacks(host.Anchor) ? EarlierStacked(host, panelSpace) : null;
+            var stackRef = VanillaPanelPlacement.StackReference(member, earlierRow, before);
 
             var reference = host.Anchor == VanillaPanelAnchor.BesideSort && Alive(view.Sort)
                 ? RectIn(panelSpace, Rt(view.Sort))
@@ -2771,10 +3063,14 @@ internal sealed partial class UnityUiRuntime
             float gap = VanillaPanelAnchors.PositionedSpacing(GroupSpacing(group, 0f));
             int capable = host.IconCapableCount(out int visibleButtons);
             bool allowIcons = host.Anchor == VanillaPanelAnchor.BesideSort && visibleButtons > 0 && capable == visibleButtons;
-            inlineVerdict = VanillaPanelPlacement.PlaceBesideRow(
-                lastMember, reference, allowAbove: host.Anchor == VanillaPanelAnchor.BesideSort, allowIcons, gap,
-                width, host.MinInlineWidth(rowSpacing), visibleButtons, host.ButtonSize.y, frame, FitScratch, out var slot);
+            BesideSlot slot;
+            inlineVerdict = before
+                ? VanillaPanelPlacement.PlaceBeforeRow(stackRef, gap, width, host.ButtonSize.y, frame, FitScratch, out slot)
+                : VanillaPanelPlacement.PlaceBesideRow(
+                    stackRef, reference, allowAbove: host.Anchor == VanillaPanelAnchor.BesideSort, allowIcons, gap,
+                    width, host.MinInlineWidth(rowSpacing), visibleButtons, host.ButtonSize.y, frame, FitScratch, out slot);
             host.Slot = slot;
+            NoteStack(host, earlierRow?.Count ?? 0, inlineVerdict);
             if (inlineVerdict.Fit == VanillaFit.Fits)
             {
                 if (host.IconRow != inlineVerdict.Icons) host.SetIconRow(inlineVerdict.Icons);
@@ -2783,17 +3079,21 @@ internal sealed partial class UnityUiRuntime
 
             // The geometry the verdict was made on, said when it changes (a refused slot is asked
             // again every 30 frames; the line repeats only if something moved).
-            string slotWord = slot == BesideSlot.After ? "after" : slot == BesideSlot.Above ? "above" : "none";
+            string slotWord = SlotWord(slot);
             string faceWord = inlineVerdict.Fit == VanillaFit.Fits ? host.FaceWord() : "none";
+            int stacked = earlierRow?.Count ?? 0;
             string geometry = "Ui: attach " + VanillaUiSites.Key(host.Site) + " anchor=" + VanillaUiSites.AnchorKey(host.Anchor)
                 + " slot=" + slotWord
                 + " face=" + faceWord
-                + " last=" + lastMember + " frame=" + frame + " row=" + Mathf.RoundToInt(width) + "/min" + Mathf.RoundToInt(host.MinInlineWidth(rowSpacing))
+                + (before ? " first=" + firstMember : " last=" + lastMember)
+                + (stacked > 0 ? " stacked=" + stacked + " beside=" + stackRef : "")
+                + " frame=" + frame + " row=" + Mathf.RoundToInt(width) + "/min" + Mathf.RoundToInt(host.MinInlineWidth(rowSpacing))
                 + " placed=" + inlineVerdict.Rect + " reason=" + inlineVerdict.Reason;
 
             // Said, and counted as a placement, when the placement's shape changes; a window sliding as one piece
             // keeps its shape, so one open is one line.
-            string shape = PlacementSettle.ShapeKey(slotWord, faceWord, frame, lastMember, inlineVerdict.Rect) + "|" + inlineVerdict.Reason;
+            string shape = PlacementSettle.ShapeKey(slotWord, faceWord, frame, member, inlineVerdict.Rect) + "|" + inlineVerdict.Reason
+                + "|" + stacked;
             if (host.LastShape != shape)
             {
                 host.LastShape = shape;
@@ -2807,11 +3107,14 @@ internal sealed partial class UnityUiRuntime
                 }
             }
 
-            if (!PlacementSaid.TryGetValue((host.Site, host.Anchor), out var said) || said != shape)
+            // Keyed by container, so two plugins' containers on one anchor each say their own placement.
+            if (!PlacementSaid.TryGetValue(host.Name, out var said) || said != shape)
             {
-                PlacementSaid[(host.Site, host.Anchor)] = shape;
+                PlacementSaid[host.Name] = shape;
                 Plugin.Logger?.LogInfo(geometry);
             }
+
+            NotePlaced(host, inlineVerdict.Fit == VanillaFit.Fits ? inlineVerdict.Rect : default);
         }
         else
         {
@@ -2827,8 +3130,11 @@ internal sealed partial class UnityUiRuntime
 
     private static readonly List<UiRect> FitScratchRects = new();
 
-    /// <summary>The group's visible members as obstacles (ours skipped); <paramref name="last"/> is the last of them.</summary>
-    private static void AddMembers(Transform group, Transform space, IntPtr ours, ref UiRect last)
+    /// <summary>
+    /// The group's visible members as obstacles (ours skipped); <paramref name="last"/> is the last of them and
+    /// <paramref name="first"/> the leftmost (the reference of a row placed before them).
+    /// </summary>
+    private static void AddMembers(Transform group, Transform space, IntPtr ours, ref UiRect last, ref UiRect first)
     {
         for (int i = 0; i < group.childCount; i++)
         {
@@ -2836,8 +3142,114 @@ internal sealed partial class UnityUiRuntime
             if (child == null || child.Pointer == ours || !child.gameObject.activeInHierarchy) continue;
             var r = RectIn(space, child.TryCast<RectTransform>());
             FitScratch.Add(new UiObstacle(SafeObjectName(child.gameObject), r));
-            if (!r.IsEmpty) last = r;
+            if (r.IsEmpty) continue;
+            last = r;
+            if (first.IsEmpty || r.X < first.X) first = r;
         }
+    }
+
+    /// <summary>The row is shown (active in the hierarchy).</summary>
+    private static bool RowShown(Transform group)
+    {
+        try { return group.gameObject.activeInHierarchy; }
+        catch { return false; }
+    }
+
+    /// <summary>The <c>slot=</c> word (geometry line and readback).</summary>
+    private static string SlotWord(BesideSlot slot) => slot switch
+    {
+        BesideSlot.After => "after",
+        BesideSlot.Above => "above",
+        BesideSlot.Before => "before",
+        _ => "none",
+    };
+
+    // ---- stacking: containers of one site and anchor line up in attach order
+
+    /// <summary>Every live container on a stacking anchor (<see cref="VanillaUiSites.Stacks"/>), in build order.</summary>
+    private static readonly List<PanelContainerWidget> StackedContainers = new();
+
+    /// <summary>Bumped when a stacked container moves, shows, hides or goes (<see cref="AttachStackVersion"/>).</summary>
+    private static readonly Dictionary<(VanillaUiSite, VanillaPanelAnchor), int> StackVersions = new();
+
+    private static readonly List<UiRect> StackScratch = new();
+
+    public void SetAttachOrder(IRuntimeWidget container, long order)
+    {
+        if (container is PanelContainerWidget pc) pc.Order = order;
+    }
+
+    public int AttachStackVersion(VanillaUiSite site, VanillaPanelAnchor anchor) =>
+        StackVersions.TryGetValue((site, anchor), out int v) ? v : 0;
+
+    private static void BumpStack(VanillaUiSite site, VanillaPanelAnchor anchor)
+    {
+        StackVersions.TryGetValue((site, anchor), out int v);
+        StackVersions[(site, anchor)] = unchecked(v + 1);
+    }
+
+    /// <summary>
+    /// The rects, in <paramref name="space"/>, of the live, shown containers of <paramref name="host"/>'s site and
+    /// anchor attached before it (lower <see cref="PanelContainerWidget.Order"/>). Dead ones are dropped from the list.
+    /// The list is reused: read it before the next call.
+    /// </summary>
+    private static List<UiRect> EarlierStacked(PanelContainerWidget host, Transform space)
+    {
+        StackScratch.Clear();
+        for (int i = StackedContainers.Count - 1; i >= 0; i--)
+            if (StackedContainers[i] == null || !StackedContainers[i].Alive) StackedContainers.RemoveAt(i);
+        if (host.Order <= 0 || !VanillaUiSites.Stacks(host.Anchor)) return StackScratch;
+        for (int i = 0; i < StackedContainers.Count; i++)
+        {
+            var c = StackedContainers[i];
+            if (ReferenceEquals(c, host) || c.Site != host.Site || c.Anchor != host.Anchor) continue;
+            if (c.Order <= 0 || c.Order >= host.Order || !c.StackShown) continue;
+            var r = RectIn(space, c.Rect);
+            if (!r.IsEmpty) StackScratch.Add(r);
+        }
+
+        return StackScratch;
+    }
+
+    /// <summary>Whether <paramref name="t"/> is another live container on <paramref name="host"/>'s site and anchor.</summary>
+    private static bool IsStackPeer(PanelContainerWidget host, Transform t)
+    {
+        if (!VanillaUiSites.Stacks(host.Anchor)) return false;
+        for (int i = 0; i < StackedContainers.Count; i++)
+        {
+            var c = StackedContainers[i];
+            if (ReferenceEquals(c, host) || c.Site != host.Site || c.Anchor != host.Anchor) continue;
+            var ct = c.Transform;
+            if (ct != null && ct.Pointer == t.Pointer) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Record where a stacked container was placed (empty while it is hidden or settling) and bump the anchor's version
+    /// when that changed, so the containers stacked behind it follow on the next frame.
+    /// </summary>
+    private static void NotePlaced(PanelContainerWidget host, UiRect placed)
+    {
+        if (!VanillaUiSites.Stacks(host.Anchor)) return;
+        string key = placed.ToString();
+        if (host.StackKey == key) return;
+        host.StackKey = key;
+        BumpStack(host.Site, host.Anchor);
+    }
+
+    /// <summary>One line when a container is stacked behind others, or no longer is (once per change of the count).</summary>
+    private static void NoteStack(PanelContainerWidget host, int earlier, in VanillaFitResult result)
+    {
+        host.StackedBehind = earlier;
+        if (host.StackSaid == earlier) return;
+        bool first = host.StackSaid < 0;
+        host.StackSaid = earlier;
+        if (first && earlier == 0) return;
+        Plugin.Logger?.LogInfo("Ui: attach " + VanillaUiSites.Key(host.Site) + " anchor=" + VanillaUiSites.AnchorKey(host.Anchor)
+            + " container " + host.Name + " stacked behind " + earlier + " attached before it (order " + host.Order + ")"
+            + " fit=" + (result.Fit == VanillaFit.Fits ? "ok" : result.Fit == VanillaFit.Blocked ? "blocked" : "unknown") + " placed=" + result.Rect);
     }
 
     /// <summary>
@@ -3009,6 +3421,13 @@ internal sealed partial class UnityUiRuntime
                     // The open window's rename button: where BesideRename goes, or why it cannot.
                     d["rename"] = Alive(view.RenameGroup) ? "ok via=" + view.RenameSource
                         : view.RenameMissing.Length > 0 ? "missing: " + view.RenameMissing : "";
+                    // The castle heart's icon row: where BesideTitleButtons goes, or why it cannot.
+                    if (rb.Site == VanillaUiSite.CastleHeartPanel)
+                        d["titleButtons"] = Alive(view.TitleButtons)
+                            ? "ok via=" + view.TitleButtonsSource + " ref=" + SafeObjectName(view.TitleButtonsRef)
+                                + " donor=" + (Alive(view.TitleButtonsDonor) ? SafeObjectName(view.TitleButtonsDonor) : "bar:" + view.DonorSource)
+                                + " iconShare=" + Math.Round(view.TitleIconShare, 3)
+                            : "missing: " + (view.TitleButtonsMissing.Length > 0 ? view.TitleButtonsMissing : TitleButtonsFields);
                 }
 
                 d["siteAnchors"] = VanillaUiSites.AnchorKeys(rb.Site);
@@ -3035,9 +3454,20 @@ internal sealed partial class UnityUiRuntime
                     footSlot["alignedTo"] = tip.LineBefore;
                 }
             }
+            if (rb.Container is PanelContainerWidget stacked && VanillaUiSites.Stacks(stacked.Anchor))
+            {
+                // Where this container is in its anchor's stack: how many attached before it are shown, and its order.
+                d["stack"] = new Dictionary<string, object?>
+                {
+                    ["order"] = stacked.Order,
+                    ["behind"] = stacked.StackedBehind,
+                    ["shown"] = stacked.StackShown,
+                };
+            }
+
             if (rb.Container is PanelContainerWidget placed && placed.Mode == InlineMode.Positioned)
             {
-                d["slot"] = placed.Slot == BesideSlot.After ? "after" : placed.Slot == BesideSlot.Above ? "above" : "none";
+                d["slot"] = SlotWord(placed.Slot);
                 d["face"] = placed.FaceWord();
                 d["placements"] = placed.Placements;
                 d["parent"] = placed.Transform != null && placed.Transform.parent != null ? SafeObjectName(placed.Transform.parent.gameObject) : "";
@@ -3119,6 +3549,7 @@ internal sealed partial class UnityUiRuntime
                 + Describe("donor", view.ButtonDonor != null ? view.ButtonDonor.transform : null) + (view.ButtonDonor != null ? "{" + view.DonorSource + "}" : "")
                 + Describe("bar", view.Bar) + (view.Bar != null ? "{" + LayoutOf(view.Bar) + "}" : "")
                 + Describe("renameGroup", view.RenameGroup) + (view.RenameGroup != null ? "{" + view.RenameSource + "}" : "")
+                + (site == VanillaUiSite.CastleHeartPanel ? Describe("titleButtons", view.TitleButtons) + (view.TitleButtons != null ? "{" + view.TitleButtonsSource + " " + LayoutOf(view.TitleButtons) + "}" : "") : "")
                 + Describe("caption", view.CaptionDonor)
                 + Describe("body", view.BodyDonor)
                 + (view.Tooltip != null ? Describe("tooltipFrame", view.Tooltip.DescriptionFrame != null ? view.Tooltip.DescriptionFrame.transform : null) : "")
@@ -3220,6 +3651,23 @@ internal sealed partial class UnityUiRuntime
 
         /// <summary>How many different placements this container got (a window open is one; readback <c>placements</c>).</summary>
         internal int Placements { get; set; }
+
+        /// <summary>The attach order of the handle that owns it (<see cref="SetAttachOrder"/>); 0 when not given (no stacking).</summary>
+        internal long Order { get; set; }
+
+        /// <summary>The last placed rect, as a key (empty while hidden or settling), for <see cref="NotePlaced"/>.</summary>
+        internal string StackKey { get; set; } = "";
+
+        /// <summary>How many containers attached before it it was last stacked behind; and the count last said (-1: none yet).</summary>
+        internal int StackedBehind { get; set; }
+
+        internal int StackSaid { get; set; } = -1;
+
+        /// <summary>Shown now, so a container attached later stacks behind it.</summary>
+        internal bool StackShown
+        {
+            get { try { return UnityUiRuntime.Alive(_go) && _go!.activeSelf; } catch { return false; } }
+        }
 
         /// <summary>What the visible buttons show: <c>icon</c> (all), <c>text</c> (none) or <c>mixed</c>.</summary>
         internal string FaceWord()
@@ -3367,7 +3815,16 @@ internal sealed partial class UnityUiRuntime
             set
             {
                 if (_gated) { _wanted = value; Apply(); return; }
-                try { if (UnityUiRuntime.Alive(_go) && _go!.activeSelf != value) _go.SetActive(value); } catch { /* */ }
+                try
+                {
+                    if (UnityUiRuntime.Alive(_go) && _go!.activeSelf != value)
+                    {
+                        _go.SetActive(value);
+                        // A stacked container that shows or hides moves the ones stacked behind it.
+                        if (VanillaUiSites.Stacks(Anchor)) BumpStack(Site, Anchor);
+                    }
+                }
+                catch { /* */ }
             }
         }
 
@@ -3407,6 +3864,12 @@ internal sealed partial class UnityUiRuntime
             {
                 _go = null;
                 Buttons.Clear();
+            }
+
+            if (VanillaUiSites.Stacks(Anchor))
+            {
+                StackedContainers.Remove(this);
+                BumpStack(Site, Anchor);
             }
         }
     }

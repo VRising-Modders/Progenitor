@@ -74,6 +74,18 @@ public sealed class Plugin : ProgenitorPlugin<PanelsContext>
         Attach(ctx, VanillaUiSite.InventoryPanel, VanillaPanelAnchor.BesideSort, "Stash");
         Attach(ctx, VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.LeftEdge, "Castles");
         Attach(ctx, VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, "Fuel");
+        // A second column on the same edge under another plugin id: it stacks under Fuel, in attach order.
+        var routes = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.RightEdge, ctx.Owner, ctx.Guid + ".routes");
+        ctx.Track(routes);
+        var routesLog = ctx.Log;
+        ctx.Track(routes.Button("Routes").OnClick(() => routesLog.LogInfo("Panels example: click heart routes " + routes.Target)));
+        // The heart window's top-right icon row: a cog left of the game's own two icon buttons, at their size.
+        var heartRow = UiApi.AttachToVanilla(VanillaUiSite.CastleHeartPanel, VanillaPanelAnchor.BesideTitleButtons, ctx.Owner, ctx.Guid);
+        ctx.Track(heartRow);
+        var settings = heartRow.Button("Settings", VanillaButtonIcon.Drawn("settings"));
+        ctx.Track(settings.Tooltip("Options of this castle's mods.", "Castle settings"));
+        var settingsLog = ctx.Log;
+        ctx.Track(settings.OnClick(() => settingsLog.LogInfo("Panels example: click heart settings " + heartRow.Target)));
 
         // The tooltip site takes rows only. The line is rewritten on every hovered item, before the
         // frame's rows are drawn, so it never shows the previous item's text.

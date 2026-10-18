@@ -53,6 +53,9 @@ internal enum UiMarkShape
 
     /// <summary>A log: a page outline with four short horizontal lines across it (a journal, a history, a list).</summary>
     Log = 15,
+
+    /// <summary>A settings cog: a gear outline with six teeth around a round hub (open the thing's settings).</summary>
+    Settings = 16,
 }
 
 /// <summary>Which side of its text a drawn mark sits on.</summary>
@@ -114,7 +117,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static UiDrawnMark Icon(UiMarkShape shape) =>
         shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
             or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye
-            or UiMarkShape.Block or UiMarkShape.Log
+            or UiMarkShape.Block or UiMarkShape.Log or UiMarkShape.Settings
             ? new UiDrawnMark(shape, 0, 0)
             : None;
 
@@ -130,11 +133,12 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
     internal static readonly UiDrawnMark EyeMark = Icon(UiMarkShape.Eye);
     internal static readonly UiDrawnMark BlockMark = Icon(UiMarkShape.Block);
     internal static readonly UiDrawnMark LogMark = Icon(UiMarkShape.Log);
+    internal static readonly UiDrawnMark SettingsMark = Icon(UiMarkShape.Settings);
 
     /// <summary>The mark is an icon button's face (centered in its cell, sized as an icon).</summary>
     internal bool IsIcon => Shape is UiMarkShape.Up or UiMarkShape.Down or UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip
         or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye
-        or UiMarkShape.Block or UiMarkShape.Log;
+        or UiMarkShape.Block or UiMarkShape.Log or UiMarkShape.Settings;
 
     /// <summary>Spinner frame <paramref name="frame"/> (taken modulo 4).</summary>
     internal static UiDrawnMark Spinner(int frame) => new(UiMarkShape.Spinner, 0, ((frame % 4) + 4) % 4);
@@ -157,6 +161,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
         UiMarkShape.Eye => "eye",
         UiMarkShape.Block => "block",
         UiMarkShape.Log => "log",
+        UiMarkShape.Settings => "settings",
         _ => "",
     };
 
@@ -197,6 +202,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
             case "eye":
             case "block":
             case "log":
+            case "settings":
                 if (colon >= 0) return false;
                 mark = Icon(head switch
                 {
@@ -211,6 +217,7 @@ internal readonly struct UiDrawnMark : IEquatable<UiDrawnMark>
                     "eye" => UiMarkShape.Eye,
                     "block" => UiMarkShape.Block,
                     "log" => UiMarkShape.Log,
+                    "settings" => UiMarkShape.Settings,
                     _ => UiMarkShape.Grip,
                 });
                 return true;
@@ -252,7 +259,8 @@ internal static class UiDrawnMarkArt
         UiMarkShape.Spinner => (TextureHeight, TextureHeight),
         UiMarkShape.Up or UiMarkShape.Down => (ArrowWidth, TextureHeight),
         UiMarkShape.Remove or UiMarkShape.Check or UiMarkShape.Grip or UiMarkShape.CheckEmpty or UiMarkShape.CheckBox
-            or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye or UiMarkShape.Block or UiMarkShape.Log => (TextureHeight, TextureHeight),
+            or UiMarkShape.Chest or UiMarkShape.Locate or UiMarkShape.Eye or UiMarkShape.Block or UiMarkShape.Log
+            or UiMarkShape.Settings => (TextureHeight, TextureHeight),
         _ => (0, 0),
     };
 
@@ -357,6 +365,8 @@ internal static class UiDrawnMarkArt
                 return Clamp01(Block(px, py));
             case UiMarkShape.Log:
                 return Clamp01(Log(px, py));
+            case UiMarkShape.Settings:
+                return Clamp01(Cog(px, py));
             default:
                 return 0f;
         }
@@ -450,6 +460,48 @@ internal static class UiDrawnMarkArt
             new[] { a, LogLines[0], b, LogLines[0] }, new[] { a, LogLines[1], b, LogLines[1] },
             new[] { a, LogLines[2], b, LogLines[2] }, new[] { a, LogLines[3], a + (b - a) * 0.6f, LogLines[3] });
         return Math.Max(page, lines);
+    }
+
+    /// <summary>
+    /// The settings cog, as shares of the texture: the gear's body radius, the radius its teeth reach, half a tooth's
+    /// width and the hub ring's radius. Drawn as outlines in the log's stroke (<see cref="LogStroke"/>), so the two
+    /// marks read as one set beside the game's rename pencil.
+    /// </summary>
+    internal const float CogBody = 0.27f, CogTip = 0.41f, CogToothHalf = 0.075f, CogHub = 0.10f;
+
+    /// <summary>How many teeth the cog has; the first points straight up.</summary>
+    internal const int CogTeeth = 6;
+
+    /// <summary>
+    /// The cog: the outline of a disk of radius <see cref="CogBody"/> joined with <see cref="CogTeeth"/> square teeth out to
+    /// <see cref="CogTip"/>, and a hub ring of radius <see cref="CogHub"/>, all <see cref="LogStroke"/> half-wide. The
+    /// outline is the zero line of the joined shape's distance (the nearest of the disk's and each tooth's), so a tooth
+    /// and the body meet without a seam.
+    /// </summary>
+    private static float Cog(float px, float py)
+    {
+        float n = TextureHeight;
+        float gx = px / n - 0.5f, gy = py / n - 0.5f;
+        float r = (float)Math.Sqrt(gx * gx + gy * gy);
+        float d = r - CogBody;
+
+        // Each tooth is a box along its own ray, reaching a little into the body so the join is inside the shape.
+        const float inner = CogBody - 0.04f;
+        float center = (inner + CogTip) * 0.5f, half = (CogTip - inner) * 0.5f;
+        for (int k = 0; k < CogTeeth; k++)
+        {
+            double a = Math.PI / 2 + k * 2 * Math.PI / CogTeeth;
+            float c = (float)Math.Cos(a), s = (float)Math.Sin(a);
+            float u = gx * c + gy * s, v = -gx * s + gy * c;
+            float dx = Math.Abs(u - center) - half, dy = Math.Abs(v) - CogToothHalf;
+            float outside = (float)Math.Sqrt(Math.Max(dx, 0f) * Math.Max(dx, 0f) + Math.Max(dy, 0f) * Math.Max(dy, 0f));
+            float inside = Math.Min(Math.Max(dx, dy), 0f);
+            d = Math.Min(d, outside + inside);
+        }
+
+        float contour = Smooth((LogStroke - Math.Abs(d)) * n);
+        float hub = Smooth((LogStroke - Math.Abs(r - CogHub)) * n);
+        return Math.Max(contour, hub);
     }
 
     /// <summary>Half the eye's width and its lids' height above and below the center, as shares of the texture.</summary>

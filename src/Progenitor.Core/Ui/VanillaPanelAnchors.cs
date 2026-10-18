@@ -217,6 +217,52 @@ internal static class VanillaPanelAnchors
                 _ => InlineMode.Positioned,
             };
 
+    /// <summary>
+    /// The fields of the castle heart window's top-right icon row, in the order the row is read from:
+    /// <c>CastleHeartLevelPanel.AbandonButton</c> and <c>.ExposeButton</c> (<c>CastleHeartSubMenu.AllyWindow.LevelPanel</c>).
+    /// On 1.1.13.0 both sit in <c>ForfeitButtonsParent</c>: a horizontal group anchored to the level panel's top-right
+    /// corner (pivot at its right, aligned upper right, spacing 8) that sizes its children to their 42-unit preferred
+    /// width and is sized to them, holding the two 42 x 42 icon buttons (<c>Icon_Castle</c>, <c>Icon_ExposeCastle</c>, 24 x 24).
+    /// </summary>
+    internal static readonly string[] TitleButtonFields = { "AbandonButton", "ExposeButton" };
+
+    /// <summary>
+    /// The row <see cref="VanillaPanelAnchor.BesideTitleButtons"/> goes beside, and the button that is its reference: the
+    /// parent of the first of <paramref name="buttons"/> (<see cref="TitleButtonFields"/> order) that is a game button,
+    /// and of those in that row the first active one (the leftmost the game shows), else the first found. The reference
+    /// is also the button donor, when it is clone-safe: the mod's buttons then are the row's own art and size.
+    /// </summary>
+    internal static (AnchorPick Group, AnchorPick Reference) TitleButtonsRow(IReadOnlyList<IAnchorNode?>? buttons)
+    {
+        int n = Math.Min(buttons?.Count ?? 0, TitleButtonFields.Length);
+        IAnchorNode? group = null;
+        AnchorPick reference = AnchorPick.None, inactive = AnchorPick.None;
+        for (int i = 0; i < n; i++)
+        {
+            var b = buttons![i];
+            if (b == null || !b.IsButton || b.Parent == null) continue;
+            if (group == null) group = b.Parent;
+            else if (!Equals(b.Parent, group)) continue;
+            if (b.Active && !reference.Found) reference = new AnchorPick(b, TitleButtonFields[i]);
+            if (!inactive.Found) inactive = new AnchorPick(b, TitleButtonFields[i]);
+        }
+
+        if (group == null) return (AnchorPick.None, AnchorPick.None);
+        var refPick = reference.Found ? reference : inactive;
+        return (new AnchorPick(group, refPick.Source + ".parent"), refPick);
+    }
+
+    /// <summary>
+    /// How a <see cref="VanillaPanelAnchor.BesideTitleButtons"/> container goes beside its row: always placed, never
+    /// joined. The heart's row sizes its children, so <see cref="PlanInline"/> would join it; joined, the row (pivot at
+    /// its right) would grow and move the game's buttons left. Placed, nothing of the game's moves.
+    /// </summary>
+    internal static InlineMode PlanTitleButtons(IAnchorNode? group) => group == null ? InlineMode.None : InlineMode.Positioned;
+
+    /// <summary>The <c>mode=</c> word for a placed container that goes left of its reference: <c>before</c>.</summary>
+    internal static string ModeWord(InlineMode mode, bool before) =>
+        before && mode == InlineMode.Positioned ? "before" : ModeWord(mode);
+
     /// <summary>The word the log line and <c>ui_read</c> use for a mode.</summary>
     internal static string ModeWord(InlineMode mode) => mode switch
     {
