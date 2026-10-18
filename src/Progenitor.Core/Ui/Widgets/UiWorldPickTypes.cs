@@ -183,8 +183,9 @@ public readonly struct UiWorldPickResult
     /// PICKMOD1: the modifier keys (either side's Ctrl, Shift, Alt) held at the Interact press that made this pick, from
     /// the framework's own key sampling (the same reads the keybinds use; nothing polls the keyboard for it). A modifier
     /// let go within a quarter second before the pick was seen still counts. Works with <see cref="UiWorldPickOptions.Repeat"/>:
-    /// each pick has its own; after a pick a modifier counts again only from a frame with none held, so one still held
-    /// from the last pick never reaches the next. <see cref="KeyModifiers.None"/> on a gamepad or when the keyboard cannot be read.
+    /// each pick has its own. A modifier held at the press always counts, also one held through several picks (hold Shift
+    /// to mark a run); the quarter-second grace counts only a modifier pressed after the previous pick, so one let go just
+    /// before the next press does not reach it. <see cref="KeyModifiers.None"/> on a gamepad or when the keyboard cannot be read.
     /// </summary>
     public KeyModifiers Modifiers { get; }
 

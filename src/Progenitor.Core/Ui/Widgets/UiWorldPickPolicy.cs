@@ -85,7 +85,10 @@ internal static class UiWorldPickCopy
 /// PICKMOD1, game-free: which modifier keys count as held at a pick's Interact press. The framework samples its own held
 /// modifiers once a frame while a pick is armed; the interact is seen a frame or more after the press, by which time a
 /// quick player may have let go of Shift, so the modifiers held at any sample in the last <see cref="WindowSeconds"/>
-/// count.
+/// count (the grace window). A modifier held at the press itself (the fresh reading <see cref="Deliver"/> takes) always
+/// counts, also one held through several repeat picks. Only the grace window is gated after a delivery: its samples
+/// count again from a frame with no modifier held, so a Shift held into one pick and let go just before the next does
+/// not reach that next pick.
 /// </summary>
 internal sealed class UiWorldPickModifiers
 {
@@ -95,8 +98,9 @@ internal sealed class UiWorldPickModifiers
     private readonly System.Collections.Generic.List<(double At, KeyModifiers Held)> _samples = new();
 
     /// <summary>
-    /// After a delivery: the modifiers of the press just delivered may still be held. Samples count again only from a
-    /// frame with none held, so a Shift let go slowly after one pick never reaches the next.
+    /// After a delivery: the modifiers of the press just delivered may still be held. Grace samples count again only
+    /// from a frame with none held, so a Shift let go after one pick and before the next is not the next press's. The
+    /// fresh reading at the press is not gated.
     /// </summary>
     private bool _awaitRelease;
 
@@ -122,13 +126,12 @@ internal sealed class UiWorldPickModifiers
     }
 
     /// <summary>
-    /// A pick's Interact press is seen: note <paramref name="heldNow"/> (read at that moment), take the modifiers that
-    /// count (<see cref="At"/>), then <see cref="Delivered"/>.
+    /// A pick's Interact press is seen: <paramref name="heldNow"/> (read at that moment) always counts, plus the grace
+    /// window's modifiers (<see cref="At"/>); then <see cref="Delivered"/>.
     /// </summary>
     internal KeyModifiers Deliver(double now, KeyModifiers heldNow)
     {
-        Note(now, heldNow);
-        var held = At(now);
+        var held = heldNow | At(now);
         Delivered();
         return held;
     }
@@ -141,8 +144,9 @@ internal sealed class UiWorldPickModifiers
     }
 
     /// <summary>
-    /// A pick delivered: a repeating pick's next press starts fresh, and only from a frame with no modifier held (one
-    /// still held from this press is not the next press's). To pick again with Shift, let go and press it again.
+    /// A pick delivered: a repeating pick's grace window starts fresh, and only from a frame with no modifier held (one
+    /// held from this press and let go before the next is not the next press's). A modifier still held at the next
+    /// press counts through the fresh reading.
     /// </summary>
     internal void Delivered()
     {

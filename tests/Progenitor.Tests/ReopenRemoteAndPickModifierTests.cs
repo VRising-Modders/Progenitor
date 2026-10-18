@@ -142,22 +142,36 @@ public sealed class ReopenRemoteAndPickModifierTests
     }
 
     [Fact]
-    public void A_shift_still_held_from_the_last_pick_does_not_reach_the_next()
+    public void Shift_held_through_three_repeat_picks_counts_on_all_three()
+    {
+        var m = new UiWorldPickModifiers();
+        double t = 0;
+        var got = new List<KeyModifiers>();
+        for (int pick = 0; pick < 3; pick++)
+        {
+            for (int frame = 0; frame < 20; frame++) { m.Note(t, KeyModifiers.Shift); t += 0.016; }
+            got.Add(m.Deliver(t, KeyModifiers.Shift));
+        }
+        Assert.Equal(new[] { KeyModifiers.Shift, KeyModifiers.Shift, KeyModifiers.Shift }, got);
+    }
+
+    [Fact]
+    public void Shift_let_go_after_a_pick_and_a_repick_within_the_grace_window_gives_no_shift()
     {
         var m = new UiWorldPickModifiers();
         m.Note(0.00, KeyModifiers.Shift);
         Assert.Equal(KeyModifiers.Shift, m.Deliver(0.02, KeyModifiers.Shift));
-        // Shift let go slowly after the pick: still held for a few frames, then a plain press.
+        // Still held for a few frames after the pick, then let go; the next press comes within 250 ms.
         m.Note(0.04, KeyModifiers.Shift);
         m.Note(0.06, KeyModifiers.Shift);
-        Assert.Equal(KeyModifiers.None, m.Deliver(0.08, KeyModifiers.None));
-        // Held across both picks, never let go: not the next press's either.
-        m.Note(0.10, KeyModifiers.Shift);
-        Assert.Equal(KeyModifiers.None, m.Deliver(0.12, KeyModifiers.Shift));
-        // Let go (one clean frame), pressed again: it counts.
-        m.Note(0.14, KeyModifiers.None);
-        m.Note(0.16, KeyModifiers.Shift);
-        Assert.Equal(KeyModifiers.Shift, m.Deliver(0.18, KeyModifiers.Shift));
+        m.Note(0.08, KeyModifiers.None);
+        Assert.Equal(KeyModifiers.None, m.Deliver(0.10, KeyModifiers.None));
+        Assert.True(0.10 - 0.06 < UiWorldPickModifiers.WindowSeconds);
+        // A Shift pressed after that pick and let go just before the next press: the grace counts it.
+        m.Note(0.12, KeyModifiers.None);
+        m.Note(0.14, KeyModifiers.Shift);
+        m.Note(0.16, KeyModifiers.None);
+        Assert.Equal(KeyModifiers.Shift, m.Deliver(0.18, KeyModifiers.None));
     }
 
     [Fact]
